@@ -20,3 +20,8 @@ node_modules/
 .venv/
 __pycache__/
 .pytest_cache/
+
+# Isolated implementation and task evidence
+/.worktrees/
+/.superpowers/
+/.tools/

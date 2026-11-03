@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status:** DRAFT. Design approval and execution-method selection are prerequisites. Commands below are proposed acceptance commands, not run results.
+**Status:** APPROVED for product implementation by Aryn Yklas on 2026-11-03 with m1 implementers and m2 reviewers. Commands below are acceptance instructions, not run results. Publication and customer infrastructure changes need separate authorization.
 
 **Goal:** Ship operable single-host/distributed Soundpost, real host collection, reproducible full-language/runtime/privacy/failure evidence and verifiable Apache releases.
 

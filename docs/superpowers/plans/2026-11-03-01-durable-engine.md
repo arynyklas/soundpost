@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status:** DRAFT. No step is authorized until the owner approves the full design and selects an execution method. No command below has been exercised; source paths are planned Create operations.
+**Status:** APPROVED for implementation by Aryn Yklas on 2026-11-03 with m1 implementers and m2 reviewers. Planned commands are acceptance instructions, not executed results. Source paths are Create operations until implemented.
 
 **Goal:** Deliver an actual authenticated, privacy-checked, durable single-host/distributed telemetry engine with scope-enforced scans and retention/deletion.
 

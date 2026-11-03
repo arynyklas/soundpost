@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status: DRAFT — design and implementation plan only.** Execution is gated on Aryn Yklas's full-design approval, approval of the shared contracts and an explicit execution-method choice. No product code, dependency installation, deployment or exercised runtime capability is represented by this document.
+**Status:** APPROVED for implementation by Aryn Yklas on 2026-11-03 with m1 implementers and m2 reviewers. Planned interfaces and commands are requirements, not implemented or exercised capabilities.
 
 **Goal:** Deliver a native, authorized investigation experience that takes a real failure through queue, incident, release, query, critical path, job, masked replay and correctly qualified profile evidence.
 

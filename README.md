@@ -2,7 +2,7 @@
 
 Self-hosted observability and incident investigation, designed as an independent Apache-2.0 product.
 
-**Status: design for approval. No server, SDK, sampler or runnable product is implemented in this repository yet.** Repository initialization and design preparation are authorized; product implementation is gated on owner approval of the complete design and selection of an execution method. Proposed budgets and support matrices are targets, not benchmark or compatibility claims.
+**Status: implementation authorized and in progress.** Aryn Yklas approved the complete design/contracts and selected m1 implementation subagents with m2 reviewers on 2026-11-03. No server, SDK or sampler has passed product acceptance yet. Budgets and support matrices are acceptance targets, not measured capability claims.
 
 ## Product scope
 

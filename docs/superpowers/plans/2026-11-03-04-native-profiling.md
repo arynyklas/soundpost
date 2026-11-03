@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status: DRAFT — NOT AUTHORIZED FOR EXECUTION.** Full-design approval by Aryn Yklas and an execution-method choice are required first. Every implementation, fixture and test path below is a planned **Create**. No compiler, dependency, kernel capability, performance test or runtime profiler was exercised while preparing this plan.
+**Status:** APPROVED for implementation by Aryn Yklas on 2026-11-03 with m1 implementers and m2 reviewers. Source/test/fixture paths are Create until implemented. Kernel capability, privacy and performance gates require actual exercised evidence.
 
 **Goal:** Deliver a first-party Linux perf-event CPU/off-CPU engine with fixed authorized acquisition, evidence-correct scheduler correlation, bounded resources, privacy-preserving export and measured per-kernel/architecture/runtime coverage.
 
