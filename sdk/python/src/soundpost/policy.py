@@ -85,7 +85,7 @@ def normalize_record(policy: SourcePolicy, capture: CaptureInput, templates: dic
     if int(capture["observed_at_ns"])>=int(policy.expires_ns): return None,"policy_expired"
     if not getattr(policy.decision,"errors" if kind=="error" else "logs"): return None,"policy_disabled"
     if kind=="error":
-        payload={"occurrence_id":capture["id"],"exception_class":capture["exception_class"],"code":capture["code"],"build_id":capture["build_id"],"handled":True,"fatal":False,"frames":[]}
+        payload={"occurrence_id":capture["id"],"exception_class":capture["exception_class"],"code":capture["code"],"build_id":capture["build_id"],"handled":capture["handled"],"fatal":capture["fatal"],"mechanism":capture["mechanism"],"frames":capture["exception_graph"]["nodes"][0]["frames"],"exception_graph":capture["exception_graph"]}
     else:
         template=templates.get(capture["template_id"])
         if template is None:return None,"unknown_template"

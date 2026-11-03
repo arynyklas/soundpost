@@ -1,5 +1,6 @@
 // Copyright 2026 Aryn Yklas
 // SPDX-License-Identifier: Apache-2.0
+import type {ExceptionGraph} from "./errors.ts";
 export type EventId = string;
 export type Primitive = string | number | boolean | null;
 export interface SignedPolicy {readonly version:1;readonly algorithm:"Ed25519";readonly key_id:string;readonly payload:string;readonly signature:string}
@@ -14,7 +15,10 @@ export interface Config {
 }
 export interface PolicyDecision {readonly approved:boolean;readonly reason:string;readonly revision:string;readonly errors:boolean;readonly logs:boolean;readonly replay:boolean;readonly bodies:boolean}
 export interface FlushReport {readonly acknowledgedBatchIds:readonly string[];readonly acknowledgedCursors:readonly string[];readonly pending:number;readonly lost:number;readonly deadlineExceeded:boolean}
-export interface ErrorInput {readonly kind:"error";readonly id:string;readonly observed_at_ns:string;readonly exception_class:string;readonly code:string|null;readonly build_id:string}
+export interface ErrorInput {readonly kind:"error";readonly id:string;readonly observed_at_ns:string;readonly exception_class:string;readonly code:string|null;readonly build_id:string;readonly exception_graph:ExceptionGraph;readonly handled:boolean;readonly fatal:boolean;readonly mechanism:HookMechanism|"manual"}
 export interface LogInput {readonly kind:"log";readonly id:string;readonly observed_at_ns:string;readonly template_id:string;readonly fields:Readonly<Record<string,unknown>>}
 export type CaptureInput=ErrorInput|LogInput;
 export interface SafeRecord {readonly kind:"error"|"log";readonly id:string;readonly observed_at_ns:string;readonly policy_revision:string;readonly payload:Readonly<Record<string,unknown>>}
+export type HookMechanism="uncaught_exception"|"unhandled_rejection"|"thread_exception"|"asyncio_exception";
+export type ExceptionEdgeKind="cause"|"context"|"group";
+export interface OwnedHookLease {close():void}

@@ -51,7 +51,7 @@ test("safe records use the exact native snake_case wire mirror",()=>{
  const c=init(config());c.captureException(null);c.captureLog("operation.failed",{status:503});
  const records=c.bufferedRecords().map(text=>JSON.parse(text) as {kind:string;payload:Record<string,unknown>});
  for(const record of records)expect(Object.keys(record).sort()).toEqual(["id","kind","observed_at_ns","payload","policy_revision"]);
- expect(Object.keys(records[0]!.payload).sort()).toEqual(["build_id","code","exception_class","fatal","frames","handled","occurrence_id"]);
+ expect(Object.keys(records[0]!.payload).sort()).toEqual(["build_id","code","exception_class","exception_graph","fatal","frames","handled","mechanism","occurrence_id"]);
  expect(Object.keys(records[1]!.payload).sort()).toEqual(["fields","line","severity","source_class","stream_labels","structured_metadata","template_id","template_revision"]);
 });
 test("UTF-8 byte boundaries preserve registered severity and reject unpaired surrogates",()=>{

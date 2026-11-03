@@ -5,6 +5,8 @@ from typing import Callable, Mapping, TypeAlias, TypedDict, Literal
 import time
 EventID: TypeAlias = str
 Primitive: TypeAlias = str | int | bool | None
+ErrorMechanism: TypeAlias = Literal["manual","uncaught_exception","unhandled_rejection","thread_exception","asyncio_exception"]
+ExceptionEdgeKind: TypeAlias = Literal["cause","context","group"]
 @dataclass(frozen=True)
 class SignedPolicy:
     version: int
@@ -41,6 +43,7 @@ class Config:
     max_records: int = 1024
     max_bytes: int = 2097152
     clock_ns: Callable[[], str] = lambda: str(time.time_ns())
+    project_root: str | None = None
 @dataclass(frozen=True)
 class PolicyDecision:
     approved: bool
@@ -65,6 +68,10 @@ class ErrorInput(TypedDict):
     exception_class: str
     code: str | None
     build_id: str
+    exception_graph: dict
+    handled: bool
+    fatal: bool
+    mechanism: ErrorMechanism
 
 class LogInput(TypedDict):
     kind: Literal["log"]

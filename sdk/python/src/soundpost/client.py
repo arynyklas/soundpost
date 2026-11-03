@@ -3,8 +3,10 @@
 import secrets
 import threading
 import time
-from .types import Config, Template, PolicyDecision, CaptureInput
+from .types import Config, Template, PolicyDecision, CaptureInput, ErrorMechanism
 from .policy import resolve, decimal, approve_template, normalize_record, utf8_size
+from .errors import extract_exception, HandlingEpisode
+from .frames import normalize_root
 
 class Client:
     """Policy-bound local capture. Delivery APIs are intentionally unavailable."""
@@ -23,6 +25,7 @@ class Client:
         self._templates={}
         self._queue: list[tuple[str,int,float]]=[];self._bytes=0;self._counts:dict[str,int]={}
         self._closed=False;self._lock=threading.RLock()
+        self._project_root=normalize_root(config.project_root);self._hook_leases=[]
         for template in config.templates:self.register_template(template)
     @property
     def policy_decision(self) -> PolicyDecision:return self._policy.decision
@@ -49,14 +52,24 @@ class Client:
             if len(self._queue)>=self._max_records or self._bytes+size>self._max_bytes:self._loss("queue_full");return False
             self._queue.append((record,size,time.monotonic()));self._bytes+=size;return True
     def capture_exception(self,error:BaseException,*,code:str|None=None)->str:
+        return self._capture_exception(error,code,"manual",False)
+    def _capture_exception(self,error,code,mechanism:ErrorMechanism,fatal:bool):
+        if type(mechanism) is not str or mechanism not in ("manual","uncaught_exception","unhandled_rejection","thread_exception","asyncio_exception") or type(fatal) is not bool:raise ValueError("invalid error mechanism")
         event=secrets.token_hex(16)
-        # Metaclass descriptors and exception values are never inspected.
-        cls=type(error)
-        name=type.__getattribute__(cls,"__name__") if type(cls) is type and isinstance(error,BaseException) else "UnknownError"
-        if type(name) is not str or not name.isidentifier() or utf8_size(name)>128:name="UnknownError"
+        graph=extract_exception(error,self._policy,project_root=self._project_root)
         safe_code=code if type(code) is str and code in self._codes else None
-        self._admit({"kind":"error","id":event,"observed_at_ns":decimal(self._clock()),"exception_class":name,"code":safe_code,"build_id":self._build})
+        self._admit({"kind":"error","id":event,"observed_at_ns":decimal(self._clock()),"exception_class":graph["nodes"][0]["exception_class"],"code":safe_code,"build_id":self._build,"exception_graph":graph,"handled":mechanism=="manual","fatal":fatal,"mechanism":mechanism})
         return event
+    def begin_handling_episode(self):
+        return HandlingEpisode(self)
+    def _own_hook_lease(self,lease):
+        with self._lock:
+            if self._closed:raise RuntimeError("client closed")
+            if len(self._hook_leases)>=8:raise RuntimeError("hook lease limit")
+            self._hook_leases.append(lease)
+    def _release_hook_lease(self,lease):
+        with self._lock:
+            if lease in self._hook_leases:self._hook_leases.remove(lease)
     def capture_log(self,template:str,fields:dict)->str|None:
         if type(template) is not str:
             with self._lock:self._loss("unknown_template")
@@ -70,6 +83,7 @@ class Client:
     def close(self)->None:
         with self._lock:
             if not self._closed:
+                for lease in tuple(self._hook_leases):lease.close()
                 self._counts["closed_pending"]=self._counts.get("closed_pending",0)+len(self._queue)
                 self._queue.clear();self._bytes=0;self._closed=True
 

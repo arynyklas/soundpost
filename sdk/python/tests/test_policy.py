@@ -90,7 +90,7 @@ def test_exact_native_snake_case_record_mirror():
     error,log=map(json.loads,c.buffered_records())
     for record in (error,log):
         assert set(record)=={"id","kind","observed_at_ns","payload","policy_revision"}
-    assert set(error["payload"])=={"build_id","code","exception_class","fatal","frames","handled","occurrence_id"}
+    assert set(error["payload"])=={"build_id","code","exception_class","exception_graph","fatal","frames","handled","mechanism","occurrence_id"}
     assert set(log["payload"])=={"fields","line","severity","source_class","stream_labels","structured_metadata","template_id","template_revision"}
 
 def test_bool_envelope_version_is_not_numeric_one():

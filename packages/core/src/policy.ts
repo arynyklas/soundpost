@@ -61,7 +61,7 @@ export function normalizeRecord(policy:SourcePolicy,input:CaptureInput,templates
  if(BigInt(input.observed_at_ns)>=BigInt(policy.expiresNs))return {reason:"policy_expired"};
  if(!(input.kind==="error"?policy.decision.errors:policy.decision.logs))return {reason:"policy_disabled"};
  let payload:Record<string,unknown>;
- if(input.kind==="error")payload={occurrence_id:input.id,exception_class:input.exception_class,code:input.code,build_id:input.build_id,handled:true,fatal:false,frames:[]};
+ if(input.kind==="error")payload={occurrence_id:input.id,exception_class:input.exception_class,code:input.code,build_id:input.build_id,handled:input.handled,fatal:input.fatal,mechanism:input.mechanism,frames:input.exception_graph.nodes[0]?.frames??[],exception_graph:input.exception_graph};
  else{
   const template=templates.get(input.template_id);if(!template)return {reason:"unknown_template"};
   if(input.fields===null||typeof input.fields!=="object")return {reason:"invalid_fields"};

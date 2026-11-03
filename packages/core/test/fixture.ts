@@ -4,7 +4,7 @@ import {ed25519} from "@noble/curves/ed25519";
 import type {Config,SignedPolicy} from "../src/types.ts";
 export function signed(text:string):SignedPolicy{
  const key=Uint8Array.from({length:32},(_,i)=>i),bytes=new TextEncoder().encode(text);
- const b64=(v:Uint8Array)=>Buffer.from(v).toString("base64url");
+ const b64=(v:Uint8Array)=>btoa(Array.from(v,b=>String.fromCharCode(b)).join("")).replace(/=/g,"").replace(/\+/g,"-").replace(/\//g,"_");
  return {version:1,algorithm:"Ed25519",key_id:"test",payload:b64(bytes),signature:b64(ed25519.sign(bytes,key))};
 }
 export function config(project="p"):Config{
