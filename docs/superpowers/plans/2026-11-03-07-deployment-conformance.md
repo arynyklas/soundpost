@@ -46,6 +46,8 @@
 
 **Files:** Create `deploy/compose.distributed.yaml`, `deploy/helm/soundpost/{Chart.yaml,values.yaml,templates/statefulset.yaml,templates/service.yaml,templates/secrets.yaml,templates/networkpolicy.yaml,templates/pdb.yaml}`, `internal/config/{validate,placement,backup}.go`, `internal/config/validate_test.go`, `docs/operations/{distributed,upgrade,backup-authority}.md`.
 
+Task2 wires plan04's optional helper/seccomp profile into Compose/Helm rather than granting server privileges. Add `TestNativeRecipeSeparatesHelperAndServerPermissions`: server/exporter cannot perf-open; helper requires explicit PERFMON plus audited seccomp/LSM/tracefs/target visibility, no privileged/unconfined/SYS_ADMIN fallback. Verify actual runtime behavior in install-distributed/qualification, not manifest text alone. Systemd helper and Kubernetes Localhost seccomp/host-path/PID exceptions need documented operator setup; denied deployment leaves capability denied, not zero/off-CPU-complete. Record host kernel because container tags cannot supply6.1/6.6 kernels.
+
 **Interfaces:** `config.Validate(InstallConfig) error` requires distinct durable member identities/volumes, RF3, mTLS trust, C12 restore authority capabilities when off-host backup is enabled. `InstallConfig` typed YAML has mode, nodes/failure domains, disks, listen/public origins, source policies, quotas, retention, backup/authority and optional collector grants. Safe logs redact secret references and credentials.
 
 - [ ] Write `TestDistributedRejectsSharedIdentityOrMissingVoter` and `TestOffhostBackupRequiresAuthorityCASAndFreshHead`: invalid placement/missing authority/conditional-update failure cannot become ready. Local recovery copy must not be labeled deletion-safe disaster backup.

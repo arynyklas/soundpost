@@ -56,3 +56,7 @@ Owner review must accept/revise the proposed architecture/contracts, runtime/bro
 - Source-file inventory found no Go/Python/TypeScript/TSX source, package.json or go.mod. This confirms the design-only implementation gate remains intact; it is not a build pass.
 
 No product test command printed anywhere in the plans has been run or claimed passing.
+
+## Follow-up deployment clarification
+
+Delayed feedback identified missing explicit native-container prerequisites despite existing permission/unsupported rules. Added a spec-level verification-environment matrix and per-systemd/container/Compose/Kubernetes native helper contract, including seccomp, tracefs/target visibility, LSM, effective host capability and independent CPU/off-CPU denial states. Primary kernel documentation confirms CAP_PERFMON bypasses perf scope checks; it does not require weakening global paranoid settings and does not bypass the other controls. Added independent tools/perf implementation licensing guardrail and UAPI exception scope. No compiler/dependency/VM/profiler/drill was started; numerical/durability/coverage obligations remain unexecuted.

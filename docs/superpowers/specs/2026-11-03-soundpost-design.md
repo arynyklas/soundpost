@@ -173,6 +173,24 @@ System-wide scheduler events may be needed to observe a wakeup occurring outside
 
 No eBPF code is shipped in this design, avoiding GPL-only BPF program/helper issues for the selected Apache first-party engine. The Linux kernel is an operating-system prerequisite, not code relicensed into Soundpost. License review covers any redistributed user-space dependency and UAPI bindings.
 
+#### Native deployment and permission contract
+
+Use independently authored perf syscall/ring parsing; do not copy Linux `tools/perf` implementation or GPL test corpora. `golang.org/x/sys/unix` is a candidate BSD-3-Clause syscall binding, with exact release/license/notice closure locked before approved implementation. Linux6.6 `include/uapi/linux/perf_event.h` declares `GPL-2.0 WITH Linux-syscall-note`: the syscall ABI exception is not permission to relicense unrelated kernel/perf implementation. No dependency has been imported.
+
+Probe each requested mode under its actual credentials, namespace, seccomp and LSM policy. On supported upstream kernels, effective host-scoped `CAP_PERFMON` bypasses perf scope checks; it does **not** bypass seccomp, SELinux/AppArmor, tracefs DAC, missing kernel features or target metadata permissions. Do not require a globally weakened sysctl in addition to that capability. Without it, upstream `kernel.perf_event_paranoid=-1` is least restricted; `>=0` restricts raw/ftrace tracepoints, `>=1` excludes system-wide collection, and `>=2` further limits unprivileged collection to user-space execution. Distribution-specific higher values may restrict more. Record the actual value and probe result; never change it automatically. No `CAP_SYS_ADMIN`, `CAP_SYS_PTRACE`, root or unconfined fallback is enabled by default.
+
+Only the acquisition helper receives `CAP_PERFMON`, narrowly scoped target `/proc`/cgroup metadata and read-only scheduler tracefs `id`/`format` files for the fixed switch/wakeup event set. The server/exporter drop all such capabilities. Off-CPU acquisition needs scheduler events from the host kernel, including foreign-wakeup visibility; kernel tracepoint acquisition is distinct from exporting kernel callchains, which remains disabled by default. Missing mounts/ACLs or filtered events produce denied/unknown coverage, never inferred zero waits.
+
+| Deployment | Explicit operator prerequisite for optional native acquisition |
+|---|---|
+| systemd | Dedicated helper identity, capability bounding/ambient set limited to PERFMON, Unix-socket peer policy, read-only tracefs/cgroup/approved proc access; record any LSM/system-call-filter permission. No product-wide root service or sysctl rewrite. |
+| Container / Compose | Separate helper with `cap_drop: ALL`, `cap_add: [PERFMON]`, audited custom seccomp allowlist permitting required perf/mmap/poll/ioctl calls, read-only tracefs/cgroup/approved proc mounts and explicitly approved target PID visibility. Use `security_opt: seccomp=<audited-profile>`; never privileged or seccomp=unconfined. Container-root/rootless namespace capabilities do not automatically grant host profiling authority. |
+| Kubernetes | Optional helper only: explicit PERFMON securityContext capability, node-installed Localhost seccomp profile, narrowly mounted read-only host tracefs/cgroup/target metadata and approved PID visibility. Any hostPID/host-path/LSM exception requires operator authorization; Pod Security rejection is a denied capability, not a reason to escalate automatically. A host systemd helper is an alternative to broadening ordinary application pods. |
+
+Docker's documented default seccomp profile blocks `perf_event_open`; other runtimes' defaults must be inspected/probed, not assumed equivalent. Failure reasons distinguish `permission_seccomp`, `permission_capability`, `permission_lsm`, `tracefs_unavailable`, `target_visibility` and `kernel_feature`. If a permitted self/task-scoped CPU sampler works but system-wide scheduler access does not, report CPU supported and off-CPU denied separately; core telemetry continues, but this degraded row does not pass the required full native-engine qualification.
+
+Sources: [kernel perf security](https://docs.kernel.org/admin-guide/perf-security.html), [Docker seccomp](https://docs.docker.com/engine/security/seccomp/), [Linux6.6 UAPI license](https://github.com/torvalds/linux/blob/v6.6/include/uapi/linux/perf_event.h), [syscall binding license](https://github.com/golang/sys/blob/master/LICENSE). Moving documentation/license checks are evidence, not a pinned dependency BOM or runtime result.
+
 ### 10.3 Runtime/browser supplements and support truth
 
 Node 22/24 and Bun 1.3.14 use a single-owned callback inspector session with bounded enable/start/stop/disable, no debugging listener, no Runtime.evaluate/Debugger/heap commands and explicit coexistence handling. Bun's limited inspector support and per-process state require its own tests, not a Node pass copied to Bun. Record engine samples/time deltas separately from strict OS CPU nanoseconds. CPython perf trampolines can enrich native CPU frame names when enabled; deterministic `sys.monitoring` and best-effort Python wall samples are separate optional modes with tool-ID coexistence and no values retained. Runtime supplements never satisfy the native-engine gate by themselves.
@@ -217,6 +235,20 @@ These are proposed acceptance workloads/budgets, not benchmarks or retained-capa
 | Native profiler | CPU loop, timed block/runqueue workload, 99-Hz CPU plus off-CPU tracking on supported kernel/arch | <=3% CPU overhead per profiled target workload; bounded 64-MiB acquisition/export memory; measured sample loss and correct nonzero blocked intervals |
 
 If a budget fails, optimize or seek explicit owner changes; do not relabel timing as sampling, reduce full query scope or silently weaken durability/privacy. Default query budget is 30 seconds, 256 MiB working memory and 5 million returned samples/logs capped further by endpoint limits. Operators can grant bounded higher budgets. Cancellation releases iterators, temp files, RPC and memory; spills use org-scoped encrypted temporary files and the same deletion policy. Concurrency admission is fair by organization, not one global unbounded queue.
+
+### Where each gate is executed
+
+**Every durability, coverage and numerical statement in sections7,10 and13 is a specified acceptance obligation, not an executed or measured result.** This design was prepared on Windows with no installed Go compiler. No Linux VM/container, kernel profiler or three-node drill was run.
+
+| Gate | Required execution environment and evidence |
+|---|---|
+| Compiler, owned engines and semantic oracles | Pinned Go1.27.3 and exact locked upstream reference binaries/configurations in isolated Linux CI/VM runners. Capture build/digest, corpus/provenance/seed, input-normalization and semantic reports; production never contacts oracles. |
+| Disk durability, snapshot/restore and node loss | Linux servers/VMs with real persistent local volumes; record filesystem/mount/controller/cache and failure-domain identity. Separate-process/container kills prove only their stated fault model. Single-host physical/power failure and three-node independent-storage claims require separately authorized matching failure-domain drills, not three directories on one failed disk. |
+| Native CPU/off-CPU and container restrictions | Linux6.1/6.6 × amd64/arm64 runners with actual kernel config, tracefs/permissions/seccomp/LSM and target namespaces recorded. Test host/systemd plus audited container/Compose/Kubernetes recipes and denied-permission rows. A container shares its host kernel; its image cannot select a different kernel. Windows/WSL/Docker Desktop does not implicitly qualify these rows. |
+| Native overhead and SDK budgets | Native target hardware for claimed performance numbers; emulated/cross-compiled runs can support functional evidence only, not native overhead claims. Record workload, hardware/runtime/compiler, baseline/capture series, requested/achieved intervals, loss and memory/FD accounting. |
+| SDK/browser/application journeys | Actual Python/Node/Bun version/platform runners and real Chromium/Firefox/Safari qualification where advertised; Playwright WebKit alone is not a Safari-release certification. Real HTTP/DB/build/error/job/replay/profile paths and browser visual interaction remain mandatory. |
+
+Unavailable runners or permissions leave their gate unexecuted/denied. They cannot be turned into passing rows, zero activity or a reduced product scope.
 
 ## 14. Investigation UI and accessibility
 
