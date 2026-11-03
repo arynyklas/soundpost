@@ -1,0 +1,16 @@
+<!-- Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0 -->
+# Read-only intake authorization
+
+Product approval is not customer authorization. The operator must obtain a separate owning-environment grant before any actual customer intake. This tool never performs deployment, SSH, cutover, notification sending or failure drills.
+
+A grant supplies `GrantID`, `Authority`, `ReadOnly: true`, `NotBefore`, `ExpiresAt`, `MaxEvidenceAgeSeconds` in the inclusive range 1–86400, and exact `Scopes`. Each scope binds one target ID, canonical local repository path, exact HTTP evidence URL, and the collector names `git-current-ref` and `http-live-evidence`. Grant and target JSON are private operator inputs. They are assertions of delegated authority, not cryptographic identity verification; the operator must authenticate their issuer outside this tool. Never accept a target-authored grant as authority.
+
+The collector commands are fixed `git --no-optional-locks -C <repository> rev-parse --verify HEAD` and an HTTP GET of the exact authorized evidence URL. Output containment additionally reads local `git --no-optional-locks -C <repository> worktree list --porcelain` metadata. No shell, hooks, config discovery, SSH, credentials lookup, redirect following or target-supplied command is supported. HTTP responses are structured observations supplied by an authorized live evidence producer, not independently attested proof. Ownership and failure-domain statements remain producer observations, not drill acceptance.
+
+Private output requires an existing operator-controlled directory outside every configured public repository/worktree and this checkout. The directory must not be shared with untrusted writers. A newly created output file uses exclusive creation and mode 0600; directory permissions are checked on POSIX. On Windows the operator must apply and verify a restrictive NTFS ACL; Go mode bits do not establish an ACL. Output there fails closed until the operator explicitly confirms this ACL prerequisite with `--private-directory-acl-confirmed`. Symlink paths are resolved before containment checks. Existing output files are never overwritten.
+
+Credentials are never accepted as configuration fields or forwarded to HTTP. Use external secret references for inventory links only; the tool does not resolve them. Do not put credentials into endpoint URLs. Actual customer collection remains blocked until private grants, exact endpoints, checkout paths and secure destination are supplied by the owning operator.
+
+Run from a valid local public Git checkout; every configured repository and the process working directory must support `git worktree list --porcelain`. Any discovery error fails closed; the tool does not search unrelated paths for a replacement Git context. `ExpectedRef` is the exact, case-sensitive full lowercase 40- or 64-hex commit identifier, not a short ref or branch name.
+
+`--timeout` bounds the operation (default 2 minutes; positive and at most 1 hour). Cancellation and interrupt signals propagate to Git subprocesses and HTTP requests, including private-directory preflight and final containment checks. OS/filesystem writes are synchronous and not forcibly interruptible; an already-created private file is retained if later summary writing fails.

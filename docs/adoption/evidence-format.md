@@ -1,0 +1,14 @@
+<!-- Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0 -->
+# Intake evidence boundaries
+
+Private intake records the authorization identifier, collection time, evidence age bound and each repository's observed HEAD alongside the expected ref and live producer ref. Explicit discrepancies record mismatches; they are not silently reconciled or treated as accepted migration evidence.
+
+Live evidence includes its observation time, source version/collector coverage/ordering, runtime and version, build release and ref, protocol/version, policy registration/template, current normal-notification owner/mode, legacy read-only retention deadline/export reference, rollback owner/procedure reference, and deadman owner/product and external failure domains/proof reference. All fields are required. Missing, future or stale observations fail. A producer-supplied proof reference is a pointer requiring operator verification, not proof that a drill ran.
+
+Public summary is a separate closed shape: schema version, target count, discrepancy count, and fixed boolean completeness indicators. No arbitrary strings, identifiers, times, source labels, versions, endpoint names, paths, references or private error messages are copied from intake. This is an allowlisted projection, not regex redaction. It intentionally cannot establish actual customer acceptance, shadow correctness, cutover safety or completed outage drills.
+
+Synthetic smoke uses a temporary local Git repository and a loopback HTTP fixture. Its passing behavior proves only tool mechanics. No customer inventory, journeys, runtime verification or access authorization is implied. Future shadow/cutover engines own their own policies; this collector does not implement them.
+
+`LiveEvidence.ReportedAt` is the producer clock sampled when preparing the response; `ObservedAt` is the underlying observation instant. The collector records `CollectorStartedAt` (before Git), `CollectorReceivedAt` (after decoding HTTP), and `ProducerClockDeltaNano` (receipt minus reported time, including network latency). Neither timestamp attests a producer's honesty.
+
+Conservative admission rejects producer time ahead of receipt, receipt/report delta exceeding 5 seconds, observation after report, producer-reported observation age exceeding the grant bound, and collector-window/absolute observation age exceeding that bound. This may reject a legitimate skewed or slow producer; it never corrects a future clock into apparently fresh evidence. Operator clock synchronization is required. Clock/freshness failure returns partial private intake plus an error, with `CurrentEvidenceComplete: false` and `producer-clock-or-freshness-incomplete`; no public summary is accepted and the CLI writes no successful intake. API operators may securely preserve that partial ledger for diagnosis. A malicious producer can lie consistently about both clocks: independent live verification remains required.
