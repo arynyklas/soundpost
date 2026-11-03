@@ -1,0 +1,14 @@
+{
+ "copyright":"Copyright 2026 Aryn Yklas",
+ "license":"Apache-2.0",
+ "schema":1,
+ "sources":["https://man7.org/linux/man-pages/man2/perf_event_open.2.html","https://docs.kernel.org/trace/events.html"],
+ "rows":[
+  {"kernel_series":"6.1 LTS","arch":"amd64","kernel_build":null,"kernel_config":null,"toolchain":"go1.27.3","runtime_build_flags":null,"state":"not_run"},
+  {"kernel_series":"6.1 LTS","arch":"arm64","kernel_build":null,"kernel_config":null,"toolchain":"go1.27.3","runtime_build_flags":null,"state":"not_run"},
+  {"kernel_series":"6.6 LTS","arch":"amd64","kernel_build":null,"kernel_config":null,"toolchain":"go1.27.3","runtime_build_flags":null,"state":"not_run"},
+  {"kernel_series":"6.6 LTS","arch":"arm64","kernel_build":null,"kernel_config":null,"toolchain":"go1.27.3","runtime_build_flags":null,"state":"not_run"},
+  {"kernel_series":"6.6","arch":"amd64","kernel_build":"6.6.87.2-microsoft-standard-WSL2","kernel_config":null,"toolchain":"go1.27.3","runtime_build_flags":null,"state":"not_run","qualification":"functional evidence only; exact permissions, config and acquisition gates pending"}
+ ],
+ "required_evidence":["exact uname/build and config digest","perf_event_paranoid and effective capability snapshot","authorized target identity","actual CPU and scheduler samples","callchain coverage","nonzero known blocked intervals","sample loss","64 MiB total resource budget","target workload overhead <=3 percent","privacy canary audit"]
+}
