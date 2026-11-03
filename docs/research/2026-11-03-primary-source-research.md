@@ -1,0 +1,59 @@
+# Soundpost research: active design evidence
+
+Date: 2026-11-03. Research, not an implementation, conformance, performance or legal assurance claim.
+
+## Scope and precedence
+
+The owner's direct clarification in this session is authoritative: **Soundpost defines its own contracts throughout. Full PromQL/LogQL language compatibility remains; other products' backend APIs, envelopes, schemas and UI contracts do not.** There is no minimum Sentry-compatible backend to implement, no OTLP receiver obligation and no obligation to duplicate another product. Source adapters are specific migration tools, not the native architecture.
+
+The [selected requirements](../superpowers/specs/2026-11-03-soundpost-requirements.md) and [proposed design](../superpowers/specs/2026-11-03-soundpost-design.md) are the active product documents. Four complete earlier source reports are preserved unchanged in the [historical archive](archive/2026-11-03-primary-source-research.md) for evidence/provenance. Sections there describing a “minimum Sentry-compatible backend,” wrapper options, external telemetry engines, upstream HTTP API parity or deferred names are **historical comparisons, not active work or requirements**. They are intentionally absent from this digest. The archive is not required reading to discover the current product scope.
+
+## 1. Licensing and isolation lessons
+
+Soundpost's first-party code, SDKs, SSO, organization authorization, replay and profiling use Apache-2.0. Generic permissively licensed infrastructure libraries may be used with their notices; “Apache throughout” does not falsely relicense third-party notices. Source provenance and dependency closure must be checked per pinned version before reuse.
+
+Current Sentry server FSL and Bugsink PolyForm Shield are not default source foundations for an independent competing Apache product. Their capabilities can be observed as prior art without copying restricted code. SDK/server licenses differ. Keep, GlitchTip and SigNoz have different core/enterprise and permission models; product names or an “OSS” label do not establish that all desired code/features are permissively reusable. Isolation must be designed into every query and secondary artifact path, not inferred from teams, labels or dashboard folders.
+
+Primary sources: [Sentry licensing](https://open.sentry.io/licensing/), [Bugsink license](https://github.com/bugsink/bugsink/blob/main/LICENSE), [Keep core license](https://github.com/keephq/keep/blob/main/LICENSE), [Keep EE license](https://github.com/keephq/keep/blob/main/ee/LICENSE), [GlitchTip onboarding/permission semantics](https://glitchtip.com/documentation/getting-started/), [SigNoz license](https://github.com/SigNoz/signoz/blob/main/LICENSE).
+
+## 2. Custom SDK and protocol responsibilities
+
+Owned capture means owning global error/rejection hooks, exception causes and non-Error throws, framework-handled errors, hook coexistence, request-local context across async/thread/task boundaries, fatal-exit behavior, stack normalization and duplicate suppression. A trace ID does not imply collected spans. Error delivery must not depend on sampled trace export. Source maps require exact build/artifact identity, a protected upload/lookup policy and a real mapping engine; retaining a release string alone is not symbolication.
+
+The custom protocol must specify all signal schemas, safe enrichment, versioning, source credentials, limits before/after decompression, atomic acceptance, stable retry identity, durable ACK, bounded queues/backoff and loss counters. Public browser write identifiers are not authorization or trusted-client identity. A telemetry outage must not break the instrumented application. No delivery promise survives all process kills/page exits before ACK.
+
+Metadata-first is an allowlist, not a universal scrubbing switch. Messages, source paths, URLs, console/breadcrumbs and artifacts can expose values without bodies. Apply policy before SDK queueing/serialization. Unknown raw sources need explicit restricted-source policy. Avoid getters, repr/object serialization, locals and heap traversal. Explicitly model source-map/source-content sensitivity separately from runtime telemetry.
+
+Primary sources for runtime facts, not SDK reuse: [Node process semantics](https://nodejs.org/api/process.html), [Python sys.monitoring 3.12](https://docs.python.org/3.12/library/sys.monitoring.html), [Python frame APIs](https://docs.python.org/3.14/library/sys.html#sys._current_frames), [W3C trace context](https://www.w3.org/TR/trace-context/). Historical competitor privacy examples remain evidence that permissive defaults or PII flags are not proofs of metadata-only capture.
+
+## 3. Replay and runtime profiling feasibility
+
+Replay is a reconstructable ordered stream with checkpoints and gaps, not screenshots or ordinary breadcrumbs. Strict masking must happen while constructing capture records, before any raw snapshot buffer. Text/input-only masking is insufficient: attributes, CSS URLs, SVG, canvas, media, iframes, shadow roots and network/console side channels require policy. Masked geometry/interactions are still sensitive. The product's recorder/viewer and sequence contract are independently designed.
+
+Bun 1.3.14 has a narrow in-process callback `node:inspector` profiler subset backed by JSC. `Profiler.enable/setSamplingInterval/start/stop/disable` are source-backed; unrelated inspector methods are stubs. No network debugger is needed. Global profiler state and session interactions require single ownership and actual worker/coexistence tests. CLI profile import is not evidence of live SDK start/stop behavior. Requested intervals are not achieved accuracy guarantees.
+
+Node 22/24 in-process V8 CPU samples are not complete off-CPU or suspended-Promise stack attribution. Python monitoring callbacks offer deterministic execution accounting, not a universal unbiased native CPU sampler; `_current_frames` timer sampling has GIL/scheduling bias and does not capture every suspended asyncio task/native stack. Ignore callback values, arguments, locals and globals. Python 3.15 `profiling.sampling` must not be claimed for 3.14.
+
+Chromium's page-facing JS Self-Profiling API is experimental and policy/feature gated. Firefox/Safari lack the equivalent standard ordinary-page sampler in the inspected compatibility data. An unsupported/denied capability must be explicit. Long tasks, event-loop delays and duration spans are not CPU samples. Runtime sample deltas must retain their real clock semantics instead of being relabeled OS CPU nanoseconds.
+
+The native Linux CPU/off-CPU engine is a selected separate deliverable, not replaced by the portable limits above. CPython perf trampolines can enrich Linux callchains; DWARF raw user-stack capture can contain local values and violates the default no-content contract. The proposed design uses an owned perf-event collector, frame-pointer callchains, scheduler correlation and no persisted raw process stacks. Kernel/arch, privilege, JIT and thread/task coverage still need real qualification.
+
+Primary sources: [Bun pinned inspector](https://github.com/oven-sh/bun/blob/bun-v1.3.14/src/js/node/inspector.ts), [Bun native profiler](https://github.com/oven-sh/bun/blob/bun-v1.3.14/src/jsc/bindings/BunCPUProfiler.cpp), [Bun pinned CLI tests](https://github.com/oven-sh/bun/blob/bun-v1.3.14/test/cli/run/cpu-prof.test.ts), [Node 22 inspector](https://nodejs.org/docs/latest-v22.x/api/inspector.html), [Node 24 inspector](https://nodejs.org/docs/latest-v24.x/api/inspector.html), [CPython perf support](https://docs.python.org/3.14/howto/perf_profiling.html), [Python monitoring 3.14](https://docs.python.org/3.14/library/sys.monitoring.html), [JS Self-Profiling draft](https://wicg.github.io/js-self-profiling/), [browser compatibility data](https://github.com/mdn/browser-compat-data/blob/main/api/Profiler.json), [perf_event_open](https://man7.org/linux/man-pages/man2/perf_event_open.2.html).
+
+## 4. Full language compatibility, independent interfaces
+
+Reference profiles are Prometheus 3.1.0 (`7086161a93b262aa0949dbf2aba15a5a7b13e0a3`), Prometheus 3.13.5 (`f497435984d1ca1d84cda5ed309387ac2eb1f8f6`) and Loki 3.5.2 (`257d2f62bf8a81b44dea6fe88968d1d28c8e01e7`). A profile includes the entire language, type/evaluation semantics and all feature flags/valid combinations, not queries used by one dashboard. Source wire protocols and upstream HTTP routes are separate and not required by this selection. Isolated upstream binaries may act as test oracles; production must always use Soundpost's engines.
+
+PromQL includes scalar/string/vector/matrix typing, every function/operator, native histograms/flavors/resets/schema interactions, IEEE-754 NaN/Inf/signed zero versus stale markers, labels/cardinality/UTF-8/RE2, lookback/selector boundaries, time grids/offsets/@/subqueries, warnings/infos and disabled/experimental behavior. Profile versions cannot silently share expected answers where upstream changed behavior.
+
+LogQL includes complete pipelines and metric queries, parsers/error labels, left-to-right mutations, patterns/IP/RE2, label extraction/collisions/conversion, templates/control flow/function whitelist, unwrap/line/counter rates, precision and log ordering/multiplicity/tie/limit behavior. Match Go-template semantics, not just interpolation. Static-source discrepancies involving newline selector matches and `__line__` must be settled through explicit independently authored oracle cases, not guessed from prose. Tail transport is Soundpost's own interface; a gap cannot appear as complete data.
+
+Prometheus corpora are generally Apache-2.0 with notices. Loki `pkg/logql`, `pkg/iter` and integration test corpora are generally AGPL; being tests or translating grammar does not make them permissive. Some HTTP/model subtrees have exceptions, but their dependencies may still reach AGPL code. Use independently authored LogQL implementation/cases and a provenance ledger; no copied AGPL grammar/test tables. Out-of-process oracle execution is not blanket permission to distribute derived code or corpora.
+
+A complete manifest maps grammar/functions/stages/gates to implementation and tests. Compare semantic results through separate harness adapters, including errors/warnings and data loss; normalize only documented freedom. Exercise ingest→flush→compact→restart, hot/cold/shards/caches, cancellation and adversarial authorization. Generated mixed cases supplement inventory. Zero unresolved promised-semantic mismatches and no silent skips are gates; a finite green corpus is evidence, not mathematical equivalence proof.
+
+Primary sources: [Prometheus 3.13.5 language basics](https://github.com/prometheus/prometheus/blob/v3.13.5/docs/querying/basics.md), [functions](https://github.com/prometheus/prometheus/blob/v3.13.5/docs/querying/functions.md), [operators](https://github.com/prometheus/prometheus/blob/v3.13.5/docs/querying/operators.md), [flags](https://github.com/prometheus/prometheus/blob/v3.13.5/docs/feature_flags.md), [3.1.0 basics](https://github.com/prometheus/prometheus/blob/v3.1.0/docs/querying/basics.md), [Loki 3.5.2 queries](https://github.com/grafana/loki/tree/v3.5.2/docs/sources/query), [Loki license exceptions](https://github.com/grafana/loki/blob/v3.5.2/LICENSING.md), [Prometheus compliance](https://github.com/prometheus/compliance/tree/6ae8d35df52ce697425370259f2dedc7e6b27828).
+
+## Uncertainty
+
+All inherited reports are desk research. No SDK/native profiler/runtime/browser acceptance, complete semantic differential run, benchmark or legal review has yet been performed. The design's initial implementation tasks must freeze exact dependency/build/browser inputs and retain provenance. Private customer inventory is not included in this digest or the archived public-source reports.

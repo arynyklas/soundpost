@@ -1,0 +1,22 @@
+# Local secrets and private customer adoption material
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+customer-private/
+
+# Runtime data, capture artifacts and temporary build output
+/data/
+/var/
+/tmp/
+/dist/
+/coverage/
+*.perf.data
+*.cpuprofile
+node_modules/
+.venv/
+__pycache__/
+.pytest_cache/
