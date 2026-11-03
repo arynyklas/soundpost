@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"soundpost/internal/auth"
+	"soundpost/internal/durablefs"
 	"soundpost/internal/model"
 	"sync"
 	"time"
@@ -23,6 +24,7 @@ type Store struct {
 	dir        string
 	registryMu sync.RWMutex
 	keyMu      sync.Mutex
+	ownerProof AdmissionProofs
 	handlers   map[CommandKind]Handler
 }
 type User = model.ControlUser
@@ -36,11 +38,15 @@ type Result = model.ControlResult
 
 // Control writes accept only authorization-owned opaque scopes.
 func Open(dir string) (*Store, error) {
-	if e := os.MkdirAll(dir, 0700); e != nil {
+	if e := durablefs.MkdirAll(dir); e != nil {
 		return nil, e
 	}
 	db, e := bolt.Open(filepath.Join(dir, "control.db"), 0600, &bolt.Options{Timeout: time.Second})
 	if e != nil {
+		return nil, e
+	}
+	if e = durablefs.SyncFileAndDir(filepath.Join(dir, "control.db")); e != nil {
+		db.Close()
 		return nil, e
 	}
 	s := &Store{db: db, dir: dir}
@@ -54,7 +60,7 @@ func Open(dir string) (*Store, error) {
 		}
 		token := Random()
 		st := State{Installation: model.NewID(), BootstrapHash: Hash(token), Users: map[string]User{}, Sessions: map[string]Session{}, Orgs: map[string]Org{}, Commands: map[string]Result{}, OIDC: map[string]json.RawMessage{}}
-		if e = os.WriteFile(filepath.Join(dir, "bootstrap.token"), []byte(token), 0600); e != nil {
+		if e = durablefs.Exclusive(filepath.Join(dir, "bootstrap.token"), []byte(token)); e != nil {
 			return e
 		}
 		v, e := json.Marshal(st)
@@ -75,11 +81,7 @@ func (s *Store) BootstrapToken() (string, error) {
 	return string(b), e
 }
 func (s *Store) RemoveBootstrapFile() error {
-	e := os.Remove(filepath.Join(s.dir, "bootstrap.token"))
-	if os.IsNotExist(e) {
-		return nil
-	}
-	return e
+	return durablefs.Remove(filepath.Join(s.dir, "bootstrap.token"))
 }
 func (s *Store) View(ctx context.Context, fn func(State) error) error {
 	if e := ctx.Err(); e != nil {

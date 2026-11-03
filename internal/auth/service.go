@@ -27,6 +27,7 @@ type Service struct {
 	store         ControlStore
 	now           func() time.Time
 	bearerHashKey [32]byte
+	sourceBarrier SourceBarrier
 }
 type Session struct {
 	Token   string   `json:"-"`
@@ -95,7 +96,9 @@ func (s *Service) Bootstrap(ctx context.Context, token, email, p string) (Sessio
 	if e != nil {
 		return Session{}, e
 	}
-	_ = s.store.RemoveBootstrapFile()
+	if e = s.store.RemoveBootstrapFile(); e != nil {
+		return Session{}, model.Fail(model.Unavailable)
+	}
 	return out, nil
 }
 func validEmail(v string) bool {

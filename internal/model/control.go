@@ -72,6 +72,7 @@ type ControlState struct {
 	BootstrapHash        string
 	BearerHashKey        string
 	BearerHashKeyVersion uint8
+	DataInitialized      bool
 	Users                map[string]ControlUser
 	Sessions             map[string]ControlSession
 	Orgs                 map[string]ControlOrg
@@ -80,6 +81,14 @@ type ControlState struct {
 	CommandOwners        map[string]string
 	OIDC                 map[string]json.RawMessage
 	ServerTokens         map[string]ControlServerToken
+	Sources              map[string]SourceAuthority
+	SourceCredentials    map[string]string
+	Reservations         map[string]AdmissionReservation
+	AdmissionKeys        map[string]string
+	Quotas               map[string]QuotaState
+	SourceFences         map[string]SourceFence
+	SourceOperations     map[string]SourceFence
+	PolicySigningKey     string
 }
 type ControlCommand struct {
 	CommandID        ID

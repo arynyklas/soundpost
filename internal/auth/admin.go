@@ -175,6 +175,41 @@ func (s *Service) AdminCommand(ctx context.Context, c Credential, r AdminCommand
 				return err
 			}
 			o.Settings[r.Kind+":"+p.ID.String()] = append(json.RawMessage(nil), p.Config...)
+			if r.Kind == "source_policy" {
+				if src, active := st.Sources[p.ID.String()]; active {
+					if src.Closing {
+						return model.Fail(model.Stale)
+					}
+					var cfg SourcePolicyConfig
+					if json.Unmarshal(p.Config, &cfg) != nil || cfg.ProjectID != src.Project || src.Org != r.OrgID {
+						return model.Fail(model.Forbidden)
+					}
+					src.Closing = true
+					src.Policy.Enabled = cfg.Enabled
+					if src.Browser {
+						narrowed := make([]string, 0, len(src.Origins))
+						for _, origin := range src.Origins {
+							for _, allowed := range cfg.Origins {
+								if origin == allowed {
+									narrowed = append(narrowed, origin)
+									break
+								}
+							}
+						}
+						src.Origins = narrowed
+					}
+					src.Policy.Revision++
+					if st.SourceFences == nil {
+						st.SourceFences = map[string]model.SourceFence{}
+					}
+					st.SourceFences[p.ID.String()] = model.SourceFence{Operation: r.CommandID, Source: p.ID, Org: r.OrgID, Epoch: o.Epoch + 1, Phase: "fencing"}
+					if st.SourceOperations == nil {
+						st.SourceOperations = map[string]model.SourceFence{}
+					}
+					st.SourceOperations[r.CommandID.String()] = st.SourceFences[p.ID.String()]
+					st.Sources[p.ID.String()] = src
+				}
+			}
 			if p.Secret != "" {
 				o.Secrets[r.Kind+":"+p.ID.String()] = sealedSecret
 			}
@@ -194,6 +229,12 @@ func (s *Service) AdminCommand(ctx context.Context, c Credential, r AdminCommand
 		}
 		st.Audits = append(st.Audits, audit)
 		out = model.ControlResult{Revision: st.Revision + 1, Cursor: model.Cursor{Group: st.Installation, Index: uint64(st.Revision + 1)}}
+		if r.Kind == "source_policy" {
+			if f, ok := st.SourceFences[p.ID.String()]; ok && f.Operation == r.CommandID {
+				out.Phase = f.Phase
+				out.AffectedIDs = []model.ID{f.Operation}
+			}
+		}
 		if st.CommandOwners == nil {
 			st.CommandOwners = map[string]string{}
 		}

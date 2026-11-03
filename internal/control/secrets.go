@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"soundpost/internal/durablefs"
 	"soundpost/internal/model"
 	"strings"
 )
@@ -24,19 +25,7 @@ func (s *Store) keyPath(id string) (string, error) {
 	return filepath.Join(s.dir, "envelope-"+id+".key"), nil
 }
 func writeSecretFile(path string, value []byte) error {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
-	if err != nil {
-		return err
-	}
-	_, err = f.Write(value)
-	if err == nil {
-		err = f.Sync()
-	}
-	closeErr := f.Close()
-	if err == nil {
-		err = closeErr
-	}
-	return err
+	return durablefs.Exclusive(path, value)
 }
 func (s *Store) Seal(secret string) (string, error) {
 	s.keyMu.Lock()
@@ -61,6 +50,9 @@ func (s *Store) Seal(secret string) (string, error) {
 		err = writeSecretFile(path, key)
 	}
 	if err != nil {
+		return "", err
+	}
+	if err = durablefs.SyncFileAndDir(path); err != nil {
 		return "", err
 	}
 	block, err := aes.NewCipher(key)
@@ -146,7 +138,7 @@ func (s *Store) RotateSecretKey() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err = os.Rename(name, filepath.Join(s.dir, "envelope.active")); err != nil {
+	if err = durablefs.Rename(name, filepath.Join(s.dir, "envelope.active")); err != nil {
 		return "", err
 	}
 	return id, nil

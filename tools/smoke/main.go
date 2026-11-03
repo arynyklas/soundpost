@@ -23,22 +23,37 @@ import (
 
 func main() {
 	if e := run(); e != nil {
-		if len(os.Args) >= 2 && os.Args[1] == "source-map" {
-			fmt.Fprintln(os.Stderr, "source-map smoke failed:", e)
-		} else {
-			fmt.Fprintln(os.Stderr, "bootstrap-scope smoke failed")
-		}
+		fmt.Fprintln(os.Stderr, "smoke failed:", e)
 		os.Exit(1)
 	}
 }
-func run() error {
+func run() (err error) {
+	smoke, stage := "bootstrap_scope", "dispatch"
+	runID := model.NewID()
+	defer func(){ err = annotateSmokeFailure(smoke,stage,runID,err) }()
+	if len(os.Args) >= 2 {
+		switch os.Args[1] {
+		case "durable-child":
+			smoke, stage = "durable_child", "child_start"
+			return runDurableChild(os.Args[2:])
+		case "durable-restart":
+			smoke, stage = "durable_restart", "durable_dispatch"
+			return runDurable(os.Args[2:], os.Args[1])
+		case "privacy-admission":
+			smoke, stage = "privacy_admission", "privacy_dispatch"
+			return runDurable(os.Args[2:], os.Args[1])
+		}
+	}
 	if len(os.Args) >= 2 && os.Args[1] == "source-map" {
+		smoke, stage = "source_map", "source_map_dispatch"
 		return runSourceMap(os.Args[2:])
 	}
 	if len(os.Args) < 2 || os.Args[1] != "bootstrap-scope" {
 		return fmt.Errorf("expected bootstrap-scope")
 	}
 	f := flag.NewFlagSet("bootstrap-scope", flag.ContinueOnError)
+	f.SetOutput(io.Discard)
+	stage = "bootstrap_flags"
 	artifact := f.String("artifact-dir", "", "sanitized artifact directory")
 	if err := f.Parse(os.Args[2:]); err != nil {
 		return err
@@ -46,23 +61,28 @@ func run() error {
 	if *artifact == "" {
 		return fmt.Errorf("artifact directory required")
 	}
+	stage = "artifact_directory"
 	if err := os.MkdirAll(*artifact, 0700); err != nil {
 		return err
 	}
+	stage = "fixture_directory"
 	dir, err := os.MkdirTemp("", "soundpost-smoke-")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(dir)
+	stage = "control_open"
 	store, err := control.Open(dir)
 	if err != nil {
 		return err
 	}
 	defer store.Close()
+	stage = "auth_new"
 	service, err := auth.NewService(auth.AuthDependencies{Control: store})
 	if err != nil {
 		return err
 	}
+	stage = "https_start"
 	server := httptest.NewTLSServer(httpapi.NewServer("", service, nil).Handler)
 	defer server.Close()
 	client := server.Client()
@@ -71,16 +91,19 @@ func run() error {
 	statuses := map[string]int{}
 	expected := map[string]int{}
 	call := func(name, path string, v any, csrf string, want int) ([]byte, error) {
+		stage = "http_"+name+"_encode"
 		raw, err := json.Marshal(v)
 		if err != nil {
 			return nil, err
 		}
+		stage = "http_"+name+"_request"
 		req, err := http.NewRequest("POST", server.URL+path, bytes.NewReader(raw))
 		if err != nil {
 			return nil, err
 		}
 		req.Header.Set("Origin", server.URL)
 		req.Header.Set("X-CSRF-Token", csrf)
+		stage = "http_"+name+"_send"
 		response, err := client.Do(req)
 		if err != nil {
 			return nil, err
@@ -89,10 +112,13 @@ func run() error {
 		statuses[name] = response.StatusCode
 		expected[name] = want
 		if response.StatusCode != want {
-			return nil, fmt.Errorf("unexpected status for %s", name)
+			body, _ := io.ReadAll(io.LimitReader(response.Body,65536))
+			return nil, httpSmokeFailure(name,response.StatusCode,want,body)
 		}
+		stage = "http_"+name+"_body"
 		return io.ReadAll(response.Body)
 	}
+	stage = "bootstrap_token_read"
 	bootstrap, err := store.BootstrapToken()
 	if err != nil {
 		return err
@@ -102,6 +128,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	stage = "bootstrap_session_decode"
 	var session auth.Session
 	if err = json.Unmarshal(raw, &session); err != nil {
 		return err
@@ -112,11 +139,13 @@ func run() error {
 	}
 	ctx := context.Background()
 	command := func(name, kind string, org model.ID, p auth.AdminPayload) error {
+		stage = "command_"+name+"_revision"
 		var revision model.Revision
 		if err := store.View(ctx, func(st control.State) error { revision = st.Revision; return nil }); err != nil {
 			return err
 		}
 		p.Reason = "bootstrap-scope smoke"
+		stage = "command_"+name+"_encode"
 		payload, err := json.Marshal(p)
 		if err != nil {
 			return err
@@ -154,6 +183,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	stage = "reader_session_decode"
 	if err = json.Unmarshal(raw, &session); err != nil {
 		return err
 	}
@@ -180,12 +210,14 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	stage = "elevation_decode"
 	var elevated struct {
 		ID model.ID `json:"id"`
 	}
 	if err = json.Unmarshal(raw, &elevated); err != nil {
 		return err
 	}
+	stage = "elevation_origin"
 	serverURL, err := url.Parse(server.URL)
 	if err != nil {
 		return err
@@ -196,17 +228,21 @@ func run() error {
 			adminCookie = cookie.Value
 		}
 	}
+	stage = "elevation_authenticate"
 	credential, err := service.Authenticate(ctx, adminCookie)
 	if err != nil {
 		return err
 	}
+	stage = "elevation_resolve"
 	handle, err := service.ResolveElevation(ctx, credential, elevated.ID)
 	if err != nil {
 		return err
 	}
+	stage = "elevation_scope"
 	if _, err = service.ElevatedScope(ctx, handle, orgs[0], []model.ID{projects[0]}, auth.Read); err != nil {
 		return err
 	}
+	stage = "elevation_audit_read"
 	auditOrdered := false
 	if err = store.View(ctx, func(st control.State) error {
 		n := len(st.Audits)
@@ -215,6 +251,7 @@ func run() error {
 	}); err != nil {
 		return err
 	}
+	stage = "elevation_audit_order"
 	if !auditOrdered {
 		return fmt.Errorf("durable audit ordering absent")
 	}
@@ -226,14 +263,17 @@ func run() error {
 	if _, err = call("csrf_denied", "/api/v1/admin/read", auth.AdminReadRequest{OrgID: orgs[0], Kind: "organization"}, "invalid", 403); err != nil {
 		return err
 	}
+	stage = "artifact_encode"
 	report := struct {
 		Statuses     map[string]int `json:"statuses"`
 		Expected     map[string]int `json:"expected"`
 		AuditOrdered bool           `json:"audit_ordered"`
-	}{statuses, expected, auditOrdered}
+		RunID model.ID `json:"run_id"`
+	}{statuses, expected, auditOrdered, runID}
 	artifactJSON, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {
 		return err
 	}
+	stage = "artifact_write"
 	return os.WriteFile(filepath.Join(*artifact, "bootstrap-scope.json"), artifactJSON, 0600)
 }

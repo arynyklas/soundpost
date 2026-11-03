@@ -29,6 +29,12 @@ func (s *Service) validateCredentialState(st model.ControlState, c Credential) e
 // ValidateControlState is invoked inside the authority's write transaction so a
 // revocation ordered before that transaction cannot race an earlier read check.
 func (scope Scope) ValidateControlState(st model.ControlState) error {
+	if scope.sourceCredential != nil {
+		if len(scope.projects) != 1 || len(scope.sources) != 1 {
+			return model.Fail(model.Forbidden)
+		}
+		return scope.ValidateSourceState(st, scope.projects[0], scope.sources[0], !scope.historical)
+	}
 	if scope.service == nil {
 		return model.Fail(model.Forbidden)
 	}

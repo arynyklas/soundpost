@@ -3,6 +3,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"net/http"
 	"soundpost/internal/auth"
 )
@@ -23,6 +24,13 @@ func RegisterAdminRoutes(mux *http.ServeMux, s *auth.Service) {
 			return
 		}
 		v, e := s.AdminCommand(r.Context(), c, q)
+		if e == nil && v.Phase == "fencing" {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Cache-Control", "no-store")
+			w.WriteHeader(http.StatusAccepted)
+			_ = json.NewEncoder(w).Encode(v)
+			return
+		}
 		reply(w, v, e)
 	})
 	mux.HandleFunc("POST /api/v1/admin/read", func(w http.ResponseWriter, r *http.Request) {

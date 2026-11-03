@@ -10,8 +10,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"soundpost/internal/appcore"
 	"soundpost/internal/auth"
-	"soundpost/internal/control"
 	"soundpost/internal/httpapi"
 	"syscall"
 	"time"
@@ -34,17 +34,19 @@ func run() error {
 	cert := f.String("tls-cert", "", "TLS certificate PEM")
 	key := f.String("tls-key", "", "TLS private key PEM")
 	oidcPath := f.String("oidc-config", "", "private OIDC configuration JSON")
+	webDir := f.String("web-dir", "", "real built same-origin web asset directory")
 	if e := f.Parse(os.Args[2:]); e != nil {
 		return e
 	}
 	if *mode != "single" || *dir == "" || ((*cert == "") != (*key == "")) {
 		return fmt.Errorf("single mode, data directory and paired TLS files required")
 	}
-	store, e := control.Open(*dir)
+	core, e := appcore.Open(*dir)
 	if e != nil {
 		return e
 	}
-	defer store.Close()
+	defer core.Close()
+	store, service := core.Control, core.Auth
 	if *cert == "" {
 		*cert, *key, e = localTLS(*dir, *listen)
 		if e != nil {
@@ -55,10 +57,7 @@ func run() error {
 	if token, e := store.BootstrapToken(); e == nil {
 		fmt.Fprintln(os.Stderr, "One-time bootstrap token:", token)
 	}
-	service, e := auth.NewService(auth.AuthDependencies{Control: store})
-	if e != nil {
-		return e
-	}
+	// Authentication and durable data services were opened together above.
 	var cfg *auth.OIDCConfig
 	if *oidcPath != "" {
 		raw, e := os.ReadFile(*oidcPath)
@@ -70,9 +69,18 @@ func run() error {
 			return e
 		}
 	}
-	server := httpapi.NewServer(*listen, service, cfg)
+	routes := []func(*http.ServeMux){core.Register}
+	if *webDir != "" {
+		register, err := httpapi.UIRoutes(os.DirFS(*webDir))
+		if err != nil {
+			return err
+		}
+		routes = append(routes, register)
+	}
+	server := httpapi.NewServer(*listen, service, cfg, routes...)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	go core.RunFences(ctx)
 	go func() {
 		<-ctx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)

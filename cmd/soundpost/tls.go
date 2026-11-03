@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"soundpost/internal/durablefs"
 	"time"
 )
 
@@ -24,6 +25,12 @@ func localTLS(dir, listen string) (string, string, error) {
 	_, ce := os.Stat(certPath)
 	_, ke := os.Stat(keyPath)
 	if ce == nil && ke == nil {
+		if e := durablefs.SyncFileAndDir(keyPath); e != nil {
+			return "", "", e
+		}
+		if e := durablefs.SyncFileAndDir(certPath); e != nil {
+			return "", "", e
+		}
 		return certPath, keyPath, nil
 	}
 	if !os.IsNotExist(ce) || !os.IsNotExist(ke) {
@@ -65,17 +72,5 @@ func localTLS(dir, listen string) (string, string, error) {
 	return certPath, keyPath, nil
 }
 func exclusiveFile(path string, b []byte) error {
-	f, e := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
-	if e != nil {
-		return e
-	}
-	_, e = f.Write(b)
-	if e == nil {
-		e = f.Sync()
-	}
-	ce := f.Close()
-	if e == nil {
-		e = ce
-	}
-	return e
+	return durablefs.Exclusive(path, b)
 }

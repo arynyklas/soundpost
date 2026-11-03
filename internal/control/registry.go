@@ -18,13 +18,13 @@ type Effect struct {
 
 func (k CommandKind) Valid() bool {
 	switch k {
-	case CreateOrg, Grant, PolicyChange, BeginFence, CompleteFence, ReserveAdmission, FinalizeAdmission, ApplyIssueEvidence, ApplyCondition, ApplyRuleEvaluation, IncidentAction, ClaimDelivery, CompleteDelivery, DeleteScope, AuditCommand, RegisterRelease, UpdateJob, RecordEvidenceGap:
+	case KindCreateOrg, KindGrant, KindPolicyChange, KindBeginFence, KindCompleteFence, KindReserveAdmission, KindFinalizeAdmission, KindApplyIssueEvidence, KindApplyCondition, KindApplyRuleEvaluation, KindIncidentAction, KindClaimDelivery, KindCompleteDelivery, KindDeleteScope, KindAudit, KindRegisterRelease, KindUpdateJob, KindRecordEvidenceGap:
 		return true
 	}
 	return false
 }
 func (s *Store) RegisterHandler(kind CommandKind, handler Handler) error {
-	if !kind.Valid() || kind == AuditCommand || handler == nil {
+	if !kind.Valid() || kind == KindAudit || handler == nil {
 		return model.Fail(model.Invalid)
 	}
 	s.registryMu.Lock()

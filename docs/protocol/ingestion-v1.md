@@ -1,0 +1,64 @@
+# Native ingestion v1
+
+Copyright 2026 Aryn Yklas. SPDX-License-Identifier: Apache-2.0.
+
+The server accepts its own closed typed JSON protocol, not an upstream telemetry backend API. In the current implementation intake is a durable **single-host, non-HA** service. The distributed Raft/quorum qualification remains a release blocker.
+
+## Onboarding and authority
+
+A freshly authenticated organization administrator uses the existing HTTPS session, exact Origin and synchronizer CSRF protection:
+
+- `POST /api/v1/sources` with `command_id`, `org`, `project`, `source`, `browser`, `origins`, decimal-string `expires_ns`, `policy`, and a bounded audit `reason`.
+- `POST /api/v1/sources/policy` with `command_id`, `source`, decimal-string `expected_revision`, the complete next `policy`, and `reason`.
+- `POST /api/v1/sources/revoke` with `source` and `reason`.
+- `POST /api/v1/quotas` with command/revision/org identity, optional project, decimal-string `max_bytes` / `max_series`, and `reason` configures a hard organization or project quota. Existing charges are retained when a cap is lowered.
+
+The source creation response discloses its random write-only credential once. Its installation-owned, purpose-separated HMAC authority is persisted; plaintext credentials are not. A lost onboarding response cannot retrieve the plaintext key: the administrator must revoke that source and provision a new source identity. Onboarding command IDs cannot be reused to issue another key. Source credentials never authenticate as a server API bearer, browser session, read grant, artifact grant or elevation.
+
+A descriptor exposes version, org/project/source, routing version 1, 64 slots and the source policy revision. Capture policy retrieval is `POST /ingest/v1/source` with the current source credential. Its Ed25519 envelope has exactly the C09 fields `version`, `algorithm`, `key_id`, `payload`, `signature`; the canonical payload has exactly `version`, `org`, `project`, `source`, `revision`, `expires_ns`, `errors`, `logs`, `replay`, `bodies`. Bodies remain false. Counters and times are canonical decimal strings. The key ID fingerprints the installation signing key. Pin the onboarding/deployment public key out of band; a key map returned by a later source request is not permission to replace the deployment trust root automatically. Unknown or expired policy and invalid signatures must fail closed in a client.
+
+The typed policy registers resource identities, approved labels, operation/dependency/error codes, immutable log template revisions and typed metadata fields with finite allowlisted values. Source onboarding respects existing `source_policy:<source>` settings; it cannot silently enable, rebind or widen an explicitly configured source. Structured logging is the default. A private `restricted_raw` source additionally needs a pre-existing restricted administrative policy with named readers, a real org member/admin owner, rationale, expiration, bounded explicitly restricted template fields and at most seven-day retention. It cannot be a browser source. There is no arbitrary line/message fallback. Restricted reads still require the existing named-source `raw.read` authority.
+
+## Requests and exact values
+
+`POST /ingest/v1/batches` takes:
+
+```json
+{"version":1,"project":"<32 lowercase hex>","source":"<32 lowercase hex>","producer":"<32 lowercase hex>","id":"<32 lowercase hex>","policy_revision":"1","route_slot":0,"records":[{"id":"<32 lowercase hex>","kind":"metric","observed_at_ns":"9007199254740993","resource":{"service_id":"11111111111111111111111111111111","environment_id":"22222222222222222222222222222222","build_id":"33333333333333333333333333333333","instance_pseudonym":"registered-opaque-instance","labels":[]},"payload":{"name":"requests_total","labels":[],"sample_kind":"float","value":"3ff0000000000000","unit":"1","type":"counter"}}]}
+```
+
+The placeholders in this explanatory example are not valid IDs. A real client must calculate the record's slot; `route_slot:0` is not a default route.
+
+Native service_id, environment_id and build_id are nonzero canonical 128-bit IDs, not human display aliases. Error payload build_id is the same typed identity as the record's approved resource build_id. The authenticated source's project-bound policy contains the closed ResourceRegistry: service_id/environment_id/build_id arrays of canonical IDs and instance_pseudonym approved opaque strings. Missing, zero, uppercase, malformed or unregistered identities deny; there is no alias compatibility parser or default ID selection. Display names belong to separate metadata, not these join keys.
+
+Private credentials use `Authorization: Bearer …`. A browser credential uses `X-Soundpost-Source` and its exact configured HTTPS Origin, without cookies. Duplicate credential/origin headers, mixed credential classes, foreign origins and ingestion cookies deny. Preflight allows only the configured exact origin, POST, Content-Type, Content-Encoding and X-Soundpost-Source. Responses expose Retry-After, X-Soundpost-Receipt, X-Soundpost-Cursor and X-Request-ID. No ingestion endpoint sets a session cookie or Access-Control-Allow-Credentials.
+
+Limits are 1 MiB for a gzip-compressed body, 4 MiB expanded (including an uncompressed body and canonical normalized batch), 256 KiB per input/canonical record, and 512 records. Gzip is optional. Duplicate JSON keys, invalid UTF-8, lone UTF-16 surrogate escapes, excessive nesting, unsupported versions, unknown kinds, overflowing exact integer types, malformed labels and mixed payload tags deny the entire batch before reservation. Unknown optional extensions disappear before hashing/persistence. A payload is a concrete kind-specific DTO, never an arbitrary object bag.
+
+Kinds are metric, log, span, error, job_attempt, replay_chunk, profile_chunk, capability, loss and condition. The canonical Go wire DTOs are `internal/model/telemetry.go`; SDK error `exception_graph` nodes/edges/reasons are part of that closed error payload. Default exception messages, locals, heap/object values, bodies, headers/cookies, prompts, full SQL and URL query/fragment have no payload fields. Frames are bounded metadata with project-relative artifact identities, not source text or stack-memory blobs. Replay accepts masked nodes/events, not raw DOM. Profiling uses frame/stack/sample/interval tables, not registers, locals, heap or raw memory.
+
+IDs are nonzero lowercase canonical hex. Nanoseconds, producer counters and uint64 values use exact decimal strings; floating values use 16 lowercase IEEE-754 hex digits. Native integer and float histograms reuse C01 validation and representations. Counts above 2^53 never pass through float64. Labels are sorted, unique-name lists. An empty SDK log-label object is normalized to the empty list; nonempty label maps are not accepted.
+
+Approved logs are rendered once from the immutable template revision and selected safe fields. Caller-provided lines and unknown optional fields are not stored. Replacement values are never recursively interpolated. Stream labels, typed fields and approved structured metadata remain separate. Editing policy cannot rerender already committed history.
+
+## Fixed routing and atomic apply
+
+Owner hashing is SHA-256 over four length-prefixed UTF-8 byte strings: canonical org hex, canonical project hex, kind, owner key. Each prefix is uint32 big-endian byte length. The first uint64 big-endian hash word modulo 64 selects the slot. Metric owner key is canonical JSON of name and sorted labels; log owner key is the canonical stream-label list. Trace/run/replay/profile/occurrence/condition IDs own their respective records. Capability/loss ownership uses canonical source hex + producer hex + kind. Producer identity never changes the owner of a canonical project metric series.
+
+Clients partition normalized records by slot before assigning independent batch IDs and keep one in-flight batch per producer/slot lane. The server verifies every record's owner before any quota reservation. A mixed-slot batch is terminal 422 and accepts zero records. Placement changes must never rehash these 64 logical identities.
+
+Within the single ordered apply path, equal-time canonical metric samples with identical type/value collapse across producers; conflicting samples reject the entire batch. Out-of-order nonconflicting samples remain. Terminal job attempts cannot be rewritten through later ingestion. The state-machine checks run under the same ordering lock as proposal and again at apply, not only in a router preflight.
+
+The hash covers canonical **normalized input**: never server admission time, quota reservation ID, policy epoch/hash metadata, or newly calculated retention/dedup deadlines. The dedup identity is org/project/source/producer/slot/batch. Same identity with changed canonical content is conflict. Receipts and data persist atomically with the applied cursor after the owned WAL is fsynced. Data-group consumption proofs and original receipts are durable, not in-memory acknowledgements.
+
+## Quotas, barriers and retries
+
+Reservations atomically charge org, project and source admitted bytes and canonical series references before data proposal. Explicit org/project quotas remain authoritative; conservative source-derived caps apply until explicitly configured. Series are canonical per project, not multiplied by producer. Ambiguous writes stay charged. Control finalization verifies the installed owner's durable consumption record. Cancellation requires that same owner to prove receipt absence and commit a permanent cancellation fence before control refunds the charge. TTL, router death and timeout alone never refund. This implementation does not yet reclaim live-byte/cardinality charges through later retention/deletion processing.
+
+Source policy changes first commit closing state and return 202 with a real operation ID. New grants deny while closing. The installed one-voter owner commits a barrier to every one of the 64 slots; control records all cursors before marking complete. `GET /api/v1/operations/{id}` is authenticated admin metadata, not source-key read authority. Restart resumes pending source fences before intake opens. Failed/unavailable groups leave the operation fencing. The current local ordered owner is not a substitute for future distributed quorum fencing, deletion sagas or restored-cluster readiness certificates.
+
+Successful receipts contain version, batch_id, hash, cursor, minimum retain_until_ns, per-kind signal_deadlines and dedup_until_ns. Different signals may have different deadlines. The seven-day dedup deadline and every original receipt field are persisted. No retention/deletion worker or physical reclamation is advertised here; later lifecycle work must enforce those deadlines and retain authoritative receipt coverage.
+
+Network errors, timeouts and retryable errors can be ambiguous. Before a new-admission retry, use `POST /ingest/v1/receipts` with source, producer, route_slot, batch_id and original_hash. This path checks current credential ownership and nonretired scope independently of new-admission capture policy. It neither normalizes nor reserves nor appends. An unchanged original receipt is returned with `historical:true`, even after a restrictive policy or removal/expiry of historical rows; this is not a new write and cannot resurrect data. Invalid/revoked credentials and retired scopes are outside that retry guarantee and deny. Hash mismatches conflict without revealing payloads.
+
+Terminal schema/route failures are 422, size failures 413, unsupported encoding 415, credential failures 401/403, conflicts 409, quotas 429, and unavailable/stale/ambiguous service failures 503. Retryable responses include Retry-After. Errors contain only bounded reason codes and request correlation, never rejected content or credentials.

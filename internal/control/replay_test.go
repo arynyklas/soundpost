@@ -87,13 +87,13 @@ func TestTransactReplayIsBoundToPrincipalOrgAndKind(t *testing.T) {
 		st.Orgs[scope.OrgID().String()] = org
 		return control.Effect{AffectedIDs: []model.ID{scope.OrgID()}}, nil
 	}
-	if err := store.RegisterHandler(control.PolicyChange, handler); err != nil {
+	if err := store.RegisterHandler(control.KindPolicyChange, handler); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.RegisterHandler(control.Grant, handler); err != nil {
+	if err := store.RegisterHandler(control.KindGrant, handler); err != nil {
 		t.Fatal(err)
 	}
-	command := control.Command{CommandID: model.NewID(), ExpectedRevision: revision(), Kind: string(control.PolicyChange)}
+	command := control.Command{CommandID: model.NewID(), ExpectedRevision: revision(), Kind: string(control.KindPolicyChange)}
 	original, err := store.Transact(ctx, first, command)
 	if err != nil {
 		t.Fatal(err)
@@ -116,9 +116,9 @@ func TestTransactReplayIsBoundToPrincipalOrgAndKind(t *testing.T) {
 			t.Fatal("mismatched owner received result metadata")
 		}
 	}
-	denied(foreign, string(control.PolicyChange))
-	denied(otherScope, string(control.PolicyChange))
-	denied(first, string(control.Grant))
+	denied(foreign, string(control.KindPolicyChange))
+	denied(otherScope, string(control.KindPolicyChange))
+	denied(first, string(control.KindGrant))
 	if calls != 1 {
 		t.Fatalf("replayed or mismatched command executed %d effects", calls)
 	}
@@ -134,7 +134,7 @@ func TestTransactReplayIsBoundToPrincipalOrgAndKind(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	auditCommand := control.Command{CommandID: model.NewID(), ExpectedRevision: revision(), Kind: string(control.AuditCommand), Payload: auditPayload}
+	auditCommand := control.Command{CommandID: model.NewID(), ExpectedRevision: revision(), Kind: string(control.KindAudit), Payload: auditPayload}
 	if _, err := store.Transact(ctx, first, auditCommand); err != nil {
 		t.Fatal(err)
 	}

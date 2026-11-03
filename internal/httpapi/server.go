@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-func NewServer(address string, s *auth.Service, oidc *auth.OIDCConfig) *http.Server {
+func NewServer(address string, s *auth.Service, oidc *auth.OIDCConfig, register ...func(*http.ServeMux)) *http.Server {
 	mux := http.NewServeMux()
 	RegisterSessionRoutes(mux, s)
 	RegisterAdminRoutes(mux, s)
@@ -21,6 +21,9 @@ func NewServer(address string, s *auth.Service, oidc *auth.OIDCConfig) *http.Ser
 		cfg = *oidc
 	}
 	RegisterOIDCRoutes(mux, s, cfg)
+	for _, routes := range register {
+		routes(mux)
+	}
 	return &http.Server{Addr: address, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestID := model.RequestCorrelationID(r.Context(), model.ID{})
 		r = r.WithContext(model.WithRequestID(r.Context(), requestID))

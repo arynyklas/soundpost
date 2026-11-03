@@ -6,11 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"soundpost/internal/auth"
 	"soundpost/internal/control"
 	"soundpost/internal/model"
+	"strconv"
+	"strings"
 )
 
 const sessionCookie = "__Host-soundpost"
@@ -86,6 +89,24 @@ func protected(s *auth.Service, w http.ResponseWriter, r *http.Request) (auth.Cr
 		return auth.Credential{}, e
 	}
 	return s.Authenticate(r.Context(), token(r))
+}
+
+// acceptsHTML requires an explicit positive-quality HTML media range.
+func acceptsHTML(value string) bool {
+	for _, item := range strings.Split(value, ",") {
+		media, params, err := mime.ParseMediaType(strings.TrimSpace(item))
+		if err != nil || media != "text/html" {
+			continue
+		}
+		if quality, ok := params["q"]; ok {
+			q, err := strconv.ParseFloat(quality, 64)
+			if err != nil || !(q > 0 && q <= 1) {
+				continue
+			}
+		}
+		return true
+	}
+	return false
 }
 func RegisterSessionRoutes(mux *http.ServeMux, s *auth.Service) {
 	mux.HandleFunc("POST /api/v1/bootstrap", func(w http.ResponseWriter, r *http.Request) {
@@ -237,6 +258,12 @@ func RegisterOIDCRoutes(mux *http.ServeMux, s *auth.Service, cfg auth.OIDCConfig
 			var err error
 			selected, err = s.OIDCConfigForState(r.Context(), r.URL.Query().Get("state"))
 			if err != nil {
+				if acceptsHTML(r.Header.Get("Accept")) {
+					w.Header().Set("Cache-Control", "no-store")
+					w.Header().Set("Referrer-Policy", "no-referrer")
+					http.Redirect(w, r, "/?auth=failed", http.StatusSeeOther)
+					return
+				}
 				reply(w, nil, err)
 				return
 			}
@@ -248,6 +275,16 @@ func RegisterOIDCRoutes(mux *http.ServeMux, s *auth.Service, cfg auth.OIDCConfig
 				_ = s.Logout(r.Context(), old)
 			}
 			setSession(w, v)
+		}
+		if acceptsHTML(r.Header.Get("Accept")) {
+			w.Header().Set("Cache-Control", "no-store")
+			w.Header().Set("Referrer-Policy", "no-referrer")
+			target := "/"
+			if err != nil {
+				target = "/?auth=failed"
+			}
+			http.Redirect(w, r, target, http.StatusSeeOther)
+			return
 		}
 		reply(w, v, err)
 	})

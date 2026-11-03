@@ -32,6 +32,8 @@ type Scope struct {
 	elevation        model.ID
 	sources          []model.ID
 	elevationExpires time.Time
+	sourceCredential *SourceCredential
+	historical       bool
 }
 
 func (s Scope) OrgID() model.ID               { return s.org }
@@ -173,6 +175,12 @@ func joinSorted(v []string) string {
 	return string(b)
 }
 func (s *Service) Revalidate(ctx context.Context, scope Scope) error {
+	if scope.sourceCredential != nil {
+		if scope.service != s || len(scope.projects) != 1 || len(scope.sources) != 1 {
+			return model.Fail(model.Forbidden)
+		}
+		return scope.RevalidateSource(ctx, scope.projects[0], scope.sources[0], !scope.historical)
+	}
 	if scope.service != s || scope.lease == nil {
 		return model.Fail(model.Forbidden)
 	}
