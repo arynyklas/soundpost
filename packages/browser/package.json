@@ -1,0 +1,12 @@
+{
+  "name": "@soundpost/browser",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "author": "Aryn Yklas",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@soundpost/core": "workspace:*"
+  }
+}

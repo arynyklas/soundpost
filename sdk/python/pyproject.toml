@@ -1,0 +1,16 @@
+# Copyright 2026 Aryn Yklas
+# SPDX-License-Identifier: Apache-2.0
+[build-system]
+requires = ["setuptools==84.1.0"]
+build-backend = "setuptools.build_meta"
+[project]
+name = "soundpost"
+version = "0.1.0"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+authors = [{name = "Aryn Yklas"}]
+dependencies = ["cryptography==50.0.0"]
+[project.optional-dependencies]
+test = ["pytest==9.0.3"]
+[tool.pytest.ini_options]
+pythonpath = ["src"]

@@ -20,6 +20,9 @@ node_modules/
 .venv/
 __pycache__/
 .pytest_cache/
+*.egg-info/
+/conformance/query/oracles/querycheck-linux-amd64
+/fixtures/artifacts/generated/
 
 # Isolated implementation and task evidence
 /.worktrees/
