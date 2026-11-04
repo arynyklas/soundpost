@@ -1,41 +1,53 @@
 // Copyright 2026 Aryn Yklas
 // SPDX-License-Identifier: Apache-2.0
-import type {Config,EventId,Template,PolicyDecision,CaptureInput,HookMechanism,OwnedHookLease} from "./types.ts";
-import {resolve,decimal,approveTemplate,normalizeRecord,canonical,utf8Size,type SourcePolicy} from "./policy.ts";
+import type {Config,EventId,Template,PolicyDecision,CaptureInput,HookMechanism,OwnedHookLease,ExportContext} from "./types.ts";
+import {resolve,approveTemplate,normalizeRecord,canonical,canonicalId,unixNano,type SourcePolicy} from "./policy.ts";
 import {extractException,type ErrorBoundary} from "./errors.ts";
 export type {ErrorBoundary} from "./errors.ts";
+import {DeliveryQueue} from "./queue.ts";
+import {HttpsReceiptTransport} from "./transport.ts";
+import type {FlushReport} from "./types.ts";
+import {SpanRecorder,createSynchronousMetadataContext,signalAborted} from "./tracing.ts";
+import type {MetadataContext,TraceContext,SpanOptions,ActiveSpan} from "./tracing.ts";
+import {JobRecorder} from "./jobs.ts";
+export {checkedTraceContext,createTraceClock} from "./tracing.ts";
+export {createTimerCancellationBoundary} from "./jobs.ts";
+type RuntimeErrorBoundary=ErrorBoundary&{readonly timerCancellation?:(error:unknown)=>Promise<boolean>};
 export class Client {
- private readonly queue:{record:string;bytes:number;at:number}[]=[];
+ private readonly delivery:DeliveryQueue;
  private readonly counts:Record<string,number>=Object.create(null) as Record<string,number>;
  private readonly policy:SourcePolicy;
  private readonly templates=new Map<string,Template>();
  private readonly clock:()=>string;
- private readonly maxRecords:number;private readonly maxBytes:number;private bytes=0;
  private readonly build:string;private readonly codes:ReadonlySet<string>;private closed=false;
  private readonly hookLeases=new Set<OwnedHookLease>();
- constructor(config:Config,private readonly errorBoundary?:ErrorBoundary){
+ private readonly spans:SpanRecorder;
+ private readonly jobs:JobRecorder;
+ constructor(config:Config,private readonly errorBoundary?:RuntimeErrorBoundary,private readonly exportContext:ExportContext=(()=>{let depth=0;return {active:()=>depth>0,run<T>(callback:()=>T):T{depth++;try{return callback();}finally{depth--;}},close(){}};})(),private readonly metadataContext:MetadataContext=createSynchronousMetadataContext(config.clockNs)){
   const records=config.maxRecords??1024,bytes=config.maxBytes??2097152;
   if(!Number.isInteger(records)||records<1||records>1024||!Number.isInteger(bytes)||bytes<1||bytes>2097152)throw Error("invalid queue limits");
-  for(const identity of [config.org,config.project,config.source,config.build])if(typeof identity!=="string"||!identity.length||utf8Size(identity)>128)throw Error("invalid identity");
-  for(const flag of [config.deploymentErrors,config.deploymentLogs,config.deploymentReplay,config.deploymentBodies])if(flag!==undefined&&typeof flag!=="boolean")throw Error("deployment permissions must be boolean");
+  for(const identity of [config.org,config.project,config.source,config.build])canonicalId(identity);
+  for(const flag of [config.deploymentErrors,config.deploymentLogs,config.deploymentReplay,config.deploymentBodies,config.deploymentTraces,config.deploymentJobs,config.deploymentLoss])if(flag!==undefined&&typeof flag!=="boolean")throw Error("deployment permissions must be boolean");
   if(config.integrations?.length)throw Error("integrations not available");
-  this.policy=resolve(config);this.clock=config.clockNs??(()=>String(BigInt(Date.now())*1000000n));this.maxRecords=records;this.maxBytes=bytes;this.build=config.build;this.codes=new Set(config.operations??[]);
+  this.policy=resolve(config);this.clock=config.clockNs??(()=>String(BigInt(Date.now())*1000000n));this.build=config.build;this.codes=new Set(config.operations??[]);
+  this.jobs=new JobRecorder(metadataContext,config.jobRegistry,{clock:()=>this.readClock(),emit:(payload,observed)=>{this.admit({kind:"job_attempt",id:this.id(),observed_at_ns:observed,payload});},capture:error=>this.captureException(error),loss:reason=>this.loss(reason),nativeError:error=>this.errorBoundary!==undefined&&this.errorBoundary.isProxy?.(error)!==true&&this.errorBoundary.isNativeError(error),timerCancellation:error=>this.errorBoundary?.timerCancellation?.(error)??Promise.resolve(false)});
+  this.delivery=new DeliveryQueue(config,config.transport??new HttpsReceiptTransport(config),{context:this.exportContext});
+  this.spans=new SpanRecorder(metadataContext,config.operations??[],config.dependencies??[],config.traceSampleProbability,()=>!this.closed&&this.policy.decision.traces&&!this.exportContext.active(),span=>{this.admit({kind:"span",id:this.id(),observed_at_ns:span.start.wall_ns,span});},reason=>{
+   this.loss(reason);if(!this.policy.decision.loss||this.closed||this.exportContext.active())return;const nativeReason=reason==="trace_sampled_out"?"policy":reason==="trace_active_limit"?"queue_full":undefined;if(nativeReason===undefined)return;const at=this.readClock();if(at!==undefined&&BigInt(at)<BigInt(this.policy.expiresNs))this.delivery.recordSignalLoss("span",nativeReason,1n,at);
+  });
   for(const template of config.templates??[])this.registerTemplate(template);
  }
  get policyDecision():PolicyDecision{return this.policy.decision;}
  private loss(reason:string):void{this.counts[reason]=(this.counts[reason]??0)+1;}
- private expire():void{const now=performance.now();while(this.queue[0]&&now-this.queue[0].at>=300000){const item=this.queue.shift();if(item){this.bytes-=item.bytes;this.loss("queue_expired");}}}
+ private readClock():string|undefined{try{return unixNano(this.clock());}catch{this.loss("invalid_clock");return undefined;}}
  registerTemplate(template:Template):void{
   if(this.closed)throw Error("client closed");const safe=approveTemplate(template),old=this.templates.get(safe.id);
   if(old&&BigInt(old.revision)>=BigInt(safe.revision))throw Error("template revision must increase");this.templates.set(safe.id,safe);
  }
  private admit(input:CaptureInput):boolean{
-  if(this.closed){this.loss("closed");return false;}this.expire();const result=normalizeRecord(this.policy,input,this.templates);
+  if(this.closed){this.loss("closed");return false;}if(this.exportContext.active()){this.loss("exporter_recursion");return false;}const result=normalizeRecord(this.policy,input,this.templates);
   if(!result.record){this.loss(result.reason??"policy_rejected");return false;}
-  const record=canonical(result.record),bytes=new TextEncoder().encode(record).length;
-  if(bytes>262144){this.loss("record_too_large");return false;}
-  if(this.queue.length>=this.maxRecords||this.bytes+bytes>this.maxBytes){this.loss("queue_full");return false;}
-  this.queue.push({record,bytes,at:performance.now()});this.bytes+=bytes;return true;
+  return this.delivery.enqueue(canonical(result.record));
  }
  private id():string{return Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,"0")).join("");}
  captureException(error:unknown,options?:{code?:string}):EventId{
@@ -43,10 +55,12 @@ export class Client {
  }
  private captureError(error:unknown,options:{code?:string}|undefined,mechanism:HookMechanism|"manual",fatal:boolean):EventId{
   const id=this.id();
+  const observed=this.readClock();if(observed===undefined)return id;
   const descriptor=options&&Object.getOwnPropertyDescriptor(options,"code");const value:unknown=descriptor&&"value" in descriptor?descriptor.value:undefined;
   const code=typeof value==="string"&&this.codes.has(value)?value:null;
   const graph=extractException(error,this.policy,this.errorBoundary);
-  this.admit({kind:"error",id,observed_at_ns:decimal(this.clock()),exception_class:graph.nodes[0]?.exception_class??"UnknownError",code,build_id:this.build,exception_graph:graph,handled:mechanism==="manual",fatal,mechanism});return id;
+  const context=this.spans.current(),job=this.metadataContext.jobCurrent();
+  this.admit({kind:"error",id,observed_at_ns:observed,exception_class:graph.nodes[0]?.exception_class??"UnknownError",code,build_id:this.build,exception_graph:graph,handled:mechanism==="manual",fatal,mechanism,...(context?{trace_id:context.traceId,span_id:context.spanId}:{}),...(job?{run_id:job.runId}:{})});return id;
  }
  beginHandlingEpisode():HandlingEpisode{return new HandlingEpisode(this);}
  captureHook(error:unknown,mechanism:HookMechanism,fatal:boolean):EventId{
@@ -58,11 +72,24 @@ export class Client {
  releaseHookLease(lease:OwnedHookLease):void{this.hookLeases.delete(lease);}
  captureLog(template:string,fields:Readonly<Record<string,unknown>>):EventId|undefined{
   if(typeof template!=="string"){this.loss("unknown_template");return undefined;}
-  const id=this.id();return this.admit({kind:"log",id,observed_at_ns:decimal(this.clock()),template_id:template,fields})?id:undefined;
+  const id=this.id(),observed=this.readClock();if(observed===undefined)return undefined;
+  return this.admit({kind:"log",id,observed_at_ns:observed,template_id:template,fields})?id:undefined;
  }
- bufferedRecords():readonly string[]{this.expire();return Object.freeze(this.queue.map(x=>x.record));}
- diagnostics():Readonly<Record<string,number>>{return Object.freeze({...this.counts});}
- async close():Promise<void>{if(!this.closed){for(const lease of [...this.hookLeases])lease.close();this.counts.closed_pending=(this.counts.closed_pending??0)+this.queue.length;this.queue.length=0;this.bytes=0;this.closed=true;}}
+ /** Internal adapter seams. Context IDs carry causality, never tenant authority. */
+ traceContext():TraceContext|undefined{return this.spans.current();}
+ withTraceContext<T>(context:TraceContext|null,callback:()=>T):T{if(this.closed)throw Error("client closed");if(context&&this.errorBoundary?.isProxy?.(context))throw Error("invalid_trace_context");return this.spans.run(context,callback);}
+ startSpan(operation:string,options?:SpanOptions):ActiveSpan{if(this.closed)throw Error("client closed");return this.spans.start(operation,options);}
+ async withSpan<T>(operation:string,callback:()=>Promise<T>,options?:SpanOptions):Promise<T>{
+  const span=this.startSpan(operation,options),signal=options?Object.getOwnPropertyDescriptor(options,"signal")?.value:undefined;
+  try{const value=await span.run(callback);span.end(signalAborted(signal)?"cancelled":"ok");return value;}catch(error){span.run(()=>this.captureException(error));span.end(signalAborted(signal)?"cancelled":"error");throw error;}
+ }
+ async withJobAttempt<T>(job:string,runId:string,ordinal:number,callback:()=>Promise<T>):Promise<T>{
+  if(this.closed)throw Error("client closed");return this.jobs.run(job,runId,ordinal,callback);
+ }
+ bufferedRecords():readonly string[]{return this.delivery.records();}
+ diagnostics():Readonly<Record<string,number>>{const counts={...this.counts};for(const [key,value] of Object.entries(this.delivery.diagnostics()))counts[key]=(counts[key]??0)+value;return Object.freeze(counts);}
+ flush(timeoutMs=2000):Promise<FlushReport>{return this.delivery.flush(timeoutMs);}
+ async close():Promise<void>{if(this.closed)return;for(const lease of [...this.hookLeases])lease.close();this.spans.close();this.closed=true;await this.delivery.close();}
 }
 export function init(config:Config):Client{return new Client(config);}
 /** One token means exactly one logical occurrence, not an implicit identity cache.

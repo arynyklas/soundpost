@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import {test, expect} from "bun:test";
 import {init} from "../src/client.ts";
-import {config,signed} from "./fixture.ts";
+import {config,signed,OTHER_PROJECT} from "./fixture.ts";
 test("policy precedes queue without evaluating hostile values",()=>{
  const c=init(config()); const trap={get message(){throw Error("getter");},toJSON(){throw Error("toJSON");}};
  expect(c.captureLog("unknown",{})).toBeUndefined();
@@ -14,15 +14,15 @@ test("policy precedes queue without evaluating hostile values",()=>{
  expect(c.policyDecision.replay).toBe(false); expect(c.policyDecision.bodies).toBe(false);
 });
 test("templates are immutable history and clients independent",()=>{
- const c=init(config()),d=init(config("other")); c.captureLog("operation.failed",{status:503}); const before=c.bufferedRecords();
+ const c=init(config()),d=init(config(OTHER_PROJECT)); c.captureLog("operation.failed",{status:503}); const before=c.bufferedRecords();
  c.registerTemplate({id:"operation.failed",revision:"2",line:"new: {status}",fields:{status:[503]},severity:"error"});
  expect(c.bufferedRecords()).toEqual(before); expect(d.bufferedRecords()).toEqual([]);
  c.captureLog("operation.failed",{status:503}); expect(c.bufferedRecords()[1]).toContain("new: 503");
 });
 test("invalid signatures, bindings, expiry and bounds",()=>{
  expect(()=>init({...config(),trustedKeys:{test:new Uint8Array(32)}})).toThrow();
- expect(()=>init({...config(),project:"wrong"})).toThrow();
- const c=init({...config(),clockNs:()=>"99999999999999999999"}); expect(c.captureLog("operation.failed",{status:503})).toBeUndefined(); expect(c.diagnostics().policy_expired).toBe(1);
+ expect(()=>init({...config(),project:OTHER_PROJECT})).toThrow();
+ const c=init({...config(),clockNs:()=>"9223372036854775807"}); expect(c.captureLog("operation.failed",{status:503})).toBeUndefined(); expect(c.diagnostics().policy_expired).toBe(1);
  const d=init({...config(),maxRecords:1});d.captureException(null);d.captureException(null);expect(d.bufferedRecords()).toHaveLength(1);expect(d.diagnostics().queue_full).toBe(1);
 });
 test("canonical signature and source trust fail closed",()=>{
@@ -35,7 +35,7 @@ test("canonical signature and source trust fail closed",()=>{
  expect(()=>init({...c,policy:{...c.policy,key_id:"unknown"}})).toThrow("invalid signed policy");
  const signature=Buffer.from(c.policy.signature,"base64url");signature[0]=(signature[0]??0)^1;
  expect(()=>init({...c,policy:{...c.policy,signature:signature.toString("base64url")}})).toThrow("invalid signed policy");
- expect(()=>init({...c,source:"other"})).toThrow("invalid signed policy");
+ expect(()=>init({...c,source:OTHER_PROJECT})).toThrow("invalid signed policy");
  expect(()=>init({...c,policy:{...c.policy,payload:c.policy.payload+"="}})).toThrow("invalid signed policy");
  expect(()=>init({...c,policy:{...c.policy,signature:c.policy.signature+"="}})).toThrow("invalid signed policy");
 });
@@ -66,7 +66,39 @@ test("UTF-8 byte boundaries preserve registered severity and reject unpaired sur
   {id:"surrogate.line",revision:"1",line:"\ud800",fields:{},severity:"warn" as const},
   {id:"surrogate.value",revision:"1",line:"{value}",fields:{value:["\ud800"]},severity:"warn" as const},
  ])expect(()=>c.registerTemplate(template)).toThrow();
- expect(()=>init({...config(),build:"😀".repeat(32)})).not.toThrow();
+ expect(()=>init({...config(),build:"😀".repeat(32)})).toThrow();
  expect(()=>init({...config(),build:"😀".repeat(32)+"a"})).toThrow();
  expect(()=>init({...config(),build:"\ud800"})).toThrow();
+});
+test("C01 consumer boundaries enforce opaque IDs, uint64 revision and signed int64 expiry",()=>{
+ const c=config();
+ for(const key of ["org","project","source","build"] as const)
+  for(const invalid of ["alias","0".repeat(32),"A".repeat(32),"1".repeat(31),"1".repeat(33),"1".repeat(32)+"\n"])
+   expect(()=>init({...c,[key]:invalid})).toThrow();
+ const raw=Buffer.from(c.policy.payload,"base64url").toString("utf8");
+ const policy=(updates:Record<string,unknown>)=>{const doc={...JSON.parse(raw) as Record<string,unknown>,...updates};return signed(JSON.stringify(doc,Object.keys(doc).sort()));};
+ for(const key of ["org","project","source"])expect(()=>init({...c,policy:policy({[key]:"0".repeat(32)})})).toThrow();
+ for(const revision of ["-1","18446744073709551616","01","1.0","1\n"])expect(()=>init({...c,policy:policy({revision})})).toThrow();
+ expect(init({...c,policy:policy({revision:"18446744073709551615"})}).policyDecision.revision).toBe("18446744073709551615");
+ expect(init({...c,policy:policy({revision:"0"})}).policyDecision.revision).toBe("0");
+ const zero=init(c);zero.registerTemplate({id:"zero",revision:"0",line:"zero",fields:{},severity:"info"});zero.captureLog("zero",{});
+ expect(JSON.parse(zero.bufferedRecords()[0]!).payload.template_revision).toBe("0");
+ for(const expires_ns of ["9223372036854775808","-9223372036854775809","-0","01","1.0","1\n"])expect(()=>init({...c,policy:policy({expires_ns})})).toThrow();
+ const expired=init({...c,policy:policy({expires_ns:"-9223372036854775808"})});
+ expect(expired.captureLog("operation.failed",{status:503})).toBeUndefined();expect(expired.diagnostics()).toEqual({policy_expired:1});
+ for(const revision of ["-1","18446744073709551616"])
+  expect(()=>init(c).registerTemplate({id:"overflow",revision,line:"line",fields:{},severity:"info"})).toThrow();
+});
+test("injected invalid clock fails closed with safe counters, not user exceptions or bodies",()=>{
+ const clocks=[()=>{throw Error("CANARY_CLOCK_BODY");},...["9223372036854775808","-9223372036854775809","-0","01","1\n","CANARY_CLOCK_BODY",9007199254740993,null,{toString(){throw Error("must not coerce");}}].map(value=>()=>value)];
+ for(const clock of clocks){
+  // Deliberately violate the typed injection boundary to exercise runtime validation.
+  const c=init({...config(),clockNs:clock as ()=>string});
+  expect(c.captureException({message:"CANARY_ERROR_BODY"})).toMatch(/^[0-9a-f]{32}$/);
+  expect(c.captureLog("operation.failed",{status:503})).toBeUndefined();
+  expect(c.bufferedRecords()).toEqual([]);expect(c.diagnostics()).toEqual({invalid_clock:2});
+  expect(JSON.stringify(c.diagnostics())).not.toContain("CANARY");
+ }
+ const c=init({...config(),clockNs:()=>"-9223372036854775808"});c.captureLog("operation.failed",{status:503});
+ expect(JSON.parse(c.bufferedRecords()[0]!).observed_at_ns).toBe("-9223372036854775808");
 });

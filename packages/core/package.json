@@ -7,10 +7,12 @@
   "author": "Aryn Yklas",
   "exports": {
     ".": "./src/client.ts",
-    "./types": "./src/types.ts"
+    "./types": "./src/types.ts",
+    "./spool": "./src/spool.ts"
   },
   "dependencies": {
-    "@noble/curves": "1.9.7"
+    "@noble/curves": "1.9.7",
+    "@noble/hashes": "1.8.0"
   },
   "devDependencies": {
     "@types/node": "25.0.0",
