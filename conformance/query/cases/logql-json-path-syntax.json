@@ -1,0 +1,1180 @@
+{
+ "schema": "soundpost-authored-logql-cases-v1",
+ "copyright": "Copyright 2026 Aryn Yklas",
+ "license": "Apache-2.0",
+ "phases": [
+  "syntax"
+ ],
+ "cases": [
+  {
+   "id": "b2s-keyexpr-00",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"\\\\tk\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-keyexpr-01",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"k\\\\t\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-keyexpr-02",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"\\\\nk\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-keyexpr-03",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"k\\\\n\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-keyexpr-04",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"k\\\\u00a0\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-keyexpr-05",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"\\\\u00a0k\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-keyexpr-06",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"\\\\u2003k\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-keyexpr-07",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"k\\\\u2003\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-keyexpr-08",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"\\\\u3000k\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-keyexpr-10",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"a\\\\tb\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-keyexpr-11",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"a\\\\u00a0b\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-keyexpr-12",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"\\\\u000bk\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-keyexpr-13",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"\\\\fk\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-keyexpr-14",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"\\\\u0085k\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-keyexpr-15",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"k\\\\u2028\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-04-0",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"[\"a\"]\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-04-1",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"[\"a\"]\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-04-2",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"[\"a\"]\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-04-3",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"[\"a\"]\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-05-0",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"a[\"b\"]\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-05-1",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"a[\"b\"]\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-05-2",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"a[\"b\"]\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-05-3",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"a[\"b\"]\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-06-0",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"a[\"b.c\"]\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-06-1",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"a[\"b.c\"]\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-06-2",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"a[\"b.c\"]\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-06-3",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"a[\"b.c\"]\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-07-0",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"a[-1]\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-07-1",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"a[-1]\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-07-2",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"a[-1]\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-07-3",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"a[-1]\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-08-0",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"a[]\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-08-1",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"a[]\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-08-2",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"a[]\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-08-3",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"a[]\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-09-0",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"a.\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-09-1",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"a.\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-09-2",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"a.\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-09-3",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"a.\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-10-0",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\".a\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-10-1",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\".a\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-10-2",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\".a\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-10-3",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\".a\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-11-0",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"a..b\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-11-1",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"a..b\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-11-2",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"a..b\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-11-3",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"a..b\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-12-0",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"é\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-12-1",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"é\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-12-2",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"é\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-12-3",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"é\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-13-0",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"🙂\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-13-1",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"🙂\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-13-2",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"🙂\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-13-3",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"🙂\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-14-0",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"a.é\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-14-1",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"a.é\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-14-2",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"a.é\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-14-3",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"a.é\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-15-0",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"a\\\\.b\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-15-1",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"a\\\\.b\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-15-2",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"a\\\\.b\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b2s-path-15-3",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"a\\\\.b\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b3s-qkey-05-0",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"[\\\"a\\\\\\\"b\\\"]\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b3s-qkey-05-1",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"[\\\"a\\\\\\\"b\\\"]\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b3s-qkey-05-2",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"[\\\"a\\\\\\\"b\\\"]\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b3s-qkey-05-3",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"[\\\"a\\\\\\\"b\\\"]\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b3s-qkey-06-0",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"a[\\\"b\\\\\\\"c\\\"]\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b3s-qkey-06-1",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"a[\\\"b\\\\\\\"c\\\"]\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b3s-qkey-06-2",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"a[\\\"b\\\\\\\"c\\\"]\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b3s-qkey-06-3",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"a[\\\"b\\\\\\\"c\\\"]\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b3s-qkey-11-0",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"a['b']\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b3s-qkey-11-1",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"a['b']\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b3s-qkey-11-2",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"a['b']\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "b3s-qkey-11-3",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json x=\"a['b']\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this json expression at parse time"
+  },
+  {
+   "id": "s-b5-exprspec-06",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|logfmt x=\"\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this expression at parse time"
+  },
+  {
+   "id": "s-b5-exprspec-07",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|logfmt x=\"a b\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this expression at parse time"
+  },
+  {
+   "id": "s-b5-exprspec-08",
+   "phase": "syntax",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|logfmt x=\"é\""
+   },
+   "expected": {
+    "accepted": false
+   },
+   "binding_scope": "differential regression vector; native rejects this expression at parse time"
+  }
+ ]
+}

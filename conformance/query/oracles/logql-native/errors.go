@@ -90,7 +90,7 @@ func projectError(err error, source ...string) *languageError {
 	return out
 }
 
-var nativeUnexpected = regexp.MustCompile(`syntax error: unexpected|unexpected (IDENTIFIER|STRING|NUMBER|\$end)|unexpected character`)
+var nativeUnexpected = regexp.MustCompile(`syntax error: unexpected|unexpected (IDENTIFIER|STRING|NUMBER|\$end)|unexpected character|: unexpected char `)
 var nativePipelineFamily = regexp.MustCompile(`^pipeline error: '([^']*)'`)
 var nativePosition = regexp.MustCompile(`^parse error at line ([0-9]+), col ([0-9]+):`)
 

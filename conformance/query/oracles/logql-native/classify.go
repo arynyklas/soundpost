@@ -16,7 +16,27 @@ import (
 // (single-line) source: an empty duration, or a unit the duration grammar does
 // not know. Anchored on the fixed prefix and wording so a real syntax error on
 // a source line (line >= 1) is never swept in.
-var nativeDurationLexError = regexp.MustCompile(`^parse error at line 0, col ([0-9]+): (?:empty duration string|unknown unit .+ in duration .+)$`)
+var nativeDurationLexError = regexp.MustCompile(`^parse error at line 0, col ([0-9]+): (?:empty duration string|unknown unit .+ in duration .+|missing closing '\]' in duration|not a valid duration string: .+)$`)
+
+// nativeLiteralNotTerminated matches the scanner's unterminated string/raw-string
+// failure on a real source line. Its column is converted by the caller from the
+// supplied source, so no start is returned here.
+var nativeLiteralNotTerminated = regexp.MustCompile(`^parse error at line [1-9][0-9]*, col [0-9]+: literal not terminated$`)
+
+// nativeScannerNumberError matches the fixed wording the Go text/scanner number
+// scanner reports through the native lexer's error callback on a real source
+// line (line >= 1). The column is converted by the caller from the supplied
+// source, so no start is returned here.
+var nativeScannerNumberError = regexp.MustCompile(`^parse error at line [1-9][0-9]*, col [0-9]+: (?:exponent has no digits|'[eEpP]' exponent requires (?:decimal|binary|octal|hexadecimal) mantissa|hexadecimal mantissa requires a 'p' exponent|(?:decimal|hexadecimal|octal|binary) literal has no digits|invalid digit '.+' in (?:octal|binary|decimal|hexadecimal) literal|'_' must separate successive digits)$`)
+
+// nativeScannerEscapeError matches the text/scanner string-escape failure on a
+// real source line.
+var nativeScannerEscapeError = regexp.MustCompile(`^parse error at line [1-9][0-9]*, col [0-9]+: invalid char escape$`)
+
+// nativeFloatLiteralError matches the native parser's reduction-time failure to
+// convert a metric-expression numeric literal with strconv.ParseFloat. It
+// exposes no position.
+var nativeFloatLiteralError = regexp.MustCompile(`^parse error : unable to parse (?:literal|vectorExpr) as a float: strconv\.ParseFloat: parsing ".*": (?:invalid syntax|value out of range)$`)
 
 // classifyNativeParseMessage projects the fixed constructor wording of native
 // parse-stage errors that carry no exported identity onto semantic families.
@@ -31,6 +51,18 @@ func classifyNativeParseMessage(text string) (semantic string, start *int) {
 			return "", nil
 		}
 		return "syntax.duration", &col
+	}
+	if nativeLiteralNotTerminated.MatchString(text) {
+		return "syntax.string", nil
+	}
+	if nativeScannerNumberError.MatchString(text) {
+		return "syntax.number", nil
+	}
+	if nativeScannerEscapeError.MatchString(text) {
+		return "syntax.string-escape", nil
+	}
+	if nativeFloatLiteralError.MatchString(text) {
+		return "syntax.number", nil
 	}
 	switch {
 	case strings.Contains(text, ": named captures are not allowed"):
