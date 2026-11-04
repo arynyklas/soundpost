@@ -4,10 +4,8 @@ package logql
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"soundpost/internal/query/regexcompat"
 	jsonparser "soundpost/third_party/jsonparser/v1.1.1"
 	"strconv"
@@ -103,16 +101,6 @@ func jsonPath(s string) ([]pathStep, error) {
 	return out, nil
 }
 
-type jsonMember struct {
-	name  string
-	value *jsonValue
-}
-type jsonValue struct {
-	kind      byte
-	text, raw string
-	object    []jsonMember
-	array     []*jsonValue
-}
 type parserStop struct{ cause error }
 
 func (e *parserStop) Error() string { return "query parsing interrupted" }
@@ -123,125 +111,6 @@ func stoppedParser(err error) error {
 		return stop.cause
 	}
 	return nil
-}
-func decodeJSON(line string, check func() error) (*jsonValue, error) {
-	d := json.NewDecoder(strings.NewReader(line))
-	d.UseNumber()
-	v, err := readJSONValue(d, line, 0, check)
-	if err != nil {
-		return v, err
-	}
-	if err = check(); err != nil {
-		return nil, &parserStop{err}
-	}
-	if _, err = d.Token(); err != io.EOF {
-		return v, errors.New("trailing JSON input")
-	}
-	return v, nil
-}
-func readJSONValue(d *json.Decoder, line string, depth int, check func() error) (*jsonValue, error) {
-	if err := check(); err != nil {
-		return nil, &parserStop{err}
-	}
-	if depth > 10000 {
-		return nil, errors.New("JSON nesting limit")
-	}
-	start := int(d.InputOffset())
-	for start < len(line) && (line[start] == ' ' || line[start] == '\t' || line[start] == '\r' || line[start] == '\n' || line[start] == ':' || line[start] == ',') {
-		start++
-	}
-	tok, err := d.Token()
-	if err != nil {
-		return nil, err
-	}
-	v := &jsonValue{}
-	switch t := tok.(type) {
-	case json.Delim:
-		switch t {
-		case '{':
-			v.kind = 'o'
-			for d.More() {
-				key, err := d.Token()
-				if err != nil {
-					return v, err
-				}
-				name, ok := key.(string)
-				if !ok {
-					return v, errors.New("invalid JSON key")
-				}
-				child, err := readJSONValue(d, line, depth+1, check)
-				if child != nil {
-					v.object = append(v.object, jsonMember{name, child})
-				}
-				if err != nil {
-					return v, err
-				}
-			}
-			if _, err = d.Token(); err != nil {
-				return v, err
-			}
-		case '[':
-			v.kind = 'a'
-			for d.More() {
-				child, err := readJSONValue(d, line, depth+1, check)
-				if child != nil {
-					v.array = append(v.array, child)
-				}
-				if err != nil {
-					return v, err
-				}
-			}
-			if _, err = d.Token(); err != nil {
-				return v, err
-			}
-		default:
-			return nil, errors.New("unexpected JSON delimiter")
-		}
-	case string:
-		v.kind = 's'
-		v.text = t
-	case json.Number:
-		v.kind = 'n'
-		v.text = t.String()
-	case bool:
-		v.kind = 'b'
-		v.text = strconv.FormatBool(t)
-	case nil:
-		v.kind = '0'
-	default:
-		return nil, errors.New("invalid JSON token")
-	}
-	end := int(d.InputOffset())
-	if start <= end && end <= len(line) {
-		v.raw = line[start:end]
-	}
-	return v, nil
-}
-func (v *jsonValue) lookup(path []pathStep) *jsonValue {
-	for _, s := range path {
-		if v == nil {
-			return nil
-		}
-		if s.array {
-			if v.kind != 'a' || s.index >= len(v.array) {
-				return nil
-			}
-			v = v.array[s.index]
-		} else {
-			if v.kind != 'o' {
-				return nil
-			}
-			var child *jsonValue
-			for _, m := range v.object {
-				if m.name == s.key {
-					child = m.value
-					break
-				}
-			}
-			v = child
-		}
-	}
-	return v
 }
 
 // parseJSONExpressions evaluates `| json name="path", ...` against the line
@@ -673,6 +542,11 @@ func parseLogfmtRequests(s Stage, e *LogEntry, fields []logfmtField, check func(
 	}
 	return stopped, nil
 }
+
+// parseRegexpStage writes one label per named group in group order. A group
+// that does not take part in the match (an alternative or optional group that
+// was not used) is written as the empty string, exactly like a group that
+// matched nothing; a line the expression does not match writes nothing.
 func parseRegexpStage(ctx context.Context, c compiledStage, e *LogEntry, scope *regexcompat.Scope) error {
 	indices, err := scope.FindStringSubmatchIndex(ctx, c.regex, e.Line)
 	if err != nil {
@@ -681,62 +555,86 @@ func parseRegexpStage(ctx context.Context, c compiledStage, e *LogEntry, scope *
 	if indices == nil {
 		return nil
 	}
-	seen := map[string]bool{}
+	w := captureWriter{e: e}
 	for i, n := range c.regex.SubexpNames() {
-		if i == 0 || n == "" || seen[n] || 2*i+1 >= len(indices) {
+		if i == 0 || n == "" || 2*i+1 >= len(indices) {
 			continue
 		}
-		seen[n] = true
+		value := ""
 		if indices[2*i] >= 0 {
-			e.extract(n, e.Line[indices[2*i]:indices[2*i+1]])
+			value = e.Line[indices[2*i]:indices[2*i+1]]
 		}
+		w.put(n, value)
 	}
 	return nil
 }
 func parsePatternStage(c compiledStage, e *LogEntry) {
 	values, _ := c.pattern.match(e.Line)
+	w := captureWriter{e: e}
 	for _, part := range c.pattern.parts {
 		if part.capture && part.name != "_" {
 			if text, ok := values[part.name]; ok {
-				e.extract(part.name, text)
+				w.put(part.name, text)
 			}
 		}
 	}
 }
+
+// errUnpackNotObject is the detail reported for a non-empty line that does not
+// start with an object brace (`[1]`, `"s"`, `5`, `true`, `null`, or an object
+// behind leading whitespace).
+const errUnpackNotObject = "expecting json object(6), but it is not"
+
+// parseUnpackStage reads a packed entry. An empty line is left alone and a line
+// whose first byte is not '{' is a JSONParserErr. Otherwise the object is
+// walked with the lenient scanner of the json stage: only string values count
+// (numbers, booleans, null, arrays and objects are skipped), `_entry` names the
+// replacement line and the remaining string members become labels, but the
+// labels are written, in member order, only when an `_entry` string was found;
+// a packed object without it leaves the line and the labels alone. A scanner
+// error anywhere in the object (the scan is not validated up front) reports the
+// scanner's message and keeps the line and the labels untouched.
 func parseUnpackStage(e *LogEntry, check func() error) error {
-	v, err := decodeJSON(e.Line, check)
+	if e.Line == "" {
+		return nil
+	}
+	if e.Line[0] != '{' {
+		e.setError("JSONParserErr", errUnpackNotObject)
+		return nil
+	}
+	type member struct{ name, value string }
+	var members []member
+	line := ""
+	packed := false
+	err := jsonparser.ObjectEach([]byte(e.Line), func(k, v []byte, kind jsonparser.ValueType, _ int) error {
+		if stop := check(); stop != nil {
+			return &parserStop{stop}
+		}
+		if kind != jsonparser.String {
+			return nil
+		}
+		text := jsonValueText(v, kind)
+		if string(k) == "_entry" {
+			line = text
+			packed = true
+			return nil
+		}
+		members = append(members, member{string(k), text})
+		return nil
+	})
 	if stop := stoppedParser(err); stop != nil {
 		return stop
 	}
-	if err != nil || v == nil || v.kind != 'o' {
-		e.setError("JSONParserErr", "Malformed JSON error")
+	if err != nil {
+		e.setError("JSONParserErr", err.Error())
 		return nil
 	}
-	line := ""
-	found := false
-	for _, m := range v.object {
-		if m.name == "_entry" && m.value.kind == 's' {
-			line = m.value.text
-			found = true
-		}
-	}
-	if !found {
+	if !packed {
 		return nil
 	}
-	origins := map[string]string{}
-	for _, m := range v.object {
-		if stop := check(); stop != nil {
-			return stop
-		}
-		if m.value.kind != 's' || m.name == "_entry" {
-			continue
-		}
-		name := sanitizeLabel(m.name)
-		previous, exists := origins[name]
-		if name != "" && (!exists || previous == m.name) {
-			e.extract(name, m.value.text)
-			origins[name] = m.name
-		}
+	w := captureWriter{e: e}
+	for _, m := range members {
+		w.put(m.name, m.value)
 	}
 	e.Line = line
 	return nil

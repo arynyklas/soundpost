@@ -342,11 +342,14 @@ func checkStage(s Stage, p profile.Profile) error {
 			return fail("regex.invalid", "invalid parser regular expression")
 		}
 		found := false
+		seen := map[string]bool{}
 		for _, n := range re.SubexpNames() {
 			if n != "" {
-				if !validLabel(n) {
+				// A name repeated by two groups is as invalid as a malformed one.
+				if !validLabel(n) || seen[n] {
 					return fail("regexp.capture-invalid", "invalid regex capture name")
 				}
+				seen[n] = true
 				found = true
 			}
 		}

@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 package logql
 
-// Label builder: how the json and logfmt stages write parsed labels.
+// Label builder: how the json, logfmt, regexp, pattern and unpack stages write
+// parsed labels.
 //
 // A label name lives in one of three categories of an entry: stream (the
 // immutable selector namespace at pipeline entry), structured metadata (owned
@@ -79,8 +80,43 @@ func (e *LogEntry) putRequested(n, v string) {
 	e.ParsedLabels = setLabel(e.ParsedLabels, n, v)
 }
 
-// extract is the write for the stages outside this model (regexp, pattern,
-// unpack): stream names rename, nothing else is protected.
-func (e *LogEntry) extract(n, v string) {
-	e.ParsedLabels = setLabel(e.ParsedLabels, e.extractedName(n), v)
+// captureWriter is the write of the capture stages (`| regexp`, `| pattern`,
+// `| unpack`), whose labels come from named captures or object members rather
+// than from a line scan with its own duplicate handling. One writer serves one
+// stage on one entry:
+//
+//	capture stage, name n
+//	  n is a stream name           -> the value goes to n_extracted
+//	  the final name is parsed by
+//	  an EARLIER stage             -> the write is discarded, that value stays
+//	  the final name is structured
+//	  metadata (not taken over)    -> the write is discarded, the metadata stays
+//	  otherwise                    -> the value is set (an empty value included);
+//	                                  a later write of the same stage replaces it
+//
+// The refusal of a name an earlier stage parsed is observed for chained regexp
+// stages (`| regexp "(?P<a>..)" | regexp "(?P<a>..)"` keeps the first a and
+// writes no a_extracted) and for a regexp after logfmt. A stage never refuses its
+// own earlier write, as in the json stage where the last duplicate wins.
+type captureWriter struct {
+	e       *LogEntry
+	written []string
+}
+
+func (w *captureWriter) put(n, v string) {
+	n = w.e.extractedName(n)
+	mine := false
+	for _, s := range w.written {
+		if s == n {
+			mine = true
+			break
+		}
+	}
+	if !mine {
+		if labelPresent(w.e.ParsedLabels, n) || labelPresent(w.e.StructuredMetadata, n) {
+			return
+		}
+		w.written = append(w.written, n)
+	}
+	w.e.ParsedLabels = setLabel(w.e.ParsedLabels, n, v)
 }

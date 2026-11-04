@@ -136,9 +136,18 @@ func parsePattern(s string, named bool) (*linePattern, error) {
 	}
 	return p, nil
 }
+
+// match walks the pattern over the line. Every capture reached is recorded,
+// an empty value included (`<a> <b>` on "  x" gives a="", b=" x"; `x<a>` on
+// "x" gives a=""). A capture whose following literal is missing takes the rest
+// of the line and ends the walk. An empty line produces no captures at all, and
+// a leading literal that is not a prefix of the line produces none either.
 func (p *linePattern) match(line string) (map[string]string, bool) {
 	pos := 0
 	values := map[string]string{}
+	if line == "" {
+		return values, false
+	}
 	for i, part := range p.parts {
 		if !part.capture {
 			if !strings.HasPrefix(line[pos:], part.literal) {
@@ -151,15 +160,12 @@ func (p *linePattern) match(line string) (map[string]string, bool) {
 		if i+1 < len(p.parts) {
 			at := strings.Index(line[pos:], p.parts[i+1].literal)
 			if at < 0 {
-				if part.name != "_" && pos < len(line) {
+				if part.name != "_" {
 					values[part.name] = line[pos:]
 				}
 				return values, false
 			}
 			end = pos + at
-		}
-		if end == pos && part.name != "_" {
-			return values, false
 		}
 		if part.name != "_" {
 			values[part.name] = line[pos:end]

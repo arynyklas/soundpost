@@ -66683,6 +66683,804 @@
    "accepted": false,
    "semantic": "syntax.number",
    "start_byte": 24
+  },
+  {
+   "id": "r8-00251",
+   "expression": "{app=\"api\"}| regexp \"(?P<a>\\\\w+)\\\\s(?P<a>\\\\w+)\"",
+   "accepted": false,
+   "semantic": "regexp.capture-invalid",
+   "start_byte": null
+  },
+  {
+   "id": "r8-00252",
+   "expression": "{app=\"api\"}| regexp \"(?P<a>\\\\w+)\\\\s(?P<a>\\\\w+)\"",
+   "accepted": false,
+   "semantic": "regexp.capture-invalid",
+   "start_byte": null
+  },
+  {
+   "id": "r8-00253",
+   "expression": "{app=\"api\"}| regexp \"(?P<a>\\\\w+)\\\\s(?P<a>\\\\w+)\"",
+   "accepted": false,
+   "semantic": "regexp.capture-invalid",
+   "start_byte": null
+  },
+  {
+   "id": "r8-00254",
+   "expression": "{app=\"api\"}| regexp \"(?P<a>\\\\w+)\\\\s(?P<a>\\\\w+)\"",
+   "accepted": false,
+   "semantic": "regexp.capture-invalid",
+   "start_byte": null
+  },
+  {
+   "id": "r8-00255",
+   "expression": "{app=\"api\"}| regexp \"(?P<a>\\\\w+)\\\\s(?P<a>\\\\w+)\"",
+   "accepted": false,
+   "semantic": "regexp.capture-invalid",
+   "start_byte": null
+  },
+  {
+   "id": "r8-00256",
+   "expression": "{app=\"api\"}| regexp \"(?P<a>\\\\w+)\\\\s(?P<a>\\\\w+)\"",
+   "accepted": false,
+   "semantic": "regexp.capture-invalid",
+   "start_byte": null
+  },
+  {
+   "id": "r8-00257",
+   "expression": "{app=\"api\"}| regexp \"(?P<a>\\\\w+)\\\\s(?P<a>\\\\w+)\"",
+   "accepted": false,
+   "semantic": "regexp.capture-invalid",
+   "start_byte": null
+  },
+  {
+   "id": "r8-00258",
+   "expression": "{app=\"api\"}| regexp \"(?P<a>\\\\w+)\\\\s(?P<a>\\\\w+)\"",
+   "accepted": false,
+   "semantic": "regexp.capture-invalid",
+   "start_byte": null
+  },
+  {
+   "id": "r8-00259",
+   "expression": "{app=\"api\"}| regexp \"(?P<a>\\\\w+)\\\\s(?P<a>\\\\w+)\"",
+   "accepted": false,
+   "semantic": "regexp.capture-invalid",
+   "start_byte": null
+  },
+  {
+   "id": "r8-00260",
+   "expression": "{app=\"api\"}| regexp \"(?P<a>\\\\w+)\\\\s(?P<a>\\\\w+)\"",
+   "accepted": false,
+   "semantic": "regexp.capture-invalid",
+   "start_byte": null
+  },
+  {
+   "id": "r8-00261",
+   "expression": "{app=\"api\"}| regexp \"(?P<a>\\\\w+)\\\\s(?P<a>\\\\w+)\"",
+   "accepted": false,
+   "semantic": "regexp.capture-invalid",
+   "start_byte": null
+  },
+  {
+   "id": "r8-00262",
+   "expression": "{app=\"api\"}| regexp \"(?P<a>\\\\w+)\\\\s(?P<a>\\\\w+)\"",
+   "accepted": false,
+   "semantic": "regexp.capture-invalid",
+   "start_byte": null
+  },
+  {
+   "id": "r8-00263",
+   "expression": "{app=\"api\"}| regexp \"(?P<a>\\\\w+)\\\\s(?P<a>\\\\w+)\"",
+   "accepted": false,
+   "semantic": "regexp.capture-invalid",
+   "start_byte": null
+  },
+  {
+   "id": "r8-00264",
+   "expression": "{app=\"api\"}| regexp \"(?P<a>\\\\w+)\\\\s(?P<a>\\\\w+)\"",
+   "accepted": false,
+   "semantic": "regexp.capture-invalid",
+   "start_byte": null
+  },
+  {
+   "id": "r8-00265",
+   "expression": "{app=\"api\"}| regexp \"(?P<a>\\\\w+)\\\\s(?P<a>\\\\w+)\"",
+   "accepted": false,
+   "semantic": "regexp.capture-invalid",
+   "start_byte": null
+  },
+  {
+   "id": "r8-00266",
+   "expression": "{app=\"api\"}| regexp \"(?P<a>\\\\w+)\\\\s(?P<a>\\\\w+)\"",
+   "accepted": false,
+   "semantic": "regexp.capture-invalid",
+   "start_byte": null
+  },
+  {
+   "id": "r8-00267",
+   "expression": "{app=\"api\"}| regexp \"(?P<a>\\\\w+)\\\\s(?P<a>\\\\w+)\"",
+   "accepted": false,
+   "semantic": "regexp.capture-invalid",
+   "start_byte": null
+  },
+  {
+   "id": "r8-00268",
+   "expression": "{app=\"api\"}| regexp \"(?P<a>\\\\w+)\\\\s(?P<a>\\\\w+)\"",
+   "accepted": false,
+   "semantic": "regexp.capture-invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00689",
+   "expression": "{app=\"api\"}| pattern \"<a><b>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00690",
+   "expression": "{app=\"api\"}| pattern \"<a><b>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00691",
+   "expression": "{app=\"api\"}| pattern \"<a><b>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00692",
+   "expression": "{app=\"api\"}| pattern \"<a><b>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00693",
+   "expression": "{app=\"api\"}| pattern \"<a><b>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00694",
+   "expression": "{app=\"api\"}| pattern \"<a><b>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00695",
+   "expression": "{app=\"api\"}| pattern \"<a><b>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00696",
+   "expression": "{app=\"api\"}| pattern \"<a><b>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00697",
+   "expression": "{app=\"api\"}| pattern \"<a><b>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00698",
+   "expression": "{app=\"api\"}| pattern \"<a><b>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00699",
+   "expression": "{app=\"api\"}| pattern \"<a><b>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00700",
+   "expression": "{app=\"api\"}| pattern \"<a><b>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00701",
+   "expression": "{app=\"api\"}| pattern \"<a><b>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00702",
+   "expression": "{app=\"api\"}| pattern \"<a><b>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00703",
+   "expression": "{app=\"api\"}| pattern \"<a><b>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00704",
+   "expression": "{app=\"api\"}| pattern \"<a><b>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00705",
+   "expression": "{app=\"api\"}| pattern \"<a> <a>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00706",
+   "expression": "{app=\"api\"}| pattern \"<a> <a>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00707",
+   "expression": "{app=\"api\"}| pattern \"<a> <a>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00708",
+   "expression": "{app=\"api\"}| pattern \"<a> <a>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00709",
+   "expression": "{app=\"api\"}| pattern \"<a> <a>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00710",
+   "expression": "{app=\"api\"}| pattern \"<a> <a>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00711",
+   "expression": "{app=\"api\"}| pattern \"<a> <a>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00712",
+   "expression": "{app=\"api\"}| pattern \"<a> <a>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00713",
+   "expression": "{app=\"api\"}| pattern \"<a> <a>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00714",
+   "expression": "{app=\"api\"}| pattern \"<a> <a>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00715",
+   "expression": "{app=\"api\"}| pattern \"<a> <a>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00716",
+   "expression": "{app=\"api\"}| pattern \"<a> <a>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00717",
+   "expression": "{app=\"api\"}| pattern \"<a> <a>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00718",
+   "expression": "{app=\"api\"}| pattern \"<a> <a>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00719",
+   "expression": "{app=\"api\"}| pattern \"<a> <a>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00720",
+   "expression": "{app=\"api\"}| pattern \"<a> <a>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00817",
+   "expression": "{app=\"api\"}| pattern \"<_>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00818",
+   "expression": "{app=\"api\"}| pattern \"<_>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00819",
+   "expression": "{app=\"api\"}| pattern \"<_>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00820",
+   "expression": "{app=\"api\"}| pattern \"<_>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00821",
+   "expression": "{app=\"api\"}| pattern \"<_>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00822",
+   "expression": "{app=\"api\"}| pattern \"<_>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00823",
+   "expression": "{app=\"api\"}| pattern \"<_>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00824",
+   "expression": "{app=\"api\"}| pattern \"<_>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00825",
+   "expression": "{app=\"api\"}| pattern \"<_>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00826",
+   "expression": "{app=\"api\"}| pattern \"<_>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00827",
+   "expression": "{app=\"api\"}| pattern \"<_>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00828",
+   "expression": "{app=\"api\"}| pattern \"<_>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00829",
+   "expression": "{app=\"api\"}| pattern \"<_>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00830",
+   "expression": "{app=\"api\"}| pattern \"<_>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00831",
+   "expression": "{app=\"api\"}| pattern \"<_>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p8-00832",
+   "expression": "{app=\"api\"}| pattern \"<_>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "k8-01117",
+   "expression": "{app=\"api\"}| keep",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": 17
+  },
+  {
+   "id": "k8-01118",
+   "expression": "{app=\"api\"}| keep",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": 17
+  },
+  {
+   "id": "k8-01119",
+   "expression": "{app=\"api\"}| keep",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": 17
+  },
+  {
+   "id": "k8-01120",
+   "expression": "{app=\"api\"}| keep",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": 17
+  },
+  {
+   "id": "k8-01121",
+   "expression": "{app=\"api\"}| keep",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": 17
+  },
+  {
+   "id": "k8-01122",
+   "expression": "{app=\"api\"}| keep",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": 17
+  },
+  {
+   "id": "k8-01123",
+   "expression": "{app=\"api\"}| keep",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": 17
+  },
+  {
+   "id": "k8-01124",
+   "expression": "{app=\"api\"}| keep",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": 17
+  },
+  {
+   "id": "k8-01125",
+   "expression": "{app=\"api\"}| keep",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": 17
+  },
+  {
+   "id": "k8-01126",
+   "expression": "{app=\"api\"}| keep",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": 17
+  },
+  {
+   "id": "k8-01127",
+   "expression": "{app=\"api\"}| keep",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": 17
+  },
+  {
+   "id": "k8-01128",
+   "expression": "{app=\"api\"}| keep",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": 17
+  },
+  {
+   "id": "p9-00436",
+   "expression": "{app=\"api\"}| pattern \"<a><_>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p9-00437",
+   "expression": "{app=\"api\"}| pattern \"<a><_>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p9-00438",
+   "expression": "{app=\"api\"}| pattern \"<a><_>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p9-00439",
+   "expression": "{app=\"api\"}| pattern \"<a><_>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p9-00440",
+   "expression": "{app=\"api\"}| pattern \"<a><_>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p9-00441",
+   "expression": "{app=\"api\"}| pattern \"<a><_>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p9-00442",
+   "expression": "{app=\"api\"}| pattern \"<a><_>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p9-00443",
+   "expression": "{app=\"api\"}| pattern \"<a><_>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p9-00444",
+   "expression": "{app=\"api\"}| pattern \"<a><_>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p9-00445",
+   "expression": "{app=\"api\"}| pattern \"<a><_>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p9-00446",
+   "expression": "{app=\"api\"}| pattern \"<a><_>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p9-00447",
+   "expression": "{app=\"api\"}| pattern \"<a><_>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p9-00448",
+   "expression": "{app=\"api\"}| pattern \"<a><_>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p9-00449",
+   "expression": "{app=\"api\"}| pattern \"<a><_>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p9-00450",
+   "expression": "{app=\"api\"}| pattern \"<a><_>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p9-00451",
+   "expression": "{app=\"api\"}| pattern \"<a><_>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p9-00452",
+   "expression": "{app=\"api\"}| pattern \"<a><_>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p9-00453",
+   "expression": "{app=\"api\"}| pattern \"<a><_>\"",
+   "accepted": false,
+   "semantic": "pattern.invalid",
+   "start_byte": null
+  },
+  {
+   "id": "p9-00508",
+   "expression": "{app=\"api\"}| pattern \"<a> \"<b>\"\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": 28
+  },
+  {
+   "id": "p9-00509",
+   "expression": "{app=\"api\"}| pattern \"<a> \"<b>\"\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": 28
+  },
+  {
+   "id": "p9-00510",
+   "expression": "{app=\"api\"}| pattern \"<a> \"<b>\"\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": 28
+  },
+  {
+   "id": "p9-00511",
+   "expression": "{app=\"api\"}| pattern \"<a> \"<b>\"\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": 28
+  },
+  {
+   "id": "p9-00512",
+   "expression": "{app=\"api\"}| pattern \"<a> \"<b>\"\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": 28
+  },
+  {
+   "id": "p9-00513",
+   "expression": "{app=\"api\"}| pattern \"<a> \"<b>\"\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": 28
+  },
+  {
+   "id": "p9-00514",
+   "expression": "{app=\"api\"}| pattern \"<a> \"<b>\"\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": 28
+  },
+  {
+   "id": "p9-00515",
+   "expression": "{app=\"api\"}| pattern \"<a> \"<b>\"\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": 28
+  },
+  {
+   "id": "p9-00516",
+   "expression": "{app=\"api\"}| pattern \"<a> \"<b>\"\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": 28
+  },
+  {
+   "id": "p9-00517",
+   "expression": "{app=\"api\"}| pattern \"<a> \"<b>\"\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": 28
+  },
+  {
+   "id": "p9-00518",
+   "expression": "{app=\"api\"}| pattern \"<a> \"<b>\"\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": 28
+  },
+  {
+   "id": "p9-00519",
+   "expression": "{app=\"api\"}| pattern \"<a> \"<b>\"\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": 28
+  },
+  {
+   "id": "p9-00520",
+   "expression": "{app=\"api\"}| pattern \"<a> \"<b>\"\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": 28
+  },
+  {
+   "id": "p9-00521",
+   "expression": "{app=\"api\"}| pattern \"<a> \"<b>\"\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": 28
+  },
+  {
+   "id": "p9-00522",
+   "expression": "{app=\"api\"}| pattern \"<a> \"<b>\"\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": 28
+  },
+  {
+   "id": "p9-00523",
+   "expression": "{app=\"api\"}| pattern \"<a> \"<b>\"\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": 28
+  },
+  {
+   "id": "p9-00524",
+   "expression": "{app=\"api\"}| pattern \"<a> \"<b>\"\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": 28
+  },
+  {
+   "id": "p9-00525",
+   "expression": "{app=\"api\"}| pattern \"<a> \"<b>\"\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": 28
   }
  ]
 }
