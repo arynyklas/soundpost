@@ -10,6 +10,7 @@ import (
 	"hash"
 	"os"
 	"path/filepath"
+	"reflect"
 	"soundpost/internal/durablefs"
 	"soundpost/internal/model"
 )
@@ -156,6 +157,39 @@ func (e *Engine) Publish(ctx context.Context, groupID model.ID, expected model.R
 	defer e.mu.Unlock()
 	return e.publishManifestLocked(ctx, groupID, expected, replacement, nil)
 }
+
+// publishManifestLocalLocked atomically replaces this node's own physical-layout
+// manifest. The manifest, the segment files and the page locations are
+// node-local state: every voter rebuilds them from the replicated command
+// history, and nothing outside this engine observes them except through this
+// engine's own fenced reads. A publication therefore has no Raft leadership or
+// quorum requirement: a follower, a node that leads only some groups and a
+// node that has just lost leadership all maintain their own layout. Requiring
+// leadership of all 65 groups, as an earlier version did, made maintenance
+// impossible on every follower and on every leader that did not happen to lead
+// everything, and with it the snapshot coverage a publication records.
+//
+// The one lock it needs is e.mu, which the caller holds for the whole
+// operation, from choosing the pages being relocated until the durable
+// compare-and-swap. Apply, snapshot Restore, the snapshot cut (Snapshot,
+// DeletionLedger, PinFiles), Append and every read take e.mu, so none of them
+// can interleave: a hot page cannot grow or move while it is flushed, and the
+// recorded Applied watermarks and snapshot coverage are read from the same
+// engine state the publication verified. No group mutex is taken (Apply holds
+// one while waiting for e.mu), and no quorum round trip is made for a purely
+// local operation.
+//
+// What this path must never do is change anything other nodes or clients
+// depend on: TombstoneGeneration must stay equal and no retained page may be
+// dropped, so a publication cannot delete or hide data. Deletion, retention
+// and any external destination must go through replicated commands (and, for
+// external effects, Group.Fence/ValidateFence), not through this function.
+// The format term stays 1: it is an on-disk format constant, not a Raft term.
+//
+// Segments that the previous publication (or this engine's open) already
+// verified are immutable and are carried forward after a size/existence/header
+// check without hashing or decoding them again; new or altered segments are
+// hashed and every page is read back before the manifest can point at them.
 func (e *Engine) publishManifestLocalLocked(ctx context.Context, groupID model.ID, expected model.Revision, replacement Manifest, updates []pageRef) (model.Revision, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, model.Fail(model.Cancelled)
@@ -167,9 +201,13 @@ func (e *Engine) publishManifestLocalLocked(ctx context.Context, groupID model.I
 	if groupID != e.identity || replacement.Group != groupID || replacement.Term != old.Term || expected != old.Revision || replacement.Version != 1 || replacement.TombstoneGeneration != old.TombstoneGeneration || !validIndexReferences(replacement.IndexReferences) {
 		return 0, model.Fail(model.Conflict)
 	}
+	previous := make(map[string]SegmentManifest, len(old.Segments))
+	for _, s := range old.Segments {
+		previous[s.File] = s
+	}
 	// Publication may relocate every retained page, never drop a committed page.
 	covered := map[model.ID]SegmentManifest{}
-	files := map[string]bool{}
+	files, carried := map[string]bool{}, map[string]bool{}
 	for _, s := range replacement.Segments {
 		if ctx.Err() != nil {
 			return 0, model.Fail(model.Cancelled)
@@ -186,9 +224,13 @@ func (e *Engine) publishManifestLocalLocked(ctx context.Context, groupID model.I
 		if err != nil || info.Size() < 0 || uint64(info.Size()) != s.Bytes {
 			return 0, model.Fail(model.Corrupt)
 		}
-		hash, err := hashFile(path)
-		if err != nil || hash != s.Checksum {
-			return 0, model.Fail(model.Corrupt)
+		if verified, ok := previous[s.File]; ok && sameSegmentManifest(verified, s) {
+			carried[s.File] = true
+		} else {
+			hash, err := hashFile(path)
+			if err != nil || hash != s.Checksum {
+				return 0, model.Fail(model.Corrupt)
+			}
 		}
 		for _, id := range s.Pages {
 			if _, ok := covered[id]; ok {
@@ -244,8 +286,10 @@ func (e *Engine) publishManifestLocalLocked(ctx context.Context, groupID model.I
 				summary.Bytes += uint64(p.Length)
 				summary.Rows += uint64(p.Count)
 				summary.Pages++
-				if _, err = e.readPage(p); err != nil {
-					return err
+				if !carried[p.Segment] {
+					if _, err = e.readPage(p); err != nil {
+						return err
+					}
 				}
 			}
 			return nil
@@ -275,7 +319,7 @@ func (e *Engine) publishManifestLocalLocked(ctx context.Context, groupID model.I
 		return 0, model.Fail(model.Unavailable)
 	}
 	replacement.Applied = e.watermarksLocked()
-	replacement.SnapshotCoverage = nil // WAL is deliberately never truncated by this task.
+	replacement.SnapshotCoverage = e.snapshotCoverageLocked() // journal truncation is bounded by these verified cuts
 	replacement.IndexReferences, err = e.currentIndexReferencesLocked()
 	if err != nil {
 		return 0, err
@@ -338,6 +382,21 @@ type segmentBounds struct {
 	Start, End, RetainUntil model.UnixNano
 	Bytes, Rows             uint64
 	Pages                   int
+}
+
+// sameSegmentManifest reports whether b is exactly the entry a publication
+// already verified. Equal entries name the same immutable file and checksum.
+func sameSegmentManifest(a, b SegmentManifest) bool {
+	if len(a.Pages) != len(b.Pages) {
+		return false
+	}
+	for i := range a.Pages {
+		if a.Pages[i] != b.Pages[i] {
+			return false
+		}
+	}
+	a.Pages, b.Pages = nil, nil
+	return reflect.DeepEqual(a, b)
 }
 
 func (e *Engine) currentIndexReferencesLocked() ([]IndexReference, error) {

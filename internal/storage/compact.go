@@ -5,7 +5,6 @@ package storage
 import (
 	"context"
 	"sort"
-	"soundpost/internal/durablefs"
 	"soundpost/internal/model"
 )
 
@@ -54,7 +53,7 @@ func (e *Engine) Compact(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if err = durablefs.Remove(path); err != nil {
+		if err = e.retireFileLocked(path); err != nil {
 			return err
 		}
 	}

@@ -60,6 +60,12 @@ func run() (err error) {
 		case "isolation":
 			smoke, stage = "isolation", "isolation_dispatch"
 			return RunIsolation(os.Args[2:])
+		case "snapshot-repair":
+			smoke, stage = "snapshot_repair", "repair_dispatch"
+			return RunSnapshotRepair(os.Args[2:])
+		case "snapshot-repair-child":
+			smoke, stage = "snapshot_repair_child", "repair_child_start"
+			return RunSnapshotRepairChild(os.Args[2:])
 		}
 	}
 	if len(os.Args) >= 2 && os.Args[1] == "source-map" {

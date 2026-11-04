@@ -38,7 +38,7 @@ type readyWAL struct {
 	fault      func(string) error
 }
 
-func openReadyWAL(dir string, group model.ID, node uint64, members Members, seed []byte, application, seedIndex, seedTerm uint64, fault func(string) error) (*readyWAL, *raft.MemoryStorage, error) {
+func openReadyWAL(dir string, group model.ID, node uint64, members Members, seed []byte, application, seedIndex, seedTerm uint64, fault func(string) error, installed *installedSeed) (*readyWAL, *raft.MemoryStorage, error) {
 	if err := durablefs.MkdirAll(dir); err != nil {
 		return nil, nil, err
 	}
@@ -121,7 +121,15 @@ func openReadyWAL(dir string, group model.ID, node uint64, members Members, seed
 		}
 		snap := &pb.Snapshot{Metadata: &pb.SnapshotMetadata{ConfState: conf}}
 		rd := raft.Ready{Snapshot: snap}
-		if seed != nil {
+		if installed != nil {
+			if installed.conf != nil {
+				snap.Metadata.ConfState = installed.conf
+			}
+			snap.Data = installed.data
+			snap.Metadata.Index = new(installed.index)
+			snap.Metadata.Term = new(installed.term)
+			rd.HardState = &pb.HardState{Term: new(installed.term), Commit: new(installed.index)}
+		} else if seed != nil {
 			if seedIndex == 0 {
 				seedIndex = 1
 			}

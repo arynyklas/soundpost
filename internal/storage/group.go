@@ -46,6 +46,7 @@ type Engine struct {
 	scans        map[*rowIterator]struct{}
 	subscribers  map[*changeIterator]struct{}
 	storageStats StorageStats
+	snap         snapshotState
 }
 type walEntry struct {
 	Type       string                      `json:"type"`

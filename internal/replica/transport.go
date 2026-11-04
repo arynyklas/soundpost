@@ -231,6 +231,8 @@ func (g *Group) ReportDelivery(to uint64, snapshot bool, err error) {
 		status := raft.SnapshotFinish
 		if err != nil {
 			status = raft.SnapshotFailure
+		} else {
+			g.sendSnap = nil // delivered: a later recipient gets a fresh cut
 		}
 		g.raw.ReportSnapshot(to, status)
 	}

@@ -337,6 +337,9 @@ func (e *Engine) EnableReplication(c replica.Config, seed *ReplicationSeed, auth
 	if err := e.initializeReplicaNamespace(); err != nil {
 		return nil, err
 	}
+	if err := e.loadRestoreHold(); err != nil {
+		return nil, err
+	}
 	r := &replicatedEngine{}
 	out := make([]*replica.Group, 0, 64)
 	fail := func(err error) ([]*replica.Group, error) {
@@ -380,7 +383,7 @@ func (e *Engine) replicaBeforeWrite(ctx context.Context, slot uint16) error {
 	if slot >= 64 {
 		return model.Fail(model.Invalid)
 	}
-	if e.repl == nil {
+	if e.repl == nil || e.snap.hold.Load() {
 		return model.Fail(model.Unavailable)
 	}
 	_, err := e.repl.groups[slot].ReadIndex(ctx)
@@ -832,21 +835,17 @@ func (e *Engine) ReplicaGroups() []*replica.Group {
 	}
 	return append([]*replica.Group(nil), e.repl.groups[:]...)
 }
+
+// publishManifestLocked requires e.mu for the whole call and holds it: it takes
+// no group lock and makes no quorum round trip, so a voter publishes its own
+// layout whether it leads every group, some groups or none (see
+// publishManifestLocalLocked). A publication is allowed only once replication is
+// installed; before that no node-local layout is authoritative.
 func (e *Engine) publishManifestLocked(ctx context.Context, group model.ID, expected model.Revision, replacement Manifest, updates []pageRef) (model.Revision, error) {
 	if e.repl == nil {
 		return 0, model.Fail(model.Unavailable)
 	}
-	groups := append([]*replica.Group(nil), e.repl.groups[:]...)
-	var revision model.Revision
-	e.mu.Unlock()
-	err := replica.WithLeaderFences(ctx, groups, func(fenced context.Context) error {
-		e.mu.Lock()
-		defer e.mu.Unlock()
-		var err error
-		revision, err = e.publishManifestLocalLocked(fenced, group, expected, replacement, updates)
-		return err
-	})
-	e.mu.Lock()
+	revision, err := e.publishManifestLocalLocked(ctx, group, expected, replacement, updates)
 	if err != nil {
 		return 0, storageReplicaFault(err)
 	}

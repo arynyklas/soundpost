@@ -133,6 +133,11 @@ type Group struct {
 	closed         bool
 	stop           chan struct{}
 	closeOnce      sync.Once
+	dir            string
+	fault          func(string) error
+	snaps          *SnapshotStore
+	pins           map[model.ID]*JournalPin
+	sendSnap       *pb.Snapshot // snapshot for members added after the stored one; never persisted
 }
 
 func Open(c Config) (*Group, error) {
@@ -157,11 +162,30 @@ func Open(c Config) (*Group, error) {
 			return nil, ErrInvalid
 		}
 	}
-	disk, memory, err := openReadyWAL(c.Directory, c.Group, c.ID, c.Members, c.Seed, c.Application, c.SeedIndex, c.SeedTerm, c.Fault)
+	if err := os.Remove(filepath.Join(c.Directory, journalCompactTemp)); err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	snaps, err := OpenSnapshotStore(c.Directory, c.Group, c.Fault)
 	if err != nil {
 		return nil, err
 	}
-	g := &Group{id: c.ID, group: c.Group, disk: disk, memory: memory, machine: c.Machine, transport: c.Transport, members: disk.members, completed: map[model.ID]CommittedEntry{}, known: map[model.ID]map[uint64]struct{}{}, pending: map[model.ID][]chan proposalResult{}, reads: map[string]*readRequest{}, changed: make(chan struct{}), stop: make(chan struct{})}
+	var installed *installedSeed
+	if _, statErr := os.Stat(filepath.Join(c.Directory, "ready.wal")); os.IsNotExist(statErr) {
+		// A fresh journal starts from an installed, fully verified snapshot when
+		// one was selected; a directory that does not verify refuses to open.
+		if installed, err = loadInstalledSeed(snaps); err != nil {
+			return nil, err
+		}
+	}
+	disk, memory, err := openReadyWAL(c.Directory, c.Group, c.ID, c.Members, c.Seed, c.Application, c.SeedIndex, c.SeedTerm, c.Fault, installed)
+	if err != nil {
+		return nil, err
+	}
+	g := &Group{dir: c.Directory, fault: c.Fault, snaps: snaps, id: c.ID, group: c.Group, disk: disk, memory: memory, machine: c.Machine, transport: c.Transport, members: disk.members, completed: map[model.ID]CommittedEntry{}, known: map[model.ID]map[uint64]struct{}{}, pending: map[model.ID][]chan proposalResult{}, reads: map[string]*readRequest{}, changed: make(chan struct{}), stop: make(chan struct{})}
+	if err = g.loadPins(); err != nil {
+		disk.Close()
+		return nil, err
+	}
 	g.validate = c.Validate
 	g.logCommands = map[model.ID]CommittedEntry{}
 	hard, conf, err := memory.InitialState()
@@ -191,7 +215,7 @@ func Open(c Config) (*Group, error) {
 		disk.Close()
 		return nil, err
 	}
-	g.raw, err = raft.NewRawNode(&raft.Config{ID: c.ID, ElectionTick: 10, HeartbeatTick: 1, Storage: memory, Applied: g.applied, MaxSizePerMsg: 20 << 20, MaxCommittedSizePerReady: 32 << 20, MaxUncommittedEntriesSize: 64 << 20, MaxInflightMsgs: 32, CheckQuorum: true, PreVote: true, ReadOnlyOption: raft.ReadOnlySafe, DisableProposalForwarding: true})
+	g.raw, err = raft.NewRawNode(&raft.Config{ID: c.ID, ElectionTick: 10, HeartbeatTick: 1, Storage: snapshotSource{MemoryStorage: memory, g: g}, Applied: g.applied, MaxSizePerMsg: 20 << 20, MaxCommittedSizePerReady: 32 << 20, MaxUncommittedEntriesSize: 64 << 20, MaxInflightMsgs: 32, CheckQuorum: true, PreVote: true, ReadOnlyOption: raft.ReadOnlySafe, DisableProposalForwarding: true})
 	if err != nil {
 		disk.Close()
 		return nil, err

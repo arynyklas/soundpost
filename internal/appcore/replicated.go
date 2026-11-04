@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"os"
@@ -54,6 +55,22 @@ type replicatedApp struct {
 	node      *replica.Node
 }
 
+// awaitReady waits for one ReadIndex quorum round on a group. Each round has
+// its own five-second freshness window, and a group that has no leader or quorum
+// yet (a peer that is still starting, a replacement learner being repaired from
+// snapshots, an election in progress under disk contention) fails that window
+// with ErrStale. The startup context, not one window, bounds how long a node
+// waits, so a node does not abandon startup at the first slow group while its
+// startup budget remains. Intake stays closed until every group answered; any
+// error other than the freshness window (a failed or closed group) is final.
+func awaitReady(ctx context.Context, g *replica.Group) error {
+	for {
+		err := g.Ready(ctx)
+		if err == nil || !errors.Is(err, replica.ErrStale) || ctx.Err() != nil {
+			return err
+		}
+	}
+}
 func OpenDistributed(dir string, node NodeConfig) (*App, error) {
 	if err := replica.ValidateMembers(node.Members); err != nil || len(node.Members.Nodes) < 3 || node.Seed == "" || node.PeerListen == "" {
 		return nil, model.Fail(model.Invalid)
@@ -183,7 +200,7 @@ func (a *App) enableReplication(ctx context.Context, dir string, options *replic
 		return err
 	}
 	for _, g := range lifecycle.groups {
-		if err = g.Ready(ctx); err != nil {
+		if err = awaitReady(ctx, g); err != nil {
 			return err
 		}
 	}
