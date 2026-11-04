@@ -48,7 +48,7 @@ func TestNativeCanonicalDecimalRoundTrip(t *testing.T) {
 	if err = json.Unmarshal(b, &decoded); err != nil || decoded.PolicyRevision != model.Revision(exact) || decoded.Validate() != nil {
 		t.Fatalf("config roundtrip %v %s", err, b)
 	}
-	target := Target{PIDNamespace: exact, TGID: 1, ProcessStart: model.MonoNano(exact)}
+	target := Target{PIDNamespace: model.Uint64(exact), TGID: 1, ProcessStart: model.MonoNano(exact)}
 	b, _ = json.Marshal(target)
 	var rt Target
 	if err = json.Unmarshal(b, &rt); err != nil || !reflect.DeepEqual(target, rt) {
@@ -110,7 +110,7 @@ func TestLossAndProcessMappingNeedNoInventedThread(t *testing.T) {
 }
 func TestNativeSampleEvidence(t *testing.T) {
 	e := testEvent()
-	for _, mutate := range []func(*CPUSample){func(s *CPUSample) { s.Method = "timer" }, func(s *CPUSample) { s.Unit = UnitEngineSamples }, func(s *CPUSample) { s.Period = 0 }, func(s *CPUSample) { s.RequestedHz = 0 }, func(s *CPUSample) { s.Callchain = []CallchainEntry{{IP: ^uint64(511)}} }, func(s *CPUSample) { s.Truncated = ReasonPlatform }} {
+	for _, mutate := range []func(*CPUSample){func(s *CPUSample) { s.Method = "timer" }, func(s *CPUSample) { s.Unit = UnitEngineSamples }, func(s *CPUSample) { s.Period = 0 }, func(s *CPUSample) { s.RequestedHz = 0 }, func(s *CPUSample) { s.Callchain = []CallchainEntry{{IP: model.Uint64(^uint64(511))}} }, func(s *CPUSample) { s.Truncated = ReasonPlatform }} {
 		bad := *e.CPUEvent
 		mutate(&bad)
 		e.CPUEvent = &bad

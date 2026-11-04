@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"soundpost/internal/model"
 	"soundpost/internal/nativeperf"
 	"strings"
 	"syscall"
@@ -81,7 +82,7 @@ func run() error {
 	if e != nil {
 		return e
 	}
-	target.CgroupID = st.Sys().(*syscall.Stat_t).Ino
+	target.CgroupID = model.Uint64(st.Sys().(*syscall.Stat_t).Ino)
 	executable, e := elf.Open(*workload)
 	if e != nil {
 		return e
@@ -168,6 +169,7 @@ func run() error {
 	deadline := startTime.Add(time.Duration(*seconds) * time.Second)
 	conn.SetReadDeadline(deadline)
 	samples, lost, hot, throttle := uint64(0), uint64(0), uint64(0), uint64(0)
+	canaryLeaks := 0
 	threads := map[uint32]bool{}
 	ready := false
 	for {
@@ -185,10 +187,9 @@ func run() error {
 		if _, e = io.ReadFull(conn, payload); e != nil {
 			return e
 		}
-		for _, canary := range []string{"SOUNDPOST_CPU_LOCAL_CANARY_2026", "SOUNDPOST_CPU_HEAP_CANARY_2026"} {
-			if bytes.Contains(payload, []byte(canary)) {
-				return errors.New("canary leaked")
-			}
+		canaryLeaks += countCanaryLeaks(payload)
+		if canaryLeaks != 0 {
+			return fmt.Errorf("canary leaked (%d sanitized-payload matches)", canaryLeaks)
 		}
 		var reply struct {
 			Error string
@@ -215,7 +216,7 @@ func run() error {
 		if event.CPUEvent != nil {
 			samples++
 			threads[event.Task.TID] = true
-			if event.CPUEvent.IP >= hotStart && event.CPUEvent.IP < hotEnd {
+			if uint64(event.CPUEvent.IP) >= hotStart && uint64(event.CPUEvent.IP) < hotEnd {
 				hot++
 			}
 			for _, frame := range event.CPUEvent.Callchain {
@@ -225,7 +226,7 @@ func run() error {
 			}
 		}
 		if event.Loss != nil {
-			lost += event.Loss.Count
+			lost += uint64(event.Loss.Count)
 			if event.Loss.Throttle != nil {
 				throttle++
 			}
@@ -241,7 +242,7 @@ func run() error {
 		RequestedHz                                        int
 		Method                                             string
 		CanaryLeaks                                        int
-	}{samples, lost, hot, throttle, len(threads), time.Since(startTime).Seconds(), float64(samples) / time.Since(startTime).Seconds(), *hz, string(nativeperf.MethodSoftwareCPUClock), 0}
+	}{samples, lost, hot, throttle, len(threads), time.Since(startTime).Seconds(), float64(samples) / time.Since(startTime).Seconds(), *hz, string(nativeperf.MethodSoftwareCPUClock), canaryLeaks}
 	if *cycles {
 		result.Method = string(nativeperf.MethodHardwareCycles)
 	}
@@ -252,4 +253,12 @@ func run() error {
 		return errors.New("require real samples, known hot function and both existing workload threads")
 	}
 	return nil
+}
+
+func countCanaryLeaks(payload []byte) int {
+	count := 0
+	for _, canary := range []string{"SOUNDPOST_CPU_LOCAL_CANARY_2026", "SOUNDPOST_CPU_HEAP_CANARY_2026"} {
+		count += bytes.Count(payload, []byte(canary))
+	}
+	return count
 }

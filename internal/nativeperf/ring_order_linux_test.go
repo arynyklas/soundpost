@@ -38,7 +38,7 @@ func TestRingAcquireHeadReleaseTailOrdering(t *testing.T) {
 			if e != nil {
 				return e
 			}
-			if sample.IP != uint64(0x2000+n) || sample.Callchain[0].IP != uint64(0x1000+n) {
+			if uint64(sample.IP) != uint64(0x2000+n) || uint64(sample.Callchain[0].IP) != uint64(0x1000+n) {
 				t.Error("payload read before publication or reused before release")
 			}
 			return nil

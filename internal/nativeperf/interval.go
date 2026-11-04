@@ -16,11 +16,14 @@ type correlationProcessState struct {
 	tasks      int
 }
 
-func correlationPID(k TaskKey) correlationProcess { return correlationProcess{k.PIDNamespace, k.TGID} }
+func correlationPID(k TaskKey) correlationProcess {
+	return correlationProcess{uint64(k.PIDNamespace), k.TGID}
+}
 
 type correlationTaskState struct {
 	start, wake          model.MonoNano
 	out, runnable, woken bool
+	unknown              bool
 	chain                []CallchainEntry
 	missing              Reason
 }
@@ -42,7 +45,7 @@ func (c *Correlator) Stats() CorrelationStats {
 	return CorrelationStats{ReservedBytes: c.reserved, HeapEvents: len(c.events), TaskStates: len(c.tasks), MaxHeapEvents: c.maxEvents, MaxTaskStates: c.maxTasks, PeakHeapEvents: c.peakHeap, PeakTaskStates: c.peakTasks}
 }
 func (c *Correlator) interval(key TaskKey, start, end model.MonoNano, kind IntervalKind, reason Reason, state *correlationTaskState) Interval {
-	i := Interval{Task: key, Domain: c.domain, Start: start, End: end, Kind: kind, Reason: reason, Measure: Measure{Unit: UnitNanoseconds, Value: uint64(end - start)}}
+	i := Interval{Task: key, Domain: c.domain, Start: start, End: end, Kind: kind, Reason: reason, Measure: Measure{Unit: UnitNanoseconds, Value: model.Uint64(end - start)}}
 	if state != nil {
 		i.SwitchOutCallchain = append([]CallchainEntry(nil), state.chain...)
 		i.MissingCallchain = state.missing
@@ -67,7 +70,7 @@ func (c *Correlator) invalidate(at model.MonoNano, reason Reason) []Interval {
 	}
 	clear(c.tasks)
 	clear(c.processes)
-	return []Interval{{Domain: c.domain, Kind: IntervalUnknown, Start: 0, End: end, Measure: Measure{Unit: UnitNanoseconds, Value: uint64(end)}, Reason: reason, Correction: true}}
+	return []Interval{{Domain: c.domain, Kind: IntervalUnknown, Start: 0, End: end, Measure: Measure{Unit: UnitNanoseconds, Value: model.Uint64(end)}, Reason: reason, Correction: true}}
 }
 func (c *Correlator) sortedTasks() []TaskKey {
 	keys := make([]TaskKey, 0, len(c.tasks))
@@ -94,7 +97,7 @@ func (c *Correlator) sortedTasks() []TaskKey {
 }
 func (c *Correlator) identityConflict(key TaskKey) bool {
 	process, ok := c.processes[correlationPID(key)]
-	return ok && (process.start != key.ProcessStart || process.generation != key.Generation)
+	return ok && (process.start != key.ProcessStart || process.generation != uint64(key.Generation))
 }
 func (c *Correlator) apply(e SanitizedEvent) []Interval {
 	switch e.Kind {
@@ -149,7 +152,9 @@ func (c *Correlator) apply(e SanitizedEvent) []Interval {
 				if e.Time < state.start || state.woken && (state.wake < state.start || state.wake > e.Time) {
 					return c.invalidate(e.Time, ReasonClock)
 				}
-				if state.runnable {
+				if state.unknown {
+					out = append(out, c.interval(key, state.start, e.Time, IntervalUnknown, ReasonUnmeasured, state))
+				} else if state.runnable {
 					out = append(out, c.interval(key, state.start, e.Time, IntervalRunnable, "", state))
 				} else if state.woken {
 					out = append(out, c.interval(key, state.start, state.wake, IntervalBlocked, "", state), c.interval(key, state.wake, e.Time, IntervalRunnable, "", state))
@@ -177,11 +182,11 @@ func (c *Correlator) apply(e SanitizedEvent) []Interval {
 				return out
 			}
 			key := *s.Previous
-			c.tasks[key] = &correlationTaskState{start: e.Time, out: true, runnable: s.Preempted || s.PreviousState == 0, chain: s.SwitchOutCallchain, missing: s.MissingCallchain}
+			c.tasks[key] = &correlationTaskState{start: e.Time, out: true, runnable: s.Preempted || s.PreviousState == 0, unknown: s.PreviousStateUnknown, chain: s.SwitchOutCallchain, missing: s.MissingCallchain}
 			id := correlationPID(key)
 			process := c.processes[id]
 			process.start = key.ProcessStart
-			process.generation = key.Generation
+			process.generation = uint64(key.Generation)
 			process.tasks++
 			c.processes[id] = process
 			if len(c.tasks) > c.peakTasks {

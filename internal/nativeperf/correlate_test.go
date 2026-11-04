@@ -20,15 +20,15 @@ func correlationOut(at uint64, runnable bool) SanitizedEvent {
 	if runnable {
 		state = 0
 	}
-	return SanitizedEvent{Kind: EventSwitch, Time: model.MonoNano(at), Sequence: at + 1, Domain: correlationDomain, Switch: &SchedulerSwitch{Previous: &k, PreviousState: state, MissingCallchain: ReasonMissingSwitchCallchain}}
+	return SanitizedEvent{Kind: EventSwitch, Time: model.MonoNano(at), Sequence: model.Uint64(at + 1), Domain: correlationDomain, Switch: &SchedulerSwitch{Previous: &k, PreviousState: model.Uint64(state), MissingCallchain: ReasonMissingSwitchCallchain}}
 }
 func correlationIn(at uint64) SanitizedEvent {
 	k := correlationTask()
-	return SanitizedEvent{Kind: EventSwitch, Time: model.MonoNano(at), Sequence: at + 1, Domain: correlationDomain, Switch: &SchedulerSwitch{Next: &k}}
+	return SanitizedEvent{Kind: EventSwitch, Time: model.MonoNano(at), Sequence: model.Uint64(at + 1), Domain: correlationDomain, Switch: &SchedulerSwitch{Next: &k}}
 }
 func correlationWake(at uint64) SanitizedEvent {
 	k := correlationTask()
-	return SanitizedEvent{Kind: EventWakeup, Time: model.MonoNano(at), Sequence: at + 1, Domain: correlationDomain, Task: k, Wakeup: &SchedulerWakeup{Target: k, TargetCPU: 0}}
+	return SanitizedEvent{Kind: EventWakeup, Time: model.MonoNano(at), Sequence: model.Uint64(at + 1), Domain: correlationDomain, Task: k, Wakeup: &SchedulerWakeup{Target: k, TargetCPU: 0}}
 }
 func configuredCorrelation(t *testing.T, cpus ...uint32) *Correlator {
 	t.Helper()
@@ -335,7 +335,7 @@ func TestCorrelationIntervalCorrectionAndStackValidation(t *testing.T) {
 	if err := interval.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	interval.SwitchOutCallchain[1].IP = ^uint64(511)
+	interval.SwitchOutCallchain[1].IP = model.Uint64(^uint64(511))
 	if interval.Validate() == nil {
 		t.Fatal("context sentinel accepted as address")
 	}

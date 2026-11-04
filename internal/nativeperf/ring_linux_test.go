@@ -83,7 +83,7 @@ func TestRingLossAndThrottle(t *testing.T) {
 			binary.LittleEndian.PutUint64(b[8+8*i:], v)
 		}
 		loss, _, e := decodeCPULoss(KernelRecordView{first: b})
-		if e != nil || loss.Count != tc.count || loss.Reason != tc.reason || !loss.valid() {
+		if e != nil || uint64(loss.Count) != tc.count || loss.Reason != tc.reason || !loss.valid() {
 			t.Fatalf("%+v %v", loss, e)
 		}
 	}

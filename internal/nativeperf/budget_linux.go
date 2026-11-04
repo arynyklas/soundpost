@@ -24,6 +24,7 @@ type Reservation struct {
 	closed              bool
 	owned               []io.Closer
 	cpuRings, fdCeiling uint64
+	workingLimit        uint64
 }
 
 func (b *ResourceBudget) Reserve(a AuthorizedTargets, c Config, t Topology, m MemoryUsage) (*Reservation, error) {
@@ -35,7 +36,7 @@ func (b *ResourceBudget) Reserve(a AuthorizedTargets, c Config, t Topology, m Me
 		if t.CPUs > 256 {
 			return nil, ErrResources
 		}
-		rings += 2 * t.CPUs
+		rings += 3 * t.CPUs
 	}
 	// pidfds, proc dirs, executable metadata, connection, listener, and ring FDs.
 	fds := rings + 3*uint64(len(a.targets)) + 2
@@ -66,7 +67,7 @@ func (b *ResourceBudget) Reserve(a AuthorizedTargets, c Config, t Topology, m Me
 	}
 	b.memory += memory
 	b.fds += fds
-	return &Reservation{budget: b, Memory: memory, FDs: fds, cpuRings: uint64(len(a.targets)), fdCeiling: ceiling}, nil
+	return &Reservation{budget: b, Memory: memory, FDs: fds, cpuRings: uint64(len(a.targets)), fdCeiling: ceiling, workingLimit: c.MaxMemory}, nil
 }
 func (r *Reservation) Own(c io.Closer) error {
 	r.mu.Lock()

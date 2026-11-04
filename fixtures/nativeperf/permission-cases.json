@@ -2,13 +2,16 @@
  "license":"Apache-2.0",
  "author":"Aryn Yklas",
  "status":"not_run",
+ "unitBoundaryTest":"TestPerfPermissionDimensions",
+ "unitBoundaryScope":"Generic errno classification, fixed capability/error transport, missing metadata and target refusal only. Unit inputs do not install or qualify seccomp, effective host capability, LSM, tracefs ACL or PID isolation.",
+ "denyingLayer":"unknown unless independently established by retained operator-controlled policy evidence; EPERM/EACCES alone do not identify a layer",
  "command":"go run ./fixtures/nativeperf/capability --probe-only --target-pid $TARGET_PID",
  "cases":[
-  {"name":"seccomp-denied","change":"Operator-owned disposable container denies perf_event_open with EPERM; retain PERFMON and approved target/tracefs visibility","expected":"CPU denied; no samples; no unconfined fallback"},
-  {"name":"host-capability-denied","change":"Operator-owned disposable namespace lacks effective host PERFMON; host perf_event_paranoid remains unchanged","expected":"Real upstream perf scope decision reported; no assumption namespace capability grants host scope"},
-  {"name":"lsm-denied","change":"Operator-supplied disposable LSM policy denies perf_event_open while capability and seccomp allow it","expected":"Permission denial; retain externally supplied LSM evidence rather than infer cause from EPERM"},
-  {"name":"tracefs-denied","change":"Operator-owned disposable mount namespace hides tracefs while self CPU perf remains permitted","expected":"CPU supported and off-CPU unavailable independently; not successful full qualification"},
-  {"name":"target-visibility-denied","change":"Operator-owned disposable PID/mount namespace hides authorized target proc identity","expected":"Target refusal before acquisition; no hostPID escalation"}
+  {"name":"seccomp-denied","status":"not_run","change":"Operator-owned disposable container denies perf_event_open with EPERM; retain PERFMON and approved target/tracefs visibility","expected":"CPU denied; denying layer unknown without external policy evidence; no samples or unconfined fallback"},
+  {"name":"host-capability-denied","status":"not_run","change":"Operator-owned disposable namespace lacks effective host PERFMON; host perf_event_paranoid remains unchanged","expected":"Real upstream perf scope decision reported; no assumption namespace capability grants host scope"},
+  {"name":"lsm-denied","status":"not_run","change":"Operator-supplied disposable LSM policy denies perf_event_open while capability and seccomp allow it","expected":"Generic permission denial; retain independently supplied LSM evidence instead of inferring cause from EPERM"},
+  {"name":"tracefs-denied","status":"not_run","change":"Operator-owned disposable mount namespace hides tracefs while self CPU perf remains permitted","expected":"CPU supported and off-CPU unavailable independently; not successful full qualification"},
+  {"name":"target-visibility-denied","status":"not_run","change":"Operator-owned disposable PID/mount namespace hides authorized target proc identity","expected":"Target refusal before acquisition; no hostPID escalation"}
  ],
  "deploymentPrerequisites":{
   "systemd":"Use packaging/systemd/soundpost-perf-acquire.service only after dedicated UID, root-owned policy, proc/tracefs/cgroup access and PERFMON approval",

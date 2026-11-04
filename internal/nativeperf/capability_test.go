@@ -4,6 +4,7 @@ package nativeperf
 
 import (
 	"context"
+	"soundpost/internal/model"
 	"testing"
 )
 
@@ -23,7 +24,7 @@ func TestTargetIdentityValidation(t *testing.T) {
 	}
 }
 func TestMeasureOverflow(t *testing.T) {
-	if _, err := (Measure{Unit: UnitNanoseconds, Value: ^uint64(0)}).Add(Measure{Unit: UnitNanoseconds, Value: 1}); err == nil {
+	if _, err := (Measure{Unit: UnitNanoseconds, Value: model.Uint64(^uint64(0))}).Add(Measure{Unit: UnitNanoseconds, Value: 1}); err == nil {
 		t.Fatal("overflow accepted")
 	}
 }

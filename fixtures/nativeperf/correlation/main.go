@@ -57,7 +57,7 @@ func main() {
 	var last uint64
 	event := func(kind nativeperf.EventKind, at uint64, cpu uint32) nativeperf.SanitizedEvent {
 		sequence++
-		return nativeperf.SanitizedEvent{Kind: kind, Time: model.MonoNano(at), CPU: cpu, Sequence: sequence, Domain: domain}
+		return nativeperf.SanitizedEvent{Kind: kind, Time: model.MonoNano(at), CPU: cpu, Sequence: model.Uint64(sequence), Domain: domain}
 	}
 	record := func(s *summary, is []nativeperf.Interval) {
 		for _, i := range is {
@@ -74,18 +74,18 @@ func main() {
 				s.CensoredNS = 0
 			case i.Kind == nativeperf.IntervalBlocked:
 				s.BlockedIntervals++
-				s.BlockedNS += i.Measure.Value
+				s.BlockedNS += uint64(i.Measure.Value)
 			case i.Kind == nativeperf.IntervalRunnable:
 				s.RunnableIntervals++
-				s.RunnableNS += i.Measure.Value
+				s.RunnableNS += uint64(i.Measure.Value)
 			case i.Kind == nativeperf.IntervalUnknown:
 				s.UnknownIntervals++
 				s.EmittedUnknownIntervals++
-				s.UnknownNS += i.Measure.Value
+				s.UnknownNS += uint64(i.Measure.Value)
 			case i.Kind == nativeperf.IntervalCensored:
 				s.CensoredIntervals++
 				s.EmittedCensoredIntervals++
-				s.CensoredNS += i.Measure.Value
+				s.CensoredNS += uint64(i.Measure.Value)
 			case i.Kind == nativeperf.IntervalCPU:
 				s.NativeSamples++
 			default:
@@ -179,7 +179,7 @@ func main() {
 		if mode == 0 {
 			state = 0
 		}
-		out.Switch = &nativeperf.SchedulerSwitch{Previous: &key, PreviousState: state, MissingCallchain: nativeperf.ReasonMissingSwitchCallchain}
+		out.Switch = &nativeperf.SchedulerSwitch{Previous: &key, PreviousState: model.Uint64(state), MissingCallchain: nativeperf.ReasonMissingSwitchCallchain}
 		middle := event(nativeperf.EventWakeup, wake, 1)
 		middle.Task = key
 		middle.Wakeup = &nativeperf.SchedulerWakeup{Target: key, TargetCPU: 1}

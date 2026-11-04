@@ -61,8 +61,9 @@ type OperatorPolicy struct {
 	Allowlist    []Target
 }
 type AuthorizedTargets struct {
-	targets []Target
-	mode    CaptureMode
+	targets        []Target
+	mode           CaptureMode
+	schedulerTasks []cpuThread
 }
 
 func (a AuthorizedTargets) Targets() []Target {

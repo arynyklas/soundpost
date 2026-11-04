@@ -15,6 +15,10 @@ func helperErrorCode(err error) string {
 	switch {
 	case errors.Is(err, ErrAuthorization):
 		return "authorization_denied"
+	case errors.Is(err, ErrTopologyChanged):
+		return "topology_changed"
+	case errors.Is(err, context.Canceled):
+		return "source_canceled"
 	case errors.Is(err, ErrResources):
 		return "resource_limit"
 	case errors.Is(err, ErrThreadCoverageChanged):
@@ -41,6 +45,10 @@ func helperCodeError(code string) error {
 	switch code {
 	case "authorization_denied":
 		return ErrAuthorization
+	case "topology_changed":
+		return ErrTopologyChanged
+	case "source_canceled":
+		return context.Canceled
 	case "resource_limit":
 		return ErrResources
 	case "permission_denied":
@@ -65,6 +73,27 @@ func streamHelperEvents(ctx context.Context, c *net.UnixConn, source EventSource
 		return
 	}
 	for {
+		if proofSource, ok := source.(interface {
+			NextItem(context.Context) (AcquisitionItem, error)
+		}); ok {
+			item, e := proofSource.NextItem(ctx)
+			if e != nil {
+				if errors.Is(e, ErrSourceComplete) {
+					writeMessage(c, helperReply{Complete: true})
+				} else if ctx.Err() == nil {
+					writeMessage(c, helperReply{Error: helperErrorCode(e)})
+				}
+				return
+			}
+			if (item.Event == nil) == (item.Proof == nil) || item.Event != nil && item.Event.Validate() != nil || item.Proof != nil && !item.Proof.valid() {
+				writeMessage(c, helperReply{Error: "acquisition_failed"})
+				return
+			}
+			if writeMessage(c, helperReply{Event: item.Event, Proof: item.Proof}) != nil {
+				return
+			}
+			continue
+		}
 		event, e := source.Next(ctx)
 		if e != nil {
 			if ctx.Err() == nil {

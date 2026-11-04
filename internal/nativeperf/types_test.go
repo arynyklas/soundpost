@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"runtime"
 	"soundpost/internal/model"
+	"strings"
 	"testing"
 )
 
@@ -64,5 +65,23 @@ func TestConfigBounds(t *testing.T) {
 	c.MaxMemory++
 	if c.Validate() == nil {
 		t.Fatal("memory budget widened")
+	}
+}
+
+func TestNativeWireCountersRejectDecimalAliases(t *testing.T) {
+	event := testEvent()
+	raw, e := json.Marshal(event)
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, pair := range [][2]string{{`"sequence":"1"`, `"sequence":"01"`}, {`"pid_namespace":"1"`, `"pid_namespace":"01"`}, {`"generation":"1"`, `"generation":"01"`}, {`"period":"10000000"`, `"period":"010000000"`}, {`"ip":"4096"`, `"ip":"04096"`}} {
+		changed := strings.Replace(string(raw), pair[0], pair[1], 1)
+		if changed == string(raw) {
+			t.Fatal("native scalar fixture unchanged")
+		}
+		var decoded SanitizedEvent
+		if json.Unmarshal([]byte(changed), &decoded) == nil {
+			t.Fatal("native decimal alias accepted")
+		}
 	}
 }

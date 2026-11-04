@@ -21,8 +21,8 @@ var (
 )
 
 type Target struct {
-	CgroupID        uint64         `json:"cgroup_id,string"`
-	PIDNamespace    uint64         `json:"pid_namespace,string"`
+	CgroupID        model.Uint64   `json:"cgroup_id"`
+	PIDNamespace    model.Uint64   `json:"pid_namespace"`
 	TGID            uint32         `json:"tgid"`
 	ProcessStart    model.MonoNano `json:"process_start"`
 	AllowedBuildIDs []string       `json:"allowed_build_ids,omitempty"`
@@ -71,11 +71,11 @@ func safeIdentity(s string) bool {
 
 type TaskKey struct {
 	BootID       string         `json:"boot_id"`
-	PIDNamespace uint64         `json:"pid_namespace,string"`
+	PIDNamespace model.Uint64   `json:"pid_namespace"`
 	TGID         uint32         `json:"tgid"`
 	TID          uint32         `json:"tid"`
 	ProcessStart model.MonoNano `json:"process_start"`
-	Generation   uint64         `json:"generation,string"`
+	Generation   model.Uint64   `json:"generation"`
 }
 
 func (k TaskKey) valid(d ClockDomain) bool {
@@ -85,10 +85,10 @@ func (k TaskKey) valid(d ClockDomain) bool {
 // ProcessKey binds process-scoped mappings without inventing a thread identity.
 type ProcessKey struct {
 	BootID       string         `json:"boot_id"`
-	PIDNamespace uint64         `json:"pid_namespace,string"`
+	PIDNamespace model.Uint64   `json:"pid_namespace"`
 	TGID         uint32         `json:"tgid"`
 	ProcessStart model.MonoNano `json:"process_start"`
-	Generation   uint64         `json:"generation,string"`
+	Generation   model.Uint64   `json:"generation"`
 }
 
 func (k ProcessKey) valid(d ClockDomain) bool {
@@ -127,7 +127,7 @@ const (
 // A context marker is never an instruction address. The decoder translates
 // documented PERF_CONTEXT sentinels into these closed markers before export.
 type CallchainEntry struct {
-	IP      uint64           `json:"ip,string,omitempty"`
+	IP      model.Uint64     `json:"ip,omitempty"`
 	Context CallchainContext `json:"context,omitempty"`
 }
 
@@ -142,13 +142,13 @@ func (c CallchainEntry) valid() bool {
 		}
 		return false
 	}
-	return c.IP != 0 && c.IP < ^uint64(4094)
+	return c.IP != 0 && uint64(c.IP) < ^uint64(4094)
 }
 
 type ThrottleEvidence struct {
-	Reason   Reason `json:"reason"`
-	EventID  uint64 `json:"event_id,string"`
-	StreamID uint64 `json:"stream_id,string"`
+	Reason   Reason       `json:"reason"`
+	EventID  model.Uint64 `json:"event_id"`
+	StreamID model.Uint64 `json:"stream_id"`
 }
 
 func (t ThrottleEvidence) valid() bool {
@@ -156,18 +156,18 @@ func (t ThrottleEvidence) valid() bool {
 }
 
 type CPUSample struct {
-	IP          uint64            `json:"ip,string"`
+	IP          model.Uint64      `json:"ip"`
 	Callchain   []CallchainEntry  `json:"callchain"`
 	Method      SamplingMethod    `json:"method"`
 	Unit        Unit              `json:"unit"`
 	RequestedHz uint32            `json:"requested_hz"`
-	Period      uint64            `json:"period,string"`
+	Period      model.Uint64      `json:"period"`
 	Truncated   Reason            `json:"truncated,omitempty"`
 	Throttle    *ThrottleEvidence `json:"throttle,omitempty"`
 }
 
 func (s CPUSample) valid() bool {
-	if s.IP == 0 || s.IP >= ^uint64(4094) || len(s.Callchain) > 128 || s.RequestedHz != 99 || s.Period == 0 || !s.Truncated.callchainReason() || s.Truncated == ReasonMissingSwitchCallchain {
+	if s.IP == 0 || uint64(s.IP) >= ^uint64(4094) || len(s.Callchain) > 128 || s.RequestedHz != 99 || s.Period == 0 || !s.Truncated.callchainReason() || s.Truncated == ReasonMissingSwitchCallchain {
 		return false
 	}
 	if s.Method == MethodSoftwareCPUClock {
@@ -194,26 +194,27 @@ func (s CPUSample) valid() bool {
 
 type SchedulerSwitch struct {
 	// Nil participants are idle/foreign and intentionally have no exported identity.
-	Previous           *TaskKey         `json:"previous,omitempty"`
-	Next               *TaskKey         `json:"next,omitempty"`
-	PreviousState      uint64           `json:"previous_state,string"`
-	Preempted          bool             `json:"preempted"`
-	SwitchOutCallchain []CallchainEntry `json:"switch_out_callchain,omitempty"`
-	MissingCallchain   Reason           `json:"missing_callchain,omitempty"`
+	Previous             *TaskKey         `json:"previous,omitempty"`
+	Next                 *TaskKey         `json:"next,omitempty"`
+	PreviousState        model.Uint64     `json:"previous_state"`
+	PreviousStateUnknown bool             `json:"previous_state_unknown,omitempty"`
+	Preempted            bool             `json:"preempted"`
+	SwitchOutCallchain   []CallchainEntry `json:"switch_out_callchain,omitempty"`
+	MissingCallchain     Reason           `json:"missing_callchain,omitempty"`
 }
 type SchedulerWakeup struct {
 	Target    TaskKey `json:"target"`
 	TargetCPU uint32  `json:"target_cpu"`
 }
 type MappingUpdate struct {
-	Process    ProcessKey `json:"process"`
-	Start      uint64     `json:"start,string"`
-	End        uint64     `json:"end,string"`
-	FileOffset uint64     `json:"file_offset,string"`
-	BuildID    string     `json:"build_id"`
+	Process    ProcessKey   `json:"process"`
+	Start      model.Uint64 `json:"start"`
+	End        model.Uint64 `json:"end"`
+	FileOffset model.Uint64 `json:"file_offset"`
+	BuildID    string       `json:"build_id"`
 }
 type LossEvent struct {
-	Count    uint64            `json:"count,string"`
+	Count    model.Uint64      `json:"count"`
 	Reason   Reason            `json:"reason"`
 	Throttle *ThrottleEvidence `json:"throttle,omitempty"`
 }
@@ -230,14 +231,14 @@ func (l LossEvent) valid() bool {
 }
 
 type TargetGeneration struct {
-	Previous uint64 `json:"previous,string"`
-	Current  uint64 `json:"current,string"`
+	Previous model.Uint64 `json:"previous"`
+	Current  model.Uint64 `json:"current"`
 }
 type SanitizedEvent struct {
 	Kind       EventKind         `json:"kind"`
 	Time       model.MonoNano    `json:"time"`
 	CPU        uint32            `json:"cpu"`
-	Sequence   uint64            `json:"sequence,string"`
+	Sequence   model.Uint64      `json:"sequence"`
 	Domain     ClockDomain       `json:"domain"`
 	Task       TaskKey           `json:"task"`
 	CPUEvent   *CPUSample        `json:"cpu_sample,omitempty"`
@@ -274,7 +275,7 @@ func (e SanitizedEvent) Validate() error {
 		if len(s.SwitchOutCallchain) > 128 || !s.MissingCallchain.callchainReason() {
 			return ErrInvalid
 		}
-		if s.Previous == nil && (len(s.SwitchOutCallchain) != 0 || s.MissingCallchain != "" || s.PreviousState != 0 || s.Preempted) {
+		if s.Previous == nil && (len(s.SwitchOutCallchain) != 0 || s.MissingCallchain != "" || s.PreviousState != 0 || s.Preempted || s.PreviousStateUnknown) {
 			return ErrInvalid
 		}
 		if s.Previous != nil && len(s.SwitchOutCallchain) == 0 && s.MissingCallchain != ReasonMissingSwitchCallchain {
@@ -342,8 +343,8 @@ const (
 )
 
 type Measure struct {
-	Unit  Unit   `json:"unit"`
-	Value uint64 `json:"value,string"`
+	Unit  Unit         `json:"unit"`
+	Value model.Uint64 `json:"value"`
 }
 
 func (m Measure) Add(n Measure) (Measure, error) {
@@ -387,7 +388,7 @@ func (i Interval) Validate() error {
 		return ErrInvalid
 	}
 	if i.Correction {
-		if i.Task != (TaskKey{}) && !i.Task.valid(i.Domain) || i.Kind != IntervalUnknown || i.Reason == "" || i.Measure.Unit != UnitNanoseconds || i.Measure.Value != uint64(i.End-i.Start) || len(i.SwitchOutCallchain) != 0 || i.MissingCallchain != "" {
+		if i.Task != (TaskKey{}) && !i.Task.valid(i.Domain) || i.Kind != IntervalUnknown || i.Reason == "" || i.Measure.Unit != UnitNanoseconds || i.Measure.Value != model.Uint64(i.End-i.Start) || len(i.SwitchOutCallchain) != 0 || i.MissingCallchain != "" {
 			return ErrInvalid
 		}
 		return nil
@@ -409,11 +410,11 @@ func (i Interval) Validate() error {
 			return ErrInvalid
 		}
 	case IntervalBlocked, IntervalRunnable:
-		if i.Measure.Unit != UnitNanoseconds || i.Measure.Value != uint64(i.End-i.Start) {
+		if i.Measure.Unit != UnitNanoseconds || i.Measure.Value != model.Uint64(i.End-i.Start) {
 			return ErrInvalid
 		}
 	case IntervalUnknown, IntervalCensored:
-		if i.Measure.Unit != UnitNanoseconds || i.Measure.Value != uint64(i.End-i.Start) || i.Reason == "" {
+		if i.Measure.Unit != UnitNanoseconds || i.Measure.Value != model.Uint64(i.End-i.Start) || i.Reason == "" {
 			return ErrInvalid
 		}
 	default:

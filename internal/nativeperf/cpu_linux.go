@@ -32,7 +32,7 @@ func decodeCPUSample(v KernelRecordView, c DecodeContext) (CPUSample, error) {
 	if !v.valid() || v.u32(0) != perfRecordSample || v.len() < 56 || v.u16(4)&7 != 2 || c.MaxFrames == 0 || c.MaxFrames > 128 {
 		return CPUSample{}, ErrRingMalformed
 	}
-	s := CPUSample{IP: v.u64(8), Method: c.Method, RequestedHz: 99, Period: v.u64(40)}
+	s := CPUSample{IP: model.Uint64(v.u64(8)), Method: c.Method, RequestedHz: 99, Period: model.Uint64(v.u64(40))}
 	switch c.Method {
 	case MethodSoftwareCPUClock:
 		s.Unit = UnitCPUClockNanoseconds
@@ -41,7 +41,7 @@ func decodeCPUSample(v KernelRecordView, c DecodeContext) (CPUSample, error) {
 	default:
 		return CPUSample{}, ErrInvalid
 	}
-	if !safeUserIP(s.IP) || s.Period == 0 || v.u32(36) != 0 {
+	if !safeUserIP(uint64(s.IP)) || s.Period == 0 || v.u32(36) != 0 {
 		return CPUSample{}, ErrRingMalformed
 	}
 	count := v.u64(48)
@@ -84,7 +84,7 @@ func decodeCPUSample(v KernelRecordView, c DecodeContext) (CPUSample, error) {
 			s.Truncated = ReasonTruncated
 			continue
 		}
-		s.Callchain = append(s.Callchain, CallchainEntry{IP: ip})
+		s.Callchain = append(s.Callchain, CallchainEntry{IP: model.Uint64(ip)})
 		frames++
 	}
 	if frames == 0 && s.Truncated == "" {
@@ -121,15 +121,15 @@ func decodeCPULoss(v KernelRecordView) (LossEvent, model.MonoNano, error) {
 	}
 	switch v.u32(0) {
 	case perfRecordLost:
-		loss = LossEvent{Count: v.u64(16), Reason: ReasonLoss}
+		loss = LossEvent{Count: model.Uint64(v.u64(16)), Reason: ReasonLoss}
 	case perfRecordLostSamples:
-		loss = LossEvent{Count: v.u64(8), Reason: ReasonSampleLost}
+		loss = LossEvent{Count: model.Uint64(v.u64(8)), Reason: ReasonSampleLost}
 	case perfRecordThrottle, perfRecordUnthrottle:
 		reason := ReasonThrottle
 		if v.u32(0) == perfRecordUnthrottle {
 			reason = ReasonUnthrottle
 		}
-		loss = LossEvent{Reason: reason, Throttle: &ThrottleEvidence{Reason: reason, EventID: v.u64(16), StreamID: v.u64(24)}}
+		loss = LossEvent{Reason: reason, Throttle: &ThrottleEvidence{Reason: reason, EventID: model.Uint64(v.u64(16)), StreamID: model.Uint64(v.u64(24))}}
 		timestamp = model.MonoNano(v.u64(8))
 	default:
 		return loss, 0, ErrRingMalformed

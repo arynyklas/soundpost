@@ -16,15 +16,21 @@ import (
 )
 
 type socketSource struct {
-	conn     *net.UnixConn
-	once     sync.Once
-	next     sync.Mutex
-	stopMu   sync.Mutex
-	stop     func() bool
-	parent   context.Context
-	closed   atomic.Bool
-	closeErr error
-	terminal error
+	conn         *net.UnixConn
+	once         sync.Once
+	next         sync.Mutex
+	stopMu       sync.Mutex
+	stop         func() bool
+	parent       context.Context
+	closed       atomic.Bool
+	closeErr     error
+	terminal     error
+	pending      *AcquisitionProof
+	finalSeen    bool
+	topologySeen bool
+	writeMu      sync.Mutex
+	stopSent     bool
+	initialProof *AcquisitionProof
 }
 
 func newSocketSource(ctx context.Context, c *net.UnixConn) *socketSource {
@@ -61,44 +67,99 @@ func (s *socketSource) readFailure(ctx context.Context) error {
 	return ErrAcquisitionFailed
 }
 func (s *socketSource) Next(ctx context.Context) (SanitizedEvent, error) {
+	item, e := s.NextItem(ctx)
+	if e != nil {
+		return SanitizedEvent{}, e
+	}
+	if item.Proof != nil {
+		s.next.Lock()
+		s.pending = item.Proof
+		s.next.Unlock()
+		return SanitizedEvent{}, ErrProgressRequired
+	}
+	return *item.Event, nil
+}
+func (s *socketSource) NextItem(ctx context.Context) (AcquisitionItem, error) {
 	s.next.Lock()
 	defer s.next.Unlock()
 	if e := ctx.Err(); e != nil {
-		return SanitizedEvent{}, e
+		return AcquisitionItem{}, e
 	}
-	if s.parent != nil {
-		if e := s.parent.Err(); e != nil {
-			return SanitizedEvent{}, e
-		}
+	if s.pending != nil {
+		p := s.pending
+		s.pending = nil
+		return AcquisitionItem{Proof: p}, nil
 	}
 	if s.terminal != nil {
-		return SanitizedEvent{}, s.terminal
+		return AcquisitionItem{}, s.terminal
 	}
 	if s.closed.Load() {
-		return SanitizedEvent{}, ErrAcquisitionClosed
+		return AcquisitionItem{}, s.readFailure(ctx)
 	}
 	stop := context.AfterFunc(ctx, func() { s.Close() })
 	defer stop()
 	var reply helperReply
-	if e := readMessage(s.conn, &reply); e != nil {
-		failure := s.readFailure(ctx)
-		if failure == ErrAcquisitionFailed {
-			s.terminal = failure
+	fail := func(e error) (AcquisitionItem, error) { s.terminal = e; s.Close(); return AcquisitionItem{}, e }
+	if readMessage(s.conn, &reply) != nil {
+		return fail(s.readFailure(ctx))
+	}
+	count := 0
+	for _, v := range []bool{reply.Error != "", reply.Event != nil, reply.Proof != nil, reply.Complete, reply.Ready} {
+		if v {
+			count++
 		}
-		s.Close()
-		return SanitizedEvent{}, failure
 	}
-	if reply.Error != "" && reply.Event == nil && !reply.Ready {
-		s.terminal = helperCodeError(reply.Error)
-		s.Close()
-		return SanitizedEvent{}, s.terminal
+	if count != 1 || reply.Ready {
+		return fail(ErrAcquisitionFailed)
 	}
-	if reply.Event == nil || reply.Error != "" || reply.Ready || reply.Event.Validate() != nil {
-		s.terminal = ErrAcquisitionFailed
-		s.Close()
-		return SanitizedEvent{}, s.terminal
+	if reply.Error != "" {
+		return fail(helperCodeError(reply.Error))
 	}
-	return *reply.Event, nil
+	if reply.Complete {
+		if !s.finalSeen {
+			return fail(ErrAcquisitionFailed)
+		}
+		return fail(ErrSourceComplete)
+	}
+	if reply.Proof != nil {
+		p := reply.Proof
+		if !p.valid() || s.finalSeen || p.Final && !s.topologySeen || !p.Final && s.topologySeen {
+			return fail(ErrAcquisitionFailed)
+		}
+		if p.Final {
+			if s.initialProof == nil || p.Domain != s.initialProof.Domain || !reflect.DeepEqual(p.CPUs, s.initialProof.CPUs) || p.Through < s.initialProof.Through {
+				return fail(ErrAcquisitionFailed)
+			}
+			s.finalSeen = true
+		} else {
+			s.topologySeen = true
+			copyProof := *p
+			copyProof.CPUs = append([]uint32(nil), p.CPUs...)
+			s.initialProof = &copyProof
+		}
+		return AcquisitionItem{Proof: p}, nil
+	}
+	if s.finalSeen || reply.Event.Validate() != nil {
+		return fail(ErrAcquisitionFailed)
+	}
+	return AcquisitionItem{Event: reply.Event}, nil
+}
+func (s *socketSource) Stop() error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	if s.closed.Load() {
+		return ErrAcquisitionClosed
+	}
+	if s.stopSent {
+		return nil
+	}
+	if e := writeMessage(s.conn, struct {
+		Stop bool `json:"stop"`
+	}{true}); e != nil {
+		return e
+	}
+	s.stopSent = true
+	return nil
 }
 
 // OpenAuthorized sends one immutable signed request to the fixed local helper.
@@ -136,11 +197,11 @@ func OpenAuthorized(ctx context.Context, r CaptureRequest) (*Session, error) {
 		source.Close()
 		return nil, failure
 	}
-	if reply.Error != "" && reply.Event == nil && !reply.Ready {
+	if reply.Error != "" && reply.Event == nil && !reply.Ready && reply.Proof == nil && !reply.Complete {
 		source.Close()
 		return nil, helperCodeError(reply.Error)
 	}
-	if !reply.Ready || reply.Error != "" || reply.Event != nil {
+	if !reply.Ready || reply.Error != "" || reply.Event != nil || reply.Proof != nil || reply.Complete {
 		source.Close()
 		return nil, ErrAcquisitionFailed
 	}

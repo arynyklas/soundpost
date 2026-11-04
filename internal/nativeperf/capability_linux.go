@@ -105,7 +105,7 @@ func Probe(ctx context.Context, targets []Target) (Capabilities, error) {
 	}
 	c.Permissions.CPUEventOpen = c.CPU
 	c.OffCPU = Supported
-	for _, event := range []string{"sched_switch", "sched_wakeup"} {
+	for _, event := range []string{"sched_switch", "sched_wakeup", "sched_wakeup_new"} {
 		if err := ctx.Err(); err != nil {
 			return c, err
 		}
@@ -214,6 +214,6 @@ func ResolveLocalTarget(pid int) (Target, error) {
 	if tgid != uint64(pid) {
 		return Target{}, fmt.Errorf("%w: target must be a process leader", ErrInvalid)
 	}
-	t := Target{PIDNamespace: ns, TGID: uint32(tgid), ProcessStart: model.MonoNano(ticks * 10000000)}
+	t := Target{PIDNamespace: model.Uint64(ns), TGID: uint32(tgid), ProcessStart: model.MonoNano(ticks * 10000000)}
 	return t, t.Validate()
 }

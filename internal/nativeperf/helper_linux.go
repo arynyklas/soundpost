@@ -26,9 +26,11 @@ type Helper struct {
 	Acquire AcquisitionFactory
 }
 type helperReply struct {
-	Error string          `json:"error,omitempty"`
-	Event *SanitizedEvent `json:"event,omitempty"`
-	Ready bool            `json:"ready,omitempty"`
+	Error    string            `json:"error,omitempty"`
+	Event    *SanitizedEvent   `json:"event,omitempty"`
+	Ready    bool              `json:"ready,omitempty"`
+	Proof    *AcquisitionProof `json:"proof,omitempty"`
+	Complete bool              `json:"complete,omitempty"`
 }
 
 func writeMessage(w io.Writer, v any) error {
@@ -176,20 +178,54 @@ func (h *Helper) serveConnection(parent context.Context, c *net.UnixConn) {
 		deny(ErrAcquisitionPending)
 		return
 	}
-	ctx, cancel := context.WithCancel(parent)
+	ctx, cancel, e := helperCaptureContext(parent, c, time.Unix(req.Authorization.Expires, 0))
+	if e != nil {
+		deny(e)
+		return
+	}
 	defer cancel()
-	c.SetDeadline(time.Time{})
-	// EOF, cancellation, or any extra client bytes terminate this immutable request.
-	go func() { var b [1]byte; c.Read(b[:]); cancel() }()
-	stop := context.AfterFunc(ctx, func() { c.Close() })
-	defer stop()
 	source, e := h.Acquire(ctx, a, req.Config, lease)
 	if e != nil {
 		deny(e)
 		return
 	}
 	defer source.Close()
+	// No arbitrary control command: one bounded fixed stop message, then EOF.
+	go func() {
+		var control struct {
+			Stop bool `json:"stop"`
+		}
+		if readMessage(c, &control) != nil || !control.Stop {
+			cancel()
+			return
+		}
+		stopper, ok := source.(interface{ Stop() error })
+		if !ok {
+			cancel()
+			return
+		}
+		if stopper.Stop() != nil {
+			return
+		}
+		var extra [1]byte
+		c.Read(extra[:])
+		cancel()
+	}()
 	streamHelperEvents(ctx, c, source)
+}
+
+// The signed grant bounds both acquisition and blocked socket operations. A
+// peer that stops reading/writing cannot keep the single active lease forever.
+func helperCaptureContext(parent context.Context, c *net.UnixConn, expires time.Time) (context.Context, context.CancelFunc, error) {
+	ctx, cancel := context.WithDeadline(parent, expires)
+	deadline, _ := ctx.Deadline()
+	if c.SetDeadline(deadline) != nil {
+		cancel()
+		return nil, nil, ErrAcquisitionFailed
+	}
+	stop := context.AfterFunc(ctx, func() { c.Close() })
+	release := func() { cancel(); stop(); c.Close() }
+	return ctx, release, nil
 }
 func processRSS(pid int) (uint64, error) {
 	b, e := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/statm")

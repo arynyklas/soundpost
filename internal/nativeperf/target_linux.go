@@ -78,7 +78,7 @@ func openCheckedTarget(t Target) (*TargetHandle, error) {
 		return fail()
 	}
 	cg, e := cgroupIdentity(c)
-	if e != nil || cg != t.CgroupID {
+	if e != nil || cg != uint64(t.CgroupID) {
 		return fail()
 	}
 	again, e := syscall.Openat(p, "exe", syscall.O_RDONLY|syscall.O_CLOEXEC, 0)

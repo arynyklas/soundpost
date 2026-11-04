@@ -10,6 +10,7 @@ import (
 	"os"
 	"reflect"
 	"sort"
+	"soundpost/internal/model"
 	"strconv"
 	"strings"
 	"sync"
@@ -251,7 +252,7 @@ func (s *cpuSource) Next(ctx context.Context) (SanitizedEvent, error) {
 			e := drainRing(ring, func(event SanitizedEvent) error {
 				event.Domain = s.domain
 				s.sequence++
-				event.Sequence = s.sequence
+				event.Sequence = model.Uint64(s.sequence)
 				if e := event.Validate(); e != nil {
 					return e
 				}

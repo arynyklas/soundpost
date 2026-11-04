@@ -33,12 +33,22 @@ func TestCPUAttrPrivacy(t *testing.T) {
 		if a.SampleRegsUser != 0 || a.SampleStackUser != 0 || a.SampleRegsIntr != 0 || a.BranchSampleType != 0 || a.Flags&(1<<1) != 0 || a.Flags&(1<<5) == 0 || a.Flags&(1<<6) == 0 {
 			t.Fatal("unsafe capture or inheritance")
 		}
+		for _, required := range []uint64{1 << 9, 1 << 13, 1 << 18, 1 << 21, 1 << 24} {
+			if a.Flags&required == 0 {
+				t.Fatal("missing generation-control, sample identity or kernel-callchain exclusion flag")
+			}
+		}
 		if method == MethodHardwareCycles && (a.Type != 0 || a.Config != 0) {
 			t.Fatal("cycles not explicit")
 		}
 	}
 	if _, e := cpuAttr("arbitrary", 128); e == nil {
 		t.Fatal("unknown selector accepted")
+	}
+	cfg := DefaultConfig(1)
+	cfg.CPUHz = 50
+	if cfg.Validate() == nil {
+		t.Fatal("lower rate admitted without threading the fixed attr/DTO rate contract")
 	}
 }
 func TestCPUCallchainPrivacyAndBookkeeping(t *testing.T) {

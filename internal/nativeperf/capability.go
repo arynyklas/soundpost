@@ -5,6 +5,7 @@ package nativeperf
 import (
 	"context"
 	"errors"
+	"soundpost/internal/model"
 )
 
 type Status string
@@ -70,10 +71,10 @@ func (c Coverage) Validate() error {
 }
 
 type Coverage struct {
-	Measured bool     `json:"measured"`
-	Observed uint64   `json:"observed,string"`
-	Eligible uint64   `json:"eligible,string"`
-	Reasons  []Reason `json:"reasons"`
+	Measured bool         `json:"measured"`
+	Observed model.Uint64 `json:"observed"`
+	Eligible model.Uint64 `json:"eligible"`
+	Reasons  []Reason     `json:"reasons"`
 }
 type Permissions struct {
 	PerfEventParanoid     *int   `json:"perf_event_paranoid,omitempty"`
