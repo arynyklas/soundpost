@@ -75,6 +75,16 @@ go run ./cmd/soundpost-querycheck compare --phase pipeline --profiles logql-loki
 
 The other phases are `evaluation` (PromQL), `logql-template` and `logql-metric`.
 
+## Sample timestamps in comparison rows must be whole milliseconds
+
+The pinned Prometheus oracle stores and returns milliseconds, while Soundpost keeps
+nanosecond storage. Rows are only valid comparison inputs when every sample
+timestamp is a whole number of milliseconds; otherwise the oracle sees floored
+copies and the comparison measures that input difference, not an engine defect
+(the design forbids rounding nanosecond storage into evaluator input without a
+declared normalization). Evaluation times, steps and lookbacks are floored to the
+millisecond domain by the engines themselves.
+
 ## Docker-free replay of recorded observations
 
 The comparator needs the oracle images, which not every environment has. Native
