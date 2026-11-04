@@ -257,9 +257,23 @@ func CompareLogQL(want, got LogQLObservation) []Mismatch {
 	}
 	projectedWant, projectedGot := logQLEmptyLabelProjection(want.Values, got.Values)
 	add("output", want.Output, got.Output)
-	add("pipeline", want.Pipeline, got.Pipeline)
+	projectedWantPipeline, projectedGotPipeline := logQLEmptyPipelineLabelProjection(want.Pipeline, got.Pipeline)
+	add("pipeline", projectedWantPipeline, projectedGotPipeline)
 	add("values", projectedWant, projectedGot)
 	return out
+}
+
+// logQLEmptyPipelineLabelProjection applies the same declared rule to a pipeline
+// observation: paired zero-length label sets are one set whether nil or
+// allocated-empty. Retention, line, unwrapped bits and every nonempty label are
+// compared unchanged, and the raw observations are never mutated.
+func logQLEmptyPipelineLabelProjection(want, got *LogQLPipeline) (*LogQLPipeline, *LogQLPipeline) {
+	if want == nil || got == nil || len(want.Labels) != 0 || len(got.Labels) != 0 || (want.Labels == nil) == (got.Labels == nil) {
+		return want, got
+	}
+	a, b := *want, *got
+	a.Labels, b.Labels = nil, nil
+	return &a, &b
 }
 func logQLFeatureKey(in []string) string { return strings.Join(in, "\x00") }
 

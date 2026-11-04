@@ -251,6 +251,33 @@ func TestLogQLCompareProjectsOnlyBothEmptyLabelSetsWithoutMutatingRaw(t *testing
 		t.Fatal("signed zero normalized with labels")
 	}
 }
+func TestLogQLCompareProjectsOnlyBothEmptyPipelineLabelSets(t *testing.T) {
+	a := LogQLObservation{ID: "pipeline-empty", Accepted: true, Pipeline: &LogQLPipeline{Retained: true, Line: "x", Labels: nil}}
+	b := a
+	b.Pipeline = &LogQLPipeline{Retained: true, Line: "x", Labels: model.Labels{}}
+	if got := CompareLogQL(a, b); len(got) != 0 {
+		t.Fatalf("empty pipeline label representation became mismatch: %#v", got)
+	}
+	if b.Pipeline.Labels == nil || a.Pipeline.Labels != nil {
+		t.Fatal("raw observations mutated")
+	}
+	b.Pipeline = &LogQLPipeline{Retained: true, Line: "x", Labels: model.Labels{{Name: "x", Value: ""}}}
+	if len(CompareLogQL(a, b)) == 0 {
+		t.Fatal("nonempty pipeline label set erased")
+	}
+	b.Pipeline = &LogQLPipeline{Retained: false, Line: "x", Labels: model.Labels{}}
+	if len(CompareLogQL(a, b)) == 0 {
+		t.Fatal("retention difference hidden by label projection")
+	}
+	b.Pipeline = &LogQLPipeline{Retained: true, Line: "y", Labels: model.Labels{}}
+	if len(CompareLogQL(a, b)) == 0 {
+		t.Fatal("line difference hidden by label projection")
+	}
+	b.Pipeline = nil
+	if len(CompareLogQL(a, b)) == 0 {
+		t.Fatal("missing pipeline observation hidden")
+	}
+}
 func TestLogQLNativePanicReportRetainsUnobservedRowsAndPartialFailure(t *testing.T) {
 	report := LogQLPhaseReport{Compared: 1, Cases: []LogQLComparison{{ID: "observed"}}}
 	rows := []LogQLCase{{ID: "observed"}, {ID: "approx"}, {ID: "variants"}}
