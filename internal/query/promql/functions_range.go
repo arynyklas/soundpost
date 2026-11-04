@@ -57,38 +57,90 @@ func functionSum(xs []float64) float64 {
 	return sum + comp
 }
 
-// functionMean is the compensated mean. 3.1.0 divides the combined sum
-// ((sum+comp)/n); 3.13.5 divides the sum and its compensation separately
-// (sum/n + comp/n). A finite input set whose sum overflows falls back to an
-// incremental mean in both.
+// functionMean is the compensated mean shared by avg_over_time and the avg
+// aggregation. Both pinned releases sum with Neumaier compensation and divide
+// once at the end, but switch mid-stream to an incremental mean that keeps the
+// compensation as soon as the running sum would become +/-Inf (a finite input
+// set can overflow the sum while its mean is representable; an infinite input
+// also trips the switch). The two releases differ in the divide and in the
+// incremental step:
+//
+//	3.1.0:  (sum+c)/n; incremental step folds f/n - (mean+c)/n into mean,
+//	        with an Inf-mean guard.
+//	3.13.5: sum/n + c/n; incremental step scales mean and c by (n-1)/n and
+//	        folds f/n.
 func functionMean(xs []float64, profileID string) float64 {
 	if len(xs) == 0 {
 		return math.NaN()
 	}
-	n := float64(len(xs))
-	sum, comp := functionKahan(xs)
-	if combined := sum + comp; !math.IsInf(combined, 0) {
-		if profileID == "promql-prometheus-3.13.5" {
-			return sum/n + comp/n
-		}
-		return combined / n
+	if profileID == "promql-prometheus-3.13.5" {
+		return functionMean3135(xs)
 	}
-	allFinite := true
+	return functionMean310(xs)
+}
+
+func functionMean310(xs []float64) float64 {
+	var sum, mean, count, comp float64
+	incremental := false
 	for _, x := range xs {
-		if math.IsInf(x, 0) || math.IsNaN(x) {
-			allFinite = false
-			break
+		count++
+		if !incremental {
+			next, nextComp := functionKahanAdd(sum, comp, x)
+			// The first value is always accepted, even if infinite, so the
+			// switch never divides by a zero count.
+			if count == 1 || !math.IsInf(next, 0) {
+				sum, comp = next, nextComp
+				continue
+			}
+			incremental = true
+			mean = sum / (count - 1)
+			comp /= count - 1
 		}
+		if math.IsInf(mean, 0) {
+			// An infinite mean cannot absorb a finite value or an equal
+			// infinity through the subtraction below (Inf - Inf = NaN).
+			if math.IsInf(x, 0) && (mean > 0) == (x > 0) {
+				continue
+			}
+			if !math.IsInf(x, 0) && !math.IsNaN(x) {
+				continue
+			}
+		}
+		corrected := mean + comp
+		mean, comp = functionKahanAdd(mean, comp, x/count-corrected/count)
 	}
-	if !allFinite {
-		return (sum + comp) / n
+	if incremental {
+		return mean + comp
 	}
-	mean := xs[0]
+	return (sum + comp) / count
+}
+
+func functionMean3135(xs []float64) float64 {
+	sum, count := xs[0], 1.0
+	var mean, comp float64
+	incremental := false
 	for i, x := range xs[1:] {
-		k := float64(i + 2)
-		mean += x/k - mean/k
+		count = float64(i + 2)
+		if !incremental {
+			next, nextComp := functionKahanAdd(sum, comp, x)
+			if !math.IsInf(next, 0) {
+				sum, comp = next, nextComp
+				continue
+			}
+			incremental = true
+			mean = sum / (count - 1)
+			comp /= count - 1
+		}
+		// Explicit conversions keep the products rounded to float64 on
+		// targets that would otherwise fuse them into the following add.
+		q := (count - 1) / count
+		scaledMean, scaledComp := float64(q*mean), float64(q*comp)
+		mean, comp = functionKahanAdd(scaledMean, scaledComp, x/count)
 	}
-	return mean
+	if incremental {
+		return mean + comp
+	}
+	return sum/count + comp/count
 }
 
 // functionRangeVariance is the window (`*_over_time`) population variance: a

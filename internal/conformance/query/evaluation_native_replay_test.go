@@ -35,7 +35,7 @@ func TestOwnedMatchesRecordedNativeEvaluationObservations(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A floor, not an exact count: recorded rows may be added, never silently lost.
-	if len(f.Rows) < 6673 {
+	if len(f.Rows) < 7033 {
 		t.Fatalf("recorded native evaluation observations shrank to %d rows", len(f.Rows))
 	}
 	registry, err := profile.Load(os.DirFS("../../../profiles/query"))
