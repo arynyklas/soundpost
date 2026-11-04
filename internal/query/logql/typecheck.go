@@ -384,12 +384,10 @@ func checkStage(s Stage, p profile.Profile) error {
 				return fail("label-format.duplicate", "duplicate format destination")
 			}
 			names[a.Name] = true
-			if a.Rename {
-				if a.Value == "__error__" {
-					return fail("label-format.rename-invalid", "invalid rename source")
+			if !a.Rename {
+				if _, err := compileLabelTemplate(a.Value, p, defaultTemplateRuntime()); err != nil {
+					return fail("template.invalid", "invalid label template")
 				}
-			} else if _, err := compileLabelTemplate(a.Value, p, defaultTemplateRuntime()); err != nil {
-				return fail("template.invalid", "invalid label template")
 			}
 		}
 	case "drop", "keep":

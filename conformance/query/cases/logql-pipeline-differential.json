@@ -472273,6 +472273,1081 @@
     ]
    },
    "binding_scope": "differential regression vector; expected value is the pinned Loki 3.5.2 observation"
+  },
+  {
+   "id": "rn-000",
+   "phase": "pipeline",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json|label_format x=__error__",
+    "entry": {
+     "timestamp_ns": "123",
+     "id": "01000000000000000000000000000000",
+     "multiplicity": "1",
+     "line": "{\"a\":",
+     "stream_labels": [
+      {
+       "name": "app",
+       "value": "api"
+      }
+     ],
+     "structured_metadata": [],
+     "fields": []
+    }
+   },
+   "expected": {
+    "retained": true,
+    "line": "{\"a\":",
+    "labels_subset": [
+     {
+      "name": "__error__",
+      "value": "JSONParserErr"
+     },
+     {
+      "name": "__error_details__",
+      "value": "Malformed JSON error"
+     },
+     {
+      "name": "app",
+      "value": "api"
+     }
+    ]
+   },
+   "binding_scope": "differential regression vector; expected value is the pinned Loki 3.5.2 observation"
+  },
+  {
+   "id": "rn-001",
+   "phase": "pipeline",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json|label_format x=__error__|x!=\"\"",
+    "entry": {
+     "timestamp_ns": "123",
+     "id": "01000000000000000000000000000000",
+     "multiplicity": "1",
+     "line": "{\"a\":",
+     "stream_labels": [
+      {
+       "name": "app",
+       "value": "api"
+      }
+     ],
+     "structured_metadata": [],
+     "fields": []
+    }
+   },
+   "expected": {
+    "retained": false
+   },
+   "binding_scope": "differential regression vector; expected value is the pinned Loki 3.5.2 observation"
+  },
+  {
+   "id": "rn-002",
+   "phase": "pipeline",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json|label_format x=__error_details__",
+    "entry": {
+     "timestamp_ns": "123",
+     "id": "01000000000000000000000000000000",
+     "multiplicity": "1",
+     "line": "{\"a\":",
+     "stream_labels": [
+      {
+       "name": "app",
+       "value": "api"
+      }
+     ],
+     "structured_metadata": [],
+     "fields": []
+    }
+   },
+   "expected": {
+    "retained": true,
+    "line": "{\"a\":",
+    "labels_subset": [
+     {
+      "name": "__error__",
+      "value": "JSONParserErr"
+     },
+     {
+      "name": "__error_details__",
+      "value": "Malformed JSON error"
+     },
+     {
+      "name": "app",
+      "value": "api"
+     }
+    ]
+   },
+   "binding_scope": "differential regression vector; expected value is the pinned Loki 3.5.2 observation"
+  },
+  {
+   "id": "rn-003",
+   "phase": "pipeline",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json|label_format x=__error__|__error__!=\"\"",
+    "entry": {
+     "timestamp_ns": "123",
+     "id": "01000000000000000000000000000000",
+     "multiplicity": "1",
+     "line": "{\"a\":",
+     "stream_labels": [
+      {
+       "name": "app",
+       "value": "api"
+      }
+     ],
+     "structured_metadata": [],
+     "fields": []
+    }
+   },
+   "expected": {
+    "retained": true,
+    "line": "{\"a\":",
+    "labels_subset": [
+     {
+      "name": "__error__",
+      "value": "JSONParserErr"
+     },
+     {
+      "name": "__error_details__",
+      "value": "Malformed JSON error"
+     },
+     {
+      "name": "app",
+      "value": "api"
+     }
+    ]
+   },
+   "binding_scope": "differential regression vector; expected value is the pinned Loki 3.5.2 observation"
+  },
+  {
+   "id": "rn-004",
+   "phase": "pipeline",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json|label_format x=__error__|keep x",
+    "entry": {
+     "timestamp_ns": "123",
+     "id": "01000000000000000000000000000000",
+     "multiplicity": "1",
+     "line": "{\"a\":",
+     "stream_labels": [
+      {
+       "name": "app",
+       "value": "api"
+      }
+     ],
+     "structured_metadata": [],
+     "fields": []
+    }
+   },
+   "expected": {
+    "retained": true,
+    "line": "{\"a\":",
+    "labels_subset": [
+     {
+      "name": "__error__",
+      "value": "JSONParserErr"
+     },
+     {
+      "name": "__error_details__",
+      "value": "Malformed JSON error"
+     }
+    ]
+   },
+   "binding_scope": "differential regression vector; expected value is the pinned Loki 3.5.2 observation"
+  },
+  {
+   "id": "rn-005",
+   "phase": "pipeline",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json|label_format x=__error__,y=__error_details__",
+    "entry": {
+     "timestamp_ns": "123",
+     "id": "01000000000000000000000000000000",
+     "multiplicity": "1",
+     "line": "{\"a\":",
+     "stream_labels": [
+      {
+       "name": "app",
+       "value": "api"
+      }
+     ],
+     "structured_metadata": [],
+     "fields": []
+    }
+   },
+   "expected": {
+    "retained": true,
+    "line": "{\"a\":",
+    "labels_subset": [
+     {
+      "name": "__error__",
+      "value": "JSONParserErr"
+     },
+     {
+      "name": "__error_details__",
+      "value": "Malformed JSON error"
+     },
+     {
+      "name": "app",
+      "value": "api"
+     }
+    ]
+   },
+   "binding_scope": "differential regression vector; expected value is the pinned Loki 3.5.2 observation"
+  },
+  {
+   "id": "rn-006",
+   "phase": "pipeline",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json|label_format x=\"{{.__error__}}\"",
+    "entry": {
+     "timestamp_ns": "123",
+     "id": "01000000000000000000000000000000",
+     "multiplicity": "1",
+     "line": "{\"a\":",
+     "stream_labels": [
+      {
+       "name": "app",
+       "value": "api"
+      }
+     ],
+     "structured_metadata": [],
+     "fields": []
+    }
+   },
+   "expected": {
+    "retained": true,
+    "line": "{\"a\":",
+    "labels_subset": [
+     {
+      "name": "__error__",
+      "value": "JSONParserErr"
+     },
+     {
+      "name": "__error_details__",
+      "value": "Malformed JSON error"
+     },
+     {
+      "name": "app",
+      "value": "api"
+     },
+     {
+      "name": "x",
+      "value": "JSONParserErr"
+     }
+    ]
+   },
+   "binding_scope": "differential regression vector; expected value is the pinned Loki 3.5.2 observation"
+  },
+  {
+   "id": "rn-007",
+   "phase": "pipeline",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|logfmt|label_format x=__error__|drop __error__",
+    "entry": {
+     "timestamp_ns": "123",
+     "id": "01000000000000000000000000000000",
+     "multiplicity": "1",
+     "line": "{\"a\":",
+     "stream_labels": [
+      {
+       "name": "app",
+       "value": "api"
+      }
+     ],
+     "structured_metadata": [],
+     "fields": []
+    }
+   },
+   "expected": {
+    "retained": true,
+    "line": "{\"a\":",
+    "labels_subset": [
+     {
+      "name": "app",
+      "value": "api"
+     }
+    ]
+   },
+   "binding_scope": "differential regression vector; expected value is the pinned Loki 3.5.2 observation"
+  },
+  {
+   "id": "rn-008",
+   "phase": "pipeline",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json|label_format x=__error__|label_format __error_details__=x",
+    "entry": {
+     "timestamp_ns": "123",
+     "id": "01000000000000000000000000000000",
+     "multiplicity": "1",
+     "line": "{\"a\":",
+     "stream_labels": [
+      {
+       "name": "app",
+       "value": "api"
+      }
+     ],
+     "structured_metadata": [],
+     "fields": []
+    }
+   },
+   "expected": {
+    "retained": true,
+    "line": "{\"a\":",
+    "labels_subset": [
+     {
+      "name": "__error__",
+      "value": "JSONParserErr"
+     },
+     {
+      "name": "__error_details__",
+      "value": "Malformed JSON error"
+     },
+     {
+      "name": "app",
+      "value": "api"
+     }
+    ]
+   },
+   "binding_scope": "differential regression vector; expected value is the pinned Loki 3.5.2 observation"
+  },
+  {
+   "id": "rn-009",
+   "phase": "pipeline",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json|label_format x=__error__",
+    "entry": {
+     "timestamp_ns": "123",
+     "id": "01000000000000000000000000000000",
+     "multiplicity": "1",
+     "line": "not json",
+     "stream_labels": [
+      {
+       "name": "app",
+       "value": "api"
+      }
+     ],
+     "structured_metadata": [],
+     "fields": []
+    }
+   },
+   "expected": {
+    "retained": true,
+    "line": "not json",
+    "labels_subset": [
+     {
+      "name": "__error__",
+      "value": "JSONParserErr"
+     },
+     {
+      "name": "__error_details__",
+      "value": "Value looks like object, but can't find closing '}' symbol"
+     },
+     {
+      "name": "app",
+      "value": "api"
+     }
+    ]
+   },
+   "binding_scope": "differential regression vector; expected value is the pinned Loki 3.5.2 observation"
+  },
+  {
+   "id": "rn-010",
+   "phase": "pipeline",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json|label_format x=__error__|x!=\"\"",
+    "entry": {
+     "timestamp_ns": "123",
+     "id": "01000000000000000000000000000000",
+     "multiplicity": "1",
+     "line": "not json",
+     "stream_labels": [
+      {
+       "name": "app",
+       "value": "api"
+      }
+     ],
+     "structured_metadata": [],
+     "fields": []
+    }
+   },
+   "expected": {
+    "retained": false
+   },
+   "binding_scope": "differential regression vector; expected value is the pinned Loki 3.5.2 observation"
+  },
+  {
+   "id": "rn-011",
+   "phase": "pipeline",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json|label_format x=__error_details__",
+    "entry": {
+     "timestamp_ns": "123",
+     "id": "01000000000000000000000000000000",
+     "multiplicity": "1",
+     "line": "not json",
+     "stream_labels": [
+      {
+       "name": "app",
+       "value": "api"
+      }
+     ],
+     "structured_metadata": [],
+     "fields": []
+    }
+   },
+   "expected": {
+    "retained": true,
+    "line": "not json",
+    "labels_subset": [
+     {
+      "name": "__error__",
+      "value": "JSONParserErr"
+     },
+     {
+      "name": "__error_details__",
+      "value": "Value looks like object, but can't find closing '}' symbol"
+     },
+     {
+      "name": "app",
+      "value": "api"
+     }
+    ]
+   },
+   "binding_scope": "differential regression vector; expected value is the pinned Loki 3.5.2 observation"
+  },
+  {
+   "id": "rn-012",
+   "phase": "pipeline",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json|label_format x=__error__|__error__!=\"\"",
+    "entry": {
+     "timestamp_ns": "123",
+     "id": "01000000000000000000000000000000",
+     "multiplicity": "1",
+     "line": "not json",
+     "stream_labels": [
+      {
+       "name": "app",
+       "value": "api"
+      }
+     ],
+     "structured_metadata": [],
+     "fields": []
+    }
+   },
+   "expected": {
+    "retained": true,
+    "line": "not json",
+    "labels_subset": [
+     {
+      "name": "__error__",
+      "value": "JSONParserErr"
+     },
+     {
+      "name": "__error_details__",
+      "value": "Value looks like object, but can't find closing '}' symbol"
+     },
+     {
+      "name": "app",
+      "value": "api"
+     }
+    ]
+   },
+   "binding_scope": "differential regression vector; expected value is the pinned Loki 3.5.2 observation"
+  },
+  {
+   "id": "rn-013",
+   "phase": "pipeline",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json|label_format x=__error__|keep x",
+    "entry": {
+     "timestamp_ns": "123",
+     "id": "01000000000000000000000000000000",
+     "multiplicity": "1",
+     "line": "not json",
+     "stream_labels": [
+      {
+       "name": "app",
+       "value": "api"
+      }
+     ],
+     "structured_metadata": [],
+     "fields": []
+    }
+   },
+   "expected": {
+    "retained": true,
+    "line": "not json",
+    "labels_subset": [
+     {
+      "name": "__error__",
+      "value": "JSONParserErr"
+     },
+     {
+      "name": "__error_details__",
+      "value": "Value looks like object, but can't find closing '}' symbol"
+     }
+    ]
+   },
+   "binding_scope": "differential regression vector; expected value is the pinned Loki 3.5.2 observation"
+  },
+  {
+   "id": "rn-014",
+   "phase": "pipeline",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json|label_format x=__error__,y=__error_details__",
+    "entry": {
+     "timestamp_ns": "123",
+     "id": "01000000000000000000000000000000",
+     "multiplicity": "1",
+     "line": "not json",
+     "stream_labels": [
+      {
+       "name": "app",
+       "value": "api"
+      }
+     ],
+     "structured_metadata": [],
+     "fields": []
+    }
+   },
+   "expected": {
+    "retained": true,
+    "line": "not json",
+    "labels_subset": [
+     {
+      "name": "__error__",
+      "value": "JSONParserErr"
+     },
+     {
+      "name": "__error_details__",
+      "value": "Value looks like object, but can't find closing '}' symbol"
+     },
+     {
+      "name": "app",
+      "value": "api"
+     }
+    ]
+   },
+   "binding_scope": "differential regression vector; expected value is the pinned Loki 3.5.2 observation"
+  },
+  {
+   "id": "rn-015",
+   "phase": "pipeline",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json|label_format x=\"{{.__error__}}\"",
+    "entry": {
+     "timestamp_ns": "123",
+     "id": "01000000000000000000000000000000",
+     "multiplicity": "1",
+     "line": "not json",
+     "stream_labels": [
+      {
+       "name": "app",
+       "value": "api"
+      }
+     ],
+     "structured_metadata": [],
+     "fields": []
+    }
+   },
+   "expected": {
+    "retained": true,
+    "line": "not json",
+    "labels_subset": [
+     {
+      "name": "__error__",
+      "value": "JSONParserErr"
+     },
+     {
+      "name": "__error_details__",
+      "value": "Value looks like object, but can't find closing '}' symbol"
+     },
+     {
+      "name": "app",
+      "value": "api"
+     },
+     {
+      "name": "x",
+      "value": "JSONParserErr"
+     }
+    ]
+   },
+   "binding_scope": "differential regression vector; expected value is the pinned Loki 3.5.2 observation"
+  },
+  {
+   "id": "rn-016",
+   "phase": "pipeline",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|logfmt|label_format x=__error__|drop __error__",
+    "entry": {
+     "timestamp_ns": "123",
+     "id": "01000000000000000000000000000000",
+     "multiplicity": "1",
+     "line": "not json",
+     "stream_labels": [
+      {
+       "name": "app",
+       "value": "api"
+      }
+     ],
+     "structured_metadata": [],
+     "fields": []
+    }
+   },
+   "expected": {
+    "retained": true,
+    "line": "not json",
+    "labels_subset": [
+     {
+      "name": "app",
+      "value": "api"
+     }
+    ]
+   },
+   "binding_scope": "differential regression vector; expected value is the pinned Loki 3.5.2 observation"
+  },
+  {
+   "id": "rn-017",
+   "phase": "pipeline",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json|label_format x=__error__|label_format __error_details__=x",
+    "entry": {
+     "timestamp_ns": "123",
+     "id": "01000000000000000000000000000000",
+     "multiplicity": "1",
+     "line": "not json",
+     "stream_labels": [
+      {
+       "name": "app",
+       "value": "api"
+      }
+     ],
+     "structured_metadata": [],
+     "fields": []
+    }
+   },
+   "expected": {
+    "retained": true,
+    "line": "not json",
+    "labels_subset": [
+     {
+      "name": "__error__",
+      "value": "JSONParserErr"
+     },
+     {
+      "name": "__error_details__",
+      "value": "Value looks like object, but can't find closing '}' symbol"
+     },
+     {
+      "name": "app",
+      "value": "api"
+     }
+    ]
+   },
+   "binding_scope": "differential regression vector; expected value is the pinned Loki 3.5.2 observation"
+  },
+  {
+   "id": "rn-018",
+   "phase": "pipeline",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json|label_format x=__error__",
+    "entry": {
+     "timestamp_ns": "123",
+     "id": "01000000000000000000000000000000",
+     "multiplicity": "1",
+     "line": "{\"a\":1}",
+     "stream_labels": [
+      {
+       "name": "app",
+       "value": "api"
+      }
+     ],
+     "structured_metadata": [],
+     "fields": []
+    }
+   },
+   "expected": {
+    "retained": true,
+    "line": "{\"a\":1}",
+    "labels_subset": [
+     {
+      "name": "a",
+      "value": "1"
+     },
+     {
+      "name": "app",
+      "value": "api"
+     }
+    ]
+   },
+   "binding_scope": "differential regression vector; expected value is the pinned Loki 3.5.2 observation"
+  },
+  {
+   "id": "rn-019",
+   "phase": "pipeline",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json|label_format x=__error__|x!=\"\"",
+    "entry": {
+     "timestamp_ns": "123",
+     "id": "01000000000000000000000000000000",
+     "multiplicity": "1",
+     "line": "{\"a\":1}",
+     "stream_labels": [
+      {
+       "name": "app",
+       "value": "api"
+      }
+     ],
+     "structured_metadata": [],
+     "fields": []
+    }
+   },
+   "expected": {
+    "retained": false
+   },
+   "binding_scope": "differential regression vector; expected value is the pinned Loki 3.5.2 observation"
+  },
+  {
+   "id": "rn-020",
+   "phase": "pipeline",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json|label_format x=__error_details__",
+    "entry": {
+     "timestamp_ns": "123",
+     "id": "01000000000000000000000000000000",
+     "multiplicity": "1",
+     "line": "{\"a\":1}",
+     "stream_labels": [
+      {
+       "name": "app",
+       "value": "api"
+      }
+     ],
+     "structured_metadata": [],
+     "fields": []
+    }
+   },
+   "expected": {
+    "retained": true,
+    "line": "{\"a\":1}",
+    "labels_subset": [
+     {
+      "name": "a",
+      "value": "1"
+     },
+     {
+      "name": "app",
+      "value": "api"
+     }
+    ]
+   },
+   "binding_scope": "differential regression vector; expected value is the pinned Loki 3.5.2 observation"
+  },
+  {
+   "id": "rn-021",
+   "phase": "pipeline",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json|label_format x=__error__|__error__!=\"\"",
+    "entry": {
+     "timestamp_ns": "123",
+     "id": "01000000000000000000000000000000",
+     "multiplicity": "1",
+     "line": "{\"a\":1}",
+     "stream_labels": [
+      {
+       "name": "app",
+       "value": "api"
+      }
+     ],
+     "structured_metadata": [],
+     "fields": []
+    }
+   },
+   "expected": {
+    "retained": false
+   },
+   "binding_scope": "differential regression vector; expected value is the pinned Loki 3.5.2 observation"
+  },
+  {
+   "id": "rn-022",
+   "phase": "pipeline",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json|label_format x=__error__|keep x",
+    "entry": {
+     "timestamp_ns": "123",
+     "id": "01000000000000000000000000000000",
+     "multiplicity": "1",
+     "line": "{\"a\":1}",
+     "stream_labels": [
+      {
+       "name": "app",
+       "value": "api"
+      }
+     ],
+     "structured_metadata": [],
+     "fields": []
+    }
+   },
+   "expected": {
+    "retained": true,
+    "line": "{\"a\":1}",
+    "labels_subset": []
+   },
+   "binding_scope": "differential regression vector; expected value is the pinned Loki 3.5.2 observation"
+  },
+  {
+   "id": "rn-023",
+   "phase": "pipeline",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json|label_format x=__error__,y=__error_details__",
+    "entry": {
+     "timestamp_ns": "123",
+     "id": "01000000000000000000000000000000",
+     "multiplicity": "1",
+     "line": "{\"a\":1}",
+     "stream_labels": [
+      {
+       "name": "app",
+       "value": "api"
+      }
+     ],
+     "structured_metadata": [],
+     "fields": []
+    }
+   },
+   "expected": {
+    "retained": true,
+    "line": "{\"a\":1}",
+    "labels_subset": [
+     {
+      "name": "a",
+      "value": "1"
+     },
+     {
+      "name": "app",
+      "value": "api"
+     }
+    ]
+   },
+   "binding_scope": "differential regression vector; expected value is the pinned Loki 3.5.2 observation"
+  },
+  {
+   "id": "rn-024",
+   "phase": "pipeline",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json|label_format x=\"{{.__error__}}\"",
+    "entry": {
+     "timestamp_ns": "123",
+     "id": "01000000000000000000000000000000",
+     "multiplicity": "1",
+     "line": "{\"a\":1}",
+     "stream_labels": [
+      {
+       "name": "app",
+       "value": "api"
+      }
+     ],
+     "structured_metadata": [],
+     "fields": []
+    }
+   },
+   "expected": {
+    "retained": true,
+    "line": "{\"a\":1}",
+    "labels_subset": [
+     {
+      "name": "a",
+      "value": "1"
+     },
+     {
+      "name": "app",
+      "value": "api"
+     },
+     {
+      "name": "x",
+      "value": ""
+     }
+    ]
+   },
+   "binding_scope": "differential regression vector; expected value is the pinned Loki 3.5.2 observation"
+  },
+  {
+   "id": "rn-025",
+   "phase": "pipeline",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|logfmt|label_format x=__error__|drop __error__",
+    "entry": {
+     "timestamp_ns": "123",
+     "id": "01000000000000000000000000000000",
+     "multiplicity": "1",
+     "line": "{\"a\":1}",
+     "stream_labels": [
+      {
+       "name": "app",
+       "value": "api"
+      }
+     ],
+     "structured_metadata": [],
+     "fields": []
+    }
+   },
+   "expected": {
+    "retained": true,
+    "line": "{\"a\":1}",
+    "labels_subset": [
+     {
+      "name": "app",
+      "value": "api"
+     }
+    ]
+   },
+   "binding_scope": "differential regression vector; expected value is the pinned Loki 3.5.2 observation"
+  },
+  {
+   "id": "rn-026",
+   "phase": "pipeline",
+   "profiles": [
+    "logql-loki-3.5.2"
+   ],
+   "enabled_features": [],
+   "input": {
+    "expression": "{app=\"api\"}|json|label_format x=__error__|label_format __error_details__=x",
+    "entry": {
+     "timestamp_ns": "123",
+     "id": "01000000000000000000000000000000",
+     "multiplicity": "1",
+     "line": "{\"a\":1}",
+     "stream_labels": [
+      {
+       "name": "app",
+       "value": "api"
+      }
+     ],
+     "structured_metadata": [],
+     "fields": []
+    }
+   },
+   "expected": {
+    "retained": true,
+    "line": "{\"a\":1}",
+    "labels_subset": [
+     {
+      "name": "a",
+      "value": "1"
+     },
+     {
+      "name": "app",
+      "value": "api"
+     }
+    ]
+   },
+   "binding_scope": "differential regression vector; expected value is the pinned Loki 3.5.2 observation"
   }
  ]
 }

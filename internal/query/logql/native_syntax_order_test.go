@@ -35,7 +35,7 @@ func TestNativeSyntaxErrorOrdering(t *testing.T) {
 	if err = json.Unmarshal(raw, &f); err != nil {
 		t.Fatal(err)
 	}
-	if len(f.Rows) < 9640 {
+	if len(f.Rows) < 12154 {
 		t.Fatalf("native syntax observations shrank to %d rows", len(f.Rows))
 	}
 	p := testProfile(t)

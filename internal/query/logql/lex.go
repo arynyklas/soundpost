@@ -32,7 +32,7 @@ var alwaysKeywords = map[string]bool{
 	"or": true, "and": true, "unless": true, "by": true, "without": true, "bool": true, "on": true, "ignoring": true,
 	"group_left": true, "group_right": true, "offset": true, "json": true, "logfmt": true, "regexp": true,
 	"pattern": true, "unpack": true, "decolorize": true, "line_format": true, "label_format": true,
-	"unwrap": true, "drop": true, "keep": true, "of": true,
+	"unwrap": true, "drop": true, "keep": true, "of": true, "variants": true,
 }
 
 // functionWords are reserved only when they read as a call: the next
@@ -43,7 +43,7 @@ func isFunctionWord(w string) bool {
 		return true
 	}
 	switch w {
-	case "vector", "label_replace", "variants", "ip", "bytes", "duration", "duration_seconds":
+	case "vector", "label_replace", "ip", "bytes", "duration", "duration_seconds":
 		return true
 	}
 	return false
