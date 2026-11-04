@@ -10,7 +10,7 @@ import (
 
 func TestExactHistogramCountsAndFloatBits(t *testing.T) {
 	count := uint64(9007199254740993)
-	h := model.NativeHistogram{Integer: &model.IntegerHistogram{Flavor: "counter", Schema: 0, Count: count, PositiveSpans: []model.HistogramSpan{{Length: 1}}, PositiveCounts: []model.AbsoluteBucket{model.AbsoluteBucket(count)}, ResetHint: "unknown"}}
+	h := model.NativeHistogram{Integer: &model.IntegerHistogram{Flavor: "counter", Schema: 0, Count: model.Uint64(count), PositiveSpans: []model.HistogramSpan{{Length: 1}}, PositiveCounts: []model.AbsoluteBucket{model.AbsoluteBucket(count)}, ResetHint: "unknown"}}
 	if err := h.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -22,7 +22,7 @@ func TestExactHistogramCountsAndFloatBits(t *testing.T) {
 	if err = json.Unmarshal(raw, &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if decoded.Integer.Count != count || uint64(decoded.Integer.PositiveCounts[0]) != count {
+	if uint64(decoded.Integer.Count) != count || uint64(decoded.Integer.PositiveCounts[0]) != count {
 		t.Fatal("count lost integer precision")
 	}
 	decoded.Integer.PositiveSpans[0].Length = 2

@@ -22,6 +22,7 @@ func TestSameOrgDisjointNamedRawSourceGrants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	activateAuthControl(t, store, t.TempDir())
 	bootstrap, err := store.BootstrapToken()
 	if err != nil {
 		t.Fatal(err)

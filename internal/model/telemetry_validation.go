@@ -358,8 +358,11 @@ func ValidateRecord(r *Record, p SourcePolicy) error {
 		if c.Profile == (ID{}) || c.Process == (ID{}) || c.Capability == (ID{}) || c.End < c.Start || !oneOf(c.Method, "runtime_cpu", "native_cpu", "native_offcpu") || !oneOf(c.Units, "samples", "nanoseconds") || len(c.Frames) > 4096 || len(c.Stacks) > 4096 || len(c.Samples) > 8192 || len(c.Intervals) > 8192 {
 			return Fail(Invalid)
 		}
+		if validateNativeProfile(c) != nil || c.NativeDomain != nil && c.PolicyRevision != p.Revision {
+			return Fail(Invalid)
+		}
 		for _, f := range c.Frames {
-			if !safeCode(f.Module, 256) || f.Function != "" && !safeCode(f.Function, 256) || f.Artifact != "" && !safePath(f.Artifact) || f.Reason != "" && !oneOf(f.Reason, "unresolved", "not_captured", "unsupported", "missing_artifact") {
+			if c.NativeDomain == nil && (!safeCode(f.Module, 256) || f.Function != "" && !safeCode(f.Function, 256) || f.Artifact != "" && !safePath(f.Artifact) || f.Reason != "" && !oneOf(f.Reason, "unresolved", "not_captured", "unsupported", "missing_artifact")) {
 				return Fail(Invalid)
 			}
 		}

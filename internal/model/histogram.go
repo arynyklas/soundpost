@@ -117,7 +117,8 @@ func (h IntegerHistogram) validateHistogram() error {
 			return err
 		}
 	}
-	if h.ZeroCount > h.Count || positive > h.Count-h.ZeroCount || negative > h.Count-h.ZeroCount-positive {
+	count, zero := uint64(h.Count), uint64(h.ZeroCount)
+	if zero > count || positive > count-zero || negative > count-zero-positive {
 		return errors.New("histogram count mismatch")
 	}
 	if h.Schema == -53 && h.ZeroCount != 0 {

@@ -89,6 +89,11 @@ type ControlState struct {
 	SourceFences         map[string]SourceFence
 	SourceOperations     map[string]SourceFence
 	PolicySigningKey     string
+	Releases             map[string]Release
+	GroupingIssues       map[string]GroupingIssue
+	GroupingMigrations   map[string]GroupingMigration
+	ArtifactIntents      map[string]ArtifactReferenceIntent
+	ArtifactReservations map[string]ArtifactQuotaReservation
 }
 type ControlCommand struct {
 	CommandID        ID

@@ -149,5 +149,5 @@ func Normalize(g SourceGrant, input model.Batch) (model.NormalizedBatch, error) 
 	if e != nil {
 		return model.NormalizedBatch{}, e
 	}
-	return model.NormalizedBatch{Batch: b, Org: src.Org, Hash: model.HashCanonical(canonical), Canonical: canonical, PolicyEpoch: g.scope.PolicyEpoch(), PolicyHash: model.HashCanonical(pb).String(), AdmissionAt: model.UnixNano(now), Deadlines: deadlines, Series: ss}, nil
+	return model.NormalizedBatch{Batch: b, Org: src.Org, Hash: model.HashCanonical(canonical), Canonical: canonical, PolicyEpoch: model.Uint64(g.scope.PolicyEpoch()), PolicyHash: model.HashCanonical(pb).String(), AdmissionAt: model.UnixNano(now), Deadlines: deadlines, Series: ss}, nil
 }

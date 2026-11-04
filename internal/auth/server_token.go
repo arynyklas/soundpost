@@ -8,9 +8,9 @@ import (
 )
 
 type IssuedServerToken struct {
-	ID      model.ID `json:"id"`
-	Token   string   `json:"token"`
-	Expires int64    `json:"expires,string"`
+	ID      model.ID    `json:"id"`
+	Token   string      `json:"token"`
+	Expires model.Int64 `json:"expires"`
 }
 
 func (c Credential) IsServerToken() bool { return c.machine }
@@ -18,7 +18,7 @@ func (s *Service) IssueServerToken(ctx context.Context, actor Credential, org, p
 	if actor.service != s || !actor.Fresh() || expires <= s.now().Unix() || reason == "" || len(reason) > 512 || len(projects) == 0 || len(permissions) == 0 {
 		return IssuedServerToken{}, model.Fail(model.Forbidden)
 	}
-	out := IssuedServerToken{model.NewID(), randomToken(), expires}
+	out := IssuedServerToken{model.NewID(), randomToken(), model.Int64(expires)}
 	actions := make([]string, len(permissions))
 	for i, p := range permissions {
 		if !validPermission(string(p)) {

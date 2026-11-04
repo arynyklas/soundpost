@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"strconv"
 )
 
 type ID [16]byte
@@ -17,7 +16,7 @@ type MonoNano uint64
 type Revision uint64
 type Cursor struct {
 	Group ID     `json:"group"`
-	Index uint64 `json:"index,string"`
+	Index Uint64 `json:"index"`
 }
 
 func NewID() ID {
@@ -91,55 +90,30 @@ func (s *SpanID) UnmarshalJSON(b []byte) error {
 	}
 	return nil
 }
-func parseDecimal(b []byte, signed bool) (string, error) {
-	var s string
-	if e := json.Unmarshal(b, &s); e != nil {
-		return "", e
+func (v UnixNano) MarshalJSON() ([]byte, error) { return Int64(v).MarshalJSON() }
+func (v *UnixNano) UnmarshalJSON(raw []byte) error {
+	var value Int64
+	if err := value.UnmarshalJSON(raw); err != nil {
+		return err
 	}
-	if signed {
-		v, e := strconv.ParseInt(s, 10, 64)
-		if e != nil || strconv.FormatInt(v, 10) != s {
-			return "", errors.New("invalid integer")
-		}
-	} else {
-		v, e := strconv.ParseUint(s, 10, 64)
-		if e != nil || strconv.FormatUint(v, 10) != s {
-			return "", errors.New("invalid integer")
-		}
+	*v = UnixNano(value)
+	return nil
+}
+func (v MonoNano) MarshalJSON() ([]byte, error) { return Uint64(v).MarshalJSON() }
+func (v *MonoNano) UnmarshalJSON(raw []byte) error {
+	var value Uint64
+	if err := value.UnmarshalJSON(raw); err != nil {
+		return err
 	}
-	return s, nil
+	*v = MonoNano(value)
+	return nil
 }
-func (v UnixNano) MarshalJSON() ([]byte, error) { return json.Marshal(strconv.FormatInt(int64(v), 10)) }
-func (v *UnixNano) UnmarshalJSON(b []byte) error {
-	s, e := parseDecimal(b, true)
-	if e != nil {
-		return e
+func (v Revision) MarshalJSON() ([]byte, error) { return Uint64(v).MarshalJSON() }
+func (v *Revision) UnmarshalJSON(raw []byte) error {
+	var value Uint64
+	if err := value.UnmarshalJSON(raw); err != nil {
+		return err
 	}
-	x, e := strconv.ParseInt(s, 10, 64)
-	*v = UnixNano(x)
-	return e
-}
-func (v MonoNano) MarshalJSON() ([]byte, error) {
-	return json.Marshal(strconv.FormatUint(uint64(v), 10))
-}
-func (v *MonoNano) UnmarshalJSON(b []byte) error {
-	s, e := parseDecimal(b, false)
-	if e != nil {
-		return e
-	}
-	x, e := strconv.ParseUint(s, 10, 64)
-	*v = MonoNano(x)
-	return e
-}
-func (v Revision) MarshalJSON() ([]byte, error) {
-	return json.Marshal(strconv.FormatUint(uint64(v), 10))
-}
-func (v *Revision) UnmarshalJSON(b []byte) error {
-	s, e := parseDecimal(b, false)
-	if e != nil {
-		return e
-	}
-	x, e := strconv.ParseUint(s, 10, 64)
-	*v = Revision(x)
-	return e
+	*v = Revision(value)
+	return nil
 }

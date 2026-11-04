@@ -25,6 +25,7 @@ func testGrant(t *testing.T, revoke bool) {
 	if e != nil {
 		t.Fatal(e)
 	}
+	activateAuthControl(t, store, t.TempDir())
 	token, _ := store.BootstrapToken()
 	admin, e := service.Bootstrap(ctx, token, "owner@example.test", "correct horse battery staple 2026")
 	if e != nil {

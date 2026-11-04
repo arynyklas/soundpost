@@ -26,9 +26,9 @@ type elevationRecord struct {
 
 func (e Elevation) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		ID      model.ID `json:"id"`
-		Expires int64    `json:"expires,string"`
-	}{e.audit, e.expires.Unix()})
+		ID      model.ID    `json:"id"`
+		Expires model.Int64 `json:"expires"`
+	}{e.audit, model.Int64(e.expires.Unix())})
 }
 func (s *Service) Elevate(ctx context.Context, session Session, reason string, orgs []model.ID) (Elevation, error) {
 	c, err := s.Authenticate(ctx, session.Token)

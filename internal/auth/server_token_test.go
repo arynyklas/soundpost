@@ -23,6 +23,7 @@ func TestServerTokenCannotBroadenOrSurviveRevocation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	activateAuthControl(t, store, t.TempDir())
 	boot, _ := store.BootstrapToken()
 	session, err := service.Bootstrap(ctx, boot, "owner@example.test", "correct horse battery staple 2026")
 	if err != nil {

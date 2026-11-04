@@ -83,7 +83,7 @@ func (s *Service) ChangeSourcePolicy(ctx context.Context, c Credential, r Source
 		st.Sources[r.Source.String()] = src
 		org.Epoch++
 		st.Orgs[src.Org.String()] = org
-		out = model.SourceFence{Operation: r.CommandID, Source: r.Source, Org: src.Org, Epoch: org.Epoch, Phase: "fencing"}
+		out = model.SourceFence{Operation: r.CommandID, Source: r.Source, Org: src.Org, Epoch: model.Uint64(org.Epoch), Phase: "fencing"}
 		if st.SourceFences == nil {
 			st.SourceFences = map[string]model.SourceFence{}
 		}
@@ -96,7 +96,7 @@ func (s *Service) ChangeSourcePolicy(ctx context.Context, c Credential, r Source
 			st.CommandOwners = map[string]string{}
 		}
 		st.CommandOwners[r.CommandID.String()] = binding
-		st.Commands[r.CommandID.String()] = model.ControlResult{Revision: st.Revision + 1, Cursor: model.Cursor{Group: st.Installation, Index: uint64(st.Revision + 1)}, AffectedIDs: []model.ID{r.CommandID}, Phase: "fencing"}
+		st.Commands[r.CommandID.String()] = model.ControlResult{Revision: st.Revision + 1, Cursor: model.Cursor{Group: st.Installation, Index: model.Uint64(st.Revision + 1)}, AffectedIDs: []model.ID{r.CommandID}, Phase: "fencing"}
 		st.Audits = append(st.Audits, model.ControlAudit{ID: audit, Principal: c.user, Org: src.Org.String(), Action: "source.policy", Reason: r.Reason, Time: admittedAt, PolicyEpoch: org.Epoch, Targets: []model.ID{src.Project, src.ID, r.CommandID}, RequestID: model.RequestCorrelationID(ctx, r.CommandID), Outcome: model.AuditAllowed})
 		return nil
 	})

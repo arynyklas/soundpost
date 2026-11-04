@@ -3,6 +3,8 @@
 package control_test
 
 import (
+	"context"
+	"path/filepath"
 	"soundpost/internal/control"
 	"strings"
 	"testing"
@@ -12,6 +14,9 @@ func TestSecretRotationRetainsOldDecrypt(t *testing.T) {
 	dir := t.TempDir()
 	store, err := control.Open(dir)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err = store.EnableSingle(context.Background(), filepath.Join(dir, "raft-control")); err != nil {
 		t.Fatal(err)
 	}
 	old, err := store.Seal("first-secret")
@@ -34,6 +39,9 @@ func TestSecretRotationRetainsOldDecrypt(t *testing.T) {
 	}
 	store, err = control.Open(dir)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err = store.EnableSingle(context.Background(), filepath.Join(dir, "raft-control")); err != nil {
 		t.Fatal(err)
 	}
 	defer store.Close()

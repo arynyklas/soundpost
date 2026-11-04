@@ -56,8 +56,8 @@ func initializeBearerHashKey(store ControlStore) ([32]byte, error) {
 		if st.BearerHashKeyVersion > 1 {
 			return model.Fail(model.Corrupt)
 		}
-		if sealed == "" && (st.BearerHashKeyVersion != 0 || len(st.ServerTokens) > 0) {
-			return model.Fail(model.Unavailable)
+		if sealed == "" && (st.BearerHashKeyVersion != 0 || st.BootstrapHash == "" || len(st.Users) > 0 || len(st.Sessions) > 0 || len(st.ServerTokens) > 0 || len(st.Sources) > 0 || len(st.SourceCredentials) > 0) {
+			return model.Fail(model.Corrupt)
 		}
 		if sealed != "" && st.BearerHashKeyVersion != 1 {
 			return model.Fail(model.Corrupt)
@@ -77,21 +77,16 @@ func initializeBearerHashKey(store ControlStore) ([32]byte, error) {
 		if err != nil {
 			return key, err
 		}
-		if err := store.Update(ctx, func(st *model.ControlState) error {
-			if st.BearerHashKey != "" {
-				if st.BearerHashKeyVersion != 1 {
-					return model.Fail(model.Corrupt)
-				}
-				sealed = st.BearerHashKey
-				return nil
+		if err := store.InitializeBearerHashKey(ctx, candidateEnvelope, 1); err != nil {
+			return key, err
+		}
+		// Re-read the committed root: concurrent constructors must use the first
+		// installed authority, never assume their prepared candidate won.
+		if err := store.View(ctx, func(st model.ControlState) error {
+			if st.BearerHashKey == "" || st.BearerHashKeyVersion != 1 {
+				return model.Fail(model.Corrupt)
 			}
-			// There is deliberately no SHA-only legacy lookup or lost-key replacement.
-			if st.BearerHashKeyVersion != 0 || len(st.ServerTokens) > 0 {
-				return model.Fail(model.Unavailable)
-			}
-			st.BearerHashKey = candidateEnvelope
-			st.BearerHashKeyVersion = 1
-			sealed = candidateEnvelope
+			sealed = st.BearerHashKey
 			return nil
 		}); err != nil {
 			return key, err

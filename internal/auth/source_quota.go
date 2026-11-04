@@ -12,8 +12,8 @@ type AdmissionQuotaChange struct {
 	ExpectedRevision model.Revision `json:"expected_revision"`
 	Org              model.ID       `json:"org"`
 	Project          *model.ID      `json:"project,omitempty"`
-	MaxBytes         uint64         `json:"max_bytes,string"`
-	MaxSeries        uint64         `json:"max_series,string"`
+	MaxBytes         model.Uint64   `json:"max_bytes"`
+	MaxSeries        model.Uint64   `json:"max_series"`
 	Reason           string         `json:"reason"`
 }
 
@@ -60,7 +60,7 @@ func (s *Service) SetAdmissionQuota(ctx context.Context, c Credential, r Admissi
 		q.Configured = true
 		st.Quotas[key] = q
 		st.Audits = append(st.Audits, model.ControlAudit{ID: audit, Principal: c.user, Org: r.Org.String(), Action: "admission.quota", Reason: r.Reason, Time: at, PolicyEpoch: org.Epoch, Targets: targets, RequestID: model.RequestCorrelationID(ctx, r.CommandID), Outcome: model.AuditAllowed})
-		out = model.ControlResult{Revision: st.Revision + 1, Cursor: model.Cursor{Group: st.Installation, Index: uint64(st.Revision + 1)}, AffectedIDs: targets}
+		out = model.ControlResult{Revision: st.Revision + 1, Cursor: model.Cursor{Group: st.Installation, Index: model.Uint64(st.Revision + 1)}, AffectedIDs: targets}
 		if st.CommandOwners == nil {
 			st.CommandOwners = map[string]string{}
 		}

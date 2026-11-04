@@ -109,7 +109,7 @@ func (s *Service) OIDCCallback(ctx context.Context, cfg OIDCConfig, binding, sta
 				return model.Fail(model.Forbidden)
 			}
 		}
-		st.Sessions[hashToken(out.Token)] = model.ControlSession{User: user, CSRF: out.CSRF, Expires: out.Expires, Reauthenticated: s.now().Unix()}
+		st.Sessions[hashToken(out.Token)] = model.ControlSession{User: user, CSRF: out.CSRF, Expires: int64(out.Expires), Reauthenticated: s.now().Unix()}
 		return nil
 	})
 	return out, e

@@ -29,6 +29,7 @@ func TestScopeRevalidateRefreshesSharedBoundedLease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	activateAuthControl(t, store, t.TempDir())
 	token, _ := store.BootstrapToken()
 	session, err := service.Bootstrap(ctx, token, "owner@example.test", "correct horse battery staple 2026")
 	if err != nil {
@@ -79,14 +80,14 @@ func TestScopeRevalidateRefreshesSharedBoundedLease(t *testing.T) {
 		}()
 	}
 	group.Wait()
-	clock.Store(time.Unix(session.Expires-2, 0).UnixNano())
+	clock.Store(time.Unix(int64(session.Expires)-2, 0).UnixNano())
 	if err := service.Revalidate(ctx, scope); err != nil {
 		t.Fatal(err)
 	}
-	if !scope.LeaseDeadline().Equal(time.Unix(session.Expires, 0)) {
+	if !scope.LeaseDeadline().Equal(time.Unix(int64(session.Expires), 0)) {
 		t.Fatal("lease outlives credential expiry")
 	}
-	clock.Store(time.Unix(session.Expires, 0).UnixNano())
+	clock.Store(time.Unix(int64(session.Expires), 0).UnixNano())
 	assertCode(t, service.Revalidate(ctx, scope), model.Unauthenticated)
 	if !scope.LeaseDeadline().IsZero() {
 		t.Fatal("failed revalidation left a usable lease")

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"reflect"
 	"soundpost/internal/auth"
 	"soundpost/internal/control"
@@ -15,13 +16,17 @@ import (
 
 func TestTransactReplayIsBoundToPrincipalOrgAndKind(t *testing.T) {
 	ctx := context.Background()
-	store, err := control.Open(t.TempDir())
+	dir := t.TempDir()
+	store, err := control.Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.Close()
 	service, err := auth.NewService(auth.AuthDependencies{Control: store})
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err = store.EnableSingle(ctx, filepath.Join(dir, "raft-control")); err != nil {
 		t.Fatal(err)
 	}
 	bootstrap, _ := store.BootstrapToken()

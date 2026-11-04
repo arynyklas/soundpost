@@ -26,6 +26,8 @@ type Store struct {
 	keyMu      sync.Mutex
 	ownerProof AdmissionProofs
 	handlers   map[CommandKind]Handler
+	updateMu   sync.Mutex
+	repl       *replicatedControl
 }
 type User = model.ControlUser
 type Session = model.ControlSession
@@ -41,7 +43,13 @@ func Open(dir string) (*Store, error) {
 	if e := durablefs.MkdirAll(dir); e != nil {
 		return nil, e
 	}
-	db, e := bolt.Open(filepath.Join(dir, "control.db"), 0600, &bolt.Options{Timeout: time.Second})
+	path := filepath.Join(dir, "control.db")
+	_, statErr := os.Stat(path)
+	fresh := os.IsNotExist(statErr)
+	if statErr != nil && !fresh {
+		return nil, statErr
+	}
+	db, e := bolt.Open(path, 0600, &bolt.Options{Timeout: time.Second})
 	if e != nil {
 		return nil, e
 	}
@@ -51,6 +59,13 @@ func Open(dir string) (*Store, error) {
 	}
 	s := &Store{db: db, dir: dir}
 	e = db.Update(func(tx *bolt.Tx) error {
+		if !fresh {
+			b := tx.Bucket([]byte("control"))
+			if b == nil || b.Get([]byte("state")) == nil {
+				return model.Fail(model.Corrupt)
+			}
+			return nil
+		}
 		b, e := tx.CreateBucketIfNotExists([]byte("control"))
 		if e != nil {
 			return e
@@ -75,7 +90,15 @@ func Open(dir string) (*Store, error) {
 	}
 	return s, nil
 }
-func (s *Store) Close() error { return s.db.Close() }
+func (s *Store) Close() error {
+	if s.repl != nil {
+		if err := s.repl.close(); err != nil {
+			s.db.Close()
+			return err
+		}
+	}
+	return s.db.Close()
+}
 func (s *Store) BootstrapToken() (string, error) {
 	b, e := os.ReadFile(filepath.Join(s.dir, "bootstrap.token"))
 	return string(b), e
@@ -86,6 +109,11 @@ func (s *Store) RemoveBootstrapFile() error {
 func (s *Store) View(ctx context.Context, fn func(State) error) error {
 	if e := ctx.Err(); e != nil {
 		return e
+	}
+	if s.repl != nil {
+		if _, err := s.repl.group.ReadIndex(ctx); err != nil {
+			return replicaFault(err)
+		}
 	}
 	return s.db.View(func(tx *bolt.Tx) error {
 		var st State
@@ -99,22 +127,10 @@ func (s *Store) Update(ctx context.Context, fn func(*State) error) error {
 	if e := ctx.Err(); e != nil {
 		return e
 	}
-	return s.db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte("control"))
-		var st State
-		if e := json.Unmarshal(b.Get([]byte("state")), &st); e != nil {
-			return model.Fail(model.Corrupt)
-		}
-		if e := fn(&st); e != nil {
-			return e
-		}
-		st.Revision++
-		v, e := json.Marshal(st)
-		if e != nil {
-			return e
-		}
-		return b.Put([]byte("state"), v)
-	})
+	if s.repl == nil {
+		return model.Fail(model.Unavailable)
+	}
+	return s.replicatedUpdate(ctx, fn)
 }
 func (s *Store) Transact(ctx context.Context, scope auth.Scope, cmd Command) (Result, error) {
 	if !CommandKind(cmd.Kind).Valid() || cmd.CommandID == (model.ID{}) {
@@ -164,7 +180,7 @@ func (s *Store) Transact(ctx context.Context, scope auth.Scope, cmd Command) (Re
 				return err
 			}
 		}
-		out = Result{AffectedIDs: append([]model.ID(nil), effect.AffectedIDs...), Phase: effect.Phase, Revision: st.Revision + 1, Cursor: model.Cursor{Group: st.Installation, Index: uint64(st.Revision + 1)}}
+		out = Result{AffectedIDs: append([]model.ID(nil), effect.AffectedIDs...), Phase: effect.Phase, Revision: st.Revision + 1, Cursor: model.Cursor{Group: st.Installation, Index: model.Uint64(st.Revision + 1)}}
 		if st.CommandOwners == nil {
 			st.CommandOwners = map[string]string{}
 		}

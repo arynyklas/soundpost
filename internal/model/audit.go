@@ -17,7 +17,7 @@ type auditWire struct {
 	Org         string       `json:"org"`
 	RequestID   *ID          `json:"request_id,omitempty"`
 	Outcome     AuditOutcome `json:"outcome"`
-	PolicyEpoch uint64       `json:"policy_epoch,string"`
+	PolicyEpoch Uint64       `json:"policy_epoch"`
 	Targets     []ID         `json:"targets"`
 }
 
@@ -27,14 +27,14 @@ func (a ControlAudit) MarshalJSON() ([]byte, error) {
 		id := a.RequestID
 		requestID = &id
 	}
-	return json.Marshal(auditWire{a.ID, a.Principal, a.Action, a.Reason, UnixNano(a.Time), a.Org, requestID, a.Outcome, a.PolicyEpoch, a.Targets})
+	return json.Marshal(auditWire{a.ID, a.Principal, a.Action, a.Reason, UnixNano(a.Time), a.Org, requestID, a.Outcome, Uint64(a.PolicyEpoch), a.Targets})
 }
 func (a *ControlAudit) UnmarshalJSON(raw []byte) error {
 	var wire auditWire
 	if err := json.Unmarshal(raw, &wire); err != nil {
 		return err
 	}
-	*a = ControlAudit{ID: wire.ID, Principal: wire.Principal, Action: wire.Action, Reason: wire.Reason, Time: int64(wire.Time), Org: wire.Org, PolicyEpoch: wire.PolicyEpoch, Targets: wire.Targets, Outcome: wire.Outcome}
+	*a = ControlAudit{ID: wire.ID, Principal: wire.Principal, Action: wire.Action, Reason: wire.Reason, Time: int64(wire.Time), Org: wire.Org, PolicyEpoch: uint64(wire.PolicyEpoch), Targets: wire.Targets, Outcome: wire.Outcome}
 	if wire.RequestID != nil {
 		a.RequestID = *wire.RequestID
 	}

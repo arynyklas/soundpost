@@ -28,8 +28,8 @@ type SourcePolicy struct {
 	Dependencies  []string            `json:"dependencies"`
 	Codes         []string            `json:"codes"`
 	RetentionDays map[Kind]uint32     `json:"retention_days"`
-	MaxBytes      uint64              `json:"max_bytes,string"`
-	MaxSeries     uint64              `json:"max_series,string"`
+	MaxBytes      Uint64              `json:"max_bytes"`
+	MaxSeries     Uint64              `json:"max_series"`
 	Replay        bool                `json:"replay"`
 	Expires       UnixNano            `json:"expires_ns"`
 	RawOwner      *ID                 `json:"raw_owner,omitempty"`
@@ -74,24 +74,24 @@ type AdmissionReservation struct {
 	Batch       ID       `json:"batch"`
 	Slot        uint16   `json:"slot"`
 	Hash        Hash     `json:"hash"`
-	PolicyEpoch uint64   `json:"policy_epoch,string"`
-	Bytes       uint64   `json:"bytes,string"`
+	PolicyEpoch Uint64   `json:"policy_epoch"`
+	Bytes       Uint64   `json:"bytes"`
 	Series      []string `json:"series"`
 	State       string   `json:"state"`
 	Cursor      *Cursor  `json:"cursor,omitempty"`
 }
 type QuotaState struct {
-	Bytes      uint64            `json:"bytes,string"`
+	Bytes      Uint64            `json:"bytes"`
 	Series     map[string]uint64 `json:"series"`
-	MaxBytes   uint64            `json:"max_bytes,string"`
-	MaxSeries  uint64            `json:"max_series,string"`
+	MaxBytes   Uint64            `json:"max_bytes"`
+	MaxSeries  Uint64            `json:"max_series"`
 	Configured bool              `json:"configured"`
 }
 type ReserveAdmission struct {
 	Reservation     AdmissionReservation `json:"reservation"`
-	OrgMaxBytes     uint64               `json:"org_max_bytes,string"`
-	ProjectMaxBytes uint64               `json:"project_max_bytes,string"`
-	MaxSeries       uint64               `json:"max_series,string"`
+	OrgMaxBytes     Uint64               `json:"org_max_bytes"`
+	ProjectMaxBytes Uint64               `json:"project_max_bytes"`
+	MaxSeries       Uint64               `json:"max_series"`
 }
 type FinalizeAdmission struct {
 	ReservationID ID     `json:"reservation_id"`
@@ -109,7 +109,7 @@ type SourceFence struct {
 	Operation ID       `json:"operation"`
 	Source    ID       `json:"source"`
 	Org       ID       `json:"org"`
-	Epoch     uint64   `json:"epoch,string"`
+	Epoch     Uint64   `json:"epoch"`
 	Phase     string   `json:"phase"`
 	Barriers  []Cursor `json:"barriers"`
 }

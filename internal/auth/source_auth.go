@@ -41,6 +41,9 @@ type SourceOnboarded struct {
 	TrustedKeys map[string]string          `json:"trusted_keys"`
 }
 
+// Source credentials have one content-free denial class across admission,
+// descriptors and historical receipts: forbidden. This does not alter browser
+// session/server-token authentication or expose whether a source exists.
 func (s *Service) AuthenticateSource(ctx context.Context, raw, origin string, browser bool) (SourceCredential, error) {
 	d, e := s.BearerDigest(SourceBearer, raw)
 	if e != nil {
@@ -50,11 +53,11 @@ func (s *Service) AuthenticateSource(ctx context.Context, raw, origin string, br
 	e = s.store.View(ctx, func(st model.ControlState) error {
 		id, ok := st.SourceCredentials[d]
 		if !ok {
-			return model.Fail(model.Unauthenticated)
+			return model.Fail(model.Forbidden)
 		}
 		src, ok := st.Sources[id]
 		if !ok {
-			return model.Fail(model.Unauthenticated)
+			return model.Fail(model.Forbidden)
 		}
 		c.source = src.ID
 		return s.checkSource(st, c, false)
@@ -66,11 +69,11 @@ func (s *Service) AuthenticateSource(ctx context.Context, raw, origin string, br
 }
 func (s *Service) checkSource(st model.ControlState, c SourceCredential, admission bool) error {
 	if c.service != s || st.SourceCredentials[c.digest] != c.source.String() {
-		return model.Fail(model.Unauthenticated)
+		return model.Fail(model.Forbidden)
 	}
 	src, ok := st.Sources[c.source.String()]
 	if !ok || src.Revoked || int64(src.Expires) <= s.now().UnixNano() {
-		return model.Fail(model.Unauthenticated)
+		return model.Fail(model.Forbidden)
 	}
 	o, ok := st.Orgs[src.Org.String()]
 	if !ok || src.Retired {
@@ -205,7 +208,6 @@ func (s *Service) OnboardSource(ctx context.Context, c Credential, r SourceOnboa
 		}
 	}
 	admittedAt := s.now().UnixNano()
-	var keyEnvelope string
 	e = s.store.Update(ctx, func(st *model.ControlState) error {
 		if e := s.validateCredentialState(*st, c); e != nil {
 			return e
@@ -260,7 +262,6 @@ func (s *Service) OnboardSource(ctx context.Context, c Credential, r SourceOnboa
 		if st.PolicySigningKey == "" {
 			st.PolicySigningKey = sealed
 		}
-		keyEnvelope = st.PolicySigningKey
 		st.Sources[r.Source.String()] = model.SourceAuthority{ID: r.Source, Org: r.Org, Project: r.Project, Browser: r.Browser, Origins: append([]string(nil), r.Origins...), Expires: r.Expires, Policy: r.Policy, CredentialID: credentialID}
 		st.SourceCredentials[digest] = r.Source.String()
 		o.Epoch++
@@ -269,41 +270,25 @@ func (s *Service) OnboardSource(ctx context.Context, c Credential, r SourceOnboa
 			st.CommandOwners = map[string]string{}
 		}
 		st.CommandOwners[r.CommandID.String()] = binding
-		st.Commands[r.CommandID.String()] = model.ControlResult{Revision: st.Revision + 1, Cursor: model.Cursor{Group: st.Installation, Index: uint64(st.Revision + 1)}, AffectedIDs: []model.ID{r.Source}}
+		st.Commands[r.CommandID.String()] = model.ControlResult{Revision: st.Revision + 1, Cursor: model.Cursor{Group: st.Installation, Index: model.Uint64(st.Revision + 1)}, AffectedIDs: []model.ID{r.Source}}
 		st.Audits = append(st.Audits, model.ControlAudit{ID: auditID, Principal: c.user, Org: r.Org.String(), Action: "source.onboard", Reason: r.Reason, Time: admittedAt, Targets: []model.ID{r.Project, r.Source}, PolicyEpoch: o.Epoch, RequestID: model.RequestCorrelationID(ctx, r.CommandID), Outcome: model.AuditAllowed})
 		return nil
 	})
 	if e != nil {
 		return SourceOnboarded{}, e
 	}
-	secret, e := s.store.OpenSecret(keyEnvelope)
-	if e != nil {
-		return SourceOnboarded{}, model.Fail(model.Unavailable)
+	// Use the same current-authority payload/signer as every refresh, rather
+	// than signing the caller's earlier policy snapshot with a second vocabulary.
+	credential := SourceCredential{service: s, digest: digest, source: r.Source, browser: r.Browser}
+	if r.Browser {
+		credential.origin = r.Origins[0]
 	}
-	key, e := base64.RawStdEncoding.DecodeString(secret)
-	if e != nil || len(key) != ed25519.PrivateKeySize {
-		return SourceOnboarded{}, model.Fail(model.Corrupt)
-	}
-	pub := ed25519.PrivateKey(key).Public().(ed25519.PublicKey)
-	expires := r.Expires
-	if r.Policy.Expires != 0 && r.Policy.Expires < expires {
-		expires = r.Policy.Expires
-	}
-	enabled := func(k model.Kind) bool {
-		for _, v := range r.Policy.Kinds {
-			if v == k {
-				return true
-			}
-		}
-		return false
-	}
-	payload, e := model.CanonicalJSON(map[string]any{"version": 1, "org": r.Org.String(), "project": r.Project.String(), "source": r.Source.String(), "revision": r.Policy.Revision, "expires_ns": expires, "errors": enabled(model.ErrorKind), "logs": enabled(model.Log), "replay": enabled(model.Replay) && r.Policy.Replay, "bodies": false})
+	configuration, e := s.SourceConfiguration(ctx, credential)
 	if e != nil {
 		return SourceOnboarded{}, e
 	}
-	keyID := "installation-" + model.HashCanonical(pub).String()[:32]
-	signature := ed25519.Sign(ed25519.PrivateKey(key), payload)
-	return SourceOnboarded{Credential: raw, Descriptor: model.SourceDescriptor{Version: 1, Org: r.Org, Project: r.Project, Source: r.Source, RoutingVersion: 1, Slots: 64, PolicyRevision: r.Policy.Revision}, Policy: model.SignedPolicyEnvelope{Version: 1, Algorithm: "Ed25519", KeyID: keyID, Payload: base64.RawURLEncoding.EncodeToString(payload), Signature: base64.RawURLEncoding.EncodeToString(signature)}, TrustedKeys: map[string]string{keyID: base64.RawURLEncoding.EncodeToString(pub)}}, nil
+	configuration.Credential = raw
+	return configuration, nil
 }
 func (s *Service) RevokeSource(ctx context.Context, c Credential, source model.ID, reason string) error {
 	if c.service != s || c.machine || !c.Fresh() || strings.TrimSpace(reason) == "" || len(reason) > 512 {
@@ -336,7 +321,7 @@ func (s *Service) RevokeSource(ctx context.Context, c Credential, source model.I
 		if st.SourceFences == nil {
 			st.SourceFences = map[string]model.SourceFence{}
 		}
-		st.SourceFences[source.String()] = model.SourceFence{Operation: operation, Source: source, Org: src.Org, Epoch: o.Epoch, Phase: "fencing"}
+		st.SourceFences[source.String()] = model.SourceFence{Operation: operation, Source: source, Org: src.Org, Epoch: model.Uint64(o.Epoch), Phase: "fencing"}
 		if st.SourceOperations == nil {
 			st.SourceOperations = map[string]model.SourceFence{}
 		}

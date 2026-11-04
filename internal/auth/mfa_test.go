@@ -39,6 +39,7 @@ func TestTOTPAndRecoveryCodesAreOneUse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	activateAuthControl(t, store, t.TempDir())
 	token, _ := store.BootstrapToken()
 	session, err := service.Bootstrap(ctx, token, "owner@example.test", "correct horse battery staple 2026")
 	if err != nil {

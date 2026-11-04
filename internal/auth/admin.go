@@ -202,7 +202,7 @@ func (s *Service) AdminCommand(ctx context.Context, c Credential, r AdminCommand
 					if st.SourceFences == nil {
 						st.SourceFences = map[string]model.SourceFence{}
 					}
-					st.SourceFences[p.ID.String()] = model.SourceFence{Operation: r.CommandID, Source: p.ID, Org: r.OrgID, Epoch: o.Epoch + 1, Phase: "fencing"}
+					st.SourceFences[p.ID.String()] = model.SourceFence{Operation: r.CommandID, Source: p.ID, Org: r.OrgID, Epoch: model.Uint64(o.Epoch + 1), Phase: "fencing"}
 					if st.SourceOperations == nil {
 						st.SourceOperations = map[string]model.SourceFence{}
 					}
@@ -228,7 +228,7 @@ func (s *Service) AdminCommand(ctx context.Context, c Credential, r AdminCommand
 			}
 		}
 		st.Audits = append(st.Audits, audit)
-		out = model.ControlResult{Revision: st.Revision + 1, Cursor: model.Cursor{Group: st.Installation, Index: uint64(st.Revision + 1)}}
+		out = model.ControlResult{Revision: st.Revision + 1, Cursor: model.Cursor{Group: st.Installation, Index: model.Uint64(st.Revision + 1)}}
 		if r.Kind == "source_policy" {
 			if f, ok := st.SourceFences[p.ID.String()]; ok && f.Operation == r.CommandID {
 				out.Phase = f.Phase

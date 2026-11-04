@@ -49,16 +49,15 @@ type HistogramSpan struct {
 type DeltaBucket int64
 
 func (v DeltaBucket) MarshalJSON() ([]byte, error) {
-	return json.Marshal(strconv.FormatInt(int64(v), 10))
+	return Int64(v).MarshalJSON()
 }
 func (v *DeltaBucket) UnmarshalJSON(b []byte) error {
-	s, e := parseDecimal(b, true)
-	if e != nil {
-		return e
+	var value Int64
+	if err := value.UnmarshalJSON(b); err != nil {
+		return err
 	}
-	n, e := strconv.ParseInt(s, 10, 64)
-	*v = DeltaBucket(n)
-	return e
+	*v = DeltaBucket(value)
+	return nil
 }
 
 type IntegerHistogram struct {
@@ -66,8 +65,8 @@ type IntegerHistogram struct {
 	Schema          int32            `json:"schema"`
 	ZeroThreshold   FloatBits        `json:"zero_threshold"`
 	Sum             FloatBits        `json:"sum"`
-	Count           uint64           `json:"count,string"`
-	ZeroCount       uint64           `json:"zero_count,string"`
+	Count           Uint64           `json:"count"`
+	ZeroCount       Uint64           `json:"zero_count"`
 	PositiveSpans   []HistogramSpan  `json:"positive_spans"`
 	NegativeSpans   []HistogramSpan  `json:"negative_spans"`
 	PositiveBuckets []DeltaBucket    `json:"positive_buckets"`

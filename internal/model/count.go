@@ -2,22 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 package model
 
-import (
-	"encoding/json"
-	"strconv"
-)
-
 type AbsoluteBucket uint64
 
 func (v AbsoluteBucket) MarshalJSON() ([]byte, error) {
-	return json.Marshal(strconv.FormatUint(uint64(v), 10))
+	return Uint64(v).MarshalJSON()
 }
 func (v *AbsoluteBucket) UnmarshalJSON(raw []byte) error {
-	s, err := parseDecimal(raw, false)
-	if err != nil {
+	var value Uint64
+	if err := value.UnmarshalJSON(raw); err != nil {
 		return err
 	}
-	n, err := strconv.ParseUint(s, 10, 64)
-	*v = AbsoluteBucket(n)
-	return err
+	*v = AbsoluteBucket(value)
+	return nil
 }

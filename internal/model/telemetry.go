@@ -260,15 +260,16 @@ func (r *Record) UnmarshalJSON(b []byte) error {
 }
 
 type MetricPoint struct {
-	Name          string           `json:"name"`
-	Labels        Labels           `json:"labels"`
-	SampleKind    string           `json:"sample_kind"`
-	Value         *FloatBits       `json:"value,omitempty"`
-	Histogram     *NativeHistogram `json:"histogram,omitempty"`
-	Unit          string           `json:"unit"`
-	Type          string           `json:"type"`
-	ExemplarTrace *ID              `json:"exemplar_trace,omitempty"`
-	ExemplarSpan  *SpanID          `json:"exemplar_span,omitempty"`
+	Name           string           `json:"name"`
+	Labels         Labels           `json:"labels"`
+	SampleKind     string           `json:"sample_kind"`
+	Value          *FloatBits       `json:"value,omitempty"`
+	Histogram      *NativeHistogram `json:"histogram,omitempty"`
+	StartTimestamp *UnixNano        `json:"start_timestamp_ns,omitempty"`
+	Unit           string           `json:"unit"`
+	Type           string           `json:"type"`
+	ExemplarTrace  *ID              `json:"exemplar_trace,omitempty"`
+	ExemplarSpan   *SpanID          `json:"exemplar_span,omitempty"`
 }
 type LogRecord struct {
 	Timestamp        *UnixNano         `json:"timestamp_ns,omitempty"`
@@ -354,9 +355,9 @@ type JobAttemptEvent struct {
 	Run        ID        `json:"run_id"`
 	Attempt    ID        `json:"attempt_id"`
 	Schedule   string    `json:"schedule_occurrence"`
-	Ordinal    uint64    `json:"ordinal,string"`
+	Ordinal    Uint64    `json:"ordinal"`
 	Epoch      ID        `json:"producer_epoch"`
-	Sequence   uint64    `json:"sequence,string"`
+	Sequence   Uint64    `json:"sequence"`
 	State      string    `json:"state"`
 	Observed   UnixNano  `json:"observed_ns"`
 	Terminal   *UnixNano `json:"terminal_ns"`
@@ -364,8 +365,8 @@ type JobAttemptEvent struct {
 	CauseError *ID       `json:"cause_error,omitempty"`
 }
 type MaskedNode struct {
-	ID     uint64 `json:"id,string"`
-	Parent uint64 `json:"parent,string"`
+	ID     Uint64 `json:"id"`
+	Parent Uint64 `json:"parent"`
 	Tag    string `json:"tag"`
 	Class  string `json:"class"`
 	Text   string `json:"text"`
@@ -373,7 +374,7 @@ type MaskedNode struct {
 type MaskedEvent struct {
 	At   MonoNano `json:"at_ns"`
 	Kind string   `json:"kind"`
-	Node uint64   `json:"node,string"`
+	Node Uint64   `json:"node"`
 	X    int32    `json:"x"`
 	Y    int32    `json:"y"`
 }
@@ -381,14 +382,14 @@ type ReplayChunk struct {
 	Replay             ID            `json:"replay_id"`
 	Session            ID            `json:"session_id"`
 	Recorder           string        `json:"recorder_version"`
-	Sequence           uint64        `json:"sequence,string"`
+	Sequence           Uint64        `json:"sequence"`
 	Previous           Hash          `json:"previous_hash"`
-	CheckpointSequence uint64        `json:"checkpoint_sequence,string"`
+	CheckpointSequence Uint64        `json:"checkpoint_sequence"`
 	Checkpoint         Hash          `json:"checkpoint_hash"`
 	Clock              TraceClock    `json:"clock"`
 	Nodes              []MaskedNode  `json:"nodes"`
 	Events             []MaskedEvent `json:"events"`
-	Loss               uint64        `json:"loss,string"`
+	Loss               Uint64        `json:"loss"`
 	Gap                bool          `json:"gap"`
 	PolicyRevision     Revision      `json:"capture_policy_revision"`
 }
@@ -396,41 +397,52 @@ type ProfileFrame struct {
 	Module   string `json:"module_id"`
 	Function string `json:"function"`
 	Artifact string `json:"artifact_id"`
-	Offset   uint64 `json:"offset,string"`
+	Offset   Uint64 `json:"offset"`
 	Reason   string `json:"reason"`
 }
 type ProfileStack struct {
 	Frames []uint32 `json:"frames"`
 }
 type ProfileSample struct {
-	At     MonoNano `json:"at_ns"`
-	Stack  uint32   `json:"stack"`
-	Count  uint64   `json:"count,string"`
-	Thread uint64   `json:"thread,string"`
+	At     MonoNano             `json:"at_ns"`
+	Stack  uint32               `json:"stack"`
+	Count  Uint64               `json:"count"`
+	Thread Uint64               `json:"thread"`
+	Native *ProfileNativeSample `json:"native,omitempty"`
 }
 type ProfileInterval struct {
-	Start    MonoNano `json:"start_ns"`
-	End      MonoNano `json:"end_ns"`
-	Stack    uint32   `json:"stack"`
-	Kind     string   `json:"kind"`
-	Thread   uint64   `json:"thread,string"`
-	Censored bool     `json:"censored"`
+	Start      MonoNano           `json:"start_ns"`
+	End        MonoNano           `json:"end_ns"`
+	Stack      uint32             `json:"stack"`
+	Kind       string             `json:"kind"`
+	Thread     Uint64             `json:"thread"`
+	Censored   bool               `json:"censored"`
+	NativeTask *ProfileNativeTask `json:"native_task,omitempty"`
+	Unit       string             `json:"unit,omitempty"`
+	Reason     string             `json:"reason,omitempty"`
+	Correction bool               `json:"correction,omitempty"`
 }
 type ProfileChunk struct {
-	Profile    ID                `json:"profile_id"`
-	Process    ID                `json:"process_id"`
-	Capability ID                `json:"capability_id"`
-	Method     string            `json:"method"`
-	Units      string            `json:"units"`
-	Start      UnixNano          `json:"start_ns"`
-	End        UnixNano          `json:"end_ns"`
-	Clock      TraceClock        `json:"clock"`
-	Frames     []ProfileFrame    `json:"frames"`
-	Stacks     []ProfileStack    `json:"stacks"`
-	Samples    []ProfileSample   `json:"samples"`
-	Intervals  []ProfileInterval `json:"intervals"`
-	Loss       uint64            `json:"loss,string"`
-	Truncated  bool              `json:"truncated"`
+	Profile            ID                   `json:"profile_id"`
+	Process            ID                   `json:"process_id"`
+	Capability         ID                   `json:"capability_id"`
+	Method             string               `json:"method"`
+	Units              string               `json:"units"`
+	Start              UnixNano             `json:"start_ns"`
+	End                UnixNano             `json:"end_ns"`
+	Clock              TraceClock           `json:"clock"`
+	Frames             []ProfileFrame       `json:"frames"`
+	Stacks             []ProfileStack       `json:"stacks"`
+	Samples            []ProfileSample      `json:"samples"`
+	Intervals          []ProfileInterval    `json:"intervals"`
+	Loss               Uint64               `json:"loss"`
+	Truncated          bool                 `json:"truncated"`
+	NativeDomain       *ProfileNativeDomain `json:"native_domain,omitempty"`
+	PolicyRevision     Revision             `json:"policy_revision,omitempty"`
+	Sequence           Uint64               `json:"sequence,omitempty"`
+	Complete           bool                 `json:"complete,omitempty"`
+	NativeCapabilities []ID                 `json:"native_capabilities,omitempty"`
+	NativeLoss         []ProfileNativeLoss  `json:"native_loss,omitempty"`
 }
 type Coverage struct {
 	Frames  string `json:"frames"`
@@ -460,15 +472,15 @@ type LossReport struct {
 	End          UnixNano `json:"end_ns"`
 	Signal       Kind     `json:"signal"`
 	Reason       string   `json:"reason"`
-	Count        uint64   `json:"count,string"`
+	Count        Uint64   `json:"count"`
 	LastAck      *Cursor  `json:"last_ack"`
-	QueueBytes   uint64   `json:"queue_bytes,string"`
-	QueueRecords uint64   `json:"queue_records,string"`
+	QueueBytes   Uint64   `json:"queue_bytes"`
+	QueueRecords Uint64   `json:"queue_records"`
 }
 type ConditionEvent struct {
 	Condition ID       `json:"condition_id"`
 	Epoch     ID       `json:"epoch"`
-	Sequence  uint64   `json:"sequence,string"`
+	Sequence  Uint64   `json:"sequence"`
 	At        UnixNano `json:"event_ns"`
 	Status    string   `json:"status"`
 	Severity  string   `json:"severity"`
@@ -501,7 +513,7 @@ type NormalizedBatch struct {
 	Org         ID                   `json:"org"`
 	Hash        Hash                 `json:"hash"`
 	Canonical   []byte               `json:"canonical"`
-	PolicyEpoch uint64               `json:"policy_epoch,string"`
+	PolicyEpoch Uint64               `json:"policy_epoch"`
 	PolicyHash  string               `json:"policy_hash"`
 	AdmissionAt UnixNano             `json:"admission_at_ns"`
 	Deadlines   []SignalDeadline     `json:"deadlines"`

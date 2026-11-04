@@ -18,7 +18,7 @@ func (scope Scope) ValidateReservation(ctx context.Context, b model.NormalizedBa
 			return e
 		}
 		r, ok := st.Reservations[b.Reservation.ID.String()]
-		if !ok || r.State == "cancelled" || r.Org != scope.org || r.Org != b.Org || r.Project != b.Project || r.Source != b.Source || r.Producer != b.Producer || r.Batch != b.ID || r.Slot != b.RouteSlot || r.Hash != b.Hash || r.PolicyEpoch != b.PolicyEpoch || r.Bytes != uint64(len(b.Canonical)) {
+		if !ok || r.State == "cancelled" || r.Org != scope.org || r.Org != b.Org || r.Project != b.Project || r.Source != b.Source || r.Producer != b.Producer || r.Batch != b.ID || r.Slot != b.RouteSlot || r.Hash != b.Hash || r.PolicyEpoch != b.PolicyEpoch || r.Bytes != model.Uint64(len(b.Canonical)) {
 			return model.Fail(model.Forbidden)
 		}
 		if r.State != "reserved" {

@@ -13,15 +13,17 @@ import (
 
 func TestMissingBearerHashKeyWithExistingAuthorityFailsClosed(t *testing.T) {
 	ctx := context.Background()
-	store, err := control.Open(t.TempDir())
+	directory := t.TempDir()
+	store, err := control.Open(directory)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer func() { store.Close() }()
 	service, err := auth.NewService(auth.AuthDependencies{Control: store})
 	if err != nil {
 		t.Fatal(err)
 	}
+	activateAuthControl(t, store, directory)
 	digest, err := service.BearerDigest(auth.ServerAPIBearer, "existing authority fixture")
 	if err != nil {
 		t.Fatal(err)
@@ -34,8 +36,17 @@ func TestMissingBearerHashKeyWithExistingAuthorityFailsClosed(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	if err = store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store, err = control.Open(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Constructor must reject persisted missing initialized authority before any
+	// reactivation can serve feature traffic; never regenerate an empty token set.
 	_, err = auth.NewService(auth.AuthDependencies{Control: store})
-	assertCode(t, err, model.Unavailable)
+	assertCode(t, err, model.Corrupt)
 	if err := store.View(ctx, func(st control.State) error {
 		if st.BearerHashKey != "" {
 			t.Fatal("missing authority key was silently replaced")
@@ -48,19 +59,28 @@ func TestMissingBearerHashKeyWithExistingAuthorityFailsClosed(t *testing.T) {
 
 func TestInitializedBearerAuthorityDoesNotReplaceLostKeyWhenTokenSetIsEmpty(t *testing.T) {
 	ctx := context.Background()
-	store, err := control.Open(t.TempDir())
+	directory := t.TempDir()
+	store, err := control.Open(directory)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer func() { store.Close() }()
 	if _, err := auth.NewService(auth.AuthDependencies{Control: store}); err != nil {
 		t.Fatal(err)
 	}
+	activateAuthControl(t, store, directory)
 	if err := store.Update(ctx, func(st *control.State) error { st.BearerHashKey = ""; st.ServerTokens = nil; return nil }); err != nil {
 		t.Fatal(err)
 	}
+	if err = store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store, err = control.Open(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
 	_, err = auth.NewService(auth.AuthDependencies{Control: store})
-	assertCode(t, err, model.Unavailable)
+	assertCode(t, err, model.Corrupt)
 	if err := store.View(ctx, func(st control.State) error {
 		if st.BearerHashKey != "" || st.BearerHashKeyVersion != 1 {
 			t.Fatal("initialized installation silently replaced its lost hash key")

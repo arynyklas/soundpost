@@ -15,6 +15,7 @@ import (
 type ControlStore interface {
 	View(context.Context, func(model.ControlState) error) error
 	Update(context.Context, func(*model.ControlState) error) error
+	InitializeBearerHashKey(context.Context, string, uint8) error
 	RemoveBootstrapFile() error
 	Seal(string) (string, error)
 	OpenSecret(string) (string, error)
@@ -30,10 +31,10 @@ type Service struct {
 	sourceBarrier SourceBarrier
 }
 type Session struct {
-	Token   string   `json:"-"`
-	CSRF    string   `json:"csrf"`
-	User    model.ID `json:"user"`
-	Expires int64    `json:"expires,string"`
+	Token   string      `json:"-"`
+	CSRF    string      `json:"csrf"`
+	User    model.ID    `json:"user"`
+	Expires model.Int64 `json:"expires"`
 }
 type Credential struct {
 	service *Service
@@ -90,7 +91,7 @@ func (s *Service) Bootstrap(ctx context.Context, token, email, p string) (Sessio
 		}
 		st.Users[id.String()] = model.ControlUser{ID: id, Email: email, Password: h, Admin: true}
 		st.BootstrapHash = ""
-		st.Sessions[hashToken(out.Token)] = model.ControlSession{User: id, CSRF: out.CSRF, Expires: out.Expires, Reauthenticated: s.now().Unix()}
+		st.Sessions[hashToken(out.Token)] = model.ControlSession{User: id, CSRF: out.CSRF, Expires: int64(out.Expires), Reauthenticated: s.now().Unix()}
 		return nil
 	})
 	if e != nil {
@@ -105,7 +106,7 @@ func validEmail(v string) bool {
 	return len(v) < 255 && strings.Contains(v, "@") && strings.TrimSpace(v) == v
 }
 func (s *Service) newSession(id model.ID) Session {
-	return Session{Token: randomToken(), CSRF: randomToken(), User: id, Expires: s.now().Add(12 * time.Hour).Unix()}
+	return Session{Token: randomToken(), CSRF: randomToken(), User: id, Expires: model.Int64(s.now().Add(12 * time.Hour).Unix())}
 }
 func (s *Service) Login(ctx context.Context, email, p, code string) (Session, error) {
 	out := s.newSession(model.ID{})
@@ -131,7 +132,7 @@ func (s *Service) Login(ctx context.Context, email, p, code string) (Session, er
 				st.Users[k] = u
 			}
 			out.User = u.ID
-			st.Sessions[hashToken(out.Token)] = model.ControlSession{User: u.ID, CSRF: out.CSRF, Expires: out.Expires, Reauthenticated: s.now().Unix()}
+			st.Sessions[hashToken(out.Token)] = model.ControlSession{User: u.ID, CSRF: out.CSRF, Expires: int64(out.Expires), Reauthenticated: s.now().Unix()}
 			return nil
 		}
 		return model.Fail(model.Unauthenticated)
@@ -166,7 +167,7 @@ func (s *Service) Session(ctx context.Context, token string) (Session, error) {
 		if !ok || v.Expires <= s.now().Unix() || st.Users[v.User.String()].ID == (model.ID{}) || st.Users[v.User.String()].Disabled {
 			return model.Fail(model.Unauthenticated)
 		}
-		out = Session{Token: token, CSRF: v.CSRF, User: v.User, Expires: v.Expires}
+		out = Session{Token: token, CSRF: v.CSRF, User: v.User, Expires: model.Int64(v.Expires)}
 		return nil
 	})
 	return out, e

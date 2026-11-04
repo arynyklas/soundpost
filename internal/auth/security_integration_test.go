@@ -29,6 +29,7 @@ func TestBootstrapTokenConsumedOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	activateAuthControl(t, store, dir)
 	if _, err = service.Bootstrap(ctx, token, "owner@example.test", "correct horse battery staple 2026"); err != nil {
 		t.Fatal(err)
 	}
@@ -44,6 +45,7 @@ func TestBootstrapTokenConsumedOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	activateAuthControl(t, store, dir)
 	_, err = service.Bootstrap(ctx, token, "attacker@example.test", "another sufficiently long password")
 	assertCode(t, err, model.Unauthenticated)
 	if _, err = service.Login(ctx, "owner@example.test", "correct horse battery staple 2026", ""); err != nil {

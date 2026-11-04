@@ -101,6 +101,7 @@ func TestServerBearerAuthoritySurvivesRestartAndEnvelopeRotation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	activateAuthControl(t, store, dir)
 	bootstrap, err := store.BootstrapToken()
 	if err != nil {
 		t.Fatal(err)
@@ -182,6 +183,7 @@ func TestServerBearerAuthoritySurvivesRestartAndEnvelopeRotation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	activateAuthControl(t, store, dir)
 	again, err := service.BearerDigest(auth.ServerAPIBearer, issued.Token)
 	if err != nil || again != digest {
 		t.Fatal("envelope rotation/restart changed bearer hash authority")

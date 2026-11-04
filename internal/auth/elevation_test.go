@@ -18,11 +18,13 @@ func TestElevationAuditsBeforeRead(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
+	defer store.Close()
 	now := time.Now()
 	service, e := auth.NewService(auth.AuthDependencies{Control: store, Now: func() time.Time { return now }})
 	if e != nil {
 		t.Fatal(e)
 	}
+	activateAuthControl(t, store, t.TempDir())
 	token, _ := store.BootstrapToken()
 	session, e := service.Bootstrap(ctx, token, "owner@example.test", "correct horse battery staple 2026")
 	if e != nil {

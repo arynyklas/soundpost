@@ -4,43 +4,40 @@ package model
 
 import (
 	"encoding/json"
+	"errors"
 )
 
 func (h *IntegerHistogram) UnmarshalJSON(raw []byte) error {
 	type plain IntegerHistogram
-	var decoded plain
-	if err := json.Unmarshal(raw, &decoded); err != nil {
+	var value plain
+	wire := struct {
+		*plain
+		Count     *Uint64 `json:"count"`
+		ZeroCount *Uint64 `json:"zero_count"`
+	}{plain: &value}
+	if err := json.Unmarshal(raw, &wire); err != nil {
 		return err
 	}
-	var fields struct {
-		Count     json.RawMessage `json:"count"`
-		ZeroCount json.RawMessage `json:"zero_count"`
+	if wire.Count == nil || wire.ZeroCount == nil {
+		return errors.New("histogram counts required")
 	}
-	if err := json.Unmarshal(raw, &fields); err != nil {
-		return err
-	}
-	if _, err := parseDecimal(fields.Count, false); err != nil {
-		return err
-	}
-	if _, err := parseDecimal(fields.ZeroCount, false); err != nil {
-		return err
-	}
-	*h = IntegerHistogram(decoded)
+	value.Count = *wire.Count
+	value.ZeroCount = *wire.ZeroCount
+	*h = IntegerHistogram(value)
 	return nil
 }
 func (c *Cursor) UnmarshalJSON(raw []byte) error {
 	var wire struct {
-		Group ID              `json:"group"`
-		Index json.RawMessage `json:"index"`
+		Group ID      `json:"group"`
+		Index *Uint64 `json:"index"`
 	}
 	if err := json.Unmarshal(raw, &wire); err != nil {
 		return err
 	}
-	var index AbsoluteBucket
-	if err := json.Unmarshal(wire.Index, &index); err != nil {
-		return err
+	if wire.Index == nil {
+		return errors.New("cursor index required")
 	}
 	c.Group = wire.Group
-	c.Index = uint64(index)
+	c.Index = *wire.Index
 	return nil
 }

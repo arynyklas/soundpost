@@ -23,6 +23,7 @@ func TestBootstrapCleanupFailureNeverAcknowledgesOrRestoresToken(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
+	activateAuthControl(t, store, t.TempDir())
 	token, e := store.BootstrapToken()
 	if e != nil {
 		t.Fatal(e)
