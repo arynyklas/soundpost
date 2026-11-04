@@ -5,6 +5,7 @@ package auth_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"soundpost/internal/auth"
 	"soundpost/internal/control"
 	"soundpost/internal/model"
@@ -19,6 +20,7 @@ type cacheFixture struct {
 	store   *control.Store
 	service *auth.Service
 	actor   auth.Credential
+	session auth.Session
 	org     model.ID
 	project model.ID
 	now     atomic.Int64
@@ -49,6 +51,7 @@ func newCacheFixture(t *testing.T) *cacheFixture {
 	activateAuthControl(t, f.store, t.TempDir())
 	boot, _ := f.store.BootstrapToken()
 	session, err := f.service.Bootstrap(f.ctx, boot, "cache-owner@example.test", "cache owner password 2026")
+	f.session = session
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,5 +277,100 @@ func TestSelectedNamedSourceIsPartOfTheFingerprint(t *testing.T) {
 	token, _ := cache.IssueTicket(f.ctx, first, "cursor", sources[0], nil, time.Minute)
 	if _, _, err = cache.OpenTicket(f.ctx, second, "cursor", token); code(err) != model.NotFound {
 		t.Fatal("cursor of source one resumed under source two", err)
+	}
+}
+
+// Bookkeeping must be bounded by the cache limit no matter how entries leave:
+// TTL-expired keys that are looked up and stored again must not leave stale
+// index records behind.
+func TestCacheBookkeepingIsBoundedUnderChurn(t *testing.T) {
+	f := newCacheFixture(t)
+	reader, _ := f.reader("churn@example.test", auth.Read)
+	cache, err := auth.NewCache(f.service, f.service.SourceLifecycleGenerations(), 8, time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := f.scope(reader, auth.Read)
+	churn := func(query string) {
+		t.Helper()
+		res, err := cache.Lookup(f.ctx, scope, "p", query, "t")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = cache.Store(f.ctx, scope, res.Fill, []byte("v"), false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A small working set whose entries expire and are re-stored every round.
+	for round := 0; round < 3000; round++ {
+		f.advance(2 * time.Millisecond)
+		churn(fmt.Sprintf("hot-%d", round%3))
+	}
+	if cache.EntryLen() > 8 || cache.OrderLen() > 8 {
+		t.Fatalf("hot keys grew the cache index: entries=%d order=%d (limit 8)", cache.EntryLen(), cache.OrderLen())
+	}
+	// Ten thousand distinct short-lived keys.
+	for i := 0; i < 10000; i++ {
+		if i%4 == 0 {
+			f.advance(2 * time.Millisecond)
+		}
+		churn(fmt.Sprintf("distinct-%d", i))
+	}
+	if cache.EntryLen() > 8 || cache.OrderLen() > 8 {
+		t.Fatalf("distinct keys grew the cache index: entries=%d order=%d (limit 8)", cache.EntryLen(), cache.OrderLen())
+	}
+	// The newest entry is never the one evicted by a stale duplicate.
+	f.advance(2 * time.Millisecond)
+	churn("survivor")
+	if res, err := cache.Lookup(f.ctx, scope, "p", "survivor", "t"); err != nil || !res.Hit {
+		t.Fatal("the freshest entry was evicted", err)
+	}
+}
+
+func TestCacheAndTicketInputBounds(t *testing.T) {
+	f := newCacheFixture(t)
+	reader, _ := f.reader("bounds@example.test", auth.Read)
+	cache := f.cache(f.service.SourceLifecycleGenerations())
+	scope := f.scope(reader, auth.Read)
+	res, err := cache.Lookup(f.ctx, scope, "p", "q", "t")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = cache.Store(f.ctx, scope, res.Fill, make([]byte, 1<<20+1), false); code(err) != model.TooLarge {
+		t.Fatalf("oversized cache value accepted: %v", err)
+	}
+	if err = cache.Store(f.ctx, scope, res.Fill, []byte("not empty"), true); err == nil {
+		t.Fatal("negative entry carrying a value accepted")
+	}
+	if again, err := cache.Lookup(f.ctx, scope, "p", "q", "t"); err != nil || again.Hit {
+		t.Fatal("a rejected store left an entry behind", err)
+	}
+	subject := model.NewID()
+	for name, try := range map[string]func() error{
+		"empty kind": func() error { _, e := cache.IssueTicket(f.ctx, scope, "", subject, nil, time.Minute); return e },
+		"33 byte kind": func() error {
+			_, e := cache.IssueTicket(f.ctx, scope, string(make([]byte, 33)), subject, nil, time.Minute)
+			return e
+		},
+		"8193 byte state": func() error {
+			_, e := cache.IssueTicket(f.ctx, scope, "cursor", subject, make([]byte, 8193), time.Minute)
+			return e
+		},
+		"zero ttl": func() error { _, e := cache.IssueTicket(f.ctx, scope, "cursor", subject, nil, 0); return e },
+		"16 minute ttl": func() error {
+			_, e := cache.IssueTicket(f.ctx, scope, "cursor", subject, nil, 16*time.Minute)
+			return e
+		},
+	} {
+		if code(try()) != model.Invalid {
+			t.Fatalf("%s ticket was not rejected as invalid", name)
+		}
+	}
+	// Boundary sizes are accepted.
+	if _, err = cache.IssueTicket(f.ctx, scope, string(make([]byte, 32)), subject, make([]byte, 8192), 15*time.Minute); err != nil {
+		t.Fatalf("maximum ticket rejected: %v", err)
+	}
+	if _, _, err = cache.OpenTicket(f.ctx, scope, "cursor", string(make([]byte, 16385))); code(err) != model.NotFound {
+		t.Fatalf("oversized ticket not a plain NotFound: %v", err)
 	}
 }

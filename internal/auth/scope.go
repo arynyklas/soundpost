@@ -34,6 +34,10 @@ type Scope struct {
 	elevationExpires time.Time
 	sourceCredential *SourceCredential
 	historical       bool
+	// expiresAt is the instant the scope's raw-read authority lapses on its
+	// own (a restricted-raw source policy or source lifetime ending). Zero means
+	// the scope carries no clock-based expiry.
+	expiresAt time.Time
 }
 
 func (s Scope) OrgID() model.ID               { return s.org }
@@ -41,6 +45,15 @@ func (s Scope) PrincipalID() model.ID         { return s.credential.user }
 func (s Scope) ProjectIDs() []model.ID        { return append([]model.ID(nil), s.projects...) }
 func (s Scope) VisibilityFingerprint() string { return s.fingerprint }
 func (s Scope) PolicyEpoch() uint64           { return s.epoch }
+
+// ExpiresAt is the instant a clock-based authority window (restricted-raw
+// policy or source lifetime) closes; zero when the scope has none. Caches,
+// tickets and export grants must never be held past it.
+func (s Scope) ExpiresAt() time.Time { return s.expiresAt }
+
+// Now is the authority's clock, the single time source every authorization,
+// ticket and export-lifetime decision must share.
+func (s *Service) Now() time.Time { return s.now() }
 func (s Scope) AllowsProject(id model.ID) bool {
 	for _, v := range s.projects {
 		if v == id {
@@ -120,6 +133,11 @@ func (s *Service) Authorize(ctx context.Context, c Credential, org model.ID, pro
 		keys := make([]string, 0)
 		if c.machine {
 			keys = append(keys, "server_token:"+s.serverTokenDigest(c.token))
+		} else {
+			// A human session is part of the visibility identity, so logout/login
+			// or rotation ends every ticket, cursor, export grant and warm entry
+			// minted under the previous session.
+			keys = append(keys, "session:"+hashToken(c.token))
 		}
 		for k, v := range o.Grants {
 			if len(k) >= 32 && k[:32] == c.user.String() {
@@ -190,6 +208,9 @@ func (s *Service) Revalidate(ctx context.Context, scope Scope) error {
 	checkedAt := s.now()
 	if scope.elevation != (model.ID{}) && !s.now().Before(scope.elevationExpires) {
 		return model.Fail(model.Forbidden)
+	}
+	if !scope.expiresAt.IsZero() && !checkedAt.Before(scope.expiresAt) {
+		return model.Fail(model.NotFound)
 	}
 	if scope.service != s {
 		return model.Fail(model.Forbidden)

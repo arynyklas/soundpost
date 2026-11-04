@@ -38,6 +38,9 @@ func (s *Service) grantLease(scope Scope, st model.ControlState, checkedAt time.
 	if scope.elevation != (model.ID{}) && scope.elevationExpires.Before(deadline) {
 		deadline = checkedAt.Add(scope.elevationExpires.Sub(checkedAt))
 	}
+	if !scope.expiresAt.IsZero() && scope.expiresAt.Before(deadline) {
+		deadline = checkedAt.Add(scope.expiresAt.Sub(checkedAt))
+	}
 	if !s.now().Before(deadline) {
 		return model.Fail(model.Stale)
 	}

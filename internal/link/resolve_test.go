@@ -5,6 +5,7 @@ package link_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"path/filepath"
 	"soundpost/internal/auth"
@@ -19,13 +20,16 @@ import (
 // scriptedRecords answers a scan from the selector alone, so the test can see
 // exactly which targets reached an index.
 type scriptedRecords struct {
-	known   map[model.ID]bool
-	scans   []model.ID
-	closeOK bool
+	known map[model.ID]bool
+	scans []model.ID
+	// failure modes of an otherwise-present target
+	scanErr, nextErr, closeErr bool
 }
 type scriptedRows struct {
-	row  bool
-	done bool
+	row      bool
+	done     bool
+	nextErr  bool
+	closeErr bool
 }
 
 func (s *scriptedRecords) Scan(_ context.Context, _ auth.Scope, req storage.ScanRequest) (storage.RowIterator, error) {
@@ -34,9 +38,15 @@ func (s *scriptedRecords) Scan(_ context.Context, _ auth.Scope, req storage.Scan
 		return nil, err
 	}
 	s.scans = append(s.scans, id)
-	return &scriptedRows{row: s.known[id]}, nil
+	if s.scanErr {
+		return nil, errors.New("index unavailable")
+	}
+	return &scriptedRows{row: s.known[id], nextErr: s.nextErr, closeErr: s.closeErr}, nil
 }
 func (r *scriptedRows) Next(context.Context) (storage.Page, error) {
+	if r.nextErr {
+		return storage.Page{}, errors.New("page read failed")
+	}
 	if r.done || !r.row {
 		return storage.Page{}, io.EOF
 	}
@@ -44,7 +54,12 @@ func (r *scriptedRows) Next(context.Context) (storage.Page, error) {
 	return storage.Page{IDs: []model.ID{{}}}, nil
 }
 func (r *scriptedRows) Watermarks() []model.Cursor { return nil }
-func (r *scriptedRows) Close() error               { return nil }
+func (r *scriptedRows) Close() error {
+	if r.closeErr {
+		return errors.New("close failed")
+	}
+	return nil
+}
 
 func TestResolveAuthorizesBeforeAnyLookupAndHidesDifference(t *testing.T) {
 	ctx := context.Background()
@@ -136,6 +151,23 @@ func TestResolveAuthorizesBeforeAnyLookupAndHidesDifference(t *testing.T) {
 	}
 	if _, err = resolver.Resolve(ctx, scope, make([]link.Reference, 129)); err == nil {
 		t.Fatal("oversized reference batch accepted")
+	}
+	// A target is available only if the index read completed cleanly end to end:
+	// a failed scan, page read or close is the same unavailable value, never a
+	// resolved reference.
+	for name, failing := range map[string]*scriptedRecords{
+		"scan":  {known: map[model.ID]bool{present: true}, scanErr: true},
+		"next":  {known: map[model.ID]bool{present: true}, nextErr: true},
+		"close": {known: map[model.ID]bool{present: true}, closeErr: true},
+	} {
+		broken, err := link.New(service, failing, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := broken.Resolve(ctx, scope, refs[:1])
+		if err != nil || got[0] != (link.ResolvedReference{}) {
+			t.Fatalf("%s failure resolved a reference: %+v %v", name, got, err)
+		}
 	}
 	// Revocation fails the whole call before any further lookup.
 	cmd("grant", auth.AdminPayload{UserID: reader, ProjectID: p1, Enabled: false})

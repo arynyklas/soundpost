@@ -4,7 +4,10 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"net/http"
+	"net/url"
+	"slices"
 	"soundpost/internal/auth"
 	"soundpost/internal/model"
 )
@@ -31,9 +34,13 @@ func secondaryScope(ctx context.Context, s *auth.Service, c auth.Credential, org
 		}
 		e, err := s.ResolveElevation(ctx, c, elevation)
 		if err != nil {
-			return auth.Scope{}, err
+			return auth.Scope{}, collapseElevationDenial(err)
 		}
-		return s.ElevatedScope(ctx, e, org, []model.ID{project}, permission)
+		scope, err := s.ElevatedScope(ctx, e, org, []model.ID{project}, permission)
+		if err != nil {
+			return auth.Scope{}, collapseElevationDenial(err)
+		}
+		return scope, nil
 	}
 	switch permission {
 	case auth.Read:
@@ -48,6 +55,33 @@ func secondaryScope(ctx context.Context, s *auth.Service, c auth.Credential, org
 		return s.AuthorizeRestrictedSource(ctx, c, org, project, source)
 	}
 	return auth.Scope{}, model.Fail(model.Invalid)
+}
+
+// collapseElevationDenial makes every elevation denial that depends on the
+// target (unknown, someone else's, expired, not covering this org/project) one
+// identical NotFound, byte-equal to a guessed elevation ID. Only failures that
+// do not depend on the target stay distinct: a dead credential and
+// infrastructure faults.
+func collapseElevationDenial(err error) error {
+	var f *model.Fault
+	if errors.As(err, &f) {
+		switch f.Code {
+		case model.Unauthenticated, model.Unavailable, model.Cancelled, model.Timeout:
+			return err
+		}
+	}
+	return model.Fail(model.NotFound)
+}
+
+// onlyKeys reports whether every query key is allowed and carries exactly one
+// value, keeping the capabilities DTO as closed as the JSON bodies.
+func onlyKeys(q url.Values, allowed ...string) bool {
+	for key, values := range q {
+		if len(values) != 1 || !slices.Contains(allowed, key) {
+			return false
+		}
+	}
+	return true
 }
 func parsePermission(v string) (auth.Permission, error) {
 	switch v {
@@ -80,12 +114,16 @@ func RegisterCapabilityRoutes(mux *http.ServeMux, s *auth.Service) {
 			return
 		}
 		q := r.URL.Query()
+		if !onlyKeys(q, "org", "project", "permission", "elevation", "source") {
+			reply(w, nil, model.Fail(model.Invalid))
+			return
+		}
 		org, e1 := model.ParseID(q.Get("org"))
 		project, e2 := model.ParseID(q.Get("project"))
 		permission, e3 := parsePermission(q.Get("permission"))
 		elevation, e4 := optionalID(q.Get("elevation"))
 		source, e5 := optionalID(q.Get("source"))
-		if e1 != nil || e2 != nil || e3 != nil || e4 != nil || e5 != nil || len(q) > 5 {
+		if e1 != nil || e2 != nil || e3 != nil || e4 != nil || e5 != nil {
 			reply(w, nil, model.Fail(model.Invalid))
 			return
 		}

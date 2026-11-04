@@ -3,6 +3,7 @@
 package auth
 
 import (
+	"container/list"
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
@@ -65,10 +66,13 @@ type Cache struct {
 	limit   int
 	ttl     time.Duration
 	mu      sync.Mutex
-	entries map[[32]byte]cacheEntry
-	order   [][32]byte
+	entries map[[32]byte]*list.Element
+	// order holds exactly the entries in map, oldest first. It is the single
+	// source of truth for eviction: every removal path deletes from both.
+	order *list.List
 }
 type cacheEntry struct {
+	key      [32]byte
 	value    []byte
 	negative bool
 	expires  time.Time
@@ -93,7 +97,7 @@ func NewCache(service *Service, deletes DeleteGenerations, limit int, ttl time.D
 	if service == nil || deletes == nil || limit < 1 || limit > 1<<16 || ttl <= 0 || ttl > 5*time.Minute {
 		return nil, model.Fail(model.Invalid)
 	}
-	c := &Cache{service: service, deletes: deletes, limit: limit, ttl: ttl, entries: map[[32]byte]cacheEntry{}}
+	c := &Cache{service: service, deletes: deletes, limit: limit, ttl: ttl, entries: map[[32]byte]*list.Element{}, order: list.New()}
 	if _, err := rand.Read(c.secret[:]); err != nil {
 		return nil, model.Fail(model.Unavailable)
 	}
@@ -167,11 +171,13 @@ func (c *Cache) Lookup(ctx context.Context, scope Scope, profile, query, params 
 	out := CacheResult{Fill: CacheFill{key: key, fingerprint: b.fingerprint, epoch: b.epoch, deletion: b.deletion}}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	e, ok := c.entries[key]
-	if !ok || !c.service.now().Before(e.expires) {
-		if ok {
-			delete(c.entries, key)
-		}
+	el, ok := c.entries[key]
+	if !ok {
+		return out, nil
+	}
+	e := el.Value.(*cacheEntry)
+	if !c.service.now().Before(e.expires) {
+		c.removeLocked(el)
 		return out, nil
 	}
 	out.Hit, out.Negative = true, e.negative
@@ -194,15 +200,33 @@ func (c *Cache) Store(ctx context.Context, scope Scope, fill CacheFill, value []
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if _, exists := c.entries[fill.key]; !exists {
-		c.order = append(c.order, fill.key)
+	entry := &cacheEntry{key: fill.key, value: append([]byte(nil), value...), negative: negative, expires: c.lifetimeEnd(scope, c.ttl)}
+	if el, exists := c.entries[fill.key]; exists {
+		el.Value = entry
+		c.order.MoveToBack(el)
+	} else {
+		c.entries[fill.key] = c.order.PushBack(entry)
 	}
-	c.entries[fill.key] = cacheEntry{value: append([]byte(nil), value...), negative: negative, expires: c.service.now().Add(c.ttl)}
-	for len(c.entries) > c.limit && len(c.order) > 0 {
-		delete(c.entries, c.order[0])
-		c.order = c.order[1:]
+	for c.order.Len() > c.limit {
+		c.removeLocked(c.order.Front())
 	}
 	return nil
+}
+
+func (c *Cache) removeLocked(el *list.Element) {
+	delete(c.entries, el.Value.(*cacheEntry).key)
+	c.order.Remove(el)
+}
+
+// lifetimeEnd is now+ttl, never later than the instant the scope's own
+// clock-based authority (restricted-raw window) closes: nothing minted under a
+// scope may be held past the window that authorized it.
+func (c *Cache) lifetimeEnd(scope Scope, ttl time.Duration) time.Time {
+	end := c.service.now().Add(ttl)
+	if !scope.expiresAt.IsZero() && scope.expiresAt.Before(end) {
+		end = scope.expiresAt
+	}
+	return end
 }
 
 type ticketBody struct {
@@ -234,7 +258,7 @@ func (c *Cache) IssueTicket(ctx context.Context, scope Scope, kind string, subje
 	sort.Strings(projects)
 	sources := idStrings(scope.sources)
 	sort.Strings(sources)
-	raw, err := json.Marshal(ticketBody{Kind: kind, Org: scope.org, Fingerprint: b.fingerprint, Action: string(scope.action), Projects: projects, Sources: sources, Epoch: b.epoch, Deletion: b.deletion, Subject: subject, State: state, Expires: c.service.now().Add(ttl).Unix()})
+	raw, err := json.Marshal(ticketBody{Kind: kind, Org: scope.org, Fingerprint: b.fingerprint, Action: string(scope.action), Projects: projects, Sources: sources, Epoch: b.epoch, Deletion: b.deletion, Subject: subject, State: state, Expires: c.lifetimeEnd(scope, ttl).Unix()})
 	if err != nil {
 		return "", model.Fail(model.Unavailable)
 	}
@@ -252,8 +276,11 @@ func (c *Cache) OpenTicket(ctx context.Context, scope Scope, kind, token string)
 		return model.ID{}, nil, err
 	}
 	denied := model.Fail(model.NotFound)
+	if len(token) > 16384 {
+		return model.ID{}, nil, denied
+	}
 	raw, e := base64.RawURLEncoding.DecodeString(token)
-	if e != nil || len(token) > 16384 || len(raw) < 33 {
+	if e != nil || len(raw) < 33 {
 		return model.ID{}, nil, denied
 	}
 	body, sig := raw[:len(raw)-32], raw[len(raw)-32:]
@@ -330,6 +357,11 @@ func (s *Service) VisibleSources(ctx context.Context, scope Scope) ([]VisibleSou
 			}
 			if src.Policy.Expires != 0 && int64(src.Policy.Expires) <= s.now().UnixNano() {
 				continue
+			}
+			if src.Policy.Class == "restricted_raw" {
+				if _, alive := rawWindowEnd(src, s.now()); !alive {
+					continue
+				}
 			}
 			restricted := src.Policy.Class == "restricted_raw"
 			if restricted != (scope.action == RawRead) || restricted && scope.elevation != (model.ID{}) {

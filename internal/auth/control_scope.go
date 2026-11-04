@@ -51,5 +51,8 @@ func (scope Scope) ValidateControlState(st model.ControlState) error {
 	if scope.elevation != (model.ID{}) && !scope.service.now().Before(scope.elevationExpires) {
 		return model.Fail(model.Forbidden)
 	}
+	if !scope.expiresAt.IsZero() && !scope.service.now().Before(scope.expiresAt) {
+		return model.Fail(model.NotFound)
+	}
 	return nil
 }

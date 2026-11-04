@@ -1089,3 +1089,306 @@ func TestElevationReadAuditMustCommit(t *testing.T) {
 		t.Fatalf("audit count %d, want the full baseline plus exactly one committed chunk (%d)", got, want)
 	}
 }
+
+// elevate mints a real elevation for the owner and returns its public ID.
+func (e *isoEnv) elevate(orgs ...model.ID) model.ID {
+	e.t.Helper()
+	el, err := e.app.Auth.Elevate(e.ctx, e.actor.Session, "isolation elevation oracle", orgs)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	raw, err := json.Marshal(el)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	var out struct{ ID model.ID }
+	if err = json.Unmarshal(raw, &out); err != nil {
+		e.t.Fatal(err)
+	}
+	return out.ID
+}
+
+// expire rewrites the stored elevation so its lifetime ended long ago, the way
+// the passage of 15 minutes would.
+func (e *isoEnv) expire(id model.ID) {
+	e.t.Helper()
+	if err := e.app.Control.Update(e.ctx, func(st *model.ControlState) error {
+		var record map[string]json.RawMessage
+		if err := json.Unmarshal(st.OIDC["elevation:"+id.String()], &record); err != nil {
+			return err
+		}
+		record["Expires"] = json.RawMessage("1")
+		raw, err := json.Marshal(record)
+		st.OIDC["elevation:"+id.String()] = raw
+		return err
+	}); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
+// surfaces runs every secondary surface once and reduces each reply to what a
+// client can compare.
+func (e *isoEnv) surfaces(who person, org, project, elevation model.ID) map[string]string {
+	e.t.Helper()
+	out := map[string]string{}
+	status, raw, _ := e.call(who, "GET", "/api/v1/capabilities?org="+org.String()+"&project="+project.String()+"&elevation="+elevation.String(), nil)
+	out["capabilities"] = denial(e.t, status, raw)
+	for name, req := range map[string]httpapi.ExportRequest{
+		"export create":   {Operation: "create", Signal: model.Metric, End: 10},
+		"export status":   {Operation: "status", ID: httpapi.OptionalID(model.NewID())},
+		"export download": {Operation: "download", ID: httpapi.OptionalID(model.NewID()), Ticket: "forged"},
+	} {
+		req.Org, req.Project, req.Elevation = org, project, httpapi.OptionalID(elevation)
+		status, raw, _ = e.call(who, "POST", "/api/v1/exports", req)
+		out[name] = denial(e.t, status, raw)
+	}
+	return out
+}
+
+// Elevation IDs are not an existence oracle: a guessed ID, someone else's live
+// ID, an expired ID and the caller's own ID for an org it does not cover all
+// produce the byte-identical NotFound on every secondary surface.
+func TestElevationIDDenialsAreIndistinguishableFromAGuess(t *testing.T) {
+	e := newIsoEnv(t)
+	project, otherProject := model.NewID(), model.NewID()
+	orgA := e.org("elevation A", project)
+	orgB := e.org("elevation B", otherProject)
+	alice := e.user(orgA, "elevation-alice@example.test")
+	e.grant(orgA, alice, project, true, auth.Read)
+	owner := e.actor
+	covering, onlyB, lapsed := e.elevate(orgA), e.elevate(orgB), e.elevate(orgA)
+	e.expire(lapsed)
+	// Control: the owner's own live elevation of orgA is a real, working read.
+	if status, raw, _ := e.call(owner, "GET", "/api/v1/capabilities?org="+orgA.String()+"&project="+project.String()+"&elevation="+covering.String(), nil); status != 200 {
+		t.Fatalf("own live elevation rejected: %d %s", status, raw)
+	}
+	baseline := e.surfaces(alice, orgA, project, model.NewID())
+	for surface, got := range baseline {
+		if !strings.HasPrefix(got, "Not Found/not_found/") {
+			t.Fatalf("guessed elevation on %s is %q, want a NotFound", surface, got)
+		}
+	}
+	for _, c := range []struct {
+		name      string
+		who       person
+		elevation model.ID
+	}{
+		{"someone else's live elevation", alice, covering},
+		{"own elevation that covers another org only", owner, onlyB},
+		{"own expired elevation", owner, lapsed},
+		{"another guessed elevation, authorized caller", owner, model.NewID()},
+	} {
+		got := e.surfaces(c.who, orgA, project, c.elevation)
+		for surface, want := range baseline {
+			if got[surface] != want {
+				t.Fatalf("%s: %s denial %q differs from a guessed elevation %q", c.name, surface, got[surface], want)
+			}
+		}
+	}
+	// A bad credential is a target-independent failure and stays distinct.
+	status, raw, _ := e.call(person{Session: auth.Session{Token: "not-a-session", CSRF: owner.Session.CSRF}}, "GET", "/api/v1/capabilities?org="+orgA.String()+"&project="+project.String()+"&elevation="+covering.String(), nil)
+	if status != 401 || bytes.Contains(raw, []byte(covering.String())) {
+		t.Fatalf("dead credential: %d %s", status, raw)
+	}
+}
+
+func TestCapabilitiesRejectUnknownQueryKeys(t *testing.T) {
+	e := newIsoEnv(t)
+	project := model.NewID()
+	org := e.org("strict query", project)
+	alice := e.user(org, "strict-alice@example.test")
+	e.grant(org, alice, project, true, auth.Read)
+	base := "/api/v1/capabilities?org=" + org.String() + "&project=" + project.String()
+	if status, raw, _ := e.call(alice, "GET", base, nil); status != 200 {
+		t.Fatalf("control: %d %s", status, raw)
+	}
+	for _, extra := range []string{"&bogus=1", "&projcet=" + project.String(), "&org=" + org.String(), "&permission=telemetry.read&permission=raw.read"} {
+		if status, raw, _ := e.call(alice, "GET", base+extra, nil); status != 400 || !strings.Contains(string(raw), "invalid") {
+			t.Fatalf("%q accepted: %d %s", extra, status, raw)
+		}
+	}
+}
+
+// A complete export with no rows is a real, empty download, not a missing one.
+func TestEmptyCompleteExportDownloadsAsEmptyBody(t *testing.T) {
+	e := newIsoEnv(t)
+	ids := sharedIDs{model.NewID(), model.NewID(), model.NewID()}
+	project := model.NewID()
+	org := e.org("empty export", project)
+	alice := e.user(org, "empty-alice@example.test")
+	stranger := e.user(org, "empty-stranger@example.test")
+	e.grant(org, alice, project, true, auth.Read)
+	e.source(org, project, ids, []model.Kind{model.Metric}) // a source, but no rows at all
+	g := e.mustGrant(e.exportCreate(alice, exports.Request{Project: project, Signal: model.Metric, End: model.Int64(math.MaxInt64)}, org, "", model.ID{}, model.ID{}))
+	op := e.waitExport(alice, org, project, "", model.ID{}, g.Operation.ID)
+	if op.Phase != "complete" {
+		t.Fatalf("empty export phase %q reason %q", op.Phase, op.SafeReason)
+	}
+	status, body, header := e.call(alice, "POST", "/api/v1/exports", httpapi.ExportRequest{Operation: "download", Org: org, Project: project, ID: httpapi.OptionalID(g.Operation.ID), Ticket: g.Ticket})
+	if status != 200 || len(body) != 0 || header.Get("Content-Type") != "application/x-ndjson" {
+		t.Fatalf("empty complete export download: %d %q %q", status, body, header.Get("Content-Type"))
+	}
+	// A missing operation, another principal's operation and a wrong ticket stay
+	// one indistinguishable NotFound.
+	status, raw := e.exportDownload(alice, org, project, "", model.ID{}, model.NewID(), g.Ticket)
+	missing := denial(t, status, raw)
+	if status != 404 {
+		t.Fatalf("missing operation: %d", status)
+	}
+	status, raw = e.exportDownload(stranger, org, project, "", model.ID{}, g.Operation.ID, g.Ticket)
+	if denial(t, status, raw) != missing {
+		t.Fatal("another reader's empty export is distinguishable from a missing one")
+	}
+	status, raw = e.exportDownload(alice, org, project, "", model.ID{}, g.Operation.ID, "forged")
+	if denial(t, status, raw) != missing {
+		t.Fatal("empty export with a forged ticket is distinguishable from a missing one")
+	}
+}
+
+// A grant, ticket and operation die with the session that minted them even when
+// the principal logs straight back in with unchanged grants.
+func TestExportGrantDiesWithItsSessionAcrossRelogin(t *testing.T) {
+	e := newIsoEnv(t)
+	ids := sharedIDs{model.NewID(), model.NewID(), model.NewID()}
+	project := model.NewID()
+	org := e.org("relogin", project)
+	alice := e.user(org, "relogin-alice@example.test")
+	e.grant(org, alice, project, true, auth.Read)
+	src := e.source(org, project, ids, []model.Kind{model.Metric})
+	e.metric(src, "relogin_canary_total")
+	g := e.mustGrant(e.exportCreate(alice, exports.Request{Project: project, Signal: model.Metric, End: model.Int64(math.MaxInt64)}, org, "", model.ID{}, model.ID{}))
+	if op := e.waitExport(alice, org, project, "", model.ID{}, g.Operation.ID); op.Phase != "complete" {
+		t.Fatalf("phase %q", op.Phase)
+	}
+	if err := e.app.Auth.Logout(e.ctx, alice.Session.Token); err != nil {
+		t.Fatal(err)
+	}
+	login, err := e.app.Auth.Login(e.ctx, "relogin-alice@example.test", "isolation reader password", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cred, err := e.app.Auth.Authenticate(e.ctx, login.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again := person{ID: alice.ID, Session: login, Cred: cred}
+	status, body := e.exportDownload(again, org, project, "", model.ID{}, g.Operation.ID, g.Ticket)
+	if status != 404 || bytes.Contains(body, []byte("relogin_canary_total")) {
+		t.Fatalf("grant from a logged-out session downloaded after login: %d", status)
+	}
+	if status, _ = e.exportStatus(again, org, project, "", model.ID{}, g.Operation.ID); status != 404 {
+		t.Fatal("operation of a logged-out session is visible after login")
+	}
+	// The new session works normally.
+	g2 := e.mustGrant(e.exportCreate(again, exports.Request{Project: project, Signal: model.Metric, End: model.Int64(math.MaxInt64)}, org, "", model.ID{}, model.ID{}))
+	e.waitExport(again, org, project, "", model.ID{}, g2.Operation.ID)
+	if status, body = e.exportDownload(again, org, project, "", model.ID{}, g2.Operation.ID, g2.Ticket); status != 200 || !bytes.Contains(body, []byte("relogin_canary_total")) {
+		t.Fatalf("new session's export: %d", status)
+	}
+}
+
+// While a scan is genuinely pending the operation is running (conflict on
+// download); an authority change before it finishes means it never completes.
+func TestPendingExportIsConflictAndDoesNotSurviveRevocation(t *testing.T) {
+	e := newIsoEnv(t)
+	ids := sharedIDs{model.NewID(), model.NewID(), model.NewID()}
+	project := model.NewID()
+	org := e.org("pending", project)
+	alice := e.user(org, "pending-alice@example.test")
+	e.grant(org, alice, project, true, auth.Read)
+	src := e.source(org, project, ids, []model.Kind{model.Metric})
+	e.metric(src, "pending_canary_total")
+	release := e.gate.arm()
+	g := e.mustGrant(e.exportCreate(alice, exports.Request{Project: project, Signal: model.Metric, End: model.Int64(math.MaxInt64)}, org, "", model.ID{}, model.ID{}))
+	status, raw := e.exportStatus(alice, org, project, "", model.ID{}, g.Operation.ID)
+	var op exports.Operation
+	if status != 200 || json.Unmarshal(raw, &op) != nil || op.Phase != "running" {
+		t.Fatalf("pending export: %d %s", status, raw)
+	}
+	if status, raw = e.exportDownload(alice, org, project, "", model.ID{}, g.Operation.ID, g.Ticket); status != 409 {
+		t.Fatalf("download of a running export: %d %s", status, raw)
+	}
+	// Authority changes while the scan is parked, then the scan is released.
+	e.grant(org, alice, project, false)
+	close(release)
+	e.grant(org, alice, project, true, auth.Read)
+	status, body := e.exportDownload(alice, org, project, "", model.ID{}, g.Operation.ID, g.Ticket)
+	if status == 200 || bytes.Contains(body, []byte("pending_canary_total")) {
+		t.Fatalf("export computed across a revocation was released: %d", status)
+	}
+	if status, _ = e.exportStatus(alice, org, project, "", model.ID{}, g.Operation.ID); status != 404 {
+		t.Fatal("export computed across a revocation is still visible")
+	}
+}
+
+// A restricted-raw source policy has an expiration. Once it passes, over real
+// HTTPS, the named reader's capabilities, new exports, existing export status
+// and a download grant minted before the boundary all deny with the same
+// NotFound a guessed source gets; nothing in the control state changed.
+func TestRestrictedRawExpiryEndsCapabilitiesAndExportsOverHTTP(t *testing.T) {
+	e := newIsoEnv(t)
+	ids := sharedIDs{model.NewID(), model.NewID(), model.NewID()}
+	project := model.NewID()
+	org := e.org("raw expiry", project)
+	reader := e.user(org, "raw-expiry-reader@example.test")
+	e.grant(org, reader, project, true, auth.RawRead)
+	policy := e.rawPolicy(e.actor.ID)
+	expiry := time.Now().Add(10 * time.Second)
+	policy.Expires = model.UnixNano(expiry.UnixNano())
+	src := e.onboard(org, project, model.NewID(), ids, policy, auth.SourcePolicyConfig{ProjectID: project, Restricted: true, Readers: []model.ID{reader.ID}, Enabled: true})
+	e.rawLog(src, "expiry-canary-line")
+	capabilities := func(source model.ID) (int, []byte) {
+		path := "/api/v1/capabilities?org=" + org.String() + "&project=" + project.String() + "&permission=raw.read"
+		if source != (model.ID{}) {
+			path += "&source=" + source.String()
+		}
+		status, raw, _ := e.call(reader, "GET", path, nil)
+		return status, raw
+	}
+	export := func() exports.Grant {
+		g := e.mustGrant(e.exportCreate(reader, exports.Request{Project: project, Signal: model.Log, End: model.Int64(math.MaxInt64)}, org, "raw.read", src.ID, model.ID{}))
+		if op := e.waitExport(reader, org, project, "raw.read", src.ID, g.Operation.ID); op.Phase != "complete" {
+			t.Fatalf("raw export phase %q reason %q", op.Phase, op.SafeReason)
+		}
+		return g
+	}
+	// Inside the window everything works and agrees.
+	if status, raw := capabilities(model.ID{}); status != 200 || !strings.Contains(string(raw), src.ID.String()) {
+		t.Fatalf("source not listed inside its window: %d %s", status, raw)
+	}
+	if status, raw := capabilities(src.ID); status != 200 || !strings.Contains(string(raw), src.ID.String()) {
+		t.Fatalf("named source not listed inside its window: %d %s", status, raw)
+	}
+	first, second := export(), export()
+	if status, body := e.exportDownload(reader, org, project, "raw.read", src.ID, first.Operation.ID, first.Ticket); status != 200 || !bytes.Contains(body, []byte("expiry-canary-line")) {
+		t.Fatalf("download inside the window: %d", status)
+	}
+	if !time.Now().Before(expiry) {
+		t.Fatal("fixture too slow: the raw window closed before the in-window checks finished")
+	}
+	for time.Now().Before(expiry.Add(500 * time.Millisecond)) {
+		time.Sleep(50 * time.Millisecond)
+	}
+	// Past the window.
+	status, raw, _ := e.call(reader, "GET", "/api/v1/capabilities?org="+org.String()+"&project="+project.String()+"&permission=raw.read&source="+model.NewID().String(), nil)
+	guessed := denial(t, status, raw)
+	if status != 404 {
+		t.Fatalf("guessed source: %d", status)
+	}
+	if status, raw = capabilities(src.ID); denial(t, status, raw) != guessed {
+		t.Fatalf("expired named source distinguishable from a guess: %d %s", status, raw)
+	}
+	if status, raw = capabilities(model.ID{}); status != 200 || strings.Contains(string(raw), src.ID.String()) {
+		t.Fatalf("expired source still listed: %d %s", status, raw)
+	}
+	status, body := e.exportDownload(reader, org, project, "raw.read", src.ID, second.Operation.ID, second.Ticket)
+	if denial(t, status, body) != guessed || bytes.Contains(body, []byte("expiry-canary-line")) {
+		t.Fatalf("grant minted inside the window released bytes after it: %d", status)
+	}
+	if status, raw = e.exportStatus(reader, org, project, "raw.read", src.ID, second.Operation.ID); denial(t, status, raw) != guessed {
+		t.Fatalf("operation visible after the window: %d", status)
+	}
+	if status, raw = e.exportCreate(reader, exports.Request{Project: project, Signal: model.Log, End: 10}, org, "raw.read", src.ID, model.ID{}); denial(t, status, raw) != guessed {
+		t.Fatalf("export created after the window: %d", status)
+	}
+}

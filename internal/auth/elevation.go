@@ -75,8 +75,10 @@ func (s *Service) ResolveElevation(ctx context.Context, c Credential, id model.I
 		if err := json.Unmarshal(st.OIDC["elevation:"+id.String()], &r); err != nil {
 			return model.Fail(model.NotFound)
 		}
+		// Unknown, another principal's/session's and expired elevations are one
+		// NotFound: the reply never reveals whether an ID exists.
 		if r.User != c.user || r.SessionHash != hashToken(c.token) || r.Expires <= s.now().Unix() {
-			return model.Fail(model.Forbidden)
+			return model.Fail(model.NotFound)
 		}
 		out = Elevation{s, c, append([]model.ID(nil), r.Orgs...), r.Audit, time.Unix(r.Expires, 0)}
 		return nil
@@ -122,7 +124,7 @@ func (s *Service) ElevatedScope(ctx context.Context, e Elevation, org model.ID, 
 		for i, project := range projects {
 			projectKeys[i] = project.String()
 		}
-		out.fingerprint = hashToken(e.credential.user.String() + org.String() + e.audit.String() + string(action) + joinSorted(projectKeys))
+		out.fingerprint = hashToken(e.credential.user.String() + org.String() + e.audit.String() + string(action) + joinSorted(projectKeys) + "|session:" + hashToken(e.credential.token))
 		st.Audits = append(st.Audits, a)
 		return s.grantLease(out, *st, checkedAt)
 	})

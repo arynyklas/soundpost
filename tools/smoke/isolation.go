@@ -281,11 +281,14 @@ func RunIsolation(args []string) (result error) {
 		matrix = append(matrix, isoRow{who, target, surface, status, outcome})
 	}
 	markers := []string{"iso_marker_one_total", "iso_marker_two_total", "iso_marker_b_total", "iso-raw-marker-one", "iso-raw-marker-two"}
-	surfaces := func(who isoPerson, org, project model.ID, permission string, source model.ID) (map[string][2]any, error) {
+	surfaces := func(who isoPerson, org, project model.ID, permission string, source, elevation model.ID) (map[string][2]any, error) {
 		out := map[string][2]any{}
 		capPath := "/api/v1/capabilities?org=" + org.String() + "&project=" + project.String() + "&permission=" + permission
 		if source != (model.ID{}) {
 			capPath += "&source=" + source.String()
+		}
+		if elevation != (model.ID{}) {
+			capPath += "&elevation=" + elevation.String()
 		}
 		status, body, err := call(who, "GET", capPath, nil)
 		if err != nil {
@@ -296,12 +299,12 @@ func RunIsolation(args []string) (result error) {
 		if permission == "raw.read" {
 			signal = model.Log
 		}
-		create := httpapi.ExportRequest{Operation: "create", Org: org, Project: project, Permission: permission, Source: httpapi.OptionalID(source), Signal: signal, Start: 0, End: model.Int64(math.MaxInt64)}
+		create := httpapi.ExportRequest{Operation: "create", Org: org, Project: project, Permission: permission, Source: httpapi.OptionalID(source), Elevation: httpapi.OptionalID(elevation), Signal: signal, Start: 0, End: model.Int64(math.MaxInt64)}
 		if status, body, err = call(who, "POST", "/api/v1/exports", create); err != nil {
 			return nil, err
 		}
 		out["export_create"] = [2]any{status, body}
-		probe := httpapi.ExportRequest{Operation: "status", Org: org, Project: project, Permission: permission, Source: httpapi.OptionalID(source), ID: httpapi.OptionalID(model.NewID())}
+		probe := httpapi.ExportRequest{Operation: "status", Org: org, Project: project, Permission: permission, Source: httpapi.OptionalID(source), Elevation: httpapi.OptionalID(elevation), ID: httpapi.OptionalID(model.NewID())}
 		if status, body, err = call(who, "POST", "/api/v1/exports", probe); err != nil {
 			return nil, err
 		}
@@ -314,7 +317,7 @@ func RunIsolation(args []string) (result error) {
 		return out, nil
 	}
 	// The guessed-ID baseline is what every unauthorized request must equal.
-	baseline, err := surfaces(carol, model.NewID(), model.NewID(), "", model.ID{})
+	baseline, err := surfaces(carol, model.NewID(), model.NewID(), "", model.ID{}, model.ID{})
 	if err != nil {
 		return err
 	}
@@ -324,27 +327,79 @@ func RunIsolation(args []string) (result error) {
 			return err
 		}
 	}
+	// Elevation IDs must not be an existence oracle: someone else's live ID, the
+	// caller's own ID for an org it does not cover, the caller's own expired ID
+	// and a pure guess all have to equal the guessed baseline.
+	ownerPerson := isoPerson{id: owner.User, session: owner}
+	elevate := func(orgs ...model.ID) (model.ID, error) {
+		el, err := app.Auth.Elevate(ctx, owner, "isolation smoke elevation", orgs)
+		if err != nil {
+			return model.ID{}, err
+		}
+		raw, err := json.Marshal(el)
+		if err != nil {
+			return model.ID{}, err
+		}
+		var out struct{ ID model.ID }
+		err = json.Unmarshal(raw, &out)
+		return out.ID, err
+	}
+	coversA, err := elevate(orgA)
+	if err != nil {
+		return err
+	}
+	coversOnlyB, err := elevate(orgB)
+	if err != nil {
+		return err
+	}
+	lapsed, err := elevate(orgA)
+	if err != nil {
+		return err
+	}
+	if err = app.Control.Update(ctx, func(st *model.ControlState) error {
+		var record map[string]json.RawMessage
+		if err := json.Unmarshal(st.OIDC["elevation:"+lapsed.String()], &record); err != nil {
+			return err
+		}
+		record["Expires"] = json.RawMessage("1")
+		raw, err := json.Marshal(record)
+		st.OIDC["elevation:"+lapsed.String()] = raw
+		return err
+	}); err != nil {
+		return err
+	}
+	// Control: the owner's own live elevation of orgA really works, so the
+	// denial rows below are not vacuous.
+	status, body, err := call(ownerPerson, "GET", "/api/v1/capabilities?org="+orgA.String()+"&project="+p1.String()+"&elevation="+coversA.String(), nil)
+	if err = requireSmokeResponse("isolation_elevation_control", status, 200, body, err); err != nil {
+		return err
+	}
 	denied := []struct {
 		who        string
 		person     isoPerson
 		org, pj    model.ID
 		permission string
 		source     model.ID
+		elevation  model.ID
 		target     string
 	}{
-		{"dave(orgB)", dave, orgA, p1, "", model.ID{}, "orgA/P1"},
-		{"dave(orgB)", dave, orgB, p1, "", model.ID{}, "orgB/foreign-project"},
-		{"alice(P1 grant)", alice, orgB, pb, "", model.ID{}, "orgB/PB"},
-		{"alice(P1 grant)", alice, orgA, p2, "", model.ID{}, "orgA/P2"},
-		{"bob(P2 team)", bob, orgA, p1, "", model.ID{}, "orgA/P1"},
-		{"carol(no grant)", carol, orgA, p1, "", model.ID{}, "orgA/P1"},
-		{"alice(read only)", alice, orgA, p1, "raw.read", rs1.id, "orgA/P1 raw one"},
-		{"raw-two", rawTwo, orgA, p1, "raw.read", rs1.id, "orgA/P1 raw one"},
-		{"raw-one", rawOne, orgA, p1, "raw.read", rs2.id, "orgA/P1 raw two"},
-		{"raw-one", rawOne, orgA, p1, "raw.read", model.NewID(), "orgA/P1 guessed raw"},
+		{"dave(orgB)", dave, orgA, p1, "", model.ID{}, model.ID{}, "orgA/P1"},
+		{"dave(orgB)", dave, orgB, p1, "", model.ID{}, model.ID{}, "orgB/foreign-project"},
+		{"alice(P1 grant)", alice, orgB, pb, "", model.ID{}, model.ID{}, "orgB/PB"},
+		{"alice(P1 grant)", alice, orgA, p2, "", model.ID{}, model.ID{}, "orgA/P2"},
+		{"bob(P2 team)", bob, orgA, p1, "", model.ID{}, model.ID{}, "orgA/P1"},
+		{"carol(no grant)", carol, orgA, p1, "", model.ID{}, model.ID{}, "orgA/P1"},
+		{"alice(read only)", alice, orgA, p1, "raw.read", rs1.id, model.ID{}, "orgA/P1 raw one"},
+		{"raw-two", rawTwo, orgA, p1, "raw.read", rs1.id, model.ID{}, "orgA/P1 raw one"},
+		{"raw-one", rawOne, orgA, p1, "raw.read", rs2.id, model.ID{}, "orgA/P1 raw two"},
+		{"raw-one", rawOne, orgA, p1, "raw.read", model.NewID(), model.ID{}, "orgA/P1 guessed raw"},
+		{"alice(P1 grant)", alice, orgA, p1, "", model.ID{}, model.NewID(), "orgA/P1 guessed elevation"},
+		{"alice(P1 grant)", alice, orgA, p1, "", model.ID{}, coversA, "orgA/P1 someone else's live elevation"},
+		{"owner(elevation of orgB)", ownerPerson, orgA, p1, "", model.ID{}, coversOnlyB, "orgA/P1 own elevation covering another org"},
+		{"owner(expired elevation)", ownerPerson, orgA, p1, "", model.ID{}, lapsed, "orgA/P1 own expired elevation"},
 	}
 	for _, d := range denied {
-		got, err := surfaces(d.person, d.org, d.pj, d.permission, d.source)
+		got, err := surfaces(d.person, d.org, d.pj, d.permission, d.source, d.elevation)
 		if err != nil {
 			return err
 		}
