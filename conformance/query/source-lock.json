@@ -1,0 +1,271 @@
+{
+  "manifest_version": 1,
+  "profiles": [
+    {
+      "id": "promql-prometheus-3.1.0",
+      "commit": "7086161a93b262aa0949dbf2aba15a5a7b13e0a3",
+      "source_url": "https://codeload.github.com/prometheus/prometheus/tar.gz/7086161a93b262aa0949dbf2aba15a5a7b13e0a3",
+      "source_sha256": "1a394b385e1fca89a6b81eab782074de26c5d35fccdebfef15c68daa55029de5",
+      "license": "Apache-2.0",
+      "artifact": {
+        "path": "sha256:cc38fc9976a6f7b4141466f44b3fd88245885cbeb74df08d48e74b8363da39fb",
+        "sha256": "cc38fc9976a6f7b4141466f44b3fd88245885cbeb74df08d48e74b8363da39fb",
+        "architecture": "linux/amd64",
+        "adapter": "oci-semantic-json-v1",
+        "configuration_sha256": "7164c79eddd23b2b804fee720f4ab2b563617b923289499088f330f7a2698679",
+        "args": []
+      },
+      "configuration": {
+        "path": "conformance/query/oracles/promql-prometheus-3.1.0.yaml",
+        "sha256": "7164c79eddd23b2b804fee720f4ab2b563617b923289499088f330f7a2698679",
+        "mount": "/fixture/configuration",
+        "encoding": "UTF-8 YAML"
+      },
+      "invocation": {
+        "wrapper_entrypoint": [
+          "/adapter",
+          "adapter",
+          "promql-prometheus-3.1.0"
+        ],
+        "upstream_binary": "/bin/prometheus",
+        "upstream_arguments": [
+          "--config.file=/fixture/configuration",
+          "--storage.tsdb.path=/tmp/data",
+          "--web.listen-address=127.0.0.1:19090"
+        ],
+        "isolation": {
+          "network": "none (loopback only)",
+          "root_filesystem": "read-only",
+          "uid_gid": "65534:65534",
+          "capabilities": "none",
+          "privilege_escalation": false,
+          "pids": 128,
+          "memory_bytes": 536870912,
+          "cpus": 1,
+          "temporary_filesystem": "/tmp:rw,noexec,nosuid,size=268435456",
+          "input_mount": "disposable org-free directory mounted read-only at /fixture"
+        },
+        "input_transport": "authored JSON stdin",
+        "output_transport": "SemanticResult JSON stdout with observed upstream build identity",
+        "output_limit_bytes_per_stream": 16777216
+      },
+      "configuration_path": "conformance/query/oracles/promql-prometheus-3.1.0.yaml",
+      "configuration_sha256": "7164c79eddd23b2b804fee720f4ab2b563617b923289499088f330f7a2698679",
+      "upstream_image": {
+        "repository": "prom/prometheus",
+        "tag": "v3.1.0",
+        "index_digest": "sha256:6559acbd5d770b15bb3c954629ce190ac3cbbdb2b7f1c30f0385c4e05104e218",
+        "linux_amd64_digest": "sha256:da1630c5102817ed365a523448c766e417030a53ec3dfbe064d429df504e023e",
+        "acquisition_mirror": "mirror.gcr.io/prom/prometheus@sha256:da1630c5102817ed365a523448c766e417030a53ec3dfbe064d429df504e023e"
+      },
+      "license_evidence": [
+        {
+          "path": "LICENSE",
+          "url": "https://github.com/prometheus/prometheus/blob/7086161a93b262aa0949dbf2aba15a5a7b13e0a3/LICENSE",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+        },
+        {
+          "path": "NOTICE",
+          "url": "https://github.com/prometheus/prometheus/blob/7086161a93b262aa0949dbf2aba15a5a7b13e0a3/NOTICE",
+          "sha256": "4d69c19300dc95e26630247f7d76d525b738f87c5af79f39b61ca0831c23ca34"
+        }
+      ],
+      "reference_compiler": {
+        "version": "go1.23.4",
+        "evidence": ".superpowers/sdd/approved-product/02.01-loki-stage-trace.txt",
+        "evidence_sha256": "0fe2b2913ce32c3f5bfedd734d25ad16276ce787d398b8642df815790776f32f",
+        "compatibility_with_own_compiler": "not assumed; versioned primitive obligations remain release-blocking"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5",
+      "commit": "f497435984d1ca1d84cda5ed309387ac2eb1f8f6",
+      "source_url": "https://codeload.github.com/prometheus/prometheus/tar.gz/f497435984d1ca1d84cda5ed309387ac2eb1f8f6",
+      "source_sha256": "c2f96e97afede2cb4b43266bf62d964bed9194c7a1ac37759e1c6fd68600b410",
+      "license": "Apache-2.0",
+      "artifact": {
+        "path": "sha256:c69b2d2ef2c4056ccf2bdab557a4ae6acbe5dd7c2d01b68422eeeef063cb3bb3",
+        "sha256": "c69b2d2ef2c4056ccf2bdab557a4ae6acbe5dd7c2d01b68422eeeef063cb3bb3",
+        "architecture": "linux/amd64",
+        "adapter": "oci-semantic-json-v1",
+        "configuration_sha256": "7164c79eddd23b2b804fee720f4ab2b563617b923289499088f330f7a2698679",
+        "args": []
+      },
+      "configuration": {
+        "path": "conformance/query/oracles/promql-prometheus-3.13.5.yaml",
+        "sha256": "7164c79eddd23b2b804fee720f4ab2b563617b923289499088f330f7a2698679",
+        "mount": "/fixture/configuration",
+        "encoding": "UTF-8 YAML"
+      },
+      "invocation": {
+        "wrapper_entrypoint": [
+          "/adapter",
+          "adapter",
+          "promql-prometheus-3.13.5"
+        ],
+        "upstream_binary": "/bin/prometheus",
+        "upstream_arguments": [
+          "--config.file=/fixture/configuration",
+          "--storage.tsdb.path=/tmp/data",
+          "--web.listen-address=127.0.0.1:19090"
+        ],
+        "isolation": {
+          "network": "none (loopback only)",
+          "root_filesystem": "read-only",
+          "uid_gid": "65534:65534",
+          "capabilities": "none",
+          "privilege_escalation": false,
+          "pids": 128,
+          "memory_bytes": 536870912,
+          "cpus": 1,
+          "temporary_filesystem": "/tmp:rw,noexec,nosuid,size=268435456",
+          "input_mount": "disposable org-free directory mounted read-only at /fixture"
+        },
+        "input_transport": "authored JSON stdin",
+        "output_transport": "SemanticResult JSON stdout with observed upstream build identity",
+        "output_limit_bytes_per_stream": 16777216
+      },
+      "configuration_path": "conformance/query/oracles/promql-prometheus-3.13.5.yaml",
+      "configuration_sha256": "7164c79eddd23b2b804fee720f4ab2b563617b923289499088f330f7a2698679",
+      "upstream_image": {
+        "repository": "prom/prometheus",
+        "tag": "v3.13.5",
+        "index_digest": "sha256:aafa9d694e6a883c02db516d9f6e5b84e14195f49a2a6456a4cca815edda72b9",
+        "linux_amd64_digest": "sha256:dc30314819e04a1a3d18d0b37eaa9c8e4e18f33f026e3e2d81bf127c7cddcd55",
+        "acquisition_mirror": "mirror.gcr.io/prom/prometheus@sha256:dc30314819e04a1a3d18d0b37eaa9c8e4e18f33f026e3e2d81bf127c7cddcd55"
+      },
+      "license_evidence": [
+        {
+          "path": "LICENSE",
+          "url": "https://github.com/prometheus/prometheus/blob/f497435984d1ca1d84cda5ed309387ac2eb1f8f6/LICENSE",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+        },
+        {
+          "path": "NOTICE",
+          "url": "https://github.com/prometheus/prometheus/blob/f497435984d1ca1d84cda5ed309387ac2eb1f8f6/NOTICE",
+          "sha256": "ac9e304462a58a4d71b6488423d4447e614c8b31d517fe24345016522c102a78"
+        }
+      ],
+      "reference_compiler": {
+        "version": "go1.26.10",
+        "evidence": ".superpowers/sdd/approved-product/02.01-loki-stage-trace.txt",
+        "evidence_sha256": "0fe2b2913ce32c3f5bfedd734d25ad16276ce787d398b8642df815790776f32f",
+        "compatibility_with_own_compiler": "not assumed; versioned primitive obligations remain release-blocking"
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2",
+      "commit": "257d2f62bf8a81b44dea6fe88968d1d28c8e01e7",
+      "source_url": "https://codeload.github.com/grafana/loki/tar.gz/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7",
+      "source_sha256": "0db690662744694667c031a81d3e20cdd3a68a387a8050c8096bebbdf2ff8db2",
+      "license": "AGPL-3.0-only",
+      "artifact": {
+        "path": "sha256:e97497f7d473398701ce147ae6f17a16e8ce0b300d5aeb5386e785a66feee8df",
+        "sha256": "e97497f7d473398701ce147ae6f17a16e8ce0b300d5aeb5386e785a66feee8df",
+        "architecture": "linux/amd64",
+        "adapter": "oci-semantic-json-v1",
+        "configuration_sha256": "797fff5838030e44b4c0ef56401d22c250d3f335897cd36783dd2d9f0416d6c2",
+        "args": []
+      },
+      "configuration": {
+        "path": "conformance/query/oracles/logql-loki-3.5.2.yaml",
+        "sha256": "797fff5838030e44b4c0ef56401d22c250d3f335897cd36783dd2d9f0416d6c2",
+        "mount": "/fixture/configuration",
+        "encoding": "UTF-8 YAML"
+      },
+      "invocation": {
+        "wrapper_entrypoint": [
+          "/adapter",
+          "adapter",
+          "logql-loki-3.5.2"
+        ],
+        "upstream_binary": "/usr/bin/loki",
+        "upstream_arguments": [
+          "-config.file=/fixture/configuration"
+        ],
+        "isolation": {
+          "network": "none (loopback only)",
+          "root_filesystem": "read-only",
+          "uid_gid": "65534:65534",
+          "capabilities": "none",
+          "privilege_escalation": false,
+          "pids": 128,
+          "memory_bytes": 536870912,
+          "cpus": 1,
+          "temporary_filesystem": "/tmp:rw,noexec,nosuid,size=268435456",
+          "input_mount": "disposable org-free directory mounted read-only at /fixture"
+        },
+        "input_transport": "authored JSON stdin",
+        "output_transport": "SemanticResult JSON stdout with observed upstream build identity",
+        "output_limit_bytes_per_stream": 16777216
+      },
+      "configuration_path": "conformance/query/oracles/logql-loki-3.5.2.yaml",
+      "configuration_sha256": "797fff5838030e44b4c0ef56401d22c250d3f335897cd36783dd2d9f0416d6c2",
+      "upstream_image": {
+        "repository": "grafana/loki",
+        "tag": "3.5.2",
+        "index_digest": "sha256:d0a95e651bb7d0a5a6468035c5b49c52f4678d90d598f853c06716bca102686b",
+        "linux_amd64_digest": "sha256:d12ab5b1cd7ac58c1c0ea8cb43e0d151d1d5bee1cb897c7e7eaf225adae07928",
+        "acquisition_mirror": "mirror.gcr.io/grafana/loki@sha256:d12ab5b1cd7ac58c1c0ea8cb43e0d151d1d5bee1cb897c7e7eaf225adae07928"
+      },
+      "license_evidence": [
+        {
+          "path": "LICENSE",
+          "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/LICENSE",
+          "sha256": "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0"
+        }
+      ],
+      "fixture_configuration_rationale": {
+        "query_ingesters_within": "0s permits the fixed historic fixture to be queried from the newly populated ingester; upstream default 3h otherwise excludes it relative to wall time. This is an explicit oracle configuration pin, not a product fallback.",
+        "source_ref": "pkg/querier/querier.go:56,72,280-309",
+        "source_sha256": "25a8c3b5e2911ba5fb57c521109679a4af8aeb685c59fdca8b4fe051cea2e2ba",
+        "discover_service_name": "Empty list explicitly disables default ingestion-time service_name enrichment so authored fixture stream labels are unmodified. Source pkg/validation/limits.go:94,290-305.",
+        "query_store_max_look_back_period": "-1ns is exactly time.Duration(-1), the infinite sentinel. target=all initializes this field from minDuration when default0, then initQuerier copies the positive override, taking precedence over query_ingesters_within=0. Pinning -1ns retains exact historic fixture bounds and makes querier query the admitted ingester data.",
+        "override_source_ref": "pkg/loki/modules.go:559-563,1113-1127,2187-2201; pkg/querier/querier.go:280-316",
+        "override_source_sha256": "b87530e3706d062c2b7486ed552ede2483d9afbc255ac2cda52a9350cd18ed44",
+        "discover_log_levels": "false disables default ingestion-time level discovery; exact source pkg/validation/limits.go:95,306,1042-1043. Newly observed detected_level:unknown enrichment must not alter authored fixture input."
+      },
+      "reference_compiler": {
+        "version": "go1.24.5",
+        "evidence": ".superpowers/sdd/approved-product/02.01-loki-actual-buildinfo.txt",
+        "evidence_sha256": "4b0d56b9216e0f5bed8ae576042abb3663ce6869b4206989b1f889c43c05a66b",
+        "compatibility_with_own_compiler": "not assumed; versioned primitive obligations remain release-blocking",
+        "upstream_elf_sha256": "4924f98d63eaff80ad2a50d261bb1561baa5d41a1a02d62a7a78556a5805b20d"
+      }
+    }
+  ],
+  "ledger_sha256": "1f7c2799fda0cf489a8ce990d6c8c6b8961dd79c1e46f01696461d3a29ae0dc9",
+  "inventory_files": {
+    "flags.json": "d47316a20492ba5fa1fffa0d59575aa228e4f6220e88ce7a5ca016d981ba7953",
+    "provenance.json": "26cf6b39936f1c6157f34280e220dbce0f2be2115b5e2b71e1b1deedfd235de6",
+    "semantic-scope.json": "e6d72eee373eb64eb557e21a4840896acde71752d5548451b32ac4c3a98db148",
+    "version-diff.json": "681e3d11c84a26b663454eaa2d07eee3d590f98a5dc468cc2367195d8038f2ad",
+    "gate-domains.json": "d88c0fcc3f192f489d5ddf60872a6a0d4485ef992b65c9e6d53a5d32bbaffe67",
+    "binary-flags.json": "df356fb1b26c900a9a4017909e1e1cedb496f3609c6a5f777d243acfa9fffad4",
+    "source-discovery.json": "c8b9b2c778d5a3af27a5b3eb8bb44329a559f155ee1a44cb6f0d852f29095049",
+    "audits/promql.json": "65c927205eb1dd292f26bac1c8bb0a35e9c10e7c1370d4f856e3a939259c3717",
+    "audits/logql.json": "e1b1e36b5364299615007ea7052e9b6c33afff83ffba26775b1878a354df32e4",
+    "audits/logql-configuration-evidence.json": "0362151d19b0dfd284d11e6ad7fa4396cef0be3d90001c9dba8c2250937695b8",
+    "audits/logql-template-evidence.json": "8872af47f235cf9b0f2bafe086b261743267ef794f4042a3befd152f309dc981",
+    "cases/promql-syntax.json": "49fd0dec730cf5ece8b9225239e697a80b96df4ccae1f705bd693db75d640d07",
+    "case-descriptions.json": "40e4624d244aa36e29c89fe6193b6bace1aecc370de94040653b88e9b698bfad",
+    "audits/logql-primitive-evidence.json": "ca66dd2de12674ed76bb4fbdb1743ef54e48421e46b53398de349404a5693826",
+    "audits/promql-primitives.json": "7ef60a7f685b9b29f2e2a12ef5a15531672060b1ab43427dcfa8d9ec673fa769",
+    "promql-syntax-bindings.json": "e405dc56fa92d11fc55d99cf80d95ee6dcb0a7082f296d13b86af117936d372e",
+    "cases/oracle-sanity.json": "cca2366462a90986c545a7d375dac2a71aff6a4b0451fd6313115b31564169ec",
+    "cases/promql-time-operators.json": "efc8adf41586adab80c0a5b2d199c8fc9b5303ed40f50b2ed18c2a1df5baab6a",
+    "cases/promql-functions.json": "0659939e7fd2a34198e346e521d8e48e7fab7165f8ec65bce22f8b55c7390841",
+    "cases/promql-histograms.json": "d9f7b347d3c2e9c75f63a9571ea4d64619c0435d8c0d416570c14bfd77ec1a13",
+    "cases/promql-version-differences.json": "02a043ed388949b8686770dd433224d50a69cb8e00d4807cb0d8010c0379504d",
+    "cases/promql-trim-syntax.json": "7101ef52428f6a2f2522bb523ced887abf58dee09c5cff15dcbb5f2c6d094b1a",
+    "cases/promql-unicode-syntax.json": "2629cc95a1e084defa046a8a604769618c06a6689761ff0a8dd21dde2d7e1418",
+    "cases/logql-syntax-pipeline.json": "98b0002c20d27184b23f9d7ce4a1a1ed7b32bb842e0d2956b7178ef0ce4fc5e3",
+    "cases/logql-templates.json": "762bfe4da659abec401a45beb09287766891e5bd787916962efe672cf27ba8c6",
+    "cases/logql-metrics-order.json": "7c9d0b3bcc9dc40e6c847834a45b6b30cda5b8a1d686fedeb85d07ca650dd0d9"
+  },
+  "profile_files": {
+    "profiles/query/logql-loki-3.5.2.json": "a43ac3c104035ee112f576b4cec84da6f04f2bc8f5a032b6bdb97f3e9bc5233d",
+    "profiles/query/promql-prometheus-3.1.0.json": "4398852781c8e00ead9134c45ae1fe3858820af9ddfb985bc6a5e3b3e3ccdc70",
+    "profiles/query/promql-prometheus-3.13.5.json": "a1b08e374b9a1b82746fb3c6aabcc29979f922b81a227b72e1fd5ce963a70292"
+  }
+}

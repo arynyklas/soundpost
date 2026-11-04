@@ -1,0 +1,2015 @@
+{
+  "schema": "soundpost-authored-bindings-v1",
+  "status": "owned bindings updated for source-proven contextual gate distinction; real differential qualification pending",
+  "case_file": "conformance/query/cases/promql-syntax.json",
+  "bindings": [
+    {
+      "obligation": "promql-prometheus-3.1.0/function/abs",
+      "case_id": "promql-prometheus-3.1.0/function/abs/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/abs",
+      "case_id": "promql-prometheus-3.1.0/function/abs/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/absent",
+      "case_id": "promql-prometheus-3.1.0/function/absent/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/absent",
+      "case_id": "promql-prometheus-3.1.0/function/absent/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/absent_over_time",
+      "case_id": "promql-prometheus-3.1.0/function/absent_over_time/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/absent_over_time",
+      "case_id": "promql-prometheus-3.1.0/function/absent_over_time/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/acos",
+      "case_id": "promql-prometheus-3.1.0/function/acos/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/acos",
+      "case_id": "promql-prometheus-3.1.0/function/acos/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/acosh",
+      "case_id": "promql-prometheus-3.1.0/function/acosh/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/acosh",
+      "case_id": "promql-prometheus-3.1.0/function/acosh/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/asin",
+      "case_id": "promql-prometheus-3.1.0/function/asin/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/asin",
+      "case_id": "promql-prometheus-3.1.0/function/asin/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/asinh",
+      "case_id": "promql-prometheus-3.1.0/function/asinh/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/asinh",
+      "case_id": "promql-prometheus-3.1.0/function/asinh/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/atan",
+      "case_id": "promql-prometheus-3.1.0/function/atan/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/atan",
+      "case_id": "promql-prometheus-3.1.0/function/atan/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/atanh",
+      "case_id": "promql-prometheus-3.1.0/function/atanh/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/atanh",
+      "case_id": "promql-prometheus-3.1.0/function/atanh/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/avg_over_time",
+      "case_id": "promql-prometheus-3.1.0/function/avg_over_time/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/avg_over_time",
+      "case_id": "promql-prometheus-3.1.0/function/avg_over_time/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/ceil",
+      "case_id": "promql-prometheus-3.1.0/function/ceil/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/ceil",
+      "case_id": "promql-prometheus-3.1.0/function/ceil/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/changes",
+      "case_id": "promql-prometheus-3.1.0/function/changes/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/changes",
+      "case_id": "promql-prometheus-3.1.0/function/changes/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/clamp",
+      "case_id": "promql-prometheus-3.1.0/function/clamp/arity-3",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/clamp",
+      "case_id": "promql-prometheus-3.1.0/function/clamp/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/clamp_max",
+      "case_id": "promql-prometheus-3.1.0/function/clamp_max/arity-2",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/clamp_max",
+      "case_id": "promql-prometheus-3.1.0/function/clamp_max/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/clamp_min",
+      "case_id": "promql-prometheus-3.1.0/function/clamp_min/arity-2",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/clamp_min",
+      "case_id": "promql-prometheus-3.1.0/function/clamp_min/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/cos",
+      "case_id": "promql-prometheus-3.1.0/function/cos/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/cos",
+      "case_id": "promql-prometheus-3.1.0/function/cos/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/cosh",
+      "case_id": "promql-prometheus-3.1.0/function/cosh/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/cosh",
+      "case_id": "promql-prometheus-3.1.0/function/cosh/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/count_over_time",
+      "case_id": "promql-prometheus-3.1.0/function/count_over_time/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/count_over_time",
+      "case_id": "promql-prometheus-3.1.0/function/count_over_time/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/days_in_month",
+      "case_id": "promql-prometheus-3.1.0/function/days_in_month/arity-0",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/days_in_month",
+      "case_id": "promql-prometheus-3.1.0/function/days_in_month/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/days_in_month",
+      "case_id": "promql-prometheus-3.1.0/function/days_in_month/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/day_of_month",
+      "case_id": "promql-prometheus-3.1.0/function/day_of_month/arity-0",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/day_of_month",
+      "case_id": "promql-prometheus-3.1.0/function/day_of_month/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/day_of_month",
+      "case_id": "promql-prometheus-3.1.0/function/day_of_month/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/day_of_week",
+      "case_id": "promql-prometheus-3.1.0/function/day_of_week/arity-0",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/day_of_week",
+      "case_id": "promql-prometheus-3.1.0/function/day_of_week/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/day_of_week",
+      "case_id": "promql-prometheus-3.1.0/function/day_of_week/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/day_of_year",
+      "case_id": "promql-prometheus-3.1.0/function/day_of_year/arity-0",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/day_of_year",
+      "case_id": "promql-prometheus-3.1.0/function/day_of_year/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/day_of_year",
+      "case_id": "promql-prometheus-3.1.0/function/day_of_year/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/deg",
+      "case_id": "promql-prometheus-3.1.0/function/deg/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/deg",
+      "case_id": "promql-prometheus-3.1.0/function/deg/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/delta",
+      "case_id": "promql-prometheus-3.1.0/function/delta/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/delta",
+      "case_id": "promql-prometheus-3.1.0/function/delta/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/deriv",
+      "case_id": "promql-prometheus-3.1.0/function/deriv/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/deriv",
+      "case_id": "promql-prometheus-3.1.0/function/deriv/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/exp",
+      "case_id": "promql-prometheus-3.1.0/function/exp/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/exp",
+      "case_id": "promql-prometheus-3.1.0/function/exp/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/floor",
+      "case_id": "promql-prometheus-3.1.0/function/floor/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/floor",
+      "case_id": "promql-prometheus-3.1.0/function/floor/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/histogram_avg",
+      "case_id": "promql-prometheus-3.1.0/function/histogram_avg/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/histogram_avg",
+      "case_id": "promql-prometheus-3.1.0/function/histogram_avg/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/histogram_count",
+      "case_id": "promql-prometheus-3.1.0/function/histogram_count/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/histogram_count",
+      "case_id": "promql-prometheus-3.1.0/function/histogram_count/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/histogram_sum",
+      "case_id": "promql-prometheus-3.1.0/function/histogram_sum/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/histogram_sum",
+      "case_id": "promql-prometheus-3.1.0/function/histogram_sum/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/histogram_stddev",
+      "case_id": "promql-prometheus-3.1.0/function/histogram_stddev/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/histogram_stddev",
+      "case_id": "promql-prometheus-3.1.0/function/histogram_stddev/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/histogram_stdvar",
+      "case_id": "promql-prometheus-3.1.0/function/histogram_stdvar/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/histogram_stdvar",
+      "case_id": "promql-prometheus-3.1.0/function/histogram_stdvar/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/histogram_fraction",
+      "case_id": "promql-prometheus-3.1.0/function/histogram_fraction/arity-3",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/histogram_fraction",
+      "case_id": "promql-prometheus-3.1.0/function/histogram_fraction/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/histogram_quantile",
+      "case_id": "promql-prometheus-3.1.0/function/histogram_quantile/arity-2",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/histogram_quantile",
+      "case_id": "promql-prometheus-3.1.0/function/histogram_quantile/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/double_exponential_smoothing",
+      "case_id": "promql-prometheus-3.1.0/function/double_exponential_smoothing/arity-3",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/double_exponential_smoothing",
+      "case_id": "promql-prometheus-3.1.0/function/double_exponential_smoothing/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/double_exponential_smoothing",
+      "case_id": "promql-prometheus-3.1.0/function/double_exponential_smoothing/disabled-gate",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/hour",
+      "case_id": "promql-prometheus-3.1.0/function/hour/arity-0",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/hour",
+      "case_id": "promql-prometheus-3.1.0/function/hour/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/hour",
+      "case_id": "promql-prometheus-3.1.0/function/hour/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/idelta",
+      "case_id": "promql-prometheus-3.1.0/function/idelta/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/idelta",
+      "case_id": "promql-prometheus-3.1.0/function/idelta/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/increase",
+      "case_id": "promql-prometheus-3.1.0/function/increase/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/increase",
+      "case_id": "promql-prometheus-3.1.0/function/increase/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/info",
+      "case_id": "promql-prometheus-3.1.0/function/info/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/info",
+      "case_id": "promql-prometheus-3.1.0/function/info/arity-2",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/info",
+      "case_id": "promql-prometheus-3.1.0/function/info/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/info",
+      "case_id": "promql-prometheus-3.1.0/function/info/disabled-gate",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/irate",
+      "case_id": "promql-prometheus-3.1.0/function/irate/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/irate",
+      "case_id": "promql-prometheus-3.1.0/function/irate/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/label_replace",
+      "case_id": "promql-prometheus-3.1.0/function/label_replace/arity-5",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/label_replace",
+      "case_id": "promql-prometheus-3.1.0/function/label_replace/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/label_join",
+      "case_id": "promql-prometheus-3.1.0/function/label_join/arity-3",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/label_join",
+      "case_id": "promql-prometheus-3.1.0/function/label_join/arity-4",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/label_join",
+      "case_id": "promql-prometheus-3.1.0/function/label_join/arity-6",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/label_join",
+      "case_id": "promql-prometheus-3.1.0/function/label_join/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/last_over_time",
+      "case_id": "promql-prometheus-3.1.0/function/last_over_time/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/last_over_time",
+      "case_id": "promql-prometheus-3.1.0/function/last_over_time/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/ln",
+      "case_id": "promql-prometheus-3.1.0/function/ln/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/ln",
+      "case_id": "promql-prometheus-3.1.0/function/ln/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/log10",
+      "case_id": "promql-prometheus-3.1.0/function/log10/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/log10",
+      "case_id": "promql-prometheus-3.1.0/function/log10/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/log2",
+      "case_id": "promql-prometheus-3.1.0/function/log2/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/log2",
+      "case_id": "promql-prometheus-3.1.0/function/log2/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/mad_over_time",
+      "case_id": "promql-prometheus-3.1.0/function/mad_over_time/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/mad_over_time",
+      "case_id": "promql-prometheus-3.1.0/function/mad_over_time/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/mad_over_time",
+      "case_id": "promql-prometheus-3.1.0/function/mad_over_time/disabled-gate",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/max_over_time",
+      "case_id": "promql-prometheus-3.1.0/function/max_over_time/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/max_over_time",
+      "case_id": "promql-prometheus-3.1.0/function/max_over_time/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/min_over_time",
+      "case_id": "promql-prometheus-3.1.0/function/min_over_time/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/min_over_time",
+      "case_id": "promql-prometheus-3.1.0/function/min_over_time/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/minute",
+      "case_id": "promql-prometheus-3.1.0/function/minute/arity-0",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/minute",
+      "case_id": "promql-prometheus-3.1.0/function/minute/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/minute",
+      "case_id": "promql-prometheus-3.1.0/function/minute/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/month",
+      "case_id": "promql-prometheus-3.1.0/function/month/arity-0",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/month",
+      "case_id": "promql-prometheus-3.1.0/function/month/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/month",
+      "case_id": "promql-prometheus-3.1.0/function/month/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/pi",
+      "case_id": "promql-prometheus-3.1.0/function/pi/arity-0",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/pi",
+      "case_id": "promql-prometheus-3.1.0/function/pi/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/predict_linear",
+      "case_id": "promql-prometheus-3.1.0/function/predict_linear/arity-2",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/predict_linear",
+      "case_id": "promql-prometheus-3.1.0/function/predict_linear/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/present_over_time",
+      "case_id": "promql-prometheus-3.1.0/function/present_over_time/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/present_over_time",
+      "case_id": "promql-prometheus-3.1.0/function/present_over_time/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/quantile_over_time",
+      "case_id": "promql-prometheus-3.1.0/function/quantile_over_time/arity-2",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/quantile_over_time",
+      "case_id": "promql-prometheus-3.1.0/function/quantile_over_time/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/rad",
+      "case_id": "promql-prometheus-3.1.0/function/rad/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/rad",
+      "case_id": "promql-prometheus-3.1.0/function/rad/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/rate",
+      "case_id": "promql-prometheus-3.1.0/function/rate/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/rate",
+      "case_id": "promql-prometheus-3.1.0/function/rate/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/resets",
+      "case_id": "promql-prometheus-3.1.0/function/resets/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/resets",
+      "case_id": "promql-prometheus-3.1.0/function/resets/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/round",
+      "case_id": "promql-prometheus-3.1.0/function/round/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/round",
+      "case_id": "promql-prometheus-3.1.0/function/round/arity-2",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/round",
+      "case_id": "promql-prometheus-3.1.0/function/round/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/scalar",
+      "case_id": "promql-prometheus-3.1.0/function/scalar/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/scalar",
+      "case_id": "promql-prometheus-3.1.0/function/scalar/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/sgn",
+      "case_id": "promql-prometheus-3.1.0/function/sgn/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/sgn",
+      "case_id": "promql-prometheus-3.1.0/function/sgn/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/sin",
+      "case_id": "promql-prometheus-3.1.0/function/sin/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/sin",
+      "case_id": "promql-prometheus-3.1.0/function/sin/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/sinh",
+      "case_id": "promql-prometheus-3.1.0/function/sinh/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/sinh",
+      "case_id": "promql-prometheus-3.1.0/function/sinh/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/sort",
+      "case_id": "promql-prometheus-3.1.0/function/sort/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/sort",
+      "case_id": "promql-prometheus-3.1.0/function/sort/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/sort_desc",
+      "case_id": "promql-prometheus-3.1.0/function/sort_desc/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/sort_desc",
+      "case_id": "promql-prometheus-3.1.0/function/sort_desc/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/sort_by_label",
+      "case_id": "promql-prometheus-3.1.0/function/sort_by_label/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/sort_by_label",
+      "case_id": "promql-prometheus-3.1.0/function/sort_by_label/arity-2",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/sort_by_label",
+      "case_id": "promql-prometheus-3.1.0/function/sort_by_label/arity-4",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/sort_by_label",
+      "case_id": "promql-prometheus-3.1.0/function/sort_by_label/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/sort_by_label",
+      "case_id": "promql-prometheus-3.1.0/function/sort_by_label/disabled-gate",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/sort_by_label_desc",
+      "case_id": "promql-prometheus-3.1.0/function/sort_by_label_desc/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/sort_by_label_desc",
+      "case_id": "promql-prometheus-3.1.0/function/sort_by_label_desc/arity-2",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/sort_by_label_desc",
+      "case_id": "promql-prometheus-3.1.0/function/sort_by_label_desc/arity-4",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/sort_by_label_desc",
+      "case_id": "promql-prometheus-3.1.0/function/sort_by_label_desc/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/sort_by_label_desc",
+      "case_id": "promql-prometheus-3.1.0/function/sort_by_label_desc/disabled-gate",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/sqrt",
+      "case_id": "promql-prometheus-3.1.0/function/sqrt/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/sqrt",
+      "case_id": "promql-prometheus-3.1.0/function/sqrt/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/stddev_over_time",
+      "case_id": "promql-prometheus-3.1.0/function/stddev_over_time/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/stddev_over_time",
+      "case_id": "promql-prometheus-3.1.0/function/stddev_over_time/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/stdvar_over_time",
+      "case_id": "promql-prometheus-3.1.0/function/stdvar_over_time/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/stdvar_over_time",
+      "case_id": "promql-prometheus-3.1.0/function/stdvar_over_time/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/sum_over_time",
+      "case_id": "promql-prometheus-3.1.0/function/sum_over_time/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/sum_over_time",
+      "case_id": "promql-prometheus-3.1.0/function/sum_over_time/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/tan",
+      "case_id": "promql-prometheus-3.1.0/function/tan/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/tan",
+      "case_id": "promql-prometheus-3.1.0/function/tan/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/tanh",
+      "case_id": "promql-prometheus-3.1.0/function/tanh/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/tanh",
+      "case_id": "promql-prometheus-3.1.0/function/tanh/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/time",
+      "case_id": "promql-prometheus-3.1.0/function/time/arity-0",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/time",
+      "case_id": "promql-prometheus-3.1.0/function/time/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/timestamp",
+      "case_id": "promql-prometheus-3.1.0/function/timestamp/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/timestamp",
+      "case_id": "promql-prometheus-3.1.0/function/timestamp/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/vector",
+      "case_id": "promql-prometheus-3.1.0/function/vector/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/vector",
+      "case_id": "promql-prometheus-3.1.0/function/vector/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/year",
+      "case_id": "promql-prometheus-3.1.0/function/year/arity-0",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/year",
+      "case_id": "promql-prometheus-3.1.0/function/year/arity-1",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.1.0/function/year",
+      "case_id": "promql-prometheus-3.1.0/function/year/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.1.0"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/abs",
+      "case_id": "promql-prometheus-3.13.5/function/abs/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/abs",
+      "case_id": "promql-prometheus-3.13.5/function/abs/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/absent",
+      "case_id": "promql-prometheus-3.13.5/function/absent/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/absent",
+      "case_id": "promql-prometheus-3.13.5/function/absent/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/absent_over_time",
+      "case_id": "promql-prometheus-3.13.5/function/absent_over_time/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/absent_over_time",
+      "case_id": "promql-prometheus-3.13.5/function/absent_over_time/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/acos",
+      "case_id": "promql-prometheus-3.13.5/function/acos/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/acos",
+      "case_id": "promql-prometheus-3.13.5/function/acos/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/acosh",
+      "case_id": "promql-prometheus-3.13.5/function/acosh/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/acosh",
+      "case_id": "promql-prometheus-3.13.5/function/acosh/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/asin",
+      "case_id": "promql-prometheus-3.13.5/function/asin/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/asin",
+      "case_id": "promql-prometheus-3.13.5/function/asin/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/asinh",
+      "case_id": "promql-prometheus-3.13.5/function/asinh/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/asinh",
+      "case_id": "promql-prometheus-3.13.5/function/asinh/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/atan",
+      "case_id": "promql-prometheus-3.13.5/function/atan/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/atan",
+      "case_id": "promql-prometheus-3.13.5/function/atan/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/atanh",
+      "case_id": "promql-prometheus-3.13.5/function/atanh/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/atanh",
+      "case_id": "promql-prometheus-3.13.5/function/atanh/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/avg_over_time",
+      "case_id": "promql-prometheus-3.13.5/function/avg_over_time/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/avg_over_time",
+      "case_id": "promql-prometheus-3.13.5/function/avg_over_time/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/ceil",
+      "case_id": "promql-prometheus-3.13.5/function/ceil/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/ceil",
+      "case_id": "promql-prometheus-3.13.5/function/ceil/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/changes",
+      "case_id": "promql-prometheus-3.13.5/function/changes/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/changes",
+      "case_id": "promql-prometheus-3.13.5/function/changes/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/clamp",
+      "case_id": "promql-prometheus-3.13.5/function/clamp/arity-3",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/clamp",
+      "case_id": "promql-prometheus-3.13.5/function/clamp/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/clamp_max",
+      "case_id": "promql-prometheus-3.13.5/function/clamp_max/arity-2",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/clamp_max",
+      "case_id": "promql-prometheus-3.13.5/function/clamp_max/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/clamp_min",
+      "case_id": "promql-prometheus-3.13.5/function/clamp_min/arity-2",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/clamp_min",
+      "case_id": "promql-prometheus-3.13.5/function/clamp_min/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/cos",
+      "case_id": "promql-prometheus-3.13.5/function/cos/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/cos",
+      "case_id": "promql-prometheus-3.13.5/function/cos/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/cosh",
+      "case_id": "promql-prometheus-3.13.5/function/cosh/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/cosh",
+      "case_id": "promql-prometheus-3.13.5/function/cosh/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/count_over_time",
+      "case_id": "promql-prometheus-3.13.5/function/count_over_time/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/count_over_time",
+      "case_id": "promql-prometheus-3.13.5/function/count_over_time/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/days_in_month",
+      "case_id": "promql-prometheus-3.13.5/function/days_in_month/arity-0",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/days_in_month",
+      "case_id": "promql-prometheus-3.13.5/function/days_in_month/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/days_in_month",
+      "case_id": "promql-prometheus-3.13.5/function/days_in_month/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/day_of_month",
+      "case_id": "promql-prometheus-3.13.5/function/day_of_month/arity-0",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/day_of_month",
+      "case_id": "promql-prometheus-3.13.5/function/day_of_month/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/day_of_month",
+      "case_id": "promql-prometheus-3.13.5/function/day_of_month/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/day_of_week",
+      "case_id": "promql-prometheus-3.13.5/function/day_of_week/arity-0",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/day_of_week",
+      "case_id": "promql-prometheus-3.13.5/function/day_of_week/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/day_of_week",
+      "case_id": "promql-prometheus-3.13.5/function/day_of_week/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/day_of_year",
+      "case_id": "promql-prometheus-3.13.5/function/day_of_year/arity-0",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/day_of_year",
+      "case_id": "promql-prometheus-3.13.5/function/day_of_year/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/day_of_year",
+      "case_id": "promql-prometheus-3.13.5/function/day_of_year/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/deg",
+      "case_id": "promql-prometheus-3.13.5/function/deg/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/deg",
+      "case_id": "promql-prometheus-3.13.5/function/deg/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/end",
+      "case_id": "promql-prometheus-3.13.5/function/end/arity-0",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/end",
+      "case_id": "promql-prometheus-3.13.5/function/end/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/end",
+      "case_id": "promql-prometheus-3.13.5/function/end/disabled-gate",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/delta",
+      "case_id": "promql-prometheus-3.13.5/function/delta/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/delta",
+      "case_id": "promql-prometheus-3.13.5/function/delta/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/deriv",
+      "case_id": "promql-prometheus-3.13.5/function/deriv/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/deriv",
+      "case_id": "promql-prometheus-3.13.5/function/deriv/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/exp",
+      "case_id": "promql-prometheus-3.13.5/function/exp/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/exp",
+      "case_id": "promql-prometheus-3.13.5/function/exp/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/first_over_time",
+      "case_id": "promql-prometheus-3.13.5/function/first_over_time/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/first_over_time",
+      "case_id": "promql-prometheus-3.13.5/function/first_over_time/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/first_over_time",
+      "case_id": "promql-prometheus-3.13.5/function/first_over_time/disabled-gate",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/floor",
+      "case_id": "promql-prometheus-3.13.5/function/floor/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/floor",
+      "case_id": "promql-prometheus-3.13.5/function/floor/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/histogram_avg",
+      "case_id": "promql-prometheus-3.13.5/function/histogram_avg/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/histogram_avg",
+      "case_id": "promql-prometheus-3.13.5/function/histogram_avg/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/histogram_count",
+      "case_id": "promql-prometheus-3.13.5/function/histogram_count/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/histogram_count",
+      "case_id": "promql-prometheus-3.13.5/function/histogram_count/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/histogram_sum",
+      "case_id": "promql-prometheus-3.13.5/function/histogram_sum/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/histogram_sum",
+      "case_id": "promql-prometheus-3.13.5/function/histogram_sum/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/histogram_stddev",
+      "case_id": "promql-prometheus-3.13.5/function/histogram_stddev/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/histogram_stddev",
+      "case_id": "promql-prometheus-3.13.5/function/histogram_stddev/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/histogram_stdvar",
+      "case_id": "promql-prometheus-3.13.5/function/histogram_stdvar/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/histogram_stdvar",
+      "case_id": "promql-prometheus-3.13.5/function/histogram_stdvar/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/histogram_fraction",
+      "case_id": "promql-prometheus-3.13.5/function/histogram_fraction/arity-3",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/histogram_fraction",
+      "case_id": "promql-prometheus-3.13.5/function/histogram_fraction/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/histogram_quantile",
+      "case_id": "promql-prometheus-3.13.5/function/histogram_quantile/arity-2",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/histogram_quantile",
+      "case_id": "promql-prometheus-3.13.5/function/histogram_quantile/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/histogram_quantiles",
+      "case_id": "promql-prometheus-3.13.5/function/histogram_quantiles/arity-3",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/histogram_quantiles",
+      "case_id": "promql-prometheus-3.13.5/function/histogram_quantiles/arity-12",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/histogram_quantiles",
+      "case_id": "promql-prometheus-3.13.5/function/histogram_quantiles/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/histogram_quantiles",
+      "case_id": "promql-prometheus-3.13.5/function/histogram_quantiles/disabled-gate",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/double_exponential_smoothing",
+      "case_id": "promql-prometheus-3.13.5/function/double_exponential_smoothing/arity-3",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/double_exponential_smoothing",
+      "case_id": "promql-prometheus-3.13.5/function/double_exponential_smoothing/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/double_exponential_smoothing",
+      "case_id": "promql-prometheus-3.13.5/function/double_exponential_smoothing/disabled-gate",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/hour",
+      "case_id": "promql-prometheus-3.13.5/function/hour/arity-0",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/hour",
+      "case_id": "promql-prometheus-3.13.5/function/hour/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/hour",
+      "case_id": "promql-prometheus-3.13.5/function/hour/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/idelta",
+      "case_id": "promql-prometheus-3.13.5/function/idelta/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/idelta",
+      "case_id": "promql-prometheus-3.13.5/function/idelta/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/increase",
+      "case_id": "promql-prometheus-3.13.5/function/increase/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/increase",
+      "case_id": "promql-prometheus-3.13.5/function/increase/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/info",
+      "case_id": "promql-prometheus-3.13.5/function/info/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/info",
+      "case_id": "promql-prometheus-3.13.5/function/info/arity-2",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/info",
+      "case_id": "promql-prometheus-3.13.5/function/info/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/info",
+      "case_id": "promql-prometheus-3.13.5/function/info/disabled-gate",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/irate",
+      "case_id": "promql-prometheus-3.13.5/function/irate/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/irate",
+      "case_id": "promql-prometheus-3.13.5/function/irate/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/label_replace",
+      "case_id": "promql-prometheus-3.13.5/function/label_replace/arity-5",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/label_replace",
+      "case_id": "promql-prometheus-3.13.5/function/label_replace/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/label_join",
+      "case_id": "promql-prometheus-3.13.5/function/label_join/arity-3",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/label_join",
+      "case_id": "promql-prometheus-3.13.5/function/label_join/arity-4",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/label_join",
+      "case_id": "promql-prometheus-3.13.5/function/label_join/arity-6",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/label_join",
+      "case_id": "promql-prometheus-3.13.5/function/label_join/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/max_of",
+      "case_id": "promql-prometheus-3.13.5/function/max_of/arity-2",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/max_of",
+      "case_id": "promql-prometheus-3.13.5/function/max_of/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/max_of",
+      "case_id": "promql-prometheus-3.13.5/function/max_of/disabled-gate",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/last_over_time",
+      "case_id": "promql-prometheus-3.13.5/function/last_over_time/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/last_over_time",
+      "case_id": "promql-prometheus-3.13.5/function/last_over_time/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/min_of",
+      "case_id": "promql-prometheus-3.13.5/function/min_of/arity-2",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/min_of",
+      "case_id": "promql-prometheus-3.13.5/function/min_of/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/min_of",
+      "case_id": "promql-prometheus-3.13.5/function/min_of/disabled-gate",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/ln",
+      "case_id": "promql-prometheus-3.13.5/function/ln/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/ln",
+      "case_id": "promql-prometheus-3.13.5/function/ln/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/log10",
+      "case_id": "promql-prometheus-3.13.5/function/log10/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/log10",
+      "case_id": "promql-prometheus-3.13.5/function/log10/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/log2",
+      "case_id": "promql-prometheus-3.13.5/function/log2/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/log2",
+      "case_id": "promql-prometheus-3.13.5/function/log2/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/mad_over_time",
+      "case_id": "promql-prometheus-3.13.5/function/mad_over_time/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/mad_over_time",
+      "case_id": "promql-prometheus-3.13.5/function/mad_over_time/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/mad_over_time",
+      "case_id": "promql-prometheus-3.13.5/function/mad_over_time/disabled-gate",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/max_over_time",
+      "case_id": "promql-prometheus-3.13.5/function/max_over_time/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/max_over_time",
+      "case_id": "promql-prometheus-3.13.5/function/max_over_time/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/min_over_time",
+      "case_id": "promql-prometheus-3.13.5/function/min_over_time/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/min_over_time",
+      "case_id": "promql-prometheus-3.13.5/function/min_over_time/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/ts_of_first_over_time",
+      "case_id": "promql-prometheus-3.13.5/function/ts_of_first_over_time/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/ts_of_first_over_time",
+      "case_id": "promql-prometheus-3.13.5/function/ts_of_first_over_time/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/ts_of_first_over_time",
+      "case_id": "promql-prometheus-3.13.5/function/ts_of_first_over_time/disabled-gate",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/ts_of_max_over_time",
+      "case_id": "promql-prometheus-3.13.5/function/ts_of_max_over_time/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/ts_of_max_over_time",
+      "case_id": "promql-prometheus-3.13.5/function/ts_of_max_over_time/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/ts_of_max_over_time",
+      "case_id": "promql-prometheus-3.13.5/function/ts_of_max_over_time/disabled-gate",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/ts_of_min_over_time",
+      "case_id": "promql-prometheus-3.13.5/function/ts_of_min_over_time/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/ts_of_min_over_time",
+      "case_id": "promql-prometheus-3.13.5/function/ts_of_min_over_time/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/ts_of_min_over_time",
+      "case_id": "promql-prometheus-3.13.5/function/ts_of_min_over_time/disabled-gate",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/ts_of_last_over_time",
+      "case_id": "promql-prometheus-3.13.5/function/ts_of_last_over_time/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/ts_of_last_over_time",
+      "case_id": "promql-prometheus-3.13.5/function/ts_of_last_over_time/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/ts_of_last_over_time",
+      "case_id": "promql-prometheus-3.13.5/function/ts_of_last_over_time/disabled-gate",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/minute",
+      "case_id": "promql-prometheus-3.13.5/function/minute/arity-0",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/minute",
+      "case_id": "promql-prometheus-3.13.5/function/minute/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/minute",
+      "case_id": "promql-prometheus-3.13.5/function/minute/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/month",
+      "case_id": "promql-prometheus-3.13.5/function/month/arity-0",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/month",
+      "case_id": "promql-prometheus-3.13.5/function/month/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/month",
+      "case_id": "promql-prometheus-3.13.5/function/month/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/pi",
+      "case_id": "promql-prometheus-3.13.5/function/pi/arity-0",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/pi",
+      "case_id": "promql-prometheus-3.13.5/function/pi/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/predict_linear",
+      "case_id": "promql-prometheus-3.13.5/function/predict_linear/arity-2",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/predict_linear",
+      "case_id": "promql-prometheus-3.13.5/function/predict_linear/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/present_over_time",
+      "case_id": "promql-prometheus-3.13.5/function/present_over_time/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/present_over_time",
+      "case_id": "promql-prometheus-3.13.5/function/present_over_time/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/quantile_over_time",
+      "case_id": "promql-prometheus-3.13.5/function/quantile_over_time/arity-2",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/quantile_over_time",
+      "case_id": "promql-prometheus-3.13.5/function/quantile_over_time/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/rad",
+      "case_id": "promql-prometheus-3.13.5/function/rad/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/rad",
+      "case_id": "promql-prometheus-3.13.5/function/rad/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/range",
+      "case_id": "promql-prometheus-3.13.5/function/range/arity-0",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/range",
+      "case_id": "promql-prometheus-3.13.5/function/range/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/range",
+      "case_id": "promql-prometheus-3.13.5/function/range/disabled-gate",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/rate",
+      "case_id": "promql-prometheus-3.13.5/function/rate/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/rate",
+      "case_id": "promql-prometheus-3.13.5/function/rate/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/resets",
+      "case_id": "promql-prometheus-3.13.5/function/resets/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/resets",
+      "case_id": "promql-prometheus-3.13.5/function/resets/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/round",
+      "case_id": "promql-prometheus-3.13.5/function/round/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/round",
+      "case_id": "promql-prometheus-3.13.5/function/round/arity-2",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/round",
+      "case_id": "promql-prometheus-3.13.5/function/round/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/scalar",
+      "case_id": "promql-prometheus-3.13.5/function/scalar/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/scalar",
+      "case_id": "promql-prometheus-3.13.5/function/scalar/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/sgn",
+      "case_id": "promql-prometheus-3.13.5/function/sgn/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/sgn",
+      "case_id": "promql-prometheus-3.13.5/function/sgn/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/sin",
+      "case_id": "promql-prometheus-3.13.5/function/sin/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/sin",
+      "case_id": "promql-prometheus-3.13.5/function/sin/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/sinh",
+      "case_id": "promql-prometheus-3.13.5/function/sinh/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/sinh",
+      "case_id": "promql-prometheus-3.13.5/function/sinh/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/sort",
+      "case_id": "promql-prometheus-3.13.5/function/sort/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/sort",
+      "case_id": "promql-prometheus-3.13.5/function/sort/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/sort_desc",
+      "case_id": "promql-prometheus-3.13.5/function/sort_desc/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/sort_desc",
+      "case_id": "promql-prometheus-3.13.5/function/sort_desc/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/sort_by_label",
+      "case_id": "promql-prometheus-3.13.5/function/sort_by_label/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/sort_by_label",
+      "case_id": "promql-prometheus-3.13.5/function/sort_by_label/arity-2",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/sort_by_label",
+      "case_id": "promql-prometheus-3.13.5/function/sort_by_label/arity-4",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/sort_by_label",
+      "case_id": "promql-prometheus-3.13.5/function/sort_by_label/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/sort_by_label",
+      "case_id": "promql-prometheus-3.13.5/function/sort_by_label/disabled-gate",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/sort_by_label_desc",
+      "case_id": "promql-prometheus-3.13.5/function/sort_by_label_desc/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/sort_by_label_desc",
+      "case_id": "promql-prometheus-3.13.5/function/sort_by_label_desc/arity-2",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/sort_by_label_desc",
+      "case_id": "promql-prometheus-3.13.5/function/sort_by_label_desc/arity-4",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/sort_by_label_desc",
+      "case_id": "promql-prometheus-3.13.5/function/sort_by_label_desc/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/sort_by_label_desc",
+      "case_id": "promql-prometheus-3.13.5/function/sort_by_label_desc/disabled-gate",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/sqrt",
+      "case_id": "promql-prometheus-3.13.5/function/sqrt/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/sqrt",
+      "case_id": "promql-prometheus-3.13.5/function/sqrt/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/start",
+      "case_id": "promql-prometheus-3.13.5/function/start/arity-0",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/start",
+      "case_id": "promql-prometheus-3.13.5/function/start/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/start",
+      "case_id": "promql-prometheus-3.13.5/function/start/disabled-gate",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/step",
+      "case_id": "promql-prometheus-3.13.5/function/step/arity-0",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/step",
+      "case_id": "promql-prometheus-3.13.5/function/step/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/step",
+      "case_id": "promql-prometheus-3.13.5/function/step/disabled-gate",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/stddev_over_time",
+      "case_id": "promql-prometheus-3.13.5/function/stddev_over_time/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/stddev_over_time",
+      "case_id": "promql-prometheus-3.13.5/function/stddev_over_time/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/stdvar_over_time",
+      "case_id": "promql-prometheus-3.13.5/function/stdvar_over_time/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/stdvar_over_time",
+      "case_id": "promql-prometheus-3.13.5/function/stdvar_over_time/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/sum_over_time",
+      "case_id": "promql-prometheus-3.13.5/function/sum_over_time/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/sum_over_time",
+      "case_id": "promql-prometheus-3.13.5/function/sum_over_time/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/tan",
+      "case_id": "promql-prometheus-3.13.5/function/tan/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/tan",
+      "case_id": "promql-prometheus-3.13.5/function/tan/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/tanh",
+      "case_id": "promql-prometheus-3.13.5/function/tanh/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/tanh",
+      "case_id": "promql-prometheus-3.13.5/function/tanh/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/time",
+      "case_id": "promql-prometheus-3.13.5/function/time/arity-0",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/time",
+      "case_id": "promql-prometheus-3.13.5/function/time/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/timestamp",
+      "case_id": "promql-prometheus-3.13.5/function/timestamp/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/timestamp",
+      "case_id": "promql-prometheus-3.13.5/function/timestamp/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/vector",
+      "case_id": "promql-prometheus-3.13.5/function/vector/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/vector",
+      "case_id": "promql-prometheus-3.13.5/function/vector/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/year",
+      "case_id": "promql-prometheus-3.13.5/function/year/arity-0",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/year",
+      "case_id": "promql-prometheus-3.13.5/function/year/arity-1",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/year",
+      "case_id": "promql-prometheus-3.13.5/function/year/wrong-argument-or-arity",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/max_of",
+      "case_id": "promql-prometheus-3.13.5/function/max_of/arity-2/experimental-enabled",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/min_of",
+      "case_id": "promql-prometheus-3.13.5/function/min_of/arity-2/experimental-enabled",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/range",
+      "case_id": "promql-prometheus-3.13.5/function/range/arity-0/experimental-enabled",
+      "profile": "promql-prometheus-3.13.5"
+    },
+    {
+      "obligation": "promql-prometheus-3.13.5/function/step",
+      "case_id": "promql-prometheus-3.13.5/function/step/arity-0/experimental-enabled",
+      "profile": "promql-prometheus-3.13.5"
+    }
+  ],
+  "grammar_case_namespace": "grammar/",
+  "grammar_cases": 30,
+  "grammar_inventory_status": "independently-authored; exact-ledger-binding-and-oracle-location-observations-pending",
+  "additional_unit_observations": [
+    "all 16 binary operator spellings",
+    "all 14 aggregators crossed with absent/by-empty/without-empty/by-labels/without-UTF8-labels grouping",
+    "active feature selection excludes gates registered only on inactive feature sets",
+    "ordinary NaN/infinity/signed-zero literal bit preservation",
+    "half-open UTF8 byte/rune spans and modifier diagnostic locations",
+    "typed structural roundtrip ignoring only redundant parenthesis nodes"
+  ],
+  "contextual_function_corrections": [
+    {
+      "retained_negative": "promql-prometheus-3.13.5/function/max_of/arity-2",
+      "new_positive": "promql-prometheus-3.13.5/function/max_of/arity-2/experimental-enabled",
+      "gate": "promql-experimental-functions",
+      "duration_gate_is_not_standalone_function_gate": true,
+      "source_refs": [
+        "promql/parser/generated_parser.y:493-550@299268003cee3f5d1329294c894db7a769848e6d7b6c29bfc3eb231b738b350e",
+        "promql/parser/generated_parser.y:1360-1393@299268003cee3f5d1329294c894db7a769848e6d7b6c29bfc3eb231b738b350e"
+      ]
+    },
+    {
+      "retained_negative": "promql-prometheus-3.13.5/function/min_of/arity-2",
+      "new_positive": "promql-prometheus-3.13.5/function/min_of/arity-2/experimental-enabled",
+      "gate": "promql-experimental-functions",
+      "duration_gate_is_not_standalone_function_gate": true,
+      "source_refs": [
+        "promql/parser/generated_parser.y:493-550@299268003cee3f5d1329294c894db7a769848e6d7b6c29bfc3eb231b738b350e",
+        "promql/parser/generated_parser.y:1360-1393@299268003cee3f5d1329294c894db7a769848e6d7b6c29bfc3eb231b738b350e"
+      ]
+    },
+    {
+      "retained_negative": "promql-prometheus-3.13.5/function/range/arity-0",
+      "new_positive": "promql-prometheus-3.13.5/function/range/arity-0/experimental-enabled",
+      "gate": "promql-experimental-functions",
+      "duration_gate_is_not_standalone_function_gate": true,
+      "source_refs": [
+        "promql/parser/generated_parser.y:493-550@299268003cee3f5d1329294c894db7a769848e6d7b6c29bfc3eb231b738b350e",
+        "promql/parser/generated_parser.y:1360-1393@299268003cee3f5d1329294c894db7a769848e6d7b6c29bfc3eb231b738b350e"
+      ]
+    },
+    {
+      "retained_negative": "promql-prometheus-3.13.5/function/step/arity-0",
+      "new_positive": "promql-prometheus-3.13.5/function/step/arity-0/experimental-enabled",
+      "gate": "promql-experimental-functions",
+      "duration_gate_is_not_standalone_function_gate": true,
+      "source_refs": [
+        "promql/parser/generated_parser.y:493-550@299268003cee3f5d1329294c894db7a769848e6d7b6c29bfc3eb231b738b350e",
+        "promql/parser/generated_parser.y:1360-1393@299268003cee3f5d1329294c894db7a769848e6d7b6c29bfc3eb231b738b350e"
+      ]
+    }
+  ]
+}

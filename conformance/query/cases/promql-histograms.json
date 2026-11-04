@@ -1,0 +1,2550 @@
+{
+  "phase": "evaluation",
+  "cases": [
+    {
+      "id": "promql-histograms/mixed/sum_over_time",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "sum_over_time(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "3ff0000000000000"
+            },
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-histograms/mixed/avg_over_time",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "avg_over_time(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "3ff0000000000000"
+            },
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-histograms/mixed/count_over_time",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "count_over_time(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "3ff0000000000000"
+            },
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-histograms/mixed/min_over_time",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "min_over_time(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "3ff0000000000000"
+            },
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-histograms/mixed/max_over_time",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "max_over_time(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "3ff0000000000000"
+            },
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-histograms/mixed/last_over_time",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "last_over_time(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "3ff0000000000000"
+            },
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-histograms/mixed/rate",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "rate(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "3ff0000000000000"
+            },
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-histograms/mixed/increase",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "increase(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "3ff0000000000000"
+            },
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-histograms/mixed/delta",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "delta(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "3ff0000000000000"
+            },
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-histograms/mixed/irate",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "irate(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "3ff0000000000000"
+            },
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-histograms/mixed/idelta",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "idelta(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "3ff0000000000000"
+            },
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-histograms/mixed/changes",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "changes(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "3ff0000000000000"
+            },
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-histograms/mixed/resets",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "resets(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "3ff0000000000000"
+            },
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-histograms/mixed/present_over_time",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "present_over_time(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "3ff0000000000000"
+            },
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-histograms/native-quantile/0",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "histogram_quantile(0,hist_total)",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "hist_total"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-histograms/native-quantile/.5",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "histogram_quantile(.5,hist_total)",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "hist_total"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-histograms/native-quantile/1",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "histogram_quantile(1,hist_total)",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "hist_total"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-histograms/native-quantile/-1",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "histogram_quantile(-1,hist_total)",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "hist_total"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-histograms/native-quantile/2",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "histogram_quantile(2,hist_total)",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "hist_total"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-histograms/native-quantile/NaN",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "histogram_quantile(NaN,hist_total)",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "hist_total"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-histograms/native/histogram_count",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "histogram_count(hist_total)",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "hist_total"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-histograms/native/histogram_sum",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "histogram_sum(hist_total)",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "hist_total"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-histograms/native/histogram_avg",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "histogram_avg(hist_total)",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "hist_total"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-histograms/native/histogram_stddev",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "histogram_stddev(hist_total)",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "hist_total"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-histograms/native/histogram_stdvar",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "histogram_stdvar(hist_total)",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "hist_total"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-histograms/binary/+",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "hist_total + hist_total",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "hist_total"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-histograms/binary/-",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "hist_total - hist_total",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "hist_total"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-histograms/binary/*",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "hist_total * -2",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "hist_total"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-histograms/binary//",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "hist_total / -2",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "hist_total"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-histograms/binary/==",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "hist_total == hist_total",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "hist_total"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-histograms/binary/!=",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "hist_total != hist_total",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "hist_total"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-histograms/trim/<//0",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "hist_total </ 0",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "hist_total"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-histograms/trim/<//1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "hist_total </ 1",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "hist_total"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-histograms/trim/<//1.5",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "hist_total </ 1.5",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "hist_total"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-histograms/trim/<//2",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "hist_total </ 2",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "hist_total"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-histograms/trim/<//+Inf",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "hist_total </ +Inf",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "hist_total"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-histograms/trim/<//-Inf",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "hist_total </ -Inf",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "hist_total"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-histograms/trim/<//NaN",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "hist_total </ NaN",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "hist_total"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-histograms/trim/>//0",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "hist_total >/ 0",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "hist_total"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-histograms/trim/>//1",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "hist_total >/ 1",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "hist_total"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-histograms/trim/>//1.5",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "hist_total >/ 1.5",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "hist_total"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-histograms/trim/>//2",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "hist_total >/ 2",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "hist_total"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-histograms/trim/>//+Inf",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "hist_total >/ +Inf",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "hist_total"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-histograms/trim/>//-Inf",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "hist_total >/ -Inf",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "hist_total"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-histograms/trim/>//NaN",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "hist_total >/ NaN",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "hist_total"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-histograms/classic/nonmonotonic",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "histogram_quantile(.5,classic_bucket)",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "classic_bucket"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            },
+            {
+              "name": "le",
+              "value": "1"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "float_bits": "4008000000000000"
+            }
+          ]
+        },
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "classic_bucket"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            },
+            {
+              "name": "le",
+              "value": "2"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "float_bits": "4000000000000000"
+            }
+          ]
+        },
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "classic_bucket"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            },
+            {
+              "name": "le",
+              "value": "+Inf"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "float_bits": "4014000000000000"
+            }
+          ]
+        },
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "classic_bucket"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            },
+            {
+              "name": "le",
+              "value": "malformed"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "float_bits": "401c000000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-histograms/integer-retention",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "last_over_time(hist_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "hist_total"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "9007199254740993",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "9007199254740993"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

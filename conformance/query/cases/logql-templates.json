@@ -1,0 +1,3974 @@
+{
+  "phase": "logql-template",
+  "authorship": "Independently authored Apache-2.0 inputs by Aryn Yklas; no stored oracle answers.",
+  "clock_contract": "Observe each native/owned call between its real process wall-clock brackets. Calendar outputs compare exactly only when both brackets are wholly within the same declared calendar unit in the explicit timezone; otherwise validate each observation against its own bracket and layout. Integer Unix outputs must lie in the observed precision-adjusted bracket. Query evaluation time is never substituted. Injected-clock unit tests are separately exact.",
+  "cases": [
+    {
+      "id": "logql-loki-3.5.2/template/Replace/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{Replace \"a-a-a\" \"a\" \"b\" 2}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/Replace/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{Replace \"a\" \"a\" \"b\" 0}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/Replace/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{Replace \"a\" \"b\" \"c\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/ToLower/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{ToLower \"ÄBC\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/ToLower/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{ToLower \"\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/ToLower/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{ToLower true}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/ToUpper/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{ToUpper \"äbc\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/ToUpper/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{ToUpper \"𐵰\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/ToUpper/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{ToUpper 1}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/Trim/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{Trim \"abVALUEba\" \"ab\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/Trim/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{Trim \"abc\" \"\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/Trim/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{Trim 2 \"a\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/TrimLeft/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{TrimLeft \"aaXaa\" \"a\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/TrimLeft/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{TrimLeft \"\" \"a\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/TrimLeft/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{TrimLeft \"a\" 2}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/TrimPrefix/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{TrimPrefix \"abXab\" \"ab\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/TrimPrefix/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{TrimPrefix \"Xab\" \"ab\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/TrimPrefix/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{TrimPrefix \"a\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/TrimRight/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{TrimRight \"aaXaa\" \"a\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/TrimRight/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{TrimRight \"abc\" \"z\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/TrimRight/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{TrimRight true \"a\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/TrimSpace/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{TrimSpace \"\\t X\\u00a0\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/TrimSpace/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{TrimSpace \"\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/TrimSpace/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{TrimSpace 1}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/TrimSuffix/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{TrimSuffix \"abXab\" \"ab\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/TrimSuffix/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{TrimSuffix \"abX\" \"ab\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/TrimSuffix/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{TrimSuffix \"a\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/__line__/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{__line__}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/__line__/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{__line__ | len}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/__line__/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{__line__ 1}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/__timestamp__/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{__timestamp__ | unixEpochNanos}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/__timestamp__/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{(__timestamp__).Nanosecond}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/__timestamp__/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{__timestamp__ 1}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/add/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{add \"2\" 3 true}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/add/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{add}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/add/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{add \"not-an-integer\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/addf/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{addf \"0.1\" \"0.2\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/addf/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{addf}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/addf/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{addf \"NaN\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/alignLeft/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{alignLeft 4 \"éx\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/alignLeft/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{alignLeft 1 \"éx\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/alignLeft/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{alignLeft \"2\" \"abc\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/alignRight/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{alignRight 4 \"éx\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/alignRight/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{alignRight 1 \"éx\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/alignRight/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{alignRight 2 3}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/b64dec/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{b64dec \"aGk=\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/b64dec/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{b64dec \"!\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/b64dec/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{b64dec 1}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/b64enc/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{b64enc \"hi\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/b64enc/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{b64enc \"\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/b64enc/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{b64enc false}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/bytes/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{bytes \"1.5 KiB\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/bytes/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{bytes \"0\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/bytes/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{bytes \"18446744073709551616 B\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/ceil/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{ceil \"1.2\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/ceil/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{ceil \"-1.2\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/ceil/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{ceil}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/contains/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{contains \"bc\" \"abcd\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/contains/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{contains \"\" \"\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/contains/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{contains 1 \"a\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/count/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{count \"a+\" \"aa ba\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/count/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{count \"\" \"ab\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/count/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{count \"[\" \"a\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/date/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{date \"2006-01-02\" 0}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/date/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{date \"2006-01-02\" \"unsupported\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC",
+      "clock_observation": {
+        "kind": "calendar",
+        "layout": "2006-01-02",
+        "unit": "day"
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/template/date/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{date 1 0}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/default/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{default \"fallback\" \"given\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/default/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{default \"fallback\" false \"ignored\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/default/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{default}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/div/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{div -7 2}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/div/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{div \"bad\" 2}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/div/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{div 1 0}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/divf/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{divf 1 3}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/divf/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{divf 2}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/divf/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{divf 1 0}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/duration/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{duration \"1m30s\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/duration/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{duration \"-1ns\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/duration/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{duration \"nonsense\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/duration_seconds/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{duration_seconds \"1.5s\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/duration_seconds/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{duration_seconds \"0\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/duration_seconds/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{duration_seconds \"nonsense\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/float64/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{float64 true}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/float64/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{float64 \"bad\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/float64/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{float64}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/floor/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{floor \"1.9\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/floor/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{floor \"-1.2\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/floor/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{floor}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/fromJson/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{index (fromJson \"{\\\"x\\\":[2]}\") \"x\" 0}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/fromJson/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{fromJson \"invalid\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/fromJson/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{fromJson false}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/hasPrefix/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{hasPrefix \"ab\" \"abc\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/hasPrefix/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{hasPrefix \"z\" \"abc\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/hasPrefix/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{hasPrefix \"a\" 2}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/hasSuffix/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{hasSuffix \"bc\" \"abc\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/hasSuffix/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{hasSuffix \"\" \"abc\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/hasSuffix/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{hasSuffix 2 \"a\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/indent/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{indent 2 \"a\\nb\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/indent/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{indent 0 \"\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/indent/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{indent -1 \"x\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/int/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{int 2.9}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/int/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{int \"invalid\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/int/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{int}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/lower/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{lower \"ÄBC\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/lower/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{lower \"\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/lower/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{lower 1}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/max/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{max -2 \"8\" 3}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/max/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{max -2}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/max/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{max}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/maxf/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{maxf -2 \"8.5\" 3}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/maxf/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{maxf \"NaN\" 2}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/maxf/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{maxf}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/min/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{min -2 \"8\" 3}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/min/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{min 3}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/min/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{min}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/minf/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{minf -2 \"8.5\" 3}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/minf/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{minf \"-0\" 0}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/minf/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{minf}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/mod/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{mod -7 2}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/mod/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{mod 0 2}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/mod/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{mod 1 0}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/mul/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{mul 2 \"3\" 4}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/mul/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{mul 7}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/mul/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{mul}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/mulf/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{mulf 0.1 0.2}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/mulf/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{mulf 7}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/mulf/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{mulf}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/nindent/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{nindent 2 \"a\\nb\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/nindent/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{nindent 0 \"\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/nindent/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{nindent -1 \"x\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/now/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{now | date \"2006-01-02\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC",
+      "clock_observation": {
+        "kind": "calendar",
+        "layout": "2006-01-02",
+        "unit": "day"
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/template/now/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{now | unixEpoch}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC",
+      "clock_observation": {
+        "kind": "unix-seconds",
+        "unit": "second"
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/template/now/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{now 1}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/regexReplaceAll/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{regexReplaceAll \"(a)\" \"aba\" \"${1}x\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/regexReplaceAll/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{regexReplaceAll \"z\" \"abc\" \"x\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/regexReplaceAll/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{regexReplaceAll \"[\" \"x\" \"y\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/regexReplaceAllLiteral/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{regexReplaceAllLiteral \"a\" \"aba\" \"$1\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/regexReplaceAllLiteral/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{regexReplaceAllLiteral \"z\" \"abc\" \"x\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/regexReplaceAllLiteral/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{regexReplaceAllLiteral \"[\" \"x\" \"y\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/repeat/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{repeat 3 \"ab\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/repeat/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{repeat 0 \"ab\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/repeat/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{repeat -1 \"x\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/replace/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{replace \"a\" \"x\" \"aba\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/replace/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{replace \"\" \"x\" \"a\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/replace/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{replace \"a\" \"b\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/round/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{round \"1.25\" 1}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/round/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{round \"-1.25\" 1}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/round/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{round 1 \"2\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/sub/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{sub 9 4}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/sub/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{sub \"bad\" 3}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/sub/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{sub 1}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/subf/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{subf 0.3 0.1}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/subf/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{subf 8}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/subf/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{subf}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/substr/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{substr 1 3 \"abcd\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/substr/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{substr -1 2 \"abcd\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/substr/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{substr 4 1 \"abc\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/title/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{title \"hello_world hello-world\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/title/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{title \"\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/title/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{title 1}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/toDate/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{toDate \"2006-01-02\" \"2001-01-01\" | unixEpoch}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/toDate/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{(toDate \"2006\" \"bad\").IsZero}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/toDate/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{toDate \"2006\" 1}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/toDateInZone/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{toDateInZone \"2006-01-02 15:04 -0700\" \"UTC\" \"2001-01-01 01:00 +0100\" | unixEpoch}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/toDateInZone/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{toDateInZone \"2006\" \"Not/A_Zone\" \"2001\" | date \"2006\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/toDateInZone/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{toDateInZone \"2006\" \"UTC\" 1}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/trim/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{trim \"\\n abc\\t\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/trim/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{trim \"\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/trim/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{trim 1}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/trimAll/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{trimAll \"ab\" \"abXba\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/trimAll/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{trimAll \"\" \"abc\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/trimAll/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{trimAll \"a\" 1}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/trimPrefix/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{trimPrefix \"ab\" \"abXab\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/trimPrefix/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{trimPrefix \"z\" \"abc\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/trimPrefix/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{trimPrefix 1 \"a\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/trimSuffix/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{trimSuffix \"ab\" \"abXab\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/trimSuffix/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{trimSuffix \"z\" \"abc\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/trimSuffix/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{trimSuffix \"a\" false}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/trunc/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{trunc 2 \"abcd\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/trunc/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{trunc -2 \"abcd\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/trunc/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{trunc \"1\" \"abc\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/unixEpoch/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{unixEpoch (__timestamp__)}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/unixEpoch/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{unixEpoch (toDate \"2006\" \"2001\")}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/unixEpoch/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{unixEpoch \"1\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/unixEpochMillis/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{unixEpochMillis (__timestamp__)}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/unixEpochMillis/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{unixEpochMillis (toDate \"2006\" \"2001\")}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/unixEpochMillis/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{unixEpochMillis 1}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/unixEpochNanos/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{unixEpochNanos (__timestamp__)}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/unixEpochNanos/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{unixEpochNanos (toDate \"2006\" \"2001\")}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/unixEpochNanos/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{unixEpochNanos \"1\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/unixToTime/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{unixToTime \"1000000000\" | unixEpoch}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/unixToTime/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{unixToTime \"00001\" | unixEpoch}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/unixToTime/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{unixToTime \"123\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/upper/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{upper \"äbc\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/upper/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{upper \"\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/upper/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{upper 1}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/urldecode/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{urldecode \"a%2Bb+c\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/urldecode/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{urldecode \"\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/urldecode/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{urldecode \"%Q0\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/urlencode/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{urlencode \"a+b c\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/urlencode/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{urlencode \"\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/urlencode/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{urlencode 1}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template-runtime/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{if eq .level \"warn\"}}{{.level | upper}}{{else}}ok{{end}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template-runtime/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "prefix{{div 3 0}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template-runtime/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{$x := \"\"}}{{range $v := fromJson \"[1,2,3]\"}}{{$x = printf \"%s%v\" $x $v}}{{end}}{{$x}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/primitive/template-version/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{range 3}}{{.}}{{end}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/primitive/template-version/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{range $i,$v := 3}}{{$v}}{{end}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/primitive/template-version/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{index . \"missing\"}}/{{(fromJson \"{}\").missing.child}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/primitive/unicode-case-version/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{upper \"äbc\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/primitive/unicode-case-version/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{upper \"𐵰\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/primitive/unicode-case-version/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{printf \"%q\" \"𐵰\"}}/{{js \"𐵰\"}}/{{count \"\\\\p{L}\" \"𐵰\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/primitive/regexp-engine-identity/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{count \"a*\" \"aba\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/primitive/regexp-engine-identity/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{regexReplaceAll \"[\" \"abc\" \"x\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/primitive/regexp-engine-identity/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{regexReplaceAll \"(?P<x>a)\" \"aba\" \"${x}X\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/primitive/numeric-string-stdlib-version/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{float64 \"0x1p-2\"}}/{{addf 0.1 0.2}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/primitive/numeric-string-stdlib-version/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{float64 \"not-a-number\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/primitive/numeric-string-stdlib-version/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{minf \"-0\" 0}}/{{maxf \"NaN\" 1}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/primitive/time-stdlib-version/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{(__timestamp__).UnixNano}}/{{(__timestamp__).Month.String}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/primitive/time-stdlib-version/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{(now).Zone}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/primitive/time-stdlib-version/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{now | date \"2006-01-02\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC",
+      "clock_observation": {
+        "kind": "calendar",
+        "layout": "2006-01-02",
+        "unit": "day"
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/template/current-line-after-stage",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{__line__ | upper}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/forbidden-env",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{env \"PATH\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/forbidden-file",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{readFile \"generic.txt\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/forbidden-network",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{getHostByName \"example.invalid\"}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/forbidden-random",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{randAlphaNum 8}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/forbidden-input-method",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{.level.Method}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/nonerror-time-multiple-return",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{(now).Clock}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/nested-range-output",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{$a := fromJson \"[1,2]\"}}{{range $a}}{{range $a}}{{.}}{{end}}{{end}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/variables-template-call",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{template \"child\" \"abc\"}}{{define \"child\"}}{{. | upper}}{{end}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/short-circuit",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{and false (div 1 0)}}/{{or \"yes\" (div 1 0)}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/printf-known-types",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{printf \"%T/%T\" (now).Month (index \"a\" 0)}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template/identifier-unicode-new",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{.𐵰}}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {"id":"logql-loki-3.5.2/template/timestamp-millisecond-overflow","profiles":["logql-loki-3.5.2"],"source":"{{unixToTime \"9999999999999\" | unixEpochNanos}}","line":"line","timestamp_ns":"-1","labels":[],"fields":[],"timezone":"UTC"},
+    {"id":"logql-loki-3.5.2/template/label-map-identity","profiles":["logql-loki-3.5.2"],"source":"{{eq (printf \"%p\" .) (printf \"%p\" .)}}","line":"line","timestamp_ns":"-1","labels":[{"name":"level","value":"warn"}],"fields":[],"timezone":"UTC"},
+    {"id":"logql-loki-3.5.2/template/empty-repeat-large-count","profiles":["logql-loki-3.5.2"],"source":"{{repeat 1000000000 \"\"}}","line":"line","timestamp_ns":"-1","labels":[],"fields":[],"timezone":"UTC"},
+    {"id":"logql-loki-3.5.2/template/time-append-text","profiles":["logql-loki-3.5.2"],"source":"{{printf \"%s\" ((__timestamp__).AppendText nil)}}","line":"line","timestamp_ns":"-1","labels":[],"fields":[],"timezone":"UTC"},
+    {"id":"logql-loki-3.5.2/template/empty-range-declaration","profiles":["logql-loki-3.5.2"],"source":"{{range $x := fromJson \"[]\"}}bad{{else}}{{printf \"%T\" $x}}{{end}}","line":"line","timestamp_ns":"-1","labels":[],"fields":[],"timezone":"UTC"},
+    {"id":"logql-loki-3.5.2/template/standalone-nil-command","profiles":["logql-loki-3.5.2"],"source":"{{nil}}","line":"line","timestamp_ns":"-1","labels":[],"fields":[],"timezone":"UTC"},
+    {"id":"logql-loki-3.5.2/template-stage/current-line-chain","profiles":["logql-loki-3.5.2"],"kind":"pipeline","pipeline_query":"{job=\"x\"} | line_format `{{__line__ | upper}}` | line_format `{{__line__}}`","source":"{{__line__}}","line":"mixed Case","timestamp_ns":"1","labels":[{"name":"job","value":"x"}],"fields":[],"timezone":"UTC"},
+    {"id":"logql-loki-3.5.2/template-stage/line-failure-preserves-current","profiles":["logql-loki-3.5.2"],"kind":"pipeline","pipeline_query":"{job=\"x\"} | line_format `{{__line__ | upper}}` | line_format `prefix{{div 1 0}}`","source":"prefix{{div 1 0}}","line":"mixed Case","timestamp_ns":"1","labels":[{"name":"job","value":"x"}],"fields":[],"timezone":"UTC"},
+    {"id":"logql-loki-3.5.2/template-stage/label-failure-continues","profiles":["logql-loki-3.5.2"],"kind":"pipeline","pipeline_query":"{job=\"x\"} | label_format failed=`{{div 1 0}}`, after=`kept`","source":"{{div 1 0}}","line":"line","timestamp_ns":"1","labels":[{"name":"job","value":"x"}],"fields":[],"timezone":"UTC"},
+    {"id":"logql-loki-3.5.2/template/pinned-zone-winter","profiles":["logql-loki-3.5.2"],"source":"{{toDateInZone \"2006-01-02 15:04\" \"America/New_York\" \"2026-01-01 00:00\" | unixEpoch}}","line":"line","timestamp_ns":"1","labels":[],"fields":[],"timezone":"UTC"},
+    {"id":"logql-loki-3.5.2/template/pinned-zone-summer","profiles":["logql-loki-3.5.2"],"source":"{{toDateInZone \"2006-01-02 15:04\" \"America/New_York\" \"2026-07-01 00:00\" | unixEpoch}}","line":"line","timestamp_ns":"1","labels":[],"fields":[],"timezone":"UTC"},
+    {"id":"logql-loki-3.5.2/template/printf-indexed-stars","profiles":["logql-loki-3.5.2"],"source":"{{printf \"%[3]*.[2]*[1]f\" 1.25 1 5}}","line":"line","timestamp_ns":"1","labels":[],"fields":[],"timezone":"UTC"},
+    {"id":"logql-loki-3.5.2/template/error-detail-duration","profiles":["logql-loki-3.5.2"],"source":"{{duration \"private-marker\"}}","line":"line","timestamp_ns":"1","labels":[],"fields":[],"timezone":"UTC"},
+    {"id":"logql-loki-3.5.2/template/error-detail-index","profiles":["logql-loki-3.5.2"],"source":"{{index \"abc\" 99}}","line":"line","timestamp_ns":"1","labels":[],"fields":[],"timezone":"UTC"},
+    {"id":"logql-loki-3.5.2/template/error-detail-nil-length","profiles":["logql-loki-3.5.2"],"source":"{{len nil}}","line":"line","timestamp_ns":"1","labels":[],"fields":[],"timezone":"UTC"},
+    {"id":"logql-loki-3.5.2/template/error-detail-leading-byte-space","profiles":["logql-loki-3.5.2"],"source":"{{bytes \" 1 KB\"}}","line":"line","timestamp_ns":"1","labels":[],"fields":[],"timezone":"UTC"},
+    {"id":"logql-loki-3.5.2/template/error-detail-positive-infinity","profiles":["logql-loki-3.5.2"],"source":"{{addf \"Inf\"}}","line":"line","timestamp_ns":"1","labels":[],"fields":[],"timezone":"UTC"},
+    {"id":"logql-loki-3.5.2/template/cast-whitespace-decimal-suffix","profiles":["logql-loki-3.5.2"],"source":"{{int \" 1 \"}}/{{float64 \" 1 \"}}/{{int \"1.\"}}/{{int \"1.0.\"}}/{{int \"9223372036854775808\"}}/{{float64 \"1e999\"}}","line":"line","timestamp_ns":"1","labels":[],"fields":[],"timezone":"UTC"},
+    {"id":"logql-loki-3.5.2/template/nan-template-comparisons","profiles":["logql-loki-3.5.2"],"source":"{{$n:=float64 \"NaN\"}}{{lt $n 1.0}}/{{le $n 1.0}}/{{gt $n 1.0}}/{{ge $n 1.0}}","line":"line","timestamp_ns":"1","labels":[],"fields":[],"timezone":"UTC"},
+    {"id":"logql-loki-3.5.2/template/closed-byte-method-range","profiles":["logql-loki-3.5.2"],"source":"{{range (__timestamp__).AppendFormat nil \"ab\"}}{{int .}};{{end}}","line":"line","timestamp_ns":"1","labels":[],"fields":[],"timezone":"UTC"},
+    {"id":"logql-loki-3.5.2/template-stage/error-details-are-query-visible","profiles":["logql-loki-3.5.2"],"kind":"pipeline","pipeline_query":"{job=\"x\"} | line_format `{{duration \"private-marker\"}}` | __error_details__=~\".*private-marker.*\"","source":"{{duration \"private-marker\"}}","line":"line","timestamp_ns":"1","labels":[{"name":"job","value":"x"}],"fields":[],"timezone":"UTC"}
+  ]
+}

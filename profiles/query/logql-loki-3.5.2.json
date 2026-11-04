@@ -1,0 +1,2284 @@
+{
+  "id": "logql-loki-3.5.2",
+  "commit": "257d2f62bf8a81b44dea6fe88968d1d28c8e01e7",
+  "manifest_version": 1,
+  "feature_sets": [
+    {
+      "id": "features-ef306c4e3aff8e4e9f5fb90595bb4f4b13f3de438c78ba73db83d9eb088e79eb",
+      "enabled": []
+    },
+    {
+      "id": "features-d89eb07db302ed15a875481f844953b6d589f4dba77dc502d3e0f0d4e5f3afe1",
+      "enabled": [
+        "multi-variant-queries"
+      ]
+    },
+    {
+      "id": "features-f5c3927f04901be477e550551b2c310037dfb7e2a5b722438f6ad58f58502dcd",
+      "enabled": [
+        "structured-metadata-admission"
+      ]
+    },
+    {
+      "id": "features-5420b5c21c34d4f94a4a96d7fad8ed184db2703d234316d42d5f88ad7cae1185",
+      "enabled": [
+        "multi-variant-queries",
+        "structured-metadata-admission"
+      ]
+    },
+    {
+      "id": "features-c7bdbdc4ea01ade3b72094370f28f823ecd789bb2f4fb9dcfdb52f3a1da15fe9",
+      "enabled": [
+        "shard-first_over_time"
+      ]
+    },
+    {
+      "id": "features-c3ff0630768b5466baff1ae2936f66eebcdc9a73978099bf6d24f23467e6da27",
+      "enabled": [
+        "multi-variant-queries",
+        "shard-first_over_time"
+      ]
+    },
+    {
+      "id": "features-605860cd3f74c54e783fc94ab46f9c98911e434272bf91e4debf644dd381425e",
+      "enabled": [
+        "structured-metadata-admission",
+        "shard-first_over_time"
+      ]
+    },
+    {
+      "id": "features-da399eba6202e374c7679e17b98d1f75b0ce3e2b91acf3590b44e29c92a8c5c3",
+      "enabled": [
+        "multi-variant-queries",
+        "structured-metadata-admission",
+        "shard-first_over_time"
+      ]
+    },
+    {
+      "id": "features-c0773d30bfca23f7a9355ae1da3c9987102618d555ac7d2c30864c6cdc52cf57",
+      "enabled": [
+        "shard-last_over_time"
+      ]
+    },
+    {
+      "id": "features-786efe229724ddebf3bd8af810a74c78877205644a6ff176044e6695fb220f1f",
+      "enabled": [
+        "multi-variant-queries",
+        "shard-last_over_time"
+      ]
+    },
+    {
+      "id": "features-815e74691b79d7126d2a8e84c7d89f1fc5b8c60b815d233bcca5d9fb830a5b10",
+      "enabled": [
+        "structured-metadata-admission",
+        "shard-last_over_time"
+      ]
+    },
+    {
+      "id": "features-80140ab6d47128c5fb8c5ddb91657e95387db4add9154ddbe0a33ceb6c483504",
+      "enabled": [
+        "multi-variant-queries",
+        "structured-metadata-admission",
+        "shard-last_over_time"
+      ]
+    },
+    {
+      "id": "features-8b5e0b7f8df65660ebe2c10541131811df0f101fe176562bf66a214ab721b42c",
+      "enabled": [
+        "shard-first_over_time",
+        "shard-last_over_time"
+      ]
+    },
+    {
+      "id": "features-ecba27601114dacfd19ca8f08dc07e435b4b11940fa8788a9557aeadd6e55cb3",
+      "enabled": [
+        "multi-variant-queries",
+        "shard-first_over_time",
+        "shard-last_over_time"
+      ]
+    },
+    {
+      "id": "features-c93829eeba7642b48d2ae618812f985dc4f29335f47d4f7291617603062ab100",
+      "enabled": [
+        "structured-metadata-admission",
+        "shard-first_over_time",
+        "shard-last_over_time"
+      ]
+    },
+    {
+      "id": "features-3bd710979aa8bff310cc7139a34bbf5a3d47267b1c28c171dbdc6a5d86e9029d",
+      "enabled": [
+        "multi-variant-queries",
+        "structured-metadata-admission",
+        "shard-first_over_time",
+        "shard-last_over_time"
+      ]
+    },
+    {
+      "id": "features-656c26655e3e010f93db6159a5da47344a5ab5e316f8c253fd159e925ed780e7",
+      "enabled": [
+        "shard-quantile_over_time"
+      ]
+    },
+    {
+      "id": "features-091217d8ea2f2abb5892a0457e0840d9859c4ef10eb913cd3fc50e047b7c49b1",
+      "enabled": [
+        "multi-variant-queries",
+        "shard-quantile_over_time"
+      ]
+    },
+    {
+      "id": "features-50f63b7ab55a79e96b484307ed547d52ce5873432c48f08536032b0f13a95fec",
+      "enabled": [
+        "structured-metadata-admission",
+        "shard-quantile_over_time"
+      ]
+    },
+    {
+      "id": "features-5aa6c1913932c703c58648ea39e3b964b81aac408ce33764459392fa7949b2f6",
+      "enabled": [
+        "multi-variant-queries",
+        "structured-metadata-admission",
+        "shard-quantile_over_time"
+      ]
+    },
+    {
+      "id": "features-adc18b5cc5e47c465b6361fccfbf3bfdaa24606892d164b28be806e49ba8388d",
+      "enabled": [
+        "shard-first_over_time",
+        "shard-quantile_over_time"
+      ]
+    },
+    {
+      "id": "features-064df8463b072520d91c64bf8d390e3bbed0465a8ce736c6cd2504e223615709",
+      "enabled": [
+        "multi-variant-queries",
+        "shard-first_over_time",
+        "shard-quantile_over_time"
+      ]
+    },
+    {
+      "id": "features-17df3411a0f1e0591d9d4df3f16d4e2c8163412789139f4b80d9c0b759382d3e",
+      "enabled": [
+        "structured-metadata-admission",
+        "shard-first_over_time",
+        "shard-quantile_over_time"
+      ]
+    },
+    {
+      "id": "features-a1f09f1a68b4a607f9de57140e2237b43022b86c8eda275d46e49a7941f35b28",
+      "enabled": [
+        "multi-variant-queries",
+        "structured-metadata-admission",
+        "shard-first_over_time",
+        "shard-quantile_over_time"
+      ]
+    },
+    {
+      "id": "features-38378212b0d24075a3753fb299d6fe8be8fdc262649772a25bfb5b2a0b31f77c",
+      "enabled": [
+        "shard-last_over_time",
+        "shard-quantile_over_time"
+      ]
+    },
+    {
+      "id": "features-975e08b98f18f836fe519f5bc2186a8228a95c22ede9bf1fde3c10bde8a90d2c",
+      "enabled": [
+        "multi-variant-queries",
+        "shard-last_over_time",
+        "shard-quantile_over_time"
+      ]
+    },
+    {
+      "id": "features-26c764c0c9c7e4c1f7ba3f4b70b05f0786a79562d2500c5335f5607cffb5e4c2",
+      "enabled": [
+        "structured-metadata-admission",
+        "shard-last_over_time",
+        "shard-quantile_over_time"
+      ]
+    },
+    {
+      "id": "features-868b0b750eb4f365a957c0c843c9ba5671e6ca60360a212d74879a14fc5454bf",
+      "enabled": [
+        "multi-variant-queries",
+        "structured-metadata-admission",
+        "shard-last_over_time",
+        "shard-quantile_over_time"
+      ]
+    },
+    {
+      "id": "features-7067aeed181c4bb122887c727932c25fcead0fc5f4d048c0e0eaa7dea2d22884",
+      "enabled": [
+        "shard-first_over_time",
+        "shard-last_over_time",
+        "shard-quantile_over_time"
+      ]
+    },
+    {
+      "id": "features-4bc3a0bdff4037b03e044e493793352b4c7d196a8da66177b4ba8ae905d0b173",
+      "enabled": [
+        "multi-variant-queries",
+        "shard-first_over_time",
+        "shard-last_over_time",
+        "shard-quantile_over_time"
+      ]
+    },
+    {
+      "id": "features-ed53531efcd1d99b920a4c21652752f7bb1867d25d2fa8cadaf356983c9070be",
+      "enabled": [
+        "structured-metadata-admission",
+        "shard-first_over_time",
+        "shard-last_over_time",
+        "shard-quantile_over_time"
+      ]
+    },
+    {
+      "id": "features-94b505b7fb1a30fbafcf856b41c2a3f11b3674d9226e9c7eb1f91cb9f306a689",
+      "enabled": [
+        "multi-variant-queries",
+        "structured-metadata-admission",
+        "shard-first_over_time",
+        "shard-last_over_time",
+        "shard-quantile_over_time"
+      ]
+    },
+    {
+      "id": "features-a41829d9b0c5285a26eb7a606bda5290a1944af56e80fbd59c0126af1f269927",
+      "enabled": [
+        "approx_topk"
+      ]
+    },
+    {
+      "id": "features-4980ecd6b1508206a32171ab442d629f300a433bda2becd19e1c6e72f60ca9cf",
+      "enabled": [
+        "multi-variant-queries",
+        "approx_topk"
+      ]
+    },
+    {
+      "id": "features-24396508cb478d337ecf85b7bd9f5fdb6a4d0c3e05aeb78501050036a7b31561",
+      "enabled": [
+        "structured-metadata-admission",
+        "approx_topk"
+      ]
+    },
+    {
+      "id": "features-f9075058dd880639392346b38578a5f9baba2150549de41399482dcda3511403",
+      "enabled": [
+        "multi-variant-queries",
+        "structured-metadata-admission",
+        "approx_topk"
+      ]
+    },
+    {
+      "id": "features-e36bd1236e726d7461700d70e70f26b01e8b05ef3eadc7d2e61cca7abc6c54cf",
+      "enabled": [
+        "shard-first_over_time",
+        "approx_topk"
+      ]
+    },
+    {
+      "id": "features-9db7f484285bbb86bccddc35de9b5df56a8881a132b094d38133b15319591fee",
+      "enabled": [
+        "multi-variant-queries",
+        "shard-first_over_time",
+        "approx_topk"
+      ]
+    },
+    {
+      "id": "features-07f715c1706081c8d475657b14e10ebf858493bbae29a0e549cc94d11c8e8637",
+      "enabled": [
+        "structured-metadata-admission",
+        "shard-first_over_time",
+        "approx_topk"
+      ]
+    },
+    {
+      "id": "features-ce1c568b7d775658ab44f9f125a0640353406109cc62bd5385e3ebf5471d39b9",
+      "enabled": [
+        "multi-variant-queries",
+        "structured-metadata-admission",
+        "shard-first_over_time",
+        "approx_topk"
+      ]
+    },
+    {
+      "id": "features-789e7c9ab894d5ab97974385e7f8c5f62c4873d2e833d2a47af5a611b760b144",
+      "enabled": [
+        "shard-last_over_time",
+        "approx_topk"
+      ]
+    },
+    {
+      "id": "features-bb32e6ca433de9b554d0342bd04717b6e4bf7a24ce97fce7212a9cc4c768d7dd",
+      "enabled": [
+        "multi-variant-queries",
+        "shard-last_over_time",
+        "approx_topk"
+      ]
+    },
+    {
+      "id": "features-5a80a7b60b6ae086d6d1a410d719ad5c9aa148c4f53627c533242e34324ed556",
+      "enabled": [
+        "structured-metadata-admission",
+        "shard-last_over_time",
+        "approx_topk"
+      ]
+    },
+    {
+      "id": "features-6be4a1ec08f7d1a5f7ae211ea75ed1816a2bb819501e96ff3de2f9a3203cdf17",
+      "enabled": [
+        "multi-variant-queries",
+        "structured-metadata-admission",
+        "shard-last_over_time",
+        "approx_topk"
+      ]
+    },
+    {
+      "id": "features-cf8f16994635ca288529cbcd857cf915bceea2af142a2904933d20e8a64b9598",
+      "enabled": [
+        "shard-first_over_time",
+        "shard-last_over_time",
+        "approx_topk"
+      ]
+    },
+    {
+      "id": "features-a42630e9cff4abc53ebfd401daa86bcd4e5cf15d24a42a745e027545e722cca6",
+      "enabled": [
+        "multi-variant-queries",
+        "shard-first_over_time",
+        "shard-last_over_time",
+        "approx_topk"
+      ]
+    },
+    {
+      "id": "features-45c3beb9cfcfc260a8a6de2fc62f8c5e7ab90113ec3716f4c42dc4587a793fd2",
+      "enabled": [
+        "structured-metadata-admission",
+        "shard-first_over_time",
+        "shard-last_over_time",
+        "approx_topk"
+      ]
+    },
+    {
+      "id": "features-3c85585716bb949acbf85939e0f664d33343093579c6052b624bf4ecafb7421b",
+      "enabled": [
+        "multi-variant-queries",
+        "structured-metadata-admission",
+        "shard-first_over_time",
+        "shard-last_over_time",
+        "approx_topk"
+      ]
+    },
+    {
+      "id": "features-2edece531de28ab7880d655308e7be0a9f37b7c0fea503f830b095fbe3ac5edb",
+      "enabled": [
+        "shard-quantile_over_time",
+        "approx_topk"
+      ]
+    },
+    {
+      "id": "features-7d16a80657983f0c878c81df298f5f5899ce89005afaddaa89844f881df12041",
+      "enabled": [
+        "multi-variant-queries",
+        "shard-quantile_over_time",
+        "approx_topk"
+      ]
+    },
+    {
+      "id": "features-3c3c24801d17d284b3bdc25ddd40b2798d2d6595c801a8d10e48c47b9c08796d",
+      "enabled": [
+        "structured-metadata-admission",
+        "shard-quantile_over_time",
+        "approx_topk"
+      ]
+    },
+    {
+      "id": "features-f8fce2b3cce1c33a974febc1a572e91ea81da421e2b869264b58d65a7da0576f",
+      "enabled": [
+        "multi-variant-queries",
+        "structured-metadata-admission",
+        "shard-quantile_over_time",
+        "approx_topk"
+      ]
+    },
+    {
+      "id": "features-0fcc0537a50c80295175f4d5c093bece57ca2cf42142d2bbe1ed7dd6770fb35c",
+      "enabled": [
+        "shard-first_over_time",
+        "shard-quantile_over_time",
+        "approx_topk"
+      ]
+    },
+    {
+      "id": "features-cf7c7de223fbb98dc04b1a4b56d231c59006dd66bf440fdffbc1340e4e39c257",
+      "enabled": [
+        "multi-variant-queries",
+        "shard-first_over_time",
+        "shard-quantile_over_time",
+        "approx_topk"
+      ]
+    },
+    {
+      "id": "features-6d3d9fc8e2f6731908f4f5279a4227b3b886c7f87f0cb02471b0589e2287b09f",
+      "enabled": [
+        "structured-metadata-admission",
+        "shard-first_over_time",
+        "shard-quantile_over_time",
+        "approx_topk"
+      ]
+    },
+    {
+      "id": "features-b57103f4e392792c66b3c48f3dbc430a2d32b0fb549f44be380ec4e65fbc0870",
+      "enabled": [
+        "multi-variant-queries",
+        "structured-metadata-admission",
+        "shard-first_over_time",
+        "shard-quantile_over_time",
+        "approx_topk"
+      ]
+    },
+    {
+      "id": "features-b732f5c9f4b49ef5f8ac915f46bf17d3ea17ff31bf47838f9c60cc1fb487b0fc",
+      "enabled": [
+        "shard-last_over_time",
+        "shard-quantile_over_time",
+        "approx_topk"
+      ]
+    },
+    {
+      "id": "features-351ba66d6046135772d0615b59fb9d777623cf9419726f7a869c7f17881472d4",
+      "enabled": [
+        "multi-variant-queries",
+        "shard-last_over_time",
+        "shard-quantile_over_time",
+        "approx_topk"
+      ]
+    },
+    {
+      "id": "features-26687ef31c1930a4473a799d9ca74724247136a7059ea3fb3e93b6af4accbd37",
+      "enabled": [
+        "structured-metadata-admission",
+        "shard-last_over_time",
+        "shard-quantile_over_time",
+        "approx_topk"
+      ]
+    },
+    {
+      "id": "features-cc33a0ccae6ba8d12f5c5858bb8309d896578517e23668ce33dfbf2cd5aa11b2",
+      "enabled": [
+        "multi-variant-queries",
+        "structured-metadata-admission",
+        "shard-last_over_time",
+        "shard-quantile_over_time",
+        "approx_topk"
+      ]
+    },
+    {
+      "id": "features-0b97c42dccad51773ce63a29703e17eb5ae942a64cb6228cfaa67221eb3b145b",
+      "enabled": [
+        "shard-first_over_time",
+        "shard-last_over_time",
+        "shard-quantile_over_time",
+        "approx_topk"
+      ]
+    },
+    {
+      "id": "features-8195335d1973d193f43c7d5fbce9fedebd06685012ebd0ec94dbfb6713138107",
+      "enabled": [
+        "multi-variant-queries",
+        "shard-first_over_time",
+        "shard-last_over_time",
+        "shard-quantile_over_time",
+        "approx_topk"
+      ]
+    },
+    {
+      "id": "features-a1e989248b09ba0a5ed2c64efc01accbc96948f0d3e60cd741bb3b0ac9bd3442",
+      "enabled": [
+        "structured-metadata-admission",
+        "shard-first_over_time",
+        "shard-last_over_time",
+        "shard-quantile_over_time",
+        "approx_topk"
+      ]
+    },
+    {
+      "id": "features-69280509fbb88439b40119420cdd88fadb9b228aa4ecf5f9ab43ef4f24be8aa9",
+      "enabled": [
+        "multi-variant-queries",
+        "structured-metadata-admission",
+        "shard-first_over_time",
+        "shard-last_over_time",
+        "shard-quantile_over_time",
+        "approx_topk"
+      ]
+    }
+  ],
+  "configuration": {
+    "instant_log_lookback_ns": "30000000000",
+    "count_min_sketch_heap_size": "10000",
+    "multi_variant_queries": false,
+    "limits_config.enable_multi_variant_queries": {
+      "name": "limits_config.enable_multi_variant_queries",
+      "default": false,
+      "valid_domain": [
+        false,
+        true
+      ],
+      "semantic_rule": "Enable variants query evaluation; disabled returns variants-disabled error.",
+      "source_refs": [
+        "pkg/validation/limits.go:474@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "boundary_cases": [
+        "off rejects variants",
+        "on evaluates shared-selector variants"
+      ]
+    },
+    "limits_config.allow_structured_metadata": {
+      "name": "limits_config.allow_structured_metadata",
+      "default": true,
+      "valid_domain": [
+        false,
+        true
+      ],
+      "semantic_rule": "Admission of structured metadata; schema/chunk format must support it. This is input normalization/admission, not grammar suppression.",
+      "source_refs": [
+        "pkg/validation/limits.go:448@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "boundary_cases": [
+        "off rejects metadata input",
+        "on preserves nonindexed category"
+      ]
+    },
+    "querier.engine.max_look_back_period": {
+      "name": "querier.engine.max_look_back_period",
+      "default": "30s",
+      "valid_domain": "duration; zero is replaced with 30s by EngineOpts.applyDefault",
+      "semantic_rule": "Instant log-query lookback, distinct from range window duration.",
+      "source_refs": [
+        "pkg/logql/engine.go:156@208d82afb768b4f59461529952d13c9b85cdbe4013d5eddb007657cb145994d2"
+      ],
+      "boundary_cases": [
+        "0",
+        "1ns",
+        "30s",
+        "negative value: consumer behavior requires observation"
+      ]
+    },
+    "querier.engine.max_count_min_sketch_heap_size": {
+      "name": "querier.engine.max_count_min_sketch_heap_size",
+      "default": 10000,
+      "valid_domain": "signed int parser; meaningful approximation heap domain >=0; negative configuration is not constructor-validated",
+      "semantic_rule": "Default 10000. Zero immediately removes each pushed label candidate; -1 produces zero initial capacity and also removes every candidate; values below -1 produce invalid negative slice capacity on initialization, a runtime failure rather than accepted useful domain. No invented config validation rejection.",
+      "source_refs": [
+        "pkg/logql/engine.go:163@208d82afb768b4f59461529952d13c9b85cdbe4013d5eddb007657cb145994d2"
+      ],
+      "boundary_cases": [
+        "0",
+        "1",
+        "9999",
+        "10000",
+        "10001",
+        "k > heap bound"
+      ]
+    },
+    "querier.query_ingesters_within": {
+      "name": "querier.query_ingesters_within",
+      "default": "3h",
+      "valid_domain": "Go duration; zero unbounded only absent nonzero inherited horizon; target-all may supply horizon",
+      "semantic_rule": "For filesystem target=all use ingester.query_store_max_look_back_period:-1ns together with querier.query_ingesters_within:0s. Target-all replaces default zero horizon and initQuerier gives nonzero inherited horizon precedence, so query_ingesters_within zero alone is insufficient.",
+      "source_refs": [
+        "pkg/querier/querier.go:72@25a8c3b5e2911ba5fb57c521109679a4af8aeb685c59fdca8b4fe051cea2e2ba"
+      ],
+      "boundary_cases": [
+        "0",
+        "query just inside/outside threshold",
+        "negative: unresolved validation"
+      ]
+    },
+    "limits_config.discover_service_name": {
+      "name": "limits_config.discover_service_name",
+      "default": [
+        "service",
+        "app",
+        "application",
+        "app_name",
+        "name",
+        "app_kubernetes_io_name",
+        "container",
+        "container_name",
+        "k8s_container_name",
+        "component",
+        "workload",
+        "job",
+        "k8s_job_name"
+      ],
+      "valid_domain": "ordered string list",
+      "semantic_rule": "If service_name absent, discover from configured stream labels; empty list disables enrichment. Oracle fixtures must set [].",
+      "source_refs": [
+        "pkg/validation/limits.go:290@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "boundary_cases": [
+        "empty",
+        "existing service_name",
+        "two candidates with different values",
+        "no candidates"
+      ]
+    },
+    "limits_config.max_query_series": {
+      "name": "limits_config.max_query_series",
+      "default": 500,
+      "valid_domain": "int; no registration/limits validation rejection of nonpositive values",
+      "semantic_rule": "Consumer takes minimum across tenants without discarding nonpositive values despite helper name. First vector and accumulated unique range series fail if count > limit: 0 rejects nonempty; negative rejects even zero count.",
+      "source_refs": [
+        "pkg/validation/limits.go:333@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "boundary_cases": [
+        "zero",
+        "one unit below bound",
+        "at bound",
+        "one unit above bound",
+        "negative rejected or separately observed"
+      ]
+    },
+    "limits_config.max_query_range": {
+      "name": "limits_config.max_query_range",
+      "default": "0s",
+      "valid_domain": "duration; 0 unlimited",
+      "semantic_rule": "Reject expression range interval exceeding configured bound.",
+      "source_refs": [
+        "pkg/validation/limits.go:334@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "boundary_cases": [
+        "zero",
+        "one unit below bound",
+        "at bound",
+        "one unit above bound",
+        "negative rejected or separately observed"
+      ]
+    },
+    "limits_config.query_timeout": {
+      "name": "limits_config.query_timeout",
+      "default": "1m",
+      "valid_domain": "duration",
+      "semantic_rule": "Cancel query at tenant timeout, not silently return empty success.",
+      "source_refs": [
+        "pkg/validation/limits.go:336@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "boundary_cases": [
+        "zero",
+        "one unit below bound",
+        "at bound",
+        "one unit above bound",
+        "negative rejected or separately observed"
+      ]
+    },
+    "limits_config.max_query_lookback": {
+      "name": "limits_config.max_query_lookback",
+      "default": "0s",
+      "valid_domain": "duration; 0 unlimited",
+      "semantic_rule": "Clamp query time range against wall clock.",
+      "source_refs": [
+        "pkg/validation/limits.go:339@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "boundary_cases": [
+        "zero",
+        "one unit below bound",
+        "at bound",
+        "one unit above bound",
+        "negative rejected or separately observed"
+      ]
+    },
+    "limits_config.max_query_length": {
+      "name": "limits_config.max_query_length",
+      "default": "721h",
+      "valid_domain": "duration; 0 disables bound",
+      "semantic_rule": "Bound requested store query interval.",
+      "source_refs": [
+        "pkg/validation/limits.go:331@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "boundary_cases": [
+        "zero",
+        "one unit below bound",
+        "at bound",
+        "one unit above bound",
+        "negative rejected or separately observed"
+      ]
+    },
+    "limits_config.max_entries_limit_per_query": {
+      "name": "limits_config.max_entries_limit_per_query",
+      "default": 5000,
+      "valid_domain": "signed int; positive tenant values bound request count; nonpositive skipped",
+      "semantic_rule": "Positive nonzero minimum bounds log request limit; all nonpositive yields no request bound. Metric requests bypass this limit.",
+      "source_refs": [
+        "pkg/validation/limits.go:315@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "boundary_cases": [
+        "zero",
+        "one unit below bound",
+        "at bound",
+        "one unit above bound",
+        "negative rejected or separately observed"
+      ]
+    },
+    "limits_config.shard_aggregations": {
+      "name": "limits_config.shard_aggregations",
+      "default": [],
+      "valid_domain": {
+        "type": "list of strings",
+        "recognized": [
+          "quantile_over_time",
+          "last_over_time",
+          "first_over_time",
+          "approx_topk"
+        ],
+        "duplicates": "idempotent enablement",
+        "unknown_names": "ignored by NewShardMapper switch"
+      },
+      "semantic_rule": "Independent set membership enables four mapper capabilities. Empty/unknown-only list leaves all disabled; approx_topk requires enabled support in shardable path. No additional constraint between recognized names.",
+      "source_refs": [
+        "pkg/logql/shardmapper.go:31@11bfdd0318a345400975eb1f545eb3a4c1efb909eaa8600cc33d91333b07ab1b"
+      ],
+      "boundary_cases": [
+        "empty",
+        "approx_topk",
+        "unknown name",
+        "duplicate name",
+        "mixed supported/unsupported"
+      ]
+    },
+    "binary.compactor.deletion-mode": {
+      "name": "binary.compactor.deletion-mode",
+      "default": "\"filter-and-delete\"",
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 1102,
+        "printed_default": "\"filter-and-delete\"",
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "string",
+      "valid_domain": [
+        "disabled",
+        "filter-only",
+        "filter-and-delete"
+      ],
+      "semantic_rule": "Controls application of deletion requests to visible source records; oracle uses no deletion requests.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "boundary_cases": [
+        "empty",
+        "valid value",
+        "unknown value",
+        "missing config path"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.compactor.retention-enabled": {
+      "name": "binary.compactor.retention-enabled",
+      "default": false,
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 1162,
+        "printed_default": null,
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "bool",
+      "valid_domain": [
+        false,
+        true
+      ],
+      "semantic_rule": "Enables retention removal from stored input; fixtures use retention-free isolated input.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "boundary_cases": [
+        "false",
+        "true"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.config.expand-env": {
+      "name": "binary.config.expand-env",
+      "default": false,
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 1254,
+        "printed_default": null,
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "bool",
+      "valid_domain": [
+        false,
+        true
+      ],
+      "semantic_rule": "Config decoding can expand environment values before engine configuration; oracle expands only frozen credential-free config, never expose this to templates.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "boundary_cases": [
+        "false",
+        "true"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.config.file": {
+      "name": "binary.config.file",
+      "default": "\"config.yaml,config/config.yaml\"",
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 1256,
+        "printed_default": "\"config.yaml,config/config.yaml\"",
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "string",
+      "valid_domain": {
+        "type": "string",
+        "meaning": "configuration path or enumerated consumer string; no template access to files granted"
+      },
+      "semantic_rule": "Selects process configuration including language gates, temporal and normalization options; full config bytes must be hashed.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "boundary_cases": [
+        "empty",
+        "valid value",
+        "unknown value",
+        "missing config path"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.dataobj-querier-enabled": {
+      "name": "binary.dataobj-querier-enabled",
+      "default": false,
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 1320,
+        "printed_default": null,
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "bool",
+      "valid_domain": [
+        false,
+        true
+      ],
+      "semantic_rule": "Selects an alternate query-input backend; oracle backend identity must be explicit.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "boundary_cases": [
+        "false",
+        "true"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.dataobj-querier-from": {
+      "name": "binary.dataobj-querier-from",
+      "default": "zero time (unset)",
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 1322,
+        "printed_default": null,
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "value",
+      "valid_domain": {
+        "type": "RFC3339 time or unset",
+        "unset": "zero time"
+      },
+      "semantic_rule": "Clock/time boundary for alternate backend visibility; pin with schema and source interval.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "boundary_cases": [
+        "unset",
+        "before/equal/after wall clock",
+        "invalid timestamp rejected by typed parser"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.distributor.max-line-size": {
+      "name": "binary.distributor.max-line-size",
+      "default": "256KB",
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 1350,
+        "printed_default": "256KB",
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "distributor.max-line-size-truncate",
+      "valid_domain": "byte-size parser for size fields; signed int for count; exact zero disables corresponding bound",
+      "semantic_rule": "Nonzero configured limit is compared with actual bytes/count; exceeding rejects input. Metadata checks run only when metadata present and admission allowed. Negative count is not unlimited and rejects nonempty metadata. Truncation precedes line validation when enabled.",
+      "source_refs": [
+        "pkg/distributor/validator.go:117@d03852716cc10124d99cbb3b14d5eea2a08c7f422f781fbb309c733f731aa3d3"
+      ],
+      "boundary_cases": [
+        "negative",
+        "zero",
+        "smallest positive",
+        "at bound",
+        "one unit above",
+        "malformed token"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.distributor.max-line-size-truncate": {
+      "name": "binary.distributor.max-line-size-truncate",
+      "default": false,
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 1352,
+        "printed_default": null,
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "bool",
+      "valid_domain": [
+        false,
+        true
+      ],
+      "semantic_rule": "Over-limit lines are shortened instead of rejected, changing later filters/parsers and byte aggregates.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "boundary_cases": [
+        "false",
+        "true"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.frontend.max-querier-bytes-read": {
+      "name": "binary.frontend.max-querier-bytes-read",
+      "default": "150GB",
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 1854,
+        "printed_default": "150GB",
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "value",
+      "valid_domain": {
+        "type": "flag value parser domain",
+        "meaning": "duration, byte size or timestamp selected by bound field; negative sentinel effects below are consumer-specific"
+      },
+      "semantic_rule": "Sets a query/admission bound or normalization gate: changes acceptance, observable error, source visibility or input identity. Effective configuration is frozen; owned product budgets need not replicate upstream HTTP controls.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "boundary_cases": [
+        "negative",
+        "zero",
+        "smallest positive",
+        "at bound",
+        "one unit above",
+        "malformed token"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.frontend.max-query-bytes-read": {
+      "name": "binary.frontend.max-query-bytes-read",
+      "default": 0,
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 1858,
+        "printed_default": null,
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "value",
+      "valid_domain": {
+        "type": "flag value parser domain",
+        "meaning": "duration, byte size or timestamp selected by bound field; negative sentinel effects below are consumer-specific"
+      },
+      "semantic_rule": "Sets a query/admission bound or normalization gate: changes acceptance, observable error, source visibility or input identity. Effective configuration is frozen; owned product budgets need not replicate upstream HTTP controls.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "boundary_cases": [
+        "negative",
+        "zero",
+        "smallest positive",
+        "at bound",
+        "one unit above",
+        "malformed token"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.ingester.unordered-writes": {
+      "name": "binary.ingester.unordered-writes",
+      "default": "true",
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 2730,
+        "printed_default": "true",
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "bool",
+      "valid_domain": [
+        false,
+        true
+      ],
+      "semantic_rule": "Changes admission of timestamp-disordered logs; query normalization cannot silently sort away rejection.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "boundary_cases": [
+        "false",
+        "true"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.legacy-read-mode": {
+      "name": "binary.legacy-read-mode",
+      "default": false,
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 2806,
+        "printed_default": null,
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "bool",
+      "valid_domain": [
+        false,
+        true
+      ],
+      "semantic_rule": "Selects read routing generation; frozen oracle backend config must retain complete input visibility.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "boundary_cases": [
+        "false",
+        "true"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.limits.block-ingestion-until": {
+      "name": "binary.limits.block-ingestion-until",
+      "default": "zero time (unset)",
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 2810,
+        "printed_default": null,
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "value",
+      "valid_domain": {
+        "type": "RFC3339 time or unset",
+        "unset": "zero time"
+      },
+      "semantic_rule": "RFC3339 wall-clock admission barrier; fixture must admit input before evaluation.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "boundary_cases": [
+        "unset",
+        "before/equal/after wall clock",
+        "invalid timestamp rejected by typed parser"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.limits.enable-multi-variant-queries": {
+      "name": "binary.limits.enable-multi-variant-queries",
+      "default": false,
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 2812,
+        "printed_default": null,
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "bool",
+      "valid_domain": [
+        false,
+        true
+      ],
+      "semantic_rule": "Sets a query/admission bound or normalization gate: changes acceptance, observable error, source visibility or input identity. Effective configuration is frozen; owned product budgets need not replicate upstream HTTP controls.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "boundary_cases": [
+        "false",
+        "true"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.limits.max-structured-metadata-entries-count": {
+      "name": "binary.limits.max-structured-metadata-entries-count",
+      "default": "128",
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 2816,
+        "printed_default": "128",
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "int",
+      "valid_domain": "byte-size parser for size fields; signed int for count; exact zero disables corresponding bound",
+      "semantic_rule": "Nonzero configured limit is compared with actual bytes/count; exceeding rejects input. Metadata checks run only when metadata present and admission allowed. Negative count is not unlimited and rejects nonempty metadata. Truncation precedes line validation when enabled.",
+      "source_refs": [
+        "pkg/distributor/validator.go:117@d03852716cc10124d99cbb3b14d5eea2a08c7f422f781fbb309c733f731aa3d3"
+      ],
+      "boundary_cases": [
+        -1,
+        0,
+        1,
+        "bound-1",
+        "bound",
+        "bound+1"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.limits.max-structured-metadata-size": {
+      "name": "binary.limits.max-structured-metadata-size",
+      "default": "64KB",
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 2818,
+        "printed_default": "64KB",
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "value",
+      "valid_domain": "byte-size parser for size fields; signed int for count; exact zero disables corresponding bound",
+      "semantic_rule": "Nonzero configured limit is compared with actual bytes/count; exceeding rejects input. Metadata checks run only when metadata present and admission allowed. Negative count is not unlimited and rejects nonempty metadata. Truncation precedes line validation when enabled.",
+      "source_refs": [
+        "pkg/distributor/validator.go:117@d03852716cc10124d99cbb3b14d5eea2a08c7f422f781fbb309c733f731aa3d3"
+      ],
+      "boundary_cases": [
+        "negative",
+        "zero",
+        "smallest positive",
+        "at bound",
+        "one unit above",
+        "malformed token"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.limits.per-user-override-config": {
+      "name": "binary.limits.per-user-override-config",
+      "default": "",
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 2828,
+        "printed_default": null,
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "string",
+      "valid_domain": {
+        "type": "string",
+        "meaning": "configuration path or enumerated consumer string; no template access to files granted"
+      },
+      "semantic_rule": "Deprecated runtime override file selector; freeze it or leave unset rather than allowing mutable tenant configuration.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "boundary_cases": [
+        "empty",
+        "valid value",
+        "unknown value",
+        "missing config path"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.limits.per-user-override-period": {
+      "name": "binary.limits.per-user-override-period",
+      "default": "10s",
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 2830,
+        "printed_default": "10s",
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "value",
+      "valid_domain": {
+        "type": "flag value parser domain",
+        "meaning": "duration, byte size or timestamp selected by bound field; negative sentinel effects below are consumer-specific"
+      },
+      "semantic_rule": "Deprecated override reload interval; no template capabilities are granted.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "boundary_cases": [
+        "negative",
+        "zero",
+        "smallest positive",
+        "at bound",
+        "one unit above",
+        "malformed token"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.querier.align-querier-with-step": {
+      "name": "binary.querier.align-querier-with-step",
+      "default": false,
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 3358,
+        "printed_default": null,
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "bool",
+      "valid_domain": [
+        false,
+        true
+      ],
+      "semantic_rule": "Optionally changes requested start/end grid to step boundaries; normalization must record whether enabled.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "boundary_cases": [
+        "false",
+        "true"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.querier.engine.max-count-min-sketch-heap-size": {
+      "name": "binary.querier.engine.max-count-min-sketch-heap-size",
+      "default": "10000",
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 3376,
+        "printed_default": "10000",
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "int",
+      "valid_domain": "signed int parser; meaningful approximation heap domain >=0; negative configuration is not constructor-validated",
+      "semantic_rule": "Default 10000. Zero immediately removes each pushed label candidate; -1 produces zero initial capacity and also removes every candidate; values below -1 produce invalid negative slice capacity on initialization, a runtime failure rather than accepted useful domain. No invented config validation rejection.",
+      "source_refs": [
+        "pkg/logql/count_min_sketch.go:172@35a5bbca94d6140e8bf0a7afc7359b4961cc6384939ff8dfdab6d13351100aca"
+      ],
+      "boundary_cases": [
+        -1,
+        0,
+        1,
+        "bound-1",
+        "bound",
+        "bound+1"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.querier.engine.max-lookback-period": {
+      "name": "binary.querier.engine.max-lookback-period",
+      "default": "30s",
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 3378,
+        "printed_default": "30s",
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "duration",
+      "valid_domain": "signed Go duration; zero restored to 30s",
+      "semantic_rule": "Instant log selector subtracts effective lookback from start. Positive looks backward; negative moves start forward; applyDefault normalizes only exact zero.",
+      "source_refs": [
+        "pkg/logql/engine.go:173@208d82afb768b4f59461529952d13c9b85cdbe4013d5eddb007657cb145994d2",
+        "pkg/logql/evaluator.go:304@207893d2ddf2ffd2f28640c46649ed407ae98d6475e9adeff8e041c98267273a"
+      ],
+      "boundary_cases": [
+        "negative",
+        "zero",
+        "smallest positive",
+        "at bound",
+        "one unit above",
+        "malformed token"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.querier.instant-metric-query-split-align": {
+      "name": "binary.querier.instant-metric-query-split-align",
+      "default": false,
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 3478,
+        "printed_default": null,
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "bool",
+      "valid_domain": [
+        false,
+        true
+      ],
+      "semantic_rule": "Controls alignment of split instant metric windows; pin to avoid hidden temporal input changes.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "boundary_cases": [
+        "false",
+        "true"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.querier.max-query-lookback": {
+      "name": "binary.querier.max-query-lookback",
+      "default": 0,
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 3486,
+        "printed_default": null,
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "value",
+      "valid_domain": "duration parser domain; positive bound, nonpositive disables this validation branch",
+      "semantic_rule": "Lookback clamps start to wall-clock minus bound only when >0. Length rejects only when >0 and post-clamp span exceeds bound. End-before-effective-start errors independently.",
+      "source_refs": [
+        "pkg/querier/limits/validation.go:93@b5778eb6a8f27f1c7cd7687711f5f66484ccb235581d055e19139195f2b5179b"
+      ],
+      "boundary_cases": [
+        "negative",
+        "zero",
+        "smallest positive",
+        "at bound",
+        "one unit above",
+        "malformed token"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.querier.max-query-range": {
+      "name": "binary.querier.max-query-range",
+      "default": 0,
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 3490,
+        "printed_default": null,
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "value",
+      "valid_domain": "duration parsed into int64 nanoseconds; Limits.Validate adds no nonnegative constraint",
+      "semantic_rule": "Smallest strictly positive tenant duration bounds range selector. Zero and negative limits are skipped by this reducer; all nonpositive means no range bound.",
+      "source_refs": [
+        "pkg/logql/engine.go:386@208d82afb768b4f59461529952d13c9b85cdbe4013d5eddb007657cb145994d2",
+        "pkg/util/validation/limits.go:46@e9059af5998d292866805b1ff7ae91df6e701cdabe4f84523a949d7810a71370"
+      ],
+      "boundary_cases": [
+        "negative",
+        "zero",
+        "smallest positive",
+        "at bound",
+        "one unit above",
+        "malformed token"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.querier.max-query-series": {
+      "name": "binary.querier.max-query-series",
+      "default": "500",
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 3492,
+        "printed_default": "500",
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "int",
+      "valid_domain": "int; no registration/limits validation rejection of nonpositive values",
+      "semantic_rule": "Consumer takes minimum across tenants without discarding nonpositive values despite helper name. First vector and accumulated unique range series fail if count > limit: 0 rejects nonempty; negative rejects even zero count.",
+      "source_refs": [
+        "pkg/logql/engine.go:458@208d82afb768b4f59461529952d13c9b85cdbe4013d5eddb007657cb145994d2",
+        "pkg/util/validation/limits.go:10@e9059af5998d292866805b1ff7ae91df6e701cdabe4f84523a949d7810a71370"
+      ],
+      "boundary_cases": [
+        -1,
+        0,
+        1,
+        "bound-1",
+        "bound",
+        "bound+1"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.querier.max-streams-matcher-per-query": {
+      "name": "binary.querier.max-streams-matcher-per-query",
+      "default": "1000",
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 3496,
+        "printed_default": "1000",
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "int",
+      "valid_domain": "signed int; no zero-disable sentinel",
+      "semantic_rule": "Reject when matcher count exceeds limit; zero permits no matcher, negative causes any nonnegative count to exceed bound.",
+      "source_refs": [
+        "pkg/querier/limits/validation.go:39@b5778eb6a8f27f1c7cd7687711f5f66484ccb235581d055e19139195f2b5179b"
+      ],
+      "boundary_cases": [
+        -1,
+        0,
+        1,
+        "bound-1",
+        "bound",
+        "bound+1"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.querier.per-request-limits-enabled": {
+      "name": "binary.querier.per-request-limits-enabled",
+      "default": false,
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 3502,
+        "printed_default": null,
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "bool",
+      "valid_domain": [
+        false,
+        true
+      ],
+      "semantic_rule": "Allows request headers to override admission budgets; owned API does not promise these headers, oracle must fix effective budgets.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "boundary_cases": [
+        "false",
+        "true"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.querier.query-ingester-only": {
+      "name": "binary.querier.query-ingester-only",
+      "default": false,
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 3504,
+        "printed_default": null,
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "bool",
+      "valid_domain": [
+        false,
+        true
+      ],
+      "semantic_rule": "Restricts input visibility to ingesters; fixture must not silently omit persisted rows.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "boundary_cases": [
+        "false",
+        "true"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.querier.query-ingesters-within": {
+      "name": "binary.querier.query-ingesters-within",
+      "default": "3h0m0s",
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 3506,
+        "printed_default": "3h0m0s",
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "duration",
+      "valid_domain": "signed Go duration; zero means unbounded only absent nonzero inherited store horizon",
+      "semantic_rule": "Registered3h. Nonzero IngesterQueryStoreMaxLookback takes precedence. Exact duration -1ns in inherited horizon activates whole-ingester interval; zero alone can be overwritten indirectly by target initialization.",
+      "source_refs": [
+        "pkg/querier/querier.go:281@25a8c3b5e2911ba5fb57c521109679a4af8aeb685c59fdca8b4fe051cea2e2ba",
+        "pkg/loki/modules.go:559@b87530e3706d062c2b7486ed552ede2483d9afbc255ac2cda52a9350cd18ed44"
+      ],
+      "boundary_cases": [
+        "negative",
+        "zero",
+        "smallest positive",
+        "at bound",
+        "one unit above",
+        "malformed token"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.querier.query-store-only": {
+      "name": "binary.querier.query-store-only",
+      "default": false,
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 3510,
+        "printed_default": null,
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "bool",
+      "valid_domain": [
+        false,
+        true
+      ],
+      "semantic_rule": "Restricts input visibility to storage; historical ingester fixtures require false.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "boundary_cases": [
+        "false",
+        "true"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.querier.query-timeout": {
+      "name": "binary.querier.query-timeout",
+      "default": "1m",
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 3512,
+        "printed_default": "1m",
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "value",
+      "valid_domain": "duration; effective positive-min reducer then context deadline",
+      "semantic_rule": "Smallest positive configured tenant timeout feeds WithTimeout. When every value is nonpositive the reducer returns zero and the context expires immediately; zero is not unlimited execution.",
+      "source_refs": [
+        "pkg/logql/engine.go:307@208d82afb768b4f59461529952d13c9b85cdbe4013d5eddb007657cb145994d2",
+        "pkg/util/validation/limits.go:46@e9059af5998d292866805b1ff7ae91df6e701cdabe4f84523a949d7810a71370"
+      ],
+      "boundary_cases": [
+        "negative",
+        "zero",
+        "smallest positive",
+        "at bound",
+        "one unit above",
+        "malformed token"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.querier.shard-aggregations": {
+      "name": "binary.querier.shard-aggregations",
+      "default": [],
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 3562,
+        "printed_default": null,
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "value",
+      "valid_domain": {
+        "type": "list",
+        "recognized": [
+          "first_over_time",
+          "last_over_time",
+          "quantile_over_time",
+          "approx_topk"
+        ],
+        "duplicates": "idempotent",
+        "unknown": "ignored"
+      },
+      "semantic_rule": "Four independent memberships; approx query requires positive k, no grouping and instant result type.",
+      "source_refs": [
+        "pkg/logql/shardmapper.go:31@11bfdd0318a345400975eb1f545eb3a4c1efb909eaa8600cc33d91333b07ab1b",
+        "pkg/logql/count_min_sketch.go:249@35a5bbca94d6140e8bf0a7afc7359b4961cc6384939ff8dfdab6d13351100aca"
+      ],
+      "boundary_cases": [
+        "empty",
+        "one item",
+        "duplicates",
+        "unknown item"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.runtime-config.file": {
+      "name": "binary.runtime-config.file",
+      "default": [],
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 4362,
+        "printed_default": null,
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "value",
+      "valid_domain": {
+        "type": "ordered string list",
+        "empty": "accepted"
+      },
+      "semantic_rule": "Loads tenant-specific override configuration; include frozen override bytes in oracle identity.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "boundary_cases": [
+        "empty",
+        "one item",
+        "duplicates",
+        "unknown item"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.runtime-config.reload-period": {
+      "name": "binary.runtime-config.reload-period",
+      "default": "10s",
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 4364,
+        "printed_default": "10s",
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "duration",
+      "valid_domain": {
+        "type": "flag value parser domain",
+        "meaning": "duration, byte size or timestamp selected by bound field; negative sentinel effects below are consumer-specific"
+      },
+      "semantic_rule": "Determines when tenant overrides become effective; disable external mutation or freeze files for oracle.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "boundary_cases": [
+        "negative",
+        "zero",
+        "smallest positive",
+        "at bound",
+        "one unit above",
+        "malformed token"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.schema-config-file": {
+      "name": "binary.schema-config-file",
+      "default": "",
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 4414,
+        "printed_default": null,
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "string",
+      "valid_domain": {
+        "type": "string",
+        "meaning": "configuration path or enumerated consumer string; no template access to files granted"
+      },
+      "semantic_rule": "Selects storage schema history and metadata-capable formats; freeze configuration, not a new grammar restriction.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "boundary_cases": [
+        "empty",
+        "valid value",
+        "unknown value",
+        "missing config path"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.store.cardinality-limit": {
+      "name": "binary.store.cardinality-limit",
+      "default": "100000",
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 4536,
+        "printed_default": "100000",
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "int",
+      "valid_domain": {
+        "type": "signed platform int (oracle linux/amd64: 64-bit)",
+        "validation": "No general nonnegative check in Limits.Validate; consumer-specific comparison below determines effect."
+      },
+      "semantic_rule": "Sets a query/admission bound or normalization gate: changes acceptance, observable error, source visibility or input identity. Effective configuration is frozen; owned product budgets need not replicate upstream HTTP controls.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "boundary_cases": [
+        -1,
+        0,
+        1,
+        "bound-1",
+        "bound",
+        "bound+1"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.store.max-query-length": {
+      "name": "binary.store.max-query-length",
+      "default": "30d1h",
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 4916,
+        "printed_default": "30d1h",
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "value",
+      "valid_domain": "duration parser domain; positive bound, nonpositive disables this validation branch",
+      "semantic_rule": "Lookback clamps start to wall-clock minus bound only when >0. Length rejects only when >0 and post-clamp span exceeds bound. End-before-effective-start errors independently.",
+      "source_refs": [
+        "pkg/querier/limits/validation.go:93@b5778eb6a8f27f1c7cd7687711f5f66484ccb235581d055e19139195f2b5179b"
+      ],
+      "boundary_cases": [
+        "negative",
+        "zero",
+        "smallest positive",
+        "at bound",
+        "one unit above",
+        "malformed token"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.store.query-chunk-limit": {
+      "name": "binary.store.query-chunk-limit",
+      "default": "2000000",
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 4920,
+        "printed_default": "2000000",
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "int",
+      "valid_domain": "signed int flag; deprecated/no-op in frozen overrides path",
+      "semantic_rule": "Registration default2000000, but Overrides.MaxChunksPerQueryFromStore returns constant0; do not invent active chunk limit semantics from name/help.",
+      "source_refs": [
+        "pkg/validation/limits.go:697@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "boundary_cases": [
+        -1,
+        0,
+        1,
+        "bound-1",
+        "bound",
+        "bound+1"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.store.retention": {
+      "name": "binary.store.retention",
+      "default": 0,
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 4924,
+        "printed_default": null,
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "value",
+      "valid_domain": {
+        "type": "flag value parser domain",
+        "meaning": "duration, byte size or timestamp selected by bound field; negative sentinel effects below are consumer-specific"
+      },
+      "semantic_rule": "Sets a query/admission bound or normalization gate: changes acceptance, observable error, source visibility or input identity. Effective configuration is frozen; owned product budgets need not replicate upstream HTTP controls.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "boundary_cases": [
+        "negative",
+        "zero",
+        "smallest positive",
+        "at bound",
+        "one unit above",
+        "malformed token"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.validation.allow-structured-metadata": {
+      "name": "binary.validation.allow-structured-metadata",
+      "default": "true",
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 5210,
+        "printed_default": "true",
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "bool",
+      "valid_domain": [
+        false,
+        true
+      ],
+      "semantic_rule": "Sets a query/admission bound or normalization gate: changes acceptance, observable error, source visibility or input identity. Effective configuration is frozen; owned product budgets need not replicate upstream HTTP controls.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "boundary_cases": [
+        "false",
+        "true"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.validation.create-grace-period": {
+      "name": "binary.validation.create-grace-period",
+      "default": "10m",
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 5212,
+        "printed_default": "10m",
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "value",
+      "valid_domain": {
+        "type": "flag value parser domain",
+        "meaning": "duration, byte size or timestamp selected by bound field; negative sentinel effects below are consumer-specific"
+      },
+      "semantic_rule": "Clock-relative future admission bound; affects which records become query input.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "boundary_cases": [
+        "negative",
+        "zero",
+        "smallest positive",
+        "at bound",
+        "one unit above",
+        "malformed token"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.validation.discover-log-levels": {
+      "name": "binary.validation.discover-log-levels",
+      "default": "true",
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 5214,
+        "printed_default": "true",
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "bool",
+      "valid_domain": [
+        false,
+        true
+      ],
+      "semantic_rule": "Optional ingestion enrichment adds derived structured metadata and can affect later pipeline lookup.",
+      "source_refs": [
+        "pkg/distributor/field_detection.go:88@de97c33ff466f41814fcee409c1c52107f79f66333078e8e04149369e153e3de"
+      ],
+      "boundary_cases": [
+        "false",
+        "true"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.validation.discover-service-name": {
+      "name": "binary.validation.discover-service-name",
+      "default": "[service app application app_name name app_kubernetes_io_name container container_name k8s_container_name component workload job k8s_job_name]",
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 5216,
+        "printed_default": "[service app application app_name name app_kubernetes_io_name container container_name k8s_container_name component workload job k8s_job_name]",
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "value",
+      "valid_domain": {
+        "type": "ordered string list",
+        "empty": "accepted"
+      },
+      "semantic_rule": "Optional ordered stream-label enrichment changes selector identity; empty list required for oracle fixture identity.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "boundary_cases": [
+        "empty",
+        "one item",
+        "duplicates",
+        "unknown item"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.validation.enforced-labels": {
+      "name": "binary.validation.enforced-labels",
+      "default": [],
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 5218,
+        "printed_default": null,
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "value",
+      "valid_domain": {
+        "type": "ordered string list",
+        "empty": "accepted"
+      },
+      "semantic_rule": "Required stream label set for admission; missing label rejects stream input.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "boundary_cases": [
+        "empty",
+        "one item",
+        "duplicates",
+        "unknown item"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.validation.increment-duplicate-timestamps": {
+      "name": "binary.validation.increment-duplicate-timestamps",
+      "default": false,
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 5220,
+        "printed_default": null,
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "bool",
+      "valid_domain": [
+        false,
+        true
+      ],
+      "semantic_rule": "Optional ingestion timestamp mutation adds 1ns for adjacent same-stream ties; disabled in multiplicity fixtures.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "boundary_cases": [
+        "false",
+        "true"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.validation.log-level-fields": {
+      "name": "binary.validation.log-level-fields",
+      "default": "[level LEVEL Level Severity severity SEVERITY lvl LVL Lvl severity_text Severity_Text SEVERITY_TEXT]",
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 5222,
+        "printed_default": "[level LEVEL Level Severity severity SEVERITY lvl LVL Lvl severity_text Severity_Text SEVERITY_TEXT]",
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "value",
+      "valid_domain": {
+        "type": "ordered string list",
+        "empty": "accepted"
+      },
+      "semantic_rule": "Ordered candidate field names for derived level metadata; case-sensitive names affect input enrichment.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "boundary_cases": [
+        "empty",
+        "one item",
+        "duplicates",
+        "unknown item"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.validation.log-level-from-json-max-depth": {
+      "name": "binary.validation.log-level-from-json-max-depth",
+      "default": "2",
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 5224,
+        "printed_default": "2",
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "int",
+      "valid_domain": "signed int; <=0 unbounded; >0 bounds JSON search depth",
+      "semantic_rule": "Default2. Negative/zero do not disable discovery; disable discover_log_levels explicitly to avoid detected_level enrichment.",
+      "source_refs": [
+        "pkg/validation/limits.go:309@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd",
+        "pkg/distributor/field_detection.go:88@de97c33ff466f41814fcee409c1c52107f79f66333078e8e04149369e153e3de"
+      ],
+      "boundary_cases": [
+        -1,
+        0,
+        1,
+        "bound-1",
+        "bound",
+        "bound+1"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.validation.max-entries-limit": {
+      "name": "binary.validation.max-entries-limit",
+      "default": "5000",
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 5226,
+        "printed_default": "5000",
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "int",
+      "valid_domain": "signed int; positive tenant values bound request count; nonpositive skipped",
+      "semantic_rule": "Positive nonzero minimum bounds log request limit; all nonpositive yields no request bound. Metric requests bypass this limit.",
+      "source_refs": [
+        "pkg/querier/http.go:270@1a6e4b18cf6efde8cca0ef3e77a3d78f760c202f2fa31496200a9ca40dd8dec3",
+        "pkg/util/validation/limits.go:28@e9059af5998d292866805b1ff7ae91df6e701cdabe4f84523a949d7810a71370"
+      ],
+      "boundary_cases": [
+        -1,
+        0,
+        1,
+        "bound-1",
+        "bound",
+        "bound+1"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.validation.max-label-names-per-series": {
+      "name": "binary.validation.max-label-names-per-series",
+      "default": "15",
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 5228,
+        "printed_default": "15",
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "int",
+      "valid_domain": "signed int; no zero-disable or generic negative rejection",
+      "semantic_rule": "Compare effective count/byte length directly with limit; zero admits only zero-length/count (service_name is subtracted from counted labels). Negative rejects nonnegative size. Duplicate/empty label validation remains separate.",
+      "source_refs": [
+        "pkg/distributor/validator.go:151@d03852716cc10124d99cbb3b14d5eea2a08c7f422f781fbb309c733f731aa3d3"
+      ],
+      "boundary_cases": [
+        -1,
+        0,
+        1,
+        "bound-1",
+        "bound",
+        "bound+1"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.validation.max-length-label-name": {
+      "name": "binary.validation.max-length-label-name",
+      "default": "1024",
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 5230,
+        "printed_default": "1024",
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "int",
+      "valid_domain": "signed int; no zero-disable or generic negative rejection",
+      "semantic_rule": "Compare effective count/byte length directly with limit; zero admits only zero-length/count (service_name is subtracted from counted labels). Negative rejects nonnegative size. Duplicate/empty label validation remains separate.",
+      "source_refs": [
+        "pkg/distributor/validator.go:151@d03852716cc10124d99cbb3b14d5eea2a08c7f422f781fbb309c733f731aa3d3"
+      ],
+      "boundary_cases": [
+        -1,
+        0,
+        1,
+        "bound-1",
+        "bound",
+        "bound+1"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.validation.max-length-label-value": {
+      "name": "binary.validation.max-length-label-value",
+      "default": "2048",
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 5232,
+        "printed_default": "2048",
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "int",
+      "valid_domain": "signed int; no zero-disable or generic negative rejection",
+      "semantic_rule": "Compare effective count/byte length directly with limit; zero admits only zero-length/count (service_name is subtracted from counted labels). Negative rejects nonnegative size. Duplicate/empty label validation remains separate.",
+      "source_refs": [
+        "pkg/distributor/validator.go:151@d03852716cc10124d99cbb3b14d5eea2a08c7f422f781fbb309c733f731aa3d3"
+      ],
+      "boundary_cases": [
+        -1,
+        0,
+        1,
+        "bound-1",
+        "bound",
+        "bound+1"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.validation.reject-old-samples": {
+      "name": "binary.validation.reject-old-samples",
+      "default": "true",
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 5234,
+        "printed_default": "true",
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "bool",
+      "valid_domain": [
+        false,
+        true
+      ],
+      "semantic_rule": "Enable clock-relative input rejection; fixture normalization must preserve admitted records.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "boundary_cases": [
+        "false",
+        "true"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "binary.validation.reject-old-samples.max-age": {
+      "name": "binary.validation.reject-old-samples.max-age",
+      "default": "1w",
+      "default_source": {
+        "help_sha256": "50e9f3fa02e841f0ad2b5525d6bdf501bdddfc3ca9774d38094f1fcef4c98ce0",
+        "line": 5236,
+        "printed_default": "1w",
+        "omission_meaning": "Not printed; zero/empty/default may only be assigned after registration review."
+      },
+      "type": "value",
+      "valid_domain": {
+        "type": "flag value parser domain",
+        "meaning": "duration, byte size or timestamp selected by bound field; negative sentinel effects below are consumer-specific"
+      },
+      "semantic_rule": "Age cutoff relative to ingestion wall clock when old-sample rejection is enabled.",
+      "source_refs": [
+        "pkg/validation/limits.go:575@394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd"
+      ],
+      "boundary_cases": [
+        "negative",
+        "zero",
+        "smallest positive",
+        "at bound",
+        "one unit above",
+        "malformed token"
+      ],
+      "effective_default_rule": "Registered value unless explicit frozen YAML/CLI/tenant override replaces it. Tenant YAML defaults inherit configured global limits, not fresh CLI defaults."
+    },
+    "ingester.query_store_max_look_back_period": {
+      "name": "ingester.query_store_max_look_back_period",
+      "registered_default": 0,
+      "effective_default_rule": "For shipper target all, zero becomes max_chunk_age + shard/upload delay + index-cache validity + 3*resync interval +5m; initQuerier propagates nonzero value and overrides query_ingesters_within precedence.",
+      "source_refs": [
+        "pkg/loki/modules.go:1084@b87530e3706d062c2b7486ed552ede2483d9afbc255ac2cda52a9350cd18ed44",
+        "pkg/loki/modules.go:2187@b87530e3706d062c2b7486ed552ede2483d9afbc255ac2cda52a9350cd18ed44",
+        "pkg/querier/querier.go:292@25a8c3b5e2911ba5fb57c521109679a4af8aeb685c59fdca8b4fe051cea2e2ba",
+        "pkg/ingester/ingester.go:1598@d097270542ab5676e1f5533826c04f2c3183258add5fdde84257cb5f206b7881"
+      ],
+      "valid_domain": "Go duration; exact -1ns is whole-history querier sentinel; zero target-dependent; positive must meet computed minimum for filesystem shipper target all",
+      "boundary_cases": [
+        "negative",
+        "zero",
+        "smallest positive",
+        "at bound",
+        "one unit above",
+        "malformed token"
+      ],
+      "consumer_effect": "Registered0. Target all computes horizon when zero and sets QueryStore=true. Nonfilesystem object store rejects nonzero values in calculateMaxLookBack. Filesystem positive below computed minimum rejects; negative values pass calculator, but only exact -1ns triggers querier whole-history branch. Ingester adjustQueryStartTime clamps only positive durations."
+    },
+    "primitive_identity": {
+      "source_audit": "audits/logql-primitive-evidence.json",
+      "sha256": "ca66dd2de12674ed76bb4fbdb1743ef54e48421e46b53398de349404a5693826",
+      "reference_go": "go1.24.5",
+      "unicode_edition": "15.0.0",
+      "compatibility_with_own_go": "Not assumed; versioned primitive implementation and observations remain mandatory."
+    },
+    "timezone_dataset_path": "third_party/timezone/go124/zoneinfo.zip",
+    "timezone_dataset_sha256": "58b3770b2c2216eaa856c18464dcac90bcb8547764e40ef660ef3b0f19cd43d0"
+  },
+  "obligations": [
+    "logql-loki-3.5.2/aggregate/approx_topk",
+    "logql-loki-3.5.2/aggregate/avg",
+    "logql-loki-3.5.2/aggregate/bottomk",
+    "logql-loki-3.5.2/aggregate/count",
+    "logql-loki-3.5.2/aggregate/max",
+    "logql-loki-3.5.2/aggregate/min",
+    "logql-loki-3.5.2/aggregate/sort",
+    "logql-loki-3.5.2/aggregate/sort_desc",
+    "logql-loki-3.5.2/aggregate/stddev",
+    "logql-loki-3.5.2/aggregate/stdvar",
+    "logql-loki-3.5.2/aggregate/sum",
+    "logql-loki-3.5.2/aggregate/topk",
+    "logql-loki-3.5.2/binary-matching",
+    "logql-loki-3.5.2/decolorize",
+    "logql-loki-3.5.2/drop-keep",
+    "logql-loki-3.5.2/first-last-ties",
+    "logql-loki-3.5.2/ip",
+    "logql-loki-3.5.2/iterator-entry-merge",
+    "logql-loki-3.5.2/iterator-sample-merge",
+    "logql-loki-3.5.2/json",
+    "logql-loki-3.5.2/label-filter",
+    "logql-loki-3.5.2/label-format",
+    "logql-loki-3.5.2/label-replace",
+    "logql-loki-3.5.2/lexical",
+    "logql-loki-3.5.2/line-filters",
+    "logql-loki-3.5.2/log-order-limit",
+    "logql-loki-3.5.2/logfmt",
+    "logql-loki-3.5.2/operator/add",
+    "logql-loki-3.5.2/operator/div",
+    "logql-loki-3.5.2/operator/eq",
+    "logql-loki-3.5.2/operator/ge",
+    "logql-loki-3.5.2/operator/gt",
+    "logql-loki-3.5.2/operator/le",
+    "logql-loki-3.5.2/operator/lt",
+    "logql-loki-3.5.2/operator/mod",
+    "logql-loki-3.5.2/operator/mul",
+    "logql-loki-3.5.2/operator/ne",
+    "logql-loki-3.5.2/operator/pow",
+    "logql-loki-3.5.2/operator/sub",
+    "logql-loki-3.5.2/pattern",
+    "logql-loki-3.5.2/pipeline-order",
+    "logql-loki-3.5.2/primitive/numeric-string-stdlib-version",
+    "logql-loki-3.5.2/primitive/regexp-engine-identity",
+    "logql-loki-3.5.2/primitive/template-version",
+    "logql-loki-3.5.2/primitive/time-stdlib-version",
+    "logql-loki-3.5.2/primitive/unicode-case-version",
+    "logql-loki-3.5.2/range-time",
+    "logql-loki-3.5.2/range/absent_over_time",
+    "logql-loki-3.5.2/range/avg_over_time",
+    "logql-loki-3.5.2/range/bytes_over_time",
+    "logql-loki-3.5.2/range/bytes_rate",
+    "logql-loki-3.5.2/range/count_over_time",
+    "logql-loki-3.5.2/range/first_over_time",
+    "logql-loki-3.5.2/range/last_over_time",
+    "logql-loki-3.5.2/range/max_over_time",
+    "logql-loki-3.5.2/range/min_over_time",
+    "logql-loki-3.5.2/range/quantile_over_time",
+    "logql-loki-3.5.2/range/rate",
+    "logql-loki-3.5.2/range/rate_counter",
+    "logql-loki-3.5.2/range/stddev_over_time",
+    "logql-loki-3.5.2/range/stdvar_over_time",
+    "logql-loki-3.5.2/range/sum_over_time",
+    "logql-loki-3.5.2/regexp",
+    "logql-loki-3.5.2/selectors",
+    "logql-loki-3.5.2/set-operators",
+    "logql-loki-3.5.2/shard-capability-domain",
+    "logql-loki-3.5.2/structured-metadata",
+    "logql-loki-3.5.2/template-capabilities",
+    "logql-loki-3.5.2/template-runtime",
+    "logql-loki-3.5.2/template/Replace",
+    "logql-loki-3.5.2/template/ToLower",
+    "logql-loki-3.5.2/template/ToUpper",
+    "logql-loki-3.5.2/template/Trim",
+    "logql-loki-3.5.2/template/TrimLeft",
+    "logql-loki-3.5.2/template/TrimPrefix",
+    "logql-loki-3.5.2/template/TrimRight",
+    "logql-loki-3.5.2/template/TrimSpace",
+    "logql-loki-3.5.2/template/TrimSuffix",
+    "logql-loki-3.5.2/template/__line__",
+    "logql-loki-3.5.2/template/__timestamp__",
+    "logql-loki-3.5.2/template/add",
+    "logql-loki-3.5.2/template/addf",
+    "logql-loki-3.5.2/template/alignLeft",
+    "logql-loki-3.5.2/template/alignRight",
+    "logql-loki-3.5.2/template/b64dec",
+    "logql-loki-3.5.2/template/b64enc",
+    "logql-loki-3.5.2/template/bytes",
+    "logql-loki-3.5.2/template/ceil",
+    "logql-loki-3.5.2/template/contains",
+    "logql-loki-3.5.2/template/count",
+    "logql-loki-3.5.2/template/date",
+    "logql-loki-3.5.2/template/default",
+    "logql-loki-3.5.2/template/div",
+    "logql-loki-3.5.2/template/divf",
+    "logql-loki-3.5.2/template/duration",
+    "logql-loki-3.5.2/template/duration_seconds",
+    "logql-loki-3.5.2/template/float64",
+    "logql-loki-3.5.2/template/floor",
+    "logql-loki-3.5.2/template/fromJson",
+    "logql-loki-3.5.2/template/hasPrefix",
+    "logql-loki-3.5.2/template/hasSuffix",
+    "logql-loki-3.5.2/template/indent",
+    "logql-loki-3.5.2/template/int",
+    "logql-loki-3.5.2/template/lower",
+    "logql-loki-3.5.2/template/max",
+    "logql-loki-3.5.2/template/maxf",
+    "logql-loki-3.5.2/template/min",
+    "logql-loki-3.5.2/template/minf",
+    "logql-loki-3.5.2/template/mod",
+    "logql-loki-3.5.2/template/mul",
+    "logql-loki-3.5.2/template/mulf",
+    "logql-loki-3.5.2/template/nindent",
+    "logql-loki-3.5.2/template/now",
+    "logql-loki-3.5.2/template/regexReplaceAll",
+    "logql-loki-3.5.2/template/regexReplaceAllLiteral",
+    "logql-loki-3.5.2/template/repeat",
+    "logql-loki-3.5.2/template/replace",
+    "logql-loki-3.5.2/template/round",
+    "logql-loki-3.5.2/template/sub",
+    "logql-loki-3.5.2/template/subf",
+    "logql-loki-3.5.2/template/substr",
+    "logql-loki-3.5.2/template/title",
+    "logql-loki-3.5.2/template/toDate",
+    "logql-loki-3.5.2/template/toDateInZone",
+    "logql-loki-3.5.2/template/trim",
+    "logql-loki-3.5.2/template/trimAll",
+    "logql-loki-3.5.2/template/trimPrefix",
+    "logql-loki-3.5.2/template/trimSuffix",
+    "logql-loki-3.5.2/template/trunc",
+    "logql-loki-3.5.2/template/unixEpoch",
+    "logql-loki-3.5.2/template/unixEpochMillis",
+    "logql-loki-3.5.2/template/unixEpochNanos",
+    "logql-loki-3.5.2/template/unixToTime",
+    "logql-loki-3.5.2/template/upper",
+    "logql-loki-3.5.2/template/urldecode",
+    "logql-loki-3.5.2/template/urlencode",
+    "logql-loki-3.5.2/unpack",
+    "logql-loki-3.5.2/unwrap",
+    "logql-loki-3.5.2/variants",
+    "logql-loki-3.5.2/vector"
+  ],
+  "complete": true,
+  "inventory_scope_status": "Factual inventory accepted from hash-locked audits; production coverage and release acceptance remain false."
+}

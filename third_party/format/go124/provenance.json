@@ -1,0 +1,155 @@
+{
+  "primitive": "Go 1.24.5 generic formatting and numeric/string conversion",
+  "license": "BSD-3-Clause",
+  "approved_by": "integration parent Main, approved02.06",
+  "upstream_release": "go1.24.5",
+  "archive_url": "https://go.dev/dl/go1.24.5.windows-amd64.zip",
+  "local_archive": ".tools/primitive-probe/archives/go1.24.5.windows-amd64.zip",
+  "not_telemetry_code": true,
+  "files": [
+    {
+      "path": "fmt/print.go",
+      "source_url": "https://raw.githubusercontent.com/golang/go/go1.24.5/src/fmt/print.go",
+      "original_sha256": "50f53c45b639c12f8c01fb7ecb8937d4dd3d02c02d3cc25b85afa778da2a1198",
+      "adapted_sha256": "d5fbb6eb86cb27026b49d0ae6aec6368b586e48c584875240009b8b317477b97",
+      "adaptations": [
+        "Relocate internal/fmtsort and strconv imports to this pinned primitive tree.",
+        "Remove global printer sync.Pool; invocation-local printers clear/discard byte buffers and argument references on release so tenant bytes are not retained across query accounting lifetimes."
+      ]
+    },
+    {
+      "path": "fmt/format.go",
+      "source_url": "https://raw.githubusercontent.com/golang/go/go1.24.5/src/fmt/format.go",
+      "original_sha256": "f254775bc34e4d6b0dbc2ebc279e98f8662256e43e167b31b573368e58d3aacd",
+      "adapted_sha256": "399846421bbd633c795c7c6d95afa6cf1b1fc84d77f890b71bb97807c0bdce24",
+      "adaptations": [
+        "Relocate internal/fmtsort and strconv imports to this pinned primitive tree."
+      ]
+    },
+    {
+      "path": "internal/fmtsort/sort.go",
+      "source_url": "https://raw.githubusercontent.com/golang/go/go1.24.5/src/internal/fmtsort/sort.go",
+      "original_sha256": "46d972102d8d6900ce8d1eb24be5c8ee92f6a0a8c78aed946292ecb50ff6a81b",
+      "adapted_sha256": "46d972102d8d6900ce8d1eb24be5c8ee92f6a0a8c78aed946292ecb50ff6a81b",
+      "adaptations": []
+    },
+    {
+      "path": "strconv/atob.go",
+      "source_url": "https://raw.githubusercontent.com/golang/go/go1.24.5/src/strconv/atob.go",
+      "original_sha256": "a811df1f66377d76716b133aaa0e0029f8b8432f39b9128e60aeb792c5e70fdb",
+      "adapted_sha256": "a811df1f66377d76716b133aaa0e0029f8b8432f39b9128e60aeb792c5e70fdb",
+      "adaptations": []
+    },
+    {
+      "path": "strconv/atoc.go",
+      "source_url": "https://raw.githubusercontent.com/golang/go/go1.24.5/src/strconv/atoc.go",
+      "original_sha256": "f26230e4759ab0eff2fd0cf65b827c8cad93fff8cd1bc1606539be9eaf3ac25b",
+      "adapted_sha256": "5d60bc53f907a9d64129e1a69be4eaf4a67111d8dffeba7f485ff62044f4099a",
+      "adaptations": [
+        "Replace only stringslite.Clone with stable host strings.Clone byte ownership primitive."
+      ]
+    },
+    {
+      "path": "strconv/atof.go",
+      "source_url": "https://raw.githubusercontent.com/golang/go/go1.24.5/src/strconv/atof.go",
+      "original_sha256": "c8d9a1720134e2f42816f74a4925f2f062ee17694698cc9a6add5471e920bde4",
+      "adapted_sha256": "c8d9a1720134e2f42816f74a4925f2f062ee17694698cc9a6add5471e920bde4",
+      "adaptations": []
+    },
+    {
+      "path": "strconv/atoi.go",
+      "source_url": "https://raw.githubusercontent.com/golang/go/go1.24.5/src/strconv/atoi.go",
+      "original_sha256": "51240f70d2b366dad4e9b2c93b58345e0ad34084fb144a203f90866d7ae16f67",
+      "adapted_sha256": "adf7e137e19e9d4bbf069fef6da4feb36aa598d704311c6ccfe592c1cd05d657",
+      "adaptations": [
+        "Replace only stringslite.Clone with stable host strings.Clone byte ownership primitive."
+      ]
+    },
+    {
+      "path": "strconv/ctoa.go",
+      "source_url": "https://raw.githubusercontent.com/golang/go/go1.24.5/src/strconv/ctoa.go",
+      "original_sha256": "3b3c4b7928150ed751d97f0e48908195c244d263512c06df6f97c4843749edce",
+      "adapted_sha256": "3b3c4b7928150ed751d97f0e48908195c244d263512c06df6f97c4843749edce",
+      "adaptations": []
+    },
+    {
+      "path": "strconv/decimal.go",
+      "source_url": "https://raw.githubusercontent.com/golang/go/go1.24.5/src/strconv/decimal.go",
+      "original_sha256": "23bd45989d0b5a7b441c45873bf43f210fdf8381132fc74424d381216ac3a8b4",
+      "adapted_sha256": "23bd45989d0b5a7b441c45873bf43f210fdf8381132fc74424d381216ac3a8b4",
+      "adaptations": []
+    },
+    {
+      "path": "strconv/eisel_lemire.go",
+      "source_url": "https://raw.githubusercontent.com/golang/go/go1.24.5/src/strconv/eisel_lemire.go",
+      "original_sha256": "702cdbff7add80c64c79178226355c6c4fd228c19e31c0dac4479fe4b476e662",
+      "adapted_sha256": "702cdbff7add80c64c79178226355c6c4fd228c19e31c0dac4479fe4b476e662",
+      "adaptations": []
+    },
+    {
+      "path": "strconv/ftoa.go",
+      "source_url": "https://raw.githubusercontent.com/golang/go/go1.24.5/src/strconv/ftoa.go",
+      "original_sha256": "0b6347b52b3016250953f21b957535c1a43591e278deb85b3f358ba89f1a6066",
+      "adapted_sha256": "0b6347b52b3016250953f21b957535c1a43591e278deb85b3f358ba89f1a6066",
+      "adaptations": []
+    },
+    {
+      "path": "strconv/ftoaryu.go",
+      "source_url": "https://raw.githubusercontent.com/golang/go/go1.24.5/src/strconv/ftoaryu.go",
+      "original_sha256": "369cf8c283e9ca407d26b7faa7b2a91ee29bb75a535b7591f132dd8d1908932f",
+      "adapted_sha256": "369cf8c283e9ca407d26b7faa7b2a91ee29bb75a535b7591f132dd8d1908932f",
+      "adaptations": []
+    },
+    {
+      "path": "strconv/isprint.go",
+      "source_url": "https://raw.githubusercontent.com/golang/go/go1.24.5/src/strconv/isprint.go",
+      "original_sha256": "24114557c2b3cad7b80c8e71683831bfbe1c72eb99e8fd28a3a48eaf77705fb4",
+      "adapted_sha256": "24114557c2b3cad7b80c8e71683831bfbe1c72eb99e8fd28a3a48eaf77705fb4",
+      "adaptations": []
+    },
+    {
+      "path": "strconv/itoa.go",
+      "source_url": "https://raw.githubusercontent.com/golang/go/go1.24.5/src/strconv/itoa.go",
+      "original_sha256": "3ab40aaee22f21db6aac5da7a2cbcf7725a487a38762e33b52cc55f445b1fe9c",
+      "adapted_sha256": "3ab40aaee22f21db6aac5da7a2cbcf7725a487a38762e33b52cc55f445b1fe9c",
+      "adaptations": []
+    },
+    {
+      "path": "strconv/quote.go",
+      "source_url": "https://raw.githubusercontent.com/golang/go/go1.24.5/src/strconv/quote.go",
+      "original_sha256": "6f85a5b0e9cc573c94d58a01fe9cd4c6ea7978a9402aa9fe39beed74f8888542",
+      "adapted_sha256": "6f85a5b0e9cc573c94d58a01fe9cd4c6ea7978a9402aa9fe39beed74f8888542",
+      "adaptations": []
+    },
+    {
+      "path": "strconv/bytealg.go",
+      "source_url": "https://raw.githubusercontent.com/golang/go/go1.24.5/src/strconv/bytealg.go",
+      "original_sha256": "210ed5dd413d26575dabbb917c047ba52a144d133414f5e06b9595a4b30d3c60",
+      "adapted_sha256": "115e5d05ad613257d316e04f326fd1c3553f41c61089659d237a3f3503098a75",
+      "adaptations": [
+        "Replace only bytealg.IndexByteString with stable host strings.IndexByte; omit compiler-bootstrap-only selection tag."
+      ]
+    },
+    {
+      "path": "LICENSE",
+      "source_url": "https://raw.githubusercontent.com/golang/go/go1.24.5/LICENSE",
+      "original_sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad",
+      "adapted_sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad",
+      "adaptations": []
+    },
+    {
+      "path": "fmt/errors.go",
+      "source_url": "https://raw.githubusercontent.com/golang/go/go1.24.5/src/fmt/errors.go",
+      "original_sha256": "31acf4dc998508f801e6f741089897430cc86fe5c32b729a12f9e2595f358fab",
+      "adapted_sha256": "31acf4dc998508f801e6f741089897430cc86fe5c32b729a12f9e2595f358fab",
+      "adaptations": []
+    }
+  ],
+  "host_adapters": [
+    "internal/stringslite.Clone -> strings.Clone: byte-identical string ownership operation",
+    "internal/bytealg.IndexByteString -> strings.IndexByte: byte search only",
+    "io/os/reflect/cmp/slices/math/math-bits/unicode-utf8 remain standard-library structural, arithmetic and byte primitives; no host Unicode classification tables are used by the pinned formatter",
+    "strconv/isprint.go is the archived Go1.24.5 generated printable/graphic classification table; existing third_party/regex sources are unchanged"
+  ],
+  "scope": "Sprint/Sprintf/Sprintln are called by the owned metered closed-value LogQL interpreter; Errorf supplies exact independently licensed generic primitive error text. This vendored code is not itself a memory/work/capability boundary."
+}

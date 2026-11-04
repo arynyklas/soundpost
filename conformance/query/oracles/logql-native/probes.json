@@ -1,0 +1,348 @@
+{
+  "copyright": "Copyright 2026 Aryn Yklas",
+  "license": "Apache-2.0",
+  "phase": "syntax,pipeline",
+  "logql": {
+    "profile": "logql-loki-3.5.2",
+    "commit": "257d2f62bf8a81b44dea6fe88968d1d28c8e01e7",
+    "profile_identity": "technical-probe-only-not-release-qualification",
+    "feature_set": "technical-default",
+    "configuration_hash": "technical-probe-only-not-release-qualification",
+    "enabled_features": [],
+    "phase": "syntax,pipeline",
+    "timezone_sha256": "58b3770b2c2216eaa856c18464dcac90bcb8547764e40ef660ef3b0f19cd43d0",
+    "lookback_ns": "30000000000",
+    "sketch_heap": 10000,
+    "cases": [
+      {
+        "id": "scalar-comparison-no-bool",
+        "phase": "syntax",
+        "profiles": [
+          "logql-loki-3.5.2"
+        ],
+        "enabled_features": [],
+        "input": {
+          "expression": "1 == 2"
+        }
+      },
+      {
+        "id": "scalar-comparison-bool",
+        "phase": "syntax",
+        "profiles": [
+          "logql-loki-3.5.2"
+        ],
+        "enabled_features": [],
+        "input": {
+          "expression": "1 == bool 2"
+        }
+      },
+      {
+        "id": "line-regex-dot-newline",
+        "phase": "pipeline",
+        "profiles": [
+          "logql-loki-3.5.2"
+        ],
+        "enabled_features": [],
+        "input": {
+          "expression": "{app=\"api\"}|~\"a.b\"",
+          "entry": {
+            "timestamp_ns": "1000000001",
+            "id": "00000000000000000000000000000001",
+            "multiplicity": "1",
+            "line": "a\nb",
+            "stream_labels": [
+              {
+                "name": "app",
+                "value": "api"
+              }
+            ],
+            "structured_metadata": [],
+            "fields": []
+          }
+        }
+      },
+      {
+        "id": "selector-regex-dot-newline",
+        "phase": "pipeline",
+        "profiles": [
+          "logql-loki-3.5.2"
+        ],
+        "enabled_features": [],
+        "input": {
+          "expression": "{multiline=~\"a.b\"}",
+          "entry": {
+            "timestamp_ns": "1000000001",
+            "id": "00000000000000000000000000000001",
+            "multiplicity": "1",
+            "line": "a\nb",
+            "stream_labels": [
+              {
+                "name": "multiline",
+                "value": "a\nb"
+              }
+            ],
+            "structured_metadata": [],
+            "fields": []
+          }
+        }
+      },
+      {
+        "id": "negative-line-or",
+        "phase": "pipeline",
+        "profiles": [
+          "logql-loki-3.5.2"
+        ],
+        "enabled_features": [],
+        "input": {
+          "expression": "{app=\"api\"} != \"one\" or \"two\"",
+          "entry": {
+            "timestamp_ns": "1000000001",
+            "id": "00000000000000000000000000000001",
+            "multiplicity": "1",
+            "line": "one",
+            "stream_labels": [
+              {
+                "name": "app",
+                "value": "api"
+              }
+            ],
+            "structured_metadata": [],
+            "fields": []
+          }
+        }
+      },
+      {
+        "id": "pattern-partial-captures",
+        "phase": "pipeline",
+        "profiles": [
+          "logql-loki-3.5.2"
+        ],
+        "enabled_features": [],
+        "input": {
+          "expression": "{app=\"api\"}|pattern \"<first> ok <second> end\"",
+          "entry": {
+            "timestamp_ns": "1000000001",
+            "id": "00000000000000000000000000000001",
+            "multiplicity": "1",
+            "line": "a ok b missing",
+            "stream_labels": [
+              {
+                "name": "app",
+                "value": "api"
+              }
+            ],
+            "structured_metadata": [],
+            "fields": []
+          }
+        }
+      },
+      {
+        "id": "json-duplicates-sanitized-collision",
+        "phase": "pipeline",
+        "profiles": [
+          "logql-loki-3.5.2"
+        ],
+        "enabled_features": [],
+        "input": {
+          "expression": "{app=\"api\"}|json",
+          "entry": {
+            "timestamp_ns": "1000000001",
+            "id": "00000000000000000000000000000001",
+            "multiplicity": "1",
+            "line": "{\"n\":\"first\",\"n\":\"last\",\"a-b\":1,\"a.b\":2}",
+            "stream_labels": [
+              {
+                "name": "app",
+                "value": "api"
+              }
+            ],
+            "structured_metadata": [],
+            "fields": []
+          }
+        }
+      },
+      {
+        "id": "logfmt-duplicates",
+        "phase": "pipeline",
+        "profiles": [
+          "logql-loki-3.5.2"
+        ],
+        "enabled_features": [],
+        "input": {
+          "expression": "{app=\"api\"}|logfmt",
+          "entry": {
+            "timestamp_ns": "1000000001",
+            "id": "00000000000000000000000000000001",
+            "multiplicity": "1",
+            "line": "code=first code=last",
+            "stream_labels": [
+              {
+                "name": "app",
+                "value": "api"
+              }
+            ],
+            "structured_metadata": [],
+            "fields": []
+          }
+        }
+      },
+      {
+        "id": "logfmt-strict-partial",
+        "phase": "pipeline",
+        "profiles": [
+          "logql-loki-3.5.2"
+        ],
+        "enabled_features": [],
+        "input": {
+          "expression": "{app=\"api\"}|logfmt --strict",
+          "entry": {
+            "timestamp_ns": "1000000001",
+            "id": "00000000000000000000000000000001",
+            "multiplicity": "1",
+            "line": "code=first bad=\"unterminated",
+            "stream_labels": [
+              {
+                "name": "app",
+                "value": "api"
+              }
+            ],
+            "structured_metadata": [],
+            "fields": []
+          }
+        }
+      },
+      {
+        "id": "unpack-no-entry",
+        "phase": "pipeline",
+        "profiles": [
+          "logql-loki-3.5.2"
+        ],
+        "enabled_features": [],
+        "input": {
+          "expression": "{app=\"api\"}|unpack",
+          "entry": {
+            "timestamp_ns": "1000000001",
+            "id": "00000000000000000000000000000001",
+            "multiplicity": "1",
+            "line": "{\"region\":\"north\"}",
+            "stream_labels": [
+              {
+                "name": "app",
+                "value": "api"
+              }
+            ],
+            "structured_metadata": [],
+            "fields": []
+          }
+        }
+      },
+      {
+        "id": "unpack-malformed",
+        "phase": "pipeline",
+        "profiles": [
+          "logql-loki-3.5.2"
+        ],
+        "enabled_features": [],
+        "input": {
+          "expression": "{app=\"api\"}|unpack",
+          "entry": {
+            "timestamp_ns": "1000000001",
+            "id": "00000000000000000000000000000001",
+            "multiplicity": "1",
+            "line": "{",
+            "stream_labels": [
+              {
+                "name": "app",
+                "value": "api"
+              }
+            ],
+            "structured_metadata": [],
+            "fields": []
+          }
+        }
+      },
+      {
+        "id": "unpack-nonstring-entry",
+        "phase": "pipeline",
+        "profiles": [
+          "logql-loki-3.5.2"
+        ],
+        "enabled_features": [],
+        "input": {
+          "expression": "{app=\"api\"}|unpack",
+          "entry": {
+            "timestamp_ns": "1000000001",
+            "id": "00000000000000000000000000000001",
+            "multiplicity": "1",
+            "line": "{\"_entry\":1,\"region\":\"north\"}",
+            "stream_labels": [
+              {
+                "name": "app",
+                "value": "api"
+              }
+            ],
+            "structured_metadata": [],
+            "fields": []
+          }
+        }
+      },
+      {
+        "id": "ip-typed-invalid",
+        "phase": "pipeline",
+        "profiles": [
+          "logql-loki-3.5.2"
+        ],
+        "enabled_features": [],
+        "input": {
+          "expression": "{app=\"api\"}|json|peer=ip(\"192.0.2.0/24\")",
+          "entry": {
+            "timestamp_ns": "1000000001",
+            "id": "00000000000000000000000000000001",
+            "multiplicity": "1",
+            "line": "{\"peer\":\"unknown\"}",
+            "stream_labels": [
+              {
+                "name": "app",
+                "value": "api"
+              }
+            ],
+            "structured_metadata": [],
+            "fields": []
+          }
+        }
+      },
+      {
+        "id": "typed-filter-preserves-error",
+        "phase": "pipeline",
+        "profiles": [
+          "logql-loki-3.5.2"
+        ],
+        "enabled_features": [],
+        "input": {
+          "expression": "{app=\"api\"}|json|n>1",
+          "entry": {
+            "timestamp_ns": "1000000001",
+            "id": "00000000000000000000000000000001",
+            "multiplicity": "1",
+            "line": "{",
+            "stream_labels": [
+              {
+                "name": "app",
+                "value": "api"
+              }
+            ],
+            "structured_metadata": [],
+            "fields": []
+          }
+        }
+      },
+      {"id":"typed-number-detail","phase":"pipeline","profiles":["logql-loki-3.5.2"],"enabled_features":[],"input":{"expression":"{app=\"api\"}|logfmt|n>1","entry":{"timestamp_ns":"1000000001","id":"00000000000000000000000000000001","multiplicity":"1","line":"n=bad","stream_labels":[{"name":"app","value":"api"}],"structured_metadata":[],"fields":[]}}},
+      {"id":"typed-duration-detail","phase":"pipeline","profiles":["logql-loki-3.5.2"],"enabled_features":[],"input":{"expression":"{app=\"api\"}|logfmt|n>1s","entry":{"timestamp_ns":"1000000001","id":"00000000000000000000000000000001","multiplicity":"1","line":"n=bad","stream_labels":[{"name":"app","value":"api"}],"structured_metadata":[],"fields":[]}}},
+      {"id":"typed-bytes-detail","phase":"pipeline","profiles":["logql-loki-3.5.2"],"enabled_features":[],"input":{"expression":"{app=\"api\"}|logfmt|n>1KB","entry":{"timestamp_ns":"1000000001","id":"00000000000000000000000000000001","multiplicity":"1","line":"n=bad","stream_labels":[{"name":"app","value":"api"}],"structured_metadata":[],"fields":[]}}},
+      {"id":"unwrap-number-detail","phase":"pipeline","profiles":["logql-loki-3.5.2"],"enabled_features":[],"input":{"expression":"sum_over_time({app=\"api\"}|logfmt|unwrap n[1s])","entry":{"timestamp_ns":"1000000001","id":"00000000000000000000000000000001","multiplicity":"1","line":"n=bad","stream_labels":[{"name":"app","value":"api"}],"structured_metadata":[],"fields":[]}}},
+      {"id":"unwrap-duration-detail","phase":"pipeline","profiles":["logql-loki-3.5.2"],"enabled_features":[],"input":{"expression":"sum_over_time({app=\"api\"}|logfmt|unwrap duration(n)[1s])","entry":{"timestamp_ns":"1000000001","id":"00000000000000000000000000000001","multiplicity":"1","line":"n=bad","stream_labels":[{"name":"app","value":"api"}],"structured_metadata":[],"fields":[]}}},
+      {"id":"unwrap-bytes-detail","phase":"pipeline","profiles":["logql-loki-3.5.2"],"enabled_features":[],"input":{"expression":"sum_over_time({app=\"api\"}|logfmt|unwrap bytes(n)[1s])","entry":{"timestamp_ns":"1000000001","id":"00000000000000000000000000000001","multiplicity":"1","line":"n=bad","stream_labels":[{"name":"app","value":"api"}],"structured_metadata":[],"fields":[]}}},
+      {"id":"typed-duration-preserves-json-detail","phase":"pipeline","profiles":["logql-loki-3.5.2"],"enabled_features":[],"input":{"expression":"{app=\"api\"}|json|n>1s","entry":{"timestamp_ns":"1000000001","id":"00000000000000000000000000000001","multiplicity":"1","line":"{","stream_labels":[{"name":"app","value":"api"}],"structured_metadata":[],"fields":[]}}}
+    ]
+  }
+}

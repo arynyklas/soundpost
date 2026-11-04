@@ -1,0 +1,4081 @@
+{
+  "complete": false,
+  "function_signatures": [
+    {
+      "id": "promql-prometheus-3.1.0/function/abs",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "abs",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:31@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/absent",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "absent",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:36@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/absent_over_time",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "absent_over_time",
+      "argument_types": [
+        "ValueTypeMatrix"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:41@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/acos",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "acos",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:46@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/acosh",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "acosh",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:51@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/asin",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "asin",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:56@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/asinh",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "asinh",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:61@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/atan",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "atan",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:66@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/atanh",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "atanh",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:71@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/avg_over_time",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "avg_over_time",
+      "argument_types": [
+        "ValueTypeMatrix"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:76@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/ceil",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "ceil",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:81@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/changes",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "changes",
+      "argument_types": [
+        "ValueTypeMatrix"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:86@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/clamp",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "clamp",
+      "argument_types": [
+        "ValueTypeVector",
+        "ValueTypeScalar",
+        "ValueTypeScalar"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:91@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/clamp_max",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "clamp_max",
+      "argument_types": [
+        "ValueTypeVector",
+        "ValueTypeScalar"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:96@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/clamp_min",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "clamp_min",
+      "argument_types": [
+        "ValueTypeVector",
+        "ValueTypeScalar"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:101@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/cos",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "cos",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:106@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/cosh",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "cosh",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:111@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/count_over_time",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "count_over_time",
+      "argument_types": [
+        "ValueTypeMatrix"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:116@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/days_in_month",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "days_in_month",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 1,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:121@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/day_of_month",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "day_of_month",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 1,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:127@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/day_of_week",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "day_of_week",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 1,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:133@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/day_of_year",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "day_of_year",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 1,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:139@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/deg",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "deg",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:145@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/delta",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "delta",
+      "argument_types": [
+        "ValueTypeMatrix"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:150@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/deriv",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "deriv",
+      "argument_types": [
+        "ValueTypeMatrix"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:155@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/exp",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "exp",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:160@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/floor",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "floor",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:165@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/histogram_avg",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "histogram_avg",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:170@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/histogram_count",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "histogram_count",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:175@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/histogram_sum",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "histogram_sum",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:180@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/histogram_stddev",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "histogram_stddev",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:185@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/histogram_stdvar",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "histogram_stdvar",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:190@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/histogram_fraction",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "histogram_fraction",
+      "argument_types": [
+        "ValueTypeScalar",
+        "ValueTypeScalar",
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:195@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/histogram_quantile",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "histogram_quantile",
+      "argument_types": [
+        "ValueTypeScalar",
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:200@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/double_exponential_smoothing",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "double_exponential_smoothing",
+      "argument_types": [
+        "ValueTypeMatrix",
+        "ValueTypeScalar",
+        "ValueTypeScalar"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "promql-experimental-functions",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:205@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/hour",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "hour",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 1,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:211@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/idelta",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "idelta",
+      "argument_types": [
+        "ValueTypeMatrix"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:217@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/increase",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "increase",
+      "argument_types": [
+        "ValueTypeMatrix"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:222@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/info",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "info",
+      "argument_types": [
+        "ValueTypeVector",
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 1,
+      "gate": "promql-experimental-functions",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:227@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/irate",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "irate",
+      "argument_types": [
+        "ValueTypeMatrix"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:234@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/label_replace",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "label_replace",
+      "argument_types": [
+        "ValueTypeVector",
+        "ValueTypeString",
+        "ValueTypeString",
+        "ValueTypeString",
+        "ValueTypeString"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:239@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/label_join",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "label_join",
+      "argument_types": [
+        "ValueTypeVector",
+        "ValueTypeString",
+        "ValueTypeString",
+        "ValueTypeString"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": -1,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:244@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/last_over_time",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "last_over_time",
+      "argument_types": [
+        "ValueTypeMatrix"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:250@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/ln",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "ln",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:255@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/log10",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "log10",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:260@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/log2",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "log2",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:265@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/mad_over_time",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "mad_over_time",
+      "argument_types": [
+        "ValueTypeMatrix"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "promql-experimental-functions",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:270@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/max_over_time",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "max_over_time",
+      "argument_types": [
+        "ValueTypeMatrix"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:276@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/min_over_time",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "min_over_time",
+      "argument_types": [
+        "ValueTypeMatrix"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:281@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/minute",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "minute",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 1,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:286@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/month",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "month",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 1,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:292@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/pi",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "pi",
+      "argument_types": [],
+      "return_type": "ValueTypeScalar",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:298@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/predict_linear",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "predict_linear",
+      "argument_types": [
+        "ValueTypeMatrix",
+        "ValueTypeScalar"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:303@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/present_over_time",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "present_over_time",
+      "argument_types": [
+        "ValueTypeMatrix"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:308@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/quantile_over_time",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "quantile_over_time",
+      "argument_types": [
+        "ValueTypeScalar",
+        "ValueTypeMatrix"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:313@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/rad",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "rad",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:318@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/rate",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "rate",
+      "argument_types": [
+        "ValueTypeMatrix"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:323@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/resets",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "resets",
+      "argument_types": [
+        "ValueTypeMatrix"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:328@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/round",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "round",
+      "argument_types": [
+        "ValueTypeVector",
+        "ValueTypeScalar"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 1,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:333@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/scalar",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "scalar",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeScalar",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:339@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/sgn",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "sgn",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:344@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/sin",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "sin",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:349@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/sinh",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "sinh",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:354@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/sort",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "sort",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:359@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/sort_desc",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "sort_desc",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:364@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/sort_by_label",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "sort_by_label",
+      "argument_types": [
+        "ValueTypeVector",
+        "ValueTypeString"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": -1,
+      "gate": "promql-experimental-functions",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:369@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/sort_by_label_desc",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "sort_by_label_desc",
+      "argument_types": [
+        "ValueTypeVector",
+        "ValueTypeString"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": -1,
+      "gate": "promql-experimental-functions",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:376@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/sqrt",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "sqrt",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:383@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/stddev_over_time",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "stddev_over_time",
+      "argument_types": [
+        "ValueTypeMatrix"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:388@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/stdvar_over_time",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "stdvar_over_time",
+      "argument_types": [
+        "ValueTypeMatrix"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:393@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/sum_over_time",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "sum_over_time",
+      "argument_types": [
+        "ValueTypeMatrix"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:398@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/tan",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "tan",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:403@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/tanh",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "tanh",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:408@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/time",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "time",
+      "argument_types": [],
+      "return_type": "ValueTypeScalar",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:413@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/timestamp",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "timestamp",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:418@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/vector",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "vector",
+      "argument_types": [
+        "ValueTypeScalar"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:423@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/function/year",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "year",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 1,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:428@11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/abs",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "abs",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:28@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/absent",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "absent",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:33@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/absent_over_time",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "absent_over_time",
+      "argument_types": [
+        "ValueTypeMatrix"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:38@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/acos",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "acos",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:43@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/acosh",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "acosh",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:48@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/asin",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "asin",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:53@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/asinh",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "asinh",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:58@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/atan",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "atan",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:63@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/atanh",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "atanh",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:68@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/avg_over_time",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "avg_over_time",
+      "argument_types": [
+        "ValueTypeMatrix"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:73@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/ceil",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "ceil",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:78@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/changes",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "changes",
+      "argument_types": [
+        "ValueTypeMatrix"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:83@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/clamp",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "clamp",
+      "argument_types": [
+        "ValueTypeVector",
+        "ValueTypeScalar",
+        "ValueTypeScalar"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:88@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/clamp_max",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "clamp_max",
+      "argument_types": [
+        "ValueTypeVector",
+        "ValueTypeScalar"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:93@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/clamp_min",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "clamp_min",
+      "argument_types": [
+        "ValueTypeVector",
+        "ValueTypeScalar"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:98@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/cos",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "cos",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:103@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/cosh",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "cosh",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:108@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/count_over_time",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "count_over_time",
+      "argument_types": [
+        "ValueTypeMatrix"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:113@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/days_in_month",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "days_in_month",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 1,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:118@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/day_of_month",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "day_of_month",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 1,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:124@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/day_of_week",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "day_of_week",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 1,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:130@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/day_of_year",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "day_of_year",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 1,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:136@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/deg",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "deg",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:142@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/end",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "end",
+      "argument_types": [],
+      "return_type": "ValueTypeScalar",
+      "variadic": 0,
+      "gate": "promql-experimental-functions",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:147@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/delta",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "delta",
+      "argument_types": [
+        "ValueTypeMatrix"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:153@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/deriv",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "deriv",
+      "argument_types": [
+        "ValueTypeMatrix"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:158@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/exp",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "exp",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:163@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/first_over_time",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "first_over_time",
+      "argument_types": [
+        "ValueTypeMatrix"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "promql-experimental-functions",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:168@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/floor",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "floor",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:174@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/histogram_avg",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "histogram_avg",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:179@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/histogram_count",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "histogram_count",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:184@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/histogram_sum",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "histogram_sum",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:189@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/histogram_stddev",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "histogram_stddev",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:194@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/histogram_stdvar",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "histogram_stdvar",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:199@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/histogram_fraction",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "histogram_fraction",
+      "argument_types": [
+        "ValueTypeScalar",
+        "ValueTypeScalar",
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:204@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/histogram_quantile",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "histogram_quantile",
+      "argument_types": [
+        "ValueTypeScalar",
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:209@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/histogram_quantiles",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "histogram_quantiles",
+      "argument_types": [
+        "ValueTypeVector",
+        "ValueTypeString",
+        "ValueTypeScalar",
+        "ValueTypeScalar"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 9,
+      "gate": "promql-experimental-functions",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:214@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/double_exponential_smoothing",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "double_exponential_smoothing",
+      "argument_types": [
+        "ValueTypeMatrix",
+        "ValueTypeScalar",
+        "ValueTypeScalar"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "promql-experimental-functions",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:221@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/hour",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "hour",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 1,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:227@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/idelta",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "idelta",
+      "argument_types": [
+        "ValueTypeMatrix"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:233@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/increase",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "increase",
+      "argument_types": [
+        "ValueTypeMatrix"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:238@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/info",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "info",
+      "argument_types": [
+        "ValueTypeVector",
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 1,
+      "gate": "promql-experimental-functions",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:243@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/irate",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "irate",
+      "argument_types": [
+        "ValueTypeMatrix"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:250@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/label_replace",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "label_replace",
+      "argument_types": [
+        "ValueTypeVector",
+        "ValueTypeString",
+        "ValueTypeString",
+        "ValueTypeString",
+        "ValueTypeString"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:255@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/label_join",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "label_join",
+      "argument_types": [
+        "ValueTypeVector",
+        "ValueTypeString",
+        "ValueTypeString",
+        "ValueTypeString"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": -1,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:260@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/max_of",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "max_of",
+      "argument_types": [
+        "ValueTypeScalar",
+        "ValueTypeScalar"
+      ],
+      "return_type": "ValueTypeScalar",
+      "variadic": 0,
+      "gate": "promql-experimental-functions",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:266@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/last_over_time",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "last_over_time",
+      "argument_types": [
+        "ValueTypeMatrix"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:272@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/min_of",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "min_of",
+      "argument_types": [
+        "ValueTypeScalar",
+        "ValueTypeScalar"
+      ],
+      "return_type": "ValueTypeScalar",
+      "variadic": 0,
+      "gate": "promql-experimental-functions",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:277@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/ln",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "ln",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:283@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/log10",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "log10",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:288@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/log2",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "log2",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:293@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/mad_over_time",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "mad_over_time",
+      "argument_types": [
+        "ValueTypeMatrix"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "promql-experimental-functions",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:298@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/max_over_time",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "max_over_time",
+      "argument_types": [
+        "ValueTypeMatrix"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:304@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/min_over_time",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "min_over_time",
+      "argument_types": [
+        "ValueTypeMatrix"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:309@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/ts_of_first_over_time",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "ts_of_first_over_time",
+      "argument_types": [
+        "ValueTypeMatrix"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "promql-experimental-functions",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:314@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/ts_of_max_over_time",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "ts_of_max_over_time",
+      "argument_types": [
+        "ValueTypeMatrix"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "promql-experimental-functions",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:320@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/ts_of_min_over_time",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "ts_of_min_over_time",
+      "argument_types": [
+        "ValueTypeMatrix"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "promql-experimental-functions",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:326@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/ts_of_last_over_time",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "ts_of_last_over_time",
+      "argument_types": [
+        "ValueTypeMatrix"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "promql-experimental-functions",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:332@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/minute",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "minute",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 1,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:338@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/month",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "month",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 1,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:344@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/pi",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "pi",
+      "argument_types": [],
+      "return_type": "ValueTypeScalar",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:350@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/predict_linear",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "predict_linear",
+      "argument_types": [
+        "ValueTypeMatrix",
+        "ValueTypeScalar"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:355@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/present_over_time",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "present_over_time",
+      "argument_types": [
+        "ValueTypeMatrix"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:360@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/quantile_over_time",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "quantile_over_time",
+      "argument_types": [
+        "ValueTypeScalar",
+        "ValueTypeMatrix"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:365@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/rad",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "rad",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:370@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/range",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "range",
+      "argument_types": [],
+      "return_type": "ValueTypeScalar",
+      "variadic": 0,
+      "gate": "promql-experimental-functions",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:375@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/rate",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "rate",
+      "argument_types": [
+        "ValueTypeMatrix"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:381@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/resets",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "resets",
+      "argument_types": [
+        "ValueTypeMatrix"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:386@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/round",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "round",
+      "argument_types": [
+        "ValueTypeVector",
+        "ValueTypeScalar"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 1,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:391@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/scalar",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "scalar",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeScalar",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:397@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/sgn",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "sgn",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:402@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/sin",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "sin",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:407@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/sinh",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "sinh",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:412@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/sort",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "sort",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:417@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/sort_desc",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "sort_desc",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:422@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/sort_by_label",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "sort_by_label",
+      "argument_types": [
+        "ValueTypeVector",
+        "ValueTypeString"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": -1,
+      "gate": "promql-experimental-functions",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:427@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/sort_by_label_desc",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "sort_by_label_desc",
+      "argument_types": [
+        "ValueTypeVector",
+        "ValueTypeString"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": -1,
+      "gate": "promql-experimental-functions",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:434@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/sqrt",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "sqrt",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:441@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/start",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "start",
+      "argument_types": [],
+      "return_type": "ValueTypeScalar",
+      "variadic": 0,
+      "gate": "promql-experimental-functions",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:446@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/step",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "step",
+      "argument_types": [],
+      "return_type": "ValueTypeScalar",
+      "variadic": 0,
+      "gate": "promql-experimental-functions",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:452@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/stddev_over_time",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "stddev_over_time",
+      "argument_types": [
+        "ValueTypeMatrix"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:458@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/stdvar_over_time",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "stdvar_over_time",
+      "argument_types": [
+        "ValueTypeMatrix"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:463@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/sum_over_time",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "sum_over_time",
+      "argument_types": [
+        "ValueTypeMatrix"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:468@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/tan",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "tan",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:473@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/tanh",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "tanh",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:478@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/time",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "time",
+      "argument_types": [],
+      "return_type": "ValueTypeScalar",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:483@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/timestamp",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "timestamp",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:488@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/vector",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "vector",
+      "argument_types": [
+        "ValueTypeScalar"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 0,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:493@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/function/year",
+      "kind": "function-signature",
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "year",
+      "argument_types": [
+        "ValueTypeVector"
+      ],
+      "return_type": "ValueTypeVector",
+      "variadic": 1,
+      "gate": "",
+      "semantic_rule": "Each accepted arity and sample-kind path requires separately authored positive, rejection, and mixed-kind interaction observations; declaration type alone does not establish evaluator semantics.",
+      "source_ref": "promql/parser/functions.go:498@d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "coverage": "signature-audited; behavior-unbound"
+    }
+  ],
+  "loki_template_symbols": [
+    "Replace",
+    "ToLower",
+    "ToUpper",
+    "Trim",
+    "TrimLeft",
+    "TrimPrefix",
+    "TrimRight",
+    "TrimSpace",
+    "TrimSuffix",
+    "__line__",
+    "__timestamp__",
+    "add",
+    "addf",
+    "alignLeft",
+    "alignRight",
+    "b64dec",
+    "b64enc",
+    "bytes",
+    "ceil",
+    "contains",
+    "count",
+    "date",
+    "default",
+    "div",
+    "divf",
+    "duration",
+    "duration_seconds",
+    "float64",
+    "floor",
+    "fromJson",
+    "hasPrefix",
+    "hasSuffix",
+    "indent",
+    "int",
+    "lower",
+    "max",
+    "maxf",
+    "min",
+    "minf",
+    "mod",
+    "mul",
+    "mulf",
+    "nindent",
+    "now",
+    "regexReplaceAll",
+    "regexReplaceAllLiteral",
+    "repeat",
+    "replace",
+    "round",
+    "sub",
+    "subf",
+    "substr",
+    "title",
+    "toDate",
+    "toDateInZone",
+    "trim",
+    "trimAll",
+    "trimPrefix",
+    "trimSuffix",
+    "trunc",
+    "unixEpoch",
+    "unixEpochMillis",
+    "unixEpochNanos",
+    "unixToTime",
+    "upper",
+    "urldecode",
+    "urlencode"
+  ],
+  "loki_template_source_ref": "pkg/logql/log/fmt.go@65beeb56487e1af5c5d1fa7e2f367eddbc32786c8d68430248bdb9e58697caf5",
+  "missing": [
+    "sample-kind overload behavior",
+    "function rejection and interaction cases",
+    "complete independent language productions",
+    "template signatures and runtime failures",
+    "full flag/configuration classification",
+    "feature-domain validity constraints"
+  ],
+  "lexical_registries": [
+    {
+      "profile": "promql-prometheus-3.1.0",
+      "registry": "key",
+      "source_ref": "promql/parser/lex.go@f5b2a20d9707a203245784c0003bc8534fb9d887684e1f31b686cf3e79b822bf",
+      "symbols": [
+        {
+          "name": "and",
+          "symbol": "LAND"
+        },
+        {
+          "name": "or",
+          "symbol": "LOR"
+        },
+        {
+          "name": "unless",
+          "symbol": "LUNLESS"
+        },
+        {
+          "name": "atan2",
+          "symbol": "ATAN2"
+        },
+        {
+          "name": "sum",
+          "symbol": "SUM"
+        },
+        {
+          "name": "avg",
+          "symbol": "AVG"
+        },
+        {
+          "name": "count",
+          "symbol": "COUNT"
+        },
+        {
+          "name": "min",
+          "symbol": "MIN"
+        },
+        {
+          "name": "max",
+          "symbol": "MAX"
+        },
+        {
+          "name": "group",
+          "symbol": "GROUP"
+        },
+        {
+          "name": "stddev",
+          "symbol": "STDDEV"
+        },
+        {
+          "name": "stdvar",
+          "symbol": "STDVAR"
+        },
+        {
+          "name": "topk",
+          "symbol": "TOPK"
+        },
+        {
+          "name": "bottomk",
+          "symbol": "BOTTOMK"
+        },
+        {
+          "name": "count_values",
+          "symbol": "COUNT_VALUES"
+        },
+        {
+          "name": "quantile",
+          "symbol": "QUANTILE"
+        },
+        {
+          "name": "limitk",
+          "symbol": "LIMITK"
+        },
+        {
+          "name": "limit_ratio",
+          "symbol": "LIMIT_RATIO"
+        },
+        {
+          "name": "offset",
+          "symbol": "OFFSET"
+        },
+        {
+          "name": "by",
+          "symbol": "BY"
+        },
+        {
+          "name": "without",
+          "symbol": "WITHOUT"
+        },
+        {
+          "name": "on",
+          "symbol": "ON"
+        },
+        {
+          "name": "ignoring",
+          "symbol": "IGNORING"
+        },
+        {
+          "name": "group_left",
+          "symbol": "GROUP_LEFT"
+        },
+        {
+          "name": "group_right",
+          "symbol": "GROUP_RIGHT"
+        },
+        {
+          "name": "bool",
+          "symbol": "BOOL"
+        },
+        {
+          "name": "start",
+          "symbol": "START"
+        },
+        {
+          "name": "end",
+          "symbol": "END"
+        }
+      ],
+      "behavior_cases": "pending"
+    },
+    {
+      "profile": "promql-prometheus-3.1.0",
+      "registry": "histogramDesc",
+      "source_ref": "promql/parser/lex.go@f5b2a20d9707a203245784c0003bc8534fb9d887684e1f31b686cf3e79b822bf",
+      "symbols": [
+        {
+          "name": "sum",
+          "symbol": "SUM_DESC"
+        },
+        {
+          "name": "count",
+          "symbol": "COUNT_DESC"
+        },
+        {
+          "name": "schema",
+          "symbol": "SCHEMA_DESC"
+        },
+        {
+          "name": "offset",
+          "symbol": "OFFSET_DESC"
+        },
+        {
+          "name": "n_offset",
+          "symbol": "NEGATIVE_OFFSET_DESC"
+        },
+        {
+          "name": "buckets",
+          "symbol": "BUCKETS_DESC"
+        },
+        {
+          "name": "n_buckets",
+          "symbol": "NEGATIVE_BUCKETS_DESC"
+        },
+        {
+          "name": "z_bucket",
+          "symbol": "ZERO_BUCKET_DESC"
+        },
+        {
+          "name": "z_bucket_w",
+          "symbol": "ZERO_BUCKET_WIDTH_DESC"
+        },
+        {
+          "name": "custom_values",
+          "symbol": "CUSTOM_VALUES_DESC"
+        },
+        {
+          "name": "counter_reset_hint",
+          "symbol": "COUNTER_RESET_HINT_DESC"
+        }
+      ],
+      "behavior_cases": "pending"
+    },
+    {
+      "profile": "promql-prometheus-3.1.0",
+      "registry": "counterResetHints",
+      "source_ref": "promql/parser/lex.go@f5b2a20d9707a203245784c0003bc8534fb9d887684e1f31b686cf3e79b822bf",
+      "symbols": [
+        {
+          "name": "unknown",
+          "symbol": "UNKNOWN_COUNTER_RESET"
+        },
+        {
+          "name": "reset",
+          "symbol": "COUNTER_RESET"
+        },
+        {
+          "name": "not_reset",
+          "symbol": "NOT_COUNTER_RESET"
+        },
+        {
+          "name": "gauge",
+          "symbol": "GAUGE_TYPE"
+        }
+      ],
+      "behavior_cases": "pending"
+    },
+    {
+      "profile": "promql-prometheus-3.1.0",
+      "registry": "ItemTypeStr",
+      "source_ref": "promql/parser/lex.go@f5b2a20d9707a203245784c0003bc8534fb9d887684e1f31b686cf3e79b822bf",
+      "symbols": [
+        {
+          "name": "OPEN_HIST",
+          "symbol": "{{"
+        },
+        {
+          "name": "CLOSE_HIST",
+          "symbol": "}}"
+        },
+        {
+          "name": "LEFT_PAREN",
+          "symbol": "("
+        },
+        {
+          "name": "RIGHT_PAREN",
+          "symbol": ")"
+        },
+        {
+          "name": "LEFT_BRACE",
+          "symbol": "{"
+        },
+        {
+          "name": "RIGHT_BRACE",
+          "symbol": "}"
+        },
+        {
+          "name": "LEFT_BRACKET",
+          "symbol": "["
+        },
+        {
+          "name": "RIGHT_BRACKET",
+          "symbol": "]"
+        },
+        {
+          "name": "COMMA",
+          "symbol": ","
+        },
+        {
+          "name": "EQL",
+          "symbol": "="
+        },
+        {
+          "name": "COLON",
+          "symbol": ":"
+        },
+        {
+          "name": "SEMICOLON",
+          "symbol": ";"
+        },
+        {
+          "name": "BLANK",
+          "symbol": "_"
+        },
+        {
+          "name": "TIMES",
+          "symbol": "x"
+        },
+        {
+          "name": "SPACE",
+          "symbol": "<space>"
+        },
+        {
+          "name": "SUB",
+          "symbol": "-"
+        },
+        {
+          "name": "ADD",
+          "symbol": "+"
+        },
+        {
+          "name": "MUL",
+          "symbol": "*"
+        },
+        {
+          "name": "MOD",
+          "symbol": "%"
+        },
+        {
+          "name": "DIV",
+          "symbol": "/"
+        },
+        {
+          "name": "EQLC",
+          "symbol": "=="
+        },
+        {
+          "name": "NEQ",
+          "symbol": "!="
+        },
+        {
+          "name": "LTE",
+          "symbol": "<="
+        },
+        {
+          "name": "LSS",
+          "symbol": "<"
+        },
+        {
+          "name": "GTE",
+          "symbol": ">="
+        },
+        {
+          "name": "GTR",
+          "symbol": ">"
+        },
+        {
+          "name": "EQL_REGEX",
+          "symbol": "=~"
+        },
+        {
+          "name": "NEQ_REGEX",
+          "symbol": "!~"
+        },
+        {
+          "name": "POW",
+          "symbol": "^"
+        }
+      ],
+      "behavior_cases": "pending"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "registry": "key",
+      "source_ref": "promql/parser/lex.go@5ddb072d7b3352184095eb84235c6c3bd792f8b43ae3270e46e55ed808efb68c",
+      "symbols": [
+        {
+          "name": "and",
+          "symbol": "LAND"
+        },
+        {
+          "name": "or",
+          "symbol": "LOR"
+        },
+        {
+          "name": "unless",
+          "symbol": "LUNLESS"
+        },
+        {
+          "name": "atan2",
+          "symbol": "ATAN2"
+        },
+        {
+          "name": "sum",
+          "symbol": "SUM"
+        },
+        {
+          "name": "avg",
+          "symbol": "AVG"
+        },
+        {
+          "name": "count",
+          "symbol": "COUNT"
+        },
+        {
+          "name": "min",
+          "symbol": "MIN"
+        },
+        {
+          "name": "max",
+          "symbol": "MAX"
+        },
+        {
+          "name": "group",
+          "symbol": "GROUP"
+        },
+        {
+          "name": "stddev",
+          "symbol": "STDDEV"
+        },
+        {
+          "name": "stdvar",
+          "symbol": "STDVAR"
+        },
+        {
+          "name": "topk",
+          "symbol": "TOPK"
+        },
+        {
+          "name": "bottomk",
+          "symbol": "BOTTOMK"
+        },
+        {
+          "name": "count_values",
+          "symbol": "COUNT_VALUES"
+        },
+        {
+          "name": "quantile",
+          "symbol": "QUANTILE"
+        },
+        {
+          "name": "limitk",
+          "symbol": "LIMITK"
+        },
+        {
+          "name": "limit_ratio",
+          "symbol": "LIMIT_RATIO"
+        },
+        {
+          "name": "offset",
+          "symbol": "OFFSET"
+        },
+        {
+          "name": "smoothed",
+          "symbol": "SMOOTHED"
+        },
+        {
+          "name": "anchored",
+          "symbol": "ANCHORED"
+        },
+        {
+          "name": "by",
+          "symbol": "BY"
+        },
+        {
+          "name": "without",
+          "symbol": "WITHOUT"
+        },
+        {
+          "name": "on",
+          "symbol": "ON"
+        },
+        {
+          "name": "ignoring",
+          "symbol": "IGNORING"
+        },
+        {
+          "name": "group_left",
+          "symbol": "GROUP_LEFT"
+        },
+        {
+          "name": "group_right",
+          "symbol": "GROUP_RIGHT"
+        },
+        {
+          "name": "fill",
+          "symbol": "FILL"
+        },
+        {
+          "name": "fill_left",
+          "symbol": "FILL_LEFT"
+        },
+        {
+          "name": "fill_right",
+          "symbol": "FILL_RIGHT"
+        },
+        {
+          "name": "bool",
+          "symbol": "BOOL"
+        },
+        {
+          "name": "start",
+          "symbol": "START"
+        },
+        {
+          "name": "end",
+          "symbol": "END"
+        },
+        {
+          "name": "step",
+          "symbol": "STEP"
+        },
+        {
+          "name": "range",
+          "symbol": "RANGE"
+        },
+        {
+          "name": "max_of",
+          "symbol": "MAX_OF"
+        },
+        {
+          "name": "min_of",
+          "symbol": "MIN_OF"
+        }
+      ],
+      "behavior_cases": "pending"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "registry": "histogramDesc",
+      "source_ref": "promql/parser/lex.go@5ddb072d7b3352184095eb84235c6c3bd792f8b43ae3270e46e55ed808efb68c",
+      "symbols": [
+        {
+          "name": "sum",
+          "symbol": "SUM_DESC"
+        },
+        {
+          "name": "count",
+          "symbol": "COUNT_DESC"
+        },
+        {
+          "name": "schema",
+          "symbol": "SCHEMA_DESC"
+        },
+        {
+          "name": "offset",
+          "symbol": "OFFSET_DESC"
+        },
+        {
+          "name": "n_offset",
+          "symbol": "NEGATIVE_OFFSET_DESC"
+        },
+        {
+          "name": "buckets",
+          "symbol": "BUCKETS_DESC"
+        },
+        {
+          "name": "n_buckets",
+          "symbol": "NEGATIVE_BUCKETS_DESC"
+        },
+        {
+          "name": "z_bucket",
+          "symbol": "ZERO_BUCKET_DESC"
+        },
+        {
+          "name": "z_bucket_w",
+          "symbol": "ZERO_BUCKET_WIDTH_DESC"
+        },
+        {
+          "name": "custom_values",
+          "symbol": "CUSTOM_VALUES_DESC"
+        },
+        {
+          "name": "counter_reset_hint",
+          "symbol": "COUNTER_RESET_HINT_DESC"
+        }
+      ],
+      "behavior_cases": "pending"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "registry": "counterResetHints",
+      "source_ref": "promql/parser/lex.go@5ddb072d7b3352184095eb84235c6c3bd792f8b43ae3270e46e55ed808efb68c",
+      "symbols": [
+        {
+          "name": "unknown",
+          "symbol": "UNKNOWN_COUNTER_RESET"
+        },
+        {
+          "name": "reset",
+          "symbol": "COUNTER_RESET"
+        },
+        {
+          "name": "not_reset",
+          "symbol": "NOT_COUNTER_RESET"
+        },
+        {
+          "name": "gauge",
+          "symbol": "GAUGE_TYPE"
+        }
+      ],
+      "behavior_cases": "pending"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "registry": "ItemTypeStr",
+      "source_ref": "promql/parser/lex.go@5ddb072d7b3352184095eb84235c6c3bd792f8b43ae3270e46e55ed808efb68c",
+      "symbols": [
+        {
+          "name": "OPEN_HIST",
+          "symbol": "{{"
+        },
+        {
+          "name": "CLOSE_HIST",
+          "symbol": "}}"
+        },
+        {
+          "name": "LEFT_PAREN",
+          "symbol": "("
+        },
+        {
+          "name": "RIGHT_PAREN",
+          "symbol": ")"
+        },
+        {
+          "name": "LEFT_BRACE",
+          "symbol": "{"
+        },
+        {
+          "name": "RIGHT_BRACE",
+          "symbol": "}"
+        },
+        {
+          "name": "LEFT_BRACKET",
+          "symbol": "["
+        },
+        {
+          "name": "RIGHT_BRACKET",
+          "symbol": "]"
+        },
+        {
+          "name": "COMMA",
+          "symbol": ","
+        },
+        {
+          "name": "EQL",
+          "symbol": "="
+        },
+        {
+          "name": "COLON",
+          "symbol": ":"
+        },
+        {
+          "name": "SEMICOLON",
+          "symbol": ";"
+        },
+        {
+          "name": "BLANK",
+          "symbol": "_"
+        },
+        {
+          "name": "TIMES",
+          "symbol": "x"
+        },
+        {
+          "name": "SPACE",
+          "symbol": "<space>"
+        },
+        {
+          "name": "SUB",
+          "symbol": "-"
+        },
+        {
+          "name": "ADD",
+          "symbol": "+"
+        },
+        {
+          "name": "MUL",
+          "symbol": "*"
+        },
+        {
+          "name": "MOD",
+          "symbol": "%"
+        },
+        {
+          "name": "DIV",
+          "symbol": "/"
+        },
+        {
+          "name": "EQLC",
+          "symbol": "=="
+        },
+        {
+          "name": "NEQ",
+          "symbol": "!="
+        },
+        {
+          "name": "LTE",
+          "symbol": "<="
+        },
+        {
+          "name": "LSS",
+          "symbol": "<"
+        },
+        {
+          "name": "GTE",
+          "symbol": ">="
+        },
+        {
+          "name": "GTR",
+          "symbol": ">"
+        },
+        {
+          "name": "TRIM_UPPER",
+          "symbol": "</"
+        },
+        {
+          "name": "TRIM_LOWER",
+          "symbol": ">/"
+        },
+        {
+          "name": "EQL_REGEX",
+          "symbol": "=~"
+        },
+        {
+          "name": "NEQ_REGEX",
+          "symbol": "!~"
+        },
+        {
+          "name": "POW",
+          "symbol": "^"
+        },
+        {
+          "name": "AT",
+          "symbol": "@"
+        }
+      ],
+      "behavior_cases": "pending"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "registry": "durationKeywordTokens",
+      "source_ref": "promql/parser/lex.go@5ddb072d7b3352184095eb84235c6c3bd792f8b43ae3270e46e55ed808efb68c",
+      "symbols": [
+        {
+          "name": "step",
+          "symbol": "STEP"
+        },
+        {
+          "name": "range",
+          "symbol": "RANGE"
+        },
+        {
+          "name": "max_of",
+          "symbol": "MAX_OF"
+        },
+        {
+          "name": "min_of",
+          "symbol": "MIN_OF"
+        }
+      ],
+      "behavior_cases": "pending"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "registry": "tokens",
+      "source_ref": "pkg/logql/syntax/lex.go@09445fce16eab0911378a58d93992f3a780f9e7585c0dcb5116e363858d4ae8a",
+      "symbols": [
+        {
+          "name": ",",
+          "symbol": "COMMA"
+        },
+        {
+          "name": ".",
+          "symbol": "DOT"
+        },
+        {
+          "name": "{",
+          "symbol": "OPEN_BRACE"
+        },
+        {
+          "name": "}",
+          "symbol": "CLOSE_BRACE"
+        },
+        {
+          "name": "=",
+          "symbol": "EQ"
+        },
+        {
+          "name": "OpTypeNEQ",
+          "symbol": "NEQ"
+        },
+        {
+          "name": "=~",
+          "symbol": "RE"
+        },
+        {
+          "name": "!~",
+          "symbol": "NRE"
+        },
+        {
+          "name": "!>",
+          "symbol": "NPA"
+        },
+        {
+          "name": "|=",
+          "symbol": "PIPE_EXACT"
+        },
+        {
+          "name": "|~",
+          "symbol": "PIPE_MATCH"
+        },
+        {
+          "name": "|>",
+          "symbol": "PIPE_PATTERN"
+        },
+        {
+          "name": "OpPipe",
+          "symbol": "PIPE"
+        },
+        {
+          "name": "OpUnwrap",
+          "symbol": "UNWRAP"
+        },
+        {
+          "name": "(",
+          "symbol": "OPEN_PARENTHESIS"
+        },
+        {
+          "name": ")",
+          "symbol": "CLOSE_PARENTHESIS"
+        },
+        {
+          "name": "by",
+          "symbol": "BY"
+        },
+        {
+          "name": "without",
+          "symbol": "WITHOUT"
+        },
+        {
+          "name": "bool",
+          "symbol": "BOOL"
+        },
+        {
+          "name": "[",
+          "symbol": "OPEN_BRACKET"
+        },
+        {
+          "name": "]",
+          "symbol": "CLOSE_BRACKET"
+        },
+        {
+          "name": "OpLabelReplace",
+          "symbol": "LABEL_REPLACE"
+        },
+        {
+          "name": "OpOffset",
+          "symbol": "OFFSET"
+        },
+        {
+          "name": "OpOn",
+          "symbol": "ON"
+        },
+        {
+          "name": "OpIgnoring",
+          "symbol": "IGNORING"
+        },
+        {
+          "name": "OpGroupLeft",
+          "symbol": "GROUP_LEFT"
+        },
+        {
+          "name": "OpGroupRight",
+          "symbol": "GROUP_RIGHT"
+        },
+        {
+          "name": "OpTypeOr",
+          "symbol": "OR"
+        },
+        {
+          "name": "OpTypeAnd",
+          "symbol": "AND"
+        },
+        {
+          "name": "OpTypeUnless",
+          "symbol": "UNLESS"
+        },
+        {
+          "name": "OpTypeAdd",
+          "symbol": "ADD"
+        },
+        {
+          "name": "OpTypeSub",
+          "symbol": "SUB"
+        },
+        {
+          "name": "OpTypeMul",
+          "symbol": "MUL"
+        },
+        {
+          "name": "OpTypeDiv",
+          "symbol": "DIV"
+        },
+        {
+          "name": "OpTypeMod",
+          "symbol": "MOD"
+        },
+        {
+          "name": "OpTypePow",
+          "symbol": "POW"
+        },
+        {
+          "name": "OpTypeCmpEQ",
+          "symbol": "CMP_EQ"
+        },
+        {
+          "name": "OpTypeGT",
+          "symbol": "GT"
+        },
+        {
+          "name": "OpTypeGTE",
+          "symbol": "GTE"
+        },
+        {
+          "name": "OpTypeLT",
+          "symbol": "LT"
+        },
+        {
+          "name": "OpTypeLTE",
+          "symbol": "LTE"
+        },
+        {
+          "name": "OpParserTypeJSON",
+          "symbol": "JSON"
+        },
+        {
+          "name": "OpParserTypeRegexp",
+          "symbol": "REGEXP"
+        },
+        {
+          "name": "OpParserTypeLogfmt",
+          "symbol": "LOGFMT"
+        },
+        {
+          "name": "OpParserTypeUnpack",
+          "symbol": "UNPACK"
+        },
+        {
+          "name": "OpParserTypePattern",
+          "symbol": "PATTERN"
+        },
+        {
+          "name": "OpFmtLabel",
+          "symbol": "LABEL_FMT"
+        },
+        {
+          "name": "OpFmtLine",
+          "symbol": "LINE_FMT"
+        },
+        {
+          "name": "OpFilterIP",
+          "symbol": "IP"
+        },
+        {
+          "name": "OpDecolorize",
+          "symbol": "DECOLORIZE"
+        },
+        {
+          "name": "OpDrop",
+          "symbol": "DROP"
+        },
+        {
+          "name": "OpKeep",
+          "symbol": "KEEP"
+        },
+        {
+          "name": "OpVariants",
+          "symbol": "VARIANTS"
+        },
+        {
+          "name": "VariantsOf",
+          "symbol": "OF"
+        }
+      ],
+      "behavior_cases": "pending"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "registry": "functionTokens",
+      "source_ref": "pkg/logql/syntax/lex.go@09445fce16eab0911378a58d93992f3a780f9e7585c0dcb5116e363858d4ae8a",
+      "symbols": [
+        {
+          "name": "OpRangeTypeRate",
+          "symbol": "RATE"
+        },
+        {
+          "name": "OpRangeTypeRateCounter",
+          "symbol": "RATE_COUNTER"
+        },
+        {
+          "name": "OpRangeTypeCount",
+          "symbol": "COUNT_OVER_TIME"
+        },
+        {
+          "name": "OpRangeTypeBytesRate",
+          "symbol": "BYTES_RATE"
+        },
+        {
+          "name": "OpRangeTypeBytes",
+          "symbol": "BYTES_OVER_TIME"
+        },
+        {
+          "name": "OpRangeTypeAvg",
+          "symbol": "AVG_OVER_TIME"
+        },
+        {
+          "name": "OpRangeTypeSum",
+          "symbol": "SUM_OVER_TIME"
+        },
+        {
+          "name": "OpRangeTypeMin",
+          "symbol": "MIN_OVER_TIME"
+        },
+        {
+          "name": "OpRangeTypeMax",
+          "symbol": "MAX_OVER_TIME"
+        },
+        {
+          "name": "OpRangeTypeStdvar",
+          "symbol": "STDVAR_OVER_TIME"
+        },
+        {
+          "name": "OpRangeTypeStddev",
+          "symbol": "STDDEV_OVER_TIME"
+        },
+        {
+          "name": "OpRangeTypeQuantile",
+          "symbol": "QUANTILE_OVER_TIME"
+        },
+        {
+          "name": "OpRangeTypeFirst",
+          "symbol": "FIRST_OVER_TIME"
+        },
+        {
+          "name": "OpRangeTypeLast",
+          "symbol": "LAST_OVER_TIME"
+        },
+        {
+          "name": "OpRangeTypeAbsent",
+          "symbol": "ABSENT_OVER_TIME"
+        },
+        {
+          "name": "OpTypeVector",
+          "symbol": "VECTOR"
+        },
+        {
+          "name": "OpTypeSum",
+          "symbol": "SUM"
+        },
+        {
+          "name": "OpTypeAvg",
+          "symbol": "AVG"
+        },
+        {
+          "name": "OpTypeMax",
+          "symbol": "MAX"
+        },
+        {
+          "name": "OpTypeMin",
+          "symbol": "MIN"
+        },
+        {
+          "name": "OpTypeCount",
+          "symbol": "COUNT"
+        },
+        {
+          "name": "OpTypeStddev",
+          "symbol": "STDDEV"
+        },
+        {
+          "name": "OpTypeStdvar",
+          "symbol": "STDVAR"
+        },
+        {
+          "name": "OpTypeBottomK",
+          "symbol": "BOTTOMK"
+        },
+        {
+          "name": "OpTypeTopK",
+          "symbol": "TOPK"
+        },
+        {
+          "name": "OpTypeSort",
+          "symbol": "SORT"
+        },
+        {
+          "name": "OpTypeSortDesc",
+          "symbol": "SORT_DESC"
+        },
+        {
+          "name": "OpLabelReplace",
+          "symbol": "LABEL_REPLACE"
+        },
+        {
+          "name": "OpTypeApproxTopK",
+          "symbol": "APPROX_TOPK"
+        },
+        {
+          "name": "OpConvBytes",
+          "symbol": "BYTES_CONV"
+        },
+        {
+          "name": "OpConvDuration",
+          "symbol": "DURATION_CONV"
+        },
+        {
+          "name": "OpConvDurationSeconds",
+          "symbol": "DURATION_SECONDS_CONV"
+        },
+        {
+          "name": "OpFilterIP",
+          "symbol": "IP"
+        }
+      ],
+      "behavior_cases": "pending"
+    }
+  ],
+  "independently_authored_semantic_families": [
+    {
+      "family": "literal",
+      "rule": "Distinguish string, numeric, duration and special float forms; malformed syntax must retain source ranges.",
+      "coverage": "pending exhaustive per-profile cases"
+    },
+    {
+      "family": "selector",
+      "rule": "Match absent and empty labels according to the exact language profile; selection time is not storage raw-scan boundary semantics.",
+      "coverage": "pending exhaustive per-profile cases"
+    },
+    {
+      "family": "binary",
+      "rule": "Apply operand-kind compatibility, vector cardinality, label matching and output-name rules before producing samples; no implicit cross-project aggregation.",
+      "coverage": "pending exhaustive per-profile cases"
+    },
+    {
+      "family": "aggregation",
+      "rule": "Each aggregation requires independent handling of scalar parameters, label grouping, mixed sample kinds, NaNs and ordering.",
+      "coverage": "pending exhaustive per-profile cases"
+    },
+    {
+      "family": "range",
+      "rule": "Preserve exact evaluation timestamps, left-open metric windows, counter resets and histogram precision.",
+      "coverage": "pending exhaustive per-profile cases"
+    },
+    {
+      "family": "pipeline",
+      "rule": "Respect stage order, label collisions, immutable admitted lines, parser failures and structured-metadata separation.",
+      "coverage": "pending exhaustive per-profile cases"
+    },
+    {
+      "family": "template",
+      "rule": "Expose only pinned whitelist functions and explicitly supplied line/time values; forbid external I/O and distinguish runtime failures.",
+      "coverage": "pending exhaustive per-profile cases"
+    },
+    {
+      "family": "diagnostic",
+      "rule": "Do not conflate language errors with warnings, removals, annotation order or infrastructure failure.",
+      "coverage": "pending exhaustive per-profile cases"
+    }
+  ],
+  "promql_annotation_categories": [
+    {
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "PromQLInfo",
+      "source_ref": "util/annotations/annotations.go:134@15170d92e303191ac11cb6fb639b18a95554d2ef0fe257bfe358ad3a0aef6530",
+      "ordered_observation_cases": "pending"
+    },
+    {
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "PromQLWarning",
+      "source_ref": "util/annotations/annotations.go:135@15170d92e303191ac11cb6fb639b18a95554d2ef0fe257bfe358ad3a0aef6530",
+      "ordered_observation_cases": "pending"
+    },
+    {
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "InvalidRatioWarning",
+      "source_ref": "util/annotations/annotations.go:137@15170d92e303191ac11cb6fb639b18a95554d2ef0fe257bfe358ad3a0aef6530",
+      "ordered_observation_cases": "pending"
+    },
+    {
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "InvalidQuantileWarning",
+      "source_ref": "util/annotations/annotations.go:138@15170d92e303191ac11cb6fb639b18a95554d2ef0fe257bfe358ad3a0aef6530",
+      "ordered_observation_cases": "pending"
+    },
+    {
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "BadBucketLabelWarning",
+      "source_ref": "util/annotations/annotations.go:139@15170d92e303191ac11cb6fb639b18a95554d2ef0fe257bfe358ad3a0aef6530",
+      "ordered_observation_cases": "pending"
+    },
+    {
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "MixedFloatsHistogramsWarning",
+      "source_ref": "util/annotations/annotations.go:140@15170d92e303191ac11cb6fb639b18a95554d2ef0fe257bfe358ad3a0aef6530",
+      "ordered_observation_cases": "pending"
+    },
+    {
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "MixedClassicNativeHistogramsWarning",
+      "source_ref": "util/annotations/annotations.go:141@15170d92e303191ac11cb6fb639b18a95554d2ef0fe257bfe358ad3a0aef6530",
+      "ordered_observation_cases": "pending"
+    },
+    {
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "NativeHistogramNotCounterWarning",
+      "source_ref": "util/annotations/annotations.go:142@15170d92e303191ac11cb6fb639b18a95554d2ef0fe257bfe358ad3a0aef6530",
+      "ordered_observation_cases": "pending"
+    },
+    {
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "NativeHistogramNotGaugeWarning",
+      "source_ref": "util/annotations/annotations.go:143@15170d92e303191ac11cb6fb639b18a95554d2ef0fe257bfe358ad3a0aef6530",
+      "ordered_observation_cases": "pending"
+    },
+    {
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "MixedExponentialCustomHistogramsWarning",
+      "source_ref": "util/annotations/annotations.go:144@15170d92e303191ac11cb6fb639b18a95554d2ef0fe257bfe358ad3a0aef6530",
+      "ordered_observation_cases": "pending"
+    },
+    {
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "IncompatibleCustomBucketsHistogramsWarning",
+      "source_ref": "util/annotations/annotations.go:145@15170d92e303191ac11cb6fb639b18a95554d2ef0fe257bfe358ad3a0aef6530",
+      "ordered_observation_cases": "pending"
+    },
+    {
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "PossibleNonCounterInfo",
+      "source_ref": "util/annotations/annotations.go:147@15170d92e303191ac11cb6fb639b18a95554d2ef0fe257bfe358ad3a0aef6530",
+      "ordered_observation_cases": "pending"
+    },
+    {
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "HistogramQuantileForcedMonotonicityInfo",
+      "source_ref": "util/annotations/annotations.go:148@15170d92e303191ac11cb6fb639b18a95554d2ef0fe257bfe358ad3a0aef6530",
+      "ordered_observation_cases": "pending"
+    },
+    {
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "IncompatibleTypesInBinOpInfo",
+      "source_ref": "util/annotations/annotations.go:149@15170d92e303191ac11cb6fb639b18a95554d2ef0fe257bfe358ad3a0aef6530",
+      "ordered_observation_cases": "pending"
+    },
+    {
+      "profile": "promql-prometheus-3.1.0",
+      "symbol": "HistogramIgnoredInAggregationInfo",
+      "source_ref": "util/annotations/annotations.go:150@15170d92e303191ac11cb6fb639b18a95554d2ef0fe257bfe358ad3a0aef6530",
+      "ordered_observation_cases": "pending"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "PromQLInfo",
+      "source_ref": "util/annotations/annotations.go:147@f419ed2a4857e82752674922e8334f7bf9717a20bd5cc86e96b3c1b083fb5bdc",
+      "ordered_observation_cases": "pending"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "PromQLWarning",
+      "source_ref": "util/annotations/annotations.go:148@f419ed2a4857e82752674922e8334f7bf9717a20bd5cc86e96b3c1b083fb5bdc",
+      "ordered_observation_cases": "pending"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "InvalidRatioWarning",
+      "source_ref": "util/annotations/annotations.go:150@f419ed2a4857e82752674922e8334f7bf9717a20bd5cc86e96b3c1b083fb5bdc",
+      "ordered_observation_cases": "pending"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "InvalidQuantileWarning",
+      "source_ref": "util/annotations/annotations.go:151@f419ed2a4857e82752674922e8334f7bf9717a20bd5cc86e96b3c1b083fb5bdc",
+      "ordered_observation_cases": "pending"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "BadBucketLabelWarning",
+      "source_ref": "util/annotations/annotations.go:152@f419ed2a4857e82752674922e8334f7bf9717a20bd5cc86e96b3c1b083fb5bdc",
+      "ordered_observation_cases": "pending"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "MixedFloatsHistogramsWarning",
+      "source_ref": "util/annotations/annotations.go:153@f419ed2a4857e82752674922e8334f7bf9717a20bd5cc86e96b3c1b083fb5bdc",
+      "ordered_observation_cases": "pending"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "MixedClassicNativeHistogramsWarning",
+      "source_ref": "util/annotations/annotations.go:154@f419ed2a4857e82752674922e8334f7bf9717a20bd5cc86e96b3c1b083fb5bdc",
+      "ordered_observation_cases": "pending"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "NativeHistogramNotCounterWarning",
+      "source_ref": "util/annotations/annotations.go:155@f419ed2a4857e82752674922e8334f7bf9717a20bd5cc86e96b3c1b083fb5bdc",
+      "ordered_observation_cases": "pending"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "NativeHistogramNotGaugeWarning",
+      "source_ref": "util/annotations/annotations.go:156@f419ed2a4857e82752674922e8334f7bf9717a20bd5cc86e96b3c1b083fb5bdc",
+      "ordered_observation_cases": "pending"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "MixedExponentialCustomHistogramsWarning",
+      "source_ref": "util/annotations/annotations.go:157@f419ed2a4857e82752674922e8334f7bf9717a20bd5cc86e96b3c1b083fb5bdc",
+      "ordered_observation_cases": "pending"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "IncompatibleBucketLayoutInBinOpWarning",
+      "source_ref": "util/annotations/annotations.go:158@f419ed2a4857e82752674922e8334f7bf9717a20bd5cc86e96b3c1b083fb5bdc",
+      "ordered_observation_cases": "pending"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "SortInRangeQueryWarning",
+      "source_ref": "util/annotations/annotations.go:159@f419ed2a4857e82752674922e8334f7bf9717a20bd5cc86e96b3c1b083fb5bdc",
+      "ordered_observation_cases": "pending"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "PossibleNonCounterInfo",
+      "source_ref": "util/annotations/annotations.go:161@f419ed2a4857e82752674922e8334f7bf9717a20bd5cc86e96b3c1b083fb5bdc",
+      "ordered_observation_cases": "pending"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "PossibleNonCounterLabelInfo",
+      "source_ref": "util/annotations/annotations.go:162@f419ed2a4857e82752674922e8334f7bf9717a20bd5cc86e96b3c1b083fb5bdc",
+      "ordered_observation_cases": "pending"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "HistogramQuantileForcedMonotonicityInfo",
+      "source_ref": "util/annotations/annotations.go:163@f419ed2a4857e82752674922e8334f7bf9717a20bd5cc86e96b3c1b083fb5bdc",
+      "ordered_observation_cases": "pending"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "IncompatibleTypesInBinOpInfo",
+      "source_ref": "util/annotations/annotations.go:164@f419ed2a4857e82752674922e8334f7bf9717a20bd5cc86e96b3c1b083fb5bdc",
+      "ordered_observation_cases": "pending"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "HistogramIgnoredInAggregationInfo",
+      "source_ref": "util/annotations/annotations.go:165@f419ed2a4857e82752674922e8334f7bf9717a20bd5cc86e96b3c1b083fb5bdc",
+      "ordered_observation_cases": "pending"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "HistogramIgnoredInMixedRangeInfo",
+      "source_ref": "util/annotations/annotations.go:166@f419ed2a4857e82752674922e8334f7bf9717a20bd5cc86e96b3c1b083fb5bdc",
+      "ordered_observation_cases": "pending"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "NativeHistogramQuantileNaNResultInfo",
+      "source_ref": "util/annotations/annotations.go:167@f419ed2a4857e82752674922e8334f7bf9717a20bd5cc86e96b3c1b083fb5bdc",
+      "ordered_observation_cases": "pending"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "NativeHistogramQuantileNaNSkewInfo",
+      "source_ref": "util/annotations/annotations.go:168@f419ed2a4857e82752674922e8334f7bf9717a20bd5cc86e96b3c1b083fb5bdc",
+      "ordered_observation_cases": "pending"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "NativeHistogramFractionNaNsInfo",
+      "source_ref": "util/annotations/annotations.go:169@f419ed2a4857e82752674922e8334f7bf9717a20bd5cc86e96b3c1b083fb5bdc",
+      "ordered_observation_cases": "pending"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "HistogramCounterResetCollisionWarning",
+      "source_ref": "util/annotations/annotations.go:170@f419ed2a4857e82752674922e8334f7bf9717a20bd5cc86e96b3c1b083fb5bdc",
+      "ordered_observation_cases": "pending"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "symbol": "MismatchedCustomBucketsHistogramsInfo",
+      "source_ref": "util/annotations/annotations.go:171@f419ed2a4857e82752674922e8334f7bf9717a20bd5cc86e96b3c1b083fb5bdc",
+      "ordered_observation_cases": "pending"
+    }
+  ],
+  "logql_error_symbols": [
+    {
+      "symbol": "ErrParse",
+      "source_ref": "pkg/logqlmodel/error.go:13@f481d2720f4b53c54c841b4eac2fa3dc6603c4e0aee8aa7e3f73a64c36cf85fe",
+      "cases": "pending independent language/pipeline/range error observations"
+    },
+    {
+      "symbol": "ErrPipeline",
+      "source_ref": "pkg/logqlmodel/error.go:14@f481d2720f4b53c54c841b4eac2fa3dc6603c4e0aee8aa7e3f73a64c36cf85fe",
+      "cases": "pending independent language/pipeline/range error observations"
+    },
+    {
+      "symbol": "ErrLimit",
+      "source_ref": "pkg/logqlmodel/error.go:15@f481d2720f4b53c54c841b4eac2fa3dc6603c4e0aee8aa7e3f73a64c36cf85fe",
+      "cases": "pending independent language/pipeline/range error observations"
+    },
+    {
+      "symbol": "ErrIntervalLimit",
+      "source_ref": "pkg/logqlmodel/error.go:16@f481d2720f4b53c54c841b4eac2fa3dc6603c4e0aee8aa7e3f73a64c36cf85fe",
+      "cases": "pending independent language/pipeline/range error observations"
+    },
+    {
+      "symbol": "ErrBlocked",
+      "source_ref": "pkg/logqlmodel/error.go:17@f481d2720f4b53c54c841b4eac2fa3dc6603c4e0aee8aa7e3f73a64c36cf85fe",
+      "cases": "pending independent language/pipeline/range error observations"
+    },
+    {
+      "symbol": "ErrParseMatchers",
+      "source_ref": "pkg/logqlmodel/error.go:18@f481d2720f4b53c54c841b4eac2fa3dc6603c4e0aee8aa7e3f73a64c36cf85fe",
+      "cases": "pending independent language/pipeline/range error observations"
+    },
+    {
+      "symbol": "ErrUnsupportedSyntaxForInstantQuery",
+      "source_ref": "pkg/logqlmodel/error.go:19@f481d2720f4b53c54c841b4eac2fa3dc6603c4e0aee8aa7e3f73a64c36cf85fe",
+      "cases": "pending independent language/pipeline/range error observations"
+    },
+    {
+      "symbol": "ErrVariantsDisabled",
+      "source_ref": "pkg/logqlmodel/error.go:22@f481d2720f4b53c54c841b4eac2fa3dc6603c4e0aee8aa7e3f73a64c36cf85fe",
+      "cases": "pending independent language/pipeline/range error observations"
+    },
+    {
+      "symbol": "ErrorLabel",
+      "source_ref": "pkg/logqlmodel/error.go:25@f481d2720f4b53c54c841b4eac2fa3dc6603c4e0aee8aa7e3f73a64c36cf85fe",
+      "cases": "pending independent language/pipeline/range error observations"
+    },
+    {
+      "symbol": "PreserveErrorLabel",
+      "source_ref": "pkg/logqlmodel/error.go:26@f481d2720f4b53c54c841b4eac2fa3dc6603c4e0aee8aa7e3f73a64c36cf85fe",
+      "cases": "pending independent language/pipeline/range error observations"
+    },
+    {
+      "symbol": "ErrorDetailsLabel",
+      "source_ref": "pkg/logqlmodel/error.go:27@f481d2720f4b53c54c841b4eac2fa3dc6603c4e0aee8aa7e3f73a64c36cf85fe",
+      "cases": "pending independent language/pipeline/range error observations"
+    },
+    {
+      "symbol": "errJSON",
+      "source_ref": "pkg/logql/log/error.go:5@8e2b03c625587eec6510382758e538d262606b5e995767663b4f842699d833ed",
+      "cases": "pending independent language/pipeline/range error observations"
+    },
+    {
+      "symbol": "errLogfmt",
+      "source_ref": "pkg/logql/log/error.go:6@8e2b03c625587eec6510382758e538d262606b5e995767663b4f842699d833ed",
+      "cases": "pending independent language/pipeline/range error observations"
+    },
+    {
+      "symbol": "errSampleExtraction",
+      "source_ref": "pkg/logql/log/error.go:7@8e2b03c625587eec6510382758e538d262606b5e995767663b4f842699d833ed",
+      "cases": "pending independent language/pipeline/range error observations"
+    },
+    {
+      "symbol": "errLabelFilter",
+      "source_ref": "pkg/logql/log/error.go:8@8e2b03c625587eec6510382758e538d262606b5e995767663b4f842699d833ed",
+      "cases": "pending independent language/pipeline/range error observations"
+    },
+    {
+      "symbol": "errTemplateFormat",
+      "source_ref": "pkg/logql/log/error.go:9@8e2b03c625587eec6510382758e538d262606b5e995767663b4f842699d833ed",
+      "cases": "pending independent language/pipeline/range error observations"
+    }
+  ],
+  "loki_template_standard_library_scope": {
+    "function_names": [
+      "and",
+      "call",
+      "html",
+      "index",
+      "slice",
+      "js",
+      "len",
+      "not",
+      "or",
+      "print",
+      "printf",
+      "println",
+      "urlquery",
+      "eq",
+      "ge",
+      "gt",
+      "le",
+      "lt",
+      "ne"
+    ],
+    "action_names": [
+      "if",
+      "else",
+      "range",
+      "with",
+      "define",
+      "template",
+      "block",
+      "break",
+      "continue"
+    ],
+    "status": "known text/template built-in scope; exact upstream build Go version, source hashes, capability filtering and failure behavior remain pending. These are additional obligations, not part of the 67 custom/whitelisted symbols."
+  },
+  "status": "superseded discovery artifact; not authoritative accepted inventory",
+  "superseded_by": [
+    "audits/promql.json",
+    "audits/promql-primitives.json",
+    "audits/logql.json",
+    "audits/logql-configuration-evidence.json",
+    "audits/logql-primitive-evidence.json"
+  ]
+}

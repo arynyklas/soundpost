@@ -1,0 +1,177 @@
+{
+  "release_ready": false,
+  "inventory_complete": true,
+  "production_bindings": [],
+  "oracle_observations": [
+    {
+      "profile": "promql-prometheus-3.1.0",
+      "case": "authored-scalar-addition",
+      "status": "observed-pass",
+      "semantic_result": {
+        "kind": "scalar",
+        "type": "scalar",
+        "values": [
+          {
+            "timestamp": "1700000000000000000",
+            "bits": "4008000000000000"
+          }
+        ],
+        "diagnostics": null,
+        "oracle": {
+          "profile": "promql-prometheus-3.1.0",
+          "revision": "7086161a93b262aa0949dbf2aba15a5a7b13e0a3",
+          "version": "3.1.0",
+          "image_sha256": "836dc8af413f534f854b61ecc75b1a62e9e971d3855aa6c77903f22e08f7a078",
+          "configuration_sha256": "7164c79eddd23b2b804fee720f4ab2b563617b923289499088f330f7a2698679"
+        }
+      },
+      "evidence": ".superpowers/sdd/approved-product/02.01-oracle-sanity.txt",
+      "evidence_sha256": "93154b30c5052cfcdc067bfc90d3af670c1ad39cd9fb603d9123dc5e9c2267f4"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "case": "authored-scalar-addition",
+      "status": "observed-pass",
+      "semantic_result": {
+        "kind": "scalar",
+        "type": "scalar",
+        "values": [
+          {
+            "timestamp": "1700000000000000000",
+            "bits": "4008000000000000"
+          }
+        ],
+        "diagnostics": null,
+        "oracle": {
+          "profile": "promql-prometheus-3.13.5",
+          "revision": "f497435984d1ca1d84cda5ed309387ac2eb1f8f6",
+          "version": "3.13.5",
+          "image_sha256": "3ae04846217bf370ea80a6ac2d96c37b231bff356bd406855cc9b71483cb396d",
+          "configuration_sha256": "7164c79eddd23b2b804fee720f4ab2b563617b923289499088f330f7a2698679"
+        }
+      },
+      "evidence": ".superpowers/sdd/approved-product/02.01-oracle-sanity.txt",
+      "evidence_sha256": "93154b30c5052cfcdc067bfc90d3af670c1ad39cd9fb603d9123dc5e9c2267f4"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "case": "authored-log-multiplicity",
+      "status": "observed-failure",
+      "reason": "Actual upstream returned no records because default wall-clock-relative 3h ingester visibility excluded fixed historic fixture; explicit runtime config fix awaiting rerun.",
+      "evidence": ".superpowers/sdd/approved-product/02.01-oracle-sanity.txt",
+      "evidence_sha256": "93154b30c5052cfcdc067bfc90d3af670c1ad39cd9fb603d9123dc5e9c2267f4"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "case": "authored-log-multiplicity",
+      "status": "observed-failure",
+      "configuration_sha256": "0623fa11401bba8908b95a0056f6b3f03ecdc2324c88854a46ca6fbae64c3d4d",
+      "reason": "Still returned empty values after explicit horizon/enrichment controls; root cause unresolved, bounded raw stage evidence requested.",
+      "evidence": ".superpowers/sdd/approved-product/02.01-oracle-sanity-fixed.txt",
+      "evidence_sha256": "93154b30c5052cfcdc067bfc90d3af670c1ad39cd9fb603d9123dc5e9c2267f4"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "case": "authored-log-multiplicity",
+      "status": "observed-failure",
+      "configuration_sha256": "d026997381029141f7152484d9835becb6a59f5e974e643cf81e51795ca58bd6",
+      "reason": "Both exact-nanosecond lines returned after horizon fix; new mismatch is unrequested detected_level:unknown enrichment.",
+      "evidence": ".superpowers/sdd/approved-product/02.01-oracle-sanity-final.txt",
+      "evidence_sha256": "ff44b2c025a6747b3f8f5603c646cfe1e5c7b882ad3295e996085522adc17034"
+    }
+  ],
+  "blockers": [
+    "Production evaluator bindings and positive/negative/interaction execution pending",
+    "Versioned primitive compatibility implementations and cross-profile observations pending",
+    "Reference HTTP does not expose end ranges/full private error taxonomy; independent expanded location qualification remains required"
+  ],
+  "production_coverage_complete": false,
+  "oracle_sanity_complete": true,
+  "verified_sanity": {
+    "evidence": ".superpowers/sdd/approved-product/02.01-oracle-sanity-verified.txt",
+    "evidence_sha256": "c8540930f02ce6ff0fd112f83125c0eb412b3de844a7e05f33af11e2c21098e7",
+    "observations": [
+      {
+        "kind": "scalar",
+        "type": "scalar",
+        "values": [
+          {
+            "timestamp": "1700000000000000000",
+            "bits": "4008000000000000"
+          }
+        ],
+        "diagnostics": null,
+        "oracle": {
+          "profile": "promql-prometheus-3.1.0",
+          "revision": "7086161a93b262aa0949dbf2aba15a5a7b13e0a3",
+          "version": "3.1.0",
+          "image_sha256": "836dc8af413f534f854b61ecc75b1a62e9e971d3855aa6c77903f22e08f7a078",
+          "configuration_sha256": "7164c79eddd23b2b804fee720f4ab2b563617b923289499088f330f7a2698679"
+        }
+      },
+      {
+        "kind": "scalar",
+        "type": "scalar",
+        "values": [
+          {
+            "timestamp": "1700000000000000000",
+            "bits": "4008000000000000"
+          }
+        ],
+        "diagnostics": null,
+        "oracle": {
+          "profile": "promql-prometheus-3.13.5",
+          "revision": "f497435984d1ca1d84cda5ed309387ac2eb1f8f6",
+          "version": "3.13.5",
+          "image_sha256": "3ae04846217bf370ea80a6ac2d96c37b231bff356bd406855cc9b71483cb396d",
+          "configuration_sha256": "7164c79eddd23b2b804fee720f4ab2b563617b923289499088f330f7a2698679"
+        }
+      },
+      {
+        "kind": "streams",
+        "type": "log",
+        "values": [
+          {
+            "timestamp": "1700000000000000001",
+            "labels": {
+              "fixture": "sanity"
+            },
+            "line": "alpha"
+          },
+          {
+            "timestamp": "1700000000000000001",
+            "labels": {
+              "fixture": "sanity"
+            },
+            "line": "beta"
+          }
+        ],
+        "diagnostics": null,
+        "oracle": {
+          "profile": "logql-loki-3.5.2",
+          "revision": "257d2f62",
+          "version": "3.5.2",
+          "image_sha256": "c6e167e6e3d3155396e8db41f501320511b16985d13f3b4d154f0790518215ff",
+          "configuration_sha256": "797fff5838030e44b4c0ef56401d22c250d3f335897cd36783dd2d9f0416d6c2"
+        }
+      }
+    ]
+  },
+  "syntax_phase": {
+    "status": "observed-pass",
+    "compared": 421,
+    "failed": 0,
+    "evidence": ".superpowers/sdd/approved-product/02.02-real-differential-round2.json",
+    "evidence_sha256": "d94fdfcabc9bae810cae539a597fad76f7a06024989987391671fc8e4455f5a0",
+    "scope": "Executed authored syntax/type/gate/Format cases and exposed reference starts only; not full evaluation or LogQL conformance.",
+    "reference_end_positions_exposed": false
+  },
+  "inventory_scope": {
+    "accepted_semantic_obligations": 785,
+    "promql": 645,
+    "logql": 140,
+    "semantic_feature_sets": 196,
+    "classified_prometheus_flags": 165,
+    "classified_loki_flags": 2615
+  }
+}

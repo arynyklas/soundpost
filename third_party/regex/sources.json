@@ -1,0 +1,500 @@
+{
+  "schema": "soundpost-regex-primitives-v1",
+  "license": "BSD-3-Clause",
+  "adaptations": [
+    "Literal import relocation: regexp/syntax to the actual compiler edition's stdsyntax; unicode to the same edition's unicode.",
+    "exec.go machine gains one checkedInput field for pooled cancellation state; original parsing/matching algorithms are unchanged.",
+    "First-party Apache-2.0 context.go adapters force the pinned NFA for cancellable execution, polling every 256 rune steps and disabling prefix skipping.",
+    "No upstream telemetry parser, evaluator, optimizer, corpus, or AGPL implementation is vendored."
+  ],
+  "licenses": {
+    "source": "https://raw.githubusercontent.com/golang/go/go1.23.4/LICENSE",
+    "sha256": "2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067",
+    "paths": ["third_party/regex/go123/LICENSE", "third_party/regex/go124/LICENSE", "third_party/regex/go126/LICENSE"]
+  },
+  "first_party_extensions": {
+    "license": "Apache-2.0",
+    "author": "Aryn Yklas",
+    "paths": ["third_party/regex/go123/regexp/context.go", "third_party/regex/go124/regexp/context.go", "third_party/regex/go126/regexp/context.go"],
+    "sha256": "ca97acdce6f76266b32378160134bf43ab66fc383ffd11b6f225f780c59f5e9e"
+  },
+  "editions": [
+    {
+      "edition": "go123",
+      "toolchain": "go1.23.4",
+      "unicode": "15.0.0",
+      "regexp_module": "v0.0.0-20240518133315-a468a5bfb3bc",
+      "module_zip_sha256": "0834c0727a787e26ea060eaca46a8ecafb719aca0fd6860d69d98211acd22c00",
+      "files": [
+        {
+          "path": "third_party/regex/go123/regexp/backtrack.go",
+          "source": "https://proxy.golang.org/github.com/grafana/regexp/@v/v0.0.0-20240518133315-a468a5bfb3bc.zip#backtrack.go",
+          "source_sha256": "ac5a1e4cf49b1c7f4372c0a7c2e8d156100c17d3a114fcf9539f55d223d06092",
+          "vendored_sha256": "017cc5b2ecac04a06fe601b05fff51bf9ea8ca9b81f378701249ab3716a0e426"
+        },
+        {
+          "path": "third_party/regex/go123/regexp/exec.go",
+          "source": "https://proxy.golang.org/github.com/grafana/regexp/@v/v0.0.0-20240518133315-a468a5bfb3bc.zip#exec.go",
+          "source_sha256": "cc9fda63ad7056d4c4abaaa49c00470f726be35ccee53f1c3fe73259e9634dd5",
+          "vendored_sha256": "ef493ac4b83fcd331955508578241c057671e4e9a6fcaa478ae4c6ca37581d0a"
+        },
+        {
+          "path": "third_party/regex/go123/regexp/onepass.go",
+          "source": "https://proxy.golang.org/github.com/grafana/regexp/@v/v0.0.0-20240518133315-a468a5bfb3bc.zip#onepass.go",
+          "source_sha256": "4af92ba759a365e26ce71c677583c13ad7c0ee5305f6a4adfee3ed8ac19f3528",
+          "vendored_sha256": "45697eaf245ca0f8ff0db791130600b3e6c8a4600a525b6925fc25be1fa2d2c8"
+        },
+        {
+          "path": "third_party/regex/go123/regexp/regexp.go",
+          "source": "https://proxy.golang.org/github.com/grafana/regexp/@v/v0.0.0-20240518133315-a468a5bfb3bc.zip#regexp.go",
+          "source_sha256": "7a9cf2620aead6b42221d7187543aea3877afc2d7d2b8f9274844fa47d4f9b4a",
+          "vendored_sha256": "9c4066b25d1d47ccc42f2fa706951642dc560bf9967d8b78a74c048761039217"
+        },
+        {
+          "path": "third_party/regex/go123/forksyntax/compile.go",
+          "source": "https://proxy.golang.org/github.com/grafana/regexp/@v/v0.0.0-20240518133315-a468a5bfb3bc.zip#syntax/compile.go",
+          "source_sha256": "2e1f753be77bf1fa54aed2a7f98932394324b82c91109e19d93283f482f7ee01",
+          "vendored_sha256": "ebef08adadd6294871b9d28eb59198b22cf96413b544092a6055e025287efa21"
+        },
+        {
+          "path": "third_party/regex/go123/forksyntax/doc.go",
+          "source": "https://proxy.golang.org/github.com/grafana/regexp/@v/v0.0.0-20240518133315-a468a5bfb3bc.zip#syntax/doc.go",
+          "source_sha256": "51e7c5718bbb80a6c21d2b5a8ab991a3a80cc215ec4971a2454e45b94187ca88",
+          "vendored_sha256": "51e7c5718bbb80a6c21d2b5a8ab991a3a80cc215ec4971a2454e45b94187ca88"
+        },
+        {
+          "path": "third_party/regex/go123/forksyntax/op_string.go",
+          "source": "https://proxy.golang.org/github.com/grafana/regexp/@v/v0.0.0-20240518133315-a468a5bfb3bc.zip#syntax/op_string.go",
+          "source_sha256": "391e4d0f59334da7c36c0a32f0a661139f181aecb2f7c209ca63280b030dfa0a",
+          "vendored_sha256": "391e4d0f59334da7c36c0a32f0a661139f181aecb2f7c209ca63280b030dfa0a"
+        },
+        {
+          "path": "third_party/regex/go123/forksyntax/parse.go",
+          "source": "https://proxy.golang.org/github.com/grafana/regexp/@v/v0.0.0-20240518133315-a468a5bfb3bc.zip#syntax/parse.go",
+          "source_sha256": "881ab9e6e7a7e00af93357d1f13f53ac7b1fdbd0b25b67ffa842f9f530fb4545",
+          "vendored_sha256": "9f4921b6f85464e9bda3bcda1a66ea09c3352ebbca19d67ad36a2c77ffd6b7e3"
+        },
+        {
+          "path": "third_party/regex/go123/forksyntax/perl_groups.go",
+          "source": "https://proxy.golang.org/github.com/grafana/regexp/@v/v0.0.0-20240518133315-a468a5bfb3bc.zip#syntax/perl_groups.go",
+          "source_sha256": "62c4757955ddf046fd7831919bd02e9ec2e2569b1ac036a6d0e3b3f715379603",
+          "vendored_sha256": "62c4757955ddf046fd7831919bd02e9ec2e2569b1ac036a6d0e3b3f715379603"
+        },
+        {
+          "path": "third_party/regex/go123/forksyntax/prog.go",
+          "source": "https://proxy.golang.org/github.com/grafana/regexp/@v/v0.0.0-20240518133315-a468a5bfb3bc.zip#syntax/prog.go",
+          "source_sha256": "7a24ebd22eec504ceaeffbd33641ae330d3ca666d54f6a29ce6d96fc127e6c64",
+          "vendored_sha256": "6fadf1f905f2ef66fa3b3d013e9bd27e876d275a85d6e389ef9f96a0b67bb9ec"
+        },
+        {
+          "path": "third_party/regex/go123/forksyntax/regexp.go",
+          "source": "https://proxy.golang.org/github.com/grafana/regexp/@v/v0.0.0-20240518133315-a468a5bfb3bc.zip#syntax/regexp.go",
+          "source_sha256": "e167ec4e162fe319c2d749f492b0a583ffa64ec40ef1e67e98657cdbf197b950",
+          "vendored_sha256": "85933d368865d4bc71a3f655a4fa30f45679369d375a01955e62bdbdd0f68286"
+        },
+        {
+          "path": "third_party/regex/go123/forksyntax/simplify.go",
+          "source": "https://proxy.golang.org/github.com/grafana/regexp/@v/v0.0.0-20240518133315-a468a5bfb3bc.zip#syntax/simplify.go",
+          "source_sha256": "d22b48ecde668bc22cd8998492c752ec088da5d027d61b7f04f7a9298796eec0",
+          "vendored_sha256": "d22b48ecde668bc22cd8998492c752ec088da5d027d61b7f04f7a9298796eec0"
+        },
+        {
+          "path": "third_party/regex/go123/stdsyntax/compile.go",
+          "source": "https://raw.githubusercontent.com/golang/go/go1.23.4/src/regexp/syntax/compile.go",
+          "source_sha256": "2e1f753be77bf1fa54aed2a7f98932394324b82c91109e19d93283f482f7ee01",
+          "vendored_sha256": "ebef08adadd6294871b9d28eb59198b22cf96413b544092a6055e025287efa21"
+        },
+        {
+          "path": "third_party/regex/go123/stdsyntax/doc.go",
+          "source": "https://raw.githubusercontent.com/golang/go/go1.23.4/src/regexp/syntax/doc.go",
+          "source_sha256": "51e7c5718bbb80a6c21d2b5a8ab991a3a80cc215ec4971a2454e45b94187ca88",
+          "vendored_sha256": "51e7c5718bbb80a6c21d2b5a8ab991a3a80cc215ec4971a2454e45b94187ca88"
+        },
+        {
+          "path": "third_party/regex/go123/stdsyntax/op_string.go",
+          "source": "https://raw.githubusercontent.com/golang/go/go1.23.4/src/regexp/syntax/op_string.go",
+          "source_sha256": "391e4d0f59334da7c36c0a32f0a661139f181aecb2f7c209ca63280b030dfa0a",
+          "vendored_sha256": "391e4d0f59334da7c36c0a32f0a661139f181aecb2f7c209ca63280b030dfa0a"
+        },
+        {
+          "path": "third_party/regex/go123/stdsyntax/parse.go",
+          "source": "https://raw.githubusercontent.com/golang/go/go1.23.4/src/regexp/syntax/parse.go",
+          "source_sha256": "9f8170163c527645a9c6ec9d7721ca83c4b5858e1569d720e4e186ef9318ee68",
+          "vendored_sha256": "8ad08f00b2d1fe426a5e949a24d8c6dbccdf8a123cb52b774a8856a916bb80dd"
+        },
+        {
+          "path": "third_party/regex/go123/stdsyntax/perl_groups.go",
+          "source": "https://raw.githubusercontent.com/golang/go/go1.23.4/src/regexp/syntax/perl_groups.go",
+          "source_sha256": "d060a0645b60b210eaec7c3dba6d554dc297c14fe71cdbcc9c25b4fc7562c3a4",
+          "vendored_sha256": "d060a0645b60b210eaec7c3dba6d554dc297c14fe71cdbcc9c25b4fc7562c3a4"
+        },
+        {
+          "path": "third_party/regex/go123/stdsyntax/prog.go",
+          "source": "https://raw.githubusercontent.com/golang/go/go1.23.4/src/regexp/syntax/prog.go",
+          "source_sha256": "7a24ebd22eec504ceaeffbd33641ae330d3ca666d54f6a29ce6d96fc127e6c64",
+          "vendored_sha256": "6fadf1f905f2ef66fa3b3d013e9bd27e876d275a85d6e389ef9f96a0b67bb9ec"
+        },
+        {
+          "path": "third_party/regex/go123/stdsyntax/regexp.go",
+          "source": "https://raw.githubusercontent.com/golang/go/go1.23.4/src/regexp/syntax/regexp.go",
+          "source_sha256": "bccc8fe5bf53c9e34aee2df851c05052f9b0d447310d151501dfbca7a8ee7fcb",
+          "vendored_sha256": "b5dbfe635c48ba816119fa4bb5c805e672649e567a666d71cee270de71f77636"
+        },
+        {
+          "path": "third_party/regex/go123/stdsyntax/simplify.go",
+          "source": "https://raw.githubusercontent.com/golang/go/go1.23.4/src/regexp/syntax/simplify.go",
+          "source_sha256": "d22b48ecde668bc22cd8998492c752ec088da5d027d61b7f04f7a9298796eec0",
+          "vendored_sha256": "d22b48ecde668bc22cd8998492c752ec088da5d027d61b7f04f7a9298796eec0"
+        },
+        {
+          "path": "third_party/regex/go123/unicode/tables.go",
+          "source": "https://raw.githubusercontent.com/golang/go/go1.23.4/src/unicode/tables.go",
+          "source_sha256": "80a109e5dd4ed40a85d69ddf95175f647bbd68c577d27eb475cda63790bb2487",
+          "vendored_sha256": "80a109e5dd4ed40a85d69ddf95175f647bbd68c577d27eb475cda63790bb2487"
+        },
+        {
+          "path": "third_party/regex/go123/unicode/letter.go",
+          "source": "https://raw.githubusercontent.com/golang/go/go1.23.4/src/unicode/letter.go",
+          "source_sha256": "6be2e26975e7e4bfe167e7c1f8698cb919729f1e3a76aa75cdabc7afb96ef8d7",
+          "vendored_sha256": "6be2e26975e7e4bfe167e7c1f8698cb919729f1e3a76aa75cdabc7afb96ef8d7"
+        },
+        {
+          "path": "third_party/regex/go123/unicode/digit.go",
+          "source": "https://raw.githubusercontent.com/golang/go/go1.23.4/src/unicode/digit.go",
+          "source_sha256": "dfb14dbbcb918a6c7ee9be15293327d022f9d64a4c1a90f9c8049b682e799761",
+          "vendored_sha256": "dfb14dbbcb918a6c7ee9be15293327d022f9d64a4c1a90f9c8049b682e799761"
+        },
+        {
+          "path": "third_party/regex/go123/unicode/graphic.go",
+          "source": "https://raw.githubusercontent.com/golang/go/go1.23.4/src/unicode/graphic.go",
+          "source_sha256": "46a43107a87c88cf17a05a557e00dbf6b0f4bb53ebcd7d3035e02f1e67c428be",
+          "vendored_sha256": "46a43107a87c88cf17a05a557e00dbf6b0f4bb53ebcd7d3035e02f1e67c428be"
+        },
+        {
+          "path": "third_party/regex/go123/unicode/casetables.go",
+          "source": "https://raw.githubusercontent.com/golang/go/go1.23.4/src/unicode/casetables.go",
+          "source_sha256": "b70c5009086ffaef3d8191924481b9b2a39108afb42d9f2b979ecf670c77670c",
+          "vendored_sha256": "b70c5009086ffaef3d8191924481b9b2a39108afb42d9f2b979ecf670c77670c"
+        }
+      ]
+    },
+    {
+      "edition": "go124",
+      "toolchain": "go1.24.5",
+      "unicode": "15.0.0",
+      "regexp_module": "v0.0.0-20240518133315-a468a5bfb3bc",
+      "module_zip_sha256": "0834c0727a787e26ea060eaca46a8ecafb719aca0fd6860d69d98211acd22c00",
+      "files": [
+        {
+          "path": "third_party/regex/go124/regexp/backtrack.go",
+          "source": "https://proxy.golang.org/github.com/grafana/regexp/@v/v0.0.0-20240518133315-a468a5bfb3bc.zip#backtrack.go",
+          "source_sha256": "ac5a1e4cf49b1c7f4372c0a7c2e8d156100c17d3a114fcf9539f55d223d06092",
+          "vendored_sha256": "c21e1f5507432aee4e6bbff8cf44c8f9df0abc85e04e6f9e8da4f21306deab64"
+        },
+        {
+          "path": "third_party/regex/go124/regexp/exec.go",
+          "source": "https://proxy.golang.org/github.com/grafana/regexp/@v/v0.0.0-20240518133315-a468a5bfb3bc.zip#exec.go",
+          "source_sha256": "cc9fda63ad7056d4c4abaaa49c00470f726be35ccee53f1c3fe73259e9634dd5",
+          "vendored_sha256": "9e3b16c1c1d4e83a96969c8c62697eae4439bc404c4ebd7e730c420649240c1f"
+        },
+        {
+          "path": "third_party/regex/go124/regexp/onepass.go",
+          "source": "https://proxy.golang.org/github.com/grafana/regexp/@v/v0.0.0-20240518133315-a468a5bfb3bc.zip#onepass.go",
+          "source_sha256": "4af92ba759a365e26ce71c677583c13ad7c0ee5305f6a4adfee3ed8ac19f3528",
+          "vendored_sha256": "8a89dee753aabb8f8af5f368ae1537792bc39f57a7c2cf1900c8c1b6d62164a1"
+        },
+        {
+          "path": "third_party/regex/go124/regexp/regexp.go",
+          "source": "https://proxy.golang.org/github.com/grafana/regexp/@v/v0.0.0-20240518133315-a468a5bfb3bc.zip#regexp.go",
+          "source_sha256": "7a9cf2620aead6b42221d7187543aea3877afc2d7d2b8f9274844fa47d4f9b4a",
+          "vendored_sha256": "899dde8ab31765103c6117d920507445cb1a919c4f4d47ea9b3c2277531b0984"
+        },
+        {
+          "path": "third_party/regex/go124/forksyntax/compile.go",
+          "source": "https://proxy.golang.org/github.com/grafana/regexp/@v/v0.0.0-20240518133315-a468a5bfb3bc.zip#syntax/compile.go",
+          "source_sha256": "2e1f753be77bf1fa54aed2a7f98932394324b82c91109e19d93283f482f7ee01",
+          "vendored_sha256": "28711f9933a2356d0aee5d30b183537a222d3dd395d4032a0e11844be4b41210"
+        },
+        {
+          "path": "third_party/regex/go124/forksyntax/doc.go",
+          "source": "https://proxy.golang.org/github.com/grafana/regexp/@v/v0.0.0-20240518133315-a468a5bfb3bc.zip#syntax/doc.go",
+          "source_sha256": "51e7c5718bbb80a6c21d2b5a8ab991a3a80cc215ec4971a2454e45b94187ca88",
+          "vendored_sha256": "51e7c5718bbb80a6c21d2b5a8ab991a3a80cc215ec4971a2454e45b94187ca88"
+        },
+        {
+          "path": "third_party/regex/go124/forksyntax/op_string.go",
+          "source": "https://proxy.golang.org/github.com/grafana/regexp/@v/v0.0.0-20240518133315-a468a5bfb3bc.zip#syntax/op_string.go",
+          "source_sha256": "391e4d0f59334da7c36c0a32f0a661139f181aecb2f7c209ca63280b030dfa0a",
+          "vendored_sha256": "391e4d0f59334da7c36c0a32f0a661139f181aecb2f7c209ca63280b030dfa0a"
+        },
+        {
+          "path": "third_party/regex/go124/forksyntax/parse.go",
+          "source": "https://proxy.golang.org/github.com/grafana/regexp/@v/v0.0.0-20240518133315-a468a5bfb3bc.zip#syntax/parse.go",
+          "source_sha256": "881ab9e6e7a7e00af93357d1f13f53ac7b1fdbd0b25b67ffa842f9f530fb4545",
+          "vendored_sha256": "7c500fbcc103b0d1d0709957d7861a85b607a79c85e79f8483385657e362b51f"
+        },
+        {
+          "path": "third_party/regex/go124/forksyntax/perl_groups.go",
+          "source": "https://proxy.golang.org/github.com/grafana/regexp/@v/v0.0.0-20240518133315-a468a5bfb3bc.zip#syntax/perl_groups.go",
+          "source_sha256": "62c4757955ddf046fd7831919bd02e9ec2e2569b1ac036a6d0e3b3f715379603",
+          "vendored_sha256": "62c4757955ddf046fd7831919bd02e9ec2e2569b1ac036a6d0e3b3f715379603"
+        },
+        {
+          "path": "third_party/regex/go124/forksyntax/prog.go",
+          "source": "https://proxy.golang.org/github.com/grafana/regexp/@v/v0.0.0-20240518133315-a468a5bfb3bc.zip#syntax/prog.go",
+          "source_sha256": "7a24ebd22eec504ceaeffbd33641ae330d3ca666d54f6a29ce6d96fc127e6c64",
+          "vendored_sha256": "93cf33b2ff0b2d295ac0a33a271a4af81dc7db13bfcaedf84b8685d38b9799fd"
+        },
+        {
+          "path": "third_party/regex/go124/forksyntax/regexp.go",
+          "source": "https://proxy.golang.org/github.com/grafana/regexp/@v/v0.0.0-20240518133315-a468a5bfb3bc.zip#syntax/regexp.go",
+          "source_sha256": "e167ec4e162fe319c2d749f492b0a583ffa64ec40ef1e67e98657cdbf197b950",
+          "vendored_sha256": "186da46e4a7759d4273286574ba7c90168ae4f7d398a52b39424d319081b7dd9"
+        },
+        {
+          "path": "third_party/regex/go124/forksyntax/simplify.go",
+          "source": "https://proxy.golang.org/github.com/grafana/regexp/@v/v0.0.0-20240518133315-a468a5bfb3bc.zip#syntax/simplify.go",
+          "source_sha256": "d22b48ecde668bc22cd8998492c752ec088da5d027d61b7f04f7a9298796eec0",
+          "vendored_sha256": "d22b48ecde668bc22cd8998492c752ec088da5d027d61b7f04f7a9298796eec0"
+        },
+        {
+          "path": "third_party/regex/go124/stdsyntax/compile.go",
+          "source": "https://raw.githubusercontent.com/golang/go/go1.24.5/src/regexp/syntax/compile.go",
+          "source_sha256": "2e1f753be77bf1fa54aed2a7f98932394324b82c91109e19d93283f482f7ee01",
+          "vendored_sha256": "28711f9933a2356d0aee5d30b183537a222d3dd395d4032a0e11844be4b41210"
+        },
+        {
+          "path": "third_party/regex/go124/stdsyntax/doc.go",
+          "source": "https://raw.githubusercontent.com/golang/go/go1.24.5/src/regexp/syntax/doc.go",
+          "source_sha256": "51e7c5718bbb80a6c21d2b5a8ab991a3a80cc215ec4971a2454e45b94187ca88",
+          "vendored_sha256": "51e7c5718bbb80a6c21d2b5a8ab991a3a80cc215ec4971a2454e45b94187ca88"
+        },
+        {
+          "path": "third_party/regex/go124/stdsyntax/op_string.go",
+          "source": "https://raw.githubusercontent.com/golang/go/go1.24.5/src/regexp/syntax/op_string.go",
+          "source_sha256": "391e4d0f59334da7c36c0a32f0a661139f181aecb2f7c209ca63280b030dfa0a",
+          "vendored_sha256": "391e4d0f59334da7c36c0a32f0a661139f181aecb2f7c209ca63280b030dfa0a"
+        },
+        {
+          "path": "third_party/regex/go124/stdsyntax/parse.go",
+          "source": "https://raw.githubusercontent.com/golang/go/go1.24.5/src/regexp/syntax/parse.go",
+          "source_sha256": "c821d029b622d474fa87c9df8f1e9471fd2298b6c6965c6db09130a58b80c5b7",
+          "vendored_sha256": "c3b57fc47497cfd7cd9cba1c81c0433a003f5a6fac1d8722a9635e7fe1c4febe"
+        },
+        {
+          "path": "third_party/regex/go124/stdsyntax/perl_groups.go",
+          "source": "https://raw.githubusercontent.com/golang/go/go1.24.5/src/regexp/syntax/perl_groups.go",
+          "source_sha256": "d060a0645b60b210eaec7c3dba6d554dc297c14fe71cdbcc9c25b4fc7562c3a4",
+          "vendored_sha256": "d060a0645b60b210eaec7c3dba6d554dc297c14fe71cdbcc9c25b4fc7562c3a4"
+        },
+        {
+          "path": "third_party/regex/go124/stdsyntax/prog.go",
+          "source": "https://raw.githubusercontent.com/golang/go/go1.24.5/src/regexp/syntax/prog.go",
+          "source_sha256": "7a24ebd22eec504ceaeffbd33641ae330d3ca666d54f6a29ce6d96fc127e6c64",
+          "vendored_sha256": "93cf33b2ff0b2d295ac0a33a271a4af81dc7db13bfcaedf84b8685d38b9799fd"
+        },
+        {
+          "path": "third_party/regex/go124/stdsyntax/regexp.go",
+          "source": "https://raw.githubusercontent.com/golang/go/go1.24.5/src/regexp/syntax/regexp.go",
+          "source_sha256": "bccc8fe5bf53c9e34aee2df851c05052f9b0d447310d151501dfbca7a8ee7fcb",
+          "vendored_sha256": "109198c2682377a6871726db2e9cd8bdc3892cbea76eda68e00fed9c4b677f4b"
+        },
+        {
+          "path": "third_party/regex/go124/stdsyntax/simplify.go",
+          "source": "https://raw.githubusercontent.com/golang/go/go1.24.5/src/regexp/syntax/simplify.go",
+          "source_sha256": "d22b48ecde668bc22cd8998492c752ec088da5d027d61b7f04f7a9298796eec0",
+          "vendored_sha256": "d22b48ecde668bc22cd8998492c752ec088da5d027d61b7f04f7a9298796eec0"
+        },
+        {
+          "path": "third_party/regex/go124/unicode/tables.go",
+          "source": "https://raw.githubusercontent.com/golang/go/go1.24.5/src/unicode/tables.go",
+          "source_sha256": "80a109e5dd4ed40a85d69ddf95175f647bbd68c577d27eb475cda63790bb2487",
+          "vendored_sha256": "80a109e5dd4ed40a85d69ddf95175f647bbd68c577d27eb475cda63790bb2487"
+        },
+        {
+          "path": "third_party/regex/go124/unicode/letter.go",
+          "source": "https://raw.githubusercontent.com/golang/go/go1.24.5/src/unicode/letter.go",
+          "source_sha256": "b35a6d259313cef88d07e9e4027b8bd72c60ae140418f5be2c41a2ecea6074fe",
+          "vendored_sha256": "b35a6d259313cef88d07e9e4027b8bd72c60ae140418f5be2c41a2ecea6074fe"
+        },
+        {
+          "path": "third_party/regex/go124/unicode/digit.go",
+          "source": "https://raw.githubusercontent.com/golang/go/go1.24.5/src/unicode/digit.go",
+          "source_sha256": "dfb14dbbcb918a6c7ee9be15293327d022f9d64a4c1a90f9c8049b682e799761",
+          "vendored_sha256": "dfb14dbbcb918a6c7ee9be15293327d022f9d64a4c1a90f9c8049b682e799761"
+        },
+        {
+          "path": "third_party/regex/go124/unicode/graphic.go",
+          "source": "https://raw.githubusercontent.com/golang/go/go1.24.5/src/unicode/graphic.go",
+          "source_sha256": "46a43107a87c88cf17a05a557e00dbf6b0f4bb53ebcd7d3035e02f1e67c428be",
+          "vendored_sha256": "46a43107a87c88cf17a05a557e00dbf6b0f4bb53ebcd7d3035e02f1e67c428be"
+        },
+        {
+          "path": "third_party/regex/go124/unicode/casetables.go",
+          "source": "https://raw.githubusercontent.com/golang/go/go1.24.5/src/unicode/casetables.go",
+          "source_sha256": "b70c5009086ffaef3d8191924481b9b2a39108afb42d9f2b979ecf670c77670c",
+          "vendored_sha256": "b70c5009086ffaef3d8191924481b9b2a39108afb42d9f2b979ecf670c77670c"
+        }
+      ]
+    },
+    {
+      "edition": "go126",
+      "toolchain": "go1.26.10",
+      "unicode": "15.0.0",
+      "regexp_module": "v0.0.0-20250905093917-f7b3be9d1853",
+      "module_zip_sha256": "79e15003a12157d71a1e851a680586b6a42bb8117005972c61673222df4b15cc",
+      "files": [
+        {
+          "path": "third_party/regex/go126/regexp/backtrack.go",
+          "source": "https://proxy.golang.org/github.com/grafana/regexp/@v/v0.0.0-20250905093917-f7b3be9d1853.zip#backtrack.go",
+          "source_sha256": "ac5a1e4cf49b1c7f4372c0a7c2e8d156100c17d3a114fcf9539f55d223d06092",
+          "vendored_sha256": "3d37187542a941e1bc3d1b8d5620ea7196a3e9e8ad828016613c83f1d431b326"
+        },
+        {
+          "path": "third_party/regex/go126/regexp/exec.go",
+          "source": "https://proxy.golang.org/github.com/grafana/regexp/@v/v0.0.0-20250905093917-f7b3be9d1853.zip#exec.go",
+          "source_sha256": "cc9fda63ad7056d4c4abaaa49c00470f726be35ccee53f1c3fe73259e9634dd5",
+          "vendored_sha256": "cde0ca54fde6b673683a966f7efa453708d33467b5762148550943d4726cff27"
+        },
+        {
+          "path": "third_party/regex/go126/regexp/onepass.go",
+          "source": "https://proxy.golang.org/github.com/grafana/regexp/@v/v0.0.0-20250905093917-f7b3be9d1853.zip#onepass.go",
+          "source_sha256": "fd0e29803438c6ea3021c78227d4f69de163f693e82c155dc62d721eaacbd24b",
+          "vendored_sha256": "4a2611c6c3301b8077dbad4013db45ca03af338c3f352ed72217231ace3ecdd8"
+        },
+        {
+          "path": "third_party/regex/go126/regexp/regexp.go",
+          "source": "https://proxy.golang.org/github.com/grafana/regexp/@v/v0.0.0-20250905093917-f7b3be9d1853.zip#regexp.go",
+          "source_sha256": "3c6b372bf6e658c167d100093f946741ddd4bfb2717d71455d2bf6a4c515b406",
+          "vendored_sha256": "85491cf5e21c18d3ea87067c6ef3dac0d33fee8f75f7536e7925cad04e633956"
+        },
+        {
+          "path": "third_party/regex/go126/forksyntax/compile.go",
+          "source": "https://proxy.golang.org/github.com/grafana/regexp/@v/v0.0.0-20250905093917-f7b3be9d1853.zip#syntax/compile.go",
+          "source_sha256": "2e1f753be77bf1fa54aed2a7f98932394324b82c91109e19d93283f482f7ee01",
+          "vendored_sha256": "cc39d7a259107d571fd474e85f0c48d13a3b620d71091bfb23efc97203043a06"
+        },
+        {
+          "path": "third_party/regex/go126/forksyntax/doc.go",
+          "source": "https://proxy.golang.org/github.com/grafana/regexp/@v/v0.0.0-20250905093917-f7b3be9d1853.zip#syntax/doc.go",
+          "source_sha256": "51e7c5718bbb80a6c21d2b5a8ab991a3a80cc215ec4971a2454e45b94187ca88",
+          "vendored_sha256": "51e7c5718bbb80a6c21d2b5a8ab991a3a80cc215ec4971a2454e45b94187ca88"
+        },
+        {
+          "path": "third_party/regex/go126/forksyntax/op_string.go",
+          "source": "https://proxy.golang.org/github.com/grafana/regexp/@v/v0.0.0-20250905093917-f7b3be9d1853.zip#syntax/op_string.go",
+          "source_sha256": "391e4d0f59334da7c36c0a32f0a661139f181aecb2f7c209ca63280b030dfa0a",
+          "vendored_sha256": "391e4d0f59334da7c36c0a32f0a661139f181aecb2f7c209ca63280b030dfa0a"
+        },
+        {
+          "path": "third_party/regex/go126/forksyntax/parse.go",
+          "source": "https://proxy.golang.org/github.com/grafana/regexp/@v/v0.0.0-20250905093917-f7b3be9d1853.zip#syntax/parse.go",
+          "source_sha256": "c821d029b622d474fa87c9df8f1e9471fd2298b6c6965c6db09130a58b80c5b7",
+          "vendored_sha256": "090df2cc482f15e8609a276afa28f0a3b69ddae4d8c83a72d83a6416e09ac229"
+        },
+        {
+          "path": "third_party/regex/go126/forksyntax/perl_groups.go",
+          "source": "https://proxy.golang.org/github.com/grafana/regexp/@v/v0.0.0-20250905093917-f7b3be9d1853.zip#syntax/perl_groups.go",
+          "source_sha256": "d060a0645b60b210eaec7c3dba6d554dc297c14fe71cdbcc9c25b4fc7562c3a4",
+          "vendored_sha256": "d060a0645b60b210eaec7c3dba6d554dc297c14fe71cdbcc9c25b4fc7562c3a4"
+        },
+        {
+          "path": "third_party/regex/go126/forksyntax/prog.go",
+          "source": "https://proxy.golang.org/github.com/grafana/regexp/@v/v0.0.0-20250905093917-f7b3be9d1853.zip#syntax/prog.go",
+          "source_sha256": "7a24ebd22eec504ceaeffbd33641ae330d3ca666d54f6a29ce6d96fc127e6c64",
+          "vendored_sha256": "da66b9dcd6c96fe73c5ce49bd9ce28b7f4fb7831674955d00424cbe2b507096d"
+        },
+        {
+          "path": "third_party/regex/go126/forksyntax/regexp.go",
+          "source": "https://proxy.golang.org/github.com/grafana/regexp/@v/v0.0.0-20250905093917-f7b3be9d1853.zip#syntax/regexp.go",
+          "source_sha256": "bccc8fe5bf53c9e34aee2df851c05052f9b0d447310d151501dfbca7a8ee7fcb",
+          "vendored_sha256": "d4a8072778fd7cd27e5cb550159d18f6b96e48fcc6bfbe9e87ea8586a5f65c7b"
+        },
+        {
+          "path": "third_party/regex/go126/forksyntax/simplify.go",
+          "source": "https://proxy.golang.org/github.com/grafana/regexp/@v/v0.0.0-20250905093917-f7b3be9d1853.zip#syntax/simplify.go",
+          "source_sha256": "d22b48ecde668bc22cd8998492c752ec088da5d027d61b7f04f7a9298796eec0",
+          "vendored_sha256": "d22b48ecde668bc22cd8998492c752ec088da5d027d61b7f04f7a9298796eec0"
+        },
+        {
+          "path": "third_party/regex/go126/stdsyntax/compile.go",
+          "source": "https://raw.githubusercontent.com/golang/go/go1.26.10/src/regexp/syntax/compile.go",
+          "source_sha256": "2e1f753be77bf1fa54aed2a7f98932394324b82c91109e19d93283f482f7ee01",
+          "vendored_sha256": "cc39d7a259107d571fd474e85f0c48d13a3b620d71091bfb23efc97203043a06"
+        },
+        {
+          "path": "third_party/regex/go126/stdsyntax/doc.go",
+          "source": "https://raw.githubusercontent.com/golang/go/go1.26.10/src/regexp/syntax/doc.go",
+          "source_sha256": "d61fed6f5a70cb4a0883f2c70da086d52edc80faf79ecb33a95393f28f24711e",
+          "vendored_sha256": "d61fed6f5a70cb4a0883f2c70da086d52edc80faf79ecb33a95393f28f24711e"
+        },
+        {
+          "path": "third_party/regex/go126/stdsyntax/op_string.go",
+          "source": "https://raw.githubusercontent.com/golang/go/go1.26.10/src/regexp/syntax/op_string.go",
+          "source_sha256": "391e4d0f59334da7c36c0a32f0a661139f181aecb2f7c209ca63280b030dfa0a",
+          "vendored_sha256": "391e4d0f59334da7c36c0a32f0a661139f181aecb2f7c209ca63280b030dfa0a"
+        },
+        {
+          "path": "third_party/regex/go126/stdsyntax/parse.go",
+          "source": "https://raw.githubusercontent.com/golang/go/go1.26.10/src/regexp/syntax/parse.go",
+          "source_sha256": "d0f657113901da39d6118e4172206a0358b71c96ef43051cc0a741a0a4d04820",
+          "vendored_sha256": "deebe851dd07afdb1a43ab14ecb4ebe79628f0e1dae02f6e2217a5b3b01fc898"
+        },
+        {
+          "path": "third_party/regex/go126/stdsyntax/perl_groups.go",
+          "source": "https://raw.githubusercontent.com/golang/go/go1.26.10/src/regexp/syntax/perl_groups.go",
+          "source_sha256": "d060a0645b60b210eaec7c3dba6d554dc297c14fe71cdbcc9c25b4fc7562c3a4",
+          "vendored_sha256": "d060a0645b60b210eaec7c3dba6d554dc297c14fe71cdbcc9c25b4fc7562c3a4"
+        },
+        {
+          "path": "third_party/regex/go126/stdsyntax/prog.go",
+          "source": "https://raw.githubusercontent.com/golang/go/go1.26.10/src/regexp/syntax/prog.go",
+          "source_sha256": "7a24ebd22eec504ceaeffbd33641ae330d3ca666d54f6a29ce6d96fc127e6c64",
+          "vendored_sha256": "da66b9dcd6c96fe73c5ce49bd9ce28b7f4fb7831674955d00424cbe2b507096d"
+        },
+        {
+          "path": "third_party/regex/go126/stdsyntax/regexp.go",
+          "source": "https://raw.githubusercontent.com/golang/go/go1.26.10/src/regexp/syntax/regexp.go",
+          "source_sha256": "72fad4645d96cf8b0ef0ea4a9dae21f09e7bea090d1bdd500732d811982b2192",
+          "vendored_sha256": "e2ef56cf5826a73b9cfa126f92b2e34ee8c3bfeb06e5bfac5e321838a0b8c74c"
+        },
+        {
+          "path": "third_party/regex/go126/stdsyntax/simplify.go",
+          "source": "https://raw.githubusercontent.com/golang/go/go1.26.10/src/regexp/syntax/simplify.go",
+          "source_sha256": "d22b48ecde668bc22cd8998492c752ec088da5d027d61b7f04f7a9298796eec0",
+          "vendored_sha256": "d22b48ecde668bc22cd8998492c752ec088da5d027d61b7f04f7a9298796eec0"
+        },
+        {
+          "path": "third_party/regex/go126/unicode/tables.go",
+          "source": "https://raw.githubusercontent.com/golang/go/go1.26.10/src/unicode/tables.go",
+          "source_sha256": "6a88d48746c4b2c471cc04ae40559694b734770212e6f5ea5f1962adb0c0bdb1",
+          "vendored_sha256": "6a88d48746c4b2c471cc04ae40559694b734770212e6f5ea5f1962adb0c0bdb1"
+        },
+        {
+          "path": "third_party/regex/go126/unicode/letter.go",
+          "source": "https://raw.githubusercontent.com/golang/go/go1.26.10/src/unicode/letter.go",
+          "source_sha256": "b35a6d259313cef88d07e9e4027b8bd72c60ae140418f5be2c41a2ecea6074fe",
+          "vendored_sha256": "b35a6d259313cef88d07e9e4027b8bd72c60ae140418f5be2c41a2ecea6074fe"
+        },
+        {
+          "path": "third_party/regex/go126/unicode/digit.go",
+          "source": "https://raw.githubusercontent.com/golang/go/go1.26.10/src/unicode/digit.go",
+          "source_sha256": "dfb14dbbcb918a6c7ee9be15293327d022f9d64a4c1a90f9c8049b682e799761",
+          "vendored_sha256": "dfb14dbbcb918a6c7ee9be15293327d022f9d64a4c1a90f9c8049b682e799761"
+        },
+        {
+          "path": "third_party/regex/go126/unicode/graphic.go",
+          "source": "https://raw.githubusercontent.com/golang/go/go1.26.10/src/unicode/graphic.go",
+          "source_sha256": "46a43107a87c88cf17a05a557e00dbf6b0f4bb53ebcd7d3035e02f1e67c428be",
+          "vendored_sha256": "46a43107a87c88cf17a05a557e00dbf6b0f4bb53ebcd7d3035e02f1e67c428be"
+        },
+        {
+          "path": "third_party/regex/go126/unicode/casetables.go",
+          "source": "https://raw.githubusercontent.com/golang/go/go1.26.10/src/unicode/casetables.go",
+          "source_sha256": "b70c5009086ffaef3d8191924481b9b2a39108afb42d9f2b979ecf670c77670c",
+          "vendored_sha256": "b70c5009086ffaef3d8191924481b9b2a39108afb42d9f2b979ecf670c77670c"
+        }
+      ]
+    }
+  ]
+}

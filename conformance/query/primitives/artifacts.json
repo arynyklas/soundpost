@@ -1,0 +1,24 @@
+{
+  "schema": "soundpost-primitive-probe-artifacts-v1",
+  "metadata_source": "https://go.dev/dl/?mode=json&include=all",
+  "metadata_obtained": "2026-11-04",
+  "toolchains": {
+    "go1.23.4": {
+      "windows-amd64": {"filename": "go1.23.4.windows-amd64.zip", "sha256": "16c59ac9196b63afb872ce9b47f945b9821a3e1542ec125f16f6085a1c0f3c39"},
+      "linux-amd64": {"filename": "go1.23.4.linux-amd64.tar.gz", "sha256": "6924efde5de86fe277676e929dc9917d466efa02fb934197bc2eba35d5680971"}
+    },
+    "go1.24.5": {
+      "windows-amd64": {"filename": "go1.24.5.windows-amd64.zip", "sha256": "658f432689106d4e0a401a2ebb522b1213f497bc8357142fe8def18d79f02957"},
+      "linux-amd64": {"filename": "go1.24.5.linux-amd64.tar.gz", "sha256": "10ad9e86233e74c0f6590fe5426895de6bf388964210eac34a6d83f38918ecdc"}
+    },
+    "go1.26.10": {
+      "windows-amd64": {"filename": "go1.26.10.windows-amd64.zip", "sha256": "7ecd2d7260e82c59bcbd7f1077a07cee2dea607295b858df67195a1e4e09629b"},
+      "linux-amd64": {"filename": "go1.26.10.linux-amd64.tar.gz", "sha256": "ccfe7ae822d2c2f41f4fe7c956199967a4dac22d0ee0d2b2bfdb440aab3b20c5"}
+    }
+  },
+  "profiles": [
+    {"id": "promql-prometheus-3.1.0", "commit": "7086161a93b262aa0949dbf2aba15a5a7b13e0a3", "edition": "go123", "compiler": "go1.23.4", "module": "v0.0.0-20240518133315-a468a5bfb3bc", "module_zip_sha256": "0834c0727a787e26ea060eaca46a8ecafb719aca0fd6860d69d98211acd22c00"},
+    {"id": "logql-loki-3.5.2", "commit": "257d2f62bf8a81b44dea6fe88968d1d28c8e01e7", "edition": "go124", "compiler": "go1.24.5", "module": "v0.0.0-20240518133315-a468a5bfb3bc", "module_zip_sha256": "0834c0727a787e26ea060eaca46a8ecafb719aca0fd6860d69d98211acd22c00"},
+    {"id": "promql-prometheus-3.13.5", "commit": "f497435984d1ca1d84cda5ed309387ac2eb1f8f6", "edition": "go126", "compiler": "go1.26.10", "module": "v0.0.0-20250905093917-f7b3be9d1853", "module_zip_sha256": "79e15003a12157d71a1e851a680586b6a42bb8117005972c61673222df4b15cc"}
+  ]
+}

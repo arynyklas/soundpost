@@ -1,0 +1,2974 @@
+{
+  "id": "promql-prometheus-3.13.5",
+  "commit": "f497435984d1ca1d84cda5ed309387ac2eb1f8f6",
+  "manifest_version": 1,
+  "feature_sets": [
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-83c73719d785858aa72b493c92ac76a30bb3f3f2d73cda157fa23c43a7ebe393",
+      "enabled": []
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-b4167d2927545900fa5389901c8063cbdc048cbb602241b58d40039032b984f6",
+      "enabled": [
+        "type-and-unit-labels"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-55df1b597daebc0591641339ed92fa5669266d813f87e7d2713a49135397d81d",
+      "enabled": [
+        "promql-binop-fill-modifiers"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-338a6f092f213183f03f558014f66baa06507f1191be036a7435a2f9e2a82ad1",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "type-and-unit-labels"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-2f93c635668cdbef424701111c94f6d8547144d80700abfa57be4e0d273c3e55",
+      "enabled": [
+        "promql-extended-range-selectors"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-3b2a162bdd0d86d6dcc3641bd794b4e11016cd43da53b7b3b8d6e42ce7a6e41b",
+      "enabled": [
+        "promql-extended-range-selectors",
+        "type-and-unit-labels"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-7cc1f22901796bdaaee9b66c726254510f41bd3027fce2f81bd4a0ef2921c92c",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-extended-range-selectors"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-29781010d7884d7f2a781f7b8779ffefa0c59bfb794c7859d9226ba2bfd5f70d",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-extended-range-selectors",
+        "type-and-unit-labels"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-8ad079e960c8ad104842c3b8265e66603480e2103a5e6e8b3546eb997ef226b1",
+      "enabled": [
+        "promql-delayed-name-removal"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-71c28da49c057aa85c657185b9af99c7af757f7159ac937310a3297f4718982c",
+      "enabled": [
+        "promql-delayed-name-removal",
+        "type-and-unit-labels"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-42b7327028b271fb8da3baf7a4420f2b5118a7a1426b30ee216673dc48590715",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-delayed-name-removal"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-84d9f2b02165b03acdcb13b9fa6f282ee48151b92d9f6da20c39f81a69bb7b96",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-delayed-name-removal",
+        "type-and-unit-labels"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-fae56ffca669051f0139fb33f55c23c7264f6339d32fdf3171a91583bec972cb",
+      "enabled": [
+        "promql-delayed-name-removal",
+        "promql-extended-range-selectors"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-0c5898a29d570343737e63b9fbaa15edd401fc432dc5ca6b9e2dd12402343ea4",
+      "enabled": [
+        "promql-delayed-name-removal",
+        "promql-extended-range-selectors",
+        "type-and-unit-labels"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-8f904f6047a5f0f45b9bc1cbad680abc916ebb4f83bcb398d19d88a4815bf64b",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-delayed-name-removal",
+        "promql-extended-range-selectors"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-d819a937b4b20c883ca897cb713034236ac64e8936dc8e8ad77f13f932a6af41",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-delayed-name-removal",
+        "promql-extended-range-selectors",
+        "type-and-unit-labels"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-46f530ec480eb54ba7bdb712abc93bf74803ed464f26750f2912e2afa1b725cb",
+      "enabled": [
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-0fadafe677b9afe5c3d166a30a95a2594b311600c0bff9c2e47237882e3397c3",
+      "enabled": [
+        "type-and-unit-labels",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-5808c7ae7289ad36297ef80156b5a856edac32f27e5786d8d4329286e0b2249f",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-f2b0ccb5061021e2f37e045063b64e29ca148c6d1efca1955d784a8f4f9c6076",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "type-and-unit-labels",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-d61b2663ff79afb74960bee49329b41758389f3e169e6d38e9d0051d258dafc4",
+      "enabled": [
+        "promql-extended-range-selectors",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-61be43e34627cc32fe497ac392b99de9511f76d30b685c28c00cdd3d1ff3560a",
+      "enabled": [
+        "promql-extended-range-selectors",
+        "type-and-unit-labels",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-8ef29bcf206f669f305acbaa39d8edfcd2da5b0f1efefe95f3ea063e72eb949c",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-extended-range-selectors",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-646a7f6384f7101ae131ad6a724c939b906631a71790fd2d55db8fd95393bd71",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-extended-range-selectors",
+        "type-and-unit-labels",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-ea0fcd06b64a925c7ca069be9647e9aa632898ef7b7fdf09334d8fbf192fcc12",
+      "enabled": [
+        "promql-delayed-name-removal",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-e51906e9bb79c892bcb6c3092c32a8e45da8f5f24e7fbcf4083e248fa300b042",
+      "enabled": [
+        "promql-delayed-name-removal",
+        "type-and-unit-labels",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-74c3d86b8ba2e123c3f3c643c01f6e8a6ffeda231ae45aa06511f67ced79cfbd",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-delayed-name-removal",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-8fd0ce83a8136fafef87d74c8a59ba977ddb39a52c581d4618477468f57274f0",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-delayed-name-removal",
+        "type-and-unit-labels",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-abf62b3b2ad11ee42e05eac369fa2a590334c3e3a044c6af9b4bb837de66f2f3",
+      "enabled": [
+        "promql-delayed-name-removal",
+        "promql-extended-range-selectors",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-5b6f07b52f4e150bae795e96949eb8f04bc861d8b7c682ce9c4f54d96c965f06",
+      "enabled": [
+        "promql-delayed-name-removal",
+        "promql-extended-range-selectors",
+        "type-and-unit-labels",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-803292e692ef42f93f9b0349811f156d3f956d38079a7b3a00e2d8785cecf383",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-delayed-name-removal",
+        "promql-extended-range-selectors",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-099dc88a3dfad5b1f5a80ef6d6d2595ec8d47100470e345a72a37ad6bbf95a10",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-delayed-name-removal",
+        "promql-extended-range-selectors",
+        "type-and-unit-labels",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-ce434d8cff71b7083768816e1912e11d619b3bdbce5d9bf131b8ce79dc0ba238",
+      "enabled": [
+        "promql-duration-expr"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-97e04345e4c098984d717fff0ad503197ea02432f2c89f75049af206718d991c",
+      "enabled": [
+        "promql-duration-expr",
+        "type-and-unit-labels"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-9a9fcf05a48f33045b9b3d58c0a5cde327801133622699f2a0ca9717f53ac3a1",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-duration-expr"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-0d5ef15b1252f8961b36bf231682a4e49d6bd2bc4dd2d91c56f259bbe3c70df0",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-duration-expr",
+        "type-and-unit-labels"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-c5e22287fc4f1f223b2ed6a32eadd0789f2a91222f1ad78ef31f4cffcf5c598c",
+      "enabled": [
+        "promql-duration-expr",
+        "promql-extended-range-selectors"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-413349df6e74b83e20db5461e5abc8e9f088bcd5201c7ba5a571143b6969d502",
+      "enabled": [
+        "promql-duration-expr",
+        "promql-extended-range-selectors",
+        "type-and-unit-labels"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-45909f5a96fa59066c10c44d5d470a279f53e7ff29ed9a9e6efaaf930d198659",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-duration-expr",
+        "promql-extended-range-selectors"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-46736a7048d2d7dad069211e12c37f8dba333805a5fa9e27aaac2ccf12651c4a",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-duration-expr",
+        "promql-extended-range-selectors",
+        "type-and-unit-labels"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-3617c3bc38124d64dace2e8a5e796cc9089aff77f82819c32d22910a20af8f9a",
+      "enabled": [
+        "promql-delayed-name-removal",
+        "promql-duration-expr"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-44ab6fd1af46fff9a992217f3b869cd435b0657aec50d91f88d06edddec20497",
+      "enabled": [
+        "promql-delayed-name-removal",
+        "promql-duration-expr",
+        "type-and-unit-labels"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-a1b402b6d51b71387923e2f8115899822a2794052c817391436c8d35ede58c03",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-delayed-name-removal",
+        "promql-duration-expr"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-172a40dc300be5ad573db6c784dcd51088228791b4155594623c80e3752f78b9",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-delayed-name-removal",
+        "promql-duration-expr",
+        "type-and-unit-labels"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-cd8515363d3a1aaac5e3e68c89672bb34f438cdd3e30deceb19cf65d2e75bdd5",
+      "enabled": [
+        "promql-delayed-name-removal",
+        "promql-duration-expr",
+        "promql-extended-range-selectors"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-78e0b59f57d4627e8f3ce9c1b7b82c6b40aaec656691a4849176715819c34750",
+      "enabled": [
+        "promql-delayed-name-removal",
+        "promql-duration-expr",
+        "promql-extended-range-selectors",
+        "type-and-unit-labels"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-dc991d6d77d4190fa8b493f1c5bf3c9e702a27dd995c8dcacfb329edea24e62f",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-delayed-name-removal",
+        "promql-duration-expr",
+        "promql-extended-range-selectors"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-7ba2bd4d5c4f4f5b7fb95749f9895213560b124c31235c5f5b8f5d017415feba",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-delayed-name-removal",
+        "promql-duration-expr",
+        "promql-extended-range-selectors",
+        "type-and-unit-labels"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-5471309717a36addb27c036b73b4279abca64fc6a8ba939b1cd4162068014704",
+      "enabled": [
+        "promql-duration-expr",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-09bc5022399e9860eb2e6d03b09a077778de589551a30592533b323acd80d211",
+      "enabled": [
+        "promql-duration-expr",
+        "type-and-unit-labels",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-dcf6830b601e561101d482bd3a2ad2945c37730133a057e2f987ee6d1269d50b",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-duration-expr",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-7874688e2598e423a964de170dedc8a208fcc8f2037d72e94281b8f73a5e65ce",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-duration-expr",
+        "type-and-unit-labels",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-d5ea1fc36799733b53e134df57563ab5ab4675c06e97e6c3e2aab536930c234b",
+      "enabled": [
+        "promql-duration-expr",
+        "promql-extended-range-selectors",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-31655238d8cb346560efa0fc090c4c58254668da2dbee93afe4fa80e4bc2d73a",
+      "enabled": [
+        "promql-duration-expr",
+        "promql-extended-range-selectors",
+        "type-and-unit-labels",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-6c0a9a733dd49636d018c68f9c540a715f05e2a39ae27c442048b93d9774c041",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-duration-expr",
+        "promql-extended-range-selectors",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-ec79d8ff507cac3f4e1946ac1ee43c98d30215bb42ce277602e5ddf9665d0705",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-duration-expr",
+        "promql-extended-range-selectors",
+        "type-and-unit-labels",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-f264ce977681899bc46f6b6a57b8af9ac34cc7fa0bad901234f8facf175e83c2",
+      "enabled": [
+        "promql-delayed-name-removal",
+        "promql-duration-expr",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-1f0709b8e6cf8ab2d3355ffcf322602054137a214bfd151d62cf4c37be033ab5",
+      "enabled": [
+        "promql-delayed-name-removal",
+        "promql-duration-expr",
+        "type-and-unit-labels",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-30d62cb2f140cb7ed1d3dc1fd7ad8ab066c27e5f10995884c456480401e1f819",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-delayed-name-removal",
+        "promql-duration-expr",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-321700d7b89f066f7ff1b0b394e00111893bcc106c222f872c4593c45a27c690",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-delayed-name-removal",
+        "promql-duration-expr",
+        "type-and-unit-labels",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-15425f4a8949eaa70dbf4e9b3a5a8f1e4144cbb54077364c3b7922395533bbe6",
+      "enabled": [
+        "promql-delayed-name-removal",
+        "promql-duration-expr",
+        "promql-extended-range-selectors",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-68ee3198674c285585c2021b970e4c35412bc7dd7e7ad1cdc9c6a2ccf8d6cc71",
+      "enabled": [
+        "promql-delayed-name-removal",
+        "promql-duration-expr",
+        "promql-extended-range-selectors",
+        "type-and-unit-labels",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-ba47b3892caa9a2671779b1074dcfad19f288d1b48f5678851bbcf637fd0f1ff",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-delayed-name-removal",
+        "promql-duration-expr",
+        "promql-extended-range-selectors",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-0d58d720500d946b31f80864d6fa4d73fdecc358e3406f64bab708d88f19449a",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-delayed-name-removal",
+        "promql-duration-expr",
+        "promql-extended-range-selectors",
+        "type-and-unit-labels",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-71baca903aa2a77810c2c635452641d0215e762c330d8020fc499540e141bb33",
+      "enabled": [
+        "promql-experimental-functions"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-5fa65a104cb05ea3156b8203dd519af168e589d7475d165afbee67a88e59dd9b",
+      "enabled": [
+        "promql-experimental-functions",
+        "type-and-unit-labels"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-22750ed79ffebc091c8a68fb3028d370ae36b6f12e680634f2146a11de4e440e",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-experimental-functions"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-92f05d548308d4232aaf0e9d946766558ab79d4b9b626ecdd70b6a91c1d92b40",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-experimental-functions",
+        "type-and-unit-labels"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-c2985d6dc128359ac251f7602d3df8dfb63eec47b50af8a349d2a81fa0d206a2",
+      "enabled": [
+        "promql-experimental-functions",
+        "promql-extended-range-selectors"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-63a48ce68f13e4d31a254ac59695096f598fc6a4e8d5a91702a1c8fb90bbec14",
+      "enabled": [
+        "promql-experimental-functions",
+        "promql-extended-range-selectors",
+        "type-and-unit-labels"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-aae2aac2b3d37d8a33144e828c9a2889baf5245d40e43d15e27461ede272eb49",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-experimental-functions",
+        "promql-extended-range-selectors"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-8fe180d456e88a8ea7d7d6c9553e6b63d8151271f80d03f18f94ee21b45fa9fc",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-experimental-functions",
+        "promql-extended-range-selectors",
+        "type-and-unit-labels"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-a542a49574186fa3f7a38c72a32ed2b9af473e1f1e347d71183088a4be6326a2",
+      "enabled": [
+        "promql-delayed-name-removal",
+        "promql-experimental-functions"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-adf696ea42872277b79157b0c661588da197ef5d2652c90a213ad1641bd6d6bf",
+      "enabled": [
+        "promql-delayed-name-removal",
+        "promql-experimental-functions",
+        "type-and-unit-labels"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-a514f33994fc398598357ed80a4b75012059149e7881196e81115f8800880e62",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-delayed-name-removal",
+        "promql-experimental-functions"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-0e4c0d6810f33b24b790a623d3663588815974cce2512f2779f22dad5525443c",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-delayed-name-removal",
+        "promql-experimental-functions",
+        "type-and-unit-labels"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-64ae0816fff5f2d43327df4e8dd88f24bc12f83abf53a006122ea13478e46514",
+      "enabled": [
+        "promql-delayed-name-removal",
+        "promql-experimental-functions",
+        "promql-extended-range-selectors"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-7b002e828c87c50bf842cff171048ca05ce2c1ff3e9ae0d4972efcd865c5c88c",
+      "enabled": [
+        "promql-delayed-name-removal",
+        "promql-experimental-functions",
+        "promql-extended-range-selectors",
+        "type-and-unit-labels"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-60f7270d2456d9827f4fa9f4838fab3aa73ed80f4074a907fa1fc77cd0dffc38",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-delayed-name-removal",
+        "promql-experimental-functions",
+        "promql-extended-range-selectors"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-3f1f7cd91424c6f568a689610520580f74ea03d7bec6c7eece4e25c28e833dfe",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-delayed-name-removal",
+        "promql-experimental-functions",
+        "promql-extended-range-selectors",
+        "type-and-unit-labels"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-a3a45e0513ce0f2cbfa2b16d3726d0131d232694f22baf5fd2598a6d660204e6",
+      "enabled": [
+        "promql-experimental-functions",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-8b06150f30f680b45566c1f0e55b8fca9ef0c9c746daa116c94d46bcb26accf1",
+      "enabled": [
+        "promql-experimental-functions",
+        "type-and-unit-labels",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-eb7a8f23a0071a57c992d9fbbb8889c5c868d7344028683ce582dad422196968",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-experimental-functions",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-d7fe2939ef43d40dccfd1847a684f709787f581246a3c4b6303ea2415cd88cc5",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-experimental-functions",
+        "type-and-unit-labels",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-8ffc4bec5d150cd4590550472bc28771ce68d64524d7c82ef04ae6f9c480b761",
+      "enabled": [
+        "promql-experimental-functions",
+        "promql-extended-range-selectors",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-ae2a7845cf50f66267820bfdebf78a6ae2208ce62b42b26c92f0035b26738bb3",
+      "enabled": [
+        "promql-experimental-functions",
+        "promql-extended-range-selectors",
+        "type-and-unit-labels",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-2f472c28846624024d06c0f225c6d5dbd41c3b6e694ab8970546a0c7750d68bb",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-experimental-functions",
+        "promql-extended-range-selectors",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-c11873fd83cd33dd77e313ba8b90174deb0d26b0c9403b7d67e9a1e3b790890d",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-experimental-functions",
+        "promql-extended-range-selectors",
+        "type-and-unit-labels",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-b1097d4c9efc6bcfa712d1d95425f1e06d860666cf022a75ce841b061ce6d8bd",
+      "enabled": [
+        "promql-delayed-name-removal",
+        "promql-experimental-functions",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-5234c13798174a3ce42c7a0ea1b2f542f08009a0e1a752d237a1a6e5591a7a74",
+      "enabled": [
+        "promql-delayed-name-removal",
+        "promql-experimental-functions",
+        "type-and-unit-labels",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-31a7b8bfd9f8abc6742bda914596d36793499982156bbd9b8b0b80307b4cf34b",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-delayed-name-removal",
+        "promql-experimental-functions",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-408ad3451fe4bf13223261cf7e29ecc45fd5ab43219a8acfad6374b8d5b24b04",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-delayed-name-removal",
+        "promql-experimental-functions",
+        "type-and-unit-labels",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-5357958fe6fc16e1aabf65293d431145c0a5605e97b1cdd0f0125d2d3683c5cc",
+      "enabled": [
+        "promql-delayed-name-removal",
+        "promql-experimental-functions",
+        "promql-extended-range-selectors",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-4d8aa231c4a806ca9b60e5d9c11855564a9a7fc0839192eb444df156b5f4e551",
+      "enabled": [
+        "promql-delayed-name-removal",
+        "promql-experimental-functions",
+        "promql-extended-range-selectors",
+        "type-and-unit-labels",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-e4b3793f7138f3c14265f3b350c15cdf4cf9ce4e02c5893296f19928ab6e5d61",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-delayed-name-removal",
+        "promql-experimental-functions",
+        "promql-extended-range-selectors",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-e1c1e84037fab75e47b62776b2d88f92578ba23405b3aae75aa791a3d981cfcd",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-delayed-name-removal",
+        "promql-experimental-functions",
+        "promql-extended-range-selectors",
+        "type-and-unit-labels",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-f27a85c16af1e854a148e16bdefc01552de4b14dbcd3aa35d78e53253e2518fb",
+      "enabled": [
+        "promql-duration-expr",
+        "promql-experimental-functions"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-fa3008bb0ed7f6820258fc209a1a0a6051c791bdb59e48ca7c96a5d418170a0f",
+      "enabled": [
+        "promql-duration-expr",
+        "promql-experimental-functions",
+        "type-and-unit-labels"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-4e0a5300802c795614f8eec8b830718582aec610f042f1273720d79522f104cc",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-duration-expr",
+        "promql-experimental-functions"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-d25ff9316cd4c10afc5a80c4635ed48adc349670db3dd28bc50d7a52105f67f4",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-duration-expr",
+        "promql-experimental-functions",
+        "type-and-unit-labels"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-38e2e118366453622643c1156a6d8a4630a17d879aea6289bcfc0c380a386b91",
+      "enabled": [
+        "promql-duration-expr",
+        "promql-experimental-functions",
+        "promql-extended-range-selectors"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-fb6538c86032f666c0717cf0095905753b60311dbd244a0d2eb88c26236f7f53",
+      "enabled": [
+        "promql-duration-expr",
+        "promql-experimental-functions",
+        "promql-extended-range-selectors",
+        "type-and-unit-labels"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-ee485956745075250a9953f75a7ce818b04529793bf4eeb49f5a4c01129553c5",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-duration-expr",
+        "promql-experimental-functions",
+        "promql-extended-range-selectors"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-2956cabd9207b458388f90aa14d92ce4007007dc0275de8970f38ac235d11151",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-duration-expr",
+        "promql-experimental-functions",
+        "promql-extended-range-selectors",
+        "type-and-unit-labels"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-da37c9d8b0fbb09a49a2631434507eb224852075b4828c0c481efe0d3c5d0cee",
+      "enabled": [
+        "promql-delayed-name-removal",
+        "promql-duration-expr",
+        "promql-experimental-functions"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-6225d5698e0f2a681a57459283dffe07c9fa7b229608f77274f5f7fef26c1689",
+      "enabled": [
+        "promql-delayed-name-removal",
+        "promql-duration-expr",
+        "promql-experimental-functions",
+        "type-and-unit-labels"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-2f860b8a158c2a56682bc05f1d74ee61fb17973a6b1944c28544509231410d62",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-delayed-name-removal",
+        "promql-duration-expr",
+        "promql-experimental-functions"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-3285c77c2c7a41766f33da356673d85ea5c1bc8a6521008eea3611a78015f1e2",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-delayed-name-removal",
+        "promql-duration-expr",
+        "promql-experimental-functions",
+        "type-and-unit-labels"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-cc589c1e6cc4a126ec260c5f258d8d319474e53f83d5d6f9a61a09f046eef3a8",
+      "enabled": [
+        "promql-delayed-name-removal",
+        "promql-duration-expr",
+        "promql-experimental-functions",
+        "promql-extended-range-selectors"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-70bb1fc1c707e179f2d9d426a1bc8267fd5760fd52d8e5d252397c6ca878fb29",
+      "enabled": [
+        "promql-delayed-name-removal",
+        "promql-duration-expr",
+        "promql-experimental-functions",
+        "promql-extended-range-selectors",
+        "type-and-unit-labels"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-e0b291b4dffddaa8e64ff4fbe2385dc14245770a6d8a9ae672973bae7d73cb46",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-delayed-name-removal",
+        "promql-duration-expr",
+        "promql-experimental-functions",
+        "promql-extended-range-selectors"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-3b4582f5c186b481f39ee1d70974f1b20b158baacf8588f922803cd81f469ede",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-delayed-name-removal",
+        "promql-duration-expr",
+        "promql-experimental-functions",
+        "promql-extended-range-selectors",
+        "type-and-unit-labels"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-ac75d86a620051c7bf0692eddab479cdbf61285c85a749207e4c7a1558465a9d",
+      "enabled": [
+        "promql-duration-expr",
+        "promql-experimental-functions",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-602b6e07b35f8896acd791be6a53de3f36ba2f5e769e148fd5fa9aff2da8c7f9",
+      "enabled": [
+        "promql-duration-expr",
+        "promql-experimental-functions",
+        "type-and-unit-labels",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-923f1cf277c38ccbf0bb6f0b4c98607a03c49e475e165755dbcec1425855ef64",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-duration-expr",
+        "promql-experimental-functions",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-8db5b79b6aec01d96d9c765a7652163355ab002cc556a6f29e8f2b3b6cd7da1f",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-duration-expr",
+        "promql-experimental-functions",
+        "type-and-unit-labels",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-61e2ef63052c46365f8eb957111bd97d60c76d5089fd8f1a1e6381c5d2c03535",
+      "enabled": [
+        "promql-duration-expr",
+        "promql-experimental-functions",
+        "promql-extended-range-selectors",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-2d957b44583885f698485f690dd082410dfc4d7392e878c5cfce68f8a5c3c957",
+      "enabled": [
+        "promql-duration-expr",
+        "promql-experimental-functions",
+        "promql-extended-range-selectors",
+        "type-and-unit-labels",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-38f6265a2899e6f039d498ed8807b9bf0994b22f939d98fc8f77232c88adfa3a",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-duration-expr",
+        "promql-experimental-functions",
+        "promql-extended-range-selectors",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-b30012143938ef6e7504fa2056b8b44648455b8eac5433f3fd822cc1bc43644a",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-duration-expr",
+        "promql-experimental-functions",
+        "promql-extended-range-selectors",
+        "type-and-unit-labels",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-f76a3503e33f66dc4b9186d1773b68f40a499a1d8ef42430ee2ac96d3712a39e",
+      "enabled": [
+        "promql-delayed-name-removal",
+        "promql-duration-expr",
+        "promql-experimental-functions",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-212e2a5766f598aa094df5b651f7a2e462e6fb193bcea358eac4c5f1bbe95a27",
+      "enabled": [
+        "promql-delayed-name-removal",
+        "promql-duration-expr",
+        "promql-experimental-functions",
+        "type-and-unit-labels",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-64a5cfdca89d429e94d1ff3dda51bc308cbe5150ed4406228351a11cbc7db83b",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-delayed-name-removal",
+        "promql-duration-expr",
+        "promql-experimental-functions",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-12700d51002838e7f06ce87ca6545756de64620dcfee6a81c00e0bc30b86e768",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-delayed-name-removal",
+        "promql-duration-expr",
+        "promql-experimental-functions",
+        "type-and-unit-labels",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-b55f15a9bbde825beb3d385e33672385e736b86507783607021127263e6e7a04",
+      "enabled": [
+        "promql-delayed-name-removal",
+        "promql-duration-expr",
+        "promql-experimental-functions",
+        "promql-extended-range-selectors",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-cbc05fbb4413c433f1af87a48953e42a92e01699aecc410041848d8b0f120797",
+      "enabled": [
+        "promql-delayed-name-removal",
+        "promql-duration-expr",
+        "promql-experimental-functions",
+        "promql-extended-range-selectors",
+        "type-and-unit-labels",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-e6b72a52292733610230a111ca2fddbbaeca998af41315f6503f2546004f11db",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-delayed-name-removal",
+        "promql-duration-expr",
+        "promql-experimental-functions",
+        "promql-extended-range-selectors",
+        "use-start-timestamps"
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantic-sha256-36be446528a9a2a3e08d37f4dd34d880a7dd06103d2f7e10eb8a06af14545f32",
+      "enabled": [
+        "promql-binop-fill-modifiers",
+        "promql-delayed-name-removal",
+        "promql-duration-expr",
+        "promql-experimental-functions",
+        "promql-extended-range-selectors",
+        "type-and-unit-labels",
+        "use-start-timestamps"
+      ]
+    }
+  ],
+  "configuration": {
+    "lookback_delta_ns": "300000000000",
+    "default_subquery_step_ns": "60000000000",
+    "query.lookback-delta": {
+      "name": "query.lookback-delta",
+      "default": "5m",
+      "domain": {
+        "valid": "nonnegative duration at engine boundary; zero engine option falls back to default",
+        "boundaries": [
+          "0",
+          "1ms",
+          "5m-1ms",
+          "5m",
+          "5m+1ms",
+          "maximum duration"
+        ],
+        "interactions": [
+          "sample at target-lookback",
+          "sample one millisecond before bound",
+          "stale within lookback"
+        ]
+      },
+      "source_ref": "cmd/prometheus/main.go:1@1ed01d530b9c053ab4e3d7700b50ec5690e15fa63b0347a0e0dad6496c040228",
+      "classification": "semantic"
+    },
+    "query.timeout": {
+      "name": "query.timeout",
+      "default": "2m",
+      "domain": {
+        "valid": "duration accepted by flag parser; nonpositive yields immediately expiring context",
+        "boundaries": [
+          "-1ms",
+          "0",
+          "1ms",
+          "2m"
+        ],
+        "interactions": [
+          "cancellation before scan",
+          "timeout during subquery"
+        ]
+      },
+      "source_ref": "cmd/prometheus/main.go:1@1ed01d530b9c053ab4e3d7700b50ec5690e15fa63b0347a0e0dad6496c040228",
+      "classification": "semantic"
+    },
+    "query.max-samples": {
+      "name": "query.max-samples",
+      "default": "50000000",
+      "domain": {
+        "valid": "integer sample memory budget",
+        "boundaries": [
+          "0",
+          "1",
+          "limit-1",
+          "limit",
+          "limit+1"
+        ],
+        "interactions": [
+          "histogram memory weighted samples",
+          "subquery peak memory",
+          "aggregation release"
+        ]
+      },
+      "source_ref": "cmd/prometheus/main.go:1@1ed01d530b9c053ab4e3d7700b50ec5690e15fa63b0347a0e0dad6496c040228",
+      "classification": "semantic"
+    },
+    "global.evaluation_interval": {
+      "name": "global.evaluation_interval",
+      "default": "1m",
+      "domain": {
+        "valid": "model.Duration >=0; zero replaced with default1m; effective interval positive",
+        "boundaries": [
+          "0=>1m",
+          "1ms",
+          "1m",
+          "negative invalid"
+        ],
+        "interactions": [
+          "implicit subquery resolution",
+          "explicit subquery resolution"
+        ]
+      },
+      "source_ref": "config/config.go:1@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "classification": "semantic"
+    },
+    "engine.enable-at-modifier": {
+      "name": "engine.enable-at-modifier",
+      "default": "true",
+      "domain": {
+        "valid": [
+          false,
+          true
+        ],
+        "boundaries": [
+          false,
+          true
+        ],
+        "interactions": [
+          "@start()",
+          "@end()",
+          "@numeric"
+        ]
+      },
+      "source_ref": "cmd/prometheus/main.go:1@1ed01d530b9c053ab4e3d7700b50ec5690e15fa63b0347a0e0dad6496c040228",
+      "classification": "semantic"
+    },
+    "engine.enable-negative-offset": {
+      "name": "engine.enable-negative-offset",
+      "default": "true",
+      "domain": {
+        "valid": [
+          false,
+          true
+        ],
+        "boundaries": [
+          false,
+          true
+        ],
+        "interactions": [
+          "offset 0",
+          "offset -1ms",
+          "@ offset order"
+        ]
+      },
+      "source_ref": "cmd/prometheus/main.go:1@1ed01d530b9c053ab4e3d7700b50ec5690e15fa63b0347a0e0dad6496c040228",
+      "classification": "semantic"
+    },
+    "scrape_interval": {
+      "name": "scrape_interval",
+      "classification": "nonsemantic-fixed-input-acquisition",
+      "reason": "Changes which samples/labels are admitted, represented or retained; owned input is already materialized. Does not modify evaluation over identical input.",
+      "default_source": "config/config.go:173@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "boundary_domains": [
+        "unset",
+        "explicit empty",
+        "explicit default",
+        "valid override",
+        "invalid encoded value"
+      ],
+      "scope": "acquisition evidence, not an enabled language gate",
+      "default": "1m; scrape override 0 inherits global"
+    },
+    "scrape_timeout": {
+      "name": "scrape_timeout",
+      "classification": "nonsemantic-fixed-input-acquisition",
+      "reason": "Changes which samples/labels are admitted, represented or retained; owned input is already materialized. Does not modify evaluation over identical input.",
+      "default_source": "config/config.go:173@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "boundary_domains": [
+        "unset",
+        "explicit empty",
+        "explicit default",
+        "valid override",
+        "invalid encoded value"
+      ],
+      "scope": "acquisition evidence, not an enabled language gate",
+      "default": "10s global; scrape0 inherits min(global timeout,effective interval)"
+    },
+    "scrape_protocols": {
+      "name": "scrape_protocols",
+      "classification": "nonsemantic-fixed-input-acquisition",
+      "reason": "Changes which samples/labels are admitted, represented or retained; owned input is already materialized. Does not modify evaluation over identical input.",
+      "default_source": "config/config.go:173@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "boundary_domains": [
+        "unset",
+        "explicit empty",
+        "explicit default",
+        "valid override",
+        "invalid encoded value"
+      ],
+      "scope": "acquisition evidence, not an enabled language gate",
+      "default": [
+        "OpenMetricsText1.0.0",
+        "OpenMetricsText0.0.1",
+        "PrometheusText1.0.0",
+        "PrometheusText0.0.4"
+      ]
+    },
+    "metric_name_validation_scheme": {
+      "name": "metric_name_validation_scheme",
+      "classification": "nonsemantic-fixed-input-acquisition",
+      "reason": "Changes which samples/labels are admitted, represented or retained; owned input is already materialized. Does not modify evaluation over identical input.",
+      "default_source": "config/config.go:173@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "boundary_domains": [
+        "unset",
+        "explicit empty",
+        "explicit default",
+        "valid override",
+        "invalid encoded value"
+      ],
+      "scope": "acquisition evidence, not an enabled language gate",
+      "default": "utf8"
+    },
+    "metric_name_escaping_scheme": {
+      "name": "metric_name_escaping_scheme",
+      "classification": "nonsemantic-fixed-input-acquisition",
+      "reason": "Changes which samples/labels are admitted, represented or retained; owned input is already materialized. Does not modify evaluation over identical input.",
+      "default_source": "config/config.go:173@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "boundary_domains": [
+        "unset",
+        "explicit empty",
+        "explicit default",
+        "valid override",
+        "invalid encoded value"
+      ],
+      "scope": "acquisition evidence, not an enabled language gate",
+      "default": "allow-utf-8"
+    },
+    "honor_labels": {
+      "name": "honor_labels",
+      "classification": "nonsemantic-fixed-input-acquisition",
+      "reason": "Changes which samples/labels are admitted, represented or retained; owned input is already materialized. Does not modify evaluation over identical input.",
+      "default_source": "config/config.go:173@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "boundary_domains": [
+        false,
+        true
+      ],
+      "scope": "acquisition evidence, not an enabled language gate",
+      "default": false
+    },
+    "honor_timestamps": {
+      "name": "honor_timestamps",
+      "classification": "nonsemantic-fixed-input-acquisition",
+      "reason": "Changes which samples/labels are admitted, represented or retained; owned input is already materialized. Does not modify evaluation over identical input.",
+      "default_source": "config/config.go:173@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "boundary_domains": [
+        false,
+        true
+      ],
+      "scope": "acquisition evidence, not an enabled language gate",
+      "default": true
+    },
+    "track_timestamps_staleness": {
+      "name": "track_timestamps_staleness",
+      "classification": "nonsemantic-fixed-input-acquisition",
+      "reason": "Changes which samples/labels are admitted, represented or retained; owned input is already materialized. Does not modify evaluation over identical input.",
+      "default_source": "config/config.go:173@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "boundary_domains": [
+        false,
+        true
+      ],
+      "scope": "acquisition evidence, not an enabled language gate",
+      "default": false
+    },
+    "metric_relabel_configs": {
+      "name": "metric_relabel_configs",
+      "classification": "nonsemantic-fixed-input-acquisition",
+      "reason": "Changes which samples/labels are admitted, represented or retained; owned input is already materialized. Does not modify evaluation over identical input.",
+      "default_source": "config/config.go:173@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "boundary_domains": [
+        "unset",
+        "explicit empty",
+        "explicit default",
+        "valid override",
+        "invalid encoded value"
+      ],
+      "scope": "acquisition evidence, not an enabled language gate",
+      "default": []
+    },
+    "relabel_configs": {
+      "name": "relabel_configs",
+      "classification": "nonsemantic-fixed-input-acquisition",
+      "reason": "Changes which samples/labels are admitted, represented or retained; owned input is already materialized. Does not modify evaluation over identical input.",
+      "default_source": "config/config.go:173@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "boundary_domains": [
+        "unset",
+        "explicit empty",
+        "explicit default",
+        "valid override",
+        "invalid encoded value"
+      ],
+      "scope": "acquisition evidence, not an enabled language gate",
+      "default": []
+    },
+    "sample_limit": {
+      "name": "sample_limit",
+      "classification": "nonsemantic-fixed-input-acquisition",
+      "reason": "Changes which samples/labels are admitted, represented or retained; owned input is already materialized. Does not modify evaluation over identical input.",
+      "default_source": "config/config.go:173@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "boundary_domains": [
+        0,
+        1,
+        2,
+        4294967295,
+        18446744073709551615
+      ],
+      "scope": "acquisition evidence, not an enabled language gate",
+      "default": 0
+    },
+    "label_limit": {
+      "name": "label_limit",
+      "classification": "nonsemantic-fixed-input-acquisition",
+      "reason": "Changes which samples/labels are admitted, represented or retained; owned input is already materialized. Does not modify evaluation over identical input.",
+      "default_source": "config/config.go:173@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "boundary_domains": [
+        0,
+        1,
+        2,
+        4294967295,
+        18446744073709551615
+      ],
+      "scope": "acquisition evidence, not an enabled language gate",
+      "default": 0
+    },
+    "label_name_length_limit": {
+      "name": "label_name_length_limit",
+      "classification": "nonsemantic-fixed-input-acquisition",
+      "reason": "Changes which samples/labels are admitted, represented or retained; owned input is already materialized. Does not modify evaluation over identical input.",
+      "default_source": "config/config.go:173@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "boundary_domains": [
+        0,
+        1,
+        2,
+        4294967295,
+        18446744073709551615
+      ],
+      "scope": "acquisition evidence, not an enabled language gate",
+      "default": 0
+    },
+    "label_value_length_limit": {
+      "name": "label_value_length_limit",
+      "classification": "nonsemantic-fixed-input-acquisition",
+      "reason": "Changes which samples/labels are admitted, represented or retained; owned input is already materialized. Does not modify evaluation over identical input.",
+      "default_source": "config/config.go:173@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "boundary_domains": [
+        0,
+        1,
+        2,
+        4294967295,
+        18446744073709551615
+      ],
+      "scope": "acquisition evidence, not an enabled language gate",
+      "default": 0
+    },
+    "native_histogram_bucket_limit": {
+      "name": "native_histogram_bucket_limit",
+      "classification": "nonsemantic-fixed-input-acquisition",
+      "reason": "Changes which samples/labels are admitted, represented or retained; owned input is already materialized. Does not modify evaluation over identical input.",
+      "default_source": "config/config.go:173@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "boundary_domains": [
+        0,
+        1,
+        2,
+        4294967295,
+        18446744073709551615
+      ],
+      "scope": "acquisition evidence, not an enabled language gate",
+      "default": 0
+    },
+    "native_histogram_min_bucket_factor": {
+      "name": "native_histogram_min_bucket_factor",
+      "classification": "nonsemantic-fixed-input-acquisition",
+      "reason": "Changes which samples/labels are admitted, represented or retained; owned input is already materialized. Does not modify evaluation over identical input.",
+      "default_source": "config/config.go:173@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "boundary_domains": [
+        0,
+        1,
+        2,
+        4294967295,
+        18446744073709551615
+      ],
+      "scope": "acquisition evidence, not an enabled language gate",
+      "default": 0
+    },
+    "always_scrape_classic_histograms": {
+      "name": "always_scrape_classic_histograms",
+      "classification": "nonsemantic-fixed-input-acquisition",
+      "reason": "Changes which samples/labels are admitted, represented or retained; owned input is already materialized. Does not modify evaluation over identical input.",
+      "default_source": "config/config.go:173@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "boundary_domains": [
+        false,
+        true
+      ],
+      "scope": "acquisition evidence, not an enabled language gate",
+      "default": false
+    },
+    "scrape_native_histograms": {
+      "name": "scrape_native_histograms",
+      "classification": "nonsemantic-fixed-input-acquisition",
+      "reason": "Changes which samples/labels are admitted, represented or retained; owned input is already materialized. Does not modify evaluation over identical input.",
+      "default_source": "config/config.go:173@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "boundary_domains": [
+        false,
+        true
+      ],
+      "scope": "acquisition evidence, not an enabled language gate",
+      "default": false
+    },
+    "convert_classic_histograms_to_nhcb": {
+      "name": "convert_classic_histograms_to_nhcb",
+      "classification": "nonsemantic-fixed-input-acquisition",
+      "reason": "Changes which samples/labels are admitted, represented or retained; owned input is already materialized. Does not modify evaluation over identical input.",
+      "default_source": "config/config.go:173@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "boundary_domains": [
+        false,
+        true
+      ],
+      "scope": "acquisition evidence, not an enabled language gate",
+      "default": false
+    },
+    "out_of_order_time_window": {
+      "name": "out_of_order_time_window",
+      "classification": "nonsemantic-fixed-input-acquisition",
+      "reason": "Changes which samples/labels are admitted, represented or retained; owned input is already materialized. Does not modify evaluation over identical input.",
+      "default_source": "config/config.go:173@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "boundary_domains": [
+        0,
+        1,
+        2,
+        4294967295,
+        18446744073709551615
+      ],
+      "scope": "acquisition evidence, not an enabled language gate",
+      "default": 0
+    },
+    "external_labels": {
+      "name": "external_labels",
+      "classification": "nonsemantic-fixed-input-acquisition",
+      "reason": "Changes which samples/labels are admitted, represented or retained; owned input is already materialized. Does not modify evaluation over identical input.",
+      "default_source": "config/config.go:173@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "boundary_domains": [
+        "unset",
+        "explicit empty",
+        "explicit default",
+        "valid override",
+        "invalid encoded value"
+      ],
+      "scope": "acquisition evidence, not an enabled language gate",
+      "default": {}
+    },
+    "Config.global": {
+      "name": "Config.global",
+      "go_type": "GlobalConfig",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:292@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "Config.runtime": {
+      "name": "Config.runtime",
+      "go_type": "RuntimeConfig",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:292@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "Config.alerting": {
+      "name": "Config.alerting",
+      "go_type": "AlertingConfig",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:292@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "Config.rule_files": {
+      "name": "Config.rule_files",
+      "go_type": "[]string",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:292@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "Config.scrape_config_files": {
+      "name": "Config.scrape_config_files",
+      "go_type": "[]string",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:292@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "Config.scrape_configs": {
+      "name": "Config.scrape_configs",
+      "go_type": "[]*ScrapeConfig",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:292@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "Config.storage": {
+      "name": "Config.storage",
+      "go_type": "StorageConfig",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:292@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "Config.tracing": {
+      "name": "Config.tracing",
+      "go_type": "TracingConfig",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:292@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "Config.remote_write": {
+      "name": "Config.remote_write",
+      "go_type": "[]*RemoteWriteConfig",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:292@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "Config.remote_read": {
+      "name": "Config.remote_read",
+      "go_type": "[]*RemoteReadConfig",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:292@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "Config.otlp": {
+      "name": "Config.otlp",
+      "go_type": "OTLPConfig",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:292@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "GlobalConfig.scrape_interval": {
+      "name": "GlobalConfig.scrape_interval",
+      "go_type": "model.Duration",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:483@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultGlobalConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "GlobalConfig.scrape_timeout": {
+      "name": "GlobalConfig.scrape_timeout",
+      "go_type": "model.Duration",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:483@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultGlobalConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "GlobalConfig.scrape_protocols": {
+      "name": "GlobalConfig.scrape_protocols",
+      "go_type": "[]ScrapeProtocol",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:483@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultGlobalConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "GlobalConfig.evaluation_interval": {
+      "name": "GlobalConfig.evaluation_interval",
+      "go_type": "model.Duration",
+      "classification": "semantic-subquery-resolution",
+      "default_source": "config/config.go:483@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultGlobalConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "GlobalConfig.rule_query_offset": {
+      "name": "GlobalConfig.rule_query_offset",
+      "go_type": "model.Duration",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:483@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultGlobalConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "GlobalConfig.query_log_file": {
+      "name": "GlobalConfig.query_log_file",
+      "go_type": "string",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:483@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultGlobalConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "GlobalConfig.scrape_failure_log_file": {
+      "name": "GlobalConfig.scrape_failure_log_file",
+      "go_type": "string",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:483@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultGlobalConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "GlobalConfig.external_labels": {
+      "name": "GlobalConfig.external_labels",
+      "go_type": "labels.Labels",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:483@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultGlobalConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "GlobalConfig.body_size_limit": {
+      "name": "GlobalConfig.body_size_limit",
+      "go_type": "units.Base2Bytes",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:483@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultGlobalConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "GlobalConfig.sample_limit": {
+      "name": "GlobalConfig.sample_limit",
+      "go_type": "uint",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:483@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultGlobalConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "GlobalConfig.target_limit": {
+      "name": "GlobalConfig.target_limit",
+      "go_type": "uint",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:483@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultGlobalConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "GlobalConfig.label_limit": {
+      "name": "GlobalConfig.label_limit",
+      "go_type": "uint",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:483@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultGlobalConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "GlobalConfig.label_name_length_limit": {
+      "name": "GlobalConfig.label_name_length_limit",
+      "go_type": "uint",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:483@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultGlobalConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "GlobalConfig.label_value_length_limit": {
+      "name": "GlobalConfig.label_value_length_limit",
+      "go_type": "uint",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:483@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultGlobalConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "GlobalConfig.keep_dropped_targets": {
+      "name": "GlobalConfig.keep_dropped_targets",
+      "go_type": "uint",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:483@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultGlobalConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "GlobalConfig.metric_name_validation_scheme": {
+      "name": "GlobalConfig.metric_name_validation_scheme",
+      "go_type": "model.ValidationScheme",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:483@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultGlobalConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "GlobalConfig.metric_name_escaping_scheme": {
+      "name": "GlobalConfig.metric_name_escaping_scheme",
+      "go_type": "string",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:483@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultGlobalConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "GlobalConfig.scrape_native_histograms": {
+      "name": "GlobalConfig.scrape_native_histograms",
+      "go_type": "*bool",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:483@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultGlobalConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "GlobalConfig.convert_classic_histograms_to_nhcb": {
+      "name": "GlobalConfig.convert_classic_histograms_to_nhcb",
+      "go_type": "bool",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:483@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultGlobalConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "GlobalConfig.always_scrape_classic_histograms": {
+      "name": "GlobalConfig.always_scrape_classic_histograms",
+      "go_type": "bool",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:483@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultGlobalConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "GlobalConfig.extra_scrape_metrics": {
+      "name": "GlobalConfig.extra_scrape_metrics",
+      "go_type": "*bool",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:483@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultGlobalConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "RuntimeConfig.gogc": {
+      "name": "RuntimeConfig.gogc",
+      "go_type": "int",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:734@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultRuntimeConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "ScrapeConfigs.scrape_configs": {
+      "name": "ScrapeConfigs.scrape_configs",
+      "go_type": "[]*ScrapeConfig",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:759@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultScrapeConfigs initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "ScrapeConfig.job_name": {
+      "name": "ScrapeConfig.job_name",
+      "go_type": "string",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:764@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultScrapeConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "ScrapeConfig.honor_labels": {
+      "name": "ScrapeConfig.honor_labels",
+      "go_type": "bool",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:764@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultScrapeConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "ScrapeConfig.honor_timestamps": {
+      "name": "ScrapeConfig.honor_timestamps",
+      "go_type": "bool",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:764@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultScrapeConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "ScrapeConfig.track_timestamps_staleness": {
+      "name": "ScrapeConfig.track_timestamps_staleness",
+      "go_type": "bool",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:764@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultScrapeConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "ScrapeConfig.params": {
+      "name": "ScrapeConfig.params",
+      "go_type": "url.Values",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:764@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultScrapeConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "ScrapeConfig.scrape_interval": {
+      "name": "ScrapeConfig.scrape_interval",
+      "go_type": "model.Duration",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:764@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultScrapeConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "ScrapeConfig.scrape_timeout": {
+      "name": "ScrapeConfig.scrape_timeout",
+      "go_type": "model.Duration",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:764@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultScrapeConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "ScrapeConfig.scrape_protocols": {
+      "name": "ScrapeConfig.scrape_protocols",
+      "go_type": "[]ScrapeProtocol",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:764@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultScrapeConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "ScrapeConfig.fallback_scrape_protocol": {
+      "name": "ScrapeConfig.fallback_scrape_protocol",
+      "go_type": "ScrapeProtocol",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:764@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultScrapeConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "ScrapeConfig.scrape_native_histograms": {
+      "name": "ScrapeConfig.scrape_native_histograms",
+      "go_type": "*bool",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:764@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultScrapeConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "ScrapeConfig.always_scrape_classic_histograms": {
+      "name": "ScrapeConfig.always_scrape_classic_histograms",
+      "go_type": "*bool",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:764@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultScrapeConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "ScrapeConfig.convert_classic_histograms_to_nhcb": {
+      "name": "ScrapeConfig.convert_classic_histograms_to_nhcb",
+      "go_type": "*bool",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:764@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultScrapeConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "ScrapeConfig.scrape_failure_log_file": {
+      "name": "ScrapeConfig.scrape_failure_log_file",
+      "go_type": "string",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:764@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultScrapeConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "ScrapeConfig.metrics_path": {
+      "name": "ScrapeConfig.metrics_path",
+      "go_type": "string",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:764@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultScrapeConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "ScrapeConfig.scheme": {
+      "name": "ScrapeConfig.scheme",
+      "go_type": "string",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:764@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultScrapeConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "ScrapeConfig.enable_compression": {
+      "name": "ScrapeConfig.enable_compression",
+      "go_type": "bool",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:764@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultScrapeConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "ScrapeConfig.body_size_limit": {
+      "name": "ScrapeConfig.body_size_limit",
+      "go_type": "units.Base2Bytes",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:764@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultScrapeConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "ScrapeConfig.sample_limit": {
+      "name": "ScrapeConfig.sample_limit",
+      "go_type": "uint",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:764@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultScrapeConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "ScrapeConfig.target_limit": {
+      "name": "ScrapeConfig.target_limit",
+      "go_type": "uint",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:764@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultScrapeConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "ScrapeConfig.label_limit": {
+      "name": "ScrapeConfig.label_limit",
+      "go_type": "uint",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:764@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultScrapeConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "ScrapeConfig.label_name_length_limit": {
+      "name": "ScrapeConfig.label_name_length_limit",
+      "go_type": "uint",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:764@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultScrapeConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "ScrapeConfig.label_value_length_limit": {
+      "name": "ScrapeConfig.label_value_length_limit",
+      "go_type": "uint",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:764@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultScrapeConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "ScrapeConfig.native_histogram_bucket_limit": {
+      "name": "ScrapeConfig.native_histogram_bucket_limit",
+      "go_type": "uint",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:764@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultScrapeConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "ScrapeConfig.native_histogram_min_bucket_factor": {
+      "name": "ScrapeConfig.native_histogram_min_bucket_factor",
+      "go_type": "float64",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:764@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultScrapeConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "ScrapeConfig.keep_dropped_targets": {
+      "name": "ScrapeConfig.keep_dropped_targets",
+      "go_type": "uint",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:764@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultScrapeConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "ScrapeConfig.metric_name_validation_scheme": {
+      "name": "ScrapeConfig.metric_name_validation_scheme",
+      "go_type": "model.ValidationScheme",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:764@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultScrapeConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "ScrapeConfig.metric_name_escaping_scheme": {
+      "name": "ScrapeConfig.metric_name_escaping_scheme",
+      "go_type": "string",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:764@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultScrapeConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "ScrapeConfig.extra_scrape_metrics": {
+      "name": "ScrapeConfig.extra_scrape_metrics",
+      "go_type": "*bool",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:764@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultScrapeConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "ScrapeConfig.relabel_configs": {
+      "name": "ScrapeConfig.relabel_configs",
+      "go_type": "[]*relabel.Config",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:764@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultScrapeConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "ScrapeConfig.metric_relabel_configs": {
+      "name": "ScrapeConfig.metric_relabel_configs",
+      "go_type": "[]*relabel.Config",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:764@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultScrapeConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "StorageConfig.tsdb": {
+      "name": "StorageConfig.tsdb",
+      "go_type": "*TSDBConfig",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1100@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultStorageConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "StorageConfig.exemplars": {
+      "name": "StorageConfig.exemplars",
+      "go_type": "*ExemplarsConfig",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1100@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultStorageConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "TSDBRetentionConfig.time": {
+      "name": "TSDBRetentionConfig.time",
+      "go_type": "model.Duration",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1106@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultTSDBRetentionConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "TSDBRetentionConfig.size": {
+      "name": "TSDBRetentionConfig.size",
+      "go_type": "units.Base2Bytes",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1106@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultTSDBRetentionConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "TSDBRetentionConfig.percentage": {
+      "name": "TSDBRetentionConfig.percentage",
+      "go_type": "float64",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1106@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultTSDBRetentionConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "ChunkEncodingConfig.floats": {
+      "name": "ChunkEncodingConfig.floats",
+      "go_type": "string",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1141@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultChunkEncodingConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "TSDBConfig.out_of_order_time_window": {
+      "name": "TSDBConfig.out_of_order_time_window",
+      "go_type": "model.Duration",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1149@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultTSDBConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "TSDBConfig.stale_series_compaction_threshold": {
+      "name": "TSDBConfig.stale_series_compaction_threshold",
+      "go_type": "float64",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1149@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultTSDBConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "TSDBConfig.chunk_encoding": {
+      "name": "TSDBConfig.chunk_encoding",
+      "go_type": "ChunkEncodingConfig",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1149@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultTSDBConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "TSDBConfig.retention": {
+      "name": "TSDBConfig.retention",
+      "go_type": "*TSDBRetentionConfig",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1149@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultTSDBConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "TracingConfig.client_type": {
+      "name": "TracingConfig.client_type",
+      "go_type": "TracingClientType",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1223@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultTracingConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "TracingConfig.endpoint": {
+      "name": "TracingConfig.endpoint",
+      "go_type": "string",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1223@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultTracingConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "TracingConfig.sampling_fraction": {
+      "name": "TracingConfig.sampling_fraction",
+      "go_type": "float64",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1223@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultTracingConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "TracingConfig.insecure": {
+      "name": "TracingConfig.insecure",
+      "go_type": "bool",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1223@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultTracingConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "TracingConfig.tls_config": {
+      "name": "TracingConfig.tls_config",
+      "go_type": "config.TLSConfig",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1223@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultTracingConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "TracingConfig.headers": {
+      "name": "TracingConfig.headers",
+      "go_type": "map[string]string",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1223@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultTracingConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "TracingConfig.compression": {
+      "name": "TracingConfig.compression",
+      "go_type": "string",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1223@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultTracingConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "TracingConfig.timeout": {
+      "name": "TracingConfig.timeout",
+      "go_type": "model.Duration",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1223@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultTracingConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "ExemplarsConfig.max_exemplars": {
+      "name": "ExemplarsConfig.max_exemplars",
+      "go_type": "int64",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1266@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultExemplarsConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "AlertingConfig.alert_relabel_configs": {
+      "name": "AlertingConfig.alert_relabel_configs",
+      "go_type": "[]*relabel.Config",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1273@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultAlertingConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "AlertingConfig.alertmanagers": {
+      "name": "AlertingConfig.alertmanagers",
+      "go_type": "AlertmanagerConfigs",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1273@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultAlertingConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "AlertmanagerConfig.sigv4": {
+      "name": "AlertmanagerConfig.sigv4",
+      "go_type": "*sigv4.SigV4Config",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1363@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultAlertmanagerConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "AlertmanagerConfig.scheme": {
+      "name": "AlertmanagerConfig.scheme",
+      "go_type": "string",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1363@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultAlertmanagerConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "AlertmanagerConfig.path_prefix": {
+      "name": "AlertmanagerConfig.path_prefix",
+      "go_type": "string",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1363@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultAlertmanagerConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "AlertmanagerConfig.timeout": {
+      "name": "AlertmanagerConfig.timeout",
+      "go_type": "model.Duration",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1363@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultAlertmanagerConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "AlertmanagerConfig.api_version": {
+      "name": "AlertmanagerConfig.api_version",
+      "go_type": "AlertmanagerAPIVersion",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1363@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultAlertmanagerConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "AlertmanagerConfig.relabel_configs": {
+      "name": "AlertmanagerConfig.relabel_configs",
+      "go_type": "[]*relabel.Config",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1363@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultAlertmanagerConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "AlertmanagerConfig.alert_relabel_configs": {
+      "name": "AlertmanagerConfig.alert_relabel_configs",
+      "go_type": "[]*relabel.Config",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1363@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultAlertmanagerConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "RemoteWriteConfig.url": {
+      "name": "RemoteWriteConfig.url",
+      "go_type": "*config.URL",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1482@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultRemoteWriteConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "RemoteWriteConfig.remote_timeout": {
+      "name": "RemoteWriteConfig.remote_timeout",
+      "go_type": "model.Duration",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1482@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultRemoteWriteConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "RemoteWriteConfig.headers": {
+      "name": "RemoteWriteConfig.headers",
+      "go_type": "map[string]string",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1482@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultRemoteWriteConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "RemoteWriteConfig.write_relabel_configs": {
+      "name": "RemoteWriteConfig.write_relabel_configs",
+      "go_type": "[]*relabel.Config",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1482@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultRemoteWriteConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "RemoteWriteConfig.name": {
+      "name": "RemoteWriteConfig.name",
+      "go_type": "string",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1482@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultRemoteWriteConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "RemoteWriteConfig.send_exemplars": {
+      "name": "RemoteWriteConfig.send_exemplars",
+      "go_type": "bool",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1482@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultRemoteWriteConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "RemoteWriteConfig.send_native_histograms": {
+      "name": "RemoteWriteConfig.send_native_histograms",
+      "go_type": "bool",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1482@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultRemoteWriteConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "RemoteWriteConfig.round_robin_dns": {
+      "name": "RemoteWriteConfig.round_robin_dns",
+      "go_type": "bool",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1482@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultRemoteWriteConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "RemoteWriteConfig.protobuf_message": {
+      "name": "RemoteWriteConfig.protobuf_message",
+      "go_type": "remoteapi.WriteMessageType",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1482@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultRemoteWriteConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "RemoteWriteConfig.queue_config": {
+      "name": "RemoteWriteConfig.queue_config",
+      "go_type": "QueueConfig",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1482@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultRemoteWriteConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "RemoteWriteConfig.metadata_config": {
+      "name": "RemoteWriteConfig.metadata_config",
+      "go_type": "MetadataConfig",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1482@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultRemoteWriteConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "RemoteWriteConfig.sigv4": {
+      "name": "RemoteWriteConfig.sigv4",
+      "go_type": "*sigv4.SigV4Config",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1482@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultRemoteWriteConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "RemoteWriteConfig.azuread": {
+      "name": "RemoteWriteConfig.azuread",
+      "go_type": "*azuread.AzureADConfig",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1482@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultRemoteWriteConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "RemoteWriteConfig.google_iam": {
+      "name": "RemoteWriteConfig.google_iam",
+      "go_type": "*googleiam.Config",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1482@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultRemoteWriteConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "QueueConfig.capacity": {
+      "name": "QueueConfig.capacity",
+      "go_type": "int",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1610@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultQueueConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "QueueConfig.max_shards": {
+      "name": "QueueConfig.max_shards",
+      "go_type": "int",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1610@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultQueueConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "QueueConfig.min_shards": {
+      "name": "QueueConfig.min_shards",
+      "go_type": "int",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1610@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultQueueConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "QueueConfig.max_samples_per_send": {
+      "name": "QueueConfig.max_samples_per_send",
+      "go_type": "int",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1610@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultQueueConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "QueueConfig.batch_send_deadline": {
+      "name": "QueueConfig.batch_send_deadline",
+      "go_type": "model.Duration",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1610@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultQueueConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "QueueConfig.min_backoff": {
+      "name": "QueueConfig.min_backoff",
+      "go_type": "model.Duration",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1610@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultQueueConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "QueueConfig.max_backoff": {
+      "name": "QueueConfig.max_backoff",
+      "go_type": "model.Duration",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1610@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultQueueConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "QueueConfig.retry_on_http_429": {
+      "name": "QueueConfig.retry_on_http_429",
+      "go_type": "bool",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1610@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultQueueConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "QueueConfig.sample_age_limit": {
+      "name": "QueueConfig.sample_age_limit",
+      "go_type": "model.Duration",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1610@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultQueueConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "MetadataConfig.send": {
+      "name": "MetadataConfig.send",
+      "go_type": "bool",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1661@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultMetadataConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "MetadataConfig.send_interval": {
+      "name": "MetadataConfig.send_interval",
+      "go_type": "model.Duration",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1661@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultMetadataConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "MetadataConfig.max_samples_per_send": {
+      "name": "MetadataConfig.max_samples_per_send",
+      "go_type": "int",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1661@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultMetadataConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "RemoteReadConfig.url": {
+      "name": "RemoteReadConfig.url",
+      "go_type": "*config.URL",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1677@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultRemoteReadConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "RemoteReadConfig.remote_timeout": {
+      "name": "RemoteReadConfig.remote_timeout",
+      "go_type": "model.Duration",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1677@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultRemoteReadConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "RemoteReadConfig.chunked_read_limit": {
+      "name": "RemoteReadConfig.chunked_read_limit",
+      "go_type": "uint64",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1677@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultRemoteReadConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "RemoteReadConfig.headers": {
+      "name": "RemoteReadConfig.headers",
+      "go_type": "map[string]string",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1677@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultRemoteReadConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "RemoteReadConfig.read_recent": {
+      "name": "RemoteReadConfig.read_recent",
+      "go_type": "bool",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1677@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultRemoteReadConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "RemoteReadConfig.name": {
+      "name": "RemoteReadConfig.name",
+      "go_type": "string",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1677@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultRemoteReadConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "RemoteReadConfig.required_matchers": {
+      "name": "RemoteReadConfig.required_matchers",
+      "go_type": "model.LabelSet",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1677@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultRemoteReadConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "RemoteReadConfig.filter_external_labels": {
+      "name": "RemoteReadConfig.filter_external_labels",
+      "go_type": "bool",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1677@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultRemoteReadConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "OTLPConfig.promote_all_resource_attributes": {
+      "name": "OTLPConfig.promote_all_resource_attributes",
+      "go_type": "bool",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1750@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultOTLPConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "OTLPConfig.promote_resource_attributes": {
+      "name": "OTLPConfig.promote_resource_attributes",
+      "go_type": "[]string",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1750@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultOTLPConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "OTLPConfig.ignore_resource_attributes": {
+      "name": "OTLPConfig.ignore_resource_attributes",
+      "go_type": "[]string",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1750@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultOTLPConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "OTLPConfig.translation_strategy": {
+      "name": "OTLPConfig.translation_strategy",
+      "go_type": "otlptranslator.TranslationStrategyOption",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1750@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultOTLPConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "OTLPConfig.keep_identifying_resource_attributes": {
+      "name": "OTLPConfig.keep_identifying_resource_attributes",
+      "go_type": "bool",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1750@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultOTLPConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "OTLPConfig.convert_histograms_to_nhcb": {
+      "name": "OTLPConfig.convert_histograms_to_nhcb",
+      "go_type": "bool",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1750@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultOTLPConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "OTLPConfig.promote_scope_metadata": {
+      "name": "OTLPConfig.promote_scope_metadata",
+      "go_type": "bool",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1750@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultOTLPConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "OTLPConfig.label_name_underscore_sanitization": {
+      "name": "OTLPConfig.label_name_underscore_sanitization",
+      "go_type": "bool",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1750@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultOTLPConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "OTLPConfig.label_name_preserve_multiple_underscores": {
+      "name": "OTLPConfig.label_name_preserve_multiple_underscores",
+      "go_type": "bool",
+      "classification": "nonsemantic-materialized-input-or-process",
+      "default_source": "config/config.go:1750@629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a",
+      "default_rule": "Explicit DefaultOTLPConfig initializer if present; otherwise Go zero value; UnmarshalYAML/Validate applies declared inheritance and validation. Main query-relevant defaults are resolved separately in this artifact.",
+      "reason": "Only GlobalConfig.evaluation_interval supplies the default subquery resolution. Remaining fields configure acquisition/retention/export/discovery/rule scheduling/transport/runtime rather than expression evaluation over identical supplied sample labels, values, timestamps, histogram and start timestamp metadata."
+    },
+    "primitive_identity": {
+      "source_audit": "audits/promql-primitives.json",
+      "sha256": "7ef60a7f685b9b29f2e2a12ef5a15531672060b1ab43427dcfa8d9ec673fa769",
+      "reference_go": "go1.26.10",
+      "unicode_edition": "15.0.0",
+      "compatibility_with_own_go": "Not assumed; versioned primitive implementation and observations remain mandatory."
+    }
+  },
+  "obligations": [
+    "promql-prometheus-3.13.5/aggregation/avg",
+    "promql-prometheus-3.13.5/aggregation/bottomk",
+    "promql-prometheus-3.13.5/aggregation/count",
+    "promql-prometheus-3.13.5/aggregation/count_values",
+    "promql-prometheus-3.13.5/aggregation/group",
+    "promql-prometheus-3.13.5/aggregation/limit_ratio",
+    "promql-prometheus-3.13.5/aggregation/limitk",
+    "promql-prometheus-3.13.5/aggregation/max",
+    "promql-prometheus-3.13.5/aggregation/min",
+    "promql-prometheus-3.13.5/aggregation/quantile",
+    "promql-prometheus-3.13.5/aggregation/stddev",
+    "promql-prometheus-3.13.5/aggregation/stdvar",
+    "promql-prometheus-3.13.5/aggregation/sum",
+    "promql-prometheus-3.13.5/aggregation/topk",
+    "promql-prometheus-3.13.5/annotation/BadBucketLabelWarning",
+    "promql-prometheus-3.13.5/annotation/HistogramCounterResetCollisionWarning",
+    "promql-prometheus-3.13.5/annotation/HistogramIgnoredInAggregationInfo",
+    "promql-prometheus-3.13.5/annotation/HistogramIgnoredInMixedRangeInfo",
+    "promql-prometheus-3.13.5/annotation/HistogramQuantileForcedMonotonicityInfo",
+    "promql-prometheus-3.13.5/annotation/IncompatibleBucketLayoutInBinOpWarning",
+    "promql-prometheus-3.13.5/annotation/IncompatibleTypesInBinOpInfo",
+    "promql-prometheus-3.13.5/annotation/InvalidQuantileWarning",
+    "promql-prometheus-3.13.5/annotation/InvalidRatioWarning",
+    "promql-prometheus-3.13.5/annotation/MismatchedCustomBucketsHistogramsInfo",
+    "promql-prometheus-3.13.5/annotation/MixedClassicNativeHistogramsWarning",
+    "promql-prometheus-3.13.5/annotation/MixedExponentialCustomHistogramsWarning",
+    "promql-prometheus-3.13.5/annotation/MixedFloatsHistogramsWarning",
+    "promql-prometheus-3.13.5/annotation/NativeHistogramFractionNaNsInfo",
+    "promql-prometheus-3.13.5/annotation/NativeHistogramNotCounterWarning",
+    "promql-prometheus-3.13.5/annotation/NativeHistogramNotGaugeWarning",
+    "promql-prometheus-3.13.5/annotation/NativeHistogramQuantileNaNResultInfo",
+    "promql-prometheus-3.13.5/annotation/NativeHistogramQuantileNaNSkewInfo",
+    "promql-prometheus-3.13.5/annotation/PossibleNonCounterInfo",
+    "promql-prometheus-3.13.5/annotation/PossibleNonCounterLabelInfo",
+    "promql-prometheus-3.13.5/annotation/SortInRangeQueryWarning",
+    "promql-prometheus-3.13.5/configuration/protocols",
+    "promql-prometheus-3.13.5/configuration/query-options",
+    "promql-prometheus-3.13.5/configuration/scrape-inheritance",
+    "promql-prometheus-3.13.5/diagnostic/accumulation",
+    "promql-prometheus-3.13.5/duration-form/max_of",
+    "promql-prometheus-3.13.5/duration-form/min_of",
+    "promql-prometheus-3.13.5/duration-form/range",
+    "promql-prometheus-3.13.5/duration-form/step",
+    "promql-prometheus-3.13.5/error/cancel",
+    "promql-prometheus-3.13.5/error/disabled-gate",
+    "promql-prometheus-3.13.5/error/duplicate-labelset",
+    "promql-prometheus-3.13.5/error/feature-validation",
+    "promql-prometheus-3.13.5/error/invalid-parameter",
+    "promql-prometheus-3.13.5/error/lexical",
+    "promql-prometheus-3.13.5/error/many-to-many",
+    "promql-prometheus-3.13.5/error/multiple-match",
+    "promql-prometheus-3.13.5/error/regex-label",
+    "promql-prometheus-3.13.5/error/sample-budget",
+    "promql-prometheus-3.13.5/error/storage",
+    "promql-prometheus-3.13.5/error/syntax",
+    "promql-prometheus-3.13.5/error/time-modifier",
+    "promql-prometheus-3.13.5/error/timeout",
+    "promql-prometheus-3.13.5/error/type-arity",
+    "promql-prometheus-3.13.5/fact/absent-derived-labels",
+    "promql-prometheus-3.13.5/fact/aggregation-parameters",
+    "promql-prometheus-3.13.5/fact/classic-quantile",
+    "promql-prometheus-3.13.5/fact/delayed-name-range-merge",
+    "promql-prometheus-3.13.5/fact/duration-runtime",
+    "promql-prometheus-3.13.5/fact/extended-endpoints",
+    "promql-prometheus-3.13.5/fact/extended-root-context",
+    "promql-prometheus-3.13.5/fact/fill-operands",
+    "promql-prometheus-3.13.5/fact/float-sum-mean",
+    "promql-prometheus-3.13.5/fact/histogram-layout-pin",
+    "promql-prometheus-3.13.5/fact/histogram-rate-zero-cap",
+    "promql-prometheus-3.13.5/fact/histogram-reset",
+    "promql-prometheus-3.13.5/fact/histogram-scale",
+    "promql-prometheus-3.13.5/fact/histogram-variance",
+    "promql-prometheus-3.13.5/fact/info-join",
+    "promql-prometheus-3.13.5/fact/instant-latest-two",
+    "promql-prometheus-3.13.5/fact/lookback-boundary",
+    "promql-prometheus-3.13.5/fact/matching-labels",
+    "promql-prometheus-3.13.5/fact/mixed-range-annotations",
+    "promql-prometheus-3.13.5/fact/native-fraction",
+    "promql-prometheus-3.13.5/fact/native-quantile",
+    "promql-prometheus-3.13.5/fact/native-quantile-nans",
+    "promql-prometheus-3.13.5/fact/number-conversion",
+    "promql-prometheus-3.13.5/fact/quantile-tolerance",
+    "promql-prometheus-3.13.5/fact/quantile-values",
+    "promql-prometheus-3.13.5/fact/rate-extrapolation",
+    "promql-prometheus-3.13.5/fact/regression",
+    "promql-prometheus-3.13.5/fact/reserved-name-removal",
+    "promql-prometheus-3.13.5/fact/round-clamp",
+    "promql-prometheus-3.13.5/fact/sample-budget",
+    "promql-prometheus-3.13.5/fact/scalar-sample-kind",
+    "promql-prometheus-3.13.5/fact/smoothing",
+    "promql-prometheus-3.13.5/fact/start-timestamp-reset",
+    "promql-prometheus-3.13.5/fact/string-escapes",
+    "promql-prometheus-3.13.5/fact/subquery-alignment",
+    "promql-prometheus-3.13.5/fact/subquery-histogram-hints",
+    "promql-prometheus-3.13.5/fact/trim-finite-buckets",
+    "promql-prometheus-3.13.5/fact/trim-infinity-crossing",
+    "promql-prometheus-3.13.5/fact/trim-zero-infinite",
+    "promql-prometheus-3.13.5/fact/type-unit-feature",
+    "promql-prometheus-3.13.5/fact/utc-calendar",
+    "promql-prometheus-3.13.5/function/abs",
+    "promql-prometheus-3.13.5/function/absent",
+    "promql-prometheus-3.13.5/function/absent_over_time",
+    "promql-prometheus-3.13.5/function/acos",
+    "promql-prometheus-3.13.5/function/acosh",
+    "promql-prometheus-3.13.5/function/asin",
+    "promql-prometheus-3.13.5/function/asinh",
+    "promql-prometheus-3.13.5/function/atan",
+    "promql-prometheus-3.13.5/function/atanh",
+    "promql-prometheus-3.13.5/function/avg_over_time",
+    "promql-prometheus-3.13.5/function/ceil",
+    "promql-prometheus-3.13.5/function/changes",
+    "promql-prometheus-3.13.5/function/clamp",
+    "promql-prometheus-3.13.5/function/clamp_max",
+    "promql-prometheus-3.13.5/function/clamp_min",
+    "promql-prometheus-3.13.5/function/cos",
+    "promql-prometheus-3.13.5/function/cosh",
+    "promql-prometheus-3.13.5/function/count_over_time",
+    "promql-prometheus-3.13.5/function/day_of_month",
+    "promql-prometheus-3.13.5/function/day_of_week",
+    "promql-prometheus-3.13.5/function/day_of_year",
+    "promql-prometheus-3.13.5/function/days_in_month",
+    "promql-prometheus-3.13.5/function/deg",
+    "promql-prometheus-3.13.5/function/delta",
+    "promql-prometheus-3.13.5/function/deriv",
+    "promql-prometheus-3.13.5/function/double_exponential_smoothing",
+    "promql-prometheus-3.13.5/function/end",
+    "promql-prometheus-3.13.5/function/exp",
+    "promql-prometheus-3.13.5/function/first_over_time",
+    "promql-prometheus-3.13.5/function/floor",
+    "promql-prometheus-3.13.5/function/histogram_avg",
+    "promql-prometheus-3.13.5/function/histogram_count",
+    "promql-prometheus-3.13.5/function/histogram_fraction",
+    "promql-prometheus-3.13.5/function/histogram_quantile",
+    "promql-prometheus-3.13.5/function/histogram_quantiles",
+    "promql-prometheus-3.13.5/function/histogram_stddev",
+    "promql-prometheus-3.13.5/function/histogram_stdvar",
+    "promql-prometheus-3.13.5/function/histogram_sum",
+    "promql-prometheus-3.13.5/function/hour",
+    "promql-prometheus-3.13.5/function/idelta",
+    "promql-prometheus-3.13.5/function/increase",
+    "promql-prometheus-3.13.5/function/info",
+    "promql-prometheus-3.13.5/function/irate",
+    "promql-prometheus-3.13.5/function/label_join",
+    "promql-prometheus-3.13.5/function/label_replace",
+    "promql-prometheus-3.13.5/function/last_over_time",
+    "promql-prometheus-3.13.5/function/ln",
+    "promql-prometheus-3.13.5/function/log10",
+    "promql-prometheus-3.13.5/function/log2",
+    "promql-prometheus-3.13.5/function/mad_over_time",
+    "promql-prometheus-3.13.5/function/max_of",
+    "promql-prometheus-3.13.5/function/max_over_time",
+    "promql-prometheus-3.13.5/function/min_of",
+    "promql-prometheus-3.13.5/function/min_over_time",
+    "promql-prometheus-3.13.5/function/minute",
+    "promql-prometheus-3.13.5/function/month",
+    "promql-prometheus-3.13.5/function/pi",
+    "promql-prometheus-3.13.5/function/predict_linear",
+    "promql-prometheus-3.13.5/function/present_over_time",
+    "promql-prometheus-3.13.5/function/quantile_over_time",
+    "promql-prometheus-3.13.5/function/rad",
+    "promql-prometheus-3.13.5/function/range",
+    "promql-prometheus-3.13.5/function/rate",
+    "promql-prometheus-3.13.5/function/resets",
+    "promql-prometheus-3.13.5/function/round",
+    "promql-prometheus-3.13.5/function/scalar",
+    "promql-prometheus-3.13.5/function/sgn",
+    "promql-prometheus-3.13.5/function/sin",
+    "promql-prometheus-3.13.5/function/sinh",
+    "promql-prometheus-3.13.5/function/sort",
+    "promql-prometheus-3.13.5/function/sort_by_label",
+    "promql-prometheus-3.13.5/function/sort_by_label_desc",
+    "promql-prometheus-3.13.5/function/sort_desc",
+    "promql-prometheus-3.13.5/function/sqrt",
+    "promql-prometheus-3.13.5/function/start",
+    "promql-prometheus-3.13.5/function/stddev_over_time",
+    "promql-prometheus-3.13.5/function/stdvar_over_time",
+    "promql-prometheus-3.13.5/function/step",
+    "promql-prometheus-3.13.5/function/sum_over_time",
+    "promql-prometheus-3.13.5/function/tan",
+    "promql-prometheus-3.13.5/function/tanh",
+    "promql-prometheus-3.13.5/function/time",
+    "promql-prometheus-3.13.5/function/timestamp",
+    "promql-prometheus-3.13.5/function/ts_of_first_over_time",
+    "promql-prometheus-3.13.5/function/ts_of_last_over_time",
+    "promql-prometheus-3.13.5/function/ts_of_max_over_time",
+    "promql-prometheus-3.13.5/function/ts_of_min_over_time",
+    "promql-prometheus-3.13.5/function/vector",
+    "promql-prometheus-3.13.5/function/year",
+    "promql-prometheus-3.13.5/grammar/aggregate_expr",
+    "promql-prometheus-3.13.5/grammar/aggregate_modifier",
+    "promql-prometheus-3.13.5/grammar/aggregate_op",
+    "promql-prometheus-3.13.5/grammar/anchored_expr",
+    "promql-prometheus-3.13.5/grammar/at_modifier_preprocessors",
+    "promql-prometheus-3.13.5/grammar/bin_modifier",
+    "promql-prometheus-3.13.5/grammar/binary_expr",
+    "promql-prometheus-3.13.5/grammar/bool_modifier",
+    "promql-prometheus-3.13.5/grammar/duration_expr",
+    "promql-prometheus-3.13.5/grammar/expr",
+    "promql-prometheus-3.13.5/grammar/fill_modifiers",
+    "promql-prometheus-3.13.5/grammar/fill_value",
+    "promql-prometheus-3.13.5/grammar/function_call",
+    "promql-prometheus-3.13.5/grammar/function_call_args",
+    "promql-prometheus-3.13.5/grammar/function_call_body",
+    "promql-prometheus-3.13.5/grammar/group_modifiers",
+    "promql-prometheus-3.13.5/grammar/grouping_label",
+    "promql-prometheus-3.13.5/grammar/grouping_label_list",
+    "promql-prometheus-3.13.5/grammar/grouping_labels",
+    "promql-prometheus-3.13.5/grammar/label_match_list",
+    "promql-prometheus-3.13.5/grammar/label_matcher",
+    "promql-prometheus-3.13.5/grammar/label_matchers",
+    "promql-prometheus-3.13.5/grammar/match_op",
+    "promql-prometheus-3.13.5/grammar/matrix_selector",
+    "promql-prometheus-3.13.5/grammar/max_of_min_of",
+    "promql-prometheus-3.13.5/grammar/maybe_grouping_labels",
+    "promql-prometheus-3.13.5/grammar/maybe_label",
+    "promql-prometheus-3.13.5/grammar/metric_identifier",
+    "promql-prometheus-3.13.5/grammar/number",
+    "promql-prometheus-3.13.5/grammar/number_duration_literal",
+    "promql-prometheus-3.13.5/grammar/offset_duration_expr",
+    "promql-prometheus-3.13.5/grammar/offset_expr",
+    "promql-prometheus-3.13.5/grammar/on_or_ignoring",
+    "promql-prometheus-3.13.5/grammar/paren_duration_expr",
+    "promql-prometheus-3.13.5/grammar/paren_expr",
+    "promql-prometheus-3.13.5/grammar/positive_duration_expr",
+    "promql-prometheus-3.13.5/grammar/signed_number",
+    "promql-prometheus-3.13.5/grammar/signed_or_unsigned_number",
+    "promql-prometheus-3.13.5/grammar/smoothed_expr",
+    "promql-prometheus-3.13.5/grammar/start",
+    "promql-prometheus-3.13.5/grammar/step_invariant_expr",
+    "promql-prometheus-3.13.5/grammar/string_identifier",
+    "promql-prometheus-3.13.5/grammar/string_literal",
+    "promql-prometheus-3.13.5/grammar/subquery_expr",
+    "promql-prometheus-3.13.5/grammar/unary_expr",
+    "promql-prometheus-3.13.5/grammar/unary_op",
+    "promql-prometheus-3.13.5/grammar/vector_selector",
+    "promql-prometheus-3.13.5/modifier/fill-typecheck",
+    "promql-prometheus-3.13.5/numeric/abs",
+    "promql-prometheus-3.13.5/numeric/acos",
+    "promql-prometheus-3.13.5/numeric/acosh",
+    "promql-prometheus-3.13.5/numeric/asin",
+    "promql-prometheus-3.13.5/numeric/asinh",
+    "promql-prometheus-3.13.5/numeric/atan",
+    "promql-prometheus-3.13.5/numeric/atanh",
+    "promql-prometheus-3.13.5/numeric/ceil",
+    "promql-prometheus-3.13.5/numeric/cos",
+    "promql-prometheus-3.13.5/numeric/cosh",
+    "promql-prometheus-3.13.5/numeric/deg",
+    "promql-prometheus-3.13.5/numeric/exp",
+    "promql-prometheus-3.13.5/numeric/floor",
+    "promql-prometheus-3.13.5/numeric/ln",
+    "promql-prometheus-3.13.5/numeric/log10",
+    "promql-prometheus-3.13.5/numeric/log2",
+    "promql-prometheus-3.13.5/numeric/rad",
+    "promql-prometheus-3.13.5/numeric/sgn",
+    "promql-prometheus-3.13.5/numeric/sin",
+    "promql-prometheus-3.13.5/numeric/sinh",
+    "promql-prometheus-3.13.5/numeric/sqrt",
+    "promql-prometheus-3.13.5/numeric/tan",
+    "promql-prometheus-3.13.5/operator/add/float-float",
+    "promql-prometheus-3.13.5/operator/add/float-histogram",
+    "promql-prometheus-3.13.5/operator/add/histogram-float",
+    "promql-prometheus-3.13.5/operator/add/histogram-histogram",
+    "promql-prometheus-3.13.5/operator/and",
+    "promql-prometheus-3.13.5/operator/atan2/float-float",
+    "promql-prometheus-3.13.5/operator/atan2/float-histogram",
+    "promql-prometheus-3.13.5/operator/atan2/histogram-float",
+    "promql-prometheus-3.13.5/operator/atan2/histogram-histogram",
+    "promql-prometheus-3.13.5/operator/div/float-float",
+    "promql-prometheus-3.13.5/operator/div/float-histogram",
+    "promql-prometheus-3.13.5/operator/div/histogram-float",
+    "promql-prometheus-3.13.5/operator/div/histogram-histogram",
+    "promql-prometheus-3.13.5/operator/eq/float-float",
+    "promql-prometheus-3.13.5/operator/eq/float-histogram",
+    "promql-prometheus-3.13.5/operator/eq/histogram-float",
+    "promql-prometheus-3.13.5/operator/eq/histogram-histogram",
+    "promql-prometheus-3.13.5/operator/ge/float-float",
+    "promql-prometheus-3.13.5/operator/ge/float-histogram",
+    "promql-prometheus-3.13.5/operator/ge/histogram-float",
+    "promql-prometheus-3.13.5/operator/ge/histogram-histogram",
+    "promql-prometheus-3.13.5/operator/gt/float-float",
+    "promql-prometheus-3.13.5/operator/gt/float-histogram",
+    "promql-prometheus-3.13.5/operator/gt/histogram-float",
+    "promql-prometheus-3.13.5/operator/gt/histogram-histogram",
+    "promql-prometheus-3.13.5/operator/le/float-float",
+    "promql-prometheus-3.13.5/operator/le/float-histogram",
+    "promql-prometheus-3.13.5/operator/le/histogram-float",
+    "promql-prometheus-3.13.5/operator/le/histogram-histogram",
+    "promql-prometheus-3.13.5/operator/lt/float-float",
+    "promql-prometheus-3.13.5/operator/lt/float-histogram",
+    "promql-prometheus-3.13.5/operator/lt/histogram-float",
+    "promql-prometheus-3.13.5/operator/lt/histogram-histogram",
+    "promql-prometheus-3.13.5/operator/mod/float-float",
+    "promql-prometheus-3.13.5/operator/mod/float-histogram",
+    "promql-prometheus-3.13.5/operator/mod/histogram-float",
+    "promql-prometheus-3.13.5/operator/mod/histogram-histogram",
+    "promql-prometheus-3.13.5/operator/mul/float-float",
+    "promql-prometheus-3.13.5/operator/mul/float-histogram",
+    "promql-prometheus-3.13.5/operator/mul/histogram-float",
+    "promql-prometheus-3.13.5/operator/mul/histogram-histogram",
+    "promql-prometheus-3.13.5/operator/ne/float-float",
+    "promql-prometheus-3.13.5/operator/ne/float-histogram",
+    "promql-prometheus-3.13.5/operator/ne/histogram-float",
+    "promql-prometheus-3.13.5/operator/ne/histogram-histogram",
+    "promql-prometheus-3.13.5/operator/or",
+    "promql-prometheus-3.13.5/operator/pow/float-float",
+    "promql-prometheus-3.13.5/operator/pow/float-histogram",
+    "promql-prometheus-3.13.5/operator/pow/histogram-float",
+    "promql-prometheus-3.13.5/operator/pow/histogram-histogram",
+    "promql-prometheus-3.13.5/operator/sub/float-float",
+    "promql-prometheus-3.13.5/operator/sub/float-histogram",
+    "promql-prometheus-3.13.5/operator/sub/histogram-float",
+    "promql-prometheus-3.13.5/operator/sub/histogram-histogram",
+    "promql-prometheus-3.13.5/operator/trim-lower",
+    "promql-prometheus-3.13.5/operator/trim-upper",
+    "promql-prometheus-3.13.5/operator/unless",
+    "promql-prometheus-3.13.5/primitive/anchoring-captures-replacement",
+    "promql-prometheus-3.13.5/primitive/ascii-classes-boundaries",
+    "promql-prometheus-3.13.5/primitive/backend-dialect",
+    "promql-prometheus-3.13.5/primitive/matcher-optimization-fold-length",
+    "promql-prometheus-3.13.5/primitive/normalization-version-selection",
+    "promql-prometheus-3.13.5/primitive/property-name-acceptance",
+    "promql-prometheus-3.13.5/primitive/simple-fold-version",
+    "promql-prometheus-3.13.5/primitive/unicode-table-membership",
+    "promql-prometheus-3.13.5/primitive/utf8-runtime-semantics",
+    "promql-prometheus-3.13.5/semantics/annotations",
+    "promql-prometheus-3.13.5/semantics/arithmetic",
+    "promql-prometheus-3.13.5/semantics/at-offset",
+    "promql-prometheus-3.13.5/semantics/comparison",
+    "promql-prometheus-3.13.5/semantics/duration-expression",
+    "promql-prometheus-3.13.5/semantics/errors",
+    "promql-prometheus-3.13.5/semantics/extended-range",
+    "promql-prometheus-3.13.5/semantics/fill",
+    "promql-prometheus-3.13.5/semantics/grid",
+    "promql-prometheus-3.13.5/semantics/histogram-layout",
+    "promql-prometheus-3.13.5/semantics/ieee",
+    "promql-prometheus-3.13.5/semantics/lexical",
+    "promql-prometheus-3.13.5/semantics/lookback",
+    "promql-prometheus-3.13.5/semantics/name-removal",
+    "promql-prometheus-3.13.5/semantics/ordering",
+    "promql-prometheus-3.13.5/semantics/precedence",
+    "promql-prometheus-3.13.5/semantics/range-window",
+    "promql-prometheus-3.13.5/semantics/selector",
+    "promql-prometheus-3.13.5/semantics/set-operators",
+    "promql-prometheus-3.13.5/semantics/start-timestamps",
+    "promql-prometheus-3.13.5/semantics/subquery",
+    "promql-prometheus-3.13.5/semantics/vector-match",
+    "promql-prometheus-3.13.5/type/instant-vector",
+    "promql-prometheus-3.13.5/type/range-vector",
+    "promql-prometheus-3.13.5/type/scalar",
+    "promql-prometheus-3.13.5/type/string"
+  ],
+  "complete": true,
+  "configuration_source_refs": [
+    {
+      "path": "config/config.go",
+      "sha256": "629498030714922f585aa2414bce578377b3fa9dc587f001fca658ae83c42a9a"
+    },
+    {
+      "path": "cmd/prometheus/main.go",
+      "sha256": "1ed01d530b9c053ab4e3d7700b50ec5690e15fa63b0347a0e0dad6496c040228"
+    }
+  ],
+  "inventory_scope_status": "Factual inventory accepted from hash-locked audits; production coverage and release acceptance remain false."
+}
