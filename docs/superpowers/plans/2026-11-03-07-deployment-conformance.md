@@ -46,6 +46,8 @@
 
 **Files:** Create `deploy/compose.distributed.yaml`, `deploy/helm/soundpost/{Chart.yaml,values.yaml,templates/statefulset.yaml,templates/service.yaml,templates/secrets.yaml,templates/networkpolicy.yaml,templates/pdb.yaml}`, `internal/config/{validate,placement,backup}.go`, `internal/config/validate_test.go`, `docs/operations/{distributed,upgrade,backup-authority}.md`.
 
+`docs/operations/distributed.md` already belongs to plan01 Task6: modify its real deployment instructions, never recreate or overwrite that earlier implementation evidence.
+
 Task2 wires plan04's optional helper/seccomp profile into Compose/Helm rather than granting server privileges. Add `TestNativeRecipeSeparatesHelperAndServerPermissions`: server/exporter cannot perf-open; helper requires explicit PERFMON plus audited seccomp/LSM/tracefs/target visibility, no privileged/unconfined/SYS_ADMIN fallback. Verify actual runtime behavior in install-distributed/qualification, not manifest text alone. Systemd helper and Kubernetes Localhost seccomp/host-path/PID exceptions need documented operator setup; denied deployment leaves capability denied, not zero/off-CPU-complete. Record host kernel because container tags cannot supply6.1/6.6 kernels.
 
 **Interfaces:** `config.Validate(InstallConfig) error` requires distinct durable member identities/volumes, RF3, mTLS trust, C12 restore authority capabilities when off-host backup is enabled. `InstallConfig` typed YAML has mode, nodes/failure domains, disks, listen/public origins, source policies, quotas, retention, backup/authority and optional collector grants. Safe logs redact secret references and credentials.
@@ -99,6 +101,7 @@ Task3 additionally creates `internal/sources/scrape.go`/`scrape_test.go`: `Fetch
 - [ ] Write `TestQualificationCannotPromoteUnsupportedToZero` and `TestPrivacyCanaryFindsPrebufferLeak`: a Firefox/Safari unavailable sampler cannot show zero CPU; a secret materialized in the recorder/export queue fails even if network is scrubbed. Native no-stack-byte config and actual stored/exported records must both be inspected.
 - [ ] Run `go test ./tools/qualify -run 'TestQualification|TestPrivacyCanary' -count=1`; verify red.
 - [ ] Implement real runtime hooks/concurrency/fatal/worker/coexistence cases, canary instrumentation and measured with/without budgets from design section13. Exercise Linux CPU loops, blocked sleeps/I/O, runqueue contention, PID reuse/namespace/CPU hotplug and permission failures. Do not benchmark timers as samplers or extrapolate one architecture's pass to another.
+- [ ] Required native rows reject staged `acquisition_pending` or empty-success sampler implementations; runtime-only/timer evidence cannot substitute for real native CPU/off-CPU capture. Preserve separate permission-denied/unsupported results rather than promote them to passing qualification.
 - [ ] Run matrix and publish exact build IDs, raw safe measurement series, requested/observed intervals, loss/coverage and limits. A missed budget blocks the claim or needs explicit owner revision; no scope downgrade. Commit `test(qualification): Measure capture privacy coverage and overhead`.
 
 ### Task7: Pipeline outage, partitions, deletion/restore and external deadman drills
