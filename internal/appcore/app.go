@@ -10,6 +10,7 @@ import (
 	"soundpost/internal/artifacts"
 	"soundpost/internal/auth"
 	"soundpost/internal/control"
+	"soundpost/internal/exports"
 	"soundpost/internal/httpapi"
 	"soundpost/internal/ingest"
 	"soundpost/internal/model"
@@ -26,6 +27,8 @@ type App struct {
 	Ingest      *ingest.Service
 	Releases    *releases.Service
 	Artifacts   *artifacts.Service
+	Cache       *auth.Cache
+	Exports     *exports.Service
 	replication *replicatedApp
 }
 
@@ -62,7 +65,15 @@ func open(dir string, options *replicationOptions) (*App, error) {
 		c.Close()
 		return nil, e
 	}
-	fail := func(err error) (*App, error) { engine.Close(); c.Close(); return nil, err }
+	var exportService *exports.Service
+	fail := func(err error) (*App, error) {
+		if exportService != nil {
+			exportService.Close()
+		}
+		engine.Close()
+		c.Close()
+		return nil, err
+	}
 	if e = c.BindAdmissionOwner(engine); e != nil {
 		return fail(e)
 	}
@@ -81,7 +92,18 @@ func open(dir string, options *replicationOptions) (*App, error) {
 	if e != nil {
 		return fail(e)
 	}
-	out := &App{Control: c, Auth: a, Storage: engine, Ingest: i, Releases: r, Artifacts: artifactService}
+	// Until a retention service owns historical-range and entity deletion, the
+	// delete generation is derived from authoritative revoked/retired sources.
+	cache, e := auth.NewCache(a, a.SourceLifecycleGenerations(), 4096, time.Minute)
+	if e != nil {
+		return fail(e)
+	}
+	exportService, e = exports.New(a, cache, a.SourceLifecycleGenerations(), engine)
+	if e != nil {
+		exportService = nil
+		return fail(e)
+	}
+	out := &App{Control: c, Auth: a, Storage: engine, Ingest: i, Releases: r, Artifacts: artifactService, Cache: cache, Exports: exportService}
 	startupTimeout := 20 * time.Second
 	if options != nil {
 		startupTimeout = 60 * time.Second
@@ -110,6 +132,7 @@ func open(dir string, options *replicationOptions) (*App, error) {
 }
 func (a *App) Close() error {
 	replicationErr := a.CloseReplication()
+	a.Exports.Close()
 	e := a.Storage.Close()
 	other := a.Control.Close()
 	if e != nil {
@@ -122,6 +145,8 @@ func (a *App) Close() error {
 }
 func (a *App) Register(mux *http.ServeMux) {
 	httpapi.RegisterIngestRoutes(mux, a.Auth, a.Ingest)
+	httpapi.RegisterCapabilityRoutes(mux, a.Auth)
+	httpapi.RegisterExportRoutes(mux, a.Auth, a.Exports)
 	a.RegisterArtifactRoutes(mux)
 }
 func (a *App) RunFences(ctx context.Context) {

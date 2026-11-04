@@ -29,6 +29,7 @@ func (s *Service) AuthorizeRestrictedSource(ctx context.Context, c Credential, o
 			return model.Fail(model.NotFound)
 		}
 		scope.sources = []model.ID{source}
+		scope.fingerprint = hashToken(scope.fingerprint + "|selected_source:" + source.String())
 		return nil
 	})
 	if e != nil {

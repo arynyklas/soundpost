@@ -57,6 +57,9 @@ func run() (err error) {
 		case "privacy-admission":
 			smoke, stage = "privacy_admission", "privacy_dispatch"
 			return runDurable(os.Args[2:], os.Args[1])
+		case "isolation":
+			smoke, stage = "isolation", "isolation_dispatch"
+			return RunIsolation(os.Args[2:])
 		}
 	}
 	if len(os.Args) >= 2 && os.Args[1] == "source-map" {
