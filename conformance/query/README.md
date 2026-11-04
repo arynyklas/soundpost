@@ -74,3 +74,34 @@ go run ./cmd/soundpost-querycheck compare --phase pipeline --profiles logql-loki
 ```
 
 The other phases are `evaluation` (PromQL), `logql-template` and `logql-metric`.
+
+## Docker-free replay of recorded observations
+
+The comparator needs the oracle images, which not every environment has. Native
+results for the metric (LogQL) and evaluation (PromQL) phases are therefore also
+recorded as offline testdata, and ordinary `go test` replays them through the same
+production comparator:
+
+- `internal/conformance/query/testdata/native-metric-observations.json`
+  (`TestOwnedMatchesRecordedNativeMetricObservations`);
+- `internal/conformance/query/testdata/native-promql-observations.json`
+  (`TestOwnedMatchesRecordedNativeEvaluationObservations`).
+
+Each row names the exact profile and enabled features it was observed under. Where
+a native error text had no semantic family when it was recorded, `error.id` was
+projected with the same rules as the oracle driver source. Both tests carry a row
+floor so recorded evidence cannot silently shrink. They complement, and never
+replace, the live `--require-locked` runs above.
+
+## Native tie order is nondeterministic
+
+`topk`/`bottomk` over tied values return different series on repeated native runs
+(Go map order). Soundpost orders ties deterministically by label order, and rows
+whose native result varied across repeated runs are excluded from every corpus.
+
+## Build network
+
+The PromQL oracle builds fetch Go modules. When the build container cannot reach
+the module proxy ("connection refused"), the build fails although the host can;
+retry, because the failure has been intermittent. The pinned Dockerfiles are not
+edited to work around it.

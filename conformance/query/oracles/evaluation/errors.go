@@ -81,6 +81,12 @@ func classifyNativeError(message string) string {
 		return "binary.many-to-many"
 	case strings.HasPrefix(message, "multiple matches for labels:"):
 		return "binary.matching-cardinality"
+	case strings.Contains(message, " modifier can only be used with: "):
+		return "function.range-extension"
+	case strings.HasSuffix(message, " modifier is not supported for subqueries"):
+		return "range.extension-subquery"
+	case strings.HasPrefix(message, "Scalar value ") && strings.HasSuffix(message, " overflows int64"):
+		return "aggregation.parameter-range"
 	case message == "vector cannot contain metrics with the same labelset" || message == "matrix cannot contain metrics with the same labelset":
 		return "result.duplicate-labelset"
 	case strings.HasPrefix(message, "invalid expression type ") && strings.HasSuffix(message, " for range query, must be Scalar or instant Vector"):

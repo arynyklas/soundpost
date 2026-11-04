@@ -38,6 +38,11 @@ var nativeScannerEscapeError = regexp.MustCompile(`^parse error at line [1-9][0-
 // exposes no position.
 var nativeFloatLiteralError = regexp.MustCompile(`^parse error : unable to parse (?:literal|vectorExpr) as a float: strconv\.ParseFloat: parsing ".*": (?:invalid syntax|value out of range)$`)
 
+// nativeAggregationParameterError matches the native parser's reduction-time
+// rejection of a topk/bottomk parameter that is not a positive integer literal.
+// It exposes no position.
+var nativeAggregationParameterError = regexp.MustCompile(`^parse error : invalid parameter(?: \(must be greater than 0\))? [a-z_]+\(.*$`)
+
 // classifyNativeParseMessage projects the fixed constructor wording of native
 // parse-stage errors that carry no exported identity onto semantic families.
 // It returns the family and, only when the native text itself exposes a position,
@@ -63,6 +68,9 @@ func classifyNativeParseMessage(text string) (semantic string, start *int) {
 	}
 	if nativeFloatLiteralError.MatchString(text) {
 		return "syntax.number", nil
+	}
+	if nativeAggregationParameterError.MatchString(text) {
+		return "function.arguments", nil
 	}
 	switch {
 	case strings.Contains(text, ": named captures are not allowed"):
