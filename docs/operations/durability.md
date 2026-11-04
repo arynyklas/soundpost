@@ -4,6 +4,12 @@ Copyright 2026 Aryn Yklas. SPDX-License-Identifier: Apache-2.0.
 
 This implementation owns a single-host, non-HA telemetry WAL and ordered apply state. It is not a claim of implemented Raft, snapshots, segments, physical retention/deletion, backup, restore reconciliation or a qualified power-loss guarantee. Those later gates remain mandatory. Do not enable a distributed deployment by treating the current local lock or fsync as a quorum.
 
+## Explicit control activation at the 01.06 cutover
+
+Opening a control database does not activate a feature write path. Store.Update is unavailable until the actual Raft authority is enabled; no generic local feature-ACK fallback is allowed. Before activation, auth.NewService may only prepare and seal random bearer material and invoke the narrow InitializeBearerHashKey transition on pristine bootstrap state. Existing initialized/versioned authority is never overwritten or regenerated; a missing installed root is corrupt even when the token set is empty.
+
+Auth-only HTTPS/CLI/test compositions explicitly call Store.EnableSingle(ctx, persistentRaftDirectory) after NewService and before Bootstrap, login mutations, administrative writes or other feature traffic. This enables a real one-voter group, not an in-memory fixture. Store.Close owns its group/loopback lifecycle. Restart must reuse the same Raft directory. Full application composition uses its actual control-plus-data activation, then publishes data-initialized state; neither constructor order nor a fixture may acknowledge features before that activation. These setup requirements are distinct from HA/power-loss qualification.
+
 ## What an intake acknowledgement waits for
 
 1. Current source credential, scope, registered privacy policy, every record owner and the whole batch are validated.
@@ -47,6 +53,10 @@ Require an operator-owned private data directory, appropriately restricted host/
 A source policy/revocation operation first commits closing state. The real installed owner drains prior ordered work and fsyncs a barrier to every one of the 64 slots. Only after all durable cursors are recorded does control mark complete. Startup resumes pending source barriers before opening intake. Unavailable groups block completion. Concurrent changes to an already closing source fail instead of overwriting an unfinished saga. Operation history is retained separately from the current source fence.
 
 Cancellation is a distinct durable data entry: while holding the same order lock as append, the owner proves no receipt exists and commits a permanent reservation no-use fence. Control accepts only that installed owner's exact persisted proof, then commits the refund. An append or consumed reservation cannot be cancelled. TTLs and router death are not proofs. Retention/deletion live-charge release and backup/restore reconciliation certificates are later work, not an implied lazy refund.
+
+The one-voter no-commit proof is safe only with the complete recovered ordered prefix plus the fault latch that prevents cancellation after uncertain append/apply errors. A Raft owner at 01.06 must replace that argument with commit-set-watermark evidence including committed-but-unapplied proposals; an absent applied receipt is not sufficient. Lock order is engine order mutex → control read. Owner verification must finish before a control write starts; no control Update/Transact/apply callback may call back into the engine.
+
+Source authority failures use the same content-free forbidden/403 result for invalid, missing, expired or revoked credentials on admission and historical receipts. This does not change browser-session or server/API-token authentication. Historical denial never creates a new write, reservation or data resurrection.
 
 ## Parent-owned checks and qualification
 

@@ -44,14 +44,14 @@ func RegisterTokenRoutes(mux *http.ServeMux, s *auth.Service) {
 			Principal   model.ID          `json:"principal"`
 			Projects    []model.ID        `json:"projects"`
 			Permissions []auth.Permission `json:"permissions"`
-			Expires     int64             `json:"expires,string"`
+			Expires     model.Int64       `json:"expires"`
 			Reason      string            `json:"reason"`
 		}
 		if err = decode(w, r, &q); err != nil {
 			reply(w, nil, err)
 			return
 		}
-		v, err := s.IssueServerToken(r.Context(), c, q.OrgID, q.Principal, q.Projects, q.Permissions, q.Expires, q.Reason)
+		v, err := s.IssueServerToken(r.Context(), c, q.OrgID, q.Principal, q.Projects, q.Permissions, int64(q.Expires), q.Reason)
 		reply(w, v, err)
 	})
 	mux.HandleFunc("POST /api/v1/admin/tokens/revoke", func(w http.ResponseWriter, r *http.Request) {

@@ -41,8 +41,8 @@ func RegisterControlRoutes(mux *http.ServeMux, s *auth.Service) {
 			return
 		}
 		reply(w, struct {
-			Authorized  bool   `json:"authorized"`
-			PolicyEpoch uint64 `json:"policy_epoch,string"`
-		}{true, scope.PolicyEpoch()}, nil)
+			Authorized  bool         `json:"authorized"`
+			PolicyEpoch model.Uint64 `json:"policy_epoch"`
+		}{true, model.Uint64(scope.PolicyEpoch())}, nil)
 	})
 }

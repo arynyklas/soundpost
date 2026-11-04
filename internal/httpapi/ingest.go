@@ -19,7 +19,7 @@ func sourceCredential(s *auth.Service, r *http.Request) (auth.SourceCredential, 
 	}
 	for _, name := range []string{"Authorization", "X-Soundpost-Source", "Origin"} {
 		if len(r.Header.Values(name)) > 1 {
-			return auth.SourceCredential{}, model.Fail(model.Unauthenticated)
+			return auth.SourceCredential{}, model.Fail(model.Forbidden)
 		}
 	}
 	browser, bearer := r.Header.Get("X-Soundpost-Source"), r.Header.Get("Authorization")
@@ -31,7 +31,7 @@ func sourceCredential(s *auth.Service, r *http.Request) (auth.SourceCredential, 
 	}
 	scheme, raw, ok := strings.Cut(bearer, " ")
 	if !ok || scheme != "Bearer" || raw == "" || strings.ContainsAny(raw, " \t\r\n") {
-		return auth.SourceCredential{}, model.Fail(model.Unauthenticated)
+		return auth.SourceCredential{}, model.Fail(model.Forbidden)
 	}
 	return s.AuthenticateSource(r.Context(), raw, r.Header.Get("Origin"), false)
 }
@@ -123,7 +123,7 @@ func RegisterIngestRoutes(mux *http.ServeMux, a *auth.Service, s *ingest.Service
 		receipt, e := s.Admit(r.Context(), g, b)
 		if e == nil {
 			w.Header().Set("X-Soundpost-Receipt", receipt.BatchID.String())
-			w.Header().Set("X-Soundpost-Cursor", receipt.Cursor.Group.String()+":"+stringRevision(receipt.Cursor.Index))
+			w.Header().Set("X-Soundpost-Cursor", receipt.Cursor.Group.String()+":"+stringRevision(uint64(receipt.Cursor.Index)))
 		}
 		ingestReply(w, r, receipt, e)
 	})

@@ -84,6 +84,7 @@ func TestSessionUIOIDCNegotiation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	activateHTTPControl(t, store, t.TempDir())
 	token, _ := store.BootstrapToken()
 	owner, err := service.Bootstrap(context.Background(), token, "oidc-ui@example.test", "generic UI fixture password 2026")
 	if err != nil {

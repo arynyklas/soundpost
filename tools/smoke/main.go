@@ -30,9 +30,24 @@ func main() {
 func run() (err error) {
 	smoke, stage := "bootstrap_scope", "dispatch"
 	runID := model.NewID()
-	defer func(){ err = annotateSmokeFailure(smoke,stage,runID,err) }()
+	defer func() { err = annotateSmokeFailure(smoke, stage, runID, err) }()
 	if len(os.Args) >= 2 {
 		switch os.Args[1] {
+		case "quorum-node-loss":
+			smoke, stage = "quorum_node_loss", "quorum_dispatch"
+			return runQuorumNodeLoss(os.Args[2:])
+		case "quorum-child":
+			smoke, stage = "quorum_child", "quorum_child_start"
+			return runQuorumChild(os.Args[2:])
+		case "artifact-upload":
+			smoke, stage = "artifact_upload", "artifact_dispatch"
+			return runArtifactUpload(os.Args[2:])
+		case "artifact-upload-child":
+			smoke, stage = "artifact_upload_child", "artifact_child"
+			return runArtifactUploadChild(os.Args[2:])
+		case "storage-roundtrip":
+			smoke, stage = "storage_roundtrip", "storage_dispatch"
+			return runStorageRoundtrip(os.Args[2:])
 		case "durable-child":
 			smoke, stage = "durable_child", "child_start"
 			return runDurableChild(os.Args[2:])
@@ -82,6 +97,10 @@ func run() (err error) {
 	if err != nil {
 		return err
 	}
+	stage = "control_activate"
+	if err = store.EnableSingle(context.Background(), filepath.Join(dir, "raft-control")); err != nil {
+		return err
+	}
 	stage = "https_start"
 	server := httptest.NewTLSServer(httpapi.NewServer("", service, nil).Handler)
 	defer server.Close()
@@ -91,19 +110,19 @@ func run() (err error) {
 	statuses := map[string]int{}
 	expected := map[string]int{}
 	call := func(name, path string, v any, csrf string, want int) ([]byte, error) {
-		stage = "http_"+name+"_encode"
+		stage = "http_" + name + "_encode"
 		raw, err := json.Marshal(v)
 		if err != nil {
 			return nil, err
 		}
-		stage = "http_"+name+"_request"
+		stage = "http_" + name + "_request"
 		req, err := http.NewRequest("POST", server.URL+path, bytes.NewReader(raw))
 		if err != nil {
 			return nil, err
 		}
 		req.Header.Set("Origin", server.URL)
 		req.Header.Set("X-CSRF-Token", csrf)
-		stage = "http_"+name+"_send"
+		stage = "http_" + name + "_send"
 		response, err := client.Do(req)
 		if err != nil {
 			return nil, err
@@ -112,10 +131,10 @@ func run() (err error) {
 		statuses[name] = response.StatusCode
 		expected[name] = want
 		if response.StatusCode != want {
-			body, _ := io.ReadAll(io.LimitReader(response.Body,65536))
-			return nil, httpSmokeFailure(name,response.StatusCode,want,body)
+			body, _ := io.ReadAll(io.LimitReader(response.Body, 65536))
+			return nil, httpSmokeFailure(name, response.StatusCode, want, body)
 		}
-		stage = "http_"+name+"_body"
+		stage = "http_" + name + "_body"
 		return io.ReadAll(response.Body)
 	}
 	stage = "bootstrap_token_read"
@@ -139,13 +158,13 @@ func run() (err error) {
 	}
 	ctx := context.Background()
 	command := func(name, kind string, org model.ID, p auth.AdminPayload) error {
-		stage = "command_"+name+"_revision"
+		stage = "command_" + name + "_revision"
 		var revision model.Revision
 		if err := store.View(ctx, func(st control.State) error { revision = st.Revision; return nil }); err != nil {
 			return err
 		}
 		p.Reason = "bootstrap-scope smoke"
-		stage = "command_"+name+"_encode"
+		stage = "command_" + name + "_encode"
 		payload, err := json.Marshal(p)
 		if err != nil {
 			return err
@@ -268,7 +287,7 @@ func run() (err error) {
 		Statuses     map[string]int `json:"statuses"`
 		Expected     map[string]int `json:"expected"`
 		AuditOrdered bool           `json:"audit_ordered"`
-		RunID model.ID `json:"run_id"`
+		RunID        model.ID       `json:"run_id"`
 	}{statuses, expected, auditOrdered, runID}
 	artifactJSON, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {

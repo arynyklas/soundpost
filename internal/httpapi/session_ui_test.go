@@ -26,6 +26,7 @@ func TestSessionUI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	activateHTTPControl(t, store, t.TempDir())
 	bundle := fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte(`<div id="root"></div><script type="module" src="/assets/main.js"></script>`)}, "assets/main.js": &fstest.MapFile{Data: []byte(`document.title='Soundpost'`)}}
 	registrar, err := httpapi.UIRoutes(bundle)
 	if err != nil {

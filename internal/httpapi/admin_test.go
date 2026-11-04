@@ -27,6 +27,7 @@ func TestAdminCannotGrantOutsideOrgOrReadSecrets(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
+	activateHTTPControl(t, store, t.TempDir())
 	server := httptest.NewTLSServer(httpapi.NewServer("", service, nil).Handler)
 	defer server.Close()
 	client := server.Client()

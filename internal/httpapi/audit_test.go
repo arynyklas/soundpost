@@ -29,6 +29,7 @@ func TestHTTPAuditPersistsRequestCorrelationAndOutcome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	activateHTTPControl(t, store, dir)
 	server := httptest.NewTLSServer(httpapi.NewServer("", service, nil).Handler)
 	defer server.Close()
 	client := server.Client()
@@ -118,6 +119,7 @@ func TestHTTPAuditPersistsRequestCorrelationAndOutcome(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
+	activateHTTPControl(t, reopened, dir)
 	if err := reopened.View(ctx, check); err != nil {
 		t.Fatal(err)
 	}

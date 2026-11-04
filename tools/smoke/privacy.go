@@ -34,11 +34,13 @@ func (c *smokeChild) ingestRaw(raw []byte, encoding, credential string) (int, []
 	return response.StatusCode, body, e
 }
 func checkAtomicPrivacy(c *smokeChild, credential string, org model.ID, resource model.Resource, base model.Batch, canary string) error {
-	reject := func(name string,raw []byte, encoding string, want int) error {
+	reject := func(name string, raw []byte, encoding string, want int) error {
 		status, body, e := c.ingestRaw(raw, encoding, credential)
-		if e=requireSmokeResponse("privacy_"+name,status,want,body,e);e!=nil{return e}
+		if e = requireSmokeResponse("privacy_"+name, status, want, body, e); e != nil {
+			return e
+		}
 		if bytes.Contains(body, []byte(canary)) {
-			return &smokeFailure{Stage:"privacy_"+name,Code:"content_leak"}
+			return &smokeFailure{Stage: "privacy_" + name, Code: "content_leak"}
 		}
 		return nil
 	}
@@ -60,15 +62,15 @@ func checkAtomicPrivacy(c *smokeChild, credential string, org model.ID, resource
 		records[0]["payload"], _ = json.Marshal(payload)
 		wire["records"], _ = json.Marshal(records)
 		bad, _ := json.Marshal(wire)
-		if e := reject("forbidden_"+field,bad, "", 422); e != nil {
+		if e := reject("forbidden_"+field, bad, "", 422); e != nil {
 			return e
 		}
 		delete(payload, field)
 	}
-	if e := reject("duplicate_json",[]byte(`{"version":1,"version":1}`), "", 422); e != nil {
+	if e := reject("duplicate_json", []byte(`{"version":1,"version":1}`), "", 422); e != nil {
 		return e
 	}
-	if e := reject("invalid_utf8",[]byte("{\"version\":1,\"extension\":\"\xff\"}"), "", 422); e != nil {
+	if e := reject("invalid_utf8", []byte("{\"version\":1,\"extension\":\"\xff\"}"), "", 422); e != nil {
 		return e
 	}
 	oversized := b
@@ -79,7 +81,7 @@ func checkAtomicPrivacy(c *smokeChild, credential string, org model.ID, resource
 		oversized.Records[i].ID = model.NewID()
 	}
 	raw, _ = json.Marshal(oversized)
-	if e := reject("record_count",raw, "", 422); e != nil {
+	if e := reject("record_count", raw, "", 422); e != nil {
 		return e
 	}
 	valueBits := model.FloatBits(0x3ff0000000000000)
@@ -106,18 +108,18 @@ func checkAtomicPrivacy(c *smokeChild, credential string, org model.ID, resource
 		return errors.New("fixed slot owner routing failed")
 	}
 	raw, _ = json.Marshal(mixed)
-	if e := reject("mixed_slot",raw, "", 422); e != nil {
+	if e := reject("mixed_slot", raw, "", 422); e != nil {
 		return e
 	}
 	foreign := b
 	foreign.Project = model.NewID()
 	raw, _ = json.Marshal(foreign)
-	if e := reject("foreign_project",raw, "", 403); e != nil {
+	if e := reject("foreign_project", raw, "", 403); e != nil {
 		return e
 	}
 	raw, _ = json.Marshal(b)
 	raw = bytes.Replace(raw, []byte(`"observed_at_ns":"1"`), []byte(`"observed_at_ns":"9223372036854775808"`), 1)
-	if e := reject("int64_overflow",raw, "", 422); e != nil {
+	if e := reject("int64_overflow", raw, "", 422); e != nil {
 		return e
 	}
 	var compressed bytes.Buffer
@@ -131,5 +133,5 @@ func checkAtomicPrivacy(c *smokeChild, credential string, org model.ID, resource
 	if e := z.Close(); e != nil {
 		return e
 	}
-	return reject("gzip_expansion",compressed.Bytes(), "gzip", 413)
+	return reject("gzip_expansion", compressed.Bytes(), "gzip", 413)
 }

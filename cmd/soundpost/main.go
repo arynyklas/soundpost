@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"soundpost/internal/appcore"
 	"soundpost/internal/auth"
 	"soundpost/internal/httpapi"
 	"syscall"
@@ -24,6 +23,9 @@ func main() {
 	}
 }
 func run() error {
+	if len(os.Args) >= 2 && os.Args[1] == "cluster-seed" {
+		return runClusterSeed(os.Args[2:])
+	}
 	if len(os.Args) < 2 || os.Args[1] != "serve" {
 		return fmt.Errorf("usage: soundpost serve --mode=single --data-dir PATH --listen ADDRESS --tls-cert PATH --tls-key PATH")
 	}
@@ -35,13 +37,15 @@ func run() error {
 	key := f.String("tls-key", "", "TLS private key PEM")
 	oidcPath := f.String("oidc-config", "", "private OIDC configuration JSON")
 	webDir := f.String("web-dir", "", "real built same-origin web asset directory")
+	clusterConfig := f.String("cluster-config", "", "private mTLS node configuration JSON")
+	nodeID := f.Uint64("node-id", 0, "configured Raft node identity")
 	if e := f.Parse(os.Args[2:]); e != nil {
 		return e
 	}
-	if *mode != "single" || *dir == "" || ((*cert == "") != (*key == "")) {
-		return fmt.Errorf("single mode, data directory and paired TLS files required")
+	if (*mode != "single" && *mode != "distributed") || *dir == "" || ((*cert == "") != (*key == "")) {
+		return fmt.Errorf("valid mode, data directory and paired TLS files required")
 	}
-	core, e := appcore.Open(*dir)
+	core, e := openConfiguredCore(*dir, *mode, *clusterConfig, *nodeID)
 	if e != nil {
 		return e
 	}

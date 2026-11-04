@@ -60,7 +60,7 @@ func run() error {
 		return e
 	}
 	defer l.Close()
-	acquire := nativeperf.NewCPUAcquisition
+	acquire := nativeperf.NewNativeAcquisition
 	if *cycles {
 		acquire = nativeperf.NewCyclesAcquisition
 	}
