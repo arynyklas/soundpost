@@ -4,236 +4,6 @@
   "dependencies": [
     {
       "ecosystem": "python",
-      "name": "starlette",
-      "version": "0.47.3",
-      "provenance": "https://pypi.org/pypi/starlette/0.47.3/json",
-      "license": "BSD-3-Clause",
-      "requires_dist": [
-        "anyio<5,>=3.6.2",
-        "typing-extensions>=4.10.0; python_version < \"3.13\"",
-        "httpx<0.29.0,>=0.27.0; extra == \"full\"",
-        "itsdangerous; extra == \"full\"",
-        "jinja2; extra == \"full\"",
-        "python-multipart>=0.0.18; extra == \"full\"",
-        "pyyaml; extra == \"full\""
-      ],
-      "artifacts": [
-        {
-          "filename": "starlette-0.47.3-py3-none-any.whl",
-          "sha256": "89c0778ca62a76b826101e7c709e70680a1699ca7da6b44d38eb0a7e61fe4b51",
-          "url": "https://files.pythonhosted.org/packages/ce/fd/901cfa59aaa5b30a99e16876f11abe38b59a1a2c51ffb3d7142bb6089069/starlette-0.47.3-py3-none-any.whl"
-        },
-        {
-          "filename": "starlette-0.47.3.tar.gz",
-          "sha256": "6bc94f839cc176c4858894f1f8908f0ab79dfec1a6b8402f6da9be26ebea52e9",
-          "url": "https://files.pythonhosted.org/packages/15/b9/cc3017f9a9c9b6e27c5106cc10cc7904653c3eec0729793aec10479dd669/starlette-0.47.3.tar.gz"
-        }
-      ],
-      "advisories": [
-        {
-          "id": "GHSA-7f5h-v6xp-fcq8",
-          "aliases": [
-            "CVE-2025-62727",
-            "PYSEC-2026-1942"
-          ],
-          "fixed_in": [
-            "0.49.1"
-          ]
-        },
-        {
-          "id": "PYSEC-2026-161",
-          "aliases": [
-            "CVE-2026-48710",
-            "GHSA-86qp-5c8j-p5mr",
-            "X41-2026-002"
-          ],
-          "fixed_in": [
-            "1.0.1"
-          ]
-        },
-        {
-          "id": "GHSA-86qp-5c8j-p5mr",
-          "aliases": [
-            "CVE-2026-48710",
-            "PYSEC-2026-161",
-            "X41-2026-002"
-          ],
-          "fixed_in": [
-            "1.0.1"
-          ]
-        },
-        {
-          "id": "GHSA-wqp7-x3pw-xc5r",
-          "aliases": [
-            "CVE-2026-48818",
-            "PYSEC-2026-2281"
-          ],
-          "fixed_in": [
-            "1.1.0"
-          ]
-        },
-        {
-          "id": "GHSA-x746-7m8f-x49c",
-          "aliases": [
-            "CVE-2026-48817",
-            "PYSEC-2026-2280"
-          ],
-          "fixed_in": [
-            "1.1.0"
-          ]
-        },
-        {
-          "id": "GHSA-82w8-qh3p-5jfq",
-          "aliases": [
-            "CVE-2026-54283",
-            "PYSEC-2026-249"
-          ],
-          "fixed_in": [
-            "1.3.1"
-          ]
-        },
-        {
-          "id": "GHSA-jp82-jpqv-5vv3",
-          "aliases": [
-            "CVE-2026-54282",
-            "PYSEC-2026-248"
-          ],
-          "fixed_in": [
-            "1.3.0"
-          ]
-        },
-        {
-          "id": "PYSEC-2026-249",
-          "aliases": [
-            "CVE-2026-54283",
-            "GHSA-82w8-qh3p-5jfq"
-          ],
-          "fixed_in": [
-            "1.3.1"
-          ]
-        },
-        {
-          "id": "PYSEC-2026-248",
-          "aliases": [
-            "CVE-2026-54282",
-            "GHSA-jp82-jpqv-5vv3"
-          ],
-          "fixed_in": [
-            "1.3.0"
-          ]
-        },
-        {
-          "id": "PYSEC-2026-1942",
-          "aliases": [
-            "CVE-2025-62727",
-            "GHSA-7f5h-v6xp-fcq8"
-          ],
-          "fixed_in": [
-            "0.49.1"
-          ]
-        },
-        {
-          "id": "PYSEC-2026-2281",
-          "aliases": [
-            "CVE-2026-48818",
-            "GHSA-wqp7-x3pw-xc5r"
-          ],
-          "fixed_in": [
-            "1.1.0"
-          ]
-        },
-        {
-          "id": "PYSEC-2026-2280",
-          "aliases": [
-            "CVE-2026-48817",
-            "GHSA-x746-7m8f-x49c"
-          ],
-          "fixed_in": [
-            "1.1.0"
-          ]
-        }
-      ],
-      "qualification": "BLOCKED_SECURITY",
-      "blocking_advisories": [
-        "GHSA-7f5h-v6xp-fcq8",
-        "PYSEC-2026-161",
-        "GHSA-86qp-5c8j-p5mr",
-        "GHSA-wqp7-x3pw-xc5r",
-        "GHSA-x746-7m8f-x49c",
-        "GHSA-82w8-qh3p-5jfq",
-        "GHSA-jp82-jpqv-5vv3",
-        "PYSEC-2026-249",
-        "PYSEC-2026-248",
-        "PYSEC-2026-1942",
-        "PYSEC-2026-2281",
-        "PYSEC-2026-2280"
-      ],
-      "proposed_contract_review": {
-        "starlette": "1.3.1",
-        "fastapi": "0.136.1",
-        "status": "not_approved_not_qualified",
-        "metadata_compatible": true,
-        "fastapi_starlette_requirement": "starlette>=0.46.0",
-        "reason": "Exact registry metadata exists; Starlette1.3.1 has no advisories in response; full dependency resolution and runtime qualification remain unexecuted.",
-        "provenance": [
-          "https://pypi.org/pypi/fastapi/0.136.1/json",
-          "https://pypi.org/pypi/starlette/1.3.1/json"
-        ]
-      }
-    },
-    {
-      "ecosystem": "python",
-      "name": "fastapi",
-      "version": "0.116.2",
-      "provenance": "https://pypi.org/pypi/fastapi/0.116.2/json",
-      "license": "MIT",
-      "requires_dist": [
-        "starlette<0.49.0,>=0.40.0",
-        "pydantic!=1.8,!=1.8.1,!=2.0.0,!=2.0.1,!=2.1.0,<3.0.0,>=1.7.4",
-        "typing-extensions>=4.8.0",
-        "fastapi-cli[standard]>=0.0.8; extra == \"standard\"",
-        "httpx>=0.23.0; extra == \"standard\"",
-        "jinja2>=3.1.5; extra == \"standard\"",
-        "python-multipart>=0.0.18; extra == \"standard\"",
-        "email-validator>=2.0.0; extra == \"standard\"",
-        "uvicorn[standard]>=0.12.0; extra == \"standard\"",
-        "fastapi-cli[standard-no-fastapi-cloud-cli]>=0.0.8; extra == \"standard-no-fastapi-cloud-cli\"",
-        "httpx>=0.23.0; extra == \"standard-no-fastapi-cloud-cli\"",
-        "jinja2>=3.1.5; extra == \"standard-no-fastapi-cloud-cli\"",
-        "python-multipart>=0.0.18; extra == \"standard-no-fastapi-cloud-cli\"",
-        "email-validator>=2.0.0; extra == \"standard-no-fastapi-cloud-cli\"",
-        "uvicorn[standard]>=0.12.0; extra == \"standard-no-fastapi-cloud-cli\"",
-        "fastapi-cli[standard]>=0.0.8; extra == \"all\"",
-        "httpx>=0.23.0; extra == \"all\"",
-        "jinja2>=3.1.5; extra == \"all\"",
-        "python-multipart>=0.0.18; extra == \"all\"",
-        "itsdangerous>=1.1.0; extra == \"all\"",
-        "pyyaml>=5.3.1; extra == \"all\"",
-        "ujson!=4.0.2,!=4.1.0,!=4.2.0,!=4.3.0,!=5.0.0,!=5.1.0,>=4.0.1; extra == \"all\"",
-        "orjson>=3.2.1; extra == \"all\"",
-        "email-validator>=2.0.0; extra == \"all\"",
-        "uvicorn[standard]>=0.12.0; extra == \"all\"",
-        "pydantic-settings>=2.0.0; extra == \"all\"",
-        "pydantic-extra-types>=2.0.0; extra == \"all\""
-      ],
-      "artifacts": [
-        {
-          "filename": "fastapi-0.116.2-py3-none-any.whl",
-          "sha256": "c3a7a8fb830b05f7e087d920e0d786ca1fc9892eb4e9a84b227be4c1bc7569db",
-          "url": "https://files.pythonhosted.org/packages/32/e4/c543271a8018874b7f682bf6156863c416e1334b8ed3e51a69495c5d4360/fastapi-0.116.2-py3-none-any.whl"
-        },
-        {
-          "filename": "fastapi-0.116.2.tar.gz",
-          "sha256": "231a6af2fe21cfa2c32730170ad8514985fc250bec16c9b242d3b94c835ef529",
-          "url": "https://files.pythonhosted.org/packages/01/64/1296f46d6b9e3b23fb22e5d01af3f104ef411425531376212f1eefa2794d/fastapi-0.116.2.tar.gz"
-        }
-      ],
-      "advisories": [],
-      "qualification": "not_run",
-      "license_provenance": "https://raw.githubusercontent.com/fastapi/fastapi/0.116.2/LICENSE"
-    },
-    {
-      "ecosystem": "python",
       "name": "flask",
       "version": "3.1.3",
       "provenance": "https://pypi.org/pypi/flask/3.1.3/json",
@@ -903,6 +673,127 @@
       "integrity": "sha512-BICHQ67iqxQGFSzfCFTT7MRQ5XcBjG5aeKh5Ok38UBbPe5fxTyE+aHFxwVrGyr8GNlqFMLKD1D3P2K/1ks8tog==",
       "provenance": "pnpm-lock.yaml and installed node_modules/@types/node/package.json",
       "qualification": "not_run"
+    },
+    {
+      "ecosystem": "python",
+      "name": "starlette",
+      "version": "1.3.1",
+      "provenance": "https://pypi.org/pypi/starlette/1.3.1/json",
+      "license": "BSD-3-Clause",
+      "requires_python": ">=3.10",
+      "requires_dist": [
+        "anyio<5,>=3.6.2",
+        "typing-extensions>=4.10.0; python_version < \"3.13\"",
+        "httpx2>=2.0.0; extra == \"full\"",
+        "httpx<0.29.0,>=0.27.0; extra == \"full\"",
+        "itsdangerous; extra == \"full\"",
+        "jinja2; extra == \"full\"",
+        "python-multipart>=0.0.18; extra == \"full\"",
+        "pyyaml; extra == \"full\""
+      ],
+      "artifacts": [
+        {
+          "filename": "starlette-1.3.1-py3-none-any.whl",
+          "sha256": "c7372aae11c3c3f26a42df7bd626cec2f47d03483d261d369516a615a53714c6",
+          "url": "https://files.pythonhosted.org/packages/ec/bb/2799cc2ede3ed41131f8975621e7213dfc7ef4acbbaadfa440f32500c370/starlette-1.3.1-py3-none-any.whl"
+        },
+        {
+          "filename": "starlette-1.3.1.tar.gz",
+          "sha256": "05d0213193f2fbaae60e2ecb593b4add4262ad4e46536b54abe36f11a71724e0",
+          "url": "https://files.pythonhosted.org/packages/eb/e3/7c1dc7381d9f8ab7d854328ebfa884e62cb3f3d8549ddfd37c7814f42afa/starlette-1.3.1.tar.gz"
+        }
+      ],
+      "advisories": [],
+      "qualification": "not_run"
+    },
+    {
+      "ecosystem": "python",
+      "name": "fastapi",
+      "version": "0.136.3",
+      "provenance": "https://pypi.org/pypi/fastapi/0.136.3/json",
+      "license": "MIT",
+      "requires_python": ">=3.10",
+      "requires_dist": [
+        "starlette>=0.46.0",
+        "pydantic>=2.9.0",
+        "typing-extensions>=4.8.0",
+        "typing-inspection>=0.4.2",
+        "annotated-doc>=0.0.2",
+        "fastapi-cli[standard]>=0.0.8; extra == \"standard\"",
+        "fastar>=0.9.0; extra == \"standard\"",
+        "httpx<1.0.0,>=0.23.0; extra == \"standard\"",
+        "jinja2>=3.1.5; extra == \"standard\"",
+        "python-multipart>=0.0.18; extra == \"standard\"",
+        "email-validator>=2.0.0; extra == \"standard\"",
+        "uvicorn[standard]>=0.12.0; extra == \"standard\"",
+        "pydantic-settings>=2.0.0; extra == \"standard\"",
+        "pydantic-extra-types>=2.0.0; extra == \"standard\"",
+        "fastapi-cli[standard-no-fastapi-cloud-cli]>=0.0.8; extra == \"standard-no-fastapi-cloud-cli\"",
+        "httpx<1.0.0,>=0.23.0; extra == \"standard-no-fastapi-cloud-cli\"",
+        "jinja2>=3.1.5; extra == \"standard-no-fastapi-cloud-cli\"",
+        "python-multipart>=0.0.18; extra == \"standard-no-fastapi-cloud-cli\"",
+        "email-validator>=2.0.0; extra == \"standard-no-fastapi-cloud-cli\"",
+        "uvicorn[standard]>=0.12.0; extra == \"standard-no-fastapi-cloud-cli\"",
+        "pydantic-settings>=2.0.0; extra == \"standard-no-fastapi-cloud-cli\"",
+        "pydantic-extra-types>=2.0.0; extra == \"standard-no-fastapi-cloud-cli\"",
+        "fastapi-cli[standard]>=0.0.8; extra == \"all\"",
+        "httpx<1.0.0,>=0.23.0; extra == \"all\"",
+        "jinja2>=3.1.5; extra == \"all\"",
+        "python-multipart>=0.0.18; extra == \"all\"",
+        "itsdangerous>=1.1.0; extra == \"all\"",
+        "pyyaml>=5.3.1; extra == \"all\"",
+        "email-validator>=2.0.0; extra == \"all\"",
+        "uvicorn[standard]>=0.12.0; extra == \"all\"",
+        "pydantic-settings>=2.0.0; extra == \"all\"",
+        "pydantic-extra-types>=2.0.0; extra == \"all\""
+      ],
+      "artifacts": [
+        {
+          "filename": "fastapi-0.136.3-py3-none-any.whl",
+          "sha256": "3d2a69bdf04b7e9f3afa292c3bc7a98816bbfafa10bc9b45f3f3700d2f761620",
+          "url": "https://files.pythonhosted.org/packages/e0/82/45359b62a067409bd929ae8a56b8ed13e5a8c8a61194b3c236920999ab83/fastapi-0.136.3-py3-none-any.whl"
+        },
+        {
+          "filename": "fastapi-0.136.3.tar.gz",
+          "sha256": "e487fae93ad408e6f47641ee4dfe389864fd7bec92e547ea8498fc13f43e83ab",
+          "url": "https://files.pythonhosted.org/packages/81/2d/ff8d91d7b564d464629a0fd50a4489c97fcb836ac230bf3a7269232a9b1f/fastapi-0.136.3.tar.gz"
+        }
+      ],
+      "advisories": [],
+      "qualification": "not_run"
+    },
+    {
+      "ecosystem": "python",
+      "name": "uvicorn",
+      "version": "0.54.0",
+      "provenance": "https://pypi.org/pypi/uvicorn/0.54.0/json",
+      "license": "BSD-3-Clause",
+      "requires_python": ">=3.10",
+      "requires_dist": [
+        "click>=7.0",
+        "h11>=0.8",
+        "typing-extensions>=4.0; python_version < \"3.11\"",
+        "httptools>=0.8.0; extra == \"standard\"",
+        "python-dotenv>=0.13; extra == \"standard\"",
+        "pyyaml>=5.1; extra == \"standard\"",
+        "uvloop>=0.15.1; (sys_platform != \"win32\" and (sys_platform != \"cygwin\" and platform_python_implementation != \"PyPy\")) and extra == \"standard\"",
+        "watchfiles>=0.20; extra == \"standard\"",
+        "websockets>=13.0; extra == \"standard\""
+      ],
+      "artifacts": [
+        {
+          "filename": "uvicorn-0.54.0-py3-none-any.whl",
+          "sha256": "505bdb0f318731d45f1f712071fc781a8981f6847a31c902c9f5e652d4f67faf",
+          "url": "https://files.pythonhosted.org/packages/38/0c/b54a4fdd7f90a3af8b02ebc9ce6712c2c208b7926a2f7bad95c33ebbe943/uvicorn-0.54.0-py3-none-any.whl"
+        },
+        {
+          "filename": "uvicorn-0.54.0.tar.gz",
+          "sha256": "a2e33cbfaa0306f8e6b0c13e0cb89d7d7a2da3e62b90c66e18c33d9807b28620",
+          "url": "https://files.pythonhosted.org/packages/da/34/30e9280707135d2cfc589dfff3cb796bd07a3aeb1a3e415ba09dd89d7bb4/uvicorn-0.54.0.tar.gz"
+        }
+      ],
+      "advisories": [],
+      "qualification": "not_run"
     }
   ],
   "runtime_targets": [
@@ -981,6 +872,242 @@
   ],
   "notes": [
     "Registry availability/hashes are not qualification. Browser OS/driver lock requires actual host before its first run.",
-    "Starlette/FastAPI/httpx preserve approved lines. Known upstream advisories are retained; policy SDK does not install framework dependencies."
-  ]
+    "Reviewed security-contract cutover selects Starlette1.3.1/FastAPI0.136.3, keeping old rows BLOCKED_SECURITY and all new rows unqualified until exact runtime/OS tests. Frameworks and uvicorn are development/matrix dependencies, not core SDK dependencies."
+  ],
+  "historical_blocked_targets": [
+    {
+      "ecosystem": "python",
+      "name": "starlette",
+      "version": "0.47.3",
+      "provenance": "https://pypi.org/pypi/starlette/0.47.3/json",
+      "license": "BSD-3-Clause",
+      "requires_dist": [
+        "anyio<5,>=3.6.2",
+        "typing-extensions>=4.10.0; python_version < \"3.13\"",
+        "httpx<0.29.0,>=0.27.0; extra == \"full\"",
+        "itsdangerous; extra == \"full\"",
+        "jinja2; extra == \"full\"",
+        "python-multipart>=0.0.18; extra == \"full\"",
+        "pyyaml; extra == \"full\""
+      ],
+      "artifacts": [
+        {
+          "filename": "starlette-0.47.3-py3-none-any.whl",
+          "sha256": "89c0778ca62a76b826101e7c709e70680a1699ca7da6b44d38eb0a7e61fe4b51",
+          "url": "https://files.pythonhosted.org/packages/ce/fd/901cfa59aaa5b30a99e16876f11abe38b59a1a2c51ffb3d7142bb6089069/starlette-0.47.3-py3-none-any.whl"
+        },
+        {
+          "filename": "starlette-0.47.3.tar.gz",
+          "sha256": "6bc94f839cc176c4858894f1f8908f0ab79dfec1a6b8402f6da9be26ebea52e9",
+          "url": "https://files.pythonhosted.org/packages/15/b9/cc3017f9a9c9b6e27c5106cc10cc7904653c3eec0729793aec10479dd669/starlette-0.47.3.tar.gz"
+        }
+      ],
+      "advisories": [
+        {
+          "id": "GHSA-7f5h-v6xp-fcq8",
+          "aliases": [
+            "CVE-2025-62727",
+            "PYSEC-2026-1942"
+          ],
+          "fixed_in": [
+            "0.49.1"
+          ]
+        },
+        {
+          "id": "PYSEC-2026-161",
+          "aliases": [
+            "CVE-2026-48710",
+            "GHSA-86qp-5c8j-p5mr",
+            "X41-2026-002"
+          ],
+          "fixed_in": [
+            "1.0.1"
+          ]
+        },
+        {
+          "id": "GHSA-86qp-5c8j-p5mr",
+          "aliases": [
+            "CVE-2026-48710",
+            "PYSEC-2026-161",
+            "X41-2026-002"
+          ],
+          "fixed_in": [
+            "1.0.1"
+          ]
+        },
+        {
+          "id": "GHSA-wqp7-x3pw-xc5r",
+          "aliases": [
+            "CVE-2026-48818",
+            "PYSEC-2026-2281"
+          ],
+          "fixed_in": [
+            "1.1.0"
+          ]
+        },
+        {
+          "id": "GHSA-x746-7m8f-x49c",
+          "aliases": [
+            "CVE-2026-48817",
+            "PYSEC-2026-2280"
+          ],
+          "fixed_in": [
+            "1.1.0"
+          ]
+        },
+        {
+          "id": "GHSA-82w8-qh3p-5jfq",
+          "aliases": [
+            "CVE-2026-54283",
+            "PYSEC-2026-249"
+          ],
+          "fixed_in": [
+            "1.3.1"
+          ]
+        },
+        {
+          "id": "GHSA-jp82-jpqv-5vv3",
+          "aliases": [
+            "CVE-2026-54282",
+            "PYSEC-2026-248"
+          ],
+          "fixed_in": [
+            "1.3.0"
+          ]
+        },
+        {
+          "id": "PYSEC-2026-249",
+          "aliases": [
+            "CVE-2026-54283",
+            "GHSA-82w8-qh3p-5jfq"
+          ],
+          "fixed_in": [
+            "1.3.1"
+          ]
+        },
+        {
+          "id": "PYSEC-2026-248",
+          "aliases": [
+            "CVE-2026-54282",
+            "GHSA-jp82-jpqv-5vv3"
+          ],
+          "fixed_in": [
+            "1.3.0"
+          ]
+        },
+        {
+          "id": "PYSEC-2026-1942",
+          "aliases": [
+            "CVE-2025-62727",
+            "GHSA-7f5h-v6xp-fcq8"
+          ],
+          "fixed_in": [
+            "0.49.1"
+          ]
+        },
+        {
+          "id": "PYSEC-2026-2281",
+          "aliases": [
+            "CVE-2026-48818",
+            "GHSA-wqp7-x3pw-xc5r"
+          ],
+          "fixed_in": [
+            "1.1.0"
+          ]
+        },
+        {
+          "id": "PYSEC-2026-2280",
+          "aliases": [
+            "CVE-2026-48817",
+            "GHSA-x746-7m8f-x49c"
+          ],
+          "fixed_in": [
+            "1.1.0"
+          ]
+        }
+      ],
+      "qualification": "BLOCKED_SECURITY",
+      "blocking_advisories": [
+        "GHSA-7f5h-v6xp-fcq8",
+        "PYSEC-2026-161",
+        "GHSA-86qp-5c8j-p5mr",
+        "GHSA-wqp7-x3pw-xc5r",
+        "GHSA-x746-7m8f-x49c",
+        "GHSA-82w8-qh3p-5jfq",
+        "GHSA-jp82-jpqv-5vv3",
+        "PYSEC-2026-249",
+        "PYSEC-2026-248",
+        "PYSEC-2026-1942",
+        "PYSEC-2026-2281",
+        "PYSEC-2026-2280"
+      ],
+      "target_status": "retired_by_explicit_security_contract_review",
+      "reason": "Original pair cannot resolve to a Starlette release without the currently listed advisories; a newer target does not qualify this row."
+    },
+    {
+      "ecosystem": "python",
+      "name": "fastapi",
+      "version": "0.116.2",
+      "provenance": "https://pypi.org/pypi/fastapi/0.116.2/json",
+      "license": "MIT",
+      "requires_dist": [
+        "starlette<0.49.0,>=0.40.0",
+        "pydantic!=1.8,!=1.8.1,!=2.0.0,!=2.0.1,!=2.1.0,<3.0.0,>=1.7.4",
+        "typing-extensions>=4.8.0",
+        "fastapi-cli[standard]>=0.0.8; extra == \"standard\"",
+        "httpx>=0.23.0; extra == \"standard\"",
+        "jinja2>=3.1.5; extra == \"standard\"",
+        "python-multipart>=0.0.18; extra == \"standard\"",
+        "email-validator>=2.0.0; extra == \"standard\"",
+        "uvicorn[standard]>=0.12.0; extra == \"standard\"",
+        "fastapi-cli[standard-no-fastapi-cloud-cli]>=0.0.8; extra == \"standard-no-fastapi-cloud-cli\"",
+        "httpx>=0.23.0; extra == \"standard-no-fastapi-cloud-cli\"",
+        "jinja2>=3.1.5; extra == \"standard-no-fastapi-cloud-cli\"",
+        "python-multipart>=0.0.18; extra == \"standard-no-fastapi-cloud-cli\"",
+        "email-validator>=2.0.0; extra == \"standard-no-fastapi-cloud-cli\"",
+        "uvicorn[standard]>=0.12.0; extra == \"standard-no-fastapi-cloud-cli\"",
+        "fastapi-cli[standard]>=0.0.8; extra == \"all\"",
+        "httpx>=0.23.0; extra == \"all\"",
+        "jinja2>=3.1.5; extra == \"all\"",
+        "python-multipart>=0.0.18; extra == \"all\"",
+        "itsdangerous>=1.1.0; extra == \"all\"",
+        "pyyaml>=5.3.1; extra == \"all\"",
+        "ujson!=4.0.2,!=4.1.0,!=4.2.0,!=4.3.0,!=5.0.0,!=5.1.0,>=4.0.1; extra == \"all\"",
+        "orjson>=3.2.1; extra == \"all\"",
+        "email-validator>=2.0.0; extra == \"all\"",
+        "uvicorn[standard]>=0.12.0; extra == \"all\"",
+        "pydantic-settings>=2.0.0; extra == \"all\"",
+        "pydantic-extra-types>=2.0.0; extra == \"all\""
+      ],
+      "artifacts": [
+        {
+          "filename": "fastapi-0.116.2-py3-none-any.whl",
+          "sha256": "c3a7a8fb830b05f7e087d920e0d786ca1fc9892eb4e9a84b227be4c1bc7569db",
+          "url": "https://files.pythonhosted.org/packages/32/e4/c543271a8018874b7f682bf6156863c416e1334b8ed3e51a69495c5d4360/fastapi-0.116.2-py3-none-any.whl"
+        },
+        {
+          "filename": "fastapi-0.116.2.tar.gz",
+          "sha256": "231a6af2fe21cfa2c32730170ad8514985fc250bec16c9b242d3b94c835ef529",
+          "url": "https://files.pythonhosted.org/packages/01/64/1296f46d6b9e3b23fb22e5d01af3f104ef411425531376212f1eefa2794d/fastapi-0.116.2.tar.gz"
+        }
+      ],
+      "advisories": [],
+      "qualification": "BLOCKED_SECURITY",
+      "license_provenance": "https://raw.githubusercontent.com/fastapi/fastapi/0.116.2/LICENSE",
+      "target_status": "retired_by_explicit_security_contract_review",
+      "reason": "Original pair cannot resolve to a Starlette release without the currently listed advisories; a newer target does not qualify this row.",
+      "transitive_block": "Requires starlette<0.49.0,>=0.40.0; every allowed Starlette version remains advisory-blocked."
+    }
+  ],
+  "contract_review": {
+    "recorded": "2026-11-04",
+    "decision": "Starlette1.3.x/FastAPI0.136.x; exact1.3.1/0.136.3; httpx0.28.x unchanged",
+    "kind": "explicit_security_compatibility_target_change",
+    "runtime_qualification": false,
+    "reason": "Original minor pair admits only advisory-blocked Starlette versions. New metadata compatibility is not execution proof.",
+    "primary_sources": [
+      "https://pypi.org/pypi/starlette/1.3.1/json",
+      "https://pypi.org/pypi/fastapi/0.136.3/json"
+    ]
+  }
 }

@@ -43,7 +43,7 @@ def qualify(runtime,command,modes):
             payloads=[json.loads(record)["payload"] for record in records]
             assert [payload["exception_class"] for payload in payloads]==["TypeError","RangeError"], "unrelated failure consumed the intended episode"
             assert payloads[0]["handled"] is True and payloads[1]["mechanism"]=="uncaught_exception"
-        if mode=="capture-failure":assert snapshot["diagnostics"]=={"hook_capture_failed":1}
+        if mode=="capture-failure":assert snapshot["diagnostics"]=={"invalid_clock":1}
         for record in records:
             payload=json.loads(record)["payload"]
             assert payload["exception_class"] in ("ValueError","TypeError","RangeError")
