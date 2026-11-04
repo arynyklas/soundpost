@@ -59,7 +59,7 @@ def test_capture_failure_does_not_replace_prior_or_leak_diagnostics():
     try:
         sys.excepthook(ValueError,ValueError("CANARY_NATIVE"),None)
         assert seen==["prior"] and not c.buffered_records()
-        assert c.diagnostics()=={"hook_capture_failed":1}
+        assert c.diagnostics()=={"invalid_clock":1}
     finally:lease.close();c.close();sys.excepthook=old
 
 def test_leases_are_bounded_and_prior_handlers_keep_order():
