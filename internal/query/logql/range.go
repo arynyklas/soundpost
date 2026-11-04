@@ -27,7 +27,38 @@ type Frame struct {
 	Profile profile.Profile
 	Project model.ID
 	Account value.Account
+	// budget is shared by every window of one query; a nil budget gives the
+	// call its own.
+	budget *repetitionBudget
 }
+
+// MaxAccumulatorRepetitions bounds the accumulator steps one query may spend
+// unfolding entry multiplicities (sum/rate/avg/stddev/stdvar over unwrap).
+// Bit-exact results need one step per repetition, so a stored multiplicity
+// would otherwise be an arbitrary CPU cost. 2^26 steps (about 67 million) is
+// far above any recorded or realistic multiplicity total in a query and costs
+// well under a second of arithmetic; exceeding it fails with model.Quota.
+const MaxAccumulatorRepetitions uint64 = 1 << 26
+
+type repetitionBudget struct{ left uint64 }
+
+func newRepetitionBudget() *repetitionBudget {
+	return &repetitionBudget{left: MaxAccumulatorRepetitions}
+}
+
+// charge spends n repetitions or fails with the typed quota fault.
+func (b *repetitionBudget) charge(n uint64) error {
+	if b == nil {
+		return nil
+	}
+	if n > b.left {
+		b.left = 0
+		return model.Fail(model.Quota)
+	}
+	b.left -= n
+	return nil
+}
+
 type MetricPipelineError struct{ Category string }
 
 func (e *MetricPipelineError) Error() string {
@@ -48,6 +79,7 @@ type rangeGroup struct {
 // EvaluateRange owns and closes input. Metric windows are (left,right], unlike
 // the raw source's [start,end). A surviving error is not an absent sample.
 func EvaluateRange(ctx context.Context, p RangePlan, input EntryIterator, frame Frame) (result value.Result, err error) {
+	defer func() { err = boundaryErr(err) }()
 	if ctx == nil || input == nil || frame.Account == nil || p.Range == nil || p.Range.Log == nil || p.Range.Interval <= 0 || frame.Project == (model.ID{}) || !rangeNames[p.Function] {
 		if input != nil {
 			input.Close()
@@ -55,6 +87,10 @@ func EvaluateRange(ctx context.Context, p RangePlan, input EntryIterator, frame 
 		return result, model.Fail(model.Invalid)
 	}
 	a := frame.Account
+	budget := frame.budget
+	if budget == nil {
+		budget = newRepetitionBudget()
+	}
 	held := int64(0)
 	result.Type = "vector"
 	defer func() {
@@ -197,7 +233,7 @@ func EvaluateRange(ctx context.Context, p RangePlan, input EntryIterator, frame 
 		if e = metricSort(g.points, func(i, j int) bool { return g.points[i].at < g.points[j].at }, check); e != nil {
 			return result, e
 		}
-		v, ok, e := rangeStatistic(p.Function, g.points, p.Parameter, left, right, p.Range.Interval, check)
+		v, ok, e := rangeStatistic(p.Function, g.points, p.Parameter, left, right, p.Range.Interval, budget, check)
 		if e != nil {
 			return result, e
 		}
@@ -279,7 +315,7 @@ func nextMoments(mean, m2, v float64, n uint64) (float64, float64) {
 	return next, m2 + float64(delta*(v-next))
 }
 
-func rangeStatistic(name string, ps []rangePoint, q float64, left, right, interval int64, checks ...func() error) (float64, bool, error) {
+func rangeStatistic(name string, ps []rangePoint, q float64, left, right, interval int64, budget *repetitionBudget, checks ...func() error) (float64, bool, error) {
 	if len(ps) == 0 {
 		return 0, false, nil
 	}
@@ -323,6 +359,12 @@ func rangeStatistic(name string, ps []rangePoint, q float64, left, right, interv
 		// An entry of multiplicity m is m separate samples of one value. The
 		// sums and moments are order- and repetition-sensitive in the last bit,
 		// so each repetition enters its accumulator on its own, in entry order.
+		if name != "sum_over_time" && name != "bytes_over_time" && name != "rate" && name != "bytes_rate" {
+			// These loops never skip, so the whole run is charged up front.
+			if err := budget.charge(p.n); err != nil {
+				return 0, false, err
+			}
+		}
 	repeat:
 		for k := uint64(0); k < p.n; k++ {
 			if k&1023 == 1023 {
@@ -332,6 +374,9 @@ func rangeStatistic(name string, ps []rangePoint, q float64, left, right, interv
 			}
 			switch name {
 			case "sum_over_time", "bytes_over_time", "rate", "bytes_rate":
+				if err := budget.charge(1); err != nil {
+					return 0, false, err
+				}
 				next := sum + p.v
 				if next == sum || math.IsNaN(sum) {
 					// A repeated addend no longer changes the sum.

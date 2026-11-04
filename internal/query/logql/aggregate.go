@@ -92,7 +92,7 @@ func aggregateMetric(n *CallExpr, args []value.Result, at model.UnixNano, projec
 		if n.Name == "count" {
 			name = "count_over_time"
 		}
-		f, ok, err := rangeStatistic(name, ps, 0, 0, 0, 1, check)
+		f, ok, err := rangeStatistic(name, ps, 0, 0, 0, 1, nil, check)
 		if err != nil {
 			return r, err
 		}

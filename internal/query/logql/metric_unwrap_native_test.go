@@ -4,6 +4,7 @@ package logql
 
 import (
 	"context"
+	"errors"
 	"math"
 	"soundpost/internal/model"
 	"soundpost/internal/query/scan"
@@ -132,14 +133,14 @@ func TestUnwrapSumOfHugeMultiplicityStopsAtFixedPoint(t *testing.T) {
 // multiplicity stays interruptible.
 func TestUnwrapAverageOfHugeMultiplicityHonoursCancellation(t *testing.T) {
 	plan := metricPlan(t, `avg_over_time({app="api"}|logfmt|unwrap n[5s])`, value.Evaluation{Instant: true, Time: 6e9})
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
 	defer cancel()
 	account := value.NewBoundedAccount(32 << 20)
-	row := variantHostRow(1, 5e9, 1<<62, "a", "n=1.5")
+	row := variantHostRow(1, 5e9, model.Uint64(MaxAccumulatorRepetitions/2), "a", "n=1.5")
 	start := time.Now()
 	_, _, err := Evaluate(ctx, plan, &metricSource{rows: []scan.LogRow{row}}, account)
-	if err == nil {
-		t.Fatal("expected the cancelled context to end the repetition")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err=%v, want the deadline to end the repetition", err)
 	}
 	if time.Since(start) > 10*time.Second {
 		t.Fatalf("cancellation took %s", time.Since(start))

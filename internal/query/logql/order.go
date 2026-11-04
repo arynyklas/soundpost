@@ -80,6 +80,7 @@ func (i *orderedLogs) Next(ctx context.Context) (PipelineResult, error) {
 // MergeLogs accepts unsorted shard/page inputs. Equal text never identifies a
 // record. Multiplicity is conserved and a requested limit may split a run.
 func MergeLogs(ctx context.Context, inputs []EntryIterator, order LogOrder, limit uint64, account value.Account) (out LogIterator, err error) {
+	defer func() { err = boundaryErr(err) }()
 	if ctx == nil || account == nil || order != Forward && order != Backward {
 		return nil, model.Fail(model.Invalid)
 	}

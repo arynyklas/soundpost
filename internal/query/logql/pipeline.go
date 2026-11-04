@@ -17,6 +17,7 @@ import (
 // cancellation, missing-input, budget or iterator failure into filtered success.
 // Returned retained data is owned; the caller releases PipelineResult.Bytes.
 func RunPipeline(ctx context.Context, plan PipelinePlan, record LogEntry, account value.Account) (result PipelineResult, err error) {
+	defer func() { err = boundaryErr(err) }()
 	if ctx == nil || account == nil {
 		return result, model.Fail(model.Invalid)
 	}

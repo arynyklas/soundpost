@@ -233,7 +233,7 @@ func EvalAggregation(ctx context.Context, agg AggregationPlan, input value.Resul
 		} else {
 			x = functionSum(floats)
 			if agg.Name == "avg" {
-				x = functionMean(floats)
+				x = functionMean(floats, f.Profile.ID)
 			}
 		}
 	case "min", "max":

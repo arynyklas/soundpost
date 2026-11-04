@@ -51,6 +51,7 @@ type metricState struct {
 	metadata     value.Result
 	variantInput bool
 	regexScope   *regexcompat.Scope
+	budget       *repetitionBudget
 }
 
 func (s *metricState) reserve(n int64) error {
@@ -67,6 +68,7 @@ func (s *metricState) reserve(n int64) error {
 // Evaluate returns retained owned results. The consumer releases
 // value.ResultBytes(result), including successful empty/partial results.
 func Evaluate(ctx context.Context, plan Plan, src scan.LogSource, account value.Account) (result value.Result, diagnostics []syntax.Diagnostic, err error) {
+	defer func() { err = boundaryErr(err) }()
 	if ctx == nil || account == nil || src == nil || src.ProjectID() == (model.ID{}) || plan.Expression.Expr == nil {
 		return result, nil, model.Fail(model.Invalid)
 	}
@@ -81,7 +83,7 @@ func Evaluate(ctx context.Context, plan Plan, src scan.LogSource, account value.
 		result, err = EvaluateLogs(ctx, plan, src, Backward, 5000000, account)
 		return result, nil, err
 	}
-	s := &metricState{ctx: ctx, plan: plan, src: src, account: account}
+	s := &metricState{ctx: ctx, plan: plan, src: src, account: account, budget: newRepetitionBudget()}
 	defer func() {
 		value.InheritMetadata(&result, s.metadata)
 		account.Release(s.held)
@@ -236,7 +238,7 @@ func (s *metricState) node(e Expr, at model.UnixNano) (value.Result, error) {
 			if err != nil {
 				return value.Result{}, err
 			}
-			r, err := EvaluateRange(s.ctx, RangePlan{Function: n.Name, Range: rg, Pipeline: p, Parameter: parameter, Grouping: n.Grouping, Without: n.Without, checked: true}, it, Frame{Time: at, Profile: s.plan.Profile, Project: s.src.ProjectID(), Account: s.account})
+			r, err := EvaluateRange(s.ctx, RangePlan{Function: n.Name, Range: rg, Pipeline: p, Parameter: parameter, Grouping: n.Grouping, Without: n.Without, checked: true}, it, Frame{Time: at, Profile: s.plan.Profile, Project: s.src.ProjectID(), Account: s.account, budget: s.budget})
 			value.InheritMetadata(&s.metadata, r)
 			if err == nil {
 				s.held += value.ResultBytes(r)
@@ -328,6 +330,7 @@ func EvaluateLogs(ctx context.Context, plan Plan, src scan.LogSource, order LogO
 	return EvaluateLogsInterval(ctx, plan, src, order, limit, 0, account)
 }
 func EvaluateLogsInterval(ctx context.Context, plan Plan, src scan.LogSource, order LogOrder, limit uint64, interval int64, account value.Account) (result value.Result, err error) {
+	defer func() { err = boundaryErr(err) }()
 	if ctx == nil || src == nil || account == nil || src.ProjectID() == (model.ID{}) || interval < 0 {
 		return result, model.Fail(model.Invalid)
 	}

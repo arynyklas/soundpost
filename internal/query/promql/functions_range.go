@@ -33,28 +33,45 @@ func functionQuantile(q float64, xs []float64) float64 {
 	weight := rank - float64(lo)
 	return xs[lo]*(1-weight) + xs[hi]*weight
 }
-func functionSum(xs []float64) float64 {
+func functionKahan(xs []float64) (float64, float64) {
 	sum, comp := 0.0, 0.0
 	for _, x := range xs {
-		next := sum + x
-		if math.IsInf(next, 0) {
-			comp = 0
-		} else if math.Abs(sum) >= math.Abs(x) {
-			comp += (sum - next) + x
-		} else {
-			comp += (x - next) + sum
-		}
-		sum = next
+		sum, comp = functionKahanAdd(sum, comp, x)
 	}
+	return sum, comp
+}
+
+func functionKahanAdd(sum, comp, x float64) (float64, float64) {
+	next := sum + x
+	if math.IsInf(next, 0) {
+		return next, 0
+	}
+	if math.Abs(sum) >= math.Abs(x) {
+		return next, comp + ((sum - next) + x)
+	}
+	return next, comp + ((x - next) + sum)
+}
+
+func functionSum(xs []float64) float64 {
+	sum, comp := functionKahan(xs)
 	return sum + comp
 }
-func functionMean(xs []float64) float64 {
+
+// functionMean is the compensated mean. 3.1.0 divides the combined sum
+// ((sum+comp)/n); 3.13.5 divides the sum and its compensation separately
+// (sum/n + comp/n). A finite input set whose sum overflows falls back to an
+// incremental mean in both.
+func functionMean(xs []float64, profileID string) float64 {
 	if len(xs) == 0 {
 		return math.NaN()
 	}
-	sum := functionSum(xs)
-	if !math.IsInf(sum, 0) {
-		return sum / float64(len(xs))
+	n := float64(len(xs))
+	sum, comp := functionKahan(xs)
+	if combined := sum + comp; !math.IsInf(combined, 0) {
+		if profileID == "promql-prometheus-3.13.5" {
+			return sum/n + comp/n
+		}
+		return combined / n
 	}
 	allFinite := true
 	for _, x := range xs {
@@ -64,14 +81,29 @@ func functionMean(xs []float64) float64 {
 		}
 	}
 	if !allFinite {
-		return sum / float64(len(xs))
+		return (sum + comp) / n
 	}
 	mean := xs[0]
 	for i, x := range xs[1:] {
-		n := float64(i + 2)
-		mean += x/n - mean/n
+		k := float64(i + 2)
+		mean += x/k - mean/k
 	}
 	return mean
+}
+
+// functionRangeVariance is the window (`*_over_time`) population variance: a
+// Kahan-compensated incremental mean and a Kahan-compensated sum of squared
+// deviations, on both pinned releases. The aggregation operators use
+// functionVariance (plain Welford), which matches the recorded observations.
+func functionRangeVariance(xs []float64) float64 {
+	var count, mean, meanComp, m2, m2Comp float64
+	for _, x := range xs {
+		count++
+		delta := x - (mean + meanComp)
+		mean, meanComp = functionKahanAdd(mean, meanComp, delta/count)
+		m2, m2Comp = functionKahanAdd(m2, m2Comp, delta*(x-(mean+meanComp)))
+	}
+	return (m2 + m2Comp) / count
 }
 func functionVariance(xs []float64) float64 {
 	mean, m2 := 0.0, 0.0
@@ -274,7 +306,7 @@ func functionRange(ctx context.Context, call CallPlan, args []value.Result, inde
 			} else {
 				x := functionSum(xs)
 				if name == "avg_over_time" {
-					x = functionMean(xs)
+					x = functionMean(xs, f.Profile.ID)
 				}
 				sample = functionSample(x, f.Time)
 			}
@@ -317,7 +349,7 @@ func functionRange(ctx context.Context, call CallPlan, args []value.Result, inde
 				}
 				x = functionQuantile(.5, xs)
 			case "stdvar_over_time", "stddev_over_time":
-				x = functionVariance(xs)
+				x = functionRangeVariance(xs)
 				if name == "stddev_over_time" {
 					x = math.Sqrt(x)
 				}
@@ -326,7 +358,11 @@ func functionRange(ctx context.Context, call CallPlan, args []value.Result, inde
 					emit = false
 					break
 				}
-				slope, intercept := functionRegression(floats, f.Time)
+				reference := f.Time
+				if name == "deriv" {
+					reference = floats[0].Time
+				}
+				slope, intercept := functionRegression(floats, reference)
 				x = slope
 				if name == "predict_linear" {
 					x = intercept + slope*functionFloat(args[1].Scalar)

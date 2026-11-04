@@ -44,7 +44,7 @@ func TestMetricQuantileCounterAndIEEE(t *testing.T) {
 		points  []rangePoint
 		q, want float64
 	}{{"rate_counter", []rangePoint{{at: 1e9, v: 3, n: 1}}, 0, 0}, {"quantile_over_time", []rangePoint{{v: 1, n: 3}, {v: 4, n: 1}}, 0.5, 1}, {"quantile_over_time", []rangePoint{{v: 1, n: 1}}, -1, math.Inf(-1)}, {"quantile_over_time", []rangePoint{{v: 1, n: 1}}, 2, math.Inf(1)}, {"avg_over_time", []rangePoint{{v: math.Inf(1), n: 1}, {v: math.Inf(1), n: 1}}, 0, math.Inf(1)}, {"sum_over_time", []rangePoint{{v: math.Copysign(0, -1), n: 1}}, 0, 0}} {
-		got, ok, err := rangeStatistic(tc.name, tc.points, tc.q, 0, 2e9, 2e9)
+		got, ok, err := rangeStatistic(tc.name, tc.points, tc.q, 0, 2e9, 2e9, nil)
 		if err != nil || !ok || got != tc.want {
 			t.Fatalf("%s got=%g ok=%v error=%v", tc.name, got, ok, err)
 		}

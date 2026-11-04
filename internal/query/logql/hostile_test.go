@@ -265,7 +265,8 @@ func TestManyLabelParsingCancelsPromptly(t *testing.T) {
 			_, err := RunPipeline(ctx, plan, entry(c.line), account)
 			returned := time.Now()
 			cancel()
-			if !errors.Is(err, context.Canceled) {
+			var fault *model.Fault
+			if !errors.Is(err, context.Canceled) || !errors.As(err, &fault) || fault.Code != model.Cancelled {
 				t.Fatalf("%s cancel at %d/%d: %v", c.q, at, total.calls, err)
 			}
 			if lag := returned.Sub(account.cancelledAt); lag > time.Second {
