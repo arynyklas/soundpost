@@ -121,28 +121,20 @@ func (e *LogEntry) set(n, v string) {
 	e.deleteOrdinary(n)
 	e.ParsedLabels = setLabel(e.ParsedLabels, n, v)
 }
-func (e *LogEntry) extract(n, v string) {
-	base := e.baseStream
-	if base == nil {
-		base = e.StreamLabels
-	}
-	if labelPresent(base, n) {
-		n += "_extracted"
-	}
-	e.ParsedLabels = setLabel(e.ParsedLabels, n, v)
-}
+
+// sanitizeLabel maps every rune outside [A-Za-z0-9_] to '_' (one underscore
+// per rune, not per byte) and prefixes a leading digit with '_'.
 func sanitizeLabel(s string) string {
 	var b strings.Builder
-	for i, c := range []byte(s) {
-		if c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || i > 0 && c >= '0' && c <= '9' {
-			b.WriteByte(c)
-		} else {
-			if i == 0 && c >= '0' && c <= '9' {
-				b.WriteByte('_')
-				b.WriteByte(c)
-			} else {
-				b.WriteByte('_')
-			}
+	for i, c := range s {
+		switch {
+		case c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || i > 0 && c >= '0' && c <= '9':
+			b.WriteByte(byte(c))
+		case i == 0 && c >= '0' && c <= '9':
+			b.WriteByte('_')
+			b.WriteByte(byte(c))
+		default:
+			b.WriteByte('_')
 		}
 	}
 	return b.String()

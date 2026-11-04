@@ -20,59 +20,69 @@ type pathStep struct {
 	array bool
 }
 
+// jsonPath splits a JSON extraction expression into steps. Whitespace between
+// tokens is insignificant (`a[ "b" ]`, `  k  `); a quoted key ends at the first
+// double quote and takes no escapes, so a backslash inside it is rejected, as
+// is a closing bracket.
 func jsonPath(s string) ([]pathStep, error) {
 	var out []pathStep
-	for len(s) > 0 {
-		if s[0] == '[' {
+	isSpace := func(c byte) bool { return c == ' ' || c == '\t' || c == '\n' || c == '\r' }
+	skip := func() {
+		for len(s) > 0 && isSpace(s[0]) {
 			s = s[1:]
+		}
+	}
+	afterDot := false
+	needSep := false // a key or bracket was just read; a '.' or '[' must follow
+	for {
+		skip()
+		if len(s) == 0 {
+			break
+		}
+		switch {
+		case s[0] == '[' && !afterDot:
+			s = s[1:]
+			skip()
 			if len(s) == 0 {
 				return nil, errors.New("unclosed JSON path")
 			}
 			if s[0] == '"' {
-				end := 1
-				for end < len(s) {
-					if s[end] == '\\' {
-						end += 2
-						continue
-					}
-					if s[end] == '"' {
-						break
-					}
-					end++
-				}
-				if end >= len(s) || end+1 >= len(s) || s[end+1] != ']' {
+				end := strings.IndexByte(s[1:], '"')
+				if end < 0 {
 					return nil, errors.New("invalid JSON path key")
 				}
-				if strings.IndexByte(s[:end+1], ']') >= 0 {
-					return nil, errors.New("invalid JSON path key")
-				}
-				var key string
-				if json.Unmarshal([]byte(s[:end+1]), &key) != nil {
+				key := s[1 : 1+end]
+				if strings.ContainsAny(key, "\\]") {
 					return nil, errors.New("invalid JSON path key")
 				}
 				out = append(out, pathStep{key: key})
 				s = s[end+2:]
 			} else {
-				end := strings.IndexByte(s, ']')
-				if end <= 0 {
-					return nil, errors.New("invalid JSON index")
+				end := 0
+				for end < len(s) && s[end] >= '0' && s[end] <= '9' {
+					end++
 				}
-				digits := s[:end]
-				for _, c := range digits {
-					if c < '0' || c > '9' {
-						return nil, errors.New("invalid JSON index")
-					}
-				}
-				i, err := strconv.Atoi(digits)
-				if err != nil {
+				i, err := strconv.Atoi(s[:end])
+				if end == 0 || err != nil {
 					return nil, errors.New("invalid JSON index")
 				}
 				out = append(out, pathStep{index: i, array: true})
-				s = s[end+1:]
+				s = s[end:]
 			}
-		} else {
+			skip()
+			if len(s) == 0 || s[0] != ']' {
+				return nil, errors.New("unclosed JSON path")
+			}
+			s = s[1:]
+			needSep = true
+		case s[0] == '.' && needSep:
+			s = s[1:]
+			afterDot, needSep = true, false
+		case needSep:
+			return nil, errors.New("invalid JSON path separator")
+		default:
 			end := 0
-			for end < len(s) && s[end] != '.' && s[end] != '[' {
+			for end < len(s) && !isSpace(s[end]) && s[end] != '.' && s[end] != '[' {
 				end++
 			}
 			key := s[:end]
@@ -81,20 +91,11 @@ func jsonPath(s string) ([]pathStep, error) {
 			}
 			out = append(out, pathStep{key: key})
 			s = s[end:]
+			afterDot, needSep = false, true
 		}
-		if s == "" {
-			break
-		}
-		if s[0] == '[' {
-			continue
-		}
-		if s[0] != '.' {
-			return nil, errors.New("invalid JSON path separator")
-		}
-		s = s[1:]
-		if s == "" || s[0] == '[' {
-			return nil, errors.New("invalid JSON path separator")
-		}
+	}
+	if afterDot {
+		return nil, errors.New("invalid JSON path separator")
 	}
 	if len(out) == 0 {
 		return nil, errors.New("empty JSON path")
@@ -243,79 +244,122 @@ func (v *jsonValue) lookup(path []pathStep) *jsonValue {
 	return v
 }
 
+// parseJSONExpressions evaluates `| json name="path", ...` against the line
+// without validating it first. The scanner walks the possibly truncated or
+// malformed line once and reports each requested path it reaches:
+//   - a path that is reached with a readable value sets that label;
+//   - a path that is reached but whose value is malformed (an unterminated
+//     array or object, an unknown literal) sets __error__ with the scanner's
+//     message, and the label stays empty;
+//   - a path that is never reached, or whose value cannot be located at all
+//     (not-found), is an empty label and never an error;
+//   - a scanner abort without a value error (stray closer before an array,
+//     key syntax outside an object) is a bare JSONParserErr and stops the stage
+//     before the remaining labels are filled in;
+//   - an empty line produces nothing;
+//   - a line whose first byte is neither '{' nor '[' (leading whitespace, a
+//     byte-order mark, a no-break space) is a bare JSONParserErr with no labels.
+func parseJSONExpressions(s Stage, e *LogEntry, check func() error) error {
+	data := []byte(e.Line)
+	if len(data) == 0 {
+		return nil
+	}
+	if data[0] != '{' && data[0] != '[' {
+		e.setError("JSONParserErr", "")
+		return nil
+	}
+	if stop := check(); stop != nil {
+		return stop
+	}
+	var names []string
+	var paths [][]string
+	seen := map[string]bool{}
+	for _, x := range s.Extractions {
+		if seen[x.Name] {
+			continue
+		}
+		seen[x.Name] = true
+		path, _ := jsonPath(x.Path)
+		keys := make([]string, len(path))
+		for i, st := range path {
+			if st.array {
+				keys[i] = "[" + strconv.Itoa(st.index) + "]"
+			} else {
+				keys[i] = st.key
+			}
+		}
+		names = append(names, x.Name)
+		paths = append(paths, keys)
+	}
+	set := make([]bool, len(names))
+	jsonparser.EachKey(data, func(idx int, raw []byte, kind jsonparser.ValueType, err error) {
+		if idx < 0 {
+			// A key outside the root object: the scanner reports it and
+			// stops, but the requested labels still materialize.
+			e.setError("JSONParserErr", err.Error())
+			return
+		}
+		switch {
+		case err == nil:
+			e.putRequested(e.extractedName(names[idx]), jsonValueText(raw, kind))
+			set[idx] = true
+		case !errors.Is(err, jsonparser.KeyPathNotFoundError):
+			e.setError("JSONParserErr", err.Error())
+		}
+	}, paths...)
+	if stop := check(); stop != nil {
+		return stop
+	}
+	for i, name := range names {
+		if !set[i] {
+			if _, held := entryLabel(e, name); !held {
+				e.putRequested(name, "")
+			}
+		}
+	}
+	return nil
+}
+
 // parseJSONStage drives the vendored lenient streaming scanner. Labels
 // extracted before a scanner error are kept and the scanner's own message is
 // reported, so the observable result for any line is the scanner's.
 func parseJSONStage(s Stage, e *LogEntry, check func() error) error {
-	data := []byte(e.Line)
-	var failure error
 	if len(s.Extractions) > 0 {
-		// Whole-line scan only to learn whether the input is well formed.
-		failure = jsonparser.ObjectEach(data, func(_, _ []byte, _ jsonparser.ValueType, _ int) error {
+		return parseJSONExpressions(s, e, check)
+	}
+	data := []byte(e.Line)
+	origins := map[string]string{}
+	var walk func(obj []byte, prefix, sourcePrefix string, depth int) error
+	walk = func(obj []byte, prefix, sourcePrefix string, depth int) error {
+		if depth > jsonMaxDepth {
+			return errors.New("Malformed JSON error")
+		}
+		return jsonparser.ObjectEach(obj, func(k, v []byte, kind jsonparser.ValueType, _ int) error {
 			if stop := check(); stop != nil {
 				return &parserStop{stop}
 			}
+			name := jsonValueText(k, jsonparser.String)
+			// Whitespace around a JSON key is dropped before sanitizing, at
+			// every nesting level (" x-y" -> x_y; " " -> empty name).
+			key := sanitizeLabel(strings.TrimSpace(name))
+			if prefix != "" {
+				key = prefix + "_" + key
+			}
+			origin := sourcePrefix + strconv.Itoa(len(name)) + ":" + name
+			switch kind {
+			case jsonparser.Object:
+				return walk(v, key, origin, depth+1)
+			case jsonparser.String, jsonparser.Number, jsonparser.Boolean:
+				previous, exists := origins[key]
+				if !exists || previous == origin {
+					origins[key] = origin
+					e.putExtracted(key, jsonValueText(v, kind))
+				}
+			}
 			return nil
 		})
-		if stop := check(); stop != nil {
-			return stop
-		}
-		seen := map[string]bool{}
-		for _, x := range s.Extractions {
-			if stop := check(); stop != nil {
-				return stop
-			}
-			if seen[x.Name] {
-				continue
-			}
-			seen[x.Name] = true
-			path, _ := jsonPath(x.Path)
-			keys := make([]string, len(path))
-			for i, st := range path {
-				if st.array {
-					keys[i] = "[" + strconv.Itoa(st.index) + "]"
-				} else {
-					keys[i] = st.key
-				}
-			}
-			text := ""
-			if raw, kind, _, err := jsonparser.Get(data, keys...); err == nil {
-				text = jsonValueText(raw, kind)
-			}
-			e.extract(x.Name, text)
-		}
-	} else {
-		origins := map[string]string{}
-		var walk func(obj []byte, prefix, sourcePrefix string, depth int) error
-		walk = func(obj []byte, prefix, sourcePrefix string, depth int) error {
-			if depth > jsonMaxDepth {
-				return errors.New("Malformed JSON error")
-			}
-			return jsonparser.ObjectEach(obj, func(k, v []byte, kind jsonparser.ValueType, _ int) error {
-				if stop := check(); stop != nil {
-					return &parserStop{stop}
-				}
-				name := jsonValueText(k, jsonparser.String)
-				key := sanitizeLabel(name)
-				if prefix != "" {
-					key = prefix + "_" + key
-				}
-				origin := sourcePrefix + strconv.Itoa(len(name)) + ":" + name
-				switch kind {
-				case jsonparser.Object:
-					return walk(v, key, origin, depth+1)
-				case jsonparser.String, jsonparser.Number, jsonparser.Boolean:
-					previous, exists := origins[key]
-					if !exists || previous == origin {
-						origins[key] = origin
-						e.extract(key, jsonValueText(v, kind))
-					}
-				}
-				return nil
-			})
-		}
-		failure = walk(data, "", "", 0)
 	}
+	failure := walk(data, "", "", 0)
 	if stop := stoppedParser(failure); stop != nil {
 		return stop
 	}
@@ -334,7 +378,9 @@ func jsonValueText(raw []byte, kind jsonparser.ValueType) string {
 		if kind == jsonparser.Null {
 			return ""
 		}
-		return string(raw)
+		if kind != jsonparser.Number {
+			return string(raw)
+		}
 	}
 	out, err := jsonparser.Unescape(raw, nil)
 	if err != nil {
@@ -343,7 +389,13 @@ func jsonValueText(raw []byte, kind jsonparser.ValueType) string {
 	return string(out)
 }
 
-type logfmtField struct{ key, value string }
+// lone marks a value that held an unpaired UTF-16 surrogate escape: plain
+// extraction sees a space where it stood, expression extraction sees an empty
+// value.
+type logfmtField struct {
+	key, value string
+	lone       bool
+}
 type logfmtSyntaxError struct {
 	position int
 	reason   string
@@ -352,141 +404,274 @@ type logfmtSyntaxError struct {
 func (e *logfmtSyntaxError) Error() string {
 	return fmt.Sprintf("logfmt syntax error at pos %d : %s", e.position, e.reason)
 }
+
+// scanLogfmtPair reads one key[=value] token starting at pos (which is already
+// past any whitespace). On success it returns the pair and the offset where the
+// next scan starts (a quoted value needs no separator after its closing quote).
+// On a syntax error it returns the error and the offset of the cursor at the
+// time of the failure; the reported position is that cursor plus one, where the
+// cursor is the offending byte for unexpected-byte errors, the end of the line
+// for an unterminated quote and the byte after the closing quote for an
+// invalid quoted value.
+func scanLogfmtPair(line string, pos int) (logfmtField, int, *logfmtSyntaxError) {
+	n := len(line)
+	start := pos
+	for pos < n && line[pos] > ' ' && line[pos] != '=' && line[pos] != '"' {
+		pos++
+	}
+	if pos < n && line[pos] == '"' {
+		return logfmtField{}, pos, &logfmtSyntaxError{pos + 1, "unexpected '\"'"}
+	}
+	if pos < n && line[pos] == '=' && pos == start {
+		return logfmtField{}, pos, &logfmtSyntaxError{pos + 1, "unexpected '='"}
+	}
+	key := line[start:pos]
+	if pos >= n || line[pos] != '=' {
+		return logfmtField{key: key}, pos, nil
+	}
+	pos++
+	if pos >= n || line[pos] <= ' ' {
+		return logfmtField{key: key}, pos, nil
+	}
+	switch line[pos] {
+	case '=':
+		return logfmtField{}, pos, &logfmtSyntaxError{pos + 1, "unexpected '='"}
+	case '"':
+		i := pos + 1
+		for i < n && line[i] != '"' {
+			if line[i] == '\\' {
+				i++
+			}
+			i++
+		}
+		if i >= n {
+			return logfmtField{}, n, &logfmtSyntaxError{n + 1, "unterminated quoted value"}
+		}
+		value, lone, ok := unquoteLogfmt(line[pos+1 : i])
+		if !ok {
+			return logfmtField{}, i + 1, &logfmtSyntaxError{i + 2, "invalid quoted value"}
+		}
+		return logfmtField{key, value, lone}, i + 1, nil
+	}
+	vstart := pos
+	for pos < n && line[pos] > ' ' {
+		if line[pos] == '=' || line[pos] == '"' {
+			return logfmtField{}, pos, &logfmtSyntaxError{pos + 1, "unexpected '" + line[pos:pos+1] + "'"}
+		}
+		pos++
+	}
+	return logfmtField{key: key, value: line[vstart:pos]}, pos, nil
+}
+
+// unquoteLogfmt decodes the body of a double-quoted logfmt value using JSON
+// escape rules (\" \\ \/ \b \f \n \r \t \uXXXX); an unpaired surrogate
+// becomes a space and sets the second result. Raw control bytes are kept.
+func unquoteLogfmt(s string) (string, bool, bool) {
+	if strings.IndexByte(s, '\\') < 0 {
+		return s, false, true
+	}
+	lone := false
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c != '\\' {
+			b.WriteByte(c)
+			continue
+		}
+		i++
+		if i >= len(s) {
+			return "", false, false
+		}
+		switch s[i] {
+		case '"', '\\', '/':
+			b.WriteByte(s[i])
+		case 'b':
+			b.WriteByte('\b')
+		case 'f':
+			b.WriteByte('\f')
+		case 'n':
+			b.WriteByte('\n')
+		case 'r':
+			b.WriteByte('\r')
+		case 't':
+			b.WriteByte('\t')
+		case 'u':
+			r, ok := hex4(s[i+1:])
+			if !ok {
+				return "", false, false
+			}
+			i += 4
+			if r >= 0xD800 && r < 0xE000 {
+				low, ok := rune(0), false
+				if r < 0xDC00 && strings.HasPrefix(s[i+1:], `\u`) {
+					low, ok = hex4(s[i+3:])
+				}
+				if ok && low >= 0xDC00 && low < 0xE000 {
+					r = 0x10000 + (r-0xD800)<<10 + (low - 0xDC00)
+					i += 6
+				} else {
+					r = ' '
+					lone = true
+				}
+			}
+			b.WriteRune(r)
+		default:
+			return "", false, false
+		}
+	}
+	return b.String(), lone, true
+}
+
+func hex4(s string) (rune, bool) {
+	if len(s) < 4 {
+		return 0, false
+	}
+	var r rune
+	for i := range 4 {
+		c := s[i]
+		switch {
+		case c >= '0' && c <= '9':
+			c -= '0'
+		case c >= 'a' && c <= 'f':
+			c = c - 'a' + 10
+		case c >= 'A' && c <= 'F':
+			c = c - 'A' + 10
+		default:
+			return 0, false
+		}
+		r = r<<4 | rune(c)
+	}
+	return r, true
+}
+
+// decodeLogfmt tokenizes the line. Strict mode stops at the first syntax error
+// and returns it together with the pairs read before it. Lenient mode drops the
+// failing token, skips to the next whitespace byte and keeps going; its error
+// return is always nil because the reference reports nothing for lenient lines.
 func decodeLogfmt(line string, strict bool, check func() error) ([]logfmtField, error) {
 	var out []logfmtField
-	var first error
-	for pos := 0; pos < len(line); {
+	for pos := 0; ; {
 		if err := check(); err != nil {
 			return nil, &parserStop{err}
 		}
-		for pos < len(line) && (line[pos] == ' ' || line[pos] == '\t' || line[pos] == '\r' || line[pos] == '\n') {
+		for pos < len(line) && line[pos] <= ' ' {
 			pos++
 		}
-		if pos == len(line) {
-			break
+		if pos >= len(line) {
+			return out, nil
 		}
-		start := pos
-		for pos < len(line) && line[pos] != '=' && line[pos] != ' ' && line[pos] != '\t' && line[pos] != '\r' && line[pos] != '\n' {
-			pos++
-		}
-		key := line[start:pos]
-		if key == "" || strings.ContainsAny(key, "\"\\") {
-			if first == nil {
-				first = errors.New("invalid logfmt key")
-			}
+		f, next, serr := scanLogfmtPair(line, pos)
+		if serr != nil {
 			if strict {
-				return out, first
+				return out, serr
 			}
-			for pos < len(line) && line[pos] != ' ' {
-				pos++
+			for next < len(line) && line[next] > ' ' {
+				next++
 			}
-			continue
+		} else {
+			out = append(out, f)
 		}
-		value := ""
-		if pos < len(line) && line[pos] == '=' {
-			pos++
-			if pos < len(line) && line[pos] == '"' {
-				start = pos
-				pos++
-				closed := false
-				for pos < len(line) {
-					if line[pos] == '\\' {
-						pos += 2
-						continue
-					}
-					if line[pos] == '"' {
-						pos++
-						closed = true
-						break
-					}
-					pos++
-				}
-				if !closed || pos > len(line) {
-					if first == nil {
-						first = &logfmtSyntaxError{position: len(line) + 1, reason: "unterminated quoted value"}
-					}
-					if strict {
-						return out, first
-					}
-					break
-				}
-				var err error
-				value, err = strconv.Unquote(line[start:pos])
-				if err != nil {
-					if first == nil {
-						first = errors.New("invalid logfmt escape")
-					}
-					if strict {
-						return out, first
-					}
-					continue
-				}
-				if pos < len(line) && line[pos] != ' ' && line[pos] != '\t' && line[pos] != '\r' && line[pos] != '\n' {
-					if first == nil {
-						first = errors.New("invalid logfmt delimiter")
-					}
-					if strict {
-						return out, first
-					}
-					for pos < len(line) && line[pos] != ' ' {
-						pos++
-					}
-				}
-			} else {
-				start = pos
-				for pos < len(line) && line[pos] != ' ' && line[pos] != '\t' && line[pos] != '\r' && line[pos] != '\n' {
-					pos++
-				}
-				value = line[start:pos]
-				if strings.ContainsAny(value, "=\"") {
-					if first == nil {
-						first = errors.New("invalid logfmt value")
-					}
-					if strict {
-						return out, first
-					}
-					continue
-				}
-			}
-		}
-		out = append(out, logfmtField{key, value})
+		pos = next
 	}
-	return out, first
 }
 func parseLogfmtStage(s Stage, e *LogEntry, check func() error) error {
 	fields, err := decodeLogfmt(e.Line, s.Strict, check)
 	if stop := stoppedParser(err); stop != nil {
 		return stop
 	}
-	seen := map[string]bool{}
-	origins := map[string]string{}
-	for _, f := range fields {
-		if stop := check(); stop != nil {
+	if len(s.Extractions) > 0 {
+		stopped, stop := parseLogfmtRequests(s, e, fields, check)
+		if stop != nil {
 			return stop
 		}
-		if f.value == "" && !s.KeepEmpty {
-			continue
+		if stopped {
+			err = nil
 		}
-		if len(s.Extractions) == 0 {
+	} else {
+		origins := map[string]string{}
+		for _, f := range fields {
+			if stop := check(); stop != nil {
+				return stop
+			}
+			if f.value == "" && !s.KeepEmpty {
+				continue
+			}
 			n := sanitizeLabel(f.key)
 			previous, exists := origins[n]
 			if n != "" && (!exists || previous == f.key) {
-				e.extract(n, f.value)
+				e.putExtracted(n, f.value)
 				origins[n] = f.key
-			}
-		} else {
-			for _, x := range s.Extractions {
-				if x.Path == f.key && !seen[x.Name] {
-					e.extract(x.Name, f.value)
-					seen[x.Name] = true
-				}
 			}
 		}
 	}
-	if err != nil && s.Strict {
+	if err != nil {
 		e.setError("LogfmtParserErr", err.Error())
 	}
 	return nil
+}
+
+// parseLogfmtRequests evaluates `| logfmt name="key", ...`. A line key feeds the
+// label whose requested path first claimed it (request order). A key that no
+// request names as a path falls back to the label of that final name (after a
+// stream-collision rename), so a label's own name never steals a key another
+// label requested by path. Every later occurrence of a key overwrites its label
+// (the last wins), except that a renamed label keeps its first value and a
+// second write to it ends the scan (see labelbuilder.go). A label that no key
+// reached is set empty unless it collides with the stream namespace. The result
+// reports whether the scan ended early.
+func parseLogfmtRequests(s Stage, e *LogEntry, fields []logfmtField, check func() error) (bool, error) {
+	target := make(map[string]string, 2*len(s.Extractions))
+	for _, x := range s.Extractions {
+		if _, taken := target[x.Path]; !taken {
+			target[x.Path] = x.Name
+		}
+	}
+	for _, x := range s.Extractions {
+		if _, taken := target[x.Name]; !taken {
+			target[x.Name] = x.Name
+		}
+		if k := e.extractedName(x.Name); k != x.Name {
+			if _, taken := target[k]; !taken {
+				target[k] = x.Name
+			}
+		}
+	}
+	requested := make(map[string]bool, len(s.Extractions))
+	for _, x := range s.Extractions {
+		requested[x.Name] = true
+	}
+	keys := make([]string, len(fields))
+	for i, f := range fields {
+		keys[i] = e.shadowedKey(f.key, requested)
+	}
+	reached := make(map[string]bool, len(s.Extractions))
+	stopped := false
+	for i, f := range fields {
+		if stop := check(); stop != nil {
+			return false, stop
+		}
+		name, ok := target[keys[i]]
+		if !ok {
+			continue
+		}
+		final := e.extractedName(name)
+		if final != name && labelPresent(e.ParsedLabels, final) {
+			stopped = true
+			break
+		}
+		value := f.value
+		if f.lone {
+			value = ""
+		}
+		e.putRequested(final, value)
+		reached[name] = true
+	}
+	for _, x := range s.Extractions {
+		if !reached[x.Name] && !e.streamHas(x.Name) {
+			e.putRequested(x.Name, "")
+		}
+	}
+	return stopped, nil
 }
 func parseRegexpStage(ctx context.Context, c compiledStage, e *LogEntry, scope *regexcompat.Scope) error {
 	indices, err := scope.FindStringSubmatchIndex(ctx, c.regex, e.Line)

@@ -270,30 +270,36 @@ func evalPredicate(ctx context.Context, f *LabelPredicate, e *LogEntry, scope *r
 	}
 	return numericCompare(f.Op, n, f.Number), nil
 }
-func unwrapValue(s Stage, e *LogEntry) (*float64, error) {
-	v, _ := entryLabel(e, s.UnwrapLabel)
-	var n float64
+
+// unwrapValue extracts the sample value. An absent or empty label drops the
+// entry (keep=false). A failed conversion keeps the label and records
+// SampleExtractionErr, replacing any earlier error. A successful conversion
+// consumes the label only while no earlier stage left an __error__; with one
+// present the label stays in the stream.
+func unwrapValue(s Stage, e *LogEntry) (n *float64, keep bool) {
+	v, ok := entryLabel(e, s.UnwrapLabel)
+	if !ok || v == "" {
+		return nil, false
+	}
+	var f float64
 	var err error
 	switch s.Conversion {
 	case "bytes":
-		n, err = parseByteQuantity(v)
+		f, err = parseByteQuantity(v)
 	case "duration", "duration_seconds":
 		var d time.Duration
 		d, err = time.ParseDuration(v)
-		n = d.Seconds()
+		f = d.Seconds()
 	default:
-		n, err = strconv.ParseFloat(v, 64)
+		f, err = strconv.ParseFloat(v, 64)
 	}
 	if err != nil {
-		// A failed conversion leaves the label in place: there was no extracted
-		// sample value to consume it, and the pinned reference reports the error
-		// alongside the original label.
 		e.setError("SampleExtractionErr", err.Error())
-		n = 0
-	} else {
+		f = 0
+	} else if e.languageError == "" {
 		e.deleteOrdinary(s.UnwrapLabel)
 	}
-	return &n, nil
+	return &f, true
 }
 func filterDetailBytes(f *LabelPredicate, e *LogEntry) int64 {
 	if f == nil {

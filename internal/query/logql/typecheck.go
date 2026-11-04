@@ -13,7 +13,7 @@ func Check(e Expr, p profile.Profile) (TypedExpr, []syntax.Diagnostic, error) {
 	if p.ID != "logql-loki-3.5.2" || p.Commit != "257d2f62bf8a81b44dea6fe88968d1d28c8e01e7" {
 		return TypedExpr{}, nil, regexcompat.ErrProfile
 	}
-	typ, err := checkExpr(e, p, false)
+	typ, err := checkExpr(e, p)
 	if err == nil && (typ == TypeRange || typ == TypeString) {
 		err = typeError(e, "range and string expressions require a function", "type.root-invalid")
 	}
@@ -52,20 +52,10 @@ func validLabel(n string) bool {
 func uniqueNames(ns []string) bool {
 	seen := map[string]bool{}
 	for _, n := range ns {
-		if !validLabel(n) || seen[n] {
+		if seen[n] {
 			return false
 		}
 		seen[n] = true
-	}
-	return true
-}
-
-// validNames checks label syntax only; repeated names are permitted.
-func validNames(ns []string) bool {
-	for _, n := range ns {
-		if !validLabel(n) {
-			return false
-		}
 	}
 	return true
 }
@@ -104,7 +94,7 @@ func checkCapabilities(e Expr, p profile.Profile) error {
 	}
 	return nil
 }
-func checkExpr(e Expr, p profile.Profile, inRange bool) (Type, error) {
+func checkExpr(e Expr, p profile.Profile) (Type, error) {
 	switch n := e.(type) {
 	case *LiteralExpr:
 		return TypeScalar, nil
@@ -116,9 +106,6 @@ func checkExpr(e Expr, p profile.Profile, inRange bool) (Type, error) {
 		}
 		nonempty := false
 		for _, m := range n.Matchers {
-			if !validLabel(m.Name) {
-				return "", typeError(e, "invalid stream label", "label.name-invalid")
-			}
 			ok, err := matchStatic(p, m, "")
 			if err != nil {
 				return "", typeError(e, "invalid selector regular expression", "regex.invalid")
@@ -128,17 +115,7 @@ func checkExpr(e Expr, p profile.Profile, inRange bool) (Type, error) {
 		if !nonempty {
 			return "", typeError(e, "selector must exclude empty labels", "selector.empty-compatible")
 		}
-		unwrapped := false
 		for _, s := range n.Stages {
-			if unwrapped && s.Kind != "label_filter" {
-				return "", languageError("syntax", "only label filters may follow unwrap", s.Head)
-			}
-			if s.Kind == "unwrap" {
-				if !inRange {
-					return "", languageError("syntax", "unwrap requires a range", s.Head)
-				}
-				unwrapped = true
-			}
 			if err := checkStage(s, p); err != nil {
 				return "", err
 			}
@@ -148,12 +125,12 @@ func checkExpr(e Expr, p profile.Profile, inRange bool) (Type, error) {
 		if n.Interval <= 0 {
 			return "", typeError(e, "range must be positive", "range.duration-invalid")
 		}
-		if _, err := checkExpr(n.Log, p, true); err != nil {
+		if _, err := checkExpr(n.Log, p); err != nil {
 			return "", err
 		}
 		return TypeRange, nil
 	case *UnaryExpr:
-		t, err := checkExpr(n.Expr, p, false)
+		t, err := checkExpr(n.Expr, p)
 		if err != nil {
 			return "", err
 		}
@@ -162,11 +139,11 @@ func checkExpr(e Expr, p profile.Profile, inRange bool) (Type, error) {
 		}
 		return t, nil
 	case *BinaryExpr:
-		a, err := checkExpr(n.Left, p, false)
+		a, err := checkExpr(n.Left, p)
 		if err != nil {
 			return "", err
 		}
-		b, err := checkExpr(n.Right, p, false)
+		b, err := checkExpr(n.Right, p)
 		if err != nil {
 			return "", err
 		}
@@ -187,7 +164,7 @@ func checkExpr(e Expr, p profile.Profile, inRange bool) (Type, error) {
 		}
 		// The pinned engine accepts repeated labels in an on/ignoring list;
 		// only the group_left/group_right include list stays unique.
-		if !validNames(n.Matching.Labels) || !uniqueNames(n.Matching.Include) {
+		if !uniqueNames(n.Matching.Include) {
 			return "", typeError(e, "invalid vector matching labels", "binary.matching-labels")
 		}
 		if n.Matching.On {
@@ -210,7 +187,7 @@ func checkExpr(e Expr, p profile.Profile, inRange bool) (Type, error) {
 			return "", typeError(e, "variants requires expressions and source range", "variants.source-invalid")
 		}
 		for _, x := range n.Variants {
-			t, err := checkExpr(x, p, false)
+			t, err := checkExpr(x, p)
 			if err != nil {
 				return "", err
 			}
@@ -218,7 +195,7 @@ func checkExpr(e Expr, p profile.Profile, inRange bool) (Type, error) {
 				return "", typeError(e, "variant requires metric expression", "variants.input-invalid")
 			}
 		}
-		if _, err := checkExpr(n.Range, p, true); err != nil {
+		if _, err := checkExpr(n.Range, p); err != nil {
 			return "", err
 		}
 		return TypeVector, nil
@@ -237,7 +214,7 @@ func checkCall(n *CallExpr, p profile.Profile) (Type, error) {
 	}
 	types := make([]Type, len(n.Args))
 	for i, x := range n.Args {
-		t, err := checkExpr(x, p, false)
+		t, err := checkExpr(x, p)
 		if err != nil {
 			return "", err
 		}
@@ -251,7 +228,9 @@ func checkCall(n *CallExpr, p profile.Profile) (Type, error) {
 		if n.Name == "topk" || n.Name == "bottomk" || n.Name == "approx_topk" {
 			want = 2
 		}
-		if len(types) != want || types[len(types)-1] != TypeVector {
+		// The reference grammar takes any metric expression, a scalar literal
+		// included, as the operand; evaluating a scalar operand fails at run time.
+		if len(types) != want || types[want-1] != TypeVector && types[want-1] != TypeScalar {
 			return fail("function.arguments", "aggregation requires vector argument")
 		}
 		if want == 2 && types[0] != TypeScalar {
@@ -346,17 +325,15 @@ func checkStage(s Stage, p profile.Profile) error {
 		}
 	case "json":
 		for _, x := range s.Extractions {
-			if !validLabel(x.Name) {
-				return fail("label.name-invalid", "invalid extraction label")
-			}
 			if _, err := jsonPath(x.Path); err != nil {
 				return fail("syntax.unexpected-token", "invalid JSON extraction path")
 			}
 		}
 	case "logfmt":
+		// A logfmt expression names one key: a plain identifier, never a path.
 		for _, x := range s.Extractions {
-			if !validLabel(x.Name) || x.Path == "" {
-				return fail("logfmt.extraction-invalid", "invalid logfmt extraction")
+			if !validLabel(x.Path) {
+				return fail("syntax.unexpected-token", "invalid logfmt extraction key")
 			}
 		}
 	case "regexp":
@@ -387,7 +364,7 @@ func checkStage(s Stage, p profile.Profile) error {
 	case "label_format":
 		names := map[string]bool{}
 		for _, a := range s.Assignments {
-			if !validLabel(a.Name) {
+			if a.Name == "" {
 				return fail("label-format.destination-invalid", "invalid format destination")
 			}
 			if a.Name == "__error__" {
@@ -398,7 +375,7 @@ func checkStage(s Stage, p profile.Profile) error {
 			}
 			names[a.Name] = true
 			if a.Rename {
-				if !validLabel(a.Value) || a.Value == "__error__" {
+				if a.Value == "__error__" {
 					return fail("label-format.rename-invalid", "invalid rename source")
 				}
 			} else if _, err := compileLabelTemplate(a.Value, p, defaultTemplateRuntime()); err != nil {
@@ -407,7 +384,7 @@ func checkStage(s Stage, p profile.Profile) error {
 		}
 	case "drop", "keep":
 		for _, m := range s.Labels {
-			if !validLabel(m.Name) {
+			if m.Name == "" {
 				return fail("label.name-invalid", "invalid label name")
 			}
 			if m.Op != "" {
@@ -426,7 +403,7 @@ func checkStage(s Stage, p profile.Profile) error {
 			return err
 		}
 	case "unwrap":
-		if !validLabel(s.UnwrapLabel) {
+		if s.UnwrapLabel == "" {
 			return fail("label.name-invalid", "invalid unwrap label")
 		}
 		switch s.Conversion {
@@ -451,7 +428,7 @@ func checkPredicate(f *LabelPredicate, p profile.Profile) error {
 		}
 		return checkPredicate(f.Right, p)
 	}
-	if !validLabel(f.Name) {
+	if f.Name == "" {
 		return fail("label.name-invalid", "invalid filter label")
 	}
 	switch f.Type {

@@ -32,19 +32,24 @@ func TestEveryLogQLLexicalAndDurationBoundary(t *testing.T) {
 }
 func TestEveryLogQLUnicodeEditionAndRanges(t *testing.T) {
 	p := testProfile(t)
-	tokens, err := lex("label𞓐", p)
-	if err != nil || len(tokens) < 2 || tokens[0].kind != "ident" {
-		t.Fatal("Unicode15 identifier classification rejected")
+	// A letter of the locked Unicode edition continues an identifier; a later one
+	// is a separate token of its own, which the grammar then rejects at its byte.
+	if _, err := Parse("{app=\"a\"}|json label𞓐", p); err != nil {
+		t.Fatalf("Unicode15 identifier classification rejected: %v", err)
 	}
-	if _, err = lex("label𐵐", p); err == nil {
-		t.Fatal("post-Unicode15 letter accepted by lexer")
+	_, err := Parse("{app=\"a\"}|json label𐵐", p)
+	var d *syntax.LanguageError
+	if !errors.As(err, &d) || d.Code != "syntax.unexpected-token" || d.Range.StartByte != strings.Index("{app=\"a\"}|json label𐵐", "𐵐") {
+		t.Fatalf("post-Unicode15 letter joined the identifier: %v", err)
 	}
-	tokens, err = lex(`{app="界"} | json`, p)
+	expr, err := Parse(`{app="界"} | json`, p)
 	if err != nil {
 		t.Fatal(err)
 	}
-	last := tokens[len(tokens)-2]
-	if last.span.EndByte-last.span.EndRune != 2 {
+	if m := expr.(*LogExpr).Matchers[0]; m.Value != "界" {
+		t.Fatalf("matcher value %q", m.Value)
+	}
+	if span := expr.Span(); span.EndByte-span.EndRune != 2 {
 		t.Fatal("byte/rune ranges conflated")
 	}
 }

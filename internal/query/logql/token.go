@@ -7,6 +7,8 @@ import "soundpost/internal/query/syntax"
 type token struct {
 	kind, text, value string
 	span              syntax.SourceRange
+	// dur is the parsed interval of a "range" token.
+	dur int64
 }
 
 func languageError(category, message string, r syntax.SourceRange) error {

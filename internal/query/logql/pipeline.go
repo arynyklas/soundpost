@@ -169,9 +169,10 @@ func RunPipeline(ctx context.Context, plan PipelinePlan, record LogEntry, accoun
 				return result, e
 			}
 		case "unwrap":
-			unwrapped, err = unwrapValue(s, &record)
-			if err != nil {
-				return result, err
+			var keep bool
+			unwrapped, keep = unwrapValue(s, &record)
+			if !keep {
+				return result, nil
 			}
 		case "line_format":
 			line, e := c.templates[0].Execute(ctx, TemplateInput{Line: record.Line, Timestamp: record.Timestamp, Labels: combinedLabels(record), Fields: record.Fields}, account)

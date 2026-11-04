@@ -193,7 +193,7 @@ func TestPipelineConversionDetailsPreservePrimitiveErrors(t *testing.T) {
 	for _, tc := range []struct{ query, line, category, detail string }{
 		{`{app="api"}|json|n>0`, `{"n":"private-marker"}`, "LabelFilterErr", numberErr.Error()},
 		{`{app="api"}|json|n>1ms`, `{"n":"private-marker"}`, "LabelFilterErr", durationErr.Error()},
-		{`{app="api"}|json|n>0B`, `{"n":" 1B"}`, "LabelFilterErr", bytesErr.Error()},
+		{`{app="api"}|json|n>1B`, `{"n":" 1B"}`, "LabelFilterErr", bytesErr.Error()},
 		{`sum_over_time({app="api"}|json|unwrap n[1m])`, `{"n":"private-marker"}`, "SampleExtractionErr", numberErr.Error()},
 	} {
 		result := run(t, tc.query, entry(tc.line))

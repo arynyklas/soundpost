@@ -16,6 +16,9 @@ import (
 
 func aggregateMetric(n *CallExpr, args []value.Result, at model.UnixNano, project model.ID, p profile.Profile, checks ...func() error) (value.Result, error) {
 	r := value.Result{Type: "vector"}
+	if args[len(args)-1].Type != "vector" {
+		return r, typeError(n, "aggregation operand is not a vector", "function.arguments")
+	}
 	v := args[len(args)-1].Vector
 	check := func() error { return metricCheck(checks) }
 	if n.Name == "approx_topk" {
