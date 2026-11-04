@@ -15,6 +15,7 @@ import (
 	"soundpost/internal/auth"
 	"soundpost/internal/durablefs"
 	"soundpost/internal/model"
+	"soundpost/internal/replica"
 	"sync"
 	"time"
 )
@@ -29,23 +30,33 @@ type Group interface {
 	Append(context.Context, auth.Scope, model.NormalizedBatch) (model.Receipt, error)
 }
 type Engine struct {
-	mu        sync.Mutex
-	db        *bolt.DB
-	dir       string
-	identity  model.ID
-	files     [64]*os.File
-	indexes   [64]uint64
-	validator Revalidator
-	fault     func(string) error
-	failed    bool
-	closed    bool
+	mu           sync.Mutex
+	proposalMu   sync.Mutex
+	repl         *replicatedEngine
+	db           *bolt.DB
+	dir          string
+	identity     model.ID
+	files        [64]*os.File
+	indexes      [64]uint64
+	validator    Revalidator
+	fault        func(string) error
+	failed       bool
+	closed       bool
+	catalog      manifestState
+	scans        map[*rowIterator]struct{}
+	subscribers  map[*changeIterator]struct{}
+	storageStats StorageStats
 }
 type walEntry struct {
-	Type    string                   `json:"type"`
-	Batch   *model.NormalizedBatch   `json:"batch,omitempty"`
-	Receipt *model.Receipt           `json:"receipt,omitempty"`
-	Cancel  *model.CancelReservation `json:"cancel,omitempty"`
-	Fence   *model.SourceFence       `json:"fence,omitempty"`
+	Type       string                      `json:"type"`
+	Batch      *model.NormalizedBatch      `json:"batch,omitempty"`
+	Receipt    *model.Receipt              `json:"receipt,omitempty"`
+	Cancel     *model.CancelReservation    `json:"cancel,omitempty"`
+	Fence      *model.SourceFence          `json:"fence,omitempty"`
+	Artifact   *model.ArtifactFragment     `json:"artifact,omitempty"`
+	ArtifactGC *model.ArtifactGC           `json:"artifact_gc,omitempty"`
+	Rejection  *model.ID                   `json:"rejection,omitempty"`
+	CommitSet  *replica.CommitSetWatermark `json:"commit_set,omitempty"`
 }
 
 func Open(dir string, v Revalidator) (*Engine, error) {
@@ -114,6 +125,15 @@ func Open(dir string, v Revalidator) (*Engine, error) {
 		})
 	}
 	if e == nil {
+		e = out.validateReplicaNamespaces()
+	}
+	if e == nil {
+		e = out.initBlobs()
+	}
+	if e == nil {
+		e = out.initStorage()
+	}
+	if e == nil {
 		e = out.recover()
 	}
 	if e != nil {
@@ -123,12 +143,18 @@ func Open(dir string, v Revalidator) (*Engine, error) {
 	return out, nil
 }
 func (e *Engine) Close() error {
+	if e.repl != nil {
+		for _, group := range e.repl.groups {
+			_ = group.Close()
+		}
+	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.closed {
 		return nil
 	}
 	e.closed = true
+	e.closeSubscribersLocked()
 	var err error
 	for _, f := range e.files {
 		if f != nil {
@@ -163,6 +189,11 @@ func batchKey(org, project, source, producer model.ID, slot uint16, batch model.
 }
 func slotKey(slot uint16) []byte { var b [2]byte; binary.BigEndian.PutUint16(b[:], slot); return b[:] }
 func (e *Engine) Append(ctx context.Context, scope auth.Scope, b model.NormalizedBatch) (model.Receipt, error) {
+	e.proposalMu.Lock()
+	defer e.proposalMu.Unlock()
+	if err := e.replicaBeforeWrite(ctx, b.RouteSlot); err != nil {
+		return model.Receipt{}, err
+	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.closed || e.failed {
@@ -174,7 +205,7 @@ func (e *Engine) Append(ctx context.Context, scope auth.Scope, b model.Normalize
 	if b.Version != 1 || len(b.Records) > 512 || len(b.Canonical) > 4<<20 {
 		return model.Receipt{}, model.Fail(model.TooLarge)
 	}
-	if b.RouteSlot >= 64 || b.Org != scope.OrgID() || len(b.Records) == 0 || b.PolicyEpoch != scope.PolicyEpoch() {
+	if b.RouteSlot >= 64 || b.Org != scope.OrgID() || len(b.Records) == 0 || uint64(b.PolicyEpoch) != scope.PolicyEpoch() {
 		return model.Receipt{}, model.Fail(model.Forbidden)
 	}
 	if err := e.validator.Revalidate(ctx, scope); err != nil {
@@ -228,7 +259,7 @@ func (e *Engine) Append(ctx context.Context, scope auth.Scope, b model.Normalize
 		return model.Receipt{}, err
 	}
 	index := e.indexes[b.RouteSlot] + 1
-	r := model.Receipt{Version: 1, BatchID: b.ID, Hash: b.Hash, Cursor: model.Cursor{Group: e.group(b.RouteSlot), Index: index}, SignalDeadlines: append([]model.SignalDeadline(nil), b.Deadlines...), DedupUntil: b.AdmissionAt + model.UnixNano(7*24*time.Hour)}
+	r := model.Receipt{Version: 1, BatchID: b.ID, Hash: b.Hash, Cursor: model.Cursor{Group: e.group(b.RouteSlot), Index: model.Uint64(index)}, SignalDeadlines: append([]model.SignalDeadline(nil), b.Deadlines...), DedupUntil: b.AdmissionAt + model.UnixNano(7*24*time.Hour)}
 	if len(r.SignalDeadlines) == 0 {
 		return model.Receipt{}, model.Fail(model.Invalid)
 	}
@@ -248,24 +279,5 @@ func (e *Engine) Append(ctx context.Context, scope auth.Scope, b model.Normalize
 // commit is deliberately the sole durable ordered-apply path. There is no
 // parallel in-memory implementation and no enqueue acknowledgement.
 func (e *Engine) commit(slot uint16, index uint64, entry walEntry) error {
-	if slot >= 64 || e.indexes[slot] == ^uint64(0) || index == 0 || index != e.indexes[slot]+1 {
-		return model.Fail(model.Unavailable)
-	}
-	payload, err := json.Marshal(entry)
-	if err != nil {
-		return model.Fail(model.Invalid)
-	}
-	if err = e.writeWAL(slot, index, payload); err != nil {
-		e.failed = true
-		return model.Fail(model.Unavailable)
-	}
-	if err = e.trip("before_apply"); err == nil {
-		err = e.apply(slot, index, entry)
-	}
-	if err != nil {
-		e.failed = true
-		return model.Fail(model.Unavailable)
-	}
-	e.indexes[slot] = index
-	return nil
+	return e.commitReplicated(slot, index, entry)
 }

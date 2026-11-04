@@ -6,14 +6,13 @@ import (
 	"context"
 	bolt "go.etcd.io/bbolt"
 	"os"
-	"path/filepath"
 	"testing"
 )
 
 func TestCursorOverflowNeverAcknowledges(t *testing.T) {
 	store, a, c, d := fixture(t)
 	scope, b := normalized(t, store, a, c, d)
-	engine, e := Open(t.TempDir(), a)
+	engine, e := openTestEngine(t, t.TempDir(), a, store)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -29,7 +28,7 @@ func TestMissingIdentityAndAcknowledgedWALDenyOpen(t *testing.T) {
 			store, a, c, d := fixture(t)
 			scope, b := normalized(t, store, a, c, d)
 			dir := t.TempDir()
-			engine, e := Open(dir, a)
+			engine, e := openTestEngine(t, dir, a, store)
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -43,11 +42,11 @@ func TestMissingIdentityAndAcknowledgedWALDenyOpen(t *testing.T) {
 			}
 			engine.Close()
 			if part == "wal" {
-				if e = os.Remove(filepath.Join(dir, walName(b.RouteSlot))); e != nil {
+				if e = os.Remove(testReadyWALPath(dir, b.RouteSlot)); e != nil {
 					t.Fatal(e)
 				}
 			}
-			if engine, e = Open(dir, a); e == nil {
+			if engine, e = openTestEngine(t, dir, a, store); e == nil {
 				engine.Close()
 				t.Fatal("missing durable authority silently recreated")
 			}

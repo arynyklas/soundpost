@@ -13,7 +13,7 @@ import (
 func TestLocalSourcePolicyBarrierAndHistoricalReceipt(t *testing.T) {
 	store, a, c, d := fixture(t)
 	scope, b := normalized(t, store, a, c, d)
-	engine, e := Open(t.TempDir(), a)
+	engine, e := openTestEngine(t, t.TempDir(), a, store)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -89,7 +89,7 @@ func TestCrashReplayCommitsUnappliedBatch(t *testing.T) {
 	store, a, c, d := fixture(t)
 	scope, b := normalized(t, store, a, c, d)
 	dir := t.TempDir()
-	engine, e := Open(dir, a)
+	engine, e := openTestEngine(t, dir, a, store)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -103,7 +103,7 @@ func TestCrashReplayCommitsUnappliedBatch(t *testing.T) {
 		t.Fatal("unapplied ACK")
 	}
 	engine.Close()
-	engine, e = Open(dir, a)
+	engine, e = openTestEngine(t, dir, a, store)
 	if e != nil {
 		t.Fatal(e)
 	}

@@ -5,6 +5,7 @@ package storage
 import (
 	"encoding/json"
 	"soundpost/internal/model"
+	"soundpost/internal/replica"
 )
 
 // The canonical input is stored once. Encoding both Batch and its canonical
@@ -13,22 +14,26 @@ type durableBatch struct {
 	Org         model.ID                   `json:"org"`
 	Hash        model.Hash                 `json:"hash"`
 	Canonical   []byte                     `json:"canonical"`
-	PolicyEpoch uint64                     `json:"policy_epoch,string"`
+	PolicyEpoch model.Uint64               `json:"policy_epoch"`
 	PolicyHash  string                     `json:"policy_hash"`
 	AdmissionAt model.UnixNano             `json:"admission_at_ns"`
 	Deadlines   []model.SignalDeadline     `json:"deadlines"`
 	Reservation model.AdmissionReservation `json:"reservation"`
 }
 type durableEntry struct {
-	Type    string                   `json:"type"`
-	Batch   *durableBatch            `json:"batch,omitempty"`
-	Receipt *model.Receipt           `json:"receipt,omitempty"`
-	Cancel  *model.CancelReservation `json:"cancel,omitempty"`
-	Fence   *model.SourceFence       `json:"fence,omitempty"`
+	Type       string                      `json:"type"`
+	Batch      *durableBatch               `json:"batch,omitempty"`
+	Receipt    *model.Receipt              `json:"receipt,omitempty"`
+	Cancel     *model.CancelReservation    `json:"cancel,omitempty"`
+	Fence      *model.SourceFence          `json:"fence,omitempty"`
+	Artifact   *model.ArtifactFragment     `json:"artifact,omitempty"`
+	ArtifactGC *model.ArtifactGC           `json:"artifact_gc,omitempty"`
+	Rejection  *model.ID                   `json:"rejection,omitempty"`
+	CommitSet  *replica.CommitSetWatermark `json:"commit_set,omitempty"`
 }
 
 func (entry walEntry) MarshalJSON() ([]byte, error) {
-	wire := durableEntry{Type: entry.Type, Receipt: entry.Receipt, Cancel: entry.Cancel, Fence: entry.Fence}
+	wire := durableEntry{Type: entry.Type, Receipt: entry.Receipt, Cancel: entry.Cancel, Fence: entry.Fence, Artifact: entry.Artifact, ArtifactGC: entry.ArtifactGC, Rejection: entry.Rejection, CommitSet: entry.CommitSet}
 	if b := entry.Batch; b != nil {
 		wire.Batch = &durableBatch{Org: b.Org, Hash: b.Hash, Canonical: b.Canonical, PolicyEpoch: b.PolicyEpoch, PolicyHash: b.PolicyHash, AdmissionAt: b.AdmissionAt, Deadlines: b.Deadlines, Reservation: b.Reservation}
 	}
@@ -39,7 +44,25 @@ func (entry *walEntry) UnmarshalJSON(raw []byte) error {
 	if model.StrictJSON(raw, &wire) != nil {
 		return model.Fail(model.Corrupt)
 	}
-	out := walEntry{Type: wire.Type, Receipt: wire.Receipt, Cancel: wire.Cancel, Fence: wire.Fence}
+	arms := 0
+	for _, present := range []bool{wire.Batch != nil, wire.Cancel != nil, wire.Fence != nil, wire.Artifact != nil, wire.ArtifactGC != nil, wire.Rejection != nil} {
+		if present {
+			arms++
+		}
+	}
+	if arms != 1 || (wire.Type == "batch") != (wire.Batch != nil) || (wire.Type == "batch") != (wire.Receipt != nil) || (wire.Type == "cancel") != (wire.Cancel != nil) || (wire.Type == "fence") != (wire.Fence != nil) {
+		return model.Fail(model.Corrupt)
+	}
+	if wire.CommitSet != nil && (wire.Type != "cancel" || wire.Cancel == nil || wire.CommitSet.Reservation != wire.Cancel.ReservationID || wire.CommitSet.Group != wire.Cancel.OwnerGroup) {
+		return model.Fail(model.Corrupt)
+	}
+	if (wire.Type == "rejected") != (wire.Rejection != nil) || wire.Rejection != nil && (wire.Batch != nil || wire.Receipt != nil || wire.Cancel != nil || wire.Fence != nil || wire.Artifact != nil || wire.ArtifactGC != nil) {
+		return model.Fail(model.Corrupt)
+	}
+	if (wire.Type == "artifact_fragment") != (wire.Artifact != nil) || (wire.Type == "artifact_gc") != (wire.ArtifactGC != nil) || wire.Artifact != nil && (wire.Batch != nil || wire.Receipt != nil || wire.Cancel != nil || wire.Fence != nil || wire.ArtifactGC != nil) || wire.ArtifactGC != nil && (wire.Batch != nil || wire.Receipt != nil || wire.Cancel != nil || wire.Fence != nil || wire.Artifact != nil) {
+		return model.Fail(model.Corrupt)
+	}
+	out := walEntry{Type: wire.Type, Receipt: wire.Receipt, Cancel: wire.Cancel, Fence: wire.Fence, Artifact: wire.Artifact, ArtifactGC: wire.ArtifactGC, Rejection: wire.Rejection, CommitSet: wire.CommitSet}
 	if b := wire.Batch; b != nil {
 		if len(b.Canonical) > 4<<20 || model.HashCanonical(b.Canonical) != b.Hash {
 			return model.Fail(model.Corrupt)

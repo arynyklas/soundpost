@@ -10,6 +10,9 @@ import (
 )
 
 func (e *Engine) VerifyFinalization(ctx context.Context, r model.FinalizeAdmission) error {
+	if err := e.replicaBeforeCursor(ctx, r.Cursor); err != nil {
+		return err
+	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if ctx.Err() != nil || e.closed || e.failed {

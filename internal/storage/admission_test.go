@@ -16,7 +16,7 @@ import (
 func TestHistoricalReceiptLookupAfterPolicyDeleteAndRevocation(t *testing.T) {
 	store, a, c, d := fixture(t)
 	scope, b := normalized(t, store, a, c, d)
-	engine, e := Open(t.TempDir(), a)
+	engine, e := openTestEngine(t, t.TempDir(), a, store)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -72,7 +72,7 @@ func TestHistoricalReceiptLookupAfterPolicyDeleteAndRevocation(t *testing.T) {
 func TestQuotaReservationIsAtomic(t *testing.T) {
 	store, a, c, d := fixture(t)
 	scope, b := normalized(t, store, a, c, d)
-	cap := uint64(len(b.Canonical)) * 3
+	cap := model.Uint64(len(b.Canonical)) * 3
 	store.Update(context.Background(), func(st *control.State) error {
 		src := st.Sources[d.Source.String()]
 		src.Policy.MaxBytes = cap
@@ -113,7 +113,7 @@ func TestQuotaReservationIsAtomic(t *testing.T) {
 func TestReservationNotRefundedOnAmbiguousAppend(t *testing.T) {
 	store, a, c, d := fixture(t)
 	scope, b := normalized(t, store, a, c, d)
-	engine, e := Open(t.TempDir(), a)
+	engine, e := openTestEngine(t, t.TempDir(), a, store)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -137,7 +137,7 @@ func TestReservationNotRefundedOnAmbiguousAppend(t *testing.T) {
 func TestCancellationRequiresDurableOwnerFence(t *testing.T) {
 	store, a, c, d := fixture(t)
 	scope, b := normalized(t, store, a, c, d)
-	engine, e := Open(t.TempDir(), a)
+	engine, e := openTestEngine(t, t.TempDir(), a, store)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -163,7 +163,7 @@ func TestCancellationRequiresDurableOwnerFence(t *testing.T) {
 func TestOrderedMetricConflictRejectsWholeBatch(t *testing.T) {
 	store, a, c, d := fixture(t)
 	scope, b := normalized(t, store, a, c, d)
-	engine, e := Open(t.TempDir(), a)
+	engine, e := openTestEngine(t, t.TempDir(), a, store)
 	if e != nil {
 		t.Fatal(e)
 	}

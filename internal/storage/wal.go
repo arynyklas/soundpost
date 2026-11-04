@@ -11,7 +11,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"soundpost/internal/durablefs"
 	"soundpost/internal/model"
 )
 
@@ -30,55 +29,6 @@ func headerChecksum(h []byte) uint32 {
 	x.Write(h[16:32])
 	x.Write(h[36:40])
 	return x.Sum32()
-}
-func (e *Engine) writeWAL(slot uint16, index uint64, payload []byte) error {
-	if len(payload) == 0 || len(payload) > 8<<20 {
-		return model.Fail(model.TooLarge)
-	}
-	f := e.files[slot]
-	if f == nil {
-		var err error
-		f, err = os.OpenFile(filepath.Join(e.dir, walName(slot)), os.O_CREATE|os.O_RDWR|os.O_APPEND, 0600)
-		if err != nil {
-			return err
-		}
-		e.files[slot] = f
-		if err = f.Sync(); err != nil {
-			return err
-		}
-		if err = durablefs.SyncDir(e.dir); err != nil {
-			return err
-		}
-	}
-	var h [walHeader]byte
-	copy(h[:4], "SPW1")
-	binary.BigEndian.PutUint16(h[4:6], 1)
-	binary.BigEndian.PutUint16(h[6:8], slot)
-	binary.BigEndian.PutUint32(h[8:12], uint32(len(payload)))
-	binary.BigEndian.PutUint64(h[16:24], 1)
-	binary.BigEndian.PutUint64(h[24:32], index)
-	binary.BigEndian.PutUint32(h[32:36], headerChecksum(h[:]))
-	binary.BigEndian.PutUint32(h[12:16], checksum(h[:], payload))
-	if err := e.trip("wal_write"); err != nil {
-		return err
-	}
-	if n, err := f.Write(h[:]); err != nil {
-		return err
-	} else if n != len(h) {
-		return io.ErrShortWrite
-	}
-	if err := e.trip("wal_payload_write"); err != nil {
-		return err
-	}
-	if n, err := f.Write(payload); err != nil {
-		return err
-	} else if n != len(payload) {
-		return io.ErrShortWrite
-	}
-	if err := e.trip("wal_sync"); err != nil {
-		return err
-	}
-	return f.Sync()
 }
 func (e *Engine) recover() error {
 	for slot := range uint16(64) {
@@ -100,8 +50,17 @@ func (e *Engine) recover() error {
 		}); readErr != nil {
 			return readErr
 		}
+		replicated, legacy, cutErr := e.replicatedLegacyCut(slot)
+		if cutErr != nil {
+			return cutErr
+		}
+		walApplied := previouslyApplied
+		if replicated {
+			walApplied = legacy
+			e.indexes[slot] = previouslyApplied
+		}
 		if os.IsNotExist(err) {
-			if previouslyApplied != 0 {
+			if walApplied != 0 {
 				return model.Fail(model.Corrupt)
 			}
 			continue
@@ -161,6 +120,9 @@ func (e *Engine) recover() error {
 				return model.Fail(model.Corrupt)
 			}
 			index++
+			if replicated && index > legacy {
+				return model.Fail(model.Corrupt)
+			}
 			if index > previouslyApplied {
 				if err = e.apply(slot, index, entry); err != nil {
 					return model.Fail(model.Corrupt)
@@ -168,7 +130,14 @@ func (e *Engine) recover() error {
 			}
 			offset += walHeader + int64(length)
 		}
-		e.indexes[slot] = index
+		if replicated {
+			if index != legacy {
+				return model.Fail(model.Corrupt)
+			}
+			e.indexes[slot] = previouslyApplied
+		} else {
+			e.indexes[slot] = index
+		}
 		var applied uint64
 		if err = e.db.View(func(tx *bolt.Tx) error {
 			v := tx.Bucket([]byte("cursors")).Get(slotKey(slot))
@@ -179,7 +148,7 @@ func (e *Engine) recover() error {
 		}); err != nil {
 			return err
 		}
-		if applied != index {
+		if applied != e.indexes[slot] {
 			return model.Fail(model.Corrupt)
 		}
 	}

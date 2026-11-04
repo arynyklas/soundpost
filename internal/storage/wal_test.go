@@ -8,7 +8,6 @@ import (
 	"errors"
 	bolt "go.etcd.io/bbolt"
 	"os"
-	"path/filepath"
 	"soundpost/internal/auth"
 	"soundpost/internal/control"
 	"soundpost/internal/model"
@@ -18,6 +17,12 @@ import (
 
 // These tests catch ACK-before-sync, lost original receipts, and permissive WAL repair.
 func fixture(t *testing.T) (*control.Store, *auth.Service, auth.SourceCredential, model.SourceDescriptor) {
+	return fixtureConfigured(t, false)
+}
+func typedFixture(t *testing.T) (*control.Store, *auth.Service, auth.SourceCredential, model.SourceDescriptor) {
+	return fixtureConfigured(t, true)
+}
+func fixtureConfigured(t *testing.T, typed bool) (*control.Store, *auth.Service, auth.SourceCredential, model.SourceDescriptor) {
 	t.Helper()
 	c, e := control.Open(t.TempDir())
 	if e != nil {
@@ -26,6 +31,9 @@ func fixture(t *testing.T) (*control.Store, *auth.Service, auth.SourceCredential
 	t.Cleanup(func() { c.Close() })
 	a, e := auth.NewService(auth.AuthDependencies{Control: c})
 	if e != nil {
+		t.Fatal(e)
+	}
+	if e = activateTestControl(t, c); e != nil {
 		t.Fatal(e)
 	}
 	token, _ := c.BootstrapToken()
@@ -45,8 +53,30 @@ func fixture(t *testing.T) (*control.Store, *auth.Service, auth.SourceCredential
 			t.Fatal(e)
 		}
 	}
+	// Organization administration does not imply tenant membership or data
+	// permission. Establish the real reader before onboarding captures the
+	// source epoch, so later read helpers never mutate reserved-write authority.
+	for _, change := range []struct {
+		kind    string
+		payload auth.AdminPayload
+	}{
+		{"membership", auth.AdminPayload{UserID: s.User, Enabled: true, Reason: "storage fixture reader membership"}},
+		{"grant", auth.AdminPayload{UserID: s.User, ProjectID: project, Enabled: true, Permissions: []string{string(auth.Read), string(profilesRead)}, Reason: "storage fixture scoped reads"}},
+	} {
+		var revision model.Revision
+		if e = c.View(context.Background(), func(st model.ControlState) error { revision = st.Revision; return nil }); e != nil {
+			t.Fatal(e)
+		}
+		if _, e = a.AdminCommand(context.Background(), cred, auth.AdminCommandRequest{CommandID: model.NewID(), ExpectedRevision: revision, OrgID: org, Kind: change.kind, Payload: mustJSON(t, change.payload)}); e != nil {
+			t.Fatal(e)
+		}
+	}
 	serviceID, environmentID, buildID := model.NewID(), model.NewID(), model.NewID()
-	issued, e := a.OnboardSource(context.Background(), cred, auth.SourceOnboarding{CommandID: model.NewID(), Org: org, Project: project, Source: source, Expires: model.UnixNano(time.Now().Add(time.Hour).UnixNano()), Policy: model.SourcePolicy{Revision: 1, Enabled: true, Class: "structured", Kinds: []model.Kind{model.Metric}, Resources: model.ResourceRegistry{Services: []model.ID{serviceID}, Environments: []model.ID{environmentID}, Builds: []model.ID{buildID}, Instances: []string{"test"}}, RetentionDays: map[model.Kind]uint32{model.Metric: 30}, MaxBytes: 1 << 30, MaxSeries: 1000}, Reason: "test"})
+	sourcePolicy := model.SourcePolicy{Revision: 1, Enabled: true, Class: "structured", Kinds: []model.Kind{model.Metric}, Resources: model.ResourceRegistry{Services: []model.ID{serviceID}, Environments: []model.ID{environmentID}, Builds: []model.ID{buildID}, Instances: []string{"test"}}, RetentionDays: map[model.Kind]uint32{model.Metric: 30}, MaxBytes: 1 << 30, MaxSeries: 1000}
+	if typed {
+		configureTypedSource(t, &sourcePolicy)
+	}
+	issued, e := a.OnboardSource(context.Background(), cred, auth.SourceOnboarding{CommandID: model.NewID(), Org: org, Project: project, Source: source, Expires: model.UnixNano(time.Now().Add(time.Hour).UnixNano()), Policy: sourcePolicy, Reason: "test"})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -80,7 +110,7 @@ func normalized(t *testing.T, store *control.Store, a *auth.Service, c auth.Sour
 	raw := mustJSON(t, b)
 	h := model.HashCanonical(raw)
 	policyBytes := mustJSON(t, src.Policy)
-	n := model.NormalizedBatch{Batch: b, Org: d.Org, Hash: h, Canonical: raw, PolicyEpoch: scope.PolicyEpoch(), PolicyHash: model.HashCanonical(policyBytes).String(), AdmissionAt: 10, Deadlines: []model.SignalDeadline{{Kind: model.Metric, RetainUntil: 100}}}
+	n := model.NormalizedBatch{Batch: b, Org: d.Org, Hash: h, Canonical: raw, PolicyEpoch: model.Uint64(scope.PolicyEpoch()), PolicyHash: model.HashCanonical(policyBytes).String(), AdmissionAt: 10, Deadlines: []model.SignalDeadline{{Kind: model.Metric, RetainUntil: 100}}}
 	n.Reservation, e = store.ReserveAdmission(context.Background(), scope, n)
 	if e != nil {
 		t.Fatal(e)
@@ -92,7 +122,7 @@ func TestRetryReturnsOriginalReceiptAcrossRestart(t *testing.T) {
 	store, a, c, d := fixture(t)
 	scope, b := normalized(t, store, a, c, d)
 	dir := t.TempDir()
-	e, err := Open(dir, a)
+	e, err := openTestEngine(t, dir, a, store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +133,7 @@ func TestRetryReturnsOriginalReceiptAcrossRestart(t *testing.T) {
 	if err = e.Close(); err != nil {
 		t.Fatal(err)
 	}
-	e, err = Open(dir, a)
+	e, err = openTestEngine(t, dir, a, store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +164,7 @@ func TestSyncFailureNeverAcknowledges(t *testing.T) {
 		t.Run(point, func(t *testing.T) {
 			store, a, c, d := fixture(t)
 			scope, b := normalized(t, store, a, c, d)
-			engine, err := Open(t.TempDir(), a)
+			engine, err := openTestEngine(t, t.TempDir(), a, store)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -155,7 +185,7 @@ func TestTornTailRecovery(t *testing.T) {
 	store, a, c, d := fixture(t)
 	scope, b := normalized(t, store, a, c, d)
 	dir := t.TempDir()
-	e, err := Open(dir, a)
+	e, err := openTestEngine(t, dir, a, store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,14 +193,14 @@ func TestTornTailRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.Close()
-	path := filepath.Join(dir, walName(b.RouteSlot))
+	path := testReadyWALPath(dir, b.RouteSlot)
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
 		t.Fatal(err)
 	}
 	f.Write([]byte{1, 2, 3})
 	f.Close()
-	e, err = Open(dir, a)
+	e, err = openTestEngine(t, dir, a, store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +210,7 @@ func TestInteriorCorruptionRefusesRead(t *testing.T) {
 	store, a, c, d := fixture(t)
 	scope, b := normalized(t, store, a, c, d)
 	dir := t.TempDir()
-	e, err := Open(dir, a)
+	e, err := openTestEngine(t, dir, a, store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,14 +218,14 @@ func TestInteriorCorruptionRefusesRead(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.Close()
-	path := filepath.Join(dir, walName(b.RouteSlot))
+	path := testReadyWALPath(dir, b.RouteSlot)
 	f, err := os.OpenFile(path, os.O_RDWR, 0600)
 	if err != nil {
 		t.Fatal(err)
 	}
 	f.WriteAt([]byte{255}, 40)
 	f.Close()
-	if e, err = Open(dir, a); err == nil {
+	if e, err = openTestEngine(t, dir, a, store); err == nil {
 		e.Close()
 		t.Fatal("corruption repaired")
 	}
