@@ -157,7 +157,20 @@ func TestMajorityMeansDurableNotReceived(t *testing.T) {
 		if machines[0].Applied() > wire.nodes[1].Status().Commit {
 			t.Fatal("applied beyond commit")
 		}
-		if !wire.nodes[2].Status().Failed {
+		// Failing closed is asserted without a fixed delivery window: under CPU
+		// contention node 2 may not have processed the append within the first
+		// 30 ms, but it must fail closed once it does. The acknowledgement
+		// assertions above are unconditional.
+		failedClosed := false
+		for range 2000 {
+			if wire.nodes[2].Status().Failed {
+				failedClosed = true
+				break
+			}
+			wire.pump(t)
+			time.Sleep(time.Millisecond)
+		}
+		if !failedClosed {
 			t.Fatal("sync failure did not fail closed")
 		}
 	})
