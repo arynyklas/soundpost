@@ -195,6 +195,24 @@ func functionRange(ctx context.Context, call CallPlan, args []value.Result, inde
 		if len(samples) == 0 {
 			continue
 		}
+		if extension != "" {
+			// The window holds the raw samples around the range; see functions_extended.go.
+			var extended value.Sample
+			var emit bool
+			var ds []syntax.Diagnostic
+			if name == "changes" || name == "resets" {
+				var count float64
+				count, emit = functionAnchoredChanges(name, samples, int64(start), f)
+				extended = functionSample(count, f.Time)
+			} else {
+				extended, emit, ds = functionExtendedRate(call, series, int64(start), int64(end), extension, f)
+			}
+			diagnostics = append(diagnostics, ds...)
+			if emit {
+				out.Vector = append(out.Vector, functionSeries(series, extended, true))
+			}
+			continue
+		}
 		floats := make([]value.Sample, 0, len(samples))
 		xs := make([]float64, 0, len(samples))
 		histCount := 0
@@ -229,32 +247,7 @@ func functionRange(ctx context.Context, call CallPlan, args []value.Result, inde
 		case "present_over_time":
 			sample = functionSample(1, f.Time)
 		case "changes", "resets":
-			count := 0.0
-			for i := 1; i < len(samples); i++ {
-				previous, current := samples[i-1], samples[i]
-				changed := false
-				if (previous.Histogram == nil) != (current.Histogram == nil) {
-					changed = true
-				} else if previous.Histogram == nil {
-					a, b := functionFloat(previous), functionFloat(current)
-					if name == "resets" {
-						changed = b < a || functionStartTimestampReset(previous, current, f)
-					} else {
-						changed = a != b && !(math.IsNaN(a) && math.IsNaN(b))
-					}
-				} else if name == "resets" {
-					changed = histogramResetForProfile(*previous.Histogram, *current.Histogram, f.Profile.ID) || functionStartTimestampReset(previous, current, f)
-				} else {
-					changed = !histogramEquivalent(*previous.Histogram, *current.Histogram)
-				}
-				if changed {
-					count++
-				}
-			}
-			if extension != "" && samples[len(samples)-1].Time <= start {
-				emit = false
-			}
-			sample = functionSample(count, f.Time)
+			sample = functionSample(functionChangeCount(name, samples, f), f.Time)
 		case "sum_over_time", "avg_over_time":
 			if mixed {
 				emit = false
@@ -287,7 +280,7 @@ func functionRange(ctx context.Context, call CallPlan, args []value.Result, inde
 			}
 		case "rate", "increase", "delta", "irate", "idelta":
 			var e error
-			sample, emit, ds, e = functionRate(call, series, start, end, extension, f)
+			sample, emit, ds, e = functionRate(call, series, start, end, f)
 			if e != nil {
 				return out, append(diagnostics, ds...), e
 			}
@@ -363,7 +356,7 @@ func functionRange(ctx context.Context, call CallPlan, args []value.Result, inde
 	}
 	return out, diagnostics, nil
 }
-func functionRate(call CallPlan, s value.Series, start, end model.UnixNano, extension string, f Frame) (value.Sample, bool, []syntax.Diagnostic, error) {
+func functionRate(call CallPlan, s value.Series, start, end model.UnixNano, f Frame) (value.Sample, bool, []syntax.Diagnostic, error) {
 	name := call.Name
 	instant := name == "irate" || name == "idelta"
 	counter := name == "rate" || name == "increase" || name == "irate"
@@ -463,23 +456,18 @@ func functionRate(call CallPlan, s value.Series, start, end model.UnixNano, exte
 			for i := 1; i < len(points); i++ {
 				previous, current := functionFloat(points[i-1]), functionFloat(points[i])
 				if current < previous || functionStartTimestampReset(points[i-1], points[i], f) {
-					change += previous
+					if instant {
+						// A reset restarts the counter: the last sample is the whole increase.
+						change = current
+					} else {
+						change += previous
+					}
 				}
 			}
 		}
 		result = functionSample(change, f.Time)
 		if counter && !instant {
-			metricName := value.Label(s.Labels, "__name__")
-			if metricName != "" {
-				if f.Profile.ID == "promql-prometheus-3.13.5" && enabled(f.Profile, "type-and-unit-labels") {
-					metricType := value.Label(s.Labels, "__type__")
-					if metricType != "counter" && metricType != "histogram" {
-						d = append(d, functionDiagnostic(call.Expr, "PossibleNonCounterLabelInfo"))
-					}
-				} else if !strings.HasSuffix(metricName, "_total") && !strings.HasSuffix(metricName, "_sum") && !strings.HasSuffix(metricName, "_count") && !strings.HasSuffix(metricName, "_bucket") {
-					d = append(d, functionDiagnostic(call.Expr, "PossibleNonCounterInfo"))
-				}
-			}
+			d = append(d, possibleNonCounterNotes(call, s.Labels, f)...)
 		}
 	}
 	factor := 1.0
@@ -490,27 +478,6 @@ func functionRate(call CallPlan, s value.Series, start, end model.UnixNano, exte
 				result.Histogram = &histogram
 			} else {
 				result.Float = model.FloatBits(math.Float64bits(functionFloat(result) / span))
-			}
-		}
-		if result.Histogram != nil {
-			result.Histogram.Float.Flavor = "gauge"
-			result.Histogram.Float.ResetHint = "gauge"
-		}
-		return result, true, d, nil
-	} else if extension != "" {
-		var keep bool
-		var err error
-		result, keep, err = functionExtendedRate(points, start, end, extension, counter, f)
-		if err != nil || !keep {
-			return value.Sample{}, false, d, err
-		}
-		if name == "rate" {
-			duration := float64(end-start) / 1e9
-			if result.Histogram != nil {
-				histogram := value.DivideHistogram(*result.Histogram, duration)
-				result.Histogram = &histogram
-			} else {
-				result.Float = model.FloatBits(math.Float64bits(functionFloat(result) / duration))
 			}
 		}
 		if result.Histogram != nil {
@@ -541,7 +508,7 @@ func functionRate(call CallPlan, s value.Series, start, end model.UnixNano, exte
 		}
 		factor = (span + left + right) / span
 		if name == "rate" {
-			factor /= float64(end-start) / 1e9
+			factor /= rangeSeconds(int64(end - start))
 		}
 	}
 	if result.Histogram != nil {
@@ -554,94 +521,51 @@ func functionRate(call CallPlan, s value.Series, start, end model.UnixNano, exte
 	}
 	return result, true, d, nil
 }
-func functionInterpolate(previous, current value.Sample, at model.UnixNano, counter bool, frame Frame) (value.Sample, bool) {
-	if previous.Time == current.Time || at == previous.Time {
-		return value.CloneSample(previous), true
-	}
-	fraction := float64(at-previous.Time) / float64(current.Time-previous.Time)
-	if (previous.Histogram == nil) != (current.Histogram == nil) {
-		return value.Sample{}, false
-	}
-	if previous.Histogram == nil {
-		left, right := functionFloat(previous), functionFloat(current)
-		if counter && (right < left || functionStartTimestampReset(previous, current, frame)) {
-			left = 0
+
+// functionChangeCount counts, over the samples in order, the steps at which a
+// value changed (changes) or a counter reset (resets).
+func functionChangeCount(name string, samples []value.Sample, f Frame) float64 {
+	count := 0.0
+	for i := 1; i < len(samples); i++ {
+		previous, current := samples[i-1], samples[i]
+		changed := false
+		if (previous.Histogram == nil) != (current.Histogram == nil) {
+			changed = true
+		} else if previous.Histogram == nil {
+			a, b := functionFloat(previous), functionFloat(current)
+			if name == "resets" {
+				changed = b < a || functionStartTimestampReset(previous, current, f)
+			} else {
+				changed = a != b && !(math.IsNaN(a) && math.IsNaN(b))
+			}
+		} else if name == "resets" {
+			changed = histogramResetForProfile(*previous.Histogram, *current.Histogram, f.Profile.ID) || functionStartTimestampReset(previous, current, f)
+		} else {
+			changed = !histogramEquivalent(*previous.Histogram, *current.Histogram)
 		}
-		return functionSample(left+(right-left)*fraction, at), true
+		if changed {
+			count++
+		}
 	}
-	baseline := *previous.Histogram
-	if counter && (histogramResetForProfile(baseline, *current.Histogram, frame.Profile.ID) || functionStartTimestampReset(previous, current, frame)) {
-		baseline = histogramEmptyShape(*current.Histogram)
-	}
-	left, right := value.ScaleHistogram(baseline, 1-fraction), value.ScaleHistogram(*current.Histogram, fraction)
-	histogram, _ := histogramCombineForProfile(left, right, false, frame.Profile.ID)
-	if histogram.Float == nil {
-		return value.Sample{}, false
-	}
-	return value.Sample{Time: at, Histogram: &histogram}, true
+	return count
 }
-func functionExtendedRate(points []value.Sample, start, end model.UnixNano, extension string, counter bool, f Frame) (value.Sample, bool, error) {
-	if points[len(points)-1].Time <= start || points[0].Time > end {
-		return value.Sample{}, false, nil
+
+// possibleNonCounterNotes reports a counter function applied to a float series
+// that does not look like a counter.
+func possibleNonCounterNotes(call CallPlan, labels model.Labels, f Frame) []syntax.Diagnostic {
+	metricName := value.Label(labels, "__name__")
+	if metricName == "" {
+		return nil
 	}
-	left := points[0]
-	if extension == "smoothed" && len(points) > 1 && left.Time < start {
-		for i := 1; i < len(points); i++ {
-			if points[i].Time >= start {
-				var ok bool
-				left, ok = functionInterpolate(points[i-1], points[i], start, counter, f)
-				if !ok {
-					return value.Sample{}, false, nil
-				}
-				break
-			}
+	if f.Profile.ID == "promql-prometheus-3.13.5" && enabled(f.Profile, "type-and-unit-labels") {
+		metricType := value.Label(labels, "__type__")
+		if metricType != "counter" && metricType != "histogram" {
+			return []syntax.Diagnostic{functionDiagnostic(call.Expr, "PossibleNonCounterLabelInfo")}
 		}
+	} else if !strings.HasSuffix(metricName, "_total") && !strings.HasSuffix(metricName, "_sum") && !strings.HasSuffix(metricName, "_count") && !strings.HasSuffix(metricName, "_bucket") {
+		return []syntax.Diagnostic{functionDiagnostic(call.Expr, "PossibleNonCounterInfo")}
 	}
-	right := points[len(points)-1]
-	if extension == "smoothed" && right.Time > end {
-		for i := 1; i < len(points); i++ {
-			if points[i].Time >= end {
-				var ok bool
-				right, ok = functionInterpolate(points[i-1], points[i], end, counter, f)
-				if !ok {
-					return value.Sample{}, false, nil
-				}
-				break
-			}
-		}
-	}
-	if left.Histogram == nil {
-		change := functionFloat(right) - functionFloat(left)
-		if counter {
-			previous := left
-			for _, point := range points {
-				if point.Time <= start || point.Time > end {
-					continue
-				}
-				currentValue, previousValue := functionFloat(point), functionFloat(previous)
-				if currentValue < previousValue || functionStartTimestampReset(previous, point, f) {
-					change += previousValue
-				}
-				previous = point
-			}
-		}
-		return functionSample(change, f.Time), true, nil
-	}
-	h, _ := histogramCombineForProfile(*right.Histogram, *left.Histogram, true, f.Profile.ID)
-	if h.Float == nil {
-		return value.Sample{}, false, nil
-	}
-	if counter {
-		for i := 1; i < len(points); i++ {
-			if points[i].Time > start && points[i].Time <= end && (histogramResetForProfile(*points[i-1].Histogram, *points[i].Histogram, f.Profile.ID) || functionStartTimestampReset(points[i-1], points[i], f)) {
-				h, _ = histogramCombineForProfile(h, *points[i-1].Histogram, false, f.Profile.ID)
-				if h.Float == nil {
-					return value.Sample{}, false, nil
-				}
-			}
-		}
-	}
-	return value.Sample{Time: f.Time, Histogram: &h}, true, nil
+	return nil
 }
 func histogramEmptyShape(histogram model.NativeHistogram) model.NativeHistogram {
 	view := histogramView(histogram)

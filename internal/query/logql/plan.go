@@ -43,6 +43,13 @@ type compiledStage struct {
 	regex     *regexcompat.Regexp
 	pattern   *linePattern
 	templates []*Template
+	labels    *labelMatchers
+}
+
+// labelMatchers are the keep/drop matchers of one stage, compiled with the plan
+// and indexed by label name so a stage costs one lookup per label.
+type labelMatchers struct {
+	byName map[string][]compiledMatcher
 }
 
 func defaultTemplateRuntime() TemplateRuntime {
@@ -159,6 +166,20 @@ func (p *PipelinePlan) compile(ctx context.Context) error {
 				}
 				c.lines = append(c.lines, l)
 			}
+		case "keep", "drop":
+			lm := &labelMatchers{byName: make(map[string][]compiledMatcher, len(s.Labels))}
+			for _, m := range s.Labels {
+				cm := compiledMatcher{matcher: m}
+				if m.Op == "=~" || m.Op == "!~" {
+					re, err := p.RegexScope.Compile(ctx, m.Value, regexcompat.Label)
+					if err != nil {
+						return err
+					}
+					cm.regex = re
+				}
+				lm.byName[m.Name] = append(lm.byName[m.Name], cm)
+			}
+			c.labels = lm
 		case "regexp":
 			re, err := p.RegexScope.Compile(ctx, s.Pattern, regexcompat.Search)
 			if err != nil {

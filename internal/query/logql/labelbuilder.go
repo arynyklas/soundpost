@@ -2,6 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 package logql
 
+import (
+	"slices"
+	"soundpost/internal/model"
+)
+
 // Label builder: how the json, logfmt, regexp, pattern and unpack stages write
 // parsed labels.
 //
@@ -30,21 +35,80 @@ package logql
 // The stream namespace is the one captured when the pipeline started, so a
 // later stage that removes a stream label does not change what collides.
 
-// streamHas reports whether n is a stream-namespace name.
-func (e *LogEntry) streamHas(n string) bool {
+// stageLabels is the label builder of ONE parser stage on one entry. Writes
+// are collected per stage and merged into the sorted parsed category once, by
+// flush, so a stage that writes n labels costs O(n log n) instead of n sorted
+// insertions. Membership tests against the categories that exist before the
+// stage use a linear scan for small slices and a lazily built hash set for
+// large ones. Every stage that creates a builder defers flush, so labels read
+// before a scanner error are kept exactly as with in-place writes.
+type stageLabels struct {
+	e        *LogEntry
+	stream   nameSet
+	parsed   nameSet // parsed labels from EARLIER stages
+	meta     nameSet
+	pending  map[string]string   // this stage's writes (final names)
+	metaGone map[string]struct{} // metadata names taken over by this stage
+}
+
+const nameSetLinear = 32
+
+// nameSet is a membership test over a label slice that is not modified while the set is used.
+type nameSet struct {
+	ls model.Labels
+	m  map[string]struct{}
+}
+
+func (s *nameSet) has(n string) bool {
+	if len(s.ls) <= nameSetLinear {
+		return labelPresent(s.ls, n)
+	}
+	if s.m == nil {
+		s.m = make(map[string]struct{}, len(s.ls))
+		for _, l := range s.ls {
+			s.m[l.Name] = struct{}{}
+		}
+	}
+	_, ok := s.m[n]
+	return ok
+}
+
+func newStageLabels(e *LogEntry) *stageLabels {
 	base := e.baseStream
 	if base == nil {
 		base = e.StreamLabels
 	}
-	return labelPresent(base, n)
+	return &stageLabels{e: e, stream: nameSet{ls: base}, parsed: nameSet{ls: e.ParsedLabels}, meta: nameSet{ls: e.StructuredMetadata}}
 }
 
+// streamHas reports whether n is a stream-namespace name.
+func (w *stageLabels) streamHas(n string) bool { return w.stream.has(n) }
+
 // extractedName returns the parsed-category name a write for n lands on.
-func (e *LogEntry) extractedName(n string) string {
-	if e.streamHas(n) {
+func (w *stageLabels) extractedName(n string) string {
+	if w.streamHas(n) {
 		n += "_extracted"
 	}
 	return n
+}
+
+func (w *stageLabels) hasParsed(n string) bool {
+	if _, ok := w.pending[n]; ok {
+		return true
+	}
+	return w.parsed.has(n)
+}
+
+func (w *stageLabels) hasMeta(n string) bool {
+	if _, gone := w.metaGone[n]; gone {
+		return false
+	}
+	return w.meta.has(n)
+}
+
+// has reports whether any category holds n.
+func (w *stageLabels) has(n string) bool {
+	return w.hasParsed(n) || w.hasMeta(n) || w.streamHas(n)
 }
 
 // shadowedKey is the name a line key takes in expression mode. A key naming an
@@ -53,37 +117,48 @@ func (e *LogEntry) extractedName(n string) string {
 // name (that label takes the key over). A request path equal to the plain key
 // therefore no longer finds it. Stream names do not shadow: a path naming a
 // stream label still finds the key.
-func (e *LogEntry) shadowedKey(k string, requested map[string]bool) string {
+func (w *stageLabels) shadowedKey(k string, requested map[string]bool) string {
 	if requested[k] {
 		return k
 	}
-	if labelPresent(e.StructuredMetadata, k) || labelPresent(e.ParsedLabels, k) {
+	if w.hasMeta(k) || w.hasParsed(k) {
 		return k + "_extracted"
 	}
 	return k
 }
 
+func (w *stageLabels) set(n, v string) {
+	if w.pending == nil {
+		w.pending = make(map[string]string)
+	}
+	w.pending[n] = v
+}
+
 // putExtracted is the plain-stage write: a name owned by structured metadata is
 // left alone.
-func (e *LogEntry) putExtracted(n, v string) {
-	n = e.extractedName(n)
-	if labelPresent(e.StructuredMetadata, n) && !labelPresent(e.ParsedLabels, n) {
+func (w *stageLabels) putExtracted(n, v string) {
+	n = w.extractedName(n)
+	if w.hasMeta(n) && !w.hasParsed(n) {
 		return
 	}
-	e.ParsedLabels = setLabel(e.ParsedLabels, n, v)
+	w.set(n, v)
 }
 
 // putRequested is the expression-stage write to an already resolved name: the
 // parsed category takes the name over from structured metadata.
-func (e *LogEntry) putRequested(n, v string) {
-	e.StructuredMetadata = removeLabel(e.StructuredMetadata, n)
-	e.ParsedLabels = setLabel(e.ParsedLabels, n, v)
+func (w *stageLabels) putRequested(n, v string) {
+	if w.hasMeta(n) {
+		if w.metaGone == nil {
+			w.metaGone = make(map[string]struct{})
+		}
+		w.metaGone[n] = struct{}{}
+	}
+	w.set(n, v)
 }
 
-// captureWriter is the write of the capture stages (`| regexp`, `| pattern`,
+// capture is the write of the capture stages (`| regexp`, `| pattern`,
 // `| unpack`), whose labels come from named captures or object members rather
-// than from a line scan with its own duplicate handling. One writer serves one
-// stage on one entry:
+// than from a line scan with its own duplicate handling:
 //
 //	capture stage, name n
 //	  n is a stream name           -> the value goes to n_extracted
@@ -98,25 +173,54 @@ func (e *LogEntry) putRequested(n, v string) {
 // stages (`| regexp "(?P<a>..)" | regexp "(?P<a>..)"` keeps the first a and
 // writes no a_extracted) and for a regexp after logfmt. A stage never refuses its
 // own earlier write, as in the json stage where the last duplicate wins.
-type captureWriter struct {
-	e       *LogEntry
-	written []string
+func (w *stageLabels) capture(n, v string) {
+	n = w.extractedName(n)
+	if _, mine := w.pending[n]; !mine && (w.parsed.has(n) || w.hasMeta(n)) {
+		return
+	}
+	w.set(n, v)
 }
 
-func (w *captureWriter) put(n, v string) {
-	n = w.e.extractedName(n)
-	mine := false
-	for _, s := range w.written {
-		if s == n {
-			mine = true
-			break
+// flush merges this stage's writes into the entry: the parsed category stays
+// sorted by name and a name written by the stage replaces the earlier value.
+func (w *stageLabels) flush() {
+	e := w.e
+	if len(w.metaGone) > 0 {
+		kept := make(model.Labels, 0, len(e.StructuredMetadata))
+		for _, l := range e.StructuredMetadata {
+			if _, gone := w.metaGone[l.Name]; !gone {
+				kept = append(kept, l)
+			}
+		}
+		e.StructuredMetadata = kept
+		w.metaGone = nil
+	}
+	if len(w.pending) == 0 {
+		return
+	}
+	names := make([]string, 0, len(w.pending))
+	for n := range w.pending {
+		names = append(names, n)
+	}
+	slices.Sort(names)
+	old := e.ParsedLabels
+	out := make(model.Labels, 0, len(old)+len(names))
+	i, j := 0, 0
+	for i < len(old) || j < len(names) {
+		switch {
+		case j == len(names) || i < len(old) && old[i].Name < names[j]:
+			out = append(out, old[i])
+			i++
+		case i == len(old) || names[j] < old[i].Name:
+			out = append(out, model.Label{Name: names[j], Value: w.pending[names[j]]})
+			j++
+		default:
+			out = append(out, model.Label{Name: names[j], Value: w.pending[names[j]]})
+			i++
+			j++
 		}
 	}
-	if !mine {
-		if labelPresent(w.e.ParsedLabels, n) || labelPresent(w.e.StructuredMetadata, n) {
-			return
-		}
-		w.written = append(w.written, n)
-	}
-	w.e.ParsedLabels = setLabel(w.e.ParsedLabels, n, v)
+	e.ParsedLabels = out
+	w.pending = nil
+	w.parsed = nameSet{ls: out}
 }

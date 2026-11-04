@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"soundpost/internal/query/regexcompat"
 	jsonparser "soundpost/third_party/jsonparser/v1.1.1"
 	"strconv"
@@ -142,6 +143,7 @@ func parseJSONExpressions(s Stage, e *LogEntry, check func() error) error {
 	}
 	var names []string
 	var paths [][]string
+	var unsafe []bool
 	seen := map[string]bool{}
 	for _, x := range s.Extractions {
 		if seen[x.Name] {
@@ -150,18 +152,25 @@ func parseJSONExpressions(s Stage, e *LogEntry, check func() error) error {
 		seen[x.Name] = true
 		path, _ := jsonPath(x.Path)
 		keys := make([]string, len(path))
+		risky := false
 		for i, st := range path {
 			if st.array {
 				keys[i] = "[" + strconv.Itoa(st.index) + "]"
 			} else {
 				keys[i] = st.key
+				// The vendored scanner reads the first byte of a path key at
+				// every array it enters; an empty key has none.
+				risky = risky || st.key == ""
 			}
 		}
 		names = append(names, x.Name)
 		paths = append(paths, keys)
+		unsafe = append(unsafe, risky)
 	}
+	lb := newStageLabels(e)
+	defer lb.flush()
 	set := make([]bool, len(names))
-	jsonparser.EachKey(data, func(idx int, raw []byte, kind jsonparser.ValueType, err error) {
+	deliver := func(idx int, raw []byte, kind jsonparser.ValueType, err error) {
 		if idx < 0 {
 			// A key outside the root object: the scanner reports it and
 			// stops, but the requested labels still materialize.
@@ -170,65 +179,185 @@ func parseJSONExpressions(s Stage, e *LogEntry, check func() error) error {
 		}
 		switch {
 		case err == nil:
-			e.putRequested(e.extractedName(names[idx]), jsonValueText(raw, kind))
+			lb.putRequested(lb.extractedName(names[idx]), jsonValueText(raw, kind))
 			set[idx] = true
 		case !errors.Is(err, jsonparser.KeyPathNotFoundError):
 			e.setError("JSONParserErr", err.Error())
 		}
-	}, paths...)
+	}
+	// Paths without an empty key are scanned together, exactly as one request.
+	// A path with an empty key is scanned alone so that a scanner fault is
+	// confined to that path: the reference reads such a path as a key that is
+	// absent from an array (an empty label), and its own scanner faults only
+	// where the empty key follows an array index, which is reported as the
+	// stage's malformed-JSON error. Any fault of the scanner is contained here.
+	var safeIdx []int
+	var safePaths [][]string
+	for i := range names {
+		if !unsafe[i] {
+			safeIdx = append(safeIdx, i)
+			safePaths = append(safePaths, paths[i])
+		}
+	}
+	if len(safePaths) > 0 {
+		fault := guardScanner(func() {
+			jsonparser.EachKey(data, func(idx int, raw []byte, kind jsonparser.ValueType, err error) {
+				if idx >= 0 {
+					idx = safeIdx[idx]
+				}
+				deliver(idx, raw, kind, err)
+			}, safePaths...)
+		})
+		if fault.happened {
+			e.setError("JSONParserErr", errScannerFault)
+		}
+	}
+	for i := range names {
+		if !unsafe[i] {
+			continue
+		}
+		if stop := check(); stop != nil {
+			return stop
+		}
+		i := i
+		fault := guardScanner(func() {
+			jsonparser.EachKey(data, func(idx int, raw []byte, kind jsonparser.ValueType, err error) {
+				if idx >= 0 {
+					idx = i
+				}
+				deliver(idx, raw, kind, err)
+			}, paths[i])
+		})
+		if fault.nested {
+			e.setError("JSONParserErr", errScannerFault)
+		}
+	}
 	if stop := check(); stop != nil {
 		return stop
 	}
 	for i, name := range names {
-		if !set[i] {
-			if _, held := entryLabel(e, name); !held {
-				e.putRequested(name, "")
-			}
+		if !set[i] && !lb.has(name) {
+			lb.putRequested(name, "")
 		}
 	}
 	return nil
 }
 
+// errScannerFault is the stage error for a line on which the vendored scanner
+// faulted (a Go panic inside it): the scanner's own malformed-input message.
+const errScannerFault = "Malformed JSON error"
+
+// scannerFault describes a Go panic inside the vendored scanner.
+type scannerFault struct {
+	// happened is set when the scanner panicked.
+	happened bool
+	// nested is set when the panic was raised by the scanner's recursive
+	// key search into an array element (searchKeys), the one place where the
+	// reference scanner itself faults on an empty path key.
+	nested bool
+}
+
+// guardScanner runs one call into the vendored scanner and reports whether it
+// panicked. No scanner fault may leave the query engine.
+func guardScanner(fn func()) (fault scannerFault) {
+	defer func() {
+		if recover() == nil {
+			return
+		}
+		fault.happened = true
+		pcs := make([]uintptr, 32)
+		frames := runtime.CallersFrames(pcs[:runtime.Callers(2, pcs)])
+		for {
+			frame, more := frames.Next()
+			if strings.HasSuffix(frame.Function, "jsonparser/v1%2e1%2e1.searchKeys") {
+				fault.nested = true
+				break
+			}
+			if !more {
+				break
+			}
+		}
+	}()
+	fn()
+	return fault
+}
+
+// jsonWalker is the plain `| json` walk. Names are composed in one reusable
+// buffer (append, then truncate when a level closes), so a deep object costs
+// O(line) to walk; every retained key, origin and value is charged before it
+// is allocated.
+type jsonWalker struct {
+	lb       *stageLabels
+	check    func() error
+	charge   func(int64) error
+	key      []byte // composed label name of the current member
+	origin   []byte // length-prefixed raw names of the current member
+	origins  map[string]string
+	maxDepth int
+}
+
+var errMalformedJSON = errors.New("Malformed JSON error")
+
+func (w *jsonWalker) walk(obj []byte, depth int) error {
+	if depth > w.maxDepth {
+		return errMalformedJSON
+	}
+	return jsonparser.ObjectEach(obj, func(k, v []byte, kind jsonparser.ValueType, _ int) error {
+		if stop := w.check(); stop != nil {
+			return &parserStop{stop}
+		}
+		name := jsonValueText(k, jsonparser.String)
+		keyMark, originMark := len(w.key), len(w.origin)
+		// Whitespace around a JSON key is dropped before sanitizing, at
+		// every nesting level (" x-y" -> x_y; " " -> empty name).
+		if keyMark > 0 {
+			w.key = append(w.key, '_')
+		}
+		w.key = append(w.key, sanitizeLabel(strings.TrimSpace(name))...)
+		w.origin = strconv.AppendInt(w.origin, int64(len(name)), 10)
+		w.origin = append(w.origin, ':')
+		w.origin = append(w.origin, name...)
+		defer func() { w.key, w.origin = w.key[:keyMark], w.origin[:originMark] }()
+		switch kind {
+		case jsonparser.Object:
+			return w.walk(v, depth+1)
+		case jsonparser.String, jsonparser.Number, jsonparser.Boolean:
+			previous, exists := w.origins[string(w.key)]
+			if exists && previous != string(w.origin) {
+				return nil
+			}
+			text := jsonValueText(v, kind)
+			cost := int64(len(w.key)) + int64(len(text)) + 96
+			if !exists {
+				cost += int64(len(w.origin)) + 64
+			}
+			if err := w.charge(cost); err != nil {
+				return &parserStop{err}
+			}
+			label := string(w.key)
+			if !exists {
+				w.origins[label] = string(w.origin)
+			}
+			w.lb.putExtracted(label, text)
+		}
+		return nil
+	})
+}
+
 // parseJSONStage drives the vendored lenient streaming scanner. Labels
 // extracted before a scanner error are kept and the scanner's own message is
 // reported, so the observable result for any line is the scanner's.
-func parseJSONStage(s Stage, e *LogEntry, check func() error) error {
+func parseJSONStage(s Stage, e *LogEntry, check func() error, charge func(int64) error) error {
 	if len(s.Extractions) > 0 {
 		return parseJSONExpressions(s, e, check)
 	}
-	data := []byte(e.Line)
-	origins := map[string]string{}
-	var walk func(obj []byte, prefix, sourcePrefix string, depth int) error
-	walk = func(obj []byte, prefix, sourcePrefix string, depth int) error {
-		if depth > jsonMaxDepth {
-			return errors.New("Malformed JSON error")
-		}
-		return jsonparser.ObjectEach(obj, func(k, v []byte, kind jsonparser.ValueType, _ int) error {
-			if stop := check(); stop != nil {
-				return &parserStop{stop}
-			}
-			name := jsonValueText(k, jsonparser.String)
-			// Whitespace around a JSON key is dropped before sanitizing, at
-			// every nesting level (" x-y" -> x_y; " " -> empty name).
-			key := sanitizeLabel(strings.TrimSpace(name))
-			if prefix != "" {
-				key = prefix + "_" + key
-			}
-			origin := sourcePrefix + strconv.Itoa(len(name)) + ":" + name
-			switch kind {
-			case jsonparser.Object:
-				return walk(v, key, origin, depth+1)
-			case jsonparser.String, jsonparser.Number, jsonparser.Boolean:
-				previous, exists := origins[key]
-				if !exists || previous == origin {
-					origins[key] = origin
-					e.putExtracted(key, jsonValueText(v, kind))
-				}
-			}
-			return nil
-		})
+	lb := newStageLabels(e)
+	defer lb.flush()
+	w := &jsonWalker{lb: lb, check: check, charge: charge, origins: map[string]string{}, maxDepth: min(jsonMaxDepth, len(e.Line)/4+1)}
+	var failure error
+	if guardScanner(func() { failure = w.walk([]byte(e.Line), 0) }).happened {
+		failure = errMalformedJSON
 	}
-	failure := walk(data, "", "", 0)
 	if stop := stoppedParser(failure); stop != nil {
 		return stop
 	}
@@ -251,8 +380,9 @@ func jsonValueText(raw []byte, kind jsonparser.ValueType) string {
 			return string(raw)
 		}
 	}
-	out, err := jsonparser.Unescape(raw, nil)
-	if err != nil {
+	var out []byte
+	var err error
+	if guardScanner(func() { out, err = jsonparser.Unescape(raw, nil) }).happened || err != nil {
 		return ""
 	}
 	return string(out)
@@ -457,6 +587,8 @@ func parseLogfmtStage(s Stage, e *LogEntry, check func() error) error {
 			err = nil
 		}
 	} else {
+		lb := newStageLabels(e)
+		defer lb.flush()
 		origins := map[string]string{}
 		for _, f := range fields {
 			if stop := check(); stop != nil {
@@ -468,7 +600,7 @@ func parseLogfmtStage(s Stage, e *LogEntry, check func() error) error {
 			n := sanitizeLabel(f.key)
 			previous, exists := origins[n]
 			if n != "" && (!exists || previous == f.key) {
-				e.putExtracted(n, f.value)
+				lb.putExtracted(n, f.value)
 				origins[n] = f.key
 			}
 		}
@@ -489,6 +621,8 @@ func parseLogfmtStage(s Stage, e *LogEntry, check func() error) error {
 // reached is set empty unless it collides with the stream namespace. The result
 // reports whether the scan ended early.
 func parseLogfmtRequests(s Stage, e *LogEntry, fields []logfmtField, check func() error) (bool, error) {
+	lb := newStageLabels(e)
+	defer lb.flush()
 	target := make(map[string]string, 2*len(s.Extractions))
 	for _, x := range s.Extractions {
 		if _, taken := target[x.Path]; !taken {
@@ -499,7 +633,7 @@ func parseLogfmtRequests(s Stage, e *LogEntry, fields []logfmtField, check func(
 		if _, taken := target[x.Name]; !taken {
 			target[x.Name] = x.Name
 		}
-		if k := e.extractedName(x.Name); k != x.Name {
+		if k := lb.extractedName(x.Name); k != x.Name {
 			if _, taken := target[k]; !taken {
 				target[k] = x.Name
 			}
@@ -511,7 +645,7 @@ func parseLogfmtRequests(s Stage, e *LogEntry, fields []logfmtField, check func(
 	}
 	keys := make([]string, len(fields))
 	for i, f := range fields {
-		keys[i] = e.shadowedKey(f.key, requested)
+		keys[i] = lb.shadowedKey(f.key, requested)
 	}
 	reached := make(map[string]bool, len(s.Extractions))
 	stopped := false
@@ -523,8 +657,8 @@ func parseLogfmtRequests(s Stage, e *LogEntry, fields []logfmtField, check func(
 		if !ok {
 			continue
 		}
-		final := e.extractedName(name)
-		if final != name && labelPresent(e.ParsedLabels, final) {
+		final := lb.extractedName(name)
+		if final != name && lb.hasParsed(final) {
 			stopped = true
 			break
 		}
@@ -532,12 +666,12 @@ func parseLogfmtRequests(s Stage, e *LogEntry, fields []logfmtField, check func(
 		if f.lone {
 			value = ""
 		}
-		e.putRequested(final, value)
+		lb.putRequested(final, value)
 		reached[name] = true
 	}
 	for _, x := range s.Extractions {
-		if !reached[x.Name] && !e.streamHas(x.Name) {
-			e.putRequested(x.Name, "")
+		if !reached[x.Name] && !lb.streamHas(x.Name) {
+			lb.putRequested(x.Name, "")
 		}
 	}
 	return stopped, nil
@@ -547,7 +681,7 @@ func parseLogfmtRequests(s Stage, e *LogEntry, fields []logfmtField, check func(
 // that does not take part in the match (an alternative or optional group that
 // was not used) is written as the empty string, exactly like a group that
 // matched nothing; a line the expression does not match writes nothing.
-func parseRegexpStage(ctx context.Context, c compiledStage, e *LogEntry, scope *regexcompat.Scope) error {
+func parseRegexpStage(ctx context.Context, c compiledStage, e *LogEntry, scope *regexcompat.Scope, check func() error) error {
 	indices, err := scope.FindStringSubmatchIndex(ctx, c.regex, e.Line)
 	if err != nil {
 		return err
@@ -555,8 +689,14 @@ func parseRegexpStage(ctx context.Context, c compiledStage, e *LogEntry, scope *
 	if indices == nil {
 		return nil
 	}
-	w := captureWriter{e: e}
+	w := newStageLabels(e)
+	defer w.flush()
 	for i, n := range c.regex.SubexpNames() {
+		if i&255 == 0 {
+			if err := check(); err != nil {
+				return err
+			}
+		}
 		if i == 0 || n == "" || 2*i+1 >= len(indices) {
 			continue
 		}
@@ -564,20 +704,27 @@ func parseRegexpStage(ctx context.Context, c compiledStage, e *LogEntry, scope *
 		if indices[2*i] >= 0 {
 			value = e.Line[indices[2*i]:indices[2*i+1]]
 		}
-		w.put(n, value)
+		w.capture(n, value)
 	}
 	return nil
 }
-func parsePatternStage(c compiledStage, e *LogEntry) {
+func parsePatternStage(c compiledStage, e *LogEntry, check func() error) error {
 	values, _ := c.pattern.match(e.Line)
-	w := captureWriter{e: e}
-	for _, part := range c.pattern.parts {
+	w := newStageLabels(e)
+	defer w.flush()
+	for i, part := range c.pattern.parts {
+		if i&255 == 0 {
+			if err := check(); err != nil {
+				return err
+			}
+		}
 		if part.capture && part.name != "_" {
 			if text, ok := values[part.name]; ok {
-				w.put(part.name, text)
+				w.capture(part.name, text)
 			}
 		}
 	}
+	return nil
 }
 
 // errUnpackNotObject is the detail reported for a non-empty line that does not
@@ -606,22 +753,27 @@ func parseUnpackStage(e *LogEntry, check func() error) error {
 	var members []member
 	line := ""
 	packed := false
-	err := jsonparser.ObjectEach([]byte(e.Line), func(k, v []byte, kind jsonparser.ValueType, _ int) error {
-		if stop := check(); stop != nil {
-			return &parserStop{stop}
-		}
-		if kind != jsonparser.String {
+	var err error
+	if guardScanner(func() {
+		err = jsonparser.ObjectEach([]byte(e.Line), func(k, v []byte, kind jsonparser.ValueType, _ int) error {
+			if stop := check(); stop != nil {
+				return &parserStop{stop}
+			}
+			if kind != jsonparser.String {
+				return nil
+			}
+			text := jsonValueText(v, kind)
+			if string(k) == "_entry" {
+				line = text
+				packed = true
+				return nil
+			}
+			members = append(members, member{string(k), text})
 			return nil
-		}
-		text := jsonValueText(v, kind)
-		if string(k) == "_entry" {
-			line = text
-			packed = true
-			return nil
-		}
-		members = append(members, member{string(k), text})
-		return nil
-	})
+		})
+	}).happened {
+		err = errMalformedJSON
+	}
 	if stop := stoppedParser(err); stop != nil {
 		return stop
 	}
@@ -632,9 +784,15 @@ func parseUnpackStage(e *LogEntry, check func() error) error {
 	if !packed {
 		return nil
 	}
-	w := captureWriter{e: e}
-	for _, m := range members {
-		w.put(m.name, m.value)
+	w := newStageLabels(e)
+	defer w.flush()
+	for i, m := range members {
+		if i&255 == 0 {
+			if err := check(); err != nil {
+				return err
+			}
+		}
+		w.capture(m.name, m.value)
 	}
 	e.Line = line
 	return nil

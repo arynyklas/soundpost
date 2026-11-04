@@ -67481,6 +67481,510 @@
    "accepted": false,
    "semantic": "syntax.unexpected-token",
    "start_byte": 28
+  },
+  {
+   "id": "jp-00240",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"].\\\"\\\"\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00241",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"].\\\"\\\"\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00242",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"].\\\"\\\"\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00243",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"].\\\"\\\"\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00244",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"].\\\"\\\"\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00245",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"].\\\"\\\"\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00246",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"].\\\"\\\"\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00247",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"].\\\"\\\"\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00248",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"].\\\"\\\"\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00249",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"].\\\"\\\"\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00250",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"].\\\"\\\"\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00251",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"].\\\"\\\"\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00252",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"].\\\"\\\"\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00253",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"].\\\"\\\"\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00254",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"].\\\"\\\"\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00255",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"].\\\"\\\"\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00256",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"].\\\"\\\"\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00257",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"].\\\"\\\"\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00258",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"].\\\"\\\"\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00259",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"].\\\"\\\"\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00260",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"].\\\"\\\"\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00261",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"].\\\"\\\"\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00262",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"].\\\"\\\"\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00263",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"].\\\"\\\"\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00264",
+   "expression": "{app=\"api\"}|json x=\"\\\"a\\\"[\\\"\\\"]\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00265",
+   "expression": "{app=\"api\"}|json x=\"\\\"a\\\"[\\\"\\\"]\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00266",
+   "expression": "{app=\"api\"}|json x=\"\\\"a\\\"[\\\"\\\"]\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00267",
+   "expression": "{app=\"api\"}|json x=\"\\\"a\\\"[\\\"\\\"]\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00268",
+   "expression": "{app=\"api\"}|json x=\"\\\"a\\\"[\\\"\\\"]\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00269",
+   "expression": "{app=\"api\"}|json x=\"\\\"a\\\"[\\\"\\\"]\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00270",
+   "expression": "{app=\"api\"}|json x=\"\\\"a\\\"[\\\"\\\"]\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00271",
+   "expression": "{app=\"api\"}|json x=\"\\\"a\\\"[\\\"\\\"]\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00272",
+   "expression": "{app=\"api\"}|json x=\"\\\"a\\\"[\\\"\\\"]\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00273",
+   "expression": "{app=\"api\"}|json x=\"\\\"a\\\"[\\\"\\\"]\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00274",
+   "expression": "{app=\"api\"}|json x=\"\\\"a\\\"[\\\"\\\"]\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00275",
+   "expression": "{app=\"api\"}|json x=\"\\\"a\\\"[\\\"\\\"]\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00276",
+   "expression": "{app=\"api\"}|json x=\"\\\"a\\\"[\\\"\\\"]\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00277",
+   "expression": "{app=\"api\"}|json x=\"\\\"a\\\"[\\\"\\\"]\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00278",
+   "expression": "{app=\"api\"}|json x=\"\\\"a\\\"[\\\"\\\"]\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00279",
+   "expression": "{app=\"api\"}|json x=\"\\\"a\\\"[\\\"\\\"]\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00280",
+   "expression": "{app=\"api\"}|json x=\"\\\"a\\\"[\\\"\\\"]\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00281",
+   "expression": "{app=\"api\"}|json x=\"\\\"a\\\"[\\\"\\\"]\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00282",
+   "expression": "{app=\"api\"}|json x=\"\\\"a\\\"[\\\"\\\"]\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00283",
+   "expression": "{app=\"api\"}|json x=\"\\\"a\\\"[\\\"\\\"]\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00284",
+   "expression": "{app=\"api\"}|json x=\"\\\"a\\\"[\\\"\\\"]\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00285",
+   "expression": "{app=\"api\"}|json x=\"\\\"a\\\"[\\\"\\\"]\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00286",
+   "expression": "{app=\"api\"}|json x=\"\\\"a\\\"[\\\"\\\"]\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00287",
+   "expression": "{app=\"api\"}|json x=\"\\\"a\\\"[\\\"\\\"]\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00312",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"]b\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00313",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"]b\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00314",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"]b\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00315",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"]b\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00316",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"]b\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00317",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"]b\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00318",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"]b\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00319",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"]b\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00320",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"]b\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00321",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"]b\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00322",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"]b\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00323",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"]b\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00324",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"]b\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00325",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"]b\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00326",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"]b\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00327",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"]b\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00328",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"]b\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00329",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"]b\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00330",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"]b\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00331",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"]b\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00332",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"]b\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00333",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"]b\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00334",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"]b\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
+  },
+  {
+   "id": "jp-00335",
+   "expression": "{app=\"api\"}|json x=\"a[\\\"\\\"]b\"",
+   "accepted": false,
+   "semantic": "syntax.unexpected-token",
+   "start_byte": null
   }
  ]
 }

@@ -29,8 +29,11 @@ type parser struct {
 	// grammar only reports it when no syntax error precedes the reduction, so
 	// it is returned after a complete parse.
 	numErr error
-	depth  int
-	p      profile.Profile
+	// rankedErr is a topk/bottomk parameter the integer parser refused,
+	// held until the call is complete.
+	rankedErr *rankedParameterError
+	depth     int
+	p         profile.Profile
 }
 
 func Parse(source string, p profile.Profile) (Expr, error) {
@@ -378,18 +381,21 @@ func (r *parser) vectorCall(start syntax.SourceRange) (Expr, error) {
 	if err = r.expect("("); err != nil {
 		return nil, err
 	}
-	for {
-		arg, err := r.metricExpr()
-		if err != nil {
+	if c.Name == "topk" || c.Name == "bottomk" {
+		if err = r.rankedOperands(c); err != nil {
 			return nil, err
 		}
-		c.Args = append(c.Args, arg)
-		if !r.accept(",") {
-			break
+	} else {
+		err = r.operandList(c)
+		if err != nil {
+			return nil, err
 		}
 	}
 	if err = r.expect(")"); err != nil {
 		return nil, err
+	}
+	if c.Name == "topk" || c.Name == "bottomk" {
+		r.checkRankedParameter(c)
 	}
 	if r.is("by") || r.is("without") {
 		if c.Grouping != nil {
@@ -401,6 +407,78 @@ func (r *parser) vectorCall(start syntax.SourceRange) (Expr, error) {
 	}
 	c.Node = r.node(start)
 	return c, nil
+}
+
+// operandList reads the comma-separated operands of every aggregation except
+// topk and bottomk.
+func (r *parser) operandList(c *CallExpr) error {
+	for {
+		arg, err := r.metricExpr()
+		if err != nil {
+			return err
+		}
+		c.Args = append(c.Args, arg)
+		if !r.accept(",") {
+			return nil
+		}
+	}
+}
+
+// rankedOperands reads the operands of topk and bottomk. The reference grammar
+// has a parameter production only for a single NUMBER token directly followed
+// by a comma; every other first operand (a sign, a parenthesis, an arithmetic
+// expression, vector(..)) is the one metric operand, so the comma after it is
+// the unexpected token.
+func (r *parser) rankedOperands(c *CallExpr) error {
+	if r.peek().kind == "number" {
+		t := r.take()
+		if r.accept(",") {
+			c.Args = append(c.Args, &LiteralExpr{Node: Node{Range: t.span}, Value: r.rankedParameter(t)})
+			arg, err := r.metricExpr()
+			if err != nil {
+				return err
+			}
+			c.Args = append(c.Args, arg)
+			return nil
+		}
+		left, err := r.binary(r.number(t), 0)
+		if err != nil {
+			return err
+		}
+		c.Args = append(c.Args, left)
+		return nil
+	}
+	arg, err := r.metricExpr()
+	if err != nil {
+		return err
+	}
+	c.Args = append(c.Args, arg)
+	return nil
+}
+
+// rankedParameter converts the parameter token with the integer parser. The
+// reference rejects what that parser refuses (`0.5`, `1e0`, `0x2`, `1_0`,
+// `2.0`, `2.`) and a value below one, as a function-argument error without a
+// position, when the grammar reduces the call (checkRankedParameter).
+func (r *parser) rankedParameter(t token) float64 {
+	k, err := strconv.Atoi(t.value)
+	if err != nil || k <= 0 {
+		r.rankedErr = &rankedParameterError{span: t.span}
+		return 0
+	}
+	return float64(k)
+}
+
+type rankedParameterError struct{ span syntax.SourceRange }
+
+// checkRankedParameter reports a refused parameter once the call is complete:
+// like a number conversion failure it is returned only after a complete parse,
+// and an earlier failure wins.
+func (r *parser) checkRankedParameter(c *CallExpr) {
+	if r.rankedErr != nil && r.numErr == nil {
+		r.numErr = languageErrorCode("function.arguments", "function", "invalid parameter", r.rankedErr.span)
+	}
+	r.rankedErr = nil
 }
 
 // rangeCall: rangeOp ( [NUMBER ,] logRange ) [grouping].

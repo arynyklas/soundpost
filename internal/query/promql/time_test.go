@@ -166,9 +166,13 @@ func TestPartialMetadataSurvivesEmptyOperators(t *testing.T) {
 }
 func TestLookbackBoundaryAndCheckedTimeOverflow(t *testing.T) {
 	src := seriesSource{{Labels: model.Labels{{Name: "__name__", Value: "m"}}, Samples: []value.Sample{sample(0, 1)}}}
-	r, e := executeExpr(t, "m", value.Evaluation{Instant: true, Time: 300000000000}, src)
+	r, e := executeExpr(t, "m", value.Evaluation{Instant: true, Time: 299999000000}, src)
 	if e != nil || len(r.Vector) != 1 {
-		t.Fatalf("lookback exact boundary %+v %v", r, e)
+		t.Fatalf("one millisecond inside the lookback must be selected %+v %v", r, e)
+	}
+	r, e = executeExpr(t, "m", value.Evaluation{Instant: true, Time: 300000000000}, src)
+	if e != nil || len(r.Vector) != 0 {
+		t.Fatalf("a sample exactly lookback before the evaluation time is stale %+v %v", r, e)
 	}
 	r, e = executeExpr(t, "m", value.Evaluation{Instant: true, Time: 300000000001}, src)
 	if e != nil || len(r.Vector) != 0 {

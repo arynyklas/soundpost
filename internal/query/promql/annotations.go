@@ -3,6 +3,11 @@
 package promql
 
 import (
+	"context"
+	"errors"
+
+	"soundpost/internal/model"
+	"soundpost/internal/query/regexcompat"
 	"soundpost/internal/query/syntax"
 )
 
@@ -29,4 +34,23 @@ func appendAnnotations(dst []syntax.Diagnostic, src ...syntax.Diagnostic) []synt
 		}
 	}
 	return dst
+}
+
+// engineBoundaryError gives every failure that leaves Evaluate a typed form:
+// cancellation, deadline and regex budget errors of the packages below do not
+// escape as raw sentinel errors.
+func engineBoundaryError(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, context.Canceled):
+		return model.Fail(model.Cancelled)
+	case errors.Is(err, context.DeadlineExceeded):
+		return model.Fail(model.Timeout)
+	case errors.Is(err, regexcompat.ErrBudget):
+		return model.Fail(model.Quota)
+	case errors.Is(err, regexcompat.ErrScope):
+		return model.Fail(model.Invalid)
+	}
+	return err
 }

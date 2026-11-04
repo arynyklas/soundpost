@@ -10,9 +10,12 @@ import (
 )
 
 func TestMetricCounterPinnedAnchorsThresholdAndZeroCap(t *testing.T) {
-	// Pinned range_vector.go286-349 uses native raw-ns observations but a
-	// range-ms start displacement, then /1000 for both observation durations.
-	// These cases distinguish that kernel from evaluation-anchored PromQL math.
+	// The kernel reads raw-ns observation spans as microseconds and seeds the
+	// start displacement with the window length in seconds; its rule table and the
+	// native rows that fit it are in metric_counter_native_test.go. The cases below
+	// are AUTHORED arithmetic over that rule, not native observations; no recorded
+	// row has a multiplicity above one at a spacing threshold crossing, so
+	// multiplicity-changes-spacing is a model choice.
 	tests := []struct {
 		name            string
 		firstAt, lastAt int64

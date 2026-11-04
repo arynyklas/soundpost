@@ -228,14 +228,14 @@ func (s *templateState) bindInput() (any, error) {
 	root := make(templateRoot, len(s.input.Labels)+len(s.input.Fields))
 	// Typed scalars stay closed; current stage labels win name collisions.
 	for _, f := range s.input.Fields {
-		if e := s.reserve(32768); e != nil {
-			return nil, e
-		}
+		// The scalar is encoded first (bounded by its own size), then the
+		// decoder buffers and the decoded value are reserved from that size
+		// before the decoder runs.
 		raw, e := f.Value.MarshalJSON()
 		if e != nil {
 			return nil, templateBad
 		}
-		if e = s.reserve(int64(len(raw))*8 + 64); e != nil {
+		if e = s.reserve(int64(len(raw))*8 + 1024); e != nil {
 			return nil, e
 		}
 		var v any

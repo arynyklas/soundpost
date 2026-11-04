@@ -11,12 +11,18 @@ import (
 	"strings"
 )
 
+// maxParseDepth bounds the height of a parsed expression tree: parenthesised,
+// call, unary, power and subquery nesting as well as the length of left
+// associative operator chains. Everything after parsing recurses over the tree.
+const maxParseDepth = 4096
+
 type parser struct {
 	s                        string
 	ts                       []token
 	i                        int
 	p                        profile.Profile
 	err                      error
+	depth                    int
 	durationMode, allowEmpty bool
 }
 
@@ -67,6 +73,23 @@ func (q *parser) failRange(r syntax.SourceRange, s string) {
 		q.err = &syntax.LanguageError{Category: "syntax", Range: r, SafeMessage: s}
 	}
 }
+func (q *parser) failCode(r syntax.SourceRange, code, s string) {
+	if q.err == nil {
+		q.err = &syntax.LanguageError{Code: code, Category: "syntax", Range: r, SafeMessage: s}
+	}
+}
+
+// tooDeep fails the parse when the expression tree would grow beyond
+// maxParseDepth levels, given that levels of it are already open and extra
+// more are being added by operator chains or subquery suffixes.
+func (q *parser) tooDeep(extra int) bool {
+	if q.depth+extra <= maxParseDepth {
+		return false
+	}
+	t := q.peek()
+	q.failCode(syntax.Range(q.s, t.start, t.end), "syntax.nesting-too-deep", "expression nesting is too deep")
+	return true
+}
 func (q *parser) span(n *Node, start int) {
 	end := start
 	if q.i > 0 {
@@ -105,7 +128,13 @@ func (q *parser) names() []string {
 	return names
 }
 func (q *parser) expr(min int) Expr {
+	q.depth++
+	defer func() { q.depth-- }()
+	if q.tooDeep(0) {
+		return &Node{Kind: "invalid"}
+	}
 	left := q.primary()
+	chain := 0
 	for q.err == nil {
 		op := q.peek()
 		prec := precedence[op.text]
@@ -119,6 +148,10 @@ func (q *parser) expr(min int) Expr {
 		}
 		if q.durationMode && op.text != "+" && op.text != "-" && op.text != "*" && op.text != "/" && op.text != "%" && op.text != "^" {
 			q.fail("invalid duration operator")
+		}
+		chain++
+		if q.tooDeep(chain) {
+			break
 		}
 		n := &Node{Kind: "binary", Text: op.text, Children: []Expr{left}}
 		n.Bool = q.eat("bool")
@@ -233,6 +266,7 @@ func (q *parser) primary() Expr {
 		q.failRange(syntax.Range(q.s, t.start, t.end), "expected expression")
 	}
 	q.span(n, t.start)
+	wraps := 0
 	for q.err == nil {
 		if q.durationMode {
 			if n.Kind != "number" && n.Kind != "unary" && n.Kind != "paren" && n.Kind != "duration_call" {
@@ -262,6 +296,10 @@ func (q *parser) primary() Expr {
 			}
 			q.span(r, t.start)
 			n = r
+			wraps++
+			if q.tooDeep(wraps) {
+				return n
+			}
 		case "offset":
 			q.pop()
 			if n.Offset != "" {
@@ -297,14 +335,17 @@ func (q *parser) primary() Expr {
 		case "anchored", "smoothed":
 			ext := q.pop().text
 			q.gate("promql-extended-range-selectors")
+			if n.Kind == "subquery" {
+				q.failCode(n.Range, "range.extension-subquery", ext+" modifier is not supported for subqueries")
+			}
 			if n.Extension != "" && n.Extension != ext {
 				q.fail("range extensions cannot be combined")
 			}
 			if n.Kind != "range" && n.Kind != "selector" && n.Kind != "subquery" {
 				q.fail("extension requires selector or subquery")
 			}
+			// The keyword is not part of the selector's source range.
 			n.Extension = ext
-			q.span(n, t.start)
 		default:
 			return n
 		}

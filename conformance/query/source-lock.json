@@ -8,8 +8,8 @@
       "source_sha256": "1a394b385e1fca89a6b81eab782074de26c5d35fccdebfef15c68daa55029de5",
       "license": "Apache-2.0",
       "artifact": {
-        "path": "sha256:e02f01a14cc260dd71ecb96e27b8f52137087efd9cfec48b659b37b92b166cd1",
-        "sha256": "e02f01a14cc260dd71ecb96e27b8f52137087efd9cfec48b659b37b92b166cd1",
+        "path": "sha256:c3cf5b8c59fd750c169d7c6b2729d5fd91497925f48a9d99c33c7c512e716836",
+        "sha256": "c3cf5b8c59fd750c169d7c6b2729d5fd91497925f48a9d99c33c7c512e716836",
         "architecture": "linux/amd64",
         "adapter": "oci-semantic-json-v1",
         "configuration_sha256": "7164c79eddd23b2b804fee720f4ab2b563617b923289499088f330f7a2698679",
@@ -84,8 +84,8 @@
       "source_sha256": "c2f96e97afede2cb4b43266bf62d964bed9194c7a1ac37759e1c6fd68600b410",
       "license": "Apache-2.0",
       "artifact": {
-        "path": "sha256:a1117af4c303b4147a952f7e251da7103122b7f7294bb203d5dbaa6c79f30cf2",
-        "sha256": "a1117af4c303b4147a952f7e251da7103122b7f7294bb203d5dbaa6c79f30cf2",
+        "path": "sha256:1af46cf063307400fe8d3383f4b779b1c9428f3dd6383d3c1af4d252233f3ec9",
+        "sha256": "1af46cf063307400fe8d3383f4b779b1c9428f3dd6383d3c1af4d252233f3ec9",
         "architecture": "linux/amd64",
         "adapter": "oci-semantic-json-v1",
         "configuration_sha256": "7164c79eddd23b2b804fee720f4ab2b563617b923289499088f330f7a2698679",
@@ -160,8 +160,8 @@
       "source_sha256": "0db690662744694667c031a81d3e20cdd3a68a387a8050c8096bebbdf2ff8db2",
       "license": "AGPL-3.0-only",
       "artifact": {
-        "path": "sha256:6cb76a2f295d76a74b3bfb536b8570f42693e9ef897605dab57db954f89549ad",
-        "sha256": "6cb76a2f295d76a74b3bfb536b8570f42693e9ef897605dab57db954f89549ad",
+        "path": "sha256:5800aaa2f224bc9ac6d52873ceba4454bfa589175e65f0dd3ccfda432bd8bd86",
+        "sha256": "5800aaa2f224bc9ac6d52873ceba4454bfa589175e65f0dd3ccfda432bd8bd86",
         "architecture": "linux/amd64",
         "adapter": "oci-semantic-json-v1",
         "configuration_sha256": "797fff5838030e44b4c0ef56401d22c250d3f335897cd36783dd2d9f0416d6c2",
@@ -262,7 +262,7 @@
     "cases/logql-syntax-pipeline.json": "88a74606c34f8a8260c09f3fbb246e083224de63be0f6c15da675a0902aadc28",
     "cases/logql-templates.json": "762bfe4da659abec401a45beb09287766891e5bd787916962efe672cf27ba8c6",
     "cases/logql-metrics-order.json": "7c9d0b3bcc9dc40e6c847834a45b6b30cda5b8a1d686fedeb85d07ca650dd0d9",
-    "cases/logql-pipeline-differential.json": "fb2bc1367ba7004cad29de6a126149c0581d1a003ab1f94b05050a5def8381cb",
+    "cases/logql-pipeline-differential.json": "1f5f318fdf2a052026517f2ee4288132384a88be959d86471e427f6cc4d919a8",
     "cases/logql-json-path-syntax.json": "4f39cd310ecb7d51cd0fa0aa6fc54138e4cd03ef47c05feb8085a6357b35f746"
   },
   "profile_files": {

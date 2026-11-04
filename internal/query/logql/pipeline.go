@@ -85,6 +85,16 @@ func RunPipeline(ctx context.Context, plan PipelinePlan, record LogEntry, accoun
 	record.baseStream = originalStream
 	var unwrapped *float64
 	check := func() error { return account.Check(ctx) }
+	// Parser stages charge what they are about to retain before allocating it;
+	// the charge is scratch and is released with it at the stage boundary.
+	var stageCharged int64
+	charge := func(n int64) error {
+		if err := reserve(n); err != nil {
+			return err
+		}
+		stageCharged += n
+		return nil
+	}
 	for _, c := range plan.compiled {
 		if err = account.Check(ctx); err != nil {
 			return result, err
@@ -145,7 +155,7 @@ func RunPipeline(ctx context.Context, plan PipelinePlan, record LogEntry, accoun
 				return result, nil
 			}
 		case "json":
-			if e := parseJSONStage(s, &record, check); e != nil {
+			if e := parseJSONStage(s, &record, check, charge); e != nil {
 				return result, e
 			}
 		case "logfmt":
@@ -153,11 +163,13 @@ func RunPipeline(ctx context.Context, plan PipelinePlan, record LogEntry, accoun
 				return result, e
 			}
 		case "regexp":
-			if e := parseRegexpStage(ctx, c, &record, plan.RegexScope); e != nil {
+			if e := parseRegexpStage(ctx, c, &record, plan.RegexScope, check); e != nil {
 				return result, e
 			}
 		case "pattern":
-			parsePatternStage(c, &record)
+			if e := parsePatternStage(c, &record, check); e != nil {
+				return result, e
+			}
 		case "unpack":
 			if e := parseUnpackStage(&record, check); e != nil {
 				return result, e
@@ -165,7 +177,7 @@ func RunPipeline(ctx context.Context, plan PipelinePlan, record LogEntry, accoun
 		case "decolorize":
 			record.Line = decolorize(record.Line)
 		case "drop", "keep":
-			if e := mutateLabels(ctx, &record, s, plan.RegexScope); e != nil {
+			if e := mutateLabels(ctx, &record, s, plan.RegexScope, c.labels, check); e != nil {
 				return result, e
 			}
 		case "unwrap":
@@ -224,8 +236,9 @@ func RunPipeline(ctx context.Context, plan PipelinePlan, record LogEntry, accoun
 			return result, model.Fail(model.Invalid)
 		}
 		// Scratch and replaced category slices are dead at this stage boundary.
-		account.Release(scratch)
-		held -= scratch
+		account.Release(scratch + stageCharged)
+		held -= scratch + stageCharged
+		stageCharged = 0
 		need := entryBytes(record)*2 + fieldBytes + originalBytes + 128
 		if need > held {
 			if err = reserve(need - held); err != nil {

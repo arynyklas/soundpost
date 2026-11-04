@@ -4,6 +4,7 @@ package logql
 
 import (
 	"context"
+	"slices"
 	"sort"
 	"soundpost/internal/model"
 	"soundpost/internal/query/profile"
@@ -57,20 +58,35 @@ func entryBytes(e LogEntry) int64 {
 	}
 	return n
 }
+
+// combinedLabels is the effective label set: the category order is stream,
+// structured metadata, parsed, then the language error labels, a later category
+// replacing the value of an earlier one. The result is sorted by name. It is
+// built with one stable sort and one dedupe pass, not one insertion per label.
 func combinedLabels(e LogEntry) model.Labels {
-	out := value.CloneLabels(e.StreamLabels)
-	for _, ls := range []model.Labels{e.StructuredMetadata, e.ParsedLabels} {
-		for _, l := range ls {
-			out = setLabel(out, l.Name, l.Value)
-		}
+	if len(e.StructuredMetadata) == 0 && len(e.ParsedLabels) == 0 && e.languageError == "" && e.languageErrorDetails == "" {
+		return value.CloneLabels(e.StreamLabels)
 	}
+	out := make(model.Labels, 0, len(e.StreamLabels)+len(e.StructuredMetadata)+len(e.ParsedLabels)+2)
+	out = append(out, e.StreamLabels...)
+	out = append(out, e.StructuredMetadata...)
+	out = append(out, e.ParsedLabels...)
 	if e.languageError != "" {
-		out = setLabel(out, "__error__", e.languageError)
+		out = append(out, model.Label{Name: "__error__", Value: e.languageError})
 	}
 	if e.languageErrorDetails != "" {
-		out = setLabel(out, "__error_details__", e.languageErrorDetails)
+		out = append(out, model.Label{Name: "__error_details__", Value: e.languageErrorDetails})
 	}
-	return out
+	slices.SortStableFunc(out, func(a, b model.Label) int { return strings.Compare(a.Name, b.Name) })
+	kept := out[:0]
+	for _, l := range out {
+		if n := len(kept); n > 0 && kept[n-1].Name == l.Name {
+			kept[n-1] = l
+			continue
+		}
+		kept = append(kept, l)
+	}
+	return kept
 }
 func (e *LogEntry) deleteOrdinary(n string) {
 	e.StreamLabels = removeLabel(e.StreamLabels, n)
@@ -172,27 +188,71 @@ func matchScoped(ctx context.Context, scope *regexcompat.Scope, m Matcher, v str
 	}
 	return ok, err
 }
-func mutateLabels(ctx context.Context, e *LogEntry, s Stage, scope *regexcompat.Scope) error {
+
+// mutateLabels runs `keep` and `drop`: every effective label is tested against
+// the stage matchers of its name once, the names to remove are collected, and
+// the three categories are filtered in one pass each.
+func mutateLabels(ctx context.Context, e *LogEntry, s Stage, scope *regexcompat.Scope, plan *labelMatchers, check func() error) error {
 	labels := combinedLabels(*e)
-	for _, l := range labels {
-		selected := false
-		for _, m := range s.Labels {
-			if m.Name != l.Name {
-				continue
+	var del map[string]struct{}
+	for i, l := range labels {
+		if i&255 == 0 {
+			if err := check(); err != nil {
+				return err
 			}
-			if m.Op == "" {
+		}
+		selected := false
+		for _, m := range plan.byName[l.Name] {
+			if m.matcher.Op == "" {
 				selected = true
 				break
 			}
-			ok, err := matchScoped(ctx, scope, m, l.Value)
-			if err != nil {
-				return err
+			var ok bool
+			if m.regex != nil {
+				var err error
+				ok, err = scope.MatchString(ctx, m.regex, l.Value)
+				if err != nil {
+					return err
+				}
+				if m.matcher.Op == "!~" {
+					ok = !ok
+				}
+			} else {
+				var err error
+				if ok, err = matchStatic(profile.Profile{}, m.matcher, l.Value); err != nil {
+					return err
+				}
 			}
 			selected = selected || ok
 		}
 		if s.Kind == "drop" && selected || s.Kind == "keep" && !selected && l.Name != "__error__" && l.Name != "__error_details__" {
-			e.delete(l.Name)
+			if del == nil {
+				del = make(map[string]struct{})
+			}
+			del[l.Name] = struct{}{}
 		}
+	}
+	if len(del) == 0 {
+		return nil
+	}
+	drop := func(ls model.Labels) model.Labels {
+		kept := ls[:0]
+		for _, l := range ls {
+			if _, gone := del[l.Name]; !gone {
+				kept = append(kept, l)
+			}
+		}
+		clear(ls[len(kept):])
+		return kept
+	}
+	e.StreamLabels = drop(e.StreamLabels)
+	e.StructuredMetadata = drop(e.StructuredMetadata)
+	e.ParsedLabels = drop(e.ParsedLabels)
+	if _, gone := del["__error__"]; gone {
+		e.languageError = ""
+	}
+	if _, gone := del["__error_details__"]; gone {
+		e.languageErrorDetails = ""
 	}
 	return nil
 }

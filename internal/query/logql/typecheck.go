@@ -236,6 +236,13 @@ func checkCall(n *CallExpr, p profile.Profile) (Type, error) {
 		if want == 2 && types[0] != TypeScalar {
 			return fail("function.arguments", "aggregation parameter requires scalar")
 		}
+		if n.Name == "topk" || n.Name == "bottomk" {
+			// The parser only builds a positive integer literal here; a tree built
+			// any other way is refused with the same typed error, never evaluated.
+			if lit, ok := n.Args[0].(*LiteralExpr); !ok || lit.Value < 1 || math.Trunc(lit.Value) != lit.Value {
+				return fail("function.arguments", "ranked aggregation parameter must be a positive integer")
+			}
+		}
 		if n.Name == "approx_topk" {
 			if n.Grouping != nil {
 				return fail("grouping.unsupported", "approx_topk does not allow grouping")

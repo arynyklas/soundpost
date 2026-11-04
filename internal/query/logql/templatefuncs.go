@@ -138,6 +138,17 @@ func templateArgs(signature string, args []any) error {
 	return nil
 }
 func (s *templateState) stringWork(text string) error { return s.charge(int64(len(text))/64 + 1) }
+
+// cutsetWork meters strings.Trim*: with a non-ASCII cutset of r runes every
+// trimmed character is looked up in the cutset, so the cost is up to len(src)*r.
+// Charged before the call, in the same units as stringWork.
+func (s *templateState) cutsetWork(src, cutset string) error {
+	runes := utf8.RuneCountInString(cutset)
+	if runes <= 1 || len(cutset) == runes {
+		return nil
+	}
+	return s.charge(int64(len(src))*int64(runes)/64 + 1)
+}
 func (s *templateState) invoke(name string, args []any) (any, error) {
 	if e := s.charge(1); e != nil {
 		return nil, e
@@ -197,16 +208,28 @@ func (s *templateState) invoke(name string, args []any) (any, error) {
 			return r
 		}, str(0)), nil
 	case "Trim":
+		if e := s.cutsetWork(str(0), str(1)); e != nil {
+			return nil, e
+		}
 		return strings.Trim(str(0), str(1)), nil
 	case "TrimLeft":
+		if e := s.cutsetWork(str(0), str(1)); e != nil {
+			return nil, e
+		}
 		return strings.TrimLeft(str(0), str(1)), nil
 	case "TrimRight":
+		if e := s.cutsetWork(str(0), str(1)); e != nil {
+			return nil, e
+		}
 		return strings.TrimRight(str(0), str(1)), nil
 	case "TrimPrefix":
 		return strings.TrimPrefix(str(0), str(1)), nil
 	case "TrimSuffix":
 		return strings.TrimSuffix(str(0), str(1)), nil
 	case "trimAll":
+		if e := s.cutsetWork(str(1), str(0)); e != nil {
+			return nil, e
+		}
 		return strings.Trim(str(1), str(0)), nil
 	case "trimPrefix":
 		return strings.TrimPrefix(str(1), str(0)), nil

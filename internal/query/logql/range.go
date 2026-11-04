@@ -226,6 +226,59 @@ func absentLabels(ms []Matcher) model.Labels {
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }
+
+// invalidOperationNaN is the NaN an x86 division of zero by zero produces.
+var invalidOperationNaN = math.Float64frombits(0xfff8000000000000)
+
+// nextMean folds the n-th sample (1-based) into a running mean as
+// mean + (v/n - mean/n). The explicit parentheses and the absence of a product
+// keep the result independent of fused multiply-add.
+func nextMean(mean, v float64, n uint64) float64 {
+	switch {
+	case n == 1:
+		return v
+	case math.IsNaN(mean) || math.IsNaN(v):
+		return math.NaN()
+	case math.IsInf(mean, 0):
+		if math.IsInf(v, 0) && mean != v {
+			return math.NaN()
+		}
+		return mean
+	case math.IsInf(v, 0):
+		return v
+	}
+	c := float64(n)
+	return mean + (v/c - mean/c)
+}
+
+// nextMoments folds the n-th sample (1-based) into a Welford mean and sum of
+// squared deviations: delta = v-mean, mean += delta/n, m2 += delta*(v-mean).
+// Once a non-finite value enters, m2 is NaN and a surviving infinite mean makes
+// the variance NaN. float64(...) around the product forbids fused multiply-add.
+func nextMoments(mean, m2, v float64, n uint64) (float64, float64) {
+	switch {
+	case n == 1:
+		return v, 0
+	case math.IsNaN(mean) || math.IsNaN(v):
+		return math.NaN(), math.NaN()
+	case math.IsInf(mean, 0):
+		if math.IsInf(v, 0) && mean != v {
+			mean = math.NaN()
+		}
+		return mean, math.NaN()
+	case math.IsInf(v, 0):
+		return v, math.NaN()
+	}
+	c := float64(n)
+	delta := v - mean
+	next := mean + delta/c
+	if math.IsInf(delta, 0) {
+		// v-mean overflowed: rebuild the mean from scaled operands.
+		next = float64(mean*((c-1)/c)) + v/c
+	}
+	return next, m2 + float64(delta*(v-next))
+}
+
 func rangeStatistic(name string, ps []rangePoint, q float64, left, right, interval int64, checks ...func() error) (float64, bool, error) {
 	if len(ps) == 0 {
 		return 0, false, nil
@@ -240,8 +293,13 @@ func rangeStatistic(name string, ps []rangePoint, q float64, left, right, interv
 		return ps[len(ps)-1].v, true, nil
 	}
 	var count uint64
-	sum, comp, mean, m2 := 0.0, 0.0, 0.0, 0.0
+	sum, mean, m2 := 0.0, 0.0, 0.0
 	lo, hi := ps[0].v, ps[0].v
+	accumulates := false
+	switch name {
+	case "sum_over_time", "bytes_over_time", "rate", "bytes_rate", "avg_over_time", "stdvar_over_time", "stddev_over_time":
+		accumulates = true
+	}
 	for i, p := range ps {
 		if i%1024 == 0 {
 			if err := metricCheck(checks); err != nil {
@@ -253,46 +311,38 @@ func rangeStatistic(name string, ps []rangePoint, q float64, left, right, interv
 		}
 		old := count
 		count += p.n
-		weighted := p.v * float64(p.n)
-		if !math.IsInf(sum, 0) && !math.IsInf(weighted, 0) {
-			y := weighted - comp
-			t := sum + y
-			comp = (t - sum) - y
-			sum = t
-		} else {
-			sum += weighted
-			comp = 0
-		}
-		if old == 0 {
-			mean = p.v
-		} else {
-			switch {
-			case math.IsNaN(mean) || math.IsNaN(p.v):
-				mean = math.NaN()
-				m2 = math.NaN()
-			case math.IsInf(mean, 0):
-				if math.IsInf(p.v, 0) && mean != p.v {
-					mean = math.NaN()
-				}
-				m2 = math.NaN()
-			case math.IsInf(p.v, 0):
-				mean = p.v
-				m2 = math.NaN()
-			default:
-				delta := p.v - mean
-				next := mean + delta*(float64(p.n)/float64(count))
-				if math.IsInf(delta, 0) {
-					next = mean*(float64(old)/float64(count)) + p.v*(float64(p.n)/float64(count))
-				}
-				m2 += delta * (p.v - next) * float64(p.n)
-				mean = next
-			}
-		}
 		if math.IsNaN(lo) || p.v < lo {
 			lo = p.v
 		}
 		if math.IsNaN(hi) || p.v > hi {
 			hi = p.v
+		}
+		if !accumulates {
+			continue
+		}
+		// An entry of multiplicity m is m separate samples of one value. The
+		// sums and moments are order- and repetition-sensitive in the last bit,
+		// so each repetition enters its accumulator on its own, in entry order.
+	repeat:
+		for k := uint64(0); k < p.n; k++ {
+			if k&1023 == 1023 {
+				if err := metricCheck(checks); err != nil {
+					return 0, false, err
+				}
+			}
+			switch name {
+			case "sum_over_time", "bytes_over_time", "rate", "bytes_rate":
+				next := sum + p.v
+				if next == sum || math.IsNaN(sum) {
+					// A repeated addend no longer changes the sum.
+					break repeat
+				}
+				sum = next
+			case "avg_over_time":
+				mean = nextMean(mean, p.v, old+k+1)
+			default:
+				mean, m2 = nextMoments(mean, m2, p.v, old+k+1)
+			}
 		}
 	}
 	switch name {
@@ -331,7 +381,10 @@ func rangeStatistic(name string, ps []rangePoint, q float64, left, right, interv
 		// anchors the right edge at the last observation, not Frame.Time.
 		elapsed := float64(int64(last.at)-int64(first.at)) / 1000
 		if elapsed <= 0 {
-			return math.NaN(), true, nil
+			// Observations at one instant (a multiplicity above one) divide 0 by
+			// 0. The reference result is the hardware invalid-operation NaN, sign
+			// bit set (mx-0033..0038), not the positive library NaN.
+			return invalidOperationNaN, true, nil
 		}
 		increase := last.v - first.v
 		previous := first.v

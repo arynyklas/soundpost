@@ -51,11 +51,10 @@ func histogramObservationBuckets(histogram model.NativeHistogram) []histogramObs
 		})
 		return output
 	}
-	unit := math.Exp2(-float64(view.Schema))
 	threshold := math.Float64frombits(uint64(view.ZeroThreshold))
 	visit(view.NegativeSpans, view.NegativeBuckets, func(index int32, count float64) {
-		lower := -math.Exp2(float64(index) * unit)
-		upper := -math.Exp2(float64(index-1) * unit)
+		lower := -exponentialBound(view.Schema, index)
+		upper := -exponentialBound(view.Schema, index-1)
 		if lower >= -threshold {
 			return
 		}
@@ -76,8 +75,8 @@ func histogramObservationBuckets(histogram model.NativeHistogram) []histogramObs
 		output = append(output, histogramObservationBucket{lower: lower, upper: upper, count: zero})
 	}
 	visit(view.PositiveSpans, view.PositiveBuckets, func(index int32, count float64) {
-		lower := math.Exp2(float64(index-1) * unit)
-		upper := math.Exp2(float64(index) * unit)
+		lower := exponentialBound(view.Schema, index-1)
+		upper := exponentialBound(view.Schema, index)
 		if upper <= threshold {
 			return
 		}
@@ -113,81 +112,6 @@ func histogramBucketFraction(b histogramObservationBucket, bound float64) float6
 	}
 	return (bound - b.lower) / (b.upper - b.lower)
 }
-func histogramInterpolate(b histogramObservationBucket, fraction float64) float64 {
-	if math.IsInf(b.upper, 1) {
-		return b.lower
-	}
-	if math.IsInf(b.lower, -1) {
-		if b.upper <= 0 {
-			return b.upper
-		}
-		b.lower = 0
-	}
-	if b.exponential {
-		if b.upper < 0 {
-			return -math.Exp2(math.Log2(-b.lower) + (math.Log2(-b.upper)-math.Log2(-b.lower))*fraction)
-		}
-		return math.Exp2(math.Log2(b.lower) + (math.Log2(b.upper)-math.Log2(b.lower))*fraction)
-	}
-	return b.lower + (b.upper-b.lower)*fraction
-}
-func histogramNativeQuantile(q float64, h model.NativeHistogram) (float64, string) {
-	f := histogramView(h)
-	total := math.Float64frombits(uint64(f.Count))
-	if q < 0 {
-		return math.Inf(-1), ""
-	}
-	if q > 1 {
-		return math.Inf(1), ""
-	}
-	if math.IsNaN(q) || total == 0 {
-		return math.NaN(), ""
-	}
-	buckets := histogramObservationBuckets(h)
-	population := 0.0
-	for _, bucket := range buckets {
-		population += bucket.count
-	}
-	annotation := ""
-	if population < total {
-		annotation = "NativeHistogramQuantileNaNSkewInfo"
-	}
-	if q >= .5 && !math.IsNaN(math.Float64frombits(uint64(f.Sum))) {
-		rank := (1 - q) * total
-		cumulative := 0.0
-		for i := len(buckets) - 1; i >= 0; i-- {
-			bucket := buckets[i]
-			if bucket.count == 0 {
-				continue
-			}
-			next := math.Min(cumulative+bucket.count, total)
-			if next >= rank {
-				return histogramInterpolate(bucket, 1-(rank-cumulative)/bucket.count), annotation
-			}
-			cumulative = next
-		}
-	} else {
-		rank := q * total
-		cumulative := 0.0
-		for _, bucket := range buckets {
-			if bucket.count == 0 {
-				continue
-			}
-			next := math.Min(cumulative+bucket.count, total)
-			if next >= rank {
-				return histogramInterpolate(bucket, (rank-cumulative)/bucket.count), annotation
-			}
-			cumulative = next
-		}
-	}
-	if math.IsNaN(math.Float64frombits(uint64(f.Sum))) {
-		return math.NaN(), "NativeHistogramQuantileNaNResultInfo"
-	}
-	if len(buckets) > 0 {
-		return buckets[len(buckets)-1].upper, annotation
-	}
-	return math.NaN(), annotation
-}
 func histogramNativeFraction(lower, upper float64, h model.NativeHistogram) (float64, string) {
 	f := histogramView(h)
 	total := math.Float64frombits(uint64(f.Count))
@@ -197,6 +121,9 @@ func histogramNativeFraction(lower, upper float64, h model.NativeHistogram) (flo
 	if lower >= upper {
 		return 0, ""
 	}
+	if f.Schema != -53 {
+		return histogramExponentialFraction(lower, upper, f, total)
+	}
 	lo, hi, population := 0.0, 0.0, 0.0
 	for _, bucket := range histogramObservationBuckets(h) {
 		population += bucket.count
@@ -204,26 +131,105 @@ func histogramNativeFraction(lower, upper float64, h model.NativeHistogram) (flo
 		hi += bucket.count * histogramBucketFraction(bucket, upper)
 	}
 	reason := ""
-	if population < total {
+	if population < total && math.IsNaN(math.Float64frombits(uint64(f.Sum))) {
 		reason = "NativeHistogramFractionNaNsInfo"
 	}
 	return (math.Min(hi, population) - math.Min(lo, population)) / total, reason
+}
+
+// histogramExponentialFraction is the fraction of observations in
+// [lower, upper] of an exponential-schema histogram. Buckets are walked in
+// ascending order of bounds, exactly as stored (a bucket that straddles the
+// zero threshold is not clamped, and a bucket entirely inside it is still
+// visited). A bound's rank is the population of the buckets below it plus the
+// interpolated share of the bucket that contains it; a bound that is never
+// placed (above every bucket, or above the buckets that hold anything) takes
+// the whole observation count, not the bucket total, so observations that are
+// in no bucket count as lying below it.
+func histogramExponentialFraction(lower, upper float64, f model.FloatHistogram, total float64) (float64, string) {
+	var rank, lowerRank, upperRank, population float64
+	var lowerSet, upperSet bool
+	buckets := nativeBuckets(f, false)
+	for _, b := range buckets {
+		population += b.count
+	}
+	for _, b := range buckets {
+		zero := b.lower <= 0 && b.upper >= 0
+		if zero {
+			switch {
+			case len(f.NegativeBuckets) == 0 && len(f.PositiveBuckets) > 0:
+				b.lower = 0
+			case len(f.PositiveBuckets) == 0 && len(f.NegativeBuckets) > 0:
+				b.upper = 0
+			}
+		}
+		if !lowerSet && b.lower >= lower {
+			lowerRank, lowerSet = rank, true
+		}
+		if !upperSet && b.lower >= upper {
+			upperRank, upperSet = rank, true
+		}
+		if lowerSet && upperSet {
+			break
+		}
+		share := func(bound float64) float64 {
+			if zero {
+				return (bound - b.lower) / (b.upper - b.lower)
+			}
+			logLower, logUpper := math.Log2(math.Abs(b.lower)), math.Log2(math.Abs(b.upper))
+			return (math.Log2(math.Abs(bound)) - logLower) / (logUpper - logLower)
+		}
+		if !lowerSet && b.lower < lower && b.upper > lower {
+			lowerRank, lowerSet = rank+b.count*share(lower), true
+		}
+		if !upperSet && b.lower < upper && b.upper > upper {
+			upperRank, upperSet = rank+b.count*share(upper), true
+		}
+		rank += b.count
+	}
+	if !lowerSet || lowerRank > total {
+		lowerRank = total
+	}
+	if !upperSet || upperRank > total {
+		upperRank = total
+	}
+	reason := ""
+	if population < total && math.IsNaN(math.Float64frombits(uint64(f.Sum))) {
+		reason = "NativeHistogramFractionNaNsInfo"
+	}
+	return (upperRank - lowerRank) / total, reason
 }
 func histogramNativeVariance(h model.NativeHistogram, profileID string) float64 {
 	f := histogramView(h)
 	count := math.Float64frombits(uint64(f.Count))
 	mean := math.Float64frombits(uint64(f.Sum)) / count
+	if f.Schema != -53 {
+		terms := make([]float64, 0, len(f.PositiveBuckets)+len(f.NegativeBuckets)+1)
+		for _, b := range nativeBuckets(f, false) {
+			if b.count == 0 {
+				continue
+			}
+			representative := 0.0
+			if !(b.lower <= 0 && b.upper >= 0) {
+				representative = math.Sqrt(b.upper * b.lower)
+				if b.upper < 0 {
+					representative = -representative
+				}
+			}
+			delta := representative - mean
+			terms = append(terms, b.count*delta*delta)
+		}
+		return functionSum(terms) / count
+	}
 	buckets := histogramObservationBuckets(h)
 	terms := make([]float64, 0, len(buckets))
 	for _, bucket := range buckets {
 		representative := (bucket.lower + bucket.upper) / 2
-		if bucket.exponential || profileID == "promql-prometheus-3.1.0" && f.Schema == -53 {
+		if profileID == "promql-prometheus-3.1.0" {
 			representative = math.Sqrt(bucket.lower * bucket.upper)
 			if bucket.upper < 0 {
 				representative = -representative
 			}
-		} else if f.Schema != -53 {
-			representative = 0
 		}
 		delta := representative - mean
 		terms = append(terms, bucket.count*delta*delta)
@@ -317,31 +323,44 @@ func functionHistogram(ctx context.Context, call CallPlan, args []value.Result, 
 	out := value.Result{Type: "vector"}
 	var d []syntax.Diagnostic
 	name := call.Name
+	if name == "histogram_quantiles" {
+		label := args[1].String
+		if !functionLabelValid(label) {
+			return out, nil, functionError(call.Expr, "function.invalid-label", "invalid quantile destination label")
+		}
+		for i, quantile := range args[2:] {
+			if q := functionFloat(quantile.Scalar); math.IsNaN(q) || q < 0 || q > 1 {
+				d = append(d, functionDiagnosticArg(call.Expr, "InvalidQuantileWarning", 2+i))
+			}
+			single := CallPlan{Name: "histogram_quantile", Expr: call.Expr}
+			r, ds, e := functionHistogramOne(ctx, single, []value.Result{quantile, args[0]}, f, false)
+			d = append(d, ds...)
+			if e != nil {
+				return out, d, e
+			}
+			for _, s := range r.Vector {
+				s.Labels = value.SetLabel(s.Labels, label, openMetricsFloat(functionFloat(quantile.Scalar)))
+				out.Vector = append(out.Vector, s)
+			}
+		}
+		return out, d, nil
+	}
+	return functionHistogramOne(ctx, call, args, f, true)
+}
+
+// functionHistogramOne evaluates one histogram function; reportInvalid says
+// whether an out-of-range quantile is reported by this call (histogram_quantiles
+// reports each of its quantiles itself, at the quantile's own argument).
+func functionHistogramOne(ctx context.Context, call CallPlan, args []value.Result, f Frame, reportInvalid bool) (value.Result, []syntax.Diagnostic, error) {
+	out := value.Result{Type: "vector"}
+	var d []syntax.Diagnostic
+	name := call.Name
 	index := 0
 	if name == "histogram_quantile" {
 		index = 1
 	}
 	if name == "histogram_fraction" {
 		index = 2
-	}
-	if name == "histogram_quantiles" {
-		label := args[1].String
-		if !functionLabelValid(label) {
-			return out, nil, functionError(call.Expr, "function.invalid-label", "invalid quantile destination label")
-		}
-		for _, quantile := range args[2:] {
-			single := CallPlan{Name: "histogram_quantile", Expr: call.Expr}
-			r, ds, e := functionHistogram(ctx, single, []value.Result{quantile, args[0]}, f)
-			d = append(d, ds...)
-			if e != nil {
-				return out, d, e
-			}
-			for _, s := range r.Vector {
-				s.Labels = value.SetLabel(s.Labels, label, strconv.FormatFloat(functionFloat(quantile.Scalar), 'g', -1, 64))
-				out.Vector = append(out.Vector, s)
-			}
-		}
-		return out, d, nil
 	}
 	quantile := name == "histogram_quantile"
 	fraction := name == "histogram_fraction"
@@ -376,7 +395,7 @@ func functionHistogram(ctx context.Context, call CallPlan, args []value.Result, 
 		return out, d, nil
 	}
 	q := functionFloat(args[0].Scalar)
-	if quantile && (math.IsNaN(q) || q < 0 || q > 1) {
+	if reportInvalid && quantile && (math.IsNaN(q) || q < 0 || q > 1) {
 		d = append(d, functionDiagnostic(call.Expr, "InvalidQuantileWarning"))
 	}
 	type group struct {
@@ -448,7 +467,7 @@ func functionHistogram(ctx context.Context, call CallPlan, args []value.Result, 
 			reason := ""
 			if entry.native != nil {
 				if quantile {
-					result, reason = histogramNativeQuantile(q, *entry.native)
+					result, reason = histogramNativeQuantile(q, *entry.native, f.Profile.ID)
 				} else {
 					result, reason = histogramNativeFraction(q, functionFloat(args[1].Scalar), *entry.native)
 				}
@@ -533,7 +552,6 @@ func histogramTrim(h model.NativeHistogram, bound float64, upper bool) model.Nat
 	f := histogramView(h)
 	positive := value.HistogramBuckets(f.PositiveSpans, f.PositiveBuckets)
 	negative := value.HistogramBuckets(f.NegativeSpans, f.NegativeBuckets)
-	unit := math.Exp2(-float64(f.Schema))
 	changed := false
 	count, sum := 0.0, 0.0
 	trim := func(index int32, n float64, neg bool) (float64, float64) {
@@ -548,8 +566,8 @@ func histogramTrim(h model.NativeHistogram, bound float64, upper bool) model.Nat
 				b.upper = math.Float64frombits(uint64(f.CustomBounds[index]))
 			}
 		} else {
-			b.lower = math.Exp2(float64(index-1) * unit)
-			b.upper = math.Exp2(float64(index) * unit)
+			b.lower = exponentialBound(f.Schema, index-1)
+			b.upper = exponentialBound(f.Schema, index)
 			b.exponential = true
 			if neg {
 				b.lower, b.upper = -b.upper, -b.lower

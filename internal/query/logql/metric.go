@@ -4,6 +4,7 @@ package logql
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"math"
@@ -114,6 +115,7 @@ func Evaluate(ctx context.Context, plan Plan, src scan.LogSource, account value.
 		if e != nil {
 			return result, nil, e
 		}
+		floorSampleTimes(&r)
 		if plan.Evaluation.Instant {
 			if r.Type == "vector" && !metricPreservesValueOrder(plan.Expression.Expr) {
 				if e = metricSort(r.Vector, func(i, j int) bool { return value.CompareLabels(r.Vector[i].Labels, r.Vector[j].Labels) < 0 }, func() error { return account.Check(ctx) }); e != nil {
@@ -126,6 +128,7 @@ func Evaluate(ctx context.Context, plan Plan, src scan.LogSource, account value.
 		if r.Type == "scalar" {
 			r.Vector = []value.Series{metricSeries(src.ProjectID(), nil, at, math.Float64frombits(uint64(r.Scalar.Float)))}
 		}
+		floorSampleTimes(&r)
 		for _, series := range r.Vector {
 			key := value.LabelKey(series.Labels)
 			i, ok := index[key]
@@ -339,8 +342,8 @@ func EvaluateLogsInterval(ctx context.Context, plan Plan, src scan.LogSource, or
 	if plan.Evaluation.Instant {
 		end = plan.Evaluation.Time
 		lookback := int64(30000000000)
-		if raw := plan.Profile.Configuration["instant_log_lookback_ns"]; len(raw) > 2 {
-			lookback, err = strconv.ParseInt(string(raw[1:len(raw)-1]), 10, 64)
+		if raw, present := plan.Profile.Configuration["instant_log_lookback_ns"]; present {
+			lookback, err = configInt64(raw)
 			if err != nil || lookback <= 0 {
 				return result, model.Fail(model.Invalid)
 			}
@@ -465,4 +468,46 @@ func metricPreservesValueOrder(expr Expr) bool {
 		return false
 	}
 	return visit(expr)
+}
+
+// configInt64 reads an integer profile setting written either as a JSON string
+// ("30000000000") or as a JSON number (30000000000).
+func configInt64(raw json.RawMessage) (int64, error) {
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		return strconv.ParseInt(text, 10, 64)
+	}
+	var number json.Number
+	if err := json.Unmarshal(raw, &number); err != nil {
+		return 0, err
+	}
+	return strconv.ParseInt(number.String(), 10, 64)
+}
+
+// floorSampleTimes reports every sample of a metric result at millisecond
+// precision, as the reference does (its samples carry a millisecond
+// timestamp): a query evaluated at t=2000000500ns returns the sample time
+// 2000000000. The evaluation itself, window edges included, keeps the exact
+// nanosecond time.
+func floorSampleTimes(r *value.Result) {
+	floor := func(t model.UnixNano) model.UnixNano {
+		const ms = int64(1000000)
+		v := int64(t)
+		if v%ms == 0 {
+			return t
+		}
+		q := v / ms
+		if v < 0 {
+			q--
+		}
+		return model.UnixNano(q * ms)
+	}
+	if r.Type == "scalar" {
+		r.Scalar.Time = floor(r.Scalar.Time)
+	}
+	for i := range r.Vector {
+		for j := range r.Vector[i].Samples {
+			r.Vector[i].Samples[j].Time = floor(r.Vector[i].Samples[j].Time)
+		}
+	}
 }

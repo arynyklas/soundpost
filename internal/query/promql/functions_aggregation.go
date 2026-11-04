@@ -57,7 +57,21 @@ func EvalAggregation(ctx context.Context, agg AggregationPlan, input value.Resul
 		}
 	}
 	if agg.Name == "topk" || agg.Name == "bottomk" || agg.Name == "limitk" {
-		if math.IsNaN(parameter) || parameter <= -math.Exp2(63) || parameter >= math.Exp2(63) {
+		// 3.13.5 answers a parameter below one with an empty result before it
+		// validates the range, so only an overflow upward (or NaN) fails there;
+		// 3.1.0 validates first, so a parameter that does not fit int64 fails
+		// on either side. The bounds are the binary64 values around 2^63: 3.1.0
+		// accepts everything strictly below 2^63; 3.13.5 only what lies strictly
+		// below 2^63-1024, the largest binary64 under 2^63, which it rejects
+		// (recorded: 9223372036854774784 fails, 4611686018427387904 passes).
+		upper := math.Exp2(63)
+		if f.Profile.ID == "promql-prometheus-3.13.5" {
+			if parameter < 1 {
+				return out, d, nil
+			}
+			upper = math.Nextafter(upper, 0)
+		}
+		if math.IsNaN(parameter) || parameter < -math.Exp2(63) || parameter >= upper {
 			return out, d, functionError(agg.Expr, "aggregation.parameter-range", "aggregation parameter is outside int64 range")
 		}
 		if parameter < 1 {

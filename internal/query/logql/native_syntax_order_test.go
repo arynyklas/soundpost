@@ -237,7 +237,9 @@ func TestLabelFilterOperandSpellings(t *testing.T) {
 		{`{job="a"} | x > 0B1`, "syntax.number", "0B1"},
 		{`rate({job="a"}[5m]) > 0b1`, "syntax.number", "0b1"},
 		{`rate({job="a"}[5m]) > 0X1F`, "syntax.number", ""},
-		{`topk(0o2, rate({job="a"}[5m]))`, "syntax.number", ""},
+		// The topk parameter takes the integer parser, not the float one: the native
+		// topk(0x2, ..) is function.arguments (tk-015), and 0o2 is refused alike.
+		{`topk(0o2, rate({job="a"}[5m]))`, "function.arguments", ""},
 		{`vector(1e999)`, "syntax.number", ""},
 		{`{job="a"} | x = 1kb`, "syntax.unexpected-token", ""},
 		{`{job="a"} | x < 4mb y="1"`, "syntax.unexpected-token", "y"},

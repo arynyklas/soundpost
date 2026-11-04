@@ -228,6 +228,14 @@ func (s *templateState) builtin(name string, args []any) (any, error) {
 			if e := s.charge(1); e != nil {
 				return nil, e
 			}
+			// A comparison reads both operands.
+			for _, operand := range []any{args[0], b} {
+				if text, ok := operand.(string); ok {
+					if e := s.stringWork(text); e != nil {
+						return nil, e
+					}
+				}
+			}
 			cmp, equal, e := templateCompare(args[0], b)
 			if e != nil {
 				return nil, e

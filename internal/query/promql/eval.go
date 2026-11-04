@@ -4,8 +4,6 @@ package promql
 
 import (
 	"context"
-	"errors"
-	"io"
 	"soundpost/internal/model"
 	"soundpost/internal/query/profile"
 	"soundpost/internal/query/regexcompat"
@@ -43,8 +41,16 @@ func Evaluate(ctx context.Context, plan Plan, src scan.MetricSource, account val
 	if account == nil || plan.Expr.Expr == nil || src == nil || src.ProjectID() == (model.ID{}) {
 		return result, nil, model.Fail(model.Invalid)
 	}
+	plan, err = millisecondDomain(plan)
+	if err != nil {
+		return result, nil, err
+	}
 	s := &evaluationState{ctx: ctx, plan: plan, src: src, account: account}
-	defer func() { value.InheritMetadata(&result, s.metadata); account.Release(s.reserved) }()
+	defer func() {
+		value.InheritMetadata(&result, s.metadata)
+		account.Release(s.reserved)
+		err = engineBoundaryError(err)
+	}()
 	count, e := gridCount(plan.Evaluation)
 	if e != nil {
 		return result, nil, e
@@ -128,9 +134,9 @@ func (s *evaluationState) evalNode(expr TypedExpr, at model.UnixNano) (value.Res
 	case "paren":
 		return s.eval(expr.Children[0], at)
 	case "selector":
-		return s.selectMetric(n, nil, at, false)
+		return s.selectMetric(n, nil, at, selectOptions{})
 	case "range":
-		return s.selectMetric(n.Children[0].(*Node), n, at, false)
+		return s.selectMetric(n.Children[0].(*Node), n, at, selectOptions{})
 	case "subquery":
 		return s.subquery(expr, at)
 	case "unary":
@@ -182,7 +188,7 @@ func (s *evaluationState) evalNode(expr TypedExpr, at model.UnixNano) (value.Res
 				raw = raw.Children[0]
 			}
 			if n.Text == "timestamp" && i == 0 && raw.Expr.(*Node).Kind == "selector" {
-				r, e = s.selectMetric(raw.Expr.(*Node), nil, at, true)
+				r, e = s.selectMetric(raw.Expr.(*Node), nil, at, selectOptions{preserveTime: true})
 			} else if n.Text == "info" && i == 1 {
 				selector := *c.Expr.(*Node)
 				hasName := selector.Text != ""
@@ -192,9 +198,13 @@ func (s *evaluationState) evalNode(expr TypedExpr, at model.UnixNano) (value.Res
 				if !hasName {
 					selector.Text = "target_info"
 				}
-				r, e = s.selectMetric(&selector, nil, at, false)
+				r, e = s.selectMetric(&selector, nil, at, selectOptions{})
 			} else {
-				r, e = s.eval(c, at)
+				if raw.Expr.(*Node).Kind == "range" {
+					r, e = s.evalFunctionWindow(raw, at)
+				} else {
+					r, e = s.eval(c, at)
+				}
 			}
 			if e != nil {
 				return r, e
@@ -202,7 +212,7 @@ func (s *evaluationState) evalNode(expr TypedExpr, at model.UnixNano) (value.Res
 			args[i] = r
 		}
 		if n.Text == "info" && len(args) == 1 {
-			r, e := s.selectMetric(&Node{Kind: "selector", Text: "target_info"}, nil, at, false)
+			r, e := s.selectMetric(&Node{Kind: "selector", Text: "target_info"}, nil, at, selectOptions{})
 			if e != nil {
 				return r, e
 			}
@@ -347,211 +357,6 @@ func (s *evaluationState) matcherScope() (*regexcompat.Scope, error) {
 		s.regexScope = scope
 	}
 	return s.regexScope, nil
-}
-func (s *evaluationState) selectMetric(sel, window *Node, at model.UnixNano, preserveSampleTime bool) (r value.Result, err error) {
-	node := sel
-	if window != nil {
-		node = window
-	}
-	target, e := selectorTime(node, at, s.plan)
-	if e != nil {
-		return r, e
-	}
-	lower, e := checkedSub(target, s.plan.Lookback)
-	if e != nil {
-		return r, e
-	}
-	left, right := lower, target
-	if window != nil {
-		width, e := durationNS(window.RangeExpr, window.RangeText, s.plan.Evaluation)
-		if e != nil || width <= 0 {
-			return r, timeError()
-		}
-		left, e = checkedSub(target, width)
-		if e != nil {
-			return r, e
-		}
-		lower, e = checkedAdd(left, 1)
-		if e != nil {
-			return r, e
-		}
-		if window.Extension != "" {
-			lower, e = checkedSub(left, s.plan.Lookback)
-			if e != nil {
-				return r, e
-			}
-			if window.Extension == "smoothed" {
-				right, e = checkedAdd(target, s.plan.Lookback)
-				if e != nil {
-					return r, e
-				}
-			}
-		}
-	}
-	end, e := checkedAdd(right, 1)
-	if e != nil {
-		return r, e
-	}
-	req := scan.MetricSelection{Start: model.UnixNano(lower), End: model.UnixNano(end), Profile: s.plan.Profile, Account: s.account}
-	if sel.Text != "" {
-		req.Matchers = append(req.Matchers, scan.LabelMatcher{Name: "__name__", Op: "=", Value: sel.Text})
-	}
-	for _, m := range sel.Matchers {
-		req.Matchers = append(req.Matchers, scan.LabelMatcher{Name: m.Name, Op: m.Op, Value: m.Value})
-	}
-	for _, m := range req.Matchers {
-		if m.Op == "=~" || m.Op == "!~" {
-			req.RegexScope, e = s.matcherScope()
-			if e != nil {
-				return r, e
-			}
-			break
-		}
-	}
-	matchers, e := scan.CompileMatchers(s.ctx, req)
-	if e != nil {
-		return r, e
-	}
-	if s.src == nil {
-		return r, model.Fail(model.Invalid)
-	}
-	it, e := s.src.Select(s.ctx, req)
-	if e != nil {
-		return r, e
-	}
-	defer func() {
-		metadata := value.Result{Partial: it.Partial(), Watermarks: it.Watermarks()}
-		value.InheritMetadata(&r, metadata)
-		value.InheritMetadata(&s.metadata, metadata)
-		if e := it.Close(); err == nil && e != nil {
-			err = e
-		}
-	}()
-	r.Type = "vector"
-	if window != nil {
-		r.Type = "matrix"
-	}
-	for {
-		series, e := it.Next(s.ctx)
-		if e != nil {
-			if errors.Is(e, io.EOF) {
-				break
-			}
-			return r, e
-		}
-		if e = s.account.Check(s.ctx); e != nil {
-			return r, e
-		}
-		if series.Project != s.src.ProjectID() {
-			return r, model.Fail(model.Corrupt)
-		}
-		ok, e := matchers.Match(s.ctx, series.Labels)
-		if e != nil {
-			return r, e
-		}
-		if !ok {
-			continue
-		}
-		samples := series.Samples
-		for i := 1; i < len(samples); i++ {
-			if samples[i].Time <= samples[i-1].Time {
-				return r, model.Fail(model.Corrupt)
-			}
-		}
-		selected := make([]int, 0)
-		if window == nil {
-			for i := len(samples) - 1; i >= 0; i-- {
-				p := samples[i]
-				if int64(p.Time) > target {
-					continue
-				}
-				if int64(p.Time) < lower || p.Stale() {
-					break
-				}
-				selected = append(selected, i)
-				break
-			}
-		} else {
-			before, after := -1, -1
-			afterSeen := false
-			for i, p := range samples {
-				t := int64(p.Time)
-				if t < lower || t > end-1 {
-					continue
-				}
-				if t <= left {
-					if p.Stale() {
-						before = -1
-					} else {
-						before = i
-					}
-					continue
-				}
-				if t > target {
-					if !afterSeen {
-						afterSeen = true
-						if !p.Stale() {
-							after = i
-						}
-					}
-					continue
-				}
-				if !p.Stale() {
-					selected = append(selected, i)
-				}
-			}
-			if window.Extension != "" && before >= 0 {
-				selected = append([]int{before}, selected...)
-			}
-			if window.Extension == "smoothed" && after >= 0 {
-				selected = append(selected, after)
-			}
-		}
-		if len(selected) == 0 {
-			continue
-		}
-		cost := value.SeriesBytes(value.Series{Labels: series.Labels})
-		for _, i := range selected {
-			cost += value.SampleBytes(samples[i])
-		}
-		if e = s.reserve(cost); e != nil {
-			return r, e
-		}
-		retained := value.Series{Project: series.Project, Labels: value.CloneLabels(series.Labels), Samples: make([]value.Sample, len(selected))}
-		for i, j := range selected {
-			p := samples[j]
-			if p.StartTimestamp != nil {
-				start := *p.StartTimestamp
-				p.StartTimestamp = &start
-			}
-			if p.Histogram != nil {
-				if (p.Histogram.Integer == nil) == (p.Histogram.Float == nil) {
-					return r, model.Fail(model.Corrupt)
-				}
-				// Both pinned language profiles materialize AtFloatHistogram here.
-				// Native scans retain exact integers; this is the explicit semantic
-				// conversion boundary, not an unsupported-kind fallback or raw rewrite.
-				histogram := value.FloatHistogram(*p.Histogram)
-				p.Histogram = &model.NativeHistogram{Float: &histogram}
-			}
-			if window == nil && !preserveSampleTime {
-				p.Time = at
-			}
-			retained.Samples[i] = p
-		}
-		if window == nil {
-			r.Vector = append(r.Vector, retained)
-		} else {
-			r.Matrix = append(r.Matrix, retained)
-		}
-	}
-	if e = s.account.Check(s.ctx); e != nil {
-		return r, e
-	}
-	if e = checkDuplicates(r.Vector); e != nil {
-		return r, e
-	}
-	return r, checkDuplicates(r.Matrix)
 }
 func (s *evaluationState) subquery(expr TypedExpr, at model.UnixNano) (value.Result, error) {
 	n := expr.Expr.(*Node)

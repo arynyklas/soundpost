@@ -214,3 +214,47 @@ func firstSubqueryPoint(left, step int64) (int64, error) {
 	}
 	return checkedAdd(left, step-rem)
 }
+
+const nanosPerMillisecond = 1_000_000
+
+// The pinned engines work in whole milliseconds. Evaluation instants and
+// sample timestamps floor to their millisecond; the step, lookback and default
+// subquery step lose their sub-millisecond remainder (truncation toward zero).
+func floorMillisecondsNS(t int64) (int64, error) {
+	q, r := t/nanosPerMillisecond, t%nanosPerMillisecond
+	if r < 0 {
+		q--
+	}
+	if q < math.MinInt64/nanosPerMillisecond {
+		return 0, timeError()
+	}
+	return q * nanosPerMillisecond, nil
+}
+func truncMillisecondsNS(d int64) int64 { return d / nanosPerMillisecond * nanosPerMillisecond }
+
+// millisecondDomain returns the plan as the pinned engines see it, with every
+// evaluation time and span on a whole millisecond.
+func millisecondDomain(plan Plan) (Plan, error) {
+	var err error
+	ev := plan.Evaluation
+	if ev.Instant {
+		var t int64
+		if t, err = floorMillisecondsNS(int64(ev.Time)); err != nil {
+			return plan, err
+		}
+		ev.Time = model.UnixNano(t)
+	} else {
+		var start, end int64
+		if start, err = floorMillisecondsNS(int64(ev.Start)); err != nil {
+			return plan, err
+		}
+		if end, err = floorMillisecondsNS(int64(ev.End)); err != nil {
+			return plan, err
+		}
+		ev.Start, ev.End, ev.Step = model.UnixNano(start), model.UnixNano(end), truncMillisecondsNS(ev.Step)
+	}
+	plan.Evaluation = ev
+	plan.Lookback = truncMillisecondsNS(plan.Lookback)
+	plan.SubqueryStep = truncMillisecondsNS(plan.SubqueryStep)
+	return plan, nil
+}

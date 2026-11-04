@@ -103,30 +103,60 @@ func functionError(e TypedExpr, code, msg string) error {
 	if e.Expr != nil {
 		r = e.Expr.SourceRange()
 	}
-	return &syntax.LanguageError{Category: "evaluation", Code: code, Range: r, SafeMessage: msg}
+	// Everything functionError reports is raised while the plan executes; the
+	// pinned engines classify these failures as execution errors.
+	return &syntax.LanguageError{Category: "execution", Code: code, Range: r, SafeMessage: msg}
 }
 func functionDiagnostic(e TypedExpr, id string) syntax.Diagnostic {
+	return functionDiagnosticArg(e, id, -1)
+}
+
+// functionDiagnosticArg anchors an annotation at one argument of a call. A
+// negative arg selects the argument the pinned engines attach id to.
+func functionDiagnosticArg(e TypedExpr, id string, arg int) syntax.Diagnostic {
 	var r syntax.SourceRange
 	if e.Expr != nil {
 		r = e.Expr.SourceRange()
 		if n, ok := e.Expr.(*Node); ok && len(n.Children) > 0 && id != "SortInRangeQueryWarning" {
-			index := 0
-			if n.Kind == "call" {
-				if n.Text == "histogram_quantile" && id != "InvalidQuantileWarning" {
-					index = 1
-				}
-				if n.Text == "histogram_fraction" {
-					index = 2
+			if arg < 0 {
+				arg = 0
+				if n.Kind == "call" {
+					arg = histogramAnnotationArg(n.Text, id)
 				}
 			}
 			if n.Kind == "call" || n.Kind == "aggregate" && (id == "InvalidQuantileWarning" || id == "InvalidRatioWarning") {
-				if index < len(n.Children) {
-					r = n.Children[index].SourceRange()
+				if arg < len(n.Children) {
+					r = n.Children[arg].SourceRange()
 				}
 			}
 		}
 	}
 	return syntax.Diagnostic{Category: id, Range: r, SafeMessage: functionAnnotationText(id)}
+}
+
+// histogramAnnotationArg is the argument each histogram function attaches an
+// annotation to: histogram_quantile reports on the quantile except for input
+// problems of the vector; the NaN information of histogram_fraction names its
+// lower bound; histogram_quantiles names its vector for input problems and its
+// label for forced monotonicity.
+func histogramAnnotationArg(name, id string) int {
+	switch name {
+	case "histogram_quantile":
+		if id == "InvalidQuantileWarning" || strings.HasPrefix(id, "NativeHistogramQuantile") {
+			return 0
+		}
+		return 1
+	case "histogram_fraction":
+		if id == "NativeHistogramFractionNaNsInfo" {
+			return 0
+		}
+		return 2
+	case "histogram_quantiles":
+		if id == "HistogramQuantileForcedMonotonicityInfo" {
+			return 1
+		}
+	}
+	return 0
 }
 func functionCheck(ctx context.Context, f Frame) error {
 	if err := ctx.Err(); err != nil {
