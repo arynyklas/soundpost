@@ -13,6 +13,7 @@ customer-private/
 /var/
 /tmp/
 /dist/
+/web/dist/
 /coverage/
 *.perf.data
 *.cpuprofile

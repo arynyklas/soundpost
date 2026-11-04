@@ -3,7 +3,7 @@
   "license": "Apache-2.0",
   "scope": "Declared licenses of all current pnpm lock packages, including optional platforms; full distribution notices remain a release gate",
   "lock": "pnpm-lock.yaml",
-  "lock_sha256": "b120d1f8111a277c10a1570706815fd68c9787a5e7fda6e38e38790a3422d77b",
+  "lock_sha256": "8f29ee6ec80d0da0a2ac0c35c6a19643a1dd0c4f4d6713c03228b7609ee3f1e0",
   "packages": [
     {
       "name": "@esbuild/aix-ppc64",
@@ -21,21 +21,6 @@
       "notice_audit": "distribution_gate_pending"
     },
     {
-      "name": "@esbuild/android-arm",
-      "version": "0.28.2",
-      "license_declared": "MIT",
-      "metadata_url": "https://registry.npmjs.org/%40esbuild%2Fandroid-arm/0.28.2",
-      "tarball": "https://registry.npmjs.org/@esbuild/android-arm/-/android-arm-0.28.2.tgz",
-      "integrity": "sha512-kXXoiPVVGQcnIYGOeaovwOURpniDBpSq4A03qkQ+BMQqtGG6HYap3xne9C1O1yo4TR3qxlCX5IqqmX6fFo2Lqg==",
-      "os": [
-        "android"
-      ],
-      "cpu": [
-        "arm"
-      ],
-      "notice_audit": "distribution_gate_pending"
-    },
-    {
       "name": "@esbuild/android-arm64",
       "version": "0.28.2",
       "license_declared": "MIT",
@@ -47,6 +32,21 @@
       ],
       "cpu": [
         "arm64"
+      ],
+      "notice_audit": "distribution_gate_pending"
+    },
+    {
+      "name": "@esbuild/android-arm",
+      "version": "0.28.2",
+      "license_declared": "MIT",
+      "metadata_url": "https://registry.npmjs.org/%40esbuild%2Fandroid-arm/0.28.2",
+      "tarball": "https://registry.npmjs.org/@esbuild/android-arm/-/android-arm-0.28.2.tgz",
+      "integrity": "sha512-kXXoiPVVGQcnIYGOeaovwOURpniDBpSq4A03qkQ+BMQqtGG6HYap3xne9C1O1yo4TR3qxlCX5IqqmX6fFo2Lqg==",
+      "os": [
+        "android"
+      ],
+      "cpu": [
+        "arm"
       ],
       "notice_audit": "distribution_gate_pending"
     },
@@ -126,21 +126,6 @@
       "notice_audit": "distribution_gate_pending"
     },
     {
-      "name": "@esbuild/linux-arm",
-      "version": "0.28.2",
-      "license_declared": "MIT",
-      "metadata_url": "https://registry.npmjs.org/%40esbuild%2Flinux-arm/0.28.2",
-      "tarball": "https://registry.npmjs.org/@esbuild/linux-arm/-/linux-arm-0.28.2.tgz",
-      "integrity": "sha512-XlDnu2q5yoqems+xay6wSAcg9DDD7K9RLKZEBOMZm3ckNpJBvOX20tSfby8KfrrhINDyv9V2YVZKY/SpoGJI8w==",
-      "os": [
-        "linux"
-      ],
-      "cpu": [
-        "arm"
-      ],
-      "notice_audit": "distribution_gate_pending"
-    },
-    {
       "name": "@esbuild/linux-arm64",
       "version": "0.28.2",
       "license_declared": "MIT",
@@ -152,6 +137,21 @@
       ],
       "cpu": [
         "arm64"
+      ],
+      "notice_audit": "distribution_gate_pending"
+    },
+    {
+      "name": "@esbuild/linux-arm",
+      "version": "0.28.2",
+      "license_declared": "MIT",
+      "metadata_url": "https://registry.npmjs.org/%40esbuild%2Flinux-arm/0.28.2",
+      "tarball": "https://registry.npmjs.org/@esbuild/linux-arm/-/linux-arm-0.28.2.tgz",
+      "integrity": "sha512-XlDnu2q5yoqems+xay6wSAcg9DDD7K9RLKZEBOMZm3ckNpJBvOX20tSfby8KfrrhINDyv9V2YVZKY/SpoGJI8w==",
+      "os": [
+        "linux"
+      ],
+      "cpu": [
+        "arm"
       ],
       "notice_audit": "distribution_gate_pending"
     },
@@ -428,6 +428,17 @@
       "metadata_url": "https://registry.npmjs.org/%40noble%2Fhashes/1.8.0",
       "tarball": "https://registry.npmjs.org/@noble/hashes/-/hashes-1.8.0.tgz",
       "integrity": "sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A==",
+      "os": [],
+      "cpu": [],
+      "notice_audit": "distribution_gate_pending"
+    },
+    {
+      "name": "@playwright/test",
+      "version": "1.64.1",
+      "license_declared": "Apache-2.0",
+      "metadata_url": "https://registry.npmjs.org/%40playwright%2Ftest/1.64.1",
+      "tarball": "https://registry.npmjs.org/@playwright/test/-/test-1.64.1.tgz",
+      "integrity": "sha512-IaYGml/nSOiZWROfPtuIL7neuu9qDOZ3TNvNljUIrhDMxiGTgPjzj/g9p9RxpS2tSepPDRY+UwAaEeiKtUvIAg==",
       "os": [],
       "cpu": [],
       "notice_audit": "distribution_gate_pending"
@@ -856,12 +867,45 @@
       "notice_audit": "distribution_gate_pending"
     },
     {
+      "name": "@types/react-dom",
+      "version": "19.3.0",
+      "license_declared": "MIT",
+      "metadata_url": "https://registry.npmjs.org/%40types%2Freact-dom/19.3.0",
+      "tarball": "https://registry.npmjs.org/@types/react-dom/-/react-dom-19.3.0.tgz",
+      "integrity": "sha512-ZI7bU42mZXXKHn/qNLEw2IrbiINU7X5+vfgdixBHkCNpYWXjKgfQ/P+uyGb5CjOLB9UcnTeg3rylQtV2hym44Q==",
+      "os": [],
+      "cpu": [],
+      "notice_audit": "distribution_gate_pending"
+    },
+    {
+      "name": "@types/react",
+      "version": "19.3.0",
+      "license_declared": "MIT",
+      "metadata_url": "https://registry.npmjs.org/%40types%2Freact/19.3.0",
+      "tarball": "https://registry.npmjs.org/@types/react/-/react-19.3.0.tgz",
+      "integrity": "sha512-N0rFCuH9YoxG9/m61l9MfpJKfmLOVU0em7ipIz6TRgSSkvReLB9vL85GB+yr8Bs5leqpvg96JSwF4ZS1s4viQg==",
+      "os": [],
+      "cpu": [],
+      "notice_audit": "distribution_gate_pending"
+    },
+    {
       "name": "bun-types",
       "version": "1.3.14",
       "license_declared": "MIT",
       "metadata_url": "https://registry.npmjs.org/bun-types/1.3.14",
       "tarball": "https://registry.npmjs.org/bun-types/-/bun-types-1.3.14.tgz",
       "integrity": "sha512-4N0ig0fEomHt5R0KCFWjovxow98rIoRwKolrYdCcknNwMekCXRnWEUvgu5soYV8QXtVsrUD8B95MBOZGPvr6KQ==",
+      "os": [],
+      "cpu": [],
+      "notice_audit": "distribution_gate_pending"
+    },
+    {
+      "name": "csstype",
+      "version": "3.2.3",
+      "license_declared": "MIT",
+      "metadata_url": "https://registry.npmjs.org/csstype/3.2.3",
+      "tarball": "https://registry.npmjs.org/csstype/-/csstype-3.2.3.tgz",
+      "integrity": "sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ==",
       "os": [],
       "cpu": [],
       "notice_audit": "distribution_gate_pending"
@@ -935,6 +979,28 @@
       "notice_audit": "distribution_gate_pending"
     },
     {
+      "name": "playwright-core",
+      "version": "1.64.1",
+      "license_declared": "Apache-2.0",
+      "metadata_url": "https://registry.npmjs.org/playwright-core/1.64.1",
+      "tarball": "https://registry.npmjs.org/playwright-core/-/playwright-core-1.64.1.tgz",
+      "integrity": "sha512-BC4s8y6SEVA6Q1rSxZTto8hI1KUI3xXlHGZgvGqP4IqPdI/a6FX9H29IDNz7vKo9l21b6LfYosScPL6M3xxyDQ==",
+      "os": [],
+      "cpu": [],
+      "notice_audit": "distribution_gate_pending"
+    },
+    {
+      "name": "playwright",
+      "version": "1.64.1",
+      "license_declared": "Apache-2.0",
+      "metadata_url": "https://registry.npmjs.org/playwright/1.64.1",
+      "tarball": "https://registry.npmjs.org/playwright/-/playwright-1.64.1.tgz",
+      "integrity": "sha512-HCrVhHr5QQuwYoswEUGTb7gGp522yflbv/ST8nF4sFWGuLjQCt17Q/EubpGGSNKYn1tsTCPZxqHhHCfVURu7UA==",
+      "os": [],
+      "cpu": [],
+      "notice_audit": "distribution_gate_pending"
+    },
+    {
       "name": "postcss",
       "version": "8.5.32",
       "license_declared": "MIT",
@@ -946,12 +1012,45 @@
       "notice_audit": "distribution_gate_pending"
     },
     {
+      "name": "react-dom",
+      "version": "19.3.1",
+      "license_declared": "MIT",
+      "metadata_url": "https://registry.npmjs.org/react-dom/19.3.1",
+      "tarball": "https://registry.npmjs.org/react-dom/-/react-dom-19.3.1.tgz",
+      "integrity": "sha512-Y0bARz53lhEC1NMCASs0/j+faB/zqt3R8hpvg1e8+61ZVJ4UL0UdC4cBbXfZMcIuhrfgeILTLe+ZeBCavQPtKQ==",
+      "os": [],
+      "cpu": [],
+      "notice_audit": "distribution_gate_pending"
+    },
+    {
+      "name": "react",
+      "version": "19.3.1",
+      "license_declared": "MIT",
+      "metadata_url": "https://registry.npmjs.org/react/19.3.1",
+      "tarball": "https://registry.npmjs.org/react/-/react-19.3.1.tgz",
+      "integrity": "sha512-QNhWdt7nrgVWWQG58QuGsAR3jv3Hbe4mb4vz7w2csnHavciZJgda1CPNaldF6eVxv90ud3jUXpKlHL69gO38yw==",
+      "os": [],
+      "cpu": [],
+      "notice_audit": "distribution_gate_pending"
+    },
+    {
       "name": "rollup",
       "version": "4.67.4",
       "license_declared": "MIT",
       "metadata_url": "https://registry.npmjs.org/rollup/4.67.4",
       "tarball": "https://registry.npmjs.org/rollup/-/rollup-4.67.4.tgz",
       "integrity": "sha512-Lsv3oKcz5jgOQJej/p7nfwbVEdAbDT+z6OPf/SCdI+nF+q2ENp0pTKT35ZwXAmH8g45mfrIiJeEyAqKYSYoL9Q==",
+      "os": [],
+      "cpu": [],
+      "notice_audit": "distribution_gate_pending"
+    },
+    {
+      "name": "scheduler",
+      "version": "0.28.0",
+      "license_declared": "MIT",
+      "metadata_url": "https://registry.npmjs.org/scheduler/0.28.0",
+      "tarball": "https://registry.npmjs.org/scheduler/-/scheduler-0.28.0.tgz",
+      "integrity": "sha512-juorfCmIkIw8tT+p5BXSm6PJjQF/ycEYmKyzURCIt/RaZIhL+PulbQ9Yu2z1HdOJDdqDTlxA1+xKBmHXJsczAw==",
       "os": [],
       "cpu": [],
       "notice_audit": "distribution_gate_pending"
