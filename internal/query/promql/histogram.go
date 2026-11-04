@@ -112,7 +112,7 @@ func histogramBucketFraction(b histogramObservationBucket, bound float64) float6
 	}
 	return (bound - b.lower) / (b.upper - b.lower)
 }
-func histogramNativeFraction(lower, upper float64, h model.NativeHistogram) (float64, string) {
+func histogramNativeFraction(lower, upper float64, h model.NativeHistogram, profileID string) (float64, string) {
 	f := histogramView(h)
 	total := math.Float64frombits(uint64(f.Count))
 	if total == 0 || math.IsNaN(lower) || math.IsNaN(upper) {
@@ -122,7 +122,7 @@ func histogramNativeFraction(lower, upper float64, h model.NativeHistogram) (flo
 		return 0, ""
 	}
 	if f.Schema != -53 {
-		return histogramExponentialFraction(lower, upper, f, total)
+		return histogramExponentialFraction(lower, upper, f, total, profileID)
 	}
 	lo, hi, population := 0.0, 0.0, 0.0
 	for _, bucket := range histogramObservationBuckets(h) {
@@ -145,8 +145,11 @@ func histogramNativeFraction(lower, upper float64, h model.NativeHistogram) (flo
 // interpolated share of the bucket that contains it; a bound that is never
 // placed (above every bucket, or above the buckets that hold anything) takes
 // the whole observation count, not the bucket total, so observations that are
-// in no bucket count as lying below it.
-func histogramExponentialFraction(lower, upper float64, f model.FloatHistogram, total float64) (float64, string) {
+// in no bucket count as lying below it. Only the 3.13 profile differs: when the
+// sum is NaN (NaN observations exist, which are in no bucket and in no
+// fraction) an unplaced bound takes the bucket population, while the
+// denominator stays the observation count.
+func histogramExponentialFraction(lower, upper float64, f model.FloatHistogram, total float64, profileID string) (float64, string) {
 	var rank, lowerRank, upperRank, population float64
 	var lowerSet, upperSet bool
 	buckets := nativeBuckets(f, false)
@@ -187,15 +190,19 @@ func histogramExponentialFraction(lower, upper float64, f model.FloatHistogram, 
 		}
 		rank += b.count
 	}
-	if !lowerSet || lowerRank > total {
-		lowerRank = total
-	}
-	if !upperSet || upperRank > total {
-		upperRank = total
-	}
+	ceiling := total
 	reason := ""
 	if population < total && math.IsNaN(math.Float64frombits(uint64(f.Sum))) {
 		reason = "NativeHistogramFractionNaNsInfo"
+		if profileID != "promql-prometheus-3.1.0" {
+			ceiling = population
+		}
+	}
+	if !lowerSet || lowerRank > ceiling {
+		lowerRank = ceiling
+	}
+	if !upperSet || upperRank > ceiling {
+		upperRank = ceiling
 	}
 	return (upperRank - lowerRank) / total, reason
 }
@@ -469,7 +476,7 @@ func functionHistogramOne(ctx context.Context, call CallPlan, args []value.Resul
 				if quantile {
 					result, reason = histogramNativeQuantile(q, *entry.native, f.Profile.ID)
 				} else {
-					result, reason = histogramNativeFraction(q, functionFloat(args[1].Scalar), *entry.native)
+					result, reason = histogramNativeFraction(q, functionFloat(args[1].Scalar), *entry.native, f.Profile.ID)
 				}
 			} else if len(entry.classic) > 0 {
 				if quantile {

@@ -77,7 +77,7 @@ func TestNativeFractionUnplacedBoundTakesObservationCount(t *testing.T) {
 		// every bucket lies under the zero threshold 0.5 and is still walked.
 		{"buckets under threshold", exponentialHistogram(-2, 0.5, 3, 17, 28.9, -6, 7, 1, 3, 3), 0, 1, 1},
 	} {
-		got, _ := histogramNativeFraction(tc.lower, tc.upper, tc.h)
+		got, _ := histogramNativeFraction(tc.lower, tc.upper, tc.h, "promql-prometheus-3.1.0")
 		if math.Float64bits(got) != math.Float64bits(tc.want) {
 			t.Errorf("%s: fraction(%v, %v) = %v, want %v", tc.name, tc.lower, tc.upper, got, tc.want)
 		}
@@ -141,5 +141,34 @@ func TestExponentialBoundTable(t *testing.T) {
 	h := exponentialHistogram(8, 0, 0, 3, 1, 0, 1, 0)
 	if got, _ := histogramNativeQuantile(0.01, h, "promql-prometheus-3.1.0"); got != 0.9973770679244123 {
 		t.Fatalf("quantile %v", got)
+	}
+}
+
+// Recorded observations (ids pz-0507, pz-0239, pn-0004): with a NaN sum the
+// observations that are in no bucket are NaNs; 3.13.5 counts them in no
+// fraction but keeps them in the denominator, 3.1.0 still places an unplaced
+// bound at the whole observation count. A finite sum keeps the count rule on
+// both profiles.
+func TestNativeFractionNaNObservationsPerProfile(t *testing.T) {
+	nan := math.NaN()
+	const old, current = "promql-prometheus-3.1.0", "promql-prometheus-3.13.5"
+	for _, tc := range []struct {
+		name         string
+		h            model.NativeHistogram
+		lower, upper float64
+		wantOld      float64
+		wantNew      float64
+	}{
+		{"bucket total 7 of count 10", exponentialHistogram(1, 0, 0, 10, nan, 0, 0, 7), 0.5, 4, 1, 0.7},
+		{"buckets under zero threshold", exponentialHistogram(8, 1, 0, 8, nan, -8, 5), 0.1, 500, 1, 0.625},
+		{"zero count and one bucket", exponentialHistogram(3, 0, 3, 13, nan, -1, 9), 0.1, 1e8, 0.7692307692307693, 0.6923076923076923},
+		{"finite sum keeps count", exponentialHistogram(1, 0, 0, 10, 5, 0, 0, 7), 0.5, 4, 1, 1},
+	} {
+		for profile, want := range map[string]float64{old: tc.wantOld, current: tc.wantNew} {
+			got, _ := histogramNativeFraction(tc.lower, tc.upper, tc.h, profile)
+			if math.Float64bits(got) != math.Float64bits(want) {
+				t.Errorf("%s %s: fraction(%v, %v) = %v, want %v", tc.name, profile, tc.lower, tc.upper, got, want)
+			}
+		}
 	}
 }
