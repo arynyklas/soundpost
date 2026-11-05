@@ -66,6 +66,15 @@ func run() (err error) {
 		case "snapshot-repair-child":
 			smoke, stage = "snapshot_repair_child", "repair_child_start"
 			return RunSnapshotRepairChild(os.Args[2:])
+		case "delete-restore-pressure":
+			smoke, stage = "delete_restore_pressure", "deletion_dispatch"
+			return RunDeletion(os.Args[2:])
+		case "backup-restore":
+			smoke, stage = "backup_restore", "backup_dispatch"
+			return RunBackupRestore(os.Args[2:])
+		case "backup-restore-child":
+			smoke, stage = "backup_restore_child", "backup_child_start"
+			return RunBackupRestoreChild(os.Args[2:])
 		}
 	}
 	if len(os.Args) >= 2 && os.Args[1] == "source-map" {

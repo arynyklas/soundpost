@@ -106,7 +106,11 @@ func (e *Engine) authorizeRead(ctx context.Context, s auth.Scope, projects []mod
 		}
 		seen[p] = true
 	}
-	return e.validator.Revalidate(ctx, s)
+	if err := e.validator.Revalidate(ctx, s); err != nil {
+		return err
+	}
+	_, err := e.readDeletions(ctx, s.OrgID(), projects)
+	return err
 }
 func readPrefixes(s auth.Scope, projects []model.ID, kind model.Kind, selectors []Matcher) ([][]byte, error) {
 	var source model.ID
@@ -272,7 +276,13 @@ func (it *rowIterator) Next(ctx context.Context) (Page, error) {
 			it.closeLocked()
 			return Page{}, err
 		}
-		err := e.db.View(func(tx *bolt.Tx) error {
+		delPreds, err := e.readDeletions(ctx, it.scope.OrgID(), it.req.Projects)
+		if err != nil {
+			it.terminal = err
+			it.closeLocked()
+			return Page{}, err
+		}
+		err = e.db.View(func(tx *bolt.Tx) error {
 			e.storageStats.IndexLookups++
 			name := "scan_time"
 			if it.posting != "" {
@@ -347,6 +357,9 @@ func (it *rowIterator) Next(ctx context.Context) (Page, error) {
 						return model.Fail(model.Corrupt)
 					}
 					resources, payload := scanColumns(it.req)
+					if entityPredicateActive(delPreds) && (it.req.Signal == model.Replay || it.req.Signal == model.Profile) {
+						payload = true
+					}
 					if it.scope.Permission() == profilesRead && partitionedSubject(ref.Kind) {
 						payload = true
 					}
@@ -364,7 +377,7 @@ func (it *rowIterator) Next(ctx context.Context) (Page, error) {
 				if decoded.Times[row] != at || !bytes.Equal(decoded.IDs[row][:], suffix[8:24]) || origin.Group != group || uint64(origin.Index) != originIndex {
 					return model.Fail(model.Corrupt)
 				}
-				if matchesRow(it.matchers, decoded, row, it.req.Signal) {
+				if !coveredRow(delPreds, it.scope.OrgID(), it.req.Signal, decoded, row) && matchesRow(it.matchers, decoded, row, it.req.Signal) {
 					appendPageRow(&selected, decoded, row)
 				}
 			}

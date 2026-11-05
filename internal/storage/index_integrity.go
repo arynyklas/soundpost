@@ -82,6 +82,18 @@ func (w *indexWriter) put(key, value []byte) error {
 	xorDigest(&w.state.Checksum, entryDigest(w.hasher, key, value, &w.scratch))
 	return w.bucket.Put(key, value)
 }
+
+// delete removes one entry and keeps the counted multiset root exact; a missing or damaged
+// entry is corruption (the caller derived the key from rows that must be indexed).
+func (w *indexWriter) delete(key []byte) error {
+	old := w.bucket.Get(key)
+	if old == nil || !validIndexValue(key, old) || w.state.Count == 0 {
+		return model.Fail(model.Corrupt)
+	}
+	xorDigest(&w.state.Checksum, entryDigest(w.hasher, key, old, &w.scratch))
+	w.state.Count--
+	return w.bucket.Delete(key)
+}
 func (w *indexWriter) finish() error { return w.meta.Put([]byte(w.name), digestBytes(w.state)) }
 func initializeIndexIntegrity(tx *bolt.Tx) error {
 	meta := tx.Bucket([]byte("scan_integrity"))

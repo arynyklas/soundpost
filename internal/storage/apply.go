@@ -184,6 +184,10 @@ func (e *Engine) applyTx(tx *bolt.Tx, slot uint16, index uint64, entry walEntry)
 		if err = tx.Bucket([]byte("fences")).Put([]byte(entry.Fence.Source.String()+":"+strconv.Itoa(int(slot))), raw); err != nil {
 			return err
 		}
+	case "delete_barrier":
+		if err := e.applyDeleteBarrier(tx, slot, index, entry); err != nil {
+			return err
+		}
 	case "artifact_fragment":
 		if entry.Artifact == nil || entry.Batch != nil || entry.Receipt != nil || entry.Cancel != nil || entry.Fence != nil || entry.ArtifactGC != nil {
 			return model.Fail(model.Corrupt)
@@ -197,6 +201,15 @@ func (e *Engine) applyTx(tx *bolt.Tx, slot uint16, index uint64, entry walEntry)
 		}
 		if err := e.applyBlobGC(tx, slot, index, *entry.ArtifactGC); err != nil {
 			return err
+		}
+	case "batch_redacted":
+		if err := e.applyBatchRedactedTx(tx, slot, index, entry); err != nil {
+			return err
+		}
+	case "artifact_redacted":
+		// The erased fragment replays to nothing: there is no root or bytes to rebuild.
+		if entry.Redaction == nil || entry.Artifact != nil || entry.Batch != nil || entry.Receipt != nil {
+			return model.Fail(model.Corrupt)
 		}
 	default:
 		return model.Fail(model.Corrupt)

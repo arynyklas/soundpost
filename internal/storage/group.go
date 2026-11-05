@@ -47,6 +47,8 @@ type Engine struct {
 	subscribers  map[*changeIterator]struct{}
 	storageStats StorageStats
 	snap         snapshotState
+	pressure     pressureState
+	tomb         tombstoneState
 }
 type walEntry struct {
 	Type       string                      `json:"type"`
@@ -58,6 +60,22 @@ type walEntry struct {
 	ArtifactGC *model.ArtifactGC           `json:"artifact_gc,omitempty"`
 	Rejection  *model.ID                   `json:"rejection,omitempty"`
 	CommitSet  *replica.CommitSetWatermark `json:"commit_set,omitempty"`
+	// DeleteBarrier is the data-slot tombstone of a C12 deletion saga
+	// (Type "delete_barrier", replicated as a replica.Barrier).
+	DeleteBarrier *model.DeleteBarrier `json:"delete_barrier,omitempty"`
+	// Redaction marks a stored command whose erased records were physically
+	// removed locally (Type "batch_redacted"/"artifact_redacted"). It is never
+	// proposed to Raft: every voter derives it from the replicated tombstone.
+	Redaction *redaction `json:"redaction,omitempty"`
+}
+
+// redaction describes a locally rewritten command. Original is the SHA-256 of
+// the exact bytes the Raft journal committed, so replaying that entry is
+// recognised as the same command rather than as corruption.
+type redaction struct {
+	Original   model.Hash `json:"original"`
+	Erased     uint32     `json:"erased"`
+	Operations []model.ID `json:"operations,omitempty"` // tombstones/expiry that caused the erasure
 }
 
 func Open(dir string, v Revalidator) (*Engine, error) {
@@ -238,6 +256,9 @@ func (e *Engine) Append(ctx context.Context, scope auth.Scope, b model.Normalize
 	if found {
 		return old, nil
 	}
+	if err = e.admitPressure(batchClass(b.Records), uint64(len(b.Canonical))); err != nil {
+		return model.Receipt{}, err
+	}
 	canonical, err := model.CanonicalJSON(b.Batch)
 	if err != nil || !bytes.Equal(canonical, b.Canonical) || model.HashCanonical(canonical) != b.Hash {
 		return model.Receipt{}, model.Fail(model.Invalid)
@@ -257,6 +278,9 @@ func (e *Engine) Append(ctx context.Context, scope auth.Scope, b model.Normalize
 		}
 		return validateOrdered(tx, b)
 	}); err != nil {
+		return model.Receipt{}, err
+	}
+	if err = e.writeDeletions(ctx, b); err != nil {
 		return model.Receipt{}, err
 	}
 	index := e.indexes[b.RouteSlot] + 1

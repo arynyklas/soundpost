@@ -16,6 +16,7 @@ import (
 	"soundpost/internal/model"
 	"soundpost/internal/policy"
 	"soundpost/internal/releases"
+	"soundpost/internal/retention"
 	"soundpost/internal/storage"
 	"time"
 )
@@ -29,6 +30,7 @@ type App struct {
 	Artifacts   *artifacts.Service
 	Cache       *auth.Cache
 	Exports     *exports.Service
+	Retention   *retention.Service
 	replication *replicatedApp
 }
 
@@ -80,6 +82,21 @@ func open(dir string, options *replicationOptions) (*App, error) {
 	if e = a.BindSourceBarrier(engine); e != nil {
 		return fail(e)
 	}
+	// Deletion suppression, disk-pressure admission and the single retention
+	// service: the control store is the one authority for deletion fences, and the
+	// service's delete generation is what every warm cache entry, cursor and
+	// export ticket binds to. The restore authority, if any, is installed on the
+	// service by the operator (Service.UseAuthority) before deletions that need it.
+	if e = engine.BindDeletions(c); e != nil {
+		return fail(e)
+	}
+	if e = engine.BindPressure(filepath.Join(dir, "data"), storage.StatfsMeter(), storage.DefaultPressureConfig()); e != nil {
+		return fail(e)
+	}
+	ret, e := retention.New(retention.Config{Control: c, Data: engine, Base: a.SourceLifecycleGenerations(), Pressure: engine})
+	if e != nil {
+		return fail(e)
+	}
 	artifactService, e := NewArtifactService(c, a, engine)
 	if e != nil {
 		return fail(e)
@@ -92,18 +109,16 @@ func open(dir string, options *replicationOptions) (*App, error) {
 	if e != nil {
 		return fail(e)
 	}
-	// Until a retention service owns historical-range and entity deletion, the
-	// delete generation is derived from authoritative revoked/retired sources.
-	cache, e := auth.NewCache(a, a.SourceLifecycleGenerations(), 4096, time.Minute)
+	cache, e := auth.NewCache(a, ret, 4096, time.Minute)
 	if e != nil {
 		return fail(e)
 	}
-	exportService, e = exports.New(a, cache, a.SourceLifecycleGenerations(), engine)
+	exportService, e = exports.New(a, cache, ret, engine)
 	if e != nil {
 		exportService = nil
 		return fail(e)
 	}
-	out := &App{Control: c, Auth: a, Storage: engine, Ingest: i, Releases: r, Artifacts: artifactService, Cache: cache, Exports: exportService}
+	out := &App{Control: c, Auth: a, Storage: engine, Ingest: i, Releases: r, Artifacts: artifactService, Cache: cache, Exports: exportService, Retention: ret}
 	startupTimeout := 20 * time.Second
 	if options != nil {
 		startupTimeout = 60 * time.Second
@@ -132,6 +147,7 @@ func open(dir string, options *replicationOptions) (*App, error) {
 }
 func (a *App) Close() error {
 	replicationErr := a.CloseReplication()
+	a.Retention.Close()
 	a.Exports.Close()
 	e := a.Storage.Close()
 	other := a.Control.Close()
@@ -149,7 +165,15 @@ func (a *App) Register(mux *http.ServeMux) {
 	httpapi.RegisterExportRoutes(mux, a.Auth, a.Exports)
 	a.RegisterArtifactRoutes(mux)
 }
+
+// RunFences drives the background loops a serving process needs: source fences,
+// admission reconciliation and the retention worker (deletion fences, physical
+// erasure, gated expiry, snapshots and journal truncation, disk pressure). It
+// returns when ctx ends.
 func (a *App) RunFences(ctx context.Context) {
+	if a.Retention != nil {
+		_ = a.Retention.Start(ctx)
+	}
 	timer := time.NewTicker(200 * time.Millisecond)
 	defer timer.Stop()
 	reconcile := time.NewTicker(5 * time.Second)

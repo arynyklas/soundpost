@@ -151,6 +151,9 @@ func validBlob(m model.BlobManifest) bool {
 	return m.Org != (model.ID{}) && m.Project != (model.ID{}) && m.Source != (model.ID{}) && m.Root != (model.ID{}) && m.Build != (model.ID{}) && m.Hash != (model.Hash{}) && m.Size > 0 && m.Size <= model.ArtifactBundleLimit && m.PolicyEpoch > 0 && m.PolicyRevision > 0 && m.RetainUntil > 0 && m.ReservationID != (model.ID{})
 }
 func validateBlobFence(tx *bolt.Tx, m model.BlobManifest, slot uint16) error {
+	if err := validateTombstoneBlob(tx, m, slot); err != nil {
+		return err
+	}
 	raw := tx.Bucket([]byte("fences")).Get([]byte(m.Source.String() + ":" + strconv.Itoa(int(slot))))
 	if raw == nil {
 		return nil
@@ -293,6 +296,9 @@ func (e *Engine) WriteBlob(ctx context.Context, scope auth.Scope, m model.BlobMa
 	if e.closed || e.failed {
 		return model.BlobReceipt{}, model.Fail(model.Unavailable)
 	}
+	if err = e.admitPressure(ClassNormal, uint64(m.Size)); err != nil {
+		return model.BlobReceipt{}, err
+	}
 	slot := model.BlobOwnerSlot(m.Org, m.Project, m.Root)
 	buffer := make([]byte, model.ArtifactFragmentLimit)
 	var out model.BlobReceipt
@@ -334,6 +340,9 @@ func (e *Engine) WriteBlob(ctx context.Context, scope auth.Scope, m model.BlobMa
 			return model.BlobReceipt{}, err
 		}
 		if int(ordinal) >= len(old.Fragments) {
+			if err = e.writeBlobDeletions(ctx, m); err != nil {
+				return model.BlobReceipt{}, err
+			}
 			f := model.ArtifactFragment{Manifest: m, Reservation: reservation, Ordinal: ordinal, Bytes: buffer[:size], Hash: hash, Cursor: model.Cursor{Group: e.group(slot), Index: model.Uint64(e.indexes[slot] + 1)}}
 			if err = e.commit(slot, uint64(f.Cursor.Index), walEntry{Type: "artifact_fragment", Artifact: &f}); err != nil {
 				return model.BlobReceipt{}, err
@@ -391,6 +400,9 @@ func (e *Engine) ReadBlobFragment(ctx context.Context, scope auth.Scope, r model
 	defer e.mu.Unlock()
 	if e.closed || e.failed {
 		return nil, model.Fail(model.Unavailable)
+	}
+	if err := e.readBlobDeletions(ctx, r.Manifest); err != nil {
+		return nil, err
 	}
 	var out []byte
 	err := e.db.View(func(tx *bolt.Tx) error {

@@ -20,7 +20,8 @@ func (e *Engine) Compact(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if len(groups) == 0 {
+	// With no page left (everything erased) the old segments must still be retired.
+	if len(groups) == 0 && len(e.catalog.Manifest.Segments) == 0 {
 		return nil
 	}
 	replacement := e.catalog.Manifest

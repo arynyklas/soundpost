@@ -28,7 +28,7 @@ func (m *replicatedControl) DeletionLedger() (replica.Ledger, error) {
 	}); err != nil {
 		return replica.Ledger{}, err
 	}
-	ledger := replica.Ledger{Version: 1, Group: st.Installation, Generation: uint64(len(st.SourceOperations)), Entries: []replica.LedgerEntry{}}
+	ledger := replica.Ledger{Version: 1, Group: st.Installation, Generation: uint64(len(st.SourceOperations) + len(st.Deletions)), Entries: []replica.LedgerEntry{}}
 	add := func(kind string, values map[string]model.SourceFence) error {
 		keys := make([]string, 0, len(values))
 		for key := range values {
@@ -52,6 +52,22 @@ func (m *replicatedControl) DeletionLedger() (replica.Ledger, error) {
 	}
 	if err := add("source_operation", st.SourceOperations); err != nil {
 		return replica.Ledger{}, err
+	}
+	// Deletion operations (any phase) are permanent tombstones as well.
+	keys := make([]string, 0, len(st.Deletions))
+	for key := range st.Deletions {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		raw, err := json.Marshal(struct {
+			Key       string                  `json:"key"`
+			Operation model.DeletionOperation `json:"operation"`
+		}{key, st.Deletions[key]})
+		if err != nil {
+			return replica.Ledger{}, err
+		}
+		ledger.Entries = append(ledger.Entries, replica.LedgerEntry{Index: uint64(len(ledger.Entries) + 1), Kind: "deletion_operation", Hash: model.HashCanonical(raw)})
 	}
 	if uint64(len(ledger.Entries)) > uint64(st.Revision) {
 		return replica.Ledger{}, model.Fail(model.Corrupt)

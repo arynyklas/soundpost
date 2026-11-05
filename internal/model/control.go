@@ -94,6 +94,17 @@ type ControlState struct {
 	GroupingMigrations   map[string]GroupingMigration
 	ArtifactIntents      map[string]ArtifactReferenceIntent
 	ArtifactReservations map[string]ArtifactQuotaReservation
+	// Retention, deletion and holds (plan 01 task 08). Every map is additive and
+	// keyed by canonical lowercase IDs; none of them ever shrinks (a completed
+	// deletion is a permanent tombstone), so the retained-operation count and the
+	// per-org generation are monotonic.
+	Deletions         map[string]DeletionOperation        // operation ID -> saga record
+	DeleteGenerations map[string]uint64                   // org ID -> monotonic delete generation
+	RetiredOrgs       map[string]ID                       // org ID -> retiring operation
+	RetiredProjects   map[string]ID                       // "org:project" -> retiring operation
+	Holds             map[string]LegalHold                // hold ID -> legal hold
+	EvidenceGaps      map[string]EvidenceGap              // gap ID -> durable declared gap
+	RetentionPolicies map[string][]RetentionPolicyVersion // "org" or "org:project" -> audited versions
 }
 type ControlCommand struct {
 	CommandID        ID

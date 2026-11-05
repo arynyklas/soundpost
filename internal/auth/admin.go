@@ -116,6 +116,9 @@ func (s *Service) AdminCommand(ctx context.Context, c Credential, r AdminCommand
 		} else if !exists || !o.Admins[c.user.String()] {
 			return model.Fail(model.NotFound)
 		}
+		if _, retired := st.RetiredOrgs[r.OrgID.String()]; retired && r.Kind != "create_user" {
+			return model.Fail(model.NotFound) // retirement is permanent
+		}
 		switch r.Kind {
 		case "create_org":
 			if exists || r.OrgID == (model.ID{}) {
@@ -135,6 +138,9 @@ func (s *Service) AdminCommand(ctx context.Context, c Credential, r AdminCommand
 		case "create_project":
 			if p.ID == (model.ID{}) {
 				return model.Fail(model.Invalid)
+			}
+			if _, retired := st.RetiredProjects[r.OrgID.String()+":"+p.ID.String()]; retired {
+				return model.Fail(model.Conflict) // a retired project ID is never reused
 			}
 			o.Projects[p.ID.String()] = p.Name
 		case "membership":

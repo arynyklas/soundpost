@@ -67,7 +67,10 @@ func (m *slotMachine) DeletionLedger() (replica.Ledger, error) {
 				return model.Fail(model.Corrupt)
 			}
 			switch entry.Type {
-			case "fence", "cancel", "artifact_gc":
+			case "fence", "cancel", "artifact_gc", "delete_barrier":
+				if entry.Type == "delete_barrier" {
+					ledger.Generation++
+				}
 				ledger.Entries = append(ledger.Entries, replica.LedgerEntry{Index: expected, Kind: entry.Type, Hash: model.HashCanonical(raw)})
 			}
 			expected++
@@ -245,6 +248,11 @@ func slotEntries(snapshot replica.Snapshot) ([]slotEntry, error) {
 // CommitSet proof attached at apply time is excluded so the journal form and the
 // stored form agree.
 func evidenceDigest(entry walEntry) (model.Hash, error) {
+	if entry.Redaction != nil {
+		// A redacted command stands for the journal original: backup replay certificates are
+		// derived from the journal form, so both forms must yield the same digest.
+		return entry.Redaction.Original, nil
+	}
 	entry.CommitSet = nil
 	raw, err := json.Marshal(entry)
 	if err != nil {
@@ -400,10 +408,12 @@ func (e *Engine) BeginBackup(ctx context.Context, cut ControlCut) (*Backup, erro
 		}
 		b.pins[slot] = pin
 	}
+	e.trackBackup(b)
 	return b, nil
 }
 
 func (b *Backup) release() {
+	b.engine.untrackBackup(b)
 	for i, pin := range b.pins {
 		if pin != nil {
 			_ = pin.Release()
@@ -572,7 +582,7 @@ func quotaEvidence(slots []replica.Snapshot) (QuotaEvidence, error) {
 		}
 		for _, e := range entries {
 			switch e.entry.Type {
-			case "batch":
+			case "batch", "batch_redacted":
 				if e.entry.Batch == nil || e.entry.Receipt == nil {
 					return QuotaEvidence{}, model.Fail(model.Corrupt)
 				}
@@ -787,6 +797,9 @@ func (e *Engine) InstallBackup(ctx context.Context, raftDirectory string, bundle
 	if err := e.writeHold(bundle.Digest); err != nil {
 		return err
 	}
+	if err := e.writeDeletionGate(bundle.Digest); err != nil {
+		return err
+	}
 	installed := make([]replica.Snapshot, 64)
 	for slot := range uint16(64) {
 		in, err := open(slot)
@@ -883,12 +896,12 @@ func (e *Engine) loadRestoreHold() error {
 	} else if !os.IsNotExist(err) {
 		return err
 	}
-	return nil
+	return e.loadDeletionGate()
 }
 
 // RestoreReady reports whether a restored engine may admit and serve receipts.
 func (e *Engine) RestoreReady() error {
-	if e.snap.hold.Load() {
+	if e.snap.hold.Load() || e.tomb.gate.Load() {
 		return model.Fail(model.Unavailable)
 	}
 	return nil

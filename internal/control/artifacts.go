@@ -236,6 +236,9 @@ func (s *Store) CancelArtifact(ctx context.Context, scope auth.Scope, id, comman
 		r.State = "cancelled"
 		r.GC = &out
 		st.ArtifactReservations[id.String()] = r
+		// GC of a root removes readable fragment bytes: every cache, cursor and
+		// ticket bound to the old delete generation must die with them.
+		bumpGeneration(st, r.Manifest.Org)
 		return nil
 	})
 	return out, err

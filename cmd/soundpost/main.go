@@ -26,6 +26,9 @@ func run() error {
 	if len(os.Args) >= 2 && os.Args[1] == "cluster-seed" {
 		return runClusterSeed(os.Args[2:])
 	}
+	if len(os.Args) >= 2 && os.Args[1] == "backup" {
+		return runBackup(os.Args[2:])
+	}
 	if len(os.Args) < 2 || os.Args[1] != "serve" {
 		return fmt.Errorf("usage: soundpost serve --mode=single --data-dir PATH --listen ADDRESS --tls-cert PATH --tls-key PATH")
 	}

@@ -956,6 +956,12 @@ func TestRestoreRebuildsPostControlCutQuota(t *testing.T) {
 	if err = again.CommitQuotaReconciliation(context.Background(), cert); err != nil {
 		t.Fatal(err)
 	}
+	if again.RestoreReady() == nil {
+		t.Fatal("restored engine ready before its deletion ledger was applied")
+	}
+	if err = again.ApplyDeletionLedger(context.Background(), replica.Ledger{Version: 1}, nil); err != nil {
+		t.Fatal(err)
+	}
 	if err = again.RestoreReady(); err != nil {
 		t.Fatal(err)
 	}

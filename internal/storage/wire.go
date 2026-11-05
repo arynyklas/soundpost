@@ -21,19 +21,22 @@ type durableBatch struct {
 	Reservation model.AdmissionReservation `json:"reservation"`
 }
 type durableEntry struct {
-	Type       string                      `json:"type"`
-	Batch      *durableBatch               `json:"batch,omitempty"`
-	Receipt    *model.Receipt              `json:"receipt,omitempty"`
-	Cancel     *model.CancelReservation    `json:"cancel,omitempty"`
-	Fence      *model.SourceFence          `json:"fence,omitempty"`
-	Artifact   *model.ArtifactFragment     `json:"artifact,omitempty"`
-	ArtifactGC *model.ArtifactGC           `json:"artifact_gc,omitempty"`
-	Rejection  *model.ID                   `json:"rejection,omitempty"`
-	CommitSet  *replica.CommitSetWatermark `json:"commit_set,omitempty"`
+	Type       string                   `json:"type"`
+	Batch      *durableBatch            `json:"batch,omitempty"`
+	Receipt    *model.Receipt           `json:"receipt,omitempty"`
+	Cancel     *model.CancelReservation `json:"cancel,omitempty"`
+	Fence      *model.SourceFence       `json:"fence,omitempty"`
+	Artifact   *model.ArtifactFragment  `json:"artifact,omitempty"`
+	ArtifactGC *model.ArtifactGC        `json:"artifact_gc,omitempty"`
+	Rejection  *model.ID                `json:"rejection,omitempty"`
+	// DeleteBarrier is the data-slot tombstone (Type "delete_barrier").
+	DeleteBarrier *model.DeleteBarrier        `json:"delete_barrier,omitempty"`
+	CommitSet     *replica.CommitSetWatermark `json:"commit_set,omitempty"`
+	Redaction     *redaction                  `json:"redaction,omitempty"`
 }
 
 func (entry walEntry) MarshalJSON() ([]byte, error) {
-	wire := durableEntry{Type: entry.Type, Receipt: entry.Receipt, Cancel: entry.Cancel, Fence: entry.Fence, Artifact: entry.Artifact, ArtifactGC: entry.ArtifactGC, Rejection: entry.Rejection, CommitSet: entry.CommitSet}
+	wire := durableEntry{Type: entry.Type, Receipt: entry.Receipt, Cancel: entry.Cancel, Fence: entry.Fence, Artifact: entry.Artifact, ArtifactGC: entry.ArtifactGC, Rejection: entry.Rejection, CommitSet: entry.CommitSet, DeleteBarrier: entry.DeleteBarrier, Redaction: entry.Redaction}
 	if b := entry.Batch; b != nil {
 		wire.Batch = &durableBatch{Org: b.Org, Hash: b.Hash, Canonical: b.Canonical, PolicyEpoch: b.PolicyEpoch, PolicyHash: b.PolicyHash, AdmissionAt: b.AdmissionAt, Deadlines: b.Deadlines, Reservation: b.Reservation}
 	}
@@ -44,8 +47,14 @@ func (entry *walEntry) UnmarshalJSON(raw []byte) error {
 	if model.StrictJSON(raw, &wire) != nil {
 		return model.Fail(model.Corrupt)
 	}
+	if wire.Type == "batch_redacted" || wire.Type == "artifact_redacted" {
+		return entry.unmarshalRedacted(wire)
+	}
+	if wire.Redaction != nil {
+		return model.Fail(model.Corrupt)
+	}
 	arms := 0
-	for _, present := range []bool{wire.Batch != nil, wire.Cancel != nil, wire.Fence != nil, wire.Artifact != nil, wire.ArtifactGC != nil, wire.Rejection != nil} {
+	for _, present := range []bool{wire.Batch != nil, wire.Cancel != nil, wire.Fence != nil, wire.Artifact != nil, wire.ArtifactGC != nil, wire.Rejection != nil, wire.DeleteBarrier != nil} {
 		if present {
 			arms++
 		}
@@ -56,13 +65,16 @@ func (entry *walEntry) UnmarshalJSON(raw []byte) error {
 	if wire.CommitSet != nil && (wire.Type != "cancel" || wire.Cancel == nil || wire.CommitSet.Reservation != wire.Cancel.ReservationID || wire.CommitSet.Group != wire.Cancel.OwnerGroup) {
 		return model.Fail(model.Corrupt)
 	}
+	if (wire.Type == "delete_barrier") != (wire.DeleteBarrier != nil) {
+		return model.Fail(model.Corrupt)
+	}
 	if (wire.Type == "rejected") != (wire.Rejection != nil) || wire.Rejection != nil && (wire.Batch != nil || wire.Receipt != nil || wire.Cancel != nil || wire.Fence != nil || wire.Artifact != nil || wire.ArtifactGC != nil) {
 		return model.Fail(model.Corrupt)
 	}
 	if (wire.Type == "artifact_fragment") != (wire.Artifact != nil) || (wire.Type == "artifact_gc") != (wire.ArtifactGC != nil) || wire.Artifact != nil && (wire.Batch != nil || wire.Receipt != nil || wire.Cancel != nil || wire.Fence != nil || wire.ArtifactGC != nil) || wire.ArtifactGC != nil && (wire.Batch != nil || wire.Receipt != nil || wire.Cancel != nil || wire.Fence != nil || wire.Artifact != nil) {
 		return model.Fail(model.Corrupt)
 	}
-	out := walEntry{Type: wire.Type, Receipt: wire.Receipt, Cancel: wire.Cancel, Fence: wire.Fence, Artifact: wire.Artifact, ArtifactGC: wire.ArtifactGC, Rejection: wire.Rejection, CommitSet: wire.CommitSet}
+	out := walEntry{Type: wire.Type, Receipt: wire.Receipt, Cancel: wire.Cancel, Fence: wire.Fence, Artifact: wire.Artifact, ArtifactGC: wire.ArtifactGC, Rejection: wire.Rejection, CommitSet: wire.CommitSet, DeleteBarrier: wire.DeleteBarrier}
 	if b := wire.Batch; b != nil {
 		if len(b.Canonical) > 4<<20 || model.HashCanonical(b.Canonical) != b.Hash {
 			return model.Fail(model.Corrupt)

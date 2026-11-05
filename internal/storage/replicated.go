@@ -45,6 +45,7 @@ type ReplicatedAuthority interface {
 	ValidateReplicatedGC(context.Context, model.ArtifactGC) error
 	ValidateReplicatedFence(context.Context, model.SourceFence) error
 	ValidateReplicatedCancellation(context.Context, model.CancelReservation) error
+	ValidateReplicatedDeleteBarrier(context.Context, model.DeleteBarrier) error
 }
 
 func storageReplicaFault(err error) error {
@@ -383,7 +384,7 @@ func (e *Engine) replicaBeforeWrite(ctx context.Context, slot uint16) error {
 	if slot >= 64 {
 		return model.Fail(model.Invalid)
 	}
-	if e.repl == nil || e.snap.hold.Load() {
+	if e.repl == nil || e.snap.hold.Load() || e.tomb.gate.Load() {
 		return model.Fail(model.Unavailable)
 	}
 	_, err := e.repl.groups[slot].ReadIndex(ctx)
@@ -419,7 +420,7 @@ func (e *Engine) commitReplicated(slot uint16, index uint64, entry walEntry) err
 		}
 		id := entry.Cancel.ReservationID
 		reservation = &id
-	case "fence":
+	case "fence", "delete_barrier":
 		kind = replica.Barrier
 	case "artifact_fragment":
 		kind = replica.Artifact
@@ -498,7 +499,7 @@ func (m *slotMachine) Apply(c replica.CommittedEntry) error {
 			return replica.ErrConflict
 		}
 		expected, err := json.Marshal(entry)
-		if err != nil || !bytes.Equal(expected, stored) {
+		if err != nil || !sameCommand(stored, expected) {
 			return model.Fail(model.Corrupt)
 		}
 		return nil
@@ -523,6 +524,19 @@ func (m *slotMachine) Apply(c replica.CommittedEntry) error {
 				if !errors.As(err, &fault) || fault.Code != model.Conflict && fault.Code != model.Stale {
 					return err
 				}
+				rejected = true
+				entry = walEntry{Type: "rejected", Rejection: &c.Entry.ID}
+			}
+		}
+		if entry.Artifact != nil && !rejected {
+			err = e.db.View(func(tx *bolt.Tx) error {
+				return validateTombstoneBlob(tx, entry.Artifact.Manifest, m.slot)
+			})
+			var deterministic bool
+			if deterministic, err = orderedRejection(err); err != nil {
+				return err
+			}
+			if deterministic {
 				rejected = true
 				entry = walEntry{Type: "rejected", Rejection: &c.Entry.ID}
 			}
@@ -567,6 +581,9 @@ func (m *slotMachine) Apply(c replica.CommittedEntry) error {
 		e.indexes[m.slot] = logical
 		if !rejected {
 			e.publishCommittedLocked(m.slot, logical, entry)
+			if entry.Type == "delete_barrier" {
+				go e.noteDeletion() // never under e.mu or a group lock: Abort releases journal pins
+			}
 		}
 	}
 	if rejected {
@@ -601,7 +618,7 @@ func (m *slotMachine) VerifySnapshot(raw []byte) error {
 	return e.db.View(func(tx *bolt.Tx) error {
 		commands := tx.Bucket([]byte("replica_commands"))
 		for index, raw := range snapshot.Entries {
-			if !bytes.Equal(commands.Get(commandKey(m.slot, uint64(index+1))), raw) {
+			if !sameCommand(commands.Get(commandKey(m.slot, uint64(index+1))), raw) {
 				return model.Fail(model.Corrupt)
 			}
 		}
@@ -629,7 +646,7 @@ func (m *slotMachine) Restore(raw []byte, physical uint64) error {
 				return model.Fail(model.Corrupt)
 			}
 			if logical <= e.indexes[m.slot] {
-				if !bytes.Equal(commands.Get(commandKey(m.slot, logical)), raw) {
+				if !sameCommand(commands.Get(commandKey(m.slot, logical)), raw) {
 					return model.Fail(model.Corrupt)
 				}
 			} else {
@@ -688,6 +705,15 @@ func (m *slotMachine) Validate(ctx context.Context, command replica.Entry) error
 			return err
 		}
 	case replica.Barrier:
+		if entry.Type == "delete_barrier" {
+			if entry.DeleteBarrier == nil {
+				return model.Fail(model.Invalid)
+			}
+			if err := m.authority.ValidateReplicatedDeleteBarrier(ctx, *entry.DeleteBarrier); err != nil {
+				return err
+			}
+			break
+		}
 		if entry.Type != "fence" || entry.Fence == nil {
 			return model.Fail(model.Invalid)
 		}
@@ -864,6 +890,10 @@ func (m *slotMachine) validRouting(command replica.Entry, entry walEntry) bool {
 	case replica.Cancellation:
 		return entry.Cancel != nil && entry.Cancel.OwnerGroup == owner && entry.Cancel.Fence.Group == owner && entry.Cancel.Fence.Index == index && command.ReservationID != nil && *command.ReservationID == entry.Cancel.ReservationID
 	case replica.Barrier:
+		if entry.Type == "delete_barrier" {
+			b := entry.DeleteBarrier
+			return b != nil && entry.Fence == nil && command.ReservationID == nil && b.Cursor == (model.Cursor{Group: owner, Index: index}) && b.Predicate.Validate() == nil
+		}
 		return entry.Fence != nil && command.ReservationID == nil && len(entry.Fence.Barriers) == 1 && entry.Fence.Barriers[0].Group == owner && entry.Fence.Barriers[0].Index == index
 	case replica.Artifact:
 		return entry.Artifact != nil && command.ReservationID == nil && model.BlobOwnerSlot(entry.Artifact.Manifest.Org, entry.Artifact.Manifest.Project, entry.Artifact.Manifest.Root) == m.slot && entry.Artifact.Cursor.Group == owner && entry.Artifact.Cursor.Index == index

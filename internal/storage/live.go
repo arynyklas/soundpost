@@ -320,9 +320,16 @@ func (it *changeIterator) Next(ctx context.Context) (ChangePage, error) {
 				e.mu.Unlock()
 				return ChangePage{}, err
 			}
+			delPreds, derr := e.readDeletions(ctx, it.scope.OrgID(), it.req.Projects)
+			if derr != nil {
+				it.terminal = derr
+				it.closeLocked()
+				e.mu.Unlock()
+				return ChangePage{}, derr
+			}
 			var selected Page
 			for i := range p.IDs {
-				if matchesRow(it.matchers, p, i, it.req.Signal) {
+				if !coveredRow(delPreds, it.scope.OrgID(), it.req.Signal, p, i) && matchesRow(it.matchers, p, i, it.req.Signal) {
 					appendPageRow(&selected, p, i)
 				}
 			}

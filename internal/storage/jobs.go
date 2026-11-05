@@ -65,6 +65,9 @@ func validateOrdered(tx *bolt.Tx, b model.NormalizedBatch) error {
 	if e := validateFence(tx, b); e != nil {
 		return e
 	}
+	if e := validateTombstoneBatch(tx, b); e != nil {
+		return e
+	}
 	if e := validateMetrics(tx, b); e != nil {
 		return e
 	}
