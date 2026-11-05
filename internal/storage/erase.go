@@ -13,10 +13,15 @@ import (
 )
 
 // EraseReport counts what one erasure pass physically removed. Held counts records and
-// artifact roots a guard refused to erase; they stay physically present.
+// artifact roots a guard refused to erase; they stay physically present. PagesScrubbed is the
+// number of free bbolt pages zeroed; ScrubPending means a scrub is still owed (a reader that
+// may still walk a freed page was open): the erased bytes can remain in free pages of apply.db
+// until a later pass finishes it, so the pass is not a physical-erasure success.
 type EraseReport struct {
 	Batches, Records, Pages, Blobs, Held uint64
 	SegmentsRewritten                    uint64
+	PagesScrubbed                        uint64
+	ScrubPending                         bool
 }
 
 // EraseCandidate is one record or artifact root a pass wants to remove. Deadline is the
@@ -144,6 +149,12 @@ func (e *Engine) erase(ctx context.Context, sel eraseSelector, guard EraseGuard)
 		if report.SegmentsRewritten, err = e.rewriteStaleSegments(ctx); err != nil {
 			return report, err
 		}
+	}
+	// The bucket-level erasure and the segment rewrite leave the erased bytes in bbolt's free
+	// pages; whether a scrub is owed is durable (set by the erasing transaction), so a crash
+	// here, or a rerun that finds nothing left to erase, still completes it.
+	if report.PagesScrubbed, report.ScrubPending, err = e.scrubFreePages(ctx); err != nil {
+		return report, err
 	}
 	return report, nil
 }
@@ -320,6 +331,9 @@ func (e *Engine) eraseBatchTx(tx *bolt.Tx, job eraseBatchJob, ops []model.ID) (r
 		return 0, 0, err
 	}
 	if err = commands.Put(commandKey(job.slot, job.index), redacted); err != nil {
+		return 0, 0, err
+	}
+	if err = e.markScrubPendingTx(tx); err != nil {
 		return 0, 0, err
 	}
 	if err = e.trip("erase_redacted"); err != nil {
@@ -544,6 +558,9 @@ func (e *Engine) eraseBlobTx(tx *bolt.Tx, job eraseBlobJob, ops []model.ID) (boo
 		return false, err
 	}
 	if err := adjustBlobCounts(tx, -1, -int64(len(job.receipt.Fragments)), 0); err != nil {
+		return false, err
+	}
+	if err := e.markScrubPendingTx(tx); err != nil {
 		return false, err
 	}
 	if err := e.trip("erase_redacted"); err != nil {

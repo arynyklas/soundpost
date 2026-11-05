@@ -35,7 +35,17 @@ type App struct {
 }
 
 func Open(dir string) (*App, error) { return open(dir, nil) }
+
+// OpenWithPressure is Open with an explicit disk meter and thresholds in place of the host
+// volume's statfs and the approved 80/90/95 defaults, so the admission levels can be driven
+// through the real ingest path deterministically (the deletion smoke does).
+func OpenWithPressure(dir string, meter storage.DiskMeter, pressure storage.PressureConfig) (*App, error) {
+	return openWith(dir, nil, meter, pressure)
+}
 func open(dir string, options *replicationOptions) (*App, error) {
+	return openWith(dir, options, storage.StatfsMeter(), storage.DefaultPressureConfig())
+}
+func openWith(dir string, options *replicationOptions, meter storage.DiskMeter, pressure storage.PressureConfig) (*App, error) {
 	c, e := openControl(dir, options)
 	if e != nil {
 		return nil, e
@@ -90,7 +100,7 @@ func open(dir string, options *replicationOptions) (*App, error) {
 	if e = engine.BindDeletions(c); e != nil {
 		return fail(e)
 	}
-	if e = engine.BindPressure(filepath.Join(dir, "data"), storage.StatfsMeter(), storage.DefaultPressureConfig()); e != nil {
+	if e = engine.BindPressure(filepath.Join(dir, "data"), meter, pressure); e != nil {
 		return fail(e)
 	}
 	ret, e := retention.New(retention.Config{Control: c, Data: engine, Base: a.SourceLifecycleGenerations(), Pressure: engine})

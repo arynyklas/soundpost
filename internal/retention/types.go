@@ -41,6 +41,15 @@ const (
 
 // DeleteReceipt is what Delete and PollDelete return. Phase fencing means reads
 // are denied but the all-group fence is not complete: it is not success.
+//
+// Physical "done" means every erasure step this installation can perform has run: records,
+// artifact roots, derived rows, segment files, the free pages of apply.db, the snapshots and the
+// journal rebuilt from them. Residual names the local stores that STILL hold copies of the
+// deleted bytes after that, because the replication layer keeps the original committed command
+// payloads (its idempotence cache) inside every journal and snapshot and offers no redaction.
+// Reads stay denied by the tombstone; those copies are not removed by this operation, and no
+// lag bound is claimed for them (see docs/privacy/retention.md). It is reported only once
+// Physical is "done"; before that the bytes are simply still present everywhere.
 type DeleteReceipt struct {
 	OperationID      model.ID       `json:"operation_id"`
 	Mode             string         `json:"mode"`
@@ -53,6 +62,7 @@ type DeleteReceipt struct {
 	BackupDeadline   model.UnixNano `json:"backup_deadline_ns"`
 	Holds            []model.ID     `json:"holds,omitempty"`
 	SafeReason       string         `json:"safe_reason,omitempty"`
+	Residual         []string       `json:"residual_stores,omitempty"`
 }
 
 // LedgerGeneration is what an independent restore authority durably stores
@@ -100,7 +110,10 @@ type DataPlane interface {
 	EraseExpired(ctx context.Context, now model.UnixNano, guard storage.EraseGuard) (storage.EraseReport, error)
 	ApplyDeletionLedger(ctx context.Context, ledger replica.Ledger, tombstones []model.DeletePredicate) error
 	CreateSnapshots(ctx context.Context) (storage.EngineSnapshot, error)
+	DropSupersededSnapshots(ctx context.Context) (uint64, error)
+	CheckpointErasure(ctx context.Context, p model.DeletePredicate) error
 	CompactJournals(ctx context.Context) error
+	ResidualStores() []string
 }
 
 // Pressure is the optional disk-pressure sampler (the engine implements it).

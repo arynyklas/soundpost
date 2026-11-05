@@ -130,6 +130,9 @@ func (s *Service) receipt(ctx context.Context, org, id model.ID) (out DeleteRece
 		out = receiptOf(st, op)
 		return nil
 	})
+	if err == nil && out.Physical == PhysicalDone {
+		out.Residual = s.cfg.Data.ResidualStores()
+	}
 	return
 }
 func receiptOf(st control.State, op model.DeletionOperation) DeleteReceipt {

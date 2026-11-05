@@ -47,6 +47,39 @@ type plane struct {
 	down    map[uint16]bool
 	checks  func(storage.EraseCandidate) // observed by the expiry planner
 	expired func(context.Context, model.UnixNano, storage.EraseGuard) (storage.EraseReport, error)
+	erased  func(context.Context, []model.DeletePredicate, storage.EraseGuard) (storage.EraseReport, error)
+	trace   func(step string) error // called first by every post-erasure maintenance step; an error fails the step
+}
+
+func (p *plane) step(name string) error {
+	if p.trace != nil {
+		return p.trace(name)
+	}
+	return nil
+}
+func (p *plane) CheckpointErasure(ctx context.Context, pr model.DeletePredicate) error {
+	if err := p.step("checkpoint"); err != nil {
+		return err
+	}
+	return p.Engine.CheckpointErasure(ctx, pr)
+}
+func (p *plane) CreateSnapshots(ctx context.Context) (storage.EngineSnapshot, error) {
+	if err := p.step("snapshot"); err != nil {
+		return storage.EngineSnapshot{}, err
+	}
+	return p.Engine.CreateSnapshots(ctx)
+}
+func (p *plane) DropSupersededSnapshots(ctx context.Context) (uint64, error) {
+	if err := p.step("drop"); err != nil {
+		return 0, err
+	}
+	return p.Engine.DropSupersededSnapshots(ctx)
+}
+func (p *plane) CompactJournals(ctx context.Context) error {
+	if err := p.step("compact"); err != nil {
+		return err
+	}
+	return p.Engine.CompactJournals(ctx)
 }
 
 func (p *plane) RecordDeleteBarrier(ctx context.Context, slot uint16, pr model.DeletePredicate) (model.Cursor, error) {
@@ -54,6 +87,12 @@ func (p *plane) RecordDeleteBarrier(ctx context.Context, slot uint16, pr model.D
 		return model.Cursor{}, model.Fail(model.Unavailable)
 	}
 	return p.Engine.RecordDeleteBarrier(ctx, slot, pr)
+}
+func (p *plane) EraseDeleted(ctx context.Context, preds []model.DeletePredicate, g storage.EraseGuard) (storage.EraseReport, error) {
+	if p.erased != nil {
+		return p.erased(ctx, preds, g)
+	}
+	return p.Engine.EraseDeleted(ctx, preds, g)
 }
 func (p *plane) EraseExpired(ctx context.Context, now model.UnixNano, g storage.EraseGuard) (storage.EraseReport, error) {
 	if p.expired != nil {

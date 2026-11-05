@@ -21,6 +21,7 @@ type WorkerStatus struct {
 	EvidenceHeld   bool // expired unprocessed evidence is retained because its gap could not commit
 	ErasedRecords  uint64
 	HeldByLegal    uint64
+	ScrubPending   bool // the last erasure pass could not finish zeroing free bbolt pages (a reader was open)
 	Snapshots      uint64
 	GapsRecorded   uint64
 	ExpiryErased   uint64
@@ -76,8 +77,9 @@ func (s *Service) Close() error {
 }
 
 // RunOnce is one deterministic maintenance pass: drive deletion fences, erase
-// physically, enforce expiry, cut snapshots/compact journals, sample pressure.
-// Every step runs even if an earlier one failed; the joined error is returned.
+// physically (including the snapshot/journal cleanup a deletion needs), enforce
+// expiry, cut snapshots/compact journals, sample pressure. Every step runs even
+// if an earlier one failed; the joined error is returned.
 func (s *Service) RunOnce(ctx context.Context) error {
 	var errs []error
 	step := func(err error) {
@@ -85,31 +87,25 @@ func (s *Service) RunOnce(ctx context.Context) error {
 			errs = append(errs, err)
 		}
 	}
-	erased, err := s.driveDeletions(ctx)
-	step(err)
+	step(s.driveDeletions(ctx))
 	now := s.cfg.Clock()
 	s.mu.Lock()
 	expiryDue := s.last.expiry.IsZero() || now.Sub(s.last.expiry) >= s.worker.ExpiryInterval
-	snapDue := erased || s.last.snapshot.IsZero() || now.Sub(s.last.snapshot) >= s.worker.SnapshotInterval
+	snapDue := s.last.snapshot.IsZero() || now.Sub(s.last.snapshot) >= s.worker.SnapshotInterval
 	s.mu.Unlock()
+	expired := false
 	if expiryDue {
 		n, err := s.expire(ctx)
 		step(err)
-		erased = erased || n > 0
+		expired = n > 0
 		if err == nil {
 			s.mu.Lock()
 			s.last.expiry = now
 			s.mu.Unlock()
 		}
 	}
-	if snapDue || erased {
-		err := s.maintainJournal(ctx)
-		step(err)
-		if err == nil {
-			s.mu.Lock()
-			s.last.snapshot = now
-			s.mu.Unlock()
-		}
+	if snapDue || expired {
+		step(s.maintainJournal(ctx, expired))
 	}
 	if s.cfg.Pressure != nil {
 		st, err := s.cfg.Pressure.ObservePressure(ctx)
@@ -137,10 +133,15 @@ func (s *Service) RunOnce(ctx context.Context) error {
 // maintainJournal cuts a verified snapshot of every group and truncates each
 // journal to it. Truncation never removes evidence: the snapshot carries the
 // whole command history, and evidence leaves only through the gap-gated expiry.
-// Two cuts are taken so the retained "previous" snapshot is also post-erasure.
-func (s *Service) maintainJournal(ctx context.Context) error {
-	for range 2 {
-		if _, err := s.cfg.Data.CreateSnapshots(ctx); err != nil {
+// afterErasure additionally drops every snapshot older than the new one (the
+// store would otherwise keep the newest previous snapshot, which pre-dates the
+// erasure and still carries the erased segment bytes).
+func (s *Service) maintainJournal(ctx context.Context, afterErasure bool) error {
+	if _, err := s.cfg.Data.CreateSnapshots(ctx); err != nil {
+		return err
+	}
+	if afterErasure {
+		if _, err := s.cfg.Data.DropSupersededSnapshots(ctx); err != nil {
 			return err
 		}
 	}
@@ -149,18 +150,18 @@ func (s *Service) maintainJournal(ctx context.Context) error {
 	}
 	s.mu.Lock()
 	s.status.Snapshots++
+	s.last.snapshot = s.cfg.Clock() // any completed maintenance, including a deletion's, satisfies the schedule
 	s.mu.Unlock()
 	return nil
 }
 
 // driveDeletions advances every fencing operation (record barriers in each
 // slot, then complete once all 64 are recorded and the authority has the
-// generation) and physically erases completed ones. It reports whether bytes
-// were physically erased.
-func (s *Service) driveDeletions(ctx context.Context) (bool, error) {
+// generation) and physically erases completed ones.
+func (s *Service) driveDeletions(ctx context.Context) error {
 	ops, err := s.cfg.Control.DeletionOperations(ctx)
 	if err != nil {
-		return false, err
+		return err
 	}
 	var errs []error
 	fencing, completed := 0, uint64(0)
@@ -172,8 +173,7 @@ func (s *Service) driveDeletions(ctx context.Context) (bool, error) {
 			}
 		}
 	}
-	erased, err := s.physical(ctx)
-	if err != nil {
+	if err := s.physical(ctx); err != nil {
 		errs = append(errs, err)
 	}
 	ops, _ = s.cfg.Control.DeletionOperations(ctx)
@@ -189,7 +189,7 @@ func (s *Service) driveDeletions(ctx context.Context) (bool, error) {
 	s.mu.Lock()
 	s.status.FencingOps, s.status.CompletedOps, s.status.PhysicalLagOps = fencing, completed, lag
 	s.mu.Unlock()
-	return erased, errors.Join(errs...)
+	return errors.Join(errs...)
 }
 
 func (s *Service) fence(ctx context.Context, op model.DeletionOperation) error {
@@ -250,10 +250,10 @@ func (s *Service) fence(ctx context.Context, op model.DeletionOperation) error {
 
 // physical erases the bytes of completed deletions unless a legal hold covers
 // them. The delete generation advances BEFORE any byte is erased.
-func (s *Service) physical(ctx context.Context) (bool, error) {
+func (s *Service) physical(ctx context.Context) error {
 	ops, err := s.cfg.Control.DeletionOperations(ctx)
 	if err != nil {
-		return false, err
+		return err
 	}
 	byOrg := map[model.ID][]model.DeletionOperation{}
 	for _, op := range ops {
@@ -267,7 +267,12 @@ func (s *Service) physical(ctx context.Context) (bool, error) {
 	}
 	sort.Slice(orgs, func(i, j int) bool { return orgs[i].String() < orgs[j].String() })
 	var errs []error
-	any := false
+	type cleaned struct {
+		org  model.ID
+		ids  []model.ID
+		pred model.DeletePredicate
+	}
+	var ready []cleaned
 	for _, org := range orgs {
 		guard, err := s.holdGuard(ctx, nil)
 		if err != nil {
@@ -292,15 +297,31 @@ func (s *Service) physical(ctx context.Context) (bool, error) {
 		s.mu.Lock()
 		s.status.ErasedRecords += report.Records + report.Blobs
 		s.status.HeldByLegal += report.Held
+		s.status.ScrubPending = report.ScrubPending
 		s.mu.Unlock()
-		any = any || report.Records+report.Blobs > 0
-		if report.Held == 0 {
-			if err = s.cfg.Control.RecordPhysicalCleanup(ctx, org, ids, s.now()); err != nil {
+		// An org is ready to be recorded only when nothing is vetoed AND the free pages the
+		// erased bytes landed in are zeroed: a pass that could not finish its scrub (a reader
+		// was open) has not erased them from apply.db, and the next pass retries.
+		if report.Held == 0 && !report.ScrubPending {
+			ready = append(ready, cleaned{org: org, ids: ids, pred: preds[0]})
+		}
+	}
+	if len(ready) > 0 {
+		// Physical cleanup includes the copies in snapshots and the journal, so it is recorded only
+		// after they are cleaned: a failure here leaves it pending and the next pass retries.
+		if err = s.cfg.Data.CheckpointErasure(ctx, ready[0].pred); err != nil {
+			return errors.Join(append(errs, err)...)
+		}
+		if err = s.maintainJournal(ctx, true); err != nil {
+			return errors.Join(append(errs, err)...)
+		}
+		for _, r := range ready {
+			if err = s.cfg.Control.RecordPhysicalCleanup(ctx, r.org, r.ids, s.now()); err != nil {
 				errs = append(errs, err)
 			}
 		}
 	}
-	return any, errors.Join(errs...)
+	return errors.Join(errs...)
 }
 
 // holdGuard builds the EraseGuard from a fresh snapshot of control state:
