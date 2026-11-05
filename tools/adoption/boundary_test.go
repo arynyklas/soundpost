@@ -60,7 +60,7 @@ func TestCLIContextCancelsBlockedEvidenceAndWritesNothing(t *testing.T) {
 	targets.Targets[0].EvidenceURL = server.URL
 	grant.Scopes[0].EvidenceURL = server.URL
 	inputs := t.TempDir()
-	private := t.TempDir()
+	private := privateTempDir(t)
 	targetPath := filepath.Join(inputs, "targets.json")
 	grantPath := filepath.Join(inputs, "grant.json")
 	summary := filepath.Join(inputs, "summary.json")
@@ -103,7 +103,7 @@ func TestCLIContextCancelsBlockedEvidenceAndWritesNothing(t *testing.T) {
 func TestExecutedSyntheticCLI(t *testing.T) {
 	targets, grant := fixture(t)
 	inputs := t.TempDir()
-	private := t.TempDir()
+	private := privateTempDir(t)
 	binary := filepath.Join(t.TempDir(), "adoption")
 	if runtime.GOOS == "windows" {
 		binary += ".exe"
@@ -148,7 +148,7 @@ func TestOperatorTimeoutBoundsBlockedEvidence(t *testing.T) {
 	targets.Targets[0].EvidenceURL = server.URL
 	grant.Scopes[0].EvidenceURL = server.URL
 	inputs := t.TempDir()
-	private := t.TempDir()
+	private := privateTempDir(t)
 	targetPath := filepath.Join(inputs, "targets.json")
 	grantPath := filepath.Join(inputs, "grant.json")
 	summary := filepath.Join(inputs, "summary.json")
