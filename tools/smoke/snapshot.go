@@ -59,7 +59,8 @@ func RunSnapshotRepairChild(args []string) (result error) {
 	stage := "repair_child_flags"
 	defer func() {
 		if result != nil {
-			_ = json.NewEncoder(os.Stdout).Encode(childAddress{Failure: &childStartupFailure{Stage: stage, Code: classifySmokeError(result)}})
+			recordChildFailure(stage, result)
+			_ = json.NewEncoder(os.Stdout).Encode(childAddress{Failure: &childStartupFailure{Stage: stage, Code: clusterChildFailureCode(result)}})
 		}
 	}()
 	f := flag.NewFlagSet("snapshot-repair-child", flag.ContinueOnError)
@@ -172,7 +173,10 @@ func launchRepairProcess(dir, configuration string) (*repairProcess, error) {
 		return nil, err
 	}
 	command.Stderr = io.Discard
-	if err = command.Start(); err != nil {
+	release := keepChildStderr(command, dir)
+	err = command.Start()
+	release()
+	if err != nil {
 		return nil, err
 	}
 	process := &clusterProcess{child: &smokeChild{cmd: command}, input: stdin, output: bufio.NewReader(stdout), startup: make(chan error, 1)}
@@ -361,7 +365,10 @@ func truncatedGroups(journals []repairJournal) int {
 
 func runSnapshotRepairScenario(root string) (evidence snapshotRepairEvidence, result error) {
 	stage := "repair_fixture"
-	defer func() { result = annotateSmokeFailure("snapshot_repair", stage, model.ID{}, result) }()
+	defer func() {
+		recordParentFailure(stage, result)
+		result = annotateSmokeFailure("snapshot_repair", stage, model.ID{}, result)
+	}()
 	evidence = snapshotRepairEvidence{Version: 1, Scope: "local_process_snapshot_repair_and_journal_truncation", DistinctHardwareQualified: false, Missing: "three_distinct_physical_nodes_and_disks_and_power_loss_evidence_not_available"}
 	fixture, err := provisionClusterSeed(root)
 	if err != nil {
@@ -371,17 +378,15 @@ func runSnapshotRepairScenario(root string) (evidence snapshotRepairEvidence, re
 	if err != nil {
 		return evidence, err
 	}
-	targets := map[uint64]string{}
-	for node := uint64(1); node <= 4; node++ {
-		if targets[node], err = freeClusterAddress(); err != nil {
-			return evidence, err
-		}
-	}
-	relays, err := newClusterRelays(targets)
+	relays, err := newClusterRelays(1, 2, 3, 4)
 	if err != nil {
 		return evidence, err
 	}
 	defer relays.close()
+	targets := map[uint64]string{}
+	if err = assignClusterPeers(relays, targets, 1, 2, 3); err != nil {
+		return evidence, err
+	}
 	members := replica.Members{Revision: 1}
 	for node := uint64(1); node <= 3; node++ {
 		members.Nodes = append(members.Nodes, replica.Member{ID: node, Address: "https://" + relays.listeners[node].Addr().String(), NodeIdentity: fmt.Sprintf("node-%d", node), FailureDomain: fmt.Sprintf("local-process-directory-%d", node)})
@@ -391,6 +396,11 @@ func runSnapshotRepairScenario(root string) (evidence snapshotRepairEvidence, re
 	defer func() {
 		for _, process := range all {
 			process.child.kill()
+		}
+	}()
+	defer func() {
+		if result != nil {
+			recordClusterState(stage, processes)
 		}
 	}()
 	configFor := func(node uint64, m replica.Members) (string, error) {
@@ -513,15 +523,22 @@ func runSnapshotRepairScenario(root string) (evidence snapshotRepairEvidence, re
 		return evidence, err
 	}
 	values, batches = append(values, value), append(batches, batch)
-	stage = "repair_fresh_learner_from_snapshot"
+	// The running voters add the learner to all 65 groups first. A starting node
+	// waits for every group to answer within its fixed startup budget, so that
+	// budget must not also cover the sequential membership changes it depends on.
+	stage = "repair_add_learner"
 	learnerMembers := members
 	learnerMembers.Revision = 2
 	learnerMembers.Nodes = append(append([]replica.Member(nil), members.Nodes...), replica.Member{ID: 4, Address: "https://" + relays.listeners[4].Addr().String(), NodeIdentity: "node-4", FailureDomain: "local-process-directory-4", Learner: true})
-	replacement, err := launch(4, learnerMembers)
-	if err != nil {
+	if err = changeClusterMembership(processes, statuses, learnerMembers); err != nil {
 		return evidence, err
 	}
-	if err = changeClusterMembership(processes, statuses, learnerMembers); err != nil {
+	stage = "repair_fresh_learner_from_snapshot"
+	if err = assignClusterPeers(relays, targets, 4); err != nil {
+		return evidence, err
+	}
+	replacement, err := launch(4, learnerMembers)
+	if err != nil {
 		return evidence, err
 	}
 	if err = replacement.ready(); err != nil {
@@ -576,6 +593,9 @@ func runSnapshotRepairScenario(root string) (evidence snapshotRepairEvidence, re
 	}
 	delete(processes, 1)
 	delete(repair, 1)
+	if err = assignClusterPeers(relays, targets, 1); err != nil {
+		return evidence, err
+	}
 	restarted, err := launch(1, finalMembers)
 	if err != nil {
 		return evidence, err
@@ -653,6 +673,9 @@ func RunSnapshotRepair(args []string) (result error) {
 		return model.Fail(model.Invalid)
 	}
 	if err := os.MkdirAll(*artifact, 0700); err != nil {
+		return err
+	}
+	if err := enableClusterDiagnostics(*artifact); err != nil {
 		return err
 	}
 	root, err := os.MkdirTemp("", "soundpost-snapshot-repair-")

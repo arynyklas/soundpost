@@ -30,6 +30,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"syscall"
 	"time"
 
 	"soundpost/internal/appcore"
@@ -74,7 +75,8 @@ func runQuorumChild(args []string) (result error) {
 	stage := "cluster_child_flags"
 	defer func() {
 		if result != nil {
-			_ = json.NewEncoder(os.Stdout).Encode(childAddress{Failure: &childStartupFailure{Stage: stage, Code: classifySmokeError(result)}})
+			recordChildFailure(stage, result)
+			_ = json.NewEncoder(os.Stdout).Encode(childAddress{Failure: &childStartupFailure{Stage: stage, Code: clusterChildFailureCode(result)}})
 		}
 	}()
 	f := flag.NewFlagSet("quorum-child", flag.ContinueOnError)
@@ -191,7 +193,10 @@ func launchClusterProcess(dir, configuration string) (*clusterProcess, error) {
 		return nil, err
 	}
 	command.Stderr = io.Discard
-	if err = command.Start(); err != nil {
+	release := keepChildStderr(command, dir)
+	err = command.Start()
+	release()
+	if err != nil {
 		return nil, err
 	}
 	process := &clusterProcess{child: &smokeChild{cmd: command}, input: stdin, output: bufio.NewReader(stdout), startup: make(chan error, 1)}
@@ -234,6 +239,7 @@ func (p *clusterProcess) ready() error {
 	case err := <-p.startup:
 		return err
 	case <-time.After(90 * time.Second):
+		dumpChildStacks(p.child.cmd)
 		return errors.New("cluster startup deadline")
 	}
 }
@@ -282,9 +288,14 @@ type clusterRelays struct {
 	done      bool
 }
 
-func newClusterRelays(targets map[uint64]string) (*clusterRelays, error) {
-	r := &clusterRelays{blocked: map[uint64]bool{}, links: map[*relayLink]bool{}, ips: map[string]uint64{}, listeners: map[uint64]net.Listener{}, targets: targets}
-	for id := range targets {
+// newClusterRelays opens one relay listener per node id and holds it for the
+// life of the scenario. Members dial these relay addresses, never the nodes'
+// own listeners, so a node can be killed, partitioned and replaced while every
+// address in the membership stays valid. Each node's real listen address is
+// attached later with retarget.
+func newClusterRelays(ids ...uint64) (*clusterRelays, error) {
+	r := &clusterRelays{blocked: map[uint64]bool{}, links: map[*relayLink]bool{}, ips: map[string]uint64{}, listeners: map[uint64]net.Listener{}, targets: map[uint64]string{}}
+	for _, id := range ids {
 		r.ips["127.0.0."+strconv.FormatUint(id+10, 10)] = id
 		listener, err := net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
@@ -295,6 +306,13 @@ func newClusterRelays(targets map[uint64]string) (*clusterRelays, error) {
 		go r.accept(id, listener)
 	}
 	return r, nil
+}
+
+// retarget points a node's relay at the address that node will listen on.
+func (r *clusterRelays) retarget(id uint64, address string) {
+	r.mu.Lock()
+	r.targets[id] = address
+	r.mu.Unlock()
 }
 func (r *clusterRelays) accept(target uint64, listener net.Listener) {
 	for {
@@ -363,14 +381,54 @@ func (r *clusterRelays) close() {
 		link.outgoing.Close()
 	}
 }
-func freeClusterAddress() (string, error) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return "", err
+
+// reserveClusterAddresses picks n distinct loopback ports. Every listener stays
+// bound until all n are chosen, so the addresses cannot repeat one another or
+// any relay listener (those are held open for the whole scenario). The caller
+// should start the owning process immediately: between this release and that
+// process binding, another process on the machine could take the port, which is
+// why a node is assigned its address right before it starts rather than at
+// scenario start. A node that finds its port taken reports address_in_use.
+func reserveClusterAddresses(n int) ([]string, error) {
+	held := make([]net.Listener, 0, n)
+	defer func() {
+		for _, listener := range held {
+			listener.Close()
+		}
+	}()
+	addresses := make([]string, 0, n)
+	for range n {
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			return nil, err
+		}
+		held = append(held, listener)
+		addresses = append(addresses, listener.Addr().String())
 	}
-	address := listener.Addr().String()
-	err = listener.Close()
-	return address, err
+	return addresses, nil
+}
+
+// assignClusterPeers gives each node a fresh listen address and points its relay
+// at it. targets is the address table the node configurations are built from.
+func assignClusterPeers(relays *clusterRelays, targets map[uint64]string, nodes ...uint64) error {
+	addresses, err := reserveClusterAddresses(len(nodes))
+	if err != nil {
+		return err
+	}
+	for i, node := range nodes {
+		targets[node] = addresses[i]
+		relays.retarget(node, addresses[i])
+	}
+	return nil
+}
+
+// clusterChildFailureCode names a refused peer port precisely: the generic
+// classification reports every network error as "transport".
+func clusterChildFailureCode(err error) string {
+	if errors.Is(err, syscall.EADDRINUSE) {
+		return "address_in_use"
+	}
+	return classifySmokeError(err)
 }
 func clusterCertificates(dir string) (string, map[uint64][2]string, error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -666,7 +724,10 @@ type quorumScenarioEvidence struct {
 
 func runQuorumScenario(root string, lost uint64) (evidence quorumScenarioEvidence, result error) {
 	stage := "quorum_fixture"
-	defer func() { result = annotateSmokeFailure("quorum_node_loss", stage, model.ID{}, result) }()
+	defer func() {
+		recordParentFailure(stage, result)
+		result = annotateSmokeFailure("quorum_node_loss", stage, model.ID{}, result)
+	}()
 	evidence.LostNode = model.Uint64(lost)
 	fixture, err := provisionClusterSeed(root)
 	if err != nil {
@@ -676,18 +737,15 @@ func runQuorumScenario(root string, lost uint64) (evidence quorumScenarioEvidenc
 	if err != nil {
 		return evidence, err
 	}
-	targets := map[uint64]string{}
-	for node := uint64(1); node <= 4; node++ {
-		targets[node], err = freeClusterAddress()
-		if err != nil {
-			return evidence, err
-		}
-	}
-	relays, err := newClusterRelays(targets)
+	relays, err := newClusterRelays(1, 2, 3, 4)
 	if err != nil {
 		return evidence, err
 	}
 	defer relays.close()
+	targets := map[uint64]string{}
+	if err = assignClusterPeers(relays, targets, 1, 2, 3); err != nil {
+		return evidence, err
+	}
 	members := replica.Members{Revision: 1}
 	for node := uint64(1); node <= 3; node++ {
 		members.Nodes = append(members.Nodes, replica.Member{ID: node, Address: "https://" + relays.listeners[node].Addr().String(), NodeIdentity: fmt.Sprintf("node-%d", node), FailureDomain: fmt.Sprintf("local-process-directory-%d", node)})
@@ -697,6 +755,11 @@ func runQuorumScenario(root string, lost uint64) (evidence quorumScenarioEvidenc
 	defer func() {
 		for _, process := range all {
 			process.child.kill()
+		}
+	}()
+	defer func() {
+		if result != nil {
+			recordClusterState(stage, processes)
 		}
 	}()
 	configFor := func(node uint64, m replica.Members) (string, error) {
@@ -815,10 +878,20 @@ func runQuorumScenario(root string, lost uint64) (evidence quorumScenarioEvidenc
 		return evidence, err
 	}
 	values = append(values, third)
-	stage = "quorum_start_replacement_learner"
+	// The running voters add the learner to all 65 groups first. A starting node
+	// waits for every group to answer within its fixed startup budget, so that
+	// budget must not also cover the sequential membership changes it depends on.
+	stage = "quorum_add_replacement_learner"
 	learnerMembers := members
 	learnerMembers.Revision = 2
 	learnerMembers.Nodes = append(append([]replica.Member(nil), members.Nodes...), replica.Member{ID: 4, Address: "https://" + relays.listeners[4].Addr().String(), NodeIdentity: "node-4", FailureDomain: "local-process-directory-4", Learner: true})
+	if err = changeClusterMembership(processes, statuses, learnerMembers); err != nil {
+		return evidence, err
+	}
+	stage = "quorum_start_replacement_learner"
+	if err = assignClusterPeers(relays, targets, 4); err != nil {
+		return evidence, err
+	}
 	config, err := configFor(4, learnerMembers)
 	if err != nil {
 		return evidence, err
@@ -828,9 +901,6 @@ func runQuorumScenario(root string, lost uint64) (evidence quorumScenarioEvidenc
 		return evidence, err
 	}
 	all = append(all, replacement)
-	if err = changeClusterMembership(processes, statuses, learnerMembers); err != nil {
-		return evidence, err
-	}
 	if err = replacement.ready(); err != nil {
 		return evidence, err
 	}
@@ -881,6 +951,9 @@ func runQuorumNodeLoss(args []string) (result error) {
 		return model.Fail(model.Invalid)
 	}
 	if err := os.MkdirAll(*artifact, 0700); err != nil {
+		return err
+	}
+	if err := enableClusterDiagnostics(*artifact); err != nil {
 		return err
 	}
 	root, err := os.MkdirTemp("", "soundpost-quorum-")

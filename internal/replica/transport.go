@@ -26,6 +26,20 @@ type outbound struct {
 	group   model.ID
 	message *pb.Message
 }
+
+// A delivery lane is one ordered queue and one worker per (peer, group). A
+// peer's groups share its HTTP/2 connection but never an ordered lane: a
+// request that waits on the receiving group (a slow disk, an applier parked on
+// a lock) delays only that group's later messages. One queue per peer would
+// make every group's heartbeats, votes and appends to that peer wait out the
+// request's timeout, so leaders lose their quorum on a healthy network.
+type deliveryLane struct {
+	peer  uint64
+	group model.ID
+}
+
+const laneDepth = 128
+
 type MTLS struct {
 	mu          sync.RWMutex
 	id          uint64
@@ -34,10 +48,11 @@ type MTLS struct {
 	roots       *x509.CertPool
 	dialer      *net.Dialer
 	groups      map[model.ID]*Group
-	queues      map[uint64]chan outbound
+	queues      map[deliveryLane]chan outbound
 	clients     map[string]*http.Client
 	stop        chan struct{}
 	once        sync.Once
+	closing     bool
 	workers     sync.WaitGroup
 }
 
@@ -57,7 +72,7 @@ func NewMTLS(id uint64, identity string, certificate tls.Certificate, roots *x50
 		}
 		dialer.LocalAddr = &net.TCPAddr{IP: ip}
 	}
-	return &MTLS{id: id, identity: identity, certificate: certificate, roots: roots, dialer: dialer, groups: map[model.ID]*Group{}, queues: map[uint64]chan outbound{}, clients: map[string]*http.Client{}, stop: make(chan struct{})}, nil
+	return &MTLS{id: id, identity: identity, certificate: certificate, roots: roots, dialer: dialer, groups: map[model.ID]*Group{}, queues: map[deliveryLane]chan outbound{}, clients: map[string]*http.Client{}, stop: make(chan struct{})}, nil
 }
 func certificateIdentity(c *x509.Certificate) string {
 	if c == nil {
@@ -145,18 +160,29 @@ func (t *MTLS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 func (t *MTLS) Send(group model.ID, m *pb.Message) error {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	g := t.groups[group]
-	if g == nil || m == nil || m.GetFrom() != t.id {
+	if m == nil {
 		return ErrInvalid
 	}
-	queue := t.queues[m.GetTo()]
+	key := deliveryLane{peer: m.GetTo(), group: group}
+	t.mu.RLock()
+	g, queue := t.groups[group], t.queues[key]
+	t.mu.RUnlock()
+	if g == nil || m.GetFrom() != t.id {
+		return ErrInvalid
+	}
 	if queue == nil {
-		queue = make(chan outbound, 128)
-		t.queues[m.GetTo()] = queue
-		t.workers.Add(1)
-		go t.deliver(queue)
+		t.mu.Lock()
+		if t.closing {
+			t.mu.Unlock()
+			return ErrUnavailable
+		}
+		if queue = t.queues[key]; queue == nil {
+			queue = make(chan outbound, laneDepth)
+			t.queues[key] = queue
+			t.workers.Add(1)
+			go t.deliver(queue)
+		}
+		t.mu.Unlock()
 	}
 	select {
 	case <-t.stop:
@@ -241,6 +267,9 @@ func (g *Group) ReportDelivery(to uint64, snapshot bool, err error) {
 	}
 }
 func (t *MTLS) Close() error {
+	t.mu.Lock()
+	t.closing = true
+	t.mu.Unlock()
 	t.once.Do(func() { close(t.stop) })
 	t.workers.Wait()
 	t.mu.Lock()
