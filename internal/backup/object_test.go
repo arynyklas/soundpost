@@ -390,3 +390,25 @@ func TestConditionalCreateIsVerifiedNotAssumed(t *testing.T) {
 		t.Fatal("a last-writer-wins store was accepted as a restore authority")
 	}
 }
+
+// S3Config and the destination built from it hold the signing secret; no way of
+// printing either (an operator-facing tool printing its config, a %#v in a log
+// line) may render it.
+func TestS3ConfigAndDestinationNeverFormatTheSecret(t *testing.T) {
+	const secret = "SECRET-KEY-THAT-MUST-NEVER-PRINT"
+	cfg := S3Config{Endpoint: "https://s3.example.test", Region: "us-east-1", Bucket: "bucket", Prefix: "p", AccessKey: "ACCESSKEY", SecretKey: secret}
+	d, err := NewS3Destination(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, value := range map[string]any{"config": cfg, "config pointer": &cfg, "destination": d, "destination value": *d} {
+		for _, verb := range []string{"%v", "%+v", "%#v", "%s", "%q", "%x"} {
+			if out := fmt.Sprintf(verb, value); strings.Contains(out, secret) || strings.Contains(out, fmt.Sprintf("%x", secret)) {
+				t.Fatalf("%s formatted with %s renders the secret: %s", name, verb, out)
+			}
+		}
+	}
+	if got := fmt.Sprint(cfg); !strings.Contains(got, "bucket") {
+		t.Fatalf("the masked form names nothing useful: %q", got)
+	}
+}

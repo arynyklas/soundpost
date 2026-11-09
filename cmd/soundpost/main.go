@@ -10,7 +10,9 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"soundpost/internal/auth"
+	"soundpost/internal/backup"
 	"soundpost/internal/httpapi"
 	"syscall"
 	"time"
@@ -18,9 +20,29 @@ import (
 
 func main() {
 	if e := run(); e != nil {
-		fmt.Fprintln(os.Stderr, "soundpost: startup or service failed")
+		fmt.Fprintln(os.Stderr, failureLine(os.Args, e))
 		os.Exit(1)
 	}
+}
+
+// failureLine is the one line main prints for a failed command. `backup` prints the
+// safe public error code (its failure matrix is keyed by it); every other command
+// keeps one generic line, because its errors can carry operator-supplied paths.
+func failureLine(args []string, err error) string {
+	if len(args) >= 2 && args[1] == "backup" {
+		return backupFailureLine(err)
+	}
+	return "soundpost: startup or service failed"
+}
+
+// bootstrapNotice is what serve prints about the one-time bootstrap token. A root
+// built by a disaster restore holds a recovery token that grants installation
+// administration: it stays in its 0600 file and never reaches the service log.
+func bootstrapNotice(dir, token string) string {
+	if backup.IsRestoredRoot(dir) {
+		return "A one-time recovery bootstrap token for this restored installation is in " + filepath.Join(dir, "bootstrap.token") + " (mode 0600); it is not printed."
+	}
+	return "One-time bootstrap token: " + token
 }
 func run() error {
 	if len(os.Args) >= 2 && os.Args[1] == "cluster-seed" {
@@ -62,7 +84,7 @@ func run() error {
 		fmt.Fprintln(os.Stderr, "Trust the generated server.crt through an authenticated channel before connecting.")
 	}
 	if token, e := store.BootstrapToken(); e == nil {
-		fmt.Fprintln(os.Stderr, "One-time bootstrap token:", token)
+		fmt.Fprintln(os.Stderr, bootstrapNotice(*dir, token))
 	}
 	// Authentication and durable data services were opened together above.
 	var cfg *auth.OIDCConfig

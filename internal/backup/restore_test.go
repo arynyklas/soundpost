@@ -584,6 +584,102 @@ func TestRestoreRequiresCurrentDeletionLedger(t *testing.T) {
 			t.Fatal("a fresh authority with no history stood in for the real one")
 		}
 	})
+	// Each comparison of the manifest's authority binding with the current journal is its own refusal.
+	// The ledger handed to Restore below is the real, verified one with exactly one fact altered, so
+	// it satisfies every other clause: removing any single clause of checkAuthority lets one of
+	// these through and fails here.
+	refuses := func(t *testing.T, m backup.BackupManifest, mutate func(cur *backup.CurrentDeletion)) {
+		t.Helper()
+		root := l.newRoot()
+		dest := &countingDest{Destination: l.dest}
+		_, err := l.restorer(l.keys, dest).Restore(l.ctx, m, backup.DestinationRoot(root), &lyingLedger{real: l.authority, mutate: mutate})
+		if code(err) != model.Conflict {
+			t.Fatalf("restore under a ledger that disagrees with the backup's binding returned %v (want conflict)", err)
+		}
+		if dest.dataOpens() != 0 || fileExists(root) || len(stageLeftovers(root)) != 0 {
+			t.Fatal("a ledger that disagrees with the backup's binding let the restore read backup data or leave a root")
+		}
+	}
+	seq, gen := int(after.Deletion.Sequence), uint64(after.Deletion.Generation)
+	if seq < 1 || gen < 1 || after.Deletion.Tombstones < 1 {
+		t.Fatalf("the backup after the deletion binds nothing to compare against: %+v", after.Deletion)
+	}
+	t.Run("clause: the ledger's authority is the one the backup names", func(t *testing.T) {
+		refuses(t, after, func(cur *backup.CurrentDeletion) { cur.Head.Authority = model.NewID() })
+	})
+	t.Run("clause: the ledger belongs to the backup's installation", func(t *testing.T) {
+		refuses(t, after, func(cur *backup.CurrentDeletion) { cur.Installation = model.NewID() })
+	})
+	t.Run("clause: the head is at or past the backup's sequence", func(t *testing.T) {
+		refuses(t, after, func(cur *backup.CurrentDeletion) { cur.Head.Sequence = uint64(seq) - 1 })
+	})
+	t.Run("clause: the head's generation is at or past the backup's", func(t *testing.T) {
+		refuses(t, after, func(cur *backup.CurrentDeletion) { cur.Head.Generation = gen - 1 })
+	})
+	t.Run("clause: the ledger holds every tombstone the backup recorded", func(t *testing.T) {
+		refuses(t, after, func(cur *backup.CurrentDeletion) { cur.Tombstones = cur.Tombstones[:int(after.Deletion.Tombstones)-1] })
+	})
+	t.Run("clause: the chain contains the head the backup was taken under (a fork)", func(t *testing.T) {
+		refuses(t, after, func(cur *backup.CurrentDeletion) { cur.Chain[seq-1] = model.Hash{0xff} })
+	})
+	t.Run("clause: the chain reaches the backup's sequence", func(t *testing.T) {
+		refuses(t, after, func(cur *backup.CurrentDeletion) { cur.Chain = cur.Chain[:seq-1] })
+	})
+	t.Run("clause: a backup taken before any deletion binds the authority's signed root", func(t *testing.T) {
+		refuses(t, before, func(cur *backup.CurrentDeletion) { cur.Root = model.Hash{0xff} })
+	})
+	t.Run("a journal holding a stray record is not an authority", func(t *testing.T) {
+		strayDir := filepath.Join(t.TempDir(), "authority-with-stray")
+		copyTree(t, l.authDir, strayDir)
+		heads := filepath.Join(strayDir, "authority", "head")
+		if err := os.WriteFile(filepath.Join(heads, "00000000000000000099"), mustRead(t, filepath.Join(heads, "00000000000000000001")), 0600); err != nil {
+			t.Fatal(err)
+		}
+		dest, err := backup.NewLocalDestination(strayDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		stray, err := backup.NewAuthority(dest, l.authKeys.Restricted(), time.Now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		root := l.newRoot()
+		counted := &countingDest{Destination: l.dest}
+		if _, err = l.restorer(l.keys, counted).Restore(l.ctx, after, backup.DestinationRoot(root), stray); err == nil {
+			t.Fatal("a journal with a record outside the sequence was read as the authority")
+		}
+		if counted.dataOpens() != 0 || fileExists(root) {
+			t.Fatal("an unreadable authority let the restore read backup data")
+		}
+	})
+	t.Run("a backup is refused under a rolled-back authority", func(t *testing.T) {
+		// The control state records that the deletion's receipt names authority head 1; the stale
+		// journal is a valid older prefix that does not contain it.
+		stale, err := backup.NewLocalDestination(staleAuthority)
+		if err != nil {
+			t.Fatal(err)
+		}
+		old, err := backup.NewAuthority(stale, l.authKeys.Restricted(), time.Now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		svc, err := backup.New(backup.Config{Control: l.app.Control, Data: l.plane, Processed: backup.AppliedProcessed(backup.EngineDataPlane(l.app.Storage)), Authority: old, Authorizer: l.app.Auth, Keys: l.keys, DataKEK: "data-kek", SecretKEK: "secret-kek", Attempts: backup.DirAttempts(filepath.Join(t.TempDir(), "attempts")), Clock: time.Now})
+		if err != nil {
+			t.Fatal(err)
+		}
+		scope, err := l.app.Auth.InstanceScope(l.ctx, l.owner, "backup under a rolled-back authority")
+		if err != nil {
+			t.Fatal(err)
+		}
+		manifests := func() int { names, _ := l.dest.List(l.ctx, "backups/"); return len(names) }
+		have := manifests()
+		if _, err = svc.Run(l.ctx, scope, l.dest); code(err) != model.Corrupt {
+			t.Fatalf("a backup was taken under an authority that forgot a completed deletion: %v", err)
+		}
+		if manifests() != have {
+			t.Fatal("a refused backup left objects in the destination")
+		}
+	})
 }
 
 // Sources and senders of the old installation never come back: not by

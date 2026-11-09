@@ -182,7 +182,9 @@ func retireScope(st *State, p model.DeletePredicate) {
 	if p.Mode != model.DeleteRetireOrg && p.Mode != model.DeleteRetireProject {
 		return
 	}
-	o := st.Orgs[p.Org.String()]
+	// An import can retire an organization this state has never contained: the
+	// retirement markers are recorded, but no organization is created for them.
+	o, known := st.Orgs[p.Org.String()]
 	o.Epoch++
 	if st.RetiredProjects == nil {
 		st.RetiredProjects = map[string]model.ID{}
@@ -202,7 +204,9 @@ func retireScope(st *State, p model.DeletePredicate) {
 			st.RetiredProjects[p.Org.String()+":"+id.String()] = p.Operation
 		}
 	}
-	st.Orgs[p.Org.String()] = o
+	if known {
+		st.Orgs[p.Org.String()] = o
+	}
 	for key, src := range st.Sources {
 		if src.Org == p.Org && p.CoversProject(p.Org, src.Project) {
 			src.Retired = true
@@ -462,25 +466,33 @@ func (s *Store) AdvanceDeleteGeneration(ctx context.Context, org model.ID) (out 
 // ImportDeletions re-installs completed tombstones from the restore authority
 // into a restored control state (idempotent): the retirement effects are
 // re-applied and the generation never moves backwards.
+//
+// The authority is installation-wide and monotonic, so it can name an
+// organization the restored state has never contained (created and retired
+// after the backup's cut). Such a tombstone is still recorded: the predicate is
+// keyed by IDs and denies that organization's data whenever it is consulted, and
+// a retirement stays permanent (the org and project IDs it retired can never be
+// created). Only the per-organization state the restored control does not have
+// (delete generation, policy epoch) is left alone: an organization is never
+// invented by an import.
 func (s *Store) ImportDeletions(ctx context.Context, tombstones []model.DeletePredicate, at model.UnixNano) error {
 	return s.Update(ctx, func(st *State) error {
 		for _, p := range tombstones {
 			if err := p.Validate(); err != nil {
 				return err
 			}
-			if _, ok := st.Orgs[p.Org.String()]; !ok {
-				return model.Fail(model.NotFound)
-			}
 			if _, ok := st.Deletions[p.Operation.String()]; ok {
 				continue
 			}
-			if uint64(p.Generation) > st.DeleteGenerations[p.Org.String()] {
-				if st.DeleteGenerations == nil {
-					st.DeleteGenerations = map[string]uint64{}
+			if _, known := st.Orgs[p.Org.String()]; known {
+				if uint64(p.Generation) > st.DeleteGenerations[p.Org.String()] {
+					if st.DeleteGenerations == nil {
+						st.DeleteGenerations = map[string]uint64{}
+					}
+					st.DeleteGenerations[p.Org.String()] = uint64(p.Generation)
 				}
-				st.DeleteGenerations[p.Org.String()] = uint64(p.Generation)
+				bumpGeneration(st, p.Org)
 			}
-			bumpGeneration(st, p.Org)
 			putDeletion(st, model.DeletionOperation{Predicate: p, Phase: model.DeletePhaseComplete, Principal: st.Installation, Reason: "restored from deletion authority", RequestedAt: at, BeginRevision: st.Revision + 1, CompletedAt: at, SafeReason: "restored_from_authority"})
 			retireScope(st, p)
 		}

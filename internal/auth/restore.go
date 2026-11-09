@@ -100,6 +100,23 @@ func integrationKey(key string) bool {
 	return strings.HasPrefix(key, "sso:") || strings.HasPrefix(key, "destination:") || strings.HasPrefix(key, "team:")
 }
 
+// DiscardRestoreStash removes the quarantine stash a previous restore left in st
+// and reports whether there was one. The stash is bookkeeping of ONE restore:
+// what that restore deactivated in the installation it built, awaiting
+// reconciliation. It is not installation data. A backup therefore never carries
+// it, and a restore never inherits it: the next generation's quarantine stashes
+// what was ACTIVE in the state it restores (including everything a previous
+// generation reauthorized) and starts again. Items an earlier generation never
+// reconciled are not carried over; they stay inactive and are not reconcilable
+// (the older backup that holds them is the way to look at them again).
+func DiscardRestoreStash(st *model.ControlState) bool {
+	if _, ok := st.OIDC[restoreStashKey]; !ok {
+		return false
+	}
+	delete(st.OIDC, restoreStashKey)
+	return true
+}
+
 // QuarantineRestoredState makes every credential, session, elevation, token,
 // source secret, sender, account, grant and identity mapping of a restored
 // control state inactive. It is deterministic and applies to the state it is

@@ -114,6 +114,13 @@ type Pin struct {
 // PinReaper is the consumer-owned view of durable journal pins (IMP-1): a backup
 // that died between BeginBackup and Seal/Abort leaves pins nothing else lists or
 // drops. The parent adapts the replica group pin accessors to it.
+//
+// A Pin carries no owner, so Service.Reap cannot tell the pins of a dead attempt
+// from those of a backup running now: when any attempt is incomplete it drops
+// every pin Pins reports. Call Reap only before a backup of the installation
+// can be in flight (process start; `backup create` opens the installation
+// exclusively). Stamping the attempt ID into each pin and filtering Pins by it is
+// what would make a scheduled in-process reap safe.
 type PinReaper interface {
 	Pins() ([]Pin, error)
 	DropPin(id string) error
@@ -528,11 +535,11 @@ func (s *Service) Backup(ctx context.Context, scope auth.Scope, set SnapshotSet,
 	if bundle.Version != 1 || len(set.Sealed.Snapshots) != 64 || len(bundle.Snapshots) != 64 || bundle.Cut.Revision != state.Revision {
 		return BackupManifest{}, model.Fail(model.Invalid)
 	}
-	reservations, err := model.CanonicalJSON(state.Reservations)
+	reservations, err := canonicalReservations(state.Reservations)
 	if err != nil {
 		return BackupManifest{}, model.Fail(model.Corrupt)
 	}
-	cutReservations, err := model.CanonicalJSON(bundle.Cut.Reservations)
+	cutReservations, err := canonicalReservations(bundle.Cut.Reservations)
 	if err != nil || !bytes.Equal(reservations, cutReservations) {
 		return BackupManifest{}, model.Fail(model.Corrupt) // the cut and the stored control state must be one revision
 	}
@@ -561,9 +568,18 @@ func (s *Service) Backup(ctx context.Context, scope auth.Scope, set SnapshotSet,
 	}
 	manifest.Encryption.Algorithm, manifest.Encryption.ChunkSize = AlgorithmAES256GCM, chunkSize
 	// The control state travels without its envelope key files; those go into a
-	// separate object under the separate key.
+	// separate object under the separate key. It also travels without the
+	// quarantine stash of the restore that built THIS installation, if any: that
+	// is bookkeeping of the source's own restore, not installation data, and a
+	// restore of this backup starts its own (installControl).
+	stateRaw := parts["state"]
+	if auth.DiscardRestoreStash(&state) {
+		if stateRaw, err = json.Marshal(state); err != nil {
+			return BackupManifest{}, model.Fail(model.Corrupt)
+		}
+	}
 	keysRaw := parts["keys"]
-	stateSeed, err := json.Marshal(map[string]json.RawMessage{"state": parts["state"], "keys": json.RawMessage(`{}`), "metadata": parts["metadata"]})
+	stateSeed, err := json.Marshal(map[string]json.RawMessage{"state": stateRaw, "keys": json.RawMessage(`{}`), "metadata": parts["metadata"]})
 	if err != nil {
 		return BackupManifest{}, err
 	}
@@ -611,11 +627,9 @@ func (s *Service) Backup(ctx context.Context, scope auth.Scope, set SnapshotSet,
 		versions += uint64(len(v))
 	}
 	manifest.Retention = RetentionBinding{PolicyDigest: model.HashCanonical(policies), Versions: model.Uint64(versions)}
-	ledger, err := model.CanonicalJSON(set.Authority.Ledger)
-	if err != nil {
-		return BackupManifest{}, model.Fail(model.Corrupt)
+	if manifest.Deletion, err = bindingOf(set.Authority); err != nil {
+		return BackupManifest{}, err
 	}
-	manifest.Deletion = AuthorityBinding{Authority: set.Authority.Head.Authority, Sequence: model.Uint64(set.Authority.Head.Sequence), Generation: model.Uint64(set.Authority.Head.Generation), Head: set.Authority.Head.Digest, Tombstones: model.Uint64(len(set.Authority.Tombstones)), LedgerDigest: model.HashCanonical(ledger)}
 	manifest.Gaps = append([]GapAttestation{}, set.Gaps...)
 	manifest.CompletedAt = model.UnixNano(s.cfg.Clock().UnixNano())
 	// The backup must be restorable before it is published: re-verify what it asserts.
@@ -815,21 +829,29 @@ type RestoreReport struct {
 }
 
 type restoreState struct {
-	Version         int                         `json:"version"`
-	Backup          model.ID                    `json:"backup"`
-	Control         model.Revision              `json:"control_revision"`
-	Cert            storage.QuotaReconciliation `json:"quota_certificate"`
-	Deletion        AuthorityBinding            `json:"deletion"`
-	Installation    model.ID                    `json:"installation"`
-	At              model.UnixNano              `json:"at_ns"`
-	QuotaStarted    model.UnixNano              `json:"quota_started_ns,omitempty"`
-	QuotaCommitted  model.UnixNano              `json:"quota_committed_ns,omitempty"`
-	Activated       model.UnixNano              `json:"activated_ns,omitempty"`
-	GapsVerified    int                         `json:"gaps_verified"`
-	AuthorityHeadAt uint64                      `json:"authority_sequence"`
+	Version int                         `json:"version"`
+	Backup  model.ID                    `json:"backup"`
+	Control model.Revision              `json:"control_revision"`
+	Cert    storage.QuotaReconciliation `json:"quota_certificate"`
+	// Deletion is the authority position Restore verified (activation refuses any
+	// journal that is not at or beyond it, with that head in its chain).
+	Deletion       AuthorityBinding `json:"deletion"`
+	Installation   model.ID         `json:"installation"`
+	At             model.UnixNano   `json:"at_ns"`
+	QuotaStarted   model.UnixNano   `json:"quota_started_ns,omitempty"`
+	QuotaCommitted model.UnixNano   `json:"quota_committed_ns,omitempty"`
+	Activated      model.UnixNano   `json:"activated_ns,omitempty"`
 }
 
 const restoreStateFile = "restore.json"
+
+// IsRestoredRoot reports whether dir was built by Restore (it carries the restore's
+// bookkeeping file). A process that starts on such a root must not log the root's
+// one-time recovery bootstrap secret.
+func IsRestoredRoot(dir string) bool {
+	info, err := os.Stat(filepath.Join(dir, restoreStateFile))
+	return err == nil && info.Mode().IsRegular()
+}
 
 // checkAuthority is the single place a restore decides an authority is the
 // current, unrolled-back authority of this backup's installation. It runs
@@ -846,6 +868,25 @@ func checkAuthority(cur CurrentDeletion, b AuthorityBinding, installation model.
 		return model.Fail(model.Conflict) // the head this backup was taken under is not in the authority's history
 	}
 	return nil
+}
+
+// canonicalReservations is the canonical encoding of a reservation set. A control
+// state that never admitted a batch carries no reservation map at all while the
+// data cut carries an empty one; both are "no reservations" and encode alike.
+func canonicalReservations(r map[string]model.AdmissionReservation) ([]byte, error) {
+	if r == nil {
+		r = map[string]model.AdmissionReservation{}
+	}
+	return model.CanonicalJSON(r)
+}
+
+// bindingOf is the authority position one verified read stands at.
+func bindingOf(cur CurrentDeletion) (AuthorityBinding, error) {
+	ledger, err := model.CanonicalJSON(cur.Ledger)
+	if err != nil {
+		return AuthorityBinding{}, model.Fail(model.Corrupt)
+	}
+	return AuthorityBinding{Authority: cur.Head.Authority, Sequence: model.Uint64(cur.Head.Sequence), Generation: model.Uint64(cur.Head.Generation), Head: cur.Head.Digest, Tombstones: model.Uint64(len(cur.Tombstones)), LedgerDigest: model.HashCanonical(ledger)}, nil
 }
 
 func expectedObjects() map[string]string {
@@ -948,6 +989,9 @@ func (r *Restorer) Restore(ctx context.Context, m BackupManifest, root Destinati
 	if err != nil {
 		return RestoreReport{}, err
 	}
+	if model.HashCanonical(staged.controlState) != m.Control.StateSHA256 {
+		return RestoreReport{}, model.Fail(model.Corrupt) // the manifest names another control state than the one it carries
+	}
 	seed, state, err := reassembleSeed(staged.controlState, staged.controlKeys)
 	if err != nil {
 		return RestoreReport{}, err
@@ -967,7 +1011,13 @@ func (r *Restorer) Restore(ctx context.Context, m BackupManifest, root Destinati
 		return RestoreReport{}, err
 	}
 	_ = os.RemoveAll(filepath.Join(stage, ".objects")) // no plaintext duplicates of the installed data
-	state2 := restoreState{Version: 1, Backup: m.ID, Control: m.Control.Revision, Cert: cert, Deletion: m.Deletion, Installation: m.Control.Installation, At: model.UnixNano(r.cfg.Clock().UnixNano()), GapsVerified: len(m.Gaps), AuthorityHeadAt: current.Head.Sequence}
+	// Activation is bound to the authority position THIS restore verified (not only to the older
+	// head the backup was taken under): a journal rolled back or forked below it is refused.
+	observed, err := bindingOf(current)
+	if err != nil {
+		return RestoreReport{}, err
+	}
+	state2 := restoreState{Version: 1, Backup: m.ID, Control: m.Control.Revision, Cert: cert, Deletion: observed, Installation: m.Control.Installation, At: model.UnixNano(r.cfg.Clock().UnixNano())}
 	raw, err := json.Marshal(state2)
 	if err != nil {
 		return RestoreReport{}, err
@@ -1135,8 +1185,8 @@ func reassembleSeed(stateObject, keysObject []byte) ([]byte, model.ControlState,
 }
 
 func verifyControl(m BackupManifest, b storage.BackupBundle, st model.ControlState) error {
-	reservations, err := model.CanonicalJSON(st.Reservations)
-	cut, err2 := model.CanonicalJSON(b.Cut.Reservations)
+	reservations, err := canonicalReservations(st.Reservations)
+	cut, err2 := canonicalReservations(b.Cut.Reservations)
 	policies, err3 := model.CanonicalJSON(st.RetentionPolicies)
 	if err != nil || err2 != nil || err3 != nil || st.Installation != m.Control.Installation || st.Revision != m.Control.Revision || st.Revision != b.Cut.Revision || model.HashCanonical(reservations) != m.Control.ReservationsSHA256 || !bytes.Equal(reservations, cut) || model.HashCanonical(policies) != m.Retention.PolicyDigest {
 		return model.Fail(model.Corrupt)
@@ -1214,6 +1264,11 @@ func installControl(ctx context.Context, stage string, seed []byte, cert storage
 	token, hash := auth.NewRecoveryBootstrap()
 	var summary auth.RestoreSummary
 	err = store.Update(ctx, func(st *model.ControlState) error {
+		// A backup of an installation that was itself restored (and one taken by an
+		// older build) can still carry that restore's stash. It is bookkeeping of the
+		// earlier restore: this generation quarantines what is active in the state it
+		// restores and replaces it.
+		auth.DiscardRestoreStash(st)
 		var e error
 		if summary, e = auth.QuarantineRestoredState(st, auth.RestoreInput{Generation: model.NewID(), Backup: backupID, BootstrapHash: hash, SealedBearerKey: sealed, At: at}); e != nil {
 			return e

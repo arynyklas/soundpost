@@ -167,7 +167,7 @@ func TestWrappedKeysBindTheirContext(t *testing.T) {
 }
 
 func TestKeyDirLoadsOnlyPrivateKeyFiles(t *testing.T) {
-	dir := t.TempDir()
+	dir := privateTempDir(t)
 	k := testKey(t, "backup-key-1")
 	if err := WriteKeyFile(dir, k); err != nil {
 		t.Fatal(err)
@@ -201,6 +201,53 @@ func TestKeyDirLoadsOnlyPrivateKeyFiles(t *testing.T) {
 	if _, err = KeyDir(dir).Key(context.Background(), "renamed"); err == nil {
 		t.Fatal("a key file under the wrong name was accepted")
 	}
+}
+
+// The directory is part of the secret's protection: a 0600 key file inside a
+// directory group- or world-accessible (listable, replaceable by a symlink) is refused.
+func TestKeyDirRefusesAGroupOrOtherAccessibleDirectory(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX modes")
+	}
+	dir := privateTempDir(t)
+	if err := WriteKeyFile(dir, testKey(t, "backup-key-1")); err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []os.FileMode{0o750, 0o705, 0o755, 0o770} {
+		if err := os.Chmod(dir, mode); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := KeyDir(dir).Key(context.Background(), "backup-key-1"); faultCode(err) != model.Forbidden {
+			t.Fatalf("a key directory with mode %o was accepted: %v", mode, err)
+		}
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := KeyDir(dir).Key(context.Background(), "backup-key-1"); err != nil {
+		t.Fatalf("a private key directory was refused: %v", err)
+	}
+	// A key is never written where it could not be read back.
+	shared := t.TempDir()
+	if err := os.Chmod(shared, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteKeyFile(shared, testKey(t, "backup-key-2")); faultCode(err) != model.Forbidden {
+		t.Fatalf("a key was written into a world-readable directory: %v", err)
+	}
+	if entries, _ := os.ReadDir(shared); len(entries) != 0 {
+		t.Fatalf("a refused key write left %d files behind", len(entries))
+	}
+}
+
+// privateTempDir is a test directory only its owner can enter (t.TempDir is 0755 on POSIX).
+func privateTempDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return dir
 }
 
 func mustRead(t *testing.T, path string) []byte {

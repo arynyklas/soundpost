@@ -488,3 +488,103 @@ func TestDeleteImportRestoresTombstonesAndNeverLowersGeneration(t *testing.T) {
 		t.Fatal("invalid tombstone imported")
 	}
 }
+
+// The deletion authority is installation-wide and monotonic, so the ledger a
+// restore applies can name an organization the restored control state never
+// contained (it was created, and retired, after the backup's cut). Importing such
+// a tombstone must neither fail (the restore could then never activate) nor invent
+// the organization: it is recorded as a deny predicate keyed by IDs that are
+// meaningless until the organization appears, and retirements stay permanent.
+func TestDeleteImportOfAnUnknownOrganizationIsADenyPredicateNotAnOrganization(t *testing.T) {
+	at := model.UnixNano(time.Unix(1_800_000_000, 0).UnixNano())
+	type scenario struct {
+		name      string
+		predicate func(org, project model.ID) model.DeletePredicate
+	}
+	for _, sc := range []scenario{
+		{"range", func(org, project model.ID) model.DeletePredicate {
+			return model.DeletePredicate{Operation: model.NewID(), Org: org, Mode: model.DeleteHistoricalRange, Projects: []model.ID{project}, Signals: []model.Kind{model.Metric}, Start: 100, End: 200, Generation: 7}
+		}},
+		{"retire project", func(org, project model.ID) model.DeletePredicate {
+			return model.DeletePredicate{Operation: model.NewID(), Org: org, Mode: model.DeleteRetireProject, Projects: []model.ID{project}, Generation: 3}
+		}},
+		{"retire org", func(org, project model.ID) model.DeletePredicate {
+			return model.DeletePredicate{Operation: model.NewID(), Org: org, Mode: model.DeleteRetireOrg, Generation: 4}
+		}},
+	} {
+		t.Run(sc.name, func(t *testing.T) {
+			f := newFenceFx(t)
+			org, project := model.NewID(), model.NewID()
+			p := sc.predicate(org, project)
+			if err := f.store.ImportDeletions(f.ctx, []model.DeletePredicate{p}, at); err != nil {
+				t.Fatalf("a tombstone for an organization the restored state does not know was refused: %v", err)
+			}
+			if err := f.store.ImportDeletions(f.ctx, []model.DeletePredicate{p}, at); err != nil {
+				t.Fatalf("import is not idempotent for an unknown organization: %v", err)
+			}
+			f.store.View(f.ctx, func(st control.State) error {
+				if _, invented := st.Orgs[org.String()]; invented {
+					t.Fatal("importing a tombstone invented the organization")
+				}
+				if _, invented := st.DeleteGenerations[org.String()]; invented {
+					t.Fatal("importing a tombstone invented per-organization generation state")
+				}
+				if op, ok := st.Deletions[p.Operation.String()]; !ok || op.Phase != model.DeletePhaseComplete {
+					t.Fatalf("the tombstone was not recorded as a completed deletion: %+v", op)
+				}
+				if p.Mode == model.DeleteRetireOrg {
+					if st.RetiredOrgs[org.String()] != p.Operation {
+						t.Fatal("a retired organization is not remembered as retired")
+					}
+				}
+				if p.Mode == model.DeleteRetireProject {
+					if st.RetiredProjects[org.String()+":"+project.String()] != p.Operation {
+						t.Fatal("a retired project is not remembered as retired")
+					}
+				}
+				return nil
+			})
+			if _, err := f.store.DeleteGeneration(f.ctx, org); code(err) != model.NotFound {
+				t.Fatalf("an organization that does not exist has a delete generation: %v", err)
+			}
+			// The tombstone denies the organization's data whatever the organization is called later.
+			denied, err := f.store.ActiveDeletions(f.ctx, org, []model.ID{project})
+			if err != nil || len(denied) != 1 || denied[0].Operation != p.Operation {
+				t.Fatalf("the tombstone is not an active deletion: %v %v", denied, err)
+			}
+			// If the organization ever appears, its data inside the predicate is still denied.
+			create := func() error {
+				raw, _ := json.Marshal(auth.AdminPayload{Name: "appears later", Reason: "fixture"})
+				_, err := f.svc.AdminCommand(f.ctx, f.cred, auth.AdminCommandRequest{CommandID: model.NewID(), ExpectedRevision: f.revision(), OrgID: org, Kind: "create_org", Payload: raw})
+				return err
+			}
+			if p.Mode == model.DeleteRetireOrg {
+				if err := create(); code(err) != model.NotFound {
+					t.Fatalf("a retired organization was created: %v", err)
+				}
+				return
+			}
+			if err := create(); err != nil {
+				t.Fatalf("an organization named only by a range tombstone cannot be created: %v", err)
+			}
+			f.store.View(f.ctx, func(st control.State) error {
+				if p.Mode == model.DeleteHistoricalRange && !control.EffectSuppressed(st, org, project, model.Metric, 150, nil) {
+					t.Fatal("the deny predicate does not cover the organization once it appears")
+				}
+				if p.Mode == model.DeleteRetireProject && !control.EffectSuppressed(st, org, project, model.Metric, 150, nil) {
+					t.Fatal("a retired project of an organization that appears later is not denied")
+				}
+				if control.EffectSuppressed(st, org, model.NewID(), model.Metric, 150, nil) && p.Mode != model.DeleteRetireOrg {
+					t.Fatal("the predicate denies a project it does not name")
+				}
+				return nil
+			})
+			if p.Mode == model.DeleteRetireProject {
+				raw, _ := json.Marshal(auth.AdminPayload{ID: project, Name: "again", Reason: "fixture"})
+				if _, err := f.svc.AdminCommand(f.ctx, f.cred, auth.AdminCommandRequest{CommandID: model.NewID(), ExpectedRevision: f.revision(), OrgID: org, Kind: "create_project", Payload: raw}); code(err) != model.Conflict {
+					t.Fatalf("a retired project ID was reused under an organization that appeared later: %v", err)
+				}
+			}
+		})
+	}
+}

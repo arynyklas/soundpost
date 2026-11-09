@@ -53,7 +53,14 @@ import (
 //     what was ACKed before the seal minus the deleted range, nothing ACKed after
 //     the seal reappears before it is retried, old source credentials stay dead,
 //     no sender is configured, and a fresh recovery admin sees no former grant
-//     until an audited reauthorization.
+//     until an audited reauthorization;
+//  6. second generation (the normal situation weeks after a disaster): the
+//     restored installation takes its OWN backup, is killed, and that backup is
+//     restored into a third clean root and served by a third process. Every
+//     credential of generations 0 and 1 is dead again (including the user
+//     reauthorized in generation 1 and the source credential reissued in
+//     generation 1), the deletion tombstone still holds and every row and
+//     receipt of generation 1 is intact.
 //
 // Registered by the parent as:
 //
@@ -65,8 +72,10 @@ import (
 // claimed.
 
 const (
-	brOwnerEmail    = "backup-owner@example.test"
-	brOwnerPassword = "backup smoke owner password 2026"
+	brOwnerEmail       = "backup-owner@example.test"
+	brOwnerPassword    = "backup smoke owner password 2026"
+	brRecoveryEmail    = "recovery-admin@example.test"
+	brRecoveryPassword = "backup smoke recovery password 2026"
 )
 
 type brCommand struct {
@@ -107,15 +116,6 @@ type brAnswer struct {
 	ActivateMillis int64     `json:"activate_ms,omitempty"`
 }
 
-type brActivation struct {
-	*storage.Engine
-	svc *retention.Service
-}
-
-func (a brActivation) RestoreDeletions(ctx context.Context, authority retention.Authority) error {
-	return a.svc.Restore(ctx, authority)
-}
-
 // RunBackupRestoreChild is the installation process: mode "live" (backs up and
 // deletes on command) or "restored" (activates, reconciles and reads on command).
 func RunBackupRestoreChild(args []string) (result error) {
@@ -137,7 +137,13 @@ func RunBackupRestoreChild(args []string) (result error) {
 		return err
 	}
 	stage = "backup_child_open"
-	app, err := appcore.Open(*dir)
+	open := appcore.Open
+	if *mode == "restored" {
+		// A restored root holds its engine closed until activation; OpenForActivation defers the
+		// artifact-reference validation Open would run (App.RestoreReady runs it after the hold lifts).
+		open = appcore.OpenForActivation
+	}
+	app, err := open(*dir)
 	if err != nil {
 		return err
 	}
@@ -169,7 +175,7 @@ func RunBackupRestoreChild(args []string) (result error) {
 		return err
 	}
 	var backups *backup.Service
-	if *mode == "live" {
+	if *mode == "live" || *mode == "restored" { // a restored installation takes its own backups too (generation 2)
 		stage = "backup_child_service"
 		plane := backup.EngineDataPlane(app.Storage)
 		backups, err = backup.New(backup.Config{Control: app.Control, Data: plane, Processed: backup.AppliedProcessed(plane), Authority: authority, Authorizer: app.Auth, Keys: backup.KeyDir(*keyDir), DataKEK: "smoke-data-kek", SecretKEK: "smoke-secret-kek", Attempts: backup.DirAttempts(filepath.Join(*dir, "backup-attempts")), Clock: time.Now})
@@ -294,7 +300,7 @@ func (h *brChild) run(ctx context.Context, c brCommand) (brAnswer, error) {
 		return brAnswer{OK: true, Phase: receipt.Phase, AuthoritySeq: current.Head.Sequence, AuthorityGen: current.Head.Generation, Tombstones: len(current.Tombstones)}, nil
 	case "activate":
 		started := time.Now()
-		report, err := backup.Activate(ctx, backup.DestinationRoot(h.root), brActivation{Engine: h.app.Storage, svc: h.svc}, h.authority, time.Now)
+		report, err := backup.Activate(ctx, backup.DestinationRoot(h.root), h.app, h.authority, time.Now)
 		if err != nil {
 			return brAnswer{}, err
 		}
@@ -304,7 +310,7 @@ func (h *brChild) run(ctx context.Context, c brCommand) (brAnswer, error) {
 		if err != nil {
 			return brAnswer{}, err
 		}
-		session, err := h.app.Auth.Bootstrap(ctx, token, "recovery-admin@example.test", "backup smoke recovery password 2026")
+		session, err := h.app.Auth.Bootstrap(ctx, token, brRecoveryEmail, brRecoveryPassword)
 		if err != nil {
 			return brAnswer{}, err
 		}
@@ -353,6 +359,13 @@ func (h *brChild) run(ctx context.Context, c brCommand) (brAnswer, error) {
 		}
 		sort.Slice(a.Rows, func(i, j int) bool { return a.Rows[i] < a.Rows[j] })
 		return a, nil
+	case "login":
+		_, session, err := h.login(ctx, c.Email, c.Password)
+		if err != nil {
+			return brAnswer{}, err
+		}
+		_ = h.app.Auth.Logout(ctx, session.Token)
+		return brAnswer{OK: true}, nil
 	case "state":
 		a := brAnswer{OK: true}
 		err := h.app.Control.View(ctx, func(st control.State) error {
@@ -498,7 +511,7 @@ func RunBackupRestore(args []string) (result error) {
 		return err
 	}
 	defer os.RemoveAll(work)
-	live, offhost, authorityDir, keyDir, restored := filepath.Join(work, "live"), filepath.Join(work, "offhost"), filepath.Join(work, "authority"), filepath.Join(work, "keys"), filepath.Join(work, "restored")
+	live, offhost, authorityDir, keyDir, restored, restored2 := filepath.Join(work, "live"), filepath.Join(work, "offhost"), filepath.Join(work, "authority"), filepath.Join(work, "keys"), filepath.Join(work, "restored"), filepath.Join(work, "restored-2")
 	stage = "backup_keys"
 	for _, id := range []string{"smoke-data-kek", "smoke-secret-kek"} {
 		key, err := backup.GenerateKey(id)
@@ -692,7 +705,7 @@ func RunBackupRestore(args []string) (result error) {
 	}
 	restoreDuration := time.Since(restoreStarted)
 	stage = "backup_restored_start"
-	second, err := launchBackupChild("--mode", "restored", "--data-dir", restored, "--authority-dir", authorityDir, "--authority-keys", keysPath)
+	second, err := launchBackupChild("--mode", "restored", "--data-dir", restored, "--authority-dir", authorityDir, "--authority-keys", keysPath, "--offhost-dir", offhost, "--key-dir", keyDir)
 	if err != nil {
 		return err
 	}
@@ -771,6 +784,7 @@ func RunBackupRestore(args []string) (result error) {
 	// Receipts: a retry of every batch the backup held returns the original receipt byte for byte.
 	stage = "backup_receipts"
 	identical, readmitted, deletedRetries := 0, 0, 0
+	gen1Receipts := map[model.ID]model.Receipt{}
 	retry := func(b *brBatch) (int, model.Receipt, error) {
 		status, raw, err := second.call("/ingest/v1/batches", b.batch, "", recovered.SourceToken)
 		if err != nil {
@@ -778,7 +792,9 @@ func RunBackupRestore(args []string) (result error) {
 		}
 		var r model.Receipt
 		if status == 200 {
-			err = json.Unmarshal(raw, &r)
+			if err = json.Unmarshal(raw, &r); err == nil {
+				gen1Receipts[b.batch.ID] = r // what generation 2 must answer for the same batch
+			}
 		}
 		return status, r, err
 	}
@@ -848,6 +864,152 @@ func RunBackupRestore(args []string) (result error) {
 			firstLost = b.ackedAt
 		}
 	}
+	// ---- generation 2: the restored installation takes its OWN backup, is lost, and that backup is restored ----
+	stage = "backup_gen1_backup"
+	gen1Backup, err := second.ask(brCommand{Kind: "backup", Email: brRecoveryEmail, Password: brRecoveryPassword})
+	if err != nil {
+		return err
+	}
+	if gen1Backup.Backup == nil {
+		return &smokeFailure{Stage: "backup_gen1_backup", Code: "decode"}
+	}
+	stage = "backup_gen1_disaster"
+	if err = second.kill(); err != nil {
+		return err
+	}
+	stage = "backup_gen2_restore"
+	gen2ID, err := model.ParseID(gen1Backup.Backup.ID)
+	if err != nil {
+		return err
+	}
+	manifest2, err := backup.LoadManifest(context.Background(), source2, gen2ID, keys)
+	if err != nil {
+		return err
+	}
+	restore2Started := time.Now()
+	report2, err := restorer.Restore(context.Background(), manifest2, backup.DestinationRoot(restored2), restoreAuthority)
+	if err != nil {
+		return err
+	}
+	restore2Duration := time.Since(restore2Started)
+	// What was ACTIVE in generation 1 is quarantined: the owner and the recovery admin it reauthorized,
+	// the reissued source credential; senders were never reauthorized, so none is left to stash.
+	if report2.Quarantined.Users != 2 || report2.Quarantined.Sources != 1 || report2.Quarantined.Integrations != 0 {
+		return &smokeFailure{Stage: "backup_gen2_restore", Code: "quarantine_population"}
+	}
+	stage = "backup_gen2_start"
+	third, err := launchBackupChild("--mode", "restored", "--data-dir", restored2, "--authority-dir", authorityDir, "--authority-keys", keysPath, "--offhost-dir", offhost, "--key-dir", keyDir)
+	if err != nil {
+		return err
+	}
+	defer third.kill()
+	stage = "backup_gen2_gated_before_activation"
+	state3, err := third.ask(brCommand{Kind: "state"})
+	if err != nil {
+		return err
+	}
+	if state3.Pending == 0 || state3.Destinations != 0 {
+		return &smokeFailure{Stage: "backup_gen2_state", Code: "senders_active"}
+	}
+	oldCredentials := func(name string) error {
+		for which, credential := range map[string]string{"generation_0": issued.Credential, "generation_1": recovered.SourceToken} {
+			status, raw, err := third.call("/ingest/v1/batches", ledger[0].batch, "", credential)
+			if err = requireSmokeResponse(which+"_source_credential_"+name, status, 403, raw, err); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if err = oldCredentials("before_activation"); err != nil {
+		return err
+	}
+	stage = "backup_gen2_activate"
+	activated2, err := third.ask(brCommand{Kind: "activate"})
+	if err != nil {
+		return err
+	}
+	if !activated2.Ready || activated2.Tombstones != 1 || activated2.AuthorityGen == 0 {
+		return &smokeFailure{Stage: "backup_gen2_activate", Code: "not_ready"}
+	}
+	stage = "backup_gen2_old_credentials_dead"
+	if err = oldCredentials("after_activation"); err != nil {
+		return err
+	}
+	// The owner reauthorized in generation 1 and the generation 1 recovery admin are inactive again.
+	for name, login := range map[string]brCommand{"owner": {Kind: "login", Email: brOwnerEmail, Password: brOwnerPassword}, "recovery_admin": {Kind: "login", Email: brRecoveryEmail, Password: brRecoveryPassword}} {
+		if _, err = third.ask(login); err == nil {
+			return &smokeFailure{Stage: "backup_gen2_inactive_" + name, Code: "login_without_reauthorization"}
+		}
+	}
+	stage = "backup_gen2_recover"
+	recovered2, err := third.ask(brCommand{Kind: "recover", Org: org.String(), Project: project.String(), Source: source.String(), Owner: session.User.String()})
+	if err != nil || recovered2.SourceToken == "" || recovered2.SourceToken == issued.Credential || recovered2.SourceToken == recovered.SourceToken {
+		return &smokeFailure{Stage: "backup_gen2_recover", Code: "reconcile"}
+	}
+	if err = oldCredentials("after_reconcile"); err != nil {
+		return err
+	}
+	stage = "backup_gen2_rows"
+	rows2, err := third.ask(brCommand{Kind: "rows", Email: brOwnerEmail, Password: brOwnerPassword, Org: org.String(), Project: project.String()})
+	if err != nil {
+		return err
+	}
+	present2 := map[int64]bool{}
+	for _, t := range rows2.Rows {
+		present2[t] = true
+	}
+	checkedRows2 := 0
+	for _, b := range all {
+		deleted := b.at >= deletedFrom && b.at < deletedTo
+		if deleted && present2[b.at] {
+			return &smokeFailure{Stage: "backup_gen2_rows", Code: "deleted_row_served"}
+		}
+		if !deleted {
+			if !present2[b.at] {
+				return &smokeFailure{Stage: "backup_gen2_rows", Code: "acked_row_missing"}
+			}
+			checkedRows2++
+		}
+	}
+	stage = "backup_gen2_receipts"
+	identical2 := 0
+	for _, b := range all {
+		deleted := b.at >= deletedFrom && b.at < deletedTo
+		status, raw, err := third.call("/ingest/v1/batches", b.batch, "", recovered2.SourceToken)
+		if err != nil {
+			return err
+		}
+		if status != 200 {
+			if !deleted || status != 409 {
+				return &smokeFailure{Stage: "backup_gen2_receipts", Code: "retry_refused", Actual: status, Expected: 200}
+			}
+			continue
+		}
+		var got model.Receipt
+		if err = json.Unmarshal(raw, &got); err != nil {
+			return err
+		}
+		want, known := gen1Receipts[b.batch.ID]
+		if !known {
+			return &smokeFailure{Stage: "backup_gen2_receipts", Code: "receipt_unknown"}
+		}
+		wantJSON, _ := model.CanonicalJSON(want)
+		gotJSON, _ := model.CanonicalJSON(got)
+		if !bytes.Equal(wantJSON, gotJSON) {
+			return &smokeFailure{Stage: "backup_gen2_receipts", Code: "receipt_changed"}
+		}
+		identical2++
+	}
+	stage = "backup_gen2_tombstone"
+	inside2, err := send(int64(deletedFrom+4), "late_inside_deleted_range_generation_two", recovered2.SourceToken, third)
+	var refused2 *smokeFailure
+	if inside2 != nil || !errors.As(err, &refused2) || refused2.Actual != 409 {
+		return &smokeFailure{Stage: "backup_gen2_tombstone", Code: "late_write_not_refused"}
+	}
+	final2, err := third.ask(brCommand{Kind: "state"})
+	if err != nil {
+		return err
+	}
 	stage = "backup_artifact"
 	artifactJSON, err := json.MarshalIndent(map[string]any{
 		"version": 1, "mode": "single-non-HA", "qualification": "local-process-drill-not-power-loss-not-multi-host",
@@ -858,6 +1020,7 @@ func RunBackupRestore(args []string) (result error) {
 		"results":             map[string]any{"acked_before_backup_present_or_deleted": mustHave, "deleted_range_rows_served": 0, "during_backup_restored": duringRestored, "during_backup_not_restored": len(during) - duringRestored, "after_backup_present_before_retry": 0, "after_backup_lost_then_readmitted": mustNot, "receipts_byte_identical": identical, "receipts_readmitted_after_loss": readmitted, "deleted_batch_retries_refused_by_tombstone": deletedRetries, "late_write_inside_deleted_range_refused": true},
 		"measured_backup_rpo": map[string]any{"backup_window_ms": backupFinished.Sub(backupStarted).Milliseconds(), "disaster_after_backup_cut_ms": disaster.UnixMilli() - answer.Backup.CreatedNS/int64(time.Millisecond), "acked_batches_lost": len(after), "oldest_lost_ack_after_backup_done_ms": firstLost.Sub(backupFinished).Milliseconds(), "claim": "disaster RPO is the last complete verified backup; no backup-based single-node RPO is claimed"},
 		"isolation":           map[string]any{"old_source_credential_refused": true, "old_source_refused_before_and_after_activation_and_reconcile": true, "recovery_admin_reconciled_items": 4, "senders_configured_after_restore": final.Destinations, "pending_reconciliation_items": final.Pending, "notifications_sent_by_restore": 0},
+		"second_generation":   map[string]any{"backup_of_restored_installation_ms": gen1Backup.Backup.DurationMS, "restore_ms": restore2Duration.Milliseconds(), "activate_ms": activated2.ActivateMillis, "ready": activated2.Ready, "tombstones": activated2.Tombstones, "quarantined_users": report2.Quarantined.Users, "quarantined_sources": report2.Quarantined.Sources, "generation_0_and_1_source_credentials_refused_before_and_after_activation_and_reconcile": true, "owner_reauthorized_in_generation_1_inactive_until_reauthorized_again": true, "generation_1_recovery_admin_inactive": true, "rows_checked": checkedRows2, "receipts_byte_identical_to_generation_1": identical2, "late_write_inside_deleted_range_refused": true, "pending_reconciliation_items": final2.Pending, "senders_configured": final2.Destinations},
 	}, "", "  ")
 	if err != nil {
 		return err

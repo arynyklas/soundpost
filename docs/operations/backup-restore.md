@@ -34,7 +34,7 @@ A backup is a set of objects under one prefix in a `Destination`:
 backups/<id>/key/<id>-data        wrapped data key (JSON; ciphertext only)
 backups/<id>/key/<id>-keys        wrapped key-material key
 backups/<id>/obj/bundle           storage.BackupBundle (C12 replay and quota certificates, cut C, 64 snapshot manifests)
-backups/<id>/obj/control-state    control seed without its key files
+backups/<id>/obj/control-state    control seed without its key files and without any restore quarantine stash
 backups/<id>/obj/control-keys     the control envelope key files (class "keys")
 backups/<id>/obj/slot-00..63      the 64 verified slot snapshot streams
 backups/<id>/manifest.json        written last
@@ -90,26 +90,41 @@ authority/head/<20-digit seq>   record seq: previous record digest, generation, 
 6. Every object is fetched, decrypted and verified against the manifest; the object set must be exactly the bundle, the two control objects and 64 slots. A missing object is `unavailable`, never silently omitted.
 7. The bundle is bound to the manifest (digests, cursors, identity), `storage.ReconcileQuota` authenticates the certificates, the control state is bound to the manifest and to the bundle's cut (same installation, revision and reservations), and **every gap is re-verified** (`verifyGaps`): each `gap` interval needs an attestation, each attestation needs a fact in the control state at the cut with the same group, exact interval, reason and digest, verified at the cut's revision, with nothing left over on either side. A widened, shifted, duplicated, unattested or unbacked gap is rejected.
 8. The 64 snapshots are installed with `Engine.InstallBackup` (intake closed until the quota certificate and deletion ledger are applied). Reservations created after C are rebuilt whole from the batches inside the sealed snapshots so their idempotency keys exist.
-9. The control state is installed through the real replicated control path, in one update: **quarantine** (below), the quota certificate (exactly one charge per consumed reservation, refunds for committed cancellation fences, pending intents kept charged), after rotating the control envelope key (old keys stay decrypt-only) and sealing a fresh bearer hash key.
-10. A fresh one-time recovery bootstrap token is written to `<root>/bootstrap.token` (mode 0600; never printed or logged) and `restore.json` (certificate and bindings, no secrets) is written.
+9. The control state is installed through the real replicated control path, in one update: any quarantine stash the source installation's own earlier restore left in it is discarded, then **quarantine** (below), the quota certificate (exactly one charge per consumed reservation, refunds for committed cancellation fences, pending intents kept charged), after rotating the control envelope key (old keys stay decrypt-only) and sealing a fresh bearer hash key.
+10. A fresh one-time recovery bootstrap token is written to `<root>/bootstrap.token` (mode 0600; never printed or logged: `soundpost serve` on a restored root says where the file is instead of printing the token) and `restore.json` (certificate, the authority position this restore verified, no secrets) is written.
 
-`Activate(ctx, root, target, ledger)` runs against the opened restored installation: it commits the quota certificate, re-reads the **current** deletion ledger (a deletion may have completed since `Restore`), applies exactly that head (control import plus a tombstone barrier in all 64 slots) and only then lets the engine open. Until it succeeds the engine serves no read and admits no write. It is idempotent after a crash.
+`Activate(ctx, root, target, ledger)` runs against the opened restored installation: it commits the quota certificate, re-reads the **current** deletion ledger (a deletion may have completed since `Restore`) and checks it against the authority position `Restore` verified (`restore.json` records that head's authority, sequence, generation, digest and tombstone count; an older journal, or one that does not contain that head, is `conflict`), applies exactly that head (control import plus a tombstone barrier in all 64 slots) and only then lets the engine open. Until it succeeds the engine serves no read and admits no write. It is idempotent after a crash.
 
-### Failure matrix (all covered by tests)
+The root is opened with `appcore.OpenForActivation`, which differs from `appcore.Open` in one respect: while the restore hold is armed it does not run the artifact-reference validation (it reads blob bytes through the engine, which refuses everything until the hold lifts, so on a good restore it could only fail and the root could never be activated). `appcore.App` is the `Activation`; its `RestoreReady` runs that validation immediately after the hold is lifted. A root whose hold is already lifted validates at open like any other.
 
-| Condition | Result |
-| --- | --- |
-| No ledger, authority unavailable, unverifiable, from another installation, behind the backup's binding | restore fails before any data object is opened; no root created |
-| Wrong data KEK, wrong key-material KEK, retired KEK, missing wrapped key | fails before any data object is opened |
-| Missing, truncated, bit-flipped or swapped snapshot or control object | fails; no root, no staging directory |
-| Manifest edited | MAC fails |
-| Existing non-empty root | refused, untouched |
-| Gap interval without a committed fact, widened or forged attestation | rejected at restore |
-| Authority write fails, or reads back differently | no receipt; deletion stays `fencing`; backups and restores are refused while it is down |
+### Failure matrix (covered by tests, except where a row says otherwise)
+
+| Condition | CLI code | Result |
+| --- | --- | --- |
+| No ledger, authority unavailable or unverifiable (flipped byte, gap, stray record, wrong keys) | `unavailable` | restore fails before any data object is opened; no root created |
+| Authority of another installation, another authority ID, behind the backup's sequence, generation or tombstone count, or whose chain does not contain the head the backup was taken under (a fork or a truncated journal) | `conflict` | restore fails before any data object is opened; no root created |
+| Authority rolled back or replaced between `restore` and `activate` (older than the position `restore` verified, or not containing it) | `conflict` | activation refused before anything is applied; the root stays closed |
+| The authority ledger names an organization or project the restored control state never contained (created and retired after the backup's cut) | none (succeeds) | activation completes; the tombstone is recorded as a deny predicate, no organization is created, and the retired organization and project IDs can never be created in the restored installation |
+| Backup taken under an authority that forgot a completed deletion (control's receipt names a head the journal does not contain) | `corrupt` | no backup is written |
+| Wrong data KEK (the manifest MAC does not verify) | `forbidden` | fails before any other object is opened |
+| Retired or absent KEK | `not_found` | fails before any data object is opened |
+| Wrong key-material KEK, or a missing or altered wrapped key | `corrupt` | fails before any data object is opened |
+| Key file or key directory readable by group or others (POSIX) | `forbidden` | the key is not read (nor written by `keygen`) |
+| Missing snapshot or control object | `unavailable` | fails; no root, no staging directory |
+| Truncated, bit-flipped or swapped snapshot or control object | `corrupt` | fails; no root, no staging directory |
+| Manifest edited | `forbidden` | the MAC does not verify; nothing else is opened |
+| Backup expired (more than 30 days after its cut) | `stale` | never restored |
+| Existing non-empty root | `conflict` | refused, untouched |
+| Gap interval without a committed fact, widened or forged attestation | `corrupt` | rejected at restore |
+| Authority write fails, or reads back differently | `unavailable` | no receipt; deletion stays `fencing`; backups and restores are refused while it is down |
+| Root with artifact reference intents | none (succeeds) | `activate` opens the root without validating artifact bytes (the closed engine cannot serve them) and validates them right after the restore hold is lifted. A blob that then fails to verify fails the activation with `corrupt` (by construction of that validation; **not exercised by a test**, only the success path is) |
+| Installation that never admitted a batch | none (succeeds) | backs up and restores like any other |
+
+`soundpost backup ...` prints one line per failure, `soundpost backup failed: <code>` plus the approved detail and `[retryable]` when the fault says so, with exit status 1. The text of an error that is not a typed fault is withheld (it can name a path), usage mistakes print the usage text, and no line ever contains a key, a secret or an input value. Every other command keeps its single generic line.
 
 ## Bootstrap-only auth: nothing old becomes active
 
-`auth.QuarantineRestoredState` runs inside the restore's control update. It is deterministic and one-shot (a second application conflicts):
+`auth.QuarantineRestoredState` runs inside the restore's control update. It is deterministic and one-shot on a given state (a second application over a state that already carries its stash conflicts). It is applied to what is ACTIVE in the state being restored, which is not always an installation's first generation: see "Restoring a restored installation's own backup" below.
 
 * every session, elevation and in-flight OIDC state is removed; every server token is revoked; every source credential digest is removed and every active source is revoked; the bearer hash key is replaced by a fresh one sealed under the fresh envelope key, so no digest stored before the restore can match any credential presented afterwards;
 * every account is disabled (passwords, TOTP and recovery codes stay stored but cannot be used by anything);
@@ -119,6 +134,17 @@ authority/head/<20-digit seq>   record seq: previous record digest, generation, 
 Old decryption keys decrypt stored secrets and nothing else. The restored installation therefore cannot send notifications (no sender is configured; the restore itself performs no external effect) and cannot accept a source credential issued before the restore.
 
 `Service.Reconcile` is the only way an item leaves the stash. It takes one explicit `Reconciliation` (account, org admin, membership, grant, team, integration, source reader, source), a reason, and a fresh-authenticated instance admin who is not a restored account; the audit record is committed in the same transaction. Each item is single-use and reinstated as of the backup, nothing is widened. Reauthorizing an account grants nothing by itself (its membership and grants are separate items), two enabled accounts may not share a login, and a source is reissued a **new** credential (the old secret is never revived). Server tokens and sessions are never reinstated; they are reissued through the normal flows. Logout, token revocation or demotion performed after the backup cannot be undone by a restore: the restore reinstates nothing on its own, so the administrator decides item by item with current identity information.
+
+### Restoring a restored installation's own backup (second generation)
+
+A restored installation takes its own nightly backups like any other, and in a second disaster that is the only surviving copy. The quarantine stash is the bookkeeping of the restore that built the installation, not installation data, so:
+
+* `Service.Backup` writes the control state without the stash, and `Restore` discards one if a backup (for example one taken by an older build) still carries it, before it quarantines.
+* The new generation quarantines what is **active** in the state it restores: the accounts the previous generation reauthorized (and its recovery admin), the source credential it reissued, the grants and memberships it reinstated, and so on. All of it is inactive again and must be reauthorized by the new generation's recovery admin; nothing minted in any earlier generation (sessions, server tokens, source credentials, passwords of disabled accounts) authenticates.
+* Items an earlier generation never reconciled are not carried across: they stay inactive and the new generation cannot reconcile them (the older backup that holds them is the way to look at them again). Dropping them can only leave more inactive, never reactivate anything. This is a deliberate, conservative choice; merging the old stash is possible but widens what a second recovery admin can reinstate.
+* The operator may bootstrap the new recovery admin with the same address as the previous one: it is a new account with a new ID and holds nothing.
+
+`TestABackupOfARestoredInstallationRestoresAgain` and the second half of the `backup-restore` smoke exercise exactly this (fresh install, backup, restore, activate, reauthorize one user, backup, restore again, activate).
 
 ## Commands
 
@@ -166,3 +192,7 @@ The data cut D falls somewhere inside the copy window, so a batch ACKed during t
 * The retention-side `retention.Service.Restore` imports tombstones into control and applies them to the data groups but does not itself check the authority against a backup binding; `Activate` does, and hands it a pinned read-only view of exactly the verified head.
 * Backup objects of expired or abandoned backups are not deleted by this code.
 * Power loss, lying fsync hardware, distinct failure domains and scale are not exercised.
+* **The authority journal is O(D²) in completed deletions.** Every head record carries the whole tombstone ledger (that is what lets a restore verify one record and read the full current ledger from it), so a journal of D deletions holds D(D+1)/2 tombstones, and `Authority.Current` (run twice by every checkpoint, once by every backup, and by every restore and activation) fetches, decrypts, signature-checks and re-validates all of them. Measured on the local-disk destination of one 32-CPU WSL host (`go test ./internal/backup -run '^$' -bench AuthorityCurrent -benchtime=1x`, journals forged directly, one run each): 100 deletions 2.3 MiB and 0.10 s per read; 250: 14 MiB, 0.66-0.68 s; 500: 56 MiB, 2.4-2.6 s; **1,000: 224 MiB, 10.3-11.4 s**; 2,000: 40 s (size not printed; about 900 MiB by scaling). One record holding 10,000 tombstones is 4.5 MiB and verifies in 0.19 s; the cost is linear in tombstones read (about 19 µs and 0.45 KiB each), so **10,000 deletions are about 50 million tombstones: about 22 GiB and about 16 minutes per read** (derived, not run), and one checkpoint, which reads twice, would hold the deletion in `fencing` for over half an hour. A single record would hit the 64 MiB read limit at roughly 140,000 tombstones. This was **not** fixed: skipping re-verification of the prefix (a verified-prefix cache keyed by the head hash) saves CPU but not the bytes fetched, and trusting the destination for the prefix gives up the property that every read detects tampering. The safe fix is a record format change (each record carries the previous digest and only the tombstones it appends, plus a periodic full snapshot or a compaction digest). Until then the practical bound is a few hundred completed deletions per installation; an operator near it should expect checkpoints (and therefore deletion completion) to take tens of seconds.
+* `AuthorityBinding.LedgerDigest` is computed and signed into the manifest but never compared on restore: chain containment of the head the backup names already pins exactly that ledger (the head record's sealed payload is digest-bound). Treat it as informational. (`ControlBinding.StateSHA256` is verified against the decrypted control-state object.)
+* Key wrapping uses a random 96-bit nonce under a long-lived key-encryption key (birthday bound about 4 million wraps per key); `Encryption.ChunkSize` is asserted equal to the compiled constant, not honoured.
+* `Service.Reap` cannot scope pins to an attempt (see the `PinReaper` contract); it is safe only at process start.

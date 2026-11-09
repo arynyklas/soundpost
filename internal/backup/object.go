@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"encoding/xml"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -219,6 +220,18 @@ type S3Destination struct {
 	client   *http.Client
 	now      func() time.Time
 }
+
+// String, GoString and Format never include the secret key: S3Config and the
+// destination built from it are the kind of value an operator-facing tool prints.
+func (c S3Config) String() string {
+	return "s3-config:" + c.Bucket + "@" + c.Endpoint + " (credentials masked)"
+}
+func (c S3Config) GoString() string           { return c.String() }
+func (c S3Config) Format(f fmt.State, _ rune) { _, _ = io.WriteString(f, c.String()) }
+
+func (d S3Destination) String() string             { return d.cfg.String() }
+func (d S3Destination) GoString() string           { return d.cfg.String() }
+func (d S3Destination) Format(f fmt.State, _ rune) { _, _ = io.WriteString(f, d.cfg.String()) }
 
 var bucketName = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$`)
 

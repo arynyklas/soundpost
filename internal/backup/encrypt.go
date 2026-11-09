@@ -110,7 +110,7 @@ func (s StaticKeys) Key(ctx context.Context, id string) (Key, error) {
 }
 
 // KeyDir reads <dir>/<id>.key files created by WriteKeyFile. On POSIX systems a
-// file readable by group or others is refused.
+// file, or the directory that holds it, accessible by group or others is refused.
 type KeyDir string
 
 const keyFileMagic = "soundpost-backup-key-v1"
@@ -123,6 +123,9 @@ func (d KeyDir) Key(ctx context.Context, id string) (Key, error) {
 		return Key{}, model.Fail(model.Invalid)
 	}
 	path := filepath.Join(string(d), id+".key")
+	if err := requirePrivateDir(string(d)); err != nil {
+		return Key{}, err
+	}
 	info, err := os.Stat(path)
 	if os.IsNotExist(err) {
 		return Key{}, model.Fail(model.NotFound)
@@ -153,7 +156,9 @@ func (d KeyDir) Key(ctx context.Context, id string) (Key, error) {
 	return k, nil
 }
 
-// WriteKeyFile stores k as <dir>/<id>.key with mode 0600; it never overwrites.
+// WriteKeyFile stores k as <dir>/<id>.key with mode 0600; it never overwrites. A
+// directory KeyDir would refuse (group- or other-accessible) is refused here too,
+// so a key is never written where it cannot be read back.
 func WriteKeyFile(dir string, k Key) error {
 	if !k.valid() {
 		return model.Fail(model.Invalid)
@@ -161,8 +166,23 @@ func WriteKeyFile(dir string, k Key) error {
 	if err := durablefs.MkdirAll(dir); err != nil {
 		return err
 	}
+	if err := requirePrivateDir(dir); err != nil {
+		return err
+	}
 	content := keyFileMagic + "\n" + k.id + "\n" + base64.StdEncoding.EncodeToString(k.b[:]) + "\n"
 	return durablefs.Exclusive(filepath.Join(dir, k.id+".key"), []byte(content))
+}
+
+// requirePrivateDir refuses, on POSIX systems, a directory accessible by group or
+// others: it lists the key names and lets a stray copy or a symlink replace a key.
+func requirePrivateDir(dir string) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	if info, err := os.Stat(dir); err == nil && info.Mode().Perm()&0o077 != 0 {
+		return model.Fail(model.Forbidden)
+	}
+	return nil
 }
 
 type streamResult struct {

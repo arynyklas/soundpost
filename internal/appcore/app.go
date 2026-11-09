@@ -36,16 +36,24 @@ type App struct {
 
 func Open(dir string) (*App, error) { return open(dir, nil) }
 
+// OpenForActivation opens a root a disaster restore built, for `soundpost backup
+// activate`. It differs from Open in one respect only: while the restore hold is
+// armed the artifact-reference validation is deferred to App.RestoreReady, which
+// activation calls right after the hold is lifted (see openWith).
+func OpenForActivation(dir string) (*App, error) {
+	return openWith(dir, nil, storage.StatfsMeter(), storage.DefaultPressureConfig(), true)
+}
+
 // OpenWithPressure is Open with an explicit disk meter and thresholds in place of the host
 // volume's statfs and the approved 80/90/95 defaults, so the admission levels can be driven
 // through the real ingest path deterministically (the deletion smoke does).
 func OpenWithPressure(dir string, meter storage.DiskMeter, pressure storage.PressureConfig) (*App, error) {
-	return openWith(dir, nil, meter, pressure)
+	return openWith(dir, nil, meter, pressure, false)
 }
 func open(dir string, options *replicationOptions) (*App, error) {
-	return openWith(dir, options, storage.StatfsMeter(), storage.DefaultPressureConfig())
+	return openWith(dir, options, storage.StatfsMeter(), storage.DefaultPressureConfig(), false)
 }
-func openWith(dir string, options *replicationOptions, meter storage.DiskMeter, pressure storage.PressureConfig) (*App, error) {
+func openWith(dir string, options *replicationOptions, meter storage.DiskMeter, pressure storage.PressureConfig, forActivation bool) (*App, error) {
 	c, e := openControl(dir, options)
 	if e != nil {
 		return nil, e
@@ -145,9 +153,16 @@ func openWith(dir string, options *replicationOptions, meter storage.DiskMeter, 
 			return fail(e)
 		}
 	}
-	if e = c.ValidateArtifactReferences(startup); e != nil {
-		out.CloseReplication()
-		return fail(e)
+	// A restored root holds its engine closed until activation lifts the restore
+	// hold, and artifact-reference validation reads blob bytes through that engine,
+	// so on a perfectly good restore it could only fail. Opening for activation
+	// defers it (App.RestoreReady runs it once the hold is lifted); every other
+	// open, and an activation root whose hold is already lifted, validates here.
+	if !(forActivation && engine.RestoreReady() != nil) {
+		if e = c.ValidateArtifactReferences(startup); e != nil {
+			out.CloseReplication()
+			return fail(e)
+		}
 	}
 	if e = a.DrainSourceFences(startup); e != nil {
 		out.CloseReplication()
@@ -168,6 +183,32 @@ func (a *App) Close() error {
 		return replicationErr
 	}
 	return other
+}
+
+// The three methods below make *App the backup.Activation of a restored root
+// opened with OpenForActivation (the CLI passes the App itself).
+
+// CommitQuotaReconciliation applies the restore's verified quota certificate.
+func (a *App) CommitQuotaReconciliation(ctx context.Context, cert storage.QuotaReconciliation) error {
+	return a.Storage.CommitQuotaReconciliation(ctx, cert)
+}
+
+// RestoreDeletions applies the authority's ledger (control import and a tombstone
+// barrier in every data group).
+func (a *App) RestoreDeletions(ctx context.Context, authority retention.Authority) error {
+	return a.Retention.Restore(ctx, authority)
+}
+
+// RestoreReady reports whether the restore hold is lifted and, only then, runs
+// the artifact-reference validation OpenForActivation had to defer: it reads blob
+// bytes through the engine, which refuses everything while the hold is armed.
+func (a *App) RestoreReady() error {
+	if err := a.Storage.RestoreReady(); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	return a.Control.ValidateArtifactReferences(ctx)
 }
 func (a *App) Register(mux *http.ServeMux) {
 	httpapi.RegisterIngestRoutes(mux, a.Auth, a.Ingest)

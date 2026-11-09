@@ -18,8 +18,6 @@ import (
 	"soundpost/internal/backup"
 	"soundpost/internal/control"
 	"soundpost/internal/model"
-	"soundpost/internal/retention"
-	"soundpost/internal/storage"
 )
 
 const backupUsage = `usage: soundpost backup <command> [flags]
@@ -41,9 +39,72 @@ The administrator password for create is read from SOUNDPOST_ADMIN_PASSWORD (and
 optional one-time code from SOUNDPOST_ADMIN_CODE). create, authority-init (with --data-dir)
 and activate open the installation exclusively: stop the server first.`
 
+// cliError is an operator-facing message written by this file: static text that
+// carries no runtime data (no path, key, input value or error text), so it is
+// printed as it is.
+type cliError string
+
+func (e cliError) Error() string { return string(e) }
+
+const (
+	errUsage           = cliError(backupUsage)
+	errBadFlags        = cliError("invalid or unknown flag\n\n" + backupUsage)
+	errNoAuthorityKeys = cliError("--authority-keys is required")
+)
+
+// parseFlags parses a subcommand's flags. A flag error echoes the operator's own
+// input, so it is replaced by the static usage message.
+func parseFlags(f *flag.FlagSet, args []string) error {
+	if f.Parse(args) != nil {
+		return errBadFlags
+	}
+	return nil
+}
+
+// backupFailureLine is what main prints for a failed `backup` command: the typed
+// public error code (and the fault's approved detail, when it has one), which is
+// what the failure matrix in docs/operations/backup-restore.md is keyed by. The
+// text of any other error is withheld: it can name paths, and no error from this
+// tree may carry a key or a secret.
+func backupFailureLine(err error) string {
+	var message cliError
+	if errors.As(err, &message) {
+		if message == errUsage {
+			return string(message)
+		}
+		return "soundpost backup: " + string(message)
+	}
+	var fault *model.Fault
+	if errors.As(err, &fault) {
+		line := "soundpost backup failed: " + string(fault.Code)
+		if detail := safeDetail(fault); detail != "" {
+			line += " (" + detail + ")"
+		}
+		if fault.Retryable {
+			line += " [retryable]"
+		}
+		return line
+	}
+	return "soundpost backup failed: internal error (details withheld; the underlying error can name paths)"
+}
+
+// safeDetail is a fault's approved detail when it is a short token and adds
+// something to the code.
+func safeDetail(f *model.Fault) string {
+	d := f.SafeDetail
+	if d == "" || d == string(f.Code) || len(d) > 80 {
+		return ""
+	}
+	for _, r := range d {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' || r == ':' || r == '.' || r == '-') {
+			return ""
+		}
+	}
+	return d
+}
 func runBackup(args []string) error {
 	if len(args) == 0 {
-		return errors.New(backupUsage)
+		return errUsage
 	}
 	switch args[0] {
 	case "keygen":
@@ -61,7 +122,7 @@ func runBackup(args []string) error {
 	case "activate":
 		return backupActivate(args[1:])
 	}
-	return errors.New(backupUsage)
+	return errUsage
 }
 
 // destinationFlags registers --<name>-dir and the --<name>-s3-* flags.
@@ -84,14 +145,14 @@ func newDestinationFlags(f *flag.FlagSet, name string) *destinationFlags {
 func (d *destinationFlags) open() (backup.Destination, error) {
 	switch {
 	case *d.dir != "" && *d.endpoint != "":
-		return nil, fmt.Errorf("--%s-dir and --%s-s3-endpoint are exclusive", d.name, d.name)
+		return nil, cliError(fmt.Sprintf("--%s-dir and --%s-s3-endpoint are exclusive", d.name, d.name))
 	case *d.dir != "":
 		return backup.NewLocalDestination(*d.dir)
 	case *d.endpoint != "":
 		env := "SOUNDPOST_" + strings.ToUpper(d.name) + "_S3_"
 		return backup.NewS3Destination(backup.S3Config{Endpoint: *d.endpoint, Region: *d.region, Bucket: *d.bucket, Prefix: *d.prefix, AccessKey: os.Getenv(env + "ACCESS_KEY"), SecretKey: os.Getenv(env + "SECRET_KEY")})
 	}
-	return nil, fmt.Errorf("--%s-dir or --%s-s3-endpoint is required", d.name, d.name)
+	return nil, cliError(fmt.Sprintf("--%s-dir or --%s-s3-endpoint is required", d.name, d.name))
 }
 
 func flagSet(name string) *flag.FlagSet {
@@ -113,11 +174,11 @@ func backupKeygen(args []string) error {
 	f := flagSet("keygen")
 	dir := f.String("key-dir", "", "")
 	id := f.String("id", "", "")
-	if err := f.Parse(args); err != nil {
+	if err := parseFlags(f, args); err != nil {
 		return err
 	}
 	if *dir == "" || *id == "" {
-		return errors.New(backupUsage)
+		return errUsage
 	}
 	key, err := backup.GenerateKey(*id)
 	if err != nil {
@@ -135,11 +196,11 @@ func backupAuthorityKeygen(args []string) error {
 	out := f.String("out", "", "")
 	restricted := f.String("restricted-out", "", "")
 	id := f.String("id", "", "")
-	if err := f.Parse(args); err != nil {
+	if err := parseFlags(f, args); err != nil {
 		return err
 	}
 	if *out == "" || *id == "" {
-		return errors.New(backupUsage)
+		return errUsage
 	}
 	keys, err := backup.GenerateAuthorityKeys(*id)
 	if err != nil {
@@ -159,7 +220,7 @@ func backupAuthorityKeygen(args []string) error {
 
 func openAuthority(dest *destinationFlags, keysPath string) (*backup.Authority, error) {
 	if keysPath == "" {
-		return nil, errors.New("--authority-keys is required")
+		return nil, errNoAuthorityKeys
 	}
 	keys, err := backup.ReadAuthorityKeys(keysPath)
 	if err != nil {
@@ -178,7 +239,7 @@ func backupAuthorityInit(args []string) error {
 	installation := f.String("installation", "", "")
 	keysPath := f.String("authority-keys", "", "")
 	dest := newDestinationFlags(f, "authority")
-	if err := f.Parse(args); err != nil {
+	if err := parseFlags(f, args); err != nil {
 		return err
 	}
 	var id model.ID
@@ -200,7 +261,7 @@ func backupAuthorityInit(args []string) error {
 			return err
 		}
 	default:
-		return errors.New(backupUsage)
+		return errUsage
 	}
 	authority, err := openAuthority(dest, *keysPath)
 	if err != nil {
@@ -226,11 +287,11 @@ func backupCreate(args []string) error {
 	keysPath := f.String("authority-keys", "", "")
 	dest := newDestinationFlags(f, "dest")
 	authorityDest := newDestinationFlags(f, "authority")
-	if err := f.Parse(args); err != nil {
+	if err := parseFlags(f, args); err != nil {
 		return err
 	}
 	if *dataDir == "" || *email == "" || *keyDir == "" || *dataKEK == "" || *secretKEK == "" {
-		return errors.New(backupUsage)
+		return errUsage
 	}
 	if *attempts == "" {
 		*attempts = filepath.Join(*dataDir, "backup-attempts")
@@ -283,7 +344,7 @@ func backupCreate(args []string) error {
 func backupList(args []string) error {
 	f := flagSet("list")
 	dest := newDestinationFlags(f, "dest")
-	if err := f.Parse(args); err != nil {
+	if err := parseFlags(f, args); err != nil {
 		return err
 	}
 	destination, err := dest.open()
@@ -310,12 +371,12 @@ func backupRestore(args []string) error {
 	keysPath := f.String("authority-keys", "", "")
 	dest := newDestinationFlags(f, "dest")
 	authorityDest := newDestinationFlags(f, "authority")
-	if err := f.Parse(args); err != nil {
+	if err := parseFlags(f, args); err != nil {
 		return err
 	}
 	id, err := model.ParseID(*backupID)
 	if err != nil || *root == "" || *keyDir == "" {
-		return errors.New(backupUsage)
+		return errUsage
 	}
 	source, err := dest.open()
 	if err != nil {
@@ -348,41 +409,33 @@ func backupRestore(args []string) error {
 	return nil
 }
 
-// activation adapts the opened restored installation to backup.Activation.
-type activation struct {
-	*storage.Engine
-	svc *retention.Service
-}
-
-func (a activation) RestoreDeletions(ctx context.Context, authority retention.Authority) error {
-	return a.svc.Restore(ctx, authority)
-}
-
 func backupActivate(args []string) error {
 	f := flagSet("activate")
 	root := f.String("root", "", "")
 	keysPath := f.String("authority-keys", "", "")
 	authorityDest := newDestinationFlags(f, "authority")
-	if err := f.Parse(args); err != nil {
+	if err := parseFlags(f, args); err != nil {
 		return err
 	}
 	if *root == "" {
-		return errors.New(backupUsage)
+		return errUsage
 	}
 	authority, err := openAuthority(authorityDest, *keysPath)
 	if err != nil {
 		return err
 	}
-	app, err := appcore.Open(*root)
+	// A restored root holds its engine closed until this command lifts the restore hold,
+	// so the artifact-reference validation Open runs is deferred to the activation itself
+	// (appcore.App.RestoreReady runs it right after the hold is lifted).
+	app, err := appcore.OpenForActivation(*root)
 	if err != nil {
 		return err
 	}
 	defer app.Close()
-	svc := app.Retention
-	if err = svc.UseAuthority(authority); err != nil {
+	if err = app.Retention.UseAuthority(authority); err != nil {
 		return err
 	}
-	report, err := backup.Activate(context.Background(), backup.DestinationRoot(*root), activation{Engine: app.Storage, svc: svc}, authority, time.Now)
+	report, err := backup.Activate(context.Background(), backup.DestinationRoot(*root), app, authority, time.Now)
 	if err != nil {
 		return err
 	}
