@@ -356,3 +356,103 @@ func TestDiskPressureWriteBlobDeniedThenAdmitted(t *testing.T) {
 		t.Fatalf("admission did not reopen: %v", err)
 	}
 }
+
+func TestDiskPressureCompleteBlobRetryReturnsReceiptWhileNewUploadIsRefused(t *testing.T) {
+	c, a, scope, mf, raw := blobFixture(t)
+	engine, err := openTestEngine(t, t.TempDir(), a, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	var clock time.Time
+	m := &fakeMeter{total: 1_000_000_000}
+	if err = engine.BindPressure(t.TempDir(), m, pressureConfig(&clock)); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	original, err := engine.WriteBlob(ctx, scope, mf, bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := mf
+	next.Root, next.ReservationID = model.NewID(), model.ID{}
+	reserved, err := c.ReserveArtifact(ctx, scope, next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next = reserved.Manifest
+	for _, pct := range []uint64{80, 95, 96, 100} {
+		m.set(1_000_000_000 / 100 * pct)
+		got, err := engine.WriteBlob(ctx, scope, mf, bytes.NewReader(raw))
+		if err != nil || !bytes.Equal(mustJSON(t, got), mustJSON(t, original)) {
+			t.Fatalf("retry of a complete upload at %d%%: %v", pct, err)
+		}
+		if pct >= 95 {
+			_, err = engine.WriteBlob(ctx, scope, next, bytes.NewReader(raw))
+			requireCapacity(t, err)
+		}
+	}
+	engine.db.View(func(tx *bolt.Tx) error {
+		if tx.Bucket([]byte("artifact_roots")).Stats().KeyN != 1 {
+			t.Fatal("refused new upload left a root behind")
+		}
+		return nil
+	})
+}
+
+func TestDiskPressureUnmeteredAdmitsAndIsVisible(t *testing.T) {
+	store, a, c, d := fixture(t)
+	scope, b := normalized(t, store, a, c, d)
+	engine, err := openTestEngine(t, t.TempDir(), a, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	clock := time.Unix(1_800_000_000, 0)
+	if err = engine.BindPressureUnmetered(func() time.Time { clock = clock.Add(time.Second); return clock }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = engine.Append(context.Background(), scope, b); err != nil {
+		t.Fatalf("unmetered engine rejected intake: %v", err)
+	}
+	st, err := engine.ObservePressure(context.Background())
+	if err != nil {
+		t.Fatalf("observe of an unmetered engine failed: %v", err)
+	}
+	if !st.Unmetered || st.Level != PressureNormal || st.DeniedAll != 0 || st.DeniedLow != 0 {
+		t.Fatalf("status %+v", st)
+	}
+	if len(st.Warnings) != 1 || st.Warnings[0].Code != "disk_unmetered" || st.Warnings[0].At <= 0 || st.Warnings[0].Seq != 1 {
+		t.Fatalf("warnings %+v", st.Warnings)
+	}
+	if st2, _ := engine.ObservePressure(context.Background()); len(st2.Warnings) != 1 {
+		t.Fatalf("observing re-records the warning: %+v", st2.Warnings)
+	}
+	m := &fakeMeter{total: 1000}
+	if err = engine.BindPressure(t.TempDir(), m, pressureConfig(&clock)); err == nil {
+		t.Fatal("a meter was bound over an unmetered engine")
+	}
+	if err = engine.BindPressureUnmetered(nil); err == nil {
+		t.Fatal("unmetered bound twice")
+	}
+}
+
+func TestDiskPressureMeteredEngineIsNotUnmeteredAndCannotBecomeOne(t *testing.T) {
+	var clock time.Time
+	e := &Engine{}
+	m := &fakeMeter{total: 1000, use: 100}
+	if err := e.BindPressure(t.TempDir(), m, pressureConfig(&clock)); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.BindPressureUnmetered(nil); err == nil {
+		t.Fatal("a metered engine was flipped to unmetered")
+	}
+	st, err := e.ObservePressure(context.Background())
+	if err != nil || st.Unmetered || len(st.Warnings) != 0 {
+		t.Fatalf("%v %+v", err, st)
+	}
+	var bare Engine
+	if _, err = bare.ObservePressure(context.Background()); err == nil {
+		t.Fatal("observe of an engine with no pressure binding reported success")
+	}
+}

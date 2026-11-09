@@ -346,6 +346,28 @@ func (it *changeIterator) Next(ctx context.Context) (ChangePage, error) {
 				e.mu.Unlock()
 				continue
 			}
+			// A deletion that began after the predicates above were fetched (the
+			// release fence is many round trips) must also hide rows of this
+			// page: refilter the decoded page against the current set. A page
+			// emptied this way is skipped like any fully covered page.
+			latest, lerr := e.readDeletions(ctx, it.scope.OrgID(), it.req.Projects)
+			if lerr != nil {
+				page, failure := it.failLocked(&scopeReadError{cause: lerr})
+				e.mu.Unlock()
+				return page, failure
+			}
+			if deletionsChanged(delPreds, latest) {
+				selected = Page{}
+				for i := range p.IDs {
+					if !coveredRow(latest, it.scope.OrgID(), it.req.Signal, p, i) && matchesRow(it.matchers, p, i, it.req.Signal) {
+						appendPageRow(&selected, p, i)
+					}
+				}
+				if selected.Len() == 0 {
+					e.mu.Unlock()
+					continue
+				}
+			}
 			selected.Bytes = p.Bytes
 			it.page = selected
 			e.storageStats.BorrowedPages++

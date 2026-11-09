@@ -41,17 +41,18 @@ func Open(dir string) (*App, error) { return open(dir, nil) }
 // armed the artifact-reference validation is deferred to App.RestoreReady, which
 // activation calls right after the hold is lifted (see openWith).
 func OpenForActivation(dir string) (*App, error) {
-	return openWith(dir, nil, storage.StatfsMeter(), storage.DefaultPressureConfig(), true)
+	return openWith(dir, nil, storage.HostMeter(), storage.DefaultPressureConfig(), true)
 }
 
 // OpenWithPressure is Open with an explicit disk meter and thresholds in place of the host
-// volume's statfs and the approved 80/90/95 defaults, so the admission levels can be driven
-// through the real ingest path deterministically (the deletion smoke does).
+// volume's meter and the approved 80/90/95 defaults, so the admission levels can be driven
+// through the real ingest path deterministically (the deletion smoke does). A nil meter is
+// the "this platform has no meter" case: the engine is bound unmetered (see openWith).
 func OpenWithPressure(dir string, meter storage.DiskMeter, pressure storage.PressureConfig) (*App, error) {
 	return openWith(dir, nil, meter, pressure, false)
 }
 func open(dir string, options *replicationOptions) (*App, error) {
-	return openWith(dir, options, storage.StatfsMeter(), storage.DefaultPressureConfig(), false)
+	return openWith(dir, options, storage.HostMeter(), storage.DefaultPressureConfig(), false)
 }
 func openWith(dir string, options *replicationOptions, meter storage.DiskMeter, pressure storage.PressureConfig, forActivation bool) (*App, error) {
 	c, e := openControl(dir, options)
@@ -108,7 +109,15 @@ func openWith(dir string, options *replicationOptions, meter storage.DiskMeter, 
 	if e = engine.BindDeletions(c); e != nil {
 		return fail(e)
 	}
-	if e = engine.BindPressure(filepath.Join(dir, "data"), meter, pressure); e != nil {
+	// A platform with no meter (HostMeter() == nil) runs unmetered, visibly: the
+	// pressure status reports Unmetered and the warning ring says so. A meter that
+	// exists but errors still fails closed inside the engine.
+	if meter == nil {
+		e = engine.BindPressureUnmetered(pressure.Now)
+	} else {
+		e = engine.BindPressure(filepath.Join(dir, "data"), meter, pressure)
+	}
+	if e != nil {
 		return fail(e)
 	}
 	ret, e := retention.New(retention.Config{Control: c, Data: engine, Base: a.SourceLifecycleGenerations(), Pressure: engine})

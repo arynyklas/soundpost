@@ -58,12 +58,17 @@ type PressureWarning struct {
 	Seq         uint64
 }
 
-// PressureStatus is the operator-visible state.
+// PressureStatus is the operator-visible state. Unmetered is true when the engine
+// was bound without a meter because the platform has none (BindPressureUnmetered):
+// admission is then not gated by disk usage, Level stays PressureNormal and the
+// warning ring carries one "disk_unmetered" entry, so the missing protection is
+// visible instead of silently absent.
 type PressureStatus struct {
 	Level                PressureLevel
 	UsedPercent          uint8
 	Warnings             []PressureWarning
 	DeniedLow, DeniedAll uint64
+	Unmetered            bool
 }
 
 // AdmissionClass separates low-priority batches from everything else.
@@ -77,6 +82,7 @@ const (
 type pressureState struct {
 	mu        sync.Mutex
 	bound     bool
+	unmetered bool
 	dir       string
 	meter     DiskMeter
 	cfg       PressureConfig
@@ -102,10 +108,32 @@ func (e *Engine) BindPressure(dir string, m DiskMeter, cfg PressureConfig) error
 	p := &e.pressure
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.bound {
+	if p.bound || p.unmetered {
 		return model.Fail(model.Conflict)
 	}
 	p.bound, p.dir, p.meter, p.cfg = true, dir, m, cfg
+	return nil
+}
+
+// BindPressureUnmetered records that this platform has no disk meter. Admission
+// is not gated by disk usage (the alternative, rejecting every write with a
+// capacity fault that can never clear, would make the platform unusable), the
+// status reports Unmetered and the warning ring carries a "disk_unmetered" entry
+// so an operator can see that the 80/90/95 protection is absent. It is for the
+// absence of a meter only: a bound meter that errors still fails closed.
+func (e *Engine) BindPressureUnmetered(now func() time.Time) error {
+	if now == nil {
+		now = time.Now
+	}
+	p := &e.pressure
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.bound || p.unmetered {
+		return model.Fail(model.Conflict)
+	}
+	p.unmetered = true
+	p.seq++
+	p.warnings = append(p.warnings, PressureWarning{At: model.UnixNano(now().UnixNano()), Code: "disk_unmetered", Seq: p.seq})
 	return nil
 }
 
@@ -118,7 +146,7 @@ func (e *Engine) PressureStatus() PressureStatus {
 }
 
 func (p *pressureState) status() PressureStatus {
-	return PressureStatus{Level: p.level, UsedPercent: p.percent, Warnings: append([]PressureWarning(nil), p.warnings...), DeniedLow: p.deniedLow, DeniedAll: p.deniedAll}
+	return PressureStatus{Level: p.level, UsedPercent: p.percent, Warnings: append([]PressureWarning(nil), p.warnings...), DeniedLow: p.deniedLow, DeniedAll: p.deniedAll, Unmetered: p.unmetered}
 }
 
 // ObservePressure samples the meter now and records a warning on a level change.
@@ -127,6 +155,11 @@ func (e *Engine) ObservePressure(_ context.Context) (PressureStatus, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if !p.bound {
+		if p.unmetered {
+			// Nothing to sample; the state is reported, not an error, so the
+			// retention worker does not record a failing step every pass.
+			return p.status(), nil
+		}
 		return PressureStatus{}, model.Fail(model.Unsupported)
 	}
 	if err := p.sample(); err != nil {
@@ -225,7 +258,8 @@ func capacityFault() *model.Fault {
 }
 
 // admitPressure is the telemetry admission gate for Append and WriteBlob. It
-// never changes or removes stored data. Without a bound meter it admits.
+// never changes or removes stored data. An unmetered engine (BindPressureUnmetered)
+// admits; a bound meter that errors fails closed.
 func (e *Engine) admitPressure(class AdmissionClass, bytes uint64) error {
 	p := &e.pressure
 	p.mu.Lock()

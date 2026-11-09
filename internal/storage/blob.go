@@ -296,9 +296,11 @@ func (e *Engine) WriteBlob(ctx context.Context, scope auth.Scope, m model.BlobMa
 	if e.closed || e.failed {
 		return model.BlobReceipt{}, model.Fail(model.Unavailable)
 	}
-	if err = e.admitPressure(ClassNormal, uint64(m.Size)); err != nil {
-		return model.BlobReceipt{}, err
-	}
+	// Pressure admits only an upload that still has to commit a fragment: the
+	// gate runs at the first missing ordinal, so a retry of a complete upload
+	// verifies its stored fragments and returns the existing receipt at any
+	// pressure level (nothing is written, so there is nothing to refuse).
+	admitted := false
 	slot := model.BlobOwnerSlot(m.Org, m.Project, m.Root)
 	buffer := make([]byte, model.ArtifactFragmentLimit)
 	var out model.BlobReceipt
@@ -340,6 +342,12 @@ func (e *Engine) WriteBlob(ctx context.Context, scope auth.Scope, m model.BlobMa
 			return model.BlobReceipt{}, err
 		}
 		if int(ordinal) >= len(old.Fragments) {
+			if !admitted {
+				if err = e.admitPressure(ClassNormal, uint64(m.Size)); err != nil {
+					return model.BlobReceipt{}, err
+				}
+				admitted = true
+			}
 			if err = e.writeBlobDeletions(ctx, m); err != nil {
 				return model.BlobReceipt{}, err
 			}

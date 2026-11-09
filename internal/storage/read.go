@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	bolt "go.etcd.io/bbolt"
 	"io"
+	"reflect"
 	"regexp"
 	"soundpost/internal/auth"
 	"soundpost/internal/model"
@@ -271,6 +272,7 @@ func (it *rowIterator) Next(ctx context.Context) (Page, error) {
 		var selected Page
 		var current model.ID
 		var decoded Page
+		startPartition, startLast := it.partition, append([]byte(nil), it.last...)
 		if err := e.authorizeRead(ctx, it.scope, it.req.Projects, it.req.Signal); err != nil {
 			it.terminal = err
 			it.closeLocked()
@@ -395,6 +397,21 @@ func (it *rowIterator) Next(ctx context.Context) (Page, error) {
 				it.terminal = err
 				it.closeLocked()
 				return Page{}, err
+			}
+			// The page was filtered with predicates fetched before the decode and
+			// the release fence. A deletion that began since may cover rows already
+			// accumulated, and its entity form may need payload columns this page
+			// did not decode, so the page is discarded and rebuilt from the same
+			// cursor under the new predicates instead of being patched.
+			latest, cerr := e.readDeletions(ctx, it.scope.OrgID(), it.req.Projects)
+			if cerr != nil {
+				it.terminal = cerr
+				it.closeLocked()
+				return Page{}, cerr
+			}
+			if deletionsChanged(delPreds, latest) {
+				it.partition, it.last = startPartition, append(it.last[:0], startLast...)
+				continue
 			}
 			projectPage(&selected, it.req.Projection, it.req.Signal)
 			selected.Partial = it.partial
@@ -571,4 +588,25 @@ func (it *rowIterator) certifyLocked(ctx context.Context, allowEOF bool) error {
 		return err
 	}
 	return check()
+}
+
+// deletionsChanged reports whether the active deletion set differs, which is
+// when a page built under the old set can no longer be released as is.
+func deletionsChanged(before, after []model.DeletePredicate) bool {
+	if len(before) != len(after) {
+		return true
+	}
+	for _, b := range before {
+		found := false
+		for _, a := range after {
+			if a.Operation == b.Operation && reflect.DeepEqual(a, b) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return true
+		}
+	}
+	return false
 }
