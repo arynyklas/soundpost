@@ -50,6 +50,7 @@ type Engine struct {
 	pressure     pressureState
 	tomb         tombstoneState
 	scrub        scrubConfig
+	redact       redactState
 }
 type walEntry struct {
 	Type       string                      `json:"type"`

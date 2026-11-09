@@ -102,11 +102,12 @@ func TestPhysicalCleanupIsRecordedOnlyAfterSnapshotsAndJournalAreCleaned(t *test
 	}
 }
 
-// A "done" receipt must not imply that no copy of the deleted bytes is left on the host when the
-// replication layer still keeps them (its idempotence cache lives in every journal and
-// snapshot). The receipt names those stores once physical cleanup is done, and says nothing of
-// the kind before it is, when the bytes are simply still everywhere.
-func TestDoneReceiptDeclaresTheStoresThatStillHoldDeletedBytes(t *testing.T) {
+// A "done" receipt names a store only while it can still hold a copy of the deleted bytes. The
+// cleanup redacts the replication layer's retry table and journal and replaces the snapshots, so
+// after a completed cleanup the engine measures nothing and the receipt declares nothing; it says
+// nothing of the kind before the cleanup is done, when the bytes are simply still everywhere. What
+// the engine does declare is what the receipt shows.
+func TestDoneReceiptDeclaresOnlyWhatTheEngineMeasuresAsStillHoldingDeletedBytes(t *testing.T) {
 	f := newFx(t, options{})
 	if _, _, err := f.append(5, "requests"); err != nil {
 		t.Fatal(err)
@@ -123,10 +124,14 @@ func TestDoneReceiptDeclaresTheStoresThatStillHoldDeletedBytes(t *testing.T) {
 	if done.Physical != retention.PhysicalDone {
 		t.Fatalf("setup: %+v", done)
 	}
-	if len(done.Residual) == 0 {
-		t.Fatalf("physical done with the raft completed-entry cache still holding the bytes, but the receipt declares nothing: %+v", done)
+	if len(done.Residual) != 0 {
+		t.Fatalf("a completed cleanup left the receipt declaring residual stores: %+v", done)
 	}
-	if got := f.engine.ResidualStores(); len(got) != len(done.Residual) || got[0] != done.Residual[0] {
-		t.Fatalf("receipt %v is not what the engine declares %v", done.Residual, got)
+	if got := f.engine.ResidualStores(); len(got) != 0 {
+		t.Fatalf("the engine still measures copies after a completed cleanup: %v", got)
+	}
+	f.plane.residual = func() []string { return []string{"raft_journal"} }
+	if again := f.poll(receipt.OperationID); len(again.Residual) != 1 || again.Residual[0] != "raft_journal" {
+		t.Fatalf("the receipt does not show what the engine declares: %+v", again)
 	}
 }

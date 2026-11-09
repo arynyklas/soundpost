@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"sort"
 	"soundpost/internal/model"
+	"strings"
 	"testing"
 )
 
@@ -81,18 +82,13 @@ func (x *eraseEnv) cut() {
 	}
 }
 
-// declaredResidual is the one place erased bytes may still be found: the replication layer's
-// idempotence cache, written into every snapshot's envelope.json and the journal's ready.wal.
-func declaredResidual(path string) bool {
-	base := filepath.Base(path)
-	return base == "ready.wal" || base == "envelope.json"
-}
-
-// undeclaredHits are the hits outside the declared residual store: copies erasure must remove.
-func undeclaredHits(hits []string) []string {
+// pinnedCopyHits are the hits in the snapshots' pinned copies of segments and manifests (files/):
+// copies that exist only because a snapshot pins the engine's files, as opposed to the journal and
+// the snapshot envelopes.
+func pinnedCopyHits(hits []string) []string {
 	var out []string
 	for _, h := range hits {
-		if !declaredResidual(h) {
+		if base := filepath.Base(h); base != "ready.wal" && base != "envelope.json" {
 			out = append(out, h)
 		}
 	}
@@ -138,7 +134,7 @@ func TestErasedBytesAreNotRetainedByASupersededSnapshot(t *testing.T) {
 	x.coldCanary(eraseCanary)
 	x.cut() // the routine hourly snapshot, before anyone asked for a deletion
 	routine := x.raftHits(eraseCanary)
-	if len(undeclaredHits(routine)) == 0 {
+	if len(pinnedCopyHits(routine)) == 0 {
 		t.Fatalf("fixture invalid: the pre-deletion snapshot does not hold the canary outside the replication cache (%v)", routine)
 	}
 	pred := x.rangePredicate(0, 10, model.Metric)
@@ -147,7 +143,7 @@ func TestErasedBytesAreNotRetainedByASupersededSnapshot(t *testing.T) {
 		t.Fatalf("erase %+v %v", report, err)
 	}
 	x.cut() // the post-erasure cut is a new snapshot; the routine one is now the retained "previous"
-	if kept := undeclaredHits(x.raftHits(eraseCanary)); len(kept) == 0 {
+	if kept := pinnedCopyHits(x.raftHits(eraseCanary)); len(kept) == 0 {
 		t.Fatal("fixture invalid: the routine snapshot is not retained as the previous one, so there is nothing to drop")
 	}
 	dropped, err := x.e.DropSupersededSnapshots(ctx)
@@ -155,8 +151,8 @@ func TestErasedBytesAreNotRetainedByASupersededSnapshot(t *testing.T) {
 		t.Fatalf("dropped %d (%v)", dropped, err)
 	}
 	for _, c := range []string{eraseCanary, otherCanary} {
-		if after := undeclaredHits(x.raftHits(c)); len(after) != 0 {
-			t.Fatalf("snapshot or journal files outside the declared residual store still hold erased bytes: %v (routine %v)", after, routine)
+		if after := x.raftHits(c); len(after) != 0 {
+			t.Fatalf("a journal or snapshot file still holds erased bytes: %v (routine %v)", after, routine)
 		}
 		if after := x.snapshotStateHits(c); len(after) != 0 {
 			t.Fatalf("a snapshot's machine state still carries erased bytes: %v", after)
@@ -217,8 +213,12 @@ func TestErasureCheckpointMakesSnapshotAndJournalFreshAtAnUnchangedIndex(t *test
 	if err := x.e.CompactJournals(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if len(undeclaredHits(x.raftHits(eraseCanary)))+len(x.snapshotStateHits(eraseCanary)) == 0 {
+	if len(x.raftHits(eraseCanary))+len(x.snapshotStateHits(eraseCanary)) == 0 {
 		t.Fatal("fixture invalid: a cut at an unchanged index should be frozen with the erased bytes")
+	}
+	// The frozen cut is what the engine reports, measured against where the erasure happened.
+	if got := x.e.ResidualStores(); strings.Join(got, ",") != ResidualRaftJournal+","+ResidualRaftSnapshots {
+		t.Fatalf("residual stores while the journal and snapshot are frozen at the erasure index: %v", got)
 	}
 	if err := x.e.CheckpointErasure(ctx, pred); err != nil {
 		t.Fatal(err)
@@ -230,20 +230,16 @@ func TestErasureCheckpointMakesSnapshotAndJournalFreshAtAnUnchangedIndex(t *test
 	if err := x.e.CompactJournals(ctx); err != nil {
 		t.Fatal(err)
 	}
-	after := x.raftHits(eraseCanary)
-	if left := undeclaredHits(after); len(left) != 0 {
-		t.Fatalf("snapshots or journals outside the declared residual store still hold the erased bytes after the checkpoint: %v", left)
+	if left := x.raftHits(eraseCanary); len(left) != 0 {
+		t.Fatalf("a journal or snapshot file still holds the erased bytes after the checkpoint: %v", left)
 	}
 	if left := x.snapshotStateHits(eraseCanary); len(left) != 0 {
 		t.Fatalf("a snapshot's machine state still carries the erased bytes after the checkpoint: %v", left)
 	}
-	// The declaration is measured, not assumed: the engine says the replication layer's cache still
-	// holds the bytes, and it does, in exactly the files that cache is written to.
-	if got := x.e.ResidualStores(); len(got) != 1 || got[0] != ResidualRaftCompletedEntries {
-		t.Fatalf("declared residual stores %v", got)
-	}
-	if len(after) == 0 {
-		t.Fatal("the engine declares the raft completed-entry cache as a residual store but no erased bytes are found in it: the declaration is stale")
+	// Nothing is declared as residual any more, and the declaration is measured: it is empty
+	// because no copy exists, not because it stopped looking.
+	if got := x.e.ResidualStores(); len(got) != 0 {
+		t.Fatalf("residual stores after a complete physical cleanup: %v", got)
 	}
 	if got, want := x.ids(model.Metric), sortedIDs(hit.keepM); !reflect.DeepEqual(got, want) {
 		t.Fatalf("rows %v want %v", got, want)

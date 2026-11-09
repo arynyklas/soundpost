@@ -463,21 +463,6 @@ const (
 	storeControl   = "control.db"
 )
 
-// declaredResidual maps the stores the receipt declares (the replication layer's idempotence
-// cache) to the classes this scan attributes hits to.
-var declaredResidual = map[string][]string{storage.ResidualRaftCompletedEntries: {storeSnapCache, storeJournal}}
-
-func isDeclared(store string, declared []string) bool {
-	for _, name := range declared {
-		for _, s := range declaredResidual[name] {
-			if s == store {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 // storeHits searches every regular file under dir for every canary and returns
 // store -> canary label -> occurrences.
 func storeHits(dir string, canaries map[string]string) (map[string]map[string]int, error) {
@@ -1012,24 +997,19 @@ func (d *deletionSmoke) deleteScenario() error {
 	if err != nil {
 		return err
 	}
+	// The receipt and the engine declare exactly what the scan can still find: nothing. A
+	// declaration that was not empty would be a physical "done" with copies still on the host.
 	declared := app.Storage.ResidualStores()
-	if len(declared) == 0 || fmt.Sprint(done.Residual) != fmt.Sprint(declared) {
-		return d.fail("receipt_does_not_declare_residual_stores")
+	if len(declared) != 0 || len(done.Residual) != 0 {
+		return d.fail("residual_stores_declared_after_physical_done")
 	}
-	foundDeclared := false
 	for store, byLabel := range after {
 		for label, n := range byLabel {
 			if n == 0 || label != "doomed" {
 				continue
 			}
-			if !isDeclared(store, declared) {
-				return d.fail("erased_bytes_survived_in_" + strings.NewReplacer("/", "_", ".", "_", ":", "_").Replace(store))
-			}
-			foundDeclared = true
+			return d.fail("erased_bytes_survived_in_" + strings.NewReplacer("/", "_", ".", "_", ":", "_").Replace(store))
 		}
-	}
-	if !foundDeclared {
-		return d.fail("declared_residual_store_holds_nothing") // the receipt's statement would be false
 	}
 	for _, store := range []string{storeApply, storeSegments} {
 		if !has(after, store, "sibling") {

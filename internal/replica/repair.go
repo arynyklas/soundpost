@@ -8,12 +8,14 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"hash/crc32"
 	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	raft "go.etcd.io/raft/v3"
 	pb "go.etcd.io/raft/v3/raftpb"
@@ -34,6 +36,11 @@ const (
 )
 
 const journalCompactTemp = "ready.wal.compact"
+
+// DefaultPinTTL is the lease of a journal pin. A backup that holds a pin for longer fails closed
+// when the lease lapses (its Entries return ErrStale); a pin whose holder died is dropped by
+// truncation or by the next open once it lapses, and sooner by DropPin.
+const DefaultPinTTL = 24 * time.Hour
 
 // repair removes everything an interrupted creation or installation can leave
 // behind and re-selects the newest verified directory when the CURRENT pointer
@@ -340,11 +347,14 @@ type ReplayEntry struct {
 // After available until released, even across journal truncation: truncation
 // archives the pinned range durably before it discards anything.
 type JournalPin struct {
-	g     *Group
-	id    model.ID
-	after uint64
-	path  string
-	next  uint64 // first physical index not yet in the archive
+	g       *Group
+	id      model.ID
+	after   uint64
+	path    string
+	next    uint64 // first physical index not yet in the archive
+	owner   model.ID
+	created int64 // lease, Unix nanoseconds
+	expires int64
 }
 
 type pinRecord struct {
@@ -355,6 +365,78 @@ type pinHeader struct {
 	ID    model.ID `json:"id"`
 	After uint64   `json:"after,string"`
 	Next  uint64   `json:"next,string"`
+	// Owner is the Group instance that created the pin: a process lifetime, not a node identity.
+	// A pin whose Owner is not this instance was left by a process that is gone.
+	Owner model.ID `json:"owner"`
+	// Created and Expires are the lease, in Unix nanoseconds.
+	Created int64 `json:"created,string"`
+	Expires int64 `json:"expires,string"`
+}
+
+// PinInfo describes one durable journal pin.
+type PinInfo struct {
+	ID      model.ID
+	After   uint64
+	Created time.Time
+	Expires time.Time
+	// Orphaned: created by an earlier instance of this group, a process that is gone. Nothing in
+	// this process holds the pin; it only archives until it expires or is dropped.
+	Orphaned bool
+}
+
+// Pins lists the durable journal pins of this group after dropping every pin whose lease lapsed.
+// A backup driver reaps the pins of a backup that died with DropPin; Orphaned says which pins
+// no live holder in this process can still be using.
+func (g *Group) Pins() ([]PinInfo, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.failed || g.closed {
+		return nil, ErrUnavailable
+	}
+	if err := g.reapExpiredPinsLocked(); err != nil {
+		return nil, err
+	}
+	out := make([]PinInfo, 0, len(g.pins))
+	for _, p := range g.pins {
+		out = append(out, PinInfo{ID: p.id, After: p.after, Created: time.Unix(0, p.created), Expires: time.Unix(0, p.expires), Orphaned: p.owner != g.owner})
+	}
+	sort.Slice(out, func(i, j int) bool { return bytes.Compare(out[i].ID[:], out[j].ID[:]) < 0 })
+	return out, nil
+}
+
+// DropPin removes a pin and its archive, whoever holds it; a missing pin is not an error, so a
+// reaper can retry. A backup that still holds the pin fails closed: its Entries return ErrStale.
+func (g *Group) DropPin(id model.ID) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.failed || g.closed {
+		return ErrUnavailable
+	}
+	p, ok := g.pins[id]
+	if !ok {
+		return nil
+	}
+	if err := durablefs.Remove(p.path); err != nil {
+		return err
+	}
+	delete(g.pins, id)
+	return nil
+}
+
+// reapExpiredPinsLocked drops every pin whose lease lapsed: nothing archives into a pin that
+// can no longer be used, and a backup that holds one fails closed.
+func (g *Group) reapExpiredPinsLocked() error {
+	now := g.now().UnixNano()
+	for id, p := range g.pins {
+		if now < p.expires {
+			continue
+		}
+		if err := durablefs.Remove(p.path); err != nil {
+			return err
+		}
+		delete(g.pins, id)
+	}
+	return nil
 }
 
 // After is the processed application index this pin protects evidence beyond.
@@ -375,9 +457,10 @@ func (g *Group) PinJournal(after uint64) (*JournalPin, error) {
 	}
 	commit := g.raw.BasicStatus().HardState.GetCommit()
 	first, _ := g.memory.FirstIndex()
-	p := &JournalPin{g: g, id: model.NewID(), after: after, next: first}
+	created := g.now().UnixNano()
+	p := &JournalPin{g: g, id: model.NewID(), after: after, next: first, owner: g.owner, created: created, expires: created + int64(g.pinTTL)}
 	p.path = filepath.Join(g.pinDir(), p.id.String()+".pin")
-	if err := p.appendLocked(nil, &pinHeader{ID: p.id, After: after, Next: first}); err != nil {
+	if err := p.appendLocked(nil, &pinHeader{ID: p.id, After: after, Next: first, Owner: p.owner, Created: p.created, Expires: p.expires}); err != nil {
 		return nil, err
 	}
 	if err := g.archiveRangeLocked(p, commit); err != nil {
@@ -462,6 +545,9 @@ func (g *Group) archiveRangeLocked(p *JournalPin, through uint64) error {
 }
 
 func (g *Group) archivePinsLocked(limit uint64) (int, error) {
+	if err := g.reapExpiredPinsLocked(); err != nil {
+		return 0, err
+	}
 	if len(g.pins) == 0 {
 		return 0, nil
 	}
@@ -517,6 +603,12 @@ func (p *JournalPin) Entries(through uint64) ([]ReplayEntry, error) {
 		return nil, ErrUnavailable
 	}
 	if _, ok := g.pins[p.id]; !ok {
+		return nil, ErrStale
+	}
+	if g.now().UnixNano() >= p.expires {
+		if err := g.reapExpiredPinsLocked(); err != nil {
+			return nil, err
+		}
 		return nil, ErrStale
 	}
 	archived, err := readPinArchive(p.path)
@@ -613,13 +705,20 @@ func readPinArchive(path string) (pinArchive, error) {
 		}
 	}
 	if !headerSeen {
-		return pinArchive{}, ErrCorrupt
+		return pinArchive{}, errPinNoHeader
 	}
 	return out, nil
 }
 
-// loadPins re-registers the pins an earlier process left, so a restart cannot
-// silently let truncation discard evidence a backup still needs.
+// errPinNoHeader: the archive holds no complete header record. The header is the first durable
+// write of PinJournal, which registers the pin only after it, so such a file never was a pin.
+var errPinNoHeader = fmt.Errorf("pin archive has no durable header: %w", ErrCorrupt)
+
+// loadPins re-registers the pins an earlier process left, so a restart cannot silently let
+// truncation discard evidence a backup still needs, and validates every one of them: a file whose
+// header never became durable was never a pin, and a pin without a lease or whose lease lapsed
+// belongs to a backup that is gone; both are dropped. A pin that registered but does not read
+// back (corruption in the middle of its archive, a header naming another pin) is refused.
 func (g *Group) loadPins() error {
 	entries, err := os.ReadDir(g.pinDir())
 	if os.IsNotExist(err) {
@@ -630,23 +729,46 @@ func (g *Group) loadPins() error {
 	}
 	g.pins = map[model.ID]*JournalPin{}
 	first, _ := g.memory.FirstIndex()
+	now := g.now().UnixNano()
 	for _, e := range entries {
+		path := filepath.Join(g.pinDir(), e.Name())
+		if strings.HasSuffix(e.Name(), ".tmp") { // an interrupted archive rewrite: the .pin is intact
+			if err = durablefs.Remove(path); err != nil {
+				return err
+			}
+			continue
+		}
 		if !strings.HasSuffix(e.Name(), ".pin") {
 			continue
 		}
-		path := filepath.Join(g.pinDir(), e.Name())
 		archive, err := readPinArchive(path)
+		if errors.Is(err, errPinNoHeader) {
+			if err = durablefs.Remove(path); err != nil {
+				return err
+			}
+			continue
+		}
 		if err != nil {
 			return err
 		}
-		next := archive.header.Next
+		h := archive.header
+		if e.Name() != h.ID.String()+".pin" {
+			return ErrCorrupt
+		}
+		if h.Owner == (model.ID{}) || h.Expires == 0 || now >= h.Expires {
+			if err = durablefs.Remove(path); err != nil {
+				return err
+			}
+			continue
+		}
+		next := h.Next
 		if archive.lastIdx >= next {
 			next = archive.lastIdx + 1
 		}
 		if next < first {
 			next = first
 		}
-		g.pins[archive.header.ID] = &JournalPin{g: g, id: archive.header.ID, after: archive.header.After, path: path, next: next}
+		g.pins[h.ID] = &JournalPin{g: g, id: h.ID, after: h.After, path: path, next: next, owner: h.Owner, created: h.Created, expires: h.Expires}
 	}
 	return nil
 }

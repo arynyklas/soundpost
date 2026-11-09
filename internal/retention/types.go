@@ -43,13 +43,13 @@ const (
 // are denied but the all-group fence is not complete: it is not success.
 //
 // Physical "done" means every erasure step this installation can perform has run: records,
-// artifact roots, derived rows, segment files, the free pages of apply.db, the snapshots and the
-// journal rebuilt from them. Residual names the local stores that STILL hold copies of the
-// deleted bytes after that, because the replication layer keeps the original committed command
-// payloads (its idempotence cache) inside every journal and snapshot and offers no redaction.
-// Reads stay denied by the tombstone; those copies are not removed by this operation, and no
-// lag bound is claimed for them (see docs/privacy/retention.md). It is reported only once
-// Physical is "done"; before that the bytes are simply still present everywhere.
+// artifact roots, derived rows, segment files, the free pages of apply.db, the replication
+// layer's retry table, journal and pin archives (redacted), and the snapshots and journal
+// rebuilt from them. Residual names the local stores the engine MEASURES as still able to hold a
+// copy of the deleted bytes (a snapshot or journal head cut before the erasure that has not yet
+// been replaced, or a redaction still owed); after a completed cleanup it is empty and omitted
+// (see docs/privacy/retention.md for what it does not cover). It is reported only once Physical
+// is "done"; before that the bytes are simply still present everywhere.
 type DeleteReceipt struct {
 	OperationID      model.ID       `json:"operation_id"`
 	Mode             string         `json:"mode"`

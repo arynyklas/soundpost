@@ -175,6 +175,10 @@ func (e *Engine) CreateSnapshots(ctx context.Context) (EngineSnapshot, error) {
 	if e.repl == nil {
 		return EngineSnapshot{}, model.Fail(model.Unavailable)
 	}
+	// A cut copies the retry table: finish any redaction the erase pass owes it first.
+	if err := e.redactReplica(ctx); err != nil {
+		return EngineSnapshot{}, err
+	}
 	out := EngineSnapshot{Identity: e.identity, Slots: make([]replica.Snapshot, 0, 64)}
 	coverage := make([]model.Cursor, 0, 64)
 	for slot, group := range e.repl.groups {

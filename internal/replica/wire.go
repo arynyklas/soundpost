@@ -17,11 +17,12 @@ func (e *Entry) UnmarshalJSON(raw []byte) error {
 		ReservationID *model.ID           `json:"reservation_id,omitempty"`
 		Application   model.Uint64        `json:"application_index"`
 		CommitSet     *CommitSetWatermark `json:"commit_set,omitempty"`
+		Original      *model.Hash         `json:"original,omitempty"`
 	}
 	if model.StrictJSON(raw, &wire) != nil {
 		return ErrInvalid
 	}
-	*e = Entry{ID: wire.ID, Kind: wire.Kind, Payload: wire.Payload, ReservationID: wire.ReservationID, ApplicationIndex: uint64(wire.Application), CommitSet: wire.CommitSet}
+	*e = Entry{ID: wire.ID, Kind: wire.Kind, Payload: wire.Payload, ReservationID: wire.ReservationID, ApplicationIndex: uint64(wire.Application), CommitSet: wire.CommitSet, Original: wire.Original}
 	return nil
 }
 func (c *CommittedEntry) UnmarshalJSON(raw []byte) error {

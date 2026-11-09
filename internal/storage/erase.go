@@ -145,6 +145,12 @@ func (e *Engine) erase(ctx context.Context, sel eraseSelector, guard EraseGuard)
 			report.Blobs++
 		}
 	}
+	// The stored commands are redacted; the replication layer keeps its own copy of every
+	// committed command (retry table, journal, pin archives) and is told to forget the same
+	// bytes before the segment rewrite, the scrub and the snapshot cuts that follow.
+	if err = e.redactReplica(ctx); err != nil {
+		return report, err
+	}
 	if report.Batches > 0 || report.Blobs > 0 || e.hasStaleSegments() {
 		if report.SegmentsRewritten, err = e.rewriteStaleSegments(ctx); err != nil {
 			return report, err
@@ -269,6 +275,9 @@ func (e *Engine) eraseBatch(job eraseBatchJob, ops []model.ID) (records, pages u
 	if err != nil {
 		return 0, 0, err
 	}
+	if records > 0 {
+		e.markRedact(job.slot) // after the commit: the reconcile that clears the mark must see it
+	}
 	return records, pages, nil
 }
 
@@ -334,6 +343,9 @@ func (e *Engine) eraseBatchTx(tx *bolt.Tx, job eraseBatchJob, ops []model.ID) (r
 		return 0, 0, err
 	}
 	if err = e.markScrubPendingTx(tx); err != nil {
+		return 0, 0, err
+	}
+	if err = stampRedactFloorTx(tx, job.slot); err != nil {
 		return 0, 0, err
 	}
 	if err = e.trip("erase_redacted"); err != nil {
@@ -511,6 +523,9 @@ func (e *Engine) eraseBlob(job eraseBlobJob, ops []model.ID) (bool, error) {
 		erased, err = e.eraseBlobTx(tx, job, ops)
 		return err
 	})
+	if erased && err == nil {
+		e.markRedact(model.BlobOwnerSlot(job.receipt.Manifest.Org, job.receipt.Manifest.Project, job.receipt.Manifest.Root))
+	}
 	return erased && err == nil, err
 }
 func (e *Engine) eraseBlobTx(tx *bolt.Tx, job eraseBlobJob, ops []model.ID) (bool, error) {
@@ -561,6 +576,9 @@ func (e *Engine) eraseBlobTx(tx *bolt.Tx, job eraseBlobJob, ops []model.ID) (boo
 		return false, err
 	}
 	if err := e.markScrubPendingTx(tx); err != nil {
+		return false, err
+	}
+	if err := stampRedactFloorTx(tx, slot); err != nil {
 		return false, err
 	}
 	if err := e.trip("erase_redacted"); err != nil {

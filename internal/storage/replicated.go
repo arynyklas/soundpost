@@ -378,6 +378,16 @@ func (e *Engine) EnableReplication(c replica.Config, seed *ReplicationSeed, auth
 		out = append(out, group)
 	}
 	e.repl = r
+	// Every slot is reconciled once at open: an erasure whose redaction a crash cut short, and a
+	// node whose retry table came from a cut older than the commands it has redacted, converge
+	// before any snapshot is cut or proposal accepted.
+	for slot := range e.redact.dirty {
+		e.redact.dirty[slot].Store(true)
+	}
+	if err := e.redactReplica(context.Background()); err != nil {
+		e.repl = nil
+		return fail(err)
+	}
 	return out, nil
 }
 func (e *Engine) replicaBeforeWrite(ctx context.Context, slot uint16) error {
@@ -674,6 +684,9 @@ func (m *slotMachine) Restore(raw []byte, physical uint64) error {
 		if previous < e.indexes[m.slot] {
 			e.snapshotGapLocked(m.slot)
 		}
+		// The installed retry table comes from the sender's cut, which may predate commands this
+		// node already redacted: the next reconciliation repeats the redaction.
+		e.markRedact(m.slot)
 	}
 	return err
 }

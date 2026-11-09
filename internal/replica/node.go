@@ -43,6 +43,31 @@ type Entry struct {
 	ReservationID    *model.ID           `json:"reservation_id,omitempty"`
 	ApplicationIndex uint64              `json:"application_index,string"`
 	CommitSet        *CommitSetWatermark `json:"commit_set,omitempty"`
+	// Original is set only on a command whose payload was redacted after it was applied
+	// (RedactCompleted): the SHA-256 of the payload the command was proposed with. Payload then
+	// holds the machine's replacement, and a retry of the original command is recognized by this
+	// digest instead of by the bytes that no longer exist in this group.
+	Original *model.Hash `json:"original,omitempty"`
+}
+
+// proposed is the digest of the payload this command was proposed with.
+func (e Entry) proposed() model.Hash {
+	if e.Original != nil {
+		return *e.Original
+	}
+	return model.HashCanonical(e.Payload)
+}
+
+// sameProposal reports whether e is a retry of old: the same kind and the same proposed
+// payload, whether or not either side has since been redacted.
+func sameProposal(old, e Entry) bool {
+	if old.Kind != e.Kind {
+		return false
+	}
+	if old.Original == nil && e.Original == nil {
+		return equalPayload(old.Payload, e.Payload)
+	}
+	return old.proposed() == e.proposed()
 }
 
 // ID is an application command identity retained across leader relocation.
@@ -89,6 +114,10 @@ type Config struct {
 	SeedTerm     uint64
 	Validate     func(context.Context, Entry) error
 	Fault        func(string) error
+	// PinTTL is the lease of a journal pin (default DefaultPinTTL); Now is the clock it is judged
+	// by (default time.Now).
+	PinTTL time.Duration
+	Now    func() time.Time
 }
 type proposalResult struct {
 	entry CommittedEntry
@@ -138,6 +167,9 @@ type Group struct {
 	snaps          *SnapshotStore
 	pins           map[model.ID]*JournalPin
 	sendSnap       *pb.Snapshot // snapshot for members added after the stored one; never persisted
+	owner          model.ID     // this instance of the group: stamps the pins it creates
+	pinTTL         time.Duration
+	now            func() time.Time
 }
 
 func Open(c Config) (*Group, error) {
@@ -165,6 +197,9 @@ func Open(c Config) (*Group, error) {
 	if err := os.Remove(filepath.Join(c.Directory, journalCompactTemp)); err != nil && !os.IsNotExist(err) {
 		return nil, err
 	}
+	if err := os.Remove(filepath.Join(c.Directory, journalRedactTemp)); err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
 	snaps, err := OpenSnapshotStore(c.Directory, c.Group, c.Fault)
 	if err != nil {
 		return nil, err
@@ -181,7 +216,13 @@ func Open(c Config) (*Group, error) {
 	if err != nil {
 		return nil, err
 	}
-	g := &Group{dir: c.Directory, fault: c.Fault, snaps: snaps, id: c.ID, group: c.Group, disk: disk, memory: memory, machine: c.Machine, transport: c.Transport, members: disk.members, completed: map[model.ID]CommittedEntry{}, known: map[model.ID]map[uint64]struct{}{}, pending: map[model.ID][]chan proposalResult{}, reads: map[string]*readRequest{}, changed: make(chan struct{}), stop: make(chan struct{})}
+	g := &Group{dir: c.Directory, fault: c.Fault, snaps: snaps, id: c.ID, group: c.Group, disk: disk, memory: memory, machine: c.Machine, transport: c.Transport, members: disk.members, completed: map[model.ID]CommittedEntry{}, known: map[model.ID]map[uint64]struct{}{}, pending: map[model.ID][]chan proposalResult{}, reads: map[string]*readRequest{}, changed: make(chan struct{}), stop: make(chan struct{}), owner: model.NewID(), pinTTL: c.PinTTL, now: c.Now}
+	if g.pinTTL <= 0 {
+		g.pinTTL = DefaultPinTTL
+	}
+	if g.now == nil {
+		g.now = time.Now
+	}
 	if err = g.loadPins(); err != nil {
 		disk.Close()
 		return nil, err
@@ -368,7 +409,7 @@ func (g *Group) propose(ctx context.Context, e Entry, allowForward bool) (Commit
 		return CommittedEntry{}, ErrUnavailable
 	}
 	if old, ok := g.completed[e.ID]; ok {
-		if old.Entry.Kind != e.Kind || !equalPayload(old.Entry.Payload, e.Payload) {
+		if !sameProposal(old.Entry, e) {
 			g.mu.Unlock()
 			return CommittedEntry{}, ErrConflict
 		}
@@ -379,7 +420,7 @@ func (g *Group) propose(ctx context.Context, e Entry, allowForward bool) (Commit
 		return old, nil
 	}
 	if old, ok := g.logCommands[e.ID]; ok && old.Index > g.applied {
-		if old.Entry.Kind != e.Kind || !equalPayload(old.Entry.Payload, e.Payload) {
+		if !sameProposal(old.Entry, e) {
 			g.mu.Unlock()
 			return CommittedEntry{}, ErrConflict
 		}

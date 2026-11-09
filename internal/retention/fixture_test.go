@@ -44,11 +44,12 @@ type fx struct {
 // the physical pass.
 type plane struct {
 	*storage.Engine
-	down    map[uint16]bool
-	checks  func(storage.EraseCandidate) // observed by the expiry planner
-	expired func(context.Context, model.UnixNano, storage.EraseGuard) (storage.EraseReport, error)
-	erased  func(context.Context, []model.DeletePredicate, storage.EraseGuard) (storage.EraseReport, error)
-	trace   func(step string) error // called first by every post-erasure maintenance step; an error fails the step
+	down     map[uint16]bool
+	checks   func(storage.EraseCandidate) // observed by the expiry planner
+	expired  func(context.Context, model.UnixNano, storage.EraseGuard) (storage.EraseReport, error)
+	erased   func(context.Context, []model.DeletePredicate, storage.EraseGuard) (storage.EraseReport, error)
+	trace    func(step string) error // called first by every post-erasure maintenance step; an error fails the step
+	residual func() []string         // overrides what the engine declares as still holding deleted bytes
 }
 
 func (p *plane) step(name string) error {
@@ -56,6 +57,12 @@ func (p *plane) step(name string) error {
 		return p.trace(name)
 	}
 	return nil
+}
+func (p *plane) ResidualStores() []string {
+	if p.residual != nil {
+		return p.residual()
+	}
+	return p.Engine.ResidualStores()
 }
 func (p *plane) CheckpointErasure(ctx context.Context, pr model.DeletePredicate) error {
 	if err := p.step("checkpoint"); err != nil {

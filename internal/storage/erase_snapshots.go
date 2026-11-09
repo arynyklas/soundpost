@@ -4,12 +4,8 @@ package storage
 
 import (
 	"context"
-	"os"
-	"path/filepath"
-	"strings"
 
 	bolt "go.etcd.io/bbolt"
-	"soundpost/internal/durablefs"
 	"soundpost/internal/model"
 )
 
@@ -34,35 +30,10 @@ func (e *Engine) DropSupersededSnapshots(ctx context.Context) (uint64, error) {
 		if err := ctx.Err(); err != nil {
 			return removed, model.Fail(model.Cancelled)
 		}
-		current, ok := group.Snapshots().Current()
-		if !ok {
-			continue // nothing selected, nothing is superseded
-		}
-		selected := current.Dir()
-		root, keep := filepath.Dir(selected), filepath.Base(selected)
-		if !strings.HasPrefix(keep, "snap-") {
-			return removed, model.Fail(model.Corrupt)
-		}
-		entries, err := os.ReadDir(root)
+		n, err := group.Snapshots().DropSuperseded()
+		removed += uint64(n)
 		if err != nil {
-			return removed, err
-		}
-		dropped := false
-		for _, entry := range entries {
-			name := entry.Name()
-			if !entry.IsDir() || !strings.HasPrefix(name, "snap-") || name >= keep {
-				continue
-			}
-			if err = os.RemoveAll(filepath.Join(root, name)); err != nil {
-				return removed, err
-			}
-			removed++
-			dropped = true
-		}
-		if dropped {
-			if err = durablefs.SyncDir(root); err != nil {
-				return removed, err
-			}
+			return removed, snapshotFault(err)
 		}
 	}
 	return removed, nil
@@ -127,23 +98,4 @@ func (e *Engine) checkpointSlot(ctx context.Context, slot uint16, p model.Delete
 	}
 	cursor := model.Cursor{Group: e.group(slot), Index: model.Uint64(e.indexes[slot] + 1)}
 	return e.commit(slot, uint64(cursor.Index), walEntry{Type: "delete_barrier", DeleteBarrier: &model.DeleteBarrier{Predicate: p, Cursor: cursor}})
-}
-
-// ResidualRaftCompletedEntries names the replication layer's idempotence cache: every group
-// keeps each committed command, original payload included, so a retried proposal answers with
-// its original outcome, and writes that cache into every snapshot (envelope.json) and into the
-// journal it is compacted onto (ready.wal). Erasure rewrites the stored commands and the
-// machine state a snapshot carries, but the cache belongs to the replication layer and has no
-// redaction.
-const ResidualRaftCompletedEntries = "raft_completed_entries"
-
-// ResidualStores names the local stores that still hold copies of erased telemetry after every
-// erasure step in this package has run, because nothing in this package can reach them. It is a
-// declaration, held to account by tests and by the deletion smoke, which search those files for
-// erased bytes and require them to be found exactly where this says and nowhere else.
-func (e *Engine) ResidualStores() []string {
-	if e.repl == nil {
-		return nil
-	}
-	return []string{ResidualRaftCompletedEntries}
 }
