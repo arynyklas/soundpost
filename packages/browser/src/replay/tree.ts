@@ -1,0 +1,120 @@
+// Copyright 2026 Aryn Yklas
+// SPDX-License-Identifier: Apache-2.0
+import type {DomAccessors, ReplayNode} from "./types.ts";
+import {MASK, MAX_DEPTH, MAX_NODES, isOpaqueWidget, isSkipped, presentationFor, quantize, tagFor} from "./policy.ts";
+
+type Proto = {readonly prototype: object};
+export interface DomGlobals {
+ readonly Node: Proto; readonly Element: Proto; readonly HTMLElement?: Proto; readonly MouseEvent?: Proto; readonly Event?: Proto; readonly MutationRecord?: Proto;
+ readonly DOMRectReadOnly?: Proto; readonly CSSStyleDeclaration?: Proto; readonly getComputedStyle?: (element: object) => object;
+}
+type Read = (self: object) => unknown;
+function getter(proto: object | undefined, name: string): Read | undefined {
+ const fn = proto === undefined ? undefined : Object.getOwnPropertyDescriptor(proto, name)?.get;
+ return fn === undefined ? undefined : (self: object) => Reflect.apply(fn, self, []);
+}
+function required(proto: object | undefined, name: string): Read {
+ const read = getter(proto, name);
+ if (read === undefined) throw Error("replay_dom_accessor_missing");
+ return read;
+}
+const asObject = (value: unknown): object | null => (typeof value === "object" && value !== null ? value : null);
+const asNumber = (value: unknown): number => (typeof value === "number" ? value : 0);
+
+/**
+ * Captures platform getters once so own-property or per-instance getter traps planted by page script
+ * never execute during traversal. Every result is type-checked at the edge.
+ */
+export function captureDomAccessors(g: DomGlobals): DomAccessors {
+ const nodeP = g.Node.prototype, elementP = g.Element.prototype, htmlP = g.HTMLElement?.prototype ?? elementP;
+ const nodeType = required(nodeP, "nodeType"), first = required(nodeP, "firstChild"), next = required(nodeP, "nextSibling"), parent = required(nodeP, "parentNode");
+ const localName = required(elementP, "localName"), shadow = required(elementP, "shadowRoot"), editable = getter(htmlP, "isContentEditable");
+ const boundingRect = Object.getOwnPropertyDescriptor(elementP, "getBoundingClientRect")?.value as ((this: object) => unknown) | undefined;
+ const rx = getter(g.DOMRectReadOnly?.prototype, "x"), ry = getter(g.DOMRectReadOnly?.prototype, "y"), rw = getter(g.DOMRectReadOnly?.prototype, "width"), rh = getter(g.DOMRectReadOnly?.prototype, "height");
+ const getPropertyValue = g.CSSStyleDeclaration === undefined ? undefined : (Object.getOwnPropertyDescriptor(g.CSSStyleDeclaration.prototype, "getPropertyValue")?.value as ((this: object, name: string) => unknown) | undefined);
+ const computed = g.getComputedStyle;
+ const target = required(g.MutationRecord?.prototype, "target"), eventTarget = required(g.Event?.prototype, "target");
+ const clientX = required(g.MouseEvent?.prototype, "clientX"), clientY = required(g.MouseEvent?.prototype, "clientY");
+ return {
+  nodeType: node => asNumber(nodeType(node)),
+  firstChild: node => asObject(first(node)),
+  nextSibling: node => asObject(next(node)),
+  parentNode: node => asObject(parent(node)),
+  localName: element => { const name = localName(element); return typeof name === "string" ? name.toLowerCase() : ""; },
+  openShadowRoot: element => asObject(shadow(element)),
+  // The HTMLElement getter throws "Illegal invocation" on SVG/MathML elements, which cannot be contenteditable.
+  editable: element => { try { return editable?.(element) === true; } catch { return false; } },
+  rect: element => {
+   const rect = boundingRect === undefined || rx === undefined || ry === undefined || rw === undefined || rh === undefined ? null : asObject(Reflect.apply(boundingRect, element, []));
+   return rect === null ? [0, 0, 0, 0] : [asNumber(rx!(rect)), asNumber(ry!(rect)), asNumber(rw!(rect)), asNumber(rh!(rect))];
+  },
+  presentation: element => {
+   const style = computed === undefined || getPropertyValue === undefined ? null : asObject(computed(element));
+   if (style === null || getPropertyValue === undefined) return "other";
+   const display = Reflect.apply(getPropertyValue, style, ["display"]), visibility = Reflect.apply(getPropertyValue, style, ["visibility"]);
+   return presentationFor(typeof display === "string" ? display : "", typeof visibility === "string" ? visibility : "");
+  },
+  mutationTarget: record => asObject(target(record)),
+  eventTarget: event => asObject(eventTarget(event)),
+  clientX: event => asNumber(clientX(event)),
+  clientY: event => asNumber(clientY(event)),
+ };
+}
+
+export interface WalkState {
+ readonly nodes: ReplayNode[];
+ readonly ids: WeakMap<object, number>;
+ readonly allocate: () => number;
+ readonly onOpenShadow?: (root: object) => void;
+ overflow: boolean;
+ /** Number of siblings skipped because of the node cap or depth limit. */
+ truncated: number;
+ steps: number;
+}
+export function newWalkState(ids: WeakMap<object, number>, allocate: () => number, onOpenShadow?: (root: object) => void): WalkState {
+ return {nodes: [], ids, allocate, ...(onOpenShadow === undefined ? {} : {onOpenShadow}), overflow: false, truncated: 0, steps: 0};
+}
+
+function emit(state: WalkState, source: object, node: Omit<ReplayNode, "id">, id: number | undefined): void {
+ const assigned = id ?? state.allocate();
+ state.ids.set(source, assigned);
+ state.nodes.push({id: String(assigned), ...node});
+}
+const ZERO = {x: 0, y: 0, w: 0, h: 0} as const;
+
+/**
+ * Directly builds owned nodes from the live DOM. Text and input values are never read: a text node
+ * or input is a constant mask. Subtrees that cannot be masked structurally become one opaque node.
+ */
+export function walk(dom: DomAccessors, source: object, parentId: string, state: WalkState, depth = 0, forcedId?: number): void {
+ if (state.overflow || ++state.steps > MAX_NODES * 4) { state.overflow = true; return; }
+ const type = dom.nodeType(source);
+ if (type === 9 || type === 11) { walkChildren(dom, source, parentId, state, depth); return; }
+ if (type !== 1 && type !== 3) return;
+ if (state.nodes.length >= MAX_NODES - 1) {
+  // Last slot: one opaque placeholder stands for everything not retained; nothing further is walked.
+  state.overflow = true;
+  emit(state, source, {parent: parentId, tag: "masked", class: "masked", text: "", rect: ZERO, pres: "other"}, forcedId);
+  return;
+ }
+ if (type === 3) { emit(state, source, {parent: parentId, tag: "masked", class: "", text: MASK, rect: ZERO, pres: "other"}, forcedId); return; }
+ const name = dom.localName(source);
+ if (isSkipped(name)) return;
+ const [x, y, w, h] = dom.rect(source), rect = {x: quantize(x), y: quantize(y), w: quantize(w), h: quantize(h)}, pres = dom.presentation(source);
+ if (depth >= MAX_DEPTH || isOpaqueWidget(name) || dom.editable(source) || dom.closedShadow?.(source) === true) {
+  emit(state, source, {parent: parentId, tag: "masked", class: "masked", text: "", rect, pres}, forcedId);
+  return;
+ }
+ emit(state, source, {parent: parentId, tag: tagFor(name), class: "", text: name === "input" ? MASK : "", rect, pres}, forcedId);
+ const id = String(state.ids.get(source));
+ if (name === "input") return;
+ const root = dom.openShadowRoot(source);
+ if (root !== null) { state.onOpenShadow?.(root); walkChildren(dom, root, id, state, depth + 1); }
+ walkChildren(dom, source, id, state, depth + 1);
+}
+function walkChildren(dom: DomAccessors, container: object, parentId: string, state: WalkState, depth: number): void {
+ for (let child = dom.firstChild(container); child !== null; child = dom.nextSibling(child)) {
+  if (state.overflow) { state.truncated++; return; }
+  walk(dom, child, parentId, state, depth);
+ }
+}
