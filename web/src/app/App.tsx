@@ -1,10 +1,13 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
 import * as React from 'react';
-import { bindSession, capabilities, isAbort, stateOfFault } from '../api/client';
-import type { Id, InvestigationKind, LoadState, VisibleSource } from '../api/types';
+import { bindSession } from '../api/client';
+import type { Id, InvestigationKind, LoadState } from '../api/types';
+import { IncidentPage } from '../incidents/IncidentPage';
+import { QueuePage } from '../queue/QueuePage';
+import { ProjectSettings } from '../settings/ProjectSettings';
 import { SessionContext } from '../auth/ElevationDialog';
 import { ServicePage } from '../services/ServicePage';
-import { MAX_PROJECTS, SECTIONS, decodeHash, encodeHash, formatNs, isId, scopeKey, useInvestigation, validTimezone, windowEndingAt, type SectionId, type ViewContext } from './context';
+import { MAX_PROJECTS, SECTIONS, decodeHash, encodeHash, formatNs, isId, scopeKey, useInvestigation, validTimezone, windowEndingAt, type IncidentRef, type SectionId, type ViewContext } from './context';
 import { SectionList, StatusPanel } from './StatusPanel';
 
 const WINDOWS: readonly { minutes: number; label: string }[] = [{ minutes: 15, label: 'Last 15 minutes' }, { minutes: 60, label: 'Last hour' }, { minutes: 360, label: 'Last 6 hours' }, { minutes: 1440, label: 'Last 24 hours' }];
@@ -67,37 +70,20 @@ function Explore(): React.JSX.Element {
  return <section className="panel" aria-labelledby="view-heading"><h2 id="view-heading">Explore</h2><StatusPanel state={state} /></section>;
 }
 
-function Settings(props: { context: ViewContext }): React.JSX.Element {
- const c = props.context;
- const [held, setHeld] = React.useState<{ key: string; byProject: Record<string, LoadState<VisibleSource[]>> }>({ key: '', byProject: {} });
- const key = `${scopeKey(c)}|${c.generation}`;
- React.useEffect(() => {
-  const ctl = new AbortController();
-  setHeld({ key, byProject: {} });
-  for (const project of c.projects) {
-   capabilities(c.org, project, ctl.signal).then(
-    (r) => { if (!ctl.signal.aborted) setHeld((h) => h.key === key ? { key, byProject: { ...h.byProject, [project]: r.sources.length ? { kind: 'ready', data: r.sources } : { kind: 'empty', data: [] } } } : h); },
-    (e: unknown) => { if (!ctl.signal.aborted && !isAbort(e)) setHeld((h) => h.key === key ? { key, byProject: { ...h.byProject, [project]: stateOfFault(e) } } : h); },
-   );
-  }
-  return () => ctl.abort();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
- }, [key]);
+function IncidentEntry(props: { context: ViewContext; incident: IncidentRef | null; open: (ref: IncidentRef) => void }): React.JSX.Element {
+ const [project, setProject] = React.useState(props.incident?.project ?? props.context.projects[0] ?? '');
+ const [value, setValue] = React.useState(props.incident?.id ?? '');
+ const [error, setError] = React.useState('');
  return (
-  <section className="panel" aria-labelledby="view-heading">
-   <h2 id="view-heading">Project settings</h2>
-   <p>Source capabilities this account may read. A project with no readable source is empty, not unhealthy.</p>
-   {c.projects.map((project) => {
-    const state: LoadState<VisibleSource[]> = held.key === key ? held.byProject[project] ?? { kind: 'loading' } : { kind: 'loading' };
-    return (
-     <div key={project} data-project={project}>
-      <h3>Project <code>{project}</code></h3>
-      <StatusPanel state={state} />
-      {'data' in state && state.data.length > 0 && <ul>{state.data.map((s) => <li key={s.id}><code>{s.id}</code> — class {s.class}, kinds {s.kinds.join(', ')}{s.replay ? ', replay' : ''}</li>)}</ul>}
-     </div>
-    );
-   })}
-  </section>
+  <div>
+   <form aria-label="Open an incident" onSubmit={(e) => { e.preventDefault(); if (!isId(value.trim())) return setError('Incident ID must be 32 lowercase hexadecimal characters.'); setError(''); props.open({ project, id: value.trim() }); }}>
+    <label>Project <select value={project} onChange={(e) => setProject(e.target.value)}>{props.context.projects.map((p) => <option key={p} value={p}>{p}</option>)}</select></label>
+    <label>Incident ID <input value={value} onChange={(e) => setValue(e.target.value)} autoComplete="off" spellCheck={false} /></label>
+    <button type="submit">Open incident</button>
+    {error && <p role="alert" className="error">{error}</p>}
+   </form>
+   {props.incident ? <IncidentPage key={`${props.incident.project}:${props.incident.id}`} id={props.incident.id} project={props.incident.project} context={props.context} /> : <p role="status">Open an incident by its ID, or pick one from the queue.</p>}
+  </div>
  );
 }
 
@@ -132,8 +118,8 @@ export function App(): React.JSX.Element {
   window.addEventListener('hashchange', onHash);
   return () => window.removeEventListener('hashchange', onHash);
  }, []);
- const go = (context: ViewContext, section: SectionId, service = ''): void => {
-  const hash = encodeHash(context, section, service);
+ const go = (context: ViewContext, section: SectionId, service = '', incident: IncidentRef | null = null): void => {
+  const hash = encodeHash(context, section, service, incident);
   if (hash === window.location.hash) { generation.current += 1; setNav(decodeHash(hash, generation.current)); } else window.location.hash = hash;
  };
  const context = nav.context;
@@ -153,11 +139,13 @@ export function App(): React.JSX.Element {
        {SECTIONS.map((s) => <li key={s.id}><a href={encodeHash(context, s.id)} aria-current={s.id === nav.section ? 'page' : undefined}>{s.label}</a></li>)}
       </ul>
      </nav>
-     <button onClick={() => go(context, nav.section, nav.service)}>Refresh</button>
+     <button onClick={() => go(context, nav.section, nav.service, nav.incident)}>Refresh</button>
      {section.id === 'explore' && <Explore />}
-     {section.id === 'settings' && <Settings context={context} />}
+     {section.id === 'settings' && <ProjectSettings context={context} />}
+     {section.id === 'queue' && <QueuePage context={context} />}
+     {section.id === 'incidents' && <IncidentEntry context={context} incident={nav.incident} open={(ref) => go(context, 'incidents', '', ref)} />}
      {section.id === 'services' && <ServiceEntry key={nav.service} context={context} service={nav.service} open={(id) => go(context, 'services', id)} />}
-     {section.kind !== null && section.id !== 'services' && <KindView context={context} kind={section.kind} label={section.label} />}
+     {section.kind !== null && section.id !== 'services' && section.id !== 'queue' && section.id !== 'incidents' && <KindView context={context} kind={section.kind} label={section.label} />}
     </>
    )}
   </div>

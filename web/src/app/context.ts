@@ -61,22 +61,27 @@ export function scopeKey(c: ViewContext): string {
 
 /** The URL carries only stable IDs, nanosecond strings, the timezone name and the
  * section: never telemetry text, queries or credentials. */
-export function encodeHash(c: ViewContext, section: SectionId, service = ''): string {
+export function encodeHash(c: ViewContext, section: SectionId, service = '', incident: IncidentRef | null = null): string {
  const params = new URLSearchParams({ org: c.org, projects: c.projects.join(','), start: c.start, end: c.end, tz: c.timezone, view: section });
  if (service) params.set('service', service);
+ if (incident) params.set('incident', `${incident.project}:${incident.id}`);
  return `#${params}`;
 }
-export interface Navigation { context: ViewContext | null; section: SectionId; service: Id | '' }
+/** One incident inside the selected projects: the project is part of its identity. */
+export interface IncidentRef { project: Id; id: Id }
+export interface Navigation { context: ViewContext | null; section: SectionId; service: Id | ''; incident: IncidentRef | null }
 export function decodeHash(hash: string, generation: number): Navigation {
  const params = new URLSearchParams(hash.startsWith('#') ? hash.slice(1) : hash);
  const section = SECTIONS.find((s) => s.id === params.get('view'))?.id ?? 'queue';
  const service = params.get('service') ?? '';
- const none: Navigation = { context: null, section, service: '' };
+ const none: Navigation = { context: null, section, service: '', incident: null };
  const org = params.get('org') ?? '', start = params.get('start') ?? '', end = params.get('end') ?? '', tz = params.get('tz') ?? '';
  const projects = (params.get('projects') ?? '').split(',').filter((p) => p !== '');
  if (!isId(org) || projects.length === 0 || projects.length > MAX_PROJECTS || !projects.every(isId) || new Set(projects).size !== projects.length) return none;
  if (!validWindow(start, end) || !validTimezone(tz) || (service !== '' && !isId(service))) return none;
- return { context: { org, projects, environment: '', start, end, timezone: tz, generation }, section, service };
+ const [iproject = '', iid = ''] = (params.get('incident') ?? '').split(':');
+ const incident = isId(iproject) && isId(iid) && projects.includes(iproject) ? { project: iproject, id: iid } : null;
+ return { context: { org, projects, environment: '', start, end, timezone: tz, generation }, section, service, incident };
 }
 
 export function requestFor(c: ViewContext, kind: InvestigationKind, target?: Id): InvestigationRequest {

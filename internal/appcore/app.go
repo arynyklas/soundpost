@@ -40,6 +40,7 @@ type App struct {
 	Live         *query.LiveService
 	Investigator *httpapi.Investigator
 	Incidents    *incidents.Service
+	Actions      *httpapi.Actions
 	replication  *replicatedApp
 }
 
@@ -195,7 +196,11 @@ func openWith(dir string, options *replicationOptions, meter storage.DiskMeter, 
 	if e != nil {
 		return fail(e)
 	}
-	out := &App{Control: c, Auth: a, Storage: engine, Ingest: i, Releases: r, Artifacts: artifactService, Cache: cache, Exports: exportService, Retention: ret, Query: queryEngine, Live: liveService, Investigator: investigator, Incidents: incidentService}
+	actions, e := httpapi.NewActions(incidentService, c, c, ret, releaseActionClock{})
+	if e != nil {
+		return fail(e)
+	}
+	out := &App{Control: c, Auth: a, Storage: engine, Ingest: i, Releases: r, Artifacts: artifactService, Cache: cache, Exports: exportService, Retention: ret, Query: queryEngine, Live: liveService, Investigator: investigator, Incidents: incidentService, Actions: actions}
 	startupTimeout := 20 * time.Second
 	if options != nil {
 		startupTimeout = 60 * time.Second
@@ -280,6 +285,7 @@ func (a *App) Register(mux *http.ServeMux) {
 	httpapi.RegisterQueryRoutes(mux, a.Auth, a.Query)
 	httpapi.RegisterLiveRoutes(mux, a.Auth, a.Live)
 	httpapi.RegisterInvestigateRoutes(mux, a.Auth, a.Investigator)
+	httpapi.RegisterActionRoutes(mux, a.Auth, a.Actions)
 	a.RegisterArtifactRoutes(mux)
 }
 

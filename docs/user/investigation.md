@@ -32,10 +32,21 @@ Every view shows exactly one of these, spelled in words (never colour alone):
 
 - **Services**: the readable evidence sources of the selected projects, the metric names observed in the window (with freshness and watermarks), and separate sections for health, dependencies and releases. Those three are **Not available**; a service identity cannot be confirmed because services are not registered yet.
 - **Trace**: a link is shown only when your scope can resolve the trace; the trace content is **Not available**.
-- **Queue, incidents, issues, jobs, releases**: **Not available** (their services are not part of this installation yet). **Replays and profiles** also need separate grants that do not exist yet, so they are **Not available** without probing for the target.
+- **Queue and incidents**: every row is a real committed incident, visible as soon as it is committed (not held for a digest). The alert condition (what the source reports), the issue workflow and the incident response (what people decided) are separate badges and timelines. **Issue workflow, delivery attempts, the digest, urgency and unread changes** are **Not available** until their services exist. A missing denominator is shown as **Rate unknown** with the observed count and freshness, never as 0%. Issues, jobs and releases are **Not available**. **Replays and profiles** also need separate grants that do not exist yet, so they are **Not available** without probing for the target.
 - **Explore**: **Not available**.
-- **Project settings**: the source capabilities your account may read, per project. A project without a readable source is Empty.
+- **Project settings**: the source capabilities your account may read, per project (a project without a readable source is Empty), and the progress of a restriction, revocation or deletion operation you look up by ID. Notification destinations, retention, source policy, SSO and organization/team administration are **Not available**; no destination secret is ever shown.
 
 A restricted raw source appears only to its named readers; other readers of the same project never see it, its counts or its discovery results.
 
 Values from telemetry are shown as plain text; they are never interpreted as HTML.
+
+## Acting on an incident
+
+Assign, acknowledge, resolve, link evidence, report impact, snooze, end a snooze, start maintenance and end maintenance need organization administration of the incident's organization. The actor is always your signed-in account; no field of the request can name another actor, origin or organization.
+
+- Every action names the revision you were looking at. If someone else committed first, the server applies nothing, tells you the current revision and does not retry. Your typed reason stays in the form until you reload the incident and submit again. Nothing is shown as committed before the server acknowledges it.
+- If the connection fails after an action was sent, the outcome is **unknown**. **Resend the same request** is safe: the server returns the original result instead of applying the action twice.
+- Acknowledging pauses reminders only; the source stays firing and is still shown as firing. A worse impact is still eligible to notify unless an active maintenance window suppresses it.
+- Resolving while the source is firing needs a reason and leaves a persistent banner: the incident was resolved by a person, the source was not recovered.
+- Snooze and maintenance are separate, expiring, reasoned windows. Neither hides the source, the timeline or ingestion problems.
+- Operation progress: **fencing** is pending (reads are denied but the fence is not complete) and is never success; **held** and **failed** are not success; a logically complete deletion is not physical erasure, and the physical and backup deadlines are the real ones the server holds.
