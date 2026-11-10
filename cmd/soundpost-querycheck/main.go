@@ -22,6 +22,12 @@ func run() error {
 	if len(os.Args) < 2 {
 		return fmt.Errorf("expected inventory or oracle")
 	}
+	if os.Args[1] == "release" {
+		return runRelease(os.Args[2:])
+	}
+	if os.Args[1] == "smoke" {
+		return runSmoke(os.Args[2:])
+	}
 	if os.Args[1] == "compare" {
 		return runCompare(os.Args[2:])
 	}

@@ -1,0 +1,51 @@
+{
+  "schema": "soundpost-persisted-path/1",
+  "copyright": "Copyright 2026 Aryn Yklas",
+  "license": "Apache-2.0",
+  "description": "Authored persisted-path scenario for the owned query engines over real C03 admission (HTTPS ingest) and the real C05 storage: float, stale-marker, ordinary NaN, signed-zero and infinite samples, exact duplicates re-sent in later batches and a conflicting duplicate, queried through the owned C06 routes while the data is only in the hot tier, after a flush, with several segments, after a compaction, after a whole-node restart and after a restart following compaction. Every expectation is authored from the fixture (IEEE-754 bit patterns, left-open range windows, stale-marker removal) and never observed from an upstream engine; the answers must be identical at every stage. Native histogram, log and distributed-shard layouts are not exercised by this file.",
+  "runner": {
+    "command": "soundpost-querycheck smoke",
+    "storage": "real",
+    "control": "real",
+    "http": "own",
+    "modes": ["single"],
+    "stages": ["hot", "flush", "multi-segment", "compaction", "restart", "restart-after-compaction"],
+    "profiles": ["promql-prometheus-3.1.0", "promql-prometheus-3.13.5"]
+  },
+  "fixture": {
+    "projects": ["project-a", "project-b"],
+    "sources": [
+      {"id": "source-a", "project": "project-a", "kinds": ["metric"], "labels": {"job": ["api", "worker"]}},
+      {"id": "source-b", "project": "project-b", "kinds": ["metric"], "labels": {"job": ["api"]}}
+    ],
+    "principals": [
+      {"id": "reader", "grants": {"project-a": ["telemetry.read"], "project-b": ["telemetry.read"]}}
+    ],
+    "metric_points": [
+      {"source": "source-a", "name": "m", "labels": {"job": "api"}, "time_ns": "10000000000", "value_bits": "3ff0000000000000"},
+      {"source": "source-a", "name": "m", "labels": {"job": "api"}, "time_ns": "20000000000", "value_bits": "4000000000000000"},
+      {"source": "source-a", "name": "m", "labels": {"job": "api"}, "time_ns": "30000000000", "value_bits": "7ff0000000000002"},
+      {"source": "source-a", "name": "m", "labels": {"job": "api"}, "time_ns": "40000000000", "value_bits": "4010000000000000"},
+      {"source": "source-a", "name": "m", "labels": {"job": "api"}, "time_ns": "50000000000", "value_bits": "7ff8000000000001"},
+      {"source": "source-a", "name": "inf_m", "labels": {"job": "api"}, "time_ns": "10000000000", "value_bits": "7ff0000000000000"},
+      {"source": "source-a", "name": "negzero", "labels": {"job": "api"}, "time_ns": "10000000000", "value_bits": "8000000000000000"},
+      {"source": "source-b", "name": "m", "labels": {"job": "api"}, "time_ns": "10000000000", "value_bits": "4059000000000000"}
+    ]
+  },
+  "resends": [
+    {"source": "source-a", "name": "m", "labels": {"job": "api"}, "time_ns": "40000000000", "value_bits": "4010000000000000"},
+    {"source": "source-a", "name": "m", "labels": {"job": "api"}, "time_ns": "30000000000", "value_bits": "7ff0000000000002"},
+    {"source": "source-b", "name": "m", "labels": {"job": "api"}, "time_ns": "10000000000", "value_bits": "4059000000000000"}
+  ],
+  "conflict": {"source": "source-a", "name": "m", "labels": {"job": "api"}, "time_ns": "20000000000", "value_bits": "3ff8000000000000"},
+  "queries": [
+    {"id": "instant-before-stale", "expression": "m", "time_ns": "25000000000", "expect": {"project-a": ["4000000000000000"], "project-b": ["4059000000000000"]}},
+    {"id": "stale-marker-removes-the-series", "expression": "m", "time_ns": "35000000000", "expect": {"project-a": [], "project-b": ["4059000000000000"]}},
+    {"id": "after-stale-recovers", "expression": "m", "time_ns": "45000000000", "expect": {"project-a": ["4010000000000000"], "project-b": ["4059000000000000"]}},
+    {"id": "ordinary-nan-keeps-its-bits", "expression": "m", "time_ns": "55000000000", "expect": {"project-a": ["7ff8000000000001"], "project-b": ["4059000000000000"]}},
+    {"id": "left-open-window-drops-stale-and-collapses-duplicates", "expression": "count_over_time(m[1m])", "time_ns": "45000000000", "expect": {"project-a": ["4008000000000000"], "project-b": ["3ff0000000000000"]}},
+    {"id": "sum-never-crosses-projects", "expression": "sum(m)", "time_ns": "45000000000", "expect": {"project-a": ["4010000000000000"], "project-b": ["4059000000000000"]}},
+    {"id": "positive-infinity", "expression": "inf_m", "time_ns": "15000000000", "expect": {"project-a": ["7ff0000000000000"], "project-b": []}},
+    {"id": "signed-zero", "expression": "negzero", "time_ns": "15000000000", "expect": {"project-a": ["8000000000000000"], "project-b": []}}
+  ]
+}

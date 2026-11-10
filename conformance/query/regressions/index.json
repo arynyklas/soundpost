@@ -1,0 +1,5 @@
+{
+  "schema": "soundpost-query-regressions/1",
+  "description": "Minimized genuine mismatches observed by the release gate, with source seed and profile. A case file is created only when a real mismatch is minimized; none has been observed, so this index is empty.",
+  "regressions": []
+}

@@ -1,0 +1,71 @@
+{
+  "schema": "soundpost-profile-cross-products/1",
+  "copyright": "Copyright 2026 Aryn Yklas",
+  "license": "Apache-2.0",
+  "description": "Authored profile cross-product scenario through the owned C06 route over real admission and storage. Each query is run under each exact PromQL profile with the declared enabled gates (resolved to a registered feature set), and every profile carries its OWN expectation: a function added in 3.13.5 is a language error under 3.1.0 and a value under 3.13.5, while an unchanged selector is the same value under both. The cross product is run hot, after a flush, after a compaction and after a restart. Expectations are authored from the fixture and the version-difference ledger, never observed from an upstream engine. LogQL and native histograms are not exercised by this file.",
+  "runner": {
+    "command": "soundpost-querycheck smoke",
+    "storage": "real",
+    "control": "real",
+    "http": "own",
+    "modes": ["single"],
+    "stages": ["hot", "flush", "compaction", "restart"]
+  },
+  "fixture": {
+    "projects": ["project-a"],
+    "sources": [
+      {"id": "source-a", "project": "project-a", "kinds": ["metric"], "labels": {"job": ["api"]}}
+    ],
+    "principals": [
+      {"id": "reader", "grants": {"project-a": ["telemetry.read"]}}
+    ],
+    "metric_points": [
+      {"source": "source-a", "name": "m", "labels": {"job": "api"}, "time_ns": "10000000000", "value_bits": "3ff0000000000000"},
+      {"source": "source-a", "name": "m", "labels": {"job": "api"}, "time_ns": "20000000000", "value_bits": "4000000000000000"},
+      {"source": "source-a", "name": "m", "labels": {"job": "api"}, "time_ns": "30000000000", "value_bits": "7ff0000000000002"},
+      {"source": "source-a", "name": "m", "labels": {"job": "api"}, "time_ns": "40000000000", "value_bits": "4010000000000000"}
+    ]
+  },
+  "cross_products": [
+    {
+      "id": "selector-is-the-same-under-both-pins",
+      "expression": "m",
+      "time_ns": "25000000000",
+      "enabled": [],
+      "expect": {
+        "promql-prometheus-3.1.0": {"status": 200, "project-a": ["4000000000000000"]},
+        "promql-prometheus-3.13.5": {"status": 200, "project-a": ["4000000000000000"]}
+      }
+    },
+    {
+      "id": "stale-marker-removes-the-series-under-both-pins",
+      "expression": "m",
+      "time_ns": "35000000000",
+      "enabled": [],
+      "expect": {
+        "promql-prometheus-3.1.0": {"status": 200, "project-a": []},
+        "promql-prometheus-3.13.5": {"status": 200, "project-a": []}
+      }
+    },
+    {
+      "id": "first-over-time-exists-only-from-3.13.5",
+      "expression": "first_over_time(m[1m])",
+      "time_ns": "45000000000",
+      "enabled": ["promql-experimental-functions"],
+      "expect": {
+        "promql-prometheus-3.1.0": {"status": 400, "code": "language"},
+        "promql-prometheus-3.13.5": {"status": 200, "project-a": ["3ff0000000000000"]}
+      }
+    },
+    {
+      "id": "first-over-time-needs-its-gate-in-3.13.5",
+      "expression": "first_over_time(m[1m])",
+      "time_ns": "45000000000",
+      "enabled": [],
+      "expect": {
+        "promql-prometheus-3.1.0": {"status": 400, "code": "language"},
+        "promql-prometheus-3.13.5": {"status": 400, "code": "language"}
+      }
+    }
+  ]
+}

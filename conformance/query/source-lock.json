@@ -267,7 +267,12 @@
     "cases/input-normalization.json": "46fee92f622a54e91d600cf0b5d8bf0ce5e24fba42165f5d1181709d7b020701",
     "cases/owned-query-smoke.json": "ce7a5e3383d9192b49f7b3fbb59ecc4945fe94ab58004fffc3ae815cd8dd5953",
     "cases/live-smoke.json": "a49f648dbf04836ca2802c53c13990182f0172cbe373415e499735ed675a3f30",
-    "cases/rule-smoke.json": "6a5752b49831df6ab6584287a577c9eb25c2002068342bfdfa44944bdd70ad2b"
+    "cases/rule-smoke.json": "6a5752b49831df6ab6584287a577c9eb25c2002068342bfdfa44944bdd70ad2b",
+    "generation.json": "24271c2557490ba659282bebf94325a357be1284be3a861eb8859fc66189bef7",
+    "release-policy.json": "0125ad8206c9370f08415028fa557fc5c63c84adcbf0ec2a5ae01ec82d4fabd3",
+    "regressions/index.json": "f4e101bc07a065e60b9d5a5fac076060897f2e846596bac2ef2bc04d2234080c",
+    "cases/persisted-path.json": "5f4e328433a187c7e94b2c6f00848c6fb63643e816d6dd25cffd9839e8d3d0e3",
+    "cases/profile-cross-products.json": "21d54d107fbe4a3ca532c9d515472482d368d07f9632fdf4362696337546db22"
   },
   "profile_files": {
     "profiles/query/logql-loki-3.5.2.json": "cc57e2e121eee6db798ff192a35f44216ffa241b0130a816a672e004f934e48c",
