@@ -69,6 +69,7 @@ type Evaluator struct {
 	fencer   Fencer
 	evidence EvidenceChecker
 	producer *ProducerIdentity
+	resolver ProducerResolver
 }
 
 // Option configures an Evaluator.
@@ -87,6 +88,16 @@ func WithEvidence(c EvidenceChecker) Option { return func(e *Evaluator) { e.evid
 // to evaluate recording rules.
 func WithProducer(p ProducerIdentity) Option {
 	return func(e *Evaluator) { copied := p; e.producer = &copied }
+}
+
+// ProducerResolver resolves the recording producer identity currently
+// registered, so a source-policy revision change is picked up without a restart.
+type ProducerResolver func(ctx context.Context) (ProducerIdentity, error)
+
+// WithProducerResolver resolves the producer identity at every evaluation
+// instead of pinning one at construction.
+func WithProducerResolver(r ProducerResolver) Option {
+	return func(e *Evaluator) { e.resolver = r }
 }
 
 // NewEvaluator builds an evaluator over the C06 engine and committed state.
@@ -144,11 +155,14 @@ func (e *Evaluator) Evaluate(ctx context.Context, scope auth.Scope, rule Rule, a
 	if err := rule.Validate(); err != nil {
 		return Evaluation{}, err
 	}
+	if err := checkWorkerScope(scope, rule); err != nil {
+		return Evaluation{}, err
+	}
 	interval := model.UnixNano(rule.Interval)
 	if at < 0 || at%interval != 0 || lease.Group == (model.ID{}) || lease.Term == 0 {
 		return Evaluation{}, model.Fail(model.Invalid)
 	}
-	if rule.Kind == KindRecording && e.producer == nil {
+	if rule.Kind == KindRecording && e.producer == nil && e.resolver == nil {
 		return Evaluation{}, model.Fail(model.Invalid)
 	}
 	if e.fencer != nil {
@@ -207,8 +221,11 @@ func (e *Evaluator) Evaluate(ctx context.Context, scope auth.Scope, rule Rule, a
 		Recording: []RecordingIntent{}, Conditions: []ConditionIntent{},
 	}
 	if rule.Kind == KindRecording {
-		producer := *e.producer
-		ev.Producer = &producer
+		identity, err := e.producerIdentity(ctx)
+		if err != nil {
+			return Evaluation{}, err
+		}
+		ev.Producer = &identity
 	}
 
 	result, qerr := e.engine.Execute(ctx, scope, query.Request{
@@ -261,7 +278,52 @@ func (e *Evaluator) Evaluate(ctx context.Context, scope auth.Scope, rule Rule, a
 			ev.Recording = append(ev.Recording, RecordingIntent{ID: batch.ID, Slot: batch.RouteSlot, Batch: batch, Inputs: append([]model.Cursor{}, ev.Cursors...)})
 		}
 	}
+	if reason := overflow(ev); reason != "" {
+		// More than one control command may carry. Committing nothing would wedge the
+		// rule silently and committing a truncated set would drop firing conditions
+		// unseen, so the evaluation is committed as an error with a closed reason:
+		// health shows it, no phase or frontier moves, the effects are dropped, and
+		// the rule stays alive for the next grid point.
+		ev.Outcome, ev.Reason, ev.RecoveryBlocked = OutcomeError, reason, false
+		ev.Cursors, ev.Members, ev.Recorded = []model.Cursor{}, []model.Labels{}, []Recorded{}
+		ev.Recording, ev.Conditions = []RecordingIntent{}, []ConditionIntent{}
+		if transition, err = Reduce(current, ev, rule); err != nil {
+			return Evaluation{}, err
+		}
+		ev.State = transition.State
+		if overflow(ev) != "" {
+			return Evaluation{}, model.Fail(model.TooLarge) // the committed state alone no longer fits
+		}
+	}
 	return ev, nil
+}
+
+// producerIdentity is the recording producer an evaluation is built for: the one
+// the resolver names now, else the one pinned at construction.
+func (e *Evaluator) producerIdentity(ctx context.Context) (ProducerIdentity, error) {
+	if e.resolver != nil {
+		identity, err := e.resolver(ctx)
+		if err != nil {
+			return ProducerIdentity{}, err
+		}
+		return identity, nil
+	}
+	return *e.producer, nil
+}
+
+// checkWorkerScope asserts the pairing of a scope with the rule it evaluates: a
+// rule runs as the project-scoped worker of its own project, so a scope that
+// names any other project (or several) is refused before anything is read. A
+// scope that names no project is the unscoped form used where no principal
+// exists (the pure evaluator); every principal-backed scope the scheduler passes
+// is stricter, see (*Scheduler).RunOnce. The organization is the scope's only:
+// a Rule carries no organization, and control keys every commit by the scope's.
+func checkWorkerScope(scope auth.Scope, rule Rule) error {
+	projects := scope.ProjectIDs()
+	if len(projects) > 0 && (len(projects) != 1 || projects[0] != rule.Project) {
+		return model.Fail(model.Invalid)
+	}
+	return nil
 }
 
 // checkEvidence asks the evidence source about the window the decision depends

@@ -76,10 +76,10 @@ func PlanGrid(rule Rule, state State, now model.UnixNano, maxBackfill int) Plan 
 	newest := now - now%interval
 	first := newest
 	if state.Version == rule.Version && state.Applied != nil {
+		if newest-state.Applied.At < interval {
+			return Plan{}
+		}
 		first = state.Applied.At + interval
-	}
-	if first > newest {
-		return Plan{}
 	}
 	count := uint64((newest-first)/interval) + 1
 	var plan Plan
@@ -88,10 +88,15 @@ func PlanGrid(rule Rule, state State, now model.UnixNano, maxBackfill int) Plan 
 	}
 	keep := uint64(maxBackfill) + 1
 	if count > keep {
-		first += model.UnixNano(count-keep) * interval
+		first = newest - model.UnixNano(keep-1)*interval
 	}
-	for at := first; at <= newest; at += interval {
+	// Stepping stops at the newest point without ever computing the point after
+	// it, which would wrap past the end of the int64 time axis.
+	for at := first; ; at += interval {
 		plan.Due = append(plan.Due, at)
+		if newest-at < interval {
+			break
+		}
 	}
 	return plan
 }
@@ -110,6 +115,9 @@ const maxCommitAttempts = 3
 // RunOnce performs one scheduling pass for rule under lease.
 func (s *Scheduler) RunOnce(ctx context.Context, readScope, commitScope auth.Scope, rule Rule, lease replica.FenceToken) (RunReport, error) {
 	if err := rule.Validate(); err != nil {
+		return RunReport{}, err
+	}
+	if err := checkRunScopes(readScope, commitScope, rule); err != nil {
 		return RunReport{}, err
 	}
 	state, err := s.store.Read(ctx, readScope, rule.ID)
@@ -155,4 +163,24 @@ func (s *Scheduler) commitAt(ctx context.Context, readScope, commitScope auth.Sc
 		}
 	}
 	return last
+}
+
+// checkRunScopes asserts that a pass runs as the project-scoped worker of the
+// rule's own project: both scopes name exactly rule.Project, in one
+// organization. Anything else is refused before any read or commit, so the
+// committed facts of another project's rule of the same ID can never be folded
+// into this rule's evaluation.
+func checkRunScopes(readScope, commitScope auth.Scope, rule Rule) error {
+	read, err := workerProject(readScope)
+	if err != nil {
+		return err
+	}
+	commit, err := workerProject(commitScope)
+	if err != nil {
+		return err
+	}
+	if read != rule.Project || commit != rule.Project || readScope.OrgID() != commitScope.OrgID() {
+		return model.Fail(model.Invalid)
+	}
+	return nil
 }

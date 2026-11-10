@@ -3,6 +3,7 @@
 package control
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -44,6 +45,12 @@ type RuleCommand struct {
 	Missed     *RuleMissedApply     `json:"missed,omitempty"`
 	Replay     *RuleReplayApply     `json:"replay,omitempty"`
 	Output     *RuleOutputApply     `json:"output,omitempty"`
+	Retire     *RuleRetireApply     `json:"retire,omitempty"`
+}
+
+// RuleRetireApply is the garbage collection of one retired project's rule facts.
+type RuleRetireApply struct {
+	Project model.ID `json:"project"`
 }
 
 // The operations of a RuleCommand.
@@ -52,6 +59,7 @@ const (
 	RuleOpMissed     = "missed_interval"
 	RuleOpReplay     = "operator_replay"
 	RuleOpOutput     = "output"
+	RuleOpRetire     = "retire_project"
 )
 
 // How an evaluation relates to its scheduled time. Only live and an explicitly
@@ -81,9 +89,14 @@ const (
 )
 
 const (
-	maxRuleEvaluationBytes = 1 << 20
-	maxRuleOutputBytes     = 1 << 20
-	maxRuleOutputs         = 256
+	// MaxRuleEvaluationBytes, MaxRuleOutputBytes and MaxRuleOutputs bound one
+	// evaluation command: the payload committed with it, the payload of each
+	// output and the number of outputs. The rules package evaluates against the
+	// same bounds, so an evaluation that would exceed them is reported rather
+	// than rejected.
+	MaxRuleEvaluationBytes = 1 << 20
+	MaxRuleOutputBytes     = 1 << 20
+	MaxRuleOutputs         = 256
 	maxRuleCursors         = 256
 	maxRuleRecent          = 16
 	maxRuleMissed          = 16
@@ -335,13 +348,21 @@ func applyRuleEvaluation(scope auth.Scope, st *State, cmd Command) (Effect, erro
 		return Effect{}, err
 	}
 	arms := 0
-	for _, present := range []bool{c.Evaluation != nil, c.Missed != nil, c.Replay != nil, c.Output != nil} {
+	for _, present := range []bool{c.Evaluation != nil, c.Missed != nil, c.Replay != nil, c.Output != nil, c.Retire != nil} {
 		if present {
 			arms++
 		}
 	}
 	if arms != 1 {
 		return Effect{}, model.Fail(model.Invalid)
+	}
+	if c.Operation == RuleOpRetire {
+		// The collection of a retired project's rule facts is an administrator's
+		// act on facts nobody can lease any more: it carries no lease.
+		if c.Retire == nil || c.Lease != nil {
+			return Effect{}, model.Fail(model.Invalid)
+		}
+		return applyRuleRetire(scope, st, *c.Retire)
 	}
 	var project, rule model.ID
 	switch {
@@ -361,7 +382,11 @@ func applyRuleEvaluation(scope auth.Scope, st *State, cmd Command) (Effect, erro
 		return Effect{}, model.Fail(model.Invalid)
 	}
 	if err := releaseScope(scope, st, org, project); err != nil {
-		return Effect{}, err
+		// A retired project accepts exactly one thing: the suppression of an
+		// output that was never released, by an organization administrator.
+		if c.Operation != RuleOpOutput || c.Output.To != RulePhaseSuppress || retiredProjectAdmin(scope, *st, org, project) != nil {
+			return Effect{}, err
+		}
 	}
 	key := ruleKey(org, project, rule)
 	book, exists, err := loadRuleBook(st, key)
@@ -406,8 +431,8 @@ func applyRuleEvaluation(scope auth.Scope, st *State, cmd Command) (Effect, erro
 }
 
 func applyRuleEvaluationArm(st *State, book *RuleBook, e RuleEvaluationApply) (Effect, error) {
-	if e.Version == 0 || e.At < 0 || e.Digest == (model.Hash{}) || len(e.Payload) < 2 || len(e.Payload) > maxRuleEvaluationBytes || !json.Valid(e.Payload) ||
-		model.Hash(sha256.Sum256(e.Payload)) != e.Digest || !validRuleCursors(e.Cursors) || len(e.Outputs) > maxRuleOutputs {
+	if e.Version == 0 || e.At < 0 || e.Digest == (model.Hash{}) || len(e.Payload) < 2 || len(e.Payload) > MaxRuleEvaluationBytes || !json.Valid(e.Payload) ||
+		model.Hash(sha256.Sum256(e.Payload)) != e.Digest || !validRuleCursors(e.Cursors) || len(e.Outputs) > MaxRuleOutputs {
 		return Effect{}, model.Fail(model.Invalid)
 	}
 	switch e.Mode {
@@ -422,7 +447,7 @@ func applyRuleEvaluationArm(st *State, book *RuleBook, e RuleEvaluationApply) (E
 	}
 	ids := make(map[model.ID]bool, len(e.Outputs))
 	for _, o := range e.Outputs {
-		if o.ID == (model.ID{}) || ids[o.ID] || len(o.Payload) < 2 || len(o.Payload) > maxRuleOutputBytes || !json.Valid(o.Payload) || !validRuleCursors(o.Inputs) {
+		if o.ID == (model.ID{}) || ids[o.ID] || len(o.Payload) < 2 || len(o.Payload) > MaxRuleOutputBytes || !json.Valid(o.Payload) || !validRuleCursors(o.Inputs) {
 			return Effect{}, model.Fail(model.Invalid)
 		}
 		ids[o.ID] = true
@@ -664,7 +689,7 @@ func applyRuleOutputArm(st *State, book *RuleBook, u RuleOutputApply) (Effect, e
 		case out.Kind != RuleOutputRecording:
 			return true
 		default:
-			return out.Receipt != nil && *out.Receipt == *u.Receipt && out.Hash != nil && *out.Hash == *u.Hash
+			return out.Receipt != nil && *out.Receipt == *u.Receipt && out.Hash != nil && *out.Hash == *u.Hash && out.Reason == reason
 		}
 	}
 	switch {
@@ -691,14 +716,113 @@ func applyRuleOutputArm(st *State, book *RuleBook, u RuleOutputApply) (Effect, e
 	switch {
 	case u.To == RulePhaseSuppress:
 		out.Reason = reason
+		if _, retired := st.RetiredProjects[out.Org.String()+":"+out.Project.String()]; retired {
+			out.Payload = nil // nothing of a retired project's telemetry is kept
+		}
 	case out.Kind == RuleOutputRecording:
 		receipt, hash := *u.Receipt, *u.Hash
 		out.Receipt, out.Hash = &receipt, &hash
+		if reason != "" {
+			out.Reason = reason
+		}
 	}
 	if err = storeRuleOutput(st, out); err != nil {
 		return Effect{}, err
 	}
 	return Effect{AffectedIDs: []model.ID{out.ID}, Phase: u.To}, nil
+}
+
+// retiredProjectAdmin admits an organization administrator's unrestricted scope
+// to the rule facts of a project that has been retired (deleted).
+func retiredProjectAdmin(scope auth.Scope, st State, org, project model.ID) error {
+	if scope.Permission() != auth.OrgAdmin || scope.OrgID() != org || org == (model.ID{}) || project == (model.ID{}) || len(scope.ProjectIDs()) > 0 {
+		return model.Fail(model.NotFound)
+	}
+	authority, ok := st.Orgs[org.String()]
+	if !ok || !authority.Admins[scope.PrincipalID().String()] {
+		return model.Fail(model.NotFound)
+	}
+	if _, retired := st.RetiredProjects[org.String()+":"+project.String()]; !retired {
+		return model.Fail(model.NotFound)
+	}
+	return nil
+}
+
+// ruleRetiredReason is the reason an output left unreleased by a retirement is
+// suppressed with.
+const ruleRetiredReason = "retired_project"
+
+// applyRuleRetire collects the rule facts of a retired project, deterministically
+// and idempotently: every unreleased output is suppressed, and every retained
+// payload (output payloads and the evaluation payloads of every rule book) is
+// dropped. Identities, digests, receipts and phases stay, as evidence; they carry
+// no telemetry.
+func applyRuleRetire(scope auth.Scope, st *State, r RuleRetireApply) (Effect, error) {
+	org := scope.OrgID()
+	if err := retiredProjectAdmin(scope, *st, org, r.Project); err != nil {
+		if _, retired := st.RetiredProjects[org.String()+":"+r.Project.String()]; !retired && r.Project != (model.ID{}) && scope.Permission() == auth.OrgAdmin && st.Orgs[org.String()].Admins[scope.PrincipalID().String()] {
+			return Effect{}, ruleFault(model.Conflict, "rule_project_not_retired")
+		}
+		return Effect{}, err
+	}
+	var affected []model.ID
+	outputIDs := make([]string, 0, len(st.RuleOutputs))
+	for id := range st.RuleOutputs {
+		outputIDs = append(outputIDs, id)
+	}
+	sort.Strings(outputIDs)
+	for _, id := range outputIDs {
+		var o RuleOutput
+		if err := json.Unmarshal(st.RuleOutputs[id], &o); err != nil {
+			return Effect{}, model.Fail(model.Corrupt)
+		}
+		if o.Org != org || o.Project != r.Project {
+			continue
+		}
+		changed := false
+		if o.Phase == RulePhasePending || o.Phase == RulePhaseAdmitted {
+			o.Phase, o.Reason, changed = RulePhaseSuppress, ruleRetiredReason, true
+		}
+		if len(o.Payload) != 0 && !bytes.Equal(o.Payload, []byte("null")) {
+			o.Payload, changed = nil, true
+		}
+		if changed {
+			if err := storeRuleOutput(st, o); err != nil {
+				return Effect{}, err
+			}
+			affected = append(affected, o.ID)
+		}
+	}
+	bookKeys := make([]string, 0, len(st.RuleBooks))
+	for key := range st.RuleBooks {
+		bookKeys = append(bookKeys, key)
+	}
+	sort.Strings(bookKeys)
+	for _, key := range bookKeys {
+		var b RuleBook
+		if err := json.Unmarshal(st.RuleBooks[key], &b); err != nil {
+			return Effect{}, model.Fail(model.Corrupt)
+		}
+		if b.Org != org || b.Project != r.Project {
+			continue
+		}
+		changed := false
+		for i := range b.Versions {
+			if len(b.Versions[i].Recent) != 0 {
+				b.Versions[i].Recent, changed = nil, true
+			}
+		}
+		if changed {
+			if err := storeRuleBook(st, key, b); err != nil {
+				return Effect{}, err
+			}
+			affected = append(affected, b.Rule)
+		}
+	}
+	if len(affected) == 0 {
+		return Effect{AffectedIDs: []model.ID{}, Phase: "unchanged"}, nil
+	}
+	return Effect{AffectedIDs: affected, Phase: "retired"}, nil
 }
 
 // ruleReadScope admits a scope to read one project's rule facts: a current,
@@ -721,7 +845,13 @@ func ruleReadScope(scope auth.Scope, st State, project model.ID) error {
 		return model.Fail(model.NotFound)
 	}
 	if _, ok = org.Projects[project.String()]; !ok {
-		return model.Fail(model.NotFound)
+		// The rule facts of a retired project stay visible to an organization
+		// administrator, until collected, so they can be suppressed and dropped;
+		// to nobody else.
+		if retiredProjectAdmin(scope, st, scope.OrgID(), project) != nil {
+			return model.Fail(model.NotFound)
+		}
+		return nil
 	}
 	if len(scope.ProjectIDs()) > 0 && !scope.AllowsProject(project) {
 		return model.Fail(model.NotFound)

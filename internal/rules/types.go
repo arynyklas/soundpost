@@ -82,6 +82,13 @@ type Rule struct {
 	RecoveryHold time.Duration `json:"recovery_hold"`
 	MissingData  MissingData   `json:"missing_data"`
 	// Severity is the literal severity carried on condition events (alert rules).
+	//
+	// It is free text here (safeText): the conditions package, which consumes the
+	// committed intents, accepts any safe text, so a closed set enforced at Check
+	// would reject rules that package takes. Likewise the status words of the
+	// events a rule emits are the C07 lifecycle (pending, firing, recovering,
+	// resolved), not the C04 record vocabulary (firing, recovered, unknown): the
+	// mapping (resolved is its recovered) belongs to the conditions package.
 	Severity string `json:"severity,omitempty"`
 	// RecordName and Labels configure recording rules: the resulting metric name,
 	// and labels set on (overriding) every resulting series.
@@ -301,6 +308,11 @@ const (
 	ReasonEvidenceGap      = "evidence_gap"
 	ReasonStaleProducer    = "stale_producer"
 	ReasonLoss             = "loss"
+	// ReasonTooManyOutputs and ReasonPayloadTooLarge report an evaluation whose
+	// effects or committed payload exceed what one control command may carry. The
+	// evaluation is committed as an error, with its effects dropped, never lost.
+	ReasonTooManyOutputs  = "too_many_outputs"
+	ReasonPayloadTooLarge = "payload_too_large"
 )
 
 // EvaluationRef is the identity of an applied evaluation.

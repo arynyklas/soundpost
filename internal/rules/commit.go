@@ -6,7 +6,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
-	"errors"
 	"sort"
 
 	"soundpost/internal/auth"
@@ -38,29 +37,87 @@ const maxRevisionRetries = 8
 // before each attempt; an attempt that only lost a revision race is retried, so
 // the command ID (deterministic, owned by the caller) is what makes every retry,
 // including one after a lost response, a no-op once committed.
+//
+// A Conflict is a lost race exactly when the control revision is no longer the
+// one the command expected: that is read back from control's state, not
+// inferred from the wording of the fault. A semantic conflict (the evaluation
+// disagrees with committed state) leaves the revision where it was and is
+// returned as it is.
 func transact(ctx context.Context, ctl Control, scope auth.Scope, id model.ID, c control.RuleCommand) (control.Result, error) {
 	raw, err := json.Marshal(c)
 	if err != nil {
 		return control.Result{}, model.Fail(model.Invalid)
 	}
+	readRevision := func() (revision model.Revision, err error) {
+		err = ctl.View(ctx, func(st control.State) error { revision = st.Revision; return nil })
+		return revision, err
+	}
 	for range maxRevisionRetries {
-		var revision model.Revision
-		if err = ctl.View(ctx, func(st control.State) error { revision = st.Revision; return nil }); err != nil {
+		revision, err := readRevision()
+		if err != nil {
 			return control.Result{}, err
 		}
 		res, err := ctl.Transact(ctx, scope, control.Command{CommandID: id, ExpectedRevision: revision, Kind: string(control.KindApplyRuleEvaluation), Payload: raw})
 		if err == nil {
 			return res, nil
 		}
-		var fault *model.Fault
-		if errors.As(err, &fault) && fault.Code == model.Conflict && fault.SafeDetail == string(model.Conflict) {
-			continue // the revision moved; the command did not conflict with anything
+		if faultCode(err) == model.Conflict {
+			if now, rerr := readRevision(); rerr == nil && now != revision {
+				continue // the revision moved; the command did not conflict with anything
+			}
 		}
 		return control.Result{}, err
 	}
 	fault := model.Fail(model.Unavailable)
 	fault.Retryable = true
 	return control.Result{}, fault
+}
+
+// commandPayload is the payload of an evaluation as control receives it, and its
+// digest. The command travels as JSON, which compacts and HTML-escapes a raw
+// payload; the digest control verifies is over those exact bytes.
+func commandPayload(eval Evaluation) ([]byte, model.Hash, error) {
+	canonical, _, err := eval.Canonical()
+	if err != nil {
+		return nil, model.Hash{}, err
+	}
+	payload, err := json.Marshal(json.RawMessage(canonical))
+	if err != nil {
+		return nil, model.Hash{}, model.Fail(model.Invalid)
+	}
+	return payload, model.Hash(sha256.Sum256(payload)), nil
+}
+
+// overflow reports whether the evaluation exceeds what one control command may
+// carry (outputs, the committed payload, any output payload), as the closed
+// reason code, or "" when it fits. An evaluation that cannot be serialised at all
+// cannot be committed either, and Commit reports that; it is not an overflow.
+func overflow(eval Evaluation) string {
+	if len(eval.Recording)+len(eval.Conditions) > control.MaxRuleOutputs {
+		return ReasonTooManyOutputs
+	}
+	payload, _, err := commandPayload(eval)
+	if err != nil {
+		return ""
+	}
+	if len(payload) > control.MaxRuleEvaluationBytes {
+		return ReasonPayloadTooLarge
+	}
+	tooLarge := func(intent any) bool {
+		raw, err := model.CanonicalJSON(intent)
+		return err == nil && len(raw) > control.MaxRuleOutputBytes
+	}
+	for _, intent := range eval.Recording {
+		if tooLarge(intent) {
+			return ReasonPayloadTooLarge
+		}
+	}
+	for _, intent := range eval.Conditions {
+		if tooLarge(intent) {
+			return ReasonPayloadTooLarge
+		}
+	}
+	return ""
 }
 
 // Committer submits evaluations to C05 under a fence.
@@ -101,17 +158,10 @@ func (c *Committer) Commit(ctx context.Context, scope auth.Scope, eval Evaluatio
 	if err := c.validateLease(ctx, lease); err != nil {
 		return control.Result{}, err
 	}
-	canonical, _, err := eval.Canonical()
+	payload, digest, err := commandPayload(eval)
 	if err != nil {
 		return control.Result{}, err
 	}
-	// The command travels as JSON, which compacts and HTML-escapes a raw payload;
-	// the digest control verifies is over those exact bytes.
-	payload, err := json.Marshal(json.RawMessage(canonical))
-	if err != nil {
-		return control.Result{}, model.Fail(model.Invalid)
-	}
-	digest := model.Hash(sha256.Sum256(payload))
 	apply := &control.RuleEvaluationApply{
 		Project: eval.Project, Rule: eval.Rule, Version: eval.Version, At: eval.At,
 		ExpectedStateRevision: eval.State.Revision - 1,
@@ -160,6 +210,21 @@ func (c *Committer) DeclareReplay(ctx context.Context, scope auth.Scope, rule Ru
 	id := derive("replay", org[:], rule.Project[:], rule.ID[:], u64(uint64(from)), u64(uint64(to)))
 	return transact(ctx, c.control, scope, id, control.RuleCommand{Operation: control.RuleOpReplay, Replay: &control.RuleReplayApply{
 		Project: rule.Project, Rule: rule.ID, From: from, To: to, Reason: reason, At: at}})
+}
+
+// CollectRetired garbage-collects the rule facts of a project that has been
+// retired (deleted): pending and admitted outputs are suppressed, and every
+// retained payload (outputs, evaluations) is dropped from control, so deleted
+// telemetry does not outlive the project inside a snapshot or backup. The scope
+// is an organization administrator's; it does not name the retired project,
+// which can no longer be authorized. The command is deterministic and idempotent.
+func (c *Committer) CollectRetired(ctx context.Context, scope auth.Scope, project model.ID) (control.Result, error) {
+	if project == (model.ID{}) {
+		return control.Result{}, model.Fail(model.Invalid)
+	}
+	org := scope.OrgID()
+	id := derive("retire", org[:], project[:])
+	return transact(ctx, c.control, scope, id, control.RuleCommand{Operation: control.RuleOpRetire, Retire: &control.RuleRetireApply{Project: project}})
 }
 
 // StateStore is the control read adapter: it reconstructs this package's State

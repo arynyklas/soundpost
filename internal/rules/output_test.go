@@ -220,7 +220,7 @@ func TestFlushClassifiesAdmissionFailures(t *testing.T) {
 	}{
 		{err: model.Fail(model.Forbidden), suppress: true, reason: "admission_forbidden"},
 		{err: model.Fail(model.NotFound), suppress: true, reason: "admission_not_found"},
-		{err: model.Fail(model.Stale), suppress: true, reason: "admission_stale"},
+		{err: model.Fail(model.Stale), lookedUp: true}, // a policy revision bump: refreshable, never a reason to give up
 		{err: model.Fail(model.Invalid), suppress: true, reason: "admission_invalid"},
 		{err: model.Fail(model.Conflict), suppress: true, reason: "admission_conflict"},
 		{err: model.Fail(model.Unavailable), lookedUp: true},

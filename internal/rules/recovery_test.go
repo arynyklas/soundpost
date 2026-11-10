@@ -37,6 +37,7 @@ type ctl struct {
 	cred    auth.Credential
 	org     model.ID
 	project model.ID
+	user    model.ID
 }
 
 var authNow = time.Unix(1_800_000_000, 0)
@@ -64,6 +65,7 @@ func newCtl(t *testing.T) *ctl {
 	}
 	c.command("create_org", auth.AdminPayload{Name: "rules", Reason: "fixture"})
 	c.command("create_project", auth.AdminPayload{ID: c.project, Name: "p1", Reason: "fixture"})
+	c.user = session.User
 	c.command("membership", auth.AdminPayload{UserID: session.User, Enabled: true, Reason: "fixture"})
 	c.command("grant", auth.AdminPayload{UserID: session.User, ProjectID: c.project, Enabled: true, Permissions: []string{string(auth.Read)}, Reason: "fixture"})
 	return c
@@ -82,6 +84,9 @@ func (c *ctl) open() {
 		c.t.Fatal(err)
 	}
 	if err = c.store.BindRuleEvaluation(); err != nil {
+		c.t.Fatal(err)
+	}
+	if err = c.store.BindRetention(); err != nil {
 		c.t.Fatal(err)
 	}
 }

@@ -498,3 +498,48 @@ func TestRulesOverRealStorageAndControl(t *testing.T) {
 		t.Fatalf("condition history %v", statuses)
 	}
 }
+
+// A derived series that collides with an already-ingested sample of the same
+// identity and time is refused by real C05 admission for its whole batch. Only
+// the colliding series is lost, reported; the recording's other series is stored.
+func TestRecordingCollisionWithAnIngestedSampleDropsOnlyThatSeries(t *testing.T) {
+	n := newNode(t)
+	n.put("queue_depth", lbl("job", "api"), 30*sec, 10)
+	n.put("queue_depth", lbl("job", "worker"), 30*sec, 10)
+	// The same identity the rule records for job=api, at the rule's grid time,
+	// with another value.
+	n.put("job:queue_depth:sum", lbl("env", "prod", "job", "api"), 60*sec, 99)
+
+	recording := n.rule(rules.KindRecording, `sum by (job) (queue_depth)`)
+	if err := recording.Check(n.registry); err != nil {
+		t.Fatal(err)
+	}
+	producer := rules.ProducerIdentity{Source: n.source, Producer: model.ID{0xee}, PolicyRevision: 1, Resource: n.resource}
+	clock := &fixedClock{}
+	clock.set(65)
+	read, admin := n.scope(auth.Read), n.scope(auth.OrgAdmin)
+	evaluator, committer, store := n.wiring(clock, rules.WithProducer(producer))
+	lease := n.lease()
+	if _, err := rules.NewScheduler(evaluator, committer, store, rules.WithSchedulerClock(clock)).RunOnce(n.ctx, read, admin, recording, lease); err != nil {
+		t.Fatal(err)
+	}
+	worker, err := rules.NewOutputWorker(ingestAdmitter{n}, rules.NewOutboxStore(n.app.Control), ingestAdmitter{n}, n.app.Control.ReplicaGroup())
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := worker.Flush(n.ctx, admin, lease, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Dropped) != 1 || report.Dropped[0].Reason != rules.ReasonSeriesConflict {
+		t.Fatalf("the colliding series was not reported: %+v", report)
+	}
+	// The ingested sample (99) and the derived job=worker sample; the derived
+	// job=api sample was the only one given up.
+	if got := n.stored("job:queue_depth:sum"); len(got) != 2 || got[0] != 60*sec || got[1] != 60*sec {
+		t.Fatalf("stored samples at the grid time: %v (report %+v)", got, report)
+	}
+	if pending, err := n.app.Control.RuleOutputs(n.ctx, admin, n.project, recording.ID, control.RulePhasePending, 0); err != nil || len(pending) != 0 {
+		t.Fatalf("outputs still pending: %d %v", len(pending), err)
+	}
+}

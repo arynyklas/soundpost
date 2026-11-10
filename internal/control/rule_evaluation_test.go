@@ -708,3 +708,315 @@ func TestRuleEvaluationSurvivesRestartAndSnapshotImport(t *testing.T) {
 		t.Fatalf("a pre-restart lease committed: %v", err)
 	}
 }
+
+func (f *ruleFx) settleOutput(lease replica.FenceToken, output model.ID, u control.RuleOutputApply) (control.Result, error) {
+	f.t.Helper()
+	u.Project, u.Rule, u.Output = f.project, f.rule, output
+	return f.apply(control.RuleCommand{Operation: control.RuleOpOutput, Lease: &lease, Output: &u})
+}
+
+func bulkConditions(group byte, from, n int) []control.RuleOutputIntent {
+	out := make([]control.RuleOutputIntent, 0, n)
+	for i := from; i < from+n; i++ {
+		out = append(out, control.RuleOutputIntent{ID: model.ID{0xC0, group, byte(i >> 8), byte(i)}, Kind: control.RuleOutputCondition, Payload: json.RawMessage(fmt.Sprintf(`{"condition":%d}`, i)), Inputs: []model.Cursor{}})
+	}
+	return out
+}
+
+func (f *ruleFx) rawState() (outputs map[string]json.RawMessage, books map[string]json.RawMessage) {
+	f.t.Helper()
+	if err := f.store.View(f.ctx, func(st control.State) error {
+		outputs, books = st.RuleOutputs, st.RuleBooks
+		return nil
+	}); err != nil {
+		f.t.Fatal(err)
+	}
+	return outputs, books
+}
+
+// Retiring a project leaves its rule facts unreadable and unsettleable and, until
+// collected, resident in every snapshot. After retirement the organization
+// administrator can still see them and suppress them (nothing else), and the
+// collection command suppresses the unreleased outputs and drops every retained
+// payload of the retired project, and only of it.
+func TestRetiredProjectRuleFactsAreSuppressedAndCollected(t *testing.T) {
+	f := newRuleFx(t)
+	lease := f.lease()
+	if _, err := f.eval(lease, f.evaluation(1, 60, 0, control.RuleModeLive, `{"n":1}`, recordingIntent(1), recordingIntent(2), conditionIntent(3, true))); err != nil {
+		t.Fatal(err)
+	}
+	receipt, hash := model.Cursor{Group: model.ID{7}, Index: 1}, model.Hash{1}
+	if _, err := f.settleOutput(lease, model.ID{2}, control.RuleOutputApply{To: control.RulePhaseAdmitted, Receipt: &receipt, Hash: &hash}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.settleOutput(lease, model.ID{3}, control.RuleOutputApply{To: control.RulePhaseFinalized}); err != nil {
+		t.Fatal(err)
+	}
+	// A live project's rule in the same organization must be untouched.
+	otherRule := model.NewID()
+	live := f.evaluation(1, 60, 0, control.RuleModeLive, `{"n":9}`, recordingIntent(9))
+	live.Project, live.Rule = f.otherProject, otherRule
+	if _, err := f.eval(lease, live); err != nil {
+		t.Fatal(err)
+	}
+	collect := control.RuleCommand{Operation: control.RuleOpRetire, Retire: &control.RuleRetireApply{Project: f.project}}
+	if _, err := f.apply(collect); code(err) == "" || faultDetail(err) != "rule_project_not_retired" {
+		t.Fatalf("collecting the rule facts of a live project: %v", err)
+	}
+
+	if _, _, err := f.del(control.DeleteScope{Mode: model.DeleteRetireProject, Projects: []model.ID{f.project}}); err != nil {
+		t.Fatal(err)
+	}
+	// Still visible to the administrator, all obsolete.
+	outs := f.outputs("")
+	if len(outs) != 3 {
+		t.Fatalf("the retired project's outputs: %d", len(outs))
+	}
+	for _, o := range outs {
+		if !o.Obsolete {
+			t.Fatalf("output %s of a retired project is not obsolete", o.ID)
+		}
+	}
+	if got := f.book(); got.Head != 1 {
+		t.Fatalf("book %+v", got)
+	}
+	// Only suppression is accepted for a retired project.
+	if _, err := f.settleOutput(lease, model.ID{1}, control.RuleOutputApply{To: control.RulePhaseFinalized, Receipt: &receipt, Hash: &hash}); code(err) != model.NotFound {
+		t.Fatalf("a retired project's output was released: %v", err)
+	}
+	if _, err := f.eval(lease, f.evaluation(1, 120, 1, control.RuleModeLive, `{"n":2}`)); code(err) != model.NotFound {
+		t.Fatalf("a retired project accepted an evaluation: %v", err)
+	}
+	if res, err := f.settleOutput(lease, model.ID{1}, control.RuleOutputApply{To: control.RulePhaseSuppress, Reason: "obsolete_origin"}); err != nil || res.Phase != control.RulePhaseSuppress {
+		t.Fatalf("suppression of a retired project's output: %+v %v", res, err)
+	}
+
+	res, err := f.apply(collect)
+	if err != nil || res.Phase != "retired" {
+		t.Fatalf("collection: %+v %v", res, err)
+	}
+	phases := map[model.ID]string{}
+	for _, o := range f.outputs("") {
+		phases[o.ID] = o.Phase
+	}
+	if phases[model.ID{1}] != control.RulePhaseSuppress || phases[model.ID{2}] != control.RulePhaseSuppress || phases[model.ID{3}] != control.RulePhaseFinalized {
+		t.Fatalf("phases after collection: %v", phases)
+	}
+	outputs, books := f.rawState()
+	for _, id := range []model.ID{{1}, {2}, {3}} {
+		raw := outputs[id.String()]
+		if raw == nil || bytes.Contains(raw, []byte("batch")) || bytes.Contains(raw, []byte(`"condition":`)) {
+			t.Fatalf("output %s retains its payload: %s", id, raw)
+		}
+	}
+	key := f.org.String() + ":" + f.project.String() + ":" + f.rule.String()
+	if raw := books[key]; raw == nil || bytes.Contains(raw, []byte(`"n":1`)) {
+		t.Fatalf("the retired project's rule book retains evaluation payloads: %s", raw)
+	}
+	if got := f.book(); got.Versions[0].StateRevision != 1 || got.Versions[0].Last == nil || len(got.Versions[0].Recent) != 0 {
+		t.Fatalf("identity was not kept while payloads were: %+v", got.Versions[0])
+	}
+	// The live project is untouched.
+	kept, err := f.store.RuleOutputs(f.ctx, f.adminScope(), f.otherProject, otherRule, "", 0)
+	if err != nil || len(kept) != 1 || kept[0].Phase != control.RulePhasePending || kept[0].Obsolete || !bytes.Contains(kept[0].Payload, []byte("batch")) {
+		t.Fatalf("a live project's output: %+v %v", kept, err)
+	}
+	otherBook, found, err := f.store.RuleBook(f.ctx, f.adminScope(), f.otherProject, otherRule)
+	if err != nil || !found || len(otherBook.Versions[0].Recent) != 1 {
+		t.Fatalf("a live project's rule book: %+v %v", otherBook, err)
+	}
+	// Collection is idempotent.
+	if again, err := f.apply(collect); err != nil || again.Phase != "unchanged" {
+		t.Fatalf("second collection: %+v %v", again, err)
+	}
+}
+
+// The newest maxRuleRecent evaluations of a version are replayable verbatim; an
+// older one is gone for good and can only be refused, never recomputed.
+func TestRuleRecentEvaluationRetention(t *testing.T) {
+	f := newRuleFx(t)
+	lease := f.lease()
+	payload := func(i int) string { return fmt.Sprintf(`{"n":%d}`, i) }
+	for i := 1; i <= 20; i++ {
+		if _, err := f.eval(lease, f.evaluation(1, uint64(60*i), uint64(i-1), control.RuleModeLive, payload(i))); err != nil {
+			t.Fatalf("evaluation %d: %v", i, err)
+		}
+	}
+	v := f.book().Versions[0]
+	if len(v.Recent) != 16 || v.Recent[0].At != 300 || v.Last.At != 1200 || v.StateRevision != 20 {
+		t.Fatalf("retained %d evaluations from %d, last %d, revision %d", len(v.Recent), v.Recent[0].At, v.Last.At, v.StateRevision)
+	}
+	if res, err := f.eval(lease, f.evaluation(1, 300, 4, control.RuleModeLive, payload(5))); err != nil || res.Phase != "replayed" {
+		t.Fatalf("the oldest retained evaluation: %+v %v", res, err)
+	}
+	if _, err := f.eval(lease, f.evaluation(1, 240, 3, control.RuleModeLive, payload(4))); code(err) != model.Stale || faultDetail(err) != "rule_evaluation_out_of_order" {
+		t.Fatalf("an evicted evaluation was accepted again: %v", err)
+	}
+	if _, err := f.eval(lease, f.evaluation(1, 240, 3, control.RuleModeLive, `{"n":"other"}`)); code(err) != model.Stale {
+		t.Fatalf("an evicted evaluation was replaced by another payload: %v", err)
+	}
+}
+
+// Settled outputs are bounded to the newest maxRuleSettledOutputs (by scheduled
+// time, then ID); unsettled ones are never dropped.
+func TestRuleSettledOutputsArePruned(t *testing.T) {
+	f := newRuleFx(t)
+	lease := f.lease()
+	settle := func(outs []control.RuleOutputIntent) {
+		for _, o := range outs {
+			if _, err := f.settleOutput(lease, o.ID, control.RuleOutputApply{To: control.RulePhaseFinalized}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	first, second := bulkConditions(1, 0, 130), bulkConditions(2, 0, 130)
+	if _, err := f.eval(lease, f.evaluation(1, 60, 0, control.RuleModeLive, `{"n":1}`, first...)); err != nil {
+		t.Fatal(err)
+	}
+	settle(first)
+	if _, err := f.eval(lease, f.evaluation(1, 120, 1, control.RuleModeLive, `{"n":2}`, second...)); err != nil {
+		t.Fatal(err)
+	}
+	settle(second)
+	if got := len(f.outputs("")); got != 260 {
+		t.Fatalf("%d outputs before the bound is exceeded by a later evaluation", got)
+	}
+	pending := bulkConditions(3, 0, 1)
+	if _, err := f.eval(lease, f.evaluation(1, 180, 2, control.RuleModeLive, `{"n":3}`, pending...)); err != nil {
+		t.Fatal(err)
+	}
+	outs := f.outputs("")
+	finalized := 0
+	have := map[model.ID]bool{}
+	for _, o := range outs {
+		have[o.ID] = true
+		if o.Phase == control.RulePhaseFinalized {
+			finalized++
+		}
+	}
+	if finalized != 256 || len(outs) != 257 || !have[pending[0].ID] {
+		t.Fatalf("after the prune: %d finalized of %d outputs", finalized, len(outs))
+	}
+	// The four oldest (scheduled 60, lowest IDs) went; the newest stayed.
+	for i := range 4 {
+		if have[first[i].ID] {
+			t.Fatalf("settled output %d of the oldest evaluation survived the prune", i)
+		}
+	}
+	if !have[first[4].ID] || !have[second[129].ID] {
+		t.Fatal("the prune removed more than the oldest settled outputs")
+	}
+}
+
+// Leases of one election term are ordered by membership revision: after a
+// membership change of the same term, the earlier revision is a deposed leader.
+func TestRuleFenceOrdersTermThenMembershipRevision(t *testing.T) {
+	f := newRuleFx(t)
+	lease := f.lease()
+	later := lease
+	later.Revision++
+	if _, err := f.eval(later, f.evaluation(1, 60, 0, control.RuleModeLive, `{"n":1}`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.eval(lease, f.evaluation(1, 120, 1, control.RuleModeLive, `{"n":2}`)); code(err) != model.Stale || faultDetail(err) != "rule_lease_stale" {
+		t.Fatalf("an earlier membership revision of the same term committed: %v", err)
+	}
+	if _, err := f.eval(later, f.evaluation(1, 120, 1, control.RuleModeLive, `{"n":2}`)); err != nil {
+		t.Fatalf("the same lease is not stale against itself: %v", err)
+	}
+}
+
+// An output ID already in the outbox is never overwritten by another
+// evaluation's intent: its phase and receipt would be lost.
+func TestRuleOutputIDCannotBeReusedByAnotherEvaluation(t *testing.T) {
+	f := newRuleFx(t)
+	lease := f.lease()
+	if _, err := f.eval(lease, f.evaluation(1, 60, 0, control.RuleModeLive, `{"n":1}`, recordingIntent(1))); err != nil {
+		t.Fatal(err)
+	}
+	receipt, hash := model.Cursor{Group: model.ID{7}, Index: 1}, model.Hash{1}
+	if _, err := f.settleOutput(lease, model.ID{1}, control.RuleOutputApply{To: control.RulePhaseAdmitted, Receipt: &receipt, Hash: &hash}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.eval(lease, f.evaluation(1, 120, 1, control.RuleModeLive, `{"n":2}`, recordingIntent(1))); code(err) != model.Conflict || faultDetail(err) != "rule_output_exists" {
+		t.Fatalf("an existing output ID was accepted again: %v", err)
+	}
+	outs := f.outputs("")
+	if len(outs) != 1 || outs[0].Phase != control.RulePhaseAdmitted || outs[0].Receipt == nil || outs[0].At != 60 || f.book().Versions[0].StateRevision != 1 {
+		t.Fatalf("the existing output or the state changed: %+v", outs)
+	}
+}
+
+// Obsolescence is scoped by signal and by scheduled time: a deletion of another
+// signal, or of a range that does not contain the output's scheduled time, must
+// leave it releasable.
+func TestRuleOutputObsolescenceIsScopedBySignalAndTime(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		del      control.DeleteScope
+		obsolete bool
+	}{
+		{"another signal", control.DeleteScope{Mode: model.DeleteHistoricalRange, Signals: []model.Kind{model.Log}, Start: 0, End: 1000}, false},
+		{"range ends at the scheduled time", control.DeleteScope{Mode: model.DeleteHistoricalRange, Signals: []model.Kind{model.Metric}, Start: 0, End: 60}, false},
+		{"range starts after it", control.DeleteScope{Mode: model.DeleteHistoricalRange, Signals: []model.Kind{model.Metric}, Start: 61, End: 100}, false},
+		{"range starts at it", control.DeleteScope{Mode: model.DeleteHistoricalRange, Signals: []model.Kind{model.Metric}, Start: 60, End: 61}, true},
+		{"range contains it", control.DeleteScope{Mode: model.DeleteHistoricalRange, Signals: []model.Kind{model.Metric}, Start: 10, End: 100}, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := newRuleFx(t)
+			lease := f.lease()
+			if _, err := f.eval(lease, f.evaluation(1, 60, 0, control.RuleModeLive, `{"n":1}`, recordingIntent(1))); err != nil {
+				t.Fatal(err)
+			}
+			c.del.Projects = []model.ID{f.project}
+			if _, _, err := f.del(c.del); err != nil {
+				t.Fatal(err)
+			}
+			outs := f.outputs("")
+			if len(outs) != 1 || outs[0].Obsolete != c.obsolete {
+				t.Fatalf("obsolete=%v, want %v", outs[0].Obsolete, c.obsolete)
+			}
+		})
+	}
+}
+
+// A recording output finalized after some of its series were given up carries
+// the closed reason; repeating the same update is a no-op and any other reason
+// for the same transition is a conflict, never an overwrite.
+func TestRuleOutputFinalizationCarriesAReason(t *testing.T) {
+	f := newRuleFx(t)
+	lease := f.lease()
+	if _, err := f.eval(lease, f.evaluation(1, 60, 0, control.RuleModeLive, `{"n":1}`, recordingIntent(1))); err != nil {
+		t.Fatal(err)
+	}
+	receipt, hash := model.Cursor{Group: model.ID{7}, Index: 1}, model.Hash{1}
+	update := func(to, reason string) (control.Result, error) {
+		return f.settleOutput(lease, model.ID{1}, control.RuleOutputApply{To: to, Receipt: &receipt, Hash: &hash, Reason: reason})
+	}
+	if _, err := update(control.RulePhaseAdmitted, "series_conflict:2"); err != nil {
+		t.Fatal(err)
+	}
+	if res, err := update(control.RulePhaseFinalized, "series_conflict:2"); err != nil || res.Phase != control.RulePhaseFinalized {
+		t.Fatalf("finalization: %+v %v", res, err)
+	}
+	if outs := f.outputs(""); len(outs) != 1 || outs[0].Reason != "series_conflict:2" || outs[0].Phase != control.RulePhaseFinalized {
+		t.Fatalf("output: %+v", outs)
+	}
+	for _, c := range []struct {
+		to, reason string
+		ok         bool
+	}{
+		{control.RulePhaseFinalized, "series_conflict:2", true},
+		{control.RulePhaseAdmitted, "series_conflict:2", true},
+		{control.RulePhaseFinalized, "series_conflict:3", false},
+		{control.RulePhaseFinalized, "", false},
+	} {
+		res, err := update(c.to, c.reason)
+		if c.ok && (err != nil || res.Phase != "unchanged") {
+			t.Errorf("repeat of %s/%q: %+v %v", c.to, c.reason, res, err)
+		}
+		if !c.ok && (code(err) != model.Conflict || faultDetail(err) != "rule_output_conflict") {
+			t.Errorf("another reason for %s/%q accepted: %v", c.to, c.reason, err)
+		}
+	}
+}
