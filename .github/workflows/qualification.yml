@@ -1,0 +1,99 @@
+# Copyright 2026 Aryn Yklas
+# SPDX-License-Identifier: Apache-2.0
+#
+# Verification only: no publication, no registry push, no credentials, no host privilege change. Toolchains
+# come from build/toolchains.json and are checked against its sha256 pins before they run. Actions are pinned
+# to full commit SHAs.
+#
+# This workflow cannot be executed where it was written (no GitHub runner, no network). It runs the three
+# qualification suites against whatever builds the runner actually has, and each suite exits non-zero until
+# EVERY required row is exercised and within its design section 13 budget. On a stock ubuntu-24.04 amd64
+# runner that is never the case by design, so these jobs fail loudly instead of passing:
+#   - only the sha256-locked Node 22 (linux amd64) is installed; Python 3.13/3.14, Node 24, Bun on Linux, arm64
+#     builds, Chrome 142, Edge, Firefox and Safari have no locked artifact in build/toolchains.json and are
+#     reported not_exercised with that reason (add a locked artifact, never an unpinned download, to change it);
+#   - the runner kernel is whatever the image ships, not an LTS 6.1/6.6 runner, so the native kernel rows stay
+#     not_exercised unless a self-hosted runner of that exact series and architecture is added to the matrix;
+#   - a missed budget (for example core server capture overhead) is a measured failure and blocks the job.
+# Toolchain installation is not platform qualification.
+name: qualification
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qualification-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GOTOOLCHAIN: local
+  CGO_ENABLED: "0"
+
+jobs:
+  qualify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [runtime, privacy, overhead]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned Go toolchain
+        run: |
+          set -eu
+          version=$(jq -r .go.version build/toolchains.json)
+          url=$(jq -r .go.linux_amd64.url build/toolchains.json)
+          sum=$(jq -r .go.linux_amd64.sha256 build/toolchains.json)
+          archive=".tools/go${version}.linux-amd64.tar.gz"
+          mkdir -p .tools/linux
+          curl --fail --location --silent --show-error --output "$archive" "$url"
+          echo "${sum}  ${archive}" | sha256sum --check --strict -
+          tar -C .tools/linux -xzf "$archive"
+          echo "$PWD/.tools/linux/go/bin" >> "$GITHUB_PATH"
+
+      - name: Install the pinned Node 22
+        run: |
+          set -eu
+          url=$(jq -r .node.linux_22.url build/toolchains.json)
+          sum=$(jq -r .node.linux_22.sha256 build/toolchains.json)
+          curl --fail --location --silent --show-error --output node.tar.gz "$url"
+          echo "${sum}  node.tar.gz" | sha256sum --check --strict -
+          mkdir -p .tools/linux/node-v22.23.4-linux-x64 && tar -C .tools/linux/node-v22.23.4-linux-x64 --strip-components=1 -xzf node.tar.gz
+          echo "$PWD/.tools/linux/node-v22.23.4-linux-x64/bin" >> "$GITHUB_PATH"
+
+      - name: Install the locked workspace (Playwright driver; no browser is downloaded)
+        run: |
+          set -eu
+          corepack enable
+          pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Format and vet
+        run: |
+          set -eu
+          unformatted=$(gofmt -l tools)
+          test -z "$unformatted" || { echo "gofmt needed:"; echo "$unformatted"; exit 1; }
+          go vet ./tools/...
+
+      - name: Qualification tests (race)
+        run: go test -race -count=1 -run 'TestQualification|TestPrivacyCanary' ./tools/qualify
+
+      # Exits 0 only when every required row of the suite is exercised and within budget; 1 for a measured
+      # failure; 10 when required rows were not exercised. The unqualified rows and failures are printed.
+      - name: Qualification suite
+        run: go run ./tools/qualify/cmd/qualify --suite "${{ matrix.suite }}" --matrix qualification/matrix.yaml --report "qualification-${{ matrix.suite }}"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: qualification-${{ matrix.suite }}
+          path: qualification-${{ matrix.suite }}/
+          if-no-files-found: error
