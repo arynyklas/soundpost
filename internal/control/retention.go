@@ -5,6 +5,9 @@ package control
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
+	"fmt"
+	bolt "go.etcd.io/bbolt"
 	"sort"
 	"soundpost/internal/auth"
 	"soundpost/internal/model"
@@ -107,6 +110,12 @@ func applyRetention(scope auth.Scope, st *State, o model.ControlOrg, r *SetReten
 	return Effect{AffectedIDs: []model.ID{command}, Phase: "applied"}, nil
 }
 
+// Who declared an evidence gap. Only a worker gap authorizes expiry (see model.EvidenceGap).
+const (
+	GapDeclaredByWorker = "worker"
+	GapDeclaredByAdmin  = "admin"
+)
+
 func gapID(g model.EvidenceGap) model.ID {
 	h := sha256.New()
 	for _, id := range []model.ID{g.Org, g.Project, g.Group} {
@@ -117,11 +126,20 @@ func gapID(g model.EvidenceGap) model.ID {
 		n[i], n[8+i] = byte(uint64(g.After)>>(56-8*i)), byte(uint64(g.Through)>>(56-8*i))
 	}
 	h.Write(n[:])
+	if g.DeclaredBy == GapDeclaredByAdmin {
+		// An administrator's statement about an interval is a different fact from the worker's
+		// about the same interval, so it must neither replace nor be replaced by it.
+		h.Write([]byte(GapDeclaredByAdmin))
+	}
 	var id model.ID
 	copy(id[:], h.Sum(nil))
 	return id
 }
-func recordGap(st *State, g model.EvidenceGap) (model.EvidenceGap, error) {
+
+// recordGap commits one gap declared by `by` through `actor`. Control decides both, from the path
+// the request arrived on; whatever the request body says is overwritten. A worker gap must
+// enumerate its interval (Count == Through-After): it can never cover an entry it did not count.
+func recordGap(st *State, g model.EvidenceGap, by string, actor model.ID) (model.EvidenceGap, error) {
 	o, ok := st.Orgs[g.Org.String()]
 	if !ok || g.Org == (model.ID{}) || g.Group == (model.ID{}) {
 		return g, model.Fail(model.NotFound)
@@ -134,11 +152,15 @@ func recordGap(st *State, g model.EvidenceGap) (model.EvidenceGap, error) {
 	if g.Through <= g.After || g.Count == 0 || g.Count > g.Through-g.After || g.End < g.Start || g.RecordedAt <= 0 || len(g.Signals) > 16 || len(g.Reason) == 0 || len(g.Reason) > 64 {
 		return g, model.Fail(model.Invalid)
 	}
+	if by == GapDeclaredByWorker && g.Count != g.Through-g.After {
+		return g, model.Fail(model.Invalid)
+	}
 	for _, k := range g.Signals {
 		if !k.Valid() {
 			return g, model.Fail(model.Invalid)
 		}
 	}
+	g.DeclaredBy, g.Actor = by, &actor
 	g.ID = gapID(g)
 	if old, ok := st.EvidenceGaps[g.ID.String()]; ok {
 		return old, nil
@@ -147,6 +169,8 @@ func recordGap(st *State, g model.EvidenceGap) (model.EvidenceGap, error) {
 		st.EvidenceGaps = map[string]model.EvidenceGap{}
 	}
 	st.EvidenceGaps[g.ID.String()] = g
+	// Numbers and a declarant only: an audit never carries telemetry.
+	audit(st, actor, g.Org, "evidence.gap", fmt.Sprintf("%s declared_by=%s after=%d through=%d count=%d", g.Reason, by, uint64(g.After), uint64(g.Through), uint64(g.Count)), g.RecordedAt, []model.ID{g.ID, g.Group})
 	return g, nil
 }
 func applyEvidenceGap(scope auth.Scope, st *State, cmd Command) (Effect, error) {
@@ -158,17 +182,19 @@ func applyEvidenceGap(scope auth.Scope, st *State, cmd Command) (Effect, error) 
 		return Effect{}, err
 	}
 	g.Org = scope.OrgID()
-	out, err := recordGap(st, g)
+	out, err := recordGap(st, g, GapDeclaredByAdmin, scope.PrincipalID())
 	if err != nil {
 		return Effect{}, err
 	}
 	return Effect{AffectedIDs: []model.ID{out.ID}, Phase: "recorded"}, nil
 }
 
-// RecordEvidenceGap durably declares that lifecycle evidence in (After, Through]
-// of a data group expired before it was processed. It is idempotent by interval.
+// RecordEvidenceGap is the retention worker's declaration that lifecycle evidence in
+// (After, Through] of a data group, every entry of which it counted (Count == Through-After),
+// expired before it was processed. It is idempotent by interval and audited. The declarant is
+// always the worker, acting as the installation.
 func (s *Store) RecordEvidenceGap(ctx context.Context, g model.EvidenceGap) (out model.EvidenceGap, err error) {
-	err = s.Update(ctx, func(st *State) (e error) { out, e = recordGap(st, g); return })
+	err = s.Update(ctx, func(st *State) (e error) { out, e = recordGap(st, g, GapDeclaredByWorker, st.Installation); return })
 	return
 }
 func (s *Store) EvidenceGaps(ctx context.Context, org, project model.ID) (out []model.EvidenceGap, err error) {
@@ -182,4 +208,46 @@ func (s *Store) EvidenceGaps(ctx context.Context, org, project model.ID) (out []
 		return nil
 	})
 	return
+}
+
+// HoldSnapshot is the active legal holds of the control state this node had applied at
+// control log index Applied. The zero value is "nothing read yet".
+type HoldSnapshot struct {
+	Applied uint64
+	Holds   []model.LegalHold
+	known   bool
+}
+
+// AppliedHolds returns the active legal holds of the control state this node has APPLIED,
+// refreshing prev only when the applied index moved. It is deliberately not a linearizable
+// read: it costs one local read transaction and one 8-byte watermark compare when nothing
+// changed, so the erasing transaction can afford to ask before every batch and blob. A hold
+// that has committed in the control group but is not yet applied on this node is invisible to
+// it; that apply-lag window is the residual race and is bounded by the control apply latency
+// (the physical pass's own linearizable View before it starts closes it for holds that were
+// committed before the pass began).
+func (s *Store) AppliedHolds(prev HoldSnapshot) (HoldSnapshot, error) {
+	out := prev
+	err := s.db.View(func(tx *bolt.Tx) error {
+		var mark uint64
+		if meta := tx.Bucket([]byte("replica_control")); meta != nil {
+			mark = readWatermark(meta.Get([]byte("physical")))
+		}
+		if prev.known && prev.Applied == mark {
+			return nil
+		}
+		var st struct{ Holds map[string]model.LegalHold }
+		if json.Unmarshal(tx.Bucket([]byte("control")).Get([]byte("state")), &st) != nil {
+			return model.Fail(model.Corrupt)
+		}
+		out = HoldSnapshot{Applied: mark, known: true}
+		for _, h := range st.Holds {
+			if h.Active() {
+				out.Holds = append(out.Holds, h)
+			}
+		}
+		sort.Slice(out.Holds, func(i, j int) bool { return out.Holds[i].ID.String() < out.Holds[j].ID.String() })
+		return nil
+	})
+	return out, err
 }

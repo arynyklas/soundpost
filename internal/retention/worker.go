@@ -28,6 +28,14 @@ type WorkerStatus struct {
 	CompletedOps   uint64
 	FencingOps     int
 	PhysicalLagOps int
+	// ErasedBeforeHold counts records and artifact roots a physical pass erased for operations
+	// whose cleanup was then NOT recorded because a legal hold committed after the erasure and
+	// before the record: the bytes are gone, the receipt says "held", never "done".
+	ErasedBeforeHold uint64
+	// ConsecutiveFailures is the number of passes in a row whose RunOnce returned an error (0
+	// after a clean pass). It carries no data, only a count, so a permanently failing step is
+	// visible without a log.
+	ConsecutiveFailures uint64
 }
 
 func (s *Service) Status() WorkerStatus { s.mu.Lock(); defer s.mu.Unlock(); return s.status }
@@ -118,7 +126,10 @@ func (s *Service) RunOnce(ctx context.Context) error {
 	s.mu.Lock()
 	s.status.Passes++
 	s.status.LastError = ""
-	if joined != nil {
+	if joined == nil {
+		s.status.ConsecutiveFailures = 0
+	} else {
+		s.status.ConsecutiveFailures++
 		var f *model.Fault
 		if errors.As(joined, &f) {
 			s.status.LastError = string(f.Code)
@@ -268,9 +279,10 @@ func (s *Service) physical(ctx context.Context) error {
 	sort.Slice(orgs, func(i, j int) bool { return orgs[i].String() < orgs[j].String() })
 	var errs []error
 	type cleaned struct {
-		org  model.ID
-		ids  []model.ID
-		pred model.DeletePredicate
+		org    model.ID
+		ids    []model.ID
+		pred   model.DeletePredicate
+		erased uint64 // records and artifact roots this pass erased for the organization
 	}
 	var ready []cleaned
 	for _, org := range orgs {
@@ -303,39 +315,64 @@ func (s *Service) physical(ctx context.Context) error {
 		// erased bytes landed in are zeroed: a pass that could not finish its scrub (a reader
 		// was open) has not erased them from apply.db, and the next pass retries.
 		if report.Held == 0 && !report.ScrubPending {
-			ready = append(ready, cleaned{org: org, ids: ids, pred: preds[0]})
+			ready = append(ready, cleaned{org: org, ids: ids, pred: preds[0], erased: report.Records + report.Blobs})
 		}
 	}
 	if len(ready) > 0 {
 		// Physical cleanup includes the copies in snapshots and the journal, so it is recorded only
-		// after they are cleaned: a failure here leaves it pending and the next pass retries.
-		if err = s.cfg.Data.CheckpointErasure(ctx, ready[0].pred); err != nil {
-			return errors.Join(append(errs, err)...)
+		// after they are cleaned: a failure here leaves it pending and the next pass retries. Every
+		// ready organization is checkpointed with one of its own operations.
+		for _, r := range ready {
+			if err = s.cfg.Data.CheckpointErasure(ctx, r.pred); err != nil {
+				return errors.Join(append(errs, err)...)
+			}
 		}
 		if err = s.maintainJournal(ctx, true); err != nil {
 			return errors.Join(append(errs, err)...)
 		}
 		for _, r := range ready {
-			if err = s.cfg.Control.RecordPhysicalCleanup(ctx, r.org, r.ids, s.now()); err != nil {
+			held, err := s.cfg.Control.RecordPhysicalCleanup(ctx, r.org, r.ids, s.now())
+			if err != nil {
 				errs = append(errs, err)
+				continue
+			}
+			if len(held) > 0 {
+				// A hold committed after the erasure: control refused to record the cleanup (the
+				// receipt says held, never done). The bytes are gone; say so.
+				s.mu.Lock()
+				s.status.ErasedBeforeHold += r.erased
+				s.mu.Unlock()
 			}
 		}
 	}
 	return errors.Join(errs...)
 }
 
-// holdGuard builds the EraseGuard from a fresh snapshot of control state:
-// legal holds veto, and (for expiry) the extra check runs after them.
+// holdGuard builds the EraseGuard. Legal holds veto against the CURRENT applied control state,
+// re-read for every candidate (and again with Final set, inside the erasing transaction): the
+// guard is a check at erase time, not a snapshot of the instant the pass started, so a hold that
+// committed while the pass was running still protects what it covers. A linearizable read at
+// build time makes this node catch up with everything committed before the pass began; after
+// that the read is local (see control.Store.AppliedHolds). A hold committed in the control group
+// but not yet applied on this node is the residual window. For expiry the extra check runs
+// after the holds, at scan time only.
 func (s *Service) holdGuard(ctx context.Context, extra storage.EraseGuard) (storage.EraseGuard, error) {
-	var holds []model.LegalHold
-	if err := s.cfg.Control.View(ctx, func(st control.State) error { holds = activeHolds(st); return nil }); err != nil {
+	if err := s.cfg.Control.View(ctx, func(control.State) error { return nil }); err != nil {
 		return nil, err
 	}
+	var holds control.HoldSnapshot
 	return func(ctx context.Context, c storage.EraseCandidate) (bool, error) {
-		for _, h := range holds {
+		var err error
+		if holds, err = s.cfg.Control.AppliedHolds(holds); err != nil {
+			return false, err // fail closed
+		}
+		for _, h := range holds.Holds {
 			if c.Record != nil && h.CoversRecord(c.Org, c.Project, *c.Record) || c.Blob != nil && h.CoversBlob(*c.Blob) {
 				return false, nil
 			}
+		}
+		if c.Final {
+			return true, nil
 		}
 		if extra != nil {
 			return extra(ctx, c)
@@ -351,22 +388,23 @@ func (s *Service) holdGuard(ctx context.Context, extra storage.EraseGuard) (stor
 func (s *Service) expire(ctx context.Context) (uint64, error) {
 	now := s.now()
 	type runKey struct{ org, project, group model.ID }
-	type run struct {
-		first, last uint64
-		count       uint64
-		start, end  model.UnixNano
-		kinds       map[model.Kind]bool
+	type entry struct { // one unprocessed evidence entry (one batch index) that has expired
+		start, end model.UnixNano
+		kinds      map[model.Kind]bool
 	}
-	runs := map[runKey]*run{}
+	entries := map[runKey]map[uint64]*entry{}
 	plannedOrgs := map[model.ID]bool{}
 	var state control.State
 	load := func() error { return s.cfg.Control.View(ctx, func(st control.State) error { state = st; return nil }) }
 	if err := load(); err != nil {
 		return 0, err
 	}
+	// Only a gap the worker enumerated authorizes expiry. An administrator's gap (or one recorded
+	// before the declarant was kept) is a statement nothing enumerates: it is audited and kept,
+	// never an authority to erase unprocessed evidence.
 	covered := func(c storage.EraseCandidate) bool {
 		for _, g := range state.EvidenceGaps {
-			if g.Group == c.Cursor.Group && g.Org == c.Org && g.Project == c.Project && uint64(c.Cursor.Index) > uint64(g.After) && uint64(c.Cursor.Index) <= uint64(g.Through) {
+			if g.DeclaredBy == control.GapDeclaredByWorker && g.Group == c.Cursor.Group && g.Org == c.Org && g.Project == c.Project && uint64(c.Cursor.Index) > uint64(g.After) && uint64(c.Cursor.Index) <= uint64(g.Through) {
 				return true
 			}
 		}
@@ -395,19 +433,20 @@ func (s *Service) expire(ctx context.Context) (uint64, error) {
 			if uint64(c.Cursor.Index) > processed && !covered(c) {
 				if planning {
 					k := runKey{c.Org, c.Project, c.Cursor.Group}
-					r := runs[k]
+					if entries[k] == nil {
+						entries[k] = map[uint64]*entry{}
+					}
 					at := model.UnixNano(0)
 					if c.Record != nil {
 						at = model.SignalTime(*c.Record)
 					}
-					if r == nil {
-						r = &run{first: uint64(c.Cursor.Index), last: uint64(c.Cursor.Index), start: at, end: at, kinds: map[model.Kind]bool{}}
-						runs[k] = r
+					e := entries[k][uint64(c.Cursor.Index)]
+					if e == nil {
+						e = &entry{start: at, end: at, kinds: map[model.Kind]bool{}}
+						entries[k][uint64(c.Cursor.Index)] = e
 					}
-					r.first, r.last = min(r.first, uint64(c.Cursor.Index)), max(r.last, uint64(c.Cursor.Index))
-					r.start, r.end = min(r.start, at), max(r.end, at)
-					r.count++
-					r.kinds[c.Kind] = true
+					e.start, e.end = min(e.start, at), max(e.end, at)
+					e.kinds[c.Kind] = true
 				}
 				return false, nil
 			}
@@ -426,29 +465,55 @@ func (s *Service) expire(ctx context.Context) (uint64, error) {
 	}
 	var errs []error
 	held := false
-	keys := make([]runKey, 0, len(runs))
-	for k := range runs {
+	keys := make([]runKey, 0, len(entries))
+	for k := range entries {
 		keys = append(keys, k)
 	}
 	sort.Slice(keys, func(i, j int) bool {
-		return keys[i].group.String()+keys[i].project.String() < keys[j].group.String()+keys[j].project.String()
+		a, b := keys[i], keys[j]
+		return a.group.String()+a.project.String()+a.org.String() < b.group.String()+b.project.String()+b.org.String()
 	})
+	// One gap per CONTIGUOUS run of candidate indexes, each entry counted exactly once: the
+	// worker declares only what it enumerated, so a gap can never cover a not-yet-expired
+	// entry that sits between two candidates (control refuses a worker gap whose Count is not
+	// its whole interval).
 	for _, k := range keys {
-		r := runs[k]
-		var signals []model.Kind
-		for kind := range r.kinds {
-			signals = append(signals, kind)
+		indexes := make([]uint64, 0, len(entries[k]))
+		for i := range entries[k] {
+			indexes = append(indexes, i)
 		}
-		sort.Slice(signals, func(i, j int) bool { return signals[i] < signals[j] })
-		_, err := s.cfg.Control.RecordEvidenceGap(ctx, model.EvidenceGap{Org: k.org, Project: k.project, Group: k.group, After: model.Uint64(r.first - 1), Through: model.Uint64(r.last), Count: model.Uint64(r.count), Start: r.start, End: r.end, Signals: signals, Reason: "unprocessed_expiry", RecordedAt: now})
-		if err != nil {
-			held = true // the journal is held; nothing of this run is erased
-			errs = append(errs, err)
-			continue
+		sort.Slice(indexes, func(i, j int) bool { return indexes[i] < indexes[j] })
+		for from := 0; from < len(indexes); {
+			to := from
+			for to+1 < len(indexes) && indexes[to+1] == indexes[to]+1 {
+				to++
+			}
+			gap := model.EvidenceGap{Org: k.org, Project: k.project, Group: k.group, After: model.Uint64(indexes[from] - 1), Through: model.Uint64(indexes[to]), Count: model.Uint64(to - from + 1), Reason: "unprocessed_expiry", RecordedAt: now}
+			kinds := map[model.Kind]bool{}
+			for _, i := range indexes[from : to+1] {
+				e := entries[k][i]
+				if gap.Start == 0 || e.start < gap.Start {
+					gap.Start = e.start
+				}
+				gap.End = max(gap.End, e.end)
+				for kind := range e.kinds {
+					kinds[kind] = true
+				}
+			}
+			for kind := range kinds {
+				gap.Signals = append(gap.Signals, kind)
+			}
+			sort.Slice(gap.Signals, func(i, j int) bool { return gap.Signals[i] < gap.Signals[j] })
+			from = to + 1
+			if _, err := s.cfg.Control.RecordEvidenceGap(ctx, gap); err != nil {
+				held = true // the journal is held; nothing of this run is erased
+				errs = append(errs, err)
+				continue
+			}
+			s.mu.Lock()
+			s.status.GapsRecorded++
+			s.mu.Unlock()
 		}
-		s.mu.Lock()
-		s.status.GapsRecorded++
-		s.mu.Unlock()
 	}
 	s.mu.Lock()
 	s.status.EvidenceHeld = held

@@ -44,14 +44,3 @@ func (s *Service) ReleaseHold(ctx context.Context, scope auth.Scope, command mod
 	_, err = s.cfg.Control.Transact(ctx, scope, control.Command{CommandID: command, ExpectedRevision: expected, Kind: string(control.KindPolicyChange), Payload: payload})
 	return err
 }
-
-// activeHolds snapshots the active holds of control state for a guard.
-func activeHolds(st control.State) []model.LegalHold {
-	var out []model.LegalHold
-	for _, h := range st.Holds {
-		if h.Active() {
-			out = append(out, h)
-		}
-	}
-	return out
-}

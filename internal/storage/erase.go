@@ -34,10 +34,23 @@ type EraseCandidate struct {
 	Deadline     model.UnixNano      // the receipt deadline for this kind (0 for deletion-driven erasure)
 	Record       *model.Record       // nil for blobs
 	Blob         *model.BlobManifest // non-nil for artifact roots
+	// Final is set when the guard is consulted a second time, inside the erasing write
+	// transaction (under the engine lock), immediately before the candidate's bytes are
+	// removed. See EraseGuard.
+	Final bool
 }
 
 // EraseGuard is how holds, reference counting and the evidence gate veto physical removal.
 // Returning an error aborts the pass fail-closed: nothing the guard has not allowed is erased.
+//
+// A guard is consulted twice for a candidate it allows: during the candidate scan (outside any
+// lock; it may be slow: reference counts, processing checkpoints) and again with Final set,
+// inside the write transaction that erases the candidate, under the engine lock. The second
+// consultation exists so a veto that became true after the scan (a legal hold placed while a
+// pass was running) is honoured at the instant the bytes would be destroyed; a vetoed
+// candidate is counted in EraseReport.Held and stays. A Final call must therefore be cheap,
+// must answer from current state rather than from what the scan saw, and must not call back
+// into the Engine.
 type EraseGuard func(ctx context.Context, c EraseCandidate) (allow bool, err error)
 
 type eraseSelector struct {
@@ -50,10 +63,12 @@ type eraseBatchJob struct {
 	index uint64
 	sum   model.Hash
 	erase map[model.ID]bool
+	cands []EraseCandidate // the allowed candidates of erase, consulted again at erase time
 }
 type eraseBlobJob struct {
 	key, raw []byte
 	receipt  model.BlobReceipt
+	cand     EraseCandidate
 }
 
 // EraseDeleted physically removes every record and artifact root covered by any predicate
@@ -123,10 +138,11 @@ func (e *Engine) erase(ctx context.Context, sel eraseSelector, guard EraseGuard)
 		if err = ctx.Err(); err != nil {
 			return report, model.Fail(model.Cancelled)
 		}
-		records, pages, err := e.eraseBatch(job, sel.operations)
+		records, pages, held, err := e.eraseBatch(ctx, guard, job, sel.operations)
 		if err != nil {
 			return report, err
 		}
+		report.Held += held
 		if records > 0 {
 			report.Batches++
 			report.Records += records
@@ -137,10 +153,11 @@ func (e *Engine) erase(ctx context.Context, sel eraseSelector, guard EraseGuard)
 		if err = ctx.Err(); err != nil {
 			return report, model.Fail(model.Cancelled)
 		}
-		erased, err := e.eraseBlob(job, sel.operations)
+		erased, held, err := e.eraseBlob(ctx, guard, job, sel.operations)
 		if err != nil {
 			return report, err
 		}
+		report.Held += held
 		if erased {
 			report.Blobs++
 		}
@@ -241,6 +258,7 @@ func (e *Engine) eraseCandidates(ctx context.Context, sel eraseSelector, guard E
 				continue
 			}
 			p.job.erase[c.Record.ID] = true
+			p.job.cands = append(p.job.cands, c)
 		}
 		if len(p.job.erase) > 0 {
 			jobs = append(jobs, p.job)
@@ -256,29 +274,46 @@ func (e *Engine) eraseCandidates(ctx context.Context, sel eraseSelector, guard E
 			held++
 			continue
 		}
+		blobJobs[i].cand = c
 		blobs = append(blobs, blobJobs[i])
 	}
 	return jobs, blobs, held, nil
 }
 
-func (e *Engine) eraseBatch(job eraseBatchJob, ops []model.ID) (records, pages uint64, err error) {
+func (e *Engine) eraseBatch(ctx context.Context, guard EraseGuard, job eraseBatchJob, ops []model.ID) (records, pages, held uint64, err error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.closed || e.failed {
-		return 0, 0, model.Fail(model.Unavailable)
+		return 0, 0, 0, model.Fail(model.Unavailable)
 	}
 	err = e.db.Update(func(tx *bolt.Tx) error {
+		// The decision to erase is taken again here, under the engine lock and the write
+		// transaction, so a hold that committed after the candidate scan still wins.
+		for _, c := range job.cands {
+			c.Final = true
+			allow, err := guard(ctx, c)
+			if err != nil {
+				return err
+			}
+			if !allow {
+				delete(job.erase, c.Record.ID)
+				held++
+			}
+		}
+		if len(job.erase) == 0 {
+			return nil
+		}
 		var err error
 		records, pages, err = e.eraseBatchTx(tx, job, ops)
 		return err
 	})
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
 	if records > 0 {
 		e.markRedact(job.slot) // after the commit: the reconcile that clears the mark must see it
 	}
-	return records, pages, nil
+	return records, pages, held, nil
 }
 
 // eraseBatchTx is one atomic transaction: derived rows, pages and index entries of the batch,
@@ -511,22 +546,35 @@ func unionIDs(a, b []model.ID) []model.ID {
 	return out
 }
 
-func (e *Engine) eraseBlob(job eraseBlobJob, ops []model.ID) (bool, error) {
+func (e *Engine) eraseBlob(ctx context.Context, guard EraseGuard, job eraseBlobJob, ops []model.ID) (erased bool, held uint64, err error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.closed || e.failed {
-		return false, model.Fail(model.Unavailable)
+		return false, 0, model.Fail(model.Unavailable)
 	}
-	erased := false
-	err := e.db.Update(func(tx *bolt.Tx) error {
-		var err error
+	err = e.db.Update(func(tx *bolt.Tx) error {
+		// The decision to erase is taken again here, under the engine lock and the write
+		// transaction, so a hold that committed after the candidate scan still wins.
+		c := job.cand
+		c.Final = true
+		allow, err := guard(ctx, c)
+		if err != nil {
+			return err
+		}
+		if !allow {
+			held = 1
+			return nil
+		}
 		erased, err = e.eraseBlobTx(tx, job, ops)
 		return err
 	})
-	if erased && err == nil {
+	if err != nil {
+		return false, 0, err
+	}
+	if erased {
 		e.markRedact(model.BlobOwnerSlot(job.receipt.Manifest.Org, job.receipt.Manifest.Project, job.receipt.Manifest.Root))
 	}
-	return erased && err == nil, err
+	return erased, held, nil
 }
 func (e *Engine) eraseBlobTx(tx *bolt.Tx, job eraseBlobJob, ops []model.ID) (bool, error) {
 	roots := tx.Bucket([]byte("artifact_roots"))

@@ -380,6 +380,14 @@ func (h LegalHold) CoversBlob(m BlobManifest) bool {
 // EvidenceGap is a committed RecordEvidenceGap: lifecycle evidence in
 // (After, Through] of a data group expired before it was processed. Affected
 // intervals are incomplete/unknown, never recovered.
+//
+// DeclaredBy says who declared it and therefore how far it authorizes expiry:
+// "worker" is the retention worker, which enumerated every entry of the
+// interval (Count == Through-After); "admin" is an organization administrator's
+// declaration, which is recorded and audited but never authorizes erasure
+// because nothing enumerates the entries it names. Actor is the declaring
+// principal (the installation for the worker). Both are set by control, never
+// taken from a request.
 type EvidenceGap struct {
 	ID         ID       `json:"id"`
 	Org        ID       `json:"org"`
@@ -393,6 +401,8 @@ type EvidenceGap struct {
 	Signals    []Kind   `json:"signals,omitempty"`
 	Reason     string   `json:"reason"`
 	RecordedAt UnixNano `json:"recorded_at_ns"`
+	DeclaredBy string   `json:"declared_by,omitempty"`
+	Actor      *ID      `json:"actor,omitempty"`
 }
 
 // RetentionPolicyVersion is one audited revision of a project's (or, with a

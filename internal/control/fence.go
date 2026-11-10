@@ -162,7 +162,11 @@ func bumpGeneration(st *State, org model.ID) uint64 {
 }
 func audit(st *State, principal, org model.ID, action, reason string, at model.UnixNano, targets []model.ID) {
 	o := st.Orgs[org.String()]
-	st.Audits = append(st.Audits, model.ControlAudit{ID: model.NewID(), Principal: principal, Org: org.String(), Action: action, Reason: reason, Time: int64(at), PolicyEpoch: o.Epoch, Targets: targets, RequestID: targets[0], Outcome: model.AuditAllowed})
+	var request model.ID // an audit is never dropped or panicked over for lack of a target
+	if len(targets) > 0 {
+		request = targets[0]
+	}
+	st.Audits = append(st.Audits, model.ControlAudit{ID: model.NewID(), Principal: principal, Org: org.String(), Action: action, Reason: reason, Time: int64(at), PolicyEpoch: o.Epoch, Targets: targets, RequestID: request, Outcome: model.AuditAllowed})
 }
 func blockingHolds(st *State, p model.DeletePredicate) []model.ID {
 	var out []model.ID
@@ -430,8 +434,16 @@ func (s *Store) FailDeletion(ctx context.Context, operation model.ID, at model.U
 // RecordPhysicalCleanup advances the org's delete generation BEFORE it reports
 // local erasure (every cache/ticket bound to an older generation is dead first)
 // and stamps the operations whose bytes are physically gone.
-func (s *Store) RecordPhysicalCleanup(ctx context.Context, org model.ID, operations []model.ID, at model.UnixNano) error {
-	return s.Update(ctx, func(st *State) error {
+//
+// C11: a legal hold makes physical-erasure success impossible, so an operation whose predicate
+// overlaps an ACTIVE hold is not stamped. The check is made in this same control update, against
+// the state the stamp would be committed on, so a hold that committed after the bytes were
+// erased (the worker cannot know) still stops "physical: done". Such operations are returned in
+// held (stamping the others is unaffected); they stay selectable and are recorded by a later
+// pass once the hold is released.
+func (s *Store) RecordPhysicalCleanup(ctx context.Context, org model.ID, operations []model.ID, at model.UnixNano) (held []model.ID, err error) {
+	err = s.Update(ctx, func(st *State) error {
+		held = nil
 		if _, ok := st.Orgs[org.String()]; !ok {
 			return model.Fail(model.NotFound)
 		}
@@ -441,13 +453,22 @@ func (s *Store) RecordPhysicalCleanup(ctx context.Context, org model.ID, operati
 			if !ok || op.Predicate.Org != org || op.Phase != model.DeletePhaseComplete {
 				return model.Fail(model.Conflict)
 			}
-			if op.PhysicalAt == 0 {
-				op.PhysicalAt = at
-				putDeletion(st, op)
+			if op.PhysicalAt != 0 {
+				continue
 			}
+			if len(blockingHolds(st, op.Predicate)) > 0 {
+				held = append(held, id)
+				continue
+			}
+			op.PhysicalAt = at
+			putDeletion(st, op)
 		}
 		return nil
 	})
+	if err != nil {
+		held = nil
+	}
+	return held, err
 }
 
 // AdvanceDeleteGeneration is the seam for every other path that erases readable

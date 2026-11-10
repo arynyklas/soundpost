@@ -50,6 +50,8 @@ type plane struct {
 	erased   func(context.Context, []model.DeletePredicate, storage.EraseGuard) (storage.EraseReport, error)
 	trace    func(step string) error // called first by every post-erasure maintenance step; an error fails the step
 	residual func() []string         // overrides what the engine declares as still holding deleted bytes
+	// checkpointed replaces the engine's checkpoint (it still follows the "checkpoint" trace step).
+	checkpointed func(model.DeletePredicate) error
 }
 
 func (p *plane) step(name string) error {
@@ -67,6 +69,9 @@ func (p *plane) ResidualStores() []string {
 func (p *plane) CheckpointErasure(ctx context.Context, pr model.DeletePredicate) error {
 	if err := p.step("checkpoint"); err != nil {
 		return err
+	}
+	if p.checkpointed != nil {
+		return p.checkpointed(pr)
 	}
 	return p.Engine.CheckpointErasure(ctx, pr)
 }
