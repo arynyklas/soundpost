@@ -322,3 +322,24 @@ export const EXPORT_PHASES: readonly ExportPhase[] = ['running', 'complete', 'fa
 export interface ExportOperation { id: Id; kind: 'export'; phase: ExportPhase; generation: string; progress: string; chunks: string; safe_reason?: string }
 /** The 202 answer of a create: the operation and the one-use download ticket bound to this scope. */
 export interface ExportGrant { operation: ExportOperation; ticket: string }
+
+// ---- Error investigation evidence (internal/httpapi/evidence.go) ----
+// Versions and nanosecond timestamps are decimal strings; hashes are 64 lowercase hexadecimal characters.
+/** The sanitized frame identity the server keeps for a stack frame; the artifact is an exact ArtifactID, never a URL. */
+export interface SafeFrame { module_id: string; function: string; artifact_id: string; line: number; column: number | null; in_app: boolean; async: boolean }
+export type SourceVisibility = 'present' | 'withheld' | 'absent';
+/** `context` exists only when state is present: source text is a plain string and is never markup. */
+export interface SourceView { state: SourceVisibility; reason?: string; context?: string }
+export interface CodeIdentity { source: string; function?: string; line: number; column: number }
+export interface SymbolicatedFrame { original: SafeFrame; reason: string; resolved?: CodeIdentity; map_sha256?: string; source: SourceView }
+export interface FramesView { org: Id; project: Id; build: Id; state: ViewState; reason?: string; frames: SymbolicatedFrame[]; sections: ViewSection[] }
+export interface FramesRequest { org: Id; project: Id; build: Id; frames: SafeFrame[]; include_sources: boolean }
+export interface DebugArtifact { artifact_id: Id; debug_id: string; sha256: string }
+export interface ReleaseRecord { id: Id; build_id: Id; label: string; revision: string; build_time_ns: string; debug_artifacts: DebugArtifact[]; label_history: { revision: string; label: string }[] }
+export type AncestryOrder = 'same' | 'ancestor' | 'descendant' | 'concurrent' | 'unknown';
+export const ANCESTRY_ORDERS: readonly AncestryOrder[] = ['same', 'ancestor', 'descendant', 'concurrent', 'unknown'];
+export interface ReleaseComparison { release: Id; order: AncestryOrder }
+export interface ReleaseView { org: Id; project: Id; state: ViewState; reason?: string; release?: ReleaseRecord; parents: { id: Id; known: boolean }[]; children: Id[]; comparisons: ReleaseComparison[]; sections: ViewSection[] }
+export interface OccurrenceEvidence { occurrence_id: Id; record_id: Id; grouping_version: number; fingerprint: string; event_time_ns: string; arrival_time_ns: string; build_id?: Id; release_id?: Id; ancestry: 'known' | 'unknown'; freshness: string; late: boolean }
+export interface GroupingIdentity { grouping_version: number; fingerprint: string; workflow: string; revision: string; resolution_time_ns?: string; resolution_frontier: Id[]; observed_releases: Id[]; fixed_descendants: Id[]; migration_links: Id[] }
+export interface IssueEvidenceView { org: Id; project: Id; issue: Id; state: ViewState; reason?: string; grouping?: GroupingIdentity; occurrences: OccurrenceEvidence[]; late_history: OccurrenceEvidence[]; sections: ViewSection[] }

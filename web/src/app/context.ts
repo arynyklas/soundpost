@@ -17,11 +17,12 @@ export interface ViewContext {
  /** Bumped on every navigation or refresh; a response for an older generation is dropped. */
  generation: number;
 }
-export type SectionId = 'queue' | 'incidents' | 'issues' | 'explore' | 'services' | 'jobs' | 'replays' | 'profiles' | 'settings';
+export type SectionId = 'queue' | 'incidents' | 'issues' | 'releases' | 'explore' | 'services' | 'jobs' | 'replays' | 'profiles' | 'settings';
 export const SECTIONS: readonly { id: SectionId; label: string; kind: InvestigationKind | null }[] = [
  { id: 'queue', label: 'Queue', kind: 'queue' },
  { id: 'incidents', label: 'Incidents', kind: 'incident' },
  { id: 'issues', label: 'Issues', kind: 'issue' },
+ { id: 'releases', label: 'Releases', kind: 'release' },
  { id: 'explore', label: 'Explore', kind: null },
  { id: 'services', label: 'Services', kind: 'service' },
  { id: 'jobs', label: 'Jobs', kind: 'job' },
@@ -61,27 +62,30 @@ export function scopeKey(c: ViewContext): string {
 
 /** The URL carries only stable IDs, nanosecond strings, the timezone name and the
  * section: never telemetry text, queries or credentials. */
-export function encodeHash(c: ViewContext, section: SectionId, service = '', incident: IncidentRef | null = null): string {
+export function encodeHash(c: ViewContext, section: SectionId, service = '', incident: IncidentRef | null = null, target: IncidentRef | null = null): string {
  const params = new URLSearchParams({ org: c.org, projects: c.projects.join(','), start: c.start, end: c.end, tz: c.timezone, view: section });
  if (service) params.set('service', service);
  if (incident) params.set('incident', `${incident.project}:${incident.id}`);
+ if (target) params.set('target', `${target.project}:${target.id}`);
  return `#${params}`;
 }
 /** One incident inside the selected projects: the project is part of its identity. */
 export interface IncidentRef { project: Id; id: Id }
-export interface Navigation { context: ViewContext | null; section: SectionId; service: Id | ''; incident: IncidentRef | null }
+export interface Navigation { context: ViewContext | null; section: SectionId; service: Id | ''; incident: IncidentRef | null; /** The issue or release of the issues and releases sections. */ target: IncidentRef | null }
 export function decodeHash(hash: string, generation: number): Navigation {
  const params = new URLSearchParams(hash.startsWith('#') ? hash.slice(1) : hash);
  const section = SECTIONS.find((s) => s.id === params.get('view'))?.id ?? 'queue';
  const service = params.get('service') ?? '';
- const none: Navigation = { context: null, section, service: '', incident: null };
+ const none: Navigation = { context: null, section, service: '', incident: null, target: null };
  const org = params.get('org') ?? '', start = params.get('start') ?? '', end = params.get('end') ?? '', tz = params.get('tz') ?? '';
  const projects = (params.get('projects') ?? '').split(',').filter((p) => p !== '');
  if (!isId(org) || projects.length === 0 || projects.length > MAX_PROJECTS || !projects.every(isId) || new Set(projects).size !== projects.length) return none;
  if (!validWindow(start, end) || !validTimezone(tz) || (service !== '' && !isId(service))) return none;
- const [iproject = '', iid = ''] = (params.get('incident') ?? '').split(':');
- const incident = isId(iproject) && isId(iid) && projects.includes(iproject) ? { project: iproject, id: iid } : null;
- return { context: { org, projects, environment: '', start, end, timezone: tz, generation }, section, service, incident };
+ const refOf = (name: string): IncidentRef | null => {
+  const [rproject = '', rid = ''] = (params.get(name) ?? '').split(':');
+  return isId(rproject) && isId(rid) && projects.includes(rproject) ? { project: rproject, id: rid } : null;
+ };
+ return { context: { org, projects, environment: '', start, end, timezone: tz, generation }, section, service, incident: refOf('incident'), target: refOf('target') };
 }
 
 export function requestFor(c: ViewContext, kind: InvestigationKind, target?: Id): InvestigationRequest {

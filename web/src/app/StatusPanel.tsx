@@ -1,6 +1,7 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
 import * as React from 'react';
 import type { LoadState } from '../api/types';
+import { EVIDENCE_REASON } from '../evidence/model';
 
 const REASONS: Record<string, string> = {
  service_not_built: 'The service behind this view is not available in this installation yet.',
@@ -15,7 +16,7 @@ const REASONS: Record<string, string> = {
  project_failed: 'This project produced no value. It is not an empty or zero result; the failure is listed below.',
  saved_views_not_built: 'Saved views and their exports need the C11 saved-view actions, which this installation does not have. Nothing is saved, in this browser or on the server.',
 };
-export function reasonText(reason: string): string { return REASONS[reason] ?? 'Not available.'; }
+export function reasonText(reason: string): string { return REASONS[reason] ?? EVIDENCE_REASON[reason] ?? 'Not available.'; }
 
 interface Presentation { label: string; text: string; role: 'status' | 'alert' }
 function present(state: LoadState<unknown>): Presentation {

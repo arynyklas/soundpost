@@ -30,3 +30,7 @@ select{min-height:44px;padding:8px;border:1px solid var(--border);border-radius:
 .live-items{list-style:none;margin:8px 0;padding:0;max-height:28em;overflow:auto;border:1px solid var(--border);border-radius:4px;background:var(--card)}.live-items:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
 .live-row{display:grid;gap:2px;padding:6px 10px;border-bottom:1px solid var(--border)}.live-gap{padding:8px 10px;border-bottom:1px solid var(--border);border-left:6px dashed var(--error);background:var(--notice);overflow-wrap:anywhere}.live-meta{color:var(--muted)}.live-labels{color:var(--muted);overflow-wrap:anywhere}
 .discovery-items{padding-left:20px;max-height:20em;overflow:auto}.discovery-items li{margin:4px 0}.histogram{display:inline-block;max-width:100%}
+
+/* Error investigation (05.04): a frame's mapped, unmapped and withheld states are spelled in words; the dashed border only reinforces them. No inline styles (the CSP forbids them). */
+.frame{margin:8px 0;padding:8px 12px;border:1px solid var(--border);border-left:6px solid var(--primary);border-radius:4px;background:var(--card)}.frame[data-mapped=no]{border-left-style:dashed;border-left-color:var(--error)}.frame p{margin:4px 0;overflow-wrap:anywhere}
+.source-context{max-height:20em;overflow:auto;padding:8px;border:1px solid var(--border);border-radius:4px;background:var(--background);font-family:ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere}.source-context:focus-visible{outline:3px solid var(--focus);outline-offset:2px}

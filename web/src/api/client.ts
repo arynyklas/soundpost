@@ -1,5 +1,5 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
-import { ApiFault, COMPLETENESS, EXPORT_PHASES, INVESTIGATION_KINDS, LIVE_EVENT_TYPES, OutcomeUnknown, QueryFault, VersionConflict, type ActionRequest, type ActionResponse, type Completeness, type DiscoveryRequest, type DiscoveryResult, type ExemplarRequest, type ExemplarResult, type ExportGrant, type ExportOperation, type ExportPhase, type ExportSignal, type FormatRequest, type FormatResult, type Id, type IncidentView, type InvestigationKind, type InvestigationRequest, type InvestigationView, type LifecycleOperation, type LiveEvent, type LiveEventType, type LiveTicket, type LiveTicketRequest, type LoadState, type QueryRequest, type QueryResult, type QueueView, type ViewState, type VisibleSource } from './types';
+import { ANCESTRY_ORDERS, ApiFault, COMPLETENESS, EXPORT_PHASES, INVESTIGATION_KINDS, LIVE_EVENT_TYPES, OutcomeUnknown, QueryFault, VersionConflict, type ActionRequest, type ActionResponse, type AncestryOrder, type Completeness, type DiscoveryRequest, type DiscoveryResult, type ExemplarRequest, type ExemplarResult, type ExportGrant, type ExportOperation, type ExportPhase, type ExportSignal, type FormatRequest, type FormatResult, type FramesRequest, type FramesView, type Id, type IncidentView, type InvestigationKind, type InvestigationRequest, type InvestigationView, type IssueEvidenceView, type LifecycleOperation, type LiveEvent, type LiveEventType, type LiveTicket, type LiveTicketRequest, type LoadState, type QueryRequest, type QueryResult, type QueueView, type ReleaseView, type SafeFrame, type ViewState, type VisibleSource } from './types';
 import { SseProtocolError, readSse, type SseFrame } from './sse';
 
 // The CSRF token lives only here, in memory, handed over by the session
@@ -562,4 +562,84 @@ export async function downloadExport(org: Id, project: Id, id: Id, ticket: strin
  if (!response.ok) throw await apiFault(response);
  if (!(response.headers.get('Content-Type') ?? '').startsWith('application/x-ndjson')) throw new ApiFault(response.status, 'invalid_response', '', 'not an export');
  return response.blob();
+}
+
+// ---- Error investigation evidence (POST /api/v1/evidence/{frames,release,issue}) ----
+const HASH = /^[0-9a-f]{64}$/;
+const hashLike = (v: unknown): v is string => typeof v === 'string' && HASH.test(v);
+const stateLike = (v: unknown): v is ViewState => VIEW_STATES.includes(v as ViewState);
+const idList = (v: unknown): v is Id[] => Array.isArray(v) && v.length <= 4096 && v.every(idLike);
+const sectionsLike = (v: unknown): boolean => Array.isArray(v) && v.length <= 32 && v.every((s) => isRecord(s) && typeof s.name === 'string' && stateLike(s.state));
+
+function isSafeFrame(f: unknown): f is SafeFrame {
+ return isRecord(f) && textLike(f.module_id, 600) && textLike(f.function, 600) && textLike(f.artifact_id, 600) && typeof f.line === 'number' && Number.isInteger(f.line) && f.line >= 0
+  && (f.column === null || (typeof f.column === 'number' && Number.isInteger(f.column) && f.column >= 0)) && typeof f.in_app === 'boolean' && typeof f.async === 'boolean';
+}
+
+/** Accepts frames only for exactly the requested scope and the frames that were sent, in order, so a view of another scope or a
+ * silently shorter, longer or reordered list is a fault and never rendered. A mapped position needs a map hash; source text only exists when the source is present. */
+export function parseFrames(raw: unknown, req: FramesRequest): FramesView {
+ if (!isRecord(raw) || raw.org !== req.org || raw.project !== req.project || raw.build !== req.build || !stateLike(raw.state) || !Array.isArray(raw.frames) || raw.frames.length !== req.frames.length || !sectionsLike(raw.sections)) return badResponse();
+ raw.frames.forEach((entry: unknown, i: number) => {
+  if (!isRecord(entry) || !isSafeFrame(entry.original) || typeof entry.reason !== 'string' || !/^[a-z_]{1,48}$/.test(entry.reason) || !isRecord(entry.source)) return badResponse();
+  const sent = req.frames[i]!;
+  const o = entry.original;
+  if (o.artifact_id !== sent.artifact_id || o.line !== sent.line || o.column !== sent.column || o.function !== sent.function || o.module_id !== sent.module_id) return badResponse();
+  const s = entry.source;
+  if (!['present', 'withheld', 'absent'].includes(s.state as string) || (s.state === 'present') !== (typeof s.context === 'string') || (s.context !== undefined && (typeof s.context !== 'string' || s.context.length > 1 << 20))) return badResponse();
+  if (s.state === 'present' && !req.include_sources) return badResponse();
+  const mapped = entry.reason === 'resolved';
+  const r = entry.resolved;
+  if (mapped !== (r !== undefined) || mapped !== (entry.map_sha256 !== undefined)) return badResponse();
+  if (r !== undefined && (!isRecord(r) || !textLike(r.source, 4096) || typeof r.line !== 'number' || typeof r.column !== 'number' || (r.function !== undefined && !textLike(r.function, 600)) || !hashLike(entry.map_sha256))) return badResponse();
+ });
+ return raw as unknown as FramesView;
+}
+
+/** Symbolicate sanitized frames of one build under the caller's own scope. The browser never names a URL and never fetches a map: the server resolves an exact ArtifactID through the owned service. */
+export async function getFrames(req: FramesRequest, signal: AbortSignal): Promise<FramesView> {
+ const response = await jsonPost('/api/v1/evidence/frames', req, signal);
+ if (!response.ok) throw await apiFault(response);
+ return parseFrames(await response.json() as unknown, req);
+}
+
+export function parseReleaseEvidence(raw: unknown, want: { org: Id; project: Id; release: Id; compare: Id[] }): ReleaseView {
+ if (!isRecord(raw) || raw.org !== want.org || raw.project !== want.project || !stateLike(raw.state) || !Array.isArray(raw.parents) || !idList(raw.children) || !Array.isArray(raw.comparisons) || !sectionsLike(raw.sections)) return badResponse();
+ if (!raw.parents.every((p: unknown) => isRecord(p) && idLike(p.id) && typeof p.known === 'boolean')) return badResponse();
+ if (raw.comparisons.length !== (raw.release === undefined ? 0 : want.compare.length)) return badResponse();
+ raw.comparisons.forEach((c: unknown, i: number) => { if (!isRecord(c) || c.release !== want.compare[i] || !ANCESTRY_ORDERS.includes(c.order as AncestryOrder)) return badResponse(); });
+ const r = raw.release;
+ if (raw.state === 'not_available' ? r !== undefined : !isRecord(r)) return badResponse();
+ if (isRecord(r)) {
+  if (r.id !== want.release || !idLike(r.build_id) || !textLike(r.label, 256) || !decLike(r.revision) || !decLike(r.build_time_ns) || !Array.isArray(r.debug_artifacts) || !Array.isArray(r.label_history)) return badResponse();
+  if (!r.debug_artifacts.every((d: unknown) => isRecord(d) && idLike(d.artifact_id) && textLike(d.debug_id, 256) && hashLike(d.sha256)) || !r.label_history.every((h: unknown) => isRecord(h) && decLike(h.revision) && textLike(h.label, 256))) return badResponse();
+ }
+ return raw as unknown as ReleaseView;
+}
+
+/** Release identity, label history, declared parents and the partial-order relation to the releases named in `compare` (at most 16). */
+export async function getReleaseEvidence(org: Id, project: Id, release: Id, compare: Id[], signal: AbortSignal): Promise<ReleaseView> {
+ const response = await jsonPost('/api/v1/evidence/release', { org, project, release, ...(compare.length ? { compare } : {}) }, signal);
+ if (!response.ok) throw await apiFault(response);
+ return parseReleaseEvidence(await response.json() as unknown, { org, project, release, compare });
+}
+
+function occurrenceLike(o: unknown, late: boolean): boolean {
+ return isRecord(o) && idLike(o.occurrence_id) && idLike(o.record_id) && typeof o.grouping_version === 'number' && hashLike(o.fingerprint) && decLike(o.event_time_ns) && decLike(o.arrival_time_ns)
+  && (o.ancestry === 'known' || o.ancestry === 'unknown') && (o.ancestry === 'unknown' || idLike(o.release_id)) && typeof o.freshness === 'string' && o.late === late;
+}
+export function parseIssueEvidence(raw: unknown, want: { org: Id; project: Id; issue: Id }): IssueEvidenceView {
+ if (!isRecord(raw) || raw.org !== want.org || raw.project !== want.project || raw.issue !== want.issue || !stateLike(raw.state) || !Array.isArray(raw.occurrences) || !Array.isArray(raw.late_history) || !sectionsLike(raw.sections)) return badResponse();
+ if (!raw.occurrences.every((o: unknown) => occurrenceLike(o, false)) || !raw.late_history.every((o: unknown) => occurrenceLike(o, true))) return badResponse();
+ const g = raw.grouping;
+ if (raw.state === 'not_available' ? g !== undefined : !isRecord(g)) return badResponse();
+ if (isRecord(g) && (typeof g.grouping_version !== 'number' || !hashLike(g.fingerprint) || typeof g.workflow !== 'string' || !decLike(g.revision) || !idList(g.resolution_frontier) || !idList(g.observed_releases) || !idList(g.fixed_descendants) || !idList(g.migration_links))) return badResponse();
+ return raw as unknown as IssueEvidenceView;
+}
+
+/** Grouping version and hash, stored occurrences and the separately listed late history of one persisted issue. */
+export async function getIssueEvidence(org: Id, project: Id, issue: Id, signal: AbortSignal): Promise<IssueEvidenceView> {
+ const response = await jsonPost('/api/v1/evidence/issue', { org, project, issue }, signal);
+ if (!response.ok) throw await apiFault(response);
+ return parseIssueEvidence(await response.json() as unknown, { org, project, issue });
 }
