@@ -72,6 +72,8 @@ func run(args []string, out io.Writer) error {
 		return runRelease(args[1:], out)
 	case "image-context":
 		return runImageContext(args[1:])
+	case "sbom", "notices", "gate", "verify-signature", "handles":
+		return runPackage(args[0], args[1:], out)
 	}
 	return fmt.Errorf("unknown command %q", args[0])
 }
