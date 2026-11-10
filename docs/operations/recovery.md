@@ -44,6 +44,61 @@ Replacing a node that lost its disk must use a new member identity through the e
 
 Storage exposes `Engine.CreateSnapshots` (all 64 groups) and `Engine.CompactJournals`. The storage manifest records the verified cuts in `SnapshotCoverage`.
 
+## Engine startup cost
+
+Truncation bounds Raft journal replay. It does not make engine startup independent of history. Read from `internal/replica/{node,ready,install,repair}.go` and `internal/storage/{replicated,manifest,index_integrity}.go`:
+
+**O(retained suffix)**
+
+* Re-applying journal entries. `Group.applyCommitted` skips every entry at or below the machine's durable applied index, so only entries after it run through `slotMachine.Apply`, and entries before a truncation cut are never re-proposed or re-applied.
+* `Group.rebuildKnown` indexes the retained in-memory log entries.
+
+**O(history), paid at every start whether or not the journals were truncated**
+
+* Reading the journal. `openReadyWAL` reads and CRC-checks every record. After truncation the first record is the snapshot, whose envelope carries the slot's whole command history (`slotSnapshot.Entries`) and the completed-command table. Truncation bounds the number of retained log entries, not the bytes read: the truncated journal is larger than the untruncated one in the table below.
+* Verifying that snapshot record. `Group.restoreSnapshot` calls `slotMachine.VerifySnapshot`, which decodes the whole envelope and byte-compares every command of the slot with `replica_commands` in the apply database. `slotMachine.Restore`, a full `applyTx` replay of every command above the local applied index, runs only if the local database is behind the snapshot (a node rebuilt from a snapshot); that node pays the whole replay once.
+* Structural checks over the apply database: `validateReplicaNamespaces` looks up every command key of every slot (`EnableReplication`), and `initStorage` (`Open`) walks every scan-index entry (`validateIndexIntegrity`) and, for every cold segment in the manifest, hashes the whole file and checks its header, so `Open` also costs the size of the cold segments.
+* The completed-command (retry) table is serialized into every snapshot envelope and loaded whole into memory. It is pruned only by the dedup horizon owned by retention, so it and the envelope grow with the number of commands inside that horizon.
+* Snapshot cuts, the C12 backup evidence (`QuotaEvidence`, the replay interval digests) and `CommitQuotaReconciliation` each re-walk the full history under the engine mutex, so the pause a snapshot cut causes and the memory a backup holds while it seals (a small multiple of the whole command history) grow with history inside the retention window. Bounding these needs per-window digests and an incremental snapshot format; neither exists yet.
+
+**Not part of a plain restart.** The SHA-256 of every byte of the snapshot directory (`SnapshotStore.Verify`) runs when a journal is created from an installed snapshot (no `ready.wal`, `loadInstalledSeed`), when the `CURRENT` pointer is unusable (`repair`), and on every `CompactJournal`. A plain restart that finds `ready.wal` validates the selected snapshot only structurally (manifest, file presence and sizes, ledger parse).
+
+### Measured
+
+`BenchmarkEngineStartup` (`internal/storage/startup_bench_test.go`) builds a real single-voter replicated engine (loopback transport, 64 data groups) holding N committed batches, one metric record each, through `Engine.Append`, closes it, and times the reopen with the steps of `openTestEngine`: `Open`, `EnableReplication`, then registering and campaigning the 64 groups. The same data is measured in three states, each reopened 5 times (median shown): `full` (journals untouched), `trunc` (after `Engine.CreateSnapshots` and `Engine.CompactJournals`) and `flush` (additionally after `Engine.Flush`, so cold segment files exist). Reopen times are milliseconds, median of 5; where two figures are given they are two independent passes (pass 1 / pass 2; N=100 and 500 were measured in pass 1 only).
+
+| N | state | reopen total | Open | EnableReplication | register + campaign | journal entries retained | journal file MB | snapshot MB |
+| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 100 | full | 3037 | 38.8 | 675 | 2343 | 484 | 0.76 | 0 |
+| 100 | trunc | 3217 | 32.4 | 878 | 2292 | 320 | 1.08 | 0.68 |
+| 100 | flush | 3333 | 35.5 | 879 | 2368 | 704 | 1.35 | 0.68 |
+| 500 | full | 3603 | 39.0 | 914 | 2650 | 884 | 2.55 | 0 |
+| 500 | trunc | 3386 | 29.6 | 889 | 2474 | 320 | 4.31 | 3.11 |
+| 500 | flush | 3199 | 44.2 | 917 | 2283 | 704 | 4.58 | 3.11 |
+| 1000 | full | 3171 / 4536 | 46.4 / 51.7 | 847 / 1568 | 2335 / 2994 | 1384 | 4.79 | 0 |
+| 1000 | trunc | 3292 / 4840 | 33.0 / 59.1 | 947 / 1943 | 2339 / 2876 | 320 | 8.33 | 6.12 |
+| 1000 | flush | 3050 / 4437 | 39.2 / 48.1 | 931 / 1645 | 2042 / 2675 | 704 | 8.60 | 6.12 |
+| 2500 | full | 2104 / 4475 | 35.3 / 62.3 | 730 / 1651 | 1339 / 2704 | 2884 | 11.55 | 0 |
+| 2500 | trunc | 2032 / 5208 | 37.1 / 70.1 | 676 / 2309 | 1345 / 2932 | 320 | 20.47 | 15.23 |
+| 2500 | flush | 2133 / 5313 | 38.1 / 71.6 | 720 / 2349 | 1376 / 2896 | 704 | 20.74 | 15.23 |
+| 5000 | full | 4702 / 3843 | 166 / 136 | 2146 / 1405 | 2491 / 2035 | 5384 | 22.79 | 0 |
+| 5000 | trunc | 5130 / 3388 | 84.1 / 74.3 | 2232 / 1375 | 2567 / 2039 | 320 | 40.65 | 30.38 |
+| 5000 | flush | 5105 / 3945 | 102 / 70.9 | 2289 / 1596 | 2714 / 2318 | 704 | 40.92 | 30.36 |
+
+Retained journal entries are summed over the 64 groups at the last reopen. They include the election entries each start appends, one per group: 64 for the initial start and 64 for each reopen, so `full` holds N + 384 entries and `trunc` holds only the 5 x 64 = 320 appended after the cut. The "journal entries retained" and "journal file MB" columns are deterministic; the times are not.
+
+What the numbers show, and what they do not:
+
+* Truncation does what it promises for the log: retained entries fall from N plus the election entries to the election entries alone (5384 to 320 at N=5000). The journal file does not shrink: it grows by about 1.8x (22.8 to 40.7 MB at N=5000) because the snapshot record repeats the history.
+* Reopen time is not visibly lower after truncation at any N. At N=5000 the median total is 4702 / 3843 ms (full) against 5130 / 3388 ms (trunc) in the two passes; the difference is inside the pass-to-pass spread.
+* Most of the time is a fixed cost, not history: registering and campaigning 64 groups (an fsync each) took 1.3 to 3.0 s at every N, including N=100, and the 64 group opens in `EnableReplication` took 0.7 to 0.9 s at N=100. Both moved by up to a factor of 3 between passes on the same data because other work was using the same machine (load average 3 to 15 while measuring).
+* The N-dependent part is small next to that noise at N up to 5000 and was not resolved by this data. `Open` alone is the least noisy step: it was about 30 to 70 ms up to N=2500 and 71 to 166 ms at N=5000, which agrees with the O(history) index walk above, but it is a small fraction of the total. Do not read the table as a scaling law for larger histories: the journal and snapshot reads (tens of MB at N=5000) and the per-slot byte comparison grow linearly with history, and nothing measured here bounds them.
+
+Caveats: one machine (Intel i9-14900KF, 32 logical cores, 62 GB RAM, WSL2 kernel 6.6.87.2-microsoft-standard-WSL2 on a Windows host, `/tmp` on an ext4 virtual disk whose backing storage was not identified), `go1.27.3`, single voter on a loopback transport, shared with other processes, page cache warm after the build. It says nothing about fsync-bound power-loss latency on real disks, multi-voter catch-up, or histories much larger than N=5000. N=10000 and larger were not measured: building N batches through the real `Append` path takes about 20 minutes at N=5000 (the control-store fixture grows quadratically with N), and setup time is not part of any figure above. This is a local measurement, not a qualification.
+The figures in the table above were measured by the implementing worker; the parent read the method and the benchmark source and has not re-run it.
+
+Reproduce: `go test ./internal/storage -run '^$' -bench BenchmarkEngineStartup -benchtime 1x -timeout 5h` (set `SOUNDPOST_STARTUP_BENCH_N=1000,5000` to choose the sizes). Each N prints one line with `full-`, `trunc-` and `flush-` prefixed metrics.
+
 ## Local maintenance on every voter
 
 A voter's physical layout (storage manifest, segment files, page locations) is node-local: every voter rebuilds it independently from the replicated command history, and clients and peers see only logical contents, through that node's own fenced reads. Publishing a manifest (`Engine.Flush`, `Engine.Compact`, `Engine.Publish`) therefore needs **no Raft leadership, no quorum round trip and no group lock**. A leader, a follower, a node that leads only some groups and a node that has just lost leadership all flush hot pages, rewrite segments, record snapshot coverage and truncate their own journals. An earlier version took a quorum fence and then the lock of every one of the 65 groups, and required the caller to be leader of all of them at once; a follower could never publish and, once leadership was spread across nodes, nobody could.
@@ -65,18 +120,6 @@ Publication cost follows the data published, not the whole store: segments that 
 ## Repairing a learner added after a truncation
 
 etcd raft refuses to restore a snapshot whose configuration does not contain the recipient. The stored snapshot anchors the truncated journal and predates any member added later, so a fresh learner (a replacement voter under a new id) added after a truncation would ignore every snapshot forever. The leader therefore offers such a recipient a snapshot cut at its applied index with the current configuration (`internal/replica/joinsnapshot.go`). That snapshot is sent only: it is never stored in the in-memory log or the journal, so truncation keeps anchoring on the verified snapshot directory, and it is released once delivered. Startup (`appcore.OpenDistributed`) waits for each group's readiness round until its 60-second startup budget is spent (each round has its own 5-second freshness window, which previously ended startup at the first slow group); intake still opens only after every group answered.
-
-## Engine startup cost
-
-Journal truncation bounds only the Raft journal replay after a restart. The rest of engine startup still does work proportional to the stored history, and this document makes no claim that a restart is O(retained suffix). Established by reading the code (the independent 01.07 review) and not by a scale measurement, which has not been taken:
-
-* `Group.Open` deep-verifies the selected snapshot: it reads and hashes every byte of the snapshot directory, including a data slot's whole serialized command history.
-* `machine.Restore` walks that whole history: a byte-equality check on the node's own disk, a full re-application when the node was rebuilt from a received snapshot.
-* The storage engine hashes every cold segment file when it opens the manifest.
-* The completed-command (retry) table is serialized into every snapshot envelope and loaded whole into memory; it is pruned only by the dedup horizon owned by retention, so it and the envelope grow with the number of commands inside that horizon.
-* Snapshot cuts, the C12 backup evidence (`QuotaEvidence`, the replay interval digests) and `CommitQuotaReconciliation` each re-walk the full history under the engine mutex.
-
-Consequences an operator should plan for: restart time and the pause a snapshot cut causes grow with history inside the retention window, and a backup holds a small multiple of the whole command history in memory while it seals. Bounding these needs per-window digests and an incremental snapshot format; neither exists yet.
 
 ## Crash hooks
 
