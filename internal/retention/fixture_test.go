@@ -118,6 +118,9 @@ type options struct {
 	processed retention.Processed
 	refs      retention.References
 	pressure  bool
+	// controlResiduals wires the service's data plane through
+	// retention.NewResidualPlane, as the application does.
+	controlResiduals bool
 }
 
 func newFx(t *testing.T, o options) *fx {
@@ -192,7 +195,11 @@ func newFx(t *testing.T, o options) *fx {
 	if o.pressure {
 		pressure = f.engine
 	}
-	f.svc, err = retention.New(retention.Config{Control: f.store, Data: f.plane, Base: f.auth.SourceLifecycleGenerations(), Authority: o.authority, Pressure: pressure, Processed: o.processed, References: o.refs, Clock: now})
+	var data retention.DataPlane = f.plane
+	if o.controlResiduals {
+		data = retention.NewResidualPlane(f.plane, f.store)
+	}
+	f.svc, err = retention.New(retention.Config{Control: f.store, Data: data, Base: f.auth.SourceLifecycleGenerations(), Authority: o.authority, Pressure: pressure, Processed: o.processed, References: o.refs, Clock: now})
 	if err != nil {
 		t.Fatal(err)
 	}

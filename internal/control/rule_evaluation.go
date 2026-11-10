@@ -427,6 +427,11 @@ func applyRuleEvaluation(scope auth.Scope, st *State, cmd Command) (Effect, erro
 	if err = storeRuleBook(st, key, book); err != nil {
 		return Effect{}, err
 	}
+	// An evaluation that read its batch before a barrier can commit after its
+	// deletion completed: the covered payload never lands (eraseLateEffect).
+	if err = eraseLateEffect(st, org, project); err != nil {
+		return Effect{}, err
+	}
 	return effect, nil
 }
 

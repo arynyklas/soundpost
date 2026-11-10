@@ -683,6 +683,12 @@ func applyDelivery(scope auth.Scope, st *State, cmd Command) (Effect, error) {
 		if err = raiseDeliveryFence(st, org, project, lease); err != nil {
 			return Effect{}, err
 		}
+		// An enqueue (or a claim of a covered delivery) after the deletion
+		// completed: settle and unbody what the deletion covers before the
+		// settled history is pruned.
+		if err = eraseLateEffect(st, org, project); err != nil {
+			return Effect{}, err
+		}
 		if err = pruneSettledDeliveries(st, org, project); err != nil {
 			return Effect{}, err
 		}

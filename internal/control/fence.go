@@ -592,9 +592,15 @@ func activeDeletions(st State, org model.ID, projects []model.ID) []model.Delete
 	return out
 }
 
-// EffectSuppressed is the hook every derived-effect consumer (rules, issues,
-// notifications, outbox) calls inside the same control transaction that would
-// commit the effect, so a deletion and an effect can never interleave.
+// EffectSuppressed says whether a derived effect of (org, project, kind, at,
+// entity) is covered by a deletion that is fencing, complete or failed. It is a
+// read-side predicate for a consumer that wants to skip work early; it is NOT how
+// a deletion keeps telemetry-derived control payloads out of the control state:
+// the control writers (rule evaluation, incident, condition, job, issue
+// evidence, delivery) erase what a finished deletion covers inside the very
+// transition that commits their effect (eraseLateEffect), so an effect that
+// commits after its deletion completed never leaves a payload behind whether or
+// not its consumer asked first.
 func EffectSuppressed(st State, org, project model.ID, kind model.Kind, at model.UnixNano, entity *model.ID) bool {
 	for _, p := range activeDeletions(st, org, nil) {
 		if p.CoversOrigin(org, project, kind, at, entity) {

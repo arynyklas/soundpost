@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"sort"
+	"strings"
 
 	"soundpost/internal/model"
 )
@@ -42,7 +43,8 @@ import (
 // cannot be read is dropped whole (unattributable). Effect intents naming a
 // dropped occurrence or a removed issue are dropped. Identities, checkpoints,
 // command digests and recorded gaps stay: they carry no telemetry content. An
-// unreadable book is dropped whole.
+// unreadable book of a covered project is dropped whole; one of a project the
+// deletion does not cover is left in place.
 //
 // What a service consumer sees: a fully erased issue is gone (not found); a
 // partially erased one loads with fewer occurrences and without the erased
@@ -63,9 +65,19 @@ func eraseIssueBooks(st *State, p model.DeletePredicate, at model.UnixNano) (dro
 		}
 		seen[issueBookKey(b.Org, b.Project)] = project{b.Org, b.Project}
 	}
-	// An unreadable book cannot be attributed to anything: it is dropped whole.
+	// An unreadable book cannot be attributed from its content, but its key names
+	// its organization and project: it is dropped whole only when the predicate
+	// covers that project (an organization retirement covers every project of the
+	// organization). A book of a project the deletion does not cover is left in
+	// place: reads of it fail closed (loadIssueBook answers Corrupt), and another
+	// project's deletion must not cost it its checkpoints, command records, gaps,
+	// effect intents and revision. A key that names no project is attributable to
+	// nothing and stays too.
 	sort.Strings(unreadable)
 	for _, key := range unreadable {
+		if org, project, ok := issueBookKeyOwner(key); !ok || !p.CoversProject(org, project) {
+			continue
+		}
 		delete(st.IssueBooks, key)
 		dropped++
 	}
@@ -94,6 +106,23 @@ func eraseIssueBooks(st *State, p model.DeletePredicate, at model.UnixNano) (dro
 		dropped += n
 	}
 	return dropped, nil
+}
+
+// issueBookKeyOwner is the inverse of issueBookKey: the organization and project
+// a key names, ok false for a key that names none.
+func issueBookKeyOwner(key string) (org, project model.ID, ok bool) {
+	o, p, found := strings.Cut(key, ":")
+	if !found {
+		return org, project, false
+	}
+	var err error
+	if org, err = model.ParseID(o); err != nil {
+		return model.ID{}, model.ID{}, false
+	}
+	if project, err = model.ParseID(p); err != nil {
+		return model.ID{}, model.ID{}, false
+	}
+	return org, project, true
 }
 
 // issueEvidenceCovered says whether one evidence item is covered by a range or

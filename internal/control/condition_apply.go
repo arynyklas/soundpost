@@ -168,6 +168,9 @@ func applyCondition(scope auth.Scope, st *State, cmd Command) (Effect, error) {
 		st.Audits = append(st.Audits, model.ControlAudit{ID: cmd.CommandID, Principal: scope.PrincipalID(), Action: "conditions." + c.Change, Reason: "condition lifecycle change", Time: int64(c.At),
 			Org: org.String(), PolicyEpoch: scope.PolicyEpoch(), Targets: []model.ID{c.Condition}, RequestID: cmd.CommandID, Outcome: model.AuditAllowed})
 	}
+	if err = eraseLateEffect(st, org, c.Project); err != nil {
+		return Effect{}, err
+	}
 	return Effect{AffectedIDs: []model.ID{c.Condition}, Phase: "applied"}, nil
 }
 

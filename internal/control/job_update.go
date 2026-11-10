@@ -400,6 +400,9 @@ func applyJobUpdate(scope auth.Scope, st *State, cmd Command) (model.ID, model.R
 	if c.Audit != nil {
 		st.Audits = append(st.Audits, audit)
 	}
+	if err = eraseLateEffect(st, org, c.Project); err != nil {
+		return model.ID{}, 0, "", err
+	}
 	return c.Job, c.NewVersion, "applied", nil
 }
 

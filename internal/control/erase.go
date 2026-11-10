@@ -50,6 +50,11 @@ const (
 const (
 	controlErasedAction = "delete.control_erased"
 	controlErasedReason = "control_payloads_erased"
+	// controlScrubbedAction settles the control.db scrub an erasing audit owes:
+	// it is appended after ScrubErased zeroed every free page, and names the
+	// operations whose erasing audits the scrub covered.
+	controlScrubbedAction = "delete.control_scrubbed"
+	controlScrubbedReason = "control_db_free_pages_zeroed"
 )
 
 // eraseControlPayloads drops every control payload the operation's predicate
@@ -64,6 +69,40 @@ func eraseControlPayloads(st *State, op model.DeletionOperation, at model.UnixNa
 	}
 	if dropped > 0 {
 		audit(st, op.Principal, op.Predicate.Org, controlErasedAction, controlErasedReason, at, []model.ID{op.Predicate.Operation})
+	}
+	return nil
+}
+
+// eraseLateEffect runs inside every transition that commits an effect derived
+// from telemetry (a rule evaluation, an incident or condition action, a job
+// update, issue evidence, a delivery enqueue) of project. The barrier saga lets
+// a worker that read its batch before the barrier finish its write, so such an
+// effect can commit AFTER a deletion completed (or failed); the erasure that ran
+// when the operation completed has long passed. For every committed deletion
+// that covers the project and has finished (complete or failed: a fencing one
+// erases at its completion, and a held one has not begun) the same erasure runs
+// again over the state the effect just changed, so the covered payload never
+// reaches the committed state, the snapshot or control.db. It is idempotent and
+// adds an erasing audit only when it dropped something, like every erasure; the
+// transition time is the operation's own completion time, so it stays a pure
+// function of (state, predicate), identical on every replica.
+func eraseLateEffect(st *State, org, project model.ID) error {
+	if len(st.Deletions) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(st.Deletions))
+	for id := range st.Deletions {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		op := st.Deletions[id]
+		if op.Phase != model.DeletePhaseComplete && op.Phase != model.DeletePhaseFailed || !op.Predicate.CoversProject(org, project) {
+			continue
+		}
+		if err := eraseControlPayloads(st, op, op.CompletedAt); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -238,23 +277,47 @@ func stateLatestTime(raw json.RawMessage) (latest model.UnixNano, ok bool) {
 	return latest, ok && !bad
 }
 
-// controlErasures reads, from committed state only, what is still owed on this
-// node: the erasing audits name their operation, and an operation whose physical
-// step is not recorded still owes the control.db scrub. The journal residue is
-// owed from the first erasure on.
-func controlErasures(st State) (stateOwed, journalOwed bool) {
-	for _, a := range st.Audits {
-		if a.Action != controlErasedAction {
-			continue
-		}
-		journalOwed = true
-		for _, id := range a.Targets {
-			if op, ok := st.Deletions[id.String()]; !ok || op.PhysicalAt == 0 {
-				stateOwed = true
+// scrubDebt is the control.db scrub one operation still owes: the position of its
+// newest erasing audit in the audit log and that audit's time.
+type scrubDebt struct {
+	last int
+	at   model.UnixNano
+}
+
+// owedScrubs reads, from the audit log alone, which operations still owe a scrub
+// of control.db: an erasing audit makes its operation owe one, and a scrubbed
+// audit for the operation settles everything before it. The log is append-only
+// and ordered by commit, so the answer is a function of committed state, survives
+// restart and snapshot restore, and does not depend on the operation's phase (a
+// failed operation, whose physical step is never recorded, owes it too).
+func owedScrubs(audits []model.ControlAudit) map[model.ID]scrubDebt {
+	debts := map[model.ID]scrubDebt{}
+	for i, a := range audits {
+		switch a.Action {
+		case controlErasedAction:
+			for _, id := range a.Targets {
+				debts[id] = scrubDebt{last: i, at: model.UnixNano(a.Time)}
+			}
+		case controlScrubbedAction:
+			for _, id := range a.Targets {
+				delete(debts, id)
 			}
 		}
 	}
-	return stateOwed, journalOwed
+	return debts
+}
+
+// controlErasures reads, from committed state only, what is still owed on this
+// node: control.db while an erasing audit has no scrubbed audit after it, the
+// journal residue from the first erasure on.
+func controlErasures(st State) (stateOwed, journalOwed bool) {
+	for _, a := range st.Audits {
+		if a.Action == controlErasedAction {
+			journalOwed = true
+			break
+		}
+	}
+	return len(owedScrubs(st.Audits)) != 0, journalOwed
 }
 
 func (s *Store) localState() (st State, err error) {
@@ -271,8 +334,9 @@ func (s *Store) localState() (st State, err error) {
 // erased control payloads right now (same contract as storage.Engine.
 // ResidualStores; it reads this node only and never blocks on consensus):
 //
-//   - ResidualControlState from the first erasing deletion until its physical
-//     step is recorded (RecordPhysicalCleanup scrubs control.db first);
+//   - ResidualControlState from an erasure until ScrubErased has zeroed the free
+//     pages of control.db after it (any erasure: begin, completion, failure,
+//     import, or an effect erased as it committed after its operation finished);
 //   - ResidualControlJournal from the first erasing deletion on, for as long as
 //     the replication layer cannot redact control commands (see the constant).
 //
@@ -302,10 +366,16 @@ const (
 
 var errScrubBusy = errors.New("read transaction open")
 
-// ScrubErased overwrites every free page of control.db with zeros when an
-// erasing deletion's physical step is still owed. bbolt is copy-on-write and
+// ScrubErased overwrites every free page of control.db with zeros while an
+// erasure's scrub is owed, then records that it did (settleScrub), so the owed
+// state clears and a later erasure owes a new scrub. bbolt is copy-on-write and
 // never zeroes a page it frees, so the state that an erasure replaced would
-// otherwise stay in the file.
+// otherwise stay in the file. It does not depend on the operation's phase: a
+// completed operation's physical step runs it first (RecordPhysicalCleanup), and
+// the retention worker runs it on every pass, which is the only way the scrub of
+// a FAILED operation (whose physical step is never recorded) or of an effect that
+// was erased after its operation's physical step ever runs. It is a no-op, and
+// does not touch the file, when nothing is owed.
 //
 // Safety (the storage engine's argument, which this mirrors): inside a bbolt
 // write transaction, the single writer, a page the freelist reports free is
@@ -319,7 +389,10 @@ func (s *Store) ScrubErased(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if owed, _ := controlErasures(st); !owed {
+	// The scrub covers exactly the erasures committed before it read the state:
+	// an erasure committed while it runs freed pages it may have passed.
+	through := len(st.Audits)
+	if len(owedScrubs(st.Audits)) == 0 {
 		return nil
 	}
 	file, err := os.OpenFile(s.db.Path(), os.O_WRONLY, 0)
@@ -340,8 +413,40 @@ func (s *Store) ScrubErased(ctx context.Context) error {
 			return err
 		}
 	}
-	return nil
+	return s.settleScrub(ctx, through)
 }
+
+// settleScrub appends one scrubbed audit per operation whose erasing audits all
+// precede position `through` of the audit log (the scrub's coverage) and are not
+// settled yet. The audit's time is the newest erasure's own time (the scrub
+// knows no clock of its own and no transition reads one), so what is appended is
+// a function of the committed state and `through` only.
+func (s *Store) settleScrub(ctx context.Context, through int) error {
+	err := s.Update(ctx, func(st *State) error {
+		debts := owedScrubs(st.Audits)
+		ids := make([]model.ID, 0, len(debts))
+		for id, d := range debts {
+			if d.last < through {
+				ids = append(ids, id)
+			}
+		}
+		if len(ids) == 0 {
+			return errNothingToSettle // another pass settled them first: commit nothing
+		}
+		sort.Slice(ids, func(i, j int) bool { return ids[i].String() < ids[j].String() })
+		for _, id := range ids {
+			op := st.Deletions[id.String()]
+			audit(st, op.Principal, op.Predicate.Org, controlScrubbedAction, controlScrubbedReason, debts[id].at, []model.ID{id})
+		}
+		return nil
+	})
+	if errors.Is(err, errNothingToSettle) {
+		return nil
+	}
+	return err
+}
+
+var errNothingToSettle = errors.New("no scrub to settle")
 
 func (s *Store) scrubChunk(ctx context.Context, file *os.File, first, last, pageSize uint64) error {
 	zero := make([]byte, pageSize*scrubZeroRunPage)

@@ -45,11 +45,14 @@ const (
 // Physical "done" means every erasure step this installation can perform has run: records,
 // artifact roots, derived rows, segment files, the free pages of apply.db, the replication
 // layer's retry table, journal and pin archives (redacted), and the snapshots and journal
-// rebuilt from them. Residual names the local stores the engine MEASURES as still able to hold a
-// copy of the deleted bytes (a snapshot or journal head cut before the erasure that has not yet
-// been replaced, or a redaction still owed); after a completed cleanup it is empty and omitted
-// (see docs/privacy/retention.md for what it does not cover). It is reported only once Physical
-// is "done"; before that the bytes are simply still present everywhere.
+// rebuilt from them. Residual names the local stores that still hold, or can still hold, a
+// copy of the deleted bytes: those the engine MEASURES (a snapshot or journal head cut before
+// the erasure that has not yet been replaced, or a redaction still owed) and, through
+// ResidualPlane, those the control store owes (control_raft_journal, which cannot yet be
+// redacted, and control_state while a control.db scrub is owed). After a completed cleanup it
+// therefore is NOT empty once control payloads were erased (see docs/privacy/retention.md). It
+// is reported only once Physical is "done"; before that the bytes are simply still present
+// everywhere.
 type DeleteReceipt struct {
 	OperationID      model.ID       `json:"operation_id"`
 	Mode             string         `json:"mode"`

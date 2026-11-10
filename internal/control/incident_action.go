@@ -190,6 +190,9 @@ func applyIncidentAction(scope auth.Scope, st *State, cmd Command) (Effect, erro
 	st.IncidentBooks[key] = raw
 	st.Audits = append(st.Audits, model.ControlAudit{ID: cmd.CommandID, Principal: scope.PrincipalID(), Action: "incidents." + c.Action, Reason: "incident action", Time: int64(c.At),
 		Org: org.String(), PolicyEpoch: scope.PolicyEpoch(), Targets: []model.ID{c.Incident}, RequestID: cmd.CommandID, Outcome: model.AuditAllowed})
+	if err = eraseLateEffect(st, org, c.Project); err != nil {
+		return Effect{}, err
+	}
 	return Effect{AffectedIDs: []model.ID{c.Incident}, Phase: "applied"}, nil
 }
 

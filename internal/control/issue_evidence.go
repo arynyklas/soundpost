@@ -729,6 +729,9 @@ func applyIssueBook(scope auth.Scope, st *State, cmd Command) (Effect, error) {
 	}
 	st.IssueBooks[issueBookKey(org, c.Project)] = rawBook
 	st.Audits = append(st.Audits, c.Audits...)
+	if err = eraseLateEffect(st, org, c.Project); err != nil {
+		return Effect{}, err
+	}
 	return Effect{AffectedIDs: affected, Phase: "applied"}, nil
 }
 

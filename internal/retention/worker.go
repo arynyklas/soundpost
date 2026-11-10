@@ -187,6 +187,13 @@ func (s *Service) driveDeletions(ctx context.Context) error {
 	if err := s.physical(ctx); err != nil {
 		errs = append(errs, err)
 	}
+	// The control.db scrub of an erasure whose operation has no physical step to
+	// run it from: a FAILED deletion (its data was never erased, so its physical
+	// step is never recorded) or an effect erased as it committed after its
+	// operation's physical step. A no-op unless a scrub is owed.
+	if err := s.cfg.Control.ScrubErased(ctx); err != nil {
+		errs = append(errs, err)
+	}
 	ops, _ = s.cfg.Control.DeletionOperations(ctx)
 	lag := 0
 	for _, op := range ops {
