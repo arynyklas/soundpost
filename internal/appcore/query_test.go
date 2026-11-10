@@ -73,3 +73,36 @@ func TestOpenWiresTheInvestigateRoute(t *testing.T) {
 		t.Fatalf("GET /api/v1/investigate answered %d", rec.Code)
 	}
 }
+
+// The default Open builds the live service over the storage change feed and
+// mounts its two routes. Without a credential neither may answer with a ticket
+// or a stream, and a ticket is never accepted from a request body on the
+// stream route.
+func TestOpenWiresTheLiveRoutes(t *testing.T) {
+	app, err := appcore.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.Close()
+	if app.Live == nil {
+		t.Fatal("the live service is not wired")
+	}
+	mux := http.NewServeMux()
+	app.Register(mux)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/live-tickets", strings.NewReader("{}")))
+	if rec.Code == http.StatusNotFound || rec.Code == http.StatusMethodNotAllowed {
+		t.Fatalf("POST /api/v1/live-tickets is not registered: %d", rec.Code)
+	}
+	if rec.Code < 400 {
+		t.Fatalf("POST /api/v1/live-tickets answered %d without any credential", rec.Code)
+	}
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/live?ticket=none", nil))
+	if rec.Code == http.StatusNotFound || rec.Code == http.StatusMethodNotAllowed {
+		t.Fatalf("GET /api/v1/live is not registered: %d", rec.Code)
+	}
+	if rec.Code < 400 {
+		t.Fatalf("GET /api/v1/live answered %d without any credential", rec.Code)
+	}
+}

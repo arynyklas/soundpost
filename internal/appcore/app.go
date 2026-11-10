@@ -36,6 +36,7 @@ type App struct {
 	Exports      *exports.Service
 	Retention    *retention.Service
 	Query        *query.Engine
+	Live         *query.LiveService
 	Investigator *httpapi.Investigator
 	replication  *replicatedApp
 }
@@ -167,6 +168,10 @@ func openWith(dir string, options *replicationOptions, meter storage.DiskMeter, 
 	if e != nil {
 		return fail(e)
 	}
+	liveService, e := query.NewLiveService(engine, a, registry, query.DefaultLimits(), query.WithLiveDeleteGenerations(ret))
+	if e != nil {
+		return fail(e)
+	}
 	resolver, e := link.New(a, engine, nil)
 	if e != nil {
 		return fail(e)
@@ -175,7 +180,7 @@ func openWith(dir string, options *replicationOptions, meter storage.DiskMeter, 
 	if e != nil {
 		return fail(e)
 	}
-	out := &App{Control: c, Auth: a, Storage: engine, Ingest: i, Releases: r, Artifacts: artifactService, Cache: cache, Exports: exportService, Retention: ret, Query: queryEngine, Investigator: investigator}
+	out := &App{Control: c, Auth: a, Storage: engine, Ingest: i, Releases: r, Artifacts: artifactService, Cache: cache, Exports: exportService, Retention: ret, Query: queryEngine, Live: liveService, Investigator: investigator}
 	startupTimeout := 20 * time.Second
 	if options != nil {
 		startupTimeout = 60 * time.Second
@@ -213,6 +218,7 @@ func (a *App) Close() error {
 	replicationErr := a.CloseReplication()
 	a.Retention.Close()
 	a.Exports.Close()
+	liveErr := a.Live.Close()
 	e := a.Storage.Close()
 	other := a.Control.Close()
 	if e != nil {
@@ -220,6 +226,9 @@ func (a *App) Close() error {
 	}
 	if replicationErr != nil {
 		return replicationErr
+	}
+	if liveErr != nil {
+		return liveErr
 	}
 	return other
 }
@@ -254,6 +263,7 @@ func (a *App) Register(mux *http.ServeMux) {
 	httpapi.RegisterCapabilityRoutes(mux, a.Auth)
 	httpapi.RegisterExportRoutes(mux, a.Auth, a.Exports)
 	httpapi.RegisterQueryRoutes(mux, a.Auth, a.Query)
+	httpapi.RegisterLiveRoutes(mux, a.Auth, a.Live)
 	httpapi.RegisterInvestigateRoutes(mux, a.Auth, a.Investigator)
 	a.RegisterArtifactRoutes(mux)
 }
