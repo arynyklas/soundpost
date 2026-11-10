@@ -84,6 +84,9 @@ func run() (err error) {
 		case "host-collection":
 			smoke, stage = "host_collection", "host_collection_dispatch"
 			return RunHostCollection(os.Args[2:])
+		case "evidence":
+			smoke, stage = "evidence", "evidence_dispatch"
+			return RunEvidence(os.Args[2:])
 		case "journeys":
 			smoke, stage = "journeys", "journeys_dispatch"
 			return RunJourneys(os.Args[2:])
