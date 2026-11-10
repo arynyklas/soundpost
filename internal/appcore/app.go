@@ -136,7 +136,7 @@ func openWith(dir string, options *replicationOptions, meter storage.DiskMeter, 
 	if e != nil {
 		return fail(e)
 	}
-	ret, e := retention.New(retention.Config{Control: c, Data: engine, Base: a.SourceLifecycleGenerations(), Pressure: engine})
+	ret, e := retention.New(retention.Config{Control: c, Data: retention.NewResidualPlane(engine, c), Base: a.SourceLifecycleGenerations(), Pressure: engine})
 	if e != nil {
 		return fail(e)
 	}
