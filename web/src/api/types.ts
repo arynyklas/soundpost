@@ -152,3 +152,173 @@ export interface LifecycleOperation {
  backup_deadline: string;
  residual_stores?: string[];
 }
+
+// ---- C06 queries, discovery, exemplars, formatting and live streams (internal/query/{types,live_types}.go, internal/httpapi/{query,discovery,live}.go) ----
+// IEEE-754 values travel as their exact 16-hex-digit bits (model.FloatBits); every int64/uint64 and nanosecond is a decimal
+// string. Only bucket spans, histogram schemas and source-range offsets are JSON numbers, exactly as the server writes them.
+export type QueryLanguage = 'promql' | 'logql';
+export const QUERY_LANGUAGES: readonly QueryLanguage[] = ['promql', 'logql'];
+export type FloatBits = string;
+export interface Cursor { group: Id; index: string }
+export interface Label { name: string; value: string }
+export interface HistogramSpan { offset: number; length: number }
+export interface IntegerHistogram {
+ flavor: string;
+ schema: number;
+ zero_threshold: FloatBits;
+ sum: FloatBits;
+ count: string;
+ zero_count: string;
+ positive_spans: HistogramSpan[];
+ negative_spans: HistogramSpan[];
+ /** Delta-encoded signed decimal strings. */
+ positive_buckets: string[];
+ negative_buckets: string[];
+ /** Absolute counts, when the server states them. */
+ positive_counts?: string[];
+ negative_counts?: string[];
+ reset_hint: string;
+ custom_bounds?: FloatBits[];
+}
+export interface FloatHistogram {
+ flavor: string;
+ schema: number;
+ zero_threshold: FloatBits;
+ sum: FloatBits;
+ count: FloatBits;
+ zero_count: FloatBits;
+ positive_spans: HistogramSpan[];
+ negative_spans: HistogramSpan[];
+ positive_buckets: FloatBits[];
+ negative_buckets: FloatBits[];
+ reset_hint: string;
+ custom_bounds?: FloatBits[];
+}
+/** Exactly one variant is present. */
+export interface NativeHistogram { integer?: IntegerHistogram; float?: FloatHistogram }
+/** Exactly one of `float` and `histogram` is present. A stale marker is never emitted as a sample: it is the absence of one. */
+export interface Sample { time: string; float?: FloatBits; histogram?: NativeHistogram; start_timestamp?: string }
+export interface VectorElement { labels: Label[]; sample: Sample }
+export interface Series { labels: Label[]; samples: Sample[] }
+/** `index` is the entry's position in the language-defined order of the whole project result. Stream labels and structured metadata stay separate. */
+export interface LogEntry { index: string; time: string; id: Id; source?: Id; multiplicity: string; line: string; stream_labels: Label[]; structured_metadata: Label[] }
+export interface LogStream { labels: Label[]; entries: LogEntry[] }
+export type QueryValue =
+ | { type: 'scalar'; scalar: Sample }
+ | { type: 'string'; string: string }
+ | { type: 'vector'; vector: VectorElement[] }
+ | { type: 'matrix'; matrix: Series[] }
+ | { type: 'streams'; streams: LogStream[] };
+export interface SourceRange { start_byte: number; end_byte: number; start_rune: number; end_rune: number }
+export interface Diagnostic { severity: 'info' | 'warning'; code: string; source_range?: SourceRange; safe_message: string }
+export interface QueryStats {
+ scans_started: string;
+ pages_read: string;
+ rows_read: string;
+ bytes_read: string;
+ series_returned: string;
+ samples_returned: string;
+ logs_returned: string;
+ peak_memory_bytes: string;
+ elapsed_ns: string;
+ cached: boolean;
+ limit_reached: boolean;
+}
+/** The typed reason one project produced no value; only present when the request opted into partial results. */
+export interface ProjectFailure { code: string; category?: string; source_range?: SourceRange; safe_message: string }
+export type Completeness = 'complete' | 'partial' | 'stale';
+export const COMPLETENESS: readonly Completeness[] = ['complete', 'partial', 'stale'];
+/** One project's independent evaluation. `value` is null only with a `failure`, and then the result is partial. */
+export interface ProjectResult {
+ project_id: Id;
+ value: QueryValue | null;
+ diagnostics: Diagnostic[];
+ watermarks: Cursor[];
+ completeness: Completeness;
+ stats: QueryStats;
+ failure?: ProjectFailure;
+}
+/** One result per requested project, ordered by project ID. Series never combine across projects and no project label is injected. */
+export interface QueryResult { projects: ProjectResult[] }
+export interface EvaluationWire { instant: boolean; time: string; start: string; end: string; step: string }
+export interface BudgetWire { timeout_ns: string; memory_bytes: string; max_returned: string }
+/** The flattened POST /api/v1/query body: scope fields next to the C06 Request. `permission` is only ever 'raw.read' with exactly one project and a named restricted `source`. */
+export interface QueryRequest {
+ org: Id;
+ permission?: 'raw.read';
+ language: QueryLanguage;
+ profile: string;
+ expression: string;
+ evaluation: EvaluationWire;
+ projects: Id[];
+ feature_set: string;
+ budget: BudgetWire;
+ min_cursors?: Cursor[];
+ allow_partial: boolean;
+ source?: Id;
+ log_limit?: string;
+ log_order?: 'backward' | 'forward';
+}
+export type DiscoverSignal = 'metric' | 'log';
+export type DiscoverKind = 'metric_names' | 'label_names' | 'label_values' | 'templates' | 'fields';
+export const DISCOVER_KINDS: Record<DiscoverSignal, readonly DiscoverKind[]> = { metric: ['metric_names', 'label_names', 'label_values'], log: ['label_names', 'label_values', 'templates', 'fields'] };
+export interface Matcher { name: string; op: '=' | '!=' | '=~' | '!~'; value: string }
+export interface DiscoveryRequest {
+ org: Id;
+ projects: Id[];
+ signal: DiscoverSignal;
+ kind: DiscoverKind;
+ field?: string;
+ matchers: Matcher[];
+ time: TimeRange;
+ limit: number;
+ cursor?: string;
+ profile?: string;
+ feature_set?: string;
+ /** raw.read with a named restricted source, exactly as for a query. */
+ permission?: 'raw.read';
+ source?: Id;
+}
+/** One page of sorted distinct names. `next_cursor` is present exactly when `more` is true. */
+export interface DiscoveryResult { items: string[]; more: boolean; next_cursor?: string; freshness: Freshness }
+export interface ExemplarRequest { org: Id; projects: Id[]; profile: string; feature_set: string; expression: string; window: TimeRange; limit: number; cursor?: string }
+export interface Exemplar { project_id: Id; labels: Label[]; sample: Sample; trace_id: Id; span_id?: string; record_id: Id }
+export interface ExemplarResult { exemplars: Exemplar[]; more: boolean; next_cursor?: string; freshness: Freshness }
+export interface FormatRequest { org: Id; projects: Id[]; language: QueryLanguage; profile: string; feature_set: string; expression: string }
+export interface FormatResult { formatted: string; diagnostics: Diagnostic[] }
+/** The 400 body of a language error: category, owned code and source range, never the query text. */
+export interface LanguageFault { languageCode: string; category: string; range: SourceRange | null; detail: string }
+/** A typed query failure. A language error also carries its category and source range; nothing else of the body is kept. */
+export class QueryFault extends ApiFault {
+ constructor(status: number, code: string, requestId: string, detail: string, readonly language: LanguageFault | null = null) { super(status, code, requestId, detail); }
+}
+/** POST /api/v1/live-tickets body (scope fields plus the stored live request). Expression and projects live here, never in the stream URL. */
+export interface LiveTicketRequest { org: Id; projects: Id[]; profile: string; feature_set: string; expression: string; source?: Id; permission?: 'raw.read'; budget: BudgetWire; resume_stream_id?: Id }
+export interface LiveTicket { ticket: Id; expires_at: string }
+export type LiveEventType = 'open' | 'record' | 'gap' | 'heartbeat' | 'revoke' | 'error';
+export const LIVE_EVENT_TYPES: readonly LiveEventType[] = ['open', 'record', 'gap', 'heartbeat', 'revoke', 'error'];
+/** Exact bounds of a loss: the stream sequences not delivered (inclusive) and the committed-feed cursors around them. */
+export interface LiveGap { reason: string; from_sequence: string; to_sequence: string; after?: Cursor[]; through?: Cursor[] }
+export interface LiveEvent {
+ type: LiveEventType;
+ stream_id: Id;
+ sequence?: string;
+ project?: Id;
+ entry?: LogEntry;
+ labels?: Label[];
+ cursors?: Cursor[];
+ gap?: LiveGap;
+ watermarks?: Cursor[];
+ reason?: string;
+ failure?: ProjectFailure;
+}
+
+// ---- Async raw-record export (internal/httpapi/exports.go, internal/exports) ----
+export type ExportSignal = 'metric' | 'log' | 'span' | 'error' | 'job_attempt' | 'replay_chunk' | 'profile_chunk' | 'capability' | 'loss' | 'condition';
+export const EXPORT_SIGNALS: readonly ExportSignal[] = ['metric', 'log', 'span', 'error', 'job_attempt', 'replay_chunk', 'profile_chunk', 'capability', 'loss', 'condition'];
+export type ExportPhase = 'running' | 'complete' | 'failed';
+export const EXPORT_PHASES: readonly ExportPhase[] = ['running', 'complete', 'failed'];
+/** `safe_reason` is a closed vocabulary of static words (revoked, timeout, partial, too_large, unavailable), present exactly when the export failed. */
+export interface ExportOperation { id: Id; kind: 'export'; phase: ExportPhase; generation: string; progress: string; chunks: string; safe_reason?: string }
+/** The 202 answer of a create: the operation and the one-use download ticket bound to this scope. */
+export interface ExportGrant { operation: ExportOperation; ticket: string }

@@ -73,10 +73,22 @@ func reply(w http.ResponseWriter, v any, e error) {
 func setSession(w http.ResponseWriter, s auth.Session) {
 	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: s.Token, Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: 43200})
 }
+
+// sameOrigin reports whether the request was made by a page of this origin.
+// An explicit Origin always decides: it must be this host over https. A browser
+// sends no Origin on a same-origin GET or HEAD fetch (only on cross-origin
+// requests and on other methods), so for those two safe methods the browser's
+// own Sec-Fetch-Site: same-origin is accepted instead. Page script cannot set
+// or forge Sec-Fetch-Site (it is a forbidden header name), a missing Origin on a
+// state-changing method is never accepted, and every caller of protected still
+// has to present the CSRF token.
 func sameOrigin(r *http.Request) bool {
 	v := r.Header.Get("Origin")
 	if v == "" {
-		return false
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			return false
+		}
+		return r.Header.Get("Sec-Fetch-Site") == "same-origin"
 	}
 	u, e := url.Parse(v)
 	return e == nil && u.Scheme == "https" && u.Host == r.Host

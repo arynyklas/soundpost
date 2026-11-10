@@ -17,3 +17,16 @@ button.primary:hover:not(:disabled),button[aria-pressed=true]:hover:not(:disable
 .field-row{display:flex;flex-wrap:wrap;gap:12px;align-items:end}.field-row label{display:grid;gap:4px}
 .queue-table{width:100%;border-collapse:collapse;background:var(--card)}.queue-table caption{text-align:left;padding:8px 0;font-weight:600}.queue-table th,.queue-table td{border:1px solid var(--border);padding:8px;text-align:left;vertical-align:top;overflow-wrap:anywhere}.queue-table ul{margin:0;padding-left:16px}
 select{min-height:44px;padding:8px;border:1px solid var(--border);border-radius:4px;background:var(--card);color:var(--foreground);font:inherit}
+
+/* Explore (05.05): results, gaps and live rows are spelled in words and shapes; color only reinforces. No inline styles are used (the CSP forbids them). */
+.explore-form fieldset{margin:12px 0;padding:8px 12px}.explore-form legend{font-weight:700}.explore-form .check{margin:4px 16px 4px 0}.expr-input,.expr{font-family:ui-monospace,monospace;font-size:.95rem;white-space:pre-wrap;overflow-wrap:anywhere}
+.expr{margin:8px 0;padding:8px 12px;border:1px solid var(--border);border-radius:4px;background:var(--background)}mark{background:#ffe08a;color:#182c50;border:1px solid #946000;border-radius:2px;padding:0 2px;text-decoration:underline wavy}
+.data-table{width:100%;border-collapse:collapse;background:var(--card);margin:8px 0}.data-table caption{text-align:left;padding:8px 0;font-weight:600}.data-table th,.data-table td{border:1px solid var(--border);padding:6px 8px;text-align:left;vertical-align:top;overflow-wrap:anywhere}.data-table tr[data-gap] td{border-style:dashed;font-style:italic}
+.log-line{white-space:pre-wrap;overflow-wrap:anywhere}.labels{overflow-wrap:anywhere}.time small{display:block;color:var(--muted)}
+.value-nan,.value-pos_inf,.value-neg_inf,.value-stale{padding:1px 6px;border:2px solid var(--foreground);border-radius:4px;font-weight:700}.value-stale{border-style:dashed}.value-nan{border-style:double}
+.series{margin:12px 0;padding-top:8px;border-top:1px solid var(--border)}.series-chart{width:100%;max-width:640px;height:auto;color:var(--foreground);background:var(--card);border:1px solid var(--border)}.legend{color:var(--muted)}.gap-list li{overflow-wrap:anywhere}
+.project-panel{border-left:6px solid var(--border)}.project-panel[data-state=incomplete],.project-panel[data-state=stale]{border-left-color:var(--error);background:var(--notice)}.project-panel[data-state=ready]{border-left-style:solid}.project-panel[data-state=empty]{border-left-style:dashed}
+.diagnostics{padding-left:20px}.diagnostics li{margin:4px 0}.cursor-list{max-height:12em;overflow:auto;padding-left:20px}
+.live-items{list-style:none;margin:8px 0;padding:0;max-height:28em;overflow:auto;border:1px solid var(--border);border-radius:4px;background:var(--card)}.live-items:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+.live-row{display:grid;gap:2px;padding:6px 10px;border-bottom:1px solid var(--border)}.live-gap{padding:8px 10px;border-bottom:1px solid var(--border);border-left:6px dashed var(--error);background:var(--notice);overflow-wrap:anywhere}.live-meta{color:var(--muted)}.live-labels{color:var(--muted);overflow-wrap:anywhere}
+.discovery-items{padding-left:20px;max-height:20em;overflow:auto}.discovery-items li{margin:4px 0}.histogram{display:inline-block;max-width:100%}

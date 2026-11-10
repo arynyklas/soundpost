@@ -12,6 +12,8 @@ const REASONS: Record<string, string> = {
  freshness_stale: 'The newest data is older than expected.',
  no_visible_sources: 'No readable source was found for this selection.',
  restricted_source_discovery_unavailable: 'Discovery does not run for a restricted source.',
+ project_failed: 'This project produced no value. It is not an empty or zero result; the failure is listed below.',
+ saved_views_not_built: 'Saved views and their exports need the C11 saved-view actions, which this installation does not have. Nothing is saved, in this browser or on the server.',
 };
 export function reasonText(reason: string): string { return REASONS[reason] ?? 'Not available.'; }
 

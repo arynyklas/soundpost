@@ -1,7 +1,8 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
 import * as React from 'react';
 import { bindSession } from '../api/client';
-import type { Id, InvestigationKind, LoadState } from '../api/types';
+import type { Id, InvestigationKind } from '../api/types';
+import { ExplorePage } from '../explore/ExplorePage';
 import { IncidentPage } from '../incidents/IncidentPage';
 import { QueuePage } from '../queue/QueuePage';
 import { ProjectSettings } from '../settings/ProjectSettings';
@@ -63,11 +64,6 @@ function KindView(props: { context: ViewContext; kind: InvestigationKind; label:
    {view && <SectionList sections={view.sections} />}
   </section>
  );
-}
-
-function Explore(): React.JSX.Element {
- const state: LoadState<never> = { kind: 'unsupported', reason: 'view_not_built' };
- return <section className="panel" aria-labelledby="view-heading"><h2 id="view-heading">Explore</h2><StatusPanel state={state} /></section>;
 }
 
 function IncidentEntry(props: { context: ViewContext; incident: IncidentRef | null; open: (ref: IncidentRef) => void }): React.JSX.Element {
@@ -140,7 +136,7 @@ export function App(): React.JSX.Element {
       </ul>
      </nav>
      <button onClick={() => go(context, nav.section, nav.service, nav.incident)}>Refresh</button>
-     {section.id === 'explore' && <Explore />}
+     {section.id === 'explore' && <ExplorePage context={context} />}
      {section.id === 'settings' && <ProjectSettings context={context} />}
      {section.id === 'queue' && <QueuePage context={context} />}
      {section.id === 'incidents' && <IncidentEntry context={context} incident={nav.incident} open={(ref) => go(context, 'incidents', '', ref)} />}
