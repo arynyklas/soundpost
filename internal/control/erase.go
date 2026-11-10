@@ -82,6 +82,7 @@ func eraseControlBooks(st *State, op model.DeletionOperation, at model.UnixNano)
 		func() (int, error) { return eraseConditions(st, p) },
 		func() (int, error) { return eraseDeliveries(st, p, at, settle, op.Principal) },
 		func() (int, error) { return eraseIssueBooks(st, p, at) },
+		func() (int, error) { return eraseJobBooks(st, p, at) },
 	} {
 		n, err := erase()
 		if err != nil {

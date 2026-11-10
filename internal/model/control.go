@@ -132,6 +132,12 @@ type ControlState struct {
 	// themselves are the shared GroupingIssues records. No book holds telemetry
 	// text, only IDs, hashes, counts, cursors and versions.
 	IssueBooks map[string]json.RawMessage
+	// Job health (plan 06 task 03). "org:project:job" holds the control
+	// package's closed JobRecord DTO: the job's version (the compare-and-set
+	// token), the opaque job state the jobs reducer computes, its digest and the
+	// applied command records. After an erasure the state is a tombstone. No
+	// record holds telemetry text, only IDs, ordinals, times, states and hashes.
+	JobBooks map[string]json.RawMessage
 }
 type ControlCommand struct {
 	CommandID        ID

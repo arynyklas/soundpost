@@ -14,6 +14,7 @@ import (
 	"soundpost/internal/httpapi"
 	"soundpost/internal/incidents"
 	"soundpost/internal/ingest"
+	"soundpost/internal/jobs"
 	"soundpost/internal/link"
 	"soundpost/internal/model"
 	"soundpost/internal/policy"
@@ -40,6 +41,7 @@ type App struct {
 	Live         *query.LiveService
 	Investigator *httpapi.Investigator
 	Incidents    *incidents.Service
+	Jobs         *jobs.Service
 	Actions      *httpapi.Actions
 	Evidence     *httpapi.Evidence
 	Traces       *httpapi.Traces
@@ -148,6 +150,9 @@ func openWith(dir string, options *replicationOptions, meter storage.DiskMeter, 
 	if e = c.BindDeliveryOutbox(); e != nil {
 		return fail(e)
 	}
+	if e = c.BindJobUpdate(); e != nil {
+		return fail(e)
+	}
 	artifactService, e := NewArtifactService(c, a, engine)
 	if e != nil {
 		return fail(e)
@@ -201,6 +206,14 @@ func openWith(dir string, options *replicationOptions, meter storage.DiskMeter, 
 	if e != nil {
 		return fail(e)
 	}
+	jobStore, e := jobs.NewControlStore(c)
+	if e != nil {
+		return fail(e)
+	}
+	jobService, e := jobs.New(jobStore, a, releaseActionClock{})
+	if e != nil {
+		return fail(e)
+	}
 	actions, e := httpapi.NewActions(incidentService, c, c, ret, releaseActionClock{})
 	if e != nil {
 		return fail(e)
@@ -210,7 +223,7 @@ func openWith(dir string, options *replicationOptions, meter storage.DiskMeter, 
 	// with the typed not_available state instead of an empty success.
 	evidence := httpapi.NewEvidence(nil, r, r)
 	traces := httpapi.NewTraces(httpapi.NewStorageSpanSource(engine))
-	out := &App{Control: c, Auth: a, Storage: engine, Ingest: i, Releases: r, Artifacts: artifactService, Cache: cache, Exports: exportService, Retention: ret, Query: queryEngine, Live: liveService, Investigator: investigator, Incidents: incidentService, Actions: actions, Evidence: evidence, Traces: traces}
+	out := &App{Control: c, Auth: a, Storage: engine, Ingest: i, Releases: r, Artifacts: artifactService, Cache: cache, Exports: exportService, Retention: ret, Query: queryEngine, Live: liveService, Investigator: investigator, Incidents: incidentService, Jobs: jobService, Actions: actions, Evidence: evidence, Traces: traces}
 	startupTimeout := 20 * time.Second
 	if options != nil {
 		startupTimeout = 60 * time.Second
