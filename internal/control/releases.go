@@ -130,6 +130,9 @@ func applyReleaseOperation(scope auth.Scope, st *State, cmd Command) (Effect, er
 	return Effect{AffectedIDs: []model.ID{release.ID}, Phase: "registered"}, nil
 }
 func applyIssueOperation(scope auth.Scope, st *State, cmd Command) (Effect, error) {
+	if isIssueBookOperation(cmd.Payload) {
+		return applyIssueBook(scope, st, cmd)
+	}
 	payload, e := decodeReleaseCommand(cmd)
 	if e != nil {
 		return Effect{}, e

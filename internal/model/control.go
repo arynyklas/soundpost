@@ -125,6 +125,13 @@ type ControlState struct {
 	// "fence:<org>:<project>" the highest lease the project's outbox accepted.
 	// None of them ever holds a destination secret or telemetry text.
 	DeliveryBooks map[string]json.RawMessage
+	// Issue lifecycle (plan 06 task 02). "org:project" holds the control
+	// package's closed IssueBook DTO: the project's issue state revision (the
+	// compare-and-set token), per data group checkpoints, command records, gaps,
+	// effect intents and the opaque per-issue regression explanations. The issues
+	// themselves are the shared GroupingIssues records. No book holds telemetry
+	// text, only IDs, hashes, counts, cursors and versions.
+	IssueBooks map[string]json.RawMessage
 }
 type ControlCommand struct {
 	CommandID        ID
