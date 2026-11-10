@@ -1109,5 +1109,2979 @@
       "https://pypi.org/pypi/starlette/1.3.1/json",
       "https://pypi.org/pypi/fastapi/0.136.3/json"
     ]
+  },
+  "measured_evidence": {
+    "schema": 1,
+    "recorded_at": "2026-11-10T05:23:31.343Z",
+    "tool": "fixtures/sdk/qualify.mjs",
+    "command": "node fixtures/sdk/qualify.mjs --manifest <repo>\\fixtures\\sdk\\qualification.json --overhead <repo>\\.superpowers\\sdd\\approved-product\\03.09-overhead-result.json",
+    "meaning": "Rows record what the real runtime fixtures OBSERVED on the machine below (exit code 0 plus their own assertions), not a release qualification. `observed` is valid only for the exact runtime version/platform in the row; frozen dependency/runtime/browser targets elsewhere in this manifest keep their own status (not_run unless stated). Nothing here is a `passed` row for an unlisted combination.",
+    "machine": {
+      "platform": "win32",
+      "release": "10.0.26200",
+      "arch": "x64",
+      "cpu_model": "Intel(R) Core(TM) i9-14900KF",
+      "logical_cpus": 32,
+      "total_memory_mib": 261978,
+      "node": "v22.23.4",
+      "bun": "1.3.14",
+      "python": "Python 3.14.2"
+    },
+    "runtime_supplement_rows": [
+      {
+        "id": "node-v22.23.4-win32-x64-runtime_engine_samples",
+        "runtime": "node",
+        "version": "v22.23.4",
+        "v8": "12.4.254.21-node.57",
+        "platform": "win32",
+        "arch": "x64",
+        "method": "runtime_engine_samples",
+        "fixture": "fixtures/sdk/profiles/node.mjs",
+        "command": "<repo>\\.tools\\node-v22.23.4-win-x64\\node.exe <repo>\\fixtures\\sdk\\profiles\\node.mjs",
+        "exit_code": 0,
+        "duration_ms": 1991,
+        "status": "observed",
+        "failed_checks": [],
+        "check_count": 19,
+        "stderr_tail": "",
+        "evidence": {
+          "busy": {
+            "method": "runtime_engine_samples",
+            "units": "samples",
+            "time_delta_unit": "engine_microseconds",
+            "status": "supported",
+            "reason": "ok",
+            "coverage": {
+              "frames": "partial",
+              "threads": "partial",
+              "workers": "none",
+              "tasks": "none"
+            },
+            "sample_count": 466,
+            "frame_count": 7,
+            "stack_count": 12,
+            "interval": {
+              "requested_us": 1000,
+              "achieved_us": 1472
+            },
+            "losses": [
+              {
+                "reason": "sample_gap",
+                "count": "1"
+              }
+            ],
+            "truncated": false,
+            "stopped_by": "caller",
+            "scope": {
+              "isolate": "main",
+              "thread_id": 0,
+              "runtime": {
+                "name": "node",
+                "version": "v22.23.4"
+              },
+              "debugger_listener_present": false
+            },
+            "clock_uncertainty_ns": "18446744073709551615",
+            "non_profile": [
+              {
+                "method": "event_loop_delay",
+                "profile": false,
+                "signal": "metric",
+                "unit": "nanoseconds",
+                "resolution_ms": 10,
+                "count": 7,
+                "min": 10485760,
+                "max": 609222655,
+                "mean": 96121417.14285715,
+                "p50": 10592255,
+                "p99": 609222655,
+                "exceeds": 0
+              }
+            ],
+            "ack": {
+              "status": "not_available",
+              "reason": "no_profile_admission_path"
+            },
+            "leaf_functions": {
+              "busyLoop@fixtures/sdk/profiles/node.mjs": 265,
+              "blockingIo@fixtures/sdk/profiles/node.mjs": 138,
+              "engine:idle": 54,
+              "external": 7,
+              "engine:gc": 1,
+              "<anonymous>@fixtures/sdk/profiles/node.mjs": 1
+            }
+          },
+          "ownership": {
+            "first": "supported",
+            "second": {
+              "method": "runtime_engine_samples",
+              "units": "samples",
+              "time_delta_unit": "engine_microseconds",
+              "status": "denied",
+              "reason": "profiler_owned",
+              "coverage": {
+                "frames": "none",
+                "threads": "none",
+                "workers": "none",
+                "tasks": "none"
+              },
+              "sample_count": 0,
+              "frame_count": 0,
+              "stack_count": 0,
+              "interval": {
+                "requested_us": 1000,
+                "achieved_us": null
+              },
+              "losses": [],
+              "truncated": false,
+              "stopped_by": "not_started",
+              "scope": {
+                "isolate": "main",
+                "thread_id": 0,
+                "runtime": {
+                  "name": "node",
+                  "version": "v22.23.4"
+                },
+                "debugger_listener_present": false
+              },
+              "clock_uncertainty_ns": "18446744073709551615",
+              "non_profile": [],
+              "ack": {
+                "status": "not_available",
+                "reason": "no_profile_admission_path"
+              }
+            }
+          },
+          "foreign_session": {
+            "own": {
+              "method": "runtime_engine_samples",
+              "units": "samples",
+              "time_delta_unit": "engine_microseconds",
+              "status": "supported",
+              "reason": "ok",
+              "coverage": {
+                "frames": "partial",
+                "threads": "partial",
+                "workers": "none",
+                "tasks": "none"
+              },
+              "sample_count": 83,
+              "frame_count": 3,
+              "stack_count": 3,
+              "interval": {
+                "requested_us": 1000,
+                "achieved_us": 1475
+              },
+              "losses": [
+                {
+                  "reason": "sample_gap",
+                  "count": "1"
+                }
+              ],
+              "truncated": false,
+              "stopped_by": "caller",
+              "scope": {
+                "isolate": "main",
+                "thread_id": 0,
+                "runtime": {
+                  "name": "node",
+                  "version": "v22.23.4"
+                },
+                "debugger_listener_present": false
+              },
+              "clock_uncertainty_ns": "18446744073709551615",
+              "non_profile": [],
+              "ack": {
+                "status": "not_available",
+                "reason": "no_profile_admission_path"
+              }
+            },
+            "foreign_samples": 94
+          },
+          "duration_bound": {
+            "active_after_bound": false,
+            "summary": {
+              "method": "runtime_engine_samples",
+              "units": "samples",
+              "time_delta_unit": "engine_microseconds",
+              "status": "supported",
+              "reason": "ok",
+              "coverage": {
+                "frames": "partial",
+                "threads": "partial",
+                "workers": "none",
+                "tasks": "none"
+              },
+              "sample_count": 44,
+              "frame_count": 3,
+              "stack_count": 3,
+              "interval": {
+                "requested_us": 1000,
+                "achieved_us": 1453
+              },
+              "losses": [],
+              "truncated": false,
+              "stopped_by": "duration",
+              "scope": {
+                "isolate": "main",
+                "thread_id": 0,
+                "runtime": {
+                  "name": "node",
+                  "version": "v22.23.4"
+                },
+                "debugger_listener_present": false
+              },
+              "clock_uncertainty_ns": "18446744073709551615",
+              "non_profile": [],
+              "ack": {
+                "status": "not_available",
+                "reason": "no_profile_admission_path"
+              }
+            }
+          },
+          "worker": {
+            "status": "supported",
+            "reason": "ok",
+            "isolate": "worker",
+            "thread_id": 1,
+            "sample_count": 148,
+            "thread_ok": true,
+            "coverage": {
+              "frames": "partial",
+              "threads": "partial",
+              "workers": "none",
+              "tasks": "none"
+            }
+          },
+          "transport": {
+            "methods": [
+              "Profiler.disable",
+              "Profiler.enable",
+              "Profiler.setSamplingInterval",
+              "Profiler.start",
+              "Profiler.stop"
+            ],
+            "outside_allowlist": [],
+            "listener_calls": []
+          }
+        }
+      },
+      {
+        "id": "bun-1.3.14-win32-x64-runtime_engine_samples",
+        "runtime": "bun",
+        "version": "1.3.14",
+        "revision": "0d9b296af33f2b851fcbf4df3e9ec89751734ba4",
+        "platform": "win32",
+        "arch": "x64",
+        "method": "runtime_engine_samples",
+        "fixture": "fixtures/sdk/profiles/bun.ts",
+        "command": "<repo>\\.tools\\bun-1.3.14\\package\\bin\\bun.exe <repo>\\fixtures\\sdk\\profiles\\bun.ts",
+        "exit_code": 0,
+        "duration_ms": 1768,
+        "status": "observed",
+        "failed_checks": [],
+        "check_count": 21,
+        "stderr_tail": "",
+        "evidence": {
+          "busy": {
+            "method": "runtime_engine_samples",
+            "units": "samples",
+            "time_delta_unit": "engine_microseconds",
+            "status": "supported",
+            "reason": "ok",
+            "coverage": {
+              "frames": "partial",
+              "threads": "partial",
+              "workers": "none",
+              "tasks": "none"
+            },
+            "sample_count": 81,
+            "frame_count": 7,
+            "stack_count": 8,
+            "interval": {
+              "requested_us": 1000,
+              "achieved_us": 8760,
+              "unobserved_gaps": {
+                "count": 40,
+                "total_us": 661983
+              }
+            },
+            "losses": [],
+            "truncated": false,
+            "stopped_by": "caller",
+            "scope": {
+              "isolate": "main",
+              "thread_id": 0,
+              "runtime": {
+                "name": "bun",
+                "version": "1.3.14"
+              },
+              "debugger_listener_present": false
+            },
+            "clock_uncertainty_ns": "18446744073709551615",
+            "non_profile": [
+              {
+                "method": "event_loop_delay",
+                "profile": false,
+                "signal": "metric",
+                "unit": "nanoseconds",
+                "resolution_ms": 10,
+                "count": 4,
+                "min": 5370702,
+                "max": 609179983,
+                "mean": 156381696,
+                "p50": 5537791,
+                "p99": 609222655,
+                "exceeds": 0
+              }
+            ],
+            "ack": {
+              "status": "not_available",
+              "reason": "no_profile_admission_path"
+            },
+            "leaf_functions": {
+              "mainBusy@fixtures/sdk/profiles/bun.ts": 54,
+              "external": 22,
+              "blockingIo@fixtures/sdk/profiles/bun.ts": 3,
+              "<module>@fixtures/sdk/profiles/bun.ts": 1,
+              "<anonymous>@packages/bun/src/profile.ts": 1
+            }
+          },
+          "ownership": {
+            "first": "supported",
+            "second": {
+              "method": "runtime_engine_samples",
+              "units": "samples",
+              "time_delta_unit": "engine_microseconds",
+              "status": "denied",
+              "reason": "profiler_owned",
+              "coverage": {
+                "frames": "none",
+                "threads": "none",
+                "workers": "none",
+                "tasks": "none"
+              },
+              "sample_count": 0,
+              "frame_count": 0,
+              "stack_count": 0,
+              "interval": {
+                "requested_us": 1000,
+                "achieved_us": null,
+                "unobserved_gaps": {
+                  "count": 0,
+                  "total_us": 0
+                }
+              },
+              "losses": [],
+              "truncated": false,
+              "stopped_by": "not_started",
+              "scope": {
+                "isolate": "main",
+                "thread_id": 0,
+                "runtime": {
+                  "name": "bun",
+                  "version": "1.3.14"
+                },
+                "debugger_listener_present": false
+              },
+              "clock_uncertainty_ns": "18446744073709551615",
+              "non_profile": [],
+              "ack": {
+                "status": "not_available",
+                "reason": "no_profile_admission_path"
+              }
+            }
+          },
+          "foreign_state": {
+            "own": {
+              "method": "runtime_engine_samples",
+              "units": "samples",
+              "time_delta_unit": "engine_microseconds",
+              "status": "error",
+              "reason": "profiler_state_lost",
+              "coverage": {
+                "frames": "none",
+                "threads": "none",
+                "workers": "none",
+                "tasks": "none"
+              },
+              "sample_count": 0,
+              "frame_count": 0,
+              "stack_count": 0,
+              "interval": {
+                "requested_us": 1000,
+                "achieved_us": null,
+                "unobserved_gaps": {
+                  "count": 0,
+                  "total_us": 0
+                }
+              },
+              "losses": [
+                {
+                  "reason": "foreign_state",
+                  "count": "1"
+                }
+              ],
+              "truncated": false,
+              "stopped_by": "caller",
+              "scope": {
+                "isolate": "main",
+                "thread_id": 0,
+                "runtime": {
+                  "name": "bun",
+                  "version": "1.3.14"
+                },
+                "debugger_listener_present": false
+              },
+              "clock_uncertainty_ns": "18446744073709551615",
+              "non_profile": [],
+              "ack": {
+                "status": "not_available",
+                "reason": "no_profile_admission_path"
+              }
+            }
+          },
+          "duration_bound": {
+            "active_after_bound": false,
+            "summary": {
+              "method": "runtime_engine_samples",
+              "units": "samples",
+              "time_delta_unit": "engine_microseconds",
+              "status": "supported",
+              "reason": "ok",
+              "coverage": {
+                "frames": "partial",
+                "threads": "partial",
+                "workers": "none",
+                "tasks": "none"
+              },
+              "sample_count": 1,
+              "frame_count": 2,
+              "stack_count": 1,
+              "interval": {
+                "requested_us": 1000,
+                "achieved_us": null,
+                "unobserved_gaps": {
+                  "count": 0,
+                  "total_us": 0
+                }
+              },
+              "losses": [],
+              "truncated": false,
+              "stopped_by": "duration",
+              "scope": {
+                "isolate": "main",
+                "thread_id": 0,
+                "runtime": {
+                  "name": "bun",
+                  "version": "1.3.14"
+                },
+                "debugger_listener_present": false
+              },
+              "clock_uncertainty_ns": "18446744073709551615",
+              "non_profile": [],
+              "ack": {
+                "status": "not_available",
+                "reason": "no_profile_admission_path"
+              }
+            }
+          },
+          "worker": {
+            "refusal": {
+              "status": "denied",
+              "reason": "profiler_state_shared",
+              "isolate": "worker",
+              "thread_id": 1,
+              "sample_count": 0,
+              "thread_expected": 1
+            },
+            "main_profile": {
+              "method": "runtime_engine_samples",
+              "units": "samples",
+              "time_delta_unit": "engine_microseconds",
+              "status": "supported",
+              "reason": "ok",
+              "coverage": {
+                "frames": "partial",
+                "threads": "partial",
+                "workers": "none",
+                "tasks": "none"
+              },
+              "sample_count": 46,
+              "frame_count": 3,
+              "stack_count": 2,
+              "interval": {
+                "requested_us": 1000,
+                "achieved_us": 6531,
+                "unobserved_gaps": {
+                  "count": 19,
+                  "total_us": 269415
+                }
+              },
+              "losses": [],
+              "truncated": false,
+              "stopped_by": "caller",
+              "scope": {
+                "isolate": "main",
+                "thread_id": 0,
+                "runtime": {
+                  "name": "bun",
+                  "version": "1.3.14"
+                },
+                "debugger_listener_present": false
+              },
+              "clock_uncertainty_ns": "18446744073709551615",
+              "non_profile": [],
+              "ack": {
+                "status": "not_available",
+                "reason": "no_profile_admission_path"
+              }
+            }
+          },
+          "transport": {
+            "methods": [
+              "Profiler.disable",
+              "Profiler.enable",
+              "Profiler.setSamplingInterval",
+              "Profiler.start",
+              "Profiler.stop"
+            ],
+            "outside_allowlist": [],
+            "listener_calls": []
+          }
+        }
+      },
+      {
+        "id": "cpython-3.14.2-win32-x64-python_monitoring+python_wall_samples",
+        "runtime": "cpython",
+        "version": "3.14.2",
+        "platform": "win32",
+        "arch": "x64",
+        "methods": [
+          "python_monitoring",
+          "python_wall_samples"
+        ],
+        "fixture": "fixtures/sdk/profiles/python.py",
+        "command": "<repo>\\.venv\\Scripts\\python.exe <repo>\\fixtures\\sdk\\profiles\\python.py",
+        "exit_code": 0,
+        "duration_ms": 2918,
+        "status": "observed",
+        "stderr_tail": "",
+        "evidence": {
+          "coexistence": {
+            "foreign_saw_external_code": true,
+            "foreign_saw_project_code": true,
+            "foreign_tool_id": 2,
+            "our_busy_starts": 1,
+            "our_tool_freed": true,
+            "our_tool_id": 3
+          },
+          "lifecycle": {
+            "client_close": {
+              "active_after": false,
+              "stopped_by": "client_close"
+            },
+            "duration_auto_stop": {
+              "elapsed_ms": 200,
+              "stopped_by": "duration"
+            },
+            "leftover_profile_threads": 0
+          },
+          "monitoring": {
+            "coverage": {
+              "frames": "partial",
+              "tasks": "none",
+              "threads": "complete",
+              "workers": "none"
+            },
+            "event_rows": 9,
+            "events": {
+              "boom:PY_START": 3,
+              "boom:PY_UNWIND": 3,
+              "busy:PY_RETURN": 7,
+              "busy:PY_START": 7,
+              "generator:PY_RESUME": 2,
+              "generator:PY_RETURN": 1,
+              "generator:PY_START": 1,
+              "sleepy:PY_RETURN": 1,
+              "sleepy:PY_START": 1
+            },
+            "frame_count": 4,
+            "losses": [],
+            "reason": "ok",
+            "status": "supported",
+            "time_delta_unit": null,
+            "tool_id": 2,
+            "units": "events"
+          },
+          "refusals": {
+            "client_unavailable": {
+              "event_rows": 0,
+              "reason": "client_unavailable",
+              "sample_count": 0,
+              "status": "denied"
+            },
+            "invalid_options": {
+              "event_rows": 0,
+              "reason": "invalid_options",
+              "sample_count": 0,
+              "status": "denied"
+            },
+            "monitoring_tool_ids_occupied": {
+              "event_rows": 0,
+              "reason": "monitoring_tool_ids_occupied",
+              "sample_count": 0,
+              "status": "denied"
+            },
+            "profiler_owned": {
+              "event_rows": 0,
+              "reason": "profiler_owned",
+              "sample_count": 0,
+              "status": "denied"
+            }
+          },
+          "truncation": {
+            "ack": {
+              "reason": "no_acknowledged_cursor",
+              "status": "failed"
+            },
+            "loss": {
+              "count": "21",
+              "reason": "truncated"
+            },
+            "sample_count": 4,
+            "truncated": true
+          },
+          "wall_samples": {
+            "ack": "not_available",
+            "bias": {
+              "gil_acquisition": true,
+              "native_time_attributed_to_python_caller": true,
+              "suspended_tasks_unobserved": true
+            },
+            "coverage": {
+              "frames": "partial",
+              "tasks": "none",
+              "threads": "partial",
+              "workers": "none"
+            },
+            "distinct_stacks": 4,
+            "frame_count": 4,
+            "interval": {
+              "achieved_max_us": 15825,
+              "achieved_mean_us": 7582,
+              "requested_us": 2000
+            },
+            "leaf_samples": {
+              "": 5,
+              "busy": 62,
+              "read_blocking": 66,
+              "sleepy": 66
+            },
+            "losses": [
+              {
+                "count": "194",
+                "reason": "sample_gap"
+              }
+            ],
+            "reason": "ok",
+            "sample_count": 199,
+            "sample_gap_estimated_missed": 194,
+            "status": "supported",
+            "threads_sampled": 3,
+            "time_delta_unit": "wall_microseconds",
+            "truncated": false,
+            "units": "samples"
+          }
+        }
+      },
+      {
+        "id": "chrome-156.0.8078.80-linux-x64-browser_js_self_profile",
+        "runtime": "chrome",
+        "version": "156.0.8078.80",
+        "platform": "linux (WSL2 Ubuntu, headless; the page's emulated user agent claims Windows)",
+        "arch": "x64",
+        "method": "browser_js_self_profile",
+        "fixture": "fixtures/sdk/profiles/browser.spec.ts",
+        "command": "wsl.exe -d Ubuntu --exec sh -c set -e; ls /mnt/o >/dev/null || mount -t drvfs O: /mnt/o 2>/dev/null || true; [ -x /tmp/soundpost-qualify-node/node-v22.23.4-linux-x64/bin/node ] || { [ \"$(sha256sum /tmp/node22.tar.xz | cut -d' ' -f1)\" = \"1805bcd35e6815559bd2eb97db438d3fdb0eb3a5e6a977b7c1badca76337e9ce\" ] && mkdir -p /tmp/soundpost-qualify-node && tar -xJf /tmp/node22.tar.xz -C /tmp/soundpost-qualify-node; }; cd <repo> && HOME=/tmp/soundpost-qualify-home SOUNDPOST_BUN=/opt/bun/bin/bun SOUNDPOST_CHROME=<chrome156> NODE_PATH=<repo>/web/node_modules /tmp/soundpost-qualify-node/node-v22.23.4-linux-x64/bin/node <repo>/web/node_modules/@playwright/test/cli.js test -c fixtures/sdk/profiles/playwright.config.ts --project=chromium --output=/tmp/soundpost-qualify-pw",
+        "exit_code": 0,
+        "duration_ms": 55505,
+        "status": "observed",
+        "playwright_summary": {
+          "passed": 6,
+          "failed": 0
+        },
+        "stderr_tail": "",
+        "evidence": {
+          "with_header": {
+            "chrome": "156.0.8078.80",
+            "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.8078.4 Safari/537.36",
+            "hasProfiler": "function",
+            "status": "supported",
+            "reason": "ok",
+            "runtime": "Chromium/156.0.8078.80",
+            "os": "windows",
+            "arch": "x86_64",
+            "sample_count": 28,
+            "requested_us": 5000,
+            "achieved_us": 10100,
+            "granted_us": 10000,
+            "idle_samples": 22,
+            "frames": 6,
+            "stacks": 4,
+            "losses": [],
+            "truncated": false,
+            "long_tasks": 1,
+            "long_task_max_ms": 320,
+            "coverage": {
+              "frames": "partial",
+              "threads": "partial",
+              "workers": "none",
+              "tasks": "none"
+            },
+            "named_first_party": [
+              "",
+              "innerSpin",
+              "outerWork"
+            ],
+            "frame_modules": [
+              "assets/workload.js",
+              "external",
+              "profile.js"
+            ],
+            "frame_list": [
+              "profile.js#startProfile@330:30",
+              "profile.js#startProfile@513:22",
+              "assets/workload.js#outerWork@2:19",
+              "assets/workload.js#@3:31",
+              "assets/workload.js#innerSpin@1:19",
+              "external#@0:0"
+            ],
+            "inner_stack": [
+              "innerSpin",
+              "outerWork",
+              ""
+            ],
+            "visibility": {
+              "start": "visible",
+              "end": "visible",
+              "changed": false
+            },
+            "stopped_by": "caller"
+          },
+          "without_header": {
+            "chrome": "156.0.8078.80",
+            "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.8078.4 Safari/537.36",
+            "hasProfiler": "function",
+            "constructor_error": {
+              "constructed": false,
+              "name": "NotAllowedError",
+              "domException": true,
+              "message": "Failed to construct 'Profiler': JS profiling is disabled by Document Policy."
+            },
+            "status": "denied",
+            "reason": "document_policy_missing",
+            "runtime": "Chromium/156.0.8078.80",
+            "sample_count": 0,
+            "coverage": {
+              "frames": "none",
+              "threads": "none",
+              "workers": "none",
+              "tasks": "none"
+            }
+          },
+          "profiler_removed": {
+            "chrome": "156.0.8078.80",
+            "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.8078.4 Safari/537.36",
+            "hasProfiler": "undefined",
+            "status": "unsupported",
+            "reason": "js_self_profiling_unavailable",
+            "sample_count": 0
+          },
+          "concurrent_start": {
+            "chrome": "156.0.8078.80",
+            "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.8078.4 Safari/537.36",
+            "hasProfiler": "function",
+            "second": [
+              "denied",
+              "profiler_owned"
+            ],
+            "owner": [
+              "supported",
+              12
+            ],
+            "after_stop": [
+              "supported",
+              "ok"
+            ]
+          },
+          "scope_and_duration": {
+            "chrome": "156.0.8078.80",
+            "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.8078.4 Safari/537.36",
+            "hasProfiler": "function",
+            "mismatch": [
+              "denied",
+              "isolate_scope_mismatch"
+            ],
+            "auto_stopped_by": "duration",
+            "auto_samples": 7
+          },
+          "worker": {
+            "chrome": "156.0.8078.80",
+            "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.8078.4 Safari/537.36",
+            "hasProfiler": "function",
+            "status": "unsupported",
+            "reason": "js_self_profiling_unavailable",
+            "sample_count": 0,
+            "isolate": "worker",
+            "coverage": {
+              "frames": "none",
+              "threads": "none",
+              "workers": "none",
+              "tasks": "none"
+            }
+          }
+        }
+      }
+    ],
+    "overhead": {
+      "source": "fixtures/sdk/overhead.mjs",
+      "recorded_at": "2026-11-10T05:19:00.478Z",
+      "command": "node fixtures/sdk/overhead.mjs --requests-per-second 1000 --out .superpowers/sdd/approved-product/03.09-overhead-result.json",
+      "sha256_of_result": "924d76e97064d1309880d89d73d02fd018fdb06231e332be41ceb4d1fe211698",
+      "machine_class": {
+        "platform": "win32",
+        "release": "10.0.26200",
+        "arch": "x64",
+        "cpu_model": "Intel(R) Core(TM) i9-14900KF",
+        "logical_cpus": 32,
+        "cpu_mhz_reported": 3187,
+        "total_memory_mib": 261978,
+        "free_memory_mib_at_start": 149485,
+        "load_average_1m": 0,
+        "node": "v22.23.4",
+        "fixed_work_noise": {
+          "work": "2e6 sqrt iterations",
+          "runs_ms": [
+            3.217,
+            5.653,
+            5.69,
+            2.208,
+            2.264,
+            2.204,
+            2.367,
+            2.214,
+            2.341,
+            2.194,
+            2.358,
+            2.185,
+            2.243,
+            2.254,
+            2.262
+          ],
+          "cv_percent": 43.288
+        },
+        "note": "Shared developer workstation (other processes and agents were running); virtualization status not inspected. This is NOT a pinned CI runner class."
+      },
+      "runtimes": {
+        "node": "v22.23.4",
+        "bun": "1.3.14"
+      },
+      "budgets": {
+        "server_p95_latency_percent": 5,
+        "server_cpu_percent": 5,
+        "queue_bytes": 2097152,
+        "browser_core_gzip_bytes": 40960,
+        "browser_replay_gzip_bytes": 61440
+      },
+      "rows": {
+        "node_http_server_core_capture": [
+          {
+            "workload": "node:http loopback server, deterministic handler (3x sha256 over 1 KiB + JSON of 16 fields), open-loop load at 1000 req/s from a separate process, 3 s measured after 1 s warm-up, 5 alternating runs per mode; capture = Node SDK installHttp listener (root span per request, one handled error per 100 requests) with an in-process ACKing fake receipt transport (no TLS/network export cost measured)",
+            "handler_hashes": 3,
+            "requests_per_second_requested": 1000,
+            "p95_latency_ms": {
+              "baseline": {
+                "n": 5,
+                "values": [
+                  1.511,
+                  1.882,
+                  1.933,
+                  1.784,
+                  1.797
+                ],
+                "mean": 1.7814,
+                "stdev": 0.1631,
+                "min": 1.511,
+                "max": 1.933,
+                "cv_percent": 9.158
+              },
+              "capture": {
+                "n": 5,
+                "values": [
+                  4.465,
+                  4.547,
+                  4.479,
+                  4.536,
+                  4.55
+                ],
+                "mean": 4.5154,
+                "stdev": 0.0403,
+                "min": 4.465,
+                "max": 4.55,
+                "cv_percent": 0.892
+              },
+              "delta_percent": 153.475,
+              "delta_abs": 2.734,
+              "standard_error_abs": 0.0752,
+              "delta_exceeds_two_standard_errors": true
+            },
+            "p99_latency_ms": {
+              "baseline": {
+                "n": 5,
+                "values": [
+                  2.001,
+                  2.483,
+                  2.696,
+                  2.316,
+                  2.424
+                ],
+                "mean": 2.384,
+                "stdev": 0.255,
+                "min": 2.001,
+                "max": 2.696,
+                "cv_percent": 10.695
+              },
+              "capture": {
+                "n": 5,
+                "values": [
+                  6.355,
+                  6.621,
+                  6.466,
+                  6.182,
+                  6.314
+                ],
+                "mean": 6.3876,
+                "stdev": 0.1654,
+                "min": 6.182,
+                "max": 6.621,
+                "cv_percent": 2.589
+              },
+              "delta_percent": 167.936,
+              "delta_abs": 4.0036,
+              "standard_error_abs": 0.1359,
+              "delta_exceeds_two_standard_errors": true
+            },
+            "p50_latency_ms": {
+              "baseline": {
+                "n": 5,
+                "values": [
+                  0.802,
+                  0.962,
+                  0.948,
+                  0.869,
+                  0.9
+                ],
+                "mean": 0.8962,
+                "stdev": 0.0645,
+                "min": 0.802,
+                "max": 0.962,
+                "cv_percent": 7.197
+              },
+              "capture": {
+                "n": 5,
+                "values": [
+                  2.177,
+                  2.183,
+                  2.126,
+                  2.138,
+                  2.149
+                ],
+                "mean": 2.1546,
+                "stdev": 0.0247,
+                "min": 2.126,
+                "max": 2.183,
+                "cv_percent": 1.145
+              },
+              "delta_percent": 140.415,
+              "delta_abs": 1.2584,
+              "standard_error_abs": 0.0309,
+              "delta_exceeds_two_standard_errors": true
+            },
+            "process_cpu_us_per_request": {
+              "note": "process.cpuUsage; on Windows its resolution is the ~15.6 ms scheduler tick, so short windows can read 0 (see the raw values); treat as coarse",
+              "baseline": {
+                "n": 5,
+                "values": [
+                  120.5626,
+                  125.0417,
+                  94.0313,
+                  104.4526,
+                  93.823
+                ],
+                "mean": 107.5823,
+                "stdev": 14.6292,
+                "min": 93.82303839732889,
+                "max": 125.04168056018673,
+                "cv_percent": 13.598
+              },
+              "capture": {
+                "n": 5,
+                "values": [
+                  469.4695,
+                  276.5531,
+                  520.8403,
+                  489.8299,
+                  469.6059
+                ],
+                "mean": 445.2597,
+                "stdev": 96.6174,
+                "min": 276.55310621242484,
+                "max": 520.8402800933644,
+                "cv_percent": 21.699
+              },
+              "delta_percent": 313.878,
+              "delta_abs": 337.6775,
+              "standard_error_abs": 43.7011,
+              "delta_exceeds_two_standard_errors": true
+            },
+            "event_loop_active_us_per_request": {
+              "note": "performance.eventLoopUtilization active time per request: high-resolution busy time of the single JS thread, a CPU proxy that excludes GC/helper threads",
+              "baseline": {
+                "n": 5,
+                "values": [
+                  66.8564,
+                  85.0591,
+                  83.3316,
+                  74.5805,
+                  77.4352
+                ],
+                "mean": 77.4526,
+                "stdev": 7.2964,
+                "min": 66.85643000586754,
+                "max": 85.0591197238043,
+                "cv_percent": 9.42
+              },
+              "capture": {
+                "n": 5,
+                "values": [
+                  376.5008,
+                  371.3639,
+                  362.5559,
+                  379.6498,
+                  374.1035
+                ],
+                "mean": 372.8348,
+                "stdev": 6.506,
+                "min": 362.5558852761776,
+                "max": 379.64981661532954,
+                "cv_percent": 1.745
+              },
+              "delta_percent": 381.372,
+              "delta_abs": 295.3822,
+              "standard_error_abs": 4.3719,
+              "delta_exceeds_two_standard_errors": true
+            },
+            "achieved_rps": {
+              "baseline": {
+                "n": 5,
+                "values": [
+                  994.8424,
+                  995.3533,
+                  995.2544,
+                  995.1425,
+                  995.0762
+                ],
+                "mean": 995.1337,
+                "stdev": 0.1943,
+                "min": 994.8423786194847,
+                "max": 995.3533031275634,
+                "cv_percent": 0.02
+              },
+              "capture": {
+                "n": 5,
+                "values": [
+                  995.5116,
+                  996.3502,
+                  998.3166,
+                  998.6511,
+                  996.5969
+                ],
+                "mean": 997.0853,
+                "stdev": 1.3438,
+                "min": 995.5116277053576,
+                "max": 998.6511050695512,
+                "cv_percent": 0.135
+              }
+            },
+            "errors": {
+              "baseline": [
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "capture": [
+                0,
+                0,
+                0,
+                0,
+                0
+              ]
+            },
+            "budget": {
+              "p95_percent": 5,
+              "cpu_percent": 5
+            },
+            "verdict": {
+              "p95": "exceeds_budget",
+              "loop_active_cpu_proxy": "exceeds_budget",
+              "process_cpu": "exceeds_budget",
+              "p95_difference_distinguishable_from_run_noise": true,
+              "loop_difference_distinguishable_from_run_noise": true,
+              "process_cpu_difference_distinguishable_from_run_noise": true
+            }
+          },
+          {
+            "workload": "node:http loopback server, deterministic handler (100x sha256 over 1 KiB + JSON of 16 fields), open-loop load at 1000 req/s from a separate process, 3 s measured after 1 s warm-up, 5 alternating runs per mode; capture = Node SDK installHttp listener (root span per request, one handled error per 100 requests) with an in-process ACKing fake receipt transport (no TLS/network export cost measured)",
+            "handler_hashes": 100,
+            "requests_per_second_requested": 1000,
+            "p95_latency_ms": {
+              "baseline": {
+                "n": 5,
+                "values": [
+                  2.315,
+                  2.722,
+                  3.21,
+                  2.651,
+                  2.359
+                ],
+                "mean": 2.6514,
+                "stdev": 0.3591,
+                "min": 2.315,
+                "max": 3.21,
+                "cv_percent": 13.542
+              },
+              "capture": {
+                "n": 5,
+                "values": [
+                  5.538,
+                  6.804,
+                  5.597,
+                  5.764,
+                  6.174
+                ],
+                "mean": 5.9754,
+                "stdev": 0.5256,
+                "min": 5.538,
+                "max": 6.804,
+                "cv_percent": 8.797
+              },
+              "delta_percent": 125.368,
+              "delta_abs": 3.324,
+              "standard_error_abs": 0.2847,
+              "delta_exceeds_two_standard_errors": true
+            },
+            "p99_latency_ms": {
+              "baseline": {
+                "n": 5,
+                "values": [
+                  3.16,
+                  3.955,
+                  4.523,
+                  3.64,
+                  2.973
+                ],
+                "mean": 3.6502,
+                "stdev": 0.6232,
+                "min": 2.973,
+                "max": 4.523,
+                "cv_percent": 17.074
+              },
+              "capture": {
+                "n": 5,
+                "values": [
+                  7.605,
+                  10.02,
+                  8.008,
+                  8.488,
+                  9.126
+                ],
+                "mean": 8.6494,
+                "stdev": 0.9531,
+                "min": 7.605,
+                "max": 10.02,
+                "cv_percent": 11.02
+              },
+              "delta_percent": 136.957,
+              "delta_abs": 4.9992,
+              "standard_error_abs": 0.5093,
+              "delta_exceeds_two_standard_errors": true
+            },
+            "p50_latency_ms": {
+              "baseline": {
+                "n": 5,
+                "values": [
+                  1.3,
+                  1.377,
+                  1.462,
+                  1.393,
+                  1.328
+                ],
+                "mean": 1.372,
+                "stdev": 0.0626,
+                "min": 1.3,
+                "max": 1.462,
+                "cv_percent": 4.564
+              },
+              "capture": {
+                "n": 5,
+                "values": [
+                  2.304,
+                  2.479,
+                  2.302,
+                  2.373,
+                  2.361
+                ],
+                "mean": 2.3638,
+                "stdev": 0.072,
+                "min": 2.302,
+                "max": 2.479,
+                "cv_percent": 3.048
+              },
+              "delta_percent": 72.289,
+              "delta_abs": 0.9918,
+              "standard_error_abs": 0.0427,
+              "delta_exceeds_two_standard_errors": true
+            },
+            "process_cpu_us_per_request": {
+              "note": "process.cpuUsage; on Windows its resolution is the ~15.6 ms scheduler tick, so short windows can read 0 (see the raw values); treat as coarse",
+              "baseline": {
+                "n": 5,
+                "values": [
+                  255.4185,
+                  255.8372,
+                  266.2663,
+                  239.8266,
+                  208.8059
+                ],
+                "mean": 245.2309,
+                "stdev": 22.443,
+                "min": 208.80587058038694,
+                "max": 266.26626626626626,
+                "cv_percent": 9.152
+              },
+              "capture": {
+                "n": 5,
+                "values": [
+                  553.1062,
+                  604.7365,
+                  600,
+                  570.7105,
+                  552.5175
+                ],
+                "mean": 576.2141,
+                "stdev": 25.0254,
+                "min": 552.5175058352784,
+                "max": 604.736490993996,
+                "cv_percent": 4.343
+              },
+              "delta_percent": 134.968,
+              "delta_abs": 330.9833,
+              "standard_error_abs": 15.033,
+              "delta_exceeds_two_standard_errors": true
+            },
+            "event_loop_active_us_per_request": {
+              "note": "performance.eventLoopUtilization active time per request: high-resolution busy time of the single JS thread, a CPU proxy that excludes GC/helper threads",
+              "baseline": {
+                "n": 5,
+                "values": [
+                  190.1659,
+                  208.2036,
+                  229.7792,
+                  209.4597,
+                  193.586
+                ],
+                "mean": 206.2389,
+                "stdev": 15.7068,
+                "min": 190.16585527037174,
+                "max": 229.77917918007012,
+                "cv_percent": 7.616
+              },
+              "capture": {
+                "n": 5,
+                "values": [
+                  462.0335,
+                  519.358,
+                  451.9755,
+                  466.7811,
+                  493.1488
+                ],
+                "mean": 478.6594,
+                "stdev": 27.3672,
+                "min": 451.9755258821287,
+                "max": 519.3580053353644,
+                "cv_percent": 5.717
+              },
+              "delta_percent": 132.09,
+              "delta_abs": 272.4205,
+              "standard_error_abs": 14.1115,
+              "delta_exceeds_two_standard_errors": true
+            },
+            "achieved_rps": {
+              "baseline": {
+                "n": 5,
+                "values": [
+                  995.7276,
+                  999.2336,
+                  995.9821,
+                  995.4911,
+                  995.9051
+                ],
+                "mean": 996.4679,
+                "stdev": 1.5576,
+                "min": 995.4910696348991,
+                "max": 999.2336431235378,
+                "cv_percent": 0.156
+              },
+              "capture": {
+                "n": 5,
+                "values": [
+                  994.5858,
+                  998.5855,
+                  997.1089,
+                  994.4365,
+                  998.252
+                ],
+                "mean": 996.5937,
+                "stdev": 1.9791,
+                "min": 994.4364877676314,
+                "max": 998.5854593966093,
+                "cv_percent": 0.199
+              }
+            },
+            "errors": {
+              "baseline": [
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "capture": [
+                0,
+                0,
+                0,
+                0,
+                0
+              ]
+            },
+            "budget": {
+              "p95_percent": 5,
+              "cpu_percent": 5
+            },
+            "verdict": {
+              "p95": "exceeds_budget",
+              "loop_active_cpu_proxy": "exceeds_budget",
+              "process_cpu": "exceeds_budget",
+              "p95_difference_distinguishable_from_run_noise": true,
+              "loop_difference_distinguishable_from_run_noise": true,
+              "process_cpu_difference_distinguishable_from_run_noise": true
+            }
+          }
+        ],
+        "node_queue_acking_transport": {
+          "workload": "same server (3 hashes), ACKing fake transport, queue sampled every 50 ms",
+          "max_queue_bytes": 881686,
+          "budget_bytes": 2097152,
+          "within_budget": true
+        },
+        "node_queue_cap_stalled_transport": {
+          "workload": "same server (3 hashes), transport never acknowledges (retryable), 1000 req/s for 3+1 s",
+          "max_queue_bytes": 881686,
+          "queue_bytes_end": 872841,
+          "budget_bytes": 2097152,
+          "within_budget": true,
+          "diagnostics": {
+            "queue_full": 2983,
+            "queue_pressure": 29
+          }
+        },
+        "node_runtime_profile": [
+          {
+            "runtime": "node",
+            "runtime_version": "v22.23.4",
+            "interval_us": 1000,
+            "workload": "fixed work: 16e6 sqrt*sin iterations, same code with and without an explicit runtime_engine_samples profile (start before, stop after, stop cost excluded from the timed region), alternating order",
+            "wall_ms": {
+              "off": {
+                "n": 7,
+                "values": [
+                  111.171,
+                  109.82,
+                  109.985,
+                  108.409,
+                  110.729,
+                  116.547,
+                  125.865
+                ],
+                "mean": 113.218,
+                "stdev": 6.1446,
+                "min": 108.409,
+                "max": 125.865,
+                "cv_percent": 5.427
+              },
+              "on": {
+                "n": 7,
+                "values": [
+                  113.542,
+                  112.814,
+                  111.015,
+                  109.86,
+                  117.906,
+                  115.762,
+                  120.896
+                ],
+                "mean": 114.5421,
+                "stdev": 3.9057,
+                "min": 109.86,
+                "max": 120.896,
+                "cv_percent": 3.41
+              },
+              "delta_percent": 1.17,
+              "delta_abs": 1.3241,
+              "standard_error_abs": 2.7519,
+              "delta_exceeds_two_standard_errors": false
+            },
+            "cpu_ms": {
+              "off": {
+                "n": 7,
+                "values": [
+                  110,
+                  94,
+                  109,
+                  109,
+                  110,
+                  110,
+                  109
+                ],
+                "mean": 107.2857,
+                "stdev": 5.8797,
+                "min": 94,
+                "max": 110,
+                "cv_percent": 5.48
+              },
+              "on": {
+                "n": 7,
+                "values": [
+                  109,
+                  125,
+                  109,
+                  109,
+                  110,
+                  110,
+                  125
+                ],
+                "mean": 113.8571,
+                "stdev": 7.6251,
+                "min": 109,
+                "max": 125,
+                "cv_percent": 6.697
+              },
+              "delta_percent": 6.125,
+              "delta_abs": 6.5714,
+              "standard_error_abs": 3.6394,
+              "delta_exceeds_two_standard_errors": false
+            },
+            "samples_per_profile": [
+              78,
+              80,
+              79,
+              76,
+              80,
+              79,
+              83
+            ],
+            "raw_rows": [
+              {
+                "mode": "off",
+                "wall_ms": 111.171,
+                "cpu_ms": 110,
+                "samples": null,
+                "status": null
+              },
+              {
+                "mode": "on",
+                "wall_ms": 113.542,
+                "cpu_ms": 109,
+                "samples": 78,
+                "status": "supported"
+              },
+              {
+                "mode": "on",
+                "wall_ms": 112.814,
+                "cpu_ms": 125,
+                "samples": 80,
+                "status": "supported"
+              },
+              {
+                "mode": "off",
+                "wall_ms": 109.82,
+                "cpu_ms": 94,
+                "samples": null,
+                "status": null
+              },
+              {
+                "mode": "off",
+                "wall_ms": 109.985,
+                "cpu_ms": 109,
+                "samples": null,
+                "status": null
+              },
+              {
+                "mode": "on",
+                "wall_ms": 111.015,
+                "cpu_ms": 109,
+                "samples": 79,
+                "status": "supported"
+              },
+              {
+                "mode": "on",
+                "wall_ms": 109.86,
+                "cpu_ms": 109,
+                "samples": 76,
+                "status": "supported"
+              },
+              {
+                "mode": "off",
+                "wall_ms": 108.409,
+                "cpu_ms": 109,
+                "samples": null,
+                "status": null
+              },
+              {
+                "mode": "off",
+                "wall_ms": 110.729,
+                "cpu_ms": 110,
+                "samples": null,
+                "status": null
+              },
+              {
+                "mode": "on",
+                "wall_ms": 117.906,
+                "cpu_ms": 110,
+                "samples": 80,
+                "status": "supported"
+              },
+              {
+                "mode": "on",
+                "wall_ms": 115.762,
+                "cpu_ms": 110,
+                "samples": 79,
+                "status": "supported"
+              },
+              {
+                "mode": "off",
+                "wall_ms": 116.547,
+                "cpu_ms": 110,
+                "samples": null,
+                "status": null
+              },
+              {
+                "mode": "off",
+                "wall_ms": 125.865,
+                "cpu_ms": 109,
+                "samples": null,
+                "status": null
+              },
+              {
+                "mode": "on",
+                "wall_ms": 120.896,
+                "cpu_ms": 125,
+                "samples": 83,
+                "status": "supported"
+              }
+            ],
+            "budget": "none approved for runtime supplements (the design's 3% gate is the native profiler); numbers are reported raw"
+          },
+          {
+            "runtime": "node",
+            "runtime_version": "v22.23.4",
+            "interval_us": 10000,
+            "workload": "fixed work: 16e6 sqrt*sin iterations, same code with and without an explicit runtime_engine_samples profile (start before, stop after, stop cost excluded from the timed region), alternating order",
+            "wall_ms": {
+              "off": {
+                "n": 7,
+                "values": [
+                  120.301,
+                  120.56,
+                  119.388,
+                  118.66,
+                  117.685,
+                  114.727,
+                  111.339
+                ],
+                "mean": 117.5229,
+                "stdev": 3.3615,
+                "min": 111.339,
+                "max": 120.56,
+                "cv_percent": 2.86
+              },
+              "on": {
+                "n": 7,
+                "values": [
+                  115.317,
+                  120.174,
+                  116.118,
+                  119.259,
+                  111.968,
+                  114.796,
+                  115.25
+                ],
+                "mean": 116.126,
+                "stdev": 2.7893,
+                "min": 111.968,
+                "max": 120.174,
+                "cv_percent": 2.402
+              },
+              "delta_percent": -1.189,
+              "delta_abs": -1.3969,
+              "standard_error_abs": 1.651,
+              "delta_exceeds_two_standard_errors": false
+            },
+            "cpu_ms": {
+              "off": {
+                "n": 7,
+                "values": [
+                  125,
+                  125,
+                  125,
+                  110,
+                  124,
+                  109,
+                  110
+                ],
+                "mean": 118.2857,
+                "stdev": 8.077,
+                "min": 109,
+                "max": 125,
+                "cv_percent": 6.828
+              },
+              "on": {
+                "n": 7,
+                "values": [
+                  125,
+                  125,
+                  110,
+                  125,
+                  109,
+                  109,
+                  109
+                ],
+                "mean": 116,
+                "stdev": 8.4261,
+                "min": 109,
+                "max": 125,
+                "cv_percent": 7.264
+              },
+              "delta_percent": -1.932,
+              "delta_abs": -2.2857,
+              "standard_error_abs": 4.4116,
+              "delta_exceeds_two_standard_errors": false
+            },
+            "samples_per_profile": [
+              13,
+              13,
+              13,
+              13,
+              12,
+              13,
+              13
+            ],
+            "raw_rows": [
+              {
+                "mode": "off",
+                "wall_ms": 120.301,
+                "cpu_ms": 125,
+                "samples": null,
+                "status": null
+              },
+              {
+                "mode": "on",
+                "wall_ms": 115.317,
+                "cpu_ms": 125,
+                "samples": 13,
+                "status": "supported"
+              },
+              {
+                "mode": "on",
+                "wall_ms": 120.174,
+                "cpu_ms": 125,
+                "samples": 13,
+                "status": "supported"
+              },
+              {
+                "mode": "off",
+                "wall_ms": 120.56,
+                "cpu_ms": 125,
+                "samples": null,
+                "status": null
+              },
+              {
+                "mode": "off",
+                "wall_ms": 119.388,
+                "cpu_ms": 125,
+                "samples": null,
+                "status": null
+              },
+              {
+                "mode": "on",
+                "wall_ms": 116.118,
+                "cpu_ms": 110,
+                "samples": 13,
+                "status": "supported"
+              },
+              {
+                "mode": "on",
+                "wall_ms": 119.259,
+                "cpu_ms": 125,
+                "samples": 13,
+                "status": "supported"
+              },
+              {
+                "mode": "off",
+                "wall_ms": 118.66,
+                "cpu_ms": 110,
+                "samples": null,
+                "status": null
+              },
+              {
+                "mode": "off",
+                "wall_ms": 117.685,
+                "cpu_ms": 124,
+                "samples": null,
+                "status": null
+              },
+              {
+                "mode": "on",
+                "wall_ms": 111.968,
+                "cpu_ms": 109,
+                "samples": 12,
+                "status": "supported"
+              },
+              {
+                "mode": "on",
+                "wall_ms": 114.796,
+                "cpu_ms": 109,
+                "samples": 13,
+                "status": "supported"
+              },
+              {
+                "mode": "off",
+                "wall_ms": 114.727,
+                "cpu_ms": 109,
+                "samples": null,
+                "status": null
+              },
+              {
+                "mode": "off",
+                "wall_ms": 111.339,
+                "cpu_ms": 110,
+                "samples": null,
+                "status": null
+              },
+              {
+                "mode": "on",
+                "wall_ms": 115.25,
+                "cpu_ms": 109,
+                "samples": 13,
+                "status": "supported"
+              }
+            ],
+            "budget": "none approved for runtime supplements (the design's 3% gate is the native profiler); numbers are reported raw"
+          }
+        ],
+        "bun_runtime_profile": [
+          {
+            "runtime": "bun",
+            "runtime_version": "1.3.14",
+            "interval_us": 1000,
+            "workload": "fixed work: 16e6 sqrt*sin iterations, same code with and without an explicit runtime_engine_samples profile (start before, stop after, stop cost excluded from the timed region), alternating order",
+            "wall_ms": {
+              "off": {
+                "n": 7,
+                "values": [
+                  73.222,
+                  70.467,
+                  73.69,
+                  69.935,
+                  69.085,
+                  68.264,
+                  68.208
+                ],
+                "mean": 70.4101,
+                "stdev": 2.24,
+                "min": 68.208,
+                "max": 73.69,
+                "cv_percent": 3.181
+              },
+              "on": {
+                "n": 7,
+                "values": [
+                  70.082,
+                  83.916,
+                  70.741,
+                  73.227,
+                  68.204,
+                  68.539,
+                  68.084
+                ],
+                "mean": 71.8276,
+                "stdev": 5.6314,
+                "min": 68.084,
+                "max": 83.916,
+                "cv_percent": 7.84
+              },
+              "delta_percent": 2.013,
+              "delta_abs": 1.4174,
+              "standard_error_abs": 2.2907,
+              "delta_exceeds_two_standard_errors": false
+            },
+            "cpu_ms": {
+              "off": {
+                "n": 7,
+                "values": [
+                  79,
+                  62,
+                  78,
+                  78,
+                  63,
+                  63,
+                  78
+                ],
+                "mean": 71.5714,
+                "stdev": 8.3438,
+                "min": 62,
+                "max": 79,
+                "cv_percent": 11.658
+              },
+              "on": {
+                "n": 7,
+                "values": [
+                  62,
+                  94,
+                  63,
+                  78,
+                  62,
+                  78,
+                  62
+                ],
+                "mean": 71.2857,
+                "stdev": 12.4728,
+                "min": 62,
+                "max": 94,
+                "cv_percent": 17.497
+              },
+              "delta_percent": -0.399,
+              "delta_abs": -0.2857,
+              "standard_error_abs": 5.6719,
+              "delta_exceeds_two_standard_errors": false
+            },
+            "samples_per_profile": [
+              9,
+              5,
+              1,
+              3,
+              2,
+              3,
+              2
+            ],
+            "raw_rows": [
+              {
+                "mode": "off",
+                "wall_ms": 73.222,
+                "cpu_ms": 79,
+                "samples": null,
+                "status": null
+              },
+              {
+                "mode": "on",
+                "wall_ms": 70.082,
+                "cpu_ms": 62,
+                "samples": 9,
+                "status": "supported"
+              },
+              {
+                "mode": "on",
+                "wall_ms": 83.916,
+                "cpu_ms": 94,
+                "samples": 5,
+                "status": "supported"
+              },
+              {
+                "mode": "off",
+                "wall_ms": 70.467,
+                "cpu_ms": 62,
+                "samples": null,
+                "status": null
+              },
+              {
+                "mode": "off",
+                "wall_ms": 73.69,
+                "cpu_ms": 78,
+                "samples": null,
+                "status": null
+              },
+              {
+                "mode": "on",
+                "wall_ms": 70.741,
+                "cpu_ms": 63,
+                "samples": 1,
+                "status": "supported"
+              },
+              {
+                "mode": "on",
+                "wall_ms": 73.227,
+                "cpu_ms": 78,
+                "samples": 3,
+                "status": "supported"
+              },
+              {
+                "mode": "off",
+                "wall_ms": 69.935,
+                "cpu_ms": 78,
+                "samples": null,
+                "status": null
+              },
+              {
+                "mode": "off",
+                "wall_ms": 69.085,
+                "cpu_ms": 63,
+                "samples": null,
+                "status": null
+              },
+              {
+                "mode": "on",
+                "wall_ms": 68.204,
+                "cpu_ms": 62,
+                "samples": 2,
+                "status": "supported"
+              },
+              {
+                "mode": "on",
+                "wall_ms": 68.539,
+                "cpu_ms": 78,
+                "samples": 3,
+                "status": "supported"
+              },
+              {
+                "mode": "off",
+                "wall_ms": 68.264,
+                "cpu_ms": 63,
+                "samples": null,
+                "status": null
+              },
+              {
+                "mode": "off",
+                "wall_ms": 68.208,
+                "cpu_ms": 78,
+                "samples": null,
+                "status": null
+              },
+              {
+                "mode": "on",
+                "wall_ms": 68.084,
+                "cpu_ms": 62,
+                "samples": 2,
+                "status": "supported"
+              }
+            ],
+            "budget": "none approved for runtime supplements (the design's 3% gate is the native profiler); numbers are reported raw"
+          },
+          {
+            "runtime": "bun",
+            "runtime_version": "1.3.14",
+            "interval_us": 10000,
+            "workload": "fixed work: 16e6 sqrt*sin iterations, same code with and without an explicit runtime_engine_samples profile (start before, stop after, stop cost excluded from the timed region), alternating order",
+            "wall_ms": {
+              "off": {
+                "n": 7,
+                "values": [
+                  72.855,
+                  69.869,
+                  71.299,
+                  69.466,
+                  75.149,
+                  83.801,
+                  76.159
+                ],
+                "mean": 74.0854,
+                "stdev": 4.9702,
+                "min": 69.466,
+                "max": 83.801,
+                "cv_percent": 6.709
+              },
+              "on": {
+                "n": 7,
+                "values": [
+                  73.275,
+                  83.047,
+                  69.331,
+                  69.444,
+                  74.622,
+                  72.712,
+                  84.644
+                ],
+                "mean": 75.2964,
+                "stdev": 6.1713,
+                "min": 69.331,
+                "max": 84.644,
+                "cv_percent": 8.196
+              },
+              "delta_percent": 1.635,
+              "delta_abs": 1.211,
+              "standard_error_abs": 2.9949,
+              "delta_exceeds_two_standard_errors": false
+            },
+            "cpu_ms": {
+              "off": {
+                "n": 7,
+                "values": [
+                  63,
+                  79,
+                  62,
+                  79,
+                  78,
+                  94,
+                  63
+                ],
+                "mean": 74,
+                "stdev": 11.9164,
+                "min": 62,
+                "max": 94,
+                "cv_percent": 16.103
+              },
+              "on": {
+                "n": 7,
+                "values": [
+                  78,
+                  78,
+                  78,
+                  62,
+                  62,
+                  78,
+                  93
+                ],
+                "mean": 75.5714,
+                "stdev": 10.7681,
+                "min": 62,
+                "max": 93,
+                "cv_percent": 14.249
+              },
+              "delta_percent": 2.124,
+              "delta_abs": 1.5714,
+              "standard_error_abs": 6.0704,
+              "delta_exceeds_two_standard_errors": false
+            },
+            "samples_per_profile": [
+              5,
+              6,
+              3,
+              1,
+              1,
+              1,
+              1
+            ],
+            "raw_rows": [
+              {
+                "mode": "off",
+                "wall_ms": 72.855,
+                "cpu_ms": 63,
+                "samples": null,
+                "status": null
+              },
+              {
+                "mode": "on",
+                "wall_ms": 73.275,
+                "cpu_ms": 78,
+                "samples": 5,
+                "status": "supported"
+              },
+              {
+                "mode": "on",
+                "wall_ms": 83.047,
+                "cpu_ms": 78,
+                "samples": 6,
+                "status": "supported"
+              },
+              {
+                "mode": "off",
+                "wall_ms": 69.869,
+                "cpu_ms": 79,
+                "samples": null,
+                "status": null
+              },
+              {
+                "mode": "off",
+                "wall_ms": 71.299,
+                "cpu_ms": 62,
+                "samples": null,
+                "status": null
+              },
+              {
+                "mode": "on",
+                "wall_ms": 69.331,
+                "cpu_ms": 78,
+                "samples": 3,
+                "status": "supported"
+              },
+              {
+                "mode": "on",
+                "wall_ms": 69.444,
+                "cpu_ms": 62,
+                "samples": 1,
+                "status": "supported"
+              },
+              {
+                "mode": "off",
+                "wall_ms": 69.466,
+                "cpu_ms": 79,
+                "samples": null,
+                "status": null
+              },
+              {
+                "mode": "off",
+                "wall_ms": 75.149,
+                "cpu_ms": 78,
+                "samples": null,
+                "status": null
+              },
+              {
+                "mode": "on",
+                "wall_ms": 74.622,
+                "cpu_ms": 62,
+                "samples": 1,
+                "status": "supported"
+              },
+              {
+                "mode": "on",
+                "wall_ms": 72.712,
+                "cpu_ms": 78,
+                "samples": 1,
+                "status": "supported"
+              },
+              {
+                "mode": "off",
+                "wall_ms": 83.801,
+                "cpu_ms": 94,
+                "samples": null,
+                "status": null
+              },
+              {
+                "mode": "off",
+                "wall_ms": 76.159,
+                "cpu_ms": 63,
+                "samples": null,
+                "status": null
+              },
+              {
+                "mode": "on",
+                "wall_ms": 84.644,
+                "cpu_ms": 93,
+                "samples": 1,
+                "status": "supported"
+              }
+            ],
+            "budget": "none approved for runtime supplements (the design's 3% gate is the native profiler); numbers are reported raw"
+          }
+        ],
+        "python_runtime_profile": [
+          {
+            "runtime": "cpython",
+            "runtime_version": "3.14.2",
+            "method": "python_monitoring",
+            "interval_ms": 10,
+            "workload": "fixed work: 400k calls of a small Python function plus a 1.5M-iteration arithmetic loop (call-heavy worst case for sys.monitoring), same code with and without an explicit profile, alternating order; the profile's own start/stop cost is excluded from the timed region",
+            "wall_ms": {
+              "off": {
+                "n": 7,
+                "values": [
+                  66.389,
+                  68.661,
+                  65.221,
+                  73.704,
+                  64.856,
+                  87.178,
+                  93.705
+                ],
+                "mean": 74.2449,
+                "stdev": 11.6098,
+                "min": 64.856,
+                "max": 93.705,
+                "cv_percent": 15.637
+              },
+              "on": {
+                "n": 7,
+                "values": [
+                  317.102,
+                  306.46,
+                  301.346,
+                  337.175,
+                  353.991,
+                  469.055,
+                  374.822
+                ],
+                "mean": 351.4216,
+                "stdev": 58.1689,
+                "min": 301.346,
+                "max": 469.055,
+                "cv_percent": 16.552
+              },
+              "delta_percent": 373.328,
+              "delta_abs": 277.1767,
+              "standard_error_abs": 22.4194,
+              "delta_exceeds_two_standard_errors": true
+            },
+            "cpu_ms": {
+              "off": {
+                "n": 7,
+                "values": [
+                  62.5,
+                  78.125,
+                  62.5,
+                  62.5,
+                  78.125,
+                  93.75,
+                  93.75
+                ],
+                "mean": 75.8929,
+                "stdev": 14.0584,
+                "min": 62.5,
+                "max": 93.75,
+                "cv_percent": 18.524
+              },
+              "on": {
+                "n": 7,
+                "values": [
+                  296.875,
+                  296.875,
+                  296.875,
+                  343.75,
+                  343.75,
+                  453.125,
+                  359.375
+                ],
+                "mean": 341.5179,
+                "stdev": 55.9225,
+                "min": 296.875,
+                "max": 453.125,
+                "cv_percent": 16.375
+              },
+              "delta_percent": 350,
+              "delta_abs": 265.625,
+              "standard_error_abs": 21.7944,
+              "delta_exceeds_two_standard_errors": true
+            },
+            "profile_status": [
+              "supported",
+              "supported",
+              "supported",
+              "supported",
+              "supported",
+              "supported",
+              "supported"
+            ],
+            "samples_per_profile": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "events_per_profile": [
+              800006,
+              800006,
+              800006,
+              800006,
+              800006,
+              800006,
+              800006
+            ],
+            "raw_rows": [
+              {
+                "mode": "off",
+                "wall_ms": 66.389,
+                "cpu_ms": 62.5,
+                "samples": null,
+                "status": null,
+                "events": null
+              },
+              {
+                "mode": "on",
+                "wall_ms": 317.102,
+                "cpu_ms": 296.875,
+                "samples": 0,
+                "status": "supported",
+                "events": 800006
+              },
+              {
+                "mode": "on",
+                "wall_ms": 306.46,
+                "cpu_ms": 296.875,
+                "samples": 0,
+                "status": "supported",
+                "events": 800006
+              },
+              {
+                "mode": "off",
+                "wall_ms": 68.661,
+                "cpu_ms": 78.125,
+                "samples": null,
+                "status": null,
+                "events": null
+              },
+              {
+                "mode": "off",
+                "wall_ms": 65.221,
+                "cpu_ms": 62.5,
+                "samples": null,
+                "status": null,
+                "events": null
+              },
+              {
+                "mode": "on",
+                "wall_ms": 301.346,
+                "cpu_ms": 296.875,
+                "samples": 0,
+                "status": "supported",
+                "events": 800006
+              },
+              {
+                "mode": "on",
+                "wall_ms": 337.175,
+                "cpu_ms": 343.75,
+                "samples": 0,
+                "status": "supported",
+                "events": 800006
+              },
+              {
+                "mode": "off",
+                "wall_ms": 73.704,
+                "cpu_ms": 62.5,
+                "samples": null,
+                "status": null,
+                "events": null
+              },
+              {
+                "mode": "off",
+                "wall_ms": 64.856,
+                "cpu_ms": 78.125,
+                "samples": null,
+                "status": null,
+                "events": null
+              },
+              {
+                "mode": "on",
+                "wall_ms": 353.991,
+                "cpu_ms": 343.75,
+                "samples": 0,
+                "status": "supported",
+                "events": 800006
+              },
+              {
+                "mode": "on",
+                "wall_ms": 469.055,
+                "cpu_ms": 453.125,
+                "samples": 0,
+                "status": "supported",
+                "events": 800006
+              },
+              {
+                "mode": "off",
+                "wall_ms": 87.178,
+                "cpu_ms": 93.75,
+                "samples": null,
+                "status": null,
+                "events": null
+              },
+              {
+                "mode": "off",
+                "wall_ms": 93.705,
+                "cpu_ms": 93.75,
+                "samples": null,
+                "status": null,
+                "events": null
+              },
+              {
+                "mode": "on",
+                "wall_ms": 374.822,
+                "cpu_ms": 359.375,
+                "samples": 0,
+                "status": "supported",
+                "events": 800006
+              }
+            ],
+            "budget": "none approved for runtime supplements; raw numbers"
+          },
+          {
+            "runtime": "cpython",
+            "runtime_version": "3.14.2",
+            "method": "python_wall_samples",
+            "interval_ms": 10,
+            "workload": "fixed work: 400k calls of a small Python function plus a 1.5M-iteration arithmetic loop (call-heavy worst case for sys.monitoring), same code with and without an explicit profile, alternating order; the profile's own start/stop cost is excluded from the timed region",
+            "wall_ms": {
+              "off": {
+                "n": 7,
+                "values": [
+                  63.515,
+                  62.754,
+                  66.35,
+                  63.996,
+                  63.304,
+                  74.264,
+                  76.799
+                ],
+                "mean": 67.2831,
+                "stdev": 5.7952,
+                "min": 62.754,
+                "max": 76.799,
+                "cv_percent": 8.613
+              },
+              "on": {
+                "n": 7,
+                "values": [
+                  65.786,
+                  65.081,
+                  63.702,
+                  75.321,
+                  65.647,
+                  63.481,
+                  70.838
+                ],
+                "mean": 67.1223,
+                "stdev": 4.361,
+                "min": 63.481,
+                "max": 75.321,
+                "cv_percent": 6.497
+              },
+              "delta_percent": -0.239,
+              "delta_abs": -0.1609,
+              "standard_error_abs": 2.7413,
+              "delta_exceeds_two_standard_errors": false
+            },
+            "cpu_ms": {
+              "off": {
+                "n": 7,
+                "values": [
+                  62.5,
+                  62.5,
+                  62.5,
+                  62.5,
+                  78.125,
+                  78.125,
+                  78.125
+                ],
+                "mean": 69.1964,
+                "stdev": 8.3519,
+                "min": 62.5,
+                "max": 78.125,
+                "cv_percent": 12.07
+              },
+              "on": {
+                "n": 7,
+                "values": [
+                  62.5,
+                  62.5,
+                  62.5,
+                  62.5,
+                  62.5,
+                  62.5,
+                  78.125
+                ],
+                "mean": 64.7321,
+                "stdev": 5.9057,
+                "min": 62.5,
+                "max": 78.125,
+                "cv_percent": 9.123
+              },
+              "delta_percent": -6.452,
+              "delta_abs": -4.4643,
+              "standard_error_abs": 3.8662,
+              "delta_exceeds_two_standard_errors": false
+            },
+            "profile_status": [
+              "supported",
+              "supported",
+              "supported",
+              "supported",
+              "supported",
+              "supported",
+              "supported"
+            ],
+            "samples_per_profile": [
+              7,
+              5,
+              6,
+              6,
+              6,
+              6,
+              5
+            ],
+            "events_per_profile": [
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null
+            ],
+            "raw_rows": [
+              {
+                "mode": "off",
+                "wall_ms": 63.515,
+                "cpu_ms": 62.5,
+                "samples": null,
+                "status": null,
+                "events": null
+              },
+              {
+                "mode": "on",
+                "wall_ms": 65.786,
+                "cpu_ms": 62.5,
+                "samples": 7,
+                "status": "supported",
+                "events": null
+              },
+              {
+                "mode": "on",
+                "wall_ms": 65.081,
+                "cpu_ms": 62.5,
+                "samples": 5,
+                "status": "supported",
+                "events": null
+              },
+              {
+                "mode": "off",
+                "wall_ms": 62.754,
+                "cpu_ms": 62.5,
+                "samples": null,
+                "status": null,
+                "events": null
+              },
+              {
+                "mode": "off",
+                "wall_ms": 66.35,
+                "cpu_ms": 62.5,
+                "samples": null,
+                "status": null,
+                "events": null
+              },
+              {
+                "mode": "on",
+                "wall_ms": 63.702,
+                "cpu_ms": 62.5,
+                "samples": 6,
+                "status": "supported",
+                "events": null
+              },
+              {
+                "mode": "on",
+                "wall_ms": 75.321,
+                "cpu_ms": 62.5,
+                "samples": 6,
+                "status": "supported",
+                "events": null
+              },
+              {
+                "mode": "off",
+                "wall_ms": 63.996,
+                "cpu_ms": 62.5,
+                "samples": null,
+                "status": null,
+                "events": null
+              },
+              {
+                "mode": "off",
+                "wall_ms": 63.304,
+                "cpu_ms": 78.125,
+                "samples": null,
+                "status": null,
+                "events": null
+              },
+              {
+                "mode": "on",
+                "wall_ms": 65.647,
+                "cpu_ms": 62.5,
+                "samples": 6,
+                "status": "supported",
+                "events": null
+              },
+              {
+                "mode": "on",
+                "wall_ms": 63.481,
+                "cpu_ms": 62.5,
+                "samples": 6,
+                "status": "supported",
+                "events": null
+              },
+              {
+                "mode": "off",
+                "wall_ms": 74.264,
+                "cpu_ms": 78.125,
+                "samples": null,
+                "status": null,
+                "events": null
+              },
+              {
+                "mode": "off",
+                "wall_ms": 76.799,
+                "cpu_ms": 78.125,
+                "samples": null,
+                "status": null,
+                "events": null
+              },
+              {
+                "mode": "on",
+                "wall_ms": 70.838,
+                "cpu_ms": 78.125,
+                "samples": 5,
+                "status": "supported",
+                "events": null
+              }
+            ],
+            "budget": "none approved for runtime supplements; raw numbers"
+          },
+          {
+            "runtime": "cpython",
+            "runtime_version": "3.14.2",
+            "method": "python_wall_samples",
+            "interval_ms": 2,
+            "workload": "fixed work: 400k calls of a small Python function plus a 1.5M-iteration arithmetic loop (call-heavy worst case for sys.monitoring), same code with and without an explicit profile, alternating order; the profile's own start/stop cost is excluded from the timed region",
+            "wall_ms": {
+              "off": {
+                "n": 7,
+                "values": [
+                  68.283,
+                  64.186,
+                  64.543,
+                  65.458,
+                  73.049,
+                  64.609,
+                  65.179
+                ],
+                "mean": 66.4724,
+                "stdev": 3.2056,
+                "min": 64.186,
+                "max": 73.049,
+                "cv_percent": 4.822
+              },
+              "on": {
+                "n": 7,
+                "values": [
+                  68.514,
+                  68.787,
+                  64.427,
+                  68.138,
+                  65.521,
+                  64.444,
+                  64.136
+                ],
+                "mean": 66.281,
+                "stdev": 2.1097,
+                "min": 64.136,
+                "max": 68.787,
+                "cv_percent": 3.183
+              },
+              "delta_percent": -0.288,
+              "delta_abs": -0.1914,
+              "standard_error_abs": 1.4504,
+              "delta_exceeds_two_standard_errors": false
+            },
+            "cpu_ms": {
+              "off": {
+                "n": 7,
+                "values": [
+                  62.5,
+                  62.5,
+                  62.5,
+                  62.5,
+                  62.5,
+                  62.5,
+                  62.5
+                ],
+                "mean": 62.5,
+                "stdev": 0,
+                "min": 62.5,
+                "max": 62.5,
+                "cv_percent": 0
+              },
+              "on": {
+                "n": 7,
+                "values": [
+                  78.125,
+                  62.5,
+                  62.5,
+                  62.5,
+                  62.5,
+                  62.5,
+                  62.5
+                ],
+                "mean": 64.7321,
+                "stdev": 5.9057,
+                "min": 62.5,
+                "max": 78.125,
+                "cv_percent": 9.123
+              },
+              "delta_percent": 3.571,
+              "delta_abs": 2.2321,
+              "standard_error_abs": 2.2321,
+              "delta_exceeds_two_standard_errors": false
+            },
+            "profile_status": [
+              "supported",
+              "supported",
+              "supported",
+              "supported",
+              "supported",
+              "supported",
+              "supported"
+            ],
+            "samples_per_profile": [
+              9,
+              9,
+              9,
+              9,
+              7,
+              9,
+              7
+            ],
+            "events_per_profile": [
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null
+            ],
+            "raw_rows": [
+              {
+                "mode": "off",
+                "wall_ms": 68.283,
+                "cpu_ms": 62.5,
+                "samples": null,
+                "status": null,
+                "events": null
+              },
+              {
+                "mode": "on",
+                "wall_ms": 68.514,
+                "cpu_ms": 78.125,
+                "samples": 9,
+                "status": "supported",
+                "events": null
+              },
+              {
+                "mode": "on",
+                "wall_ms": 68.787,
+                "cpu_ms": 62.5,
+                "samples": 9,
+                "status": "supported",
+                "events": null
+              },
+              {
+                "mode": "off",
+                "wall_ms": 64.186,
+                "cpu_ms": 62.5,
+                "samples": null,
+                "status": null,
+                "events": null
+              },
+              {
+                "mode": "off",
+                "wall_ms": 64.543,
+                "cpu_ms": 62.5,
+                "samples": null,
+                "status": null,
+                "events": null
+              },
+              {
+                "mode": "on",
+                "wall_ms": 64.427,
+                "cpu_ms": 62.5,
+                "samples": 9,
+                "status": "supported",
+                "events": null
+              },
+              {
+                "mode": "on",
+                "wall_ms": 68.138,
+                "cpu_ms": 62.5,
+                "samples": 9,
+                "status": "supported",
+                "events": null
+              },
+              {
+                "mode": "off",
+                "wall_ms": 65.458,
+                "cpu_ms": 62.5,
+                "samples": null,
+                "status": null,
+                "events": null
+              },
+              {
+                "mode": "off",
+                "wall_ms": 73.049,
+                "cpu_ms": 62.5,
+                "samples": null,
+                "status": null,
+                "events": null
+              },
+              {
+                "mode": "on",
+                "wall_ms": 65.521,
+                "cpu_ms": 62.5,
+                "samples": 7,
+                "status": "supported",
+                "events": null
+              },
+              {
+                "mode": "on",
+                "wall_ms": 64.444,
+                "cpu_ms": 62.5,
+                "samples": 9,
+                "status": "supported",
+                "events": null
+              },
+              {
+                "mode": "off",
+                "wall_ms": 64.609,
+                "cpu_ms": 62.5,
+                "samples": null,
+                "status": null,
+                "events": null
+              },
+              {
+                "mode": "off",
+                "wall_ms": 65.179,
+                "cpu_ms": 62.5,
+                "samples": null,
+                "status": null,
+                "events": null
+              },
+              {
+                "mode": "on",
+                "wall_ms": 64.136,
+                "cpu_ms": 62.5,
+                "samples": 7,
+                "status": "supported",
+                "events": null
+              }
+            ],
+            "budget": "none approved for runtime supplements; raw numbers"
+          }
+        ],
+        "browser_bundle_sizes": {
+          "method": "bun build --target=browser --minify (pinned Bun), zlib gzip level 9 of the single output file; the browser index re-exports replay, so core is measured as the index minus nothing: see note",
+          "note": "packages/browser/src/index.ts currently re-exports the replay recorder, so `browser_index` includes replay code; `replay_only` is the recorder+stream entry measured alone. Budget: core <=40 KiB gzip, replay separate <=60 KiB gzip. A core-only entry that excludes replay does not exist yet, so the core budget row is measured on the full index (upper bound).",
+          "browser_index": {
+            "raw_bytes": 133466,
+            "gzip_bytes": 46570,
+            "budget_gzip_bytes": 40960,
+            "within_budget": false
+          },
+          "replay_only": {
+            "raw_bytes": 13920,
+            "gzip_bytes": 5882,
+            "budget_gzip_bytes": 61440,
+            "within_budget": true
+          },
+          "profile_module": {
+            "raw_bytes": 13588,
+            "gzip_bytes": 5527
+          }
+        },
+        "browser_recorder_mutation_batch_p95": {
+          "not_measured": "requires a real browser mutation-storm run; fixtures/sdk/replay/recorder.spec.ts asserts behavior, not this timing budget. Budget 5 ms p95 per batch is NOT claimed."
+        },
+        "python_core_capture": {
+          "not_measured": "Python handler capture overhead is not measured by this script (no Python HTTP workload is driven here); the 5% p95/CPU budget for Python core capture is NOT claimed."
+        }
+      }
+    },
+    "unqualified_rows": [
+      {
+        "row": "node-24.x-runtime_engine_samples",
+        "reason": "Node 24 is not installed on this machine; the frozen manifest rows Node 22.21.1 / 24.11.0 are different patch levels than the executed Node and stay not_run."
+      },
+      {
+        "row": "node-linux-macos-runtime_engine_samples",
+        "reason": "only the Windows x64 host was available; no Linux/macOS Node run."
+      },
+      {
+        "row": "bun-linux-macos-runtime_engine_samples",
+        "reason": "only the Windows x64 host was available; no Linux/macOS Bun run."
+      },
+      {
+        "row": "cpython-3.12-3.13-profiles",
+        "reason": "only CPython 3.14.x is installed here; 3.12 and 3.13 rows were not run."
+      },
+      {
+        "row": "cpython-free-threaded-jit-subinterpreters-pypy",
+        "reason": "start unqualified by design and were not exercised (the free-threaded refusal is covered only by a monkeypatched unit test, not a real free-threaded build)."
+      },
+      {
+        "row": "cpython-linux-macos-profiles",
+        "reason": "only the Windows x64 host was available."
+      },
+      {
+        "row": "chrome-142.0.7444.59 (frozen manifest target; Chrome 156.0 was executed instead)",
+        "reason": "not run on this machine."
+      },
+      {
+        "row": "edge-142",
+        "reason": "not run on this machine."
+      },
+      {
+        "row": "firefox-144.0.2 (no ordinary-page sampling API; unsupported capability only asserted with a fake in unit tests)",
+        "reason": "not run on this machine."
+      },
+      {
+        "row": "safari-26.0.1 (not available; WebKit in Playwright is not a Safari release certification)",
+        "reason": "not run on this machine."
+      },
+      {
+        "row": "chrome-windows-macos",
+        "reason": "not run on this machine."
+      },
+      {
+        "row": "browser-headed-run",
+        "reason": "not run on this machine."
+      },
+      {
+        "row": "critical-paths-http-db-errors-artifacts-jobs-replay-through-real-backend",
+        "reason": "fixtures/sdk/{node,bun,python,jobs}/* need private fixture configuration (SOUNDPOST_FIXTURE_*), a PostgreSQL DSN and a running backend; qualify.mjs does not run them. Earlier per-task evidence exists in the 03.0x reports and is not repeated or inferred here."
+      },
+      {
+        "row": "runtime-supplement-export-through-C03",
+        "reason": "profile/capability records cannot be admitted: core `CaptureInput` has no capability/profile input and internal/model/telemetry_validation.go accepts only runtime_cpu|native_cpu|native_offcpu profile methods, so `ack` is not_available in every report."
+      },
+      {
+        "row": "recorder-5ms-p95-per-mutation-batch",
+        "reason": "no real-browser timing run exists for this budget."
+      },
+      {
+        "row": "python-core-server-capture-overhead",
+        "reason": "no Python HTTP workload overhead run exists."
+      },
+      {
+        "row": "platform-runner-matrix",
+        "reason": "only this one workstation was used; no pinned Linux/macOS/Windows runner class matrix."
+      }
+    ]
   }
 }

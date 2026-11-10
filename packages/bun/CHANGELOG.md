@@ -12,3 +12,7 @@
 - Correct HTTP client lifetime tracking for Bun's headers-time request close and error-without-close behavior; preserve body completion, native discard and non-consuming application error ownership.
 - Remove the nonexistent ambient HeadersInit reference and add an independently executable Bun1.3.14 HTTP lifecycle regression gate.
 - Correct the real Worker fixture's unsupported browser-close assumption using documented worker-local process.exit only after reply/client cleanup; require actual close code0 and avoid redundant termination. Four-cell diagnostic evidence is separate from full changed-fixture qualification.
+
+## Unreleased — runtime supplement
+
+- Add explicit `startProfile` / `ProfileHandle.stop` (C09) for Bun on its own: JavaScriptCore sampler through one in-process inspector session, `runtime_engine_samples` with engine time deltas (no CPU unit), unobserved idle/native gaps reported separately from samples, per-process profiler state handled (worker isolates refused `profiler_state_shared`, stolen state reported `profiler_state_lost`), bounded cleanup, code-identity-only frames, no ACK path yet. Real Bun 1.3.14 fixture `fixtures/sdk/profiles/bun.ts`.

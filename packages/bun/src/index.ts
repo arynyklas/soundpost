@@ -23,3 +23,5 @@ export {installPg,PgLease} from "./pg.ts";
 export {installServe,ServeLease} from "./serve.ts";
 export {serializeWorkerContext,withWorkerContext} from "./workers.ts";
 export type {SpanOptions,TraceContext,WorkerContext} from "@soundpost/core/types";
+export {startProfile} from "./profile.ts";
+export type {ProfileOptions,ProfileHandle,ProfileReport,ProfileCapability,ProfileStatus,ProfileReason,ProfileFrame,ProfileSample,ProfileLoss,NonProfileMeasurement,ProfileAck,ProfileCoverage,StoppedBy,LeaseOwner} from "./profile.ts";

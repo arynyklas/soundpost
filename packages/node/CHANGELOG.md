@@ -12,3 +12,7 @@
 - Add manual job attempts with separate Node async-local run context, original callback outcomes and real C03/C05 process fixtures; Node22/24 qualification remains independently parent-run.
 - Correct HTTP client spans to follow IncomingMessage body completion and preserve native no-consumer draining; keep transport errors application-owned without requiring runtime-specific request close events.
 - Use native fetch Headers input inference without DOM ambient types; add separate actual Node22/24 and Bun HTTP lifecycle regression fixtures.
+
+## Unreleased — runtime supplement
+
+- Add explicit `startProfile` / `ProfileHandle.stop` (C09): single-owner in-process inspector session over V8's sampler, `runtime_engine_samples` with engine time deltas (no CPU unit), capability status/reason/coverage/loss/clock in a typed `ProfileReport`, bounded duration/size/commands with always-run cleanup, code-identity-only frames under an explicit project root, separate non-profile event-loop delay, no ACK path yet (`not_available`). Real Node 22.23.4 fixture `fixtures/sdk/profiles/node.mjs`.

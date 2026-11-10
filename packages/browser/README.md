@@ -43,3 +43,35 @@ Each chunk's `previous_hash`/`checkpoint_hash` is SHA-256 over `canonicalJSON(ch
 One emission is exactly one chunk (at most 4096 nodes and 120,000 own-accounted bytes, under the 128 KiB protocol cap). When a snapshot or mutation subtree does not fit, `fitSubtrees` replaces whole low-priority subtrees (later in document order and deeper first, smallest first) with opaque placeholders (same id/parent/rect, tag and class `masked`, empty text) until it fits, counts the loss, adds a `gap` event (a truncated checkpoint is also gap-marked) and suppresses deltas under the replaced ids until the next complete checkpoint. There is no fragmented-checkpoint format. A flat run of thousands of siblings can only shrink by collapsing their parent.
 
 **Open mismatch with the server closed format (not changed here):** `ReplayNode` still carries `rect` and `pres` and a wider tag enum (`html body img a ul li h1..h6 form label nav main header footer article aside table tr td th`). `internal/replays` (`model.StrictJSON` + `ValidateChunk`) and core's `replay_chunk` wire accept only node fields `id parent tag class text` and tags `div span p button input section canvas masked`, so Go refuses every recorder chunk today. The minimal fix is to drop `rect`/`pres` from `ReplayNode` and map `tagFor` to those eight tags (anything else `masked`), or to extend the Go closed format and core wire; this needs an owner decision across the SDK and replay-storage plans.
+
+## Browser JS Self-Profiling (optional, off by default)
+
+```ts
+import {startProfile} from "@soundpost/browser";
+const handle = await startProfile({durationMs: 5000, intervalUs: 10_000, scope: "main", longTasks: true});
+// ...application work...
+const report = await handle.stop(); // idempotent, bounded, never rejects
+```
+
+`startProfile` wraps the W3C JS Self-Profiling `Profiler` (method `browser_js_self_profile`, signal `profile_chunk`) and never throws into the application: every expected failure is a report with a capability `status` + `reason`, empty `frames/stacks/samples`, `sample_count: 0` and `stopped_by: "not_started"`. Detection is by actually constructing the API, never by browser version:
+
+| Situation | status | reason |
+| --- | --- | --- |
+| `Profiler` is not a constructor (Firefox, Safari, old Chromium, Chrome workers) | `unsupported` | `js_self_profiling_unavailable` |
+| constructor throws `NotAllowedError` (what Chrome 156 throws, "JS profiling is disabled by Document Policy") or `NotSupportedError` | `denied` | `document_policy_missing` |
+| any other `DOMException` (`SecurityError`, ...) | `denied` | `permission_denied` |
+| any other constructor failure | `error` | `sampler_failed` |
+| a second start while one is running (one lease per global, held under `Symbol.for("soundpost.profile.lease.browser_js_self_profile")`, so duplicate module copies conflict) | `denied` | `profiler_owned` |
+| declared `scope` differs from the real global (Window vs WorkerGlobalScope) | `denied` | `isolate_scope_mismatch` |
+| invalid options (`durationMs` integer 1..60000, `intervalUs` 1000..1,000,000, `maxSamples` 1..8192, `origin` an http(s) origin) | `denied` | `invalid_options` |
+| `Profiler.stop()` does not settle within 5 s | `error` | `stop_timeout` (no samples, `timeout_cleanup` loss) |
+
+The page must be served with `Document-Policy: js-profiling` (an HTTP response header on the document; the browser fixture proves Chrome refuses without it). A profile only covers the calling global: `coverage` is `{frames: partial, threads: partial, workers: none, tasks: none}` (JS frames only; native frames and cross-origin scripts without CORS are anonymized by the browser), and a worker needs its own start (Chrome 156 does not expose `Profiler` in dedicated workers at all, which is reported as `unsupported` with `scope.isolate: "worker"`).
+
+Privacy: frames are `{module_id, function, artifact_id, line, column, offset: "0", reason}` code identities only. A script becomes its origin-relative path (`assets/app.js`) only when it is on `origin` (default: the global's own origin) with no query, fragment, user info or unsafe path characters; everything else (other origins, query/fragment URLs, the document itself, native frames) collapses to one `external` placeholder frame (consecutive duplicates removed). Function names must match a conservative identifier regex, otherwise the function is empty with `reason: "not_captured"`. Stacks are leaf-first (`stack_order: "leaf_first"`, at most 128 frames, root-most frames cut, counted in `scope.stack_depth_truncated_samples` and `truncated`), at most 4096 frames/stacks and `maxSamples` (<= 8192) samples; the passed `origin` is never copied into the report. Samples without a stack are engine idle: they are counted in `scope.idle_samples`, never invented as frames. Script-path secrets that are part of the path itself (e.g. `/u/12345/app.js`) cannot be detected and are kept.
+
+Honest timing: `interval.requested_us` is what you asked for; `interval.achieved_us` is the median gap of the returned sample timestamps and `scope.granted_interval_us` is the `sampleInterval` the browser says it granted (Chrome 156 granted 10 ms for a 5 ms request in the fixture). Timestamps are `DOMHighResTimeStamp` milliseconds since the time origin; `samples[].at_us` are decimal-string offsets from the first sample and nothing is converted to wall time (`clock.uncertainty_ns` is the uncalibrated maximum). A `sample_gap` loss is reported for gaps over twice the effective interval (count = estimated missing samples) and whenever the document was hidden or its visibility changed during the run (background throttling; `scope.visibility`). A full browser buffer (`samplebufferfull`) or samples dropped at the caps is `truncated` with a lower-bound `truncated` loss count. Units are `samples`; no CPU unit exists anywhere in the report. `longTasks: true` adds `long_task` entries (`duration_ms`, `start_ms` relative to the profile start, nothing else, at most 256, overflow in `scope.long_tasks_dropped`) as separate `non_profile` metric entries, never inside the samples.
+
+`createProfiler(env)` in `src/profile.ts` is the test seam (fake `Profiler`/`PerformanceObserver`/clock/timers); `startProfile` reads the real globals when it is called. Importing the module has no side effects and imports no replay code, so core capture/replay is unaffected where profiling is unsupported.
+
+Checks: `bun test packages/browser/test/profile.test.ts` (fakes only); real Chrome: `playwright test -c fixtures/sdk/profiles/playwright.config.ts --project=chromium` (`SOUNDPOST_BUN` bundles `src/profile.ts`, `SOUNDPOST_CHROME` optional executable); the spec prints one `SOUNDPOST_PROFILE_EVIDENCE {...}` JSON line. Not qualified: Firefox, Safari, Edge, Chrome 142, Windows/macOS Chrome, headed runs.

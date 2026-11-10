@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased — 03.09 runtime supplements (additive, qualification pending)
+
+- Add internal optional `soundpost.profile` (`start_profile(options, client) -> ProfileLease`; not exported, not public C09): explicit, off-by-default, <=60 s profiles with `python_monitoring` (deterministic `sys.monitoring` PY_START/PY_RESUME/PY_RETURN/PY_UNWIND counts per project code object on the first free tool ID of 2/3/4, never touching return/exception values) and `python_wall_samples` (`sys._current_frames()` sampler, leaf-first stacks <=128 deep, no locals/globals/thread names).
+- Report carries units `events`/`samples` with `time_delta_unit` `null`/`wall_microseconds` (never a CPU unit), a fresh clock domain, achieved interval, `sample_gap`/`truncated` losses with derived counts, a C04 capability (`soundpost.wire`-valid) with truthful coverage and machine-readable bias flags (GIL acquisition, native time attributed to the Python caller, suspended asyncio tasks unobserved).
+- One lease per process via a well-known registry key (duplicate module copies conflict: `profiler_owned`); clients own and close leases; refusals are typed (`invalid_options`, `monitoring_tool_ids_occupied`, `client_unavailable`, `sys_monitoring_unavailable`, `free_threaded_unqualified`) with zero samples/events. Stop calls `sys.monitoring.restart_events()` to undo per-location DISABLE.
+- With loss permission, truncation/unsupported results use `client._record_signal_loss("profile_chunk", ...)`; ACK is reported `obtained` only with real flushed cursors. The Go C04 profile-chunk method set still excludes the Python methods, so no chunk is exported.
+- Add `tests/test_profile.py` and `fixtures/sdk/profiles/python.py`; observed results are Windows CPython 3.14.2 only.
+
 ## Unreleased — 03.04 authored, qualification pending
 
 - Add client-owned token-restored trace context, strict traceparent-only propagation, sync/async C09 span scopes and closed native C04 span DTO admission.

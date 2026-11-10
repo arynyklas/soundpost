@@ -34,3 +34,5 @@ export type {SpanOptions,TraceContext,WorkerContext} from "@soundpost/core/types
 export {createRecorder} from "./replay/recorder.ts";
 export {ReplayStream} from "./replay/stream.ts";
 export type {ReplayChunk,ReplayNode,ReplayConfig,ReplayRecorder,EnqueueResult} from "./replay/types.ts";
+export {startProfile} from "./profile.ts";
+export type {ProfileOptions,ProfileHandle,ProfileReport,ProfileCapability,ProfileFrame,ProfileSample,ProfileLongTask,ProfileLoss,ProfileReason,ProfileStatus,ProfileCoverageLevel,ProfileClockDomain} from "./profile.ts";
