@@ -1,0 +1,12 @@
+/* Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0 */
+/* Profile page. No inline styles anywhere: the page's CSP forbids them. State is carried by words; these rules only add emphasis, never meaning. */
+.profile-page section{margin-top:16px}
+.profile-page h3,.profile-page h4{margin-bottom:4px}
+.profile-table{table-layout:auto}
+.profile-table th[scope="row"]{font-weight:600}
+.profile-table tr[data-state="unsupported"] td:nth-child(2),.profile-table tr[data-state="denied"] td:nth-child(2),.profile-table tr[data-state="error"] td:nth-child(2){font-weight:600}
+.profile-table tr[data-status="unsupported"] td strong,.profile-table tr[data-status="denied"] td strong,.profile-table tr[data-status="error"] td strong{text-decoration:underline}
+.profile-table tr[data-kind="gap"] td,.profile-table tr[data-kind="gap"] th{border-style:dashed;font-style:italic}
+.profile-table tr[data-kind="loss"] td,.profile-table tr[data-kind="loss"] th{border-style:double}
+.profile-timeline{margin-top:16px}
+.profile-timeline [data-testid="profile-correlation"]{padding:8px 12px;border:1px solid var(--border);border-radius:4px;background:var(--card)}

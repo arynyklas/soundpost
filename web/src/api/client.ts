@@ -3,6 +3,9 @@ import { ANCESTRY_ORDERS, ApiFault, COMPLETENESS, EXPORT_PHASES, INVESTIGATION_K
 import { SseProtocolError, readSse, type SseFrame } from './sse';
 import type { TraceView } from './types';
 import { parseTraceView } from '../traces/model';
+import { lineSplitter, parseReplayLine, type ReplayLine } from '../replays/model';
+import { parseProfileResponse } from '../profiles/model';
+import type { ProfileResponse } from '../profiles/types';
 
 // The CSRF token lives only here, in memory, handed over by the session
 // boundary. It is never persisted and never placed in a URL.
@@ -651,4 +654,41 @@ export async function getTrace(org: Id, project: Id, trace: Id, window: { start:
  const response = await jsonPost('/api/v1/traces/view', { org, project, trace, window: { start: window.start, end: window.end } }, signal);
  if (!response.ok) throw await apiFault(response);
  return parseTraceView(await response.json() as unknown, { org, project, trace });
+}
+
+/** One profile under the caller's own scope: its separate profiles.read grant is checked by the server; the body names only the organization, project, profile and window. */
+export async function getProfile(org: Id, project: Id, profile: Id, window: { start: string; end: string }, signal: AbortSignal): Promise<ProfileResponse> {
+ const response = await jsonPost('/api/v1/profiles/view', { org, project, profile, window: { start: window.start, end: window.end } }, signal);
+ if (!response.ok) throw await apiFault(response);
+ return parseProfileResponse(await response.json() as unknown, { org, project, profile });
+}
+
+/** POST /api/v1/replays/stream: the lines of one replay as the server releases them (NDJSON). A refusal before the first line is a typed fault; after it the stream itself says revoke, error, truncated or end. The generator ends at the server's terminal line; abort the signal to stop reading. */
+export async function* streamReplay(org: Id, project: Id, replay: Id, signal: AbortSignal): AsyncGenerator<ReplayLine> {
+ const want = { org, project, replay };
+ const response = await jsonPost('/api/v1/replays/stream', { org, project, replay }, signal);
+ if (!response.ok) throw await apiFault(response);
+ if (!(response.headers.get('Content-Type') ?? '').startsWith('application/x-ndjson') || response.body === null) throw new ApiFault(200, 'invalid_response', '', 'response does not match the request');
+ const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+ const split = lineSplitter();
+ try {
+  for (;;) {
+   const { done, value } = await reader.read();
+   if (done) return;
+   for (const text of split(value)) {
+    const line = parseReplayLine(text, want);
+    yield line;
+    if (line.type === 'end' || line.type === 'revoke' || line.type === 'error' || line.type === 'truncated' || line.type === 'not_available') return;
+   }
+  }
+ } finally {
+  await reader.cancel().catch(() => undefined);
+ }
+}
+
+/** Revalidates a replay this page holds without reading any chunk: resolves while the account may still read it and throws the typed fault (404 once access ended or the replay was deleted). */
+export async function probeReplay(org: Id, project: Id, replay: Id, signal: AbortSignal): Promise<void> {
+ const response = await jsonPost('/api/v1/replays/stream', { org, project, replay, probe: true }, signal);
+ if (!response.ok) throw await apiFault(response);
+ await response.text();
 }

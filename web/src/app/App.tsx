@@ -7,6 +7,8 @@ import { IncidentPage } from '../incidents/IncidentPage';
 import { IssuePage } from '../issues/IssuePage';
 import { ReleasePage } from '../releases/ReleasePage';
 import { TracePage } from '../traces/TracePage';
+import { ReplayPage } from '../replays/ReplayPage';
+import { ProfilePage } from '../profiles/ProfilePage';
 import { QueuePage } from '../queue/QueuePage';
 import { ProjectSettings } from '../settings/ProjectSettings';
 import { SessionContext } from '../auth/ElevationDialog';
@@ -101,12 +103,12 @@ function ServiceEntry(props: { context: ViewContext; service: Id; open: (id: Id)
  );
 }
 
-function TargetEntry(props: { context: ViewContext; noun: 'issue' | 'release' | 'trace'; target: IncidentRef | null; open: (ref: IncidentRef) => void; children: (ref: IncidentRef) => React.JSX.Element }): React.JSX.Element {
+function TargetEntry(props: { context: ViewContext; noun: 'issue' | 'release' | 'trace' | 'replay' | 'profile'; target: IncidentRef | null; open: (ref: IncidentRef) => void; children: (ref: IncidentRef) => React.JSX.Element }): React.JSX.Element {
  const [project, setProject] = React.useState(props.target?.project ?? props.context.projects[0] ?? '');
  const [value, setValue] = React.useState(props.target?.id ?? '');
  const [error, setError] = React.useState('');
- const Noun = props.noun === 'issue' ? 'Issue' : props.noun === 'release' ? 'Release' : 'Trace';
- const article = props.noun === 'issue' ? 'an issue' : props.noun === 'release' ? 'a release' : 'a trace';
+ const Noun = props.noun.charAt(0).toUpperCase() + props.noun.slice(1);
+ const article = `${props.noun === 'issue' ? 'an' : 'a'} ${props.noun}`;
  return (
   <div>
    <form aria-label={`Open ${article}`} onSubmit={(e) => { e.preventDefault(); if (!isId(value.trim())) return setError(`${Noun} ID must be 32 lowercase hexadecimal characters.`); setError(''); props.open({ project, id: value.trim() }); }}>
@@ -165,8 +167,10 @@ export function App(): React.JSX.Element {
      {section.id === 'issues' && <TargetEntry context={context} noun="issue" target={nav.target} open={(ref) => go(context, 'issues', '', null, ref)}>{(ref) => <IssuePage key={`${ref.project}:${ref.id}`} id={ref.id} project={ref.project} context={context} />}</TargetEntry>}
      {section.id === 'releases' && <TargetEntry context={context} noun="release" target={nav.target} open={(ref) => go(context, 'releases', '', null, ref)}>{(ref) => <ReleasePage key={`${ref.project}:${ref.id}`} id={ref.id} project={ref.project} context={context} />}</TargetEntry>}
      {section.id === 'traces' && <TargetEntry context={context} noun="trace" target={nav.target} open={(ref) => go(context, 'traces', '', null, ref)}>{(ref) => <TracePage key={`${ref.project}:${ref.id}`} id={ref.id} project={ref.project} context={context} />}</TargetEntry>}
+     {section.id === 'replays' && <TargetEntry context={context} noun="replay" target={nav.target} open={(ref) => go(context, 'replays', '', null, ref)}>{(ref) => <ReplayPage key={`${ref.project}:${ref.id}`} id={ref.id} project={ref.project} context={context} />}</TargetEntry>}
+     {section.id === 'profiles' && <TargetEntry context={context} noun="profile" target={nav.target} open={(ref) => go(context, 'profiles', '', null, ref)}>{(ref) => <ProfilePage key={`${ref.project}:${ref.id}`} id={ref.id} project={ref.project} context={context} />}</TargetEntry>}
      {section.id === 'services' && <ServiceEntry key={nav.service} context={context} service={nav.service} open={(id) => go(context, 'services', id)} />}
-     {section.kind !== null && section.id !== 'services' && section.id !== 'queue' && section.id !== 'incidents' && section.id !== 'issues' && section.id !== 'releases' && section.id !== 'traces' && <KindView context={context} kind={section.kind} label={section.label} />}
+     {section.kind !== null && section.id !== 'services' && section.id !== 'queue' && section.id !== 'incidents' && section.id !== 'issues' && section.id !== 'releases' && section.id !== 'traces' && section.id !== 'replays' && section.id !== 'profiles' && <KindView context={context} kind={section.kind} label={section.label} />}
     </>
    )}
   </div>

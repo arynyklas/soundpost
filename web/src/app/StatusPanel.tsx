@@ -17,6 +17,14 @@ const REASONS: Record<string, string> = {
  saved_views_not_built: 'Saved views and their exports need the C11 saved-view actions, which this installation does not have. Nothing is saved, in this browser or on the server.',
  span_source_not_wired: 'This installation has no span reader wired, so no trace can be shown. That is not an empty trace.',
  no_spans_in_window: 'No span of this trace is readable by this account in the selected window. Widen the window; this is not proof that the trace does not exist.',
+ replay_service_not_wired: 'This installation has no replay reader wired, so no replay can be shown. That is not an empty replay.',
+ replay_truncated: 'This response is bounded; the rest of the replay was not sent.',
+ profile_service_not_wired: 'This installation has no profile reader wired, so no profile can be shown. That is not a profile with zero samples.',
+ profile_partial: 'This profile is partial; the parts shown are real and missing parts are not zero.',
+ coverage_incomplete: 'Coverage or loss is reported for this profile, so it does not describe all execution in the window.',
+ missing_capability_or_page: 'A page or a capability record of this profile did not arrive, so support for a method is not confirmed.',
+ missing_chunk: 'A chunk of this profile is missing between the chunks that arrived.',
+ no_observations_in_window: 'No observation of this profile lies in the selected window. That is not zero work.',
  spans_partial: 'Some data did not answer, so spans of this trace may be missing. Missing spans are not proof that no work happened.',
 };
 export function reasonText(reason: string): string { return REASONS[reason] ?? EVIDENCE_REASON[reason] ?? 'Not available.'; }

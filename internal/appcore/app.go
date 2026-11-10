@@ -45,6 +45,8 @@ type App struct {
 	Actions      *httpapi.Actions
 	Evidence     *httpapi.Evidence
 	Traces       *httpapi.Traces
+	Replays      *httpapi.Replays
+	Profiles     *httpapi.Profiles
 	replication  *replicatedApp
 }
 
@@ -223,7 +225,13 @@ func openWith(dir string, options *replicationOptions, meter storage.DiskMeter, 
 	// with the typed not_available state instead of an empty success.
 	evidence := httpapi.NewEvidence(nil, r, r)
 	traces := httpapi.NewTraces(httpapi.NewStorageSpanSource(engine))
-	out := &App{Control: c, Auth: a, Storage: engine, Ingest: i, Releases: r, Artifacts: artifactService, Cache: cache, Exports: exportService, Retention: ret, Query: queryEngine, Live: liveService, Investigator: investigator, Incidents: incidentService, Jobs: jobService, Actions: actions, Evidence: evidence, Traces: traces}
+	replayService, e := NewReplayService(engine, a, c)
+	if e != nil {
+		return fail(e)
+	}
+	out := &App{Control: c, Auth: a, Storage: engine, Ingest: i, Releases: r, Artifacts: artifactService, Cache: cache, Exports: exportService, Retention: ret, Query: queryEngine, Live: liveService, Investigator: investigator, Incidents: incidentService, Jobs: jobService, Actions: actions, Evidence: evidence, Traces: traces, Replays: httpapi.NewReplays(replayService)}
+	// Built once: the profile service keys its cursors per instance.
+	out.Profiles = httpapi.NewProfiles(out.NewNativeProfiles())
 	startupTimeout := 20 * time.Second
 	if options != nil {
 		startupTimeout = 60 * time.Second
@@ -311,6 +319,8 @@ func (a *App) Register(mux *http.ServeMux) {
 	httpapi.RegisterActionRoutes(mux, a.Auth, a.Actions)
 	httpapi.RegisterEvidenceRoutes(mux, a.Auth, a.Evidence)
 	httpapi.RegisterTraceRoutes(mux, a.Auth, a.Traces)
+	httpapi.RegisterReplayRoutes(mux, a.Auth, a.Replays)
+	httpapi.RegisterProfileRoutes(mux, a.Auth, a.Profiles)
 	a.RegisterArtifactRoutes(mux)
 }
 
