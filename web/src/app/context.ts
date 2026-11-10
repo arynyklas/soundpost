@@ -17,12 +17,13 @@ export interface ViewContext {
  /** Bumped on every navigation or refresh; a response for an older generation is dropped. */
  generation: number;
 }
-export type SectionId = 'queue' | 'incidents' | 'issues' | 'releases' | 'explore' | 'services' | 'jobs' | 'replays' | 'profiles' | 'settings';
+export type SectionId = 'queue' | 'incidents' | 'issues' | 'releases' | 'traces' | 'explore' | 'services' | 'jobs' | 'replays' | 'profiles' | 'settings';
 export const SECTIONS: readonly { id: SectionId; label: string; kind: InvestigationKind | null }[] = [
  { id: 'queue', label: 'Queue', kind: 'queue' },
  { id: 'incidents', label: 'Incidents', kind: 'incident' },
  { id: 'issues', label: 'Issues', kind: 'issue' },
  { id: 'releases', label: 'Releases', kind: 'release' },
+ { id: 'traces', label: 'Traces', kind: 'trace' },
  { id: 'explore', label: 'Explore', kind: null },
  { id: 'services', label: 'Services', kind: 'service' },
  { id: 'jobs', label: 'Jobs', kind: 'job' },

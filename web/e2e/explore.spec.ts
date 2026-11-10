@@ -272,7 +272,7 @@ test('exemplars link to a trace only through the scope-resolved link route',asyn
  await expect(table.locator('tr[data-exemplar]')).toHaveCount(2);
  // Before the server resolves anything there is no link at all.
  await expect(page.locator('[data-link]')).toHaveCount(0);
- await expect(page.locator('a[href*="trace"]')).toHaveCount(0);
+ await expect(table.locator('a[href*="trace"]')).toHaveCount(0); // the exemplar table: the section nav now has a Traces link (05.06), which is not an exemplar link
  const real=table.locator(`tr[data-trace="${seed.trace.ingested}"]`),missing=table.locator(`tr[data-trace="${seed.trace.missing}"]`);
  await real.getByRole('button',{name:'Check trace link',exact:true}).click();
  await expect(real.locator('[data-link="available"]')).toContainText(`trace ${seed.trace.ingested}`);

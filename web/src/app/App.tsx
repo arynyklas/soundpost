@@ -6,6 +6,7 @@ import { ExplorePage } from '../explore/ExplorePage';
 import { IncidentPage } from '../incidents/IncidentPage';
 import { IssuePage } from '../issues/IssuePage';
 import { ReleasePage } from '../releases/ReleasePage';
+import { TracePage } from '../traces/TracePage';
 import { QueuePage } from '../queue/QueuePage';
 import { ProjectSettings } from '../settings/ProjectSettings';
 import { SessionContext } from '../auth/ElevationDialog';
@@ -100,20 +101,21 @@ function ServiceEntry(props: { context: ViewContext; service: Id; open: (id: Id)
  );
 }
 
-function TargetEntry(props: { context: ViewContext; noun: 'issue' | 'release'; target: IncidentRef | null; open: (ref: IncidentRef) => void; children: (ref: IncidentRef) => React.JSX.Element }): React.JSX.Element {
+function TargetEntry(props: { context: ViewContext; noun: 'issue' | 'release' | 'trace'; target: IncidentRef | null; open: (ref: IncidentRef) => void; children: (ref: IncidentRef) => React.JSX.Element }): React.JSX.Element {
  const [project, setProject] = React.useState(props.target?.project ?? props.context.projects[0] ?? '');
  const [value, setValue] = React.useState(props.target?.id ?? '');
  const [error, setError] = React.useState('');
- const Noun = props.noun === 'issue' ? 'Issue' : 'Release';
+ const Noun = props.noun === 'issue' ? 'Issue' : props.noun === 'release' ? 'Release' : 'Trace';
+ const article = props.noun === 'issue' ? 'an issue' : props.noun === 'release' ? 'a release' : 'a trace';
  return (
   <div>
-   <form aria-label={`Open ${props.noun === 'issue' ? 'an issue' : 'a release'}`} onSubmit={(e) => { e.preventDefault(); if (!isId(value.trim())) return setError(`${Noun} ID must be 32 lowercase hexadecimal characters.`); setError(''); props.open({ project, id: value.trim() }); }}>
+   <form aria-label={`Open ${article}`} onSubmit={(e) => { e.preventDefault(); if (!isId(value.trim())) return setError(`${Noun} ID must be 32 lowercase hexadecimal characters.`); setError(''); props.open({ project, id: value.trim() }); }}>
     <label>Project <select value={project} onChange={(e) => setProject(e.target.value)}>{props.context.projects.map((p) => <option key={p} value={p}>{p}</option>)}</select></label>
     <label>{Noun} ID <input value={value} onChange={(e) => setValue(e.target.value)} autoComplete="off" spellCheck={false} /></label>
     <button type="submit">Open {props.noun}</button>
     {error && <p role="alert" className="error">{error}</p>}
    </form>
-   {props.target ? props.children(props.target) : <p role="status">Open {props.noun === 'issue' ? 'an issue' : 'a release'} by its ID.</p>}
+   {props.target ? props.children(props.target) : <p role="status">Open {article} by its ID.</p>}
   </div>
  );
 }
@@ -162,8 +164,9 @@ export function App(): React.JSX.Element {
      {section.id === 'incidents' && <IncidentEntry context={context} incident={nav.incident} open={(ref) => go(context, 'incidents', '', ref)} />}
      {section.id === 'issues' && <TargetEntry context={context} noun="issue" target={nav.target} open={(ref) => go(context, 'issues', '', null, ref)}>{(ref) => <IssuePage key={`${ref.project}:${ref.id}`} id={ref.id} project={ref.project} context={context} />}</TargetEntry>}
      {section.id === 'releases' && <TargetEntry context={context} noun="release" target={nav.target} open={(ref) => go(context, 'releases', '', null, ref)}>{(ref) => <ReleasePage key={`${ref.project}:${ref.id}`} id={ref.id} project={ref.project} context={context} />}</TargetEntry>}
+     {section.id === 'traces' && <TargetEntry context={context} noun="trace" target={nav.target} open={(ref) => go(context, 'traces', '', null, ref)}>{(ref) => <TracePage key={`${ref.project}:${ref.id}`} id={ref.id} project={ref.project} context={context} />}</TargetEntry>}
      {section.id === 'services' && <ServiceEntry key={nav.service} context={context} service={nav.service} open={(id) => go(context, 'services', id)} />}
-     {section.kind !== null && section.id !== 'services' && section.id !== 'queue' && section.id !== 'incidents' && section.id !== 'issues' && section.id !== 'releases' && <KindView context={context} kind={section.kind} label={section.label} />}
+     {section.kind !== null && section.id !== 'services' && section.id !== 'queue' && section.id !== 'incidents' && section.id !== 'issues' && section.id !== 'releases' && section.id !== 'traces' && <KindView context={context} kind={section.kind} label={section.label} />}
     </>
    )}
   </div>

@@ -1,6 +1,8 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
 import { ANCESTRY_ORDERS, ApiFault, COMPLETENESS, EXPORT_PHASES, INVESTIGATION_KINDS, LIVE_EVENT_TYPES, OutcomeUnknown, QueryFault, VersionConflict, type ActionRequest, type ActionResponse, type AncestryOrder, type Completeness, type DiscoveryRequest, type DiscoveryResult, type ExemplarRequest, type ExemplarResult, type ExportGrant, type ExportOperation, type ExportPhase, type ExportSignal, type FormatRequest, type FormatResult, type FramesRequest, type FramesView, type Id, type IncidentView, type InvestigationKind, type InvestigationRequest, type InvestigationView, type IssueEvidenceView, type LifecycleOperation, type LiveEvent, type LiveEventType, type LiveTicket, type LiveTicketRequest, type LoadState, type QueryRequest, type QueryResult, type QueueView, type ReleaseView, type SafeFrame, type ViewState, type VisibleSource } from './types';
 import { SseProtocolError, readSse, type SseFrame } from './sse';
+import type { TraceView } from './types';
+import { parseTraceView } from '../traces/model';
 
 // The CSRF token lives only here, in memory, handed over by the session
 // boundary. It is never persisted and never placed in a URL.
@@ -642,4 +644,11 @@ export async function getIssueEvidence(org: Id, project: Id, issue: Id, signal: 
  const response = await jsonPost('/api/v1/evidence/issue', { org, project, issue }, signal);
  if (!response.ok) throw await apiFault(response);
  return parseIssueEvidence(await response.json() as unknown, { org, project, issue });
+}
+
+/** The spans of one trace in the window, analyzed by the server into a critical path with duration bounds and limits. The scope is the caller's own; the body names only the organization, project, trace and window. */
+export async function getTrace(org: Id, project: Id, trace: Id, window: { start: string; end: string }, signal: AbortSignal): Promise<TraceView> {
+ const response = await jsonPost('/api/v1/traces/view', { org, project, trace, window: { start: window.start, end: window.end } }, signal);
+ if (!response.ok) throw await apiFault(response);
+ return parseTraceView(await response.json() as unknown, { org, project, trace });
 }

@@ -343,3 +343,24 @@ export interface ReleaseView { org: Id; project: Id; state: ViewState; reason?: 
 export interface OccurrenceEvidence { occurrence_id: Id; record_id: Id; grouping_version: number; fingerprint: string; event_time_ns: string; arrival_time_ns: string; build_id?: Id; release_id?: Id; ancestry: 'known' | 'unknown'; freshness: string; late: boolean }
 export interface GroupingIdentity { grouping_version: number; fingerprint: string; workflow: string; revision: string; resolution_time_ns?: string; resolution_frontier: Id[]; observed_releases: Id[]; fixed_descendants: Id[]; migration_links: Id[] }
 export interface IssueEvidenceView { org: Id; project: Id; issue: Id; state: ViewState; reason?: string; grouping?: GroupingIdentity; occurrences: OccurrenceEvidence[]; late_history: OccurrenceEvidence[]; sections: ViewSection[] }
+
+// ---- Trace view and critical path (POST /api/v1/traces/view; internal/httpapi/traces.go, internal/traces/critical_path.go) ----
+// Nanosecond values are decimal strings. A duration is an interval, never a single authoritative total.
+export type SpanId = string;
+export interface DurationBounds { known: boolean; min_ns: string; max_ns: string; basis?: string }
+export interface SpanLinkReport { trace_id: Id; span_id: SpanId; same_trace: boolean; resolved: boolean }
+export interface SpanReport {
+ span_id: SpanId; parent_id: SpanId | null; span_kind: string; operation: string; status: string; dependency_alias?: string;
+ start_wall_ns: string; end_wall_ns: string | null; duration: DurationBounds; flags: string[];
+ sample_probability: number; sample_decision: string; job_id?: Id; replay_id?: Id; profile_id?: Id; links: SpanLinkReport[];
+}
+export interface PathSegment { span_id: SpanId; depth: number; self: DurationBounds; ambiguous: boolean; parallel_siblings_off_path: number; async_children_off_path: number }
+export interface TreePath { root_span_id: SpanId; orphan: boolean; duration: DurationBounds; segments: PathSegment[] }
+export interface EdgeIssue { kind: string; span_id?: SpanId; other_span_ids?: SpanId[]; count?: number }
+export interface ClockIssue { span_id: SpanId; parent_id: SpanId; kind: 'starts_before_parent' | 'ends_after_parent'; certain: boolean; cross_domain: boolean; uncertainty_ns: string }
+export interface SamplingReport { kept: number; dropped: number; min_probability: number; sampled: boolean; invalid_probability: number }
+export interface PathResult {
+ trace_id: Id; span_count: number; spans: SpanReport[]; trees: TreePath[]; observed: DurationBounds; edges: EdgeIssue[]; clock_issues: ClockIssue[];
+ unlike_clock_domains: boolean; max_uncertainty_ns: string; sampling: SamplingReport; complete: boolean; reasons: string[];
+}
+export interface TraceView { org: Id; project: Id; trace: Id; state: ViewState; reason?: string; partial: boolean; path?: PathResult; sections: ViewSection[] }
