@@ -410,8 +410,23 @@ func (o *Outbox) Claim(ctx context.Context, scope auth.Scope, now model.UnixNano
 		return nil, fenceFault(err)
 	}
 	expires := now + model.UnixNano(o.ttl)
-	res, err := o.transact(ctx, scope, control.KindClaimDelivery, model.NewID(), control.DeliveryCommand{Operation: control.DeliveryOpClaim, Lease: &lease,
-		Claim: &control.DeliveryClaim{Project: project, Now: now, Expires: expires, Limit: uint32(limit)}})
+	// The claim names the cutover revision this worker observed. A cutover that
+	// commits between the read and the claim makes the claim stale (control refuses
+	// it); the next read sees the new phase, which decides whether anything may be
+	// leased at all.
+	var res control.Result
+	for attempt := 0; ; attempt++ {
+		var owner model.Revision
+		if err = o.store.View(ctx, func(st control.State) error { owner = control.CutoverRevision(st, scope.OrgID(), project); return nil }); err != nil {
+			return nil, err
+		}
+		res, err = o.transact(ctx, scope, control.KindClaimDelivery, model.NewID(), control.DeliveryCommand{Operation: control.DeliveryOpClaim, Lease: &lease,
+			Claim: &control.DeliveryClaim{Project: project, Now: now, Expires: expires, Limit: uint32(limit), OwnerRevision: owner}})
+		if code, detail := faultDetail(err); err != nil && code == model.Stale && detail == control.DeliveryOwnerStale && attempt < maxOwnerRetries {
+			continue
+		}
+		break
+	}
 	if err != nil {
 		return nil, err
 	}

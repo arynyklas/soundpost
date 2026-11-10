@@ -138,6 +138,13 @@ type ControlState struct {
 	// applied command records. After an erasure the state is a tombstone. No
 	// record holds telemetry text, only IDs, ordinals, times, states and hashes.
 	JobBooks map[string]json.RawMessage
+	// Notification ownership cutover (plan 06 task 09). "org:project" holds the
+	// control package's closed CutoverRecord DTO: the project's cutover phase,
+	// its revision (the compare-and-set token), the verified source/version
+	// frontier, the bounded transition history and the digests of the barrier
+	// evidence. A retirement drops the operator free text and the evidence
+	// payloads and keeps identities, revision, phase and the audit trail.
+	CutoverBooks map[string]json.RawMessage
 }
 type ControlCommand struct {
 	CommandID        ID

@@ -59,6 +59,10 @@ type DeliveryCommand struct {
 	Claim     *DeliveryClaim      `json:"claim,omitempty"`
 	Complete  *DeliveryComplete   `json:"complete,omitempty"`
 	Cancel    *DeliveryCancel     `json:"cancel,omitempty"`
+	// Cutover is the notification ownership transition of the project (plan 06
+	// task 09, cutover.go). It is an operator command, not a worker command, so
+	// it carries no lease.
+	Cutover *CutoverTransition `json:"cutover,omitempty"`
 }
 
 // The operations of a DeliveryCommand.
@@ -67,6 +71,8 @@ const (
 	DeliveryOpClaim    = "claim"
 	DeliveryOpComplete = "complete"
 	DeliveryOpCancel   = "cancel"
+	// DeliveryOpCutover is the operation of the cutover arm.
+	DeliveryOpCutover = "cutover"
 )
 
 // Delivery phases. pending and claimed are open; every other phase is settled.
@@ -181,6 +187,10 @@ type DeliveryClaim struct {
 	Now     model.UnixNano `json:"now_ns"`
 	Expires model.UnixNano `json:"expires_ns"`
 	Limit   uint32         `json:"limit"`
+	// OwnerRevision is the cutover revision the claiming worker observed (zero
+	// when the project has no cutover). A claim that names another revision than
+	// the committed one is stale and is refused (DeliveryOwnerStale).
+	OwnerRevision model.Revision `json:"owner_revision,omitempty"`
 }
 
 // DeliveryComplete closes exactly one claimed attempt. For retry and unknown,
@@ -225,6 +235,9 @@ type DeliveryAttempt struct {
 	RetryAfter model.UnixNano     `json:"retry_after_ns,omitempty"`
 	Next       model.UnixNano     `json:"next_ns,omitempty"`
 	ClosedBy   string             `json:"closed_by,omitempty"`
+	// Owner is the cutover revision the claim was opened under (zero when the
+	// project has no cutover): a claim is only ever valid in that revision.
+	Owner model.Revision `json:"owner_revision,omitempty"`
 }
 
 // DeliveryRecord is everything control holds for one delivery. Hold is computed
@@ -288,6 +301,9 @@ const (
 	DeliverySettled          = "delivery_settled"
 	DeliveryPolicyConflict   = "delivery_policy_conflict"
 	DeliveryIdentityConflict = "delivery_identity_conflict"
+	// DeliveryOwnerStale refuses a claim that names another cutover revision than
+	// the committed one.
+	DeliveryOwnerStale = "delivery_owner_stale"
 )
 
 // BindDeliveryOutbox installs the delivery outbox handler for both
@@ -500,12 +516,21 @@ type deliveryVerdict struct {
 // deliveryGate revalidates, from committed state only, the destination and the C12
 // deletion state of one delivery. The claim applies it atomically and the
 // read side computes the same answer for the worker's check just before a send.
-func deliveryGate(st *State, r *DeliveryRecord) deliveryVerdict {
+func deliveryGate(st *State, gate cutoverGate, gateErr error, r *DeliveryRecord) deliveryVerdict {
 	if _, retired := st.RetiredOrgs[r.Org.String()]; retired {
 		return deliveryVerdict{phase: DeliveryCancelled, code: DeliveryReasonDeleted}
 	}
 	if _, retired := st.RetiredProjects[r.Org.String()+":"+r.Project.String()]; retired {
 		return deliveryVerdict{phase: DeliveryCancelled, code: DeliveryReasonDeleted}
+	}
+	// The product may only send while the project's committed cutover state lets it
+	// (cutover.go): a delivery leased before the phase changed is revoked, and an
+	// unreadable cutover record fails closed. The caller computes the gate once.
+	switch {
+	case gateErr != nil:
+		return deliveryVerdict{pause: true}
+	case gate.block != "":
+		return deliveryVerdict{phase: DeliveryCancelled, code: DeliveryReasonRevoked}
 	}
 	paused := false
 	for _, op := range st.Deletions {
@@ -539,11 +564,16 @@ func deliveryGate(st *State, r *DeliveryRecord) deliveryVerdict {
 
 // deliveryHold computes, from committed state only, why a delivery may not be
 // sent now. It is the read-side twin of the gate the claim applies.
-func deliveryHold(st State, r DeliveryRecord, now model.UnixNano) string {
+func deliveryHold(st State, gate cutoverGate, gateErr error, r DeliveryRecord, now model.UnixNano) string {
 	if !r.Open() {
+		// A delivery the cutover revoked must never be sent by a worker that still
+		// holds an older view of it.
+		if r.Code == DeliveryReasonRevoked && (r.Phase == DeliveryCancelled || r.Phase == DeliveryUncertain) {
+			return DeliveryReasonRevoked
+		}
 		return ""
 	}
-	switch v := deliveryGate(&st, &r); {
+	switch v := deliveryGate(&st, gate, gateErr, &r); {
 	case v.pause:
 		return DeliveryHoldPaused
 	case v.phase != "":
@@ -583,7 +613,7 @@ func applyDelivery(scope auth.Scope, st *State, cmd Command) (Effect, error) {
 		return Effect{}, err
 	}
 	arms := 0
-	for _, present := range []bool{c.Enqueue != nil, c.Claim != nil, c.Complete != nil, c.Cancel != nil} {
+	for _, present := range []bool{c.Enqueue != nil, c.Claim != nil, c.Complete != nil, c.Cancel != nil, c.Cutover != nil} {
 		if present {
 			arms++
 		}
@@ -602,6 +632,8 @@ func applyDelivery(scope auth.Scope, st *State, cmd Command) (Effect, error) {
 		project, kind = c.Complete.Project, KindCompleteDelivery
 	case c.Operation == DeliveryOpCancel && c.Cancel != nil:
 		project, kind = c.Cancel.Project, KindCompleteDelivery
+	case c.Operation == DeliveryOpCutover && c.Cutover != nil:
+		project, kind = c.Cutover.Project, KindClaimDelivery
 	default:
 		return Effect{}, model.Fail(model.Invalid)
 	}
@@ -613,6 +645,14 @@ func applyDelivery(scope auth.Scope, st *State, cmd Command) (Effect, error) {
 	// answered for a scope that may not act in this project.
 	if err := releaseScope(scope, st, org, project); err != nil {
 		return Effect{}, err
+	}
+	if c.Operation == DeliveryOpCutover {
+		// An operator command: it carries no worker lease and a lease on it is a
+		// confused request, not an authority.
+		if c.Lease != nil {
+			return Effect{}, model.Fail(model.Invalid)
+		}
+		return applyCutover(scope, st, cmd, *c.Cutover)
 	}
 	if c.Lease == nil || c.Lease.Group != st.Installation || c.Lease.Term == 0 {
 		return Effect{}, model.Fail(model.Invalid)
@@ -737,6 +777,10 @@ func applyDeliveryEnqueue(st *State, org model.ID, e DeliveryEnqueue, a *deliver
 	}
 	revision := st.Revision + 1
 	generation := st.DeleteGenerations[org.String()]
+	gate, err := cutoverGateOf(st, org, e.Project)
+	if err != nil {
+		return Effect{}, err
+	}
 	var created []DeliveryRecord
 	for _, in := range e.Intents {
 		old, found, err := loadDelivery(st, in.ID)
@@ -757,6 +801,11 @@ func applyDeliveryEnqueue(st *State, org model.ID, e DeliveryEnqueue, a *deliver
 		switch {
 		case in.Disposition == DeliveryDispositionDeliver && in.Route == DeliveryRouteQueue:
 			r.Phase, r.SettledAt = DeliveryQueued, in.At
+		case in.Disposition == DeliveryDispositionDeliver && gate.block != "":
+			// The product is not the active owner (a shadow, a rollback, an
+			// unacknowledged restore): the decision is recorded and never sent.
+			r.Disposition = DeliveryDispositionSuppressed
+			r.Phase, r.Code, r.SettledAt = DeliverySuppressed, gate.block, in.At
 		case in.Disposition == DeliveryDispositionDeliver:
 			r.Phase = DeliveryPending
 			open++
@@ -795,6 +844,17 @@ func applyDeliveryClaim(st *State, org model.ID, lease replica.FenceToken, c Del
 	if c.Now <= 0 || c.Expires <= c.Now || c.Expires-c.Now > DeliveryMaxClaimTTL || c.Limit == 0 || c.Limit > maxDeliveryClaimLimit {
 		return Effect{}, model.Fail(model.Invalid)
 	}
+	gate, err := cutoverGateOf(st, org, c.Project)
+	if err != nil {
+		return Effect{}, err
+	}
+	if c.OwnerRevision != gate.revision {
+		return Effect{}, ruleFault(model.Stale, DeliveryOwnerStale)
+	}
+	if gate.block != "" {
+		// Not the active owner: nothing is leased, and nothing is settled either.
+		return Effect{Phase: "empty"}, nil
+	}
 	recs, err := projectDeliveries(st, org, c.Project)
 	if err != nil {
 		return Effect{}, err
@@ -829,7 +889,7 @@ func applyDeliveryClaim(st *State, org model.ID, lease replica.FenceToken, c Del
 			a.add(DeliveryOutcomeUnknown, r.ID, DeliveryCodeClaimExpired, c.Now)
 			changed = true
 		}
-		switch v := deliveryGate(st, r); {
+		switch v := deliveryGate(st, gate, nil, r); {
 		case v.pause:
 			// A closing deletion pauses derived sends: nothing is claimed or settled.
 		case v.phase != "":
@@ -842,7 +902,7 @@ func applyDeliveryClaim(st *State, org model.ID, lease replica.FenceToken, c Del
 			a.add(phase, r.ID, code, c.Now)
 			changed = true
 		case r.Next <= c.Now && len(claimed) < int(c.Limit):
-			r.Attempts = append(r.Attempts, DeliveryAttempt{Number: uint32(len(r.Attempts) + 1), Fence: lease, ClaimedAt: c.Now, Expires: c.Expires, Generation: generation})
+			r.Attempts = append(r.Attempts, DeliveryAttempt{Number: uint32(len(r.Attempts) + 1), Fence: lease, ClaimedAt: c.Now, Expires: c.Expires, Generation: generation, Owner: gate.revision})
 			r.Phase = DeliveryClaimed
 			claimed = append(claimed, r.ID)
 			changed = true
@@ -1056,7 +1116,8 @@ func (s *Store) Delivery(ctx context.Context, scope auth.Scope, project, id mode
 		if e != nil || !ok || r.Org != scope.OrgID() || r.Project != project {
 			return e
 		}
-		r.Hold = deliveryHold(st, r, now)
+		gate, gerr := cutoverGateOf(&st, r.Org, r.Project)
+		r.Hold = deliveryHold(st, gate, gerr, r, now)
 		out, found = r, true
 		return nil
 	})
@@ -1075,11 +1136,12 @@ func (s *Store) Deliveries(ctx context.Context, scope auth.Scope, project model.
 		if e != nil {
 			return e
 		}
+		gate, gerr := cutoverGateOf(&st, scope.OrgID(), project)
 		for _, r := range recs {
 			if phase != "" && r.Phase != phase {
 				continue
 			}
-			r.Hold = deliveryHold(st, r, now)
+			r.Hold = deliveryHold(st, gate, gerr, r, now)
 			out = append(out, r)
 			if limit > 0 && len(out) >= limit {
 				break
