@@ -3,6 +3,7 @@
 """Job producers must preserve execution and admit only native, private-safe events."""
 import asyncio
 import json
+import secrets
 from dataclasses import replace
 import pytest
 from soundpost import init
@@ -185,3 +186,130 @@ def test_terminal_clock_regression_is_unknown_loss_not_a_fabricated_time():
         assert [event['payload']['state'] for event in records(instance)] == ['started']
         assert instance.diagnostics()['job_clock_unavailable'] == 1
     finally: instance.close()
+
+
+# --- Celery propagation: a real Celery app, kombu in-memory broker and a real solo-pool worker thread ---
+celery = pytest.importorskip('celery')
+from celery.contrib.testing.worker import start_worker
+from soundpost.celery import instrument
+
+TRACE = 'c' * 32
+SPAN = 'd' * 16
+
+
+class CeleryRig:
+    def __init__(self, instance, name, origin='queue'):
+        self.seen_context = []
+        self.attempts = {'count': 0}
+        self.app = celery.Celery('soundpost_rig', broker='memory://', backend='cache+memory://')
+        # Each rig owns one queue: the in-memory kombu transport is process-wide, so a previous rig's worker must never consume this rig's message.
+        self.app.conf.update(task_default_retry_delay=0, worker_hijack_root_logger=False, task_always_eager=False, task_default_queue='soundpost-' + secrets.token_hex(8))
+        rig = self
+
+        @self.app.task(bind=True, name=name, max_retries=2)
+        def work(task, mode):
+            rig.seen_context.append(instance._trace_context.current())
+            rig.attempts['count'] += 1
+            if mode == 'retry_once' and task.request.retries == 0:
+                raise task.retry(exc=ValueError('CANARY_TASK_ARGUMENT_MESSAGE'), countdown=0)
+            if mode == 'fail':
+                raise ValueError('CANARY_TASK_FAILURE')
+            return 'done'
+        self.task = work
+        self.instrumentation = instrument(self.app, instance, origin=origin)
+
+    def run(self, mode, bind=None, timeout=20):
+        with start_worker(self.app, pool='solo', perform_ping_check=False, shutdown_timeout=20):
+            if bind is None:
+                result = self.task.apply_async((mode,))
+            else:
+                with bind:
+                    result = self.task.apply_async((mode,))
+            try:
+                return result.get(timeout=timeout)
+            except ValueError:
+                return 'failed'
+
+
+def unique_task():
+    return 'fixture.celery.' + secrets.token_hex(4)
+
+
+def celery_settings(**changes):
+    return settings(origins=('queue',), **changes)
+
+
+def test_celery_failure_then_retry_retains_both_attempts_under_one_run():
+    NAME = unique_task()
+    instance = init(celery_settings(job_registry=((NAME, JOB),)))
+    rig = CeleryRig(instance, NAME)
+    try:
+        assert rig.run('retry_once') == 'done'
+        attempts = [event['payload'] for event in records(instance)]
+        assert [event['state'] for event in attempts] == ['started', 'failed', 'started', 'succeeded']
+        assert [event['ordinal'] for event in attempts] == ['1', '1', '2', '2']
+        assert len({event['run_id'] for event in attempts}) == 1 and attempts[0]['job_id'] == JOB
+        assert attempts[0]['attempt_id'] == attempts[1]['attempt_id'] != attempts[2]['attempt_id'] == attempts[3]['attempt_id']
+        assert [event['sequence'] for event in attempts] == ['1', '2', '3', '4']
+        error = records(instance, 'error')[0]
+        assert attempts[1]['cause_error'] == error['id'] and error['payload']['run_id'] == attempts[0]['run_id']
+        assert 'cause_error' not in attempts[3]
+        blob = ''.join(instance.buffered_records())
+        assert 'CANARY' not in blob and NAME not in blob
+        assert not records(instance, 'span')
+    finally:
+        rig.instrumentation.close()
+        instance.close()
+
+
+def test_celery_exhausted_failure_is_failed_and_publisher_trace_is_a_link_not_a_child_span():
+    NAME = unique_task()
+    instance = init(celery_settings(job_registry=((NAME, JOB),)))
+    rig = CeleryRig(instance, NAME)
+    try:
+        assert rig.run('fail', bind=instance._trace_context.bind(TraceContext(TRACE, SPAN, True, 1.0))) == 'failed'
+        attempts = [event['payload'] for event in records(instance)]
+        assert [event['state'] for event in attempts] == ['started', 'failed']
+        assert {event['cause_trace'] for event in attempts} == {TRACE}
+        # Safe link only: the worker never adopts the publisher's span as the active parent.
+        assert rig.seen_context == [None]
+        assert not records(instance, 'span')
+        assert SPAN not in ''.join(instance.buffered_records())
+    finally:
+        rig.instrumentation.close()
+        instance.close()
+
+
+def test_celery_origin_must_be_allow_listed_before_trace_headers_are_published():
+    NAME = unique_task()
+    instance = init(celery_settings(job_registry=((NAME, JOB),)))
+    rig = CeleryRig(instance, NAME, origin='external')
+    try:
+        assert rig.run('ok', bind=instance._trace_context.bind(TraceContext(TRACE, SPAN, True, 1.0))) == 'done'
+        attempts = [event['payload'] for event in records(instance)]
+        assert [event['state'] for event in attempts] == ['started', 'succeeded']
+        assert all('cause_trace' not in event for event in attempts)
+    finally:
+        rig.instrumentation.close()
+        instance.close()
+
+
+def test_celery_unregistered_task_and_closed_instrumentation_change_nothing():
+    NAME = unique_task()
+    instance = init(celery_settings(job_registry=(('other.task', JOB),)))
+    rig = CeleryRig(instance, NAME)
+    try:
+        assert rig.run('retry_once') == 'done' and rig.attempts['count'] == 2
+        assert records(instance) == []
+    finally:
+        rig.instrumentation.close()
+        instance.close()
+    NAME = unique_task()
+    instance = init(celery_settings(job_registry=((NAME, JOB),)))
+    rig = CeleryRig(instance, NAME)
+    try:
+        assert rig.run('ok') == 'done' and len(records(instance)) == 2
+        rig.instrumentation.close()
+        assert rig.run('ok') == 'done' and len(records(instance)) == 2
+    finally:
+        instance.close()

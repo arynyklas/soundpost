@@ -72,3 +72,25 @@ test("terminal observation precedes asynchronous runtime classification",async()
  let at="9007199254740993";const original=Error("CANARY"),client=new Client(jobSettings({clockNs:()=>at}),{isNativeError:types.isNativeError,isProxy:types.isProxy,timerCancellation:async()=>{await Promise.resolve();at="9007199254741993";return false;}});
  try{await expect(client.withJobAttempt("fixture.task",RUN,1,async()=>{throw original;})).rejects.toBe(original);expect(records(client).at(-1).payload.terminal_ns).toBe("9007199254740993");}finally{await client.close();}
 });
+test("failure ordinal 1 then success ordinal 2 retains both attempts and the failed terminal bytes never change",async()=>{
+ const client=new Client(jobSettings()),original=Error("CANARY_TASK_FAILURE");
+ try{
+  await expect(client.withJobAttempt("fixture.task",RUN,1,async()=>{throw original;})).rejects.toBe(original);
+  const failedBytes=client.bufferedRecords().filter(value=>JSON.parse(value).payload.state==="failed");expect(failedBytes).toHaveLength(1);
+  expect(await client.withJobAttempt("fixture.task",RUN,2,async()=>"recovered")).toBe("recovered");
+  const events=records(client).map(value=>value.payload);expect(events.map(value=>[value.ordinal,value.state])).toEqual([["1","started"],["1","failed"],["2","started"],["2","succeeded"]]);
+  expect(new Set(events.map(value=>value.run_id))).toEqual(new Set([RUN]));expect(events[0].attempt_id).toBe(events[1].attempt_id);expect(events[1].attempt_id).not.toBe(events[2].attempt_id);expect(events.map(value=>value.sequence)).toEqual(["1","2","3","4"]);
+  expect(client.bufferedRecords().filter(value=>JSON.parse(value).payload.state==="failed")).toEqual(failedBytes);
+  expect(events[1].cause_error).toBeDefined();expect(events[3].cause_error).toBeUndefined();expect(client.bufferedRecords().join("")).not.toContain("CANARY");
+ }finally{await client.close();}
+});
+test("an attempt inside an active span records the trace as a link and never creates or adopts a child span",async()=>{
+ const client=new Client(jobSettings({operations:["worker"]}));let seen:unknown;
+ try{
+  await client.withSpan("worker",async()=>{await client.withJobAttempt("fixture.task",RUN,1,async()=>{seen=client.bufferedRecords().length;});});
+  const spans=records(client,"span"),attempts=records(client).map(value=>value.payload);
+  expect(spans).toHaveLength(1);expect(spans[0].payload.parent_span_id??null).toBeNull();
+  expect(attempts.every(value=>value.cause_trace===spans[0].payload.trace_id)).toBe(true);
+  expect(records(client,"span").some(value=>value.payload.operation==="fixture.task")).toBe(false);void seen;
+ }finally{await client.close();}
+});
