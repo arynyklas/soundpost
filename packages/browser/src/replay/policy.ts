@@ -6,6 +6,10 @@ export const MASK = "[masked]" as const;
 export const RECORDER_VERSION = "1";
 export const MAX_NODES = 20000;
 export const MAX_CHUNK_BYTES = 120000;
+/** Protocol ceiling of nodes in one chunk (internal/replays: 4096). */
+export const MAX_CHUNK_NODES = 4096;
+/** Reserve for the one gap event a truncation adds. */
+export const GAP_EVENT_BYTES = 96;
 export const MAX_MUTATION_ROOTS = 64;
 export const MAX_MUTATION_RECORDS = 512;
 export const CHECKPOINT_INTERVAL_MS = 30000;
@@ -69,4 +73,26 @@ export function sha256Hex(input: string): string {
   h[0] = (h[0]! + a) >>> 0; h[1] = (h[1]! + b) >>> 0; h[2] = (h[2]! + c) >>> 0; h[3] = (h[3]! + d) >>> 0; h[4] = (h[4]! + e) >>> 0; h[5] = (h[5]! + f) >>> 0; h[6] = (h[6]! + g) >>> 0; h[7] = (h[7]! + hh) >>> 0;
  }
  return Array.from(h, value => value.toString(16).padStart(8, "0")).join("");
+}
+
+/**
+ * Canonical JSON exactly as Go's model.CanonicalJSON serializes a replay chunk: object keys sorted, no whitespace,
+ * integers only, Go string escaping (U+2028/2029 escaped). The chain hash is SHA-256 over these bytes, so a server
+ * computing replays.ChunkHash over the same chunk gets the same hash regardless of this object's key order.
+ */
+export function canonicalJSON(value: unknown): string {
+ if (value === null) return "null";
+ switch (typeof value) {
+  case "boolean": return value ? "true" : "false";
+  case "number":
+   if (!Number.isSafeInteger(value)) throw Error("replay_canonical_number");
+   return String(value === 0 ? 0 : value);
+  case "string": return JSON.stringify(value).replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
+  case "object": {
+   if (Array.isArray(value)) return "[" + value.map(canonicalJSON).join(",") + "]";
+   const record = value as Record<string, unknown>;
+   return "{" + Object.keys(record).sort().map(key => JSON.stringify(key) + ":" + canonicalJSON(record[key])).join(",") + "}";
+  }
+  default: throw Error("replay_canonical_value");
+ }
 }

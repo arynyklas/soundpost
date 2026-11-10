@@ -101,6 +101,15 @@ importers:
         specifier: 22.18.12
         version: 22.18.12
 
+  packages/replay-viewer:
+    devDependencies:
+      '@types/node':
+        specifier: 25.0.0
+        version: 25.0.0
+      bun-types:
+        specifier: 1.3.14
+        version: 1.3.14(patch_hash=4ca494388362cba7a3025a77ebdce70c2d488b60a59ef810c4d72173e49967e6)
+
   web:
     dependencies:
       react:

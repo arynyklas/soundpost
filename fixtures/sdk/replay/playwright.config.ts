@@ -5,7 +5,7 @@ import {defineConfig, devices} from "@playwright/test";
 const executablePath = process.env.SOUNDPOST_CHROME;
 export default defineConfig({
  testDir: ".",
- testMatch: "recorder.spec.ts",
+ testMatch: ["recorder.spec.ts", "viewer.spec.ts"],
  fullyParallel: false, workers: 1, retries: 0,
  use: {trace: "off", screenshot: "off", video: "off"},
  projects: [{name: "chromium", use: {...devices["Desktop Chrome"], ...(executablePath ? {launchOptions: {executablePath}} : {})}}],

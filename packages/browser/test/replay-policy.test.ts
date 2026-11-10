@@ -5,8 +5,8 @@ import {createHash} from "node:crypto";
 import {init} from "../src/index.ts";
 import {createRecorder} from "../src/replay/recorder.ts";
 import {ReplayStream} from "../src/replay/stream.ts";
-import {captureDomAccessors} from "../src/replay/tree.ts";
-import {MAX_NODES, quantize, sha256Hex} from "../src/replay/policy.ts";
+import {captureDomAccessors, fitSubtrees} from "../src/replay/tree.ts";
+import {MAX_NODES, canonicalJSON, quantize, sha256Hex} from "../src/replay/policy.ts";
 import type {ReplayChunk, ReplayConfig, ReplayEventTargetLike, ReplayNode, ReplayTimers} from "../src/replay/types.ts";
 import {config as coreConfig} from "../../core/test/fixture.ts";
 
@@ -167,30 +167,113 @@ test("rectangles and pointer coordinates quantize to 8px and clamp to ±32768", 
  expect(events.map(e => [e.kind, e.node, e.x, e.y])).toEqual([["pointer", r.chunks[0]!.nodes[0]!.id, 200, 32768], ["scroll", "0", 0, 80], ["resize", "0", 1000, 800]]);
 });
 
-test("20,000 node cap: overflow becomes an opaque node plus a visible gap, chunks stay bounded and hash-chained", () => {
+test("20,000 node walk cap: overflow is still ONE bounded gap-marked checkpoint, never a fragmented format, and the chain stays hash-chained", () => {
  const root = el("div"); for (let i = 0; i < MAX_NODES + 5000; i++) root.append(el("span", text("overflow-secret")));
  const r = rig(root); r.recorder.setConsent(true);
- const nodes = allNodes(r.chunks);
- expect(nodes.length).toBe(MAX_NODES);
- expect(nodes.at(-1)).toMatchObject({tag: "masked", class: "masked", text: ""});
- expect(r.chunks[0]!.gap).toBe(true);
- expect(r.chunks[0]!.events.map(e => e.kind)).toEqual(["checkpoint", "gap"]);
- expect(Number(r.chunks[0]!.loss)).toBeGreaterThan(0);
+ expect(r.chunks).toHaveLength(1);
+ const first = r.chunks[0]!;
+ expect(first.nodes.length).toBeLessThanOrEqual(4096);
+ expect(JSON.stringify(first).length).toBeLessThanOrEqual(131072);
+ expect(first.gap).toBe(true);
+ expect(first.events.map(e => e.kind)).toEqual(["checkpoint", "gap"]);
+ expect(Number(first.loss)).toBeGreaterThan(0);
  expect(JSON.stringify(r.chunks)).not.toContain("overflow-secret");
+ expect(first.checkpoint_sequence).toBe("1");
+ expect(first.checkpoint_hash).toBe(first.previous_hash);
+ r.target.handlers.get("pointerdown")!(new FEvent(root, 8, 8));
+ r.timers.advance(1000);
  let previous = "0".repeat(64);
  r.chunks.forEach((chunk, i) => {
-  expect(chunk.nodes.length).toBeLessThanOrEqual(4096);
-  expect(JSON.stringify(chunk).length).toBeLessThanOrEqual(131072);
   expect(chunk.sequence).toBe(String(i + 1));
   expect(chunk.previous_hash).toBe(previous);
   expect(chunk.checkpoint_sequence).toBe("1");
-  previous = createHash("sha256").update(JSON.stringify(chunk)).digest("hex");
+  previous = createHash("sha256").update(canonicalJSON(chunk)).digest("hex");
  });
- expect(r.chunks.length).toBeGreaterThan(5);
- expect(r.chunks[0]!.checkpoint_hash).toBe(r.chunks[0]!.previous_hash);
- expect(r.chunks[1]!.checkpoint_hash).toBe(createHash("sha256").update(JSON.stringify(r.chunks[0]!)).digest("hex"));
+ expect(r.chunks.length).toBe(2);
+ expect(r.chunks[1]!.checkpoint_hash).toBe(createHash("sha256").update(canonicalJSON(first)).digest("hex"));
  expect(sha256Hex("abc")).toBe(createHash("sha256").update("abc").digest("hex"));
  expect(sha256Hex("a".repeat(1000))).toBe(createHash("sha256").update("a".repeat(1000)).digest("hex"));
+});
+
+function pageOfSections(count: number): {root: FHtml; sections: FHtml[]} {
+ const sections = Array.from({length: count}, (_, i) => el("section", el("p", text("section-secret-" + i), el("span", text("x")))));
+ return {root: el("div", ...sections), sections};
+}
+
+test("oversized checkpoint: whole low-priority tail subtrees become opaque placeholders in ONE chunk, truncation is reported, nothing is silently cut", () => {
+ const {root, sections} = pageOfSections(600);
+ const r = rig(root); r.recorder.setConsent(true);
+ expect(r.chunks).toHaveLength(1);
+ const chunk = r.chunks[0]!;
+ expect(chunk.nodes.length).toBeLessThanOrEqual(4096);
+ expect(JSON.stringify(chunk).length).toBeLessThanOrEqual(131072);
+ expect(chunk.gap).toBe(true);
+ expect(chunk.events.map(e => e.kind)).toEqual(["checkpoint", "gap"]);
+ expect(chunk.loss).toBe("1");
+ const ids = new Set(chunk.nodes.map(n => n.id));
+ for (const n of chunk.nodes) expect(n.parent === "0" || ids.has(n.parent)).toBe(true);
+ const rootId = chunk.nodes[0]!.id, top = chunk.nodes.filter(n => n.parent === rootId);
+ expect(top).toHaveLength(sections.length);
+ const placeholders = top.map((n, i) => [n, i] as const).filter(([n]) => n.class === "masked");
+ expect(placeholders.length).toBeGreaterThan(0);
+ for (const [placeholder] of placeholders) { expect(placeholder).toMatchObject({tag: "masked", class: "masked", text: ""}); expect(chunk.nodes.some(n => n.parent === placeholder.id)).toBe(false); }
+ // Lowest priority is the tail: the head of the page is intact, the end of the page is collapsed, and the split is contiguous.
+ const firstPlaceholder = placeholders[0]![1];
+ expect(firstPlaceholder).toBeGreaterThan(50);
+ expect(top.slice(0, firstPlaceholder).every(n => n.class === "" && n.tag === "section")).toBe(true);
+ expect(top.slice(firstPlaceholder).every(n => n.class === "masked")).toBe(true);
+ expect(chunk.nodes.some(n => n.parent === top[0]!.id && n.tag === "p")).toBe(true);
+ expect(JSON.stringify(chunk)).not.toContain("section-secret");
+});
+
+test("deltas under a placeholdered subtree are suppressed until a new complete checkpoint includes it", () => {
+ const {root, sections} = pageOfSections(600);
+ const r = rig(root); r.recorder.setConsent(true);
+ const observer = r.observer(), base = r.chunks.length;
+ const chunk = r.chunks[0]!, rootId = chunk.nodes[0]!.id, top = chunk.nodes.filter(n => n.parent === rootId);
+ expect(top[599]!.class).toBe("masked");
+ // Inside the collapsed tail: content changed, and a brand new node added. Neither may produce a delta (it would re-expose the subtree).
+ const hidden = sections[599]!;
+ hidden.children[0]!.append(text("late-secret"));
+ observer.callback([new FRecord(hidden.children[0]!)]);
+ const added = el("p", text("brand-new-secret")); hidden.append(added);
+ observer.callback([new FRecord(added)]);
+ expect(r.chunks).toHaveLength(base);
+ // The retained head still produces ordinary deltas.
+ sections[0]!.children[0]!.append(text("head-secret"));
+ observer.callback([new FRecord(sections[0]!.children[0]!)]);
+ expect(r.chunks).toHaveLength(base + 1);
+ expect(r.chunks.at(-1)!.events.map(e => e.kind)).toEqual(["mutation"]);
+ expect(r.chunks.at(-1)!.gap).toBe(false);
+ // The page shrinks so the whole snapshot fits; the next periodic checkpoint is complete and includes the formerly collapsed section.
+ root.children = [...sections.slice(0, 100), hidden];
+ r.timers.advance(30000);
+ const resnap = r.chunks.at(-1)!;
+ expect(resnap.checkpoint_sequence).toBe(resnap.sequence);
+ expect(resnap.nodes.some(n => n.class === "masked")).toBe(false);
+ expect(resnap.nodes.length).toBe(1 + 100 * 5 + 1 + 8); // root, 100 head sections (one gained a text node), the hidden section with its 3 added nodes
+ const after = r.chunks.length;
+ observer.callback([new FRecord(hidden.children[0]!)]);
+ expect(r.chunks).toHaveLength(after + 1);
+ expect(r.chunks.at(-1)!.events.map(e => e.kind)).toEqual(["mutation"]);
+ for (const secret of ["late-secret", "brand-new-secret", "head-secret", "section-secret"]) expect(JSON.stringify(r.chunks)).not.toContain(secret);
+});
+
+test("fitSubtrees collapses the lowest-priority (latest, deepest) whole subtrees first and keeps the head of the page", () => {
+ const node = (id: string, parent: string): ReplayNode => ({id, parent, tag: "div", class: "", text: "", rect: {x: 0, y: 0, w: 8, h: 8}, pres: "block"});
+ const nodes = [node("1", "0"), node("2", "1"), node("3", "2"), node("4", "1"), node("5", "4"), node("6", "4"), node("7", "1"), node("8", "7")];
+ const unchanged = fitSubtrees(nodes, 8, 1_000_000);
+ expect(unchanged.truncated).toBe(false);
+ expect(unchanged.nodes).toBe(nodes);
+ const fitted = fitSubtrees(nodes, 6, 1_000_000);
+ expect(fitted.truncated).toBe(true);
+ expect(fitted.nodes.map(n => [n.id, n.parent, n.tag, n.class])).toEqual([["1", "0", "div", ""], ["2", "1", "div", ""], ["3", "2", "div", ""], ["4", "1", "masked", "masked"], ["7", "1", "masked", "masked"]]);
+ expect([...fitted.suppressed].sort()).toEqual([4, 5, 6, 7, 8]);
+ const byBytes = fitSubtrees(nodes, 100, JSON.stringify(node("1", "0")).length * 6);
+ expect(byBytes.nodes.length).toBeLessThan(8);
+ expect(JSON.stringify(byBytes.nodes[0]!.id)).toBe("\"1\"");
+ // A single root that still cannot fit collapses to itself; the result is never larger than asked for when a root placeholder fits.
+ expect(fitSubtrees(nodes, 1, 1_000_000).nodes).toHaveLength(1);
 });
 
 test("mutation bursts extract masked structure synchronously, never raw text or removed nodes", () => {

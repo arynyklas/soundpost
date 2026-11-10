@@ -118,3 +118,47 @@ function walkChildren(dom: DomAccessors, container: object, parentId: string, st
   walk(dom, child, parentId, state, depth);
  }
 }
+
+export interface FitResult {
+ readonly nodes: readonly ReplayNode[];
+ /** True when whole subtrees were replaced by opaque placeholders to fit. */
+ readonly truncated: boolean;
+ /** Local ids of every placeholder and every node it replaced; deltas under them are suppressed until the next complete checkpoint. */
+ readonly suppressed: readonly number[];
+}
+/**
+ * Makes one emission fit one chunk without ever truncating a chunk silently or inventing a fragmented-checkpoint
+ * format: whole sanitized subtrees are replaced by bounded opaque placeholders (same id/parent/rect/presentation,
+ * tag and class "masked", empty text) until `maxNodes` and `maxBytes` hold. Priority is explicit: later in document
+ * order and deeper means lower priority, so the tail of the page is collapsed first, smallest subtrees first, and
+ * the head of the page is kept as long as possible. The input is in walk (pre-order) order; the output keeps it.
+ * A flat run of thousands of siblings cannot shrink except by collapsing their parent, which is what happens.
+ */
+export function fitSubtrees(nodes: readonly ReplayNode[], maxNodes: number, maxBytes: number): FitResult {
+ const count = nodes.length;
+ const size = nodes.map(node => JSON.stringify(node).length + 1);
+ let totalNodes = count, totalBytes = size.reduce((sum, value) => sum + value, 0);
+ if (totalNodes <= maxNodes && totalBytes <= maxBytes) return {nodes, truncated: false, suppressed: []};
+ const index = new Map<string, number>();
+ nodes.forEach((node, at) => index.set(node.id, at));
+ const parent = nodes.map(node => index.get(node.parent) ?? -1);
+ const liveCount = new Array<number>(count).fill(1), liveBytes = size.slice();
+ for (let at = count - 1; at >= 0; at--) { const up = parent[at]!; if (up >= 0) { liveCount[up]! += liveCount[at]!; liveBytes[up]! += liveBytes[at]!; } }
+ const span = liveCount.slice(); // pre-order subtree length, fixed
+ const alive = new Array<boolean>(count).fill(true);
+ const replaced = new Map<number, ReplayNode>();
+ const suppressed: number[] = [];
+ for (let at = count - 1; at >= 0 && (totalNodes > maxNodes || totalBytes > maxBytes); at--) {
+  if (!alive[at] || liveCount[at]! <= 1) continue;
+  const original = nodes[at]!;
+  const placeholder: ReplayNode = {...original, tag: "masked", class: "masked", text: ""};
+  const placeholderBytes = JSON.stringify(placeholder).length + 1;
+  const freedNodes = liveCount[at]! - 1, freedBytes = liveBytes[at]! - placeholderBytes;
+  for (let inner = at + 1; inner < at + span[at]!; inner++) if (alive[inner]) { alive[inner] = false; suppressed.push(Number(nodes[inner]!.id)); }
+  replaced.set(at, placeholder); suppressed.push(Number(original.id));
+  for (let up = parent[at]!; up >= 0; up = parent[up]!) { liveCount[up]! -= freedNodes; liveBytes[up]! -= freedBytes; }
+  liveCount[at] = 1; liveBytes[at] = placeholderBytes;
+  totalNodes -= freedNodes; totalBytes -= freedBytes;
+ }
+ return {nodes: nodes.flatMap((node, at) => (alive[at] ? [replaced.get(at) ?? node] : [])), truncated: true, suppressed};
+}

@@ -1,8 +1,8 @@
 // Copyright 2026 Aryn Yklas
 // SPDX-License-Identifier: Apache-2.0
 import type {DomAccessors, EnqueueResult, MutationObserverLike, ReplayChunk, ReplayConfig, ReplayEvent, ReplayEventTargetLike, ReplayNode, ReplayRecorder, ReplayTimers} from "./types.ts";
-import {CHECKPOINT_INTERVAL_MS, EVENT_FLUSH_MS, MAX_CHUNK_BYTES, MAX_MUTATION_RECORDS, MAX_MUTATION_ROOTS, MAX_PENDING_EVENTS, MAX_DEPTH, RECORDER_VERSION, ZERO_HASH, captureAllowed, quantize, sha256Hex} from "./policy.ts";
-import {captureDomAccessors, newWalkState, walk, type DomGlobals} from "./tree.ts";
+import {CHECKPOINT_INTERVAL_MS, EVENT_FLUSH_MS, GAP_EVENT_BYTES, MAX_CHUNK_BYTES, MAX_CHUNK_NODES, MAX_MUTATION_RECORDS, MAX_MUTATION_ROOTS, MAX_PENDING_EVENTS, MAX_DEPTH, RECORDER_VERSION, ZERO_HASH, canonicalJSON, captureAllowed, quantize, sha256Hex} from "./policy.ts";
+import {captureDomAccessors, fitSubtrees, newWalkState, walk, type DomGlobals} from "./tree.ts";
 
 const OBSERVE = {childList: true, characterData: true, attributes: true, subtree: true} as const;
 const LISTEN = {capture: true, passive: true} as const;
@@ -25,6 +25,8 @@ class Recorder implements ReplayRecorder {
  private target: ReplayEventTargetLike | undefined;
  private ids = new WeakMap<object, number>();
  private shadowRoots = new WeakSet<object>();
+ /** Local ids of placeholders and the nodes they replaced; deltas under them are dropped until the next complete checkpoint. */
+ private suppressed = new Set<number>();
  private counter = 0;
  private sequence = 0;
  private previousHash = ZERO_HASH;
@@ -90,7 +92,7 @@ class Recorder implements ReplayRecorder {
   if (this.target !== undefined) { for (const [type, listener] of this.listeners) this.target.removeEventListener(type, listener, LISTEN); this.target = undefined; }
   for (const handle of [this.flushTimer, this.checkpointTimer, this.recoverTimer]) if (handle !== undefined) this.timers.clear(handle);
   this.flushTimer = this.checkpointTimer = this.recoverTimer = undefined;
-  this.pending = []; this.ids = new WeakMap(); this.shadowRoots = new WeakSet(); this.dom = undefined;
+  this.pending = []; this.ids = new WeakMap(); this.shadowRoots = new WeakSet(); this.suppressed = new Set(); this.dom = undefined;
   if (wasActive) this.needGap = true;
  }
 
@@ -119,7 +121,7 @@ class Recorder implements ReplayRecorder {
  /** Full snapshot: fresh ID map so no earlier source node stays associated with a local ID. */
  private checkpoint(): void {
   const dom = this.dom!;
-  this.ids = new WeakMap(); this.shadowRoots = new WeakSet();
+  this.ids = new WeakMap(); this.shadowRoots = new WeakSet(); this.suppressed = new Set();
   const state = newWalkState(this.ids, this.allocate, this.observeShadow);
   walk(dom, this.config.root, "0", state);
   const at = this.now().wall_ns, gap = this.needGap || state.overflow;
@@ -142,10 +144,12 @@ class Recorder implements ReplayRecorder {
     for (let hops = 0; node !== null && !this.ids.has(node) && hops < MAX_DEPTH * 4; hops++) node = dom.parentNode(node);
     const id = node === null ? undefined : this.ids.get(node);
     if (node === null || id === undefined) { full = true; break; }
+    if (this.suppressed.has(id)) continue;
     dirty.set(id, node);
     if (dirty.size > MAX_MUTATION_ROOTS) { full = true; break; }
    }
    if (full) { this.flushEvents(); this.checkpoint(); return; }
+   if (dirty.size === 0) return;
    const state = newWalkState(this.ids, this.allocate, this.observeShadow), events: ReplayEvent[] = [], at = this.now().wall_ns;
    for (const [id, node] of dirty) {
     let covered = false;
@@ -161,32 +165,35 @@ class Recorder implements ReplayRecorder {
   });
  }
 
- /** Splits nodes into chunks bounded by count and bytes, chaining sequence and hashes. */
+ /**
+  * One emission is one chunk. Nodes that do not fit are never split into an undeclared fragmented format and never
+  * truncated silently: whole low-priority subtrees become opaque placeholders (fitSubtrees), the truncation is reported
+  * (loss counter plus a gap event; a truncated checkpoint is gap-marked) and deltas under the replaced ids are suppressed
+  * until a new complete checkpoint.
+  */
  private write(nodes: readonly ReplayNode[], events: readonly ReplayEvent[], checkpoint: boolean, gap: boolean): void {
-  let index = 0, first = true, budgetUsed = 0;
-  for (const event of events) budgetUsed += JSON.stringify(event).length;
-  do {
-   const group: ReplayNode[] = [];
-   let bytes = budgetUsed;
-   while (index < nodes.length) {
-    const size = JSON.stringify(nodes[index]).length + 1;
-    if (group.length > 0 && bytes + size > MAX_CHUNK_BYTES) break;
-    bytes += size; group.push(nodes[index]!); index++;
-   }
-   const sequence = ++this.sequence, isCheckpoint = checkpoint && first;
-   const chunk: ReplayChunk = {
-    replay_id: this.config.replayId, session_id: this.config.sessionId, recorder_version: RECORDER_VERSION, sequence: String(sequence), previous_hash: this.previousHash,
-    checkpoint_sequence: String(isCheckpoint ? sequence : this.checkpointSequence), checkpoint_hash: isCheckpoint ? this.previousHash : this.checkpointHash,
-    clock: {...this.now(), domain: this.config.domain}, nodes: group, events: first ? events : [], loss: String(this.loss), gap: first && gap, capture_policy_revision: this.config.capturePolicyRevision,
-   };
-   const hash = sha256Hex(JSON.stringify(chunk));
-   if (isCheckpoint) { this.checkpointSequence = sequence; this.checkpointHash = hash; }
-   this.previousHash = hash;
-   let result: EnqueueResult;
-   try { result = this.output(chunk); } catch { result = "rejected"; }
-   if (result !== "accepted") { this.fail(); return; }
-   first = false; budgetUsed = 0;
-  } while (index < nodes.length);
+  let budget = GAP_EVENT_BYTES;
+  for (const event of events) budget += JSON.stringify(event).length + 1;
+  const fit = fitSubtrees(nodes, MAX_CHUNK_NODES, Math.max(0, MAX_CHUNK_BYTES - budget));
+  let emitted = events, marked = gap;
+  if (fit.truncated) {
+   for (const id of fit.suppressed) this.suppressed.add(id);
+   this.loss++;
+   if (!events.some(event => event.kind === "gap")) emitted = [...events, {at_ns: this.now().wall_ns, kind: "gap", node: "0", x: 0, y: 0}];
+   if (checkpoint) marked = true;
+  }
+  const sequence = ++this.sequence;
+  const chunk: ReplayChunk = {
+   replay_id: this.config.replayId, session_id: this.config.sessionId, recorder_version: RECORDER_VERSION, sequence: String(sequence), previous_hash: this.previousHash,
+   checkpoint_sequence: String(checkpoint ? sequence : this.checkpointSequence), checkpoint_hash: checkpoint ? this.previousHash : this.checkpointHash,
+   clock: {...this.now(), domain: this.config.domain}, nodes: fit.nodes, events: emitted, loss: String(this.loss), gap: marked, capture_policy_revision: this.config.capturePolicyRevision,
+  };
+  const hash = sha256Hex(canonicalJSON(chunk));
+  if (checkpoint) { this.checkpointSequence = sequence; this.checkpointHash = hash; }
+  this.previousHash = hash;
+  let result: EnqueueResult;
+  try { result = this.output(chunk); } catch { result = "rejected"; }
+  if (result !== "accepted") this.fail();
  }
  /** A rejected chunk leaves a visible hole: counted loss, then a gap-marked checkpoint later. */
  private fail(): void {

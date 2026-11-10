@@ -1,0 +1,21 @@
+<!doctype html>
+<!-- Copyright 2026 Aryn Yklas -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!--
+  Static replay viewer frame. The host serves this document with the Content-Security-Policy header produced by
+  viewerCsp(script, style) and embeds it as <iframe sandbox="allow-scripts"> (VIEWER_SANDBOX: no allow-same-origin).
+  The two placeholders are replaced byte-for-byte by VIEWER_STYLE and the bundled viewer script so the CSP hashes
+  match exactly one style and one script. Captured content never reaches this document as markup: the script builds
+  fixed first-party elements and receives chunks only by postMessage from the parent.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Soundpost replay</title>
+<style>/*__VIEWER_STYLE__*/</style>
+</head>
+<body>
+<div id="replay"></div>
+<script>/*__VIEWER_SCRIPT__*/</script>
+</body>
+</html>
