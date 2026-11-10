@@ -687,7 +687,9 @@ func TestIssueRetiredProjectDropsPayloads(t *testing.T) {
 	if _, err := f.store.CollectRetiredIssues(f.ctx, f.writer, f.project); err == nil {
 		t.Fatal("a non-administrator collected")
 	}
-	// Before collection the payloads are still held; after, none.
+	// The retire-time deletion hook (01.08 issue deletion) erases the payloads in
+	// the transition that begins the retirement, so none are held before the
+	// explicit collection, which then finds nothing left to drop.
 	count := func() (issues, books int) {
 		_ = f.store.View(f.ctx, func(st control.State) error {
 			for _, gi := range st.GroupingIssues {
@@ -704,11 +706,11 @@ func TestIssueRetiredProjectDropsPayloads(t *testing.T) {
 		})
 		return
 	}
-	if i, b := count(); i != 2 || b != 1 {
+	if i, b := count(); i != 0 || b != 0 {
 		t.Fatalf("before collection: %d issues %d books", i, b)
 	}
 	ids, err := f.store.CollectRetiredIssues(f.ctx, f.adminScope(), f.project)
-	if err != nil || len(ids) != 2 {
+	if err != nil || len(ids) != 0 {
 		t.Fatalf("collect: %v %v", ids, err)
 	}
 	if i, b := count(); i != 0 || b != 0 {
