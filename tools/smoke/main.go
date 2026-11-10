@@ -69,6 +69,9 @@ func run() (err error) {
 		case "delete-restore-pressure":
 			smoke, stage = "delete_restore_pressure", "deletion_dispatch"
 			return RunDeletion(os.Args[2:])
+		case "artifact-policy":
+			smoke, stage = "artifact_policy", "artifact_policy_dispatch"
+			return RunArtifactPolicy(os.Args[2:])
 		case "backup-restore":
 			smoke, stage = "backup_restore", "backup_dispatch"
 			return RunBackupRestore(os.Args[2:])

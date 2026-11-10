@@ -7,6 +7,7 @@ import (
 	"io"
 	"soundpost/internal/auth"
 	"soundpost/internal/model"
+	"sync/atomic"
 )
 
 type ArtifactID = model.ID
@@ -30,6 +31,9 @@ type Service struct {
 	blobs      BlobStore
 	metadata   MetadataStore
 	authorizer ScopeAuthorizer
+	// gate is installed by NewLifecycle; reads then also fence on the org
+	// delete generation and the artifact's reference state.
+	gate atomic.Pointer[readGate]
 }
 
 func New(blobs BlobStore, metadata MetadataStore, authorizer ScopeAuthorizer) (*Service, error) {

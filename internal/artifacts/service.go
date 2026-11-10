@@ -106,87 +106,9 @@ func (s *Service) Lookup(ctx context.Context, scope auth.Scope, id ArtifactID) (
 	}
 	return s.metadata.LookupArtifact(ctx, scope, id)
 }
+
+// open is the common read path: it is the same current scope, reference,
+// generation and reference-state fence as ReadAuthorized (see reader.go).
 func (s *Service) open(ctx context.Context, scope auth.Scope, id ArtifactID, private bool) (io.ReadCloser, error) {
-	artifact, err := s.Lookup(ctx, scope, id)
-	if err != nil {
-		return nil, err
-	}
-	receipt := artifact.Map
-	if private {
-		if artifact.Sources == nil {
-			return nil, model.Fail(model.NotFound)
-		}
-		receipt = *artifact.Sources
-	}
-	if err = scope.RevalidateArtifact(ctx, receipt.Manifest, false); err != nil {
-		return nil, err
-	}
-	if err = s.blobs.VerifyBlob(ctx, receipt); err != nil {
-		return nil, model.Fail(model.Unavailable)
-	}
-	return &artifactReader{service: s, ctx: ctx, scope: scope, id: id, receipt: receipt, private: private}, nil
-}
-
-type artifactReader struct {
-	service *Service
-	ctx     context.Context
-	scope   auth.Scope
-	id      ArtifactID
-	receipt model.BlobReceipt
-	private bool
-	ordinal uint32
-	pending []byte
-	closed  bool
-}
-
-func (r *artifactReader) Read(p []byte) (int, error) {
-	if r.closed {
-		return 0, io.ErrClosedPipe
-	}
-	if len(p) == 0 {
-		return 0, nil
-	}
-	// Even a byte retained in the current fragment is a new release: check the
-	// exact current reference, named source grant, epoch and source state first.
-	artifact, err := r.service.Lookup(r.ctx, r.scope, r.id)
-	if err != nil {
-		return 0, err
-	}
-	current := artifact.Map
-	if r.private {
-		if artifact.Sources == nil {
-			return 0, model.Fail(model.NotFound)
-		}
-		current = *artifact.Sources
-	}
-	a, _ := model.CanonicalJSON(current)
-	b, _ := model.CanonicalJSON(r.receipt)
-	if !bytes.Equal(a, b) {
-		return 0, model.Fail(model.NotFound)
-	}
-	if err = r.scope.RevalidateArtifact(r.ctx, r.receipt.Manifest, false); err != nil {
-		return 0, err
-	}
-	if len(r.pending) == 0 {
-		if int(r.ordinal) >= len(r.receipt.Fragments) {
-			return 0, io.EOF
-		}
-		r.pending, err = r.service.blobs.ReadBlobFragment(r.ctx, r.scope, r.receipt, r.ordinal)
-		if err != nil {
-			return 0, err
-		}
-		r.ordinal++
-	}
-	if err = r.scope.RevalidateArtifact(r.ctx, r.receipt.Manifest, false); err != nil {
-		return 0, err
-	}
-	n := copy(p, r.pending)
-	r.pending = r.pending[n:]
-	return n, nil
-}
-func (r *artifactReader) Close() error {
-	r.closed = true
-	clear(r.pending)
-	r.pending = nil
-	return nil
+	return s.openWindow(ctx, scope, id, private, Window{})
 }
