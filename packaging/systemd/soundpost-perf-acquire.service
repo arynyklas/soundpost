@@ -32,8 +32,12 @@ LockPersonality=yes
 MemoryDenyWriteExecute=yes
 SystemCallArchitectures=native
 SystemCallFilter=@system-service perf_event_open pidfd_open pidfd_send_signal
+# Memory-inspection, tracing and eBPF syscalls are denied even where a group admits them.
+SystemCallFilter=~kcmp userfaultfd bpf ptrace process_vm_readv process_vm_writev pidfd_getfd
 SystemCallErrorNumber=EPERM
 LimitNOFILE=256
+# A crashed helper must never write a core file (its transient buffers hold borrowed kernel records).
+LimitCORE=0
 MemoryMax=64M
 TasksMax=16
 Restart=no
