@@ -12,6 +12,7 @@ import (
 	"soundpost/internal/model"
 	"soundpost/internal/storage"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -39,6 +40,7 @@ type fakeIter struct {
 	closed chan struct{}
 	errs   chan error
 	once   sync.Once
+	trip   chan struct{}
 }
 
 func (f *fakeFeed) Subscribe(ctx context.Context, scope auth.Scope, req storage.SubscribeRequest) (storage.ChangeIterator, error) {
@@ -46,7 +48,7 @@ func (f *fakeFeed) Subscribe(ctx context.Context, scope auth.Scope, req storage.
 	if f.subErr != nil {
 		return nil, f.subErr
 	}
-	it := &fakeIter{feed: f, ctx: ctx, pages: make(chan storage.ChangePage, 256), errs: make(chan error, 1), closed: make(chan struct{})}
+	it := &fakeIter{feed: f, ctx: ctx, pages: make(chan storage.ChangePage, 256), errs: make(chan error, 1), closed: make(chan struct{}), trip: make(chan struct{})}
 	f.mu.Lock()
 	f.iters = append(f.iters, it)
 	f.requests = append(f.requests, req)
@@ -74,6 +76,8 @@ func (it *fakeIter) Next(ctx context.Context) (storage.ChangePage, error) {
 		return storage.ChangePage{}, model.Fail(model.Cancelled)
 	case err := <-it.errs:
 		return storage.ChangePage{}, err
+	case <-it.trip:
+		panic("SECRET-ROW-CONTENT injected pump panic")
 	case <-it.closed:
 		return storage.ChangePage{}, io.ErrClosedPipe
 	}
@@ -794,7 +798,7 @@ func TestLiveOversizedRecordFailsTyped(t *testing.T) {
 	}
 	e.feed.last().push(rowsPage(t, project, model.NewID(), 101, string(big)))
 	ev := nextEvent(t, it)
-	if ev.Type != LiveError || ev.Failure == nil || ev.Failure.Code != string(model.Quota) {
+	if ev.Type != LiveError || ev.Failure == nil || ev.Failure.Code != string(model.Quota) || ev.Reason != reasonQuota {
 		t.Fatalf("a record beyond the buffer budget must end the stream with a typed quota error, not be dropped or truncated: %+v", ev)
 	}
 	wantEOF(t, it)
@@ -899,8 +903,12 @@ func TestLiveConnectionCaps(t *testing.T) {
 		t.Fatalf("per-organization stream cap: %v", err)
 	}
 	itD, _ := e.mustOpen(t, e.scope(d, orgB, psB[0]), e.req(`{app="web"}`, psB[0]), nil)
-	if _, err := e.open(t, e.scope(c, org, ps[0]), req, nil); faultCode(err) == "" {
-		t.Fatal("global cap must refuse")
+	// A principal of a third organization holds nothing: neither the per-org nor
+	// the per-principal cap can refuse it, so only the global cap can.
+	orgE, psE := e.newOrg("cap org E", 1)
+	g := e.user(orgE, "g@example.test", psE, auth.Read)
+	if _, err := e.open(t, e.scope(g, orgE, psE[0]), e.req(`{app="web"}`, psE[0]), nil); faultCode(err) != model.Quota {
+		t.Fatalf("the global stream cap must refuse with Quota, got %v", err)
 	}
 	// Refused attempts hold no resource.
 	if u := e.svc.Usage(); u.Streams != 3 || u.OpenIterators != 3 {
@@ -1230,5 +1238,324 @@ func TestNewLiveServiceValidates(t *testing.T) {
 		if _, err := build(); faultCode(err) != model.Invalid {
 			t.Fatalf("%s: want Invalid, got %v", name, err)
 		}
+	}
+}
+
+// gateKey marks a context whose delete-generation read parks while the gate is
+// armed. Only the test's own Next call carries it, so the guard and pump
+// goroutines never trip the gate.
+type gateKey struct{}
+
+type gateDeletes struct {
+	inner   auth.DeleteGenerations
+	armed   atomic.Bool
+	entered chan struct{}
+	release chan struct{}
+}
+
+func newGateDeletes(inner auth.DeleteGenerations) *gateDeletes {
+	return &gateDeletes{inner: inner, entered: make(chan struct{}), release: make(chan struct{})}
+}
+
+func (g *gateDeletes) DeleteGeneration(ctx context.Context, org model.ID, projects []model.ID) (uint64, error) {
+	if ctx.Value(gateKey{}) != nil && g.armed.CompareAndSwap(true, false) {
+		close(g.entered)
+		<-g.release
+	}
+	return g.inner.DeleteGeneration(ctx, org, projects)
+}
+
+// panicPolicy panics once, in a stream worker (never in a call that carries the
+// gate key), when armed.
+type panicPolicy struct {
+	inner Revalidator
+	armed atomic.Bool
+}
+
+func (p *panicPolicy) Revalidate(ctx context.Context, scope auth.Scope) error {
+	if ctx.Value(gateKey{}) == nil && p.armed.CompareAndSwap(true, false) {
+		panic("SECRET-ROW-CONTENT injected guard panic")
+	}
+	return p.inner.Revalidate(ctx, scope)
+}
+
+// rebuild replaces the environment's service with one over the given policy and
+// delete-generation source (the real ones wrapped by a test seam).
+func (e *liveEnv) rebuild(t *testing.T, policy Revalidator, deletes auth.DeleteGenerations) {
+	t.Helper()
+	_ = e.svc.Close()
+	svc, err := NewLiveService(e.feed, policy, testRegistry(t), testLimits(), WithLiveDeleteGenerations(deletes), WithLiveLimits(e.cfg), WithLiveClock(func() time.Time { return time.Unix(0, e.now.Load()) }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.svc = svc
+	t.Cleanup(func() { _ = svc.Close() })
+}
+
+func (e *liveEnv) streamByID(id LiveStreamID) *liveStream {
+	e.svc.mu.Lock()
+	defer e.svc.mu.Unlock()
+	return e.svc.streams[id]
+}
+
+// A panic in the pump or guard worker ends only that stream with a typed
+// terminal event that carries neither the panic value nor row content; other
+// streams on the same service keep working and nothing leaks.
+func TestLivePanicIsContainedToOneStream(t *testing.T) {
+	for _, mode := range []string{"pump", "guard"} {
+		t.Run(mode, func(t *testing.T) {
+			e := newLiveEnv(t, nil)
+			org, ps := e.newOrg("panic org", 1)
+			project := ps[0]
+			alice := e.user(org, "alice@example.test", ps, auth.Read)
+			bob := e.user(org, "bob@example.test", ps, auth.Read)
+			scope := e.scope(alice, org, project)
+			policy := &panicPolicy{inner: e.fx.svc}
+			e.rebuild(t, policy, e.deletes)
+			req := e.req(`{app="web"}`, project)
+			baseline := runtime.NumGoroutine()
+			victim, vopen := e.mustOpen(t, scope, req, nil)
+			var bystander LiveIterator
+			var bystanderFeed *fakeIter
+			if mode == "pump" {
+				bystander, _ = e.mustOpen(t, e.scope(bob, org, project), req, nil)
+				bystanderFeed = e.feed.last()
+				close(e.feed.iters[0].trip)
+			} else {
+				policy.armed.Store(true)
+			}
+			ev := nextEvent(t, victim)
+			if ev.Type != LiveError || ev.Reason != reasonInternal || ev.Failure == nil || ev.Failure.Code != string(model.Unavailable) || ev.StreamID != vopen.StreamID {
+				t.Fatalf("a worker panic must end its stream with a typed internal error: %+v", ev)
+			}
+			raw, _ := json.Marshal(ev)
+			if strings.Contains(string(raw), "SECRET") || strings.Contains(string(raw), "panic") {
+				t.Fatalf("the panic value leaked into the event: %s", raw)
+			}
+			wantEOF(t, victim)
+			victim.Close()
+			if bystander != nil {
+				bystanderFeed.push(rowsPage(t, project, model.NewID(), 101, "bystander survives"))
+				wantRecord(t, nextEvent(t, bystander), "bystander survives")
+				bystander.Close()
+			}
+			// The service is still usable for new streams.
+			fresh, _ := e.mustOpen(t, scope, req, nil)
+			e.feed.last().push(rowsPage(t, project, model.NewID(), 101, "new stream works"))
+			wantRecord(t, nextEvent(t, fresh), "new stream works")
+			fresh.Close()
+			_ = e.svc.Close()
+			e.settle(t)
+			deadline := time.Now().Add(3 * time.Second)
+			for runtime.NumGoroutine() > baseline+2 && time.Now().Before(deadline) {
+				time.Sleep(10 * time.Millisecond)
+			}
+			if got := runtime.NumGoroutine(); got > baseline+2 {
+				t.Fatalf("goroutines leaked after a contained panic: %d before, %d after", baseline, got)
+			}
+		})
+	}
+}
+
+// A corrupt row ends the stream with its own reason, not the generic feed_error.
+func TestLiveTerminalReasonForCorruptRow(t *testing.T) {
+	e := newLiveEnv(t, nil)
+	_, project, _, scope := fixture(t, e)
+	it, _ := e.mustOpen(t, scope, e.req(`{app="web"}`, project), nil)
+	e.feed.last().push(rowsPage(t, model.NewID(), model.NewID(), 101, "row of a project the stream never named"))
+	ev := nextEvent(t, it)
+	if ev.Type != LiveError || ev.Reason != reasonCorrupt || ev.Failure == nil || ev.Failure.Code != string(model.Corrupt) || ev.Entry != nil {
+		t.Fatalf("a corrupt row must end the stream as corrupt_record: %+v", ev)
+	}
+	wantEOF(t, it)
+	it.Close()
+	e.settle(t)
+}
+
+// A revocation that commits after the next event was picked and while its
+// per-event check is running must not let that event escape.
+func TestLiveRevokeBetweenPickAndRelease(t *testing.T) {
+	e := newLiveEnv(t, nil)
+	_, project, _, scope := fixture(t, e)
+	gate := newGateDeletes(e.deletes)
+	e.rebuild(t, e.fx.svc, gate)
+	it, open := e.mustOpen(t, scope, e.req(`{app="web"}`, project), nil)
+	e.feed.last().push(rowsPage(t, project, model.NewID(), 101, "must not escape"))
+	waitSequence(t, e, open.StreamID, 1)
+	gate.armed.Store(true)
+	type result struct {
+		ev  LiveEvent
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.WithValue(context.Background(), gateKey{}, true), 5*time.Second)
+		defer cancel()
+		ev, err := it.Next(ctx)
+		done <- result{ev, err}
+	}()
+	select {
+	case <-gate.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the per-event check never ran")
+	}
+	// The event is picked and its check is parked: commit the revocation now.
+	e.feed.last().push(storage.ChangePage{Revoked: true})
+	st := e.streamByID(open.StreamID)
+	for deadline := time.Now().Add(3 * time.Second); ; {
+		st.mu.Lock()
+		committed := st.terminal != nil && st.preempt
+		st.mu.Unlock()
+		if committed {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the revocation never committed")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	close(gate.release)
+	r := <-done
+	if r.err != nil || r.ev.Type != LiveRevoke || r.ev.Entry != nil {
+		t.Fatalf("no event may be delivered after a committed revocation, got %+v err %v", r.ev, r.err)
+	}
+	wantEOF(t, it)
+	it.Close()
+	e.settle(t)
+}
+
+// The consumer whose next wanted sequence is exactly the last evicted one gets
+// the explicit gap (From == To), and a consumer just past the window gets its
+// record: no unsigned underflow, no starvation.
+func TestLiveEvictionBoundary(t *testing.T) {
+	e := newLiveEnv(t, nil)
+	_, project, _, scope := fixture(t, e)
+	src := model.NewID()
+	req := e.req(`{app="web"}`, project)
+	req.Budget.MaxReturned = 2
+	it, open := e.mustOpen(t, scope, req, nil)
+	it.Close()
+	feed := e.feed.last()
+	for i := 0; i < 4; i++ {
+		feed.push(rowsPage(t, project, src, uint64(101+i), "r"+strconv.Itoa(i)))
+	}
+	waitSequence(t, e, open.StreamID, 4) // sequences 1 and 2 are evicted; 3 and 4 remain
+	resume := req
+	resume.ResumeStreamID = &open.StreamID
+	attach := func(after uint64) LiveIterator {
+		it2, _ := e.mustOpen(t, scope, resume, &after)
+		return it2
+	}
+	one := attach(1) // next wanted sequence 2 is exactly the last evicted one
+	gap := nextEvent(t, one)
+	if gap.Type != LiveGap || gap.Gap == nil || gap.Gap.Reason != GapReplayEvicted || gap.Gap.FromSequence != 2 || gap.Gap.ToSequence != 2 || gap.Sequence != 2 {
+		t.Fatalf("the boundary consumer must get a gap with From==To==2: %+v", gap)
+	}
+	wantRecord(t, nextEvent(t, one), "r2")
+	wantRecord(t, nextEvent(t, one), "r3")
+	one.Close()
+	zero := attach(0)
+	if gap := nextEvent(t, zero); gap.Type != LiveGap || gap.Gap.FromSequence != 1 || gap.Gap.ToSequence != 2 {
+		t.Fatalf("both evicted sequences must be reported: %+v", gap)
+	}
+	zero.Close()
+	two := attach(2) // first retained sequence 3: no loss, no gap
+	wantRecord(t, nextEvent(t, two), "r2")
+	wantRecord(t, nextEvent(t, two), "r3")
+	two.Close()
+}
+
+// A principal who logged in again presents the old stream's identifier and
+// Last-Event-ID: a different visibility fingerprint is a different owner, so
+// the old replay buffer is never attached.
+func TestLiveResumeRefusesAnotherLoginOfTheSamePrincipal(t *testing.T) {
+	e := newLiveEnv(t, nil)
+	org, ps := e.newOrg("relogin org", 1)
+	project := ps[0]
+	alice := e.user(org, "alice@example.test", ps, auth.Read)
+	old := e.scope(alice, org, project)
+	login, err := e.fx.svc.Login(e.ctx, "alice@example.test", "query reader password", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cred, err := e.fx.svc.Authenticate(e.ctx, login.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again := e.scope(person{id: alice.id, cred: cred}, org, project)
+	if old.PrincipalID() != again.PrincipalID() || old.VisibilityFingerprint() == again.VisibilityFingerprint() {
+		t.Fatal("precondition: the same principal must have a different fingerprint after another login")
+	}
+	req := e.req(`{app="web"}`, project)
+	it, open := e.mustOpen(t, old, req, nil)
+	defer it.Close()
+	e.feed.last().push(rowsPage(t, project, model.NewID(), 101, "old session only"))
+	first := nextEvent(t, it)
+	wantRecord(t, first, "old session only")
+	resume := req
+	resume.ResumeStreamID = &open.StreamID
+	after := uint64(first.Sequence)
+	it2, open2 := e.mustOpen(t, again, resume, &after)
+	defer it2.Close()
+	if open2.StreamID == open.StreamID {
+		t.Fatal("a different login attached to the old stream")
+	}
+	gap := nextEvent(t, it2)
+	if gap.Type != LiveGap || gap.Gap.Reason != GapReplayExpired || gap.Gap.FromSequence != first.Sequence+1 {
+		t.Fatalf("a different login must get a fresh stream with a replay_expired gap: %+v", gap)
+	}
+	quiet(t, it2, 100*time.Millisecond)
+}
+
+// Eviction whose window straddles a feed-gap event keeps the exact After bound
+// that the gap event itself established.
+func TestLiveEvictionKeepsGapEventBound(t *testing.T) {
+	e := newLiveEnv(t, nil)
+	_, project, _, scope := fixture(t, e)
+	src := model.NewID()
+	req := e.req(`{app="web"}`, project)
+	req.Budget.MaxReturned = 2
+	it, open := e.mustOpen(t, scope, req, nil)
+	it.Close()
+	feed := e.feed.last()
+	feed.push(rowsPage(t, project, src, 101, "s1"))
+	feed.push(storage.ChangePage{Gap: &storage.ChangeGap{After: cur(102), Through: cur(105), Reason: "slow_consumer"}, Cursors: cur(105)})
+	feed.push(rowsPage(t, project, src, 106, "s3"))
+	feed.push(rowsPage(t, project, src, 107, "s4"))
+	feed.push(rowsPage(t, project, src, 108, "s5"))
+	waitSequence(t, e, open.StreamID, 5) // 1..3 evicted; the gap is sequence 2
+	resume := req
+	resume.ResumeStreamID = &open.StreamID
+	after := uint64(2)
+	it2, _ := e.mustOpen(t, scope, resume, &after)
+	defer it2.Close()
+	gap := nextEvent(t, it2)
+	if gap.Type != LiveGap || gap.Gap.Reason != GapReplayEvicted || gap.Gap.FromSequence != 3 || gap.Gap.ToSequence != 3 {
+		t.Fatalf("unexpected eviction gap: %+v", gap)
+	}
+	if len(gap.Gap.After) != 1 || gap.Gap.After[0].Index != 105 || len(gap.Gap.Through) != 1 || gap.Gap.Through[0].Index != 106 {
+		t.Fatalf("the gap must keep the feed gap's exact bound (after 105 through 106): after %+v through %+v", gap.Gap.After, gap.Gap.Through)
+	}
+}
+
+// Expired tickets that were only minted, never used, disappear from the table.
+func TestLiveExpiredTicketsArePurged(t *testing.T) {
+	e := newLiveEnv(t, nil)
+	_, project, _, scope := fixture(t, e)
+	req := e.req(`{app="web"}`, project)
+	for i := 0; i < 2; i++ {
+		if _, err := e.svc.CreateLiveTicket(e.ctx, scope, req); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := e.svc.Usage().Tickets; n != 2 {
+		t.Fatalf("two live tickets expected, have %d", n)
+	}
+	e.advance(e.cfg.TicketTTL + time.Second)
+	if _, err := e.svc.CreateLiveTicket(e.ctx, scope, req); err != nil {
+		t.Fatal(err)
+	}
+	if n := e.svc.Usage().Tickets; n != 1 {
+		t.Fatalf("expired mint-only tickets must be purged: %d tickets remain", n)
 	}
 }

@@ -270,6 +270,11 @@ func (s *LiveService) purgeLocked(now time.Time) {
 }
 
 // matches reports whether the presenter is exactly the ticket's issuer.
+//
+// The principal term is redundant with the fingerprint, which already hashes the
+// organization and the principal (auth.Scope.VisibilityFingerprint), so no
+// presenter can match with a different principal and an identical fingerprint;
+// it stays as defense in depth.
 func (t *liveTicket) matches(scope auth.Scope, session string) bool {
 	return t.org == scope.OrgID() && t.principal == scope.PrincipalID() && t.fingerprint == scope.VisibilityFingerprint() && t.perm == scope.Permission() && t.session == session
 }
@@ -312,6 +317,10 @@ func (s *LiveService) consume(scope auth.Scope, session string, id LiveTicketID)
 // retained (ticket's ResumeStreamID) it continues after the given sequence;
 // when that stream is gone, expired, or not this caller's, a new stream starts
 // with an explicit replay_expired gap, never a silent restart.
+//
+// A failed attach burns the ticket by design: Live consumes it before the second
+// authorization and the cursor checks, so a revocation or a malformed
+// Last-Event-ID between mint and attach forces a fresh mint (fail closed).
 func (s *LiveService) Live(ctx context.Context, scope auth.Scope, ticket LiveTicketID, after *uint64) (LiveIterator, error) {
 	session := liveSessionOf(ctx)
 	tk, err := s.consume(scope, session, ticket)
@@ -687,6 +696,32 @@ func (s *liveStream) reap() {
 	s.svc.mu.Unlock()
 }
 
+// contain is the deferred recover of the stream's two workers. A panic while
+// handling one stream (a row, a revalidation, the subscription) ends only that
+// stream with a typed internal_error terminal event and discards its replay
+// buffer; the process and every other stream carry on. The panic value is
+// dropped on purpose: it may quote row content, so it is never stored, put in
+// an event or returned in an error. It must run before the worker's other
+// deferred releases, so it is deferred last.
+func (s *liveStream) contain() {
+	if recover() == nil {
+		return
+	}
+	s.finish(liveTerminal(s.id, model.Fail(model.Unavailable), reasonInternal), true)
+}
+
+// pumpReason names a non-authorization end of the pump: a corrupt row and an
+// over-budget row are not feed failures.
+func pumpReason(err error) string {
+	switch faultCode(err) {
+	case model.Corrupt:
+		return reasonCorrupt
+	case model.Quota:
+		return reasonQuota
+	}
+	return reasonFeedError
+}
+
 // guard revalidates on a timer even when no data flows, enforces the stream
 // deadline and the detached-replay lifetime, and trims aged buffer entries.
 func (s *liveStream) guard() {
@@ -695,6 +730,7 @@ func (s *liveStream) guard() {
 	defer s.done.Done()
 	t := time.NewTicker(s.svc.limits.RevalidateInterval)
 	defer t.Stop()
+	defer s.contain()
 	for {
 		select {
 		case <-s.life.Done():
@@ -712,10 +748,12 @@ func (s *liveStream) guard() {
 		if !now.Before(s.deadline) {
 			s.finish(liveTerminal(s.id, model.Fail(model.Timeout), reasonDeadline), false)
 		}
-		s.mu.Lock()
-		s.evictAgedLocked(now)
-		idle := s.cur == nil && !s.detachedAt.IsZero() && now.Sub(s.detachedAt) >= s.svc.cfg.ReplayWindow
-		s.mu.Unlock()
+		idle := func() bool {
+			s.mu.Lock()
+			defer s.mu.Unlock() // a panic must not leave the stream's lock held
+			s.evictAgedLocked(now)
+			return s.cur == nil && !s.detachedAt.IsZero() && now.Sub(s.detachedAt) >= s.svc.cfg.ReplayWindow
+		}()
 		if idle {
 			s.destroy()
 			return
@@ -730,6 +768,7 @@ func (s *liveStream) pump() {
 	defer s.svc.goroutines.Add(-1)
 	defer s.done.Done()
 	defer s.closeIter()
+	defer s.contain()
 	for {
 		page, err := s.iter.Next(s.feed)
 		if err != nil {
@@ -751,7 +790,7 @@ func (s *liveStream) pump() {
 			if asPreempt(err, &p) {
 				s.finish(liveTerminal(s.id, p.err, ""), true)
 			} else {
-				s.finish(liveTerminal(s.id, err, reasonFeedError), false)
+				s.finish(liveTerminal(s.id, err, pumpReason(err)), false)
 			}
 			return
 		}
@@ -784,9 +823,11 @@ func gapReason(r string) string {
 func (s *liveStream) handle(page storage.ChangePage) error {
 	now := s.svc.now()
 	if page.Gap != nil {
-		s.mu.Lock()
-		err := s.appendLocked(LiveEvent{Type: LiveGap, Gap: &LiveGapInfo{Reason: gapReason(page.Gap.Reason), After: cloneCursors(page.Gap.After), Through: cloneCursors(page.Gap.Through)}}, nil, now)
-		s.mu.Unlock()
+		err := func() error {
+			s.mu.Lock()
+			defer s.mu.Unlock() // a panic below must not leave the stream's lock held
+			return s.appendLocked(LiveEvent{Type: LiveGap, Gap: &LiveGapInfo{Reason: gapReason(page.Gap.Reason), After: cloneCursors(page.Gap.After), Through: cloneCursors(page.Gap.Through)}}, nil, now)
+		}()
 		return err
 	}
 	n := page.Page.Len()

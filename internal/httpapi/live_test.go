@@ -535,10 +535,20 @@ func TestLiveAuthorizationMatrixOverHTTP(t *testing.T) {
 	// A ticket copied to another session (even of the same org) is refused, and
 	// the refused presenter does not burn it.
 	ticket := e.mustTicket(alice, e.body(orgA, p1, `{app="web"}`))
+	// A wrong-session presenter and an unknown ticket get the same denial body
+	// (the per-request ID is the only field that may differ).
+	cu, unknownStatus, unknownRaw := e.connect(alice, model.NewID().String(), "")
+	if cu != nil || unknownStatus != 404 {
+		t.Fatalf("an unknown ticket: %d %s", unknownStatus, unknownRaw)
+	}
+	unknown := denial(t, unknownStatus, unknownRaw)
 	for name, who := range map[string]person{"another principal": bob, "another org": carol} {
 		c, status, raw := e.connect(who, ticket, "")
 		if c != nil || status != 404 {
 			t.Fatalf("%s used the ticket: %d %s", name, status, raw)
+		}
+		if got := denial(t, status, raw); got != unknown {
+			t.Fatalf("%s: a wrong-session ticket is distinguishable from an unknown one (%q vs %q)", name, got, unknown)
 		}
 	}
 	c, status, raw := e.connect(alice, ticket, "")

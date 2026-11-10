@@ -70,6 +70,14 @@ const (
 )
 
 // Gap reasons. Every one is a statement of loss, never of completeness.
+//
+// Terminal reasons (LiveEvent.Reason on a revoke or error event) form a closed
+// vocabulary: slow_consumer, superseded, deadline, scope_revoked, deleted,
+// unavailable, feed_error (the committed feed failed), service_closed,
+// corrupt_record (a feed row failed validation or named a project outside the
+// stream), buffer_overflow (a record exceeded the stream's memory budget) and
+// internal_error (a stream worker panicked: only that stream ends; the panic
+// value is never reported).
 const (
 	GapFeedOverrun    = "feed_overrun"    // the committed feed overran this stream's subscription
 	GapFeedCatchUp    = "feed_catch_up"   // commits between the cursors predate the subscription
@@ -87,6 +95,7 @@ const (
 	reasonClosed      = "service_closed"  //
 	reasonCorrupt     = "corrupt_record"  //
 	reasonQuota       = "buffer_overflow" //
+	reasonInternal    = "internal_error"  //
 )
 
 // LiveGapInfo gives the exact bounds of a loss. FromSequence and ToSequence are
