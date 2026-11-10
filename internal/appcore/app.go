@@ -13,6 +13,7 @@ import (
 	"soundpost/internal/exports"
 	"soundpost/internal/httpapi"
 	"soundpost/internal/ingest"
+	"soundpost/internal/link"
 	"soundpost/internal/model"
 	"soundpost/internal/policy"
 	"soundpost/internal/query"
@@ -25,17 +26,18 @@ import (
 )
 
 type App struct {
-	Control     *control.Store
-	Auth        *auth.Service
-	Storage     *storage.Engine
-	Ingest      *ingest.Service
-	Releases    *releases.Service
-	Artifacts   *artifacts.Service
-	Cache       *auth.Cache
-	Exports     *exports.Service
-	Retention   *retention.Service
-	Query       *query.Engine
-	replication *replicatedApp
+	Control      *control.Store
+	Auth         *auth.Service
+	Storage      *storage.Engine
+	Ingest       *ingest.Service
+	Releases     *releases.Service
+	Artifacts    *artifacts.Service
+	Cache        *auth.Cache
+	Exports      *exports.Service
+	Retention    *retention.Service
+	Query        *query.Engine
+	Investigator *httpapi.Investigator
+	replication  *replicatedApp
 }
 
 func Open(dir string) (*App, error) { return open(dir, nil) }
@@ -165,7 +167,15 @@ func openWith(dir string, options *replicationOptions, meter storage.DiskMeter, 
 	if e != nil {
 		return fail(e)
 	}
-	out := &App{Control: c, Auth: a, Storage: engine, Ingest: i, Releases: r, Artifacts: artifactService, Cache: cache, Exports: exportService, Retention: ret, Query: queryEngine}
+	resolver, e := link.New(a, engine, nil)
+	if e != nil {
+		return fail(e)
+	}
+	investigator, e := httpapi.NewInvestigator(a, queryEngine, resolver)
+	if e != nil {
+		return fail(e)
+	}
+	out := &App{Control: c, Auth: a, Storage: engine, Ingest: i, Releases: r, Artifacts: artifactService, Cache: cache, Exports: exportService, Retention: ret, Query: queryEngine, Investigator: investigator}
 	startupTimeout := 20 * time.Second
 	if options != nil {
 		startupTimeout = 60 * time.Second
@@ -244,6 +254,7 @@ func (a *App) Register(mux *http.ServeMux) {
 	httpapi.RegisterCapabilityRoutes(mux, a.Auth)
 	httpapi.RegisterExportRoutes(mux, a.Auth, a.Exports)
 	httpapi.RegisterQueryRoutes(mux, a.Auth, a.Query)
+	httpapi.RegisterInvestigateRoutes(mux, a.Auth, a.Investigator)
 	a.RegisterArtifactRoutes(mux)
 }
 

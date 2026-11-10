@@ -44,3 +44,32 @@ func TestOpenWiresTheOwnedQueryEngineAndRoutes(t *testing.T) {
 		t.Fatalf("GET /api/v1/query answered %d", rec.Code)
 	}
 }
+
+// The default Open builds the investigator over the owned query engine and the
+// scope-checked link resolver and mounts its POST-only route. A credential-less
+// request must be refused, never answered with a view.
+func TestOpenWiresTheInvestigateRoute(t *testing.T) {
+	app, err := appcore.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.Close()
+	if app.Investigator == nil {
+		t.Fatal("the investigator is not wired")
+	}
+	mux := http.NewServeMux()
+	app.Register(mux)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/investigate", strings.NewReader("{}")))
+	if rec.Code == http.StatusNotFound || rec.Code == http.StatusMethodNotAllowed {
+		t.Fatalf("POST /api/v1/investigate is not registered: %d", rec.Code)
+	}
+	if rec.Code < 400 {
+		t.Fatalf("POST /api/v1/investigate answered %d without any credential", rec.Code)
+	}
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/investigate?kind=service", nil))
+	if rec.Code != http.StatusMethodNotAllowed && rec.Code != http.StatusNotFound {
+		t.Fatalf("GET /api/v1/investigate answered %d", rec.Code)
+	}
+}
