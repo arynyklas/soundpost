@@ -15,9 +15,12 @@ import (
 	"soundpost/internal/ingest"
 	"soundpost/internal/model"
 	"soundpost/internal/policy"
+	"soundpost/internal/query"
+	"soundpost/internal/query/profile"
 	"soundpost/internal/releases"
 	"soundpost/internal/retention"
 	"soundpost/internal/storage"
+	"soundpost/profiles"
 	"time"
 )
 
@@ -31,6 +34,7 @@ type App struct {
 	Cache       *auth.Cache
 	Exports     *exports.Service
 	Retention   *retention.Service
+	Query       *query.Engine
 	replication *replicatedApp
 }
 
@@ -145,7 +149,23 @@ func openWith(dir string, options *replicationOptions, meter storage.DiskMeter, 
 		exportService = nil
 		return fail(e)
 	}
-	out := &App{Control: c, Auth: a, Storage: engine, Ingest: i, Releases: r, Artifacts: artifactService, Cache: cache, Exports: exportService, Retention: ret}
+	// The owned C06 query engine. It reads through the same storage scanner and
+	// scope revalidation as exports, binds its cursors and result cache to the
+	// delete generation, and runs the pinned engine profiles embedded in the
+	// binary (never a loose directory, never an upstream engine).
+	profileFiles, e := profiles.Query()
+	if e != nil {
+		return fail(e)
+	}
+	registry, e := profile.Load(profileFiles)
+	if e != nil {
+		return fail(e)
+	}
+	queryEngine, e := query.New(engine, a, registry, query.DefaultLimits(), query.WithDeleteGenerations(ret), query.WithTickets(cache), query.WithResultCache(cache))
+	if e != nil {
+		return fail(e)
+	}
+	out := &App{Control: c, Auth: a, Storage: engine, Ingest: i, Releases: r, Artifacts: artifactService, Cache: cache, Exports: exportService, Retention: ret, Query: queryEngine}
 	startupTimeout := 20 * time.Second
 	if options != nil {
 		startupTimeout = 60 * time.Second
@@ -223,6 +243,7 @@ func (a *App) Register(mux *http.ServeMux) {
 	httpapi.RegisterIngestRoutes(mux, a.Auth, a.Ingest)
 	httpapi.RegisterCapabilityRoutes(mux, a.Auth)
 	httpapi.RegisterExportRoutes(mux, a.Auth, a.Exports)
+	httpapi.RegisterQueryRoutes(mux, a.Auth, a.Query)
 	a.RegisterArtifactRoutes(mux)
 }
 
