@@ -58,19 +58,28 @@ type queryParams struct {
 // lookupQuery returns a cached complete result when one exists for exactly this
 // visibility and request. Only PromQL results are cached: a LogQL template can
 // read the wall clock, so its answer is not a function of the request and data.
-// A hit is used only if it still satisfies this request's minimum read cuts,
-// returned-value budget and memory budget.
-func (e *Engine) lookupQuery(ctx context.Context, scope auth.Scope, prof profile.Profile, n normalized) (*Result, cacheTicket, error) {
+// It runs inside the request's admitted session: the hit's payload is charged to
+// the session's account before it is decoded, and a hit is used only if it still
+// satisfies this request's minimum read cuts, returned-value budget and memory
+// budget.
+func (e *Engine) lookupQuery(s *session, scope auth.Scope, prof profile.Profile, n normalized) (*Result, cacheTicket, error) {
 	if e.cache == nil || n.Language != LanguagePromQL || !e.settled(n.Request.Evaluation) {
 		return nil, cacheTicket{}, nil
 	}
-	raw, ticket, err := e.cacheLookup(ctx, scope, prof.Identity, n.Expression, jsonKey(queryParams{Projects: n.Projects, Eval: n.Request.Evaluation, Source: n.Source}))
+	raw, ticket, err := e.cacheLookup(s.ctx, scope, prof.Identity, n.Expression, jsonKey(queryParams{Projects: n.Projects, Eval: n.Request.Evaluation, Source: n.Source}))
 	if err != nil || raw == nil {
 		return nil, ticket, err
 	}
-	if int64(len(raw)) > n.memory {
-		return nil, ticket, nil
+	cost, ok, err := s.chargeHit(raw)
+	if !ok {
+		return nil, ticket, err
 	}
+	served := false
+	defer func() {
+		if !served {
+			s.releaseHit(cost) // an unusable hit must not shrink the cold run's budget
+		}
+	}()
 	var cached Result
 	if json.Unmarshal(raw, &cached) != nil || len(cached.Projects) != len(n.Projects) {
 		return nil, ticket, nil
@@ -78,6 +87,10 @@ func (e *Engine) lookupQuery(ctx context.Context, scope auth.Scope, prof profile
 	var total uint64
 	for i := range cached.Projects {
 		pr := &cached.Projects[i]
+		// A project whose value is nil is a failed or partial project. It is never
+		// stored (storeQuery refuses any failure or non-complete project) and is
+		// refused here as well, so the {"value":null} wire form of a failed project
+		// can never come back out of the cache as if it were data.
 		if pr.ProjectID != n.Projects[i] || pr.Value == nil || pr.Failure != nil || pr.Completeness != CompletenessComplete {
 			return nil, ticket, nil
 		}
@@ -90,6 +103,7 @@ func (e *Engine) lookupQuery(ctx context.Context, scope auth.Scope, prof profile
 	if total > n.returned {
 		return nil, ticket, nil
 	}
+	served = true
 	return &cached, ticket, nil
 }
 

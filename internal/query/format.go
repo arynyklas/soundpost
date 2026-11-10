@@ -186,6 +186,17 @@ func (e *Engine) format(ctx context.Context, scope auth.Scope, req FormatRequest
 	if err != nil {
 		return FormatResult{}, err
 	}
+	// Authorization is complete; the work below parses the expression twice and
+	// compares both trees, so it is admitted like a query: one scheduler slot, a
+	// deadline of its own and a charge for the two trees before either is built.
+	l, err := e.admit(ctx, scope, e.limits.DefaultTimeout, e.limits.DefaultMemory)
+	if err != nil {
+		return FormatResult{}, err
+	}
+	defer l.close()
+	if err = l.charge(2 * planCharge(req.Expression)); err != nil {
+		return FormatResult{}, err
+	}
 	if req.Language == LanguagePromQL {
 		expr, err := promql.Parse(req.Expression, prof)
 		if err != nil {
@@ -194,6 +205,9 @@ func (e *Engine) format(ctx context.Context, scope auth.Scope, req FormatRequest
 		typed, ds, err := promql.Check(expr, prof)
 		if err != nil {
 			return FormatResult{}, normalizeError(err, true)
+		}
+		if err = l.stopped(); err != nil {
+			return FormatResult{}, err
 		}
 		text := promql.Format(expr)
 		again, err := promql.Parse(text, prof)
@@ -204,6 +218,9 @@ func (e *Engine) format(ctx context.Context, scope auth.Scope, req FormatRequest
 		if err != nil || retyped.Type != typed.Type || promql.Format(again) != text {
 			return FormatResult{}, model.Fail(model.Unsupported)
 		}
+		if err = l.stopped(); err != nil {
+			return FormatResult{}, err
+		}
 		return FormatResult{Formatted: text, Diagnostics: normalizeDiagnostics(ds, e.limits.MaxDiagnostics)}, nil
 	}
 	expr, err := logql.Parse(req.Expression, prof)
@@ -213,6 +230,9 @@ func (e *Engine) format(ctx context.Context, scope auth.Scope, req FormatRequest
 	typed, ds, err := logql.Check(expr, prof)
 	if err != nil {
 		return FormatResult{}, normalizeError(err, true)
+	}
+	if err = l.stopped(); err != nil {
+		return FormatResult{}, err
 	}
 	text, ok := collapseSpace(req.Expression)
 	if !ok {
@@ -225,6 +245,9 @@ func (e *Engine) format(ctx context.Context, scope auth.Scope, req FormatRequest
 	retyped, _, err := logql.Check(again, prof)
 	if err != nil || retyped.Type != typed.Type || !sameTree(reflect.ValueOf(expr), reflect.ValueOf(again)) {
 		return FormatResult{}, model.Fail(model.Unsupported)
+	}
+	if err = l.stopped(); err != nil {
+		return FormatResult{}, err
 	}
 	return FormatResult{Formatted: text, Diagnostics: normalizeDiagnostics(ds, e.limits.MaxDiagnostics)}, nil
 }

@@ -127,6 +127,14 @@ func registerQuery(mux *http.ServeMux, authority *auth.Service, service QuerySer
 			queryReply(w, nil, err)
 			return
 		}
+		// Release point: Execute performed the final authorization and deletion
+		// check and already freed its session, so the serialization below runs
+		// without a further revalidation. The window from that check to the last
+		// byte grows with the response (measured: 200 000 log entries serialize in
+		// about 150 ms to a null writer; a response at the working budget takes
+		// seconds). Revalidating between value chunks is the live stream's job
+		// (internal/query/live.go), whose sessions stay open while bytes flow; this
+		// one-shot route deliberately keeps the contract's single final check.
 		queryReply(w, resultStream{res}, nil)
 	})
 	mux.HandleFunc("POST /api/v1/query/format", func(w http.ResponseWriter, r *http.Request) {

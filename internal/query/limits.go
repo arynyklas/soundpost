@@ -24,7 +24,11 @@ type Limits struct {
 	MaxExpressionBytes int
 	MaxDiscoveryItems  uint32
 	MaxDiagnostics     int
-	MaxMinCursors      int
+	// MaxMinCursors bounds the engine's own input. Over HTTP the 64 KiB request
+	// body cap is reached first (a cursor is about 90 bytes of JSON, so roughly
+	// 600 fit), which fails closed as an oversize body: 1024 is the ceiling the
+	// engine accepts, not one the HTTP route can deliver.
+	MaxMinCursors int
 
 	// ProjectParallelism bounds the project fan-out of one query.
 	ProjectParallelism int

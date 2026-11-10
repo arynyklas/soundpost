@@ -59,7 +59,15 @@ func (b *repetitionBudget) charge(n uint64) error {
 	return nil
 }
 
-type MetricPipelineError struct{ Category string }
+// MetricPipelineError is the failure of a metric whose input carries an
+// __error__ label. EngineSet reports whether the engine set that label itself (a
+// pipeline stage failed, so Category is one of the closed engine error kinds) or
+// whether the record's own data produced a label of that name (Category is then
+// arbitrary record text and is never a diagnostic).
+type MetricPipelineError struct {
+	Category  string
+	EngineSet bool
+}
 
 func (e *MetricPipelineError) Error() string {
 	return "LogQL metric input contains pipeline error: " + e.Category
@@ -153,7 +161,7 @@ func EvaluateRange(ctx context.Context, p RangePlan, input EntryIterator, frame 
 		category := value.Label(r.Labels, "__error__")
 		if category != "" {
 			a.Release(r.Bytes)
-			return result, &MetricPipelineError{Category: category}
+			return result, &MetricPipelineError{Category: category, EngineSet: r.Entry.languageError != ""}
 		}
 		if r.Entry.Multiplicity == 0 {
 			a.Release(r.Bytes)

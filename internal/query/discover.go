@@ -177,6 +177,14 @@ func (e *Engine) discover(ctx context.Context, scope auth.Scope, req DiscoveryRe
 			return DiscoveryResult{}, err
 		}
 	}
+	// Admission follows authorization and precedes the cache lookup, the cursor
+	// check and the scans: a cache hit is charged and released like a cold page.
+	timeout, memory := e.limits.DefaultTimeout, e.limits.DefaultMemory
+	s, err := e.begin(ctx, scope, projects, timeout, memory)
+	if err != nil {
+		return DiscoveryResult{}, err
+	}
+	defer func() { _ = s.finish(ctx, false) }()
 	params := discoverParams{Projects: projects, Signal: req.Signal, Kind: req.Kind, Field: req.Field, Matchers: req.Matchers, Time: req.Time, Source: req.Source, Profile: req.Profile, FeatureSet: req.FeatureSet}
 	digest, err := paramsDigest("discover", params)
 	if err != nil {
@@ -185,7 +193,7 @@ func (e *Engine) discover(ctx context.Context, scope auth.Scope, req DiscoveryRe
 	var after *string
 	if req.Cursor != "" {
 		var position string
-		if err = e.openCursor(ctx, scope, "discover", digest, req.Cursor, &position); err != nil {
+		if err = e.openCursor(s.ctx, scope, "discover", digest, req.Cursor, &position); err != nil {
 			return DiscoveryResult{}, err
 		}
 		after = &position
@@ -194,7 +202,7 @@ func (e *Engine) discover(ctx context.Context, scope auth.Scope, req DiscoveryRe
 	var ticket cacheTicket
 	if cacheable {
 		var raw []byte
-		raw, ticket, err = e.cacheLookup(ctx, scope, prof.Identity, "discover", jsonKey(struct {
+		raw, ticket, err = e.cacheLookup(s.ctx, scope, prof.Identity, "discover", jsonKey(struct {
 			P discoverParams
 			L uint32
 			C string
@@ -202,18 +210,22 @@ func (e *Engine) discover(ctx context.Context, scope auth.Scope, req DiscoveryRe
 		if err != nil {
 			return DiscoveryResult{}, err
 		}
-		var hit DiscoveryResult
-		if raw != nil && json.Unmarshal(raw, &hit) == nil && hit.Freshness.Completeness == CompletenessComplete && len(hit.Items) <= int(req.Limit) {
-			hit.Freshness.Cached = true
-			return hit, nil
+		if raw != nil {
+			if cost, ok, cerr := s.chargeHit(raw); cerr != nil {
+				return DiscoveryResult{}, cerr
+			} else if ok {
+				var hit DiscoveryResult
+				if json.Unmarshal(raw, &hit) == nil && hit.Freshness.Completeness == CompletenessComplete && len(hit.Items) <= int(req.Limit) {
+					hit.Freshness.Cached = true
+					if err = s.finish(ctx, true); err != nil {
+						return DiscoveryResult{}, err
+					}
+					return hit, nil
+				}
+				s.releaseHit(cost)
+			}
 		}
 	}
-	timeout, memory := e.limits.DefaultTimeout, e.limits.DefaultMemory
-	s, err := e.begin(ctx, scope, projects, timeout, memory)
-	if err != nil {
-		return DiscoveryResult{}, err
-	}
-	defer func() { _ = s.finish(ctx, false) }()
 
 	collect := &topK[string]{max: int(req.Limit) + 1, less: func(a, b string) bool { return a < b }, cost: func(v string) int64 { return int64(len(v)) + 48 }, acct: s.acct}
 	defer collect.close()

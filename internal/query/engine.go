@@ -131,7 +131,14 @@ func normalizeError(err error, compile bool) error {
 	case errors.Is(err, regexcompat.ErrScope), errors.Is(err, regexcompat.ErrProfile):
 		return model.Fail(model.Invalid)
 	case errors.As(err, &pipeline):
-		return &syntax.LanguageError{Code: "metric.pipeline-error", Category: "execution", SafeMessage: "metric input contains pipeline error: " + pipeline.Category}
+		// The category is one of the engine's closed error kinds only when the
+		// engine set the label; a record that extracted a label of that name carries
+		// arbitrary text, which a static SafeMessage must never repeat.
+		message := "metric input contains an __error__ label"
+		if pipeline.EngineSet {
+			message = "metric input contains pipeline error: " + pipeline.Category
+		}
+		return &syntax.LanguageError{Code: "metric.pipeline-error", Category: "execution", SafeMessage: message}
 	case errors.As(err, &template):
 		return &syntax.LanguageError{Code: "template." + template.Phase, Category: "template", SafeMessage: template.SafeMessage()}
 	}
@@ -403,6 +410,79 @@ func (s *session) finish(ctx context.Context, verify bool) error {
 	return err
 }
 
+// chargeHit accounts a cache hit's payload before it is decoded: the cache's
+// copy plus the decoded structure are charged at twice the serialized size, to
+// the same query account (and process-wide pool) as a cold computation. A
+// payload the account cannot hold is reported as not usable so the caller
+// recomputes under the same admission; any other refusal is the request's error.
+func (s *session) chargeHit(raw []byte) (cost int64, ok bool, err error) {
+	cost = 2 * int64(len(raw))
+	if err = s.acct.Reserve(cost); err != nil {
+		if faultCode(err) == model.Quota {
+			return 0, false, nil
+		}
+		return 0, false, err
+	}
+	s.wire.Add(cost)
+	return cost, true, nil
+}
+
+// releaseHit gives back the charge of a hit that was not used.
+func (s *session) releaseHit(cost int64) {
+	s.acct.Release(cost)
+	s.wire.Add(-cost)
+}
+
+// lease is the admission of work that scans no project data (Format): the same
+// scheduler slot, a deadline of its own and a per-request account on the shared
+// pool, released together by close on every path.
+type lease struct {
+	e       *Engine
+	ctx     context.Context
+	acct    *queryAccount
+	charged int64
+	release func()
+	cancel  context.CancelFunc
+	once    sync.Once
+}
+
+func (e *Engine) admit(ctx context.Context, scope auth.Scope, timeout time.Duration, memory int64) (*lease, error) {
+	release, err := e.sched.Acquire(ctx, scope.OrgID(), scope.PrincipalID())
+	if err != nil {
+		return nil, err
+	}
+	timed, cancel := context.WithTimeout(ctx, timeout)
+	return &lease{e: e, ctx: timed, acct: newQueryAccount(e.pool, memory), release: release, cancel: cancel}, nil
+}
+
+// charge reserves n bytes before the allocation they stand for.
+func (l *lease) charge(n int64) error {
+	if err := l.acct.Reserve(n); err != nil {
+		return err
+	}
+	l.charged += n
+	return nil
+}
+
+// stopped reports the typed fault of an expired or cancelled lease.
+func (l *lease) stopped() error {
+	if err := l.ctx.Err(); err != nil {
+		return ctxFault(err)
+	}
+	return nil
+}
+
+func (l *lease) close() {
+	l.once.Do(func() {
+		l.acct.Release(l.charged)
+		leaked, over := l.acct.finish()
+		l.e.leakedBytes.Add(leaked)
+		l.e.overReleased.Add(over)
+		l.cancel()
+		l.release()
+	})
+}
+
 // run is the state shared by the workers of one Execute.
 type run struct {
 	e        *Engine
@@ -491,13 +571,10 @@ func (e *Engine) execute(ctx context.Context, scope auth.Scope, req Request) (Re
 	if err != nil {
 		return Result{}, err
 	}
-	cached, fill, err := e.lookupQuery(ctx, scope, prof, n)
-	if err != nil {
-		return Result{}, err
-	}
-	if cached != nil {
-		return *cached, nil
-	}
+	// Admission precedes the cache lookup: a response served from the cache is
+	// decoded, charged and released like any other, and a saturated engine refuses
+	// it with the same typed fault as a cold query. Authorization above is still
+	// the only step ahead of it, so a denied caller never learns the engine's load.
 	s, err := e.begin(ctx, scope, n.Projects, n.timeout, n.memory)
 	if err != nil {
 		return Result{}, err
@@ -508,6 +585,20 @@ func (e *Engine) execute(ctx context.Context, scope auth.Scope, req Request) (Re
 			_ = s.finish(ctx, false)
 		}
 	}()
+	cached, fill, err := e.lookupQuery(s, scope, prof, n)
+	if err != nil {
+		if latched := s.acct.latched(); latched != nil {
+			return Result{}, latched
+		}
+		return Result{}, err
+	}
+	if cached != nil {
+		released = true
+		if err = s.finish(ctx, true); err != nil {
+			return Result{}, err
+		}
+		return *cached, nil
+	}
 	rn := &run{e: e, s: s, n: n, prof: prof, scope: scope, fence: storage.ReadFence{Min: n.MinCursors, AllowPartial: n.AllowPartial}, returned: n.returned}
 
 	plans := make([]projectPlan, len(n.Projects))

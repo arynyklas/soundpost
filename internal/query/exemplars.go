@@ -131,6 +131,18 @@ func (e *Engine) exemplars(ctx context.Context, scope auth.Scope, req ExemplarRe
 	if err != nil {
 		return ExemplarResult{}, err
 	}
+	// Admission follows authorization and precedes parsing, the cursor check and
+	// the cache lookup: the expression's syntax tree is charged to the account
+	// before it is built, and a cache hit is charged and released like a cold page.
+	s, err := e.begin(ctx, scope, projects, e.limits.DefaultTimeout, e.limits.DefaultMemory)
+	if err != nil {
+		return ExemplarResult{}, err
+	}
+	defer func() { _ = s.finish(ctx, false) }()
+	if err = s.acct.Reserve(planCharge(req.Expression)); err != nil {
+		return ExemplarResult{}, err
+	}
+	s.wire.Add(planCharge(req.Expression))
 	expr, err := promql.Parse(req.Expression, prof)
 	if err != nil {
 		return ExemplarResult{}, normalizeError(err, true)
@@ -160,7 +172,7 @@ func (e *Engine) exemplars(ctx context.Context, scope auth.Scope, req ExemplarRe
 	var after *exemplarKey
 	if req.Cursor != "" {
 		var position exemplarKey
-		if err = e.openCursor(ctx, scope, "exemplars", digest, req.Cursor, &position); err != nil {
+		if err = e.openCursor(s.ctx, scope, "exemplars", digest, req.Cursor, &position); err != nil {
 			return ExemplarResult{}, err
 		}
 		after = &position
@@ -169,7 +181,7 @@ func (e *Engine) exemplars(ctx context.Context, scope auth.Scope, req ExemplarRe
 	var ticket cacheTicket
 	if cacheable {
 		var raw []byte
-		raw, ticket, err = e.cacheLookup(ctx, scope, prof.Identity, req.Expression, jsonKey(struct {
+		raw, ticket, err = e.cacheLookup(s.ctx, scope, prof.Identity, req.Expression, jsonKey(struct {
 			P exemplarParams
 			L uint32
 			C string
@@ -177,17 +189,22 @@ func (e *Engine) exemplars(ctx context.Context, scope auth.Scope, req ExemplarRe
 		if err != nil {
 			return ExemplarResult{}, err
 		}
-		var hit ExemplarResult
-		if raw != nil && json.Unmarshal(raw, &hit) == nil && hit.Freshness.Completeness == CompletenessComplete && len(hit.Exemplars) <= int(req.Limit) {
-			hit.Freshness.Cached = true
-			return hit, nil
+		if raw != nil {
+			if cost, ok, cerr := s.chargeHit(raw); cerr != nil {
+				return ExemplarResult{}, cerr
+			} else if ok {
+				var hit ExemplarResult
+				if json.Unmarshal(raw, &hit) == nil && hit.Freshness.Completeness == CompletenessComplete && len(hit.Exemplars) <= int(req.Limit) {
+					hit.Freshness.Cached = true
+					if err = s.finish(ctx, true); err != nil {
+						return ExemplarResult{}, err
+					}
+					return hit, nil
+				}
+				s.releaseHit(cost)
+			}
 		}
 	}
-	s, err := e.begin(ctx, scope, projects, e.limits.DefaultTimeout, e.limits.DefaultMemory)
-	if err != nil {
-		return ExemplarResult{}, err
-	}
-	defer func() { _ = s.finish(ctx, false) }()
 	collect := &topK[exemplarItem]{max: int(req.Limit) + 1, less: func(a, b exemplarItem) bool { return a.key.less(b.key) }, cost: exemplarCost, acct: s.acct}
 	defer collect.close()
 	for i := range sets {
