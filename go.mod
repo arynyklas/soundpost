@@ -14,4 +14,7 @@ require (
 	google.golang.org/protobuf v1.36.11
 )
 
-require github.com/go-jose/go-jose/v4 v4.1.3 // indirect
+require (
+	github.com/go-jose/go-jose/v4 v4.1.3 // indirect
+	gopkg.in/yaml.v3 v3.0.1
+)

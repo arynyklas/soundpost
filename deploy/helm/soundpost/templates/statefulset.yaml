@@ -1,0 +1,166 @@
+# Copyright 2026 Aryn Yklas
+# SPDX-License-Identifier: Apache-2.0
+{{- /*
+One single-replica StatefulSet PER MEMBER (not one StatefulSet with replicas: 3): each voter has
+a literal --node-id, its own certificate, its own PersistentVolumeClaim and its own rollout.
+updateStrategy is OnDelete on purpose: `helm upgrade` must never restart a voter by itself.
+The StatefulSet controller does not honour a PodDisruptionBudget on rolling updates, so with
+three RollingUpdate sets a single `helm upgrade` would restart all three voters at once and
+lose quorum. Upgrade one member at a time (docs/operations/upgrade.md).
+*/ -}}
+{{- $root := . }}
+{{- $name := default "soundpost" .Values.nameOverride }}
+{{- $image := required "image.repository is required" .Values.image.repository }}
+{{- if .Values.image.digest }}{{ $image = printf "%s@%s" $image .Values.image.digest }}{{ else }}{{ $image = printf "%s:%s" $image (required "image.tag or image.digest is required" .Values.image.tag) }}{{ end }}
+{{- if ne (int .Values.replicationFactor) 3 }}{{ fail "replicationFactor must be 3: the engine implements exactly one or three voters and this chart installs three" }}{{ end }}
+{{- if ne (len .Values.members) 3 }}{{ fail "exactly three members are required" }}{{ end }}
+{{- range $m := .Values.members }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $name }}-{{ $m.name }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/instance: {{ $root.Release.Name }}
+    app.kubernetes.io/component: member
+    soundpost.io/member: {{ $m.name }}
+spec:
+  replicas: 1
+  serviceName: {{ $name }}-peer
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: OnDelete
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+      app.kubernetes.io/instance: {{ $root.Release.Name }}
+      soundpost.io/member: {{ $m.name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ $name }}
+        app.kubernetes.io/instance: {{ $root.Release.Name }}
+        app.kubernetes.io/component: member
+        soundpost.io/member: {{ $m.name }}
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      hostNetwork: false
+      hostPID: false
+      hostIPC: false
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+{{- if $root.Values.image.pullSecrets }}
+      imagePullSecrets:
+{{- range $s := $root.Values.image.pullSecrets }}
+        - name: {{ $s }}
+{{- end }}
+{{- end }}
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - topologyKey: {{ $root.Values.antiAffinity.topologyKey }}
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: {{ $name }}
+                  app.kubernetes.io/instance: {{ $root.Release.Name }}
+                  app.kubernetes.io/component: member
+      containers:
+        - name: soundpost
+          image: {{ $image }}
+          imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+          args:
+            - serve
+            - --mode=distributed
+            - --node-id={{ $m.id }}
+            - --cluster-config=/etc/soundpost/config/node-{{ $m.id }}.json
+            - --data-dir=/var/lib/soundpost
+            - --listen=0.0.0.0:{{ $root.Values.ports.public }}
+          ports:
+            - {name: public, containerPort: {{ $root.Values.ports.public }}}
+            - {name: peer, containerPort: {{ $root.Values.ports.peer }}}
+          securityContext:
+            privileged: false
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+            capabilities:
+              drop: [ALL]
+          # /readyz (internal/httpapi/health.go) is the functional readiness decision: this
+          # member's own quorum, apply backlog, disk, policy fences and schema. Kubernetes
+          # sends the probe over HTTPS; the route needs no credential.
+          startupProbe:
+            httpGet: {path: /readyz, port: public, scheme: HTTPS}
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: {path: /readyz, port: public, scheme: HTTPS}
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          # No liveness probe on quorum: a member that lost quorum must stay up to rejoin;
+          # restarting every member because the others are down only deepens an outage.
+          resources:
+            requests: {cpu: {{ $root.Values.resources.requests.cpu | quote }}, memory: {{ $root.Values.resources.requests.memory | quote }}}
+            limits: {memory: {{ $root.Values.resources.limits.memory | quote }}}
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/soundpost}
+            - {name: config, mountPath: /etc/soundpost/config, readOnly: true}
+            - {name: pki, mountPath: /etc/soundpost/pki, readOnly: true}
+            - {name: ca, mountPath: /etc/soundpost/ca, readOnly: true}
+            - {name: seed, mountPath: /etc/soundpost/seed, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: config
+          secret:
+            secretName: {{ $name }}-{{ $m.name }}-config
+            defaultMode: 0440
+        - name: pki
+          secret:
+            secretName: {{ $m.pkiSecret }}
+            defaultMode: 0440
+            items:
+              - {key: tls.crt, path: {{ $m.identity }}.crt}
+              - {key: tls.key, path: {{ $m.identity }}.key}
+        - name: ca
+          secret:
+            secretName: {{ $root.Values.caSecret }}
+            defaultMode: 0440
+            items:
+              - {key: ca.crt, path: ca.crt}
+        - name: seed
+          secret:
+            secretName: {{ $root.Values.seedSecret }}
+            defaultMode: 0440
+            items:
+              - {key: cluster.seed, path: cluster.seed}
+        - name: tmp
+          emptyDir: {medium: Memory, sizeLimit: 64Mi}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          app.kubernetes.io/name: {{ $name }}
+          app.kubernetes.io/instance: {{ $root.Release.Name }}
+          soundpost.io/member: {{ $m.name }}
+      spec:
+        accessModes: [ReadWriteOnce]
+{{- if $m.storage.storageClassName }}
+        storageClassName: {{ $m.storage.storageClassName }}
+{{- end }}
+        resources:
+          requests:
+            storage: {{ $m.storage.size }}
+{{- end }}

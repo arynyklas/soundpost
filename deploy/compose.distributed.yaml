@@ -1,0 +1,144 @@
+# Copyright 2026 Aryn Yklas
+# SPDX-License-Identifier: Apache-2.0
+#
+# Three Soundpost voters (replication factor 3) as three containers of the PRODUCED image
+# (deploy/Dockerfile). Each member has its own named data volume, its own configuration
+# volume (mounted read-only) and its own durable member identity.
+#
+# READ THIS BEFORE CALLING IT HIGH AVAILABILITY. Three containers with three named volumes
+# on ONE Docker host are process and disk SIMULATIONS. They share the host's kernel, power,
+# disk controller and failure. They are NOT three physical failure domains: a host loss
+# loses all three voters at once. Use docker/compose to rehearse the protocol and for tests;
+# for production use three independent hosts (see deploy/helm/soundpost and
+# docs/operations/distributed.md).
+#
+# Required: SOUNDPOST_IMAGE (the image you built; no "latest"). The three configuration
+# volumes (soundpost-a-config, ...) must be populated first from the files that
+# `go run ./internal/config/cmd/soundpost-config render` writes; see docs/operations/distributed.md.
+# Each member's volume holds only that member's certificate and key.
+name: soundpost-distributed
+
+x-member: &member
+  # Each member's image defaults to SOUNDPOST_IMAGE; SOUNDPOST_IMAGE_A/_B/_C pin one member
+  # so a rolling upgrade can move members one at a time (docs/operations/upgrade.md).
+  # Nonroot, immutable root filesystem, no capability, no seccomp relaxation. Without
+  # CAP_PERFMON and without an allowing seccomp profile, perf_event_open is denied in the
+  # server: native profiling is a separate, optional helper (profile "native" below).
+  user: "65532:65532"
+  read_only: true
+  cap_drop: [ALL]
+  security_opt:
+    - no-new-privileges:true
+  pids_limit: 512
+  restart: unless-stopped
+  stop_grace_period: 30s
+  tmpfs:
+    - /tmp:size=64m,mode=0700,uid=65532,gid=65532
+  networks: [edge, peer]
+  healthcheck:
+    # Functional readiness (GET /readyz of this member: quorum, apply, disk, schema), not a port.
+    test: ["CMD", "/soundpost", "ready", "--data-dir", "/var/lib/soundpost", "--timeout", "5s"]
+    interval: 10s
+    timeout: 6s
+    retries: 3
+    start_period: 60s
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  soundpost-a:
+    <<: *member
+    image: ${SOUNDPOST_IMAGE_A:-${SOUNDPOST_IMAGE:?set SOUNDPOST_IMAGE to the soundpost image you built, pinned by tag or digest}}
+    command: ["serve", "--mode=distributed", "--node-id=1", "--cluster-config=/etc/soundpost/node-1.json", "--data-dir=/var/lib/soundpost", "--listen=0.0.0.0:8443"]
+    ports:
+      - "${SOUNDPOST_PUBLISH_A:-127.0.0.1:8443}:8443"
+    volumes:
+      - soundpost-a-data:/var/lib/soundpost
+      - ${SOUNDPOST_CONFIG_A:-soundpost-a-config}:/etc/soundpost:ro
+
+  soundpost-b:
+    <<: *member
+    image: ${SOUNDPOST_IMAGE_B:-${SOUNDPOST_IMAGE:?set SOUNDPOST_IMAGE to the soundpost image you built, pinned by tag or digest}}
+    command: ["serve", "--mode=distributed", "--node-id=2", "--cluster-config=/etc/soundpost/node-2.json", "--data-dir=/var/lib/soundpost", "--listen=0.0.0.0:8443"]
+    ports:
+      - "${SOUNDPOST_PUBLISH_B:-127.0.0.1:8444}:8443"
+    volumes:
+      - soundpost-b-data:/var/lib/soundpost
+      - ${SOUNDPOST_CONFIG_B:-soundpost-b-config}:/etc/soundpost:ro
+
+  soundpost-c:
+    <<: *member
+    image: ${SOUNDPOST_IMAGE_C:-${SOUNDPOST_IMAGE:?set SOUNDPOST_IMAGE to the soundpost image you built, pinned by tag or digest}}
+    command: ["serve", "--mode=distributed", "--node-id=3", "--cluster-config=/etc/soundpost/node-3.json", "--data-dir=/var/lib/soundpost", "--listen=0.0.0.0:8443"]
+    ports:
+      - "${SOUNDPOST_PUBLISH_C:-127.0.0.1:8445}:8443"
+    volumes:
+      - soundpost-c-data:/var/lib/soundpost
+      - ${SOUNDPOST_CONFIG_C:-soundpost-c-config}:/etc/soundpost:ro
+
+  # OPTIONAL native acquisition helper. Not started by default: `docker compose --profile native up`.
+  # It is the ONLY service that may call perf_event_open, and only with BOTH an explicit
+  # CAP_PERFMON and the audited seccomp profile (deploy/seccomp/soundpost-perf.json; it allows
+  # perf_event_open only with PERF_FLAG_FD_CLOEXEC and denies ptrace, bpf and memory inspection).
+  # There is no privileged, unconfined or SYS_ADMIN fallback: if the host refuses (perf_event_paranoid,
+  # LSM, missing PID visibility, tracefs) the capability stays DENIED, which is reported as
+  # unavailable and never as zero or complete profile data. It has no network, a dedicated
+  # uid, and a read-only root. The profiled workload's PID namespace, the helper image and the
+  # operator policy file must each be chosen explicitly (SOUNDPOST_PERF_PID=container:<workload>,
+  # SOUNDPOST_PERF_HELPER_IMAGE, SOUNDPOST_PERF_POLICY). Their defaults name things that do not
+  # exist, so an unconfigured `--profile native` fails closed instead of starting with host-wide
+  # visibility. (Compose interpolates every service, so a required-variable form would break the
+  # default three-member stack.)
+  # The helper image is separate from the server image: cmd/soundpost-perf-acquire.
+  soundpost-perf-helper:
+    profiles: ["native"]
+    image: ${SOUNDPOST_PERF_HELPER_IMAGE:-soundpost-perf-helper:unset}
+    # Container uid 0 holding ONLY CAP_PERFMON (every other capability dropped, no-new-privileges,
+    # read-only root, no network). A non-root container process does not get an effective
+    # capability from cap_add (Docker and Kubernetes have no ambient capabilities): observed on
+    # this host, uid 65533 + PERFMON is denied (EACCES) while uid 0 + only PERFMON is allowed.
+    user: "0:0"
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [PERFMON]
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=${SOUNDPOST_PERF_SECCOMP:-./seccomp/soundpost-perf.json}
+    pid: ${SOUNDPOST_PERF_PID:-container:soundpost-perf-target-unset}
+    network_mode: none
+    pids_limit: 16
+    mem_limit: 64m
+    restart: "no"
+    tmpfs:
+      - /run/soundpost-perf:size=1m,mode=0700,uid=0,gid=0
+    volumes:
+      # root-owned operator policy: names the exact workload and the signed start authorization
+      - type: bind
+        source: ${SOUNDPOST_PERF_POLICY:-/etc/soundpost/perf-policy.json}
+        target: /etc/soundpost/perf-policy.json
+        read_only: true
+        bind:
+          create_host_path: false
+
+networks:
+  # The only route between members. internal: no external connectivity at all.
+  peer:
+    internal: true
+  edge: {}
+
+volumes:
+  soundpost-a-data:
+    name: ${SOUNDPOST_VOLUME_A:-soundpost-a-data}
+  soundpost-b-data:
+    name: ${SOUNDPOST_VOLUME_B:-soundpost-b-data}
+  soundpost-c-data:
+    name: ${SOUNDPOST_VOLUME_C:-soundpost-c-data}
+  soundpost-a-config:
+    name: ${SOUNDPOST_VOLUME_CONFIG_A:-soundpost-a-config}
+  soundpost-b-config:
+    name: ${SOUNDPOST_VOLUME_CONFIG_B:-soundpost-b-config}
+  soundpost-c-config:
+    name: ${SOUNDPOST_VOLUME_CONFIG_C:-soundpost-c-config}

@@ -78,6 +78,9 @@ func run() (err error) {
 		case "install-single":
 			smoke, stage = "install_single", "install_dispatch"
 			return RunInstallSingle(os.Args[2:])
+		case "install-distributed":
+			smoke, stage = "install_distributed", "install_dispatch"
+			return RunInstallDistributed(os.Args[2:])
 		case "host-collection":
 			smoke, stage = "host_collection", "host_collection_dispatch"
 			return RunHostCollection(os.Args[2:])

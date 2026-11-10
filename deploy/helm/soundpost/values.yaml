@@ -1,0 +1,94 @@
+# Copyright 2026 Aryn Yklas
+# SPDX-License-Identifier: Apache-2.0
+#
+# Quorum-safe distributed Soundpost: three members, replication factor 3. There is no
+# "replicas" knob and no single-StatefulSet shortcut: every member has its own durable
+# identity (node id, certificate), its own StatefulSet, its own PersistentVolumeClaim and
+# its own configuration Secret, so a member can be neither scaled away nor started twice.
+# No secret value is stored in this file: certificates, keys and the cluster seed are
+# Kubernetes Secrets you create out of band and reference by name.
+
+nameOverride: soundpost
+
+# Required; no moving "latest" tag. Prefer a digest.
+image:
+  repository: ""
+  tag: ""
+  digest: ""
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+
+# The engine implements exactly one or three voters; this chart installs three.
+replicationFactor: 3
+
+# members: stable ids 1..3 and distinct identities. Each member's certificate must carry the
+# URI SAN spiffe://soundpost/node/<identity> and the DNS SAN of its peer address
+# (<pod>.<name>-peer.<namespace>.svc). `failureDomain` is an operator ATTESTATION recorded
+# in the membership; it is only true if the three pods really land on independent nodes,
+# zones, storage and power (see docs/operations/distributed.md).
+members:
+  - name: a
+    id: 1
+    identity: node-a
+    failureDomain: domain-a
+    pkiSecret: soundpost-a-pki   # keys: tls.crt, tls.key (created by you, this member only)
+    storage: {size: 100Gi, storageClassName: ""}
+  - name: b
+    id: 2
+    identity: node-b
+    failureDomain: domain-b
+    pkiSecret: soundpost-b-pki
+    storage: {size: 100Gi, storageClassName: ""}
+  - name: c
+    id: 3
+    identity: node-c
+    failureDomain: domain-c
+    pkiSecret: soundpost-c-pki
+    storage: {size: 100Gi, storageClassName: ""}
+
+# Initial raft leader (a voter id) and the membership revision recorded in every node file.
+initialLeader: 1
+membersRevision: 1
+
+# Shared trust material, created by you: the cluster CA (key ca.crt) and the installation seed
+# (key cluster.seed; contains private telemetry and installation secrets).
+caSecret: soundpost-cluster-ca
+seedSecret: soundpost-cluster-seed
+
+ports:
+  public: 8443
+  peer: 9444
+
+# Members are spread over different nodes. Only a required rule is offered: there is no
+# preferred/soft mode, because two voters on one node are one failure.
+antiAffinity:
+  topologyKey: kubernetes.io/hostname
+
+podDisruptionBudget:
+  minAvailable: 2
+
+# NetworkPolicy: members talk to each other only on the mTLS peer port. Public ingress is
+# denied until you name who may reach the public port.
+networkPolicy:
+  enabled: true
+  publicIngressFrom: []   # list of NetworkPolicyPeer, e.g. [{namespaceSelector: {matchLabels: {name: ingress}}}]
+  extraEgress: []         # e.g. your object store for off-host backup (list of NetworkPolicyEgressRule)
+  dnsNamespaceSelector: {kubernetes.io/metadata.name: kube-system}
+
+resources:
+  requests: {cpu: 500m, memory: 1Gi}
+  limits: {memory: 4Gi}
+
+# OPTIONAL native acquisition helper (plan 04). Off. The server pods never hold PERFMON, a
+# seccomp relaxation, privileged mode or host PID. The helper is a separate DaemonSet that
+# holds exactly CAP_PERFMON plus the audited Localhost seccomp profile
+# (deploy/seccomp/soundpost-perf.json, installed on every node by you at
+# <kubelet root>/seccomp/soundpost/soundpost-perf.json). Target visibility needs hostPID:
+# leave it false and the helper cannot see workloads (capability denied, never zero data).
+perfHelper:
+  enabled: false
+  image: {repository: "", tag: "", digest: ""}
+  seccompProfile: soundpost/soundpost-perf.json
+  hostPID: false
+  policySecret: soundpost-perf-policy   # key perf-policy.json, root-owned semantics via defaultMode
+  nodeSelector: {}
