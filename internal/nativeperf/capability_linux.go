@@ -105,7 +105,17 @@ func Probe(ctx context.Context, targets []Target) (Capabilities, error) {
 	}
 	c.Permissions.CPUEventOpen = c.CPU
 	c.OffCPU = Supported
+	if !schedulerPIDsAttributable() {
+		// Tracepoint records carry init-namespace PIDs; outside the initial PID
+		// namespace no authorized task can ever match, so a session would
+		// succeed and stay empty. Report it instead of a false capability.
+		c.OffCPU = Unsupported
+		c.Reasons = append(c.Reasons, ReasonEvent)
+	}
 	for _, event := range []string{"sched_switch", "sched_wakeup", "sched_wakeup_new"} {
+		if c.OffCPU != Supported {
+			break
+		}
 		if err := ctx.Err(); err != nil {
 			return c, err
 		}
@@ -173,6 +183,9 @@ func ResolveLocalTarget(pid int) (Target, error) {
 	base := "/proc/" + strconv.Itoa(pid)
 	link, e := os.Readlink(base + "/ns/pid")
 	if e != nil {
+		if d := permissionDenied(e); d != nil {
+			return Target{}, d
+		}
 		return Target{}, ErrInvalid
 	}
 	if !strings.HasPrefix(link, "pid:[") || !strings.HasSuffix(link, "]") {
@@ -184,6 +197,9 @@ func ResolveLocalTarget(pid int) (Target, error) {
 	}
 	b, e := os.ReadFile(base + "/stat")
 	if e != nil {
+		if d := permissionDenied(e); d != nil {
+			return Target{}, d
+		}
 		return Target{}, ErrInvalid
 	}
 	end := strings.LastIndexByte(string(b), ')')
@@ -216,4 +232,28 @@ func ResolveLocalTarget(pid int) (Target, error) {
 	}
 	t := Target{PIDNamespace: model.Uint64(ns), TGID: uint32(tgid), ProcessStart: model.MonoNano(ticks * 10000000)}
 	return t, t.Validate()
+}
+
+// initPIDNamespaceInode is PROC_PID_INIT_INO, the inode of the initial PID namespace.
+const initPIDNamespaceInode = 0xEFFFFFFC
+
+// schedulerPIDsAttributable reports whether this process runs in the initial
+// PID namespace, the only one in which sched_switch/sched_wakeup raw PIDs equal
+// the PIDs of the authorized targets.
+func schedulerPIDsAttributable() bool {
+	info, err := os.Stat("/proc/self/ns/pid")
+	if err != nil {
+		return false
+	}
+	st, ok := info.Sys().(*syscall.Stat_t)
+	return ok && st.Ino == initPIDNamespaceInode
+}
+
+// permissionDenied maps EACCES/EPERM to the typed permission denial, so a target
+// the caller may not inspect is never reported as an identity or generation change.
+func permissionDenied(err error) error {
+	if errors.Is(err, syscall.EACCES) || errors.Is(err, syscall.EPERM) {
+		return &CapabilityError{Denied, ReasonPermission}
+	}
+	return nil
 }

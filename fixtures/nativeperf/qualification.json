@@ -3,12 +3,28 @@
  "license":"Apache-2.0",
  "schema":1,
  "sources":["https://man7.org/linux/man-pages/man2/perf_event_open.2.html","https://docs.kernel.org/trace/events.html"],
+ "advertised_fixtures":["cpu"],
+ "required_runtimes":["python","node","bun"],
  "rows":[
   {"kernel_series":"6.1 LTS","arch":"amd64","kernel_build":null,"kernel_config":null,"toolchain":"go1.27.3","runtime_build_flags":null,"state":"not_run"},
   {"kernel_series":"6.1 LTS","arch":"arm64","kernel_build":null,"kernel_config":null,"toolchain":"go1.27.3","runtime_build_flags":null,"state":"not_run"},
   {"kernel_series":"6.6 LTS","arch":"amd64","kernel_build":null,"kernel_config":null,"toolchain":"go1.27.3","runtime_build_flags":null,"state":"not_run"},
   {"kernel_series":"6.6 LTS","arch":"arm64","kernel_build":null,"kernel_config":null,"toolchain":"go1.27.3","runtime_build_flags":null,"state":"not_run"},
-  {"kernel_series":"6.6","arch":"amd64","kernel_build":"6.6.87.2-microsoft-standard-WSL2","kernel_config":null,"toolchain":"go1.27.3","runtime_build_flags":null,"state":"not_run","qualification":"functional evidence only; exact permissions, config and acquisition gates pending"}
+  {"kernel_series":"6.6","arch":"amd64","kernel_build":"6.6.87.2-microsoft-standard-WSL2","kernel_config":{"source":"/proc/config.gz","config_perf_events":"y","config_frame_pointer":"y","config_ftrace":"y"},"toolchain":"go1.27.3","runtime_build_flags":"workload: cc (gcc 13.3) -O2 -pthread -fno-omit-frame-pointer -g","state":"partial","qualification":"functional evidence only: this WSL2 kernel is not a 6.6 LTS runner. Exercised rows are in measured_evidence; the scheduler rows, other kernels, arm64 and full runtime matrix are unqualified"}
  ],
- "required_evidence":["exact uname/build and config digest","perf_event_paranoid and effective capability snapshot","authorized target identity","actual CPU and scheduler samples","callchain coverage","nonzero known blocked intervals","sample loss","64 MiB total resource budget","target workload overhead <=3 percent","privacy canary audit"]
+ "required_evidence":["exact uname/build and config digest","perf_event_paranoid and effective capability snapshot","authorized target identity","actual CPU and scheduler samples","callchain coverage","nonzero known blocked intervals","sample loss","64 MiB total resource budget","target workload overhead <=3 percent","privacy canary audit"],
+ "measured_evidence":{
+  "date":"2026-11-10",
+  "host":"WSL2 Ubuntu, kernel 6.6.87.2-microsoft-standard-WSL2, amd64, perf_event_paranoid=2, root with full CapEff, non-initial PID namespace",
+  "report_files":["04.09-acceptance-60s.json","04.09-overhead-cpu-full.json","04.09-qualification-require-all.json"],
+  "supported_rows":["cpu","frame_coverage","loss","fds","memory","privacy (CPU acquisition socket only)"],
+  "overhead_full_run":{"command":"overhead --hz 99 --seconds 120 --repeats 5 --fixtures cpu","workload_cpu_overhead_percent":-0.34,"stderr_percent":0.57,"throughput_change_percent":0.37,"collector_cpu_percent_of_one_core":4.57,"combined_memory_bytes_max":38182912,"budgets_met":true},
+  "unqualified_rows":[
+   {"row":"off_cpu","reason":"scheduler_pid_namespace_not_initial: tracefs is readable as root here and sched_switch opens and fires, but raw tracepoint PIDs are init-namespace PIDs and this process is in another PID namespace; 200k real switch records produced zero authorized events before the engine was changed to refuse"},
+   {"row":"runqueue_split","reason":"scheduler_pid_namespace_not_initial"},
+   {"row":"overhead (qualification gate)","reason":"only the cpu fixture was measured; see overhead_full_run"},
+   {"row":"kernel 6.1 LTS amd64/arm64, 6.6 LTS amd64/arm64","reason":"no such runner"},
+   {"row":"python 3.13/3.14, node 24, arm64 runtimes, native-extension work, trampolines, database wait, PID reuse, CPU hotplug","reason":"not built or not available here"}
+  ]
+ }
 }

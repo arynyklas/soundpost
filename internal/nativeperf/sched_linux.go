@@ -142,6 +142,9 @@ func newSchedulerAcquisition(ctx context.Context, a AuthorizedTargets, c Config,
 	if c.Validate() != nil || r == nil {
 		return nil, ErrResources
 	}
+	if !schedulerPIDsAttributable() {
+		return nil, &CapabilityError{Unsupported, ReasonEvent}
+	}
 	if e := a.Revalidate(); e != nil {
 		return nil, e
 	}

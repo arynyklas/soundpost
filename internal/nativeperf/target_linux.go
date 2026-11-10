@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"io"
 	"os"
 	"strconv"
@@ -48,12 +49,21 @@ func openCheckedTarget(t Target) (*TargetHandle, error) {
 	}
 	h.proc = os.NewFile(uintptr(p), "proc")
 	before, e := ResolveLocalTarget(int(t.TGID))
+	var denied *CapabilityError
+	if errors.As(e, &denied) && denied.Status == Denied {
+		h.Close()
+		return nil, e
+	}
 	if e != nil || before.PIDNamespace != t.PIDNamespace || before.ProcessStart != t.ProcessStart {
 		return fail()
 	}
 	// exe is the kernel-owned proc magic link, not a request-supplied path.
 	x, e := syscall.Openat(p, "exe", syscall.O_RDONLY|syscall.O_CLOEXEC, 0)
 	if e != nil {
+		if d := permissionDenied(e); d != nil {
+			h.Close()
+			return nil, d
+		}
 		return fail()
 	}
 	h.exe = os.NewFile(uintptr(x), "executable")
