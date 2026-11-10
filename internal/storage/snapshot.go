@@ -314,7 +314,13 @@ type ReservationEvidence struct {
 	Hash    model.Hash   `json:"hash"`
 	Bytes   model.Uint64 `json:"bytes"`
 	Series  []string     `json:"series"`
-	Cursor  model.Cursor `json:"cursor"`
+	// Redacted marks a batch physical erasure rewrote. Retained then lists the
+	// canonical metric series its kept records still carry and replaces Series
+	// in the restored-index cross-check; Series stays the charged set because
+	// erasure refunds no quota.
+	Redacted bool         `json:"redacted,omitempty"`
+	Retained []string     `json:"retained,omitempty"`
+	Cursor   model.Cursor `json:"cursor"`
 }
 
 // CancellationEvidence is a committed cancellation fence carried by the cut.
@@ -591,7 +597,26 @@ func quotaEvidence(slots []replica.Snapshot) (QuotaEvidence, error) {
 					return QuotaEvidence{}, model.Fail(model.Corrupt)
 				}
 				r := e.entry.Batch.Reservation
-				out.Consumed = append(out.Consumed, ReservationEvidence{ID: r.ID, Org: r.Org, Project: r.Project, Source: r.Source, Hash: r.Hash, Bytes: r.Bytes, Series: append([]string(nil), r.Series...), Cursor: e.entry.Receipt.Cursor})
+				ev := ReservationEvidence{ID: r.ID, Org: r.Org, Project: r.Project, Source: r.Source, Hash: r.Hash, Bytes: r.Bytes, Series: append([]string(nil), r.Series...), Cursor: e.entry.Receipt.Cursor}
+				if e.entry.Type == "batch_redacted" {
+					set := map[string]bool{}
+					for _, rec := range e.entry.Batch.Records {
+						if rec.Kind != model.Metric {
+							continue
+						}
+						id, ierr := model.CanonicalSeriesID(r.Project, rec)
+						if ierr != nil {
+							return QuotaEvidence{}, model.Fail(model.Corrupt)
+						}
+						set[id] = true
+					}
+					ev.Redacted = true
+					for id := range set {
+						ev.Retained = append(ev.Retained, id)
+					}
+					sort.Strings(ev.Retained)
+				}
+				out.Consumed = append(out.Consumed, ev)
 			case "cancel":
 				if e.entry.Cancel == nil {
 					return QuotaEvidence{}, model.Fail(model.Corrupt)
@@ -731,7 +756,11 @@ func ReconcileQuota(bundle BackupBundle) (QuotaReconciliation, error) {
 		if perProject[k] == nil {
 			perProject[k] = map[string]bool{}
 		}
-		for _, s := range c.Series {
+		indexed := c.Series
+		if c.Redacted {
+			indexed = c.Retained // erased records' series are charged but no longer indexed
+		}
+		for _, s := range indexed {
 			perProject[k][s] = true
 		}
 	}
@@ -968,11 +997,16 @@ func (e *Engine) CommitQuotaReconciliation(ctx context.Context, cert QuotaReconc
 	if err != nil {
 		return err
 	}
-	if len(recomputed) != len(cert.SeriesDigest) {
-		return model.Fail(model.Corrupt)
+	// An absent entry is the empty series set on either side: a project whose
+	// batches carry no metric series (logs, spans, or everything erased) has an
+	// empty digest in the certificate and no metric in the restored index.
+	for name, want := range cert.SeriesDigest {
+		if want != seriesSetDigest(recomputed[name]) {
+			return model.Fail(model.Corrupt)
+		}
 	}
 	for name, set := range recomputed {
-		if want, ok := cert.SeriesDigest[name]; !ok || want != seriesSetDigest(set) {
+		if _, ok := cert.SeriesDigest[name]; !ok && len(set) > 0 {
 			return model.Fail(model.Corrupt)
 		}
 	}
