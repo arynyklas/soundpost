@@ -118,6 +118,13 @@ type ControlState struct {
 	// closed ConditionRecord DTO: the condition state is opaque JSON the
 	// conditions package computes and control compare-and-sets under a lease.
 	ConditionBooks map[string]json.RawMessage // "org:project:condition" -> committed condition record
+	// Notification delivery outbox (plan 06 task 07). Values are the control
+	// package's closed DTOs: "delivery:<id>" holds one DeliveryRecord (stable
+	// idempotency ID, immutable attempts, claim lease), "policy:<org>:<project>:
+	// <policy>:<subject>" the opaque notify policy state and its version, and
+	// "fence:<org>:<project>" the highest lease the project's outbox accepted.
+	// None of them ever holds a destination secret or telemetry text.
+	DeliveryBooks map[string]json.RawMessage
 }
 type ControlCommand struct {
 	CommandID        ID
