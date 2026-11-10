@@ -114,6 +114,10 @@ type ControlState struct {
 	// IncidentRecord DTO: the incident state is opaque JSON the incidents package
 	// computes and control compare-and-sets without importing it.
 	IncidentBooks map[string]json.RawMessage // "org:project:incident" -> committed incident record
+	// Condition lifecycle (plan 06 task 04). Values are the control package's
+	// closed ConditionRecord DTO: the condition state is opaque JSON the
+	// conditions package computes and control compare-and-sets under a lease.
+	ConditionBooks map[string]json.RawMessage // "org:project:condition" -> committed condition record
 }
 type ControlCommand struct {
 	CommandID        ID
