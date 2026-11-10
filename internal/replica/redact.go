@@ -97,6 +97,12 @@ type redactTarget struct {
 // only reached the table is repeated by the caller after a restart; the journal rewrite is
 // atomic (the old or the new journal is in force, never a mix).
 //
+// An error returned before the journal was replaced (a hook, a read, a temp file or a pin archive
+// that could not be written) did not start writing: the group is untouched and still serves, and
+// the caller retries the same call. An error after the journal rename, or in the in-memory swap,
+// can leave the open journal handle, the retained log and the retry table disagreeing: the group
+// fails until a restart rebuilds it from the journal and the caller repeats the redaction.
+//
 // A request that cannot be honoured is refused whole with ErrInvalid before anything is
 // rewritten: an empty or oversized replacement, application index 0, a duplicate application
 // index, or a command that is not telemetry payload (barriers, cancellations, control and
@@ -159,17 +165,23 @@ func (g *Group) RedactCompleted(ctx context.Context, requests []Redaction) (Reda
 	if len(table) == 0 && len(memory) == 0 && len(g.pins) == 0 {
 		return res, nil
 	}
+	// An error before the journal was replaced (a hook, a read, a temp file, a pin archive: each
+	// replaced whole, atomically, and re-derivable) never started writing: the group is intact,
+	// the caller retries, and the pass is idempotent. Only a failure after the journal rename, or
+	// in the in-memory swap, can leave the group torn.
 	if err = g.trip(HookRedactBegin); err != nil {
-		g.fail()
 		return RedactResult{}, err
 	}
 	if res.Pins, err = g.redactPinsLocked(targets); err != nil {
-		g.fail()
 		return RedactResult{}, err
 	}
 	if len(memory) > 0 {
 		if res.Journal, err = g.rewriteJournalRedacted(targets); err != nil {
-			g.fail()
+			var torn *tornError
+			if errors.As(err, &torn) {
+				g.fail()
+				return RedactResult{}, torn.error
+			}
 			return RedactResult{}, err
 		}
 		if err = g.trip(HookRedactMemory); err != nil {
@@ -372,26 +384,35 @@ func (g *Group) rewriteJournalRedacted(targets map[model.ID]*redactTarget) (int,
 	if err = os.Rename(temp, path); err != nil {
 		return 0, err
 	}
+	// From here the file on disk is the new journal while the open handle (and the retained
+	// in-memory log) still describe the old one: a failure leaves the group torn.
 	if err = g.trip(HookRedactRenamed); err != nil {
-		return 0, err
+		return 0, &tornError{err}
 	}
 	if err = durablefs.SyncDir(dir); err != nil {
-		return 0, err
+		return 0, &tornError{err}
 	}
 	if err = w.file.Close(); err != nil {
-		return 0, err
+		return 0, &tornError{err}
 	}
 	reopened, err := os.OpenFile(path, os.O_RDWR, 0600)
 	if err != nil {
-		return 0, err
+		return 0, &tornError{err}
 	}
 	if _, err = reopened.Seek(0, io.SeekEnd); err != nil {
 		reopened.Close()
-		return 0, err
+		return 0, &tornError{err}
 	}
 	w.file = reopened
 	return rewritten, nil
 }
+
+// tornError marks a failure after the journal was replaced: the group's durable log, its open
+// handle and its in-memory log may disagree, so the group must stop serving until a restart
+// rebuilds it. A failure before that point never started writing the journal.
+type tornError struct{ error }
+
+func (e *tornError) Unwrap() error { return e.error }
 
 // redactPinsLocked rewrites every pin archive that holds a command to redact. An archive is
 // replaced by temp file, fsync and atomic rename; one that holds nothing to redact is not

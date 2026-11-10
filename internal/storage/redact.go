@@ -38,12 +38,20 @@ import (
 type redactState struct {
 	mu    sync.Mutex // serializes reconciliation: a stale replacement never overtakes a newer one
 	dirty [64]atomic.Bool
+	// epoch counts the erasures and installations that changed a slot's stored commands;
+	// legacyClean[slot] is epoch+1 of the last time the slot's legacy WAL was seen to hold none
+	// of the redacted commands' original bytes, so the (file-sized) check is not repeated.
+	epoch       [64]atomic.Uint64
+	legacyClean [64]atomic.Uint64
 }
 
 const redactFloorKey = "redact_floor"
 
 // markRedact notes that slot's stored commands were redacted after the transaction committed.
-func (e *Engine) markRedact(slot uint16) { e.redact.dirty[slot].Store(true) }
+func (e *Engine) markRedact(slot uint16) {
+	e.redact.epoch[slot].Add(1)
+	e.redact.dirty[slot].Store(true)
+}
 
 // stampRedactFloorTx records, atomically with an erasure, the physical index the slot had applied
 // when its command was redacted. Snapshots and journal heads cut at or before it still carry the
@@ -89,6 +97,27 @@ func (e *Engine) redactReplica(ctx context.Context) error {
 }
 
 func (e *Engine) redactSlot(ctx context.Context, slot uint16) error {
+	requests, err := e.redactedCommands(slot)
+	if err != nil {
+		return err
+	}
+	if len(requests) == 0 {
+		return nil
+	}
+	if err = e.trip("redact_replica"); err != nil {
+		return err
+	}
+	if _, err = e.repl.groups[slot].RedactCompleted(ctx, requests); err != nil {
+		return storageReplicaFault(err)
+	}
+	// The pre-replication WAL of an upgraded node holds the same commands: it is no longer an
+	// authority once the history is imported, and must not keep the erased bytes either.
+	return e.redactLegacyWAL(slot, requests)
+}
+
+// redactedCommands reads every redacted command of the slot back out of replica_commands: the
+// durable authority every redaction is derived from.
+func (e *Engine) redactedCommands(slot uint16) ([]replica.Redaction, error) {
 	var requests []replica.Redaction
 	err := e.db.View(func(tx *bolt.Tx) error {
 		commands := tx.Bucket([]byte("replica_commands"))
@@ -103,19 +132,7 @@ func (e *Engine) redactSlot(ctx context.Context, slot uint16) error {
 		}
 		return nil
 	})
-	if err != nil {
-		return err
-	}
-	if len(requests) == 0 {
-		return nil
-	}
-	if err = e.trip("redact_replica"); err != nil {
-		return err
-	}
-	if _, err = e.repl.groups[slot].RedactCompleted(ctx, requests); err != nil {
-		return storageReplicaFault(err)
-	}
-	return nil
+	return requests, err
 }
 
 // Residual store names. ResidualStores reports a name only while the store can still hold a copy
@@ -137,25 +154,35 @@ const (
 // head and every snapshot directory are sealed at their cut and are replaced only by a later cut
 // followed by CompactJournals and DropSupersededSnapshots, so after a completed physical cleanup
 // (checkpoint, cut, drop, compact) the answer is empty. It is empty, too, for an engine that was
-// never erased from. A group that cannot be measured is reported as holding both.
+// never erased from. A group that cannot be measured is reported as holding both. The
+// pre-replication WAL of an upgraded node is measured directly: ResidualLegacyWAL while any of its
+// entries differs from the redacted command stored for the same index.
 func (e *Engine) ResidualStores() []string {
 	if e.repl == nil {
 		return nil
 	}
-	var floors [64]uint64
+	var floors, legacy [64]uint64
 	if err := e.db.View(func(tx *bolt.Tx) error {
 		meta := tx.Bucket([]byte("replica_data"))
 		for slot := range uint16(64) {
 			floors[slot] = getUint(meta, metaKey(slot, redactFloorKey))
+			legacy[slot] = getUint(meta, metaKey(slot, "legacy"))
 		}
 		return nil
 	}); err != nil {
-		return []string{ResidualRaftJournal, ResidualRaftSnapshots}
+		return []string{ResidualRaftJournal, ResidualRaftSnapshots, ResidualLegacyWAL}
 	}
 	set := map[string]bool{}
 	for slot := range uint16(64) {
 		if e.redact.dirty[slot].Load() {
 			set[ResidualRaftCompletedEntries] = true
+		}
+		if legacy[slot] != 0 {
+			// The pre-replication WAL is read, not trusted: it is reported while any of its
+			// entries differs from the redacted command stored for the same index.
+			if stale, err := e.legacyWALStale(slot, legacy[slot]); err != nil || stale {
+				set[ResidualLegacyWAL] = true
+			}
 		}
 		if floors[slot] == 0 {
 			continue

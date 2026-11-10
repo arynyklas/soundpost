@@ -131,7 +131,10 @@ etcd raft refuses to restore a snapshot whose configuration does not contain the
 | Install | `install_begin`, `install_file_write`, `install_file_sync`, `install_manifest_write`, `install_dir_sync`, `install_switch`, `install_renamed`, `install_current_write`, `install_current_switch`, `install_published` |
 | Truncate | `compact_begin`, `compact_archive`, `compact_write`, `compact_sync`, `compact_switch`, `compact_renamed`, `compact_memory` |
 | Redact (`Group.RedactCompleted`) | `redact_begin`, `redact_pins`, `redact_write`, `redact_sync`, `redact_switch`, `redact_renamed`, `redact_memory`; the engine adds `redact_replica` before it calls the group |
+| Redact the pre-replication WAL (engine, `data/slot-NN.wal` of a node upgraded from the 01.03 layout) | `legacy_wal_begin`, `legacy_wal_write`, `legacy_wal_sync`, `legacy_wal_switch`, `legacy_wal_renamed` |
 | Restore | `quota_certificate_persisted` |
+
+An error from a redact hook up to and including `redact_switch` (or a read, temp-file or pin-archive error before the journal rename) is returned without failing the group and the next pass retries it; `redact_renamed`, `redact_memory` and any failure after the journal rename fail the group until restart. The legacy WAL rewrite is streamed into `slot-NN.wal.redact`, fsynced and renamed, so a crash leaves the complete old or the complete new file; a leftover `*.wal.redact` holds no erased byte and is removed by the next pass.
 
 At every hook the tests prove: an ACKed entry is never lost, a retry returns the original receipt, an unacknowledged write is retried rather than duplicated, the selected snapshot (if any) verifies, and a snapshot without a deletion ledger is never selected. Only `*_published` hooks leave the new snapshot selected; all earlier ones keep the old valid directory.
 

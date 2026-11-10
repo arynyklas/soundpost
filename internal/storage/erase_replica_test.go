@@ -3,13 +3,16 @@
 package storage
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
+	bolt "go.etcd.io/bbolt"
 	"soundpost/internal/model"
 	"soundpost/internal/replica"
 )
@@ -329,5 +332,148 @@ func TestCrashedBackupPinsAreListedAndDroppedByTheEngine(t *testing.T) {
 	}
 	if err = re.DropJournalPin("not-a-pin"); faultCode(err) != model.Invalid {
 		t.Fatalf("malformed pin ID: %v", err)
+	}
+}
+
+// An erasure at exactly the index of the last cut, with the journal already compacted onto that
+// cut: no retained journal entry is at or before the stamped floor, but the journal still begins
+// with the sealed snapshot record, and the snapshot directory exists, both cut before the
+// erasure. Both are reported until a later cut replaces them.
+func TestErasureAtTheLastCutIndexReportsTheSealedJournalHead(t *testing.T) {
+	x := newCheckpointEnv(t)
+	ctx := context.Background()
+	hit := x.appendMixed(eraseCanary, bothDeadlines)
+	pred := x.rangePredicate(0, 10, model.Metric)
+	barrierAll(t, x.e, pred)
+	x.cut() // the cut index is the applied index of every group; the journal begins at it
+	if err := x.e.CompactJournals(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if report, err := x.e.EraseDeleted(ctx, []model.DeletePredicate{pred}, nil); err != nil || report.Records < 1 {
+		t.Fatalf("erase %+v %v", report, err)
+	}
+	slot := hit.batch.RouteSlot
+	var floor uint64
+	if err := x.e.db.View(func(tx *bolt.Tx) error {
+		floor = getUint(tx.Bucket([]byte("replica_data")), metaKey(slot, redactFloorKey))
+		return nil
+	}); err != nil || floor == 0 {
+		t.Fatalf("floor %d (%v)", floor, err)
+	}
+	group := x.e.ReplicaGroups()[slot]
+	if first, _ := group.JournalRange(); first <= floor {
+		t.Fatalf("fixture invalid: the journal retains entries at or before the floor (first %d floor %d)", first, floor)
+	}
+	if !inHits(x.raftHits(eraseCanary), "ready.wal") {
+		t.Fatal("fixture invalid: the sealed journal head no longer carries the payload")
+	}
+	residue, err := group.Residue(floor)
+	if err != nil || strings.Join(residue, ",") != ResidualRaftJournal+","+ResidualRaftSnapshots {
+		t.Fatalf("Residue(%d) = %v (%v): the sealed head at the cut is not reported", floor, residue, err)
+	}
+	if got := x.e.ResidualStores(); strings.Join(got, ",") != ResidualRaftJournal+","+ResidualRaftSnapshots {
+		t.Fatalf("residual stores: %v", got)
+	}
+	x.maintain(pred)
+	x.requireNoCopy("after the maintenance sequence", eraseCanary)
+	if got := x.e.ResidualStores(); len(got) != 0 {
+		t.Fatalf("residual stores after the maintenance sequence: %v", got)
+	}
+}
+
+// Artifact bytes are the largest payload class the replication layer holds: every fragment is a
+// replicated command. Erasing an artifact root redacts them from the retry table, the journal,
+// the pin archives and every snapshot the same way a deleted record is.
+func TestEraseOfAnArtifactRootRedactsTheReplicationLayer(t *testing.T) {
+	const canary = "artifact-byte"
+	c, a, scope, m, raw := blobFixture(t)
+	ctx := context.Background()
+	x := &eraseEnv{t: t, store: c, a: a, dir: t.TempDir()}
+	x.e = openDeleteEngine(t, x.dir, a, c)
+	receipt, err := x.e.WriteBlob(ctx, scope, m, bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	x.cut() // the routine snapshot, sealed before anyone asked for a deletion
+	hits := x.raftHits(canary)
+	if !inHits(hits, "ready.wal") || !inHits(hits, "envelope.json") {
+		t.Fatalf("fixture invalid: the fragments are not in the journal and the snapshot envelope: %v", hits)
+	}
+	pred := model.DeletePredicate{Operation: model.NewID(), Org: m.Org, Mode: model.DeleteRetireProject, Projects: []model.ID{m.Project}, Generation: 1}
+	barrierAll(t, x.e, pred)
+	if report, err := x.e.EraseDeleted(ctx, []model.DeletePredicate{pred}, nil); err != nil || report.Blobs != 1 {
+		t.Fatalf("erase %+v %v", report, err)
+	}
+	if hits = x.raftHits(canary); inHits(hits, "ready.wal") {
+		t.Fatalf("the journal still holds the erased fragments right after the erasure: %v", hits)
+	}
+	if got := x.e.ResidualStores(); strings.Join(got, ",") != ResidualRaftJournal+","+ResidualRaftSnapshots {
+		t.Fatalf("residual stores before the maintenance sequence: %v", got)
+	}
+	x.maintain(pred)
+	x.requireNoCopy("after the maintenance sequence", canary)
+	if got := x.e.ResidualStores(); len(got) != 0 {
+		t.Fatalf("residual stores after the maintenance sequence: %v", got)
+	}
+	x.reopenDelete()
+	x.requireNoCopy("after a restart", canary)
+	if err := x.e.VerifyBlob(ctx, receipt); err == nil {
+		t.Fatal("an erased artifact still verifies")
+	}
+}
+
+// The redaction set is found by the JSON text prefix of the stored command (isRedactedCommand,
+// redactionOf, batchCommandPrefix). Both redaction kinds, produced by the real erase pass and
+// marshalled again by the real wire encoder, must stay recognizable by every prefix reader: an
+// encoder change that moves or adds a leading field would silently drop erased commands out of
+// the reconcile.
+func TestRedactedCommandsStayRecognizedAfterTheWireEncoder(t *testing.T) {
+	op := model.NewID()
+	original := model.HashCanonical([]byte("the original command"))
+	artifact, err := json.Marshal(walEntry{Type: "artifact_redacted", Redaction: &redaction{Original: original, Erased: 2, Operations: []model.ID{op}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !isRedactedCommand(artifact) || bytes.HasPrefix(artifact, batchCommandPrefix) {
+		t.Fatalf("artifact_redacted is misclassified: %.60s", artifact)
+	}
+	if got := redactionOf(artifact); got == nil || got.Original != original || got.Erased != 2 || len(got.Operations) != 1 || got.Operations[0] != op {
+		t.Fatalf("artifact_redacted: redactionOf = %+v", got)
+	}
+
+	x := newCheckpointEnv(t)
+	hit := x.appendMixed(eraseCanary, bothDeadlines)
+	ordinary := x.command(hit.batch, hit.receipt)
+	if !bytes.HasPrefix(ordinary, batchCommandPrefix) || isRedactedCommand(ordinary) || redactionOf(ordinary) != nil {
+		t.Fatalf("an ordinary batch is misclassified: %.60s", ordinary)
+	}
+	pred := x.rangePredicate(0, 10, model.Metric)
+	barrierAll(t, x.e, pred)
+	if report, err := x.e.EraseDeleted(context.Background(), []model.DeletePredicate{pred}, nil); err != nil || report.Records != 1 {
+		t.Fatalf("erase %+v %v", report, err)
+	}
+	stored := x.command(hit.batch, hit.receipt)
+	var decoded walEntry
+	if err = json.Unmarshal(stored, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	reencoded, err := json.Marshal(decoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(reencoded, stored) {
+		t.Fatalf("the wire encoder does not round-trip a redacted batch:\n stored  %.120s\n encoded %.120s", stored, reencoded)
+	}
+	for _, raw := range [][]byte{stored, reencoded} {
+		if !isRedactedCommand(raw) || !bytes.HasPrefix(raw, batchCommandPrefix) {
+			t.Fatalf("batch_redacted is not recognized after the wire encoder: %.60s", raw)
+		}
+		got := redactionOf(raw)
+		if got == nil || got.Erased != 1 || got.Original != model.HashCanonical(ordinary) {
+			t.Fatalf("batch_redacted: redactionOf = %+v", got)
+		}
+	}
+	if !sameCommand(stored, ordinary) || !sameCommand(reencoded, ordinary) {
+		t.Fatal("the redacted command is not recognized as the redaction of the original")
 	}
 }
