@@ -132,10 +132,36 @@ func readInput(path string, value any) error {
 	defer f.Close()
 	return decodeStrict(f, value)
 }
+
+const adoptionUsage = "usage: adoption intake|shadow|journeys|policy-compare|readiness|cutover|rollback|closure [flags]; intake: --targets FILE --authorization FILE --private-output DIRECTORY --public-summary FILE"
+
+// run dispatches one subcommand; each owns its flags and receives the arguments
+// after its name.
 func run(ctx context.Context, args []string) error {
-	if len(args) == 0 || args[0] != "intake" {
-		return errors.New("usage: adoption intake --targets FILE --authorization FILE --private-output DIRECTORY --public-summary FILE")
+	if len(args) == 0 {
+		return errors.New(adoptionUsage)
 	}
+	switch args[0] {
+	case "intake":
+		return runIntake(ctx, args[1:])
+	case "shadow":
+		return runShadow(ctx, args[1:])
+	case "journeys":
+		return runJourneys(ctx, args[1:])
+	case "policy-compare":
+		return runPolicyCompare(ctx, args[1:])
+	case "readiness":
+		return runReadiness(ctx, args[1:])
+	case "cutover":
+		return runCutover(ctx, args[1:])
+	case "rollback":
+		return runRollback(ctx, args[1:])
+	case "closure":
+		return runClosure(ctx, args[1:])
+	}
+	return errors.New(adoptionUsage)
+}
+func runIntake(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("intake", flag.ContinueOnError)
 	targetsPath := fs.String("targets", "", "private targets JSON")
 	grantPath := fs.String("authorization", "", "private grant JSON")
@@ -143,7 +169,7 @@ func run(ctx context.Context, args []string) error {
 	summaryPath := fs.String("public-summary", "", "new public summary file")
 	acl := fs.Bool("private-directory-acl-confirmed", false, "operator verified restrictive NTFS ACL")
 	timeout := fs.Duration("timeout", 2*time.Minute, "overall operator deadline (positive, at most 1h)")
-	if err := fs.Parse(args[1:]); err != nil {
+	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 || !nonempty(*targetsPath, *grantPath, *output, *summaryPath) {
