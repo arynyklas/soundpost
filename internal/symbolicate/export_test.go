@@ -11,3 +11,10 @@ func (s *Service) SetFakeWorker(f func(context.Context, []byte, uint32, uint32) 
 		return workerOutput{Reason: r, Position: p}
 	}
 }
+
+// CachedEntries reports how many warm map entries the service holds.
+func (s *Service) CachedEntries() int {
+	s.cache.mu.Lock()
+	defer s.cache.mu.Unlock()
+	return s.cache.order.Len()
+}

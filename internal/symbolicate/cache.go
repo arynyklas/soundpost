@@ -9,10 +9,14 @@ import (
 	"sync"
 )
 
+// cacheKey binds warm bytes to everything that can revoke them: the exact
+// reference (Root, Hash), the caller's effective visibility and policy epoch, and
+// the organization's delete generation at the time they were read.
 type cacheKey struct {
 	Org, Project, Source, Build, Root model.ID
 	Visibility                        string
 	Epoch                             uint64
+	Generation                        uint64
 	Hash                              model.Hash
 }
 type cacheEntry struct {
@@ -67,5 +71,22 @@ func (c *boundedCache) remove(k cacheKey) {
 		c.used -= len(e.Value.(cacheEntry).data)
 		delete(c.items, k)
 		c.order.Remove(e)
+	}
+}
+
+// dropBefore discards every entry of org that was read under an older delete
+// generation. Such an entry can never be served again, so its bytes (which may
+// derive from data a deletion just removed) must not linger in memory.
+func (c *boundedCache) dropBefore(org model.ID, generation uint64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for e := c.order.Front(); e != nil; {
+		next := e.Next()
+		if v := e.Value.(cacheEntry); v.key.Org == org && v.key.Generation < generation {
+			c.used -= len(v.data)
+			delete(c.items, v.key)
+			c.order.Remove(e)
+		}
+		e = next
 	}
 }

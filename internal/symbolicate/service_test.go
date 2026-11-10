@@ -47,12 +47,12 @@ func TestSymbolicationBuildNotReleaseLabel(t *testing.T) {
 func TestWorkerLimitsPreserveOriginalFrames(t *testing.T) {
 	col := uint32(0)
 	original := model.Frame{Module: "safe/module", Function: "original", Artifact: "not-a-link", Line: 1, Column: &col, InApp: true}
-	s, e := New(nil, Config{})
+	s, e := New(nil, unusedGenerations{}, Config{})
 	if e == nil || s != nil {
 		t.Fatal("nil reader accepted")
 	}
 	// No scoped authority is fabricated, and unsupported/denied work retains the original.
-	s, e = New(&unusedReader{}, Config{})
+	s, e = New(&unusedReader{}, unusedGenerations{}, Config{})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -139,8 +139,14 @@ func (*unusedReader) Get(context.Context, auth.Scope, model.ID) (io.ReadCloser, 
 func (*unusedReader) GetSources(context.Context, auth.Scope, model.ID) (io.ReadCloser, error) {
 	return nil, errors.New("unexpected read")
 }
+
+type unusedGenerations struct{}
+
+func (unusedGenerations) DeleteGeneration(context.Context, model.ID, []model.ID) (uint64, error) {
+	return 0, errors.New("unexpected generation read")
+}
 func TestAdmissionDeadlinePreservesOriginalFrames(t *testing.T) {
-	s, e := New(&unusedReader{}, Config{})
+	s, e := New(&unusedReader{}, unusedGenerations{}, Config{})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -164,5 +170,23 @@ func TestCacheReturnsDefensiveCopies(t *testing.T) {
 	got[1] = 'Y'
 	if string(c.get(k)) != "abcdef" {
 		t.Fatal("cached bytes aliased by caller")
+	}
+}
+
+func TestCacheDropsOnlyOlderGenerationsOfOneOrganization(t *testing.T) {
+	c := newCache(64)
+	a, b := model.NewID(), model.NewID()
+	old := cacheKey{Org: a, Root: model.NewID(), Generation: 1}
+	cur := cacheKey{Org: a, Root: model.NewID(), Generation: 2}
+	foreign := cacheKey{Org: b, Root: model.NewID(), Generation: 1}
+	c.put(old, []byte("old"))
+	c.put(cur, []byte("cur"))
+	c.put(foreign, []byte("other"))
+	c.dropBefore(a, 2)
+	if c.get(old) != nil || string(c.get(cur)) != "cur" || string(c.get(foreign)) != "other" {
+		t.Fatal("dropBefore removed the wrong entries")
+	}
+	if c.used != len("cur")+len("other") || c.order.Len() != 2 {
+		t.Fatalf("accounting after drop: used=%d entries=%d", c.used, c.order.Len())
 	}
 }

@@ -54,7 +54,7 @@ func TestActualSandboxDeadlineAndRestart(t *testing.T) {
 	}
 }
 func TestSandboxUnavailableFailsClosed(t *testing.T) {
-	s, e := New(&unusedReader{}, Config{Mode: "native", CgroupRoot: "not-an-absolute-delegation"})
+	s, e := New(&unusedReader{}, unusedGenerations{}, Config{Mode: "native", CgroupRoot: "not-an-absolute-delegation"})
 	if e != nil {
 		t.Fatal(e)
 	}

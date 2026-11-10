@@ -15,7 +15,7 @@ func budgetFixture(t *testing.T) (*scopedFixture, *symbolicate.Service, *int, mo
 	t.Helper()
 	f := newScopedFixture(t)
 	_, frame := f.put(t, []byte(`{"version":3,"sources":["a.ts"],"names":[],"mappings":"AAAA"}`), []byte("generated"), false)
-	s, e := symbolicate.New(f.app.Artifacts, symbolicate.Config{})
+	s, e := symbolicate.New(f.app.Artifacts, f.app.Retention, symbolicate.Config{})
 	if e != nil {
 		t.Fatal(e)
 	}

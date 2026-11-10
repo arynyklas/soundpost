@@ -37,6 +37,18 @@ func (scope Scope) ValidateArtifactState(st model.ControlState, m model.BlobMani
 	if _, ok := o.Projects[m.Project.String()]; !ok {
 		return model.Fail(model.NotFound)
 	}
+	// An artifact root under an active deletion is gone for every consumer of
+	// this fence (reference lookup, byte reads, symbolication, native profile and
+	// link resolution), not only for the storage engine that gates its own reads:
+	// a reader that holds warm bytes must still be refused. Writes are refused the
+	// way the data plane answers a tombstoned root (Conflict); reads are
+	// indistinguishable from an absent artifact.
+	if deletionCoversArtifact(st, m) {
+		if write {
+			return model.Fail(model.Conflict)
+		}
+		return model.Fail(model.NotFound)
+	}
 	src, ok := st.Sources[m.Source.String()]
 	if !ok || src.Org != m.Org || src.Project != m.Project || src.Retired || src.Revoked || src.Closing || !src.Policy.Enabled || src.Browser {
 		return model.Fail(model.NotFound)
@@ -86,6 +98,19 @@ func (scope Scope) ValidateArtifactState(st model.ControlState, m model.BlobMani
 		}
 	}
 	return nil
+}
+
+// deletionCoversArtifact reports whether an operation that has begun covers the
+// blob's root: fencing, complete or failed, exactly the set control.ActiveDeletions
+// hands the storage engine. A held operation has not begun and hides nothing, and a
+// historical_range predicate never covers an artifact (model CoversBlob).
+func deletionCoversArtifact(st model.ControlState, m model.BlobManifest) bool {
+	for _, op := range st.Deletions {
+		if op.Phase != model.DeletePhaseHeld && op.Predicate.CoversBlob(m) {
+			return true
+		}
+	}
+	return false
 }
 
 // ValidateArtifactCleanup authorizes terminal orphan cleanup (cancel/GC). The

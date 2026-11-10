@@ -40,7 +40,7 @@ func TestCurrentAuthorityRecheckedAtWorkerRelease(t *testing.T) {
 			return nil
 		})
 	}}
-	service, e := symbolicate.New(reader, symbolicate.Config{})
+	service, e := symbolicate.New(reader, f.app.Retention, symbolicate.Config{})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -52,7 +52,7 @@ func TestCurrentAuthorityRecheckedAtWorkerRelease(t *testing.T) {
 func TestBarePathsAndLabelsNeverBecomeArtifactLookup(t *testing.T) {
 	f := newScopedFixture(t)
 	_, frame := f.put(t, []byte(`{"version":3,"sources":["a.ts"],"names":[],"mappings":"AAAA"}`), []byte("generated"), false)
-	service, e := symbolicate.New(f.app.Artifacts, symbolicate.Config{})
+	service, e := symbolicate.New(f.app.Artifacts, f.app.Retention, symbolicate.Config{})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -67,7 +67,7 @@ func TestBarePathsAndLabelsNeverBecomeArtifactLookup(t *testing.T) {
 func TestActualArtifactCannotBeSelectedWithOtherBuild(t *testing.T) {
 	f := newScopedFixture(t)
 	_, frame := f.put(t, []byte(`{"version":3,"sources":["a.ts"],"names":[],"mappings":"AAAA"}`), []byte("generated"), false)
-	service, e := symbolicate.New(f.app.Artifacts, symbolicate.Config{})
+	service, e := symbolicate.New(f.app.Artifacts, f.app.Retention, symbolicate.Config{})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -79,7 +79,7 @@ func TestActualArtifactCannotBeSelectedWithOtherBuild(t *testing.T) {
 func TestWarmedArtifactCacheCannotCrossActualOrganizationScope(t *testing.T) {
 	f := newScopedFixture(t)
 	_, frame := f.put(t, []byte(`{"version":3,"sources":["a.ts"],"names":[],"mappings":"AAAA"}`), []byte("generated"), false)
-	service, e := symbolicate.New(f.app.Artifacts, symbolicate.Config{})
+	service, e := symbolicate.New(f.app.Artifacts, f.app.Retention, symbolicate.Config{})
 	if e != nil {
 		t.Fatal(e)
 	}

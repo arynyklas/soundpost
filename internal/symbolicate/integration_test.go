@@ -118,7 +118,7 @@ func TestScopedWrongHashNeverLaunchesFallback(t *testing.T) {
 	f := newScopedFixture(t)
 	raw := []byte(`{"version":3,"sources":["a.ts"],"names":[],"mappings":"AAAA"}`)
 	_, frame := f.put(t, raw, []byte("generated"), false)
-	s, e := symbolicate.New(mismatchedReader{f.app.Artifacts}, symbolicate.Config{})
+	s, e := symbolicate.New(mismatchedReader{f.app.Artifacts}, f.app.Retention, symbolicate.Config{})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -144,7 +144,7 @@ func TestScopedSourceContextRequiresNamedGrant(t *testing.T) {
 	}); e != nil {
 		t.Fatal(e)
 	}
-	s, e := symbolicate.New(f.app.Artifacts, symbolicate.Config{})
+	s, e := symbolicate.New(f.app.Artifacts, f.app.Retention, symbolicate.Config{})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -187,7 +187,7 @@ func TestActualScopedViteSymbolicationAndRevocation(t *testing.T) {
 	_, frame := f.put(t, raw, generated, false)
 	frame.Line = position.GeneratedLine
 	frame.Column = &position.GeneratedColumn
-	s, e := symbolicate.New(f.app.Artifacts, config)
+	s, e := symbolicate.New(f.app.Artifacts, f.app.Retention, config)
 	if e != nil {
 		t.Fatal(e)
 	}

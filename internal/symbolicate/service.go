@@ -4,6 +4,7 @@ package symbolicate
 
 import (
 	"context"
+	"errors"
 	"io"
 	"slices"
 	"soundpost/internal/artifacts"
@@ -12,23 +13,29 @@ import (
 )
 
 type Service struct {
-	reader ArtifactReader
-	config Config
-	cache  *boundedCache
-	slots  chan struct{}
+	reader  ArtifactReader
+	deletes auth.DeleteGenerations
+	config  Config
+	cache   *boundedCache
+	slots   chan struct{}
 	// runner launches one worker for one frame; tests replace it with a fake.
 	runner func(context.Context, workerInput) workerOutput
 }
 
-func New(reader ArtifactReader, config Config) (*Service, error) {
-	if reader == nil || config.CacheBytes < 0 || config.CacheBytes > 64<<20 {
+// New binds the protected artifact reader and the delete-generation authority
+// (the retention service in production). Warm map bytes are keyed by the
+// generation they were read under, so any deletion, retirement or erasure that
+// advances it makes them unreachable; the deletion predicates themselves are
+// re-checked on every request through the reader's revalidation fence.
+func New(reader ArtifactReader, deletes auth.DeleteGenerations, config Config) (*Service, error) {
+	if reader == nil || deletes == nil || config.CacheBytes < 0 || config.CacheBytes > 64<<20 {
 		return nil, model.Fail(model.Invalid)
 	}
 	n := config.CacheBytes
 	if n == 0 {
 		n = 64 << 20
 	}
-	s := &Service{reader: reader, config: config, cache: newCache(n), slots: make(chan struct{}, 2)}
+	s := &Service{reader: reader, deletes: deletes, config: config, cache: newCache(n), slots: make(chan struct{}, 2)}
 	s.runner = s.run
 	return s, nil
 }
@@ -99,6 +106,15 @@ func (s *Service) ResolveWithOptions(ctx context.Context, scope auth.Scope, buil
 		if e != nil {
 			continue
 		}
+		// The generation is sampled before the reference is looked up, so a deletion
+		// that commits afterwards can only make this entry unreachable, never let its
+		// bytes be filed under the newer generation. An unanswerable authority fails
+		// closed like an absent artifact.
+		generation, e := s.deletes.DeleteGeneration(ctx, read.OrgID(), []model.ID{projects[0]})
+		if e != nil {
+			continue
+		}
+		s.cache.dropBefore(read.OrgID(), generation)
 		ref, e := s.reader.Lookup(ctx, read, id)
 		if e != nil {
 			continue
@@ -108,7 +124,9 @@ func (s *Service) ResolveWithOptions(ctx context.Context, scope auth.Scope, buil
 			continue
 		}
 		m := ref.Manifest
-		key := cacheKey{Org: m.Org, Project: m.Project, Source: m.Source, Build: build, Root: id, Visibility: read.VisibilityFingerprint(), Epoch: read.PolicyEpoch(), Hash: ref.Map.Manifest.Hash}
+		key := cacheKey{Org: m.Org, Project: m.Project, Source: m.Source, Build: build, Root: id, Visibility: read.VisibilityFingerprint(), Epoch: read.PolicyEpoch(), Generation: generation, Hash: ref.Map.Manifest.Hash}
+		// Every request, warm or cold, passes the current retention, deletion and
+		// grant fence before any cached byte is used.
 		if read.RevalidateArtifact(ctx, ref.Map.Manifest, false) != nil {
 			s.cache.remove(key)
 			continue
@@ -118,7 +136,12 @@ func (s *Service) ResolveWithOptions(ctx context.Context, scope auth.Scope, buil
 			raw, e = s.read(ctx, read, ref, false)
 			if e != nil {
 				s.cache.remove(key)
-				out[i].Reason = CorruptArtifact
+				// A NotFound read is an absent or denied artifact (a deletion
+				// committing between the fence and the read): one answer, never a
+				// corruption report that confirms the root existed.
+				if !isNotFound(e) {
+					out[i].Reason = CorruptArtifact
+				}
 				continue
 			}
 			s.cache.put(key, raw)
@@ -160,6 +183,11 @@ func (s *Service) ResolveWithOptions(ctx context.Context, scope auth.Scope, buil
 		}
 	}
 	return out, nil
+}
+
+func isNotFound(err error) bool {
+	var fault *model.Fault
+	return errors.As(err, &fault) && fault.Code == model.NotFound
 }
 
 type frameKey struct {
