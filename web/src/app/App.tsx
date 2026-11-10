@@ -17,6 +17,23 @@ import { JobsPage } from '../jobs/JobsPage';
 import { MAX_PROJECTS, SECTIONS, decodeHash, encodeHash, formatNs, isId, scopeKey, useInvestigation, validTimezone, windowEndingAt, type IncidentRef, type SectionId, type ViewContext } from './context';
 import { SectionList, StatusPanel } from './StatusPanel';
 
+/** After an entity (incident, trace, replay, ...) is opened, focus moves to the entity's own heading as soon as it exists, so
+ * keyboard and screen-reader users land on the result instead of staying on the submit button. (The session boundary remounts
+ * the investigation on every address change, so this also runs when the page is opened from a deep link.) */
+function useFocusEntityHeading(entity: string): void {
+ React.useEffect(() => {
+  if (entity === '') return;
+  const find = (): HTMLElement | null => document.querySelector<HTMLElement>('[data-entity] h2');
+  const land = (h: HTMLElement): void => { h.setAttribute('tabindex', '-1'); h.focus(); };
+  const now = find();
+  if (now) { land(now); return; }
+  const observer = new MutationObserver(() => { const h = find(); if (h) { observer.disconnect(); land(h); } });
+  observer.observe(document.body, { childList: true, subtree: true });
+  const stop = window.setTimeout(() => observer.disconnect(), 10_000);
+  return () => { observer.disconnect(); window.clearTimeout(stop); };
+ }, [entity]);
+}
+
 const WINDOWS: readonly { minutes: number; label: string }[] = [{ minutes: 15, label: 'Last 15 minutes' }, { minutes: 60, label: 'Last hour' }, { minutes: 360, label: 'Last 6 hours' }, { minutes: 1440, label: 'Last 24 hours' }];
 
 function ScopeForm(props: { current: ViewContext | null; apply: (next: Omit<ViewContext, 'generation'>) => void }): React.JSX.Element {
@@ -84,7 +101,7 @@ function IncidentEntry(props: { context: ViewContext; incident: IncidentRef | nu
     <button type="submit">Open incident</button>
     {error && <p role="alert" className="error">{error}</p>}
    </form>
-   {props.incident ? <IncidentPage key={`${props.incident.project}:${props.incident.id}`} id={props.incident.id} project={props.incident.project} context={props.context} /> : <p role="status">Open an incident by its ID, or pick one from the queue.</p>}
+   {props.incident ? <div data-entity><IncidentPage key={`${props.incident.project}:${props.incident.id}`} id={props.incident.id} project={props.incident.project} context={props.context} /></div> : <p role="status">Open an incident by its ID, or pick one from the queue.</p>}
   </div>
  );
 }
@@ -99,7 +116,7 @@ function ServiceEntry(props: { context: ViewContext; service: Id; open: (id: Id)
     <button type="submit">Open service</button>
     {error && <p role="alert" className="error">{error}</p>}
    </form>
-   {props.service ? <ServicePage id={props.service} context={props.context} /> : <KindView context={props.context} kind="service" label="Services" />}
+   {props.service ? <div data-entity><ServicePage id={props.service} context={props.context} /></div> : <KindView context={props.context} kind="service" label="Services" />}
   </div>
  );
 }
@@ -118,7 +135,7 @@ function TargetEntry(props: { context: ViewContext; noun: 'issue' | 'release' | 
     <button type="submit">Open {props.noun}</button>
     {error && <p role="alert" className="error">{error}</p>}
    </form>
-   {props.target ? props.children(props.target) : <p role="status">Open {article} by its ID.</p>}
+   {props.target ? <div data-entity>{props.children(props.target)}</div> : <p role="status">Open {article} by its ID.</p>}
   </div>
  );
 }
@@ -145,11 +162,22 @@ export function App(): React.JSX.Element {
  };
  const context = nav.context;
  const heading = React.useRef<HTMLHeadingElement>(null);
- React.useEffect(() => { heading.current?.focus(); }, [nav.section, context ? scopeKey(context) : '']);
  const section = SECTIONS.find((s) => s.id === nav.section) ?? SECTIONS[0]!;
+ const scope = context ? scopeKey(context) : '';
+ const entity = `${nav.incident ? `${nav.incident.project}:${nav.incident.id}` : ''}${nav.target ? `${nav.target.project}:${nav.target.id}` : ''}${nav.service}`;
+ const previous = React.useRef({ section: '', scope: '', entity: '' });
+ // A route change is announced by moving focus to a heading that names the destination: the section heading when the section or
+ // scope changes or an opened entity is closed, the entity's own heading (below) once an entity has been opened.
+ React.useEffect(() => {
+  const was = previous.current;
+  previous.current = { section: nav.section, scope, entity };
+  if (was.section !== nav.section || was.scope !== scope || (entity === '' && was.entity !== '')) heading.current?.focus();
+ }, [nav.section, scope, entity]);
+ React.useEffect(() => { document.title = `${section.label} — Soundpost`; }, [section.label]);
+ useFocusEntityHeading(entity);
  return (
   <div className="investigation">
-   <h2 tabIndex={-1} ref={heading}>Investigation</h2>
+   <h2 tabIndex={-1} ref={heading}>Investigation: {section.label}</h2>
    <ScopeForm current={context} apply={(next) => { generation.current += 1; go({ ...next, generation: generation.current }, nav.section); }} />
    {!context && <p role="status">Select an organization and projects to begin. Nothing is shown until a scope is chosen.</p>}
    {context && (

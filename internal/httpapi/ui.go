@@ -71,8 +71,21 @@ func RegisterUI(mux *http.ServeMux, assets fs.FS) {
 			serveReplayFrame(w, r, assets)
 			return
 		}
+		if isHashedAsset(r.URL.Path) {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		}
 		files.ServeHTTP(w, r)
 	})
+}
+
+var hashedName = regexp.MustCompile(`^.+?-([A-Za-z0-9_-]{8,})\.(?:js|css)$`)
+
+// isHashedAsset reports whether a served /assets file name carries its content hash in Vite's `name-HASH.ext` form (eight
+// or more base64url characters including a digit or an upper-case letter). Such a file never changes under its name, so it
+// is the only thing cached forever; the shell and every other name, the replay frame included, stay no-store.
+func isHashedAsset(urlPath string) bool {
+	m := hashedName.FindStringSubmatch(path.Base(urlPath))
+	return m != nil && strings.ContainsAny(m[1], "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ")
 }
 
 // replayFramePath is the sandboxed replay viewer document built by web/vite.config.ts.
