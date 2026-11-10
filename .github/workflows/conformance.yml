@@ -1,0 +1,75 @@
+# Copyright 2026 Aryn Yklas
+# SPDX-License-Identifier: Apache-2.0
+#
+# Verification only: no publication, no registry push, no credentials. Toolchains come from
+# build/toolchains.json and are checked against its sha256 pins before they run. Actions are
+# pinned to full commit SHAs. The campaign never pulls, builds or retags an oracle image.
+name: conformance
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: conformance-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GOTOOLCHAIN: local
+  CGO_ENABLED: "0"
+
+jobs:
+  query-language:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned Go toolchain
+        run: |
+          set -eu
+          version=$(jq -r .go.version build/toolchains.json)
+          url=$(jq -r .go.linux_amd64.url build/toolchains.json)
+          sum=$(jq -r .go.linux_amd64.sha256 build/toolchains.json)
+          archive=".tools/go${version}.linux-amd64.tar.gz"
+          mkdir -p .tools/linux
+          curl --fail --location --silent --show-error --output "$archive" "$url"
+          echo "${sum}  ${archive}" | sha256sum --check --strict -
+          tar -C .tools/linux -xzf "$archive"
+          echo "$PWD/.tools/linux/go/bin" >> "$GITHUB_PATH"
+
+      - name: Prove the inputs and the locked conformance inventory
+        run: |
+          set -eu
+          go mod download
+          go run ./build verify
+          go run ./cmd/soundpost-querycheck inventory --check
+
+      - name: Format and vet
+        run: |
+          set -eu
+          unformatted=$(gofmt -l tools internal/conformance cmd/soundpost-querycheck)
+          test -z "$unformatted" || { echo "gofmt needed:"; echo "$unformatted"; exit 1; }
+          go vet ./tools/... ./internal/conformance/... ./cmd/soundpost-querycheck
+
+      - name: Campaign tests (race)
+        run: go test -race -count=1 ./tools/qualify/... ./internal/conformance/... ./cmd/soundpost-querycheck
+
+      # Runs soundpost-querycheck release (every seed in the matrix, all profiles, all FeatureSets)
+      # and smoke (single and distributed) and exits nonzero unless every required row is verified.
+      # Until the plan 02 gate is complete this step fails by design; it is never allowed to pass.
+      - name: Query language campaign
+        run: go run ./tools/qualify/cmd/query-campaign --matrix qualification/query-matrix.yaml --artifact-dir query-campaign
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: query-campaign
+          path: query-campaign/
+          if-no-files-found: error

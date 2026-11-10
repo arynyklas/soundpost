@@ -1,0 +1,268 @@
+# Copyright 2026 Aryn Yklas
+# SPDX-License-Identifier: Apache-2.0
+#
+# Required evidence of the query language qualification campaign. Every row names a report
+# produced by plan 02 soundpost-querycheck release/smoke; nothing here states a verdict.
+# The release seed is not recorded inside a release report; it is bound by the campaign invocation.
+schema: soundpost-query-matrix/1
+root: ..
+policy: conformance/query/release-policy.json
+profiles_dir: profiles/query
+input_normalization_identity: 6a7d20174e66b42478b90be6c39544dfd68d79fef03541661e12ed947d767f6b
+seeds:
+  - 20261110
+  - 20270101
+smoke_cases:
+  - conformance/query/cases/owned-query-smoke.json
+  - conformance/query/cases/live-smoke.json
+  - conformance/query/cases/rule-smoke.json
+  - conformance/query/cases/persisted-path.json
+  - conformance/query/cases/profile-cross-products.json
+profiles:
+  - id: promql-prometheus-3.1.0
+    commit: 7086161a93b262aa0949dbf2aba15a5a7b13e0a3
+    config_sha256: 7164c79eddd23b2b804fee720f4ab2b563617b923289499088f330f7a2698679
+    feature_sets:
+      - promql-prometheus-3.1.0/semantic-sha256-1def724ec80987ebd117b52fbf8500c735f913efd1d1e16a7623f01699cc76a8
+      - promql-prometheus-3.1.0/semantic-sha256-eed774ed7a008d3c41ad55fb64303cbf5ee52ba038aa248470ffebebb73e0ac6
+      - promql-prometheus-3.1.0/semantic-sha256-179fdd6cfed03b91edcd310dd974c0547bf495d308888cbbee4d1a78a06be6e3
+      - promql-prometheus-3.1.0/semantic-sha256-d404a40ea2fd22b782cbc8ffde2150db6758ba6dbd2d3dc625cd861e4dac65c3
+  - id: promql-prometheus-3.13.5
+    commit: f497435984d1ca1d84cda5ed309387ac2eb1f8f6
+    config_sha256: 7164c79eddd23b2b804fee720f4ab2b563617b923289499088f330f7a2698679
+    feature_sets:
+      - promql-prometheus-3.13.5/semantic-sha256-83c73719d785858aa72b493c92ac76a30bb3f3f2d73cda157fa23c43a7ebe393
+      - promql-prometheus-3.13.5/semantic-sha256-b4167d2927545900fa5389901c8063cbdc048cbb602241b58d40039032b984f6
+      - promql-prometheus-3.13.5/semantic-sha256-55df1b597daebc0591641339ed92fa5669266d813f87e7d2713a49135397d81d
+      - promql-prometheus-3.13.5/semantic-sha256-338a6f092f213183f03f558014f66baa06507f1191be036a7435a2f9e2a82ad1
+      - promql-prometheus-3.13.5/semantic-sha256-2f93c635668cdbef424701111c94f6d8547144d80700abfa57be4e0d273c3e55
+      - promql-prometheus-3.13.5/semantic-sha256-3b2a162bdd0d86d6dcc3641bd794b4e11016cd43da53b7b3b8d6e42ce7a6e41b
+      - promql-prometheus-3.13.5/semantic-sha256-7cc1f22901796bdaaee9b66c726254510f41bd3027fce2f81bd4a0ef2921c92c
+      - promql-prometheus-3.13.5/semantic-sha256-29781010d7884d7f2a781f7b8779ffefa0c59bfb794c7859d9226ba2bfd5f70d
+      - promql-prometheus-3.13.5/semantic-sha256-8ad079e960c8ad104842c3b8265e66603480e2103a5e6e8b3546eb997ef226b1
+      - promql-prometheus-3.13.5/semantic-sha256-71c28da49c057aa85c657185b9af99c7af757f7159ac937310a3297f4718982c
+      - promql-prometheus-3.13.5/semantic-sha256-42b7327028b271fb8da3baf7a4420f2b5118a7a1426b30ee216673dc48590715
+      - promql-prometheus-3.13.5/semantic-sha256-84d9f2b02165b03acdcb13b9fa6f282ee48151b92d9f6da20c39f81a69bb7b96
+      - promql-prometheus-3.13.5/semantic-sha256-fae56ffca669051f0139fb33f55c23c7264f6339d32fdf3171a91583bec972cb
+      - promql-prometheus-3.13.5/semantic-sha256-0c5898a29d570343737e63b9fbaa15edd401fc432dc5ca6b9e2dd12402343ea4
+      - promql-prometheus-3.13.5/semantic-sha256-8f904f6047a5f0f45b9bc1cbad680abc916ebb4f83bcb398d19d88a4815bf64b
+      - promql-prometheus-3.13.5/semantic-sha256-d819a937b4b20c883ca897cb713034236ac64e8936dc8e8ad77f13f932a6af41
+      - promql-prometheus-3.13.5/semantic-sha256-46f530ec480eb54ba7bdb712abc93bf74803ed464f26750f2912e2afa1b725cb
+      - promql-prometheus-3.13.5/semantic-sha256-0fadafe677b9afe5c3d166a30a95a2594b311600c0bff9c2e47237882e3397c3
+      - promql-prometheus-3.13.5/semantic-sha256-5808c7ae7289ad36297ef80156b5a856edac32f27e5786d8d4329286e0b2249f
+      - promql-prometheus-3.13.5/semantic-sha256-f2b0ccb5061021e2f37e045063b64e29ca148c6d1efca1955d784a8f4f9c6076
+      - promql-prometheus-3.13.5/semantic-sha256-d61b2663ff79afb74960bee49329b41758389f3e169e6d38e9d0051d258dafc4
+      - promql-prometheus-3.13.5/semantic-sha256-61be43e34627cc32fe497ac392b99de9511f76d30b685c28c00cdd3d1ff3560a
+      - promql-prometheus-3.13.5/semantic-sha256-8ef29bcf206f669f305acbaa39d8edfcd2da5b0f1efefe95f3ea063e72eb949c
+      - promql-prometheus-3.13.5/semantic-sha256-646a7f6384f7101ae131ad6a724c939b906631a71790fd2d55db8fd95393bd71
+      - promql-prometheus-3.13.5/semantic-sha256-ea0fcd06b64a925c7ca069be9647e9aa632898ef7b7fdf09334d8fbf192fcc12
+      - promql-prometheus-3.13.5/semantic-sha256-e51906e9bb79c892bcb6c3092c32a8e45da8f5f24e7fbcf4083e248fa300b042
+      - promql-prometheus-3.13.5/semantic-sha256-74c3d86b8ba2e123c3f3c643c01f6e8a6ffeda231ae45aa06511f67ced79cfbd
+      - promql-prometheus-3.13.5/semantic-sha256-8fd0ce83a8136fafef87d74c8a59ba977ddb39a52c581d4618477468f57274f0
+      - promql-prometheus-3.13.5/semantic-sha256-abf62b3b2ad11ee42e05eac369fa2a590334c3e3a044c6af9b4bb837de66f2f3
+      - promql-prometheus-3.13.5/semantic-sha256-5b6f07b52f4e150bae795e96949eb8f04bc861d8b7c682ce9c4f54d96c965f06
+      - promql-prometheus-3.13.5/semantic-sha256-803292e692ef42f93f9b0349811f156d3f956d38079a7b3a00e2d8785cecf383
+      - promql-prometheus-3.13.5/semantic-sha256-099dc88a3dfad5b1f5a80ef6d6d2595ec8d47100470e345a72a37ad6bbf95a10
+      - promql-prometheus-3.13.5/semantic-sha256-ce434d8cff71b7083768816e1912e11d619b3bdbce5d9bf131b8ce79dc0ba238
+      - promql-prometheus-3.13.5/semantic-sha256-97e04345e4c098984d717fff0ad503197ea02432f2c89f75049af206718d991c
+      - promql-prometheus-3.13.5/semantic-sha256-9a9fcf05a48f33045b9b3d58c0a5cde327801133622699f2a0ca9717f53ac3a1
+      - promql-prometheus-3.13.5/semantic-sha256-0d5ef15b1252f8961b36bf231682a4e49d6bd2bc4dd2d91c56f259bbe3c70df0
+      - promql-prometheus-3.13.5/semantic-sha256-c5e22287fc4f1f223b2ed6a32eadd0789f2a91222f1ad78ef31f4cffcf5c598c
+      - promql-prometheus-3.13.5/semantic-sha256-413349df6e74b83e20db5461e5abc8e9f088bcd5201c7ba5a571143b6969d502
+      - promql-prometheus-3.13.5/semantic-sha256-45909f5a96fa59066c10c44d5d470a279f53e7ff29ed9a9e6efaaf930d198659
+      - promql-prometheus-3.13.5/semantic-sha256-46736a7048d2d7dad069211e12c37f8dba333805a5fa9e27aaac2ccf12651c4a
+      - promql-prometheus-3.13.5/semantic-sha256-3617c3bc38124d64dace2e8a5e796cc9089aff77f82819c32d22910a20af8f9a
+      - promql-prometheus-3.13.5/semantic-sha256-44ab6fd1af46fff9a992217f3b869cd435b0657aec50d91f88d06edddec20497
+      - promql-prometheus-3.13.5/semantic-sha256-a1b402b6d51b71387923e2f8115899822a2794052c817391436c8d35ede58c03
+      - promql-prometheus-3.13.5/semantic-sha256-172a40dc300be5ad573db6c784dcd51088228791b4155594623c80e3752f78b9
+      - promql-prometheus-3.13.5/semantic-sha256-cd8515363d3a1aaac5e3e68c89672bb34f438cdd3e30deceb19cf65d2e75bdd5
+      - promql-prometheus-3.13.5/semantic-sha256-78e0b59f57d4627e8f3ce9c1b7b82c6b40aaec656691a4849176715819c34750
+      - promql-prometheus-3.13.5/semantic-sha256-dc991d6d77d4190fa8b493f1c5bf3c9e702a27dd995c8dcacfb329edea24e62f
+      - promql-prometheus-3.13.5/semantic-sha256-7ba2bd4d5c4f4f5b7fb95749f9895213560b124c31235c5f5b8f5d017415feba
+      - promql-prometheus-3.13.5/semantic-sha256-5471309717a36addb27c036b73b4279abca64fc6a8ba939b1cd4162068014704
+      - promql-prometheus-3.13.5/semantic-sha256-09bc5022399e9860eb2e6d03b09a077778de589551a30592533b323acd80d211
+      - promql-prometheus-3.13.5/semantic-sha256-dcf6830b601e561101d482bd3a2ad2945c37730133a057e2f987ee6d1269d50b
+      - promql-prometheus-3.13.5/semantic-sha256-7874688e2598e423a964de170dedc8a208fcc8f2037d72e94281b8f73a5e65ce
+      - promql-prometheus-3.13.5/semantic-sha256-d5ea1fc36799733b53e134df57563ab5ab4675c06e97e6c3e2aab536930c234b
+      - promql-prometheus-3.13.5/semantic-sha256-31655238d8cb346560efa0fc090c4c58254668da2dbee93afe4fa80e4bc2d73a
+      - promql-prometheus-3.13.5/semantic-sha256-6c0a9a733dd49636d018c68f9c540a715f05e2a39ae27c442048b93d9774c041
+      - promql-prometheus-3.13.5/semantic-sha256-ec79d8ff507cac3f4e1946ac1ee43c98d30215bb42ce277602e5ddf9665d0705
+      - promql-prometheus-3.13.5/semantic-sha256-f264ce977681899bc46f6b6a57b8af9ac34cc7fa0bad901234f8facf175e83c2
+      - promql-prometheus-3.13.5/semantic-sha256-1f0709b8e6cf8ab2d3355ffcf322602054137a214bfd151d62cf4c37be033ab5
+      - promql-prometheus-3.13.5/semantic-sha256-30d62cb2f140cb7ed1d3dc1fd7ad8ab066c27e5f10995884c456480401e1f819
+      - promql-prometheus-3.13.5/semantic-sha256-321700d7b89f066f7ff1b0b394e00111893bcc106c222f872c4593c45a27c690
+      - promql-prometheus-3.13.5/semantic-sha256-15425f4a8949eaa70dbf4e9b3a5a8f1e4144cbb54077364c3b7922395533bbe6
+      - promql-prometheus-3.13.5/semantic-sha256-68ee3198674c285585c2021b970e4c35412bc7dd7e7ad1cdc9c6a2ccf8d6cc71
+      - promql-prometheus-3.13.5/semantic-sha256-ba47b3892caa9a2671779b1074dcfad19f288d1b48f5678851bbcf637fd0f1ff
+      - promql-prometheus-3.13.5/semantic-sha256-0d58d720500d946b31f80864d6fa4d73fdecc358e3406f64bab708d88f19449a
+      - promql-prometheus-3.13.5/semantic-sha256-71baca903aa2a77810c2c635452641d0215e762c330d8020fc499540e141bb33
+      - promql-prometheus-3.13.5/semantic-sha256-5fa65a104cb05ea3156b8203dd519af168e589d7475d165afbee67a88e59dd9b
+      - promql-prometheus-3.13.5/semantic-sha256-22750ed79ffebc091c8a68fb3028d370ae36b6f12e680634f2146a11de4e440e
+      - promql-prometheus-3.13.5/semantic-sha256-92f05d548308d4232aaf0e9d946766558ab79d4b9b626ecdd70b6a91c1d92b40
+      - promql-prometheus-3.13.5/semantic-sha256-c2985d6dc128359ac251f7602d3df8dfb63eec47b50af8a349d2a81fa0d206a2
+      - promql-prometheus-3.13.5/semantic-sha256-63a48ce68f13e4d31a254ac59695096f598fc6a4e8d5a91702a1c8fb90bbec14
+      - promql-prometheus-3.13.5/semantic-sha256-aae2aac2b3d37d8a33144e828c9a2889baf5245d40e43d15e27461ede272eb49
+      - promql-prometheus-3.13.5/semantic-sha256-8fe180d456e88a8ea7d7d6c9553e6b63d8151271f80d03f18f94ee21b45fa9fc
+      - promql-prometheus-3.13.5/semantic-sha256-a542a49574186fa3f7a38c72a32ed2b9af473e1f1e347d71183088a4be6326a2
+      - promql-prometheus-3.13.5/semantic-sha256-adf696ea42872277b79157b0c661588da197ef5d2652c90a213ad1641bd6d6bf
+      - promql-prometheus-3.13.5/semantic-sha256-a514f33994fc398598357ed80a4b75012059149e7881196e81115f8800880e62
+      - promql-prometheus-3.13.5/semantic-sha256-0e4c0d6810f33b24b790a623d3663588815974cce2512f2779f22dad5525443c
+      - promql-prometheus-3.13.5/semantic-sha256-64ae0816fff5f2d43327df4e8dd88f24bc12f83abf53a006122ea13478e46514
+      - promql-prometheus-3.13.5/semantic-sha256-7b002e828c87c50bf842cff171048ca05ce2c1ff3e9ae0d4972efcd865c5c88c
+      - promql-prometheus-3.13.5/semantic-sha256-60f7270d2456d9827f4fa9f4838fab3aa73ed80f4074a907fa1fc77cd0dffc38
+      - promql-prometheus-3.13.5/semantic-sha256-3f1f7cd91424c6f568a689610520580f74ea03d7bec6c7eece4e25c28e833dfe
+      - promql-prometheus-3.13.5/semantic-sha256-a3a45e0513ce0f2cbfa2b16d3726d0131d232694f22baf5fd2598a6d660204e6
+      - promql-prometheus-3.13.5/semantic-sha256-8b06150f30f680b45566c1f0e55b8fca9ef0c9c746daa116c94d46bcb26accf1
+      - promql-prometheus-3.13.5/semantic-sha256-eb7a8f23a0071a57c992d9fbbb8889c5c868d7344028683ce582dad422196968
+      - promql-prometheus-3.13.5/semantic-sha256-d7fe2939ef43d40dccfd1847a684f709787f581246a3c4b6303ea2415cd88cc5
+      - promql-prometheus-3.13.5/semantic-sha256-8ffc4bec5d150cd4590550472bc28771ce68d64524d7c82ef04ae6f9c480b761
+      - promql-prometheus-3.13.5/semantic-sha256-ae2a7845cf50f66267820bfdebf78a6ae2208ce62b42b26c92f0035b26738bb3
+      - promql-prometheus-3.13.5/semantic-sha256-2f472c28846624024d06c0f225c6d5dbd41c3b6e694ab8970546a0c7750d68bb
+      - promql-prometheus-3.13.5/semantic-sha256-c11873fd83cd33dd77e313ba8b90174deb0d26b0c9403b7d67e9a1e3b790890d
+      - promql-prometheus-3.13.5/semantic-sha256-b1097d4c9efc6bcfa712d1d95425f1e06d860666cf022a75ce841b061ce6d8bd
+      - promql-prometheus-3.13.5/semantic-sha256-5234c13798174a3ce42c7a0ea1b2f542f08009a0e1a752d237a1a6e5591a7a74
+      - promql-prometheus-3.13.5/semantic-sha256-31a7b8bfd9f8abc6742bda914596d36793499982156bbd9b8b0b80307b4cf34b
+      - promql-prometheus-3.13.5/semantic-sha256-408ad3451fe4bf13223261cf7e29ecc45fd5ab43219a8acfad6374b8d5b24b04
+      - promql-prometheus-3.13.5/semantic-sha256-5357958fe6fc16e1aabf65293d431145c0a5605e97b1cdd0f0125d2d3683c5cc
+      - promql-prometheus-3.13.5/semantic-sha256-4d8aa231c4a806ca9b60e5d9c11855564a9a7fc0839192eb444df156b5f4e551
+      - promql-prometheus-3.13.5/semantic-sha256-e4b3793f7138f3c14265f3b350c15cdf4cf9ce4e02c5893296f19928ab6e5d61
+      - promql-prometheus-3.13.5/semantic-sha256-e1c1e84037fab75e47b62776b2d88f92578ba23405b3aae75aa791a3d981cfcd
+      - promql-prometheus-3.13.5/semantic-sha256-f27a85c16af1e854a148e16bdefc01552de4b14dbcd3aa35d78e53253e2518fb
+      - promql-prometheus-3.13.5/semantic-sha256-fa3008bb0ed7f6820258fc209a1a0a6051c791bdb59e48ca7c96a5d418170a0f
+      - promql-prometheus-3.13.5/semantic-sha256-4e0a5300802c795614f8eec8b830718582aec610f042f1273720d79522f104cc
+      - promql-prometheus-3.13.5/semantic-sha256-d25ff9316cd4c10afc5a80c4635ed48adc349670db3dd28bc50d7a52105f67f4
+      - promql-prometheus-3.13.5/semantic-sha256-38e2e118366453622643c1156a6d8a4630a17d879aea6289bcfc0c380a386b91
+      - promql-prometheus-3.13.5/semantic-sha256-fb6538c86032f666c0717cf0095905753b60311dbd244a0d2eb88c26236f7f53
+      - promql-prometheus-3.13.5/semantic-sha256-ee485956745075250a9953f75a7ce818b04529793bf4eeb49f5a4c01129553c5
+      - promql-prometheus-3.13.5/semantic-sha256-2956cabd9207b458388f90aa14d92ce4007007dc0275de8970f38ac235d11151
+      - promql-prometheus-3.13.5/semantic-sha256-da37c9d8b0fbb09a49a2631434507eb224852075b4828c0c481efe0d3c5d0cee
+      - promql-prometheus-3.13.5/semantic-sha256-6225d5698e0f2a681a57459283dffe07c9fa7b229608f77274f5f7fef26c1689
+      - promql-prometheus-3.13.5/semantic-sha256-2f860b8a158c2a56682bc05f1d74ee61fb17973a6b1944c28544509231410d62
+      - promql-prometheus-3.13.5/semantic-sha256-3285c77c2c7a41766f33da356673d85ea5c1bc8a6521008eea3611a78015f1e2
+      - promql-prometheus-3.13.5/semantic-sha256-cc589c1e6cc4a126ec260c5f258d8d319474e53f83d5d6f9a61a09f046eef3a8
+      - promql-prometheus-3.13.5/semantic-sha256-70bb1fc1c707e179f2d9d426a1bc8267fd5760fd52d8e5d252397c6ca878fb29
+      - promql-prometheus-3.13.5/semantic-sha256-e0b291b4dffddaa8e64ff4fbe2385dc14245770a6d8a9ae672973bae7d73cb46
+      - promql-prometheus-3.13.5/semantic-sha256-3b4582f5c186b481f39ee1d70974f1b20b158baacf8588f922803cd81f469ede
+      - promql-prometheus-3.13.5/semantic-sha256-ac75d86a620051c7bf0692eddab479cdbf61285c85a749207e4c7a1558465a9d
+      - promql-prometheus-3.13.5/semantic-sha256-602b6e07b35f8896acd791be6a53de3f36ba2f5e769e148fd5fa9aff2da8c7f9
+      - promql-prometheus-3.13.5/semantic-sha256-923f1cf277c38ccbf0bb6f0b4c98607a03c49e475e165755dbcec1425855ef64
+      - promql-prometheus-3.13.5/semantic-sha256-8db5b79b6aec01d96d9c765a7652163355ab002cc556a6f29e8f2b3b6cd7da1f
+      - promql-prometheus-3.13.5/semantic-sha256-61e2ef63052c46365f8eb957111bd97d60c76d5089fd8f1a1e6381c5d2c03535
+      - promql-prometheus-3.13.5/semantic-sha256-2d957b44583885f698485f690dd082410dfc4d7392e878c5cfce68f8a5c3c957
+      - promql-prometheus-3.13.5/semantic-sha256-38f6265a2899e6f039d498ed8807b9bf0994b22f939d98fc8f77232c88adfa3a
+      - promql-prometheus-3.13.5/semantic-sha256-b30012143938ef6e7504fa2056b8b44648455b8eac5433f3fd822cc1bc43644a
+      - promql-prometheus-3.13.5/semantic-sha256-f76a3503e33f66dc4b9186d1773b68f40a499a1d8ef42430ee2ac96d3712a39e
+      - promql-prometheus-3.13.5/semantic-sha256-212e2a5766f598aa094df5b651f7a2e462e6fb193bcea358eac4c5f1bbe95a27
+      - promql-prometheus-3.13.5/semantic-sha256-64a5cfdca89d429e94d1ff3dda51bc308cbe5150ed4406228351a11cbc7db83b
+      - promql-prometheus-3.13.5/semantic-sha256-12700d51002838e7f06ce87ca6545756de64620dcfee6a81c00e0bc30b86e768
+      - promql-prometheus-3.13.5/semantic-sha256-b55f15a9bbde825beb3d385e33672385e736b86507783607021127263e6e7a04
+      - promql-prometheus-3.13.5/semantic-sha256-cbc05fbb4413c433f1af87a48953e42a92e01699aecc410041848d8b0f120797
+      - promql-prometheus-3.13.5/semantic-sha256-e6b72a52292733610230a111ca2fddbbaeca998af41315f6503f2546004f11db
+      - promql-prometheus-3.13.5/semantic-sha256-36be446528a9a2a3e08d37f4dd34d880a7dd06103d2f7e10eb8a06af14545f32
+  - id: logql-loki-3.5.2
+    commit: 257d2f62bf8a81b44dea6fe88968d1d28c8e01e7
+    config_sha256: 797fff5838030e44b4c0ef56401d22c250d3f335897cd36783dd2d9f0416d6c2
+    feature_sets:
+      - features-ef306c4e3aff8e4e9f5fb90595bb4f4b13f3de438c78ba73db83d9eb088e79eb
+      - features-d89eb07db302ed15a875481f844953b6d589f4dba77dc502d3e0f0d4e5f3afe1
+      - features-f5c3927f04901be477e550551b2c310037dfb7e2a5b722438f6ad58f58502dcd
+      - features-5420b5c21c34d4f94a4a96d7fad8ed184db2703d234316d42d5f88ad7cae1185
+      - features-c7bdbdc4ea01ade3b72094370f28f823ecd789bb2f4fb9dcfdb52f3a1da15fe9
+      - features-c3ff0630768b5466baff1ae2936f66eebcdc9a73978099bf6d24f23467e6da27
+      - features-605860cd3f74c54e783fc94ab46f9c98911e434272bf91e4debf644dd381425e
+      - features-da399eba6202e374c7679e17b98d1f75b0ce3e2b91acf3590b44e29c92a8c5c3
+      - features-c0773d30bfca23f7a9355ae1da3c9987102618d555ac7d2c30864c6cdc52cf57
+      - features-786efe229724ddebf3bd8af810a74c78877205644a6ff176044e6695fb220f1f
+      - features-815e74691b79d7126d2a8e84c7d89f1fc5b8c60b815d233bcca5d9fb830a5b10
+      - features-80140ab6d47128c5fb8c5ddb91657e95387db4add9154ddbe0a33ceb6c483504
+      - features-8b5e0b7f8df65660ebe2c10541131811df0f101fe176562bf66a214ab721b42c
+      - features-ecba27601114dacfd19ca8f08dc07e435b4b11940fa8788a9557aeadd6e55cb3
+      - features-c93829eeba7642b48d2ae618812f985dc4f29335f47d4f7291617603062ab100
+      - features-3bd710979aa8bff310cc7139a34bbf5a3d47267b1c28c171dbdc6a5d86e9029d
+      - features-656c26655e3e010f93db6159a5da47344a5ab5e316f8c253fd159e925ed780e7
+      - features-091217d8ea2f2abb5892a0457e0840d9859c4ef10eb913cd3fc50e047b7c49b1
+      - features-50f63b7ab55a79e96b484307ed547d52ce5873432c48f08536032b0f13a95fec
+      - features-5aa6c1913932c703c58648ea39e3b964b81aac408ce33764459392fa7949b2f6
+      - features-adc18b5cc5e47c465b6361fccfbf3bfdaa24606892d164b28be806e49ba8388d
+      - features-064df8463b072520d91c64bf8d390e3bbed0465a8ce736c6cd2504e223615709
+      - features-17df3411a0f1e0591d9d4df3f16d4e2c8163412789139f4b80d9c0b759382d3e
+      - features-a1f09f1a68b4a607f9de57140e2237b43022b86c8eda275d46e49a7941f35b28
+      - features-38378212b0d24075a3753fb299d6fe8be8fdc262649772a25bfb5b2a0b31f77c
+      - features-975e08b98f18f836fe519f5bc2186a8228a95c22ede9bf1fde3c10bde8a90d2c
+      - features-26c764c0c9c7e4c1f7ba3f4b70b05f0786a79562d2500c5335f5607cffb5e4c2
+      - features-868b0b750eb4f365a957c0c843c9ba5671e6ca60360a212d74879a14fc5454bf
+      - features-7067aeed181c4bb122887c727932c25fcead0fc5f4d048c0e0eaa7dea2d22884
+      - features-4bc3a0bdff4037b03e044e493793352b4c7d196a8da66177b4ba8ae905d0b173
+      - features-ed53531efcd1d99b920a4c21652752f7bb1867d25d2fa8cadaf356983c9070be
+      - features-94b505b7fb1a30fbafcf856b41c2a3f11b3674d9226e9c7eb1f91cb9f306a689
+      - features-a41829d9b0c5285a26eb7a606bda5290a1944af56e80fbd59c0126af1f269927
+      - features-4980ecd6b1508206a32171ab442d629f300a433bda2becd19e1c6e72f60ca9cf
+      - features-24396508cb478d337ecf85b7bd9f5fdb6a4d0c3e05aeb78501050036a7b31561
+      - features-f9075058dd880639392346b38578a5f9baba2150549de41399482dcda3511403
+      - features-e36bd1236e726d7461700d70e70f26b01e8b05ef3eadc7d2e61cca7abc6c54cf
+      - features-9db7f484285bbb86bccddc35de9b5df56a8881a132b094d38133b15319591fee
+      - features-07f715c1706081c8d475657b14e10ebf858493bbae29a0e549cc94d11c8e8637
+      - features-ce1c568b7d775658ab44f9f125a0640353406109cc62bd5385e3ebf5471d39b9
+      - features-789e7c9ab894d5ab97974385e7f8c5f62c4873d2e833d2a47af5a611b760b144
+      - features-bb32e6ca433de9b554d0342bd04717b6e4bf7a24ce97fce7212a9cc4c768d7dd
+      - features-5a80a7b60b6ae086d6d1a410d719ad5c9aa148c4f53627c533242e34324ed556
+      - features-6be4a1ec08f7d1a5f7ae211ea75ed1816a2bb819501e96ff3de2f9a3203cdf17
+      - features-cf8f16994635ca288529cbcd857cf915bceea2af142a2904933d20e8a64b9598
+      - features-a42630e9cff4abc53ebfd401daa86bcd4e5cf15d24a42a745e027545e722cca6
+      - features-45c3beb9cfcfc260a8a6de2fc62f8c5e7ab90113ec3716f4c42dc4587a793fd2
+      - features-3c85585716bb949acbf85939e0f664d33343093579c6052b624bf4ecafb7421b
+      - features-2edece531de28ab7880d655308e7be0a9f37b7c0fea503f830b095fbe3ac5edb
+      - features-7d16a80657983f0c878c81df298f5f5899ce89005afaddaa89844f881df12041
+      - features-3c3c24801d17d284b3bdc25ddd40b2798d2d6595c801a8d10e48c47b9c08796d
+      - features-f8fce2b3cce1c33a974febc1a572e91ea81da421e2b869264b58d65a7da0576f
+      - features-0fcc0537a50c80295175f4d5c093bece57ca2cf42142d2bbe1ed7dd6770fb35c
+      - features-cf7c7de223fbb98dc04b1a4b56d231c59006dd66bf440fdffbc1340e4e39c257
+      - features-6d3d9fc8e2f6731908f4f5279a4227b3b886c7f87f0cb02471b0589e2287b09f
+      - features-b57103f4e392792c66b3c48f3dbc430a2d32b0fb549f44be380ec4e65fbc0870
+      - features-b732f5c9f4b49ef5f8ac915f46bf17d3ea17ff31bf47838f9c60cc1fb487b0fc
+      - features-351ba66d6046135772d0615b59fb9d777623cf9419726f7a869c7f17881472d4
+      - features-26687ef31c1930a4473a799d9ca74724247136a7059ea3fb3e93b6af4accbd37
+      - features-cc33a0ccae6ba8d12f5c5858bb8309d896578517e23668ce33dfbf2cd5aa11b2
+      - features-0b97c42dccad51773ce63a29703e17eb5ae942a64cb6228cfaa67221eb3b145b
+      - features-8195335d1973d193f43c7d5fbce9fedebd06685012ebd0ec94dbfb6713138107
+      - features-a1e989248b09ba0a5ed2c64efc01accbc96948f0d3e60cd741bb3b0ac9bd3442
+      - features-69280509fbb88439b40119420cdd88fadb9b228aa4ecf5f9ab43ef4f24be8aa9
+rows:
+  - id: release/promql-prometheus-3.1.0/seed/20261110
+    kind: release
+    profile: promql-prometheus-3.1.0
+    seed: 20261110
+    report: release-seed-20261110.json
+  - id: release/promql-prometheus-3.13.5/seed/20261110
+    kind: release
+    profile: promql-prometheus-3.13.5
+    seed: 20261110
+    report: release-seed-20261110.json
+  - id: release/logql-loki-3.5.2/seed/20261110
+    kind: release
+    profile: logql-loki-3.5.2
+    seed: 20261110
+    report: release-seed-20261110.json
+  - id: release/promql-prometheus-3.1.0/seed/20270101
+    kind: release
+    profile: promql-prometheus-3.1.0
+    seed: 20270101
+    report: release-seed-20270101.json
+  - id: release/promql-prometheus-3.13.5/seed/20270101
+    kind: release
+    profile: promql-prometheus-3.13.5
+    seed: 20270101
+    report: release-seed-20270101.json
+  - id: release/logql-loki-3.5.2/seed/20270101
+    kind: release
+    profile: logql-loki-3.5.2
+    seed: 20270101
+    report: release-seed-20270101.json
+  - id: smoke/single
+    kind: smoke
+    layout: single
+    report: smoke-single.json
+  - id: smoke/distributed
+    kind: smoke
+    layout: distributed
+    report: smoke-distributed.json
