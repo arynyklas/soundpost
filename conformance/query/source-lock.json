@@ -266,7 +266,8 @@
     "cases/logql-json-path-syntax.json": "4f39cd310ecb7d51cd0fa0aa6fc54138e4cd03ef47c05feb8085a6357b35f746",
     "cases/input-normalization.json": "46fee92f622a54e91d600cf0b5d8bf0ce5e24fba42165f5d1181709d7b020701",
     "cases/owned-query-smoke.json": "ce7a5e3383d9192b49f7b3fbb59ecc4945fe94ab58004fffc3ae815cd8dd5953",
-    "cases/live-smoke.json": "a49f648dbf04836ca2802c53c13990182f0172cbe373415e499735ed675a3f30"
+    "cases/live-smoke.json": "a49f648dbf04836ca2802c53c13990182f0172cbe373415e499735ed675a3f30",
+    "cases/rule-smoke.json": "6a5752b49831df6ab6584287a577c9eb25c2002068342bfdfa44944bdd70ad2b"
   },
   "profile_files": {
     "profiles/query/logql-loki-3.5.2.json": "cc57e2e121eee6db798ff192a35f44216ffa241b0130a816a672e004f934e48c",

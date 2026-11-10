@@ -105,6 +105,11 @@ type ControlState struct {
 	Holds             map[string]LegalHold                // hold ID -> legal hold
 	EvidenceGaps      map[string]EvidenceGap              // gap ID -> durable declared gap
 	RetentionPolicies map[string][]RetentionPolicyVersion // "org" or "org:project" -> audited versions
+	// Rule evaluation (plan 02 task 11). Values are the control package's closed
+	// JSON DTOs (RuleBook, RuleOutput): control stores them without importing the
+	// rules package, and the rules read adapter reconstructs its own types.
+	RuleBooks   map[string]json.RawMessage // "org:project:rule" -> committed rule facts
+	RuleOutputs map[string]json.RawMessage // output ID -> internal output outbox record
 }
 type ControlCommand struct {
 	CommandID        ID

@@ -131,6 +131,9 @@ func openWith(dir string, options *replicationOptions, meter storage.DiskMeter, 
 	if e != nil {
 		return fail(e)
 	}
+	if e = c.BindRuleEvaluation(); e != nil {
+		return fail(e)
+	}
 	artifactService, e := NewArtifactService(c, a, engine)
 	if e != nil {
 		return fail(e)
