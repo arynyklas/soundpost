@@ -774,3 +774,78 @@ func TestLiveTicketValidationOverHTTP(t *testing.T) {
 		t.Fatal("an invalid request reached the feed")
 	}
 }
+
+// TestLiveStreamOriginAndCSRFOverHTTP pins the cookie-session guarantees of the
+// live GET at the route: the browser's same-origin shape (no Origin, Sec-Fetch-Site:
+// same-origin) opens the stream, but only together with the CSRF token, and every
+// other shape is refused before the ticket is read. A refused request must not
+// consume the ticket, and HEAD must never reach the ticket ledger.
+func TestLiveStreamOriginAndCSRFOverHTTP(t *testing.T) {
+	e := newLiveEnv(t, func(l *query.LiveLimits) { l.ReplayWindow = 100 * time.Millisecond })
+	p := model.NewID()
+	org := e.org("live org", p)
+	alice := e.user(org, "alice@example.test")
+	e.grant(org, alice, p, true, auth.Read)
+	stream := func(ticket string, shape func(*http.Request)) (int, string) {
+		t.Helper()
+		req := e.request(alice, "GET", "/api/v1/live?ticket="+ticket, nil, nil)
+		shape(req)
+		ctx, cancel := context.WithCancel(context.Background())
+		resp, err := e.client.Do(req.WithContext(ctx))
+		if err != nil {
+			cancel()
+			t.Fatal(err)
+		}
+		status, contentType := resp.StatusCode, resp.Header.Get("Content-Type")
+		if status != 200 {
+			_, _ = io.Copy(io.Discard, resp.Body)
+		}
+		cancel()
+		resp.Body.Close()
+		// An opened stream counts against the per-principal cap until the server
+		// notices the disconnect: wait for that so the rows cannot interfere.
+		e.idle(t)
+		return status, contentType
+	}
+	sameOriginFetch := func(r *http.Request) {
+		r.Header.Del("Origin")
+		r.Header.Set("Sec-Fetch-Site", "same-origin")
+	}
+	for _, c := range []struct {
+		name  string
+		shape func(*http.Request)
+		want  int
+	}{
+		{"no origin, no fetch metadata", func(r *http.Request) { r.Header.Del("Origin") }, 403},
+		{"no origin, cross-site", func(r *http.Request) { r.Header.Del("Origin"); r.Header.Set("Sec-Fetch-Site", "cross-site") }, 403},
+		{"no origin, same-site", func(r *http.Request) { r.Header.Del("Origin"); r.Header.Set("Sec-Fetch-Site", "same-site") }, 403},
+		{"no origin, same-origin, no CSRF token", func(r *http.Request) { sameOriginFetch(r); r.Header.Del("X-CSRF-Token") }, 403},
+		{"no origin, same-origin, wrong CSRF token", func(r *http.Request) { sameOriginFetch(r); r.Header.Set("X-CSRF-Token", "not-the-token") }, 403},
+		{"matching origin, no CSRF token", func(r *http.Request) { r.Header.Del("X-CSRF-Token") }, 403},
+		{"foreign origin with same-origin metadata", func(r *http.Request) {
+			r.Header.Set("Origin", "https://evil.example.test")
+			r.Header.Set("Sec-Fetch-Site", "same-origin")
+		}, 403},
+	} {
+		ticket := e.mustTicket(alice, e.body(org, p, `{app="web"}`))
+		if status, _ := stream(ticket, c.shape); status != c.want {
+			t.Errorf("%s: status %d, want %d", c.name, status, c.want)
+		}
+		// The refusal happened before the ticket was read: it is still usable.
+		if status, _ := stream(ticket, sameOriginFetch); status != 200 {
+			t.Errorf("%s: the refused request consumed the ticket (retry %d)", c.name, status)
+		}
+	}
+	// The accepted browser shape opens a real event stream.
+	if status, ct := stream(e.mustTicket(alice, e.body(org, p, `{app="web"}`)), sameOriginFetch); status != 200 || ct != "text/event-stream" {
+		t.Errorf("same-origin fetch: %d %q", status, ct)
+	}
+	// HEAD is a safe probe: it must not burn the single-use ticket.
+	ticket := e.mustTicket(alice, e.body(org, p, `{app="web"}`))
+	if status, _ := stream(ticket, func(r *http.Request) { sameOriginFetch(r); r.Method = http.MethodHead }); status != 405 {
+		t.Errorf("HEAD on the stream: %d, want 405", status)
+	}
+	if status, _ := stream(ticket, sameOriginFetch); status != 200 {
+		t.Errorf("HEAD consumed the live ticket (GET %d)", status)
+	}
+}

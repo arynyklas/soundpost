@@ -97,6 +97,14 @@ func RegisterLiveRoutes(mux *http.ServeMux, authority *auth.Service, service Liv
 		queryReply(w, ticket, err)
 	})
 	mux.HandleFunc("GET /api/v1/live", func(w http.ResponseWriter, r *http.Request) {
+		// The mux routes HEAD to GET patterns. A HEAD must never open a stream or
+		// consume the single-use ticket, so it is refused before anything is read.
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			w.Header().Set("Cache-Control", "no-store")
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
 		credential, err := artifactCredential(authority, w, r)
 		if err != nil {
 			queryReply(w, nil, err)
