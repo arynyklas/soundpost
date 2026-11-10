@@ -12,6 +12,7 @@ import (
 	"soundpost/internal/control"
 	"soundpost/internal/exports"
 	"soundpost/internal/httpapi"
+	"soundpost/internal/incidents"
 	"soundpost/internal/ingest"
 	"soundpost/internal/link"
 	"soundpost/internal/model"
@@ -38,6 +39,7 @@ type App struct {
 	Query        *query.Engine
 	Live         *query.LiveService
 	Investigator *httpapi.Investigator
+	Incidents    *incidents.Service
 	replication  *replicatedApp
 }
 
@@ -134,6 +136,9 @@ func openWith(dir string, options *replicationOptions, meter storage.DiskMeter, 
 	if e = c.BindRuleEvaluation(); e != nil {
 		return fail(e)
 	}
+	if e = c.BindIncidentAction(); e != nil {
+		return fail(e)
+	}
 	artifactService, e := NewArtifactService(c, a, engine)
 	if e != nil {
 		return fail(e)
@@ -183,7 +188,11 @@ func openWith(dir string, options *replicationOptions, meter storage.DiskMeter, 
 	if e != nil {
 		return fail(e)
 	}
-	out := &App{Control: c, Auth: a, Storage: engine, Ingest: i, Releases: r, Artifacts: artifactService, Cache: cache, Exports: exportService, Retention: ret, Query: queryEngine, Live: liveService, Investigator: investigator}
+	incidentService, e := incidents.New(c, releaseActionClock{})
+	if e != nil {
+		return fail(e)
+	}
+	out := &App{Control: c, Auth: a, Storage: engine, Ingest: i, Releases: r, Artifacts: artifactService, Cache: cache, Exports: exportService, Retention: ret, Query: queryEngine, Live: liveService, Investigator: investigator, Incidents: incidentService}
 	startupTimeout := 20 * time.Second
 	if options != nil {
 		startupTimeout = 60 * time.Second

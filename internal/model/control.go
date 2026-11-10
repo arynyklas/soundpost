@@ -110,6 +110,10 @@ type ControlState struct {
 	// rules package, and the rules read adapter reconstructs its own types.
 	RuleBooks   map[string]json.RawMessage // "org:project:rule" -> committed rule facts
 	RuleOutputs map[string]json.RawMessage // output ID -> internal output outbox record
+	// Incident response (plan 06 task 05). Values are the control package's closed
+	// IncidentRecord DTO: the incident state is opaque JSON the incidents package
+	// computes and control compare-and-sets without importing it.
+	IncidentBooks map[string]json.RawMessage // "org:project:incident" -> committed incident record
 }
 type ControlCommand struct {
 	CommandID        ID
