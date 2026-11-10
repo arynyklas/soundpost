@@ -1,0 +1,117 @@
+# Copyright 2026 Aryn Yklas
+# SPDX-License-Identifier: Apache-2.0
+#
+# Verification only: no publication, no registry push, no credentials. Toolchains come from
+# build/toolchains.json and are checked against its sha256 pins before they run. Actions are
+# pinned to full commit SHAs.
+name: verify
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GOTOOLCHAIN: local
+  CGO_ENABLED: "0"
+
+jobs:
+  server:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned Go toolchain
+        run: |
+          set -eu
+          version=$(jq -r .go.version build/toolchains.json)
+          url=$(jq -r .go.linux_amd64.url build/toolchains.json)
+          sum=$(jq -r .go.linux_amd64.sha256 build/toolchains.json)
+          archive=".tools/go${version}.linux-amd64.tar.gz"
+          mkdir -p .tools/linux
+          curl --fail --location --silent --show-error --output "$archive" "$url"
+          echo "${sum}  ${archive}" | sha256sum --check --strict -
+          tar -C .tools/linux -xzf "$archive"
+          .tools/linux/go/bin/go version
+
+      - name: Prove the inputs (compiler tree, go.sum, Python and pnpm locks)
+        run: |
+          set -eu
+          .tools/linux/go/bin/go mod download
+          .tools/linux/go/bin/go run ./build verify
+
+      - name: Format and vet
+        run: |
+          set -eu
+          unformatted=$(.tools/linux/go/bin/gofmt -l cmd internal build tools)
+          test -z "$unformatted" || { echo "gofmt needed:"; echo "$unformatted"; exit 1; }
+          .tools/linux/go/bin/go vet ./cmd/... ./internal/... ./build ./tools/...
+
+      - name: Tests (race) for readiness and the serving process
+        run: .tools/linux/go/bin/go test -race -count=1 ./internal/health ./internal/httpapi ./cmd/soundpost ./build
+
+  distribution:
+    needs: server
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned Go toolchain
+        run: |
+          set -eu
+          version=$(jq -r .go.version build/toolchains.json)
+          archive=".tools/go${version}.linux-amd64.tar.gz"
+          mkdir -p .tools/linux
+          curl --fail --location --silent --show-error --output "$archive" "$(jq -r .go.linux_amd64.url build/toolchains.json)"
+          echo "$(jq -r .go.linux_amd64.sha256 build/toolchains.json)  ${archive}" | sha256sum --check --strict -
+          tar -C .tools/linux -xzf "$archive"
+
+      - name: Install the pinned Node
+        run: |
+          set -eu
+          url=$(jq -r .node.linux_22.url build/toolchains.json)
+          sum=$(jq -r .node.linux_22.sha256 build/toolchains.json)
+          curl --fail --location --silent --show-error --output node.tar.gz "$url"
+          echo "${sum}  node.tar.gz" | sha256sum --check --strict -
+          mkdir -p .tools/node && tar -C .tools/node --strip-components=1 -xzf node.tar.gz
+          echo "$PWD/.tools/node/bin" >> "$GITHUB_PATH"
+
+      - name: Build the UI from the locked inputs
+        run: |
+          set -eu
+          corepack enable
+          pnpm install --frozen-lockfile --ignore-scripts
+          pnpm --filter @soundpost/web build
+
+      - name: Reproducible static server build, built twice with empty caches
+        run: |
+          set -eu
+          .tools/linux/go/bin/go mod download
+          .tools/linux/go/bin/go run ./build release --out dist --version "ci-${GITHUB_SHA}" --commit "${GITHUB_SHA}" --reproduce
+
+      - name: Run the produced binary as a real installation
+        run: |
+          set -eu
+          .tools/linux/go/bin/go run ./tools/smoke install-single --artifact-dir smoke-out --release dist --binary dist/linux-amd64/soundpost
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: distribution-qualification
+          path: |
+            dist/release.json
+            dist/SHA256SUMS
+            smoke-out/install-single.json
+          if-no-files-found: error

@@ -75,6 +75,9 @@ func run() (err error) {
 		case "backup-restore":
 			smoke, stage = "backup_restore", "backup_dispatch"
 			return RunBackupRestore(os.Args[2:])
+		case "install-single":
+			smoke, stage = "install_single", "install_dispatch"
+			return RunInstallSingle(os.Args[2:])
 		case "backup-restore-child":
 			smoke, stage = "backup_restore_child", "backup_child_start"
 			return RunBackupRestoreChild(os.Args[2:])
