@@ -208,3 +208,33 @@ func (s *Store) Conditions(ctx context.Context, scope auth.Scope, project model.
 	})
 	return
 }
+
+// eraseConditions drops the condition state a deletion covers, in the caller's
+// transition, by the same rule as eraseIncidents: the labels and recent events
+// of a state derive from telemetry, so a covered state is replaced by a
+// tombstone carrying only the closed header and the erasing operation. The
+// record's identity, version, digest and fence stay.
+func eraseConditions(st *State, p model.DeletePredicate) (dropped int, err error) {
+	keys := make([]string, 0, len(st.ConditionBooks))
+	for key := range st.ConditionBooks {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		rec, _, err := loadCondition(st, key)
+		if err != nil {
+			return 0, err
+		}
+		if !stateErased(p, rec.Org, rec.Project, rec.State) {
+			continue
+		}
+		rec.State = tombstoneState("condition_id", rec.ID, rec.Org, rec.Project, rec.Version, p.Operation)
+		raw, err := json.Marshal(rec)
+		if err != nil {
+			return 0, model.Fail(model.Corrupt)
+		}
+		st.ConditionBooks[key] = raw
+		dropped++
+	}
+	return dropped, nil
+}

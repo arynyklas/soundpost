@@ -756,7 +756,8 @@ const ruleRetiredReason = "retired_project"
 // and idempotently: every unreleased output is suppressed, and every retained
 // payload (output payloads and the evaluation payloads of every rule book) is
 // dropped. Identities, digests, receipts and phases stay, as evidence; they carry
-// no telemetry.
+// no telemetry. The collection is eraseRuleFacts, the same function a committed
+// deletion applies in its own transition.
 func applyRuleRetire(scope auth.Scope, st *State, r RuleRetireApply) (Effect, error) {
 	org := scope.OrgID()
 	if err := retiredProjectAdmin(scope, *st, org, r.Project); err != nil {
@@ -765,7 +766,65 @@ func applyRuleRetire(scope auth.Scope, st *State, r RuleRetireApply) (Effect, er
 		}
 		return Effect{}, err
 	}
-	var affected []model.ID
+	affected, _, err := eraseRuleFacts(st, model.DeletePredicate{Org: org, Mode: model.DeleteRetireProject, Projects: []model.ID{r.Project}}, true)
+	if err != nil {
+		return Effect{}, err
+	}
+	if len(affected) == 0 {
+		return Effect{AffectedIDs: []model.ID{}, Phase: "unchanged"}, nil
+	}
+	return Effect{AffectedIDs: affected, Phase: "retired"}, nil
+}
+
+// ruleOutputErased reports whether a deletion predicate covers an output's
+// payload. A retirement covers every output of its projects. A range covers the
+// outputs of its signals scheduled inside it: an output's origin is its signal
+// and scheduled time, the attribution the rule outbox has always used for
+// obsolescence (an output of another signal, or scheduled outside the range,
+// stays releasable). An entity deletion names replay and profile roots, which an
+// output never records: it covers the outputs of the replay and profile signals
+// of its project, whichever root they derive from.
+func ruleOutputErased(p model.DeletePredicate, o RuleOutput) bool {
+	if !p.CoversProject(o.Org, o.Project) {
+		return false
+	}
+	switch p.Mode {
+	case model.DeleteRetireOrg, model.DeleteRetireProject:
+		return true
+	case model.DeleteHistoricalRange:
+		return signalIn(p.Signals, o.Signal) && o.At >= p.Start && o.At < p.End
+	case model.DeleteEntity:
+		return (o.Signal == model.Replay || o.Signal == model.Profile) && (len(p.Signals) == 0 || signalIn(p.Signals, o.Signal))
+	}
+	return false
+}
+
+func signalIn(kinds []model.Kind, k model.Kind) bool {
+	for _, v := range kinds {
+		if v == k {
+			return true
+		}
+	}
+	return false
+}
+
+// eraseRuleFacts drops, in the caller's transition, every payload of the rule
+// facts a deletion covers. With suppress (the retirement's collection command) it
+// also suppresses the unreleased outputs among them; a committed deletion's own
+// transition does not: an unreleased output is obsolete at read
+// (ruleOutputObsolete) and its consumer suppresses it with its own reason, as
+// every consumer contract has it, but it no longer carries a payload to release.
+// It is deterministic (outputs and books are visited in key order, nothing reads
+// a clock) and idempotent. It returns the IDs it changed and how many payloads it
+// dropped. Identities, digests, receipts and phases stay as evidence.
+//
+// A retirement also drops the retained evaluation records of every rule book of
+// its projects; a range drops the payloads of the evaluations scheduled inside it
+// (an evaluation records no signal, so every rule of the project is treated as
+// possibly reading the range). An entity deletion drops the book payloads of
+// the rules that produced a covered (replay or profile signal) output: a rule's
+// evaluation payload is attributed to its outputs, and no other rule's.
+func eraseRuleFacts(st *State, p model.DeletePredicate, suppress bool) (affected []model.ID, dropped int, err error) {
 	outputIDs := make([]string, 0, len(st.RuleOutputs))
 	for id := range st.RuleOutputs {
 		outputIDs = append(outputIDs, id)
@@ -774,23 +833,34 @@ func applyRuleRetire(scope auth.Scope, st *State, r RuleRetireApply) (Effect, er
 	for _, id := range outputIDs {
 		var o RuleOutput
 		if err := json.Unmarshal(st.RuleOutputs[id], &o); err != nil {
-			return Effect{}, model.Fail(model.Corrupt)
+			return nil, 0, model.Fail(model.Corrupt)
 		}
-		if o.Org != org || o.Project != r.Project {
+		if !ruleOutputErased(p, o) {
 			continue
 		}
 		changed := false
-		if o.Phase == RulePhasePending || o.Phase == RulePhaseAdmitted {
+		if suppress && (o.Phase == RulePhasePending || o.Phase == RulePhaseAdmitted) {
 			o.Phase, o.Reason, changed = RulePhaseSuppress, ruleRetiredReason, true
 		}
 		if len(o.Payload) != 0 && !bytes.Equal(o.Payload, []byte("null")) {
 			o.Payload, changed = nil, true
+			dropped++
 		}
 		if changed {
 			if err := storeRuleOutput(st, o); err != nil {
-				return Effect{}, err
+				return nil, 0, err
 			}
 			affected = append(affected, o.ID)
+		}
+	}
+	covered := map[string]bool{}
+	for _, id := range outputIDs {
+		var o RuleOutput
+		if err := json.Unmarshal(st.RuleOutputs[id], &o); err != nil {
+			return nil, 0, model.Fail(model.Corrupt)
+		}
+		if ruleOutputErased(p, o) {
+			covered[ruleKey(o.Org, o.Project, o.Rule)] = true
 		}
 	}
 	bookKeys := make([]string, 0, len(st.RuleBooks))
@@ -801,28 +871,40 @@ func applyRuleRetire(scope auth.Scope, st *State, r RuleRetireApply) (Effect, er
 	for _, key := range bookKeys {
 		var b RuleBook
 		if err := json.Unmarshal(st.RuleBooks[key], &b); err != nil {
-			return Effect{}, model.Fail(model.Corrupt)
+			return nil, 0, model.Fail(model.Corrupt)
 		}
-		if b.Org != org || b.Project != r.Project {
+		if !p.CoversProject(b.Org, b.Project) || p.Mode == model.DeleteEntity && !covered[key] {
 			continue
 		}
 		changed := false
 		for i := range b.Versions {
-			if len(b.Versions[i].Recent) != 0 {
-				b.Versions[i].Recent, changed = nil, true
+			v := &b.Versions[i]
+			if p.Mode == model.DeleteHistoricalRange {
+				for j := range v.Recent {
+					if v.Recent[j].At >= p.Start && v.Recent[j].At < p.End && len(v.Recent[j].Payload) != 0 {
+						v.Recent[j].Payload, changed = nil, true
+						dropped++
+					}
+				}
+				continue
+			}
+			if len(v.Recent) != 0 {
+				for j := range v.Recent {
+					if len(v.Recent[j].Payload) != 0 {
+						dropped++
+					}
+				}
+				v.Recent, changed = nil, true
 			}
 		}
 		if changed {
 			if err := storeRuleBook(st, key, b); err != nil {
-				return Effect{}, err
+				return nil, 0, err
 			}
 			affected = append(affected, b.Rule)
 		}
 	}
-	if len(affected) == 0 {
-		return Effect{AffectedIDs: []model.ID{}, Phase: "unchanged"}, nil
-	}
-	return Effect{AffectedIDs: affected, Phase: "retired"}, nil
+	return affected, dropped, nil
 }
 
 // ruleReadScope admits a scope to read one project's rule facts: a current,
@@ -906,7 +988,8 @@ func (s *Store) RuleOutputs(ctx context.Context, scope auth.Scope, project, rule
 }
 
 // ruleOutputObsolete reports whether a committed retirement or deletion now
-// covers an output's origin, so the intent must be suppressed before release.
+// covers an output's origin, so the intent must be suppressed before release. A
+// deletion covers exactly the outputs whose payloads it drops (ruleOutputErased).
 func ruleOutputObsolete(st State, o RuleOutput) bool {
 	if _, retired := st.RetiredOrgs[o.Org.String()]; retired {
 		return true
@@ -918,7 +1001,7 @@ func ruleOutputObsolete(st State, o RuleOutput) bool {
 		if op.Phase != model.DeletePhaseFencing && op.Phase != model.DeletePhaseComplete {
 			continue
 		}
-		if op.Predicate.CoversOrigin(o.Org, o.Project, o.Signal, o.At, nil) {
+		if ruleOutputErased(op.Predicate, o) {
 			return true
 		}
 	}

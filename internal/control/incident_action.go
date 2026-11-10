@@ -228,3 +228,37 @@ func (s *Store) Incidents(ctx context.Context, scope auth.Scope, project model.I
 	})
 	return
 }
+
+// eraseIncidents drops the incident state a deletion covers, in the caller's
+// transition. The state is opaque to control, so what is covered is decided from
+// what control can read: the project, and for a range the evidence times in the
+// state (a state with none, or one that cannot be read, is covered: a payload
+// that cannot be attributed is dropped whole, never kept). A retirement covers
+// every incident of its projects. An entity deletion names replay and profile
+// roots, which an incident only links by ID: it covers none. What stays is the
+// record's identity, version, digest and intent history, and a tombstone state
+// carrying only the closed header and the erasing operation.
+func eraseIncidents(st *State, p model.DeletePredicate) (dropped int, err error) {
+	keys := make([]string, 0, len(st.IncidentBooks))
+	for key := range st.IncidentBooks {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		rec, _, err := loadIncident(st, key)
+		if err != nil {
+			return 0, err
+		}
+		if !stateErased(p, rec.Org, rec.Project, rec.State) {
+			continue
+		}
+		rec.State = tombstoneState("incident_id", rec.ID, rec.Org, rec.Project, rec.Version, p.Operation)
+		raw, err := json.Marshal(rec)
+		if err != nil {
+			return 0, model.Fail(model.Corrupt)
+		}
+		st.IncidentBooks[key] = raw
+		dropped++
+	}
+	return dropped, nil
+}

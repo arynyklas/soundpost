@@ -16,6 +16,7 @@ import (
 
 type fenceFx struct {
 	t                *testing.T
+	dir              string
 	ctx              context.Context
 	store            *control.Store
 	svc              *auth.Service
@@ -32,6 +33,7 @@ func newFenceFx(t *testing.T) *fenceFx {
 	t.Helper()
 	f := &fenceFx{t: t, ctx: context.Background(), now: time.Unix(1_800_000_000, 0)}
 	dir := t.TempDir()
+	f.dir = dir
 	var err error
 	if f.store, err = control.Open(dir); err != nil {
 		t.Fatal(err)

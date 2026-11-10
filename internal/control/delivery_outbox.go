@@ -3,6 +3,7 @@
 package control
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -1129,4 +1130,68 @@ func (s *Store) PolicyRecords(ctx context.Context, scope auth.Scope, project mod
 		return nil
 	})
 	return
+}
+
+// eraseDeliveries drops, in the caller's transition, the notification bodies a
+// deletion covers (deliveryCovered: a retirement covers every delivery of its
+// projects, a range every delivery whose evidence interval overlaps it, an
+// unknown interval included). With settle (the operation is complete or failed)
+// it also settles the ones not yet sent: an unclaimed delivery is cancelled as
+// deleted at `at`; while the operation is only fencing, deliveryGate pauses it.
+// A claimed delivery keeps its phase (the holder's attempt is open and closes
+// through its own command). Identities, digests, attempts and codes stay. A
+// retirement also
+// drops the opaque policy state of its projects; a range keeps it, because it
+// holds identities, configuration and counters, not evidence.
+func eraseDeliveries(st *State, p model.DeletePredicate, at model.UnixNano, settle bool, principal model.ID) (dropped int, err error) {
+	keys := make([]string, 0, len(st.DeliveryBooks))
+	for key := range st.DeliveryBooks {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		switch {
+		case strings.HasPrefix(key, "delivery:"):
+			var r DeliveryRecord
+			if err := json.Unmarshal(st.DeliveryBooks[key], &r); err != nil {
+				return 0, model.Fail(model.Corrupt)
+			}
+			if !deliveryCovered(p, &r) {
+				continue
+			}
+			changed := false
+			if settle && r.Phase == DeliveryPending {
+				settleDelivery(&r, DeliveryCancelled, DeliveryReasonDeleted, at)
+				// The same permanent trail the claim leaves when it cancels a delivery.
+				st.Audits = append(st.Audits, model.ControlAudit{ID: deriveID(r.ID, 1), Principal: principal, Action: "notify.delivery." + DeliveryCancelled, Reason: DeliveryReasonDeleted,
+					Time: int64(at), Org: r.Org.String(), PolicyEpoch: st.Orgs[r.Org.String()].Epoch, Targets: []model.ID{r.ID}, RequestID: p.Operation, Outcome: model.AuditAllowed})
+				changed = true
+			}
+			if len(r.Body) != 0 && !bytes.Equal(r.Body, []byte("null")) {
+				r.Body, changed = nil, true
+				dropped++
+			}
+			if changed {
+				if err := storeDelivery(st, r); err != nil {
+					return 0, err
+				}
+			}
+		case strings.HasPrefix(key, "policy:"):
+			rec, _, err := loadPolicy(st, key)
+			if err != nil {
+				return 0, err
+			}
+			if !p.RetiresProject(rec.Org, rec.Project) || len(rec.State) == 0 || bytes.Equal(rec.State, []byte("null")) {
+				continue
+			}
+			rec.State = nil
+			raw, err := json.Marshal(rec)
+			if err != nil {
+				return 0, model.Fail(model.Corrupt)
+			}
+			st.DeliveryBooks[key] = raw
+			dropped++
+		}
+	}
+	return dropped, nil
 }

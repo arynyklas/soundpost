@@ -218,10 +218,15 @@ func retireScope(st *State, p model.DeletePredicate) {
 		}
 	}
 }
-func beginDeletion(st *State, op *model.DeletionOperation) {
+
+// beginDeletion fences the operation and, in the same transition, retires its
+// scope and erases the control payloads it covers (eraseControlPayloads): the
+// predicate that hides the data groups' bytes hides this state's copies too.
+func beginDeletion(st *State, op *model.DeletionOperation) error {
 	op.Predicate.Generation = model.Uint64(bumpGeneration(st, op.Predicate.Org))
 	op.Phase, op.Holds, op.BeginRevision = model.DeletePhaseFencing, nil, st.Revision+1
 	retireScope(st, op.Predicate)
+	return eraseControlPayloads(st, *op, op.RequestedAt)
 }
 func putDeletion(st *State, op model.DeletionOperation) {
 	if st.Deletions == nil {
@@ -267,7 +272,9 @@ func applyDeleteScope(scope auth.Scope, st *State, cmd Command) (Effect, error) 
 		audit(st, scope.PrincipalID(), org, "delete.held", reason, req.At, targets)
 		return Effect{AffectedIDs: []model.ID{cmd.CommandID}, Phase: model.DeletePhaseHeld}, nil
 	}
-	beginDeletion(st, &op)
+	if err = beginDeletion(st, &op); err != nil {
+		return Effect{}, err
+	}
 	putDeletion(st, op)
 	audit(st, scope.PrincipalID(), org, "delete.begin", reason, req.At, targets)
 	return Effect{AffectedIDs: []model.ID{cmd.CommandID}, Phase: model.DeletePhaseFencing}, nil
@@ -297,7 +304,9 @@ func applyBeginFence(scope auth.Scope, st *State, cmd Command) (Effect, error) {
 		putDeletion(st, op)
 		return Effect{AffectedIDs: []model.ID{op.Predicate.Operation}, Phase: model.DeletePhaseHeld}, nil
 	}
-	beginDeletion(st, &op)
+	if err := beginDeletion(st, &op); err != nil {
+		return Effect{}, err
+	}
 	putDeletion(st, op)
 	audit(st, scope.PrincipalID(), op.Predicate.Org, "delete.begin", op.Reason, req.At, []model.ID{op.Predicate.Operation})
 	return Effect{AffectedIDs: []model.ID{op.Predicate.Operation}, Phase: model.DeletePhaseFencing}, nil
@@ -365,6 +374,10 @@ func completeDeletion(st *State, id model.ID, at model.UnixNano, authority *mode
 	}
 	op.Phase, op.CompletedAt = model.DeletePhaseComplete, at
 	bumpGeneration(st, op.Predicate.Org)
+	// An effect that committed between begin and completion is erased too.
+	if err := eraseControlPayloads(st, op, at); err != nil {
+		return op, err
+	}
 	putDeletion(st, op)
 	audit(st, op.Principal, op.Predicate.Org, "delete.complete", op.Reason, at, []model.ID{op.Predicate.Operation})
 	return op, nil
@@ -382,6 +395,11 @@ func failDeletion(st *State, id model.ID, at model.UnixNano, reason string) (mod
 	}
 	// A failed operation keeps its predicate active: nothing is ever un-deleted.
 	op.Phase, op.SafeReason, op.CompletedAt = model.DeletePhaseFailed, reason, at
+	// Nothing is ever un-deleted: a failed operation's covered deliveries must
+	// not be sent without their bodies.
+	if err := eraseControlPayloads(st, op, at); err != nil {
+		return op, err
+	}
 	putDeletion(st, op)
 	audit(st, op.Principal, op.Predicate.Org, "delete.failed", reason, at, []model.ID{op.Predicate.Operation})
 	return op, nil
@@ -442,6 +460,11 @@ func (s *Store) FailDeletion(ctx context.Context, operation model.ID, at model.U
 // held (stamping the others is unaffected); they stay selectable and are recorded by a later
 // pass once the hold is released.
 func (s *Store) RecordPhysicalCleanup(ctx context.Context, org model.ID, operations []model.ID, at model.UnixNano) (held []model.ID, err error) {
+	// control.db holds the replaced state in free pages until they are zeroed;
+	// the physical step is never recorded while that scrub is owed.
+	if err = s.ScrubErased(ctx); err != nil {
+		return nil, err
+	}
 	err = s.Update(ctx, func(st *State) error {
 		held = nil
 		if _, ok := st.Orgs[org.String()]; !ok {
@@ -516,6 +539,9 @@ func (s *Store) ImportDeletions(ctx context.Context, tombstones []model.DeletePr
 			}
 			putDeletion(st, model.DeletionOperation{Predicate: p, Phase: model.DeletePhaseComplete, Principal: st.Installation, Reason: "restored from deletion authority", RequestedAt: at, BeginRevision: st.Revision + 1, CompletedAt: at, SafeReason: "restored_from_authority"})
 			retireScope(st, p)
+			if err := eraseControlPayloads(st, model.DeletionOperation{Predicate: p, Phase: model.DeletePhaseComplete, Principal: st.Installation}, at); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
