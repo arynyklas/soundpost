@@ -1,0 +1,70 @@
+# Copyright 2026 Aryn Yklas
+# SPDX-License-Identifier: Apache-2.0
+#
+# Failure drills for task 07.07. `go run ./tools/drills --scenario NAME|all --target isolated --report DIR`.
+# The allowlist is explicit: a drill refuses any data directory outside data_roots, any directory that is
+# or contains a forbidden production/default location, and any address that is not a loopback literal
+# listed in hosts. Production execution is a separate owner action and is not implemented.
+version: 1
+allowlist:
+  data_roots:
+    - /tmp/soundpost-drills
+  hosts:
+    - 127.0.0.1
+    - localhost
+  forbidden_data_dirs:
+    - /var/lib/soundpost
+    - /var/lib
+    - /var/log
+    - /etc/soundpost
+    - /opt/soundpost
+    - /srv
+    - /data
+    - /home
+    - /root
+    - /mnt
+    - /usr
+    - /etc
+    - /boot
+scenarios:
+  # ---- real three-member cluster of the produced static binary ----
+  - name: node-kill-restart
+    needs_binary: true
+    description: SIGKILL one member of three real processes, keep acknowledging through the survivors, restart it, reconcile every ACKed id against the exact retained data on every member.
+  - name: minority-pause
+    needs_binary: true
+    description: SIGSTOP one member (a minority is unreachable but alive), acknowledge through the majority, SIGCONT, reconcile.
+  - name: majority-pause
+    needs_binary: true
+    description: SIGSTOP two members; the survivor must refuse acknowledgement (typed) and no ACK may exist for a refused batch; SIGCONT, retry the identical batch, reconcile.
+  - name: network-partition
+    not_run: "needs iptables/tc/network namespaces (CAP_NET_ADMIN); the drill refuses to weaken host privileges. SIGSTOP rows (minority-pause, majority-pause) are the unprivileged substitute and are not claimed to prove link-level partition behaviour."
+    description: Link-level minority/majority partition with both sides live.
+  - name: power-loss
+    not_run: "no power control on this host: a process kill is not a power loss (page cache and the disk write cache survive SIGKILL), so it is never simulated as passed."
+    description: Power loss on one member and on all members.
+  - name: fsync-failure
+    not_run: "no failing disk or privilege to inject block-layer errors on this host; a replaced fsync in a test double is not evidence about a real disk and is not reported as a drill pass."
+    description: Failed fsync must not acknowledge.
+  - name: disk-disappearance
+    not_run: "removing a block device or unmounting a volume needs privilege this drill must not use; a deleted directory is not the same failure."
+    description: A member's disk disappears while the other two keep their own.
+  # ---- capacity ----
+  - name: capacity-faults
+    description: Failed sync, slow apply and full disk through the committed fault hooks of the replica and retention layers; nothing acknowledged without durability, every ACK reconciled.
+  # ---- pipeline, outage, deadman, cutover ----
+  - name: provider-failure-outage
+    description: Failed provider attempts, outage and recovery with the recording senders; recovery never erases the outage or the failed attempts and never sends retroactive backlog as new emergencies; retries keep id and receipt.
+  - name: external-deadman
+    description: The independent observer process delivers while every Soundpost process is stopped, keeps the outage after recovery and announces no retroactive backlog.
+  - name: owner-cutover-rollback
+    description: Canonical notification owner cutover and rollback with exactly one active owner and no stale sender.
+  # ---- deletion, backup, restore, evidence ----
+  - name: stale-policy-delete-barrier
+    description: A stale policy revision and the all-shard delete barrier race; no stale worker sends or remaps source states.
+  - name: backup-predates-deletion
+    description: A backup older than a completed deletion, with an independent authority HEAD, must not resurrect the deleted data.
+  - name: restore-authority-unavailable
+    description: Restore with the authority unavailable fails closed.
+  - name: evidence-gap-after-retention
+    description: After retention expiry the missing evidence is an explicit gap, never an empty success.
