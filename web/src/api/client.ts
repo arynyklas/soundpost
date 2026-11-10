@@ -6,6 +6,7 @@ import { parseTraceView } from '../traces/model';
 import { lineSplitter, parseReplayLine, type ReplayLine } from '../replays/model';
 import { parseProfileResponse } from '../profiles/model';
 import type { ProfileResponse } from '../profiles/types';
+import { JOB_ATTEMPT_STATES, JOB_HEALTH_STATUSES, JOB_OBSERVER_STATES, JOB_RUN_STATUSES, type JobAttemptState, type JobAttemptView, type JobDefinition, type JobHealth, type JobObserverEvidence, type JobRunDetail, type JobRunView, type JobsListView, type JobView, type ViewSection as JobViewSection } from './types';
 
 // The CSRF token lives only here, in memory, handed over by the session
 // boundary. It is never persisted and never placed in a URL.
@@ -691,4 +692,257 @@ export async function probeReplay(org: Id, project: Id, replay: Id, signal: Abor
  const response = await jsonPost('/api/v1/replays/stream', { org, project, replay, probe: true }, signal);
  if (!response.ok) throw await apiFault(response);
  await response.text();
+}
+
+// ---- Job run and attempt investigation (POST /api/v1/jobs/list, /api/v1/jobs/view; internal/httpapi/jobs_view.go) ----
+// A response is accepted only for exactly the request that was sent and only when its parts agree with each other. A health that cannot
+// stand on its evidence (missed without an external schedule observer, ready without complete evidence, a recovered run without a failed
+// attempt, an attempt whose effective result is not its newest correction) is a fault and is never rendered. Nanosecond times, versions
+// and ordinals stay canonical decimal strings: they are only compared as BigInt, never as a JavaScript number.
+const JOBS_PERMISSION = 'telemetry.read';
+const MAX_JOBS_PAGE = 50;
+const MAX_JOB_RUNS = 100;
+const DEFAULT_JOB_RUNS = 25;
+const MAX_JOB_LOSS = 64;
+const MAX_JOB_OVERLAPS = 8;
+const MAX_JOB_COUNT = 200000;
+const WIRE_CODE = /^[a-z0-9_]{1,64}$/;
+const JOB_UNAVAILABLE_REASONS: readonly string[] = ['job_service_not_wired', 'job_store_not_readable'];
+const TERMINAL_ATTEMPT_STATES: readonly JobAttemptState[] = ['succeeded', 'failed', 'cancelled'];
+
+function need(ok: boolean): asserts ok { if (!ok) badResponse(); }
+const rec = (v: unknown): Record<string, unknown> => isRecord(v) ? v : badResponse();
+const bounded = (v: unknown, max: number): unknown[] => Array.isArray(v) && v.length <= max ? v : badResponse();
+const wtext = (v: unknown, max: number): v is string => typeof v === 'string' && v.length >= 1 && v.length <= max;
+const wcount = (v: unknown, max: number): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 && v <= max;
+const wu64 = u64Like;
+const wi64 = i64Like;
+const wnonneg = (v: unknown): v is string => wi64(v) && !v.startsWith('-');
+const wenum = <T extends string>(set: readonly T[], v: unknown): v is T => typeof v === 'string' && (set as readonly string[]).includes(v);
+const distinct = (items: readonly unknown[]): boolean => new Set(items).size === items.length;
+
+function viewReason(v: Record<string, unknown>): string | undefined {
+ if (v.reason === undefined) return undefined;
+ need(typeof v.reason === 'string' && WIRE_CODE.test(v.reason));
+ return v.reason;
+}
+
+function jobSections(v: unknown): JobViewSection[] {
+ const sections = bounded(v, 32);
+ for (const s of sections) {
+  const o = rec(s);
+  need(wtext(o.name, 64) && wenum(VIEW_STATES, o.state) && (o.reason === undefined || (typeof o.reason === 'string' && WIRE_CODE.test(o.reason))));
+ }
+ return sections as JobViewSection[];
+}
+
+function jobDefinition(v: unknown): JobDefinition {
+ const d = rec(v);
+ need(wu64(d.revision) && d.revision !== '0' && wnonneg(d.effective_from_ns) && wnonneg(d.grace_ns) && wnonneg(d.max_runtime_ns) && wnonneg(d.observer_stale_after_ns) && wtext(d.overlap, 64));
+ if (d.schedule !== undefined) {
+  const s = rec(d.schedule);
+  need(wtext(s.cron, 256) && wtext(s.timezone, 128));
+ }
+ return d as unknown as JobDefinition;
+}
+
+function jobObserverEvidence(v: unknown): JobObserverEvidence {
+ const o = rec(v);
+ need(idLike(o.observer) && wi64(o.observed_at_ns) && wi64(o.complete_through_ns) && typeof o.healthy === 'boolean' && typeof o.stale === 'boolean');
+ need(BigInt(o.complete_through_ns) <= BigInt(o.observed_at_ns));
+ return o as unknown as JobObserverEvidence;
+}
+
+/** `scheduled` is whether the job's definition has a calendar schedule: only a scheduled job can be late or missed, and only on evidence of the external schedule observer. */
+function jobHealth(v: unknown, scheduled: boolean): JobHealth {
+ const h = rec(v);
+ need(wenum(JOB_HEALTH_STATUSES, h.status) && wi64(h.as_of_ns) && typeof h.complete === 'boolean');
+ const reasons = bounded(h.reasons, 32);
+ need(reasons.every((r) => typeof r === 'string' && WIRE_CODE.test(r)) && distinct(reasons));
+ const e = rec(h.evidence);
+ need(e.occurrence === undefined || wtext(e.occurrence, 512));
+ need((e.run === undefined || idLike(e.run)) && (e.attempt === undefined || idLike(e.attempt)) && (e.cause_trace === undefined || idLike(e.cause_trace)) && (e.cause_error === undefined || idLike(e.cause_error)));
+ need((e.attempt_state === undefined || wenum(JOB_ATTEMPT_STATES, e.attempt_state)) && (e.attempt_count === undefined || wcount(e.attempt_count, 256)));
+ need((e.expected_at_ns === undefined || wi64(e.expected_at_ns)) && (e.window_end_ns === undefined || wi64(e.window_end_ns)) && (e.definition_revision === undefined || wu64(e.definition_revision)));
+ if (e.observer !== undefined) jobObserverEvidence(e.observer);
+ if (e.gaps !== undefined) { const gaps = bounded(e.gaps, 256); need(gaps.every(idLike) && distinct(gaps)); }
+ if (e.skipped_local_times !== undefined) need(bounded(e.skipped_local_times, 8).every((t) => wtext(t, 64)));
+ // A succeeded verdict is never produced from incomplete evidence, and a job that was never expected cannot be late or missed.
+ need(h.status !== 'succeeded' || h.complete === true);
+ need((h.status !== 'missed' && h.status !== 'late') || (scheduled && e.observer !== undefined));
+ return h as unknown as JobHealth;
+}
+
+/** Accepts a job listing only for exactly the requested organization and project, in strictly ascending job ID order after the requested cursor, with a page_limit truncation that resumes exactly at its last job. */
+export function parseJobsList(raw: unknown, want: { org: Id; project: Id; after?: Id; limit: number }): JobsListView {
+ const v = rec(raw);
+ need(v.org === want.org && v.project === want.project && wenum(VIEW_STATES, v.state) && v.permission === JOBS_PERMISSION && typeof v.more === 'boolean' && (v.evaluated_at_ns === undefined || wi64(v.evaluated_at_ns)));
+ const reason = viewReason(v);
+ const sections = jobSections(v.sections);
+ const jobs = bounded(v.jobs, Math.min(want.limit, MAX_JOBS_PAGE));
+ let previous = want.after ?? '';
+ for (const item of jobs) {
+  const j = rec(item);
+  need(idLike(j.job) && j.job > previous && wu64(j.version) && typeof j.erased === 'boolean' && wcount(j.runs, MAX_JOB_COUNT) && wcount(j.attempts, MAX_JOB_COUNT) && j.attempts >= j.runs);
+  const definition = j.definition === undefined ? undefined : jobDefinition(j.definition);
+  jobHealth(j.health, definition?.schedule !== undefined);
+  previous = j.job;
+ }
+ switch (v.state) {
+  case 'not_available':
+   need(reason !== undefined && JOB_UNAVAILABLE_REASONS.includes(reason) && jobs.length === 0 && !v.more && v.truncation === undefined);
+   need(sections.length === 1 && sections[0]?.name === 'jobs' && sections[0].state === 'not_available');
+   break;
+  case 'ready': need(reason === undefined && jobs.length > 0); break;
+  case 'empty': need(reason === 'no_jobs' && jobs.length === 0 && !v.more && v.truncation === undefined); break;
+  default: need(reason !== undefined);
+ }
+ if (!v.more) need(v.truncation === undefined);
+ else {
+  const t = rec(v.truncation);
+  need(jobs.length > 0 && t.reason === 'page_limit' && t.shown === jobs.length && t.total === undefined && t.next === rec(jobs[jobs.length - 1]).job);
+ }
+ return v as unknown as JobsListView;
+}
+
+function jobRunSummary(v: unknown, health: JobHealth): JobRunView {
+ const r = rec(v);
+ need(idLike(r.id) && wenum(JOB_RUN_STATUSES, r.status) && typeof r.recovered === 'boolean' && wi64(r.first_started_ns) && idLike(r.final_attempt) && typeof r.basis_of_health === 'boolean');
+ need(wcount(r.attempt_count, 256) && r.attempt_count >= 1 && wcount(r.failed_attempts, r.attempt_count) && wcount(r.overlap_count, MAX_JOB_COUNT));
+ const o = rec(r.occurrence);
+ need(wtext(o.key, 512) && typeof o.scheduled === 'boolean' && (o.fold === 0 || o.fold === 1) && (o.scheduled ? wi64(o.at_ns) : o.at_ns === undefined));
+ need(r.superseded_by === undefined || (wtext(r.superseded_by, 512) && r.superseded_by !== o.key));
+ const overlaps = bounded(r.overlaps, MAX_JOB_OVERLAPS);
+ need(overlaps.every((id) => idLike(id) && id !== r.id) && distinct(overlaps) && overlaps.length === Math.min(r.overlap_count, MAX_JOB_OVERLAPS));
+ // Recovery is one run's own attempts; it is exactly the status "recovered", and it needs a failed attempt in that run.
+ need(r.recovered === (r.status === 'recovered') && (r.status !== 'recovered' && r.status !== 'failed' || r.failed_attempts >= 1));
+ need(r.basis_of_health === (health.evidence.run === r.id));
+ return r as unknown as JobRunView;
+}
+
+function jobAttempt(v: unknown): JobAttemptView {
+ const a = rec(v);
+ need(idLike(a.id) && wu64(a.ordinal) && typeof a.started === 'boolean' && wi64(a.observed_ns) && wenum(JOB_ATTEMPT_STATES, a.effective) && typeof a.final === 'boolean' && typeof a.after_newer_occurrence === 'boolean' && wcount(a.events_accepted, 1024));
+ need((a.cause_trace === undefined || idLike(a.cause_trace)) && (a.cause_error === undefined || idLike(a.cause_error)));
+ let original: JobAttemptState | undefined;
+ if (a.terminal !== undefined) {
+  const t = rec(a.terminal);
+  need(wenum(TERMINAL_ATTEMPT_STATES, t.state) && wi64(t.at_ns));
+  original = t.state;
+ }
+ const corrections = bounded(a.corrections, 16);
+ let newest = 0n, state: JobAttemptState | undefined = original;
+ for (const item of corrections) {
+  const c = rec(item);
+  need(wu64(c.version) && BigInt(c.version) > newest && wenum(TERMINAL_ATTEMPT_STATES, c.state) && wtext(c.reason, 1024) && idLike(c.actor) && wi64(c.at_ns) && idLike(c.command));
+  newest = BigInt(c.version);
+  state = c.state;
+ }
+ // The original result is never rewritten; only a terminal attempt can be corrected, and the effective result is the newest correction's.
+ need(corrections.length === 0 || original !== undefined);
+ need(a.effective === (state ?? 'started'));
+ need(!a.after_newer_occurrence || original !== undefined);
+ return a as unknown as JobAttemptView;
+}
+
+const FINAL_STATUS: Record<JobAttemptState, readonly string[]> = { started: ['running'], succeeded: ['succeeded', 'recovered'], failed: ['failed'], cancelled: ['cancelled'] };
+
+function jobRunDetail(v: unknown, health: JobHealth, id: Id): JobRunDetail {
+ const summary = jobRunSummary(v, health);
+ const r = rec(v);
+ need(summary.id === id);
+ const attempts = bounded(r.attempts, 256).map(jobAttempt);
+ need(attempts.length === summary.attempt_count && distinct(attempts.map((a) => a.id)));
+ need(attempts.every((a, i) => i === 0 || BigInt(attempts[i - 1]?.ordinal ?? '0') <= BigInt(a.ordinal)));
+ const last = attempts[attempts.length - 1];
+ need(last !== undefined && last.id === summary.final_attempt && attempts.every((a) => a.final === (a === last)));
+ const failed = attempts.filter((a) => a.effective === 'failed').length;
+ need(failed === summary.failed_attempts && FINAL_STATUS[last.effective].includes(summary.status));
+ // Recovered: the final attempt succeeded after an earlier attempt failed; the failed attempt stays in the list.
+ need((summary.status === 'recovered') === (last.effective === 'succeeded' && attempts.slice(0, -1).some((a) => a.effective === 'failed')));
+ return r as unknown as JobRunDetail;
+}
+
+/** Accepts a job view only for exactly the requested organization, project, job (and run), in which the health, observer, loss, runs and attempts agree with each other. A view that is not_available carries no job data at all: it is never an empty job. */
+export function parseJobView(raw: unknown, want: { org: Id; project: Id; job: Id; run?: Id; runsLimit?: number }): JobView {
+ const v = rec(raw);
+ need(v.org === want.org && v.project === want.project && v.job === want.job && wenum(VIEW_STATES, v.state) && v.permission === JOBS_PERMISSION && typeof v.erased === 'boolean' && (v.evaluated_at_ns === undefined || wi64(v.evaluated_at_ns)));
+ const cap = want.runsLimit ?? DEFAULT_JOB_RUNS;
+ need(Number.isInteger(cap) && cap >= 1 && cap <= MAX_JOB_RUNS);
+ const reason = viewReason(v);
+ const sections = jobSections(v.sections);
+ need(wcount(v.total_runs, MAX_JOB_COUNT) && wcount(v.total_attempts, MAX_JOB_COUNT) && wcount(v.definition_revisions, 1000) && v.total_attempts >= v.total_runs);
+ const runs = bounded(v.runs, cap);
+ if (v.state === 'not_available') {
+  need(reason !== undefined && JOB_UNAVAILABLE_REASONS.includes(reason) && !v.erased && runs.length === 0 && v.total_runs === 0 && v.total_attempts === 0 && v.definition_revisions === 0);
+  need(v.source === undefined && v.definition === undefined && v.health === undefined && v.observer === undefined && v.loss === undefined && v.compaction === undefined && v.run === undefined && v.runs_truncation === undefined && v.latest_occurrence === undefined);
+  need(sections.length === 1 && sections[0]?.name === 'job' && sections[0].state === 'not_available');
+  return v as unknown as JobView;
+ }
+ need(v.source !== undefined && v.health !== undefined && v.observer !== undefined && v.loss !== undefined && v.compaction !== undefined && (v.definition === undefined ? v.definition_revisions === 0 : v.definition_revisions >= 1));
+ const source = rec(v.source);
+ need(wu64(source.version));
+ if (source.cursor !== undefined) { const c = rec(source.cursor); need(idLike(c.group) && wu64(c.index)); }
+ const definition = v.definition === undefined ? undefined : jobDefinition(v.definition);
+ const health = jobHealth(v.health, definition?.schedule !== undefined);
+ const compaction = rec(v.compaction);
+ need(wu64(compaction.runs) && wnonneg(compaction.through_ns) && (v.latest_occurrence === undefined || wtext(v.latest_occurrence, 512)));
+
+ // The state is the verdict's own completeness: ready only on complete evidence, incomplete otherwise, empty only for erased history.
+ need((v.state === 'empty') === v.erased);
+ switch (v.state) {
+  case 'ready': need(reason === undefined && health.complete); break;
+  case 'incomplete': need(reason === 'job_evidence_incomplete' && !health.complete); break;
+  case 'empty': need(reason === 'job_history_erased'); break;
+  default: need(reason !== undefined);
+ }
+
+ const observer = rec(v.observer);
+ need(wenum(JOB_OBSERVER_STATES, observer.state) && observer.expected_schedule === (definition?.schedule !== undefined));
+ const seen = health.evidence.observer;
+ if (observer.evidence === undefined) need(observer.state === 'none' && seen === undefined);
+ else {
+  const e = jobObserverEvidence(observer.evidence);
+  need(seen !== undefined && seen.observer === e.observer && seen.observed_at_ns === e.observed_at_ns && seen.complete_through_ns === e.complete_through_ns && seen.healthy === e.healthy && seen.stale === e.stale);
+  need(observer.state === (!e.healthy ? 'unhealthy' : e.stale ? 'stale' : 'fresh'));
+ }
+
+ const loss = rec(v.loss);
+ const intervals = bounded(loss.intervals, MAX_JOB_LOSS);
+ for (const item of intervals) { const i = rec(item); need(idLike(i.id) && wi64(i.start_ns) && wi64(i.end_ns) && BigInt(i.start_ns) < BigInt(i.end_ns) && wtext(i.reason, 1024)); }
+ need(distinct(intervals.map((i) => rec(i).id)) && wcount(loss.total, MAX_JOB_COUNT) && loss.total >= intervals.length && typeof loss.affects_current_health === 'boolean');
+ need(loss.affects_current_health === ((health.evidence.gaps?.length ?? 0) > 0));
+ if (loss.truncation === undefined) need(loss.total === intervals.length);
+ else { const t = rec(loss.truncation); need(t.reason === 'loss_limit' && t.shown === intervals.length && t.total === loss.total && t.next === undefined && loss.total > intervals.length); }
+
+ const summaries = runs.map((r) => jobRunSummary(r, health));
+ need(distinct(summaries.map((r) => r.id)) && summaries.filter((r) => r.basis_of_health).length <= 1);
+ need(v.latest_occurrence === undefined || summaries.every((r) => r.superseded_by === undefined || r.superseded_by === v.latest_occurrence));
+ if (v.runs_truncation === undefined) need(summaries.length === v.total_runs);
+ else { const t = rec(v.runs_truncation); need(t.reason === 'runs_limit' && t.shown === summaries.length && summaries.length === cap && t.total === v.total_runs && t.next === undefined && v.total_runs > summaries.length); }
+
+ if (want.run === undefined) need(v.run === undefined);
+ else {
+  const detail = jobRunDetail(v.run, health, want.run);
+  need(detail.attempt_count <= v.total_attempts);
+  const listed = summaries.find((r) => r.id === detail.id);
+  need(listed === undefined || (listed.status === detail.status && listed.recovered === detail.recovered && listed.final_attempt === detail.final_attempt && listed.attempt_count === detail.attempt_count && listed.failed_attempts === detail.failed_attempts && listed.basis_of_health === detail.basis_of_health));
+ }
+ return v as unknown as JobView;
+}
+
+/** One page of a project's jobs in job ID order, strictly after `after` ('' starts at the beginning), under the caller's own scope. */
+export async function listJobs(org: Id, project: Id, after: Id | '', limit: number, signal: AbortSignal): Promise<JobsListView> {
+ const cursor = after === '' ? {} : { after };
+ const response = await jsonPost('/api/v1/jobs/list', { org, project, ...cursor, limit }, signal);
+ if (!response.ok) throw await apiFault(response);
+ return parseJobsList(await response.json() as unknown, { org, project, ...cursor, limit });
+}
+
+/** One job: its current health, observer, loss and runs; with `run`, that run's every attempt. The scope is the caller's own and the body names only the organization, project, job, run and run limit. */
+export async function getJob(org: Id, project: Id, job: Id, options: { run?: Id; runsLimit?: number }, signal: AbortSignal): Promise<JobView> {
+ const body = { org, project, job, ...(options.run === undefined ? {} : { run: options.run }), ...(options.runsLimit === undefined ? {} : { runs_limit: options.runsLimit }) };
+ const response = await jsonPost('/api/v1/jobs/view', body, signal);
+ if (!response.ok) throw await apiFault(response);
+ return parseJobView(await response.json() as unknown, { org, project, job, ...(options.run === undefined ? {} : { run: options.run }), ...(options.runsLimit === undefined ? {} : { runsLimit: options.runsLimit }) });
 }

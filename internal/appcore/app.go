@@ -321,6 +321,7 @@ func (a *App) Register(mux *http.ServeMux) {
 	httpapi.RegisterTraceRoutes(mux, a.Auth, a.Traces)
 	httpapi.RegisterReplayRoutes(mux, a.Auth, a.Replays)
 	httpapi.RegisterProfileRoutes(mux, a.Auth, a.Profiles)
+	httpapi.RegisterJobRoutes(mux, a.Auth, httpapi.NewJobs(a.Jobs))
 	a.RegisterArtifactRoutes(mux)
 }
 

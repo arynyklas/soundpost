@@ -364,3 +364,50 @@ export interface PathResult {
  unlike_clock_domains: boolean; max_uncertainty_ns: string; sampling: SamplingReport; complete: boolean; reasons: string[];
 }
 export interface TraceView { org: Id; project: Id; trace: Id; state: ViewState; reason?: string; partial: boolean; path?: PathResult; sections: ViewSection[] }
+
+// ---- Job run and attempt investigation (POST /api/v1/jobs/list, /api/v1/jobs/view; internal/httpapi/jobs_view.go, internal/jobs/types.go) ----
+// Nanosecond times, durations, versions, ordinals and counters of the journal are decimal strings; IDs are 32 lowercase hexadecimal characters.
+// The job's current health, a run's recovery and producer loss are three separate fields; none is derived from another.
+export type JobHealthStatus = 'succeeded' | 'failed' | 'cancelled' | 'running' | 'running_too_long' | 'late' | 'missed' | 'unknown';
+export const JOB_HEALTH_STATUSES: readonly JobHealthStatus[] = ['succeeded', 'failed', 'cancelled', 'running', 'running_too_long', 'late', 'missed', 'unknown'];
+export type JobAttemptState = 'started' | 'succeeded' | 'failed' | 'cancelled';
+export const JOB_ATTEMPT_STATES: readonly JobAttemptState[] = ['started', 'succeeded', 'failed', 'cancelled'];
+export type JobRunStatus = 'running' | 'succeeded' | 'recovered' | 'failed' | 'cancelled';
+export const JOB_RUN_STATUSES: readonly JobRunStatus[] = ['running', 'succeeded', 'recovered', 'failed', 'cancelled'];
+export type JobObserverState = 'none' | 'fresh' | 'stale' | 'unhealthy';
+export const JOB_OBSERVER_STATES: readonly JobObserverState[] = ['none', 'fresh', 'stale', 'unhealthy'];
+export type JobTruncationReason = 'page_limit' | 'runs_limit' | 'loss_limit';
+export interface JobTruncation { reason: JobTruncationReason; shown: number; total?: number; next?: Id }
+export interface JobSchedule { cron: string; timezone: string }
+/** Zero grace, runtime and stale-after durations are the server's "not set" values; the page words them. */
+export interface JobDefinition { revision: string; effective_from_ns: string; schedule?: JobSchedule; grace_ns: string; max_runtime_ns: string; observer_stale_after_ns: string; overlap: string }
+export interface JobObserverEvidence { observer: Id; observed_at_ns: string; complete_through_ns: string; healthy: boolean; stale: boolean }
+export interface JobHealthEvidence {
+ occurrence?: string; run?: Id; attempt?: Id; attempt_state?: JobAttemptState; attempt_count?: number; expected_at_ns?: string; window_end_ns?: string;
+ cause_trace?: Id; cause_error?: Id; definition_revision?: string; observer?: JobObserverEvidence; gaps?: Id[]; skipped_local_times?: string[];
+}
+export interface JobHealth { status: JobHealthStatus; as_of_ns: string; complete: boolean; reasons: string[]; evidence: JobHealthEvidence }
+export interface JobSummaryView { job: Id; version: string; erased: boolean; definition?: JobDefinition; health: JobHealth; runs: number; attempts: number }
+export interface JobsListView { org: Id; project: Id; state: ViewState; reason?: string; permission: string; evaluated_at_ns?: string; jobs: JobSummaryView[]; more: boolean; truncation?: JobTruncation; sections: ViewSection[] }
+export interface JobOccurrenceView { key: string; scheduled: boolean; at_ns?: string; fold: number }
+export interface JobRunView {
+ id: Id; occurrence: JobOccurrenceView; status: JobRunStatus; recovered: boolean; first_started_ns: string; final_attempt: Id; attempt_count: number; failed_attempts: number;
+ basis_of_health: boolean; superseded_by?: string; overlaps: Id[]; overlap_count: number;
+}
+export interface JobTerminalResult { state: JobAttemptState; at_ns: string }
+export interface JobCorrection { version: string; state: JobAttemptState; reason: string; actor: Id; at_ns: string; command: Id }
+export interface JobAttemptView {
+ id: Id; ordinal: string; started: boolean; observed_ns: string; terminal?: JobTerminalResult; effective: JobAttemptState; corrections: JobCorrection[]; events_accepted: number;
+ cause_trace?: Id; cause_error?: Id; final: boolean; after_newer_occurrence: boolean;
+}
+export interface JobRunDetail extends JobRunView { attempts: JobAttemptView[] }
+export interface JobSourceView { version: string; cursor?: Cursor }
+export interface JobObserverView { state: JobObserverState; expected_schedule: boolean; evidence?: JobObserverEvidence }
+export interface JobInterval { id: Id; start_ns: string; end_ns: string; reason: string }
+export interface JobLossView { intervals: JobInterval[]; total: number; affects_current_health: boolean; truncation?: JobTruncation }
+export interface JobCompaction { runs: string; through_ns: string }
+export interface JobView {
+ org: Id; project: Id; job: Id; state: ViewState; reason?: string; permission: string; evaluated_at_ns?: string; source?: JobSourceView; erased: boolean;
+ definition?: JobDefinition; definition_revisions: number; health?: JobHealth; observer?: JobObserverView; loss?: JobLossView; total_runs: number; total_attempts: number;
+ compaction?: JobCompaction; latest_occurrence?: string; runs: JobRunView[]; runs_truncation?: JobTruncation; run?: JobRunDetail; sections: ViewSection[];
+}
