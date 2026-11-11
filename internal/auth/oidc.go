@@ -10,6 +10,7 @@ import (
 	"golang.org/x/oauth2"
 	"net/url"
 	"soundpost/internal/model"
+	"strings"
 	"time"
 )
 
@@ -30,6 +31,9 @@ func (s *Service) OIDCStart(ctx context.Context, cfg OIDCConfig, binding string)
 	if e != nil || redirectErr != nil || redirect.Scheme != "https" || u.Scheme != "https" || cfg.ClientID == "" || binding == "" {
 		return "", model.Fail(model.Invalid)
 	}
+	if e = s.OIDCCapacity(ctx); e != nil {
+		return "", e
+	}
 	provider, e := oidc.NewProvider(ctx, cfg.Issuer)
 	if e != nil {
 		return "", model.Fail(model.Unavailable)
@@ -40,9 +44,19 @@ func (s *Service) OIDCStart(ctx context.Context, cfg OIDCConfig, binding string)
 			return "", model.Fail(model.Invalid)
 		}
 	}
-	st := oidcState{State: randomToken(), Nonce: randomToken(), Verifier: oauth2.GenerateVerifier(), Binding: hashToken(binding), Issuer: cfg.Issuer, Expires: s.now().Add(5 * time.Minute).Unix(), ClientID: cfg.ClientID, RedirectURL: cfg.RedirectURL, Org: cfg.org, Provider: cfg.provider}
+	now := s.now()
+	st := oidcState{State: randomToken(), Nonce: randomToken(), Verifier: oauth2.GenerateVerifier(), Binding: hashToken(binding), Issuer: cfg.Issuer, Expires: now.Add(5 * time.Minute).Unix(), ClientID: cfg.ClientID, RedirectURL: cfg.RedirectURL, Org: cfg.org, Provider: cfg.provider}
 	raw, _ := json.Marshal(st)
-	e = s.store.Update(ctx, func(state *model.ControlState) error { state.OIDC[hashToken(st.State)] = raw; return nil })
+	e = s.store.Update(ctx, func(state *model.ControlState) error {
+		// The expiry instant is the leader-supplied now above; the transition
+		// reads no clock, so replicas install identical state bytes.
+		sweepExpiredState(state, now.Unix())
+		if livePendingOIDC(*state, now.Unix()) >= pendingOIDCCap {
+			return errOIDCFull()
+		}
+		state.OIDC[hashToken(st.State)] = raw
+		return nil
+	})
 	if e != nil {
 		return "", e
 	}
@@ -113,4 +127,102 @@ func (s *Service) OIDCCallback(ctx context.Context, cfg OIDCConfig, binding, sta
 		return nil
 	})
 	return out, e
+}
+
+// MaxPendingOIDC bounds live (unexpired) pending login records: OIDCStart is
+// reachable without a credential, so replicated state it can create is capped.
+const MaxPendingOIDC = 1024
+
+var pendingOIDCCap = MaxPendingOIDC
+
+const elevationKeyPrefix = "elevation:"
+
+func errOIDCFull() error {
+	f := model.Fail(model.Unavailable)
+	f.Retryable = true
+	return f
+}
+
+// pendingOIDCRecord reports whether (key, raw) is a pending login record and
+// its expiry. Other residents of st.OIDC (elevation records, restore stashes)
+// never match: a pending record is keyed by the hash of its own State.
+func pendingOIDCRecord(key string, raw json.RawMessage) (expires int64, ok bool) {
+	if strings.Contains(key, ":") {
+		return 0, false
+	}
+	var p oidcState
+	if json.Unmarshal(raw, &p) != nil || p.State == "" || hashToken(p.State) != key {
+		return 0, false
+	}
+	return p.Expires, true
+}
+func livePendingOIDC(st model.ControlState, now int64) (n int) {
+	for k, raw := range st.OIDC {
+		if exp, ok := pendingOIDCRecord(k, raw); ok && exp > now {
+			n++
+		}
+	}
+	return n
+}
+
+// expiredOIDC reports whether an st.OIDC resident is a pending login or
+// elevation record whose expiry is at or before now (the same boundary the
+// callback and elevation resolution refuse at).
+func expiredOIDC(key string, raw json.RawMessage, now int64) bool {
+	if strings.HasPrefix(key, elevationKeyPrefix) {
+		var r elevationRecord
+		return json.Unmarshal(raw, &r) == nil && r.Expires <= now
+	}
+	exp, ok := pendingOIDCRecord(key, raw)
+	return ok && exp <= now
+}
+
+// sweepExpiredState deletes expired records. Audit rows are never touched and
+// the result does not depend on map iteration order.
+func sweepExpiredState(st *model.ControlState, now int64) (removed int) {
+	for k, raw := range st.OIDC {
+		if expiredOIDC(k, raw, now) {
+			delete(st.OIDC, k)
+			removed++
+		}
+	}
+	return removed
+}
+
+// OIDCCapacity is a read-only check that a new login may be started. Callers on
+// unauthenticated routes use it before any outbound fetch or state write.
+func (s *Service) OIDCCapacity(ctx context.Context) error {
+	now := s.now().Unix()
+	return s.store.View(ctx, func(st model.ControlState) error {
+		if livePendingOIDC(st, now) >= pendingOIDCCap {
+			return errOIDCFull()
+		}
+		return nil
+	})
+}
+
+// SweepExpired removes expired pending OIDC state and expired elevation records
+// from replicated control state and returns how many were removed. The instant
+// is read once here, on the caller (leader); the transition itself is a pure
+// function of (state, instant). Run it periodically (RunFences cadence).
+func (s *Service) SweepExpired(ctx context.Context) (int, error) {
+	now := s.now().Unix()
+	pending := false
+	if err := s.store.View(ctx, func(st model.ControlState) error {
+		for k, raw := range st.OIDC {
+			if expiredOIDC(k, raw, now) {
+				pending = true
+				break
+			}
+		}
+		return nil
+	}); err != nil || !pending {
+		return 0, err
+	}
+	removed := 0
+	err := s.store.Update(ctx, func(st *model.ControlState) error {
+		removed = sweepExpiredState(st, now)
+		return nil
+	})
+	return removed, err
 }

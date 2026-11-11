@@ -236,6 +236,13 @@ func RegisterOIDCRoutes(mux *http.ServeMux, s *auth.Service, cfg auth.OIDCConfig
 			reply(w, nil, model.Fail(model.Forbidden))
 			return
 		}
+		// Unauthenticated: refuse before any body decode, config lookup or
+		// outbound fetch once the pending-login cap is reached.
+		if err := s.OIDCCapacity(r.Context()); err != nil {
+			w.Header().Set("Retry-After", "60")
+			reply(w, nil, err)
+			return
+		}
 		selected := cfg
 		if selected.Issuer == "" {
 			var q struct {

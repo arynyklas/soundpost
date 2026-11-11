@@ -88,3 +88,21 @@ off. None is replaced by a stand-in that reports success.
   attempt stamper) and a `notify.SecretReader` over the sealed destination
   secrets. Neither exists in a deployed node, so no notification leaves it.
 * `Producer`: the recording producer identity resolver.
+
+## Bounded retention of login and elevation state
+
+`POST /api/v1/oidc/start` needs no credential, and each elevated read leaves
+elevation bookkeeping, so both are bounded:
+
+* Live (unexpired) pending OIDC logins are capped at 1024. At the cap the start
+  route returns a retryable `unavailable` (HTTP 503, `Retry-After: 60`) before
+  any provider discovery fetch or state write.
+* `auth.Service.SweepExpired` (run on the fence cadence, about once a minute)
+  deletes pending OIDC records (5-minute life) and elevation records (15-minute
+  life) once expired; a start also collects expired pending records. The expiry
+  instant is read by the proposing node and the result is replicated as state, so
+  replicas hold identical bytes.
+* Retained on purpose: every audit row (`elevate`, `elevated_read` and the
+  per-response release audit, about 300 bytes each). They are the evidence that
+  an elevated read was audited before release and are not collected by this
+  sweep. Sessions and other control state are not touched by it.
