@@ -7,8 +7,10 @@
 #   useradd --system --shell /usr/sbin/nologin soundpost-agent
 # Its source credential is a systemd credential (0400, visible to this service only):
 #   install -m 0600 -o root -g root agent-source.token /etc/soundpost/agent/source.token
-# ExecStart follows the agent's documented command line (cmd/soundpost-agent, plan 07.03). The
-# binary is not part of this tree's build yet; adjust the flags to its --help when you install it.
+# The agent has no credential flag: agent.json names the file in `credential_file`, which must
+# be the absolute path systemd gives the loaded credential, /run/credentials/soundpost-agent.service/source.token.
+# ExecStart passes only the flags cmd/soundpost-agent defines (-config, -once, -validate); a test in
+# build/deploy_test.go fails if it names any other.
 [Unit]
 Description=Soundpost host collection agent (optional)
 After=network-online.target
@@ -22,7 +24,7 @@ StateDirectory=soundpost-agent
 StateDirectoryMode=0700
 UMask=0077
 LoadCredential=source.token:/etc/soundpost/agent/source.token
-ExecStart=/usr/local/bin/soundpost-agent --config=/etc/soundpost/agent/agent.json --source-token-file=%d/source.token
+ExecStart=/usr/local/bin/soundpost-agent -config=/etc/soundpost/agent/agent.json
 Restart=on-failure
 RestartSec=5s
 

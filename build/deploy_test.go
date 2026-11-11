@@ -125,3 +125,39 @@ func TestAgentUnitCapabilityIsOptIn(t *testing.T) {
 		t.Fatal("the opt-in capability must be documented as commented-out CAP_PERFMON only")
 	}
 }
+
+// The unit's ExecStart must pass only flags the agent actually registers: a flag the binary
+// does not define makes it exit 2 at start and the unit never runs (an m2 audit reproduced
+// `flag provided but not defined: -source-token-file`). The credential is not a flag: the
+// agent reads it from `credential_file` in its configuration.
+func TestAgentUnitPassesOnlyFlagsTheAgentDefines(t *testing.T) {
+	src := deployFile(t, "cmd/soundpost-agent/main.go")
+	defined := map[string]bool{}
+	for _, m := range regexp.MustCompile(`flags\.(?:String|Bool|Duration|Int)\("([a-z][a-z-]*)"`).FindAllStringSubmatch(src, -1) {
+		defined[m[1]] = true
+	}
+	if !defined["config"] {
+		t.Fatalf("could not read the agent's flags from cmd/soundpost-agent/main.go: %v", defined)
+	}
+	var exec string
+	for _, line := range directives(deployFile(t, "deploy/systemd/soundpost-agent.service")) {
+		if strings.HasPrefix(line, "ExecStart=") {
+			exec = strings.TrimPrefix(line, "ExecStart=")
+		}
+	}
+	if exec == "" {
+		t.Fatal("the agent unit has no ExecStart")
+	}
+	for _, field := range strings.Fields(exec)[1:] {
+		if !strings.HasPrefix(field, "-") {
+			continue
+		}
+		name := strings.TrimLeft(field, "-")
+		if i := strings.IndexByte(name, '='); i >= 0 {
+			name = name[:i]
+		}
+		if !defined[name] {
+			t.Errorf("ExecStart passes %q but the agent defines only %v", field, defined)
+		}
+	}
+}
