@@ -12,9 +12,11 @@ import (
 // NewReplayService binds the replay chain validator and authorized reader over
 // the record engine, the auth service and the replicated control state. It keeps
 // no state of its own: chunks live in storage, the immutable checkpoint index and
-// retention groups in control settings. Admission must call its Validate before
-// durable append and Record after it, and retention must consult it as a
-// References source (see docs/protocol/replay-v1.md).
+// retention groups in control settings. Admission runs the stateless closed-format
+// check (ValidateChunk, installed on ingest as its replay gate) before the durable
+// append, and NewReplayIndexingAppender runs CheckIndex before and RecordScope after
+// it; retention consults the service as a References source (see
+// docs/protocol/replay-v1.md).
 func NewReplayService(engine *storage.Engine, authorizer *auth.Service, store *control.Store) (*replays.Service, error) {
 	return replays.New(engine, authorizer, store)
 }

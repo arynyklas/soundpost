@@ -164,7 +164,15 @@ func openWith(dir string, options *replicationOptions, meter storage.DiskMeter, 
 	if e != nil {
 		return fail(e)
 	}
-	i, e := ingest.New(a, p, c, engine)
+	replayService, e := NewReplayService(engine, a, c)
+	if e != nil {
+		return fail(e)
+	}
+	indexed, e := NewReplayIndexingAppender(engine, replayService)
+	if e != nil {
+		return fail(e)
+	}
+	i, e := ingest.New(a, p, c, indexed)
 	if e != nil {
 		return fail(e)
 	}
@@ -230,10 +238,6 @@ func openWith(dir string, options *replicationOptions, meter storage.DiskMeter, 
 	// with the typed not_available state instead of an empty success.
 	evidence := httpapi.NewEvidence(nil, r, r)
 	traces := httpapi.NewTraces(httpapi.NewStorageSpanSource(engine))
-	replayService, e := NewReplayService(engine, a, c)
-	if e != nil {
-		return fail(e)
-	}
 	out := &App{Control: c, Auth: a, Storage: engine, Ingest: i, Releases: r, Artifacts: artifactService, Cache: cache, Exports: exportService, Retention: ret, Query: queryEngine, Live: liveService, Investigator: investigator, Incidents: incidentService, Jobs: jobService, Actions: actions, Evidence: evidence, Traces: traces, Replays: httpapi.NewReplays(replayService)}
 	// Built once: the profile service keys its cursors per instance.
 	out.Profiles = httpapi.NewProfiles(out.NewNativeProfiles())

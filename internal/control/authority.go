@@ -62,6 +62,13 @@ const (
 	// writerRedactNoop: the empty transition RedactRetainedControlCommands commits to move the
 	// applied index past the journal floor. Its function changes nothing.
 	writerRedactNoop writer = "RedactNoop"
+	// writerReplayIndex: the post-admission replay index step (replays.Service.Record): it adds an
+	// immutable checkpoint entry and moves a replay retention group deadline, both keyed by the
+	// replay of a chunk that admission already accepted. It reads authority (the grant and the
+	// deletion predicates are checked before and at read time) and writes no grant, policy,
+	// hold, deletion or access state. Without this entry every replay chunk admitted would move
+	// AuthorityRevision and starve a deletion Begin exactly as intake did.
+	writerReplayIndex writer = "ReplayIndex"
 )
 
 // nonAuthorityWriters is the closed allowlist of updateAs writers that leave AuthorityRevision
@@ -76,6 +83,7 @@ var nonAuthorityWriters = map[writer]string{
 	writerTransactIssues:      "issue lifecycle book commit",
 	writerTransactJobs:        "job book commit",
 	writerRedactNoop:          "empty transition that only moves the applied index",
+	writerReplayIndex:         "replay checkpoint index entry and retention group deadline",
 }
 
 // nonAuthorityKinds is the closed allowlist of Transact kinds whose commit leaves
@@ -163,4 +171,11 @@ func (s *Store) healLegacyAuthority(ctx context.Context) error {
 		return nil
 	}
 	return err
+}
+
+// UpdateReplayIndex commits fn as one control transition that leaves AuthorityRevision alone. It
+// is the only exported update that does, it exists for the replay index step, and any other caller
+// uses Update (which bumps). fn must write nothing but the replay index entries it is given.
+func (s *Store) UpdateReplayIndex(ctx context.Context, fn func(*State) error) error {
+	return s.updateAs(ctx, writerReplayIndex, fn)
 }
