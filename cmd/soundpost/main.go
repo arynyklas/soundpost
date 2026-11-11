@@ -43,14 +43,14 @@ func failureLine(args []string, err error) string {
 	return "soundpost: startup or service failed"
 }
 
-// bootstrapNotice is what serve prints about the one-time bootstrap token. A root
-// built by a disaster restore holds a recovery token that grants installation
-// administration: it stays in its 0600 file and never reaches the service log.
-func bootstrapNotice(dir, token string) string {
+// bootstrapNotice is what serve prints about the one-time bootstrap token. The
+// token grants installation administration and both shipped units capture
+// stderr into logs, so it is never printed: only the path of its 0600 file is.
+func bootstrapNotice(dir string) string {
 	if backup.IsRestoredRoot(dir) {
 		return "A one-time recovery bootstrap token for this restored installation is in " + filepath.Join(dir, "bootstrap.token") + " (mode 0600); it is not printed."
 	}
-	return "One-time bootstrap token: " + token
+	return "A one-time bootstrap token is in " + filepath.Join(dir, "bootstrap.token") + " (mode 0600); it is not printed."
 }
 func run() error {
 	if len(os.Args) >= 2 && os.Args[1] == "cluster-seed" {
@@ -121,8 +121,8 @@ func run() error {
 	}
 	defer core.Close()
 	store, service := core.Control, core.Auth
-	if token, e := store.BootstrapToken(); e == nil {
-		fmt.Fprintln(os.Stderr, bootstrapNotice(*dir, token))
+	if _, e := store.BootstrapToken(); e == nil {
+		fmt.Fprintln(os.Stderr, bootstrapNotice(*dir))
 	}
 	// Authentication and durable data services were opened together above.
 	var cfg *auth.OIDCConfig

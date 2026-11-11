@@ -6,9 +6,12 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/base64"
+	"errors"
 	"golang.org/x/crypto/argon2"
 	"soundpost/internal/model"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -29,6 +32,7 @@ type Service struct {
 	now           func() time.Time
 	bearerHashKey [32]byte
 	sourceBarrier SourceBarrier
+	throttle      *loginThrottle
 }
 type Session struct {
 	Token   string      `json:"-"`
@@ -56,9 +60,15 @@ func NewService(d AuthDependencies) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Service{store: d.Control, now: d.Now, bearerHashKey: key}, nil
+	return &Service{store: d.Control, now: d.Now, bearerHashKey: key, throttle: newLoginThrottle(d.Now)}, nil
 }
+
+// kdfRuns counts password-KDF evaluations so tests can assert equal work
+// without timing.
+var kdfRuns atomic.Int64
+
 func password(p string, salt string) string {
+	kdfRuns.Add(1)
 	return base64.RawStdEncoding.EncodeToString(argon2.IDKey([]byte(p), []byte(salt), 3, 64*1024, 2, 32))
 }
 func hashPassword(p string) (string, error) {
@@ -109,6 +119,26 @@ func (s *Service) newSession(id model.ID) Session {
 	return Session{Token: randomToken(), CSRF: randomToken(), User: id, Expires: model.Int64(s.now().Add(12 * time.Hour).Unix())}
 }
 func (s *Service) Login(ctx context.Context, email, p, code string) (Session, error) {
+	if e := s.throttle.check(ctx, email); e != nil {
+		return Session{}, e
+	}
+	out, e := s.login(ctx, email, p, code)
+	var f *model.Fault
+	if e == nil {
+		s.throttle.success(email)
+	} else if errors.As(e, &f) && f.Code == model.Unauthenticated {
+		s.throttle.failure(ctx, email)
+	}
+	return out, e
+}
+
+// dummyDigest is verified for addresses that do not exist (or are disabled) so
+// a missing account costs the same KDF work as a wrong password.
+var dummyDigest = sync.OnceValue(func() string {
+	return "soundpost-dummy-salt:" + password("soundpost dummy password", "soundpost-dummy-salt")
+})
+
+func (s *Service) login(ctx context.Context, email, p, code string) (Session, error) {
 	out := s.newSession(model.ID{})
 	e := s.store.Update(ctx, func(st *model.ControlState) error {
 		for k, u := range st.Users {
@@ -135,6 +165,7 @@ func (s *Service) Login(ctx context.Context, email, p, code string) (Session, er
 			st.Sessions[hashToken(out.Token)] = model.ControlSession{User: u.ID, CSRF: out.CSRF, Expires: int64(out.Expires), Reauthenticated: s.now().Unix()}
 			return nil
 		}
+		checkPassword(dummyDigest(), p)
 		return model.Fail(model.Unauthenticated)
 	})
 	return out, e

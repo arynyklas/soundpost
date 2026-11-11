@@ -269,20 +269,19 @@ func TestBackupActivateOpensARestoredRootHoldingAnArtifact(t *testing.T) {
 	}
 }
 
-func TestServeDoesNotPrintTheRestoreRecoveryToken(t *testing.T) {
+func TestServeNeverPrintsABootstrapToken(t *testing.T) {
 	dir := t.TempDir()
-	const token = "recovery-secret-token"
-	if got := bootstrapNotice(dir, token); !strings.Contains(got, token) {
-		t.Fatalf("a fresh installation's bootstrap notice lost its token: %q", got)
+	// bootstrapNotice no longer receives the token at all: a fresh install and a
+	// restored root both print only where the 0600 file is.
+	fresh := bootstrapNotice(dir)
+	if !strings.Contains(fresh, filepath.Join(dir, "bootstrap.token")) || !strings.Contains(fresh, "not printed") || strings.Contains(fresh, "One-time bootstrap token:") {
+		t.Fatalf("a fresh installation's bootstrap notice must name the token file only: %q", fresh)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "restore.json"), []byte(`{}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got := bootstrapNotice(dir, token)
-	if strings.Contains(got, token) {
-		t.Fatalf("serve wrote the restore's one-time recovery secret to the service log: %q", got)
-	}
-	if !strings.Contains(got, "bootstrap.token") {
-		t.Fatalf("the notice does not say where the token is: %q", got)
+	got := bootstrapNotice(dir)
+	if !strings.Contains(got, "bootstrap.token") || !strings.Contains(got, "restored") || !strings.Contains(got, "not printed") {
+		t.Fatalf("the restored notice does not say where the token is: %q", got)
 	}
 }

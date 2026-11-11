@@ -45,7 +45,7 @@ systemctl daemon-reload && systemctl enable --now soundpost
 
 * No HTTP listener exists; TLS 1.3 is required.
 * With no `--tls-cert/--tls-key`, first boot creates a stable self-signed `server.crt` / `server.key` in the data directory (valid for `localhost`, `127.0.0.1`, `::1` and the `--listen` address if it is a specific IP or name). Copy `server.crt` to clients through an authenticated channel and trust exactly that file; never disable verification. For a server reached by other names, bring your own certificate (a systemd credential, or a host file owned by uid 65532, mode 0600, bind-mounted read-only; Docker file secrets in non-swarm Compose are mounted 0444 and the server refuses such a key).
-* There is no default account, password or public signup. The first start prints a **one-time bootstrap token** to the service log and keeps it in `bootstrap.token` (0600). Use it once: `POST /api/v1/bootstrap` with `Token`, `Email`, `Password` (16–1024 bytes) and an `Origin` equal to the server origin (`docs/operations/bootstrap.md`). It is consumed and the file removed. Treat the first lines of the service log as secret and expire them (the compose file rotates its JSON log at 10 MB x 3).
+* There is no default account, password or public signup. The first start writes a **one-time bootstrap token** to `bootstrap.token` (0600) in the data directory and logs only that file's path, never the token. Read it from the file (as the data-directory owner), use it once: `POST /api/v1/bootstrap` with `Token`, `Email`, `Password` (16–1024 bytes) and an `Origin` equal to the server origin (`docs/operations/bootstrap.md`). It is consumed and the file removed.
 
 ## 5. Readiness: what "ready" means
 

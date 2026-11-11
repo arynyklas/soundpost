@@ -5,7 +5,7 @@ Open the installation’s trusted HTTPS origin. The production browser bundle an
 
 ## First boot
 
-Choose **First boot** and supply the one-use token from the private installation console or `bootstrap.token`, your email and a password of at least sixteen bytes. No default password, public signup or role selector exists. A successful request consumes the token. First boot is not disaster restore; the deletion-safe restore and audited reauthorization backend remains a separate integration prerequisite. The UI does not claim that old restored identities are active.
+Choose **First boot** and supply the one-use token from `bootstrap.token` in the installation's data directory (the service log names the file but never prints the token), your email and a password of at least sixteen bytes. No default password, public signup or role selector exists. A successful request consumes the token. First boot is not disaster restore; the deletion-safe restore and audited reauthorization backend remains a separate integration prerequisite. The UI does not claim that old restored identities are active.
 
 ## Local account and recovery
 

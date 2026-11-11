@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"mime"
+	"net"
 	"net/http"
 	"net/url"
 	"soundpost/internal/auth"
@@ -14,6 +15,7 @@ import (
 	"soundpost/internal/model"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const sessionCookie = "__Host-soundpost"
@@ -147,7 +149,21 @@ func RegisterSessionRoutes(mux *http.ServeMux, s *auth.Service) {
 			reply(w, nil, e)
 			return
 		}
-		v, e := s.Login(r.Context(), q.Email, q.Password, q.Code)
+		host, _, splitErr := net.SplitHostPort(r.RemoteAddr)
+		if splitErr != nil {
+			host = r.RemoteAddr
+		}
+		v, e := s.Login(auth.WithSource(r.Context(), host), q.Email, q.Password, q.Code)
+		var limited *auth.RateLimitedError
+		if errors.As(e, &limited) {
+			seconds := int((limited.RetryAfter + time.Second - 1) / time.Second)
+			w.Header().Set("Cache-Control", "no-store")
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Retry-After", strconv.Itoa(seconds))
+			w.WriteHeader(http.StatusTooManyRequests)
+			_ = json.NewEncoder(w).Encode(&model.Fault{Code: "rate_limited", Retryable: true, SafeDetail: "rate_limited", RequestID: model.NewID()})
+			return
+		}
 		if e == nil {
 			if old := token(r); old != "" {
 				_ = s.Logout(r.Context(), old)

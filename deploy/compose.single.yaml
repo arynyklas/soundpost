@@ -3,7 +3,8 @@
 #
 # Single-host, non-HA Soundpost. Persistent data lives in the named volume; nothing is
 # published beyond the loopback interface unless you change SOUNDPOST_PUBLISH. There is no
-# default password: the first start writes a one-time bootstrap token (see
+# default password: the first start writes a one-time bootstrap token to
+# <data>/bootstrap.token (0600; only its path is logged, never the token; see
 # docs/operations/install-single.md). Required: SOUNDPOST_IMAGE, the image you built with
 # deploy/Dockerfile (there is no moving "latest" tag).
 name: soundpost
