@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	bolt "go.etcd.io/bbolt"
 	"os"
 	"path/filepath"
@@ -134,14 +135,11 @@ func (s *Store) View(ctx context.Context, fn func(State) error) error {
 		return fn(st)
 	})
 }
+
+// Update commits fn as one control transition. It is an authority transition: it moves
+// AuthorityRevision. The writers that are known not to change authority go through updateAs.
 func (s *Store) Update(ctx context.Context, fn func(*State) error) error {
-	if e := ctx.Err(); e != nil {
-		return e
-	}
-	if s.repl == nil {
-		return model.Fail(model.Unavailable)
-	}
-	return s.replicatedUpdate(ctx, fn)
+	return s.update(ctx, true, fn)
 }
 func (s *Store) Transact(ctx context.Context, scope auth.Scope, cmd Command) (Result, error) {
 	if !CommandKind(cmd.Kind).Valid() || cmd.CommandID == (model.ID{}) {
@@ -152,7 +150,8 @@ func (s *Store) Transact(ctx context.Context, scope auth.Scope, cmd Command) (Re
 	}
 	var out Result
 	correlationID := model.RequestCorrelationID(ctx, cmd.CommandID)
-	e := s.Update(ctx, func(st *State) error {
+	legacy := false
+	e := s.update(ctx, transactBumps(cmd.Kind), func(st *State) error {
 		if err := scope.ValidateControlState(*st); err != nil {
 			return err
 		}
@@ -164,7 +163,8 @@ func (s *Store) Transact(ctx context.Context, scope auth.Scope, cmd Command) (Re
 			out = v
 			return nil
 		}
-		if st.Revision != cmd.ExpectedRevision {
+		if !expectedRevisionOK(st, cmd.Kind, cmd.ExpectedRevision) {
+			legacy = retentionKinds[CommandKind(cmd.Kind)] && st.AuthorityRevision == 0 && st.Revision > 0
 			return model.Fail(model.Conflict)
 		}
 		var effect Effect
@@ -199,6 +199,15 @@ func (s *Store) Transact(ctx context.Context, scope auth.Scope, cmd Command) (Re
 		st.Commands[cmd.CommandID.String()] = out
 		return nil
 	})
+	if legacy {
+		if f := (*model.Fault)(nil); errors.As(e, &f) && f.Code == model.Conflict {
+			// A state written before AuthorityRevision existed: stamp it so the caller's retry
+			// is judged against a real floor. The caller still gets this Conflict.
+			if err := s.healLegacyAuthority(ctx); err != nil {
+				return out, err
+			}
+		}
+	}
 	return out, e
 }
 func Random() string {

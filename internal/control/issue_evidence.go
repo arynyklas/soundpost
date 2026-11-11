@@ -829,7 +829,7 @@ func (s *Store) TransactIssues(ctx context.Context, scope auth.Scope, cmd Comman
 		return Result{}, model.Fail(model.Unsupported)
 	}
 	var out Result
-	err := s.Update(ctx, func(st *State) error {
+	err := s.updateAs(ctx, writerTransactIssues, func(st *State) error {
 		binding := scope.PrincipalID().String() + ":" + scope.OrgID().String() + ":" + cmd.Kind
 		if v, ok := st.Commands[cmd.CommandID.String()]; ok {
 			if err := issueReplayable(scope, st, cmd, binding); err != nil {

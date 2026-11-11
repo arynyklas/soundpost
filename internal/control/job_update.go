@@ -429,7 +429,7 @@ func (s *Store) TransactJobs(ctx context.Context, scope auth.Scope, cmd Command)
 		return Result{}, model.Fail(model.Unsupported)
 	}
 	var out Result
-	err := s.Update(ctx, func(st *State) error {
+	err := s.updateAs(ctx, writerTransactJobs, func(st *State) error {
 		job, version, phase, err := applyJobUpdate(scope, st, cmd)
 		if err != nil {
 			return err

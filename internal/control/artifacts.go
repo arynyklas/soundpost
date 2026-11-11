@@ -27,7 +27,7 @@ func (s *Store) ReserveArtifact(ctx context.Context, scope auth.Scope, m model.B
 	if m.Root == (model.ID{}) || m.Size == 0 || m.Size > model.ArtifactBundleLimit || m.RetainUntil <= 0 || m.ReservationID != (model.ID{}) {
 		return out, model.Fail(model.Invalid)
 	}
-	err := s.Update(ctx, func(st *State) error {
+	err := s.updateAs(ctx, writerReserveArtifact, func(st *State) error {
 		if err := scope.ValidateArtifactState(*st, m, true); err != nil {
 			return err
 		}
@@ -103,7 +103,7 @@ func (s *Store) PublishArtifact(ctx context.Context, scope auth.Scope, intent mo
 	intent.ControlRevision = 0
 	intent.CommandID = intent.ID
 	var out model.ArtifactReferenceIntent
-	err = s.Update(ctx, func(st *State) error {
+	err = s.updateAs(ctx, writerPublishArtifact, func(st *State) error {
 		m := intent.Manifest
 		b := intent.Map.Manifest
 		if intent.ID != b.Root || m.Org != b.Org || m.Project != b.Project || m.Source != b.Source || m.Build != b.Build || m.DebugID != b.DebugID || m.Path != b.Path || m.GeneratedSHA256 != b.GeneratedSHA256 || m.MapSHA256 != b.MapSHA256 || m.RetainUntil != b.RetainUntil || b.PrivateSources || m.SourceContent != (intent.Sources != nil) {

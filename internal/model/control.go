@@ -67,8 +67,14 @@ type ControlServerToken struct {
 	Revoked     bool
 }
 type ControlState struct {
-	Installation         ID
-	Revision             Revision
+	Installation ID
+	Revision     Revision
+	// AuthorityRevision is the Revision of the last control transition that could change
+	// authority, policy, retention, deletion or access state (internal/control/authority.go
+	// is the one place that classifies writers). The retention commands accept a caller view
+	// anywhere in [AuthorityRevision, Revision]: a view at least as new as the last such
+	// transition. Zero on a state written before the field existed (omitted from JSON).
+	AuthorityRevision    Revision `json:"authority_revision,omitempty"`
 	BootstrapHash        string
 	BearerHashKey        string
 	BearerHashKeyVersion uint8

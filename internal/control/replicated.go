@@ -105,7 +105,7 @@ func (s *Store) ReplicationSeed() ([]byte, uint64, error) {
 	}
 	return raw, uint64(snapshot.State.Revision), nil
 }
-func (s *Store) replicatedUpdate(ctx context.Context, fn func(*State) error) error {
+func (s *Store) replicatedUpdate(ctx context.Context, bump bool, fn func(*State) error) error {
 	s.updateMu.Lock()
 	defer s.updateMu.Unlock()
 	r := s.repl
@@ -121,7 +121,7 @@ func (s *Store) replicatedUpdate(ctx context.Context, fn func(*State) error) err
 	}); err != nil {
 		return err
 	}
-	expected := st.Revision
+	expected, priorAuthority := st.Revision, st.AuthorityRevision
 	if err := fn(&st); err != nil {
 		return err
 	}
@@ -129,6 +129,13 @@ func (s *Store) replicatedUpdate(ctx context.Context, fn func(*State) error) err
 		return model.Fail(model.Unavailable)
 	}
 	st.Revision = expected + 1
+	// Set after fn, never before: fn cannot forge, lower or suppress the field. A writer on the
+	// non-authority allowlist leaves the value it found.
+	if bump {
+		st.AuthorityRevision = st.Revision
+	} else {
+		st.AuthorityRevision = priorAuthority
+	}
 	keys, err := s.replicaKeyFiles()
 	if err != nil {
 		return err
@@ -395,7 +402,7 @@ func (s *Store) ReconcileAdmissions(ctx context.Context) error {
 		if err = owner.VerifyFinalization(ctx, proof); err != nil {
 			return err
 		}
-		if err = s.Update(ctx, func(st *State) error {
+		if err = s.updateAs(ctx, writerReconcileAdmissions, func(st *State) error {
 			old, ok := st.Reservations[proof.ReservationID.String()]
 			if !ok || old.State == "cancelled" {
 				return model.Fail(model.Corrupt)

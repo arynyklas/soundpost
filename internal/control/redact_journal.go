@@ -177,7 +177,7 @@ func (s *Store) RedactRetainedControlCommands(ctx context.Context) error {
 		return replicaFault(err)
 	}
 	if g.Status().Applied <= res.Floor {
-		if err = s.Update(ctx, func(*State) error { return nil }); err != nil {
+		if err = s.updateAs(ctx, writerRedactNoop, func(*State) error { return nil }); err != nil {
 			return err
 		}
 	}

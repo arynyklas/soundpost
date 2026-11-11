@@ -52,7 +52,7 @@ func (s *Store) ReserveAdmission(ctx context.Context, scope auth.Scope, b model.
 	if r.Slot >= 64 || r.Bytes == 0 {
 		return r, model.Fail(model.Invalid)
 	}
-	e := s.Update(ctx, func(st *State) error {
+	e := s.updateAs(ctx, writerReserveAdmission, func(st *State) error {
 		if e := scope.ValidateSourceState(*st, r.Project, r.Source, true); e != nil {
 			return e
 		}
@@ -151,7 +151,7 @@ func (s *Store) FinalizeAdmission(ctx context.Context, scope auth.Scope, r Final
 	if e := owner.VerifyFinalization(ctx, r); e != nil {
 		return e
 	}
-	return s.Update(ctx, func(st *State) error {
+	return s.updateAs(ctx, writerFinalizeAdmission, func(st *State) error {
 		old, ok := st.Reservations[r.ReservationID.String()]
 		if !ok {
 			return model.Fail(model.NotFound)
@@ -211,7 +211,7 @@ func (s *Store) CancelAdmission(ctx context.Context, scope auth.Scope, r CancelR
 	if e := owner.VerifyCancellation(ctx, r); e != nil {
 		return e
 	}
-	return s.Update(ctx, func(st *State) error {
+	return s.updateAs(ctx, writerCancelAdmission, func(st *State) error {
 		old, ok := st.Reservations[r.ReservationID.String()]
 		if !ok {
 			return model.Fail(model.NotFound)

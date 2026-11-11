@@ -111,9 +111,32 @@ entry, `facts` and `not_run_items`. No secret or raw telemetry content is writte
    against a rolled-back authority journal: the negative control of
    `backup-predates-deletion` shows a pre-deletion journal copy brings back the
    deleted rows.
-4. Deletion `Begin` is an optimistic commit on the control revision and can starve
-   under saturating intake (60/60 and 20/20 conflicts observed), so the drill
-   takes a short write pause for that single commit.
+4. Deletion `Begin` was an optimistic commit on the one global control revision and
+   starved under saturating intake (60/60 and 20/20 conflicts observed in 07.07; every
+   intake admission is a control transition and moves that revision between the
+   caller's view and its commit), so the drill takes a short write pause for that
+   single commit. **Changed (10.05):** control now keeps `AuthorityRevision` (the
+   revision of the last transition that could change authority, policy, retention,
+   deletion or access state) and the retention commands (`DeleteScope`, `BeginFence`,
+   `CompleteFence`, `PolicyChange`, `RecordEvidenceGap`) accept a caller view in
+   `[AuthorityRevision, Revision]`; intake admissions, quota accounting and the book
+   writers do not move `AuthorityRevision`. `TestDeleteBeginDoesNotStarveUnderSaturatingIntake`
+   (`internal/retention`) shows it: four goroutines reserving admissions without pause,
+   Begin conflicts 8/8 (natural race) and 8/8 (view forced stale by intake) on the
+   unchanged tree, 0/8 and 0/8 after. In the `stale-policy-delete-barrier` drill itself
+   (one run on Linux against a release built from this tree), `delete_begin` recorded
+   0 conflicts before the Begin committed (60 of 60 in 07.07) and `retire_begin`
+   recorded 2 (20 of 20 in 07.07). I did not isolate the 2; the likely cause (inferred,
+   not measured) is the first deletion's own barriers and fence steps, which are
+   authority-class commits that run while the second Begin is being decided.
+   **Still a limit:** the drill's own write pause
+   and its 60-attempt retry loop are unchanged (this change did not remove them); a
+   Begin still conflicts, as it must, when its view predates an authority-class change,
+   and a writer of another package (replay checkpoint index, artifact reference ledger,
+   login/session writes) bumps `AuthorityRevision` until it is classified in
+   `internal/control/authority.go`, so heavy traffic of those kinds can still make a
+   Begin retry. The classification table is the review surface: a writer wrongly
+   classified as non-authority would let a deletion commit on an outdated view.
 5. The source label policy admits label values from an allow-list, which bounds
    how many distinct batches the cluster drills can identify (700 pre-declared ids).
 
