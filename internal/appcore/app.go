@@ -347,6 +347,13 @@ func (a *App) RunFences(ctx context.Context) {
 			reconciliation, cancel := context.WithTimeout(ctx, 2*time.Second)
 			_ = a.Control.ReconcileAdmissions(reconciliation)
 			cancel()
+			// Expired pending logins and elevation records would otherwise stay in
+			// the replicated control state forever (m2 security review I-1, M-3).
+			// A failed sweep is retried on the next tick; OIDCStart also collects
+			// expired pending records, so a missed tick cannot grow them unbounded.
+			sweep, cancelSweep := context.WithTimeout(ctx, 2*time.Second)
+			_, _ = a.Auth.SweepExpired(sweep)
+			cancelSweep()
 		}
 	}
 }
