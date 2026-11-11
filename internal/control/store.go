@@ -38,7 +38,15 @@ type State = model.ControlState
 type Command = model.ControlCommand
 type Result = model.ControlResult
 
-// Control writes accept only authorization-owned opaque scopes.
+// Open opens (or creates) the control.db in dir. In the same write transaction it makes sure the
+// file carries the node-local scrub marker (erase.go, localScrubKey): the key's presence says that
+// a build with the marker has seen this file. A file without the key was written by an earlier
+// build, which applied erasures without recording that this file still held their payload, and the
+// replicated audit log cannot say whether this file was ever scrubbed (a leader's scrubbed audit
+// settles the leader's file): so such a file is marked owed when its log names an erasure, and
+// marked settled otherwise, once. A file that already has the key is never rewritten, and a
+// created file gets the settled key at once so that a later Open does not mark it. Control writes
+// accept only authorization-owned opaque scopes.
 func Open(dir string) (*Store, error) {
 	if e := durablefs.MkdirAll(dir); e != nil {
 		return nil, e
@@ -64,14 +72,14 @@ func Open(dir string) (*Store, error) {
 			if b == nil || b.Get([]byte("state")) == nil {
 				return model.Fail(model.Corrupt)
 			}
-			return nil
+			return markOpenedFile(b)
 		}
 		b, e := tx.CreateBucketIfNotExists([]byte("control"))
 		if e != nil {
 			return e
 		}
 		if b.Get([]byte("state")) != nil {
-			return nil
+			return markOpenedFile(b)
 		}
 		token := Random()
 		st := State{Installation: model.NewID(), BootstrapHash: Hash(token), Users: map[string]User{}, Sessions: map[string]Session{}, Orgs: map[string]Org{}, Commands: map[string]Result{}, OIDC: map[string]json.RawMessage{}}
@@ -82,7 +90,10 @@ func Open(dir string) (*Store, error) {
 		if e != nil {
 			return e
 		}
-		return b.Put([]byte("state"), v)
+		if e = b.Put([]byte("state"), v); e != nil {
+			return e
+		}
+		return writeLocalScrub(b, localScrub{})
 	})
 	if e != nil {
 		db.Close()

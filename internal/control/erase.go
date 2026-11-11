@@ -427,8 +427,10 @@ func controlErasures(st State, local localScrub) (stateOwed, journalOwed bool) {
 // replica_control metadata, the key files), so no leader can transplant it. Apply only ever
 // writes it, in the transaction that changes the state (Restore reads it only to decide
 // whether an install owes), and no transition reads it, so what every voter computes is
-// the same with or without it.
-// Value: 8 bytes big-endian generation, then one byte, 1 owed and 0 settled.
+// the same with or without it. Open writes it into every file it opens or creates, once (see
+// markOpenedFile): its presence says that a build with the marker has seen the file.
+// Value: 8 bytes big-endian generation, then one byte, 1 owed and 0 settled; nine zero bytes
+// is the settled key of a file that owes nothing, and reads as localScrub{}.
 var localScrubKey = []byte("local_scrub")
 
 // localScrub is the node-local half of the control.db scrub debt.
@@ -479,6 +481,28 @@ func oweLocalScrub(control *bolt.Bucket) error {
 	return writeLocalScrub(control, localScrub{generation: generation, owed: true})
 }
 
+// markOpenedFile runs inside the write transaction of Open on a file that exists. The marker
+// key is the fact that a build with the marker has seen this file; a file without it was
+// written by an earlier build, which applied erasures and recorded nowhere that its free pages
+// still hold their payload, while its replicated log may already carry the leader's scrubbed
+// audit. Nothing can tell a file that was scrubbed before the marker from one that never was,
+// so the file owes a scrub when its log names an erasure (a redundant bounded scrub for a node
+// that had already scrubbed), and is settled otherwise. Either way the key is written, because
+// the audit log is append-only: without a key a file that owes nothing would be re-evaluated,
+// and marked, at every Open. A state that cannot be decoded fails closed, as an install does.
+// A key that is already there is never rewritten: an owed marker stays owed under its
+// generation, a settled one stays settled.
+func markOpenedFile(control *bolt.Bucket) error {
+	if control.Get(localScrubKey) != nil {
+		return nil
+	}
+	var st State
+	if json.Unmarshal(control.Get([]byte("state")), &st) != nil || namesErasure(st.Audits) {
+		return oweLocalScrub(control)
+	}
+	return writeLocalScrub(control, localScrub{})
+}
+
 // oweInstalledScrub runs inside the write transaction that installs a snapshot, before it
 // replaces the state. The file owes a local scrub when the installed log names an erasure
 // (its payload was in this file's state or free pages, or never reached it, and this file
@@ -486,16 +510,38 @@ func oweLocalScrub(control *bolt.Bucket) error {
 // about to be replaced holds an erasing audit nothing settled (an install from another
 // lineage can drop that audit). A file whose old and new logs owe nothing and name no
 // erasure holds no payload an erasure covers, and its marker is left as it is.
+//
+// An install replaces nothing when the file already holds exactly the installed state, which
+// is what the replication group's first open does with the seed OpenSeed wrote. The marker is
+// authoritative for "this file owes nothing" (Open and OpenSeed write the key into every file,
+// and every erasure or install that could leave a payload behind owes), and installing a
+// byte-identical state frees only pages that hold that same state. So a file whose marker key
+// is present and settled, whose current log owes nothing, and whose current state equals the
+// installed one after canonical re-encoding owes nothing, whatever the log names. Every other
+// install over a clean file whose log names an erasure still owes, even over a different state
+// of the same lineage: a cost this rule does not remove, one bounded scrub per such install.
 func oweInstalledScrub(control *bolt.Bucket, installed State) error {
-	owed := readLocalScrub(control).owed || namesErasure(installed.Audits)
-	if !owed {
-		var current State
-		owed = json.Unmarshal(control.Get([]byte("state")), &current) != nil || len(owedScrubs(current.Audits)) != 0
+	local := readLocalScrub(control)
+	var current State
+	readable := json.Unmarshal(control.Get([]byte("state")), &current) == nil
+	if control.Get(localScrubKey) != nil && !local.owed && readable && len(owedScrubs(current.Audits)) == 0 && sameState(current, installed) {
+		return nil
 	}
+	owed := local.owed || namesErasure(installed.Audits) || !readable || len(owedScrubs(current.Audits)) != 0
 	if !owed {
 		return nil
 	}
 	return oweLocalScrub(control)
+}
+
+// sameState reports whether two control states are the same after canonical re-encoding.
+func sameState(a, b State) bool {
+	ca, err := model.CanonicalJSON(a)
+	if err != nil {
+		return false
+	}
+	cb, err := model.CanonicalJSON(b)
+	return err == nil && bytes.Equal(ca, cb)
 }
 
 // settleLocalScrub records that a scrub that started at the given generation zeroed the

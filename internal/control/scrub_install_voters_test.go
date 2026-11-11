@@ -114,7 +114,7 @@ func TestAFollowerThatReplayedTheErasureScrubsItsOwnFile(t *testing.T) {
 	v := newControlVoters(t)
 	const gone = "CANARYREPLAYFOLLOWER0d2b86a7c41e"
 	leader := v.fx[1]
-	for range 12 { // the replaced state spans freed pages that later writes do not all reuse
+	for range 40 { // the replaced state spans freed pages that later writes do not all reuse
 		leader.seedAll(leader.newSeed(leader.project, gone), 50)
 	}
 	for _, id := range []uint64{2, 3} {

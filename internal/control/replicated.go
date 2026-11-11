@@ -302,13 +302,17 @@ func (m *replicatedControl) Snapshot() ([]byte, error) {
 // without zeroing them, so what the replaced state held (an erased payload this voter had
 // applied before the leader erased it) stays in this file's free pages, while the installed
 // audit log may already say that a scrub settled the debt: the leader's. The same transaction
-// therefore owes this file a local scrub (oweInstalledScrub) that only ScrubErased clears.
+// therefore owes this file a local scrub (oweInstalledScrub) that only ScrubErased clears,
+// unless the install replaces nothing: the group's first open installs the seed OpenSeed has
+// just written, byte for byte, over a file whose marker is settled.
 func (m *replicatedControl) Restore(raw []byte, physical uint64) error {
 	return m.restore(raw, physical, true)
 }
 
 // restore installs snapshot raw. owe is false only for OpenSeed, which fills a control.db it
-// has just created: that file never held anything but the seed's own, already erased state.
+// has just created: that file never held anything but the seed's own, already erased state,
+// and carries the settled marker key from the start (the group's later install of that same
+// state is exempt in oweInstalledScrub, which is what keeps the file unmarked once it opens).
 func (m *replicatedControl) restore(raw []byte, physical uint64, owe bool) error {
 	var snapshot controlSnapshot
 	if model.StrictJSON(raw, &snapshot) != nil || snapshot.State.Installation == (model.ID{}) {
@@ -412,7 +416,9 @@ func (s *Store) ReconcileAdmissions(ctx context.Context) error {
 }
 
 // OpenSeed imports an operator-delivered private seed before auth initializes.
-// Existing authorities must match its installation; they are never overwritten.
+// Existing authorities must match its installation; they are never overwritten (an existing
+// file is opened by Open, which gives it the scrub marker key if it has none). A file it
+// creates holds only the seed's own, already erased state and gets the settled marker key.
 func OpenSeed(dir string, raw []byte) (*Store, error) {
 	var seed controlSnapshot
 	if model.StrictJSON(raw, &seed) != nil || seed.State.Installation == (model.ID{}) {
@@ -462,7 +468,10 @@ func OpenSeed(dir string, raw []byte) (*Store, error) {
 		if e != nil {
 			return e
 		}
-		return b.Put([]byte("state"), state)
+		if e = b.Put([]byte("state"), state); e != nil {
+			return e
+		}
+		return writeLocalScrub(b, localScrub{})
 	})
 	if err == nil {
 		err = (&replicatedControl{store: s}).restore(raw, 0, false)
