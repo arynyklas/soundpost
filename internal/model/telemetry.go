@@ -8,8 +8,9 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
-	"io"
+	"hash/maphash"
 	"strconv"
+	"unicode/utf16"
 	"unicode/utf8"
 )
 
@@ -546,103 +547,372 @@ func StrictJSON(b []byte, v any) error {
 	}
 	d := json.NewDecoder(bytes.NewReader(b))
 	d.DisallowUnknownFields()
+	// No trailing-data check: ValidateJSON has already proved that b is
+	// exactly one JSON value plus whitespace, and Decode consumes exactly one
+	// value, so the old second Decode(new(any)) could only ever return io.EOF.
+	// TestStrictJSONMatchesReference compares against the original on a
+	// corpus with trailing data.
 	if d.Decode(v) != nil {
-		return Fail(Invalid)
-	}
-	if d.Decode(new(any)) != io.EOF {
 		return Fail(Invalid)
 	}
 	return nil
 }
 
-// ValidateJSON rejects duplicate keys, invalid UTF-8, lone surrogate escapes, and excessive depth.
+// maxJSONDepth is the deepest nesting level at which a value is accepted. The
+// top-level value is level 0 and every value inside a container is one level
+// deeper than the container, so a non-empty array nested 64 deep is accepted
+// while its first element at level 65 is not; an empty container at level 64
+// has no children and is accepted.
+const maxJSONDepth = 64
+
+// jsonLinearKeys is how many keys of one object are compared linearly before
+// the object switches to a hash table.
+const jsonLinearKeys = 16
+
+var jsonKeySeed = maphash.MakeSeed()
+
+// jsonScan is a single-pass validating scanner. keys holds the decoded keys of
+// every object currently being scanned (each object owns the tail starting at
+// its base); arena backs the decoded form of keys that contain escapes.
+type jsonScan struct {
+	b     []byte
+	i     int
+	keys  [][]byte
+	arena []byte
+}
+
+// ValidateJSON rejects duplicate keys, invalid UTF-8, lone surrogate escapes, excessive depth,
+// and anything that is not exactly one well-formed JSON value surrounded by optional whitespace.
 func ValidateJSON(b []byte) error {
 	if !utf8.Valid(b) {
 		return Fail(Invalid)
 	}
-	for i := 0; i < len(b); i++ {
-		if b[i] != '\\' {
-			continue
-		}
-		if i+1 >= len(b) {
-			return Fail(Invalid)
-		}
-		if b[i+1] != 'u' {
-			i++
-			continue
-		}
-		if i+5 >= len(b) {
-			return Fail(Invalid)
-		}
-		n, e := strconv.ParseUint(string(b[i+2:i+6]), 16, 16)
-		if e != nil {
-			return Fail(Invalid)
-		}
-		if n >= 0xd800 && n <= 0xdbff {
-			if i+11 >= len(b) || b[i+6] != '\\' || b[i+7] != 'u' {
-				return Fail(Invalid)
-			}
-			m, e := strconv.ParseUint(string(b[i+8:i+12]), 16, 16)
-			if e != nil || m < 0xdc00 || m > 0xdfff {
-				return Fail(Invalid)
-			}
-			i += 11
-		} else if n >= 0xdc00 && n <= 0xdfff {
-			return Fail(Invalid)
-		} else {
-			i += 5
-		}
-	}
-	d := json.NewDecoder(bytes.NewReader(b))
-	d.UseNumber()
-	if walkJSON(d, 0) != nil {
+	s := jsonScan{b: b}
+	s.space()
+	if !s.value(0) {
 		return Fail(Invalid)
 	}
-	if _, e := d.Token(); e != io.EOF {
+	s.space()
+	if s.i != len(b) {
 		return Fail(Invalid)
 	}
 	return nil
 }
-func walkJSON(d *json.Decoder, depth int) error {
-	if depth > 64 {
-		return Fail(Invalid)
-	}
-	t, e := d.Token()
-	if e != nil {
-		return e
-	}
-	v, ok := t.(json.Delim)
-	if !ok {
-		return nil
-	}
-	switch v {
-	case '{':
-		seen := map[string]bool{}
-		for d.More() {
-			k, e := d.Token()
-			if e != nil {
-				return e
-			}
-			s, ok := k.(string)
-			if !ok || seen[s] {
-				return Fail(Invalid)
-			}
-			seen[s] = true
-			if e = walkJSON(d, depth+1); e != nil {
-				return e
-			}
+
+func (s *jsonScan) space() {
+	for s.i < len(s.b) {
+		switch s.b[s.i] {
+		case ' ', '\t', '\r', '\n':
+			s.i++
+		default:
+			return
 		}
-	case '[':
-		for d.More() {
-			if e = walkJSON(d, depth+1); e != nil {
-				return e
-			}
+	}
+}
+
+func (s *jsonScan) value(depth int) bool {
+	if depth > maxJSONDepth || s.i >= len(s.b) {
+		return false
+	}
+	switch c := s.b[s.i]; {
+	case c == '"':
+		_, _, ok := s.str()
+		return ok
+	case c == '{':
+		return s.object(depth)
+	case c == '[':
+		return s.array(depth)
+	case c == '-' || (c >= '0' && c <= '9'):
+		return s.number()
+	case c == 't':
+		return s.literal("true")
+	case c == 'f':
+		return s.literal("false")
+	case c == 'n':
+		return s.literal("null")
+	}
+	return false
+}
+
+func (s *jsonScan) literal(w string) bool {
+	if len(s.b)-s.i < len(w) || string(s.b[s.i:s.i+len(w)]) != w {
+		return false
+	}
+	s.i += len(w)
+	return true
+}
+
+func (s *jsonScan) digits() bool {
+	n := s.i
+	for s.i < len(s.b) && s.b[s.i] >= '0' && s.b[s.i] <= '9' {
+		s.i++
+	}
+	return s.i > n
+}
+
+func (s *jsonScan) number() bool {
+	if s.b[s.i] == '-' {
+		s.i++
+		if s.i >= len(s.b) {
+			return false
 		}
+	}
+	switch c := s.b[s.i]; {
+	case c == '0':
+		s.i++
+	case c >= '1' && c <= '9':
+		s.digits()
 	default:
-		return Fail(Invalid)
+		return false
 	}
-	_, e = d.Token()
-	return e
+	if s.i < len(s.b) && s.b[s.i] == '.' {
+		s.i++
+		if !s.digits() {
+			return false
+		}
+	}
+	if s.i < len(s.b) && (s.b[s.i] == 'e' || s.b[s.i] == 'E') {
+		s.i++
+		if s.i < len(s.b) && (s.b[s.i] == '+' || s.b[s.i] == '-') {
+			s.i++
+		}
+		if !s.digits() {
+			return false
+		}
+	}
+	return true
+}
+
+func hex4(b []byte) (rune, bool) {
+	if len(b) < 4 {
+		return 0, false
+	}
+	var r rune
+	for _, c := range b[:4] {
+		switch {
+		case c >= '0' && c <= '9':
+			c -= '0'
+		case c >= 'a' && c <= 'f':
+			c -= 'a' - 10
+		case c >= 'A' && c <= 'F':
+			c -= 'A' - 10
+		default:
+			return 0, false
+		}
+		r = r<<4 | rune(c)
+	}
+	return r, true
+}
+
+// str scans the string literal at s.i, validating escapes and surrogate pairs.
+// It returns the raw content (between the quotes) and whether it has escapes.
+func (s *jsonScan) str() (raw []byte, esc, ok bool) {
+	b := s.b
+	i := s.i + 1
+	start := i
+	for i < len(b) {
+		c := b[i]
+		switch {
+		case c == '"':
+			raw = b[start:i]
+			s.i = i + 1
+			return raw, esc, true
+		case c < 0x20:
+			return nil, false, false
+		case c != '\\':
+			i++
+			continue
+		}
+		esc = true
+		if i+1 >= len(b) {
+			return nil, false, false
+		}
+		switch b[i+1] {
+		case '"', '\\', '/', 'b', 'f', 'n', 'r', 't':
+			i += 2
+		case 'u':
+			n, ok := hex4(b[i+2:])
+			if !ok {
+				return nil, false, false
+			}
+			switch {
+			case n >= 0xd800 && n <= 0xdbff:
+				if i+11 >= len(b) || b[i+6] != '\\' || b[i+7] != 'u' {
+					return nil, false, false
+				}
+				m, ok := hex4(b[i+8:])
+				if !ok || m < 0xdc00 || m > 0xdfff {
+					return nil, false, false
+				}
+				i += 12
+			case n >= 0xdc00 && n <= 0xdfff:
+				return nil, false, false
+			default:
+				i += 6
+			}
+		default:
+			return nil, false, false
+		}
+	}
+	return nil, false, false
+}
+
+// decodeKey appends the unescaped form of an already validated string body.
+func decodeKey(dst, raw []byte) []byte {
+	for i := 0; i < len(raw); i++ {
+		c := raw[i]
+		if c != '\\' {
+			dst = append(dst, c)
+			continue
+		}
+		i++
+		switch raw[i] {
+		case 'b':
+			dst = append(dst, '\b')
+		case 'f':
+			dst = append(dst, '\f')
+		case 'n':
+			dst = append(dst, '\n')
+		case 'r':
+			dst = append(dst, '\r')
+		case 't':
+			dst = append(dst, '\t')
+		case 'u':
+			r, _ := hex4(raw[i+1:])
+			i += 4
+			if r >= 0xd800 && r <= 0xdbff {
+				lo, _ := hex4(raw[i+3:])
+				r = utf16.DecodeRune(r, lo)
+				i += 6
+			}
+			dst = utf8.AppendRune(dst, r)
+		default: // '"', '\\', '/'
+			dst = append(dst, raw[i])
+		}
+	}
+	return dst
+}
+
+func (s *jsonScan) array(depth int) bool {
+	s.i++
+	s.space()
+	if s.i < len(s.b) && s.b[s.i] == ']' {
+		s.i++
+		return true
+	}
+	for {
+		if !s.value(depth + 1) {
+			return false
+		}
+		s.space()
+		if s.i >= len(s.b) {
+			return false
+		}
+		c := s.b[s.i]
+		s.i++
+		switch c {
+		case ']':
+			return true
+		case ',':
+			s.space()
+		default:
+			return false
+		}
+	}
+}
+
+func (s *jsonScan) object(depth int) bool {
+	s.i++
+	s.space()
+	if s.i < len(s.b) && s.b[s.i] == '}' {
+		s.i++
+		return true
+	}
+	if s.keys == nil {
+		s.keys = make([][]byte, 0, 16)
+	}
+	base, abase := len(s.keys), len(s.arena)
+	var tab []int // open-addressing table of 1+index into s.keys[base:]; nil while small
+	for {
+		if s.i >= len(s.b) || s.b[s.i] != '"' {
+			return false
+		}
+		raw, esc, ok := s.str()
+		if !ok {
+			return false
+		}
+		key := raw
+		if esc {
+			n := len(s.arena)
+			s.arena = decodeKey(s.arena, raw)
+			key = s.arena[n:len(s.arena):len(s.arena)]
+		}
+		if tab == nil {
+			for _, k := range s.keys[base:] {
+				if string(k) == string(key) {
+					return false
+				}
+			}
+			s.keys = append(s.keys, key)
+			if len(s.keys)-base > jsonLinearKeys {
+				tab = buildKeyTable(s.keys[base:], 64)
+			}
+		} else {
+			h := int(maphash.Bytes(jsonKeySeed, key))
+			for j := h; ; j++ {
+				e := tab[j&(len(tab)-1)]
+				if e == 0 {
+					tab[j&(len(tab)-1)] = len(s.keys) - base + 1
+					break
+				}
+				if string(s.keys[base+e-1]) == string(key) {
+					return false
+				}
+			}
+			s.keys = append(s.keys, key)
+			if 2*(len(s.keys)-base) > len(tab) {
+				tab = buildKeyTable(s.keys[base:], 2*len(tab))
+			}
+		}
+		s.space()
+		if s.i >= len(s.b) || s.b[s.i] != ':' {
+			return false
+		}
+		s.i++
+		s.space()
+		if !s.value(depth + 1) {
+			return false
+		}
+		s.space()
+		if s.i >= len(s.b) {
+			return false
+		}
+		c := s.b[s.i]
+		s.i++
+		if c == '}' {
+			s.keys = s.keys[:base]
+			s.arena = s.arena[:abase]
+			return true
+		}
+		if c != ',' {
+			return false
+		}
+		s.space()
+	}
+}
+
+// buildKeyTable returns an open-addressing table of at least size slots (a
+// power of two) holding 1+index of every key; the keys are distinct.
+func buildKeyTable(keys [][]byte, size int) []int {
+	tab := make([]int, size)
+	for n, k := range keys {
+		j := int(maphash.Bytes(jsonKeySeed, k))
+		for tab[j&(size-1)] != 0 {
+			j++
+		}
+		tab[j&(size-1)] = n + 1
+	}
+	return tab
 }
 func OwnerKey(r Record) ([]byte, error) {
 	if _, e := r.Payload.Value(r.Kind); e != nil {
