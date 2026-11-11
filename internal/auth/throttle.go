@@ -119,8 +119,13 @@ func (t *throttleTable) fail(k [32]byte, now time.Time) {
 	w.times = append(w.times, now)
 }
 
-// makeRoom drops expired keys, then, if the table is still full, the key whose
-// latest failure is oldest. The table therefore never exceeds throttleMaxKeys.
+// makeRoom drops expired keys, then, if the table is still full, one more key:
+// the key with the oldest latest failure among those that are not blocking
+// anyone yet (fewer failures than the limit), and only when every tracked key is
+// blocked, the blocked key whose latest failure is oldest. A flood of throwaway
+// addresses therefore cannot free an address that is currently refusing attempts
+// while slack keys exist. The table never exceeds throttleMaxKeys. The cost of a
+// full table of blocked keys is that the oldest of them is released.
 func (t *throttleTable) makeRoom(now time.Time) {
 	for k, w := range t.keys {
 		t.prune(k, w, now)
@@ -130,11 +135,13 @@ func (t *throttleTable) makeRoom(now time.Time) {
 	}
 	var oldest [32]byte
 	var at time.Time
-	first := true
+	found, slack := false, false
 	for k, w := range t.keys {
 		last := w.times[len(w.times)-1]
-		if first || last.Before(at) {
-			oldest, at, first = k, last, false
+		isSlack := len(w.times) < t.limit
+		switch {
+		case !found, isSlack && !slack, isSlack == slack && last.Before(at):
+			oldest, at, found, slack = k, last, true, isSlack
 		}
 	}
 	delete(t.keys, oldest)
