@@ -5,6 +5,7 @@ package control
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -395,17 +396,131 @@ func owedScrubs(audits []model.ControlAudit) map[model.ID]scrubDebt {
 	return debts
 }
 
-// controlErasures reads, from committed state only, what is still owed on this
-// node: control.db while an erasing audit has no scrubbed audit after it, the
-// journal residue from the first erasure on.
-func controlErasures(st State) (stateOwed, journalOwed bool) {
-	for _, a := range st.Audits {
+// namesErasure reports whether the audit log holds an erasing audit.
+func namesErasure(audits []model.ControlAudit) bool {
+	return erasureCount(audits) != 0
+}
+
+// erasureCount is the number of erasing audits in the log.
+func erasureCount(audits []model.ControlAudit) int {
+	n := 0
+	for _, a := range audits {
 		if a.Action == controlErasedAction {
-			journalOwed = true
-			break
+			n++
 		}
 	}
-	return len(owedScrubs(st.Audits)) != 0, journalOwed
+	return n
+}
+
+// controlErasures reads what is still owed on this node: control.db while an erasing audit
+// has no scrubbed audit after it (the debt the replicated log records) or while this file
+// has applied an erasure that no scrub of this file has zeroed since (localScrub, a fact
+// about this file only); the journal residue from the first erasure on.
+func controlErasures(st State, local localScrub) (stateOwed, journalOwed bool) {
+	return len(owedScrubs(st.Audits)) != 0 || local.owed, namesErasure(st.Audits)
+}
+
+// localScrubKey is where THIS file records that it owes a scrub: it has applied an erasure
+// (a live commit, a replayed one, or a snapshot install whose log names one) and no
+// ScrubErased has zeroed its free pages since. It lives in the control bucket beside the
+// state but outside everything a snapshot, a seed or a command carries (the State, the
+// replica_control metadata, the key files), so no leader can transplant it. Apply only ever
+// writes it, in the transaction that changes the state (Restore reads it only to decide
+// whether an install owes), and no transition reads it, so what every voter computes is
+// the same with or without it.
+// Value: 8 bytes big-endian generation, then one byte, 1 owed and 0 settled.
+var localScrubKey = []byte("local_scrub")
+
+// localScrub is the node-local half of the control.db scrub debt.
+//
+// owedScrubs derives a debt from the audit log, and the log is replicated: the leader
+// writes `delete.control_scrubbed` after zeroing ITS file, and every voter receives that
+// record, by replaying the log or inside an installed snapshot, while its own file was
+// never scrubbed. bbolt is copy-on-write: the commit that applies an erasure (and an
+// install that replaces the state) frees the pages that held the covered payload and
+// zeroes none of them. So each file keeps its own fact: Apply (the commit that adds an
+// erasing audit) and Restore (an install that names one, or over a file that already owed
+// one) bump it, only a ScrubErased that zeroed the free pages after that clears it, and a
+// replicated scrubbed audit from any node never does. generation comes from the bucket's
+// own sequence, so it never repeats, and a scrub clears only the debt it started with: an
+// erasure or install that lands while it runs frees pages it may already have passed.
+type localScrub struct {
+	generation uint64
+	owed       bool
+}
+
+func readLocalScrub(control *bolt.Bucket) localScrub {
+	raw := control.Get(localScrubKey)
+	switch {
+	case raw == nil:
+		return localScrub{}
+	case len(raw) != 9 || raw[8] > 1:
+		return localScrub{owed: true} // unreadable: fail closed, the next scrub rewrites it
+	}
+	return localScrub{generation: binary.BigEndian.Uint64(raw), owed: raw[8] == 1}
+}
+
+func writeLocalScrub(control *bolt.Bucket, v localScrub) error {
+	raw := make([]byte, 9)
+	binary.BigEndian.PutUint64(raw, v.generation)
+	if v.owed {
+		raw[8] = 1
+	}
+	return control.Put(localScrubKey, raw)
+}
+
+// oweLocalScrub marks this file as owing a scrub under a generation no earlier debt had. It
+// writes and never reads the marker, inside the transaction that changes the state.
+func oweLocalScrub(control *bolt.Bucket) error {
+	generation, err := control.NextSequence()
+	if err != nil {
+		return err
+	}
+	return writeLocalScrub(control, localScrub{generation: generation, owed: true})
+}
+
+// oweInstalledScrub runs inside the write transaction that installs a snapshot, before it
+// replaces the state. The file owes a local scrub when the installed log names an erasure
+// (its payload was in this file's state or free pages, or never reached it, and this file
+// cannot tell which), or when it already owed one: the marker is still set, or the log
+// about to be replaced holds an erasing audit nothing settled (an install from another
+// lineage can drop that audit). A file whose old and new logs owe nothing and name no
+// erasure holds no payload an erasure covers, and its marker is left as it is.
+func oweInstalledScrub(control *bolt.Bucket, installed State) error {
+	owed := readLocalScrub(control).owed || namesErasure(installed.Audits)
+	if !owed {
+		var current State
+		owed = json.Unmarshal(control.Get([]byte("state")), &current) != nil || len(owedScrubs(current.Audits)) != 0
+	}
+	if !owed {
+		return nil
+	}
+	return oweLocalScrub(control)
+}
+
+// settleLocalScrub records that a scrub that started at the given generation zeroed the
+// free pages: it clears the marker unless a later erasure or install bumped it meanwhile.
+func (s *Store) settleLocalScrub(generation uint64) error {
+	return s.db.Update(func(tx *bolt.Tx) error {
+		control := tx.Bucket([]byte("control"))
+		if local := readLocalScrub(control); !local.owed || local.generation != generation {
+			return nil
+		}
+		return writeLocalScrub(control, localScrub{generation: generation})
+	})
+}
+
+// scrubState reads the committed state and this file's scrub marker in one transaction.
+func (s *Store) scrubState() (st State, local localScrub, err error) {
+	err = s.db.View(func(tx *bolt.Tx) error {
+		control := tx.Bucket([]byte("control"))
+		if json.Unmarshal(control.Get([]byte("state")), &st) != nil {
+			return model.Fail(model.Corrupt)
+		}
+		local = readLocalScrub(control)
+		return nil
+	})
+	return
 }
 
 func (s *Store) localState() (st State, err error) {
@@ -424,7 +539,12 @@ func (s *Store) localState() (st State, err error) {
 //
 //   - ResidualControlState from an erasure until ScrubErased has zeroed the free
 //     pages of control.db after it (any erasure: begin, completion, failure,
-//     import, or an effect erased as it committed after its operation finished);
+//     import, or an effect erased as it committed after its operation finished),
+//     and, whatever the replicated log says has been scrubbed, from the commit,
+//     replayed or live, or the snapshot install that gave this file an erasure until
+//     a ScrubErased that ran on this file after it (localScrub: a record that
+//     ANOTHER node's file was scrubbed settles nothing here, and the debt survives a
+//     restart);
 //   - ResidualControlJournal from the first erasing deletion on, until
 //     RedactRetainedControlCommands has proven, for every erasure committed so
 //     far, that this node's control Raft group holds none of the covered
@@ -434,11 +554,11 @@ func (s *Store) localState() (st State, err error) {
 //
 // A state that cannot be read is reported as both.
 func (s *Store) ResidualStores() []string {
-	st, err := s.localState()
+	st, local, err := s.scrubState()
 	if err != nil {
 		return []string{ResidualControlJournal, ResidualControlState}
 	}
-	stateOwed, journalOwed := controlErasures(st)
+	stateOwed, journalOwed := controlErasures(st, local)
 	var out []string
 	if journalOwed {
 		if residue, err := s.controlJournalResidue(st); err != nil || len(residue) != 0 {
@@ -460,33 +580,41 @@ const (
 
 var errScrubBusy = errors.New("read transaction open")
 
-// ScrubErased overwrites every free page of control.db with zeros while an
-// erasure's scrub is owed, then records that it did (settleScrub), so the owed
-// state clears and a later erasure owes a new scrub. bbolt is copy-on-write and
-// never zeroes a page it frees, so the state that an erasure replaced would
-// otherwise stay in the file. It does not depend on the operation's phase: a
-// completed operation's physical step runs it first (RecordPhysicalCleanup), and
-// the retention worker runs it on every pass, which is the only way the scrub of
-// a FAILED operation (whose physical step is never recorded) or of an effect that
-// was erased after its operation's physical step ever runs. It is a no-op, and
-// does not touch the file, when nothing is owed.
+// ScrubErased overwrites every free page of control.db with zeros while a scrub
+// is owed, then records that it did, so the owed state clears and a later
+// erasure owes a new scrub. Two debts are owed: the replicated one, derived from
+// the audit log (an erasing audit with no scrubbed audit after it), which a scrub
+// settles by appending a `delete.control_scrubbed` audit (settleScrub); and the
+// local one of this file (localScrub: it applied an erasure, by commit, replay or
+// snapshot install, and was not scrubbed since), which the scrub clears in this
+// file only and which commits nothing replicated. bbolt is copy-on-write and
+// never zeroes a page it frees, so the state that an erasure (or an install)
+// replaced would otherwise stay in the file. It does not depend on the
+// operation's phase: a completed operation's physical step runs it first
+// (RecordPhysicalCleanup), and the retention worker runs it on every pass, which
+// is the only way the scrub of a FAILED operation (whose physical step is never
+// recorded), of an effect that was erased after its operation's physical step, or
+// of a voter's own file after it replayed an erasure or installed a snapshot ever runs.
+// It is a no-op, and does not touch the file, when nothing is owed.
 //
 // Safety (the storage engine's argument, which this mirrors): inside a bbolt
 // write transaction, the single writer, a page the freelist reports free is
 // referenced by no committed tree provided no read transaction is open; so each
 // chunk runs in its own write transaction and defers while a reader is open. A
 // crash leaves some free pages zeroed and others not, the file valid, and the
-// scrub still owed (it is derived from committed state), so the next call redoes
-// it. It does not touch the Raft journal or its snapshots (ResidualControlJournal).
+// scrub still owed (both debts are derived from committed state, the local one
+// is cleared only after the last chunk), so the next call redoes it. It does not
+// touch the Raft journal or its snapshots (ResidualControlJournal).
 func (s *Store) ScrubErased(ctx context.Context) error {
-	st, err := s.localState()
+	st, local, err := s.scrubState()
 	if err != nil {
 		return err
 	}
 	// The scrub covers exactly the erasures committed before it read the state:
 	// an erasure committed while it runs freed pages it may have passed.
 	through := len(st.Audits)
-	if len(owedScrubs(st.Audits)) == 0 {
+	replicated := len(owedScrubs(st.Audits)) != 0
+	if !replicated && !local.owed {
 		return nil
 	}
 	file, err := os.OpenFile(s.db.Path(), os.O_WRONLY, 0)
@@ -506,6 +634,15 @@ func (s *Store) ScrubErased(ctx context.Context) error {
 		if err = s.scrubChunk(ctx, file, first, min(first+scrubChunkPages, high), pageSize); err != nil {
 			return err
 		}
+	}
+	if local.owed {
+		// Cleared only if no erasure or install landed since the state was read.
+		if err = s.settleLocalScrub(local.generation); err != nil {
+			return err
+		}
+	}
+	if !replicated {
+		return nil // nothing replicated is owed: this file's scrub is not a committed fact
 	}
 	return s.settleScrub(ctx, through)
 }

@@ -198,6 +198,7 @@ func (m *replicatedControl) Apply(c replica.CommittedEntry) error {
 		if json.Unmarshal(b.Get([]byte("state")), &current) != nil {
 			return model.Fail(model.Corrupt)
 		}
+		owe := false
 		if c.Entry.Kind != replica.Noop {
 			if c.Entry.Kind != replica.Control {
 				return model.Fail(model.Corrupt)
@@ -213,6 +214,9 @@ func (m *replicatedControl) Apply(c replica.CommittedEntry) error {
 					return err
 				}
 			} else {
+				// An erasing audit this commit adds means it frees the pages that held what was
+				// erased: this file owes a scrub whatever any later record says another node did.
+				owe = erasureCount(next.State.Audits) > erasureCount(current.Audits)
 				current = next.State
 			}
 			raw, e := json.Marshal(current)
@@ -221,6 +225,11 @@ func (m *replicatedControl) Apply(c replica.CommittedEntry) error {
 			}
 			if e = b.Put([]byte("state"), raw); e != nil {
 				return e
+			}
+			if owe {
+				if e = oweLocalScrub(b); e != nil {
+					return e
+				}
 			}
 		}
 		if uint64(current.Revision) != uint64(c.ApplicationCursor.Index) {
@@ -287,7 +296,20 @@ func (m *replicatedControl) Snapshot() ([]byte, error) {
 	}
 	return json.Marshal(out)
 }
+
+// Restore is the snapshot install of the replication layer: it replaces this node's control
+// state with the leader's. bbolt writes the new tree to fresh pages and frees the old ones
+// without zeroing them, so what the replaced state held (an erased payload this voter had
+// applied before the leader erased it) stays in this file's free pages, while the installed
+// audit log may already say that a scrub settled the debt: the leader's. The same transaction
+// therefore owes this file a local scrub (oweInstalledScrub) that only ScrubErased clears.
 func (m *replicatedControl) Restore(raw []byte, physical uint64) error {
+	return m.restore(raw, physical, true)
+}
+
+// restore installs snapshot raw. owe is false only for OpenSeed, which fills a control.db it
+// has just created: that file never held anything but the seed's own, already erased state.
+func (m *replicatedControl) restore(raw []byte, physical uint64, owe bool) error {
 	var snapshot controlSnapshot
 	if model.StrictJSON(raw, &snapshot) != nil || snapshot.State.Installation == (model.ID{}) {
 		return model.Fail(model.Corrupt)
@@ -297,6 +319,11 @@ func (m *replicatedControl) Restore(raw []byte, physical uint64) error {
 		return err
 	}
 	return s.db.Update(func(tx *bolt.Tx) error {
+		if owe {
+			if err := oweInstalledScrub(tx.Bucket([]byte("control")), snapshot.State); err != nil {
+				return err
+			}
+		}
 		b, err := tx.CreateBucketIfNotExists([]byte("replica_control"))
 		if err != nil {
 			return err
@@ -438,7 +465,7 @@ func OpenSeed(dir string, raw []byte) (*Store, error) {
 		return b.Put([]byte("state"), state)
 	})
 	if err == nil {
-		err = (&replicatedControl{store: s}).Restore(raw, 0)
+		err = (&replicatedControl{store: s}).restore(raw, 0, false)
 	}
 	if err != nil {
 		db.Close()

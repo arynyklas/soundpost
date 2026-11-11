@@ -145,6 +145,16 @@ func withoutPins(residue []string) []string {
 // for every erasure; it does nothing while an erasing deletion is still fencing. The retention
 // worker calls it on every pass. An error means the pass did not complete: ResidualStores keeps
 // naming ResidualControlJournal and the next call repeats it.
+//
+// Two limits of the bytes it writes. The replacement of a retained command is computed from
+// the state of THIS voter when the pass reads its rules, so the same command holds different
+// redacted bytes on two voters, and their snapshot envelopes (hence the snap-<index>-<checksum>
+// names and Manifest.Checksum) differ until every voter has run every pass: nothing may
+// compare them across voters. And the rules are read once, when the pass starts: an erasure
+// that commits while it runs leaves its covered payload in the ready.wal the pass rewrites and
+// in the snapshot it cuts, so a pass can introduce a copy of a payload committed after its
+// rules were read. The receipt stays honest (ResidualStores re-reads the live state) and the
+// next pass removes it.
 func (s *Store) RedactRetainedControlCommands(ctx context.Context) error {
 	g := s.ReplicaGroup()
 	if g == nil {

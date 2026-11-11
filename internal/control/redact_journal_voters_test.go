@@ -322,6 +322,19 @@ func TestEachControlVoterRedactsItsOwnCopy(t *testing.T) {
 	for _, id := range []uint64{2, 3} {
 		v.fx[id].pass()
 	}
+	// Neither follower scrubbed its own control.db: voter 2 replayed the erasure and voter 3
+	// installed the leader's snapshot, and the leader's replicated scrubbed audit is about the
+	// leader's file. Each file still holds what its commits or its install replaced, so each
+	// names control_state until the scrub the worker runs before this pass has run on it
+	// (scrub_install_voters_test.go pins the bytes).
+	for _, id := range []uint64{2, 3} {
+		if got := v.stores[id].ResidualStores(); !contains(got, control.ResidualControlState) {
+			t.Fatalf("voter %d applied the erasure and never scrubbed its own file: %v", id, got)
+		}
+		if err := v.stores[id].ScrubErased(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
 	for id := uint64(1); id <= 3; id++ {
 		for _, canary := range []string{before, during} {
 			if hits := v.fx[id].raftHits(canary); len(hits) != 0 {
