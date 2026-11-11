@@ -1,4 +1,3 @@
-<!-- Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0 -->
 # Soundpost product architecture and design
 
 Date: 2026-11-03. **Approved by Aryn Yklas for implementation.** Author and copyright owner: Aryn Yklas. The owner approved the complete design/contracts and selected subagent-driven implementation using m1 implementers and m2 reviewers. Technical choices and budgets below are approved implementation requirements; runtime support, performance and durability remain to be demonstrated. Publication and customer production changes are not authorized.

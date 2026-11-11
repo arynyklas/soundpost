@@ -1,4 +1,3 @@
-<!-- Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0 -->
 # Soundpost v1 module and protocol contracts
 
 Date: 2026-11-03. **Approved by Aryn Yklas for implementation with m1 implementers and m2 reviewers.** These are binding implementation contracts, not implemented-capability claims. [Design](2026-11-03-soundpost-design.md) and [requirements](2026-11-03-soundpost-requirements.md) govern. Paths below are planned until implemented and verified. Copyright 2026 Aryn Yklas. All first-party files are Apache-2.0. Soundpost owns its protocol/model; only PromQL/LogQL language semantics intentionally match upstream profiles.
