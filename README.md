@@ -1,3 +1,4 @@
+<!-- Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0 -->
 # Soundpost
 
 Self-hosted observability and incident investigation, designed as an independent Apache-2.0 product.

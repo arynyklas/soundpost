@@ -7,7 +7,7 @@
 
 `journey_gateway_model`, `journey_frontend_api_db`, `journey_background_retry`, `source_policy`, `query_profile`, `isolation_matrix` (cross-org/project/artifact/tail/replay/profile denial), `delivery_policy`, `deletion_restore`, `external_deadman`, `legacy_retention_export`.
 
-Each criterion needs at least one reference that is fully valid. Missing evidence is a `missing_evidence` blocker whose detail names the exact kind (for example `missing evidence: external_deadman`).
+Each criterion needs at least one reference that is fully valid. Missing evidence is a `missing_evidence` blocker whose detail names the exact kind (for example `missing evidence: external_deadman`). These kind names belong to this gate (`tools/adoption/readiness.go`); the closure ledger uses a different vocabulary for the same subjects (for example `tenant_isolation_matrix`, `retention_export_record`, `external_deadman_failure_domain`; see `closure.md`), and a gate signed by one tool is not accepted by the other without an explicit mapping.
 
 ## Evidence reference
 

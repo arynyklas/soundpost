@@ -11,8 +11,8 @@ Limits are pinned in `qualification/workloads.yaml` from design section 13 and a
 | Browser core gzip | <=40 KiB | **FAILED**: 46,570 B (index re-exports replay; no core-only entry) |
 | Browser replay gzip | <=60 KiB | met (5,882 B) |
 | Recorder p95 per mutation batch | <=5 ms | not exercised (no harness) |
-| Native CPU overhead per target | <=3% | met on the WSL2 functional row, reduced run (20 s x 3 pairs; full 120 s x 5 not run): about 0.2% |
-| Native memory | <=64 MiB | met, about 24 MB (same row) |
+| Native CPU overhead per target | <=3% | met on the full run, WSL2 functional row, cpu fixture only (`overhead --hz 99 --seconds 120 --repeats 5`, `fixtures/nativeperf/qualification.json` `overhead_full_run`): workload CPU overhead -0.34% (stderr 0.57%), throughput change 0.37%; the collector itself used 4.57% of one core. The earlier reduced 20 s x 3 run (about 0.2%) is superseded |
+| Native memory | <=64 MiB | met, 38,182,912 B (about 36 MiB) combined maximum in the same full run |
 | Python / Bun core capture | <=5% | not exercised (no workload) |
 | Native blocked/runqueue workload | <=3% | not exercised (scheduler, no harness) |
 | Single-host, distributed, queries | section 13 table | not exercised (no fixture hosts/1 h runs) |

@@ -1,3 +1,4 @@
+<!-- Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0 -->
 # Soundpost replay evidence v1
 
 Copyright 2026 Aryn Yklas. Apache-2.0.
@@ -52,6 +53,6 @@ Before every released event (and again after its body was fetched) the stream re
 ## What this does not cover
 
 - SDK pre-buffer masking, consent and opt-out (packages/browser).
-- Rendering and the investigation UI. No HTTP route reads replays yet.
+- Rendering and the investigation UI (the console has `web/src/replays/`, which reads the route below; this package defines none of it). The read route is `POST /api/v1/replays/stream` (`internal/httpapi/replay_view.go`, mounted in `appcore`); it streams NDJSON of this package's events. No running recorder feeds it: the SDK does not enqueue replay chunks (`docs/acceptance/reference-journeys.md`).
 - Covert channels inside the closed numeric fields (coordinates, node IDs).
 - Cross-language hash agreement is a contract between the recorder and `ChunkHash`; this package only defines the server side.

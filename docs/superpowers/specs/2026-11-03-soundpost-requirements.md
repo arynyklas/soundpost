@@ -1,3 +1,4 @@
+<!-- Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0 -->
 # Soundpost selected requirements
 
 Date: 2026-11-03. This is the portable product intake, not a capability claim. Aryn Yklas approved the complete design/contracts and selected subagent-driven implementation with m1 implementers and m2 reviewers on 2026-11-03. Soundpost is the selected name. Registry reservations and legal naming clearance are not claimed.

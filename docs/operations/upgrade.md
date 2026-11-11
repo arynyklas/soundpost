@@ -9,13 +9,13 @@ A three-voter installation keeps acknowledging writes while **one** voter is dow
 
 1. All three members ready: `kubectl get pods -l app.kubernetes.io/component=member` shows `1/1` for every pod, or `docker compose ps` shows three `healthy`; or `GET /readyz` returns 200 from each.
 2. The control `applied_cursor` in the three `/readyz` answers is equal (quiescent) or within a few entries; a member that is behind is still catching up and must not be the one that makes the other two the only voters.
-3. A current verified backup exists and its label is `deletion-safe-disaster-backup` (`backup-authority.md`). A recovery copy on the same host is not enough to roll back a failed migration.
+3. A current verified backup exists and its label is `deletion-safe-disaster-backup` (`backup-authority.md`). A recovery copy on the same host is not enough to roll back a failed migration. This is an offline, operator-checked precondition: a running distributed server does not build or check the backup service (`config.BackupChecker` runs only from the CLI), and multi-voter restore seeding is still an open item (see `backup-authority.md`), so a restore of that backup into a rolled cluster has not been demonstrated.
 4. The target version is documented as rolling-compatible with the running one. A member whose binary supports a different stored format than its data reports `schema_old` or `schema_newer` and stays unready: that member will not serve. Do not roll across a release that needs a data migration; use a planned full stop with a backup instead.
 5. Disk: every member's volume is below the 80% warning level.
 
 ## Order
 
-Upgrade one member at a time, **followers first if you can tell the leader** (there is no operator command to move leadership in this release; a leader restart simply causes one election, during which writes through any member are retried with `503` with `retryable: true`, and then succeed). Any order is safe provided only one member is down at a time.
+Upgrade one member at a time, **followers first if you can tell the leader** (there is no operator command to move leadership in this release; a leader restart simply causes one election, during which writes through any member are retried with `503` with `retryable: true`, and then succeed). Keep at most one member down at a time so a quorum remains. Rolling a member onto a *different binary* has not been exercised by any test or drill (the cluster drills restart the same binary; Kubernetes was never run, see `distributed.md`), so the ordering above is a precaution, not a verified guarantee; check each member's `/readyz` before moving on.
 
 For each member in turn:
 

@@ -74,9 +74,11 @@ passed and two did not. Run output: `.superpowers/sdd/approved-product/07.04-evi
   runs; 7 of 8 in one later run) and `resolved` in the others; the smoke retries up to 8 times one second apart and records every
   attempt in `details.json`. A run whose attempts are all `deadline` (or `sandbox_unavailable`) leaves the
   row unsatisfied with that reason. No timeout was changed.
-* The deployed node has no symbolication route (`httpapi.NewEvidence(nil, ...)` in `appcore`) and no job read
-  route at this commit, so frames are resolved by `app.NewSymbolicator` over the stopped node's data
-  directory, and job attempts and error records are read with `Storage.Scan` after stopping the node.
+* The deployed node has no symbolication route (`httpapi.NewEvidence(nil, ...)` in `appcore`), so frames are
+  resolved by `app.NewSymbolicator` over the stopped node's data directory. Job state is served at HEAD by
+  `POST /api/v1/jobs/list` and `/api/v1/jobs/view` (`internal/httpapi/jobs_view.go`, mounted in `appcore`);
+  this smoke deliberately reads job attempts and error records with `Storage.Scan` after stopping the node
+  and did not exercise those routes.
   Trace reads go through the real HTTP route after restarting the node on the same data.
 * Job attempts, the error and spans DO reach the backend and are admitted; the 03.06/03.09 doubt about job
   attempts was checked and did not hold for the Python SDK here. Profiles, capability records and replay

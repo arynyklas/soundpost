@@ -198,7 +198,4 @@ leader at each boundary of the pipeline. They do **not** cross separate OS
 processes, the mTLS transport, a wall clock or the data groups, and no real
 provider has been called.
 
-Not built here: the provider adapters (task 06.08), HTTP routes, the application
-wiring of the worker (the control handler is bound with
-`Store.BindDeliveryOutbox()`), and a scheduler that mints a fresh scope and
-lease per pass.
+Not built at the time of this task's commit and since added elsewhere: the provider adapters (`internal/notify/providers/{smtp,telegram,webhook}`, see `notification-channels.md`). Still not part of this document's scope: the application wiring of the worker (the control handler is bound with `Store.BindDeliveryOutbox()`; `soundpost serve` does not start the worker, see `background-workers.md`) and a scheduler that mints a fresh scope and lease per pass.

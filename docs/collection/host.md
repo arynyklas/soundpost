@@ -34,7 +34,10 @@ model metric and capability records.
 
 Verification status, stated plainly: Linux is run against fixtures and the
 real `/proc`, `/sys/fs/cgroup` of a WSL2 host; Windows is run on the Windows
-toolchain; **macOS is compiled and vetted only, never run** (no macOS machine
+toolchain, but its smoke did not run the process-count, journal or
+permission-denied rows (`system-logs.md` lists them as **not run** there), so
+the Windows `process_count` cell above is implemented, not smoke-verified;
+**macOS is compiled and vetted only, never run** (no macOS machine
 was available, and the CPU group is not implemented there); other OSes are
 only compile-checked (`GOOS=freebsd`).
 

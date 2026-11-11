@@ -1,3 +1,4 @@
+<!-- Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0 -->
 # Soundpost shared plan index
 
 Date: 2026-11-03. **APPROVED FOR IMPLEMENTATION.** Aryn Yklas approved the [complete design](../specs/2026-11-03-soundpost-design.md) and [contracts](../specs/2026-11-03-soundpost-contracts.md), selecting subagent-driven execution with m1 implementers and m2 reviewers. Approval permits product implementation and dependency installation, not public publication or customer infrastructure changes.

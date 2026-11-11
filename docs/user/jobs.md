@@ -100,10 +100,11 @@ A job state keeps the newest `MaxRetainedRuns` (512) runs. Older runs leave the 
 
 ## What is wired to real data today
 
-Implemented and tested: the pure reducer (`Reduce`, `ReduceEvent`, `Observe`, `ApplyCorrection`, `Evaluate`, `ExpectedOccurrences`) and the service (`ApplyAttempt`, `ObserveSchedule`, `Correct`, `Health`) against real `auth.Scope` authority and a **fake** persistence store.
+Implemented and tested: the pure reducer (`Reduce`, `ReduceEvent`, `Observe`, `ApplyCorrection`, `Evaluate`, `ExpectedOccurrences`) and the service (`ApplyAttempt`, `ObserveSchedule`, `Correct`, `Health`) against real `auth.Scope` authority, with a control-backed store (`jobs.NewControlStore`, constructed in `internal/appcore/app.go`; the `UpdateJob` handler is `Store.BindJobUpdate`, `internal/control/job_update.go`; per-job state is `ControlState.JobBooks`, `internal/model/control.go`).
 
-Interface only, with no production binding yet:
+Read side: `POST /api/v1/jobs/list` and `POST /api/v1/jobs/view` (`internal/httpapi/jobs_view.go`) return job state with `jobs.Health`.
 
-- `jobs.Store` has no control-store implementation. Control has the `UpdateJob` and `RecordEvidenceGap` command kinds but no `UpdateJob` handler, no job-state DTOs in the leaf `model` package, and no per-job state in `ControlState`.
-- Nothing yet reads the data-group job-attempt journal and calls `ApplyAttempt`, and no scheduler observer exists to call `ObserveSchedule`.
-- No HTTP route exposes `Health` or `Correct`; the SDK sends `manual.<run id>` schedule occurrences.
+Still not wired:
+
+- Nothing in a running node reads the data-group job-attempt journal and calls `ApplyAttempt` (its only non-test caller is the drills tool), and no scheduler observer exists to call `ObserveSchedule`.
+- No HTTP route exposes `Correct`; the SDK sends `manual.<run id>` schedule occurrences.

@@ -129,8 +129,8 @@ committed offset (the *tail*).
 
 | Situation | Result |
 | --- | --- |
-| rename rotation, predecessor listed in `rotated` | the predecessor is finished first, then the new file is read from byte zero. No loss, no duplicate |
-| copytruncate (file truncated after a copy) | the copy is found by the tail hash and finished; then the truncated live file is read from the start. No loss, no duplicate |
+| rename rotation, predecessor listed in `rotated` | the predecessor is finished first, then the new file is read from byte zero. No loss, no duplicate (exercised on WSL2/Linux only; see the Windows and OS-scope caveats under verification below) |
+| copytruncate (file truncated after a copy) | the copy is found by the tail hash and finished; then the truncated live file is read from the start. No loss, no duplicate (exercised on WSL2/Linux only; file rotation on Windows is not run) |
 | predecessor deleted or not listed; or file replaced in place (inode reuse); or truncated with no copy | unread bytes are lost: a `loss` record with reason `truncated`, signal `log` and count 1 (a **lower bound**, the true number is unknown) is exported with the same batch discipline, and reading restarts at byte zero of the live file |
 | live file missing | `unknown/not_present`; nothing is invented, no position is created |
 | open denied | `denied/permission_denied`; the position does not move, and the health is recorded. Reading resumes where it stopped when access returns. Denial is not a loss |

@@ -2,8 +2,11 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Alert rules and conditions
 
-An alert rule is evaluated by Soundpost on a fixed schedule against your own
-stored telemetry. Each series the rule's expression returns becomes an *alert
+An alert rule is meant to be evaluated by Soundpost on a fixed schedule against your own
+stored telemetry. **Status:** the evaluation runner exists (`internal/appcore/workers.go`)
+but `soundpost serve` does not start it and no rule catalogue is wired to it, so no running
+node evaluates rules today (`docs/operations/background-workers.md`); this page describes the
+behavior the runner implements. Each series the rule's expression returns becomes an *alert
 condition*: a record of whether that series is a problem right now and how far
 that answer can be trusted. A condition is deliberately separate from the error
 issue and the human incident it may be linked to (see `incidents.md`).

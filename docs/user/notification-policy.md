@@ -48,7 +48,9 @@ Everything below that is `queue`: it still appears in the shared queue at once.
   the issue workflow reports a qualifying reopen.
 
 The thresholds, the approved critical codes and the reminder timings are
-editable per project. The values above are the defaults.
+intended to be editable per project. The values above are the defaults, and today
+they are the only values: no policy catalogue or per-project store exists, and
+nothing edits policy state (`docs/operations/background-workers.md`).
 
 ## What people are told
 

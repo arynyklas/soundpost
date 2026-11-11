@@ -1,3 +1,4 @@
+<!-- Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0 -->
 # Soundpost protected artifacts v1
 
 Copyright 2026 Aryn Yklas. Apache-2.0.

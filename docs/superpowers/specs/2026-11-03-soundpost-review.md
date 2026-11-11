@@ -1,3 +1,4 @@
+<!-- Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0 -->
 # Soundpost design review and verification record
 
 Date: 2026-11-03. This record concerns design artifacts only. The product is not implemented. No server/SDK/native profiler/browser/runtime/conformance/benchmark/failure test was run, and no production change or public publication was performed.
