@@ -61,9 +61,14 @@ const (
 // covers and audits the fact when it dropped any. at is the deterministic time
 // of the transition; it never reads a clock. While the operation is fencing, a
 // delivery it covers only loses its body and stays paused (deliveryGate); once
-// it is complete or failed the unsent ones are settled.
+// it is complete or failed the unsent ones are settled. It is the begin,
+// complete and import erasure: an opaque state is covered by stateErased.
 func eraseControlPayloads(st *State, op model.DeletionOperation, at model.UnixNano) error {
-	dropped, err := eraseControlBooks(st, op, at)
+	return eraseControlPayloadsBy(st, op, at, stateErased)
+}
+
+func eraseControlPayloadsBy(st *State, op model.DeletionOperation, at model.UnixNano, rule stateRule) error {
+	dropped, err := eraseBooks(st, op, at, rule)
 	if err != nil {
 		return err
 	}
@@ -80,12 +85,22 @@ func eraseControlPayloads(st *State, op model.DeletionOperation, at model.UnixNa
 // effect can commit AFTER a deletion completed (or failed); the erasure that ran
 // when the operation completed has long passed. For every committed deletion
 // that covers the project and has finished (complete or failed: a fencing one
-// erases at its completion, and a held one has not begun) the same erasure runs
+// erases at its completion, and a held one has not begun) the erasure runs
 // again over the state the effect just changed, so the covered payload never
-// reaches the committed state, the snapshot or control.db. It is idempotent and
-// adds an erasing audit only when it dropped something, like every erasure; the
-// transition time is the operation's own completion time, so it stays a pure
-// function of (state, predicate), identical on every replica.
+// reaches the committed state, the snapshot or control.db.
+//
+// It is NOT the begin/complete erasure over again: that one drops an opaque
+// state (incident, condition, job) whose newest time is at or after the range's
+// start with no end bound, because the payloads under it really were old. Run on
+// every later commit that rule would tombstone a brand-new state in the very
+// transition that commits it, forever (09.06 review C-1). The late pass uses
+// stateErasedLate, which covers an opaque state only when it names evidence
+// inside the range's [start,end); the other books (rule evaluations, issue
+// evidence, deliveries) already are half-open and are unchanged. The pass is
+// idempotent and adds an erasing audit (and so owes a scrub) only when it
+// dropped something, like every erasure; the transition time is the
+// operation's own completion time, so it stays a pure function of (state,
+// predicate), identical on every replica.
 func eraseLateEffect(st *State, org, project model.ID) error {
 	if len(st.Deletions) == 0 {
 		return nil
@@ -100,16 +115,21 @@ func eraseLateEffect(st *State, org, project model.ID) error {
 		if op.Phase != model.DeletePhaseComplete && op.Phase != model.DeletePhaseFailed || !op.Predicate.CoversProject(org, project) {
 			continue
 		}
-		if err := eraseControlPayloads(st, op, op.CompletedAt); err != nil {
+		if err := eraseControlPayloadsBy(st, op, op.CompletedAt, stateErasedLate); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// eraseControlBooks is the erasure itself: every control book, one call each, in
-// a fixed order. It returns how many payloads it dropped.
+// eraseControlBooks is the begin/complete/import erasure itself: every control
+// book, one call each, in a fixed order. It returns how many payloads it dropped.
 func eraseControlBooks(st *State, op model.DeletionOperation, at model.UnixNano) (dropped int, err error) {
+	return eraseBooks(st, op, at, stateErased)
+}
+
+// eraseBooks is eraseControlBooks with the rule that covers an opaque state.
+func eraseBooks(st *State, op model.DeletionOperation, at model.UnixNano, rule stateRule) (dropped int, err error) {
 	p := op.Predicate
 	_, dropped, err = eraseRuleFacts(st, p, false)
 	if err != nil {
@@ -117,11 +137,11 @@ func eraseControlBooks(st *State, op model.DeletionOperation, at model.UnixNano)
 	}
 	settle := op.Phase == model.DeletePhaseComplete || op.Phase == model.DeletePhaseFailed
 	for _, erase := range []func() (int, error){
-		func() (int, error) { return eraseIncidents(st, p) },
-		func() (int, error) { return eraseConditions(st, p) },
+		func() (int, error) { return eraseIncidentsBy(st, p, rule) },
+		func() (int, error) { return eraseConditionsBy(st, p, rule) },
 		func() (int, error) { return eraseDeliveries(st, p, at, settle, op.Principal) },
 		func() (int, error) { return eraseIssueBooks(st, p, at) },
-		func() (int, error) { return eraseJobBooks(st, p, at) },
+		func() (int, error) { return eraseJobBooksBy(st, p, at, rule) },
 		func() (int, error) { return eraseCutoverBooks(st, p, at) },
 	} {
 		n, err := erase()
@@ -170,7 +190,14 @@ func (s *Store) RedactControlCommand(payload []byte) (replacement []byte, change
 		if at == 0 {
 			at = op.RequestedAt
 		}
-		n, err := eraseControlBooks(&next.State, op, at)
+		// A command whose own state already has the deletion finished was committed
+		// after it, so the live apply screened its effect with the late rule: the
+		// redaction must not drop what that apply kept.
+		rule := stateRule(stateErased)
+		if committed, ok := next.State.Deletions[id]; ok && (committed.Phase == model.DeletePhaseComplete || committed.Phase == model.DeletePhaseFailed) {
+			rule = stateErasedLate
+		}
+		n, err := eraseBooks(&next.State, op, at, rule)
 		if err != nil {
 			return nil, false, err
 		}
@@ -186,9 +213,16 @@ func (s *Store) RedactControlCommand(payload []byte) (replacement []byte, change
 	return replacement, true, nil
 }
 
-// stateErased decides whether the opaque state of one record is covered. A
-// retirement covers every record of its projects. A range covers the records
-// whose state names an evidence time at or after its start, and every record
+// stateRule decides whether the opaque state of one record is covered by a
+// predicate: stateErased when a deletion begins, completes or is imported,
+// stateErasedLate in the transition of an effect that commits after it finished.
+type stateRule func(p model.DeletePredicate, org, project model.ID, raw json.RawMessage) bool
+
+// stateErased decides whether the opaque state of one record is covered when a
+// deletion begins, completes or is imported, while the payloads under it really
+// are old. A retirement covers every record of its projects. A range covers the
+// records whose state names an evidence time at or after its start (NO end
+// bound: the state may mix times and the whole is dropped) and every record
 // whose state names none or cannot be read: a payload that cannot be attributed
 // is dropped whole. An entity deletion names replay and profile roots, which
 // these records only link by ID: it covers none. A tombstone is never covered
@@ -206,6 +240,46 @@ func stateErased(p model.DeletePredicate, org, project model.ID, raw json.RawMes
 	}
 	return false
 }
+
+// stateErasedLate is stateErased for the late re-erasure (eraseLateEffect): the
+// state was just written by an effect that may have been read before the
+// deletion's barrier, so what decides is whether it names evidence INSIDE the
+// range's half-open [start,end), exactly the interval the books that are
+// precise already use (CoversOrigin). A range covers the state when a named time
+// lies in [start,end), and, as at begin, when the state names no evidence time
+// at all or one that cannot be read (unattributable, dropped whole). Evidence
+// before start or at and after end derives from data the range did not delete: a
+// state first committed from such data is kept, whatever else it names (the
+// action's own time, a watermark, the evaluation time). Durations
+// (lateDurationKeys) and unset times (zero or negative) are no evidence of an
+// instant and are not read as one. A retirement covers every record of its
+// projects and an entity deletion none, as in stateErased. The signal list is
+// ignored, as in stateErased: a state does not name the signal its evidence came
+// from.
+func stateErasedLate(p model.DeletePredicate, org, project model.ID, raw json.RawMessage) bool {
+	if !p.CoversProject(org, project) || stateIsTombstone(raw) {
+		return false
+	}
+	switch p.Mode {
+	case model.DeleteRetireOrg, model.DeleteRetireProject:
+		return true
+	case model.DeleteHistoricalRange:
+		named, inside := false, false
+		readable := stateTimes(raw, func(key string, at model.UnixNano) {
+			if at <= 0 || lateDurationKeys[key] {
+				return
+			}
+			named = true
+			inside = inside || at >= p.Start && at < p.End
+		})
+		return !readable || !named || inside
+	}
+	return false
+}
+
+// lateDurationKeys are the keys under which an opaque state carries a length of
+// time (job definition revisions), not an instant, though they end in "_ns".
+var lateDurationKeys = map[string]bool{"grace_ns": true, "max_runtime_ns": true, "observer_stale_after_ns": true}
 
 // tombstoneState is what an erased record keeps in place of its state: the
 // closed header and the erasing operation, nothing derived from telemetry.
@@ -225,11 +299,25 @@ func stateIsTombstone(raw json.RawMessage) bool {
 // numeric string under a key "at", "*_at" or "*_ns", at any depth. ok is false
 // when it names none or a time cannot be read.
 func stateLatestTime(raw json.RawMessage) (latest model.UnixNano, ok bool) {
+	named := false
+	readable := stateTimes(raw, func(_ string, at model.UnixNano) {
+		if !named || at > latest {
+			latest, named = at, true
+		}
+	})
+	return latest, named && readable
+}
+
+// stateTimes calls visit, in sorted key order, for every time a state names:
+// every number or numeric string under a key "at", "*_at" or "*_ns", at any
+// depth, with that key. readable is false when the state is not JSON or a named
+// time cannot be read.
+func stateTimes(raw json.RawMessage, visit func(key string, at model.UnixNano)) (readable bool) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
 	var root any
 	if dec.Decode(&root) != nil {
-		return 0, false
+		return false
 	}
 	bad := false
 	var walk func(v any)
@@ -260,9 +348,7 @@ func stateLatestTime(raw json.RawMessage) (latest model.UnixNano, ok bool) {
 						bad = true
 						continue
 					}
-					if !ok || model.UnixNano(ns) > latest {
-						latest, ok = model.UnixNano(ns), true
-					}
+					visit(k, model.UnixNano(ns))
 					continue
 				}
 				walk(t[k])
@@ -274,7 +360,7 @@ func stateLatestTime(raw json.RawMessage) (latest model.UnixNano, ok bool) {
 		}
 	}
 	walk(root)
-	return latest, ok && !bad
+	return !bad
 }
 
 // scrubDebt is the control.db scrub one operation still owes: the position of its

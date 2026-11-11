@@ -447,6 +447,11 @@ func (a *Actions) GetIncident(ctx context.Context, scope auth.Scope, project, in
 	if err != nil {
 		return IncidentView{}, err
 	}
+	if state.Erased {
+		f := model.Fail(model.NotFound)
+		f.SafeDetail = incidents.DetailErased
+		return IncidentView{}, f
+	}
 	return a.view(state, true), nil
 }
 
@@ -564,6 +569,9 @@ func (a *Actions) Queue(ctx context.Context, scope auth.Scope, req QueueRequest)
 			return QueueView{}, err
 		}
 		for _, rec := range records {
+			if rec.Erased() {
+				continue // a deletion erased its state: nothing to queue, and not storage damage
+			}
 			st, err := decodeIncident(rec)
 			if err != nil {
 				return QueueView{}, err

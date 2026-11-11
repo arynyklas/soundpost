@@ -85,8 +85,17 @@ type wire struct {
 	Project model.ID `json:"project_id"`
 }
 
+// decode reads one committed record. A record a deletion erased decodes to the
+// erased marker (its identity and version only), provided the tombstone is that
+// record's own; anything else that does not match the record is damage.
 func decode(rec control.ConditionRecord) (State, error) {
 	var w wire
+	if rec.Erased() {
+		if json.Unmarshal(rec.State, &w) != nil || w.Condition != rec.ID || w.Version != rec.Version || w.Org != rec.Org || w.Project != rec.Project {
+			return State{}, model.Fail(model.Corrupt)
+		}
+		return State{Condition: rec.ID, Version: rec.Version, Erased: true}, nil
+	}
 	if json.Unmarshal(rec.State, &w) != nil || w.Condition != rec.ID || w.Version != rec.Version || w.Org != rec.Org || w.Project != rec.Project || len(w.Recent) == 0 {
 		return State{}, model.Fail(model.Corrupt)
 	}
@@ -129,6 +138,8 @@ func fenceFault(err error) error {
 
 // Get returns one condition. The scope is checked before the condition is
 // looked up; a missing condition and one outside the scope are indistinguishable.
+// A condition whose state a deletion erased is found and reads as the erased
+// marker (State.Erased, identity and version only), not as an error.
 func (s *Service) Get(ctx context.Context, scope auth.Scope, condition model.ID) (State, bool, error) {
 	project, err := reader(scope)
 	if err != nil {
@@ -142,7 +153,7 @@ func (s *Service) Get(ctx context.Context, scope auth.Scope, condition model.ID)
 	return st, err == nil, err
 }
 
-// List returns the project's conditions in ID order.
+// List returns the project's conditions in ID order, erased ones as markers.
 func (s *Service) List(ctx context.Context, scope auth.Scope) ([]State, error) {
 	project, err := reader(scope)
 	if err != nil {
@@ -216,10 +227,19 @@ func (s *Service) transition(ctx context.Context, scope auth.Scope, project mode
 			return State{}, false, err
 		}
 		var cur State
+		expected := model.Revision(0)
 		if found {
 			if cur, err = decode(rec); err != nil {
 				return State{}, false, err
 			}
+			expected = rec.Version
+		}
+		// A condition a deletion erased has no history left: the next event starts
+		// a new one on top of the preserved version (the control record is
+		// compare-and-set on it), exactly as an erased job does.
+		erased := cur.Erased
+		if erased {
+			cur = State{}
 		}
 		var next State
 		switch {
@@ -227,7 +247,7 @@ func (s *Service) transition(ctx context.Context, scope auth.Scope, project mode
 			next, err = Join(cur, *in.event, *in.obs)
 		case in.event != nil:
 			next, err = Reduce(cur, *in.event)
-		case !found:
+		case !found || erased:
 			return State{}, false, nil // nothing to observe
 		default:
 			next, err = Observe(cur, *in.obs)
@@ -237,6 +257,9 @@ func (s *Service) transition(ctx context.Context, scope auth.Scope, project mode
 		}
 		if next.Version == cur.Version {
 			return cur, false, nil // old, duplicate or already known: no effect
+		}
+		if erased {
+			next.Version = expected + 1
 		}
 		before, hadBefore := lastRef(cur)
 		after, _ := lastRef(next)
@@ -257,7 +280,7 @@ func (s *Service) transition(ctx context.Context, scope auth.Scope, project mode
 		if err = s.fencer.ValidateFence(ctx, lease); err != nil {
 			return cur, false, fenceFault(err)
 		}
-		committed, err := s.commit(ctx, scope, project, lease, cur.Version, next, change)
+		committed, err := s.commit(ctx, scope, project, lease, expected, next, change)
 		var f *model.Fault
 		if errors.As(err, &f) && (f.Code == model.Conflict && f.SafeDetail == control.ConditionVersionConflict || f.SafeDetail == DetailVersionRace) {
 			continue // another writer committed first: reduce again against its state

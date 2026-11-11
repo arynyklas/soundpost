@@ -493,7 +493,8 @@ func TestControlStoreLoadRefusesInconsistentRecord(t *testing.T) {
 
 type ownApp struct {
 	*fixture
-	dir string
+	dir   string
+	actor auth.Credential // the organization-wide administrator that built the fixture
 }
 
 func openOwn(t *testing.T) *ownApp {
@@ -519,6 +520,7 @@ func openOwn(t *testing.T) *ownApp {
 	if err != nil {
 		t.Fatal(err)
 	}
+	o.actor = actor
 	step := func(org model.ID, kind string, p auth.AdminPayload) {
 		t.Helper()
 		if err := admin(o.fixture, actor, org, kind, p); err != nil {

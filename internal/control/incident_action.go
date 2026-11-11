@@ -68,6 +68,11 @@ type IncidentRecord struct {
 	Intents []IncidentIntent `json:"intents,omitempty"`
 }
 
+// Erased reports whether a deletion replaced the record's state by its
+// tombstone: the identity, version and intent history remain, the state derived
+// from telemetry is gone. It is not storage damage.
+func (r IncidentRecord) Erased() bool { return stateIsTombstone(r.State) }
+
 const (
 	maxIncidentStateBytes     = 256 << 10
 	maxIncidentsPerProject    = 1024
@@ -242,6 +247,11 @@ func (s *Store) Incidents(ctx context.Context, scope auth.Scope, project model.I
 // record's identity, version, digest and intent history, and a tombstone state
 // carrying only the closed header and the erasing operation.
 func eraseIncidents(st *State, p model.DeletePredicate) (dropped int, err error) {
+	return eraseIncidentsBy(st, p, stateErased)
+}
+
+// eraseIncidentsBy is eraseIncidents with the rule that covers an opaque state.
+func eraseIncidentsBy(st *State, p model.DeletePredicate, rule stateRule) (dropped int, err error) {
 	keys := make([]string, 0, len(st.IncidentBooks))
 	for key := range st.IncidentBooks {
 		keys = append(keys, key)
@@ -252,7 +262,7 @@ func eraseIncidents(st *State, p model.DeletePredicate) (dropped int, err error)
 		if err != nil {
 			return 0, err
 		}
-		if !stateErased(p, rec.Org, rec.Project, rec.State) {
+		if !rule(p, rec.Org, rec.Project, rec.State) {
 			continue
 		}
 		rec.State = tombstoneState("incident_id", rec.ID, rec.Org, rec.Project, rec.Version, p.Operation)

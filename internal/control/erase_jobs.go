@@ -25,11 +25,17 @@ import (
 // the erasure is still a replay: erased history is never resurrected). It returns
 // how many states it dropped; a tombstone is never covered again.
 //
-// The deletion hook calls it once, from eraseControlBooks, next to the
-// others:
+// The deletion hook calls eraseJobBooksBy once, from eraseBooks, next to the
+// others, with the rule of the pass (stateErased at begin, completion and
+// import, stateErasedLate in the late re-erasure of an effect):
 //
-//	func() (int, error) { return eraseJobBooks(st, p, at) },
+//	func() (int, error) { return eraseJobBooksBy(st, p, at, rule) },
 func eraseJobBooks(st *State, p model.DeletePredicate, at model.UnixNano) (dropped int, err error) {
+	return eraseJobBooksBy(st, p, at, stateErased)
+}
+
+// eraseJobBooksBy is eraseJobBooks with the rule that covers an opaque state.
+func eraseJobBooksBy(st *State, p model.DeletePredicate, at model.UnixNano, rule stateRule) (dropped int, err error) {
 	keys := make([]string, 0, len(st.JobBooks))
 	for key := range st.JobBooks {
 		keys = append(keys, key)
@@ -40,7 +46,7 @@ func eraseJobBooks(st *State, p model.DeletePredicate, at model.UnixNano) (dropp
 		if err != nil {
 			return 0, err
 		}
-		if !stateErased(p, rec.Org, rec.Project, rec.State) {
+		if !rule(p, rec.Org, rec.Project, rec.State) {
 			continue
 		}
 		rec.State = tombstoneState("job_id", rec.Job, rec.Org, rec.Project, rec.Version, p.Operation)

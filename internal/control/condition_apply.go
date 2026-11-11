@@ -65,6 +65,11 @@ type ConditionRecord struct {
 	Fence   *replica.FenceToken `json:"fence,omitempty"`
 }
 
+// Erased reports whether a deletion replaced the record's state by its
+// tombstone: the identity, version and fence remain, the state derived from
+// telemetry is gone. It is not storage damage.
+func (r ConditionRecord) Erased() bool { return stateIsTombstone(r.State) }
+
 const (
 	maxConditionStateBytes = 32 << 10
 	maxConditionToken      = 32
@@ -218,6 +223,11 @@ func (s *Store) Conditions(ctx context.Context, scope auth.Scope, project model.
 // tombstone carrying only the closed header and the erasing operation. The
 // record's identity, version, digest and fence stay.
 func eraseConditions(st *State, p model.DeletePredicate) (dropped int, err error) {
+	return eraseConditionsBy(st, p, stateErased)
+}
+
+// eraseConditionsBy is eraseConditions with the rule that covers an opaque state.
+func eraseConditionsBy(st *State, p model.DeletePredicate, rule stateRule) (dropped int, err error) {
 	keys := make([]string, 0, len(st.ConditionBooks))
 	for key := range st.ConditionBooks {
 		keys = append(keys, key)
@@ -228,7 +238,7 @@ func eraseConditions(st *State, p model.DeletePredicate) (dropped int, err error
 		if err != nil {
 			return 0, err
 		}
-		if !stateErased(p, rec.Org, rec.Project, rec.State) {
+		if !rule(p, rec.Org, rec.Project, rec.State) {
 			continue
 		}
 		rec.State = tombstoneState("condition_id", rec.ID, rec.Org, rec.Project, rec.Version, p.Operation)

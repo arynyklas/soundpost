@@ -202,7 +202,17 @@ type State struct {
 	Previous       *model.ID      `json:"previous,omitempty"`
 	ResolvedAt     model.UnixNano `json:"resolved_at,omitempty"`
 	Timeline       []Entry        `json:"timeline"`
+
+	// Erased is set on the state Service.Get reads for an incident whose state a
+	// deletion erased: only the closed header (ID, Org, Project, Version) is
+	// filled and nothing derived from telemetry remains. It is never stored.
+	Erased bool `json:"-"`
 }
+
+// DetailErased is the SafeDetail of the model.NotFound an action on an erased
+// incident gets: a deletion removed the incident's state, so there is nothing to
+// act on. It is not storage damage (model.Corrupt).
+const DetailErased = "incident_erased"
 
 // AckCurrent reports whether the ACK covers the current impact revision.
 func (s State) AckCurrent() bool {

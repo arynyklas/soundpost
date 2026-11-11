@@ -59,7 +59,22 @@ func New(ctl Control, clock Clock, options ...Option) (*Service, error) {
 	return s, nil
 }
 
+// decode reads one committed record. A record a deletion erased decodes to the
+// erased marker (its closed header only), provided the tombstone is that
+// record's own; anything else that does not match the record is damage.
 func decode(rec control.IncidentRecord) (State, error) {
+	if rec.Erased() {
+		var h struct {
+			ID      model.ID       `json:"incident_id"`
+			Org     model.ID       `json:"org_id"`
+			Project model.ID       `json:"project_id"`
+			Version model.Revision `json:"version"`
+		}
+		if json.Unmarshal(rec.State, &h) != nil || h.ID != rec.ID || h.Org != rec.Org || h.Project != rec.Project || h.Version != rec.Version {
+			return State{}, model.Fail(model.Corrupt)
+		}
+		return State{ID: h.ID, Org: h.Org, Project: h.Project, Version: h.Version, Erased: true}, nil
+	}
 	var s State
 	if json.Unmarshal(rec.State, &s) != nil || s.Version != rec.Version || s.ID != rec.ID || len(s.Timeline) != int(rec.Version) {
 		return State{}, model.Fail(model.Corrupt)
@@ -67,8 +82,14 @@ func decode(rec control.IncidentRecord) (State, error) {
 	return s, nil
 }
 
+// erasedFault is what an action on an erased incident answers: the state is
+// gone, so there is nothing to act on (not found), and it is not storage damage.
+func erasedFault() error { return fault(model.NotFound, DetailErased) }
+
 // Get returns one incident. The scope is checked before the incident is looked
-// up; a missing incident and one outside the scope are indistinguishable.
+// up; a missing incident and one outside the scope are indistinguishable. An
+// incident whose state a deletion erased reads as the erased marker (State.Erased
+// with its closed header), not as an error: it is not storage damage.
 func (s *Service) Get(ctx context.Context, scope auth.Scope, project, incident model.ID) (State, error) {
 	rec, found, err := s.control.Incident(ctx, scope, project, incident)
 	if err != nil {
@@ -115,6 +136,9 @@ func (s *Service) Act(ctx context.Context, scope auth.Scope, action Action, at m
 		if before, err = decode(rec); err != nil {
 			return State{}, err
 		}
+		if before.Erased {
+			return State{}, erasedFault()
+		}
 	}
 	next, effects, err := Apply(before, action, at)
 	if err != nil {
@@ -136,6 +160,9 @@ func (s *Service) Act(ctx context.Context, scope auth.Scope, action Action, at m
 	committed, err := decode(rec)
 	if err != nil {
 		return State{}, err
+	}
+	if committed.Erased {
+		return State{}, erasedFault() // a deletion that covers the evidence erased it as it committed
 	}
 	version, ok := committed.Applied(action.CommandID)
 	if !ok {

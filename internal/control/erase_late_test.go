@@ -73,7 +73,7 @@ func TestEffectCommittedAfterCompletionIsErasedInTheSameApply(t *testing.T) {
 
 			const late, outside = "CANARYLATEc7de151f0aa93b86a", "CANARYOUTSIDE51f0aa93c7de1"
 			c.commit(f, f.newSeed(f.project, late), 60)    // inside [40,100): covered
-			c.commit(f, f.newSeed(f.project, outside), 10) // before the range: not covered (an opaque state past End would be covered, see retention.md)
+			c.commit(f, f.newSeed(f.project, outside), 10) // before the range: not covered (so is one after it, see erase_late_bound_test.go)
 
 			if f.stateHolds(late) {
 				t.Fatal("an effect that committed after the deletion completed left its covered payload in the control state")

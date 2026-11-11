@@ -162,6 +162,11 @@ type State struct {
 	// Recent are the newest accepted events, oldest first; the last is the
 	// current event.
 	Recent []EventRef `json:"recent"`
+
+	// Erased is set on the state Service.Get and List read for a condition whose
+	// state a deletion erased: only Condition and Version are filled and nothing
+	// derived from telemetry remains. It is never stored.
+	Erased bool `json:"-"`
 }
 
 // Recovered reports whether the condition is positively recovered: the source
