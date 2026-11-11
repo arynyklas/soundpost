@@ -48,9 +48,10 @@ const (
 // rebuilt from them. Residual names the local stores that still hold, or can still hold, a
 // copy of the deleted bytes: those the engine MEASURES (a snapshot or journal head cut before
 // the erasure that has not yet been replaced, or a redaction still owed) and, through
-// ResidualPlane, those the control store owes (control_raft_journal, which cannot yet be
-// redacted, and control_state while a control.db scrub is owed). After a completed cleanup it
-// therefore is NOT empty once control payloads were erased (see docs/privacy/retention.md). It
+// ResidualPlane, those the control store owes (control_raft_journal until this node's
+// redaction pass over the control Raft group is proven, and control_state while a control.db
+// scrub is owed). It is empty once every store of this node is clean (see
+// docs/privacy/retention.md). It
 // is reported only once Physical is "done"; before that the bytes are simply still present
 // everywhere.
 type DeleteReceipt struct {

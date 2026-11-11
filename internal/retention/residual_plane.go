@@ -15,8 +15,8 @@ type ResidualSource interface {
 // engine, whose residual stores it reports together with the control store's. A
 // receipt names the residual stores of the whole installation, so a "physical:
 // done" receipt can never hide a copy the control store still owes (the control
-// Raft journal, which cannot yet be redacted, and the free pages of control.db
-// until they are scrubbed): the engine alone does not know about either.
+// Raft journal until this node's redaction pass is proven, and the free pages of
+// control.db until they are scrubbed): the engine alone does not know about either.
 type ResidualPlane struct {
 	DataPlane
 	control ResidualSource

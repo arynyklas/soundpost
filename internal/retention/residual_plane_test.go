@@ -76,11 +76,16 @@ func hasResidual(list []string, name string) bool {
 }
 
 // A receipt never reports "physical: done" with an empty residual list while the
-// control store still owes a copy: the control Raft journal always (it cannot yet
-// be redacted), and control.db while a scrub is owed. (01.08 review CD-2.)
+// control store still owes a copy: the control Raft journal while a copy may remain
+// (here a live backup pin the worker's pass cannot clear), and control.db while a
+// scrub is owed. (01.08 review CD-2.) The journal is cleared by the worker's pass
+// once nothing holds it: TestReceiptDropsTheControlJournalAfterThePass.
 func TestDoneReceiptNeverHidesAControlResidual(t *testing.T) {
 	f := newFx(t, options{controlResiduals: true})
 	if _, _, err := f.append(5, "requests"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.ReplicaGroup().PinJournal(0); err != nil { // a backup in flight holds copies the pass cannot rewrite
 		t.Fatal(err)
 	}
 	f.seedIncident(f.project, "CANARYRECEIPT7c41e90d2b86a")
@@ -128,5 +133,70 @@ func TestDoneReceiptNeverHidesAControlResidual(t *testing.T) {
 	}
 	if op, _, _ := f.store.DeletionOperation(f.ctx, second.OperationID); op.PhysicalAt != 0 || op.Phase != model.DeletePhaseFailed {
 		t.Fatalf("the worker recorded a physical step for a failed operation: %+v", op)
+	}
+}
+
+// The control Raft journal is named from the first erasure on and stops being named once the
+// worker's pass over this node's control group is proven: the receipt of the SAME operation
+// drops it after the pass, keeps it before, and keeps it while the pass cannot complete.
+func TestReceiptDropsTheControlJournalAfterThePass(t *testing.T) {
+	f := newFx(t, options{controlResiduals: true})
+	if _, _, err := f.append(5, "requests"); err != nil {
+		t.Fatal(err)
+	}
+	const gone = "CANARYPASSRECEIPT7c41e90d2b86a"
+	f.seedIncident(f.project, gone)
+	first, err := f.del(model.DeleteRetireProject, func(r *retention.DeleteRequest) { r.ProjectIDs = []model.ID{f.project} })
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Before the pass: the erasure committed at begin, nothing redacted yet.
+	if !hasResidual(f.store.ResidualStores(), control.ResidualControlJournal) {
+		t.Fatalf("an erasure committed and the control store does not owe its journal: %v", f.store.ResidualStores())
+	}
+	f.run()
+	done := f.poll(first.OperationID)
+	if done.Physical != retention.PhysicalDone {
+		t.Fatalf("setup: %+v", done)
+	}
+	if hasResidual(done.Residual, control.ResidualControlJournal) || hasResidual(done.Residual, control.ResidualControlState) {
+		t.Fatalf("the pass completed and the receipt still names the control stores: %+v", done)
+	}
+
+	// A second erasure owes a new pass: its receipt names the journal until the worker has run
+	// it, and so does the first operation's (a receipt is about the node as it is now).
+	f.seedIncident(f.other, "CANARYPASSRECEIPT2c41e90d2b86a")
+	second, err := f.del(model.DeleteRetireProject, func(r *retention.DeleteRequest) { r.ProjectIDs = []model.ID{f.other} })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := f.poll(first.OperationID); !hasResidual(got.Residual, control.ResidualControlJournal) {
+		t.Fatalf("a newer erasure is owed and the done receipt hides it: %+v", got)
+	}
+	// A pass that cannot complete keeps naming it: a backup pin is live.
+	pin, err := f.store.ReplicaGroup().PinJournal(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.run()
+	if got := f.poll(second.OperationID); got.Physical != retention.PhysicalDone || !hasResidual(got.Residual, control.ResidualControlJournal) {
+		t.Fatalf("a pass held by a live pin must keep the journal named: %+v", got)
+	}
+	if err = pin.Release(); err != nil {
+		t.Fatal(err)
+	}
+	f.run()
+	for _, op := range []model.ID{first.OperationID, second.OperationID} {
+		if got := f.poll(op); hasResidual(got.Residual, control.ResidualControlJournal) {
+			t.Fatalf("the pass completed and the receipt of %s still names the journal: %+v", op, got)
+		}
+	}
+
+	// A node whose control group cannot be measured keeps naming it.
+	if err = f.store.ReplicaGroup().Close(); err != nil {
+		t.Fatal(err)
+	}
+	if !hasResidual(f.store.ResidualStores(), control.ResidualControlJournal) {
+		t.Fatalf("a group that cannot be measured must be named: %v", f.store.ResidualStores())
 	}
 }

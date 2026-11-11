@@ -41,9 +41,8 @@ const (
 	// ResidualControlJournal is the control group's Raft journal, snapshots and
 	// retry table: every control command carries the whole control state, and
 	// the group retains every command (and so its payload) for retry
-	// recognition. replica.Group.RedactCompleted refuses control commands, so no
-	// exported primitive can remove the earlier states: see the 01.08 control
-	// deletion report for the API this needs.
+	// recognition. RedactRetainedControlCommands removes the covered payloads
+	// from this node's copy; ResidualStores names it until that is proven.
 	ResidualControlJournal = "control_raft_journal"
 )
 
@@ -163,15 +162,18 @@ func eraseBooks(st *State, op model.DeletionOperation, at model.UnixNano, rule s
 // functions the live erasure runs. changed is false when nothing was covered.
 // The replacement applies to the same state: it differs only in erased books.
 //
-// Nothing in this package calls it: replica.Group.RedactCompleted refuses
-// control commands today, so it is the exact piece the replication layer needs
-// to call for each retained control command (see the 01.08 control deletion
-// report).
+// RedactRetainedControlCommands is the driver that hands this function the retained commands
+// of the control Raft group; this method is the one-payload form of the same rule.
 func (s *Store) RedactControlCommand(payload []byte) (replacement []byte, changed bool, err error) {
 	current, err := s.localState()
 	if err != nil {
 		return nil, false, err
 	}
+	return redactControlPayload(current, payload)
+}
+
+// redactControlPayload is RedactControlCommand against an explicit current state.
+func redactControlPayload(current State, payload []byte) (replacement []byte, changed bool, err error) {
 	var next controlReplacement
 	if model.StrictJSON(payload, &next) != nil {
 		return nil, false, model.Fail(model.Corrupt)
@@ -423,8 +425,12 @@ func (s *Store) localState() (st State, err error) {
 //   - ResidualControlState from an erasure until ScrubErased has zeroed the free
 //     pages of control.db after it (any erasure: begin, completion, failure,
 //     import, or an effect erased as it committed after its operation finished);
-//   - ResidualControlJournal from the first erasing deletion on, for as long as
-//     the replication layer cannot redact control commands (see the constant).
+//   - ResidualControlJournal from the first erasing deletion on, until
+//     RedactRetainedControlCommands has proven, for every erasure committed so
+//     far, that this node's control Raft group holds none of the covered
+//     payloads (replica.Group.MachineResidue is empty). A group that cannot be
+//     measured, a pass that did not complete, a live backup pin and a node that
+//     has not run the pass all keep it named.
 //
 // A state that cannot be read is reported as both.
 func (s *Store) ResidualStores() []string {
@@ -435,7 +441,9 @@ func (s *Store) ResidualStores() []string {
 	stateOwed, journalOwed := controlErasures(st)
 	var out []string
 	if journalOwed {
-		out = append(out, ResidualControlJournal)
+		if residue, err := s.controlJournalResidue(st); err != nil || len(residue) != 0 {
+			out = append(out, ResidualControlJournal)
+		}
 	}
 	if stateOwed {
 		out = append(out, ResidualControlState)

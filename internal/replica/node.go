@@ -167,9 +167,14 @@ type Group struct {
 	snaps          *SnapshotStore
 	pins           map[model.ID]*JournalPin
 	sendSnap       *pb.Snapshot // snapshot for members added after the stored one; never persisted
-	owner          model.ID     // this instance of the group: stamps the pins it creates
-	pinTTL         time.Duration
-	now            func() time.Time
+	// machineRules and machineFloor are the proof RedactMachineCommands leaves (memory only):
+	// the rule set the last completed pass covered (0: no proof) and the physical index it
+	// finished at. A snapshot install and a stale committed command withdraw it.
+	machineRules uint64
+	machineFloor uint64
+	owner        model.ID // this instance of the group: stamps the pins it creates
+	pinTTL       time.Duration
+	now          func() time.Time
 }
 
 func Open(c Config) (*Group, error) {

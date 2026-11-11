@@ -194,6 +194,12 @@ func (s *Service) driveDeletions(ctx context.Context) error {
 	if err := s.cfg.Control.ScrubErased(ctx); err != nil {
 		errs = append(errs, err)
 	}
+	// The control Raft group retains every control command (each carries the whole control
+	// state), so the payloads a finished deletion erased still sit in its journal, snapshots
+	// and retry table until this node's copy is redacted. A no-op unless that is owed.
+	if err := s.cfg.Control.RedactRetainedControlCommands(ctx); err != nil {
+		errs = append(errs, err)
+	}
 	ops, _ = s.cfg.Control.DeletionOperations(ctx)
 	lag := 0
 	for _, op := range ops {

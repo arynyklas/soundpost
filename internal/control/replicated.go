@@ -718,12 +718,32 @@ func (m *replicatedControl) verifyCurrentState(expected State) error {
 		return nil
 	})
 }
+
+// VerifySnapshot checks a snapshot against the local state before the group restores it. A
+// machine that is BEHIND the snapshot is exactly the voter a snapshot repairs (a leader that
+// compacted its journal past a lagging voter sends one: Restore then installs it); it is
+// refused only when it is for another installation. A machine at the snapshot's revision must
+// hold exactly that state, and one ahead of it holds whatever came after.
 func (m *replicatedControl) VerifySnapshot(raw []byte) error {
 	var snapshot controlSnapshot
 	if model.StrictJSON(raw, &snapshot) != nil {
 		return model.Fail(model.Corrupt)
 	}
 	if m.Applied() == 0 {
+		return nil
+	}
+	behind := false
+	if err := m.store.db.View(func(tx *bolt.Tx) error {
+		var current State
+		if json.Unmarshal(tx.Bucket([]byte("control")).Get([]byte("state")), &current) != nil {
+			return model.Fail(model.Corrupt)
+		}
+		behind = current.Installation == snapshot.State.Installation && current.Revision < snapshot.State.Revision
+		return nil
+	}); err != nil {
+		return err
+	}
+	if behind {
 		return nil
 	}
 	return m.verifyCurrentState(snapshot.State)

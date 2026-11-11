@@ -438,6 +438,9 @@ func (g *Group) applyCommitted(ent *pb.Entry) error {
 	}
 	if result == ErrConflict {
 		c.Outcome = "conflict"
+		if c.Entry.Kind == Control {
+			g.machineRules = 0 // a stale command still carries the state it was built from
+		}
 	}
 	g.applied = ent.GetIndex()
 	g.application = uint64(c.ApplicationCursor.Index)
@@ -480,6 +483,7 @@ func (g *Group) restoreSnapshot(snap *pb.Snapshot) error {
 	if model.StrictJSON(snap.GetData(), &envelope) != nil || ValidateMembers(envelope.Members) != nil {
 		return ErrInvalid
 	}
+	g.machineRules = 0 // the leader's retry table as it was cut: not covered by any local pass
 	index := snap.GetMetadata().GetIndex()
 	if verifier, ok := g.machine.(interface{ VerifySnapshot([]byte) error }); ok {
 		if err := verifier.VerifySnapshot(envelope.State); err != nil {

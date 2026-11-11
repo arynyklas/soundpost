@@ -86,6 +86,12 @@ func TestOpenReportsControlResidualsInDeletionReceipts(t *testing.T) {
 	if err = app.Control.View(ctx, func(st model.ControlState) error { revision = st.Revision; return nil }); err != nil {
 		t.Fatal(err)
 	}
+	// A live backup pin holds copies the worker's pass over the control Raft group cannot
+	// rewrite, so the journal residue stays named; the pass clears it once the pin is gone.
+	pin, err := app.Control.ReplicaGroup().PinJournal(0)
+	if err != nil {
+		t.Fatal(err)
+	}
 	receipt, err := app.Retention.Delete(ctx, admin(), retention.DeleteRequest{CommandID: model.NewID(), ExpectedRevision: revision, Mode: model.DeleteRetireProject, OrgID: org, ProjectIDs: []model.ID{project}, Reason: "retention wiring"})
 	if err != nil {
 		t.Fatal(err)
@@ -110,5 +116,17 @@ func TestOpenReportsControlResidualsInDeletionReceipts(t *testing.T) {
 	}
 	if !slices.Contains(done.Residual, control.ResidualControlJournal) {
 		t.Fatalf("a done receipt hides the control raft journal residue: %+v", done)
+	}
+	if err = pin.Release(); err != nil {
+		t.Fatal(err)
+	}
+	if err = app.Retention.RunOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(app.Control.ResidualStores(), control.ResidualControlJournal) {
+		t.Fatalf("the worker's pass proved the control group clean and the store still names it: %v", app.Control.ResidualStores())
+	}
+	if done, err = app.Retention.PollDelete(ctx, admin(), receipt.OperationID); err != nil || slices.Contains(done.Residual, control.ResidualControlJournal) {
+		t.Fatalf("the receipt after the pass: %+v %v", done, err)
 	}
 }
