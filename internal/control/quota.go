@@ -76,6 +76,13 @@ func (s *Store) ReserveAdmission(ctx context.Context, scope auth.Scope, b model.
 			if old.Hash != r.Hash || old.State == "cancelled" {
 				return model.Fail(model.Conflict)
 			}
+			if old.State == "reserved" && old.PolicyEpoch != r.PolicyEpoch {
+				// A refused/ambiguous attempt left this charge bound to a retired
+				// epoch. The retry was just revalidated against the current scope
+				// and carries the same batch hash, so re-bind without recharging.
+				old.PolicyEpoch = r.PolicyEpoch
+				st.Reservations[id] = old
+			}
 			r = old
 			return nil
 		}
