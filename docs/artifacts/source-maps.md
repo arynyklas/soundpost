@@ -13,6 +13,10 @@ Zero-valued `Limits` uses C07 ceilings: 32 MiB input, 1024 cumulative source ent
 
 `sourcesContent` and unknown extensions are not copied into the map index or Position. Errors are fixed content-free values: they contain no map text, source text, raw JSON diagnostic or supplied path. Protected source contents remain a separate policy-controlled artifact. This package grants no authorization and changes no artifact-storage behavior.
 
+## Upload memory and admission
+
+`artifacts.Service.Put` refuses a manifest whose declared size exceeds the source policy's `MaxBytes` before reading any body byte, then reserves estimated peak memory (declared size times four) from a non-queuing in-flight budget: 256 MiB globally and 128 MiB per principal by default, adjustable with `Service.LimitUploads`. A request that does not fit fails immediately with a retryable `quota` fault (HTTP 429 with `Retry-After: 1` on `POST /api/v1/artifacts`); nothing waits. The body is buffered once at its declared size, hashed, decoded with `sourcemap.DecodeBytes` (no second read) and split into the public and private outputs, whose bytes and digests are unchanged. The durable per-source byte quota is still charged on the transformed size after this phase. The 429 covers only this process's memory budget; the storage/replica write of the resulting fragments allocates considerably more transiently and is bounded only by that admission, not reduced by it. Operators should still set `GOMEMLIMIT` or a cgroup limit on the server.
+
 ## Real throwing fixture gate
 
 The parent workspace pins `vite@7.3.7` (MIT). `generate.mjs` directly invokes Vite's production build API; no source-map decoding dependency or precomputed lookup table is used. It bundles and actually runs both TypeScript throwers with the invoking Node executable, parses the thrown generated frame and writes the generated maps and position evidence. The fixture producer canonicalizes its own output `sources` to project-relative fixture basenames and excludes source contents. `sections.map` wraps the actual second Vite map in a nonzero-offset indexed map.

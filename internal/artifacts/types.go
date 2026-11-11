@@ -34,11 +34,13 @@ type Service struct {
 	// gate is installed by NewLifecycle; reads then also fence on the org
 	// delete generation and the artifact's reference state.
 	gate atomic.Pointer[readGate]
+	// uploads bounds estimated in-flight upload memory (admission.go).
+	uploads *uploadBudget
 }
 
 func New(blobs BlobStore, metadata MetadataStore, authorizer ScopeAuthorizer) (*Service, error) {
 	if blobs == nil || metadata == nil || authorizer == nil {
 		return nil, model.Fail(model.Invalid)
 	}
-	return &Service{blobs: blobs, metadata: metadata, authorizer: authorizer}, nil
+	return &Service{blobs: blobs, metadata: metadata, authorizer: authorizer, uploads: newUploadBudget(defaultUploadGlobalBytes, defaultUploadPrincipalBytes)}, nil
 }

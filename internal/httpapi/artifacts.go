@@ -144,8 +144,14 @@ func RegisterArtifactRoutes(mux *http.ServeMux, authorizer *auth.Service, servic
 				artifactReply(w, nil, err)
 				return
 			}
-			if _, _, err = scope.ArtifactPolicy(r.Context(), manifest.Project, manifest.Source, manifest.Build, manifest.SourceContent); err != nil {
+			maxBytes, _, err := scope.ArtifactPolicy(r.Context(), manifest.Project, manifest.Source, manifest.Build, manifest.SourceContent)
+			if err != nil {
 				artifactReply(w, nil, err)
+				return
+			}
+			// Refuse before spooling the body to disk (Put enforces it too).
+			if uint64(manifest.Size) > maxBytes {
+				artifactReply(w, nil, model.Fail(model.TooLarge))
 				return
 			}
 			part, err = parts.NextPart()
@@ -194,14 +200,21 @@ func RegisterArtifactRoutes(mux *http.ServeMux, authorizer *auth.Service, servic
 // keeps the shared mapping.
 func artifactReply(w http.ResponseWriter, v any, e error) {
 	var f *model.Fault
-	if errors.As(e, &f) && f.Code == model.Stale {
+	if errors.As(e, &f) && (f.Code == model.Stale || f.Code == model.Quota && f.Retryable) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("Content-Type", "application/json")
 		copy := *f
 		if requestID, err := model.ParseID(w.Header().Get("X-Request-ID")); err == nil {
 			copy.RequestID = requestID
 		}
-		w.WriteHeader(http.StatusConflict)
+		status := http.StatusConflict
+		if f.Code == model.Quota {
+			// Upload admission is a retryable refusal, like the ingest quota.
+			status = http.StatusTooManyRequests
+			copy.Retryable = true
+			w.Header().Set("Retry-After", "1")
+		}
+		w.WriteHeader(status)
 		_ = json.NewEncoder(w).Encode(&copy)
 		return
 	}

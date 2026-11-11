@@ -48,6 +48,19 @@ func Decode(input io.Reader, limits Limits) (*Map, error) {
 	if e != nil {
 		return nil, ErrInvalid
 	}
+	return decodeBuffered(b, l)
+}
+
+// DecodeBytes is Decode for a body the caller has already buffered: the same
+// limits and errors, without copying the bytes a second time. b is only read.
+func DecodeBytes(b []byte, limits Limits) (*Map, error) {
+	l, e := ceilings(limits)
+	if e != nil {
+		return nil, e
+	}
+	return decodeBuffered(b, l)
+}
+func decodeBuffered(b []byte, l Limits) (*Map, error) {
 	if int64(len(b)) > l.MaxBytes {
 		return nil, ErrLimit
 	}

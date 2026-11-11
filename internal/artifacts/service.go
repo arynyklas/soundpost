@@ -7,7 +7,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"io"
-	"os"
 	"soundpost/internal/auth"
 	"soundpost/internal/model"
 	"time"
@@ -26,20 +25,27 @@ func (s *Service) Put(ctx context.Context, scope auth.Scope, m Manifest, input i
 	if input == nil || int64(m.RetainUntil) <= time.Now().UnixNano() {
 		return Artifact{}, model.Fail(model.Invalid)
 	}
-	_, revision, err := scope.ArtifactPolicy(ctx, m.Project, m.Source, m.Build, m.SourceContent)
+	maxBytes, revision, err := scope.ArtifactPolicy(ctx, m.Project, m.Source, m.Build, m.SourceContent)
 	if err != nil {
 		return Artifact{}, err
 	}
+	// The source policy's byte ceiling applies to the declared size before any
+	// byte of the body is read or any memory is reserved for it.
+	if uint64(m.Size) > maxBytes {
+		return Artifact{}, model.Fail(model.TooLarge)
+	}
+	release, err := s.uploads.acquire(scope.PrincipalID(), uint64(m.Size)*uploadPeakFactor)
+	if err != nil {
+		return Artifact{}, err
+	}
+	defer release()
 	// No durable reservation or fragment is created until the bounded original
 	// stream has been completely verified and transformed by source policy.
-	temp, err := os.CreateTemp("", "soundpost-map-")
-	if err != nil {
-		return Artifact{}, model.Fail(model.Unavailable)
-	}
-	defer os.Remove(temp.Name())
-	defer temp.Close()
+	// The body is buffered exactly once, at its declared size; every later
+	// stage reads that buffer and drops it as soon as it has been parsed.
+	buf := bytes.NewBuffer(make([]byte, 0, int(m.Size)+1))
 	h := sha256.New()
-	n, err := io.Copy(io.MultiWriter(temp, h), io.LimitReader(input, int64(m.Size)+1))
+	n, err := io.Copy(io.MultiWriter(buf, h), io.LimitReader(input, int64(m.Size)+1))
 	if err != nil {
 		return Artifact{}, model.Fail(model.Invalid)
 	}
@@ -54,13 +60,8 @@ func (s *Service) Put(ctx context.Context, scope auth.Scope, m Manifest, input i
 	if hash != m.MapSHA256 {
 		return Artifact{}, model.Fail(model.Invalid)
 	}
-	if _, err = temp.Seek(0, 0); err != nil {
-		return Artifact{}, err
-	}
-	raw, err := io.ReadAll(temp)
-	if err != nil {
-		return Artifact{}, err
-	}
+	raw := buf.Bytes()
+	buf = nil
 	public, private, err := transformMap(raw, m.SourceContent)
 	if err != nil {
 		return Artifact{}, err
