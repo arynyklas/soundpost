@@ -1094,7 +1094,7 @@ func (n *evNode) replayRows(r *evReport) {
 	}
 	cb := n.batchFor(n.projA, n.srcA, n.orgA, producer, model.Record{ID: model.NewID(), Kind: model.Replay, ObservedAt: chainBad.Clock.Wall, Resource: n.res, Payload: model.Payload{Replay: &chainBad}})
 	if got := n.ingest(n.credA, mustJSON(cb)); got.status == 200 {
-		r.add("replay_admission_enforces_closed_format", true, false, "the real ingest route admitted a first chunk that names a previous hash, which replays.ValidateChunk rejects: admission never calls replays.Validate/ValidateJSON/Record (no production caller exists), so chain, checkpoint and recorder-version rules are not enforced at intake and no checkpoint index or group retention pin is recorded (the replay is still readable: the stream is built from the stored chunks)")
+		r.add("replay_admission_enforces_closed_format", true, false, "the real ingest route admitted a first chunk that names a previous hash, which replays.ValidateChunk rejects: the replay gate (ingest.SetReplayGate) is missing or does not enforce the closed format, so chain, checkpoint and recorder-version rules are not enforced at intake")
 	} else {
 		r.add("replay_admission_enforces_closed_format", true, true, fmt.Sprintf("the real route refused a chain-invalid chunk (status %d)", got.status))
 	}

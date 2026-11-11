@@ -605,7 +605,7 @@ func (s *evidenceServer) journey(fx *evidenceFixture) *evidenceRows {
 		cb := model.Batch{Version: 1, Project: projA, Source: srcA, Producer: producer, ID: model.NewID(), PolicyRevision: 1, Records: []model.Record{{ID: model.NewID(), Kind: model.Replay, ObservedAt: chainBad.Clock.Wall, Resource: res, Payload: model.Payload{Replay: &chainBad}}}}
 		cb.RouteSlot, _ = model.OwnerSlot(orgA, projA, srcA, producer, cb.Records[0])
 		if st, _ := s.sourcePost("/ingest/v1/batches", credA, cb); st == 200 {
-			rows.add("replay_admission_enforces_closed_format", true, false, "the real ingest route admitted a first chunk that names a previous hash, which replays.ValidateChunk rejects: admission never calls replays.Validate/ValidateJSON/Record (no production caller exists), so chain, checkpoint and recorder-version rules are not enforced at intake and no checkpoint index or group retention pin is recorded")
+			rows.add("replay_admission_enforces_closed_format", true, false, "the real ingest route admitted a first chunk that names a previous hash, which replays.ValidateChunk rejects: the replay gate (ingest.SetReplayGate) is missing or does not enforce the closed format, so chain, checkpoint and recorder-version rules are not enforced at intake")
 		} else {
 			rows.add("replay_admission_enforces_closed_format", true, true, fmt.Sprintf("the real route refused a chain-invalid chunk (status %d)", st))
 		}

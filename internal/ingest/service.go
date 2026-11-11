@@ -36,7 +36,14 @@ type Service struct {
 	policy   *policy.Service
 	quota    Quota
 	appender Appender
+	replay   ReplayGate
 }
+
+// ReplayGate is the closed-format check for one replay chunk (the chain and
+// checkpoint rules, the recorder version and the masked-node format). It is
+// injected, not imported, so the agent and conformance binaries that link
+// ingest do not link the replay reader and the storage engine behind it.
+type ReplayGate func(model.ReplayChunk) error
 
 func New(a *auth.Service, p *policy.Service, q Quota, w Appender) (*Service, error) {
 	if a == nil || p == nil || q == nil || w == nil {
@@ -44,6 +51,10 @@ func New(a *auth.Service, p *policy.Service, q Quota, w Appender) (*Service, err
 	}
 	return &Service{auth: a, policy: p, quota: q, appender: w}, nil
 }
+
+// SetReplayGate installs the replay chunk check. Until one is installed, a batch
+// carrying a replay record is refused (Unsupported), never admitted unchecked.
+func (s *Service) SetReplayGate(g ReplayGate) { s.replay = g }
 func Decode(r io.Reader, encoding string) (Batch, error) {
 	wireLimit := int64(4 << 20)
 	if encoding == "gzip" {
@@ -104,6 +115,23 @@ func (s *Service) Admit(ctx context.Context, g SourceGrant, b Batch) (Receipt, e
 	n, e := policy.Normalize(g, b)
 	if e != nil {
 		return Receipt{}, e
+	}
+	// Replay chunks are admitted only in the closed format, and before any quota
+	// is charged: a refused chunk leaves no reservation and no record.
+	for i := range n.Records {
+		r := &n.Records[i]
+		if r.Kind != model.Replay {
+			continue
+		}
+		if r.Payload.Replay == nil {
+			return Receipt{}, model.Fail(model.Invalid)
+		}
+		if s.replay == nil {
+			return Receipt{}, model.Fail(model.Unsupported)
+		}
+		if e = s.replay(*r.Payload.Replay); e != nil {
+			return Receipt{}, e
+		}
 	}
 	scope, e := g.Scope()
 	if e != nil {

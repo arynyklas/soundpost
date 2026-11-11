@@ -21,6 +21,7 @@ import (
 	"soundpost/internal/query"
 	"soundpost/internal/query/profile"
 	"soundpost/internal/releases"
+	"soundpost/internal/replays"
 	"soundpost/internal/retention"
 	"soundpost/internal/storage"
 	"soundpost/profiles"
@@ -167,6 +168,10 @@ func openWith(dir string, options *replicationOptions, meter storage.DiskMeter, 
 	if e != nil {
 		return fail(e)
 	}
+	// Replay chunks are admitted only in the closed format (chain, checkpoint,
+	// recorder version, masked nodes). The seam is injected so the agent and
+	// conformance binaries that link ingest do not link the replay reader.
+	i.SetReplayGate(replays.ValidateChunk)
 	cache, e := auth.NewCache(a, ret, 4096, time.Minute)
 	if e != nil {
 		return fail(e)
