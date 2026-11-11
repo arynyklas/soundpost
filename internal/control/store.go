@@ -43,11 +43,11 @@ type Result = model.ControlResult
 // file carries the node-local scrub marker (erase.go, localScrubKey): the key's presence says that
 // a build with the marker has seen this file. A file without the key was written by an earlier
 // build, which applied erasures without recording that this file still held their payload, and the
-// replicated audit log cannot say whether this file was ever scrubbed (a leader's scrubbed audit
-// settles the leader's file): so such a file is marked owed when its log names an erasure, and
-// marked settled otherwise, once. A file that already has the key is never rewritten, and a
-// created file gets the settled key at once so that a later Open does not mark it. Control writes
-// accept only authorization-owned opaque scopes.
+// replicated audit log is not a complete memory of them (a leader's scrubbed audit settles the
+// leader's file, and an install from another lineage can drop an erasing audit): so every such
+// file is marked owed, whatever its log names, once. A file that already has the key is never
+// rewritten, and a created file gets the settled key at once so that a later Open does not mark
+// it. Control writes accept only authorization-owned opaque scopes.
 func Open(dir string) (*Store, error) {
 	if e := durablefs.MkdirAll(dir); e != nil {
 		return nil, e

@@ -16,10 +16,10 @@ import (
 
 // The control bucket's local_scrub key says that a build with the marker has seen this file.
 // Open writes it once into every file it opens or creates, so a control.db written before the
-// marker existed is marked owed when its log names an erasure (its own free pages may hold the
-// payload and nothing says they were ever zeroed), and settled otherwise; a file that already
-// has the key is never rewritten. These tests pin that rule, and that the group's first open of
-// a seeded replica installs the seed over itself without marking the file.
+// marker existed is marked owed whatever its log names (its own free pages may hold a payload
+// and the replicated log is not a complete memory of the erasures it applied); a file that
+// already has the key is never rewritten. These tests pin that rule, and that the group's first
+// open of a seeded replica installs the seed over itself without marking the file.
 
 // zeroMarker is the stored value of a settled key with generation 0.
 var zeroMarker = make([]byte, 9)
@@ -82,27 +82,69 @@ func TestAPreMarkerFileWhoseLogNamesAnErasureIsMarkedOwedAtOpen(t *testing.T) {
 	}
 }
 
-// A pre-marker file whose log names no erasure holds no payload an erasure covers: Open writes
-// the settled key (nine zero bytes, which reads as the zero marker) and owes nothing. The key is
-// written though nothing is owed, so the next Open finds it and decides nothing again.
-func TestAPreMarkerFileWhoseLogNamesNoErasureGetsTheSettledKeyAtOpen(t *testing.T) {
+// A pre-marker file whose log names no erasure is owed too: the log is not a complete memory of
+// the erasures the file applied (see the next test), so nothing but a scrub can show that its
+// free pages hold no payload. One scrub clears it, it holds nothing to clear in this fixture,
+// and no later Open owes it again (the key stays).
+func TestAPreMarkerFileWhoseLogNamesNoErasureIsOwedOneScrubToo(t *testing.T) {
 	f := newInstallFx(t)
 	if namesErasure(f.state().Audits) {
 		t.Fatal("fixture invalid: the log names an erasure")
 	}
 	f.dropMarker()
 	f.reopen()
-	if got := f.rawMarker(); !bytes.Equal(got, zeroMarker) {
-		t.Fatalf("Open did not write the settled key: %x", got)
+	owed := f.local()
+	if !owed.owed || owed.generation == 0 || !f.owesState() {
+		t.Fatalf("Open did not mark a keyless file owed: %+v %v", owed, f.s.ResidualStores())
 	}
-	if f.local() != (localScrub{}) || f.owesState() {
-		t.Fatalf("a pre-marker file with no erasure in its log owes a scrub: %+v %v", f.local(), f.s.ResidualStores())
+	if err := f.s.ScrubErased(f.ctx); err != nil {
+		t.Fatal(err)
+	}
+	settled := f.rawMarker()
+	if f.owesState() || f.local().owed {
+		t.Fatalf("one scrub did not clear the debt: %v %+v", f.s.ResidualStores(), f.local())
 	}
 	for range 2 {
 		f.reopen()
-		if got := f.rawMarker(); !bytes.Equal(got, zeroMarker) {
-			t.Fatalf("a later Open changed the settled key: %x", got)
+		if f.owesState() || f.local().owed || !bytes.Equal(f.rawMarker(), settled) {
+			t.Fatalf("a later Open owes or rewrote the settled key: %x then %x %v", settled, f.rawMarker(), f.s.ResidualStores())
 		}
+	}
+}
+
+// A control.db that applied an erasure (the payload moves to its free pages) and then took an
+// install whose log names no erasure, from a build before the marker (restore with owe=false,
+// the branch OpenSeed itself uses), holds the payload under a log that says nothing. A review
+// reproduced a CLEAN receipt for it after Open (24 payload copies, settled key). Open now owes
+// every keyless file, so the receipt names control_state and one scrub zeroes the bytes.
+func TestAPreMarkerFileWhoseInstallDroppedTheErasingAuditIsStillOwedAtOpen(t *testing.T) {
+	f := newInstallFx(t)
+	f.erasedByTheLeader(false) // the erasing audit is in the log, unsettled
+	f.dropMarker()
+	lineage := f.leader(3, false, false)
+	lineage.Audits, lineage.Deletions = nil, nil
+	if namesErasure(lineage.Audits) || len(owedScrubs(lineage.Audits)) != 0 {
+		t.Fatal("fixture invalid: the lineage log names an erasure")
+	}
+	if err := f.s.repl.restore(f.snapshot(lineage), f.s.repl.Applied(), false); err != nil {
+		t.Fatalf("the unmarked install failed: %v", err)
+	}
+	if f.rawMarker() != nil {
+		t.Fatal("fixture invalid: the install wrote the marker key, so this is not a pre-marker file")
+	}
+	hits := f.canaryHits()
+	if hits == 0 {
+		t.Fatal("fixture invalid: the erasure left no copy of the payload in the file")
+	}
+	f.reopen() // the first start under this build
+	if got := f.s.ResidualStores(); !slices.Contains(got, ResidualControlState) {
+		t.Fatalf("FALSE CLEAN: a pre-marker file whose install dropped the erasing audit holds %d payload copies and reports %v", f.canaryHits(), got)
+	}
+	if err := f.s.ScrubErased(f.ctx); err != nil {
+		t.Fatal(err)
+	}
+	if f.owesState() || f.local().owed || f.canaryHits() != 0 {
+		t.Fatalf("one scrub did not clear the debt and the bytes: %v %+v hits=%d", f.s.ResidualStores(), f.local(), f.canaryHits())
 	}
 }
 
@@ -224,7 +266,7 @@ func seededReplica(t *testing.T) (*Store, controlSnapshot) {
 
 // A freshly SEEDED replica never held anything but the seed's already erased state. When its
 // group opens, replica.Open installs the seed's own snapshot through Restore (the file's watermark
-// is below the seed's index); that install replaces the state with a byte-identical one, frees
+// is below the seed's index); that install replaces the state with the same decoded one, frees
 // only pages that hold that same state, and must leave the file unmarked.
 func TestASeededReplicaStaysCleanWhenItsGroupInstallsTheSeed(t *testing.T) {
 	seeded, parsed := seededReplica(t)

@@ -311,7 +311,8 @@ func (m *replicatedControl) Snapshot() ([]byte, error) {
 // audit log may already say that a scrub settled the debt: the leader's. The same transaction
 // therefore owes this file a local scrub (oweInstalledScrub) that only ScrubErased clears,
 // unless the install replaces nothing: the group's first open installs the seed OpenSeed has
-// just written, byte for byte, over a file whose marker is settled.
+// just written, the same decoded state (compared after canonical re-encoding, not byte for
+// byte), over a file whose marker is settled.
 func (m *replicatedControl) Restore(raw []byte, physical uint64) error {
 	return m.restore(raw, physical, true)
 }
