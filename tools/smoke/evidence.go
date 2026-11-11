@@ -21,6 +21,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -692,7 +693,7 @@ func (s *evidenceServer) journey(fx *evidenceFixture) *evidenceRows {
 			rows.add("lifecycle_grant_revoke_denies_reads", true, false, "revocation command refused")
 			return rows
 		}
-	} else if delivered, last, why := s.midstreamHalt(revoked, orgA, projA, bigReplay, revoke); why != "" {
+	} else if delivered, last, why := s.midstreamHalt(revoked, orgA, projA, bigReplay, revoke, replays.ReasonAuthorityRevoked); why != "" {
 		rows.add("lifecycle_midstream_halt_typed_revoke", true, false, why)
 	} else {
 		rows.add("lifecycle_midstream_halt_typed_revoke", true, true, fmt.Sprintf("grant revoked mid-stream over HTTPS: %d of 100 chunks delivered, then one typed %s, nothing after", delivered, last))
@@ -707,8 +708,64 @@ func (s *evidenceServer) journey(fx *evidenceFixture) *evidenceRows {
 			rows.add("lifecycle_grant_revoke_denies_reads", true, true, fmt.Sprintf("after revocation artifact/frames/replay answered %d/%d/%d", sa, sb, sc))
 		}
 	}
-	rows.add("lifecycle_deletion_saga_halts_stream", true, false, "`soundpost serve` exposes no deletion route to begin a C12 saga (retention.Service.Delete is an in-process service call); the in-process test exercises it")
-	rows.add("restore_keeps_current_deletion_authority", true, false, "requires a post-backup deletion, which cannot be started against a served process; the in-process test and the backup-restore smoke exercise it")
+	// Deletion saga: a granted reader has the large replay open mid-response when an
+	// org admin begins retire_project over HTTPS (POST /api/v1/admin/deletions,
+	// retention.Service.Delete behind RegisterDeletionRoutes). The row is satisfied
+	// only by what is observed: 202 fencing, then exactly one typed revoke on the open
+	// stream and nothing after it, a denied re-read, and a lifecycle poll that shows
+	// the operation. A process that registers no such route answers 404/405 and the
+	// row stays unsatisfied with that status.
+	if !bigOK {
+		rows.add("lifecycle_deletion_saga_halts_stream", true, false, "the large replay was not admitted by the real route")
+	} else {
+		var beginStatus int
+		var operation model.ID
+		begin := func() error {
+			status, raw, err := owner.site.post("/api/v1/admin/read", struct {
+				Kind string `json:"kind"`
+			}{"organizations"}, owner.session.CSRF, "")
+			if err = requireSmokeResponse("admin_read", status, 200, raw, err); err != nil {
+				return err
+			}
+			var view auth.AdminView
+			if err = json.Unmarshal(raw, &view); err != nil {
+				return err
+			}
+			status, raw, err = owner.site.post("/api/v1/admin/deletions", httpapi.DeletionRequest{CommandID: model.NewID(), ExpectedRevision: model.Uint64(view.Revision), Mode: model.DeleteRetireProject,
+				OrgID: orgA, ProjectIDs: []model.ID{projA}, Reason: "evidence smoke deletion saga"}, owner.session.CSRF, "")
+			beginStatus = status
+			if err != nil {
+				return err
+			}
+			s.remember(raw)
+			var receipt httpapi.DeletionReceipt
+			if status != http.StatusAccepted || json.Unmarshal(raw, &receipt) != nil || receipt.Phase != model.DeletePhaseFencing {
+				return errors.New("the deletion was not accepted as a fencing receipt")
+			}
+			operation = receipt.OperationID
+			return nil
+		}
+		delivered, last, why := s.midstreamHalt(analyst, orgA, projA, bigReplay, begin, replays.ReasonAuthorityRevoked, replays.ReasonDeleted)
+		switch {
+		case beginStatus != http.StatusAccepted:
+			rows.add("lifecycle_deletion_saga_halts_stream", true, false, fmt.Sprintf("the served process did not begin the deletion: POST /api/v1/admin/deletions answered status %d (RegisterDeletionRoutes must be registered next to RegisterActionRoutes in appcore)", beginStatus))
+		case why != "":
+			rows.add("lifecycle_deletion_saga_halts_stream", true, false, why)
+		default:
+			reread, _, _ := s.stream(analyst, orgA, projA, bigReplay)
+			pollStatus, pollRaw, pollErr := owner.site.get("/api/v1/lifecycle/operations/" + operation.String() + "?org=" + orgA.String())
+			var polled httpapi.LifecycleOperation
+			switch {
+			case reread == 200:
+				rows.add("lifecycle_deletion_saga_halts_stream", true, false, "the stream halted but the deleted project's replay is still readable afterwards")
+			case pollErr != nil || pollStatus != 200 || json.Unmarshal(pollRaw, &polled) != nil || polled.State != httpapi.StateReady || polled.ID != operation || (polled.Phase != model.DeletePhaseFencing && polled.Phase != model.DeletePhaseComplete):
+				rows.add("lifecycle_deletion_saga_halts_stream", true, false, fmt.Sprintf("the stream halted but the lifecycle poll does not show the operation: status %d", pollStatus))
+			default:
+				rows.add("lifecycle_deletion_saga_halts_stream", true, true, fmt.Sprintf("retire_project begun over HTTPS (202 fencing): %d of 100 chunks delivered to the open reader, then one typed %s, nothing after; re-read answered %d; lifecycle poll phase %s", delivered, last, reread, polled.Phase))
+			}
+		}
+	}
+	rows.add("restore_keeps_current_deletion_authority", true, false, "needs a backup and a restore around the served process, which this smoke does not run (a deletion can be begun over HTTPS only when RegisterDeletionRoutes is registered; the in-process test and the backup-restore smoke exercise restore); nothing was observed here")
 
 	// Canaries: responses, process log and the whole data directory.
 	s.stop()
@@ -773,9 +830,10 @@ func evidenceChainSized(replay model.ID, n, events int) []model.ReplayChunk {
 }
 
 // midstreamHalt opens the replay with a tiny-receive-buffer client, reads three
-// lines, runs the revocation, drains the rest and checks the halt. why is empty on
-// success.
-func (s *evidenceServer) midstreamHalt(u *evidenceUser, org, project, replay model.ID, revoke func() error) (delivered int, last string, why string) {
+// lines, runs the revocation, drains the rest and checks the halt: the stream must
+// end with exactly one typed revoke whose reason is one of reasons, and nothing
+// after it. why is empty on success.
+func (s *evidenceServer) midstreamHalt(u *evidenceUser, org, project, replay model.ID, revoke func() error, reasons ...string) (delivered int, last string, why string) {
 	base, ok := u.site.client.Transport.(*http.Transport)
 	if !ok {
 		return 0, "", "unexpected client transport"
@@ -842,7 +900,7 @@ func (s *evidenceServer) midstreamHalt(u *evidenceUser, org, project, replay mod
 		lines = append(lines, l)
 	}
 	end := lines[len(lines)-1]
-	if end.Type != "revoke" || end.Reason != replays.ReasonAuthorityRevoked {
+	if end.Type != "revoke" || !slices.Contains(reasons, end.Reason) {
 		return 0, "", fmt.Sprintf("the stream did not end with the typed revoke: last line %q (%s)", end.Type, end.Reason)
 	}
 	for i, l := range lines {

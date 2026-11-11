@@ -67,7 +67,7 @@ canned success.
 | `profile_real_capture_or_sdk` | NOT SATISFIED: constructed sanitized events, no perf capture, no SDK profile reaches the backend | NOT SATISFIED (same) |
 | `isolation_same_ids_other_org` | satisfied (15 route variants, byte-identical to random IDs) | satisfied (7 variants) |
 | `lifecycle_grant_revoke_halts_stream` | satisfied (mid-stream: typed `revoke`/`authority_revoked`, nothing after) | revoke denies later reads; mid-stream NOT SATISFIED (no readable replay) |
-| `lifecycle_deletion_halts_stream` | satisfied (C12 entity deletion of a replay and an artifact root mid-stream: typed `revoke`/`deleted`) | NOT SATISFIED: no deletion route on a served process |
+| `lifecycle_deletion_halts_stream` | satisfied (C12 entity deletion of a replay and an artifact root mid-stream: typed `revoke`/`deleted`) | satisfied for `retire_project` through `POST /api/v1/admin/deletions` (202 fencing) while a reader has a replay open: the stream ends with one typed `revoke`/`authority_revoked`, nothing after, and a re-read answers 404; the entity mode is not driven over HTTP by the smoke |
 | `restore_keeps_current_deletion_authority`, `restore_old_credentials_inactive`, `restore_deleted_not_revived` | satisfied (restore from the pre-deletion backup; activation applies the authority's current head; old sessions, source credential and accounts inactive; deleted replay and artifact not revived by restore, a retried chunk, a receipt lookup or a re-upload) | NOT SATISFIED: needs a post-backup deletion |
 | `canary_responses_logs`, `canary_storage_scan` | satisfied (the storage scan requires a positive control, else it reports inconclusive) | responses and process log |
 
