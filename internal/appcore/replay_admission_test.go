@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 // replayIntake is a real node with one replay-enabled source and its ingest route.
 type replayIntake struct {
 	post     func(model.ReplayChunk) (int, string)
+	postWire func(model.ReplayChunk, func(map[string]any)) (int, string)
 	producer model.ID
 }
 
@@ -79,7 +81,7 @@ func newReplayIntake(t *testing.T) *replayIntake {
 	t.Cleanup(server.Close)
 	r := &replayIntake{producer: model.NewID()}
 	resource := model.Resource{Service: service, Environment: environment, Build: build, Instance: "replay-1", Labels: model.Labels{}}
-	r.post = func(c model.ReplayChunk) (int, string) {
+	r.postWire = func(c model.ReplayChunk, mutate func(map[string]any)) (int, string) {
 		t.Helper()
 		rec := model.Record{ID: model.NewID(), Kind: model.Replay, ObservedAt: c.Clock.Wall, Resource: resource, Payload: model.Payload{Replay: &c}}
 		batch := model.Batch{Version: 1, Project: project, Source: source, Producer: r.producer, ID: model.NewID(), PolicyRevision: 1, Records: []model.Record{rec}}
@@ -89,6 +91,16 @@ func newReplayIntake(t *testing.T) *replayIntake {
 		raw, err := json.Marshal(batch)
 		if err != nil {
 			t.Fatal(err)
+		}
+		if mutate != nil {
+			var wire map[string]any
+			if err = json.Unmarshal(raw, &wire); err != nil {
+				t.Fatal(err)
+			}
+			mutate(wire)
+			if raw, err = json.Marshal(wire); err != nil {
+				t.Fatal(err)
+			}
 		}
 		req, err := http.NewRequest("POST", server.URL+"/ingest/v1/batches", bytes.NewReader(raw))
 		if err != nil {
@@ -103,6 +115,7 @@ func newReplayIntake(t *testing.T) *replayIntake {
 		body, _ := io.ReadAll(resp.Body)
 		return resp.StatusCode, string(body)
 	}
+	r.post = func(c model.ReplayChunk) (int, string) { return r.postWire(c, nil) }
 	return r
 }
 
@@ -134,6 +147,78 @@ func TestReplayAdmissionRefusesChunksOutsideTheClosedFormat(t *testing.T) {
 			mutate(&c)
 			if status, body := intake.post(c); status != http.StatusUnprocessableEntity && status != http.StatusUnsupportedMediaType {
 				t.Fatalf("a chunk outside the closed format was not refused as invalid: %d %s", status, body)
+			}
+		})
+	}
+}
+
+// addToEveryNode sets key on every object found under a "nodes" array of the
+// decoded wire batch, whatever the payload envelope looks like.
+func addToEveryNode(v any, key string, value any) {
+	switch x := v.(type) {
+	case map[string]any:
+		if nodes, ok := x["nodes"].([]any); ok {
+			for _, n := range nodes {
+				if node, ok := n.(map[string]any); ok {
+					node[key] = value
+				}
+			}
+		}
+		for _, child := range x {
+			addToEveryNode(child, key, value)
+		}
+	case []any:
+		for _, child := range x {
+			addToEveryNode(child, key, value)
+		}
+	}
+}
+
+// The browser recorder (packages/browser/src/replay) emits node fields (`rect`,
+// `pres`) and tags (`body`, `img`, ...) that Go's closed format does not name.
+// Such chunks are refused at intake with a typed, content-free Invalid, whether
+// or not the replay gate is installed: the refusal comes from model-level
+// validation and strict decoding, so this test pins the CURRENT cross-language
+// state (a real browser replay is not stored until the recorder/wire schema is
+// decided), not the gate. It never echoes a value from the refused chunk.
+func TestReplayAdmissionRefusesRecorderShapedChunksContentFree(t *testing.T) {
+	intake := newReplayIntake(t)
+	const canary = "canary-node-7f3a91"
+	withNode := func(tag string) model.ReplayChunk {
+		c := firstReplayChunk(model.NewID())
+		c.Nodes = []model.MaskedNode{{ID: 1, Parent: 0, Tag: tag}}
+		return c
+	}
+	if status, body := intake.post(withNode("div")); status != http.StatusOK {
+		t.Fatalf("setup: a closed-format node was refused: %d %s", status, body)
+	}
+	for name, post := range map[string]func() (int, string){
+		"tag outside the closed set (body)": func() (int, string) { return intake.post(withNode("body")) },
+		"tag outside the closed set (img)":  func() (int, string) { return intake.post(withNode("img")) },
+		"unknown tag carrying a canary":     func() (int, string) { return intake.post(withNode(canary)) },
+		"node with a recorder rect field": func() (int, string) {
+			return intake.postWire(withNode("div"), func(w map[string]any) {
+				addToEveryNode(w, "rect", map[string]any{"x": 0, "y": 0, "w": 8, "h": 8})
+			})
+		},
+		"node with a recorder pres field": func() (int, string) {
+			return intake.postWire(withNode("div"), func(w map[string]any) { addToEveryNode(w, "pres", canary) })
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			status, body := post()
+			if status != http.StatusUnprocessableEntity {
+				t.Fatalf("a recorder-shaped chunk was not refused as invalid: %d %s", status, body)
+			}
+			if strings.Contains(body, canary) || strings.Contains(body, "rect") || strings.Contains(body, "pres") {
+				t.Fatalf("the refusal echoed content from the chunk: %s", body)
+			}
+			var fault struct {
+				Code      string `json:"code"`
+				Retryable bool   `json:"retryable"`
+			}
+			if err := json.Unmarshal([]byte(body), &fault); err != nil || fault.Code != "invalid" || fault.Retryable {
+				t.Fatalf("not a typed, non-retryable invalid fault: %v %s", err, body)
 			}
 		})
 	}
