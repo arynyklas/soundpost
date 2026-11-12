@@ -121,6 +121,9 @@ func buildFrameResolver(ctx context.Context, reader symbolicate.ArtifactReader, 
 	if reason != "" {
 		return unavailable(SymbolicatorUnavailable, reason)
 	}
+	// Remove worker containers a killed earlier process left behind (OCI mode only,
+	// exact name/image/state/age match; see symbolicate.SweepOCI).
+	symbolicate.SweepOCI(ctx, config)
 	for _, kind := range startupProbes {
 		r := probeSandbox(ctx, config, kind)
 		if !r.Denied || r.Reason != symbolicate.Resolved {

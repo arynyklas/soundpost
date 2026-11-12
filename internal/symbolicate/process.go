@@ -14,6 +14,19 @@ import (
 	"path/filepath"
 	"soundpost/internal/model"
 	"strings"
+	"sync"
+	"time"
+)
+
+// removeRetryEvery is the pause between background container-remove retries.
+// ociTransportAllowance is added to the parent-side frame wait in OCI mode only.
+const ociTransportAllowance = 400 * time.Millisecond
+
+var (
+	removeRetryEvery  = 200 * time.Millisecond
+	removeRetryBudget = ProcessTimeout
+	// removeRetries lets tests wait for the background retries.
+	removeRetries sync.WaitGroup
 )
 
 type workerProcess struct {
@@ -72,7 +85,17 @@ func (s *Service) run(ctx context.Context, in workerInput) workerOutput {
 	case <-ctx.Done():
 		return workerOutput{Reason: Deadline}
 	}
-	frameCtx, frameCancel := context.WithTimeout(ctx, FrameTimeout)
+	// The worker enforces its own authoritative 100 ms processing watchdog (exit 124,
+	// typed `deadline`). This parent bound is the independent wall backstop and it
+	// also spans the request/reply transport: through an OCI runtime that is the
+	// client -> daemon -> shim -> container stdio chain, measured at 96-162 ms
+	// round trip on an idle host, so a bare 100 ms made most OCI frames answer
+	// `deadline`. The allowance is OCI-only and far below ProcessTimeout.
+	frameBudget := FrameTimeout
+	if s.config.Mode == "oci" {
+		frameBudget += ociTransportAllowance
+	}
+	frameCtx, frameCancel := context.WithTimeout(ctx, frameBudget)
 	defer frameCancel()
 	type answer struct {
 		out workerOutput
@@ -175,13 +198,35 @@ func (s *Service) launch(ctx context.Context, probe bool) (*workerProcess, error
 		}
 		name := "soundpost-symbolicate-" + model.NewID().String()
 		cmd = exec.CommandContext(ctx, s.config.OCIRuntime, "run", "--name", name, "--pull=never", "--network=none", "--read-only", "--memory=268435456", "--memory-swap=268435456", "--pids-limit=64", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--user=65534:65534", "--env=GOMAXPROCS=1", "--env=GOMEMLIMIT=192MiB", "--env=GOGC=50", "--entrypoint=/soundpost-symbolicate", "--interactive", s.config.OCIImage, mode)
-		cleanup = func() {
+		removeOnce := func() bool {
+			// A fresh, bounded context: never the (possibly expired) request one.
 			c, cancel := context.WithTimeout(context.Background(), ProcessTimeout)
 			defer cancel()
 			x := exec.CommandContext(c, s.config.OCIRuntime, "rm", "--force", name)
 			x.Stdout = io.Discard
 			x.Stderr = io.Discard
-			x.Run()
+			return x.Run() == nil
+		}
+		cleanup = func() {
+			if removeOnce() || cmd.Process == nil {
+				return
+			}
+			// The client was started and the first remove found nothing: the runtime
+			// daemon may still be creating the container for a `run` request whose
+			// client was killed (deadline under load). It would appear later as a
+			// never-started `Created` container, so keep removing, off the request's
+			// slot, for at most ProcessTimeout in total.
+			removeRetries.Add(1)
+			go func() {
+				defer removeRetries.Done()
+				deadline := time.Now().Add(removeRetryBudget)
+				for time.Now().Before(deadline) {
+					time.Sleep(removeRetryEvery)
+					if removeOnce() {
+						return
+					}
+				}
+			}()
 		}
 		oom = func() bool {
 			c, cancel := context.WithTimeout(context.Background(), ProcessTimeout)
