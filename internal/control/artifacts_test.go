@@ -159,3 +159,65 @@ func TestLookupArtifactIsNotFoundForRootOfActiveEntityDeletion(t *testing.T) {
 		t.Fatalf("unrelated root lost: %v", err)
 	}
 }
+
+func (f *artifactLookupFx) setIntent(t *testing.T, a artifacts.Artifact, mutate func(*model.ArtifactReferenceIntent)) {
+	t.Helper()
+	key := f.org.String() + ":" + f.project.String() + ":" + a.ID.String()
+	if err := f.app.Control.Update(context.Background(), func(st *model.ControlState) error {
+		intent, ok := st.ArtifactIntents[key]
+		if !ok {
+			return model.Fail(model.NotFound)
+		}
+		mutate(&intent)
+		st.ArtifactIntents[key] = intent
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Startup validation requires the bytes of every PUBLISHED intent (a published intent
+// whose blob is gone is Corrupt: control never repairs authority from missing files) and
+// requires nothing of a RETIRED one, whose state the artifact lifecycle wrote in the
+// transition that fenced the root for erasure. A retired intent is still validated for
+// structure, is never readable through the lookup, and the skip is per intent.
+func TestValidateArtifactReferencesSkipsOnlyRetiredIntents(t *testing.T) {
+	f := newArtifactLookupFx(t)
+	ctx := context.Background()
+	a, b := f.put(t, "validate-a"), f.put(t, "validate-b")
+	if err := f.app.Control.ValidateArtifactReferences(ctx); err != nil {
+		t.Fatalf("intact references: %v", err)
+	}
+	// The expiry eraser (engine API, no guard) removes both roots and never touches control.
+	if report, err := f.app.Storage.EraseExpired(ctx, model.UnixNano(time.Now().Add(48*time.Hour).UnixNano()), nil); err != nil || report.Blobs != 2 {
+		t.Fatalf("erase: %+v %v", report, err)
+	}
+	if err := f.app.Control.ValidateArtifactReferences(ctx); lookupCode(err) != model.Corrupt {
+		t.Fatalf("published intents over missing blobs validated: %v", err)
+	}
+	f.setIntent(t, a, func(i *model.ArtifactReferenceIntent) { i.State = "retired" })
+	if err := f.app.Control.ValidateArtifactReferences(ctx); lookupCode(err) != model.Corrupt {
+		t.Fatalf("retiring one intent excused the other published intent over a missing blob: %v", err)
+	}
+	f.setIntent(t, b, func(i *model.ArtifactReferenceIntent) { i.State = "retired" })
+	if err := f.app.Control.ValidateArtifactReferences(ctx); err != nil {
+		t.Fatalf("retired intents over erased blobs must validate: %v", err)
+	}
+	if _, err := f.app.Control.LookupArtifact(ctx, f.scope(t, auth.ArtifactRead), a.ID); lookupCode(err) != model.NotFound {
+		t.Fatalf("a retired intent is readable through the lookup: %v", err)
+	}
+	// A published intent with its bytes present validates beside the retired ones.
+	f.put(t, "validate-c")
+	if err := f.app.Control.ValidateArtifactReferences(ctx); err != nil {
+		t.Fatalf("published intent with bytes beside retired ones: %v", err)
+	}
+	// Retired is not a free pass: structure is still validated, and so is the state name.
+	f.setIntent(t, a, func(i *model.ArtifactReferenceIntent) { i.ControlRevision = 0 })
+	if err := f.app.Control.ValidateArtifactReferences(ctx); lookupCode(err) != model.Corrupt {
+		t.Fatalf("a malformed retired intent validated: %v", err)
+	}
+	f.setIntent(t, a, func(i *model.ArtifactReferenceIntent) { i.ControlRevision = 1; i.State = "bogus" })
+	if err := f.app.Control.ValidateArtifactReferences(ctx); lookupCode(err) != model.Corrupt {
+		t.Fatalf("an unknown intent state validated: %v", err)
+	}
+}

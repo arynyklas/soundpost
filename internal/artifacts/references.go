@@ -22,6 +22,14 @@ const (
 	ReferenceBuild   ReferenceKind = "build"
 )
 
+// The artifact intent's state. "retired" is written in the same control transition
+// that sets the reference ledger's Retired flag (the GC fence); control, which must
+// not import this package, reads the literal (internal/control/artifacts.go).
+const (
+	intentPublished = "published"
+	intentRetired   = "retired"
+)
+
 const (
 	// DefaultMapRetention is how long a reference with no explicit deadline
 	// retains its map.
@@ -237,8 +245,9 @@ type mutation func(m model.ArtifactManifest, l *refLedger, now model.UnixNano) (
 // the org delete generation advances: readable bytes are about to go).
 func (l *Lifecycle) apply(ctx context.Context, org, project model.ID, id ArtifactID, bump bool, authorize func(model.ControlState, model.ArtifactReferenceIntent) error, fn mutation) error {
 	return l.cfg.State.Update(ctx, func(st *model.ControlState) error {
-		intent, ok := st.ArtifactIntents[org.String()+":"+project.String()+":"+id.String()]
-		if !ok || intent.State != "published" {
+		key := org.String() + ":" + project.String() + ":" + id.String()
+		intent, ok := st.ArtifactIntents[key]
+		if !ok || intent.State != intentPublished && intent.State != intentRetired {
 			return model.Fail(model.NotFound)
 		}
 		if authorize != nil {
@@ -264,20 +273,36 @@ func (l *Lifecycle) apply(ctx context.Context, org, project model.ID, id Artifac
 			ledger = &refLedger{Project: project, Root: id}
 		}
 		changed, err := fn(intent.Manifest, ledger, model.UnixNano(l.cfg.Now().UnixNano()))
-		if err != nil || !changed {
+		if err != nil {
 			return err
 		}
-		ledger.Seq++
-		if err = storeLedger(&o, ledger); err != nil {
-			return err
+		// The GC fence and the intent move together, in this one control transition: control
+		// (which cannot read the ledger) sees "retired" and no longer requires the root's
+		// bytes, and the fence is durable before retention erases them. A crash after the fence
+		// leaves a retired intent over present bytes (an orphan the next pass erases), never a
+		// published intent over missing bytes. A ledger fenced by an earlier build over a
+		// still-published intent is healed here too.
+		retire := ledger.Retired && intent.State == intentPublished
+		if !changed && !retire {
+			return nil
 		}
-		if bump {
-			if st.DeleteGenerations == nil {
-				st.DeleteGenerations = map[string]uint64{}
+		if changed {
+			ledger.Seq++
+			if err = storeLedger(&o, ledger); err != nil {
+				return err
 			}
-			st.DeleteGenerations[org.String()]++
+			if bump {
+				if st.DeleteGenerations == nil {
+					st.DeleteGenerations = map[string]uint64{}
+				}
+				st.DeleteGenerations[org.String()]++
+			}
+			st.Orgs[org.String()] = o
 		}
-		st.Orgs[org.String()] = o
+		if retire {
+			intent.State = intentRetired
+			st.ArtifactIntents[key] = intent
+		}
 		return nil
 	})
 }

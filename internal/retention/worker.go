@@ -15,16 +15,20 @@ import (
 // WorkerStatus is the last observable state of the maintenance worker. It
 // carries no telemetry values.
 type WorkerStatus struct {
-	Passes         uint64
-	LastError      string
-	Pressure       storage.PressureStatus
-	EvidenceHeld   bool // expired unprocessed evidence is retained because its gap could not commit
-	ErasedRecords  uint64
-	HeldByLegal    uint64
-	ScrubPending   bool // the last erasure pass could not finish zeroing free bbolt pages (a reader was open)
-	Snapshots      uint64
-	GapsRecorded   uint64
-	ExpiryErased   uint64
+	Passes        uint64
+	LastError     string
+	Pressure      storage.PressureStatus
+	EvidenceHeld  bool // expired unprocessed evidence is retained because its gap could not commit
+	ErasedRecords uint64
+	HeldByLegal   uint64
+	ScrubPending  bool // the last erasure pass could not finish zeroing free bbolt pages (a reader was open)
+	Snapshots     uint64
+	GapsRecorded  uint64
+	ExpiryErased  uint64
+	// UnfencedBlobs counts expired artifact roots an expiry pass kept because no References
+	// source is bound: without one nothing proves a root is retired, and erasing it would leave
+	// a published intent over missing bytes.
+	UnfencedBlobs  uint64
 	CompletedOps   uint64
 	FencingOps     int
 	PhysicalLagOps int
@@ -424,9 +428,21 @@ func (s *Service) expire(ctx context.Context) (uint64, error) {
 		return false
 	}
 	planning := true
+	references := s.references()
 	extra := func(ctx context.Context, c storage.EraseCandidate) (bool, error) {
-		if s.cfg.References != nil {
-			ref, err := s.cfg.References.LatestReference(ctx, c)
+		if c.Blob != nil && references == nil {
+			// Nothing can prove the artifact root is fenced (reference ledger retired, intent
+			// retired) or unreferenced, and a root erased without that proof leaves a published
+			// intent over missing bytes. Keep it and say so; the pass itself is not failed.
+			if !planning {
+				s.mu.Lock()
+				s.status.UnfencedBlobs++
+				s.mu.Unlock()
+			}
+			return false, nil
+		}
+		if references != nil {
+			ref, err := references.LatestReference(ctx, c)
 			if err != nil {
 				return false, err
 			}

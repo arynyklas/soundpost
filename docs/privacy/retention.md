@@ -13,7 +13,7 @@ This describes task 01.08 as implemented. Nothing here is a power-loss, distinct
 | errors, lifecycle conditions, job attempts | 90 | the declared lifecycle evidence journal |
 | replay chunks, profile chunks | 7 | a replay checkpoint outlives its own deadline while a retained chunk depends on it |
 | restricted raw sources | 1 (24 h) | never longer than 7 days (model validation) |
-| source maps / symbols | 90 | or until the last retained error/profile of the same build expires, whichever is later |
+| source maps / symbols | 90 | or until the last retained error/profile of the same build expires, whichever is later (how the served process enforces it, and what it does not yet: [artifacts/lifecycle.md](../artifacts/lifecycle.md)) |
 | audit | 365 | |
 
 `retention.Defaults()` holds these values; `retention.Resolve` layers the audited, append-only versions in control state (`RetentionPolicies`, organization default then project) over them. A new version only affects batches admitted after its effective time. **Receipts keep the absolute deadlines they were issued with**; a policy change, a disk-pressure event or a restore never recomputes or rewrites a receipt time. Every version records actor, reason and time and appends an audit record (`retention.policy`).

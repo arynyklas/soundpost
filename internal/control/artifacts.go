@@ -9,6 +9,13 @@ import (
 	"soundpost/internal/model"
 )
 
+// The states of an artifact intent. "retired" is written by the artifact lifecycle in the
+// same control transition as its GC fence (control cannot import that package).
+const (
+	artifactPublished = "published"
+	artifactRetired   = "retired"
+)
+
 type artifactBlobProofs interface {
 	VerifyBlob(context.Context, model.BlobReceipt) error
 }
@@ -177,6 +184,12 @@ func (s *Store) LookupArtifact(ctx context.Context, scope auth.Scope, id model.I
 
 // ValidateArtifactReferences gates app readiness over the exact retained bytes,
 // including private source blobs. It never repairs authority from orphan files.
+// An intent whose state is "retired" (written in the same control transition as the
+// artifact lifecycle's GC fence, before any byte is erased) no longer owns bytes: its
+// structure and reservations are still validated, but its blobs are not required, so a
+// root that retention erased (or is about to erase after a crash between fence and
+// erase) does not stop the process. A "published" intent whose blob is missing or
+// corrupt stays Corrupt.
 func (s *Store) ValidateArtifactReferences(ctx context.Context) error {
 	owner, err := s.artifactOwner()
 	if err != nil {
@@ -187,6 +200,9 @@ func (s *Store) ValidateArtifactReferences(ctx context.Context) error {
 		for key, r := range st.ArtifactIntents {
 			if err := validateArtifactReference(st, key, r); err != nil {
 				return err
+			}
+			if r.State == artifactRetired {
+				continue
 			}
 			refs = append(refs, r.Map)
 			if r.Sources != nil {
@@ -246,7 +262,7 @@ func (s *Store) CancelArtifact(ctx context.Context, scope auth.Scope, id, comman
 
 func validateArtifactReference(st State, key string, r model.ArtifactReferenceIntent) error {
 	m, b := r.Manifest, r.Map.Manifest
-	if r.State != "published" || r.ControlRevision == 0 || r.ControlRevision > st.Revision || r.CommandID != r.ID || key != m.Org.String()+":"+m.Project.String()+":"+r.ID.String() || r.ID != b.Root || m.Version != 1 || m.Org != b.Org || m.Project != b.Project || m.Source != b.Source || m.Build != b.Build || m.DebugID != b.DebugID || m.Path != b.Path || m.GeneratedSHA256 != b.GeneratedSHA256 || m.MapSHA256 != b.MapSHA256 || m.RetainUntil != b.RetainUntil || b.PrivateSources || m.SourceContent != (r.Sources != nil) {
+	if r.State != artifactPublished && r.State != artifactRetired || r.ControlRevision == 0 || r.ControlRevision > st.Revision || r.CommandID != r.ID || key != m.Org.String()+":"+m.Project.String()+":"+r.ID.String() || r.ID != b.Root || m.Version != 1 || m.Org != b.Org || m.Project != b.Project || m.Source != b.Source || m.Build != b.Build || m.DebugID != b.DebugID || m.Path != b.Path || m.GeneratedSHA256 != b.GeneratedSHA256 || m.MapSHA256 != b.MapSHA256 || m.RetainUntil != b.RetainUntil || b.PrivateSources || m.SourceContent != (r.Sources != nil) {
 		return model.Fail(model.Corrupt)
 	}
 	receipts := []model.BlobReceipt{r.Map}

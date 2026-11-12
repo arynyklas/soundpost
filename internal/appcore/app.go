@@ -29,26 +29,27 @@ import (
 )
 
 type App struct {
-	Control      *control.Store
-	Auth         *auth.Service
-	Storage      *storage.Engine
-	Ingest       *ingest.Service
-	Releases     *releases.Service
-	Artifacts    *artifacts.Service
-	Cache        *auth.Cache
-	Exports      *exports.Service
-	Retention    *retention.Service
-	Query        *query.Engine
-	Live         *query.LiveService
-	Investigator *httpapi.Investigator
-	Incidents    *incidents.Service
-	Jobs         *jobs.Service
-	Actions      *httpapi.Actions
-	Evidence     *httpapi.Evidence
-	Traces       *httpapi.Traces
-	Replays      *httpapi.Replays
-	Profiles     *httpapi.Profiles
-	replication  *replicatedApp
+	Control           *control.Store
+	Auth              *auth.Service
+	Storage           *storage.Engine
+	Ingest            *ingest.Service
+	Releases          *releases.Service
+	Artifacts         *artifacts.Service
+	ArtifactLifecycle *artifacts.Lifecycle
+	Cache             *auth.Cache
+	Exports           *exports.Service
+	Retention         *retention.Service
+	Query             *query.Engine
+	Live              *query.LiveService
+	Investigator      *httpapi.Investigator
+	Incidents         *incidents.Service
+	Jobs              *jobs.Service
+	Actions           *httpapi.Actions
+	Evidence          *httpapi.Evidence
+	Traces            *httpapi.Traces
+	Replays           *httpapi.Replays
+	Profiles          *httpapi.Profiles
+	replication       *replicatedApp
 }
 
 func Open(dir string) (*App, error) { return open(dir, nil) }
@@ -160,6 +161,10 @@ func openWith(dir string, options *replicationOptions, meter storage.DiskMeter, 
 	if e != nil {
 		return fail(e)
 	}
+	artifactLifecycle, e := NewArtifactLifecycle(c, artifactService, engine, ret)
+	if e != nil {
+		return fail(e)
+	}
 	p, e := policy.New(a, nil)
 	if e != nil {
 		return fail(e)
@@ -238,7 +243,7 @@ func openWith(dir string, options *replicationOptions, meter storage.DiskMeter, 
 	// with the typed not_available state instead of an empty success.
 	evidence := httpapi.NewEvidence(nil, r, r)
 	traces := httpapi.NewTraces(httpapi.NewStorageSpanSource(engine))
-	out := &App{Control: c, Auth: a, Storage: engine, Ingest: i, Releases: r, Artifacts: artifactService, Cache: cache, Exports: exportService, Retention: ret, Query: queryEngine, Live: liveService, Investigator: investigator, Incidents: incidentService, Jobs: jobService, Actions: actions, Evidence: evidence, Traces: traces, Replays: httpapi.NewReplays(replayService)}
+	out := &App{Control: c, Auth: a, Storage: engine, Ingest: i, Releases: r, Artifacts: artifactService, ArtifactLifecycle: artifactLifecycle, Cache: cache, Exports: exportService, Retention: ret, Query: queryEngine, Live: liveService, Investigator: investigator, Incidents: incidentService, Jobs: jobService, Actions: actions, Evidence: evidence, Traces: traces, Replays: httpapi.NewReplays(replayService)}
 	// Built once: the profile service keys its cursors per instance.
 	out.Profiles = httpapi.NewProfiles(out.NewNativeProfiles())
 	startupTimeout := 20 * time.Second
