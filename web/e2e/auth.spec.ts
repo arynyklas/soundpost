@@ -8,10 +8,14 @@ const org=process.env.SOUNDPOST_TEST_ORG;
 const provider=process.env.SOUNDPOST_TEST_PROVIDER;
 if(!org||!provider)throw new Error('Real configured OIDC organization/provider IDs required');
 test.describe.configure({mode:'serial'});
-test('real local password, rotation, TOTP, one-use recovery and logout',async({page,context})=>{
+test('real local password, rotation, TOTP, one-use recovery and logout',async({page,context,browserName})=>{
  test.setTimeout(60_000);
  await page.goto('/');await page.getByLabel('Email',{exact:true}).fill(email);await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();await expect(page.getByRole('heading',{name:'Account access',exact:true})).toBeVisible();
- const before=(await context.cookies()).find(cookie=>cookie.name==='__Host-soundpost');expect(before?.httpOnly).toBe(true);expect(before?.secure).toBe(true);expect(before?.sameSite).toBe('Strict');
+ const before=(await context.cookies()).find(cookie=>cookie.name==='__Host-soundpost');expect(before?.httpOnly).toBe(true);expect(before?.secure).toBe(true);
+ // Playwright's WebKit on Windows reports sameSite 'None' for every cookie: a control cookie added through context.addCookies as Strict, Lax and None all
+ // read back None (control experiment run in task 10.21). That is a driver/platform reporting gap, not the server, so only that
+ // combination skips the readback; Chromium, Firefox and WebKit elsewhere keep the strict assertion.
+ if(!(browserName==='webkit'&&process.platform==='win32'))expect(before?.sameSite).toBe('Strict');
  await page.getByRole('button',{name:'Start authenticator enrollment'}).click();const secret=await page.locator('output.secret').textContent();expect(secret).toBeTruthy();
  // Use the real authority's HTTP clock: the driver and server may be different OSes.
  const authorityTime=async():Promise<number>=>{const response=await page.request.get('/api/v1/session');expect(response.ok()).toBe(true);const header=response.headers().date;if(!header)throw Error('Authority time unavailable');const stamp=Date.parse(header);if(!Number.isFinite(stamp))throw Error('Authority time invalid');return stamp;};

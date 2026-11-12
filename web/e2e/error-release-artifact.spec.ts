@@ -7,8 +7,8 @@ import {CANARY_FN,CANARY_LABEL,MAP_SECRET,revoke,seedEvidence,type EvidenceSeed,
 // onboarding routes; the source map is admitted through the real multipart POST /api/v1/artifacts upload; every read
 // below is the real /api/v1/evidence/* route (plus the committed /api/v1/artifacts and /api/v1/actions routes) as a real
 // logged-in person. Release registration and one grouping issue are seeded by the temporary harness routes (see the report).
-// The symbolication sandbox is not available in this environment, so the real answer for a frame whose map was read is
-// `sandbox_unavailable`: a mapped position is not exercised in the browser (the Go tests own that against a fake resolver).
+// The symbolication sandbox MUST be ready (native mode, `symbolicator: ready (sandbox probes passed)`). The admitted map has the single mapping `AAAA`
+// (generated 1:0), so a frame at another position is answered `unmapped` by the real worker and an unknown artifact `artifact_unavailable`.
 test.describe.configure({mode:'serial'});
 let seed:EvidenceSeed,ownerPage:Page,browserRef:Browser;
 const contexts:BrowserContext[]=[];
@@ -141,7 +141,7 @@ async function resolve(page:Page,build:string,lines:string[],sources:boolean):Pr
 }
 const frameLine=(artifact:string,line:number,fn:string):string=>`${artifact} ${line} 7 ${fn}`;
 
-test('frames: the real map is found for its build, the sandbox is not available so nothing is mapped, original frames and reasons are shown, no URL is ever fetched, markup is text',async()=>{
+test('frames: the real map is found for its build, an unmapped position is said so, original frames and reasons are shown, no URL is ever fetched, markup is text',async()=>{
  const page=await as(seed.srcOwner,hash(seed.org,'issues',{project:seed.project,id:seed.issue.id}));
  await expect(page.getByRole('form',{name:'Resolve frames'})).toBeVisible();
  const requests:Request[]=[];
@@ -151,11 +151,11 @@ test('frames: the real map is found for its build, the sandbox is not available 
  await expect(results).toBeFocused();
  const frames=results.getByRole('article');
  await expect(frames).toHaveCount(3);
- // Real artifact + its build: the map is read from the real store, the sandbox is absent: a specific safe reason, original frame kept.
- await expect(frames.nth(0)).toHaveAttribute('data-reason','sandbox_unavailable');
+ // Real artifact + its build: the map is read from the real store and the real worker finds no mapping at line 10: a specific safe reason, original frame kept.
+ await expect(frames.nth(0)).toHaveAttribute('data-reason','unmapped');
  await expect(frames.nth(0).getByTestId('frame-state')).toHaveText('Not mapped');
  await expect(frames.nth(0).getByTestId('frame-original')).toContainText(`${seed.artifact}:10:7 in ${CANARY_FN}`);
- await expect(frames.nth(0).getByTestId('frame-reason')).toContainText('sandbox');
+ await expect(frames.nth(0).getByTestId('frame-reason')).toContainText('Not mapped');
  await expect(frames.nth(0).getByTestId('frame-mapped')).toHaveCount(0);
  // An artifact that is not in this scope is indistinguishable from an absent one.
  await expect(frames.nth(2)).toHaveAttribute('data-reason','artifact_unavailable');
@@ -186,7 +186,7 @@ test('frames: a map-only reader asked for sources is told the source grant is mi
  await expect(frame.getByTestId('frame-source-state')).toContainText('separate sources grant');
  await expect(frame.getByTestId('frame-original')).toContainText(`${seed.artifact}:10:7 in boom`);
  await expect(mapOnly.locator('body')).not.toContainText(MAP_SECRET);
- // Without asking for sources the same reader's frame is simply not mapped here (sandbox), and the source is not requested.
+ // Without asking for sources the same reader's frame is simply not mapped here (no mapping at that position), and the source is not requested.
  await mapOnly.getByLabel(/Also request source context/).uncheck();
  await mapOnly.getByRole('button',{name:'Resolve frames'}).click();
  await expect(mapOnly.getByTestId('frame-results').getByRole('article').first().getByTestId('frame-source-state')).toContainText('never fetched by default');
