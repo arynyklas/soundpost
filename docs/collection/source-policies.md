@@ -99,10 +99,23 @@ unchanged exporter one conflicting admission), so a retry of one scrape is
 idempotent and two scrapes are distinct.
 
 **Where scraping runs:** `FetchScrape` needs a `policy.SourceGrant`, which only
-the installation's authority can issue. A scrape therefore runs inside the
-node (the `sources.Scraper` schedules a target, resolves a fresh grant per
-attempt, admits through `ingest.Service.Admit` and carries the stale-marker
-state forward only after every batch has its receipt). The remote
-`soundpost-agent` does **not** scrape. Wiring a `Scraper` into the node's
-application composition is not part of this task (it needs `appcore/app.go`);
-the wiring is described in the task report.
+the installation's authority can issue. A scrape therefore runs inside the node:
+`soundpost serve --scrape-config PATH --scrape-secrets-dir DIR` starts one
+`sources.Scraper` per configured target (`sources.StartScrapeHost`, started by
+`cmd/soundpost` after the node opens and closed before storage closes). Each
+attempt resolves a fresh grant from a **source credential the operator provisioned
+through the existing owner path** and stored in the secrets directory
+(`AuthenticateSource`, then `ingest.Service.ResolveSource` for the configured
+project, source and policy revision), admits through `ingest.Service.Admit`, the
+same service the HTTP ingest route calls, and carries the stale-marker state
+forward only after every batch has its receipt. The node holds no identity of its
+own: revoking or expiring the source stops admission, typed (`grant_denied`). The
+remote `soundpost-agent` does **not** scrape.
+
+The configuration file (closed JSON, unknown fields refused), the secrets
+directory (a private directory of `0600` files named by reference; no traversal, no
+symbolic links, read fresh per fetch, never cached or logged), the flags, the
+startup reason codes and the per-target health reasons are in
+`docs/operations/scraping.md`. Loopback targets can not be scraped by the node
+(the egress rule above has no loopback exception); the `ScrapeTarget` loopback
+allowance exists only in this package's own tests.

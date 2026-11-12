@@ -83,6 +83,7 @@ func run() error {
 	nodeID := f.Uint64("node-id", 0, "configured Raft node identity")
 	hold := f.String("startup-hold-file", "", "keep storage closed (GET /readyz reports startup_hold) until this file exists, e.g. a volume-mount sentinel")
 	symbolicator := addSymbolicatorFlags(f)
+	scrape := addScrapeFlags(f)
 	if e := f.Parse(os.Args[2:]); e != nil {
 		return e
 	}
@@ -91,6 +92,11 @@ func run() error {
 	}
 	symbolicateSettings, e := symbolicator.settings()
 	if e != nil {
+		return e
+	}
+	scrapeCfg, e := scrape.settings()
+	if e != nil {
+		fmt.Fprintln(os.Stderr, scrapeFailureNotice(e))
 		return e
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -130,6 +136,16 @@ func run() error {
 	defer core.Close()
 	// Probes the sandbox, then swaps the frame resolver; this MUST precede Register.
 	fmt.Fprintln(os.Stderr, symbolicatorNotice(core.ConfigureSymbolicator(ctx, symbolicateSettings)))
+	scrapers, e := scrapeCfg.start(ctx, core)
+	if e != nil {
+		fmt.Fprintln(os.Stderr, scrapeFailureNotice(e))
+		return e
+	}
+	if scrapers != nil {
+		// Deferred after core.Close, so it runs first: the scrapers stop before storage closes.
+		defer scrapers.Close()
+		fmt.Fprintln(os.Stderr, scrapeStartedNotice(scrapers))
+	}
 	store, service := core.Control, core.Auth
 	if _, e := store.BootstrapToken(); e == nil {
 		fmt.Fprintln(os.Stderr, bootstrapNotice(*dir))
