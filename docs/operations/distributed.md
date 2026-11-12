@@ -200,6 +200,8 @@ go run ./tools/smoke install-distributed --artifact-dir smoke-out --container so
 
 Both generate the node files with `internal/config`, bootstrap and seed an installation, start three members, wait for each member's `/readyz`, ingest through the initial leader and query through followers, kill the initial leader and require writes to keep committing through another member, restart it and require it to rejoin and converge (same query answer, same control applied cursor), kill two members and require a typed `503` refusal (retryable, no cursor, no receipt; observed code `stale`) with no acknowledgement, and a `503` `/readyz` from the survivor (observed reason `state_unavailable`: the 3 s evaluation bound elapses before the failed quorum round is reported as `no_quorum`), restart them and require convergence again, check private modes and that no log line contains a credential or private-key material, run the off-host backup authority gate of [backup-authority.md](backup-authority.md) against the real authority on a local directory and run the native-permission probe. The artifact (`install-distributed.json`) lists what was **not** run: an authorized Kubernetes cluster, independent physical hosts, restore into a three-voter cluster, kernel 6.1 and arm64.
 
+Per-voter physical erasure of a deletion on the same three-process cluster (node 3 killed while the deletion runs, receipts, whole-directory scans of every stopped node) is the separate `go run ./tools/smoke deletion-cluster` smoke, described with its measurements in [deletion.md](deletion.md#evidence-erasure-on-three-real-members-deletion-cluster).
+
 ## Required local process drill
 
 Run with the parent-controlled supported Linux Go toolchain:

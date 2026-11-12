@@ -81,6 +81,9 @@ func run() (err error) {
 		case "install-distributed":
 			smoke, stage = "install_distributed", "install_dispatch"
 			return RunInstallDistributed(os.Args[2:])
+		case "deletion-cluster":
+			smoke, stage = "deletion_cluster", "deletion_cluster_dispatch"
+			return RunDeletionCluster(os.Args[2:])
 		case "host-collection":
 			smoke, stage = "host_collection", "host_collection_dispatch"
 			return RunHostCollection(os.Args[2:])
