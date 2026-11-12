@@ -97,6 +97,21 @@ type Machine interface {
 	Snapshot() ([]byte, error)
 	Restore([]byte, uint64) error
 }
+
+// DigestRetryMachine is optionally implemented by a Machine whose commands of some kinds each
+// carry the machine's whole state (the control machine: a command is the next state plus the
+// revision it expects). For a kind it names, the retry table keeps, for every applied command,
+// the receipt (term, index, application cursor, outcome) and the SHA-256 of the payload the
+// command was proposed with (Entry.Original, the representation a redacted command has), and no
+// payload bytes: a retry of a committed command is still answered with its original receipt, a
+// different payload under the same ID is still a conflict, and the retry table, the log index and
+// every snapshot envelope that serializes it stop growing with the payload bytes of every command
+// ever committed. What the retry table keeps per command is a fixed-size record; how long a
+// client may retry (and so how many records are kept) is not decided here: records are never
+// dropped.
+type DigestRetryMachine interface {
+	RetryByDigest(Kind) bool
+}
 type Transport interface {
 	Send(model.ID, *pb.Message) error
 }
@@ -175,6 +190,8 @@ type Group struct {
 	owner        model.ID // this instance of the group: stamps the pins it creates
 	pinTTL       time.Duration
 	now          func() time.Time
+	// retryDigest is Machine.RetryByDigest when the machine implements DigestRetryMachine.
+	retryDigest func(Kind) bool
 }
 
 func Open(c Config) (*Group, error) {
@@ -233,6 +250,9 @@ func Open(c Config) (*Group, error) {
 		return nil, err
 	}
 	g.validate = c.Validate
+	if m, ok := c.Machine.(DigestRetryMachine); ok {
+		g.retryDigest = m.RetryByDigest
+	}
 	g.logCommands = map[model.ID]CommittedEntry{}
 	hard, conf, err := memory.InitialState()
 	if err != nil {
@@ -577,7 +597,9 @@ func (g *Group) remember(ent *pb.Entry, _ uint64) error {
 	if e.ApplicationIndex > g.logApplication {
 		g.logApplication = e.ApplicationIndex
 	}
-	if _, ok := g.logCommands[e.ID]; !ok {
+	// An entry that is already applied and kept by digest is answered by the retry table; its
+	// payload is not copied into the log index (rebuildKnown replays every retained log entry).
+	if _, ok := g.logCommands[e.ID]; !ok && !(ent.GetIndex() <= g.applied && g.digestKind(e.Kind)) {
 		g.logCommands[e.ID] = CommittedEntry{Group: g.group, Term: ent.GetTerm(), Index: ent.GetIndex(), ApplicationCursor: model.Cursor{Group: g.group, Index: model.Uint64(e.ApplicationIndex)}, Entry: e}
 	}
 	if old, ok := g.completed[e.ID]; ok && old.Outcome == "conflict" {

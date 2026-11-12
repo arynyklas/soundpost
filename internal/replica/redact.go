@@ -154,7 +154,7 @@ func (g *Group) RedactCompleted(ctx context.Context, requests []Redaction) (Reda
 
 	var table []model.ID
 	for id, t := range targets {
-		if !bytes.Equal(g.completed[id].Entry.Payload, t.replacement) {
+		if p := g.completed[id].Entry.Payload; len(p) > 0 && !bytes.Equal(p, t.replacement) { // no payload: kept by digest
 			table = append(table, id)
 		}
 	}

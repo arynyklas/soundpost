@@ -147,6 +147,14 @@ func (s *Store) replicatedUpdate(ctx context.Context, bump bool, force *bool, fn
 	_, err = r.group.Propose(ctx, replica.Entry{ID: model.NewID(), Kind: replica.Control, Payload: payload, ApplicationIndex: uint64(st.Revision)})
 	return replicaFault(err)
 }
+
+// RetryByDigest implements replica.DigestRetryMachine: every control command carries the whole
+// next state, so the group keeps a digest and the receipt of an applied command, not its payload
+// (the payload is the retry table's O(commands x state) otherwise).
+func (m *replicatedControl) RetryByDigest(k replica.Kind) bool { return k == replica.Control }
+
+var _ replica.DigestRetryMachine = (*replicatedControl)(nil)
+
 func (m *replicatedControl) Applied() uint64 {
 	var value uint64
 	_ = m.store.db.View(func(tx *bolt.Tx) error {

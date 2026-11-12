@@ -11,13 +11,13 @@ import (
 )
 
 // Every control command carries the whole control state, so each command the control Raft
-// group retains (its retry table, its journal ready.wal, its in-memory log, its snapshot
-// envelopes, the backup pin archives) holds the payloads a later deletion erased from the live
+// group retains (its journal ready.wal, its in-memory log, its snapshot envelopes, the backup pin
+// archives; the retry table keeps a digest only) holds the payloads a later deletion erased from the live
 // state. RedactRetainedControlCommands removes them from THIS node's copy; ResidualStores stops
 // naming ResidualControlJournal exactly when that pass was proven for every erasure committed
 // so far (replica.Group.MachineResidue), and keeps naming it when it was not.
 //
-// What it guarantees, per voter: this voter's journal, retry table, in-memory log, snapshot
+// What it guarantees, per voter: this voter's journal, retry table (a digest only), in-memory log, snapshot
 // directories and pin archives hold none of the payloads covered by the finished deletions this
 // voter has committed, as of the pass, except what MachineResidue reports. A voter redacts only
 // its own copy and the receipt is about the node that issues it: a voter that has not run the

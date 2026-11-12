@@ -39,11 +39,13 @@ const (
 	// the state an erasure replaced still sits in free pages of the file until
 	// ScrubErased zeroes them.
 	ResidualControlState = "control_state"
-	// ResidualControlJournal is the control group's Raft journal, snapshots and
-	// retry table: every control command carries the whole control state, and
-	// the group retains every command (and so its payload) for retry
-	// recognition. RedactRetainedControlCommands removes the covered payloads
-	// from this node's copy; ResidualStores names it until that is proven.
+	// ResidualControlJournal is the control group's Raft journal and snapshots:
+	// every control command carries the whole control state, and the group
+	// retains every command (and so its payload) in the journal until a later
+	// cut compacts it onto a snapshot (the retry table keeps a digest, not the
+	// payload: replica.DigestRetryMachine). RedactRetainedControlCommands
+	// removes the covered payloads from this node's copy; ResidualStores names
+	// it until that is proven.
 	ResidualControlJournal = "control_raft_journal"
 )
 
@@ -156,7 +158,8 @@ func eraseBooks(st *State, op model.DeletionOperation, at model.UnixNano, rule s
 // RedactControlCommand is the control machine's half of redacting the control
 // group's retained commands. Every control command carries the whole control
 // state, so a command committed before a deletion still carries the payloads the
-// deletion erased, in the journal, the retry table and every snapshot. Given the
+// deletion erased, in the journal and every snapshot built from it (the retry
+// table keeps a digest of the command, not its payload: replica.DigestRetryMachine). Given the
 // retained payload of one control command it returns the payload to retain
 // instead: the same command (same expected revision, state and keys) with every
 // payload covered by a deletion this node has committed removed, by the same

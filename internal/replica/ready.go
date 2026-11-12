@@ -361,7 +361,9 @@ func (g *Group) rebuildKnown() error {
 	g.logCommands = map[model.ID]CommittedEntry{}
 	g.logApplication = g.application
 	for id, c := range g.completed {
-		g.logCommands[id] = c
+		if !g.digestKind(c.Entry.Kind) { // kept by digest: nothing to index, the retry table answers
+			g.logCommands[id] = c
+		}
 		if c.Entry.ReservationID != nil && c.Entry.Kind != Cancellation && c.Outcome != "conflict" {
 			reservation := *c.Entry.ReservationID
 			if g.known[reservation] == nil {
@@ -448,14 +450,39 @@ func (g *Group) applyCommitted(ent *pb.Entry) error {
 		if old, ok := g.completed[c.Entry.ID]; ok {
 			c = old
 		} else {
-			g.completed[c.Entry.ID] = c
+			g.completed[c.Entry.ID] = g.retained(c)
 		}
 		for _, ch := range g.pending[c.Entry.ID] {
 			ch <- proposalResult{entry: c, err: result}
 		}
 		delete(g.pending, c.Entry.ID)
+		if g.digestKind(c.Entry.Kind) {
+			// Applied: the retry table answers every later retry, and the log index only
+			// matters for a command that is in the log and not yet applied.
+			delete(g.logCommands, c.Entry.ID)
+		}
 	}
 	return nil
+}
+
+// digestKind reports whether the machine asked for the retry table to keep commands of kind k by
+// digest (DigestRetryMachine).
+func (g *Group) digestKind(k Kind) bool {
+	return g.retryDigest != nil && k != Noop && g.retryDigest(k)
+}
+
+// retained is c as the retry table keeps it: for a kind kept by digest the payload is dropped and
+// Entry.Original carries the digest of the payload the command was proposed with, so a retry is
+// still recognized by sameProposal and a different payload under the ID is still a conflict. The
+// receipt (group, term, index, application cursor, outcome) is untouched.
+func (g *Group) retained(c CommittedEntry) CommittedEntry {
+	if !g.digestKind(c.Entry.Kind) {
+		return c
+	}
+	original := c.Entry.proposed()
+	c.Entry.Payload = nil
+	c.Entry.Original = &original
+	return c
 }
 func (g *Group) completeReads() {
 	status := g.raw.BasicStatus()
@@ -504,7 +531,7 @@ func (g *Group) restoreSnapshot(snap *pb.Snapshot) error {
 		if c.Group != g.group || c.Index > index {
 			return ErrInvalid
 		}
-		g.completed[c.Entry.ID] = c
+		g.completed[c.Entry.ID] = g.retained(c)
 	}
 	return nil
 }

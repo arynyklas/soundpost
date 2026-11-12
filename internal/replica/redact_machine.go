@@ -40,7 +40,9 @@ const (
 type MachineRedaction func(payload []byte) (replacement []byte, changed bool, err error)
 
 // MachineRedactResult is what one RedactMachineCommands call changed (RedactResult.Redacted counts
-// retry-table commands) and Floor, the physical index the group had applied when the pass
+// the commands the retry table names that the pass redacted: those whose payload it replaced in the
+// table and those the table keeps by digest, whose copies in the log, journal and pins it replaced)
+// and Floor, the physical index the group had applied when the pass
 // finished: a snapshot or journal head cut at or before it may still carry the original
 // payloads (Residue(Floor)).
 type MachineRedactResult struct {
@@ -56,7 +58,9 @@ type MachineRedactResult struct {
 // retry recognition, and the entries of every backup pin archive. It is RedactCompleted for a
 // machine that owns the replacement function itself, because a control command carries the
 // whole state and its replacement cannot be listed by application index: it is derived from the
-// payload.
+// payload. A retry-table command kept by digest (DigestRetryMachine) has no payload: it is not
+// offered to redact and no replacement is written into it; the copies of that command in the log,
+// the journal and the pins are redacted, and Redacted counts it.
 //
 // A command keeps its ID, kind, term, physical and application index and outcome, so a retry
 // answers with the original receipt; its Original digest keeps the digest of the payload it was
@@ -178,12 +182,20 @@ func (g *Group) RedactMachineCommands(ctx context.Context, ruleSet uint64, redac
 		}
 	}
 	for id, t := range targets {
-		if c, ok := g.completed[id]; ok && !bytes.Equal(c.Entry.Payload, t.replacement) {
-			c.Entry = redactedCommand(c.Entry, t.replacement)
-			g.completed[id] = c
-			res.Redacted++
+		if c, ok := g.completed[id]; ok {
+			switch {
+			case len(c.Entry.Payload) == 0:
+				// Kept by digest (DigestRetryMachine): the table holds no payload and the
+				// replacement is never written into it; the command is redacted all the same,
+				// in the log, the journal and the pins above.
+				res.Redacted++
+			case !bytes.Equal(c.Entry.Payload, t.replacement):
+				c.Entry = redactedCommand(c.Entry, t.replacement)
+				g.completed[id] = c
+				res.Redacted++
+			}
 		}
-		if l, ok := g.logCommands[id]; ok && !bytes.Equal(l.Entry.Payload, t.replacement) {
+		if l, ok := g.logCommands[id]; ok && len(l.Entry.Payload) > 0 && !bytes.Equal(l.Entry.Payload, t.replacement) {
 			l.Entry = redactedCommand(l.Entry, t.replacement)
 			g.logCommands[id] = l
 		}
@@ -209,7 +221,7 @@ type machineCollector struct {
 }
 
 func (c *machineCollector) consider(e Entry) error {
-	if e.Kind != Control {
+	if e.Kind != Control || len(e.Payload) == 0 { // an empty payload is a retry-table entry kept by digest: nothing to redact
 		return nil
 	}
 	key := sha256.Sum256(e.Payload)
