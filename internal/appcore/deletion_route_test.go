@@ -40,3 +40,22 @@ func TestOpenWiresTheDeletionRoute(t *testing.T) {
 		t.Fatalf("GET %s answered %d", path, rec.Code)
 	}
 }
+
+// The default Open mounts the one C11 polling route. Without a credential it
+// must answer a refusal, never a 404 or 405 (the route is missing, so a
+// deletion cannot be polled through the contract path).
+func TestOpenWiresTheOperationsRoute(t *testing.T) {
+	app, err := appcore.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.Close()
+	mux := http.NewServeMux()
+	app.Register(mux)
+	path := "/api/v1/operations/" + strings.Repeat("0", 31) + "1"
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("GET %s without a credential answered %d, want 401", path, rec.Code)
+	}
+}

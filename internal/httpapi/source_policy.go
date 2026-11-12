@@ -7,8 +7,6 @@ import (
 	"net/http"
 	"soundpost/internal/auth"
 	"soundpost/internal/model"
-	"sync"
-	"sync/atomic"
 )
 
 func RegisterSourcePolicyRoutes(mux *http.ServeMux, a *auth.Service) {
@@ -47,35 +45,23 @@ func RegisterSourcePolicyRoutes(mux *http.ServeMux, a *auth.Service) {
 		w.WriteHeader(http.StatusAccepted)
 		_ = json.NewEncoder(w).Encode(operation)
 	})
-	operationRoute(mux, a)
 }
 
-// operationPoller owns the one GET /api/v1/operations/{id} route of a mux. The
-// route answers two kinds of operation: source-policy operations (auth store;
+// RegisterOperationRoutes mounts the one GET /api/v1/operations/{id} route.
+// It answers two kinds of operation: source-policy operations (auth store;
 // scope is the operation's own organization, caller must administer it) and
 // lifecycle operations (deletion/restriction, C11 PollDelete; scope is the
-// caller's organization admin grant for the ?org= selector). Whichever of
-// RegisterSourcePolicyRoutes and RegisterActionRoutes runs first registers the
-// route; the other only binds its half, so mount order does not matter and a
-// process with only one half answers only that half.
-type operationPoller struct {
-	authority *auth.Service
-	actions   atomic.Pointer[Actions]
+// caller's organization admin grant for the ?org= selector). actions may be
+// nil: the route then answers only source-policy operations. Mount it once per
+// mux, next to RegisterSourcePolicyRoutes and RegisterActionRoutes.
+func RegisterOperationRoutes(mux *http.ServeMux, a *auth.Service, actions *Actions) {
+	p := &operationPoller{authority: a, actions: actions}
+	mux.HandleFunc("GET /api/v1/operations/{id}", p.serve)
 }
 
-var operationPollers sync.Map // *http.ServeMux -> *operationPoller
-var operationPollersMu sync.Mutex
-
-func operationRoute(mux *http.ServeMux, a *auth.Service) *operationPoller {
-	operationPollersMu.Lock()
-	defer operationPollersMu.Unlock()
-	if p, ok := operationPollers.Load(mux); ok {
-		return p.(*operationPoller)
-	}
-	p := &operationPoller{authority: a}
-	operationPollers.Store(mux, p)
-	mux.HandleFunc("GET /api/v1/operations/{id}", p.serve)
-	return p
+type operationPoller struct {
+	authority *auth.Service
+	actions   *Actions
 }
 
 // serve resolves the id. Without ?org= only a source-policy operation can
@@ -120,7 +106,7 @@ func (p *operationPoller) serve(w http.ResponseWriter, r *http.Request) {
 		queryReply(w, operation, nil)
 		return
 	}
-	actions := p.actions.Load()
+	actions := p.actions
 	if actions == nil {
 		queryReply(w, nil, model.Fail(model.NotFound))
 		return

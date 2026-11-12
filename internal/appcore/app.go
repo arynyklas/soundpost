@@ -334,6 +334,7 @@ func (a *App) Register(mux *http.ServeMux) {
 	httpapi.RegisterLiveRoutes(mux, a.Auth, a.Live)
 	httpapi.RegisterInvestigateRoutes(mux, a.Auth, a.Investigator)
 	httpapi.RegisterActionRoutes(mux, a.Auth, a.Actions)
+	httpapi.RegisterOperationRoutes(mux, a.Auth, a.Actions)
 	httpapi.RegisterDeletionRoutes(mux, a.Auth, a.Retention)
 	httpapi.RegisterEvidenceRoutes(mux, a.Auth, a.Evidence)
 	httpapi.RegisterTraceRoutes(mux, a.Auth, a.Traces)

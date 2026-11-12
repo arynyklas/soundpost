@@ -14,9 +14,8 @@ import (
 	"soundpost/internal/model"
 )
 
-// opsEnv mounts the real routes in BOTH orders on two servers: source-policy
-// routes first and action routes first. The one GET /api/v1/operations/{id}
-// route must answer the same either way.
+// opsEnv mounts the real routes the way appcore.Register does: source-policy,
+// deletion, action and the one GET /api/v1/operations/{id} route.
 type opsEnv struct {
 	*delEnv
 	servers map[string]*httptest.Server
@@ -25,26 +24,18 @@ type opsEnv struct {
 func newOpsEnv(t *testing.T) *opsEnv {
 	t.Helper()
 	e := &opsEnv{delEnv: newDelEnv(t), servers: map[string]*httptest.Server{}}
-	mount := func(name string, sourceFirst bool) {
-		actions, err := httpapi.NewActions(e.app.Incidents, e.app.Control, e.app.Control, e.app.Retention, wallClock{})
-		if err != nil {
-			t.Fatal(err)
-		}
-		srv := httptest.NewTLSServer(httpapi.NewServer("", e.app.Auth, nil, func(mux *http.ServeMux) {
-			if sourceFirst {
-				httpapi.RegisterSourcePolicyRoutes(mux, e.app.Auth)
-			}
-			httpapi.RegisterDeletionRoutes(mux, e.app.Auth, e.deleter)
-			httpapi.RegisterActionRoutes(mux, e.app.Auth, actions)
-			if !sourceFirst {
-				httpapi.RegisterSourcePolicyRoutes(mux, e.app.Auth)
-			}
-		}).Handler)
-		t.Cleanup(srv.Close)
-		e.servers[name] = srv
+	actions, err := httpapi.NewActions(e.app.Incidents, e.app.Control, e.app.Control, e.app.Retention, wallClock{})
+	if err != nil {
+		t.Fatal(err)
 	}
-	mount("source-first", true)
-	mount("actions-first", false)
+	srv := httptest.NewTLSServer(httpapi.NewServer("", e.app.Auth, nil, func(mux *http.ServeMux) {
+		httpapi.RegisterSourcePolicyRoutes(mux, e.app.Auth)
+		httpapi.RegisterDeletionRoutes(mux, e.app.Auth, e.deleter)
+		httpapi.RegisterActionRoutes(mux, e.app.Auth, actions)
+		httpapi.RegisterOperationRoutes(mux, e.app.Auth, actions)
+	}).Handler)
+	t.Cleanup(srv.Close)
+	e.servers["served"] = srv
 	return e
 }
 
