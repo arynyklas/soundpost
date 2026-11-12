@@ -112,7 +112,7 @@ func TestServerUnitHoldsNoPrivilege(t *testing.T) {
 // The native symbolication sandbox needs a delegated, process-free parent cgroup.
 func TestServerUnitDelegatesCgroupForSymbolication(t *testing.T) {
 	u := deployFile(t, "deploy/systemd/soundpost.service")
-	for _, required := range []string{"Delegate=memory pids", "DelegateSubgroup=main", "ProtectControlGroups=no"} {
+	for _, required := range []string{"Delegate=memory pids", "DelegateSubgroup=main", "ProtectControlGroups=yes", "ReadWritePaths=/sys/fs/cgroup/system.slice/soundpost.service"} {
 		if !hasLine(u, required) {
 			t.Fatalf("server unit lacks %q", required)
 		}

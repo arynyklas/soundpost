@@ -51,8 +51,10 @@ PrivateDevices=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectKernelLogs=yes
-# The delegated cgroup must be writable by this unit; the sandbox launcher needs it.
-ProtectControlGroups=no
+# ProtectControlGroups=yes mounts /sys/fs/cgroup read-only; only this unit's own delegated
+# cgroup is made writable again, which is all the sandbox launcher writes.
+ProtectControlGroups=yes
+ReadWritePaths=/sys/fs/cgroup/system.slice/soundpost.service
 ProtectClock=yes
 ProtectHostname=yes
 ProtectProc=invisible
