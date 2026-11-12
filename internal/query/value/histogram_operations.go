@@ -216,7 +216,7 @@ func histogramGrowZero(f model.FloatHistogram, threshold float64) model.FloatHis
 	grow := func(sp []model.HistogramSpan, bs []model.FloatBits) ([]model.HistogramSpan, []model.FloatBits) {
 		m := HistogramBuckets(sp, bs)
 		for k, v := range m {
-			upper := math.Exp2(float64(k) * math.Exp2(-float64(f.Schema)))
+			upper := Exp2(float64(k) * Exp2(-float64(f.Schema)))
 			if upper <= threshold {
 				zero += v
 				delete(m, k)
@@ -259,8 +259,8 @@ func CombineHistograms(a, b model.NativeHistogram, subtract bool) (model.NativeH
 			for _, f := range []model.FloatHistogram{x, y} {
 				for _, side := range []map[int32]float64{HistogramBuckets(f.PositiveSpans, f.PositiveBuckets), HistogramBuckets(f.NegativeSpans, f.NegativeBuckets)} {
 					for k, n := range side {
-						lower := math.Exp2(float64(k-1) * math.Exp2(-float64(f.Schema)))
-						upper := math.Exp2(float64(k) * math.Exp2(-float64(f.Schema)))
+						lower := Exp2(float64(k-1) * Exp2(-float64(f.Schema)))
+						upper := Exp2(float64(k) * Exp2(-float64(f.Schema)))
 						if n != 0 && lower < threshold && upper > larger {
 							larger = upper
 						}
@@ -332,8 +332,8 @@ func HistogramReset(previous, current model.NativeHistogram) bool {
 	threshold := histogramFloat(b.ZeroThreshold)
 	for _, m := range []map[int32]float64{HistogramBuckets(a.PositiveSpans, a.PositiveBuckets), HistogramBuckets(a.NegativeSpans, a.NegativeBuckets)} {
 		for k, n := range m {
-			lower := math.Exp2(float64(k-1) * math.Exp2(-float64(a.Schema)))
-			upper := math.Exp2(float64(k) * math.Exp2(-float64(a.Schema)))
+			lower := Exp2(float64(k-1) * Exp2(-float64(a.Schema)))
+			upper := Exp2(float64(k) * Exp2(-float64(a.Schema)))
 			if n != 0 && lower < threshold && upper > threshold {
 				return true
 			}

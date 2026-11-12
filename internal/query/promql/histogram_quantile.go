@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"soundpost/internal/model"
+	"soundpost/internal/query/value"
 )
 
 // quantileBuckets enumerates every bucket of the histogram, empty ones
@@ -134,16 +135,16 @@ func histogramNativeQuantile(q float64, h model.NativeHistogram, profileID strin
 			annotation = "NativeHistogramQuantileNaNSkewInfo"
 		}
 	}
-	fraction := rank / bucket.count
+	fraction := value.Div(rank, bucket.count)
 	if view.Schema == -53 || bucket.lower <= 0 && bucket.upper >= 0 {
-		return bucket.lower + float64((bucket.upper-bucket.lower)*fraction), annotation
+		return value.Add(bucket.lower, value.Mul(value.Sub(bucket.upper, bucket.lower), fraction)), annotation
 	}
 	// Exponential buckets are interpolated on a logarithmic scale.
-	logLower, logUpper := math.Log2(math.Abs(bucket.lower)), math.Log2(math.Abs(bucket.upper))
+	logLower, logUpper := value.Log2(math.Abs(bucket.lower)), value.Log2(math.Abs(bucket.upper))
 	if bucket.lower > 0 {
-		return math.Exp2(logLower + float64((logUpper-logLower)*fraction)), annotation
+		return value.Exp2(value.Add(logLower, value.Mul(value.Sub(logUpper, logLower), fraction))), annotation
 	}
-	return -math.Exp2(logUpper + float64((logLower-logUpper)*(1-fraction))), annotation
+	return -value.Exp2(value.Add(logUpper, value.Mul(value.Sub(logLower, logUpper), 1-fraction))), annotation
 }
 
 // openMetricsFloat formats a quantile for a label value: the shortest

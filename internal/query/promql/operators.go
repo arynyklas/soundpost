@@ -12,13 +12,13 @@ import (
 func floatOperator(op string, a, b float64) (float64, bool, bool) {
 	switch op {
 	case "+":
-		return a + b, true, true
+		return value.Add(a, b), true, true
 	case "-":
-		return a - b, true, true
+		return value.Sub(a, b), true, true
 	case "*":
-		return a * b, true, true
+		return value.Mul(a, b), true, true
 	case "/":
-		return a / b, true, true
+		return value.Div(a, b), true, true
 	case "%":
 		return math.Mod(a, b), true, true
 	case "^":

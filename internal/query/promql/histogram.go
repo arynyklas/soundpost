@@ -97,9 +97,9 @@ func histogramBucketFraction(b histogramObservationBucket, bound float64) float6
 	}
 	if b.exponential {
 		if b.upper < 0 {
-			return (math.Log2(-b.lower) - math.Log2(-bound)) / (math.Log2(-b.lower) - math.Log2(-b.upper))
+			return (value.Log2(-b.lower) - value.Log2(-bound)) / (value.Log2(-b.lower) - value.Log2(-b.upper))
 		}
-		return (math.Log2(bound) - math.Log2(b.lower)) / (math.Log2(b.upper) - math.Log2(b.lower))
+		return (value.Log2(bound) - value.Log2(b.lower)) / (value.Log2(b.upper) - value.Log2(b.lower))
 	}
 	if math.IsInf(b.lower, -1) {
 		if b.upper <= 0 {
@@ -179,8 +179,8 @@ func histogramExponentialFraction(lower, upper float64, f model.FloatHistogram, 
 			if zero {
 				return (bound - b.lower) / (b.upper - b.lower)
 			}
-			logLower, logUpper := math.Log2(math.Abs(b.lower)), math.Log2(math.Abs(b.upper))
-			return (math.Log2(math.Abs(bound)) - logLower) / (logUpper - logLower)
+			logLower, logUpper := value.Log2(math.Abs(b.lower)), value.Log2(math.Abs(b.upper))
+			return (value.Log2(math.Abs(bound)) - logLower) / (logUpper - logLower)
 		}
 		if !lowerSet && b.lower < lower && b.upper > lower {
 			lowerRank, lowerSet = rank+float64(b.count*share(lower)), true
@@ -209,7 +209,7 @@ func histogramExponentialFraction(lower, upper float64, f model.FloatHistogram, 
 func histogramNativeVariance(h model.NativeHistogram, profileID string) float64 {
 	f := histogramView(h)
 	count := math.Float64frombits(uint64(f.Count))
-	mean := math.Float64frombits(uint64(f.Sum)) / count
+	mean := value.Div(math.Float64frombits(uint64(f.Sum)), count)
 	if f.Schema != -53 {
 		terms := make([]float64, 0, len(f.PositiveBuckets)+len(f.NegativeBuckets)+1)
 		for _, b := range nativeBuckets(f, false) {
@@ -226,7 +226,7 @@ func histogramNativeVariance(h model.NativeHistogram, profileID string) float64 
 			delta := representative - mean
 			terms = append(terms, b.count*delta*delta)
 		}
-		return functionSum(terms) / count
+		return value.Div(functionSum(terms), count)
 	}
 	buckets := histogramObservationBuckets(h)
 	terms := make([]float64, 0, len(buckets))
@@ -241,7 +241,7 @@ func histogramNativeVariance(h model.NativeHistogram, profileID string) float64 
 		delta := representative - mean
 		terms = append(terms, bucket.count*delta*delta)
 	}
-	return functionSum(terms) / count
+	return value.Div(functionSum(terms), count)
 }
 
 type histogramClassicBucket struct{ upper, count float64 }
@@ -389,7 +389,7 @@ func functionHistogramOne(ctx context.Context, call CallPlan, args []value.Resul
 			case "histogram_sum":
 				result = sum
 			case "histogram_avg":
-				result = sum / count
+				result = value.Div(sum, count)
 			case "histogram_stdvar":
 				result = histogramNativeVariance(*histogram, f.Profile.ID)
 			case "histogram_stddev":

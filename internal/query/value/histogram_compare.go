@@ -3,7 +3,6 @@
 package value
 
 import (
-	"math"
 	"soundpost/internal/model"
 )
 
@@ -121,10 +120,10 @@ func histogramIntegerReset(a, b *model.IntegerHistogram) bool {
 			merged[((index-1)>>shift)+1] += count
 		}
 		threshold := histogramFloat(b.ZeroThreshold)
-		unit := math.Exp2(-float64(b.Schema))
+		unit := Exp2(-float64(b.Schema))
 		for index, count := range merged {
-			lower := math.Exp2(float64(index-1) * unit)
-			upper := math.Exp2(float64(index) * unit)
+			lower := Exp2(float64(index-1) * unit)
+			upper := Exp2(float64(index) * unit)
 			if count != 0 && lower < threshold && upper > threshold {
 				return nil, false
 			}

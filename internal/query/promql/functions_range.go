@@ -31,7 +31,7 @@ func functionQuantile(q float64, xs []float64) float64 {
 		hi = lo
 	}
 	weight := rank - float64(lo)
-	return float64(xs[lo]*(1-weight)) + float64(xs[hi]*weight)
+	return value.Add(value.Mul(xs[lo], 1-weight), value.Mul(xs[hi], weight))
 }
 func functionKahan(xs []float64) (float64, float64) {
 	sum, comp := 0.0, 0.0
@@ -42,19 +42,19 @@ func functionKahan(xs []float64) (float64, float64) {
 }
 
 func functionKahanAdd(sum, comp, x float64) (float64, float64) {
-	next := sum + x
+	next := value.Add(sum, x)
 	if math.IsInf(next, 0) {
 		return next, 0
 	}
 	if math.Abs(sum) >= math.Abs(x) {
-		return next, comp + ((sum - next) + x)
+		return next, value.Add(comp, value.Add(value.Sub(sum, next), x))
 	}
-	return next, comp + ((x - next) + sum)
+	return next, value.Add(comp, value.Add(value.Sub(x, next), sum))
 }
 
 func functionSum(xs []float64) float64 {
 	sum, comp := functionKahan(xs)
-	return sum + comp
+	return value.Add(sum, comp)
 }
 
 // functionMean is the compensated mean shared by avg_over_time and the avg
@@ -151,20 +151,20 @@ func functionRangeVariance(xs []float64) float64 {
 	var count, mean, meanComp, m2, m2Comp float64
 	for _, x := range xs {
 		count++
-		delta := x - (mean + meanComp)
-		mean, meanComp = functionKahanAdd(mean, meanComp, delta/count)
-		m2, m2Comp = functionKahanAdd(m2, m2Comp, float64(delta*(x-(mean+meanComp))))
+		delta := value.Sub(x, value.Add(mean, meanComp))
+		mean, meanComp = functionKahanAdd(mean, meanComp, value.Div(delta, count))
+		m2, m2Comp = functionKahanAdd(m2, m2Comp, value.Mul(delta, value.Sub(x, value.Add(mean, meanComp))))
 	}
-	return (m2 + m2Comp) / count
+	return value.Div(value.Add(m2, m2Comp), count)
 }
 func functionVariance(xs []float64) float64 {
 	mean, m2 := 0.0, 0.0
 	for i, x := range xs {
-		d := x - mean
-		mean += d / float64(i+1)
-		m2 += float64(d * (x - mean))
+		d := value.Sub(x, mean)
+		mean = value.Add(mean, value.Div(d, float64(i+1)))
+		m2 = value.Add(m2, value.Mul(d, value.Sub(x, mean)))
 	}
-	return m2 / float64(len(xs))
+	return value.Div(m2, float64(len(xs)))
 }
 func functionRegression(xs []value.Sample, reference model.UnixNano) (float64, float64) {
 	if len(xs) < 2 {

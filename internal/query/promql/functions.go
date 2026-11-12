@@ -60,11 +60,11 @@ func functionUnary(name string) (func(float64) float64, bool) {
 	case "floor":
 		return math.Floor, true
 	case "ln":
-		return math.Log, true
+		return value.Ln, true
 	case "log10":
-		return math.Log10, true
+		return value.Log10, true
 	case "log2":
-		return math.Log2, true
+		return value.Log2, true
 	case "rad":
 		return func(x float64) float64 { return x * math.Pi / 180 }, true
 	case "sgn":

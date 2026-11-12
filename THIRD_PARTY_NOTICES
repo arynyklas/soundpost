@@ -33,6 +33,7 @@ gopkg.in/yaml.v3 v3.0.1 | license MIT AND Apache-2.0 | scope required | text yes
 == Vendored data and primitives (third_party) ==
 third_party/format/go124 go1.24.5 | license BSD-3-Clause | scope required | text yes
 third_party/jsonparser/v1.1.1 v1.1.1 | license MIT | scope required | text yes
+third_party/portablemath/go127 go1.27.3 | license BSD-3-Clause | scope required | text yes
 third_party/promhistbounds/v1 v1 | license Apache-2.0 | scope required | text yes
 third_party/regex/go123 go123 | license BSD-3-Clause | scope required | text yes
 third_party/regex/go124 go124 | license BSD-3-Clause | scope required | text yes
@@ -1191,7 +1192,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 
------ third_party/format/go124/LICENSE, third_party/timezone/go124/LICENSE -----
+----- third_party/format/go124/LICENSE, third_party/portablemath/go127/LICENSE, third_party/timezone/go124/LICENSE -----
 Copyright 2009 The Go Authors.
 
 Redistribution and use in source and binary forms, with or without
@@ -1257,6 +1258,13 @@ Copyright (c) 2016 Leonid Bugaev. MIT terms are retained in LICENSE.
 This is an individually licensed generic JSON primitive, not Loki telemetry/parser/evaluator code; the LogQL json stage logic around it is first-party.
 Files are included unmodified (adapted SHA-256 equals original). The gofuzz harness (fuzz.go) and non-Go project files are excluded.
 Exact pinned vendor source URLs, the independent Go module proxy cross-check, SHA-256 values and exclusions are in provenance.json.
+
+----- third_party/portablemath/go127/NOTICE.txt -----
+Portable, unfused ports of the pure-Go math.Log, math.Log10, math.Log2 and math.Exp2 algorithms from Go 1.27.3.
+Copyright 2009-2021 The Go Authors. All rights reserved.
+Redistributed under the BSD-3-Clause terms in LICENSE.
+The only adaptation is that every floating-point product is wrapped in an explicit float64 conversion so that no architecture fuses it into a multiply-add; exact source URLs and SHA-256 hashes are recorded in provenance.json.
+These are generic numeric primitives, not telemetry query code. No Go compiler/runtime, upstream telemetry implementation or AGPL source is vendored here.
 
 ----- third_party/promhistbounds/v1/LICENSE -----
                                  Apache License
