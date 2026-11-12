@@ -1,7 +1,7 @@
 {
   "primitive": "Go 1.27.3 portable math.Log, math.Log10, math.Log2 and math.Exp2 algorithms, with every product rounded separately (no fused multiply-add) so results match across architectures",
   "license": "BSD-3-Clause",
-  "approved_by": "task Impl1033Arm64StdlibMath, assigned by Main",
+  "approved_by": "Main (integration parent), 2026-11-13: generic BSD-3-Clause numeric primitives from the Go standard library, same approval class as third_party/format/go124 and third_party/timezone/go124; needed because Go's own math package is compiled with fused multiply-add on arm64 and amd64 results must be reproduced bit for bit. Owner confirmation pending (listed with the open owner decisions); fully reversible by deleting this directory and the value.Log2/Exp2/Log10/Ln wrappers.",
   "upstream_release": "go1.27.3",
   "not_telemetry_code": true,
   "files": [
