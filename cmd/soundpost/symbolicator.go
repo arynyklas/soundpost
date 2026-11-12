@@ -11,17 +11,22 @@ import (
 )
 
 // The default symbolication sandbox re-executes this same binary, so the release
-// stays a single static file. These are the only two argument vectors that make
-// the binary act as a worker; both are exact (no further arguments), read the
-// request from stdin only after the OS sandbox is installed, and are meaningless
-// to an operator.
+// stays a single static file. These are the only argument vectors that make the
+// binary act as a worker; all are exact (no further arguments) and meaningless to
+// an operator. The worker and probe vectors read the request from stdin only after
+// the OS sandbox is installed. The two staging vectors are used only on a host
+// without clone3 (systemd RestrictNamespaces=yes): the process blocks on an
+// inherited pipe until its parent has moved it into the limited cgroup, then execs
+// the matching worker vector.
 const (
-	workerFlag = "--worker-v1"
-	probeFlag  = "--probe-v1"
+	workerFlag      = "--worker-v1"
+	probeFlag       = "--probe-v1"
+	stageWorkerFlag = "--stage-worker-v1"
+	stageProbeFlag  = "--stage-probe-v1"
 )
 
-// symbolicateWorker runs the worker or probe entry when the process was started
-// as one. It runs before any flag parsing, storage or network setup.
+// symbolicateWorker runs the worker, probe or staging entry when the process was
+// started as one. It runs before any flag parsing, storage or network setup.
 func symbolicateWorker(args []string) (int, bool) {
 	if len(args) != 2 {
 		return 0, false
@@ -31,6 +36,10 @@ func symbolicateWorker(args []string) (int, bool) {
 		return symbolicate.WorkerMain(), true
 	case probeFlag:
 		return symbolicate.ProbeMain(), true
+	case stageWorkerFlag:
+		return symbolicate.StageMain(false), true
+	case stageProbeFlag:
+		return symbolicate.StageMain(true), true
 	}
 	return 0, false
 }

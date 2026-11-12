@@ -70,6 +70,9 @@ func installSandbox() error {
 type nativeGroup struct {
 	path      string
 	directory *os.File
+	// Set only for a staged launch (see stage): the pipe whose release byte lets the
+	// blocked staging process exec the worker once it has been moved into path.
+	releaseR, releaseW *os.File
 }
 
 func newNativeGroup(root string) (*nativeGroup, error) {
@@ -140,16 +143,59 @@ func enableChildControllers(root string) error {
 	return os.WriteFile(filepath.Join(root, "cgroup.subtree_control"), []byte(strings.Join(want, " ")), 0600)
 }
 
+// cloneIntoCgroupAvailable reports whether clone3, the only entry point of
+// CLONE_INTO_CGROUP, can be called. clone3(NULL, 0) creates nothing: it answers
+// EINVAL when the call is allowed and ENOSYS (or EPERM) when a filter removed it.
+// systemd's RestrictNamespaces=yes removes clone3 this way.
+var cloneIntoCgroupAvailable = func() bool {
+	_, _, e := unix.Syscall(unix.SYS_CLONE3, 0, 0, 0)
+	return e == unix.EINVAL
+}
+
 // CLONE_INTO_CGROUP places the worker under the memory controller from birth;
-// post-start migration would leave its preexisting memory charged elsewhere.
+// post-start migration of a running worker would leave its preexisting memory
+// charged elsewhere. Where clone3 is unavailable the launch is staged instead.
 func (g *nativeGroup) configure(cmd *exec.Cmd) error {
 	if g.directory == nil {
 		return errors.New("missing cgroup descriptor")
 	}
+	if !cloneIntoCgroupAvailable() {
+		return g.stage(cmd)
+	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{UseCgroupFD: true, CgroupFD: int(g.directory.Fd())}
 	return nil
 }
-func (g *nativeGroup) attach(pid int) error {
+
+// stage turns the launch into the two-step form for hosts without clone3: the
+// child is the same binary started with an exact staging vector, which does
+// nothing but block on the release pipe (inherited as descriptor 3). attach
+// moves that blocked process into the limited group, verifies it, and only then
+// releases it to exec the worker. Everything the worker image maps or allocates
+// after the exec is therefore charged to the limited group; only the staging
+// process's small pre-exec footprint is charged to the parent's group.
+func (g *nativeGroup) stage(cmd *exec.Cmd) error {
+	if len(cmd.Args) != 2 {
+		return errors.New("unexpected worker arguments")
+	}
+	switch cmd.Args[1] {
+	case workerArg:
+		cmd.Args[1] = stageWorkerArg
+	case probeArg:
+		cmd.Args[1] = stageProbeArg
+	default:
+		return errors.New("unexpected worker arguments")
+	}
+	r, w, e := os.Pipe()
+	if e != nil {
+		return e
+	}
+	g.releaseR, g.releaseW = r, w
+	cmd.ExtraFiles = []*os.File{r}
+	return nil
+}
+
+// member reports whether pid is listed in the group's cgroup.procs.
+func (g *nativeGroup) member(pid int) error {
 	b, e := os.ReadFile(filepath.Join(g.path, "cgroup.procs"))
 	if e != nil {
 		return e
@@ -161,9 +207,39 @@ func (g *nativeGroup) attach(pid int) error {
 	}
 	return errors.New("worker not born in required cgroup")
 }
+
+// attach proves the worker is in the limited group. A staged process is moved
+// there first, verified, and only then released; a failure leaves it blocked
+// (the caller kills it), never running outside the group.
+func (g *nativeGroup) attach(pid int) error {
+	if g.releaseW == nil {
+		return g.member(pid)
+	}
+	if e := os.WriteFile(filepath.Join(g.path, "cgroup.procs"), []byte(strconv.Itoa(pid)), 0600); e != nil {
+		return e
+	}
+	if e := g.member(pid); e != nil {
+		return e
+	}
+	_, e := g.releaseW.Write([]byte{'G'})
+	g.releaseW.Close()
+	g.releaseW = nil
+	return e
+}
 func (g *nativeGroup) cleanup() {
+	for _, f := range []*os.File{g.releaseR, g.releaseW} {
+		if f != nil {
+			f.Close()
+		}
+	}
+	g.releaseR, g.releaseW = nil, nil
 	if g.directory != nil {
 		g.directory.Close()
+	}
+	// A group without an absolute path was never created; never write relative to the
+	// working directory.
+	if !filepath.IsAbs(g.path) {
+		return
 	}
 	os.WriteFile(filepath.Join(g.path, "cgroup.kill"), []byte("1"), 0600)
 	os.Remove(g.path)

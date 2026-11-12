@@ -300,6 +300,12 @@ func verifyInputs(root, archive string) (Inputs, error) {
 		archive = filepath.Join(root, ".tools", "go"+p.Go.Version+".linux-amd64.tar.gz")
 	}
 	goBin := goBinary(root)
+	if _, err = os.Stat(goBin); err != nil {
+		return in, fmt.Errorf("pinned Go toolchain missing: %s is not usable (%v); unpack the pinned Go %s linux-amd64 archive to .tools/linux/go or set SOUNDPOST_GO to its bin/go (docs/operations/install-single.md, section 1)", goBin, err, p.Go.Version)
+	}
+	if _, err = os.Stat(archive); err != nil {
+		return in, fmt.Errorf("pinned Go archive missing: %s is not readable (%v); the pinned go%s.linux-amd64.tar.gz must be in .tools or passed with --archive (docs/operations/install-single.md, section 1)", archive, err, p.Go.Version)
+	}
 	cmd := exec.Command(goBin, "env", "GOROOT")
 	cmd.Env = goEnv()
 	rawRoot, err := cmd.Output()
@@ -327,7 +333,7 @@ func verifyInputs(root, archive string) (Inputs, error) {
 	verify := exec.Command(goBin, "mod", "verify")
 	verify.Dir, verify.Env = root, goEnv("GOFLAGS=-mod=readonly")
 	if output, err := verify.CombinedOutput(); err != nil || !strings.Contains(string(output), "all modules verified") {
-		return in, errors.New("go mod verify failed: " + strings.TrimSpace(string(output)))
+		return in, errors.New("go mod verify failed: " + strings.TrimSpace(string(output)) + " (the build runs with GOPROXY=off: every module in go.sum must already be in the Go module cache; download them with network access first, e.g. `go mod download`, before building offline; docs/operations/install-single.md, section 1)")
 	}
 	in.GoModVerify = "all modules verified"
 	if in.PnpmLockSHA256, err = sha256File(filepath.Join(root, "pnpm-lock.yaml")); err != nil {

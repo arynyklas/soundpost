@@ -5,6 +5,14 @@ Single mode is one server on one durable local disk. It is **not highly availabl
 
 ## 1. Build the distribution (reproducible, pinned)
 
+**Prerequisites (the build is offline).** `build` runs the compiler with `GOPROXY=off`, `GOTOOLCHAIN=local` and `GOENV=off`, so nothing is downloaded during `verify` or `release`. Provide these first, on a host that has network access once:
+
+* The pinned Go toolchain (the version and sha256 in `build/toolchains.json`): unpack the `go<version>.linux-amd64.tar.gz` archive to `.tools/linux/go` (so `.tools/linux/go/bin/go` exists) and keep the archive itself at `.tools/go<version>.linux-amd64.tar.gz`. Elsewhere, set `SOUNDPOST_GO` to the toolchain's `bin/go` and pass `--archive <path to the archive>`. `verify` compares every file of the installed `GOROOT` with the archive.
+* Every Go module of `go.sum` already in the module cache. The build passes only `HOME` through (not `GOPATH` or `GOMODCACHE`), so the cache is the default `$HOME/go/pkg/mod` of the user who runs the build; fill it beforehand with `go mod download` using the same pinned toolchain and the same `HOME`. Without it `go mod verify` fails with a `GOPROXY=off` lookup error.
+* A prebuilt `web/dist` (below) and the pinned Node.
+
+A missing toolchain, archive or module cache stops the build with a message naming what is missing.
+
 ```sh
 go run ./build verify
 go run ./build release --out dist --version 1.0.0 --commit "$(git rev-parse HEAD)" --reproduce

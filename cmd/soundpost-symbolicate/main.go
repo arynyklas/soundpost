@@ -16,6 +16,10 @@ func main() {
 		os.Exit(symbolicate.WorkerMain())
 	case "--probe-v1":
 		os.Exit(symbolicate.ProbeMain())
+	case "--stage-worker-v1":
+		os.Exit(symbolicate.StageMain(false))
+	case "--stage-probe-v1":
+		os.Exit(symbolicate.StageMain(true))
 	default:
 		os.Exit(64)
 	}

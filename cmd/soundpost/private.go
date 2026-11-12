@@ -48,9 +48,23 @@ func preparePrivate(dir, tlsKey string) error {
 		if err != nil {
 			return err
 		}
-		if keyInfo.Mode().Perm()&0o077 != 0 {
+		if gid, known := fileGID(keyInfo); !keyModePrivate(keyInfo.Mode().Perm(), gid, known) {
 			return errInsecureMode
 		}
 	}
 	return nil
+}
+
+// keyModePrivate decides whether an operator-supplied private key can be read by nobody but
+// its owner and root. Any "other" bit refuses. Group bits are accepted only when the file's
+// group is root (gid 0): systemd materialises LoadCredential= files as 0440 root:root and
+// grants the service user read access through an ACL, whose mask is what the group bits then
+// show; the only group members are root-equivalent. A key in any other group (the service
+// user's own, "users", ...) is readable by that group's other members and is refused, as is
+// a group whose identity cannot be read.
+func keyModePrivate(perm os.FileMode, gid uint32, gidKnown bool) bool {
+	if perm&0o007 != 0 {
+		return false
+	}
+	return perm&0o070 == 0 || (gidKnown && gid == 0)
 }
