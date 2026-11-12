@@ -17,10 +17,23 @@ type entryWire struct {
 	Application   model.Uint64        `json:"application_index"`
 	CommitSet     *CommitSetWatermark `json:"commit_set,omitempty"`
 	Original      *model.Hash         `json:"original,omitempty"`
+	Proposer      *Proposer           `json:"proposer,omitempty"`
 }
 
 func (w entryWire) entry() Entry {
-	return Entry{ID: w.ID, Kind: w.Kind, Payload: w.Payload, ReservationID: w.ReservationID, ApplicationIndex: uint64(w.Application), CommitSet: w.CommitSet, Original: w.Original}
+	return Entry{ID: w.ID, Kind: w.Kind, Payload: w.Payload, ReservationID: w.ReservationID, ApplicationIndex: uint64(w.Application), CommitSet: w.CommitSet, Original: w.Original, Proposer: w.Proposer}
+}
+
+func (p *Proposer) UnmarshalJSON(raw []byte) error {
+	var wire struct {
+		Node     model.Uint64 `json:"node"`
+		Identity string       `json:"node_identity"`
+	}
+	if model.StrictJSON(raw, &wire) != nil {
+		return ErrInvalid
+	}
+	*p = Proposer{Node: uint64(wire.Node), Identity: wire.Identity}
+	return nil
 }
 
 func (e *Entry) UnmarshalJSON(raw []byte) error {

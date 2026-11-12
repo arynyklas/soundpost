@@ -48,6 +48,20 @@ type Entry struct {
 	// holds the machine's replacement, and a retry of the original command is recognized by this
 	// digest instead of by the bytes that no longer exist in this group.
 	Original *model.Hash `json:"original,omitempty"`
+	// Proposer is the member that proposed the command, recorded by the group that ordered it and
+	// never taken from the caller: a command proposed on the leader names the leader, a command a
+	// follower forwarded names the member whose transport credential authenticated the hop, and
+	// whatever either claimed in the entry itself is discarded. A state machine that attributes a
+	// command to a node (a statement a voter makes about its own store) checks it against this
+	// field. A command committed before the field existed has none.
+	Proposer *Proposer `json:"proposer,omitempty"`
+}
+
+// Proposer names the member that proposed an Entry: its node ID and its node identity, both as the
+// committed configuration lists them.
+type Proposer struct {
+	Node     uint64 `json:"node,string"`
+	Identity string `json:"node_identity"`
 }
 
 // proposed is the digest of the payload this command was proposed with.
@@ -82,6 +96,9 @@ type CommittedEntry struct {
 
 func (e Entry) valid() bool {
 	if e.ID == (model.ID{}) || len(e.Payload) == 0 || len(e.Payload) > 16<<20 {
+		return false
+	}
+	if p := e.Proposer; p != nil && (p.Node == 0 || p.Identity == "") {
 		return false
 	}
 	switch e.Kind {
@@ -384,13 +401,33 @@ func (g *Group) Status() Status {
 	return Status{Group: g.group, ID: g.id, Leader: s.Lead, Term: s.HardState.GetTerm(), Commit: s.HardState.GetCommit(), Applied: g.applied, LastIndex: last, ApplicationCursor: model.Cursor{Group: g.group, Index: model.Uint64(g.application)}, Revision: g.members.Revision, Failed: g.failed || g.closed, Members: cloneMembers(g.members)}
 }
 func (g *Group) Propose(ctx context.Context, e Entry) (CommittedEntry, error) {
-	return g.propose(ctx, e, true)
+	return g.propose(ctx, e, nil)
 }
 
+// proposerLocked is the Proposer of member id as the group's configuration lists it, including a
+// member that is retiring; nil when the group does not know the member. g.mu is held.
+func (g *Group) proposerLocked(id uint64) *Proposer {
+	for _, m := range g.members.Nodes {
+		if m.ID == id {
+			return &Proposer{Node: m.ID, Identity: m.NodeIdentity}
+		}
+	}
+	for _, m := range g.retiring {
+		if m.ID == id {
+			return &Proposer{Node: m.ID, Identity: m.NodeIdentity}
+		}
+	}
+	return nil
+}
+
+// propose orders e. from is the member whose transport credential authenticated a proposal a
+// follower forwarded to this leader, nil for a proposal made on this node; either way the entry's
+// own Proposer is replaced, so a caller or a forwarder cannot attribute a command to anyone else.
 // Received internal requests are leader-only: a term race never adds a hop.
-func (g *Group) propose(ctx context.Context, e Entry, allowForward bool) (CommittedEntry, error) {
+func (g *Group) propose(ctx context.Context, e Entry, from *Proposer) (CommittedEntry, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
+	e.Proposer = from
 	if !e.valid() {
 		return CommittedEntry{}, ErrInvalid
 	}
@@ -403,11 +440,14 @@ func (g *Group) propose(ctx context.Context, e Entry, allowForward bool) (Commit
 		return CommittedEntry{}, ErrUnavailable
 	}
 	leader := g.raw.BasicStatus().Lead
+	if leader == g.id && from == nil {
+		e.Proposer = g.proposerLocked(g.id)
+	}
 	g.mu.Unlock()
 	if leader != g.id {
 		if forward, ok := g.transport.(interface {
 			ForwardPropose(context.Context, model.ID, Entry) (CommittedEntry, error)
-		}); ok && allowForward {
+		}); ok && from == nil {
 			committed, err := forward.ForwardPropose(ctx, g.group, e)
 			if err != nil {
 				return committed, err

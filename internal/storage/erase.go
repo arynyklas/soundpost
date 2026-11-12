@@ -82,6 +82,9 @@ func (e *Engine) EraseDeleted(ctx context.Context, preds []model.DeletePredicate
 		}
 		ops = append(ops, p.Operation)
 	}
+	if err := e.noteEraseStart(ops); err != nil {
+		return EraseReport{}, err
+	}
 	return e.erase(ctx, eraseSelector{
 		operations: ops,
 		record: func(org, project model.ID, r model.Record, _ model.Receipt) (bool, model.UnixNano) {
@@ -707,7 +710,7 @@ func (e *Engine) rewriteStaleSegments(ctx context.Context) (uint64, error) {
 // ORIGINAL hash (receipts bind it) but its canonical bytes are the re-encoded kept records, so
 // the hash check of a normal batch does not apply: redaction provenance is the Redaction digest.
 func (entry *walEntry) unmarshalRedacted(wire durableEntry) error {
-	if wire.Redaction == nil || wire.Cancel != nil || wire.Fence != nil || wire.Artifact != nil || wire.ArtifactGC != nil || wire.Rejection != nil || wire.DeleteBarrier != nil || wire.EraseAck != nil || wire.CommitSet != nil {
+	if wire.Redaction == nil || wire.Cancel != nil || wire.Fence != nil || wire.Artifact != nil || wire.ArtifactGC != nil || wire.Rejection != nil || wire.DeleteBarrier != nil || wire.EraseAck != nil || wire.EraseUnack != nil || wire.Proposer != nil || wire.CommitSet != nil {
 		return model.Fail(model.Corrupt)
 	}
 	out := walEntry{Type: wire.Type, Receipt: wire.Receipt, Redaction: wire.Redaction}

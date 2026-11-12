@@ -170,13 +170,13 @@ func (t *MTLS) serveProposal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	identity := certificateIdentity(r.TLS.PeerCertificates[0])
-	allowed := false
+	var from *Proposer
 	for _, member := range g.transportMembers().Nodes {
 		if member.NodeIdentity == identity {
-			allowed = true
+			from = &Proposer{Node: member.ID, Identity: member.NodeIdentity}
 		}
 	}
-	if !allowed {
+	if from == nil {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
@@ -191,12 +191,19 @@ func (t *MTLS) serveProposal(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid", http.StatusBadRequest)
 		return
 	}
+	// Whatever proposer the forwarder wrote into the entry is discarded: the leader records the
+	// member whose certificate authenticated this hop.
 	var entry Entry
-	if model.StrictJSON(raw, &entry) != nil || !entry.valid() {
+	if model.StrictJSON(raw, &entry) != nil {
 		http.Error(w, "invalid", http.StatusBadRequest)
 		return
 	}
-	committed, err := g.propose(r.Context(), entry, false)
+	entry.Proposer = nil
+	if !entry.valid() {
+		http.Error(w, "invalid", http.StatusBadRequest)
+		return
+	}
+	committed, err := g.propose(r.Context(), entry, from)
 	w.Header().Set("Content-Type", "application/json")
 	if err != nil {
 		w.WriteHeader(http.StatusConflict)

@@ -280,6 +280,8 @@ func TestEraseMarkerAndAcknowledgementsSurviveRestart(t *testing.T) {
 	}
 }
 
+// hasAck reports whether node's own acknowledgement of op stands: attributed, written under its
+// current epoch and not withdrawn.
 func (f *maintenanceFixture) hasAck(node uint64, op model.ID) bool {
 	e := f.v.engines[node]
 	id, identity, ok := e.selfMember()
@@ -287,7 +289,7 @@ func (f *maintenanceFixture) hasAck(node uint64, op model.ID) bool {
 		f.t.Fatal("no self member")
 	}
 	return e.db.View(func(tx *bolt.Tx) error {
-		if tx.Bucket([]byte("replica_data")).Get(eraseAckKey(op, id, identity)) == nil {
+		if !ackStands(tx.Bucket([]byte("replica_data")), op, id, identity) {
 			return errors.New("absent")
 		}
 		return nil

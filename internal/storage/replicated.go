@@ -351,6 +351,9 @@ func (e *Engine) EnableReplication(c replica.Config, seed *ReplicationSeed, auth
 	if err := e.loadRestoreHold(); err != nil {
 		return nil, err
 	}
+	if e.erasure.wake == nil {
+		e.erasure.wake = make(chan struct{}, 1)
+	}
 	r := &replicatedEngine{}
 	out := make([]*replica.Group, 0, 64)
 	fail := func(err error) ([]*replica.Group, error) {
@@ -398,6 +401,7 @@ func (e *Engine) EnableReplication(c replica.Config, seed *ReplicationSeed, auth
 		e.repl = nil
 		return fail(err)
 	}
+	e.startErasureLoop()
 	return out, nil
 }
 func (e *Engine) replicaBeforeWrite(ctx context.Context, slot uint16) error {
@@ -440,7 +444,7 @@ func (e *Engine) commitReplicated(slot uint16, index uint64, entry walEntry) err
 		}
 		id := entry.Cancel.ReservationID
 		reservation = &id
-	case "fence", "delete_barrier", "erase_ack":
+	case "fence", "delete_barrier", "erase_ack", "erase_unack":
 		kind = replica.Barrier
 	case "artifact_fragment":
 		kind = replica.Artifact
@@ -480,6 +484,11 @@ func (m *slotMachine) adaptedEntry(c replica.CommittedEntry) (walEntry, error) {
 	entry, err := m.decode(c.Entry.Payload)
 	if err != nil {
 		return entry, model.Fail(model.Corrupt)
+	}
+	if entry.Type == "erase_ack" || entry.Type == "erase_unack" {
+		// The author of a statement about a voter's own stores is the proposer the replica layer
+		// recorded, whatever the payload claimed; a command committed before attribution has none.
+		entry.Proposer = c.Entry.Proposer
 	}
 	if entry.Type == "cancel" {
 		if c.Entry.CommitSet == nil || entry.Cancel == nil || c.Entry.CommitSet.Group != c.Group || c.Entry.CommitSet.Reservation != entry.Cancel.ReservationID || c.Entry.CommitSet.PhysicalLast >= c.Index {
@@ -666,6 +675,11 @@ func (m *slotMachine) Restore(raw []byte, physical uint64) error {
 	if snapshot.Identity != e.identity || e.indexes[m.slot] > uint64(snapshot.Application) {
 		return model.Fail(model.Conflict)
 	}
+	// An install that replays data commands can put erased rows back into the live buckets, so
+	// the facts "this voter erased the operation" and "this voter acknowledged it" stop being
+	// true with the bytes. A command replayed from the snapshot that creates records, or a
+	// redacted one that keeps the records of other operations, makes the install such a replay.
+	dataBearing, owesWithdrawal := false, false
 	err := e.db.Update(func(tx *bolt.Tx) error {
 		meta := tx.Bucket([]byte("replica_data"))
 		commands := tx.Bucket([]byte("replica_commands"))
@@ -686,11 +700,21 @@ func (m *slotMachine) Restore(raw []byte, physical uint64) error {
 				if err := commands.Put(commandKey(m.slot, logical), raw); err != nil {
 					return err
 				}
+				switch entry.Type {
+				case "batch", "batch_redacted", "artifact_fragment":
+					dataBearing = true
+				}
 			}
 			if entry.Cancel != nil {
 				if err := putUint(meta, metaKey(m.slot, "logical:"+strconv.FormatUint(logical, 10)), physical); err != nil {
 					return err
 				}
+			}
+		}
+		if dataBearing {
+			var err error
+			if owesWithdrawal, err = invalidateErasureTx(tx); err != nil {
+				return err
 			}
 		}
 		if err := putUint(meta, metaKey(m.slot, "physical"), physical); err != nil {
@@ -699,6 +723,9 @@ func (m *slotMachine) Restore(raw []byte, physical uint64) error {
 		return putUint(meta, metaKey(m.slot, "application"), uint64(snapshot.Application))
 	})
 	if err == nil {
+		if owesWithdrawal {
+			e.erasure.wakeLoop()
+		}
 		previous := e.indexes[m.slot]
 		e.indexes[m.slot] = uint64(snapshot.Application)
 		if previous < e.indexes[m.slot] {
@@ -752,6 +779,12 @@ func (m *slotMachine) Validate(ctx context.Context, command replica.Entry) error
 		}
 		if entry.Type == "erase_ack" {
 			if entry.EraseAck == nil {
+				return model.Fail(model.Invalid)
+			}
+			break
+		}
+		if entry.Type == "erase_unack" {
+			if entry.EraseUnack == nil {
 				return model.Fail(model.Invalid)
 			}
 			break
@@ -937,7 +970,12 @@ func (m *slotMachine) validRouting(command replica.Entry, entry walEntry) bool {
 			return b != nil && entry.Fence == nil && command.ReservationID == nil && b.Cursor == (model.Cursor{Group: owner, Index: index}) && b.Predicate.Validate() == nil
 		}
 		if entry.Type == "erase_ack" {
-			return m.slot == eraseAckSlot && entry.EraseAck.valid() && entry.Fence == nil && command.ReservationID == nil && entry.EraseAck.Cursor == (model.Cursor{Group: owner, Index: index})
+			a := entry.EraseAck
+			return m.slot == eraseAckSlot && a.valid() && entry.EraseUnack == nil && entry.Proposer == nil && proposedBy(command.Proposer, a.Node, a.Identity) && entry.Fence == nil && command.ReservationID == nil && a.Cursor == (model.Cursor{Group: owner, Index: index})
+		}
+		if entry.Type == "erase_unack" {
+			u := entry.EraseUnack
+			return m.slot == eraseAckSlot && u.valid() && entry.EraseAck == nil && entry.Proposer == nil && proposedBy(command.Proposer, u.Node, u.Identity) && entry.Fence == nil && command.ReservationID == nil && u.Cursor == (model.Cursor{Group: owner, Index: index})
 		}
 		return entry.Fence != nil && command.ReservationID == nil && len(entry.Fence.Barriers) == 1 && entry.Fence.Barriers[0].Group == owner && entry.Fence.Barriers[0].Index == index
 	case replica.Artifact:

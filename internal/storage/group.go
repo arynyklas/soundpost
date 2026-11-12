@@ -51,6 +51,7 @@ type Engine struct {
 	tomb         tombstoneState
 	scrub        scrubConfig
 	redact       redactState
+	erasure      erasureState
 }
 type walEntry struct {
 	Type       string                      `json:"type"`
@@ -68,6 +69,15 @@ type walEntry struct {
 	// EraseAck is one voter's statement that its own copy of the listed deletion operations'
 	// bytes is gone and scrubbed (Type "erase_ack", replicated as a replica.Barrier in slot 0).
 	EraseAck *eraseAck `json:"erase_ack,omitempty"`
+	// EraseUnack is one voter's withdrawal of every acknowledgement it made before the stated
+	// installation epoch (Type "erase_unack", slot 0): its own stores took bytes in that an
+	// acknowledgement said were gone.
+	EraseUnack *eraseUnack `json:"erase_unack,omitempty"`
+	// Proposer is the member that proposed an erase_ack or erase_unack, copied from the replicated
+	// entry that carried it (replica.Entry.Proposer; the payload never carries it). The statement
+	// counts only when it names this member; a command committed before the field existed has
+	// none and is not attributed.
+	Proposer *replica.Proposer `json:"proposer,omitempty"`
 	// Redaction marks a stored command whose erased records were physically
 	// removed locally (Type "batch_redacted"/"artifact_redacted"). It is never
 	// proposed to Raft: every voter derives it from the replicated tombstone.
@@ -167,11 +177,13 @@ func Open(dir string, v Revalidator) (*Engine, error) {
 	return out, nil
 }
 func (e *Engine) Close() error {
+	e.erasure.cancelLoop()
 	if e.repl != nil {
 		for _, group := range e.repl.groups {
 			_ = group.Close()
 		}
 	}
+	e.erasure.waitLoop()
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.closed {

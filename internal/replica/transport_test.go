@@ -99,11 +99,15 @@ type mtlsCluster struct {
 	transports []*MTLS
 	groups     [][]*Group       // [node-1][group]
 	machines   [][]*gateMachine // [node-1][group]
+	members    Members
+	roots      *x509.CertPool
+	certs      []tls.Certificate // the three members' credentials
+	outsider   tls.Certificate   // issued by the same CA, but for a node that is not a member
 }
 
 func newMTLSCluster(t *testing.T, groupCount int) *mtlsCluster {
 	t.Helper()
-	roots, certificates := testPKI(t, 3)
+	roots, certificates := testPKI(t, 4)
 	listeners := make([]net.Listener, 3)
 	members := Members{Revision: 1}
 	for i := range listeners {
@@ -118,7 +122,7 @@ func newMTLSCluster(t *testing.T, groupCount int) *mtlsCluster {
 	for i := range ids {
 		ids[i] = model.NewID()
 	}
-	c := &mtlsCluster{}
+	c := &mtlsCluster{members: members, roots: roots, certs: certificates[:3], outsider: certificates[3]}
 	for i := range listeners {
 		transport, err := NewMTLS(uint64(i+1), fmt.Sprintf("node-%d", i+1), certificates[i], roots, "")
 		if err != nil {
