@@ -92,3 +92,11 @@ perfHelper:
   hostPID: false
   policySecret: soundpost-perf-policy   # key perf-policy.json, root-owned semantics via defaultMode
   nodeSelector: {}
+
+# Native symbolication is NOT available in these StatefulSets: a pod has no delegated cgroup v2
+# subtree, so every member logs `symbolicator: unavailable (probe_file_sandbox_unavailable)`
+# and native frames answer sandbox_unavailable. The OCI backend needs a container runtime a pod
+# does not have. Use a systemd or Compose install for symbolication (docs/operations/symbolication.md).
+#
+# The data directory is /var/lib/soundpost/data on the PVC; serve creates it 0700. Upgrading a
+# release that stored data at the volume root needs a one-time move (docs/operations/upgrade.md).

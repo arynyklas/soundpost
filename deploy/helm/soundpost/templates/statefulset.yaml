@@ -58,7 +58,13 @@ spec:
         runAsNonRoot: true
         runAsUser: 65532
         runAsGroup: 65532
+        # fsGroup is required for the Secret volumes (defaultMode 0440 is root-owned; the group
+        # grants uid 65532 read access). It also makes the kubelet set the PVC ROOT g+rwxs, so the
+        # PVC root is never a private directory: the data lives in the data/ subdirectory below,
+        # which serve creates itself 0700. OnRootMismatch avoids a recursive re-chown of a large
+        # data volume on every pod start.
         fsGroup: 65532
+        fsGroupChangePolicy: OnRootMismatch
         seccompProfile:
           type: RuntimeDefault
 {{- if $root.Values.image.pullSecrets }}
@@ -85,7 +91,8 @@ spec:
             - --mode=distributed
             - --node-id={{ $m.id }}
             - --cluster-config=/etc/soundpost/config/node-{{ $m.id }}.json
-            - --data-dir=/var/lib/soundpost
+            # A SUBDIRECTORY of the volume, never the mount root (see fsGroup above).
+            - --data-dir=/var/lib/soundpost/data
             - --listen=0.0.0.0:{{ $root.Values.ports.public }}
           ports:
             - {name: public, containerPort: {{ $root.Values.ports.public }}}

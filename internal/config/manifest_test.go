@@ -686,3 +686,26 @@ func TestHelmChartRefusesUnsafeValues(t *testing.T) {
 		t.Error("values.yaml carries key material")
 	}
 }
+
+func TestHelmDataDirIsSubdirectoryOfVolume(t *testing.T) {
+	for source, docs := range renderedBoth(t, chartImage) {
+		for _, sts := range ofKind(docs, "StatefulSet") {
+			c := asMap(at(t, sts, "spec", "template", "spec", "containers", 0))
+			mount := ""
+			for _, m := range asList(c["volumeMounts"]) {
+				if asMap(m)["name"] == "data" {
+					mount = fmt.Sprint(asMap(m)["mountPath"])
+				}
+			}
+			dir := ""
+			for _, a := range strs(c["args"]) {
+				if v, ok := strings.CutPrefix(a, "--data-dir="); ok {
+					dir = v
+				}
+			}
+			if mount == "" || !strings.HasPrefix(dir, mount+"/") {
+				t.Errorf("%s: --data-dir=%q must be a subdirectory of the data mount %q", source, dir, mount)
+			}
+		}
+	}
+}

@@ -3,6 +3,7 @@
 package main
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -36,5 +37,35 @@ func TestServerUnitCredentialCommentIsTruthful(t *testing.T) {
 	}
 	if !strings.Contains(u, "0440") {
 		t.Fatal("the unit comment must state the real credential file mode")
+	}
+}
+
+// A runc-based runtime needs execve and fstatfs after it installs the filter and before the
+// container process runs its first instruction (observed: runc 1.4.2 StartError fstatfs, then
+// "exec /soundpost: operation not permitted"). The profile allows exactly those two extra
+// syscalls unconditionally and must not grow other unconstrained process-control calls.
+func TestPerfSeccompProfileAllowsRuntimeStartSyscalls(t *testing.T) {
+	text := deployFile(t, "deploy/seccomp/soundpost-perf.json")
+	if !strings.Contains(text, `{"names":["execve","fstatfs"],"action":"SCMP_ACT_ALLOW"}`) {
+		t.Fatal("profile must allow exactly execve and fstatfs in one unconditional rule")
+	}
+	for _, banned := range []string{`"execveat"`, `"ptrace"`, `"mount"`, `"setns"`, `"unshare"`, `"bpf"`} {
+		if strings.Contains(text, banned) {
+			t.Errorf("profile mentions %s", banned)
+		}
+	}
+}
+
+// The data directory must be a subdirectory of the volume: with fsGroup the kubelet makes the
+// volume root group-writable and serve refuses to chmod a root it does not own to 0700.
+func TestChartDataDirIsNotTheVolumeRoot(t *testing.T) {
+	text := deployFile(t, "deploy/helm/soundpost/templates/statefulset.yaml")
+	mount := regexp.MustCompile(`name: data, mountPath: (\S+)\}`).FindStringSubmatch(text)
+	flag := regexp.MustCompile(`- --data-dir=(\S+)`).FindStringSubmatch(text)
+	if mount == nil || flag == nil {
+		t.Fatal("data mount or --data-dir flag not found")
+	}
+	if flag[1] == mount[1] || !strings.HasPrefix(flag[1], mount[1]+"/") {
+		t.Fatalf("--data-dir=%s must be a subdirectory of the data mount %s", flag[1], mount[1])
 	}
 }

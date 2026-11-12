@@ -129,3 +129,9 @@ Here `--endpoint-env` names an initially unset variable assigned **only inside t
 - Docker [resource constraints](https://docs.docker.com/engine/containers/resource_constraints/): hard memory limit and equal memory/memory-swap values disabling swap; kernel support must actually exist.
 
 Primary-source semantics are not an executed result for this workstation or another target. Parent-run actual probes, readable generated frames, worker restart/timeout evidence and independent review remain the release qualification gate.
+
+## Kubernetes: native symbolication is unavailable in the shipped chart
+
+The `deploy/helm/soundpost` StatefulSets provide no delegated cgroup v2 subtree to the server container (the container's cgroup holds the server process itself and no `memory`/`pids` controllers are delegated to the service account). The native probe therefore fails in every pod and each one logs `symbolicator: unavailable (probe_file_sandbox_unavailable)`; frames answer `sandbox_unavailable`. This is expected, not a fault of the pod: the server, ingest and `/readyz` are unaffected, only symbolication of native frames is off. Do not mount `/sys/fs/cgroup` writable, add capabilities or run privileged to change that.
+
+What is possible: nothing inside the chart as shipped. The OCI backend (`--symbolicate-config`) needs a container runtime reachable from the server, which a pod does not have, so it is not supported in Kubernetes yet. Symbolicate on a host-installed server (the systemd unit delegates the cgroup, see above) or a Compose install.
