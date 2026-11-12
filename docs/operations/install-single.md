@@ -73,6 +73,8 @@ systemctl daemon-reload && systemctl enable --now soundpost
 
 The HTTPS listener starts before storage opens, so during recovery a probe gets `503 starting` instead of a refused connection or an early "ready". `serve --startup-hold-file PATH` keeps storage closed (`startup_hold`) until `PATH` exists: use it as a volume-mount or unseal sentinel; only the file's existence is read. Results are shared for one second, so probing does not multiply the quorum reads.
 
+`serve --authority-keys FILE --authority-dir DIR` (or the `--authority-s3-*` set; both or neither, full keys only) connects deletions to the independent restore authority so a restore of an older backup cannot revive deleted data; see [backup-restore.md](backup-restore.md#the-deletion-authority-c12-restore-authority). Without them serve runs deletions with no authority checkpoint.
+
 `soundpost ready [--json] [--url https://127.0.0.1:8443] [--ca-cert PEM | --data-dir DIR]` asks the **running** server's `/readyz` with TLS verification (`--data-dir` only selects that installation's public `server.crt` as the trust root) and exits **0 only when the answer is 200 with `ready: true`**. Every other outcome — not ready, unreachable, untrusted certificate, malformed or inconsistent answer — exits 1 with a closed reason (`unreachable` when the server could not be asked). It deliberately does not open the data directory: a second opener would contend for the running process's database locks, and a read-only open of a replicated store says nothing about quorum. The container health check is this command.
 
 ## 6. Native acquisition is opt-in and never server-wide root

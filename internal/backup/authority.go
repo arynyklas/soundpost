@@ -79,6 +79,10 @@ func (k AuthorityKeys) Restricted() AuthorityKeys {
 	return k
 }
 
+// CanSign reports whether the keys include the signing key (the full keys a deletion
+// checkpoint needs) rather than the restricted read-only subset.
+func (k AuthorityKeys) CanSign() bool { return k.signer != nil }
+
 func (k AuthorityKeys) valid() bool {
 	return keyID.MatchString(k.ID) && len(k.public) == ed25519.PublicKeySize && k.seal.valid() && k.seal.id == k.ID && (k.signer == nil || len(k.signer) == ed25519.PrivateKeySize)
 }

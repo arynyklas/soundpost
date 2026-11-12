@@ -180,14 +180,15 @@ var (
 )
 
 type evidenceServer struct {
-	dir, holdDir string
-	cmd          *exec.Cmd
-	addr         string
-	logs         *syncBuffer
-	done         chan error
-	stopped      bool
-	site         *installSite
-	bodies       [][]byte
+	exe, dir, holdDir string
+	serveArgs         []string
+	cmd               *exec.Cmd
+	addr              string
+	logs              *syncBuffer
+	done              chan error
+	stopped, halted   bool
+	site              *installSite
+	bodies            [][]byte
 }
 
 func startEvidenceServer(exe string) (*evidenceServer, error) {
@@ -195,25 +196,26 @@ func startEvidenceServer(exe string) (*evidenceServer, error) {
 	if err != nil {
 		return nil, err
 	}
+	return startEvidenceServerIn(exe, dir)
+}
+
+// startEvidenceServerIn serves the installation in dir (a fresh directory, or a restored root).
+func startEvidenceServerIn(exe, dir string) (*evidenceServer, error) {
 	addr, err := freeAddress()
 	if err != nil {
 		return nil, err
 	}
-	s := &evidenceServer{dir: dir, addr: addr, logs: &syncBuffer{}, done: make(chan error, 1)}
-	serveArgs := []string{"serve", "--mode=single", "--data-dir", dir, "--listen", addr}
+	s := &evidenceServer{exe: exe, dir: dir, addr: addr, logs: &syncBuffer{}}
+	s.serveArgs = []string{"serve", "--mode=single", "--data-dir", dir, "--listen", addr}
 	// An operator-selected symbolication backend (private JSON, docs/operations/symbolication.md)
 	// is passed through only when the caller sets it; without it the row reports what the
 	// served process answers by default on this host.
 	if cfg := os.Getenv("SOUNDPOST_SMOKE_SYMBOLICATE_CONFIG"); cfg != "" {
-		serveArgs = append(serveArgs, "--symbolicate-config", cfg)
+		s.serveArgs = append(s.serveArgs, "--symbolicate-config", cfg)
 	}
-	s.cmd = exec.Command(exe, serveArgs...)
-	s.cmd.Stdout, s.cmd.Stderr = s.logs, s.logs
-	s.cmd.Env = []string{"PATH=" + os.Getenv("PATH")}
-	if err = s.cmd.Start(); err != nil {
+	if err = s.launch(); err != nil {
 		return nil, err
 	}
-	go func() { s.done <- s.cmd.Wait() }()
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
 		select {
@@ -239,21 +241,42 @@ func startEvidenceServer(exe string) (*evidenceServer, error) {
 		s.stop()
 		return nil, &smokeFailure{Stage: "evidence_serve", Code: "timeout"}
 	}
-	for time.Now().Before(deadline.Add(30 * time.Second)) {
+	if err = s.awaitReady(deadline.Add(30 * time.Second)); err != nil {
+		s.stop()
+		return nil, err
+	}
+	return s, nil
+}
+
+func (s *evidenceServer) launch() error {
+	s.done = make(chan error, 1)
+	s.cmd = exec.Command(s.exe, s.serveArgs...)
+	s.cmd.Stdout, s.cmd.Stderr = s.logs, s.logs
+	s.cmd.Env = []string{"PATH=" + os.Getenv("PATH")}
+	if err := s.cmd.Start(); err != nil {
+		return err
+	}
+	cmd, done := s.cmd, s.done
+	go func() { done <- cmd.Wait() }()
+	return nil
+}
+
+func (s *evidenceServer) awaitReady(deadline time.Time) error {
+	for time.Now().Before(deadline) {
 		if status, _, err := s.site.get("/readyz"); err == nil && status == 200 {
-			return s, nil
+			return nil
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	s.stop()
-	return nil, &smokeFailure{Stage: "evidence_serve", Code: "not_ready"}
+	return &smokeFailure{Stage: "evidence_serve", Code: "not_ready"}
 }
 
-func (s *evidenceServer) stop() {
-	if s.stopped {
+// halt stops the process but keeps the data directory (and the pinned site).
+func (s *evidenceServer) halt() {
+	if s.halted || s.stopped {
 		return
 	}
-	s.stopped = true
+	s.halted = true
 	_ = s.cmd.Process.Signal(syscall.SIGTERM)
 	select {
 	case <-s.done:
@@ -261,6 +284,26 @@ func (s *evidenceServer) stop() {
 		_ = s.cmd.Process.Kill()
 		<-s.done
 	}
+}
+
+// restart serves the same directory on the same address again.
+func (s *evidenceServer) restart() error {
+	if !s.halted {
+		return errors.New("restart of a running server")
+	}
+	if err := s.launch(); err != nil {
+		return err
+	}
+	s.halted = false
+	return s.awaitReady(time.Now().Add(60 * time.Second))
+}
+
+func (s *evidenceServer) stop() {
+	if s.stopped {
+		return
+	}
+	s.halt()
+	s.stopped = true
 	os.RemoveAll(s.dir)
 }
 
@@ -626,9 +669,54 @@ func (s *evidenceServer) journey(fx *evidenceFixture) *evidenceRows {
 		}
 	}
 
-	// Profile: nothing can send one to a served process.
-	stProf, rawProf := s.post(analyst, "/api/v1/profiles/view", map[string]any{"org": orgA, "project": projA, "profile": profileID, "window": map[string]any{"start": model.UnixNano(now - int64(time.Hour)), "end": model.UnixNano(now + int64(time.Hour))}})
-	rows.add("profile_real_view", true, false, fmt.Sprintf("no profile can reach a served process: the real exporter needs an in-process policy.SourceGrant and no SDK profile reaches the backend (03.09); the route answered status %d %s for the profile the error links", stProf, truncate(rawProf)))
+	// Profile: a real chunk and its capability record go through the real ingest route
+	// (the source policy onboarded above lists Profile and Capability), then are read
+	// back through /api/v1/profiles/view. The row is satisfied only by what that view shows.
+	capID := model.NewID()
+	pclock := model.TraceClock{Wall: model.UnixNano(now - int64(time.Second)), Mono: 1000, Domain: model.ClockDomain{Host: model.NewID(), Boot: model.NewID(), Runtime: model.NewID()}}
+	chunk := model.ProfileChunk{Profile: profileID, Process: model.NewID(), Capability: capID, Method: "runtime_cpu", Units: "samples", Start: model.UnixNano(now - int64(2*time.Second)), End: model.UnixNano(now - int64(time.Second)), Clock: pclock,
+		Frames:  []model.ProfileFrame{{Module: "simple.mjs", Function: "throwingFixture", Artifact: artifact.ID.String(), Offset: model.Uint64(fx.line)}},
+		Stacks:  []model.ProfileStack{{Frames: []uint32{0}}},
+		Samples: []model.ProfileSample{{At: 1001, Stack: 0, Count: 1, Thread: 1}, {At: 1002, Stack: 0, Count: 2, Thread: 1}, {At: 1003, Stack: 0, Count: 3, Thread: 1}}}
+	capability := model.Capability{Runtime: "web", Version: "1", Build: "evidence", OS: "linux", Arch: "amd64", Signal: model.Profile, Method: "runtime_cpu", Status: "supported", Reason: "probed", Coverage: model.Coverage{Frames: "partial", Threads: "none", Workers: "none", Tasks: "none"}, Clock: pclock.Domain, Expires: model.UnixNano(now + int64(time.Hour))}
+	profileSent := true
+	for _, r := range []model.Record{
+		{ID: capID, Kind: model.CapabilityKind, ObservedAt: model.UnixNano(now - int64(2*time.Second)), Resource: res, Payload: model.Payload{Capability: &capability}},
+		{ID: model.NewID(), Kind: model.Profile, ObservedAt: model.UnixNano(now - int64(time.Second)), Resource: res, Payload: model.Payload{Profile: &chunk}},
+	} {
+		pb := model.Batch{Version: 1, Project: projA, Source: srcA, Producer: producer, ID: model.NewID(), PolicyRevision: 1, Records: []model.Record{r}}
+		pb.RouteSlot, _ = model.OwnerSlot(orgA, projA, srcA, producer, r)
+		if st, body := s.sourcePost("/ingest/v1/batches", credA, pb); st != 200 {
+			profileSent = false
+			rows.add("profile_real_view", true, false, fmt.Sprintf("the real ingest route refused a %s record: status %d %s", r.Kind, st, truncate(body)))
+			break
+		}
+	}
+	profileWindow := map[string]any{"start": model.UnixNano(now - int64(time.Hour)), "end": model.UnixNano(now + int64(time.Hour))}
+	if profileSent {
+		stProf, rawProf := s.post(analyst, "/api/v1/profiles/view", map[string]any{"org": orgA, "project": projA, "profile": profileID, "window": profileWindow})
+		var pr httpapi.ProfileResponse
+		linked := false
+		if json.Unmarshal(rawProf, &pr) == nil && pr.View != nil {
+			for _, l := range pr.View.Links {
+				if l.Available && l.Reference != nil && l.Reference.Kind == "artifact" && l.Reference.ID == artifact.ID && l.Reference.Build == res.Build {
+					linked = true
+				}
+			}
+		}
+		switch {
+		case stProf != 200 || pr.View == nil:
+			rows.add("profile_real_view", true, false, fmt.Sprintf("the profile delivered through real ingest was not readable: status %d %s", stProf, truncate(rawProf)))
+		case pr.State != httpapi.StateReady || pr.View.Completeness != "complete":
+			rows.add("profile_real_view", true, false, fmt.Sprintf("view state %s completeness %s reasons %v", pr.State, pr.View.Completeness, pr.View.Reasons))
+		case pr.View.Profile != profileID || len(pr.View.Samples) != 3 || len(pr.View.Capabilities) != 1 || pr.View.Capabilities[0].ID != capID || pr.View.Capabilities[0].Value.Signal != model.Profile || pr.View.Capabilities[0].Value.Clock != chunk.Clock.Domain || pr.View.Capabilities[0].Value.Status != "supported":
+			rows.add("profile_real_view", true, false, fmt.Sprintf("view shape wrong: %d samples, %d capabilities", len(pr.View.Samples), len(pr.View.Capabilities)))
+		case len(pr.View.Frames) != 1 || pr.View.Frames[0].Artifact != artifact.ID.String() || !linked:
+			rows.add("profile_real_view", true, false, "the profile frame does not link to the uploaded artifact through an available explicit reference")
+		default:
+			rows.add("profile_real_view", true, true, "profile and capability record delivered over the real ingest route; /api/v1/profiles/view returned 3 samples, the linked capability record (profile signal, same clock domain, supported) and the frame's artifact link resolved as available")
+		}
+	}
 
 	// Isolation: the other organization cannot tell A's identities from missing ones.
 	type pair struct {
@@ -722,6 +810,16 @@ func (s *evidenceServer) journey(fx *evidenceFixture) *evidenceRows {
 			rows.add("lifecycle_grant_revoke_denies_reads", true, true, fmt.Sprintf("after revocation artifact/frames/replay answered %d/%d/%d", sa, sb, sc))
 		}
 	}
+	// Single-node backup around the served process, taken BEFORE the deletion: the server
+	// is stopped (backup create opens the installation exclusively), the backup and the
+	// restore authority are made with the real CLI (docs/operations/backup-restore.md),
+	// and the same installation is served again on the same address.
+	bk := s.takeBackup("owner@evidence-smoke.invalid", "evidence smoke owner password 2026")
+	if err = s.restartAfterBackup(bk); err != nil {
+		return fail("restore_keeps_current_deletion_authority", true, "the served process did not come back after the backup: %v", err)
+	}
+	var beginStatus int
+	var deletionOp model.ID
 	// Deletion saga: a granted reader has the large replay open mid-response when an
 	// org admin begins retire_project over HTTPS (POST /api/v1/admin/deletions,
 	// retention.Service.Delete behind RegisterDeletionRoutes). The row is satisfied
@@ -732,8 +830,6 @@ func (s *evidenceServer) journey(fx *evidenceFixture) *evidenceRows {
 	if !bigOK {
 		rows.add("lifecycle_deletion_saga_halts_stream", true, false, "the large replay was not admitted by the real route")
 	} else {
-		var beginStatus int
-		var operation model.ID
 		begin := func() error {
 			status, raw, err := owner.site.post("/api/v1/admin/read", struct {
 				Kind string `json:"kind"`
@@ -756,7 +852,7 @@ func (s *evidenceServer) journey(fx *evidenceFixture) *evidenceRows {
 			if status != http.StatusAccepted || json.Unmarshal(raw, &receipt) != nil || receipt.Phase != model.DeletePhaseFencing {
 				return errors.New("the deletion was not accepted as a fencing receipt")
 			}
-			operation = receipt.OperationID
+			deletionOp = receipt.OperationID
 			return nil
 		}
 		delivered, last, why := s.midstreamHalt(analyst, orgA, projA, bigReplay, begin, replays.ReasonAuthorityRevoked, replays.ReasonDeleted)
@@ -767,19 +863,26 @@ func (s *evidenceServer) journey(fx *evidenceFixture) *evidenceRows {
 			rows.add("lifecycle_deletion_saga_halts_stream", true, false, why)
 		default:
 			reread, _, _ := s.stream(analyst, orgA, projA, bigReplay)
-			pollStatus, pollRaw, pollErr := owner.site.get("/api/v1/lifecycle/operations/" + operation.String() + "?org=" + orgA.String())
+			pollStatus, pollRaw, pollErr := owner.site.get("/api/v1/lifecycle/operations/" + deletionOp.String() + "?org=" + orgA.String())
 			var polled httpapi.LifecycleOperation
 			switch {
 			case reread == 200:
 				rows.add("lifecycle_deletion_saga_halts_stream", true, false, "the stream halted but the deleted project's replay is still readable afterwards")
-			case pollErr != nil || pollStatus != 200 || json.Unmarshal(pollRaw, &polled) != nil || polled.State != httpapi.StateReady || polled.ID != operation || (polled.Phase != model.DeletePhaseFencing && polled.Phase != model.DeletePhaseComplete):
+			case pollErr != nil || pollStatus != 200 || json.Unmarshal(pollRaw, &polled) != nil || polled.State != httpapi.StateReady || polled.ID != deletionOp || (polled.Phase != model.DeletePhaseFencing && polled.Phase != model.DeletePhaseComplete):
 				rows.add("lifecycle_deletion_saga_halts_stream", true, false, fmt.Sprintf("the stream halted but the lifecycle poll does not show the operation: status %d", pollStatus))
 			default:
 				rows.add("lifecycle_deletion_saga_halts_stream", true, true, fmt.Sprintf("retire_project begun over HTTPS (202 fencing): %d of 100 chunks delivered to the open reader, then one typed %s, nothing after; re-read answered %d; lifecycle poll phase %s", delivered, last, reread, polled.Phase))
 			}
 		}
 	}
-	rows.add("restore_keeps_current_deletion_authority", true, false, "needs a backup and a restore around the served process, which this smoke does not run (a deletion can be begun over HTTPS only when RegisterDeletionRoutes is registered; the in-process test and the backup-restore smoke exercise restore); nothing was observed here")
+	if bk.err != "" {
+		rows.add("restore_keeps_current_deletion_authority", true, false, "the pre-deletion backup could not be taken around the served process: "+bk.err)
+	} else if deletionOp == (model.ID{}) {
+		rows.add("restore_keeps_current_deletion_authority", true, false, "no deletion was begun over HTTPS, so there is no deletion authority to compare against the backup")
+	} else {
+		ok, why := s.restoreAfterDeletion(bk, owner, orgA, projA, deletionOp)
+		rows.add("restore_keeps_current_deletion_authority", true, ok, why)
+	}
 
 	// Canaries: responses, process log and the whole data directory.
 	s.stop()
@@ -938,4 +1041,193 @@ func newInstallSiteLike(s *installSite) *installSite {
 	jar, _ := cookiejar.New(nil)
 	cp.client = &http.Client{Transport: s.client.Transport, Jar: jar, Timeout: s.client.Timeout, CheckRedirect: s.client.CheckRedirect}
 	return &cp
+}
+
+// evidenceBackup is the single-node backup made around the served process: key
+// material lives in a 0700 temporary directory and never in a log or artifact.
+type evidenceBackup struct {
+	tmp, keyDir, authKeys, authDir, destDir, id string
+	authFiles                                   int
+	err                                         string
+}
+
+// cli runs the produced binary's subcommand and returns its stdout. The CLI's own
+// failure lines carry a closed code and no key or input value.
+func (s *evidenceServer) cli(env []string, args ...string) ([]byte, error) {
+	cmd := exec.Command(s.exe, args...)
+	cmd.Env = append([]string{"PATH=" + os.Getenv("PATH")}, env...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("%s %s: %s", args[0], args[1], strings.TrimSpace(truncate(stderr.Bytes())))
+	}
+	return out, nil
+}
+
+// takeBackup stops the served process (backup create opens the installation
+// exclusively) and runs keygen, authority-keygen, authority-init and create.
+func (s *evidenceServer) takeBackup(email, password string) *evidenceBackup {
+	bk := &evidenceBackup{}
+	s.halt()
+	tmp, err := os.MkdirTemp("", "soundpost-evidence-backup-")
+	if err != nil {
+		bk.err = err.Error()
+		return bk
+	}
+	bk.tmp = tmp
+	bk.keyDir, bk.authKeys, bk.authDir, bk.destDir = filepath.Join(tmp, "keys"), filepath.Join(tmp, "authority.keys"), filepath.Join(tmp, "authority"), filepath.Join(tmp, "dest")
+	if err = os.MkdirAll(bk.keyDir, 0o700); err != nil {
+		bk.err = err.Error()
+		return bk
+	}
+	steps := [][]string{
+		{"backup", "keygen", "--key-dir", bk.keyDir, "--id", "evidence-data-kek"},
+		{"backup", "keygen", "--key-dir", bk.keyDir, "--id", "evidence-secret-kek"},
+		{"backup", "authority-keygen", "--out", bk.authKeys, "--id", "evidence-authority"},
+		{"backup", "authority-init", "--data-dir", s.dir, "--authority-keys", bk.authKeys, "--authority-dir", bk.authDir},
+	}
+	for _, step := range steps {
+		if _, err = s.cli(nil, step...); err != nil {
+			bk.err = err.Error()
+			return bk
+		}
+	}
+	out, err := s.cli([]string{"SOUNDPOST_ADMIN_PASSWORD=" + password}, "backup", "create", "--data-dir", s.dir, "--admin-email", email, "--key-dir", bk.keyDir,
+		"--data-kek", "evidence-data-kek", "--secret-kek", "evidence-secret-kek", "--authority-keys", bk.authKeys, "--authority-dir", bk.authDir, "--dest-dir", bk.destDir)
+	if err != nil {
+		bk.err = err.Error()
+		return bk
+	}
+	var report struct {
+		BackupID string `json:"backup_id"`
+	}
+	if json.Unmarshal(out, &report) != nil || report.BackupID == "" {
+		bk.err = "backup create printed no backup id"
+		return bk
+	}
+	bk.id = report.BackupID
+	bk.authFiles = evidenceCountFiles(bk.authDir)
+	return bk
+}
+
+// restartAfterBackup serves the same installation again. When the backup was made, the
+// full authority keys and the authority journal the backup bound are given to serve, so
+// the deletions it runs checkpoint to the same authority a restore reads.
+func (s *evidenceServer) restartAfterBackup(bk *evidenceBackup) error {
+	if bk.err == "" {
+		s.serveArgs = append(s.serveArgs, "--authority-keys", bk.authKeys, "--authority-dir", bk.authDir)
+	}
+	return s.restart()
+}
+
+// evidenceOrgView reads the organizations view as the (instance owner) caller.
+func (s *evidenceServer) evidenceOrgView(u *evidenceUser, org, project model.ID) (orgPresent, projectPresent bool, orgs int, err error) {
+	status, raw, err := u.site.post("/api/v1/admin/read", struct {
+		Kind string `json:"kind"`
+	}{"organizations"}, u.session.CSRF, "")
+	if err != nil || status != 200 {
+		return false, false, 0, fmt.Errorf("admin read answered status %d", status)
+	}
+	var view auth.AdminView
+	if err = json.Unmarshal(raw, &view); err != nil {
+		return false, false, 0, err
+	}
+	for _, o := range view.Organizations {
+		if o.ID == org {
+			orgPresent = true
+			_, projectPresent = o.Projects[project.String()]
+		}
+	}
+	return orgPresent, projectPresent, len(view.Organizations), nil
+}
+
+func evidencePollOperation(u *evidenceUser, org, op model.ID) (httpapi.LifecycleOperation, int) {
+	var polled httpapi.LifecycleOperation
+	status, raw, err := u.site.get("/api/v1/lifecycle/operations/" + op.String() + "?org=" + org.String())
+	if err != nil || json.Unmarshal(raw, &polled) != nil {
+		return httpapi.LifecycleOperation{}, status
+	}
+	return polled, status
+}
+
+// restoreAfterDeletion waits for the deletion to complete on the live installation,
+// stops it, restores the PRE-deletion backup into a fresh root, activates it, serves
+// it and reports what the restored installation shows for the deleted project. It
+// returns satisfied only when the project stays gone and the operation is visible.
+func (s *evidenceServer) restoreAfterDeletion(bk *evidenceBackup, owner *evidenceUser, org, project, op model.ID) (bool, string) {
+	var live httpapi.LifecycleOperation
+	for deadline := time.Now().Add(90 * time.Second); time.Now().Before(deadline); time.Sleep(250 * time.Millisecond) {
+		live, _ = evidencePollOperation(owner, org, op)
+		if live.Phase == model.DeletePhaseComplete {
+			break
+		}
+	}
+	if live.Phase != model.DeletePhaseComplete {
+		return false, fmt.Sprintf("the deletion did not reach complete on the served process within 90s (phase %q)", live.Phase)
+	}
+	liveOrg, liveProject, liveOrgs, err := s.evidenceOrgView(owner, org, project)
+	if err != nil {
+		return false, "live organizations view after the deletion: " + err.Error()
+	}
+	s.halt()
+	root := filepath.Join(bk.tmp, "restored")
+	common := []string{"--authority-keys", bk.authKeys, "--authority-dir", bk.authDir}
+	restoreOut, err := s.cli(nil, append([]string{"backup", "restore", "--backup-id", bk.id, "--root", root, "--key-dir", bk.keyDir, "--dest-dir", bk.destDir}, common...)...)
+	if err != nil {
+		return false, "restore of the pre-deletion backup failed: " + err.Error()
+	}
+	var restoreReport struct {
+		Tombstones int `json:"tombstones"`
+	}
+	_ = json.Unmarshal(restoreOut, &restoreReport)
+	restoredTombstones := restoreReport.Tombstones
+	if _, err = s.cli(nil, append([]string{"backup", "activate", "--root", root}, common...)...); err != nil {
+		return false, "activation of the restored root failed: " + err.Error()
+	}
+	restored, err := startEvidenceServerIn(s.exe, root)
+	if err != nil {
+		return false, "the restored root did not serve: " + err.Error()
+	}
+	defer restored.stop()
+	token, err := os.ReadFile(filepath.Join(root, "bootstrap.token"))
+	if err != nil {
+		return false, "the restored root has no recovery bootstrap token"
+	}
+	recovered := &evidenceUser{site: restored.site}
+	status, raw, err := recovered.site.post("/api/v1/bootstrap", map[string]string{"Token": string(token), "Email": "recovery@evidence-smoke.invalid", "Password": "evidence smoke recovery password 2026"}, "", "")
+	if err != nil || status != 200 || json.Unmarshal(raw, &recovered.session) != nil {
+		return false, fmt.Sprintf("recovery bootstrap on the restored root refused: status %d", status)
+	}
+	rOrg, rProject, rOrgs, err := restored.evidenceOrgView(recovered, org, project)
+	if err != nil {
+		return false, "restored organizations view: " + err.Error()
+	}
+	polled, pollStatus := evidencePollOperation(recovered, org, op)
+	visible := pollStatus == 200 && polled.ID == op && polled.State == httpapi.StateReady
+	facts := fmt.Sprintf("live after the deletion: org present=%v project present=%v (%d organizations listed), operation phase %s; authority journal files %d at the backup, %d after the deletion; restore of the pre-deletion backup reported %d tombstones and activated; restored recovery view: org present=%v project present=%v, %d organizations listed, operation lookup status %d visible=%v", liveOrg, liveProject, liveOrgs, live.Phase, bk.authFiles, evidenceCountFiles(bk.authDir), restoredTombstones, rOrg, rProject, rOrgs, pollStatus, visible)
+	if rOrgs == 0 && liveOrgs > 0 {
+		facts += " (the recovery admin sees none of the " + fmt.Sprint(liveOrgs) + " organizations, including the one that was never deleted: restore quarantine hides every organization until reconciled, so the view says nothing about the deleted project; the deletion is observed through the authority journal and the restore's tombstone count, and the readable-rows check is the in-process restore test)"
+	}
+	switch {
+	case evidenceCountFiles(bk.authDir) <= bk.authFiles:
+		return false, "PRODUCT DEFECT: the served process never checkpointed the completed deletion to the restore authority, so the authority the restore reads cannot hold it; " + facts
+	case restoredTombstones < 1:
+		return false, "PRODUCT DEFECT: the authority journal grew but the restore of the older backup applied no tombstone; " + facts
+	case rProject:
+		return false, "PRODUCT DEFECT: the restored installation holds the project whose deletion had completed (the older backup won over the current deletion authority); " + facts
+	}
+	return true, "the served deletion checkpointed to the restore authority (journal grew) and restoring the PRE-deletion backup applied that tombstone and activated; the deleted project is absent from the restored installation; " + facts
+}
+
+// evidenceCountFiles counts the regular files below dir (the authority journal's records).
+func evidenceCountFiles(dir string) int {
+	n := 0
+	_ = filepath.WalkDir(dir, func(_ string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
+			n++
+		}
+		return nil
+	})
+	return n
 }

@@ -84,6 +84,7 @@ func run() error {
 	hold := f.String("startup-hold-file", "", "keep storage closed (GET /readyz reports startup_hold) until this file exists, e.g. a volume-mount sentinel")
 	symbolicator := addSymbolicatorFlags(f)
 	scrape := addScrapeFlags(f)
+	authorityFlagSet := addAuthorityFlags(f)
 	if e := f.Parse(os.Args[2:]); e != nil {
 		return e
 	}
@@ -97,6 +98,11 @@ func run() error {
 	scrapeCfg, e := scrape.settings()
 	if e != nil {
 		fmt.Fprintln(os.Stderr, scrapeFailureNotice(e))
+		return e
+	}
+	restoreAuthority, e := authorityFlagSet.open()
+	if e != nil {
+		fmt.Fprintln(os.Stderr, serveAuthorityNotice(e))
 		return e
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -134,6 +140,11 @@ func run() error {
 		return e
 	}
 	defer core.Close()
+	// The restore authority must be installed before any route can begin a deletion.
+	if e = installServeAuthority(core, restoreAuthority); e != nil {
+		fmt.Fprintln(os.Stderr, serveAuthorityNotice(e))
+		return e
+	}
 	// Probes the sandbox, then swaps the frame resolver; this MUST precede Register.
 	fmt.Fprintln(os.Stderr, symbolicatorNotice(core.ConfigureSymbolicator(ctx, symbolicateSettings)))
 	scrapers, e := scrapeCfg.start(ctx, core)

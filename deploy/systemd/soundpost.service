@@ -29,6 +29,10 @@ UMask=0077
 # generate a stable self-signed identity in the data directory instead.
 LoadCredential=tls.crt:/etc/soundpost/tls/server.crt
 LoadCredential=tls.key:/etc/soundpost/tls/server.key
+# Off-host backup (docs/operations/backup-restore.md): to make deletions checkpoint to the
+# independent restore authority, add --authority-keys=<full key file, mode 0600> and
+# --authority-dir=<journal dir> (or the --authority-s3-* set) to ExecStart below; both or
+# neither. Not enabled here: it needs keys and a destination only the operator has.
 ExecStart=/usr/local/bin/soundpost serve --mode=single --data-dir=/var/lib/soundpost --listen=127.0.0.1:8443 --tls-cert=%d/tls.crt --tls-key=%d/tls.key --symbolicate-cgroup-root=/sys/fs/cgroup/system.slice/soundpost.service
 # Native symbolication sandbox (docs/operations/symbolication.md): systemd delegates this
 # unit's cgroup to the service user and keeps the server itself in the "main" sub-cgroup,

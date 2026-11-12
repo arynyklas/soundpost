@@ -236,12 +236,21 @@ func backupAuthorityKeygen(args []string) error {
 }
 
 func openAuthority(dest *destinationFlags, keysPath string) (*backup.Authority, error) {
+	return openAuthorityKeys(dest, keysPath, false)
+}
+
+// openAuthorityKeys opens the authority journal; requireSigning refuses restricted keys
+// (the process that checkpoints deletions needs the full ones).
+func openAuthorityKeys(dest *destinationFlags, keysPath string, requireSigning bool) (*backup.Authority, error) {
 	if keysPath == "" {
 		return nil, errNoAuthorityKeys
 	}
 	keys, err := backup.ReadAuthorityKeys(keysPath)
 	if err != nil {
 		return nil, err
+	}
+	if requireSigning && !keys.CanSign() {
+		return nil, errAuthorityRestricted
 	}
 	d, err := dest.open()
 	if err != nil {

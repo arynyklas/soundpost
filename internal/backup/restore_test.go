@@ -120,7 +120,12 @@ func (p *hookPlane) Begin(ctx context.Context, cut storage.ControlCut) (backup.P
 	return s, err
 }
 
-func newLive(t *testing.T) *live {
+func newLive(t *testing.T) *live { return newLiveWith(t, true) }
+
+// newLiveWith builds the live installation; installOnRetention=false leaves the
+// retention service without the restore authority, which is what `soundpost serve` did
+// before it gained --authority-keys/--authority-dir (the backup service still has it).
+func newLiveWith(t *testing.T, installOnRetention bool) *live {
 	t.Helper()
 	l := &live{t: t, ctx: context.Background(), dir: filepath.Join(t.TempDir(), "live")}
 	var err error
@@ -169,8 +174,10 @@ func newLive(t *testing.T) *live {
 	}
 	l.authority = &switchAuthority{inner: real}
 	l.retention = l.app.Retention
-	if err = l.retention.UseAuthority(l.authority); err != nil {
-		t.Fatal(err)
+	if installOnRetention {
+		if err = l.retention.UseAuthority(l.authority); err != nil {
+			t.Fatal(err)
+		}
 	}
 	l.keys = backup.StaticKeys{}
 	for _, id := range []string{"data-kek", "secret-kek"} {
