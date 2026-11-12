@@ -200,7 +200,14 @@ func startEvidenceServer(exe string) (*evidenceServer, error) {
 		return nil, err
 	}
 	s := &evidenceServer{dir: dir, addr: addr, logs: &syncBuffer{}, done: make(chan error, 1)}
-	s.cmd = exec.Command(exe, "serve", "--mode=single", "--data-dir", dir, "--listen", addr)
+	serveArgs := []string{"serve", "--mode=single", "--data-dir", dir, "--listen", addr}
+	// An operator-selected symbolication backend (private JSON, docs/operations/symbolication.md)
+	// is passed through only when the caller sets it; without it the row reports what the
+	// served process answers by default on this host.
+	if cfg := os.Getenv("SOUNDPOST_SMOKE_SYMBOLICATE_CONFIG"); cfg != "" {
+		serveArgs = append(serveArgs, "--symbolicate-config", cfg)
+	}
+	s.cmd = exec.Command(exe, serveArgs...)
 	s.cmd.Stdout, s.cmd.Stderr = s.logs, s.logs
 	s.cmd.Env = []string{"PATH=" + os.Getenv("PATH")}
 	if err = s.cmd.Start(); err != nil {
