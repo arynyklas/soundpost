@@ -173,6 +173,9 @@ func openWith(dir string, options *replicationOptions, meter storage.DiskMeter, 
 	if e != nil {
 		return fail(e)
 	}
+	if e = BindRetentionReferences(ret, artifactLifecycle, replayService); e != nil {
+		return fail(e)
+	}
 	indexed, e := NewReplayIndexingAppender(engine, replayService)
 	if e != nil {
 		return fail(e)

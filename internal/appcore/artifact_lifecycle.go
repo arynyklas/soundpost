@@ -23,16 +23,18 @@ const artifactReadCacheBytes = 4 << 20
 //   - on the artifact Service, as its read gate: every read (Get, ReadAuthorized,
 //     ReadSourcesAuthorized) also fences on the organization delete generation and
 //     on the artifact's reference state, and uses the visibility-bound cache;
-//   - on the retention service, as its References source
-//     (retention.Service.UseReferences): an expiry pass asks LatestReference before
-//     it erases an artifact root, so a map that a retained error, profile or build
-//     record still references is kept, a map nothing references is fenced for
-//     erasure in the same control transaction as the last check, and a reference
-//     state that cannot be verified fails the pass closed (erases nothing).
+//   - on the retention service, it is NOT bound here: retention.Service takes one
+//     References source, and the artifact lifecycle is one of two (the other is the
+//     replay service). BindRetentionReferences binds the composite once, so an expiry
+//     pass asks the artifact lifecycle before it erases an artifact root (a map that a
+//     retained error, profile or build record still references is kept, a map
+//     nothing references is fenced for erasure in the same control transaction as
+//     the last check, and a reference state that cannot be verified fails the pass
+//     closed) and the replay service before it erases a replay chunk.
 //
 // The retention service is both an input (the lifecycle takes it as its
 // delete-generation source) and the consumer of the result, so it is built first
-// and bound afterwards; UseReferences refuses a second binding.
+// and bound afterwards.
 //
 // Snapshot pins come from the real durable journal pins of the control group and
 // of every data group (see journalPins). The clock is the wall clock, the same one
@@ -52,9 +54,8 @@ func bindArtifactLifecycle(store artifacts.StateStore, service *artifacts.Servic
 	if err != nil {
 		return nil, err
 	}
-	if err = ret.UseReferences(life); err != nil {
-		return nil, err
-	}
+	// The References binding is not made here: retention accepts exactly one source,
+	// and the artifact lifecycle is one of several (see BindRetentionReferences).
 	return life, nil
 }
 
