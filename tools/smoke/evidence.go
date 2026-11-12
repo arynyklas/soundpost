@@ -546,7 +546,7 @@ func (s *evidenceServer) journey(fx *evidenceFixture) *evidenceRows {
 		}
 	}
 
-	// Frames: the served process has no symbolicator wiring.
+	// Frames: the served process maps only when its startup sandbox probe passed.
 	st, rawFrames := s.post(analyst, "/api/v1/evidence/frames", httpapi.FramesBody{Org: orgA, Project: projA, Build: res.Build, Frames: []model.Frame{frame}})
 	var fv httpapi.FramesView
 	if st != 200 || json.Unmarshal(rawFrames, &fv) != nil || len(fv.Frames) != 1 {
@@ -554,7 +554,14 @@ func (s *evidenceServer) journey(fx *evidenceFixture) *evidenceRows {
 	} else if f := fv.Frames[0]; f.Resolved != nil && f.Resolved.Source == "simple.ts" && f.Resolved.Line == 4 && f.Resolved.Column == 8 {
 		rows.add("frame_real_mapping", true, true, "real thrown frame resolved to simple.ts:4:8")
 	} else {
-		rows.add("frame_real_mapping", true, false, fmt.Sprintf("served process answered state=%s reason=%s frame_reason=%s: `soundpost serve` has no symbolicator sandbox configuration, so no frame resolves (typed answer, original frame kept)", fv.State, fv.Reason, f.Reason))
+		startup := "no `symbolicator:` line in the serve log"
+		for _, line := range strings.Split(s.logs.String(), "\n") {
+			if strings.HasPrefix(line, "symbolicator: ") {
+				startup = "serve log: " + strings.TrimSpace(line)
+				break
+			}
+		}
+		rows.add("frame_real_mapping", true, false, fmt.Sprintf("served process answered state=%s reason=%s frame_reason=%s; %s (typed answer, original frame kept)", fv.State, fv.Reason, f.Reason, startup))
 	}
 
 	// Replay: closed-format chain through the real route.

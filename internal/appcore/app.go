@@ -238,10 +238,10 @@ func openWith(dir string, options *replicationOptions, meter storage.DiskMeter, 
 	if e != nil {
 		return fail(e)
 	}
-	// No symbolication worker is configured by default (it needs an operator sandbox
-	// config), so the frame resolver stays a nil interface and frame requests answer
-	// with the typed not_available state instead of an empty success.
-	evidence := httpapi.NewEvidence(nil, r, r)
+	// The frame resolver is never nil: until `soundpost serve` applies the operator
+	// sandbox configuration (ConfigureSymbolicator) every frame answers the typed
+	// sandbox_unavailable reason with its original frame kept.
+	evidence := httpapi.NewEvidence(sandboxUnavailable{}, r, r)
 	traces := httpapi.NewTraces(httpapi.NewStorageSpanSource(engine))
 	out := &App{Control: c, Auth: a, Storage: engine, Ingest: i, Releases: r, Artifacts: artifactService, ArtifactLifecycle: artifactLifecycle, Cache: cache, Exports: exportService, Retention: ret, Query: queryEngine, Live: liveService, Investigator: investigator, Incidents: incidentService, Jobs: jobService, Actions: actions, Evidence: evidence, Traces: traces, Replays: httpapi.NewReplays(replayService)}
 	// Built once: the profile service keys its cursors per instance.

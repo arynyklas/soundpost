@@ -54,7 +54,7 @@ canned success.
 | --- | --- | --- |
 | `artifact_upload_read_policy`: real multipart upload of the Vite map, `sourcesContent` canary stripped, private-source read refused, telemetry-only reader refused | satisfied | satisfied |
 | `error_occurrence_ingest`: real occurrence with exact build and artifact frame over HTTPS, message-bearing payload refused without echo | satisfied | satisfied |
-| `frame_real_mapping`: thrown generated position resolves to the known original `simple.ts:4:8` | satisfied with the OCI sandbox (typed `sandbox_unavailable` otherwise) | NOT SATISFIED: `soundpost serve` has no symbolicator configuration (`symbolicator_not_wired`) |
+| `frame_real_mapping`: thrown generated position resolves to the known original `simple.ts:4:8` | satisfied with the OCI sandbox (typed `sandbox_unavailable` otherwise) | NOT SATISFIED on a host where the startup probe fails (the typed `sandbox_unavailable` answer, with the serve log's `symbolicator:` line); observed satisfied in 1 of 2 runs with an explicit OCI `--symbolicate-config` (the other run answered a typed `deadline`) |
 | `frame_scope_and_build_exactness` | satisfied | (covered by the frames request above) |
 | `release_registry_view` | satisfied | not exercised (no registration route) |
 | `issue_evidence_of_ingested_error` | NOT SATISFIED: nothing groups an admitted occurrence into a `GroupingIssue` | not exercised |
@@ -75,28 +75,19 @@ Canaries: a distinct sentinel in the source map `sourcesContent`, in replay node
 text and in an error `message` field is asserted absent from every HTTP response,
 the process log and (in-process) every file of the live and restored data roots.
 
-## Wiring the parent must add (not edited here)
+## Wiring status
 
-There is no `internal/app`; the wiring package is `internal/appcore` and
-`internal/appcore/app.go` is parent-owned. The test sets `app.Evidence` itself before
-`app.Register`; for a served process `openWith` needs, after `out` is built:
+`soundpost serve` applies the symbolication configuration itself: after `appcore.Open` it
+calls `App.ConfigureSymbolicator` (flags `--symbolicate-sandbox`, `--symbolicate-config`,
+`--symbolicate-cgroup-root`; `docs/operations/symbolication.md`), which probes the sandbox
+and only then installs the real service. `appcore.Open` itself answers the typed
+`sandbox_unavailable` reason until then, never `symbolicator_not_wired`. On this
+development host the native sandbox cannot start unprivileged (probe
+`probe_file_sandbox_unavailable`), so the served-process row stays NOT SATISFIED unless an
+operator selects the OCI backend.
 
-```go
-// Operator-selected sandbox (never implicit). Config is the private JSON of
-// docs/operations/symbolication.md, read from a new serve flag
-// --symbolicate-config; absent flag keeps the typed symbolicator_not_wired state.
-if cfg != nil {
-	sym, e := out.NewSymbolicator(*cfg)
-	if e != nil {
-		out.CloseReplication()
-		return fail(e)
-	}
-	out.Evidence = httpapi.NewEvidence(sym, r, r)
-}
-```
-
-and, for the replay path, the ingest route must call
-`replays.Service.ValidateJSON(grant, raw)` before the durable append and
-`Record(grant, project, chunk, retainUntil)` after it (the receipt's replay
-`SignalDeadlines` entry supplies `retainUntil`), and register the replay service as a
-retention `References` source (`docs/protocol/replay-v1.md`).
+Replay admission runs the stateless closed-format gate before the durable append and
+`replays.Service.CheckIndex`/`RecordScope` around it (`appcore.NewReplayIndexingAppender`).
+The replay service is NOT yet registered as a retention `References` source: the one
+binding `retention.Service.UseReferences` takes is the artifact lifecycle's, so whoever wires
+replays must compose both sources (`docs/protocol/replay-v1.md`).

@@ -21,6 +21,9 @@ import (
 )
 
 func main() {
+	if code, ok := symbolicateWorker(os.Args); ok {
+		os.Exit(code)
+	}
 	if e := run(); e != nil {
 		fmt.Fprintln(os.Stderr, failureLine(os.Args, e))
 		os.Exit(1)
@@ -79,11 +82,16 @@ func run() error {
 	clusterConfig := f.String("cluster-config", "", "private mTLS node configuration JSON")
 	nodeID := f.Uint64("node-id", 0, "configured Raft node identity")
 	hold := f.String("startup-hold-file", "", "keep storage closed (GET /readyz reports startup_hold) until this file exists, e.g. a volume-mount sentinel")
+	symbolicator := addSymbolicatorFlags(f)
 	if e := f.Parse(os.Args[2:]); e != nil {
 		return e
 	}
 	if (*mode != "single" && *mode != "distributed") || *dir == "" || ((*cert == "") != (*key == "")) {
 		return fmt.Errorf("valid mode, data directory and paired TLS files required")
+	}
+	symbolicateSettings, e := symbolicator.settings()
+	if e != nil {
+		return e
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -120,6 +128,8 @@ func run() error {
 		return e
 	}
 	defer core.Close()
+	// Probes the sandbox, then swaps the frame resolver; this MUST precede Register.
+	fmt.Fprintln(os.Stderr, symbolicatorNotice(core.ConfigureSymbolicator(ctx, symbolicateSettings)))
 	store, service := core.Control, core.Auth
 	if _, e := store.BootstrapToken(); e == nil {
 		fmt.Fprintln(os.Stderr, bootstrapNotice(*dir))
