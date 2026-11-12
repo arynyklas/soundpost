@@ -48,7 +48,7 @@ A retry with the same `command_id` returns the original receipt even though the 
 
 ## Polling
 
-`GET /api/v1/lifecycle/operations/{operation_id}?org=<org_id>` (existing route, org-admin) reports the same operation through `PollDelete`. `202` is not erasure: completion needs every all-group fence and, when off-host backup is configured, the independent deletion-authority checkpoint (see [backup-restore.md](backup-restore.md)).
+`GET /api/v1/operations/{operation_id}?org=<org_id>` (org-admin) is the C11 polling route and reports the same operation through `PollDelete` as a `LifecycleOperation`. `GET /api/v1/lifecycle/operations/{operation_id}?org=<org_id>` is the older spelling of the identical answer and stays. The same `/api/v1/operations/{id}` route also answers source-policy operations (`POST /api/v1/sources/policy`), in their own, different shape (the source fence, not `LifecycleOperation`), with or without `org`. A deletion id needs `org`: nothing maps a deletion id to its organization without a scope, so without `org` it is a plain 404. A foreign, missing or wrongly scoped id of either kind is the same 404; which store holds an id is not observable. `202` is not erasure: completion needs every all-group fence and, when off-host backup is configured, the independent deletion-authority checkpoint (see [backup-restore.md](backup-restore.md)).
 
 ## Wiring
 

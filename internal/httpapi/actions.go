@@ -728,11 +728,16 @@ func actionReply(w http.ResponseWriter, v any, err error) {
 //	POST /api/v1/actions                       ActionBody -> ActionResponse (409 ActionConflict)
 //	POST /api/v1/incidents/get                 IncidentGetBody -> IncidentView
 //	POST /api/v1/queue                         QueueBody -> QueueView
-//	GET  /api/v1/lifecycle/operations/{id}     ?org= -> LifecycleOperation
+//	GET  /api/v1/operations/{id}               [?org=] -> LifecycleOperation | source operation
+//	GET  /api/v1/lifecycle/operations/{id}     ?org= -> LifecycleOperation (alias)
 //
-// GET /api/v1/operations/{id} is already served by RegisterSourcePolicyRoutes
-// for source operations, so deletion/restriction polling lives under /lifecycle.
+// GET /api/v1/operations/{id} is the one C11 polling route and is shared with
+// RegisterSourcePolicyRoutes (see operationPoller): it answers source-policy
+// operations in their own shape and, with ?org=, lifecycle operations as
+// LifecycleOperation. The /lifecycle path is the older spelling of the same
+// lifecycle answer and stays.
 func RegisterActionRoutes(mux *http.ServeMux, authority *auth.Service, actions *Actions) {
+	operationRoute(mux, authority).actions.Store(actions)
 	mux.HandleFunc("POST /api/v1/actions", func(w http.ResponseWriter, r *http.Request) {
 		credential, err := artifactCredential(authority, w, r)
 		if err != nil {

@@ -17,8 +17,9 @@ import (
 )
 
 // Deleter is the one C11 call that BEGINS a deletion. *retention.Service
-// implements it. Polling is not part of it: GET /api/v1/lifecycle/operations/{id}
-// already delegates PollDelete and is not duplicated here.
+// implements it. Polling is not part of it: GET /api/v1/operations/{id}?org=
+// (alias /api/v1/lifecycle/operations/{id}) already delegates PollDelete and is
+// not duplicated here.
 type Deleter interface {
 	Delete(ctx context.Context, scope auth.Scope, req retention.DeleteRequest) (retention.DeleteReceipt, error)
 }
@@ -150,7 +151,7 @@ func nilDeleter(d Deleter) bool {
 // CALLER's credential for the requested org with organization-admin permission:
 // another org, a non-admin and a missing org are the same NotFound. A retry of
 // the same CommandID returns the original receipt. Poll with
-// GET /api/v1/lifecycle/operations/{id}.
+// GET /api/v1/operations/{id}?org= (or the /api/v1/lifecycle alias).
 func RegisterDeletionRoutes(mux *http.ServeMux, authority *auth.Service, deleter Deleter) {
 	mux.HandleFunc("POST /api/v1/admin/deletions", func(w http.ResponseWriter, r *http.Request) {
 		credential, err := artifactCredential(authority, w, r)
