@@ -132,6 +132,9 @@ func (s *Service) receipt(ctx context.Context, org, id model.ID) (out DeleteRece
 	})
 	if err == nil && out.Physical == PhysicalDone {
 		out.Residual = s.cfg.Data.ResidualStores()
+		if t, ok := s.cfg.Data.(ErasureTracker); ok {
+			out.Residual = mergeResidual(out.Residual, t.ErasureResidual(id))
+		}
 	}
 	return
 }

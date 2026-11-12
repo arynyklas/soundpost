@@ -65,6 +65,9 @@ type walEntry struct {
 	// DeleteBarrier is the data-slot tombstone of a C12 deletion saga
 	// (Type "delete_barrier", replicated as a replica.Barrier).
 	DeleteBarrier *model.DeleteBarrier `json:"delete_barrier,omitempty"`
+	// EraseAck is one voter's statement that its own copy of the listed deletion operations'
+	// bytes is gone and scrubbed (Type "erase_ack", replicated as a replica.Barrier in slot 0).
+	EraseAck *eraseAck `json:"erase_ack,omitempty"`
 	// Redaction marks a stored command whose erased records were physically
 	// removed locally (Type "batch_redacted"/"artifact_redacted"). It is never
 	// proposed to Raft: every voter derives it from the replicated tombstone.

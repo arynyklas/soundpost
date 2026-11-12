@@ -292,9 +292,17 @@ func (s *Service) physical(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	tracker, _ := s.cfg.Data.(ErasureTracker)
+	// Physical erasure is per voter. PhysicalAt is one cluster-wide fact recorded by whichever
+	// voter finished first; a voter that has not erased the operation itself still owes it and
+	// erases from its own stores now (the tombstone it applied and the completed operation in
+	// the control state say what).
 	byOrg := map[model.ID][]model.DeletionOperation{}
 	for _, op := range ops {
-		if op.Phase == model.DeletePhaseComplete && op.PhysicalAt == 0 {
+		if op.Phase != model.DeletePhaseComplete {
+			continue
+		}
+		if op.PhysicalAt == 0 || tracker != nil && !tracker.ErasedLocally(op.Predicate.Operation) {
 			byOrg[op.Predicate.Org] = append(byOrg[op.Predicate.Org], op)
 		}
 	}
@@ -305,10 +313,11 @@ func (s *Service) physical(ctx context.Context) error {
 	sort.Slice(orgs, func(i, j int) bool { return orgs[i].String() < orgs[j].String() })
 	var errs []error
 	type cleaned struct {
-		org    model.ID
-		ids    []model.ID
-		pred   model.DeletePredicate
-		erased uint64 // records and artifact roots this pass erased for the organization
+		org     model.ID
+		ids     []model.ID // every operation this voter erased
+		pending []model.ID // the ones the control state has not recorded yet
+		pred    model.DeletePredicate
+		erased  uint64 // records and artifact roots this pass erased for the organization
 	}
 	var ready []cleaned
 	for _, org := range orgs {
@@ -317,15 +326,21 @@ func (s *Service) physical(ctx context.Context) error {
 			errs = append(errs, err)
 			continue
 		}
-		if _, err = s.cfg.Control.AdvanceDeleteGeneration(ctx, org); err != nil {
-			errs = append(errs, err)
-			continue
-		}
 		preds := make([]model.DeletePredicate, 0, len(byOrg[org]))
 		ids := make([]model.ID, 0, len(byOrg[org]))
+		var pending []model.ID
 		for _, op := range byOrg[org] {
 			preds = append(preds, op.Predicate)
 			ids = append(ids, op.Predicate.Operation)
+			if op.PhysicalAt == 0 {
+				pending = append(pending, op.Predicate.Operation)
+			}
+		}
+		if len(pending) > 0 {
+			if _, err = s.cfg.Control.AdvanceDeleteGeneration(ctx, org); err != nil {
+				errs = append(errs, err)
+				continue
+			}
 		}
 		report, err := s.cfg.Data.EraseDeleted(ctx, preds, guard)
 		if err != nil {
@@ -341,7 +356,7 @@ func (s *Service) physical(ctx context.Context) error {
 		// erased bytes landed in are zeroed: a pass that could not finish its scrub (a reader
 		// was open) has not erased them from apply.db, and the next pass retries.
 		if report.Held == 0 && !report.ScrubPending {
-			ready = append(ready, cleaned{org: org, ids: ids, pred: preds[0], erased: report.Records + report.Blobs})
+			ready = append(ready, cleaned{org: org, ids: ids, pending: pending, pred: preds[0], erased: report.Records + report.Blobs})
 		}
 	}
 	if len(ready) > 0 {
@@ -357,7 +372,16 @@ func (s *Service) physical(ctx context.Context) error {
 			return errors.Join(append(errs, err)...)
 		}
 		for _, r := range ready {
-			held, err := s.cfg.Control.RecordPhysicalCleanup(ctx, r.org, r.ids, s.now())
+			if tracker != nil {
+				if err := tracker.MarkErased(r.ids); err != nil {
+					errs = append(errs, err)
+					continue
+				}
+			}
+			if len(r.pending) == 0 {
+				continue
+			}
+			held, err := s.cfg.Control.RecordPhysicalCleanup(ctx, r.org, r.pending, s.now())
 			if err != nil {
 				errs = append(errs, err)
 				continue
@@ -369,6 +393,13 @@ func (s *Service) physical(ctx context.Context) error {
 				s.status.ErasedBeforeHold += r.erased
 				s.mu.Unlock()
 			}
+		}
+	}
+	// This voter's acknowledgement to the group that its own stores are clean for every
+	// operation it erased; the receipt names the data store until every member has one.
+	if tracker != nil {
+		if err := tracker.AckErasure(ctx); err != nil {
+			errs = append(errs, err)
 		}
 	}
 	return errors.Join(errs...)

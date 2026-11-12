@@ -173,6 +173,11 @@ func (e *Engine) ResidualStores() []string {
 		return []string{ResidualRaftJournal, ResidualRaftSnapshots, ResidualLegacyWAL}
 	}
 	set := map[string]bool{}
+	// The free pages of this node's own apply.db still hold bytes an erasure removed from every
+	// bucket until the owed scrub ran (a snapshot install or an interrupted pass leaves it owed).
+	if erased, done, err := e.scrubSequences(); err != nil || done < erased {
+		set[ResidualApplyDB] = true
+	}
 	for slot := range uint16(64) {
 		if e.redact.dirty[slot].Load() {
 			set[ResidualRaftCompletedEntries] = true

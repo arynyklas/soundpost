@@ -440,7 +440,7 @@ func (e *Engine) commitReplicated(slot uint16, index uint64, entry walEntry) err
 		}
 		id := entry.Cancel.ReservationID
 		reservation = &id
-	case "fence", "delete_barrier":
+	case "fence", "delete_barrier", "erase_ack":
 		kind = replica.Barrier
 	case "artifact_fragment":
 		kind = replica.Artifact
@@ -750,6 +750,12 @@ func (m *slotMachine) Validate(ctx context.Context, command replica.Entry) error
 			}
 			break
 		}
+		if entry.Type == "erase_ack" {
+			if entry.EraseAck == nil {
+				return model.Fail(model.Invalid)
+			}
+			break
+		}
 		if entry.Type != "fence" || entry.Fence == nil {
 			return model.Fail(model.Invalid)
 		}
@@ -929,6 +935,9 @@ func (m *slotMachine) validRouting(command replica.Entry, entry walEntry) bool {
 		if entry.Type == "delete_barrier" {
 			b := entry.DeleteBarrier
 			return b != nil && entry.Fence == nil && command.ReservationID == nil && b.Cursor == (model.Cursor{Group: owner, Index: index}) && b.Predicate.Validate() == nil
+		}
+		if entry.Type == "erase_ack" {
+			return m.slot == eraseAckSlot && entry.EraseAck.valid() && entry.Fence == nil && command.ReservationID == nil && entry.EraseAck.Cursor == (model.Cursor{Group: owner, Index: index})
 		}
 		return entry.Fence != nil && command.ReservationID == nil && len(entry.Fence.Barriers) == 1 && entry.Fence.Barriers[0].Group == owner && entry.Fence.Barriers[0].Index == index
 	case replica.Artifact:

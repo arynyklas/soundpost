@@ -2,7 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 package retention
 
-import "sort"
+import (
+	"context"
+	"sort"
+
+	"soundpost/internal/model"
+)
 
 // ResidualSource names the local stores that can still hold a copy of deleted
 // bytes right now, in the vocabulary of storage.Engine.ResidualStores. The
@@ -51,6 +56,71 @@ func (p ResidualPlane) ResidualStores() []string {
 	var out []string
 	seen := map[string]bool{}
 	for _, list := range [][]string{p.DataPlane.ResidualStores(), p.controlResiduals()} {
+		for _, name := range list {
+			if !seen[name] {
+				seen[name] = true
+				out = append(out, name)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// ErasureTracker is the per-voter bookkeeping of physical erasure (storage.Engine implements
+// it). PhysicalAt in the control state is one cluster-wide fact, so a voter that did not run the
+// erasure itself must still run it (ErasedLocally false), and a receipt names the data store
+// until every voter of the group acknowledged the operation (ErasureResidual). A DataPlane
+// without it (a fake) is treated as having no per-voter state.
+type ErasureTracker interface {
+	ErasedLocally(op model.ID) bool
+	MarkErased(ops []model.ID) error
+	AckErasure(ctx context.Context) error
+	ErasureResidual(op model.ID) []string
+}
+
+func (p ResidualPlane) tracker() ErasureTracker {
+	t, _ := p.DataPlane.(ErasureTracker)
+	return t
+}
+
+// ErasedLocally forwards to the data plane's tracker; without one nothing is owed per voter.
+func (p ResidualPlane) ErasedLocally(op model.ID) bool {
+	if t := p.tracker(); t != nil {
+		return t.ErasedLocally(op)
+	}
+	return true
+}
+
+// MarkErased forwards to the data plane's tracker.
+func (p ResidualPlane) MarkErased(ops []model.ID) error {
+	if t := p.tracker(); t != nil {
+		return t.MarkErased(ops)
+	}
+	return nil
+}
+
+// AckErasure forwards to the data plane's tracker.
+func (p ResidualPlane) AckErasure(ctx context.Context) error {
+	if t := p.tracker(); t != nil {
+		return t.AckErasure(ctx)
+	}
+	return nil
+}
+
+// ErasureResidual forwards to the data plane's tracker.
+func (p ResidualPlane) ErasureResidual(op model.ID) []string {
+	if t := p.tracker(); t != nil {
+		return t.ErasureResidual(op)
+	}
+	return nil
+}
+
+// mergeResidual is the union of two residual lists, each name once, sorted; nil when empty.
+func mergeResidual(a, b []string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, list := range [][]string{a, b} {
 		for _, name := range list {
 			if !seen[name] {
 				seen[name] = true

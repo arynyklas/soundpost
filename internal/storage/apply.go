@@ -188,6 +188,10 @@ func (e *Engine) applyTx(tx *bolt.Tx, slot uint16, index uint64, entry walEntry)
 		if err := e.applyDeleteBarrier(tx, slot, index, entry); err != nil {
 			return err
 		}
+	case "erase_ack":
+		if err := applyEraseAckTx(tx, slot, entry); err != nil {
+			return err
+		}
 	case "artifact_fragment":
 		if entry.Artifact == nil || entry.Batch != nil || entry.Receipt != nil || entry.Cancel != nil || entry.Fence != nil || entry.ArtifactGC != nil {
 			return model.Fail(model.Corrupt)
