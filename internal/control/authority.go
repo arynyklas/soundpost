@@ -72,6 +72,15 @@ const (
 	// hold, deletion or access state. Without this entry every replay chunk admitted would move
 	// AuthorityRevision and starve a deletion Begin exactly as intake did.
 	writerReplayIndex writer = "ReplayIndex"
+	// writerAttestControl: a voter's own statement that its control journal and control.db are
+	// clean of the erased payloads (attest.go). It writes only that voter's attestation record
+	// (an st.OIDC resident under attestKeyPrefix) and prunes the records of nodes that left the
+	// group: evidence about files, read by the receipt, never by an authorization decision, a
+	// grant, a policy, a hold or a deletion. It is committed through updateAsGuarded with a mask
+	// that removes those records, so a change to anything else bumps AuthorityRevision as an
+	// unclassified writer would. Without this entry every attestation would move AuthorityRevision
+	// and starve a deletion Begin that holds a caller view older than it.
+	writerAttestControl writer = "AttestControl"
 )
 
 // nonAuthorityWriters is the closed allowlist of updateAs writers that leave AuthorityRevision
@@ -87,6 +96,7 @@ var nonAuthorityWriters = map[writer]string{
 	writerTransactJobs:        "job book commit",
 	writerRedactNoop:          "empty transition that only moves the applied index",
 	writerReplayIndex:         "replay checkpoint index entry and retention group deadline",
+	writerAttestControl:       "a voter's control residue attestation record (evidence about its own files)",
 }
 
 // nonAuthorityKinds is the closed allowlist of Transact kinds whose commit leaves
@@ -130,7 +140,7 @@ func (s *Store) update(ctx context.Context, bump bool, fn func(*State) error) er
 	if s.repl == nil {
 		return model.Fail(model.Unavailable)
 	}
-	return s.replicatedUpdate(ctx, bump, nil, fn)
+	return s.replicatedUpdate(ctx, bump, nil, guardAttestations(fn))
 }
 
 // authorityFloor is the oldest caller view a retention command may carry. A state that was
@@ -198,6 +208,9 @@ func (s *Store) updateAsGuarded(ctx context.Context, w writer, mask func(*State)
 	}
 	if s.repl == nil {
 		return model.Fail(model.Unavailable)
+	}
+	if w != writerAttestControl {
+		fn = guardAttestations(fn) // only the attestation writer may change an attestation
 	}
 	force := false
 	return s.replicatedUpdate(ctx, false, &force, func(st *State) error {

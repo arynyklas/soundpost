@@ -28,12 +28,29 @@ func NewResidualPlane(data DataPlane, control ResidualSource) ResidualPlane {
 	return ResidualPlane{DataPlane: data, control: control}
 }
 
+// ClusterResidualSource is a ResidualSource that also knows the other nodes of the control
+// group (control.Store.ClusterResidualStores): its list is what a receipt carries, because
+// the control journal and control.db are rewritten and scrubbed per voter and a receipt must
+// not call them clean while another voter has not attested its own copy. A source without it
+// (a fake, a store without a replication group) answers for itself only.
+type ClusterResidualSource interface {
+	ResidualSource
+	ClusterResidualStores() []string
+}
+
+func (p ResidualPlane) controlResiduals() []string {
+	if c, ok := p.control.(ClusterResidualSource); ok {
+		return c.ClusterResidualStores()
+	}
+	return p.control.ResidualStores()
+}
+
 // ResidualStores is the union of the engine's and the control store's residual
 // stores, each name once, sorted; nil when neither owes anything.
 func (p ResidualPlane) ResidualStores() []string {
 	var out []string
 	seen := map[string]bool{}
-	for _, list := range [][]string{p.DataPlane.ResidualStores(), p.control.ResidualStores()} {
+	for _, list := range [][]string{p.DataPlane.ResidualStores(), p.controlResiduals()} {
 		for _, name := range list {
 			if !seen[name] {
 				seen[name] = true

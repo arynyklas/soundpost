@@ -30,6 +30,21 @@ const (
 	ResiduePins = "raft_journal_pins"
 )
 
+// ProofWatcher is implemented by a machine that wants to know when the group drops the proof a
+// redaction pass left (MachineResidue turns non-empty): when a snapshot is restored from the
+// leader and when a stale control command is committed. The control store withdraws its
+// cluster attestation (internal/control/attest.go) on it. ProofWithdrawn is called with the
+// group lock held, from the apply path: it must return at once and must not call back into the
+// group (a channel send that cannot block is the intended body).
+type ProofWatcher interface{ ProofWithdrawn() }
+
+// proofWithdrawn tells the machine, when it is a ProofWatcher, that the proof is gone.
+func (g *Group) proofWithdrawn() {
+	if w, ok := g.machine.(ProofWatcher); ok {
+		w.ProofWithdrawn()
+	}
+}
+
 // MachineRedaction is the state machine's half of redacting its retained commands: given the
 // payload of one retained command it returns the payload to retain instead, and changed=false
 // (replacement ignored) when nothing in it is to be forgotten. It must be a pure function of the

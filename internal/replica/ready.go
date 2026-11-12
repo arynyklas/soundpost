@@ -444,6 +444,7 @@ func (g *Group) applyCommitted(ent *pb.Entry) error {
 		c.Outcome = "conflict"
 		if c.Entry.Kind == Control {
 			g.machineRules = 0 // a stale command still carries the state it was built from
+			g.proofWithdrawn()
 		}
 	}
 	g.applied = ent.GetIndex()
@@ -535,6 +536,7 @@ func (g *Group) restoreSnapshot(snap *pb.Snapshot) error {
 		}
 		g.completed[c.Entry.ID] = g.retained(c)
 	}
+	g.proofWithdrawn()
 	return nil
 }
 

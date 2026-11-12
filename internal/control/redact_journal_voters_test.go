@@ -123,6 +123,14 @@ type controlVoters struct {
 	stores map[uint64]*control.Store
 	dirs   map[uint64]string
 	fx     map[uint64]*eraseFx
+	down   map[uint64]bool // voters a test took out of the group or off the network for good
+	// genesis is what every voter was opened from; a voter that joins later is opened from the same.
+	genesis voterGenesis
+}
+
+type voterGenesis struct {
+	seed                     []byte
+	application, index, term uint64
 }
 
 func newControlVoters(t *testing.T) *controlVoters {
@@ -137,6 +145,7 @@ func newControlVoters(t *testing.T) *controlVoters {
 		t.Fatal(err)
 	}
 	v := &controlVoters{t: t, mesh: newVoterMesh(), stores: map[uint64]*control.Store{}, dirs: map[uint64]string{}, fx: map[uint64]*eraseFx{}}
+	v.genesis = voterGenesis{seed: seed, application: application, index: position.Applied + 1, term: position.Term + 1}
 	t.Cleanup(func() {
 		for _, s := range v.stores {
 			s.Close()

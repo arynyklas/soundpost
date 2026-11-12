@@ -23,6 +23,12 @@ type replicatedControl struct {
 	store *Store
 	group *replica.Group
 	local *replica.Loopback
+	// withdraw, ctx, cancel and done belong to withdrawLoop (attest.go): the group signals on
+	// withdraw when it drops its redaction proof; close cancels ctx and waits for done.
+	withdraw chan struct{}
+	ctx      context.Context
+	cancel   context.CancelFunc
+	done     chan struct{}
 }
 type controlReplacement struct {
 	Expected model.Revision     `json:"expected"`
@@ -64,7 +70,7 @@ func (s *Store) EnableReplication(c replica.Config) (*replica.Group, error) {
 	if s.repl != nil {
 		return nil, model.Fail(model.Conflict)
 	}
-	m := &replicatedControl{store: s}
+	m := &replicatedControl{store: s, withdraw: make(chan struct{}, 1)}
 	if err := s.initializeConsensusNamespace(c.Directory); err != nil {
 		return nil, err
 	}
@@ -85,12 +91,16 @@ func (s *Store) EnableReplication(c replica.Config) (*replica.Group, error) {
 		}
 		c.Application = uint64(snapshot.State.Revision)
 	}
+	m.ctx, m.cancel = context.WithCancel(context.Background())
+	m.done = make(chan struct{})
 	group, err := replica.Open(c)
 	if err != nil {
+		m.cancel()
 		return nil, err
 	}
 	m.group = group
 	s.repl = m
+	go m.withdrawLoop()
 	return group, nil
 }
 func (s *Store) ReplicationSeed() ([]byte, uint64, error) {
@@ -691,6 +701,10 @@ func (s *Store) EnableSingle(ctx context.Context, directory string) error {
 	return err
 }
 func (r *replicatedControl) close() error {
+	if r.cancel != nil {
+		r.cancel() // the attestation withdrawal loop stops before the group it talks to closes
+		<-r.done
+	}
 	first := r.group.Close()
 	if r.local != nil {
 		if err := r.local.Close(); first == nil {

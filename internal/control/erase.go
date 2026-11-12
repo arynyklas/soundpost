@@ -604,6 +604,10 @@ func (s *Store) localState() (st State, err error) {
 //     measured, a pass that did not complete, a live backup pin and a node that
 //     has not run the pass all keep it named.
 //
+// It is the answer of THIS node about its own files. The deletion receipt carries
+// ClusterResidualStores (attest.go), which adds the stores of every other node of the
+// control group that has not attested its own copy.
+//
 // A state that cannot be read is reported as both.
 func (s *Store) ResidualStores() []string {
 	st, local, err := s.scrubState()

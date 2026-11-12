@@ -205,6 +205,14 @@ func (s *Service) driveDeletions(ctx context.Context) error {
 	if err := s.cfg.Control.RedactRetainedControlCommands(ctx); err != nil {
 		errs = append(errs, err)
 	}
+	// This node's statement to the control group that its own journal and control.db are clean
+	// (control.Store.AttestControlResidue): a receipt names the control stores until every node
+	// has made one. It states only what this node's residue measures as clean after the two
+	// calls above, and withdraws a statement that stopped holding; a no-op when the record
+	// already says that.
+	if err := s.cfg.Control.AttestControlResidue(ctx); err != nil {
+		errs = append(errs, err)
+	}
 	ops, _ = s.cfg.Control.DeletionOperations(ctx)
 	lag := 0
 	for _, op := range ops {
