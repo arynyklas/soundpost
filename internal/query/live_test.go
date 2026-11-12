@@ -1401,8 +1401,13 @@ func TestLiveRevokeBetweenPickAndRelease(t *testing.T) {
 	}
 	// The event is picked and its check is parked: commit the revocation now.
 	e.feed.last().push(storage.ChangePage{Revoked: true})
-	st := e.streamByID(open.StreamID)
+	// Ending a stream removes it from the service map, so nil here means the
+	// revocation commit already finished: there is nothing left to wait for.
 	for deadline := time.Now().Add(3 * time.Second); ; {
+		st := e.streamByID(open.StreamID)
+		if st == nil {
+			break
+		}
 		st.mu.Lock()
 		committed := st.terminal != nil && st.preempt
 		st.mu.Unlock()

@@ -24,14 +24,14 @@ func functionQuantile(q float64, xs []float64) float64 {
 		return math.Inf(1)
 	}
 	sort.Float64s(xs)
-	rank := q * float64(len(xs)-1)
+	rank := float64(q * float64(len(xs)-1))
 	lo := int(math.Floor(rank))
 	hi := lo + 1
 	if hi >= len(xs) {
 		hi = lo
 	}
 	weight := rank - float64(lo)
-	return xs[lo]*(1-weight) + xs[hi]*weight
+	return float64(xs[lo]*(1-weight)) + float64(xs[hi]*weight)
 }
 func functionKahan(xs []float64) (float64, float64) {
 	sum, comp := 0.0, 0.0
@@ -153,7 +153,7 @@ func functionRangeVariance(xs []float64) float64 {
 		count++
 		delta := x - (mean + meanComp)
 		mean, meanComp = functionKahanAdd(mean, meanComp, delta/count)
-		m2, m2Comp = functionKahanAdd(m2, m2Comp, delta*(x-(mean+meanComp)))
+		m2, m2Comp = functionKahanAdd(m2, m2Comp, float64(delta*(x-(mean+meanComp))))
 	}
 	return (m2 + m2Comp) / count
 }
@@ -162,7 +162,7 @@ func functionVariance(xs []float64) float64 {
 	for i, x := range xs {
 		d := x - mean
 		mean += d / float64(i+1)
-		m2 += d * (x - mean)
+		m2 += float64(d * (x - mean))
 	}
 	return m2 / float64(len(xs))
 }
@@ -193,8 +193,8 @@ func functionRegression(xs []value.Sample, reference model.UnixNano) (float64, f
 		}
 		add(0, x)
 		add(1, y)
-		add(2, x*y)
-		add(3, x*x)
+		add(2, float64(x*y))
+		add(3, float64(x*x))
 	}
 	if constant {
 		if math.IsInf(first, 0) {
@@ -417,7 +417,7 @@ func functionRange(ctx context.Context, call CallPlan, args []value.Result, inde
 				slope, intercept := functionRegression(floats, reference)
 				x = slope
 				if name == "predict_linear" {
-					x = intercept + slope*functionFloat(args[1].Scalar)
+					x = intercept + float64(slope*functionFloat(args[1].Scalar))
 				}
 			case "double_exponential_smoothing":
 				if len(xs) < 2 {
@@ -427,8 +427,8 @@ func functionRange(ctx context.Context, call CallPlan, args []value.Result, inde
 				sf, tf := functionFloat(args[1].Scalar), functionFloat(args[2].Scalar)
 				level, trend := xs[0], xs[1]-xs[0]
 				for _, observation := range xs[1:] {
-					next := sf*observation + (1-sf)*(level+trend)
-					trend = tf*(next-level) + (1-tf)*trend
+					next := float64(sf*observation) + float64((1-sf)*(level+trend))
+					trend = float64(tf*(next-level)) + float64((1-tf)*trend)
 					level = next
 				}
 				x = level

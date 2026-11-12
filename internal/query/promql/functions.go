@@ -298,7 +298,7 @@ func EvalFunction(ctx context.Context, call CallPlan, args []value.Result, f Fra
 					nearest = functionFloat(args[1].Scalar)
 				}
 				inverse := 1 / nearest
-				x = math.Floor(x*inverse+.5) / inverse
+				x = math.Floor(float64(x*inverse)+.5) / inverse
 			default:
 				return out, nil, functionError(call.Expr, "function.internal-unbound", "unbound function implementation")
 			}

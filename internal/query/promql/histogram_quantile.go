@@ -75,9 +75,9 @@ func histogramNativeQuantile(q float64, h model.NativeHistogram, profileID strin
 	modern := profileID == "promql-prometheus-3.13.5"
 	nanObservations := math.IsNaN(sum)
 	forward := nanObservations || q < .5
-	rank := (1 - q) * total
+	rank := float64((1 - q) * total)
 	if forward {
-		rank = q * total
+		rank = float64(q * total)
 	}
 	buckets := quantileBuckets(view, !forward)
 	var bucket nativeBucket
@@ -136,14 +136,14 @@ func histogramNativeQuantile(q float64, h model.NativeHistogram, profileID strin
 	}
 	fraction := rank / bucket.count
 	if view.Schema == -53 || bucket.lower <= 0 && bucket.upper >= 0 {
-		return bucket.lower + (bucket.upper-bucket.lower)*fraction, annotation
+		return bucket.lower + float64((bucket.upper-bucket.lower)*fraction), annotation
 	}
 	// Exponential buckets are interpolated on a logarithmic scale.
 	logLower, logUpper := math.Log2(math.Abs(bucket.lower)), math.Log2(math.Abs(bucket.upper))
 	if bucket.lower > 0 {
-		return math.Exp2(logLower + (logUpper-logLower)*fraction), annotation
+		return math.Exp2(logLower + float64((logUpper-logLower)*fraction)), annotation
 	}
-	return -math.Exp2(logUpper + (logLower-logUpper)*(1-fraction)), annotation
+	return -math.Exp2(logUpper + float64((logLower-logUpper)*(1-fraction))), annotation
 }
 
 // openMetricsFloat formats a quantile for a label value: the shortest

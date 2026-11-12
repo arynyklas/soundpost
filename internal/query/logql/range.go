@@ -493,7 +493,7 @@ func weightedQuantile(q float64, ps []rangePoint, count uint64, checks ...func()
 	if q == 1 {
 		return ps[len(ps)-1].v, nil
 	}
-	rank := q * float64(count-1)
+	rank := float64(q * float64(count-1))
 	low := uint64(math.Floor(rank))
 	if low >= count {
 		low = count - 1
@@ -525,7 +525,7 @@ func weightedQuantile(q float64, ps []rangePoint, count uint64, checks ...func()
 		return lv, nil
 	}
 	w := rank - float64(low)
-	return lv*(1-w) + hv*w, nil
+	return float64(lv*(1-w)) + float64(hv*w), nil
 }
 func metricSub(a, b int64) (int64, error) {
 	if b > 0 && a < math.MinInt64+b || b < 0 && a > math.MaxInt64+b {

@@ -127,8 +127,8 @@ func histogramNativeFraction(lower, upper float64, h model.NativeHistogram, prof
 	lo, hi, population := 0.0, 0.0, 0.0
 	for _, bucket := range histogramObservationBuckets(h) {
 		population += bucket.count
-		lo += bucket.count * histogramBucketFraction(bucket, lower)
-		hi += bucket.count * histogramBucketFraction(bucket, upper)
+		lo += float64(bucket.count * histogramBucketFraction(bucket, lower))
+		hi += float64(bucket.count * histogramBucketFraction(bucket, upper))
 	}
 	reason := ""
 	if population < total && math.IsNaN(math.Float64frombits(uint64(f.Sum))) {
@@ -183,10 +183,10 @@ func histogramExponentialFraction(lower, upper float64, f model.FloatHistogram, 
 			return (math.Log2(math.Abs(bound)) - logLower) / (logUpper - logLower)
 		}
 		if !lowerSet && b.lower < lower && b.upper > lower {
-			lowerRank, lowerSet = rank+b.count*share(lower), true
+			lowerRank, lowerSet = rank+float64(b.count*share(lower)), true
 		}
 		if !upperSet && b.lower < upper && b.upper > upper {
-			upperRank, upperSet = rank+b.count*share(upper), true
+			upperRank, upperSet = rank+float64(b.count*share(upper)), true
 		}
 		rank += b.count
 	}
@@ -283,7 +283,7 @@ func histogramClassicQuantile(q float64, b []histogramClassicBucket) (float64, b
 	if len(b) < 2 || !math.IsInf(b[len(b)-1].upper, 1) || b[len(b)-1].count == 0 {
 		return math.NaN(), forced
 	}
-	rank := q * b[len(b)-1].count
+	rank := float64(q * b[len(b)-1].count)
 	index := sort.Search(len(b)-1, func(i int) bool { return b[i].count >= rank })
 	if index == len(b)-1 {
 		return b[len(b)-2].upper, forced
@@ -295,7 +295,7 @@ func histogramClassicQuantile(q float64, b []histogramClassicBucket) (float64, b
 	if index > 0 {
 		lower, previous = b[index-1].upper, b[index-1].count
 	}
-	return lower + (b[index].upper-lower)*(rank-previous)/(b[index].count-previous), forced
+	return lower + float64((b[index].upper-lower)*(rank-previous))/(b[index].count-previous), forced
 }
 func histogramClassicFraction(lower, upper float64, b []histogramClassicBucket) float64 {
 	b, _ = histogramClassicCoalesce(b)
@@ -318,7 +318,7 @@ func histogramClassicFraction(lower, upper float64, b []histogramClassicBucket) 
 				if previous == bucket.upper {
 					return bucket.count
 				}
-				return previousCount + (bucket.count-previousCount)*math.Max(0, (bound-previous)/(bucket.upper-previous))
+				return previousCount + float64((bucket.count-previousCount)*math.Max(0, (bound-previous)/(bucket.upper-previous)))
 			}
 			previous, previousCount = bucket.upper, bucket.count
 		}
