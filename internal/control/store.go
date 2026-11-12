@@ -150,6 +150,30 @@ func (s *Store) Transact(ctx context.Context, scope auth.Scope, cmd Command) (Re
 	}
 	var out Result
 	correlationID := model.RequestCorrelationID(ctx, cmd.CommandID)
+	// A retry of an applied CommandID is answered from a linearizable read: it changes no state,
+	// so it must not propose a replacement, spend a revision or move AuthorityRevision. The
+	// checks are the ones the update function makes (scope against the state, then the owner
+	// binding); a first submission racing this read finds the other's result in the update.
+	replayed := false
+	if e := s.View(ctx, func(st State) error {
+		v, ok := st.Commands[cmd.CommandID.String()]
+		if !ok {
+			return nil
+		}
+		if err := scope.ValidateControlState(st); err != nil {
+			return err
+		}
+		if st.CommandOwners[cmd.CommandID.String()] != scope.PrincipalID().String()+":"+scope.OrgID().String()+":"+cmd.Kind {
+			return model.Fail(model.NotFound)
+		}
+		out, replayed = v, true
+		return nil
+	}); e != nil {
+		return Result{}, e
+	}
+	if replayed {
+		return out, nil
+	}
 	legacy := false
 	e := s.update(ctx, transactBumps(cmd.Kind), func(st *State) error {
 		if err := scope.ValidateControlState(*st); err != nil {

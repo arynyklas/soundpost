@@ -164,3 +164,11 @@ type ControlResult struct {
 	Cursor      Cursor   `json:"cursor"`
 	Phase       string   `json:"phase,omitempty"`
 }
+
+// The keys under which the replay index (internal/replays) keeps its entries in an
+// organization's Settings. control masks exactly these keys when it decides whether a replay
+// index write could have changed authority (Store.UpdateReplayIndex).
+const (
+	ReplayIndexKeyPrefix = "replay_index:"
+	ReplayPinKeyPrefix   = "replay_pins:"
+)

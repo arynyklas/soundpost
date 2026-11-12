@@ -3,8 +3,11 @@
 package control
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 
 	"soundpost/internal/model"
 )
@@ -127,7 +130,7 @@ func (s *Store) update(ctx context.Context, bump bool, fn func(*State) error) er
 	if s.repl == nil {
 		return model.Fail(model.Unavailable)
 	}
-	return s.replicatedUpdate(ctx, bump, fn)
+	return s.replicatedUpdate(ctx, bump, nil, fn)
 }
 
 // authorityFloor is the oldest caller view a retention command may carry. A state that was
@@ -173,9 +176,60 @@ func (s *Store) healLegacyAuthority(ctx context.Context) error {
 	return err
 }
 
-// UpdateReplayIndex commits fn as one control transition that leaves AuthorityRevision alone. It
-// is the only exported update that does, it exists for the replay index step, and any other caller
-// uses Update (which bumps). fn must write nothing but the replay index entries it is given.
+// UpdateReplayIndex commits fn as one control transition for the replay index step. It leaves
+// AuthorityRevision alone only if fn changed nothing but the replay index entries
+// (model.ReplayIndexKeyPrefix / ReplayPinKeyPrefix keys of an organization's Settings): the
+// state is encoded before and after fn with those entries masked out, and any other difference
+// bumps AuthorityRevision exactly as an unclassified writer does. A misbehaving caller is never
+// rejected (that would turn a classification mistake into data loss); it only loses the
+// exemption. Cost: two canonical encodings of the state per call (see the 10.11 report).
 func (s *Store) UpdateReplayIndex(ctx context.Context, fn func(*State) error) error {
-	return s.updateAs(ctx, writerReplayIndex, fn)
+	return s.updateAsGuarded(ctx, writerReplayIndex, stateWithoutReplayIndex, fn)
+}
+
+// updateAsGuarded is updateAs for a writer whose allowlisting depends on what it wrote: mask
+// encodes the state with the writer's own entries removed, and a difference across fn bumps.
+func (s *Store) updateAsGuarded(ctx context.Context, w writer, mask func(*State) ([]byte, error), fn func(*State) error) error {
+	if _, keep := nonAuthorityWriters[w]; !keep {
+		return s.update(ctx, true, fn)
+	}
+	if e := ctx.Err(); e != nil {
+		return e
+	}
+	if s.repl == nil {
+		return model.Fail(model.Unavailable)
+	}
+	force := false
+	return s.replicatedUpdate(ctx, false, &force, func(st *State) error {
+		before, err := mask(st)
+		if err != nil {
+			force = true
+		}
+		if err = fn(st); err != nil {
+			return err
+		}
+		after, err := mask(st)
+		if err != nil || !bytes.Equal(before, after) {
+			force = true
+		}
+		return nil
+	})
+}
+
+// stateWithoutReplayIndex is the canonical encoding of st with every organization's replay
+// index entries removed from its Settings. Orgs and their Settings are copied, never mutated.
+func stateWithoutReplayIndex(st *State) ([]byte, error) {
+	masked := *st
+	masked.Orgs = make(map[string]model.ControlOrg, len(st.Orgs))
+	for id, o := range st.Orgs {
+		settings := make(map[string]json.RawMessage, len(o.Settings))
+		for k, v := range o.Settings {
+			if !strings.HasPrefix(k, model.ReplayIndexKeyPrefix) && !strings.HasPrefix(k, model.ReplayPinKeyPrefix) {
+				settings[k] = v
+			}
+		}
+		o.Settings = settings
+		masked.Orgs[id] = o
+	}
+	return json.Marshal(masked)
 }

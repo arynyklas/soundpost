@@ -105,7 +105,7 @@ func (s *Store) ReplicationSeed() ([]byte, uint64, error) {
 	}
 	return raw, uint64(snapshot.State.Revision), nil
 }
-func (s *Store) replicatedUpdate(ctx context.Context, bump bool, fn func(*State) error) error {
+func (s *Store) replicatedUpdate(ctx context.Context, bump bool, force *bool, fn func(*State) error) error {
 	s.updateMu.Lock()
 	defer s.updateMu.Unlock()
 	r := s.repl
@@ -131,7 +131,7 @@ func (s *Store) replicatedUpdate(ctx context.Context, bump bool, fn func(*State)
 	st.Revision = expected + 1
 	// Set after fn, never before: fn cannot forge, lower or suppress the field. A writer on the
 	// non-authority allowlist leaves the value it found.
-	if bump {
+	if bump || force != nil && *force {
 		st.AuthorityRevision = st.Revision
 	} else {
 		st.AuthorityRevision = priorAuthority

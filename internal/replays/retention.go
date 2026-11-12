@@ -14,8 +14,8 @@ import (
 )
 
 const (
-	groupPrefix  = "replay_index:"
-	pinPrefix    = "replay_pins:"
+	groupPrefix  = model.ReplayIndexKeyPrefix
+	pinPrefix    = model.ReplayPinKeyPrefix
 	groupVersion = 1
 	// retainCoalesce is the slack by which a replay group deadline may trail the
 	// deadline of its newest chunk. It bounds control writes to one per minute

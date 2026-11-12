@@ -184,7 +184,7 @@ func TestEveryControlWriterIsClassified(t *testing.T) {
 				switch sel.Sel.Name {
 				case "Update":
 					got[fn.Name.Name] = "bump"
-				case "updateAs":
+				case "updateAs", "updateAsGuarded":
 					if id, ok := call.Args[1].(*ast.Ident); ok {
 						got[fn.Name.Name] = id.Name
 					} else {
@@ -203,6 +203,7 @@ func TestEveryControlWriterIsClassified(t *testing.T) {
 	}
 	// updateAs forwards to update(ctx, !keep, ...): the one dispatcher.
 	delete(got, "updateAs")
+	delete(got, "updateAsGuarded") // the guarded dispatcher: forwards to update/replicatedUpdate
 	delete(want, "updateAs")
 	for name, class := range got {
 		if want[name] != class {
