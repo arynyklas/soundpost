@@ -17,7 +17,7 @@ const FRAME_REASON: Record<string, string> = {
  deadline: 'Not mapped: the resolver ran out of time for this frame.',
  sandbox_unavailable: 'Not mapped: the sandbox that resolves source maps is not available on this server, so no map was read.',
  worker_failure: 'Not mapped: the sandboxed resolver failed on this frame.',
- unmapped: 'Not mapped: this frame has no line and column to look up.',
+ unmapped: 'Not mapped: the frame has no line and column, or the source map has no mapping at that position.',
  source_context_denied: 'Mapped position unavailable: the source context was requested but the separate sources grant was not held.',
  frame_limit: 'Not mapped: more distinct frames were requested than one lookup resolves.',
  artifact_read_not_granted: 'Not mapped: your account holds telemetry access to this project but not the artifacts.read grant.',
