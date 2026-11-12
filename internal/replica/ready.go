@@ -396,9 +396,11 @@ func (g *Group) applyCommitted(ent *pb.Entry) error {
 	switch ent.GetType() {
 	case pb.EntryNormal:
 		if len(ent.GetData()) > 0 {
-			if model.StrictJSON(ent.GetData(), &c.Entry) != nil || !c.Entry.valid() {
-				return ErrInvalid
+			entry, err := g.decodeEntry(ent.GetData())
+			if err != nil {
+				return err
 			}
+			c.Entry = entry
 			c.ApplicationCursor.Index = model.Uint64(c.Entry.ApplicationIndex)
 		}
 	case pb.EntryConfChange:

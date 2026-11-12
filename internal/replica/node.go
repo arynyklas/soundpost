@@ -152,7 +152,11 @@ type Status struct {
 	Members                                      Members
 }
 type Group struct {
-	mu             sync.Mutex
+	mu      sync.Mutex
+	decoded struct {
+		data  []byte
+		entry Entry
+	}
 	id             uint64
 	group          model.ID
 	raw            *raft.RawNode
@@ -586,13 +590,29 @@ func (g *Group) WaitApplied(ctx context.Context, c model.Cursor) error {
 		}
 	}
 }
+
+// decodeEntry decodes and validates a replicated command. An entry is decoded when it is
+// remembered (persisted) and again when it is applied; the payload can be several hundred KiB, so
+// the last decoded entry is kept and reused for the very same Raft data slice (identity, and Raft
+// never mutates entry data). The cache holds the slice, so the address cannot be recycled.
+func (g *Group) decodeEntry(data []byte) (Entry, error) {
+	if len(data) > 0 && len(data) == len(g.decoded.data) && &data[0] == &g.decoded.data[0] {
+		return g.decoded.entry, nil
+	}
+	e, err := decodeEntry(data)
+	if err != nil || !e.valid() {
+		return Entry{}, ErrInvalid
+	}
+	g.decoded.data, g.decoded.entry = data, e
+	return e, nil
+}
 func (g *Group) remember(ent *pb.Entry, _ uint64) error {
 	if ent.GetType() != pb.EntryNormal || len(ent.GetData()) == 0 {
 		return nil
 	}
-	var e Entry
-	if model.StrictJSON(ent.GetData(), &e) != nil || !e.valid() {
-		return ErrInvalid
+	e, err := g.decodeEntry(ent.GetData())
+	if err != nil {
+		return err
 	}
 	if e.ApplicationIndex > g.logApplication {
 		g.logApplication = e.ApplicationIndex

@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"time"
 
 	bolt "go.etcd.io/bbolt"
@@ -21,6 +22,15 @@ import (
 
 type replicatedEngine struct{ groups [64]*replica.Group }
 type slotMachine struct {
+	// validated is the last artifact fragment that Validate decoded: the proposer validates the
+	// payload and Apply decodes the same bytes once they commit, and a fragment is hundreds of KiB.
+	// Apply reuses it only when its payload is byte-identical, so a payload that differs in any
+	// byte is decoded and checked from scratch.
+	validated struct {
+		mu      sync.Mutex
+		payload []byte
+		entry   walEntry
+	}
 	engine    *Engine
 	slot      uint16
 	authority ReplicatedAuthority
@@ -410,7 +420,7 @@ func (e *Engine) commitReplicated(slot uint16, index uint64, entry walEntry) err
 	if slot >= 64 || index == 0 || index != e.indexes[slot]+1 {
 		return model.Fail(model.Stale)
 	}
-	raw, err := json.Marshal(entry)
+	raw, err := encodeWAL(entry)
 	if err != nil {
 		return model.Fail(model.Invalid)
 	}
@@ -456,9 +466,19 @@ func (m *slotMachine) Applied() uint64 {
 	})
 	return applied
 }
-func adaptedEntry(c replica.CommittedEntry) (walEntry, error) {
-	var entry walEntry
-	if json.Unmarshal(c.Entry.Payload, &entry) != nil {
+func (m *slotMachine) decode(payload []byte) (walEntry, error) {
+	m.validated.mu.Lock()
+	if len(payload) > 0 && bytes.Equal(payload, m.validated.payload) {
+		entry := m.validated.entry
+		m.validated.mu.Unlock()
+		return entry, nil
+	}
+	m.validated.mu.Unlock()
+	return decodeWAL(payload)
+}
+func (m *slotMachine) adaptedEntry(c replica.CommittedEntry) (walEntry, error) {
+	entry, err := m.decode(c.Entry.Payload)
+	if err != nil {
 		return entry, model.Fail(model.Corrupt)
 	}
 	if entry.Type == "cancel" {
@@ -492,7 +512,7 @@ func (m *slotMachine) Apply(c replica.CommittedEntry) error {
 	entry := walEntry{}
 	var err error
 	if c.Entry.Kind != replica.Noop {
-		entry, err = adaptedEntry(c)
+		entry, err = m.adaptedEntry(c)
 		if err != nil {
 			return err
 		}
@@ -508,7 +528,7 @@ func (m *slotMachine) Apply(c replica.CommittedEntry) error {
 		if original.Type == "rejected" && original.Rejection != nil && *original.Rejection == c.Entry.ID {
 			return replica.ErrConflict
 		}
-		expected, err := json.Marshal(entry)
+		expected, err := encodeWAL(entry)
 		if err != nil || !sameCommand(stored, expected) {
 			return model.Fail(model.Corrupt)
 		}
@@ -558,7 +578,7 @@ func (m *slotMachine) Apply(c replica.CommittedEntry) error {
 	}
 	var payload []byte
 	if c.Entry.Kind != replica.Noop {
-		payload, err = json.Marshal(entry)
+		payload, err = encodeWAL(entry)
 		if err != nil {
 			return err
 		}
@@ -691,8 +711,8 @@ func (m *slotMachine) Restore(raw []byte, physical uint64) error {
 	return err
 }
 func (m *slotMachine) Validate(ctx context.Context, command replica.Entry) error {
-	var entry walEntry
-	if json.Unmarshal(command.Payload, &entry) != nil || !m.validRouting(command, entry) {
+	entry, err := m.decode(command.Payload)
+	if err != nil || !m.validRouting(command, entry) {
 		return model.Fail(model.Invalid)
 	}
 	switch command.Kind {
@@ -710,6 +730,9 @@ func (m *slotMachine) Validate(ctx context.Context, command replica.Entry) error
 		if err := m.authority.ValidateReplicatedFragment(ctx, *entry.Artifact); err != nil {
 			return err
 		}
+		m.validated.mu.Lock()
+		m.validated.payload, m.validated.entry = bytes.Clone(command.Payload), entry
+		m.validated.mu.Unlock()
 	case replica.ArtifactGC:
 		if entry.Type != "artifact_gc" || entry.ArtifactGC == nil {
 			return model.Fail(model.Invalid)

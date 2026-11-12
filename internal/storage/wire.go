@@ -35,12 +35,24 @@ type durableEntry struct {
 	Redaction     *redaction                  `json:"redaction,omitempty"`
 }
 
-func (entry walEntry) MarshalJSON() ([]byte, error) {
+func (entry walEntry) MarshalJSON() ([]byte, error) { return encodeWAL(entry) }
+
+// encodeWAL is json.Marshal(entry) without the second validate-and-copy pass that json.Marshal
+// makes over the output of MarshalJSON; the bytes are the same.
+func encodeWAL(entry walEntry) ([]byte, error) {
 	wire := durableEntry{Type: entry.Type, Receipt: entry.Receipt, Cancel: entry.Cancel, Fence: entry.Fence, Artifact: entry.Artifact, ArtifactGC: entry.ArtifactGC, Rejection: entry.Rejection, CommitSet: entry.CommitSet, DeleteBarrier: entry.DeleteBarrier, Redaction: entry.Redaction}
 	if b := entry.Batch; b != nil {
 		wire.Batch = &durableBatch{Org: b.Org, Hash: b.Hash, Canonical: b.Canonical, PolicyEpoch: b.PolicyEpoch, PolicyHash: b.PolicyHash, AdmissionAt: b.AdmissionAt, Deadlines: b.Deadlines, Reservation: b.Reservation}
 	}
 	return json.Marshal(wire)
+}
+
+// decodeWAL is json.Unmarshal(raw, &entry) without the outer pass that only re-validates and
+// copies raw before handing it to UnmarshalJSON, which validates strictly itself.
+func decodeWAL(raw []byte) (walEntry, error) {
+	var entry walEntry
+	err := entry.UnmarshalJSON(raw)
+	return entry, err
 }
 func (entry *walEntry) UnmarshalJSON(raw []byte) error {
 	var wire durableEntry

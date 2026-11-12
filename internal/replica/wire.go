@@ -9,22 +9,39 @@ import (
 
 // The Go consensus primitive uses uint64. JSON boundaries decode through the
 // owned canonical decimal scalar, rejecting numeric JSON and noncanonical forms.
+type entryWire struct {
+	ID            model.ID            `json:"id"`
+	Kind          Kind                `json:"kind"`
+	Payload       []byte              `json:"payload"`
+	ReservationID *model.ID           `json:"reservation_id,omitempty"`
+	Application   model.Uint64        `json:"application_index"`
+	CommitSet     *CommitSetWatermark `json:"commit_set,omitempty"`
+	Original      *model.Hash         `json:"original,omitempty"`
+}
+
+func (w entryWire) entry() Entry {
+	return Entry{ID: w.ID, Kind: w.Kind, Payload: w.Payload, ReservationID: w.ReservationID, ApplicationIndex: uint64(w.Application), CommitSet: w.CommitSet, Original: w.Original}
+}
+
 func (e *Entry) UnmarshalJSON(raw []byte) error {
-	var wire struct {
-		ID            model.ID            `json:"id"`
-		Kind          Kind                `json:"kind"`
-		Payload       []byte              `json:"payload"`
-		ReservationID *model.ID           `json:"reservation_id,omitempty"`
-		Application   model.Uint64        `json:"application_index"`
-		CommitSet     *CommitSetWatermark `json:"commit_set,omitempty"`
-		Original      *model.Hash         `json:"original,omitempty"`
-	}
+	var wire entryWire
 	if model.StrictJSON(raw, &wire) != nil {
 		return ErrInvalid
 	}
-	*e = Entry{ID: wire.ID, Kind: wire.Kind, Payload: wire.Payload, ReservationID: wire.ReservationID, ApplicationIndex: uint64(wire.Application), CommitSet: wire.CommitSet, Original: wire.Original}
+	*e = wire.entry()
 	return nil
 }
+
+// decodeEntry is model.StrictJSON(data, &Entry) with one validation and one decode of data:
+// Entry.UnmarshalJSON would validate and decode the same bytes again from inside the outer decode.
+func decodeEntry(data []byte) (Entry, error) {
+	var wire entryWire
+	if model.StrictJSON(data, &wire) != nil {
+		return Entry{}, ErrInvalid
+	}
+	return wire.entry(), nil
+}
+
 func (c *CommittedEntry) UnmarshalJSON(raw []byte) error {
 	var wire struct {
 		Group       model.ID     `json:"group"`
