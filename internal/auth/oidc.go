@@ -108,7 +108,7 @@ func (s *Service) OIDCCallback(ctx context.Context, cfg OIDCConfig, binding, sta
 		return Session{}, model.Fail(model.Forbidden)
 	}
 	out := s.newSession(user)
-	e = s.store.Update(ctx, func(st *model.ControlState) error {
+	e = s.updateSession(ctx, func(st *model.ControlState) error {
 		u, ok := st.Users[user.String()]
 		if !ok || u.Disabled {
 			return model.Fail(model.Forbidden)

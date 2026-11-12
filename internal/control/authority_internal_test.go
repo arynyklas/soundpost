@@ -51,7 +51,7 @@ func sortedKeys[K ~string, V any](m map[K]V) []string {
 // The tables ARE the review surface of the AuthorityRevision design: this test pins their exact
 // content, so adding or moving a writer is a change a reviewer has to look at in this file too.
 func TestAuthorityClassificationTablesAreExact(t *testing.T) {
-	if got, want := strings.Join(sortedKeys(nonAuthorityWriters), ","), "AttestControl,CancelAdmission,FinalizeAdmission,PublishArtifact,ReconcileAdmissions,RedactNoop,ReplayIndex,ReserveAdmission,ReserveArtifact,TransactIssues,TransactJobs"; got != want {
+	if got, want := strings.Join(sortedKeys(nonAuthorityWriters), ","), "ArtifactLedger,AttestControl,CancelAdmission,FinalizeAdmission,PublishArtifact,ReconcileAdmissions,RedactNoop,ReplayIndex,ReserveAdmission,ReserveArtifact,SessionCreate,TransactIssues,TransactJobs"; got != want {
 		t.Fatalf("non-authority writers: %s, want %s", got, want)
 	}
 	if got, want := strings.Join(sortedKeys(nonAuthorityKinds), ","), "ApplyCondition,ApplyIssueEvidence,ApplyRuleEvaluation,ClaimDelivery,CompleteDelivery,IncidentAction,RegisterRelease,UpdateJob"; got != want {
@@ -146,6 +146,12 @@ func TestEveryControlWriterIsClassified(t *testing.T) {
 		"TransactIssues":      "writerTransactIssues",
 		"TransactJobs":        "writerTransactJobs",
 		"UpdateReplayIndex":   "writerReplayIndex",
+		// A login that only adds a session record (10.29): see writerSessionCreate for why it
+		// cannot change who may read; credential changes, Logout and Bootstrap keep bumping.
+		"UpdateSessionCreate": "writerSessionCreate",
+		// Reference / Unreference ledger bookkeeping (10.29): see writerArtifactLedger; the GC
+		// fence and the retire transition keep bumping.
+		"UpdateArtifactReferences": "writerArtifactLedger",
 		// A voter's own attestation record (attest.go): evidence about its files only.
 		"syncAttestation": "writerAttestControl",
 		// The dispatcher itself.
@@ -186,7 +192,7 @@ func TestEveryControlWriterIsClassified(t *testing.T) {
 				switch sel.Sel.Name {
 				case "Update":
 					got[fn.Name.Name] = "bump"
-				case "updateAs", "updateAsGuarded":
+				case "updateAs", "updateAsGuarded", "updateAsGuardedChecked":
 					if id, ok := call.Args[1].(*ast.Ident); ok {
 						got[fn.Name.Name] = id.Name
 					} else {
@@ -206,6 +212,7 @@ func TestEveryControlWriterIsClassified(t *testing.T) {
 	// updateAs forwards to update(ctx, !keep, ...): the one dispatcher.
 	delete(got, "updateAs")
 	delete(got, "updateAsGuarded") // the guarded dispatcher: forwards to update/replicatedUpdate
+	delete(got, "updateAsGuardedChecked")
 	delete(want, "updateAs")
 	for name, class := range got {
 		if want[name] != class {

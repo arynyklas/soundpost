@@ -118,6 +118,21 @@ func validEmail(v string) bool {
 func (s *Service) newSession(id model.ID) Session {
 	return Session{Token: randomToken(), CSRF: randomToken(), User: id, Expires: model.Int64(s.now().Add(12 * time.Hour).Unix())}
 }
+
+// sessionCreator is implemented by *control.Store: an update that does not move the control
+// AuthorityRevision when it only adds a session. A ControlStore without it falls back to
+// Update. Only session-creating logins (password, SSO callback) use it; Bootstrap (creates the
+// admin user), Logout and every credential change keep the always-bumping Update.
+type sessionCreator interface {
+	UpdateSessionCreate(context.Context, func(*model.ControlState) error) error
+}
+
+func (s *Service) updateSession(ctx context.Context, fn func(*model.ControlState) error) error {
+	if u, ok := s.store.(sessionCreator); ok {
+		return u.UpdateSessionCreate(ctx, fn)
+	}
+	return s.store.Update(ctx, fn)
+}
 func (s *Service) Login(ctx context.Context, email, p, code string) (Session, error) {
 	if e := s.throttle.check(ctx, email); e != nil {
 		return Session{}, e
@@ -140,7 +155,7 @@ var dummyDigest = sync.OnceValue(func() string {
 
 func (s *Service) login(ctx context.Context, email, p, code string) (Session, error) {
 	out := s.newSession(model.ID{})
-	e := s.store.Update(ctx, func(st *model.ControlState) error {
+	e := s.updateSession(ctx, func(st *model.ControlState) error {
 		for k, u := range st.Users {
 			if u.Email != email || u.Disabled {
 				continue

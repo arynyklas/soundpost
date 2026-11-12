@@ -38,8 +38,8 @@ const (
 	MaxReferenceRetention = 10 * 365 * 24 * time.Hour
 	maxLedgerEntries      = 1024
 	ledgerVersion         = 1
-	ledgerPrefix          = "artifact_refs:"
-	indexPrefix           = "artifact_refs_index:"
+	ledgerPrefix          = model.ArtifactLedgerKeyPrefix
+	indexPrefix           = model.ArtifactLedgerIndexKeyPrefix
 )
 
 // OriginCursor is the durable position of the retained record that uses the map
@@ -64,6 +64,14 @@ func (o OriginCursor) valid() bool {
 type StateStore interface {
 	View(context.Context, func(model.ControlState) error) error
 	Update(context.Context, func(*model.ControlState) error) error
+}
+
+// ledgerUpdater is implemented by *control.Store: an update that does not move the control
+// AuthorityRevision when it wrote nothing but ledger entries. Reference and Unreference use it;
+// the GC fence (bump set) keeps the always-bumping Update. A StateStore without it falls back to
+// Update.
+type ledgerUpdater interface {
+	UpdateArtifactReferences(context.Context, func(*model.ControlState) error) error
 }
 
 // SnapshotPins reports whether any local snapshot, journal or replica state
@@ -244,7 +252,11 @@ type mutation func(m model.ArtifactManifest, l *refLedger, now model.UnixNano) (
 // changed ledger is sealed together with its index entry (and, when bump is set,
 // the org delete generation advances: readable bytes are about to go).
 func (l *Lifecycle) apply(ctx context.Context, org, project model.ID, id ArtifactID, bump bool, authorize func(model.ControlState, model.ArtifactReferenceIntent) error, fn mutation) error {
-	return l.cfg.State.Update(ctx, func(st *model.ControlState) error {
+	update := l.cfg.State.Update
+	if u, ok := l.cfg.State.(ledgerUpdater); ok && !bump {
+		update = u.UpdateArtifactReferences // Reference / Unreference: ledger bookkeeping, not authority
+	}
+	return update(ctx, func(st *model.ControlState) error {
 		key := org.String() + ":" + project.String() + ":" + id.String()
 		intent, ok := st.ArtifactIntents[key]
 		if !ok || intent.State != intentPublished && intent.State != intentRetired {

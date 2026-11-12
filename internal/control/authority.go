@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"strings"
 
 	"soundpost/internal/model"
@@ -81,6 +82,25 @@ const (
 	// unclassified writer would. Without this entry every attestation would move AuthorityRevision
 	// and starve a deletion Begin that holds a caller view older than it.
 	writerAttestControl writer = "AttestControl"
+	// writerSessionCreate: a login (password or SSO) that only ADDS a session record. A session
+	// is a credential for a user whose rights are unchanged by it: every access decision is
+	// computed from Users, grants, Orgs and memberships at the time of the request, never from
+	// the session's existence, so a new session cannot widen or narrow what any principal may
+	// read, what is retained, a policy, grant, membership, hold or deletion. What DOES change
+	// authority stays bumping: revocation (Logout), disabling a user, a credential or factor
+	// change (any write to Users, including a consumed TOTP step or recovery code) and the
+	// removal or alteration of an existing session. updateAsGuardedChecked therefore masks the
+	// Sessions map and separately requires every session that existed before to be unchanged.
+	writerSessionCreate writer = "SessionCreate"
+	// writerArtifactLedger: Reference / Unreference of a published artifact map. It writes the
+	// artifact's reference ledger and its index entry (org Settings artifact_refs: and
+	// artifact_refs_index: keys), a book of "which retained record still needs this map" that
+	// the GC fence reads. It cannot change who may read the map (the scope is validated before,
+	// and a deletion predicate covering the blob refuses the write), a policy, grant, hold or
+	// deletion. The transition that retires the map (ArtifactIntents state, the org
+	// DeleteGenerations counter, the retired project set) is NOT masked and keeps bumping, as do
+	// the GC fence callers (they use the unclassified Update).
+	writerArtifactLedger writer = "ArtifactLedger"
 )
 
 // nonAuthorityWriters is the closed allowlist of updateAs writers that leave AuthorityRevision
@@ -97,6 +117,8 @@ var nonAuthorityWriters = map[writer]string{
 	writerRedactNoop:          "empty transition that only moves the applied index",
 	writerReplayIndex:         "replay checkpoint index entry and retention group deadline",
 	writerAttestControl:       "a voter's control residue attestation record (evidence about its own files)",
+	writerSessionCreate:       "a new session record for an existing user (no existing session or user changed)",
+	writerArtifactLedger:      "artifact reference ledger and index entry (retention bookkeeping, not access state)",
 }
 
 // nonAuthorityKinds is the closed allowlist of Transact kinds whose commit leaves
@@ -197,9 +219,69 @@ func (s *Store) UpdateReplayIndex(ctx context.Context, fn func(*State) error) er
 	return s.updateAsGuarded(ctx, writerReplayIndex, stateWithoutReplayIndex, fn)
 }
 
+// UpdateSessionCreate commits fn, a login that adds a session, without moving AuthorityRevision
+// when fn changed nothing but the Sessions map and left every pre-existing session byte for byte
+// as it was. Any other difference (a user record, a membership, a removed or altered session)
+// bumps as an unclassified writer does.
+func (s *Store) UpdateSessionCreate(ctx context.Context, fn func(*State) error) error {
+	return s.updateAsGuardedChecked(ctx, writerSessionCreate, stateWithoutSessions, sessionsOnlyGrow, fn)
+}
+
+// UpdateArtifactReferences commits fn, a reference-ledger write, without moving
+// AuthorityRevision when fn changed nothing but ledger and ledger-index entries in organization
+// Settings. The retire transition (intent state, delete generation) is outside the mask and bumps.
+func (s *Store) UpdateArtifactReferences(ctx context.Context, fn func(*State) error) error {
+	return s.updateAsGuarded(ctx, writerArtifactLedger, stateWithoutArtifactLedger, fn)
+}
+
+// stateWithoutSessions is the canonical encoding of st with the Sessions map removed.
+func stateWithoutSessions(st *State) ([]byte, error) {
+	masked := *st
+	masked.Sessions = nil
+	return json.Marshal(masked)
+}
+
+// sessionsOnlyGrow snapshots the sessions before fn and returns the check that every one of them
+// is still present and unchanged afterwards.
+func sessionsOnlyGrow(st *State) func(*State) bool {
+	before := maps.Clone(st.Sessions)
+	return func(after *State) bool {
+		for k, v := range before {
+			if got, ok := after.Sessions[k]; !ok || got != v {
+				return false
+			}
+		}
+		return true
+	}
+}
+
+// stateWithoutArtifactLedger is the canonical encoding of st with every organization's artifact
+// reference ledger and index entries removed from its Settings.
+func stateWithoutArtifactLedger(st *State) ([]byte, error) {
+	masked := *st
+	masked.Orgs = make(map[string]model.ControlOrg, len(st.Orgs))
+	for id, o := range st.Orgs {
+		settings := make(map[string]json.RawMessage, len(o.Settings))
+		for k, v := range o.Settings {
+			if !strings.HasPrefix(k, model.ArtifactLedgerKeyPrefix) && !strings.HasPrefix(k, model.ArtifactLedgerIndexKeyPrefix) {
+				settings[k] = v
+			}
+		}
+		o.Settings = settings
+		masked.Orgs[id] = o
+	}
+	return json.Marshal(masked)
+}
+
 // updateAsGuarded is updateAs for a writer whose allowlisting depends on what it wrote: mask
 // encodes the state with the writer's own entries removed, and a difference across fn bumps.
 func (s *Store) updateAsGuarded(ctx context.Context, w writer, mask func(*State) ([]byte, error), fn func(*State) error) error {
+	return s.updateAsGuardedChecked(ctx, w, mask, nil, fn)
+}
+
+// updateAsGuardedChecked adds an optional invariant to updateAsGuarded: preserve runs before fn
+// and returns a check run after it; a false check bumps like a mask difference.
+func (s *Store) updateAsGuardedChecked(ctx context.Context, w writer, mask func(*State) ([]byte, error), preserve func(*State) func(*State) bool, fn func(*State) error) error {
 	if _, keep := nonAuthorityWriters[w]; !keep {
 		return s.update(ctx, true, fn)
 	}
@@ -215,6 +297,10 @@ func (s *Store) updateAsGuarded(ctx context.Context, w writer, mask func(*State)
 	force := false
 	return s.replicatedUpdate(ctx, false, &force, func(st *State) error {
 		before, err := mask(st)
+		var holds func(*State) bool
+		if preserve != nil {
+			holds = preserve(st)
+		}
 		if err != nil {
 			force = true
 		}
@@ -222,7 +308,7 @@ func (s *Store) updateAsGuarded(ctx context.Context, w writer, mask func(*State)
 			return err
 		}
 		after, err := mask(st)
-		if err != nil || !bytes.Equal(before, after) {
+		if err != nil || !bytes.Equal(before, after) || holds != nil && !holds(st) {
 			force = true
 		}
 		return nil

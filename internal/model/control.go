@@ -172,3 +172,12 @@ const (
 	ReplayIndexKeyPrefix = "replay_index:"
 	ReplayPinKeyPrefix   = "replay_pins:"
 )
+
+// The keys under which the artifact reference ledger (internal/artifacts) keeps one ledger per
+// published map and one index per project in an organization's Settings. control masks exactly
+// these keys when it decides whether a ledger write could have changed authority
+// (Store.UpdateArtifactReferences).
+const (
+	ArtifactLedgerKeyPrefix      = "artifact_refs:"
+	ArtifactLedgerIndexKeyPrefix = "artifact_refs_index:"
+)
