@@ -79,6 +79,16 @@ export class Client {
  private admitProfile(input:CapabilityInput|ProfileInput):boolean{try{return this.admit(input);}catch{this.loss("invalid_profile_record");return false;}}
  /** For adapters whose own profile-to-wire mapping failed before anything reached the queue. */
  profileFailed():void{this.loss("profile_wire_failed");}
+ /** Records `count` profile samples the adapter dropped from one run (past its sample/frame/stack bounds or the browser's buffer) as a native loss of the
+  * profile_chunk signal with reason "truncated", the way every other signal loss is recorded (durable `loss` record plus the queue's per-signal counters).
+  * The diagnostics counter `profile_samples_truncated` always moves; the durable record only when the signed policy allows loss and the client is open.
+  * `atNs` is the run's wall end. Never throws; false when no durable record was made. */
+ captureProfileLoss(count:bigint,atNs:string):boolean{
+  if(typeof count!=="bigint"||count<=0n)return false;
+  this.counts.profile_samples_truncated=(this.counts.profile_samples_truncated??0)+Number(count>9007199254740991n?9007199254740991n:count);
+  if(!this.policy.decision.loss||this.closed||this.exportContext.active())return false;
+  try{if(BigInt(unixNano(atNs))>=BigInt(this.policy.expiresNs))return false;return this.delivery.recordSignalLoss("profile_chunk","truncated",count,atNs);}catch{return false;}
+ }
  ownHookLease(lease:OwnedHookLease):void{if(this.closed)throw Error("client closed");if(this.hookLeases.size>=8)throw Error("hook lease limit");this.hookLeases.add(lease);}
  releaseHookLease(lease:OwnedHookLease):void{this.hookLeases.delete(lease);}
  captureLog(template:string,fields:Readonly<Record<string,unknown>>):EventId|undefined{

@@ -5,9 +5,9 @@
 // Self-Profiling API); the transport is a recording ledger that issues genuine receipts for the batches the queue freezes.
 // What the real server stores for these records is observed by the journeys smoke on Linux Chrome, not here.
 import {test, expect} from "bun:test";
-import {init, type Client} from "../src/index.ts";
+import {init, type Client, type Config} from "../src/index.ts";
 import {createProfiler, type ProfileOptions, type ProfileReport, type ProfilerEnv} from "../src/profile.ts";
-import {config as coreConfig} from "../../core/test/fixture.ts";
+import {config as coreConfig, signed, ORG, PROJECT, SOURCE} from "../../core/test/fixture.ts";
 import {parseSafeRecord} from "../../core/src/wire.ts";
 import type {FrozenBatch, Outcome, ReceiptTransport} from "../../core/src/transport.ts";
 
@@ -255,4 +255,51 @@ test("a closed client counts the profile as lost and never throws into the appli
  await expect(handle.stop()).resolves.toBeDefined();
  expect(ledger.bodies).toEqual([]);
  expect(client.diagnostics().closed).toBeGreaterThan(0);
+});
+
+// Truncation (samples past maxSamples, frame/stack table bounds, browser buffer-full) is recorded as a delivery loss for the
+// profile_chunk signal with reason "truncated", the way the core records every other signal loss: a durable `loss` record plus the
+// delivery queue's per-signal counters. The chunk's own `loss`/`truncated` fields stay as they were.
+const lossDoc = (loss: boolean): Config => {
+ const doc: Record<string, unknown> = {version: 1, org: ORG, source: SOURCE, project: PROJECT, revision: "1", expires_ns: "9223372036854775807", errors: true, logs: true, replay: true, bodies: true, ...(loss ? {loss: true} : {})};
+ return {...coreConfig(), deploymentProfiles: true, policy: signed(JSON.stringify(doc, Object.keys(doc).sort()))};
+};
+function truncatedTrace(samples: number): Trace {
+ return {
+  resources: [`${ORIGIN}/assets/app.js`], frames: [{name: "busyLoop", resourceId: 0, line: 10, column: 5}], stacks: [{frameId: 0}],
+  samples: Array.from({length: samples}, (_, i) => ({timestamp: 2000 + i * 10, stackId: 0})),
+ };
+}
+
+test("samples dropped past maxSamples are recorded as a profile_chunk truncated loss with the exact dropped count", async () => {
+ const ledger = new Ledger();
+ const client = init({...lossDoc(true), transport: ledger});
+ const {report} = await profileRun(rig(), client, {...OPTIONS, maxSamples: 2}, truncatedTrace(5));
+ expect(report?.sample_count).toBe(2); expect(report?.truncated).toBe(true);
+ expect(report?.losses).toEqual([{reason: "truncated", count: "3"}]);
+ const records = sent(ledger);
+ const losses = records.filter(record => record.kind === "loss");
+ expect(losses.length).toBe(1);
+ expect(losses[0]!.payload.signal).toBe("profile_chunk"); expect(losses[0]!.payload.reason).toBe("truncated"); expect(losses[0]!.payload.count).toBe("3");
+ expect(records.filter(record => record.kind === "profile_chunk")[0]!.payload.loss).toBe("3");
+ expect(client.diagnostics().profile_samples_truncated).toBe(3);
+ await client.close();
+});
+
+test("a profile that fits records no truncation loss", async () => {
+ const ledger = new Ledger();
+ const client = init({...lossDoc(true), transport: ledger});
+ await profileRun(rig(), client, OPTIONS, truncatedTrace(3));
+ expect(sent(ledger).filter(record => record.kind === "loss")).toEqual([]);
+ expect(client.diagnostics().profile_samples_truncated).toBeUndefined();
+ await client.close();
+});
+
+test("when the policy does not allow loss records the truncation is counted in diagnostics only and no loss record is sent", async () => {
+ const ledger = new Ledger();
+ const client = init({...lossDoc(false), transport: ledger});
+ await profileRun(rig(), client, {...OPTIONS, maxSamples: 2}, truncatedTrace(5));
+ expect(sent(ledger).filter(record => record.kind === "loss")).toEqual([]);
+ expect(client.diagnostics().profile_samples_truncated).toBe(3);
+ await client.close();
 });

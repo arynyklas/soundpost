@@ -6,9 +6,11 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"net/http"
 	"strconv"
 
 	"soundpost/internal/appcore"
+	"soundpost/internal/httpapi"
 	"soundpost/internal/sources"
 )
 
@@ -90,4 +92,35 @@ func scrapeFailureNotice(err error) string {
 // scrapeStartedNotice is the one stderr line serve prints after the scrapers start.
 func scrapeStartedNotice(host *sources.ScrapeHost) string {
 	return "scrape: " + strconv.Itoa(len(host.Status())) + " target(s) started"
+}
+
+// scrapeStatusRoutes registers the org-admin scrape status route over the
+// node's own authority and control store, reading the host started by start. It
+// returns nil when no scrapers are hosted, so an unconfigured node serves no
+// such route.
+func scrapeStatusRoutes(core *appcore.App, host *sources.ScrapeHost) func(*http.ServeMux) {
+	if host == nil {
+		return nil
+	}
+	return func(mux *http.ServeMux) {
+		httpapi.RegisterScrapeStatusRoutes(mux, core.Auth, core.Control, scrapeStatusAdapter{host})
+	}
+}
+
+// scrapeStatusAdapter presents the host's typed status to the HTTP route. It
+// copies only what the route may answer; sources.ScrapeTargetStatus carries no
+// URL, secret, header or body to begin with.
+type scrapeStatusAdapter struct{ host *sources.ScrapeHost }
+
+func (a scrapeStatusAdapter) ScrapeTargets() []httpapi.ScrapeTargetState {
+	all := a.host.Status()
+	out := make([]httpapi.ScrapeTargetState, len(all))
+	for i, t := range all {
+		out[i] = httpapi.ScrapeTargetState{
+			Alias: t.Alias, Project: t.Project, LastAttempt: t.LastAttempt, Cycles: t.Cycles,
+			Health: string(t.Last.Health.Status), HTTPStatus: t.Last.Health.HTTPStatus, Reason: string(t.Reason),
+			Coverage: string(t.Last.Coverage), Samples: t.Last.Samples, StaleMarkers: t.Last.StaleMarkers, AdmitFailures: t.AdmitFailures,
+		}
+	}
+	return out
 }

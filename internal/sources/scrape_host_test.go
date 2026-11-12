@@ -334,6 +334,9 @@ func TestScrapeHostScrapesConfiguredTargetIntoTheRealIngestPath(t *testing.T) {
 	if st.Reason != ScrapeReasonNone || st.Last.Health.Status != ScrapeOK || st.Last.Coverage != CoverageComplete || st.Last.Samples != 1 || st.Last.Target != "wiring" {
 		t.Fatalf("status %+v", st)
 	}
+	if st.Project != r.f.project || st.LastAttempt.IsZero() {
+		t.Fatalf("status must name the project the target admits into and the last attempt time: %+v", st)
+	}
 	if got := r.queryMetric(t, hostMetric); len(got) != 1 || got[0] != 41 {
 		t.Fatalf("the scraped sample is not queryable through the real query path: %v", got)
 	}

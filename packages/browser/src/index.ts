@@ -32,8 +32,15 @@ export class Client extends CoreClient {
  startProfile(options:ProfileOptions):Promise<ProfileHandle>{return createProfiler(globalProfilerEnv(),report=>{this.submitProfile(report);}).startProfile(options);}
  /** Maps a finished report to wire records and enqueues them. Returns true only when everything was queued. */
  submitProfile(report:ProfileReport):boolean{
-  try{const wire=profileWire(report,{process:this.processId??=randomId(),id:randomId});return this.captureProfile(wire.capability,wire.chunks);}
-  catch{this.profileFailed();return false;}
+  let queued:boolean;
+  try{const wire=profileWire(report,{process:this.processId??=randomId(),id:randomId});queued=this.captureProfile(wire.capability,wire.chunks);}
+  catch{this.profileFailed();queued=false;}
+  // Samples the profiler dropped from this run are a recorded loss whether or not the retained part was queued.
+  try{
+   let truncated=0n;for(const loss of report.losses)if(loss.reason==="truncated")truncated+=BigInt(loss.count);
+   if(truncated>0n)this.captureProfileLoss(truncated,BigInt(report.clock.wall_end_ns)>=BigInt(report.clock.wall_start_ns)?report.clock.wall_end_ns:report.clock.wall_start_ns);
+  }catch{this.profileFailed();}
+  return queued;
  }
  override async close():Promise<void>{this.replay?.close();await super.close();}
 }

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"sort"
 	"sync"
+	"time"
 
 	"soundpost/internal/auth"
 	"soundpost/internal/model"
@@ -77,6 +78,11 @@ type ScrapeTargetStatus struct {
 	Last ScrapeResult
 	// AdmitFailures is Scraper.AdmitFailures.
 	AdmitFailures uint64
+	// Project is the configured project the target admits into; the status
+	// route maps it to the owning organization and never returns it.
+	Project model.ID
+	// LastAttempt is when the last cycle ended; zero before the first.
+	LastAttempt time.Time
 }
 
 // OK reports whether the last cycle scraped and admitted every batch with a
@@ -98,7 +104,11 @@ type scrapeHosted struct {
 	scraper *Scraper
 	alias   string
 	cycles  uint64
-	reason  ScrapeReason
+	project model.ID
+	// lastAttempt is when the last cycle ended, whatever its outcome (a grant or
+	// secret failure produces no ScrapeResult time).
+	lastAttempt time.Time
+	reason      ScrapeReason
 }
 
 // StartScrapeHost starts one scrape schedule per spec under ctx. It validates
@@ -125,7 +135,7 @@ func startScrapeHost(ctx context.Context, deps ScrapeHostDeps, specs []ScrapeTar
 	runCtx, cancel := context.WithCancel(ctx)
 	h := &ScrapeHost{cancel: cancel}
 	for _, spec := range specs {
-		t := &scrapeHosted{alias: spec.Target.Alias, scraper: &Scraper{
+		t := &scrapeHosted{alias: spec.Target.Alias, project: spec.Project, scraper: &Scraper{
 			Target: spec.Target,
 			Grant:  scrapeGrantFunc(deps, spec),
 			Admit:  deps.Ingest.Admit,
@@ -210,6 +220,7 @@ func (h *ScrapeHost) record(t *scrapeHosted, res ScrapeResult, err error) {
 	h.mu.Lock()
 	t.cycles++
 	t.reason = reason
+	t.lastAttempt = time.Now()
 	h.mu.Unlock()
 }
 
@@ -218,7 +229,7 @@ func (h *ScrapeHost) Status() []ScrapeTargetStatus {
 	h.mu.Lock()
 	out := make([]ScrapeTargetStatus, 0, len(h.targets))
 	for _, t := range h.targets {
-		out = append(out, ScrapeTargetStatus{Alias: t.alias, Cycles: t.cycles, Reason: t.reason})
+		out = append(out, ScrapeTargetStatus{Alias: t.alias, Project: t.project, Cycles: t.cycles, Reason: t.reason, LastAttempt: t.lastAttempt})
 	}
 	h.mu.Unlock()
 	for i := range out {

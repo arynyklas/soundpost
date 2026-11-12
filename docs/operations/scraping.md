@@ -140,10 +140,20 @@ carried) and a closed `Reason`:
 A status carries no URL, header, body, secret or transport error text. A failed
 wrong secret therefore shows as `bad_status` (HTTP 401) with nothing admitted.
 
+Operators read the same health over HTTPS:
+`GET /api/v1/admin/scrape/targets?org=ORG_ID` (served only when scraping is
+configured). Only an administrator of that organization may call it; every other
+caller, including an administrator of another organization, gets the same
+not-found, and a target is listed only for the organization that owns the project
+it admits into. Each target answers its alias, `last_attempt_at`, `cycles`,
+`health` (the scrape status), `http_status`, `reason`, `coverage`, `samples`,
+`stale_markers` and `admit_failures`. It never carries a URL, a secret reference
+or secret, a header, a response body, or a project or source identifier.
+
 ## Limits of this release
 
-* There is no HTTP or CLI route that exposes `Status()`; it is readable in process.
-  The only operator-visible signals are the startup lines.
+* The status route is read-only and per organization; there is no CLI form and no
+  history (it answers the last cycle of each target since the node started).
 * The carried series set (what stale markers are computed against) is in memory: a
   restart forgets it, so series that disappeared while the node was down get no
   stale marker.

@@ -165,6 +165,9 @@ func run() error {
 	state := newAppState(core, version)
 	ready := func(c context.Context) (health.Readiness, error) { return health.Ready(c, state) }
 	routes := []func(*http.ServeMux){core.Register, func(mux *http.ServeMux) { httpapi.RegisterHealthRoutes(mux, ready) }}
+	if register := scrapeStatusRoutes(core, scrapers); register != nil {
+		routes = append(routes, register)
+	}
 	if *webDir != "" {
 		register, err := httpapi.UIRoutes(os.DirFS(*webDir))
 		if err != nil {
