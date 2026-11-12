@@ -6,7 +6,9 @@ This page says exactly what the durable notification outbox guarantees, what it
 does not, and how a delivery that did not end cleanly looks to an operator. The
 policy that decides *what* is sent is described in
 [notification policy](../user/notification-policy.md); the provider adapters (SMTP,
-Telegram, signed webhooks) are separate work. The code is
+Telegram, signed webhooks) exist as a tested package (`internal/notify/providers`,
+see [notification channels](notification-channels.md)), but `soundpost serve` does not
+wire them or start the runner that sends, so a served node sends nothing. The code is
 `internal/notify/{outbox,worker}.go` and, in the control group,
 `internal/control/delivery_outbox.go`.
 

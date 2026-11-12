@@ -2,11 +2,14 @@
 
 Copyright 2026 Aryn Yklas. SPDX-License-Identifier: Apache-2.0.
 
-These are the real delivery adapters behind the `notify.Sender` seam of the
-durable outbox (see [delivery semantics](delivery-semantics.md)). The code is
-`internal/notify/providers/{provider,smtp,telegram,webhook}.go` and the
+These are the delivery adapters for the `notify.Sender` seam of the durable outbox
+(see [delivery semantics](delivery-semantics.md)). They exist as a package with
+tests, **not as a wired feature**: `soundpost serve` configures no `Sender`, starts
+no runner that sends, and registers no destination routes, so a served node sends
+no notification. Wiring them waits for the owner's worker-identity decision. The
+code is `internal/notify/providers/{provider,smtp,telegram,webhook}.go` and the
 destination registry `internal/notify/destinations.go`. The notification worker
-does not import the providers package; the application composition binds them.
+does not import the providers package; a future application composition would bind them.
 
 ## Destinations and secrets
 
@@ -142,9 +145,10 @@ service, reminder/queue numbers) and `link` (configured public origin).
 connection drop after the data) and real HTTPS servers (webhook and Telegram Bot
 API shapes) on loopback with a private test CA, and verifies the egress cases
 above. `internal/notify/destinations_test.go` covers the registry. No real
-Telegram account, public SMTP relay or third-party receiver has been called: the
-`TestProvidersRealAcceptance` smoke needs a separately authorized disposable
-chat and secret supplied through the test environment and has not been run.
+Telegram account, public SMTP relay or third-party receiver has been called. No
+real-provider acceptance test exists in the tree (an earlier plan named
+`TestProvidersRealAcceptance`; it was never written), and no delivery from a served
+node has been exercised.
 
 Not built here: HTTP routes for destination administration, the application
 wiring (a `DestinationSource` over control state, a `SecretReader` over the control

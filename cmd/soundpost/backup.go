@@ -50,6 +50,9 @@ const (
 	errUsage           = cliError(backupUsage)
 	errBadFlags        = cliError("invalid or unknown flag\n\n" + backupUsage)
 	errNoAuthorityKeys = cliError("--authority-keys is required")
+	// errUnsupportedMode is the typed refusal for a distributed node's directory: backup,
+	// restore and activation implement the single-node layout only.
+	errUnsupportedMode = cliError("unsupported_mode: backup, restore and activate support single-node installations only (--mode single); a distributed node's data directory cannot be backed up or restored (see docs/operations/backup-restore.md)")
 )
 
 // parseFlags parses a subcommand's flags. A flag error echoes the operator's own
@@ -123,6 +126,20 @@ func runBackup(args []string) error {
 		return backupActivate(args[1:])
 	}
 	return errUsage
+}
+
+// requireSingleNode refuses a distributed node's data directory with errUnsupportedMode
+// before anything opens it (opening one as a single node fails inside the replica journal
+// with an untyped error).
+func requireSingleNode(dir string) error {
+	distributed, err := backup.IsDistributedDirectory(dir)
+	if err != nil {
+		return err
+	}
+	if distributed {
+		return errUnsupportedMode
+	}
+	return nil
 }
 
 // destinationFlags registers --<name>-dir and the --<name>-s3-* flags.
@@ -251,6 +268,9 @@ func backupAuthorityInit(args []string) error {
 		}
 		id = parsed
 	case *dataDir != "":
+		if err := requireSingleNode(*dataDir); err != nil {
+			return err
+		}
 		store, err := control.Open(*dataDir)
 		if err != nil {
 			return err
@@ -292,6 +312,9 @@ func backupCreate(args []string) error {
 	}
 	if *dataDir == "" || *email == "" || *keyDir == "" || *dataKEK == "" || *secretKEK == "" {
 		return errUsage
+	}
+	if err := requireSingleNode(*dataDir); err != nil {
+		return err
 	}
 	if *attempts == "" {
 		*attempts = filepath.Join(*dataDir, "backup-attempts")
@@ -378,6 +401,9 @@ func backupRestore(args []string) error {
 	if err != nil || *root == "" || *keyDir == "" {
 		return errUsage
 	}
+	if err = requireSingleNode(*root); err != nil {
+		return err
+	}
 	source, err := dest.open()
 	if err != nil {
 		return err
@@ -419,6 +445,9 @@ func backupActivate(args []string) error {
 	}
 	if *root == "" {
 		return errUsage
+	}
+	if err := requireSingleNode(*root); err != nil {
+		return err
 	}
 	authority, err := openAuthority(authorityDest, *keysPath)
 	if err != nil {

@@ -10,7 +10,7 @@ promoted to an incident cannot be announced twice, and an old sender cannot run
 beside the new one.
 
 This page describes the decisions. Delivery (the durable outbox, retries,
-SMTP, Telegram and signed webhooks) is separate; the policy only produces
+SMTP, Telegram and signed webhooks) is separate and not wired into `soundpost serve`; the policy only produces
 decisions called intents. An intent says what should be sent, to whom and why or
 why not. It is never a claim that something was delivered.
 
