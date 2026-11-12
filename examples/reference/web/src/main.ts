@@ -50,7 +50,7 @@ async function start(): Promise<void> {
       const report = await client.flush(10000);
       return {pending: report.pending, lost: report.lost, receipts: report.receipts.length};
     },
-    profile: durationMs => profileFor(durationMs),
+    profile: durationMs => profileFor(raw, durationMs),
     replay: () => replayFor(raw),
   };
 

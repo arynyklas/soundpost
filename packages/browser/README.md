@@ -75,3 +75,31 @@ Honest timing: `interval.requested_us` is what you asked for; `interval.achieved
 `createProfiler(env)` in `src/profile.ts` is the test seam (fake `Profiler`/`PerformanceObserver`/clock/timers); `startProfile` reads the real globals when it is called. Importing the module has no side effects and imports no replay code, so core capture/replay is unaffected where profiling is unsupported.
 
 Checks: `bun test packages/browser/test/profile.test.ts` (fakes only); real Chrome: `playwright test -c fixtures/sdk/profiles/playwright.config.ts --project=chromium` (`SOUNDPOST_BUN` bundles `src/profile.ts`, `SOUNDPOST_CHROME` optional executable); the spec prints one `SOUNDPOST_PROFILE_EVIDENCE {...}` JSON line. Not qualified: Firefox, Safari, Edge, Chrome 142, Windows/macOS Chrome, headed runs.
+
+### Delivering a profile (`client.startProfile`)
+
+The module-level `startProfile` above returns a local report and sends nothing. To deliver, start the run on a client:
+
+```ts
+const client = init({...config, deploymentProfiles: true});
+const handle = await client.startProfile({durationMs: 5000, scope: "main"});
+// ...
+await handle.stop();   // the finished report is already queued; client.flush() sends it
+```
+
+The finished report (a refusal at start, a caller `stop()`, the duration timer or the stop timeout; exactly once per run) goes through the client's ordinary queue and transport: same batching, retry, durable-receipt ACK and loss counters as errors and spans. There is no second transport. `client.submitProfile(report)` does the same for a report you already hold (`createProfiler(env, report => client.submitProfile(report))` is the test seam).
+
+What is sent, by `src/profile_wire.ts`:
+
+| Report | Wire |
+| --- | --- |
+| any run (supported, `denied`, `unsupported`, `error`) | one `capability` record: `runtime/version/build/os/arch`, `signal: profile_chunk`, `method: browser_js_self_profile`, `status`, `reason`, `coverage`, `clock_domain`, `expires_ns`. Its record id is the capability id the chunks name. |
+| `status: supported` only | one or more `profile_chunk` records: `profile_id`, a per-client `process_id`, `capability_id`, `method: runtime_cpu` (the server's closed method vocabulary has no browser value), `units: samples`, the same clock domain, frames `{module_id, function, artifact_id, offset, reason}` (no line/column: the closed server frame has none), stacks, samples `{at_ns, stack, count: "1", thread}` and `loss`/`truncated` from the report's losses. |
+
+A refused or failed run is therefore the capability truth record alone: no chunk, no samples, never a fabricated profile. Sample times are offsets from the first sample (`at_ns = at_us * 1000`, `clock.mono_ns = "0"`, `clock.wall_ns = wall_start_ns`) with the report's maximal `uncertainty_ns`: no wall alignment is claimed. Threads map `main -> "1"`, `worker -> "2"`. A profile too large for one record (the queue refuses records over 262,144 bytes) is split into several chunks with the same `profile_id`, each with its own frame/stack tables; the loss count and `truncated` ride on the first chunk only. Long-task entries are not sent (they are metrics, not samples).
+
+Privacy is the report's: origin-relative script paths without query/fragment, conservative-regex function names or `external`, nothing else. `test/profile-delivery.test.ts` proves with canaries that a query string, a fragment, a foreign origin, an argument-bearing function name and extra trace fields (`arguments`, `locals`, `source`) never reach the serialized batch.
+
+**Policy.** Delivery is off unless `deploymentProfiles: true` (`client.policyDecision.profiles`). There is no signed-policy flag for profiles: the server enforces the source policy's `kinds`, and a record whose kind is not listed makes the whole batch fail with 403, which stops the client's delivery. Enable `deploymentProfiles` only for a source whose policy lists both `profile_chunk` and `capability`. With the flag off nothing is enqueued and the drop is counted (`diagnostics().policy_disabled`, `profile_chunk_dropped`). Failures are counted, never thrown: `invalid_profile_record`, `profile_wire_failed`, `queue_full`, `record_too_large`, `closed`. A run still active when the client closes is delivered into a closed client and counted as `closed`.
+
+Checks: `bun test packages/browser/test/profile-delivery.test.ts`; the real-process proof is the `journeys` smoke row `profile_linkage_with_capability_truth`.

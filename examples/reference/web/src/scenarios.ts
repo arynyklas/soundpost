@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Diagnostic scenarios driven by drive.mjs. Each one uses its OWN client, so nothing here can change what the order
 // page's client has queued or acknowledged. No page content, note text or chunk content is returned.
-import {init, ReplayStream, startProfile} from "@soundpost/browser";
+import {init, ReplayStream} from "@soundpost/browser";
 import type {ReplayChunk} from "@soundpost/browser";
 import {sdkConfig} from "./config.ts";
 import type {PublicConfig} from "./config.ts";
@@ -12,15 +12,31 @@ export interface ProfileOutcome {
   readonly reason: string;
   readonly sampleCount: number;
   readonly stoppedBy: string;
+  readonly profilesPolicyAllowed: boolean;
+  readonly flush: {readonly pending: number; readonly lost: number; readonly receipts: number};
+  readonly bufferedRecords: number;
+  readonly diagnostics: Readonly<Record<string, number>>;
 }
 
-export async function profileFor(durationMs: number): Promise<ProfileOutcome> {
-  const handle = await startProfile({durationMs: 5000, intervalUs: 10_000, scope: "main"});
-  const end = performance.now() + durationMs;
-  let spin = 0;
-  while (performance.now() < end) spin = (spin + Math.sqrt(spin + 1)) % 1000003;
-  const report = await handle.stop();
-  return {status: report.capability.status, reason: report.capability.reason, sampleCount: report.sample_count, stoppedBy: report.stopped_by};
+// The profile is delivered by the SDK itself: client.startProfile hands the finished report (a refusal included) to this client's queue.
+export async function profileFor(raw: PublicConfig, durationMs: number): Promise<ProfileOutcome> {
+  const client = init(sdkConfig(raw, {deploymentProfiles: true}));
+  try {
+    const handle = await client.startProfile({durationMs: 5000, intervalUs: 10_000, scope: "main"});
+    const end = performance.now() + durationMs;
+    let spin = 0;
+    while (performance.now() < end) spin = (spin + Math.sqrt(spin + 1)) % 1000003;
+    const report = await handle.stop();
+    const flush = await client.flush(10000);
+    return {
+      status: report.capability.status, reason: report.capability.reason, sampleCount: report.sample_count, stoppedBy: report.stopped_by,
+      profilesPolicyAllowed: client.policyDecision.profiles,
+      flush: {pending: flush.pending, lost: flush.lost, receipts: flush.receipts.length},
+      bufferedRecords: client.bufferedRecords().length, diagnostics: client.diagnostics(),
+    };
+  } finally {
+    await client.close();
+  }
 }
 
 export interface ReplayOutcome {

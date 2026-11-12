@@ -5,6 +5,9 @@ import type {Config} from "@soundpost/core/types";
 import {createMetadataContext} from "./context.ts";
 import {createRecorder} from "./replay/recorder.ts";
 import type {EnqueueResult,ReplayChunk,ReplayConfig,ReplayRecorder} from "./replay/types.ts";
+import {createProfiler,globalProfilerEnv,type ProfileHandle,type ProfileOptions,type ProfileReport} from "./profile.ts";
+import {profileWire} from "./profile_wire.ts";
+function randomId():string{for(;;){const id=Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,"0")).join("");if(id!=="0".repeat(32))return id;}}
 export class Client extends CoreClient {
  constructor(config:Config){
   if(config.spool)throw Error("browser disk spool prohibited");
@@ -22,6 +25,16 @@ export class Client extends CoreClient {
   return this.replay=createRecorder({...config,projectPolicy:allowed,deploymentOptIn:allowed},emit);
  }
  setReplayConsent(enabled:boolean):void{this.replay?.setConsent(enabled);}
+ private processId:string|undefined;
+ /** Starts one bounded JS Self-Profiling run whose finished report (including a refusal) is delivered through THIS client's queue:
+  * the capability truth record always, the profile chunk(s) only when the sampler genuinely ran. Requires `deploymentProfiles: true`
+  * and a source policy that lists profile_chunk and capability; otherwise nothing is enqueued and the drop is counted in diagnostics(). */
+ startProfile(options:ProfileOptions):Promise<ProfileHandle>{return createProfiler(globalProfilerEnv(),report=>{this.submitProfile(report);}).startProfile(options);}
+ /** Maps a finished report to wire records and enqueues them. Returns true only when everything was queued. */
+ submitProfile(report:ProfileReport):boolean{
+  try{const wire=profileWire(report,{process:this.processId??=randomId(),id:randomId});return this.captureProfile(wire.capability,wire.chunks);}
+  catch{this.profileFailed();return false;}
+ }
  override async close():Promise<void>{this.replay?.close();await super.close();}
 }
 export function init(config:Config):Client{return new Client(config);}

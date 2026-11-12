@@ -17,3 +17,4 @@
 - Add independently signed loss permission and content-free span sampling/active-limit loss handoff; native queue export remains receipt-aware.
 - Add real C09 `withJobAttempt`, finite immutable JobID registries, native closed C04 validation, exact epoch/sequence/ordinal/time, independent sanitized failed-job errors and honest manual/unknown-observer semantics.
 - Distinguish actual Bun timer cancellation through a bounded runtime-issued direct brand, rejecting generic/non-abort/proxy/getter controls without reading inherited values; preserve Node's independent own-data path.
+- Add `deploymentProfiles` / `PolicyDecision.profiles` (deployment-only, default off; no signed-policy flag) and `Client.captureProfile(capability, chunks)`: admits browser-built `capability`/`profile_chunk` records on the ordinary queue with counted drops (`policy_disabled`, `profile_chunk_dropped`, `invalid_profile_record`, `profile_wire_failed`).

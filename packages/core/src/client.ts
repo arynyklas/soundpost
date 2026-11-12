@@ -1,6 +1,6 @@
 // Copyright 2026 Aryn Yklas
 // SPDX-License-Identifier: Apache-2.0
-import type {Config,EventId,Template,PolicyDecision,CaptureInput,HookMechanism,OwnedHookLease,ExportContext} from "./types.ts";
+import type {Config,EventId,Template,PolicyDecision,CaptureInput,CapabilityInput,ProfileInput,HookMechanism,OwnedHookLease,ExportContext} from "./types.ts";
 import {resolve,approveTemplate,normalizeRecord,canonical,canonicalId,unixNano,type SourcePolicy} from "./policy.ts";
 import {extractException,type ErrorBoundary} from "./errors.ts";
 export type {ErrorBoundary} from "./errors.ts";
@@ -27,7 +27,7 @@ export class Client {
   const records=config.maxRecords??1024,bytes=config.maxBytes??2097152;
   if(!Number.isInteger(records)||records<1||records>1024||!Number.isInteger(bytes)||bytes<1||bytes>2097152)throw Error("invalid queue limits");
   for(const identity of [config.org,config.project,config.source,config.build])canonicalId(identity);
-  for(const flag of [config.deploymentErrors,config.deploymentLogs,config.deploymentReplay,config.deploymentBodies,config.deploymentTraces,config.deploymentJobs,config.deploymentLoss])if(flag!==undefined&&typeof flag!=="boolean")throw Error("deployment permissions must be boolean");
+  for(const flag of [config.deploymentErrors,config.deploymentLogs,config.deploymentReplay,config.deploymentBodies,config.deploymentTraces,config.deploymentJobs,config.deploymentLoss,config.deploymentProfiles])if(flag!==undefined&&typeof flag!=="boolean")throw Error("deployment permissions must be boolean");
   if(config.integrations?.length)throw Error("integrations not available");
   this.policy=resolve(config);this.clock=config.clockNs??(()=>String(BigInt(Date.now())*1000000n));this.build=config.build;this.codes=new Set(config.operations??[]);
   this.jobs=new JobRecorder(metadataContext,config.jobRegistry,{clock:()=>this.readClock(),emit:(payload,observed)=>{this.admit({kind:"job_attempt",id:this.id(),observed_at_ns:observed,payload});},capture:error=>this.captureException(error),loss:reason=>this.loss(reason),nativeError:error=>this.errorBoundary!==undefined&&this.errorBoundary.isProxy?.(error)!==true&&this.errorBoundary.isNativeError(error),timerCancellation:error=>this.errorBoundary?.timerCancellation?.(error)??Promise.resolve(false)});
@@ -68,6 +68,17 @@ export class Client {
   return this.captureError(error,undefined,mechanism,fatal);
  }
  hookCaptureFailed():void{this.loss("hook_capture_failed");}
+ /** Enqueues browser-built profile records on the ordinary delivery path (same queue, batching, retry, receipts and loss counters).
+  * The capability record goes first and alone is a complete answer for a refusal; chunks follow only after it was accepted, in order,
+  * and stop at the first refusal so a profile never has a hole. Never throws: failures are counted in diagnostics() and return false. */
+ captureProfile(capability:CapabilityInput,chunks:readonly ProfileInput[]=[]):boolean{
+  if(!this.admitProfile(capability)){for(const _chunk of chunks)this.loss("profile_chunk_dropped");return false;}
+  for(const [index,chunk] of chunks.entries())if(!this.admitProfile(chunk)){for(let rest=index+1;rest<chunks.length;rest++)this.loss("profile_chunk_dropped");return false;}
+  return true;
+ }
+ private admitProfile(input:CapabilityInput|ProfileInput):boolean{try{return this.admit(input);}catch{this.loss("invalid_profile_record");return false;}}
+ /** For adapters whose own profile-to-wire mapping failed before anything reached the queue. */
+ profileFailed():void{this.loss("profile_wire_failed");}
  ownHookLease(lease:OwnedHookLease):void{if(this.closed)throw Error("client closed");if(this.hookLeases.size>=8)throw Error("hook lease limit");this.hookLeases.add(lease);}
  releaseHookLease(lease:OwnedHookLease):void{this.hookLeases.delete(lease);}
  captureLog(template:string,fields:Readonly<Record<string,unknown>>):EventId|undefined{

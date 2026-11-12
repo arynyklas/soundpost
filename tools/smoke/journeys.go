@@ -494,7 +494,9 @@ func (j *journeyRun) provision() error {
 		{"gateway", []model.Kind{model.SpanKind, model.ErrorKind}, false, false},
 		{"api", []model.Kind{model.SpanKind, model.ErrorKind}, false, false},
 		{"jobs", []model.Kind{model.SpanKind, model.ErrorKind, model.JobAttempt}, false, false},
-		{"web", []model.Kind{model.SpanKind, model.ErrorKind, model.Replay, model.Profile}, true, true},
+		// profile_chunk and capability are both listed: the browser SDK delivers the capability truth record with every profile run,
+		// and the server admits only kinds the source policy names.
+		{"web", []model.Kind{model.SpanKind, model.ErrorKind, model.Replay, model.Profile, model.CapabilityKind}, true, true},
 		// The build's private artifact source: the artifact service refuses browser sources, so the
 		// source map is uploaded under a private source whose policy registers the web build.
 		{"webbuild", []model.Kind{model.SpanKind}, false, false},
@@ -919,8 +921,32 @@ func (j *journeyRun) collect() error {
 	if err = scan(model.Replay, func(i int, p storage.Page) { counts["replay"]++; j.obs.Replay.StoredReplayRow++ }); err != nil {
 		return err
 	}
-	if err = scan(model.Profile, func(i int, p storage.Page) { counts["profile"]++; j.obs.Profile.StoredProfile++ }); err != nil {
+	var chunks []model.ProfileChunk
+	if err = scan(model.Profile, func(i int, p storage.Page) {
+		counts["profile"]++
+		j.obs.Profile.StoredProfile++
+		j.obs.Profile.StoredSamples += len(p.Values[i].Profile.Samples)
+		chunks = append(chunks, *p.Values[i].Profile)
+	}); err != nil {
 		return err
+	}
+	capabilities := map[model.ID]model.Capability{}
+	if err = scan(model.CapabilityKind, func(i int, p storage.Page) {
+		if p.Sources[i] != j.apps["web"].Source {
+			return
+		}
+		counts["capability"]++
+		j.obs.Profile.StoredCapability++
+		capabilities[p.IDs[i]] = *p.Values[i].Capability
+	}); err != nil {
+		return err
+	}
+	j.obs.Profile.CapabilityLinked = len(chunks) > 0
+	for _, chunk := range chunks {
+		c, ok := capabilities[chunk.Capability]
+		if !ok || c.Signal != model.Profile || c.Clock != chunk.Clock.Domain {
+			j.obs.Profile.CapabilityLinked = false
+		}
 	}
 	j.rep["stored_counts"] = counts
 	j.symbolicate(ctx, app)
@@ -1172,9 +1198,8 @@ func (j *journeyRun) fillReplayProfile() {
 			p.Capability, _ = pr["status"].(string)
 			p.Reason, _ = pr["reason"].(string)
 		}
-		// The SDK profiler returns a local report; nothing in packages/{core,browser} enqueues it
-		// (verified by reading the sources); the stored profile row count is what is measured.
-		p.SDKEnqueues = p.StoredProfile > 0
+		// The delivery is measured, not assumed: stored profile rows and a stored, linked capability record.
+		p.SDKEnqueues = p.StoredProfile > 0 && p.CapabilityLinked
 	}
 }
 

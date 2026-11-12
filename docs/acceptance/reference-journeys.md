@@ -61,10 +61,13 @@ passed and two did not. Run output: `.superpowers/sdd/approved-product/07.04-evi
   client method that turns an emitted chunk into a queued record (`bufferedRecords` stayed 0, 0 receipts, 0
   stored). The documented Go-validator mismatch (node fields `rect`/`pres`, wider tag enum) is therefore not
   even reached, and is still open as described in `packages/browser/README.md`.
-* `profile_linkage_with_capability_truth`: **NOT satisfied**, reason `sdk_profile_not_delivered`. Chrome 156
-  with `Document-Policy: js-profiling` really profiled (status `supported`, 32 samples), but
-  `startProfile` returns a local report and nothing in `packages/browser`/`packages/core` enqueues it: 0
-  profile rows stored. No runtime/native profile linkage exists to inspect.
+* `profile_linkage_with_capability_truth`: **satisfied** after task 10.17 (it was NOT satisfied, `sdk_profile_not_delivered`, because
+  `startProfile` returned a local report and nothing enqueued it). The reference page now starts the run with `client.startProfile`
+  (`deploymentProfiles: true`) and the SDK queues one `capability` record and the `profile_chunk`(s) through its ordinary queue. Two
+  consecutive runs on Linux Chrome 156 with `Document-Policy: js-profiling` stored 1 profile row (33 and 32 samples, equal to the
+  report's `sample_count`) and 1 linked capability record; the smoke now also requires every stored chunk to name a stored capability
+  of signal `profile_chunk` in the same clock domain before it counts the delivery. The `web` source policy lists `capability`
+  next to `profile_chunk` (the server admits only listed kinds). Evidence: `.superpowers/sdd/approved-product/10.17-report.md`.
 * Known and visible, not a row: the stored browser error has no frames (`safe_original_stack_unavailable`,
   documented SDK behaviour). The mapped-frame row therefore maps the position Chrome reported for the real
   thrown error (taken from Playwright's `pageerror`), not a frame the SDK captured. Python job errors do

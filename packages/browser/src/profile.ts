@@ -276,8 +276,11 @@ function mapTrace(trace: unknown, origin: string | undefined, limit: number, thr
  return {frames, stacks, samples, idle, dropped, deepSamples, achievedUs: median === undefined ? null : Math.round(median * 1000), missingSamples};
 }
 
-export function createProfiler(env: ProfilerEnv): ProfilerApi {
+/** `deliver`, when given, receives every finished report exactly once (a refusal at start, or the single finish of a run: caller stop, duration
+ * timer or stop timeout). It runs after the profile lease is released, and an exception from it never reaches the application. */
+export function createProfiler(env: ProfilerEnv, deliver?: (report: ProfileReport) => void): ProfilerApi {
  const stopTimeoutMs = env.stopTimeoutMs ?? STOP_TIMEOUT_MS;
+ const hand = (report: ProfileReport): void => { if (deliver === undefined) return; try { deliver(report); } catch { /* delivery failures are the delivery layer's to count; the application never sees them */ } };
  interface Frame {
   status: ProfileStatus; reason: ProfileReason; wallStart: string; wallEnd: string; identity: Identity; requestedUs: number; requested: Record<string, unknown>; scope: Record<string, unknown>;
   stoppedBy: ProfileReport["stopped_by"]; mapped?: Mapped; truncated?: boolean; losses?: ProfileLoss[]; nonProfile?: ProfileLongTask[];
@@ -301,6 +304,7 @@ export function createProfiler(env: ProfilerEnv): ProfilerApi {
  const refusal = async (status: ProfileStatus, reason: ProfileReason, identity: Promise<Identity>, requestedUs: number, requested: Record<string, unknown>): Promise<ProfileHandle> => {
   const wall = env.wallNs(), who = await identity;
   const report = assemble({status, reason, wallStart: wall, wallEnd: wall, identity: who, requestedUs, requested, scope: {isolate: env.scope, runtime: {name: who.name, version: who.version}}, stoppedBy: "not_started"});
+  hand(report);
   return {stop: () => Promise.resolve(report)};
  };
 
@@ -404,14 +408,14 @@ export function createProfiler(env: ProfilerEnv): ProfilerApi {
    if (truncatedCount > 0) losses.push({reason: "truncated", count: String(truncatedCount)});
    if (mapped.missingSamples > 0 || visibility.changed || visibility.start === "hidden" || visibilityEnd === "hidden") losses.push({reason: "sample_gap", count: String(mapped.missingSamples)});
    return assemble({...base, status: "supported", reason: "ok", mapped, truncated: truncatedCount > 0 || mapped.deepSamples > 0, losses});
-  })();
+  })().then(report => { hand(report); return report; });
   const durationTimer = env.setTimeout(() => { void finish("duration"); }, options.durationMs);
   return {stop: () => finish("caller")};
  }};
 }
 
 /** The real browser/worker globals, read at call time (never at import time). */
-function globalEnv(): ProfilerEnv {
+export function globalProfilerEnv(): ProfilerEnv {
  const g: object = globalThis;
  const document: unknown = Reflect.get(g, "document");
  const workerScope: unknown = Reflect.get(g, "WorkerGlobalScope");
@@ -437,4 +441,4 @@ function globalEnv(): ProfilerEnv {
 }
 
 /** Starts one bounded JS Self-Profiling run on the calling global. Never throws: refusals are reports with a status and reason. */
-export function startProfile(options: ProfileOptions): Promise<ProfileHandle> { return createProfiler(globalEnv()).startProfile(options); }
+export function startProfile(options: ProfileOptions): Promise<ProfileHandle> { return createProfiler(globalProfilerEnv()).startProfile(options); }

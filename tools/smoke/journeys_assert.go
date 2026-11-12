@@ -127,7 +127,12 @@ type profileObservation struct {
 	Capability    string `json:"capability_status"`
 	Reason        string `json:"capability_reason"`
 	StoredProfile int    `json:"stored_profile_rows"`
-	SDKEnqueues   bool   `json:"sdk_enqueues_profile"`
+	// StoredCapability counts the stored browser capability records; CapabilityLinked is true only when every stored profile
+	// chunk names a stored capability of signal profile_chunk in the same clock domain (what the profile reader requires).
+	StoredCapability int  `json:"stored_capability_rows"`
+	StoredSamples    int  `json:"stored_profile_samples"`
+	CapabilityLinked bool `json:"capability_linked"`
+	SDKEnqueues      bool `json:"sdk_enqueues_profile"`
 }
 
 type journeyObservation struct {
