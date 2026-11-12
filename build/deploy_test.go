@@ -109,6 +109,23 @@ func TestServerUnitHoldsNoPrivilege(t *testing.T) {
 	}
 }
 
+// The native symbolication sandbox needs a delegated, process-free parent cgroup.
+func TestServerUnitDelegatesCgroupForSymbolication(t *testing.T) {
+	u := deployFile(t, "deploy/systemd/soundpost.service")
+	for _, required := range []string{"Delegate=memory pids", "DelegateSubgroup=main", "ProtectControlGroups=no"} {
+		if !hasLine(u, required) {
+			t.Fatalf("server unit lacks %q", required)
+		}
+	}
+	found := false
+	for _, line := range directives(u) {
+		found = found || strings.HasPrefix(line, "ExecStart=") && strings.Contains(line, " --symbolicate-cgroup-root=/sys/fs/cgroup/system.slice/soundpost.service")
+	}
+	if !found {
+		t.Fatal("ExecStart must pass --symbolicate-cgroup-root for the delegated parent")
+	}
+}
+
 // Native acquisition is opt-in: the agent unit starts with no capability, the one it could
 // use is only present commented out, and it never runs as root or with CAP_SYS_ADMIN.
 func TestAgentUnitCapabilityIsOptIn(t *testing.T) {

@@ -80,6 +80,9 @@ func newNativeGroup(root string) (*nativeGroup, error) {
 	if e := unix.Statfs(root, &stat); e != nil || stat.Type != unix.CGROUP2_SUPER_MAGIC {
 		return nil, errors.New("cgroup v2 required")
 	}
+	if e := enableChildControllers(root); e != nil {
+		return nil, e
+	}
 	p, e := os.MkdirTemp(root, "soundpost-symbolicate-")
 	if e != nil {
 		return nil, e
@@ -107,6 +110,34 @@ func newNativeGroup(root string) (*nativeGroup, error) {
 	}
 	ok = true
 	return g, nil
+}
+
+// A freshly delegated systemd subtree lists memory and pids in cgroup.controllers
+// but leaves cgroup.subtree_control empty, so its children get no controller
+// files. Enabling exactly those two for children is the delegatee's own right;
+// the kernel refuses it (EBUSY) when the parent still holds processes, which keeps
+// the "empty delegated subtree" requirement enforced. The child's limits are still
+// written and read back afterwards.
+func enableChildControllers(root string) error {
+	b, e := os.ReadFile(filepath.Join(root, "cgroup.subtree_control"))
+	if e != nil {
+		return e
+	}
+	enabled := strings.Fields(string(b))
+	var want []string
+	for _, c := range []string{"memory", "pids"} {
+		found := false
+		for _, have := range enabled {
+			found = found || have == c
+		}
+		if !found {
+			want = append(want, "+"+c)
+		}
+	}
+	if len(want) == 0 {
+		return nil
+	}
+	return os.WriteFile(filepath.Join(root, "cgroup.subtree_control"), []byte(strings.Join(want, " ")), 0600)
 }
 
 // CLONE_INTO_CGROUP places the worker under the memory controller from birth;
