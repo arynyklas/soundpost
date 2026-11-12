@@ -10,5 +10,5 @@ test('selected organization elevation clears on navigation and expires at fiftee
  await page.evaluate(()=>{location.hash='access';});await expect(page.getByRole('heading',{name:'Scoped elevation active'})).toBeHidden();
  await page.getByRole('button',{name:'Request scoped elevation'}).click();await page.getByRole('checkbox',{name:selected,exact:true}).check();await page.getByLabel('Reason',{exact:true}).fill('Generic browser acceptance expiry');await page.getByLabel('Current password',{exact:true}).fill(password);await page.getByRole('button',{name:'Reauthenticate and elevate'}).click();await expect(page.getByRole('heading',{name:'Scoped elevation active'})).toBeVisible();
  // Real wall-clock expiry, not page.clock or a simulated server session.
- await expect(page.getByRole('heading',{name:'Scoped elevation active'})).toBeHidden({timeout:16*60*1000});await page.getByRole('button',{name:'Sign out',exact:true}).click();expect((await page.request.get('/api/v1/session')).status()).toBe(401);
+ await expect(page.getByRole('heading',{name:'Scoped elevation active'})).toBeHidden({timeout:16*60*1000});await page.getByRole('button',{name:'Sign out',exact:true}).click();await expect(page.getByRole('heading',{name:'Access your installation'})).toBeVisible();expect((await page.request.get('/api/v1/session')).status()).toBe(401);
 });

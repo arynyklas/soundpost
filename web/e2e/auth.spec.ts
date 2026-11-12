@@ -22,7 +22,7 @@ test('real local password, rotation, TOTP, one-use recovery and logout',async({p
  await page.getByLabel('Email',{exact:true}).fill(email);await page.getByLabel('Password',{exact:true}).fill(password);await page.getByLabel('Authenticator or recovery code').fill(recovery!);await page.getByRole('button',{name:'Sign in',exact:true}).click();await expect(page.getByRole('heading',{name:'Account access',exact:true})).toBeVisible();
  const rotated=(await context.cookies()).find(cookie=>cookie.name==='__Host-soundpost');expect(rotated?.value).not.toBe(before?.value);
  expect(await page.evaluate(()=>({local:Object.keys(localStorage),session:Object.keys(sessionStorage)}))).toEqual({local:[],session:[]});
- await page.getByRole('button',{name:'Sign out',exact:true}).click();expect((await page.request.get('/api/v1/session')).status()).toBe(401);
+ await page.getByRole('button',{name:'Sign out',exact:true}).click();await expect(page.getByRole('heading',{name:'Access your installation'})).toBeVisible();expect((await page.request.get('/api/v1/session')).status()).toBe(401);
  await page.getByLabel('Email',{exact:true}).fill(email);await page.getByLabel('Password',{exact:true}).fill(password);await page.getByLabel('Authenticator or recovery code').fill(recovery!);await page.getByRole('button',{name:'Sign in',exact:true}).click();await expect(page.getByRole('alert')).toBeVisible();
 });
 for(const identity of ['mapped','unmapped','wrong-issuer'] as const)test(`real OIDC Code+PKCE ${identity}`,async({page})=>{

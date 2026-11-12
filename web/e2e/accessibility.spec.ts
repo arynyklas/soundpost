@@ -174,6 +174,9 @@ async function statusOf(page:Page,state:string):Promise<{label:string;role:strin
  return {label:(await node.locator('strong').first().innerText()).trim(),role:await node.getAttribute('role'),live:await node.getAttribute('aria-live'),text:(await node.innerText()).trim()};
 }
 async function achromatopsia(page:Page,name:string):Promise<void>{
+ // Emulation.setEmulatedVisionDeficiency is a Chromium DevTools command: Firefox and WebKit have no CDP. It only changes the optional
+ // screenshot; every assertion of this test (words, roles, live regions) runs unchanged in every browser.
+ if(page.context().browser()?.browserType().name()!=='chromium'){if(shots)await page.screenshot({path:join(shots,`state-${name}.png`),fullPage:true});return;}
  const cdp=await page.context().newCDPSession(page);
  await cdp.send('Emulation.setEmulatedVisionDeficiency',{type:'achromatopsia'});
  if(shots)await page.screenshot({path:join(shots,`state-${name}.png`),fullPage:true});
