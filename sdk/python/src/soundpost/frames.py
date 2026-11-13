@@ -27,6 +27,9 @@ def project_frame(tb: types.TracebackType, root: str | None):
         if os.path.normcase(os.path.commonpath((root,filename))) != os.path.normcase(root): return None
         relative=os.path.relpath(filename,root).replace("\\","/")
     except ValueError: return None
+    # A virtualenv inside the project holds third-party code: installed packages are never
+    # the project's own frames.
+    if any(p in ("site-packages", "dist-packages") for p in relative.split("/")): return None
     if not re.fullmatch(r"[A-Za-z0-9_./-]{1,256}",relative) or any(p in ("", "..", ".") for p in relative.split("/")): return None
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,127}|<module>|<lambda>",function): function="unknown"
     line=types.TracebackType.tb_lineno.__get__(tb)

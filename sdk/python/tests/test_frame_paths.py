@@ -54,3 +54,10 @@ def test_frames_outside_the_project_stay_out(tmp_path):
     (tmp_path / "lib").mkdir()
     tb = _traceback_from(str(tmp_path / "lib" / "x.py"))
     assert project_frame(tb, normalize_root(str(tmp_path / "proj"))) is None
+
+
+def test_installed_packages_inside_the_project_are_not_project_frames(tmp_path):
+    pkg = tmp_path / ".venv" / "Lib" / "site-packages" / "framework"
+    pkg.mkdir(parents=True)
+    tb = _traceback_from(str(pkg / "routes.py"))
+    assert project_frame(tb, normalize_root(str(tmp_path))) is None
