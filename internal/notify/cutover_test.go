@@ -895,6 +895,7 @@ func TestCutoverRollbackRacingWorkersAndDecisions(t *testing.T) {
 	stop := make(chan struct{})
 	var mu sync.Mutex
 	var failures []string
+	decided := 0 // decisions that committed a change (guarded by mu)
 	fail := func(f string, a ...any) { mu.Lock(); failures = append(failures, fmt.Sprintf(f, a...)); mu.Unlock() }
 	// Lost races are expected here: a conflict or stale answer, or a retryable
 	// unavailable whose every attempt lost the control revision to the other
@@ -948,8 +949,13 @@ func TestCutoverRollbackRacingWorkersAndDecisions(t *testing.T) {
 				}
 				ev.OwnerRevision = st.OwnerRevision
 			}
-			if _, err = fx.ob.Submit(fx.ctx, fx.scope(), fx.lease(), incident, ev, fx.clock.Now()); !expected(err) {
+			sub, err := fx.ob.Submit(fx.ctx, fx.scope(), fx.lease(), incident, ev, fx.clock.Now())
+			if !expected(err) {
 				fail("decision: %v", err)
+			} else if err == nil && !sub.Unchanged {
+				mu.Lock()
+				decided++
+				mu.Unlock()
 			}
 			if i > 40 {
 				return
@@ -975,6 +981,11 @@ func TestCutoverRollbackRacingWorkersAndDecisions(t *testing.T) {
 	fx.clock.add(30 * sec)
 	if len(failures) != 0 {
 		t.Fatalf("failures: %v", failures)
+	}
+	// The tolerance for lost races must not make the race vacuous.
+	t.Logf("%d decisions committed while the workers and the rollback raced", decided)
+	if decided == 0 {
+		t.Fatal("no decision committed: the decisions never raced the workers")
 	}
 	for _, r := range fx.deliveries() {
 		for _, a := range r.Attempts {
