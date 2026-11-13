@@ -136,8 +136,19 @@ func (f *maintenanceFixture) voterErase(node uint64, pred model.DeletePredicate)
 	if _, err := e.EraseDeleted(ctx, []model.DeletePredicate{pred}, nil); err != nil {
 		f.t.Fatalf("node %d erase: %v", node, err)
 	}
-	if err := e.CheckpointErasure(ctx, pred); err != nil {
-		f.t.Fatalf("node %d checkpoint: %v", node, err)
+	// A voter that just rejoined or just took the lead can refuse the checkpoint's read index as
+	// unavailable until its term is committed; the retention worker retries on its next pass.
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		err := e.CheckpointErasure(ctx, pred)
+		if err == nil {
+			break
+		}
+		var fault *model.Fault
+		if !errors.As(err, &fault) || fault.Code != model.Unavailable || time.Now().After(deadline) {
+			f.t.Fatalf("node %d checkpoint: %v", node, err)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 	if err := f.v.maintain(node); err != nil {
 		f.t.Fatalf("node %d maintain: %v", node, err)
