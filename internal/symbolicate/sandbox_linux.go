@@ -20,6 +20,9 @@ import (
 
 func installSandbox() error {
 	runtime.LockOSThread()
+	if e := closeInheritedDescriptors(); e != nil {
+		return e
+	}
 	if e := verifyMemoryBoundary(); e != nil {
 		return e
 	}
@@ -49,8 +52,9 @@ func installSandbox() error {
 	// without memory_hugetlb_accounting. They and executable mappings are denied.
 	filters = append(filters, unix.SockFilter{Code: jump, K: unix.SYS_MMAP, Jf: 6}, unix.SockFilter{Code: ld, K: 32}, unix.SockFilter{Code: unix.BPF_JMP | unix.BPF_JSET | unix.BPF_K, K: unix.PROT_EXEC, Jt: 3}, unix.SockFilter{Code: ld, K: 40}, unix.SockFilter{Code: unix.BPF_JMP | unix.BPF_JSET | unix.BPF_K, K: unix.MAP_HUGETLB, Jt: 1}, unix.SockFilter{Code: ret, K: unix.SECCOMP_RET_ALLOW}, unix.SockFilter{Code: ret, K: unix.SECCOMP_RET_ERRNO | uint32(unix.EPERM)})
 	// Only stdin/stdout/stderr pipes and Go-owned eventfd/epoll descriptors
-	// exist at this point. Launchers pass no ExtraFiles or host mounts; bootstrap
-	// files are closed, and the filter cannot acquire any file/socket descriptor.
+	// exist at this point (closeInheritedDescriptors). Launchers pass no
+	// ExtraFiles or host mounts; bootstrap files are closed, and the filter
+	// cannot acquire any file/socket descriptor.
 	// Runtime eventfd reads/writes are needed for the independent wall watchdog.
 	// Go may create runtime threads, never a separate process. clone3 returns
 	// ENOSYS to use the legacy, inspectable flags ABI.
@@ -63,6 +67,33 @@ func installSandbox() error {
 	}
 	if result != 0 {
 		return errors.New("seccomp thread synchronization failed")
+	}
+	return nil
+}
+
+// closeInheritedDescriptors closes every descriptor from 3 up that is not
+// close-on-exec. In this freshly exec'd image such a descriptor can only have
+// been inherited from the process that launched it (on the clone3 path,
+// exec.Cmd passes whatever the launcher left without close-on-exec); everything
+// this image's own runtime and code opened is close-on-exec, so nothing the
+// runtime owns is touched. Failing to list the descriptors fails the sandbox.
+func closeInheritedDescriptors() error {
+	entries, err := os.ReadDir("/proc/self/fd")
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		n, err := strconv.Atoi(entry.Name())
+		if err != nil || n < 3 {
+			continue
+		}
+		flags, err := unix.FcntlInt(uintptr(n), unix.F_GETFD, 0)
+		if err != nil || flags&unix.FD_CLOEXEC != 0 {
+			continue // closed since the listing (the directory's own descriptor), or runtime-owned
+		}
+		if err = unix.Close(n); err != nil {
+			return err
+		}
 	}
 	return nil
 }
