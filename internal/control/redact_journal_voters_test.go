@@ -189,7 +189,7 @@ func newControlVoters(t *testing.T) *controlVoters {
 		if err = store.View(genesis.ctx, func(st control.State) error { installation = st.Installation; return nil }); err != nil {
 			t.Fatal(err)
 		}
-		group, err := store.EnableReplication(replica.Config{ID: id, Group: installation, Directory: filepath.Join(v.dirs[id], "raft-control"), TickInterval: 20 * time.Millisecond, Members: members,
+		group, err := store.EnableReplication(replica.Config{ID: id, Group: installation, Directory: filepath.Join(v.dirs[id], "raft-control"), TickInterval: voterTick(), Members: members,
 			Transport: voterTransport{mesh: v.mesh, node: id}, Seed: seed, Application: application, SeedIndex: position.Applied + 1, SeedTerm: position.Term + 1})
 		if err != nil {
 			t.Fatal(err)
@@ -211,6 +211,17 @@ func newControlVoters(t *testing.T) *controlVoters {
 		t.Fatal(err)
 	}
 	return v
+}
+
+// voterTick is the fixture's Raft tick. The race detector slows every goroutine several times
+// over; with the 20 ms tick a delayed heartbeat then expires followers' election timers, the
+// lead moves off voter 1 mid-fixture and its leader-bound steps answer stale. The longer tick
+// under -race keeps the fixture's leadership assumptions; the product's timing is not changed.
+func voterTick() time.Duration {
+	if raceEnabled {
+		return 100 * time.Millisecond
+	}
+	return 20 * time.Millisecond
 }
 
 func (v *controlVoters) leaderIs(id uint64) {
