@@ -226,7 +226,7 @@ func beginDeletion(st *State, op *model.DeletionOperation) error {
 	op.Predicate.Generation = model.Uint64(bumpGeneration(st, op.Predicate.Org))
 	op.Phase, op.Holds, op.BeginRevision = model.DeletePhaseFencing, nil, st.Revision+1
 	retireScope(st, op.Predicate)
-	return eraseControlPayloads(st, *op, op.RequestedAt)
+	return eraseControlPayloads(st, op, op.RequestedAt)
 }
 func putDeletion(st *State, op model.DeletionOperation) {
 	if st.Deletions == nil {
@@ -375,7 +375,7 @@ func completeDeletion(st *State, id model.ID, at model.UnixNano, authority *mode
 	op.Phase, op.CompletedAt = model.DeletePhaseComplete, at
 	bumpGeneration(st, op.Predicate.Org)
 	// An effect that committed between begin and completion is erased too.
-	if err := eraseControlPayloads(st, op, at); err != nil {
+	if err := eraseControlPayloads(st, &op, at); err != nil {
 		return op, err
 	}
 	putDeletion(st, op)
@@ -397,7 +397,7 @@ func failDeletion(st *State, id model.ID, at model.UnixNano, reason string) (mod
 	op.Phase, op.SafeReason, op.CompletedAt = model.DeletePhaseFailed, reason, at
 	// Nothing is ever un-deleted: a failed operation's covered deliveries must
 	// not be sent without their bodies.
-	if err := eraseControlPayloads(st, op, at); err != nil {
+	if err := eraseControlPayloads(st, &op, at); err != nil {
 		return op, err
 	}
 	putDeletion(st, op)
@@ -537,14 +537,31 @@ func (s *Store) ImportDeletions(ctx context.Context, tombstones []model.DeletePr
 				}
 				bumpGeneration(st, p.Org)
 			}
-			putDeletion(st, model.DeletionOperation{Predicate: p, Phase: model.DeletePhaseComplete, Principal: st.Installation, Reason: "restored from deletion authority", RequestedAt: at, BeginRevision: st.Revision + 1, CompletedAt: at, SafeReason: "restored_from_authority"})
+			op := model.DeletionOperation{Predicate: p, Phase: model.DeletePhaseComplete, Principal: st.Installation, Reason: "restored from deletion authority", RequestedAt: at, BeginRevision: st.Revision + 1, CompletedAt: at, SafeReason: "restored_from_authority"}
+			putDeletion(st, op)
 			retireScope(st, p)
-			if err := eraseControlPayloads(st, model.DeletionOperation{Predicate: p, Phase: model.DeletePhaseComplete, Principal: st.Installation}, at); err != nil {
+			recorded, err := eraseControlPayloadsBy(st, &op, at, stateErased)
+			if err != nil {
 				return err
+			}
+			if recorded {
+				putDeletion(st, op) // the over-erased counts of the import
 			}
 		}
 		return nil
 	})
+}
+
+// DeletionOrg is the lifecycle operation id -> organization index of the control
+// state: st.Deletions is keyed by operation id and every record names its
+// predicate's organization, and Begin, Resume, import and snapshot restore all
+// write that one map, so the index cannot drift from the operations it names.
+// It exists so a poller that holds only an operation id can find whose scope to
+// authorize before it reads anything of the operation; a caller must authorize
+// that organization first and answer a refusal exactly like a miss.
+func DeletionOrg(st State, operation model.ID) (org model.ID, found bool) {
+	op, ok := st.Deletions[operation.String()]
+	return op.Predicate.Org, ok
 }
 
 func (s *Store) DeletionOperation(ctx context.Context, operation model.ID) (out model.DeletionOperation, found bool, err error) {

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -563,6 +564,36 @@ func TestActionLifecycleOperationPhases(t *testing.T) {
 	op, err := bare.GetOperation(e.ctx, scope, known)
 	if err != nil || op.State != httpapi.StateNotAvailable || op.Reason != httpapi.ReasonLifecycleNotWired || op.Phase != "" {
 		t.Fatalf("unwired: %+v %v", op, err)
+	}
+}
+
+// The typed over_erased count of a receipt (CD-9) reaches the LifecycleOperation
+// body as it is: book names and decimal-string counts, omitted when empty.
+func TestActionLifecycleOperationCarriesOverErased(t *testing.T) {
+	e := newActEnv(t)
+	org := e.org("operations over-erased", model.NewID())
+	alice := e.user(org, "alice-over@example.test")
+	e.admin(org, alice)
+	e.poller.org = org
+	physical := model.UnixNano(time.Now().Add(24 * time.Hour).UnixNano())
+	put := func(over []model.OverErased) model.ID {
+		id := model.NewID()
+		e.poller.receipts[id] = retention.DeleteReceipt{OperationID: id, Phase: model.DeletePhaseComplete, Generation: 1, Progress: "64/64", Physical: "pending", PhysicalDeadline: physical, BackupDeadline: physical, OverErased: over}
+		return id
+	}
+	poll := func(id model.ID) string {
+		status, raw := e.do(alice, "GET", "/api/v1/lifecycle/operations/"+id.String()+"?org="+org.String(), nil, nil)
+		if status != 200 {
+			t.Fatalf("poll: %d %s", status, raw)
+		}
+		return string(raw)
+	}
+	with := poll(put([]model.OverErased{{Book: model.OverErasedIncident, Count: 2}, {Book: model.OverErasedJob, Count: 1}}))
+	if !strings.Contains(with, `"over_erased":[{"book":"incident","count":"2"},{"book":"job","count":"1"}]`) {
+		t.Fatalf("over_erased missing or reshaped: %s", with)
+	}
+	if without := poll(put(nil)); strings.Contains(without, "over_erased") {
+		t.Fatalf("an exact erasure must not carry over_erased: %s", without)
 	}
 }
 

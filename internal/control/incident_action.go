@@ -262,11 +262,13 @@ func (s *Store) Incidents(ctx context.Context, scope auth.Scope, project model.I
 // record's identity, version, digest and intent history, and a tombstone state
 // carrying only the closed header and the erasing operation.
 func eraseIncidents(st *State, p model.DeletePredicate) (dropped int, err error) {
-	return eraseIncidentsBy(st, p, stateErased)
+	dropped, _, err = eraseIncidentsBy(st, p, stateErased)
+	return dropped, err
 }
 
-// eraseIncidentsBy is eraseIncidents with the rule that covers an opaque state.
-func eraseIncidentsBy(st *State, p model.DeletePredicate, rule stateRule) (dropped int, err error) {
+// eraseIncidentsBy is eraseIncidents with the rule that covers an opaque state;
+// over counts the covered states that had no recorded window (CD-9).
+func eraseIncidentsBy(st *State, p model.DeletePredicate, rule stateRule) (dropped, over int, err error) {
 	keys := make([]string, 0, len(st.IncidentBooks))
 	for key := range st.IncidentBooks {
 		keys = append(keys, key)
@@ -275,18 +277,21 @@ func eraseIncidentsBy(st *State, p model.DeletePredicate, rule stateRule) (dropp
 	for _, key := range keys {
 		rec, _, err := loadIncident(st, key)
 		if err != nil {
-			return 0, err
+			return 0, 0, err
 		}
 		if !rule(p, rec.Org, rec.Project, rec.State) {
 			continue
 		}
+		if overErasure(p, rec.State) {
+			over++
+		}
 		rec.State = tombstoneState("incident_id", rec.ID, rec.Org, rec.Project, rec.Version, p.Operation)
 		raw, err := json.Marshal(rec)
 		if err != nil {
-			return 0, model.Fail(model.Corrupt)
+			return 0, 0, model.Fail(model.Corrupt)
 		}
 		st.IncidentBooks[key] = raw
 		dropped++
 	}
-	return dropped, nil
+	return dropped, over, nil
 }

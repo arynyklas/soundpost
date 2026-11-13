@@ -690,11 +690,11 @@ func applyRuleOutputArm(st *State, book *RuleBook, u RuleOutputApply) (Effect, e
 	same := func() bool {
 		switch {
 		case u.To == RulePhaseSuppress:
-			return out.Reason == reason
+			return out.Reason == reason || out.Reason == controlTextErased // an erasure redacted the stored text: the same step is still the same
 		case out.Kind != RuleOutputRecording:
 			return true
 		default:
-			return out.Receipt != nil && *out.Receipt == *u.Receipt && out.Hash != nil && *out.Hash == *u.Hash && out.Reason == reason
+			return out.Receipt != nil && *out.Receipt == *u.Receipt && out.Hash != nil && *out.Hash == *u.Hash && (out.Reason == reason || out.Reason == controlTextErased)
 		}
 	}
 	switch {
@@ -847,6 +847,11 @@ func eraseRuleFacts(st *State, p model.DeletePredicate, suppress bool) (affected
 		if suppress && (o.Phase == RulePhasePending || o.Phase == RulePhaseAdmitted) {
 			o.Phase, o.Reason, changed = RulePhaseSuppress, ruleRetiredReason, true
 		}
+		if !textErased(o.Reason) {
+			// CD-8: consumer text and data-derived text (series_conflict:<n>) go with the output.
+			o.Reason, changed = controlTextErased, true
+			dropped++
+		}
 		if len(o.Payload) != 0 && !bytes.Equal(o.Payload, []byte("null")) {
 			o.Payload, changed = nil, true
 			dropped++
@@ -882,6 +887,14 @@ func eraseRuleFacts(st *State, p model.DeletePredicate, suppress bool) (affected
 			continue
 		}
 		changed := false
+		for i := range b.Replays {
+			w := &b.Replays[i]
+			if textErased(w.Reason) || p.Mode == model.DeleteHistoricalRange && !intervalMeets(w.From, w.To, p.Start, p.End) {
+				continue
+			}
+			w.Reason, changed = controlTextErased, true // CD-8: operator text of a covered replay window
+			dropped++
+		}
 		for i := range b.Versions {
 			v := &b.Versions[i]
 			if p.Mode == model.DeleteHistoricalRange {

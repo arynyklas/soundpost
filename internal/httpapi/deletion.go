@@ -62,18 +62,19 @@ type DeletionRequest struct {
 // retention.DeleteReceipt. Phase fencing means reads are already denied but the
 // erasure is not complete; it is not success.
 type DeletionReceipt struct {
-	OperationID      model.ID     `json:"operation_id"`
-	Mode             string       `json:"mode"`
-	Phase            string       `json:"phase"`
-	Generation       model.Uint64 `json:"generation"`
-	Revision         model.Uint64 `json:"revision"`
-	Progress         string       `json:"progress"`
-	Physical         string       `json:"physical"`
-	PhysicalDeadline model.Int64  `json:"physical_deadline_ns"`
-	BackupDeadline   model.Int64  `json:"backup_deadline_ns"`
-	Holds            []model.ID   `json:"holds,omitempty"`
-	SafeReason       string       `json:"safe_reason,omitempty"`
-	ResidualStores   []string     `json:"residual_stores,omitempty"`
+	OperationID      model.ID           `json:"operation_id"`
+	Mode             string             `json:"mode"`
+	Phase            string             `json:"phase"`
+	Generation       model.Uint64       `json:"generation"`
+	Revision         model.Uint64       `json:"revision"`
+	Progress         string             `json:"progress"`
+	Physical         string             `json:"physical"`
+	PhysicalDeadline model.Int64        `json:"physical_deadline_ns"`
+	BackupDeadline   model.Int64        `json:"backup_deadline_ns"`
+	Holds            []model.ID         `json:"holds,omitempty"`
+	SafeReason       string             `json:"safe_reason,omitempty"`
+	OverErased       []model.OverErased `json:"over_erased,omitempty"`
+	ResidualStores   []string           `json:"residual_stores,omitempty"`
 }
 
 // DeletionRefused is the HTTP 409 body of a held or failed receipt. Code is the
@@ -94,7 +95,7 @@ type DeletionNotAvailable struct {
 
 func deletionReceipt(r retention.DeleteReceipt) DeletionReceipt {
 	return DeletionReceipt{OperationID: r.OperationID, Mode: r.Mode, Phase: r.Phase, Generation: model.Uint64(r.Generation), Revision: model.Uint64(r.Revision), Progress: r.Progress, Physical: r.Physical,
-		PhysicalDeadline: model.Int64(r.PhysicalDeadline), BackupDeadline: model.Int64(r.BackupDeadline), Holds: r.Holds, SafeReason: r.SafeReason, ResidualStores: r.Residual}
+		PhysicalDeadline: model.Int64(r.PhysicalDeadline), BackupDeadline: model.Int64(r.BackupDeadline), Holds: r.Holds, SafeReason: r.SafeReason, OverErased: r.OverErased, ResidualStores: r.Residual}
 }
 
 // deletionRequest validates the closed body shape before any authority is

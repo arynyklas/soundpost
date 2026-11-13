@@ -31,11 +31,13 @@ import (
 //
 //	func() (int, error) { return eraseJobBooksBy(st, p, at, rule) },
 func eraseJobBooks(st *State, p model.DeletePredicate, at model.UnixNano) (dropped int, err error) {
-	return eraseJobBooksBy(st, p, at, stateErased)
+	dropped, _, err = eraseJobBooksBy(st, p, at, stateErased)
+	return dropped, err
 }
 
-// eraseJobBooksBy is eraseJobBooks with the rule that covers an opaque state.
-func eraseJobBooksBy(st *State, p model.DeletePredicate, at model.UnixNano, rule stateRule) (dropped int, err error) {
+// eraseJobBooksBy is eraseJobBooks with the rule that covers an opaque state;
+// over counts the covered states that had no recorded window (CD-9).
+func eraseJobBooksBy(st *State, p model.DeletePredicate, at model.UnixNano, rule stateRule) (dropped, over int, err error) {
 	keys := make([]string, 0, len(st.JobBooks))
 	for key := range st.JobBooks {
 		keys = append(keys, key)
@@ -44,20 +46,23 @@ func eraseJobBooksBy(st *State, p model.DeletePredicate, at model.UnixNano, rule
 	for _, key := range keys {
 		rec, _, err := loadJobRecord(st, key)
 		if err != nil {
-			return 0, err
+			return 0, 0, err
 		}
 		if !rule(p, rec.Org, rec.Project, rec.State) {
 			continue
 		}
+		if overErasure(p, rec.State) {
+			over++
+		}
 		rec.State = tombstoneState("job_id", rec.Job, rec.Org, rec.Project, rec.Version, p.Operation)
 		raw, err := json.Marshal(rec)
 		if err != nil {
-			return 0, model.Fail(model.Corrupt)
+			return 0, 0, model.Fail(model.Corrupt)
 		}
 		st.JobBooks[key] = raw
 		dropped++
 	}
-	return dropped, nil
+	return dropped, over, nil
 }
 
 // DropRetiredJobBooks tombstones every job of one retired project, in the way

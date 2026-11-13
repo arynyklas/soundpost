@@ -139,7 +139,7 @@ func (s *Service) receipt(ctx context.Context, org, id model.ID) (out DeleteRece
 	return
 }
 func receiptOf(st control.State, op model.DeletionOperation) DeleteReceipt {
-	r := DeleteReceipt{OperationID: op.Predicate.Operation, Mode: op.Predicate.Mode, Phase: op.Phase, Generation: uint64(op.Predicate.Generation), Revision: st.Revision, Progress: strconv.Itoa(len(op.Barriers)) + "/" + strconv.Itoa(model.DeleteSlots), PhysicalDeadline: op.PhysicalDeadline, BackupDeadline: op.BackupDeadline, Holds: op.Holds, SafeReason: op.SafeReason, Physical: PhysicalPending}
+	r := DeleteReceipt{OperationID: op.Predicate.Operation, Mode: op.Predicate.Mode, Phase: op.Phase, Generation: uint64(op.Predicate.Generation), Revision: st.Revision, Progress: strconv.Itoa(len(op.Barriers)) + "/" + strconv.Itoa(model.DeleteSlots), PhysicalDeadline: op.PhysicalDeadline, BackupDeadline: op.BackupDeadline, Holds: op.Holds, SafeReason: op.SafeReason, OverErased: append([]model.OverErased(nil), op.OverErased...), Physical: PhysicalPending}
 	if op.PhysicalAt != 0 {
 		r.Physical = PhysicalDone
 	} else if op.Phase != model.DeletePhaseHeld {

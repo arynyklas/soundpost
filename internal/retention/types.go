@@ -66,7 +66,12 @@ type DeleteReceipt struct {
 	BackupDeadline   model.UnixNano `json:"backup_deadline_ns"`
 	Holds            []model.ID     `json:"holds,omitempty"`
 	SafeReason       string         `json:"safe_reason,omitempty"`
-	Residual         []string       `json:"residual_stores,omitempty"`
+	// OverErased counts the opaque control states (incident, condition, job) the
+	// erasure dropped without being able to show they intersect a range deletion's
+	// window: a state that records no evidence time is erased fail-closed and
+	// counted here. Empty when the erasure was exact.
+	OverErased []model.OverErased `json:"over_erased,omitempty"`
+	Residual   []string           `json:"residual_stores,omitempty"`
 }
 
 // LedgerGeneration is what an independent restore authority durably stores

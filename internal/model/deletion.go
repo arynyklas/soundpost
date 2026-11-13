@@ -23,6 +23,25 @@ const (
 // DeleteSlots is the number of fixed data slots every deletion barrier must reach.
 const DeleteSlots = 64
 
+// The opaque control-state books a range deletion can over-erase (see
+// OverErased).
+const (
+	OverErasedIncident  = "incident"
+	OverErasedCondition = "condition"
+	OverErasedJob       = "job"
+)
+
+// OverErased is how many opaque states of one control book a deletion erased
+// without being able to show that they intersect its range: a state whose
+// record names no evidence time at all (or a time that cannot be read) has no
+// recorded window, so it is erased fail-closed. The count is part of the
+// operation record and of its receipt, so an over-erasure is visible rather
+// than silent. Book is one of the OverErased* constants.
+type OverErased struct {
+	Book  string `json:"book"`
+	Count Uint64 `json:"count"`
+}
+
 // DeletePredicate is the persistent tombstone content. The same value is the
 // control operation record, the per-slot barrier payload and the restore ledger
 // content, so every layer rejects exactly the same writes and hides exactly the
@@ -260,6 +279,7 @@ type DeletionOperation struct {
 	CompletedAt       UnixNano           `json:"completed_at_ns,omitempty"`
 	PhysicalAt        UnixNano           `json:"physical_at_ns,omitempty"` // local physical cleanup finished
 	SafeReason        string             `json:"safe_reason,omitempty"`
+	OverErased        []OverErased       `json:"over_erased,omitempty"` // opaque control states erased fail-closed, per book (control.eraseControlPayloads)
 }
 
 // LegalHold blocks physical-erasure success for the data it covers. A zero

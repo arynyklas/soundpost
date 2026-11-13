@@ -5,6 +5,8 @@ package control_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"reflect"
 	"testing"
 
 	"soundpost/internal/control"
@@ -127,7 +129,7 @@ func TestRedactControlCommandFollowsTheRuleOfItsOwnCommit(t *testing.T) {
 	f := newEraseFx(t)
 	id := f.begin(f.lateRange())
 	const fencing, after = "CANARYFENCINGRED4e7a1c93d05b", "CANARYAFTERRED8b2f60d1e39a7"
-	f.commitIncident(f.newSeed(f.project, fencing), 1000)
+	f.commitIncidentSpan(f.newSeed(f.project, fencing), 10, 1000) // window spans the range, no time inside: the begin rule covers it, the late rule does not
 	retained := func() []byte {
 		var raw []byte
 		if err := f.store.View(f.ctx, func(st control.State) error {
@@ -145,7 +147,7 @@ func TestRedactControlCommandFollowsTheRuleOfItsOwnCommit(t *testing.T) {
 	}
 	whileFencing := retained()
 	f.complete(id)
-	f.commitIncident(f.newSeed(f.project, after), 1000)
+	f.commitIncidentSpan(f.newSeed(f.project, after), 10, 1000)
 	afterCompletion := retained()
 
 	replacement, changed, err := f.store.RedactControlCommand(whileFencing)
@@ -177,20 +179,55 @@ func TestLateCommitAfterAnEntityDeletionErasesNothing(t *testing.T) {
 	}
 }
 
-// The begin/complete rule is deliberately coarse (retention.md, "Opaque states
-// fail closed"): a state committed while the deletion is still fencing is erased
-// when it completes even when its evidence is after the range's end. Only the
-// late pass, which runs after completion, is exact in time.
-func TestCompletionErasesAStateCommittedWhileFencingEvenOutsideTheRange(t *testing.T) {
+// The begin/complete rule is exact in time (CD-9): a state committed while the
+// deletion is still fencing is erased when it completes when its recorded window
+// intersects the range, and kept when its evidence all lies after the range's
+// end. A state with no window at all is erased and counted as over-erased.
+func TestCompletionKeepsAStateCommittedWhileFencingOutsideTheRange(t *testing.T) {
 	f := newEraseFx(t)
 	id := f.begin(f.lateRange())
-	const fencing = "CANARYFENCINGOUT2c8e5a1f7d4b90"
-	f.commitIncident(f.newSeed(f.project, fencing), 1000)
-	if !f.stateHolds(fencing) {
-		t.Fatal("a fencing deletion erased at the effect: completion owns that")
+	const outside, inside, spanning, bare = "CANARYFENCINGOUT2c8e5a1f7d4b90", "CANARYFENCINGIN9d3e6b2a05c817", "CANARYFENCINGSPAN4b1f7a8e2c6d30", "CANARYFENCINGBARE8a5c1e9d37b402"
+	f.commitIncident(f.newSeed(f.project, outside), 1000)
+	f.commitIncident(f.newSeed(f.project, inside), 60)
+	f.commitIncidentSpan(f.newSeed(f.project, spanning), 10, 1000)
+	f.commitIncidentState(f.newSeed(f.project, bare), `"labels":{"host":"a"}`)
+	for _, c := range []string{outside, inside, spanning, bare} {
+		if !f.stateHolds(c) {
+			t.Fatal("a fencing deletion erased at the effect: completion owns that")
+		}
 	}
 	f.complete(id)
-	if f.stateHolds(fencing) {
-		t.Fatal("completion did not apply the coarse opaque-state rule to a state committed while fencing")
+	if !f.stateHolds(outside) {
+		t.Fatal("completion erased a state whose evidence is all after the range's end")
 	}
+	for _, gone := range []string{inside, spanning, bare} {
+		if f.stateHolds(gone) {
+			t.Fatalf("completion kept %s", gone)
+		}
+	}
+	op, _, err := f.store.DeletionOperation(f.ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []model.OverErased{{Book: model.OverErasedIncident, Count: 1}}; !reflect.DeepEqual(op.OverErased, want) {
+		t.Fatalf("over-erased = %+v, want %+v (only the state with no window)", op.OverErased, want)
+	}
+}
+
+// commitIncidentState commits an incident whose state is the seed's header and
+// canary plus the given extra members, which name the times the case needs.
+func (f *eraseFx) commitIncidentState(s eraseSeed, extra string) {
+	f.t.Helper()
+	state := json.RawMessage(fmt.Sprintf(`{"incident_id":%q,"org_id":%q,"project_id":%q,"version":"1","evidence":%q,%s}`, s.inc.String(), f.org.String(), s.project.String(), s.canary, extra))
+	c := control.IncidentCommand{Project: s.project, Incident: s.inc, Action: "open", Origin: "human", Actor: f.user, At: 100, NewVersion: 1, State: state, Digest: digest(state)}
+	if _, err := f.store.Transact(f.ctx, f.adminScope(), f.cmd(control.KindIncidentAction, model.NewID(), c)); err != nil {
+		f.t.Fatal(err)
+	}
+}
+
+// commitIncidentSpan commits an incident that names an old evidence time and a
+// newer one (a timeline that spans the range) and nothing in between.
+func (f *eraseFx) commitIncidentSpan(s eraseSeed, from, to int64) {
+	f.t.Helper()
+	f.commitIncidentState(s, fmt.Sprintf(`"first_at":"%d","at":"%d"`, from, to))
 }

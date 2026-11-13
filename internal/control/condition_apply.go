@@ -223,11 +223,13 @@ func (s *Store) Conditions(ctx context.Context, scope auth.Scope, project model.
 // tombstone carrying only the closed header and the erasing operation. The
 // record's identity, version, digest and fence stay.
 func eraseConditions(st *State, p model.DeletePredicate) (dropped int, err error) {
-	return eraseConditionsBy(st, p, stateErased)
+	dropped, _, err = eraseConditionsBy(st, p, stateErased)
+	return dropped, err
 }
 
-// eraseConditionsBy is eraseConditions with the rule that covers an opaque state.
-func eraseConditionsBy(st *State, p model.DeletePredicate, rule stateRule) (dropped int, err error) {
+// eraseConditionsBy is eraseConditions with the rule that covers an opaque
+// state; over counts the covered states that had no recorded window (CD-9).
+func eraseConditionsBy(st *State, p model.DeletePredicate, rule stateRule) (dropped, over int, err error) {
 	keys := make([]string, 0, len(st.ConditionBooks))
 	for key := range st.ConditionBooks {
 		keys = append(keys, key)
@@ -236,18 +238,21 @@ func eraseConditionsBy(st *State, p model.DeletePredicate, rule stateRule) (drop
 	for _, key := range keys {
 		rec, _, err := loadCondition(st, key)
 		if err != nil {
-			return 0, err
+			return 0, 0, err
 		}
 		if !rule(p, rec.Org, rec.Project, rec.State) {
 			continue
 		}
+		if overErasure(p, rec.State) {
+			over++
+		}
 		rec.State = tombstoneState("condition_id", rec.ID, rec.Org, rec.Project, rec.Version, p.Operation)
 		raw, err := json.Marshal(rec)
 		if err != nil {
-			return 0, model.Fail(model.Corrupt)
+			return 0, 0, model.Fail(model.Corrupt)
 		}
 		st.ConditionBooks[key] = raw
 		dropped++
 	}
-	return dropped, nil
+	return dropped, over, nil
 }

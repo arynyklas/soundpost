@@ -69,6 +69,7 @@ function OperationPanel(props: { context: ViewContext }): React.JSX.Element {
     <div data-testid="operation" data-phase={op.phase}>
      <p><strong>{words.label}.</strong> {words.text}</p>
      <p>Operation <code>{op.id}</code>, generation {op.generation}. Physical erasure is due by {formatNs(op.physical_deadline, c.timezone)}; backup copies expire by {formatNs(op.backup_deadline, c.timezone)}.</p>
+     {op.over_erased && op.over_erased.length > 0 && <p>Opaque control states erased without a recorded window: {op.over_erased.map((e) => `${e.book} ${e.count}`).join(', ')}.</p>}
      {op.residual_stores && op.residual_stores.length > 0 && <p>Local stores that may still hold a copy: {op.residual_stores.join(', ')}.</p>}
     </div>
    )}

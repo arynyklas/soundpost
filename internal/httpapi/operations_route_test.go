@@ -99,9 +99,24 @@ func TestOperationsRouteAnswersBothKindsAtTheContractPath(t *testing.T) {
 		if ws != 200 || string(wraw) != string(sraw) {
 			t.Fatalf("%s: source operation with ?org= differs: %d %s vs %s", name, ws, wraw, sraw)
 		}
-		// A deletion id without the organization selector is a plain not-found.
-		if ns, nraw := e.get(srv, &f.admin, "/api/v1/operations/"+deletion.String()); ns != 404 {
-			t.Fatalf("%s: unscoped deletion id: %d %s", name, ns, nraw)
+		// A deletion id without the organization selector answers its
+		// LifecycleOperation to an administrator of the operation's organization:
+		// the control store maps the id to its owner and that organization is
+		// authorized before anything of the operation is read.
+		us, uraw := e.get(srv, &f.admin, "/api/v1/operations/"+deletion.String())
+		if us != 200 {
+			t.Fatalf("%s: unscoped deletion id: %d %s", name, us, uraw)
+		}
+		var unscoped httpapi.LifecycleOperation
+		if err := model.StrictJSON(uraw, &unscoped); err != nil || unscoped.ID != deletion || unscoped.State != httpapi.StateReady {
+			t.Fatalf("%s: unscoped deletion id is not the LifecycleOperation: %v %s", name, err, uraw)
+		}
+		if op.Phase == model.DeletePhaseFencing && string(uraw) != string(craw) {
+			t.Fatalf("%s: unscoped and scoped answers differ: %s vs %s", name, uraw, craw)
+		}
+		// The legacy alias still needs the selector.
+		if ns, nraw := e.get(srv, &f.admin, "/api/v1/lifecycle/operations/"+deletion.String()); ns != 404 {
+			t.Fatalf("%s: unscoped alias: %d %s", name, ns, nraw)
 		}
 		// A source id polled under another organization's selector is not found.
 		other := e.org("opsroute-own-"+name, model.NewID())
@@ -157,13 +172,19 @@ func TestOperationsRouteForeignMissingAndAnonymousAreRefused(t *testing.T) {
 		note("foreign source id under own org", &foreign, "/api/v1/operations/"+sourceOp.String()+"?org="+stranger.String(), 404)
 		note("foreign source id under victim org", &foreign, "/api/v1/operations/"+sourceOp.String()+"?org="+f.org.String(), 404)
 		note("missing id, no org", &foreign, "/api/v1/operations/"+model.NewID().String(), 404)
+		// A lifecycle id without the selector: the owner is found through the
+		// control store, authorized first, and every refusal is the one
+		// indistinguishable not-found of a missing id.
+		note("foreign deletion, no org", &foreign, "/api/v1/operations/"+deletion.String(), 404)
+		note("member deletion, no org", &f.member, "/api/v1/operations/"+deletion.String(), 404)
+		note("anonymous deletion, no org", nil, "/api/v1/operations/"+deletion.String(), 401)
 		note("anonymous source id", nil, "/api/v1/operations/"+sourceOp.String(), 401)
 		note("malformed id", &f.admin, "/api/v1/operations/zz?org="+f.org.String(), 404)
 		// Which store holds an id is not observable: for the same caller and the
 		// same selector a source id, a deletion id of a foreign org and a ghost
 		// are one answer.
 		a := shapes["foreign source id under own org"]
-		for _, label := range []string{"foreign source id under victim org", "/api/v1/operations/foreign deletion under own org", "/api/v1/operations/missing id under own org", "/api/v1/operations/foreign deletion under victim org"} {
+		for _, label := range []string{"foreign source id under victim org", "/api/v1/operations/foreign deletion under own org", "/api/v1/operations/missing id under own org", "/api/v1/operations/foreign deletion under victim org", "missing id, no org", "foreign deletion, no org", "member deletion, no org"} {
 			if shapes[label] != a {
 				t.Errorf("%s: %q distinguishes: %q vs %q", name, label, shapes[label], a)
 			}

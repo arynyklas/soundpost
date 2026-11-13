@@ -232,19 +232,20 @@ type IncidentView struct {
 // not success either. Complete with Physical pending is logical deletion only:
 // the physical and backup deadlines are the real ones the control group holds.
 type LifecycleOperation struct {
-	ID               model.ID     `json:"id"`
-	State            ViewState    `json:"state"`
-	Reason           string       `json:"reason,omitempty"`
-	Phase            string       `json:"phase,omitempty"`
-	Physical         string       `json:"physical,omitempty"`
-	Generation       model.Uint64 `json:"generation"`
-	PendingGroups    uint32       `json:"pending_groups"`
-	AppliedBarriers  uint32       `json:"applied_barriers"`
-	Holds            uint32       `json:"holds"`
-	SafeFault        string       `json:"safe_fault,omitempty"`
-	PhysicalDeadline model.Int64  `json:"physical_deadline"`
-	BackupDeadline   model.Int64  `json:"backup_deadline"`
-	ResidualStores   []string     `json:"residual_stores,omitempty"`
+	ID               model.ID           `json:"id"`
+	State            ViewState          `json:"state"`
+	Reason           string             `json:"reason,omitempty"`
+	Phase            string             `json:"phase,omitempty"`
+	Physical         string             `json:"physical,omitempty"`
+	Generation       model.Uint64       `json:"generation"`
+	PendingGroups    uint32             `json:"pending_groups"`
+	AppliedBarriers  uint32             `json:"applied_barriers"`
+	Holds            uint32             `json:"holds"`
+	SafeFault        string             `json:"safe_fault,omitempty"`
+	PhysicalDeadline model.Int64        `json:"physical_deadline"`
+	BackupDeadline   model.Int64        `json:"backup_deadline"`
+	OverErased       []model.OverErased `json:"over_erased,omitempty"`
+	ResidualStores   []string           `json:"residual_stores,omitempty"`
 }
 
 // IncidentService is the committed C08 service as the handler consumes it;
@@ -629,6 +630,18 @@ func severityRank(name string) string {
 	return "0"
 }
 
+// OperationOrg is the organization a lifecycle operation id belongs to
+// (control.DeletionOrg), for a poller that has no ?org= selector. found is false
+// for an id that names no operation. The answer is only a routing fact: the
+// caller must authorize the organization before it reads the operation.
+func (a *Actions) OperationOrg(ctx context.Context, operation model.ID) (org model.ID, found bool, err error) {
+	err = a.directory.View(ctx, func(st control.State) error {
+		org, found = control.DeletionOrg(st, operation)
+		return nil
+	})
+	return org, found, err
+}
+
 // GetOperation polls one deletion/restriction operation under scope; another
 // organization's operation and a missing one are the same not-found. With no
 // poller wired the answer is an explicit not_available operation.
@@ -656,7 +669,7 @@ func (a *Actions) GetOperation(ctx context.Context, scope auth.Scope, operation 
 		return LifecycleOperation{}, model.Fail(model.Unavailable)
 	}
 	return LifecycleOperation{ID: r.OperationID, State: StateReady, Phase: r.Phase, Physical: r.Physical, Generation: model.Uint64(r.Generation), PendingGroups: uint32(slots - applied), AppliedBarriers: uint32(applied),
-		Holds: uint32(len(r.Holds)), SafeFault: r.SafeReason, PhysicalDeadline: model.Int64(r.PhysicalDeadline), BackupDeadline: model.Int64(r.BackupDeadline), ResidualStores: r.Residual}, nil
+		Holds: uint32(len(r.Holds)), SafeFault: r.SafeReason, PhysicalDeadline: model.Int64(r.PhysicalDeadline), BackupDeadline: model.Int64(r.BackupDeadline), OverErased: r.OverErased, ResidualStores: r.Residual}, nil
 }
 
 // ActionBody is the POST /api/v1/actions body. Org is a selector that

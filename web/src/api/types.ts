@@ -150,6 +150,7 @@ export interface LifecycleOperation {
  safe_fault?: string;
  physical_deadline: string;
  backup_deadline: string;
+ over_erased?: { book: 'incident' | 'condition' | 'job'; count: string }[];
  residual_stores?: string[];
 }
 
