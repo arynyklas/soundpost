@@ -65,6 +65,8 @@ export class DeliveryQueue {
  private expire():void{const now=this.now();const expired=new Set(this.entries.filter(e=>now-e.at>=300000).map(e=>e.batch).filter((v):v is string=>v!==undefined));for(const b of [...this.batches])if(expired.has(b.batch.id))this.remove(b.batch,'queue_expired');this.entries=this.entries.filter(e=>{if(now-e.at<300000)return true;this.bytes-=e.size;this.loss('queue_expired');return false;});}
  get pending():number{this.expire();this.expireSignalLosses();return this.entries.length||(this.lossBuckets.size&&[...this.lossBuckets.values()].some(b=>b.unbatched>0n)?1:0);}
  get lost():number{return this.losses;}
+ /** Destroys every queued record of `kind` that has not been frozen into a batch. Returns the number destroyed; not a loss (the owner chose to discard). */
+ discardUnsent(kind:string):number{const keep=this.entries.filter(e=>e.batch!==undefined||e.kind!==kind);const count=this.entries.length-keep.length;if(count>0){this.bytes-=this.entries.filter(e=>e.batch===undefined&&e.kind===kind).reduce((n,e)=>n+e.size,0);this.entries=keep;}return count;}
  diagnostics():Readonly<Record<string,number>>{return Object.freeze({...this.counts});}
  records():readonly string[]{this.expire();const batches=new Map(this.batches.map(s=>[s.batch.id,{revision:s.batch.policyRevision,records:array(object(JSON.parse(s.batch.body)).records)}]));return Object.freeze(this.entries.map(e=>{if(e.text)return e.text;const batch=batches.get(e.batch!);if(!batch||e.position===undefined)throw Error('invalid frozen entry');const r=object(batch.records[e.position]);return nativeCanonical({id:r.id,kind:r.kind,observed_at_ns:r.observed_at_ns,policy_revision:batch.revision,payload:r.payload});}));}
  enqueue(text:string):boolean{

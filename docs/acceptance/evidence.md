@@ -61,7 +61,7 @@ canned success.
 | `trace_view_and_link` | satisfied | not exercised |
 | `investigate_replay_profile_links` | NOT SATISFIED: `/api/v1/investigate` answers `grant_not_built` for replay and profile | not exercised |
 | `replay_closed_format_stream_and_gap` | satisfied (explicit `missing_chunk` gap, masked text only) | closed-format ingest satisfied; stream NOT SATISFIED |
-| `replay_real_recorder_chunks` | NOT SATISFIED: the recorder's own chunks are refused by the Go validator (known cross-language gap) | NOT SATISFIED (same) |
+| `replay_real_recorder_chunks` | satisfied after task 11.02 (the real recorder's golden chunks, `fixtures/replays/recorder`, are admitted unconverted and read back as one continuous chain with the recorder's own hashes) | satisfied (same chunks over the real route) |
 | `replay_admission_indexes_chunks` | NOT SATISFIED: ingest never calls `replays.Validate`/`Record` (the test runs the index step itself) | NOT SATISFIED: the replay is unreadable after real-route admission |
 | `profile_assembler_export_view` | satisfied (real assembler and exporter, real HTTPS route) | satisfied by `profile_real_view`: a profile chunk and its capability record go through the real ingest route of an onboarded source whose policy lists Profile and Capability, and `/api/v1/profiles/view` returns 3 samples, the linked capability record and the frame's artifact link as available (the chunk is runtime-format, not the native exporter's) |
 | `profile_real_capture_or_sdk` | NOT SATISFIED: constructed sanitized events, no perf capture, no SDK profile reaches the backend | NOT SATISFIED (same) |

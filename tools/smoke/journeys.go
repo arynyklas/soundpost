@@ -1174,19 +1174,17 @@ func (j *journeyRun) fillReplayProfile() {
 		r := &j.obs.Replay
 		if rp, ok := d["replay"].(map[string]any); ok {
 			emitted, _ := rp["chunksEmitted"].(float64)
-			rejected, _ := rp["chunksRejectedByStream"].(float64)
 			r.RecorderChunks = int(emitted)
-			buffered, _ := rp["bufferedRecords"].(float64)
-			if emitted > 0 && buffered == 0 {
-				// The recorder only calls the application's emit callback; packages/browser has no
-				// client method that turns an emitted chunk into a queued, deliverable record.
+			queued, _ := rp["queuedBeforeFlush"].(float64)
+			if emitted > 0 && queued == 0 {
+				// The recorder emitted chunks but the client queued none: the SDK did not turn them into deliverable records.
 				r.RefusedOrLost = "sdk_recorder_chunks_not_enqueued"
 			}
 			if fl, ok := rp["flush"].(map[string]any); ok {
 				lost, _ := fl["lost"].(float64)
 				receipts, _ := fl["receipts"].(float64)
 				r.AdmittedChunks = int(receipts)
-				if r.RefusedOrLost == "" && (lost > 0 || rejected > 0) {
+				if r.RefusedOrLost == "" && lost > 0 {
 					r.RefusedOrLost = "recorder_chunks_refused_or_lost"
 				}
 			}

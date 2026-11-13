@@ -196,7 +196,7 @@ function recordReal(): RecorderChunk[] {
   nodeType: node => (node as Fake).t, firstChild: node => (node as Fake).kids[0] ?? null,
   nextSibling: node => { const parent = (node as Fake).parent; return parent === null ? null : parent.kids[parent.kids.indexOf(node as Fake) + 1] ?? null; },
   parentNode: node => (node as Fake).parent, localName: node => (node as Fake).name, openShadowRoot: () => null, editable: () => false,
-  rect: () => [8, 16, 96, 40], presentation: () => "block", mutationTarget: record => (record as {target: object}).target, eventTarget: event => (event as {target: object}).target,
+  mutationTarget: record => (record as {target: object}).target, eventTarget: event => (event as {target: object}).target,
   clientX: event => (event as {x: number}).x, clientY: event => (event as {y: number}).y,
  };
  let observe: ((records: readonly object[]) => void) | undefined;
@@ -240,14 +240,19 @@ describe("real recorder output", () => {
   expect(canonicalJSON(shuffled)).toBe(canonicalJSON(chunk));
   expect(Object.keys(shuffled).join()).not.toBe(Object.keys(chunk).join());
  });
- // OPEN CROSS-TASK MISMATCH (reported, not hidden): the recorder (03.07) emits node `rect`/`pres` and a wider tag enum,
- // which Go's closed format (and core's replay_chunk wire) refuses. The viewer accepts exactly what Go accepts, so it
- // refuses today's recorder nodes. When the recorder is brought into the closed format this test must flip to "none".
- test("recorder nodes with rect/pres/extra tags are refused exactly as Go would refuse them", () => {
-  const chunk = recordReal()[0]!;
-  expect(code(() => decodeChunk(encoder.encode(JSON.stringify(chunk)), REPLAY_PROTOCOL_LIMITS))).toBe("invalid");
-  const closed = {...chunk, nodes: chunk.nodes.map(node => ({id: node.id, parent: node.parent, tag: node.tag === "masked" || ["div", "span", "p", "button", "input", "section", "canvas"].includes(node.tag) ? node.tag : "masked", class: node.class, text: node.text}))};
-  expect(code(() => decodeChunk(encoder.encode(JSON.stringify(closed)), REPLAY_PROTOCOL_LIMITS))).toBe("none");
+ // The recorder emits exactly the server's closed schema (D2), so the viewer's strict decode accepts its own chunks unchanged,
+ // and the golden chunks of fixtures/replays/recorder (the ones Go's validator and chain reader consume) chain end to end.
+ test("the recorder's own chunks decode strictly and the golden recorder fixtures verify as one continuous chain", () => {
+  for (const chunk of recordReal()) expect(code(() => decodeChunk(encoder.encode(JSON.stringify(chunk)), REPLAY_PROTOCOL_LIMITS))).toBe("none");
+  const root = new URL("../../../fixtures/replays/recorder/session/", import.meta.url);
+  const manifest = JSON.parse(readFileSync(new URL("manifest.json", root), "utf8")) as {chunks: string[]};
+  let state = initialChainState();
+  const kinds = manifest.chunks.map(name => {
+   const decision = verifyChain(decodeChunk(readFileSync(new URL(name, root)), REPLAY_PROTOCOL_LIMITS), state);
+   state = decision.state;
+   return decision.kind;
+  });
+  expect(kinds).toEqual(["checkpoint", "apply", "apply", "apply", "checkpoint", "apply"]);
  });
 });
 

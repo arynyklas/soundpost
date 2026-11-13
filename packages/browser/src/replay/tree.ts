@@ -1,12 +1,11 @@
 // Copyright 2026 Aryn Yklas
 // SPDX-License-Identifier: Apache-2.0
 import type {DomAccessors, ReplayNode} from "./types.ts";
-import {MASK, MAX_DEPTH, MAX_NODES, isOpaqueWidget, isSkipped, presentationFor, quantize, tagFor} from "./policy.ts";
+import {MASK, MAX_DEPTH, MAX_NODES, isOpaqueWidget, isSkipped, tagFor} from "./policy.ts";
 
 type Proto = {readonly prototype: object};
 export interface DomGlobals {
  readonly Node: Proto; readonly Element: Proto; readonly HTMLElement?: Proto; readonly MouseEvent?: Proto; readonly Event?: Proto; readonly MutationRecord?: Proto;
- readonly DOMRectReadOnly?: Proto; readonly CSSStyleDeclaration?: Proto; readonly getComputedStyle?: (element: object) => object;
 }
 type Read = (self: object) => unknown;
 function getter(proto: object | undefined, name: string): Read | undefined {
@@ -29,10 +28,6 @@ export function captureDomAccessors(g: DomGlobals): DomAccessors {
  const nodeP = g.Node.prototype, elementP = g.Element.prototype, htmlP = g.HTMLElement?.prototype ?? elementP;
  const nodeType = required(nodeP, "nodeType"), first = required(nodeP, "firstChild"), next = required(nodeP, "nextSibling"), parent = required(nodeP, "parentNode");
  const localName = required(elementP, "localName"), shadow = required(elementP, "shadowRoot"), editable = getter(htmlP, "isContentEditable");
- const boundingRect = Object.getOwnPropertyDescriptor(elementP, "getBoundingClientRect")?.value as ((this: object) => unknown) | undefined;
- const rx = getter(g.DOMRectReadOnly?.prototype, "x"), ry = getter(g.DOMRectReadOnly?.prototype, "y"), rw = getter(g.DOMRectReadOnly?.prototype, "width"), rh = getter(g.DOMRectReadOnly?.prototype, "height");
- const getPropertyValue = g.CSSStyleDeclaration === undefined ? undefined : (Object.getOwnPropertyDescriptor(g.CSSStyleDeclaration.prototype, "getPropertyValue")?.value as ((this: object, name: string) => unknown) | undefined);
- const computed = g.getComputedStyle;
  const target = required(g.MutationRecord?.prototype, "target"), eventTarget = required(g.Event?.prototype, "target");
  const clientX = required(g.MouseEvent?.prototype, "clientX"), clientY = required(g.MouseEvent?.prototype, "clientY");
  return {
@@ -44,16 +39,6 @@ export function captureDomAccessors(g: DomGlobals): DomAccessors {
   openShadowRoot: element => asObject(shadow(element)),
   // The HTMLElement getter throws "Illegal invocation" on SVG/MathML elements, which cannot be contenteditable.
   editable: element => { try { return editable?.(element) === true; } catch { return false; } },
-  rect: element => {
-   const rect = boundingRect === undefined || rx === undefined || ry === undefined || rw === undefined || rh === undefined ? null : asObject(Reflect.apply(boundingRect, element, []));
-   return rect === null ? [0, 0, 0, 0] : [asNumber(rx!(rect)), asNumber(ry!(rect)), asNumber(rw!(rect)), asNumber(rh!(rect))];
-  },
-  presentation: element => {
-   const style = computed === undefined || getPropertyValue === undefined ? null : asObject(computed(element));
-   if (style === null || getPropertyValue === undefined) return "other";
-   const display = Reflect.apply(getPropertyValue, style, ["display"]), visibility = Reflect.apply(getPropertyValue, style, ["visibility"]);
-   return presentationFor(typeof display === "string" ? display : "", typeof visibility === "string" ? visibility : "");
-  },
   mutationTarget: record => asObject(target(record)),
   eventTarget: event => asObject(eventTarget(event)),
   clientX: event => asNumber(clientX(event)),
@@ -80,7 +65,6 @@ function emit(state: WalkState, source: object, node: Omit<ReplayNode, "id">, id
  state.ids.set(source, assigned);
  state.nodes.push({id: String(assigned), ...node});
 }
-const ZERO = {x: 0, y: 0, w: 0, h: 0} as const;
 
 /**
  * Directly builds owned nodes from the live DOM. Text and input values are never read: a text node
@@ -94,18 +78,17 @@ export function walk(dom: DomAccessors, source: object, parentId: string, state:
  if (state.nodes.length >= MAX_NODES - 1) {
   // Last slot: one opaque placeholder stands for everything not retained; nothing further is walked.
   state.overflow = true;
-  emit(state, source, {parent: parentId, tag: "masked", class: "masked", text: "", rect: ZERO, pres: "other"}, forcedId);
+  emit(state, source, {parent: parentId, tag: "masked", class: "masked", text: ""}, forcedId);
   return;
  }
- if (type === 3) { emit(state, source, {parent: parentId, tag: "masked", class: "", text: MASK, rect: ZERO, pres: "other"}, forcedId); return; }
+ if (type === 3) { emit(state, source, {parent: parentId, tag: "masked", class: "", text: MASK}, forcedId); return; }
  const name = dom.localName(source);
  if (isSkipped(name)) return;
- const [x, y, w, h] = dom.rect(source), rect = {x: quantize(x), y: quantize(y), w: quantize(w), h: quantize(h)}, pres = dom.presentation(source);
  if (depth >= MAX_DEPTH || isOpaqueWidget(name) || dom.editable(source) || dom.closedShadow?.(source) === true) {
-  emit(state, source, {parent: parentId, tag: "masked", class: "masked", text: "", rect, pres}, forcedId);
+  emit(state, source, {parent: parentId, tag: "masked", class: "masked", text: ""}, forcedId);
   return;
  }
- emit(state, source, {parent: parentId, tag: tagFor(name), class: "", text: name === "input" ? MASK : "", rect, pres}, forcedId);
+ emit(state, source, {parent: parentId, tag: tagFor(name), class: "", text: name === "input" ? MASK : ""}, forcedId);
  const id = String(state.ids.get(source));
  if (name === "input") return;
  const root = dom.openShadowRoot(source);
@@ -128,7 +111,7 @@ export interface FitResult {
 }
 /**
  * Makes one emission fit one chunk without ever truncating a chunk silently or inventing a fragmented-checkpoint
- * format: whole sanitized subtrees are replaced by bounded opaque placeholders (same id/parent/rect/presentation,
+ * format: whole sanitized subtrees are replaced by bounded opaque placeholders (same id and parent,
  * tag and class "masked", empty text) until `maxNodes` and `maxBytes` hold. Priority is explicit: later in document
  * order and deeper means lower priority, so the tail of the page is collapsed first, smallest subtrees first, and
  * the head of the page is kept as long as possible. The input is in walk (pre-order) order; the output keeps it.

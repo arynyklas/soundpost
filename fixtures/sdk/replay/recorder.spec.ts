@@ -74,7 +74,7 @@ test("pre-buffer canaries: nothing from the page survives into chunks, queue byt
  expect(await page.evaluate(() => Reflect.get(window, "__traps"))).toBe(0);
  const chunks = queue.map(line => JSON.parse(line));
  const nodes = chunks.flatMap(chunk => chunk.nodes);
- for (const node of nodes) { expect(Object.keys(node).sort()).toEqual(["class", "id", "parent", "pres", "rect", "tag", "text"]); expect(["", "[masked]"]).toContain(node.text); expect(node.rect.x % 8).toBe(0); expect(Math.abs(node.rect.w)).toBeLessThanOrEqual(32768); }
+ for (const node of nodes) { expect(Object.keys(node).sort()).toEqual(["class", "id", "parent", "tag", "text"]); expect(["", "[masked]"]).toContain(node.text); expect(["div", "span", "p", "button", "input", "section", "canvas", "masked"]).toContain(node.tag); }
  const first = chunks[0];
  const inputs = first.nodes.filter((node: Node) => node.tag === "input");
  expect(inputs.length).toBeGreaterThanOrEqual(15); // 14 input types + the open-shadow input

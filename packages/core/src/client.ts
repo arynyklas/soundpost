@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import type {Config,EventId,Template,PolicyDecision,CaptureInput,CapabilityInput,ProfileInput,HookMechanism,OwnedHookLease,ExportContext} from "./types.ts";
 import {resolve,approveTemplate,normalizeRecord,canonical,canonicalId,unixNano,type SourcePolicy} from "./policy.ts";
+import {object} from "./wire.ts";
 import {extractException,type ErrorBoundary} from "./errors.ts";
 export type {ErrorBoundary} from "./errors.ts";
 import {DeliveryQueue} from "./queue.ts";
@@ -89,6 +90,15 @@ export class Client {
   if(!this.policy.decision.loss||this.closed||this.exportContext.active())return false;
   try{if(BigInt(unixNano(atNs))>=BigInt(this.policy.expiresNs))return false;return this.delivery.recordSignalLoss("profile_chunk","truncated",count,atNs);}catch{return false;}
  }
+ /** Enqueues one browser-recorded replay chunk on the ordinary delivery path (same queue, closed wire validation, batching, retry, receipts and loss counters). The chunk's own wall clock is its
+  * observation time. Never throws: false means the chunk was not queued (policy off, queue full, invalid) and the reason is counted in diagnostics(). */
+ captureReplay(chunk:Readonly<Record<string,unknown>>):boolean{
+  let observed:string;
+  try{observed=unixNano(object(object(chunk).clock).wall_ns);}catch{this.loss("invalid_replay_record");return false;}
+  try{return this.admit({kind:"replay_chunk",id:this.id(),observed_at_ns:observed,payload:chunk});}catch{this.loss("invalid_replay_record");return false;}
+ }
+ /** Destroys the replay chunks that are queued but not yet part of a batch (consent revoked). Batches already frozen or acknowledged are not recalled. Returns how many were destroyed. */
+ discardUnsentReplay():number{const count=this.delivery.discardUnsent("replay_chunk");if(count>0)this.counts.replay_chunks_discarded=(this.counts.replay_chunks_discarded??0)+count;return count;}
  ownHookLease(lease:OwnedHookLease):void{if(this.closed)throw Error("client closed");if(this.hookLeases.size>=8)throw Error("hook lease limit");this.hookLeases.add(lease);}
  releaseHookLease(lease:OwnedHookLease):void{this.hookLeases.delete(lease);}
  captureLog(template:string,fields:Readonly<Record<string,unknown>>):EventId|undefined{

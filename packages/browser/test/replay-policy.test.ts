@@ -11,7 +11,7 @@ import type {ReplayChunk, ReplayConfig, ReplayEventTargetLike, ReplayNode, Repla
 import {config as coreConfig} from "../../core/test/fixture.ts";
 
 // ---- Fake DOM. Source strings live only behind prototype getters that count every read. ----
-const reads = {value: 0, data: 0, attributes: 0, text: 0, html: 0, traps: 0};
+const reads = {value: 0, data: 0, attributes: 0, text: 0, html: 0, layout: 0, traps: 0};
 class FRect { constructor(private readonly r: number[]) {} get x() { return this.r[0]!; } get y() { return this.r[1]!; } get width() { return this.r[2]!; } get height() { return this.r[3]!; } }
 class FNode {
  parent: FNode | null = null; children: FNode[] = []; readonly nodeKind: number;
@@ -26,7 +26,7 @@ class FNode {
 }
 class FText extends FNode { constructor(readonly secret: string) { super(3); } get data() { reads.data++; return this.secret; } }
 class FElement extends FNode {
- shadow: FShadow | null = null; rect = [13, 4, 100000, -99999]; editableFlag = false; closed = false; secretAttrs: Record<string, string> = {}; secretValue = "";
+ shadow: FShadow | null = null; editableFlag = false; closed = false; secretAttrs: Record<string, string> = {}; secretValue = "";
  constructor(readonly name: string) { super(1); }
  get localName() { return this.name; }
  get shadowRoot() { return this.shadow; }
@@ -36,7 +36,7 @@ class FElement extends FNode {
  get attributes() { reads.attributes++; return this.secretAttrs; }
  get innerHTML() { reads.html++; return "x"; }
  get outerHTML() { reads.html++; return "x"; }
- getBoundingClientRect() { return new FRect(this.rect); }
+ getBoundingClientRect() { reads.layout++; return new FRect([13, 4, 100000, -99999]); }
 }
 // isContentEditable lives on HTMLElement only: calling its getter on an SVG element throws, as in real browsers.
 class FHtml extends FElement { get isContentEditable() { if (!(this instanceof FHtml)) throw new TypeError("Illegal invocation"); return this.editableFlag; } }
@@ -44,8 +44,8 @@ class FShadow extends FNode { constructor() { super(11); } }
 class FComment extends FNode { constructor() { super(8); } }
 class FRecord { constructor(private readonly t: FNode | null) {} get target() { return this.t; } }
 class FEvent { constructor(private readonly t: FNode | null, private readonly cx: number, private readonly cy: number) {} get target() { return this.t; } get clientX() { return this.cx; } get clientY() { return this.cy; } }
-class FStyle { constructor(readonly display: string) {} getPropertyValue(name: string) { return name === "display" ? this.display : "visible"; } }
-const globals = {Node: FNode, Element: FElement, HTMLElement: FHtml, MouseEvent: FEvent, Event: FEvent, MutationRecord: FRecord, DOMRectReadOnly: FRect, CSSStyleDeclaration: FStyle, getComputedStyle: (element: object) => new FStyle((element as FElement).name === "span" ? "inline" : "block")};
+class FStyle { constructor(readonly display: string) {} getPropertyValue(name: string) { reads.layout++; return name === "display" ? this.display : "visible"; } }
+const globals = {Node: FNode, Element: FElement, HTMLElement: FHtml, MouseEvent: FEvent, Event: FEvent, MutationRecord: FRecord, DOMRectReadOnly: FRect, CSSStyleDeclaration: FStyle, getComputedStyle: (element: object) => { reads.layout++; return new FStyle((element as FElement).name === "span" ? "inline" : "block"); }};
 const dom = captureDomAccessors(globals);
 
 function el(name: string, ...children: FNode[]): FHtml { const e = name === "svg" || name === "text" ? (new FElement(name) as FHtml) : new FHtml(name); for (const c of children) e.append(c); return e; }
@@ -76,7 +76,7 @@ function rig(root: FNode, overrides: Partial<ReplayConfig> = {}, flags: {project
  let tick = 0, revoked = 0;
  const config: ReplayConfig = {
   projectPolicy: flags.project ?? true, deploymentOptIn: flags.deployment ?? true, root, replayId: "a".repeat(32), sessionId: "b".repeat(32), capturePolicyRevision: "1",
-  domain: {host: "h".repeat(8), boot: "b".repeat(8), runtime: "r".repeat(8)}, clock: () => ({wall_ns: String(1000000 + ++tick), mono_ns: String(tick), uncertainty_ns: "0"}),
+  domain: {host: "c".repeat(32), boot: "d".repeat(32), runtime: "e".repeat(32)}, clock: () => ({wall_ns: String(1000000 + ++tick), mono_ns: String(tick), uncertainty_ns: "0"}),
   dom, observer: FObserver, eventTarget: target, viewport: () => ({w: 1001, h: 799, x: 0, y: 77}), timers, onRevoked: () => { revoked++; }, ...overrides,
  };
  const rec = createRecorder(config, chunk => { if (result.value === "accepted") chunks.push(chunk); return result.value; });
@@ -84,7 +84,8 @@ function rig(root: FNode, overrides: Partial<ReplayConfig> = {}, flags: {project
  return view;
 }
 const allNodes = (chunks: readonly ReplayChunk[]): ReplayNode[] => chunks.flatMap(c => [...c.nodes]);
-const NODE_KEYS = ["class", "id", "parent", "pres", "rect", "tag", "text"];
+const NODE_KEYS = ["class", "id", "parent", "tag", "text"];
+const TAGS = ["div", "span", "p", "button", "input", "section", "canvas", "masked"];
 
 function canaryTree() {
  const secrets = ["S3CR3T-A", "S3CR3T-LONGER-VALUE-B", "canary-id-xyzzy-12345", "class-secret-q", "data-secret-url(https://evil.test/p.png)", "pseudo-::before-content", "clipboard-canary-0", "console-canary-1111111", "svg-text-secret-abcdefghij", "contenteditable-secret-zz"];
@@ -119,8 +120,8 @@ test("pre-buffer canaries: mask constant, no raw field, nothing read, opaque sub
  r.recorder.setConsent(true);
  const nodes = allNodes(r.chunks), wire = JSON.stringify(r.chunks);
  for (const secret of secrets) expect(wire).not.toContain(secret);
- expect(reads).toEqual({value: 0, data: 0, attributes: 0, text: 0, html: 0, traps: 0});
- for (const n of nodes) { expect(Object.keys(n).sort()).toEqual(NODE_KEYS); expect(["", "[masked]"]).toContain(n.text); expect(["", "masked"]).toContain(n.class); expect(Object.keys(n.rect).sort()).toEqual(["h", "w", "x", "y"]); }
+ expect(reads).toEqual({value: 0, data: 0, attributes: 0, text: 0, html: 0, layout: 0, traps: 0});
+ for (const n of nodes) { expect(Object.keys(n).sort()).toEqual(NODE_KEYS); expect(["", "[masked]"]).toContain(n.text); expect(["", "masked"]).toContain(n.class); expect(TAGS).toContain(n.tag); }
  const texts = nodes.filter(n => n.text === "[masked]");
  expect(texts.length).toBeGreaterThan(13);
  expect(new Set(texts.filter(n => n.tag === "masked").map(n => JSON.stringify({...n, id: "", parent: ""}))).size).toBe(1);
@@ -136,8 +137,8 @@ test("pre-buffer canaries: mask constant, no raw field, nothing read, opaque sub
  expect(hostId).not.toBe("undefined");
  expect(r.observer().targets.length).toBe(2); // root + open shadow root only
  void closedHost;
- // skipped elements never appear: no script/style/head/title structure
- expect(nodes.filter(n => n.tag === "html" || n.tag === "body")).toHaveLength(2);
+ // skipped elements never appear and tags outside the server's closed vocabulary are the generic "masked" structural tag
+ expect(nodes.filter(n => ["html", "body", "head", "title", "script", "style", "svg", "img"].includes(n.tag))).toHaveLength(0);
  expect(nodes.every(n => n.tag === "masked" || /^[a-z0-9]+$/.test(n.tag))).toBe(true);
  // registered listeners cannot observe keys, input, clipboard, console
  expect([...r.target.handlers.keys()].sort()).toEqual(["pointerdown", "resize", "scroll"]);
@@ -153,11 +154,11 @@ test("getter traps planted on source nodes never execute", () => {
  expect(allNodes(r.chunks).map(n => n.tag)).toEqual(["div", "span", "masked"]);
 });
 
-test("rectangles and pointer coordinates quantize to 8px and clamp to ±32768", () => {
+test("pointer coordinates quantize to 8px and clamp to ±32768, and no geometry or style is ever read", () => {
  expect([quantize(13.4), quantize(3), quantize(4), quantize(-4), quantize(100000), quantize(-99999), quantize(Number.NaN), quantize(Infinity), quantize(32764), quantize(0.2)]).toEqual([16, 0, 8, 0, 32768, -32768, 0, 0, 32768, 0]);
- const root = el("div"); root.rect = [13, 21, 100000, -99999];
+ const root = el("div");
  const r = rig(root); r.recorder.setConsent(true);
- expect(r.chunks[0]!.nodes[0]!.rect).toEqual({x: 16, y: 24, w: 32768, h: -32768});
+ expect(reads.layout).toBe(0);
  const button = el("button"); root.append(button);
  r.target.handlers.get("pointerdown")!(new FEvent(root, 203, 999999));
  r.target.handlers.get("scroll")!(new FEvent(null, 0, 0));
@@ -260,7 +261,7 @@ test("deltas under a placeholdered subtree are suppressed until a new complete c
 });
 
 test("fitSubtrees collapses the lowest-priority (latest, deepest) whole subtrees first and keeps the head of the page", () => {
- const node = (id: string, parent: string): ReplayNode => ({id, parent, tag: "div", class: "", text: "", rect: {x: 0, y: 0, w: 8, h: 8}, pres: "block"});
+ const node = (id: string, parent: string): ReplayNode => ({id, parent, tag: "div", class: "", text: ""});
  const nodes = [node("1", "0"), node("2", "1"), node("3", "2"), node("4", "1"), node("5", "4"), node("6", "4"), node("7", "1"), node("8", "7")];
  const unchanged = fitSubtrees(nodes, 8, 1_000_000);
  expect(unchanged.truncated).toBe(false);
@@ -378,7 +379,7 @@ test("client.setReplayConsent delegates under policy, and revocation leaves non-
   for (const [client, expectCapture] of [[allowed, true], [denied, false]] as const) {
    const r = {chunks: [] as ReplayChunk[]}; FObserver.instances = [];
    const {root} = canaryTree();
-   const recorder = client.startReplay({root, replayId: "a".repeat(32), sessionId: "b".repeat(32), capturePolicyRevision: "1", domain: {host: "h", boot: "b", runtime: "r"}, clock: () => ({wall_ns: "1", mono_ns: "1", uncertainty_ns: "0"}), dom, observer: FObserver, eventTarget: new FTarget()}, chunk => { r.chunks.push(chunk); return "accepted"; });
+   const recorder = client.startReplay({root, replayId: "a".repeat(32), sessionId: "b".repeat(32), capturePolicyRevision: "1", domain: {host: "c".repeat(32), boot: "d".repeat(32), runtime: "e".repeat(32)}, clock: () => ({wall_ns: "1", mono_ns: "1", uncertainty_ns: "0"}), dom, observer: FObserver, eventTarget: new FTarget()}, chunk => { r.chunks.push(chunk); });
    expect(recorder).toBeDefined();
    client.captureException(Error("CANARY_BEFORE"));
    const before = client.bufferedRecords().length;

@@ -77,11 +77,11 @@ export function normalizeRecord(policy:SourcePolicy,input:CaptureInput,templates
  try{canonicalId(input.id);if(input.kind==="error")canonicalId(input.build_id);}catch{return {reason:"invalid_id"};}
  try{unixNano(input.observed_at_ns);}catch{return {reason:"invalid_clock"};}
  if(BigInt(input.observed_at_ns)>=BigInt(policy.expiresNs))return {reason:"policy_expired"};
- if(!(input.kind==="error"?policy.decision.errors:input.kind==="span"?policy.decision.traces:input.kind==="job_attempt"?policy.decision.jobs:input.kind==="log"?policy.decision.logs:input.kind==="profile_chunk"||input.kind==="capability"?policy.decision.profiles:false))return {reason:"policy_disabled"};
+ if(!(input.kind==="error"?policy.decision.errors:input.kind==="span"?policy.decision.traces:input.kind==="job_attempt"?policy.decision.jobs:input.kind==="log"?policy.decision.logs:input.kind==="replay_chunk"?policy.decision.replay:input.kind==="profile_chunk"||input.kind==="capability"?policy.decision.profiles:false))return {reason:"policy_disabled"};
  let payload:Record<string,unknown>;
  if(input.kind==="span")payload={trace_id:input.span.trace_id,span_id:input.span.span_id,parent_id:input.span.parent_id,span_kind:input.span.span_kind,operation:input.span.operation,start:input.span.start,end:input.span.end,status:input.span.status,dependency_alias:input.span.dependency_alias,links:input.span.links,sample_probability:input.span.sample_probability,sample_decision:input.span.sample_decision};
  else if(input.kind==="job_attempt"){try{payload={...normalizeAttempt(input.payload)};}catch{return {reason:"invalid_job_attempt"};}}
- else if(input.kind==="profile_chunk"||input.kind==="capability"){payload={...input.payload};}
+ else if(input.kind==="profile_chunk"||input.kind==="capability"||input.kind==="replay_chunk"){payload={...input.payload};}
  else if(input.kind==="error"){
   if(input.trace_id!==undefined){try{canonicalId(input.trace_id);if(typeof input.span_id!=="string"||!/^[0-9a-f]{16}$/.test(input.span_id)||input.span_id==="0".repeat(16))throw Error();}catch{return {reason:"invalid_trace_context"};}}
   if(input.run_id!==undefined){try{canonicalId(input.run_id);}catch{return {reason:"invalid_run_context"};}}

@@ -1,7 +1,7 @@
 // Copyright 2026 Aryn Yklas
 // SPDX-License-Identifier: Apache-2.0
 import type {DomAccessors, EnqueueResult, MutationObserverLike, ReplayChunk, ReplayConfig, ReplayEvent, ReplayEventTargetLike, ReplayNode, ReplayRecorder, ReplayTimers} from "./types.ts";
-import {CHECKPOINT_INTERVAL_MS, EVENT_FLUSH_MS, GAP_EVENT_BYTES, MAX_CHUNK_BYTES, MAX_CHUNK_NODES, MAX_MUTATION_RECORDS, MAX_MUTATION_ROOTS, MAX_PENDING_EVENTS, MAX_DEPTH, RECORDER_VERSION, ZERO_HASH, canonicalJSON, captureAllowed, quantize, sha256Hex} from "./policy.ts";
+import {CHECKPOINT_INTERVAL_MS, EVENT_FLUSH_MS, GAP_EVENT_BYTES, MAX_CHECKPOINTS, MAX_CHUNK_BYTES, MAX_CHUNK_NODES, MAX_MUTATION_RECORDS, MAX_MUTATION_ROOTS, MAX_NODE_ID, MAX_PENDING_EVENTS, MAX_DEPTH, MAX_SEQUENCE, RECORDER_VERSION, ZERO_HASH, canonicalJSON, captureAllowed, quantize, sha256Hex} from "./policy.ts";
 import {captureDomAccessors, fitSubtrees, newWalkState, walk, type DomGlobals} from "./tree.ts";
 
 const OBSERVE = {childList: true, characterData: true, attributes: true, subtree: true} as const;
@@ -29,6 +29,9 @@ class Recorder implements ReplayRecorder {
  private suppressed = new Set<number>();
  private counter = 0;
  private sequence = 0;
+ private checkpoints = 0;
+ /** The replay used its whole server-side budget (sequence or checkpoint ceiling); capture ended for good. */
+ private exhausted = false;
  private previousHash = ZERO_HASH;
  private checkpointSequence = 0;
  private checkpointHash = ZERO_HASH;
@@ -43,6 +46,8 @@ class Recorder implements ReplayRecorder {
 
  constructor(private readonly config: ReplayConfig, private readonly output: (chunk: ReplayChunk) => EnqueueResult) {
   if (typeof config.root !== "object" || config.root === null) throw Error("replay root required");
+  for (const id of [config.replayId, config.sessionId, config.domain?.host, config.domain?.boot, config.domain?.runtime]) if (typeof id !== "string" || !/^[0-9a-f]{32}$/.test(id) || id === "0".repeat(32)) throw Error("replay identifiers must be 32 lowercase hex digits and not zero");
+  if (typeof config.capturePolicyRevision !== "string" || !/^[1-9][0-9]{0,19}$/.test(config.capturePolicyRevision)) throw Error("replay capture policy revision must be a decimal revision");
   this.timers = config.timers ?? defaultTimers;
   this.listeners = [
    ["pointerdown", event => this.guard(() => { const dom = this.dom!; const node = dom.eventTarget(event); this.event("pointer", node === null ? 0 : this.ids.get(node) ?? 0, dom.clientX(event), dom.clientY(event)); })],
@@ -74,6 +79,7 @@ class Recorder implements ReplayRecorder {
   const dom = this.config.dom ?? captureDomAccessors(globalThis as unknown as DomGlobals);
   const Observer = this.config.observer ?? (globalThis as unknown as {MutationObserver?: new (callback: (records: readonly object[]) => void) => MutationObserverLike}).MutationObserver;
   if (Observer === undefined) throw Error("replay requires MutationObserver");
+  if (this.exhausted) return;
   this.dom = dom; this.active = true;
   const observer = new Observer(records => this.mutations(records));
   this.observer = observer; observer.observe(this.config.root, OBSERVE);
@@ -96,7 +102,8 @@ class Recorder implements ReplayRecorder {
   if (wasActive) this.needGap = true;
  }
 
- private allocate = (): number => ++this.counter;
+ /** Ids are unique per chunk and restart at every checkpoint (the id map is fresh there), so the server's id ceiling is never reached in practice; reaching it anyway counts as loss and a gap. */
+ private allocate = (): number => { if (this.counter >= MAX_NODE_ID) throw Error("replay_node_id_space"); return ++this.counter; };
  private observeShadow = (root: object): void => {
   if (this.shadowRoots.has(root) || this.observer === undefined) return;
   this.shadowRoots.add(root); this.observer.observe(root, OBSERVE);
@@ -104,7 +111,7 @@ class Recorder implements ReplayRecorder {
  private now(): {readonly wall_ns: string; readonly mono_ns: string; readonly uncertainty_ns: string} { return this.config.clock(); }
 
  private event(kind: ReplayEvent["kind"], node: number, x: number, y: number): void {
-  this.pending.push({at_ns: this.now().wall_ns, kind, node: String(node), x: quantize(x), y: quantize(y)});
+  this.pending.push({at_ns: this.now().mono_ns, kind, node: String(node), x: quantize(x), y: quantize(y)});
   if (this.pending.length >= MAX_PENDING_EVENTS) { this.flushEvents(); return; }
   if (this.flushTimer === undefined) this.flushTimer = this.timers.set(() => { this.flushTimer = undefined; this.guard(() => this.flushEvents()); }, EVENT_FLUSH_MS);
  }
@@ -115,16 +122,21 @@ class Recorder implements ReplayRecorder {
  }
 
  private armCheckpoint(): void {
+  if (!this.active) return;
   this.checkpointTimer = this.timers.set(() => { this.checkpointTimer = undefined; this.guard(() => { this.flushEvents(); this.checkpoint(); this.armCheckpoint(); }); }, CHECKPOINT_INTERVAL_MS);
+ }
+ /** The replay has used its whole server-side budget: nothing beyond the server's closed schema is ever emitted, so capture ends for good. */
+ private exhaust(): void {
+  this.exhausted = true; this.stop();
  }
 
  /** Full snapshot: fresh ID map so no earlier source node stays associated with a local ID. */
  private checkpoint(): void {
   const dom = this.dom!;
-  this.ids = new WeakMap(); this.shadowRoots = new WeakSet(); this.suppressed = new Set();
+  this.ids = new WeakMap(); this.shadowRoots = new WeakSet(); this.suppressed = new Set(); this.counter = 0;
   const state = newWalkState(this.ids, this.allocate, this.observeShadow);
   walk(dom, this.config.root, "0", state);
-  const at = this.now().wall_ns, gap = this.needGap || state.overflow;
+  const at = this.now().mono_ns, gap = this.needGap || state.overflow;
   if (state.overflow) this.loss++;
   const events: ReplayEvent[] = [{at_ns: at, kind: "checkpoint", node: "0", x: 0, y: 0}];
   if (gap) events.push({at_ns: at, kind: "gap", node: "0", x: 0, y: 0});
@@ -150,7 +162,7 @@ class Recorder implements ReplayRecorder {
    }
    if (full) { this.flushEvents(); this.checkpoint(); return; }
    if (dirty.size === 0) return;
-   const state = newWalkState(this.ids, this.allocate, this.observeShadow), events: ReplayEvent[] = [], at = this.now().wall_ns;
+   const state = newWalkState(this.ids, this.allocate, this.observeShadow), events: ReplayEvent[] = [], at = this.now().mono_ns;
    for (const [id, node] of dirty) {
     let covered = false;
     for (let up = dom.parentNode(node), hops = 0; up !== null && hops < MAX_DEPTH * 4; up = dom.parentNode(up), hops++) { const upId = this.ids.get(up); if (upId !== undefined && dirty.has(upId)) { covered = true; break; } }
@@ -179,10 +191,12 @@ class Recorder implements ReplayRecorder {
   if (fit.truncated) {
    for (const id of fit.suppressed) this.suppressed.add(id);
    this.loss++;
-   if (!events.some(event => event.kind === "gap")) emitted = [...events, {at_ns: this.now().wall_ns, kind: "gap", node: "0", x: 0, y: 0}];
+   if (!events.some(event => event.kind === "gap")) emitted = [...events, {at_ns: this.now().mono_ns, kind: "gap", node: "0", x: 0, y: 0}];
    if (checkpoint) marked = true;
   }
+  if (this.sequence >= MAX_SEQUENCE || checkpoint && this.checkpoints >= MAX_CHECKPOINTS) { this.exhaust(); return; }
   const sequence = ++this.sequence;
+  if (checkpoint) this.checkpoints++;
   const chunk: ReplayChunk = {
    replay_id: this.config.replayId, session_id: this.config.sessionId, recorder_version: RECORDER_VERSION, sequence: String(sequence), previous_hash: this.previousHash,
    checkpoint_sequence: String(checkpoint ? sequence : this.checkpointSequence), checkpoint_hash: checkpoint ? this.previousHash : this.checkpointHash,

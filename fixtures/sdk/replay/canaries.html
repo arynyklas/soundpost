@@ -69,7 +69,7 @@
  window.__revoked = 0;
  window.__replay = createRecorder({
   projectPolicy: true, deploymentOptIn: window.__deployment !== false, root: document.documentElement,
-  replayId: "a".repeat(32), sessionId: "b".repeat(32), capturePolicyRevision: "1", domain: {host: "host0001", boot: "boot0001", runtime: "runtime1"},
+  replayId: "a".repeat(32), sessionId: "b".repeat(32), capturePolicyRevision: "1", domain: {host: "c".repeat(32), boot: "d".repeat(32), runtime: "e".repeat(32)},
   clock: () => ({wall_ns: String(BigInt(Date.now()) * 1000000n), mono_ns: String(BigInt(Math.round(performance.now() * 1e6))), uncertainty_ns: "1000000"}),
   viewport: () => ({w: innerWidth, h: innerHeight, x: scrollX, y: scrollY}),
   onRevoked: () => { window.__revoked++; window.__stream.clear(); },

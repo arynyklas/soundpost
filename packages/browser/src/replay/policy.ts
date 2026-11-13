@@ -1,6 +1,6 @@
 // Copyright 2026 Aryn Yklas
 // SPDX-License-Identifier: Apache-2.0
-import type {ReplayPresentation, ReplayTag} from "./types.ts";
+import type {ReplayTag} from "./types.ts";
 
 export const MASK = "[masked]" as const;
 export const RECORDER_VERSION = "1";
@@ -17,8 +17,14 @@ export const EVENT_FLUSH_MS = 1000;
 export const MAX_PENDING_EVENTS = 1024;
 export const MAX_DEPTH = 256;
 export const ZERO_HASH = "0".repeat(64);
+/** Largest node id the server admits (internal/replays maxNodeID). */
+export const MAX_NODE_ID = 2 ** 31;
+/** Largest chunk sequence of one replay and most checkpoints of one replay the server admits (internal/replays MaxSequence, MaxCheckpoints). */
+export const MAX_SEQUENCE = 1 << 16;
+export const MAX_CHECKPOINTS = 1024;
 
-const TAGS: ReadonlySet<string> = new Set(["html", "body", "div", "span", "p", "button", "input", "section", "canvas", "img", "a", "ul", "ol", "li", "h1", "h2", "h3", "h4", "h5", "h6", "form", "label", "nav", "main", "header", "footer", "article", "aside", "table", "tr", "td", "th"]);
+/** The server's closed tag vocabulary (internal/replays nodeTags) minus the generic "masked". Anything else is recorded as "masked". */
+const TAGS: ReadonlySet<string> = new Set(["div", "span", "p", "button", "input", "section", "canvas"]);
 /** Elements with no replay representation at all (code, style and metadata are never walked). */
 const SKIPPED: ReadonlySet<string> = new Set(["script", "style", "template", "noscript", "head", "link", "meta", "title", "base"]);
 /** Frames, embedded media and widgets whose value or content cannot be masked structurally. */
@@ -36,12 +42,6 @@ export function quantize(value: number): number {
  if (typeof value !== "number" || !Number.isFinite(value)) return 0;
  const q = Math.round(value / 8) * 8;
  return Math.max(-32768, Math.min(32768, q)) + 0;
-}
-
-const DISPLAY: Readonly<Record<string, ReplayPresentation>> = {inline: "inline", "inline-block": "inline", block: "block", "list-item": "block", flex: "flex", "inline-flex": "flex", grid: "grid", "inline-grid": "grid", none: "hidden"};
-export function presentationFor(display: string, visibility: string): ReplayPresentation {
- if (visibility === "hidden" || visibility === "collapse") return "hidden";
- return typeof display === "string" && Object.hasOwn(DISPLAY, display) ? DISPLAY[display]! : "other";
 }
 
 /** Capture needs project policy AND deployment opt-in AND explicit consent, each strictly true. */

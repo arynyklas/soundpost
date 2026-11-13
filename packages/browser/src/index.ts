@@ -17,12 +17,20 @@ export class Client extends CoreClient {
   super({...config,sourceClass:"browser"},typeof brand==="function"?{isNativeError:(value:unknown)=>Reflect.apply(brand,Error,[value])===true}:undefined,undefined,createMetadataContext(config.clockNs));
  }
  private replay:ReplayRecorder|undefined;
- /** Creates the owned recorder under this client's policy. Capture stays off until setReplayConsent(true). */
- startReplay(config:Omit<ReplayConfig,"projectPolicy"|"deploymentOptIn">,emit:(chunk:ReplayChunk)=>EnqueueResult):ReplayRecorder{
+ /** Creates the owned recorder under this client's policy. Capture stays off until setReplayConsent(true). Every chunk the recorder emits is enqueued by THIS client on its ordinary delivery path
+  * (closed wire validation, batching, retry, receipts); a chunk the queue refuses is the recorder's counted loss and is healed by a gap-marked checkpoint. `tap` is an optional local consumer
+  * (for example a ReplayStream feeding a viewer) that sees every chunk; its own failure never affects delivery. Revoking consent also destroys this client's not-yet-batched replay chunks. */
+ startReplay(config:Omit<ReplayConfig,"projectPolicy"|"deploymentOptIn">,tap?:(chunk:ReplayChunk)=>void):ReplayRecorder{
   if(this.replay)throw Error("replay recorder already started");
   // policyDecision.replay is project policy AND deployment opt-in already combined by core.
   const allowed=this.policyDecision.replay;
-  return this.replay=createRecorder({...config,projectPolicy:allowed,deploymentOptIn:allowed},emit);
+  const deliver=(chunk:ReplayChunk):EnqueueResult=>{
+   const queued=this.captureReplay({...chunk});
+   if(tap!==undefined){try{tap(chunk);}catch{/* a local consumer cannot break delivery */}}
+   return queued?"accepted":"rejected";
+  };
+  const onRevoked=():void=>{this.discardUnsentReplay();config.onRevoked?.();};
+  return this.replay=createRecorder({...config,projectPolicy:allowed,deploymentOptIn:allowed,onRevoked},deliver);
  }
  setReplayConsent(enabled:boolean):void{this.replay?.setConsent(enabled);}
  private processId:string|undefined;

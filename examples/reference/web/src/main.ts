@@ -9,7 +9,7 @@ import type {PublicConfig} from "./config.ts";
 import {formatReceipt} from "./receipt.ts";
 import type {Order} from "./receipt.ts";
 import {profileFor, replayFor} from "./scenarios.ts";
-import type {ProfileOutcome, ReplayOutcome} from "./scenarios.ts";
+import type {ProfileOutcome, ReplayOutcome, ReplaySession} from "./scenarios.ts";
 import "./style.css";
 
 declare const __REFERENCE_BUILD_ID__: string;
@@ -21,7 +21,8 @@ interface Reference {
   ready: boolean;
   flush(): Promise<{pending: number; lost: number; receipts: number}>;
   profile(durationMs: number): Promise<ProfileOutcome>;
-  replay(): Promise<ReplayOutcome>;
+  startReplay(): void;
+  finishReplay(): Promise<ReplayOutcome>;
 }
 declare global {
   interface Window {__reference?: Reference}
@@ -44,6 +45,7 @@ async function start(): Promise<void> {
   }
   const client = init(sdkConfig(raw));
   const gateway = installFetch(client, {operation: "http.call", origins: [{origin: location.origin, dependency: "gateway"}]});
+  let replay: ReplaySession | undefined;
   const reference: Reference = {
     buildId: __REFERENCE_BUILD_ID__, traceId: "", spanId: "", ready: false,
     async flush() {
@@ -51,7 +53,14 @@ async function start(): Promise<void> {
       return {pending: report.pending, lost: report.lost, receipts: report.receipts.length};
     },
     profile: durationMs => profileFor(raw, durationMs),
-    replay: () => replayFor(raw),
+    startReplay() {
+      if (replay) throw Error("replay_already_started");
+      replay = replayFor(raw);
+    },
+    finishReplay() {
+      if (!replay) throw Error("replay_not_started");
+      return replay.finish();
+    },
   };
 
   const button = element<HTMLButtonElement>("place-order");

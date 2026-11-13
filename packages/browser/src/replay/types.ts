@@ -3,12 +3,9 @@
 
 /** The only text value a replay node can carry. */
 export type ReplayMask = "[masked]";
-/** Inert tag enum; every other element is the generic structural tag "masked". */
-export type ReplayTag = "html" | "body" | "div" | "span" | "p" | "button" | "input" | "section" | "canvas" | "img" | "a" | "ul" | "ol" | "li" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "form" | "label" | "nav" | "main" | "header" | "footer" | "article" | "aside" | "table" | "tr" | "td" | "th" | "masked";
-export type ReplayPresentation = "inline" | "block" | "flex" | "grid" | "hidden" | "other";
-/** Rectangle in CSS pixels, each field a multiple of 8 clamped to ±32768. */
-export interface ReplayRect { readonly x: number; readonly y: number; readonly w: number; readonly h: number }
-/** Closed structural node. IDs are canonical decimal strings of recorder-local counters (C04 uint64 form). */
+/** Inert tag enum of the server's closed schema (internal/replays nodeTags); every other element is the generic structural tag "masked". */
+export type ReplayTag = "div" | "span" | "p" | "button" | "input" | "section" | "canvas" | "masked";
+/** Closed structural node, exactly the server's model.MaskedNode: no geometry, style or content. IDs are canonical decimal strings of recorder-local counters (C04 uint64 form). */
 export interface ReplayNode {
  readonly id: string;
  readonly parent: string;
@@ -17,8 +14,6 @@ export interface ReplayNode {
  readonly class: "" | "masked";
  /** Constant mask for text and input nodes, "" for pure structure. Never a source value. */
  readonly text: "" | ReplayMask;
- readonly rect: ReplayRect;
- readonly pres: ReplayPresentation;
 }
 export type ReplayEventKind = "pointer" | "scroll" | "resize" | "mutation" | "checkpoint" | "gap";
 export interface ReplayEvent { readonly at_ns: string; readonly kind: ReplayEventKind; readonly node: string; readonly x: number; readonly y: number }
@@ -56,8 +51,6 @@ export interface DomAccessors {
  openShadowRoot(element: object): object | null;
  closedShadow?(element: object): boolean;
  editable(element: object): boolean;
- rect(element: object): readonly [number, number, number, number];
- presentation(element: object): ReplayPresentation;
  mutationTarget(record: object): object | null;
  eventTarget(event: object): object | null;
  clientX(event: object): number;

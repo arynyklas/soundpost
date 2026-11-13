@@ -92,7 +92,14 @@ try {
     const outcome = await page.evaluate(() => window.__reference.profile(300));
     Object.assign(result, {build_id: await page.evaluate(() => window.__reference.buildId), document_policy_header: documentPolicy, profile: outcome, page_errors: pageErrors, console_errors: consoleErrors, ingest});
   } else {
-    const outcome = await page.evaluate(() => window.__reference.replay());
+    // The recorder runs in the page while the driver types the canary note into the textarea, clicks it and writes the same
+    // text into a text node: it must see structure only. 1.3 s lets the recorder's 1 s event flush deliver the interaction.
+    await page.evaluate(() => window.__reference.startReplay());
+    await page.fill("#note", note);
+    await page.click("#note");
+    await page.evaluate(text => { document.getElementById("result").textContent = text; }, note);
+    await page.waitForTimeout(1300);
+    const outcome = await page.evaluate(() => window.__reference.finishReplay());
     Object.assign(result, {build_id: await page.evaluate(() => window.__reference.buildId), replay: outcome, page_errors: pageErrors, console_errors: consoleErrors, ingest});
   }
 } finally {

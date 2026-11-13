@@ -39,8 +39,10 @@ export interface JobInput {readonly kind:"job_attempt";readonly id:string;readon
 export interface ProfileInput {readonly kind:"profile_chunk";readonly id:string;readonly observed_at_ns:string;readonly payload:Readonly<Record<string,unknown>>}
 /** The capability truth record a profile chunk names by id (or the only record of a refused profile). */
 export interface CapabilityInput {readonly kind:"capability";readonly id:string;readonly observed_at_ns:string;readonly payload:Readonly<Record<string,unknown>>}
-export type CaptureInput=ErrorInput|LogInput|SpanInput|JobInput|ProfileInput|CapabilityInput;
-export interface SafeRecord {readonly kind:"error"|"log"|"span"|"job_attempt"|"profile_chunk"|"capability";readonly id:string;readonly observed_at_ns:string;readonly policy_revision:string;readonly payload:Readonly<Record<string,unknown>>}
+/** A browser-recorded replay_chunk wire payload (the server's closed masked schema). The closed field set is enforced again by the queue's wire validation. */
+export interface ReplayInput {readonly kind:"replay_chunk";readonly id:string;readonly observed_at_ns:string;readonly payload:Readonly<Record<string,unknown>>}
+export type CaptureInput=ErrorInput|LogInput|SpanInput|JobInput|ProfileInput|CapabilityInput|ReplayInput;
+export interface SafeRecord {readonly kind:"error"|"log"|"span"|"job_attempt"|"replay_chunk"|"profile_chunk"|"capability";readonly id:string;readonly observed_at_ns:string;readonly policy_revision:string;readonly payload:Readonly<Record<string,unknown>>}
 export type HookMechanism="uncaught_exception"|"unhandled_rejection"|"thread_exception"|"asyncio_exception";
 export type ExceptionEdgeKind="cause"|"context"|"group";
 export interface OwnedHookLease {close():void}

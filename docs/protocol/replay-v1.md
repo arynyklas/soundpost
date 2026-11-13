@@ -24,6 +24,12 @@ A chunk is one `replay_chunk` record (model.ReplayChunk), at most 128 KiB of can
 
 The chunk hash is SHA-256 over the canonical JSON of the whole chunk (sorted keys, no insignificant whitespace, decimal-string integers). The recorder and the server must agree on this serialization: a recorder that hashes a different byte form produces a chain the server reports as `hash_mismatch` gaps, never as continuity.
 
+### The browser recorder emits this schema
+
+The closed format above is the contract and the only one: the browser recorder (`packages/browser/src/replay`) is built to emit exactly these fields and vocabularies, and the server never widens to fit it. A recorder node is `id parent tag class text` with no geometry, presentation or style; an element outside the tag list is the generic tag `masked`; an event's `at_ns` is the chunk clock's monotonic reading; node ids restart at every checkpoint; and the recorder stops at the sequence and checkpoint ceilings below instead of sending a chunk the server would refuse. Masking therefore holds on both sides: no raw text, input value, attribute or class is ever read in the browser, and nothing outside the allowlist can be admitted by the server.
+
+The two sides are held together by golden chunks emitted by the real recorder (`fixtures/replays/recorder`). The recorder's test regenerates them and fails if they drift; the Go tests decode them strictly, validate them with `ValidateChunk`, check that `ChunkHash` equals the chain the recorder computed in the browser, and admit them through the production path to read the stored chain. See `packages/browser/README.md` for the commands.
+
 ## Admission order
 
 1. `Validate(grant, chunk)` (or `ValidateJSON(grant, raw)` for a wire chunk) before anything is durable, and before any quota is charged. The grant must be fresh. Failures are fixed `model.Fault` codes and never echo content. In a served process ingest installs `ValidateChunk` as its replay gate, so a chunk outside the closed format is refused `invalid`/`unsupported` and leaves no reservation and no record.
