@@ -106,5 +106,5 @@ Read side: `POST /api/v1/jobs/list` and `POST /api/v1/jobs/view` (`internal/http
 
 Still not wired:
 
-- Nothing in a running node reads the data-group job-attempt journal and calls `ApplyAttempt` (its only non-test caller is the drills tool), and no scheduler observer exists to call `ObserveSchedule`.
+- The served node's background runner (`App.JobProducer`, `internal/appcore/producers_jobs.go`) reads the data-group job-attempt journal and calls `ApplyAttempt` under the in-process `system:runner` principal (see `docs/operations/background-workers.md`). No scheduler observer exists to call `ObserveSchedule`: there is no committed source of schedule definitions, so scheduled jobs read `unknown / no_schedule_observer`.
 - No HTTP route exposes `Correct`; the SDK sends `manual.<run id>` schedule occurrences.

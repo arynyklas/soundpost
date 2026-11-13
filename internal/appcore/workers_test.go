@@ -196,9 +196,9 @@ func (n *workerNode) alertRuleIn(project model.ID) rules.Rule {
 
 func (n *workerNode) config(extra func(*appcore.WorkerConfig)) appcore.WorkerConfig {
 	cfg := appcore.WorkerConfig{
-		Principals: []appcore.WorkerPrincipal{{Org: n.org, Token: func(context.Context) (string, error) { return n.token, nil }}},
-		Clock:      n.clock,
-		Interval:   10 * time.Millisecond,
+		Orgs:     []model.ID{n.org},
+		Clock:    n.clock,
+		Interval: 10 * time.Millisecond,
 	}
 	if extra != nil {
 		extra(&cfg)
@@ -451,31 +451,122 @@ func TestWorkersBoundRulesPerPassAndRotate(t *testing.T) {
 	}
 }
 
-func TestWorkersRefuseABadTokenWithoutEffects(t *testing.T) {
+// An organization that does not exist, or that has been retired, yields no system
+// scope: the pass reports the closed auth error and commits nothing.
+func TestWorkersServeNoOrganizationThatEnded(t *testing.T) {
 	n := newWorkerNode(t)
 	rule := n.alertRule()
-	cfg := n.config(func(c *appcore.WorkerConfig) { c.Rules = staticRules{rule} })
-	cfg.Principals[0].Token = func(context.Context) (string, error) { return "not-a-token", nil }
+	for name, org := range map[string]model.ID{"unknown": model.NewID(), "retired": n.org} {
+		if name == "retired" {
+			if err := n.app.Control.Update(n.ctx, func(st *model.ControlState) error {
+				if st.RetiredOrgs == nil {
+					st.RetiredOrgs = map[string]model.ID{}
+				}
+				st.RetiredOrgs[n.org.String()] = model.NewID()
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		cfg := n.config(func(c *appcore.WorkerConfig) { c.Rules = staticRules{rule}; c.Orgs = []model.ID{org} })
+		w, err := n.app.NewWorkers(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rep := w.Tick(n.ctx)
+		if !rep.Leader || len(rep.Errors) == 0 || rep.Evaluated != 0 || rep.Consumed != 0 {
+			t.Fatalf("%s: report %+v", name, rep)
+		}
+		for _, e := range rep.Errors {
+			if e.Stage != appcore.StageAuth || e.Code != string(model.NotFound) {
+				t.Fatalf("%s: error %+v", name, e)
+			}
+		}
+		if _, found := n.book(rule); found {
+			t.Fatalf("%s: a worker committed for an organization that ended", name)
+		}
+	}
+}
+
+// The scope is re-derived every pass: a rule evaluated while the organization was live
+// is followed by nothing once it is retired.
+func TestWorkersStopAtTheNextPassWhenTheOrganizationIsRetired(t *testing.T) {
+	n := newWorkerNode(t)
+	rule := n.alertRule()
+	w, err := n.app.NewWorkers(n.config(func(c *appcore.WorkerConfig) { c.Rules = staticRules{rule}; c.Orgs = nil }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep := n.tick(w); rep.Evaluated != 1 {
+		t.Fatalf("first pass: %+v", rep)
+	}
+	n.clock.v.Add(int64(time.Minute))
+	if err = n.app.Control.Update(n.ctx, func(st *model.ControlState) error {
+		if st.RetiredOrgs == nil {
+			st.RetiredOrgs = map[string]model.ID{}
+		}
+		st.RetiredOrgs[n.org.String()] = model.NewID()
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rep := w.Tick(n.ctx)
+	if rep.Evaluated != 0 || len(rep.Errors) != 0 {
+		t.Fatalf("a pass after the organization was retired: %+v", rep)
+	}
+	book, found := n.book(rule)
+	if !found || len(book.Versions) != 1 || len(book.Versions[0].Recent) != 1 {
+		t.Fatalf("book after retirement: found=%t %+v", found, book)
+	}
+}
+
+// With no organization configured the runner serves every organization in control state,
+// and everything it commits is audited as the system principal, never as a human.
+func TestWorkersServeEveryOrganizationAsTheSystemPrincipal(t *testing.T) {
+	n := newWorkerNode(t)
+	rule := n.alertRule()
+	cfg := n.config(func(c *appcore.WorkerConfig) { c.Rules = staticRules{rule}; c.Orgs = nil })
 	w, err := n.app.NewWorkers(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	rep := w.Tick(n.ctx)
-	if !rep.Leader || len(rep.Errors) != 1 || rep.Errors[0].Stage != appcore.StageAuth || rep.Evaluated != 0 {
-		t.Fatalf("report: %+v", rep)
+	before := n.auditCount()
+	if rep := n.tick(w); rep.Evaluated != 1 || rep.Consumed != 1 {
+		t.Fatalf("pass: %+v", rep)
 	}
-	if _, found := n.book(rule); found {
-		t.Fatal("an unauthenticated worker committed")
+	system, human := 0, 0
+	if err = n.app.Control.View(n.ctx, func(st model.ControlState) error {
+		for _, a := range st.Audits[before:] {
+			switch a.Principal {
+			case auth.SystemPrincipal(n.org):
+				system++
+			case n.user:
+				human++
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
+	if system == 0 || human != 0 {
+		t.Fatalf("audits since the pass began: %d by %s, %d by a human", system, auth.SystemRunner, human)
+	}
+}
+
+func (n *workerNode) auditCount() int {
+	n.t.Helper()
+	var count int
+	if err := n.app.Control.View(n.ctx, func(st model.ControlState) error { count = len(st.Audits); return nil }); err != nil {
+		n.t.Fatal(err)
+	}
+	return count
 }
 
 func TestNewWorkersValidatesItsConfiguration(t *testing.T) {
 	n := newWorkerNode(t)
 	for name, cfg := range map[string]appcore.WorkerConfig{
-		"no principal":  {},
-		"no org":        {Principals: []appcore.WorkerPrincipal{{Token: func(context.Context) (string, error) { return "x", nil }}}},
-		"no token":      {Principals: []appcore.WorkerPrincipal{{Org: n.org}}},
-		"zero org only": {Principals: []appcore.WorkerPrincipal{{}}},
+		"zero org":                   {Orgs: []model.ID{{}}},
+		"zero org beside a real one": {Orgs: []model.ID{n.org, {}}},
 	} {
 		if _, err := n.app.NewWorkers(cfg); err == nil {
 			t.Fatalf("%s: accepted", name)
@@ -578,7 +669,7 @@ func TestWorkersRunBacksOffWhilePassesFail(t *testing.T) {
 		c.MaxBackoff = 400 * time.Millisecond
 		c.Observe = func(appcore.PassReport) { passes.Add(1) }
 	})
-	cfg.Principals[0].Token = func(context.Context) (string, error) { return "", errors.New("no token") }
+	cfg.Orgs = []model.ID{model.NewID()}
 	w, err := n.app.NewWorkers(cfg)
 	if err != nil {
 		t.Fatal(err)

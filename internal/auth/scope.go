@@ -215,6 +215,14 @@ func (s *Service) Revalidate(ctx context.Context, scope Scope) error {
 	if scope.service != s {
 		return model.Fail(model.Forbidden)
 	}
+	if scope.credential.system {
+		return s.store.View(ctx, func(st model.ControlState) error {
+			if err := s.validateSystemState(st, scope); err != nil {
+				return err
+			}
+			return s.grantLease(scope, st, checkedAt)
+		})
+	}
 	if _, e := s.Authenticate(ctx, scope.credential.token); e != nil {
 		return e
 	}

@@ -46,6 +46,9 @@ type Credential struct {
 	token   string
 	fresh   int64
 	admin   bool
+	// system marks the runner's in-process credential (AuthorizeSystem). Only
+	// that function sets it; it has no token and Authenticate never returns one.
+	system  bool
 	machine bool
 }
 

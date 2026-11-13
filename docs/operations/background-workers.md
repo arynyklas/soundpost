@@ -14,8 +14,8 @@ an adoption see [notification cutover](notification-cutover.md).
 
 A pass takes the control group's leadership lease once (`Fence`). A node that is
 not the leader returns immediately and does nothing. As the leader, for each
-configured organization it authenticates the worker principal's token afresh,
-then for each project (at most `MaxProjects` per pass, in rotation):
+organization it serves it derives the system scopes afresh (see below), then for
+each project (at most `MaxProjects` per pass, in rotation):
 
 1. **Rules.** Lists the project's rules (`RuleSource`), takes the next `MaxRules`
    in rotation and runs the scheduler under the lease with the project-scoped
@@ -24,14 +24,17 @@ then for each project (at most `MaxProjects` per pass, in rotation):
    nothing.
 2. **Recording outputs.** If an `OutputAdmission` is configured, flushes up to
    `OutputLimit` pending recording outputs.
-3. **Conditions.** Consumes up to `ConsumeLimit` condition outputs into
+3. **Producers.** Runs each configured `Producer` (issues and incidents from
+   ingested errors, job books from ingested job attempts) under the lease, each
+   bounded and idempotent.
+4. **Conditions.** Consumes up to `ConsumeLimit` condition outputs into
    condition state.
-4. **Notification decisions.** If a `NotificationRouting` is configured, decides
-   the conditions that may notify (at most `NotifyLimit` per pass) into the
-   delivery outbox.
-5. **Ownership mode.** If the project has a notification cutover record, brings
+5. **Notification decisions.** If a `NotificationRouting` is configured, decides
+   the conditions and the incidents that may notify (at most `NotifyLimit` per
+   pass, each kind) into the delivery outbox.
+6. **Ownership mode.** If the project has a notification cutover record, brings
    its delivery states to the mode its phase requires (`SyncModes`).
-6. **Delivery.** If a `Sender` is configured, runs one delivery pass (a batch of
+7. **Delivery.** If a `Sender` is configured, runs one delivery pass (a batch of
    at most `DeliveryBatch` claims).
 
 The lease is re-proved against a fresh quorum observation at the start of each
@@ -53,41 +56,75 @@ in flight observes cancellation.
 
 ## The worker principal
 
-There is no internal, privilege-minting scope in the auth package, and the
-workers do not invent one. Committing control state (rule evaluations, condition
-state, delivery records) needs an organization-administrator scope, and the only
-credential that can obtain one is an organization administrator's own: a server
-token cannot carry `org.admin` (it is not a grantable permission). A pass
-therefore acts as an administrator's session named in `WorkerConfig.Principals`:
-the organization and a function returning the bearer token. The function is
-called on every pass, which is where the process renews the session (sessions
-last 12 hours), and the token is authenticated afresh each time, so revoking it
-stops the workers at once. The principal must also be an organization member
-holding a `telemetry.read` grant on the projects served (the rule evaluator
-reads with the project-scoped read scope).
+`soundpost serve` runs the runner under an in-process **system principal per
+organization** (owner decision D1). `auth.Service.AuthorizeSystem` derives its
+scope; the audit actor is `system:runner` (the principal ID of an organization is
+the ASCII bytes of that name followed by three bytes of the organization's
+digest, so every audit row, command owner and timeline entry says who acted).
 
-A project for which the principal cannot be authorized is reported as an `auth`
-stage error and skipped. A non-interactive worker identity that may mint an
-`org.admin` scope for its own organization only would remove the session
-renewal; it needs an owner decision and an audited constructor in the auth
-package, and does not exist.
+* **Never a credential.** There is no token, session or user record. No route,
+  header, cookie or body field selects it: `Authenticate` never returns a system
+  credential, a scope cannot be decoded from JSON, and `create_user` refuses a
+  user ID that carries the system tag. A test hits every registered route with
+  every spelling of the principal and proves nothing is accepted or committed.
+* **Exactly the roles the runner needs.** Project read (the rule evaluator), the
+  organization-administrator scope of the control commits (rule evaluations,
+  conditions, delivery records, system-origin incident open/impact),
+  `issues.write` (issue producer) and `policy.write` (job producer). Raw reads,
+  artifacts, replay, profiles, source credentials, instance administration,
+  release registration, deletion, retention, legal holds and ownership cutover are
+  outside it; a system incident action other than a system-origin open or impact
+  is refused.
+* **Re-derived every pass.** Every pass derives its scopes afresh for each
+  project. An organization that is unknown or retired, or a project that is
+  retired, yields no scope at the next pass (the pass reports `auth`/`not_found`
+  and commits nothing); a scope already in hand ends at its next validation, and
+  so does one whose organization policy epoch moved.
+* **Audited as that actor.** Everything the runner commits (condition changes,
+  delivery transitions, incidents, issues, job books) carries
+  `auth.SystemPrincipal(org)` as its principal.
 
-## What is not wired by default
+With no `Orgs` configured the runner serves every organization in control state
+that is not retired, listed again at every pass. A project the scope cannot be
+derived for is reported as an `auth` stage error and skipped.
+
+## What the served process wires
+
+`soundpost serve` starts the runner next to the fences (leader only; a follower
+returns from each pass at once) with:
+
+* **Producers** (`App.Producers`): turn ingested evidence into control state before
+  conditions are consumed (issues and incidents from ingested errors, job books from
+  ingested job attempts).
+* **Routing** (`App.OrgRouting`): the conditions and incidents of every project
+  notify every enabled destination of the project's organization, under the
+  approved default notification policy. The destinations are what the
+  `destination` admin command configures (type, https endpoint or address,
+  enabled, sealed secret); a destination enabled later is picked up at the next
+  pass.
+* **Sender** (`App.NotificationSender`): the signed webhook, Telegram Bot API and
+  SMTP providers behind the organization-scoped destination registry over committed
+  control state and the control store's sealed secrets. A destination whose channel
+  the node has not configured (SMTP without `--notify-smtp-host`) fails visibly with
+  `channel_unconfigured`, never silently.
+
+The node's own delivery environment is flags, validated before storage opens:
+`--public-origin`, `--notify-egress-allow` (private CIDRs only; loopback, link-local
+and metadata ranges can never be allowed), `--notify-ca-file`, `--notify-smtp-*`,
+`--notify-telegram-api`, `--notify-send-timeout` and `--worker-interval`. Webhook
+attempt timestamps are recorded once per attempt under `<data-dir>/notify`
+(node-local, 0700, removed after two days).
+
+## What is still not wired
 
 Each seam below is a nil interface in `WorkerConfig`, which switches that stage
 off. None is replaced by a stand-in that reports success.
 
-* `RuleSource`: control state has no rule catalogue yet, so nothing lists rules.
+* `RuleSource`: control state has no rule catalogue and no authoring route, so
+  nothing lists rules and no condition is evaluated by a served node.
 * `OutputAdmission`: admitting recording batches needs a recording-source
   credential; recording outputs stay pending until one is wired.
-* `NotificationRouting`: there is no committed notification-policy catalogue; the
-  routing says which policy, revision and destinations a project's conditions
-  notify. Severity text other than `critical` and `major` is decided as minor.
-* `Sender`: the provider senders (`internal/notify/providers`) need operator
-  configuration (SMTP host, Telegram client, webhook egress policy, origin and an
-  attempt stamper) and a `notify.SecretReader` over the sealed destination
-  secrets. Neither exists in a deployed node, so no notification leaves it.
-* `Producer`: the recording producer identity resolver.
+* `Producer` (the resolver of the registered recording producer identity).
 
 ## Bounded retention of login and elevation state
 

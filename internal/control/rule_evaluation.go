@@ -381,7 +381,7 @@ func applyRuleEvaluation(scope auth.Scope, st *State, cmd Command) (Effect, erro
 	if rule == (model.ID{}) {
 		return Effect{}, model.Fail(model.Invalid)
 	}
-	if err := releaseScope(scope, st, org, project); err != nil {
+	if err := projectAdminScope(scope, st, org, project); err != nil {
 		// A retired project accepts exactly one thing: the suppression of an
 		// output that was never released, by an organization administrator.
 		if c.Operation != RuleOpOutput || c.Output.To != RulePhaseSuppress || retiredProjectAdmin(scope, *st, org, project) != nil {

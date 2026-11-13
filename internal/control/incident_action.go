@@ -118,6 +118,21 @@ func loadIncident(st *State, key string) (IncidentRecord, bool, error) {
 	return r, true, nil
 }
 
+// incidentActionScope admits the scope to the incident action. An organization
+// administrator acts as before. The in-process system runner (not a member,
+// holds org.admin by construction) is admitted only for the two system-origin
+// observations, open and impact, on a live project its scope names; it can
+// never take a human decision.
+func incidentActionScope(scope auth.Scope, st *State, org model.ID, c IncidentCommand) error {
+	if !scope.IsSystem() {
+		return releaseScope(scope, st, org, c.Project)
+	}
+	if scope.Permission() != auth.OrgAdmin || scope.OrgID() != org || c.Origin != "system" || c.Action != "open" && c.Action != "impact" {
+		return model.Fail(model.NotFound)
+	}
+	return issueProjectScope(scope, st, c.Project)
+}
+
 func applyIncidentAction(scope auth.Scope, st *State, cmd Command) (Effect, error) {
 	var c IncidentCommand
 	if err := strictPayload(cmd.Payload, &c); err != nil {
@@ -126,7 +141,7 @@ func applyIncidentAction(scope auth.Scope, st *State, cmd Command) (Effect, erro
 	org := scope.OrgID()
 	// Scope and grants first: nothing about the target is looked up, parsed or
 	// answered for a scope that may not act in this project.
-	if err := releaseScope(scope, st, org, c.Project); err != nil {
+	if err := incidentActionScope(scope, st, org, c); err != nil {
 		return Effect{}, err
 	}
 	if c.Incident == (model.ID{}) || c.At <= 0 || !incidentToken(c.Action) || c.Origin != "human" && c.Origin != "system" ||

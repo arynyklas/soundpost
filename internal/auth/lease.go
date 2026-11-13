@@ -28,12 +28,14 @@ func (scope Scope) LeaseDeadline() time.Time {
 // the lease lock. Start at the authority-read boundary, not after a slow read.
 func (s *Service) grantLease(scope Scope, st model.ControlState, checkedAt time.Time) error {
 	deadline := checkedAt.Add(5 * time.Second)
-	credentialExpiry := st.Sessions[hashToken(scope.credential.token)].Expires
-	if scope.credential.machine {
-		credentialExpiry = st.ServerTokens[s.serverTokenDigest(scope.credential.token)].Expires
-	}
-	if credentialExpiry <= deadline.Unix() {
-		deadline = checkedAt.Add(time.Unix(credentialExpiry, 0).Sub(checkedAt))
+	if !scope.credential.system {
+		credentialExpiry := st.Sessions[hashToken(scope.credential.token)].Expires
+		if scope.credential.machine {
+			credentialExpiry = st.ServerTokens[s.serverTokenDigest(scope.credential.token)].Expires
+		}
+		if credentialExpiry <= deadline.Unix() {
+			deadline = checkedAt.Add(time.Unix(credentialExpiry, 0).Sub(checkedAt))
+		}
 	}
 	if scope.elevation != (model.ID{}) && scope.elevationExpires.Before(deadline) {
 		deadline = checkedAt.Add(scope.elevationExpires.Sub(checkedAt))

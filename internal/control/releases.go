@@ -55,6 +55,32 @@ func releaseScope(scope auth.Scope, st *State, org, project model.ID) error {
 	}
 	return nil
 }
+
+// projectAdminScope is releaseScope for the control writers the background runner
+// drives (rule evaluation, conditions, notification delivery, incident actions): a
+// human organization administrator as before, and the runner's own system scope,
+// which holds its role by construction (auth.AuthorizeSystem) and has no
+// administrator record. Release registration and grouping migration stay with
+// releaseScope, so the runner can never write them.
+func projectAdminScope(scope auth.Scope, st *State, org, project model.ID) error {
+	if !scope.IsSystem() {
+		return releaseScope(scope, st, org, project)
+	}
+	if scope.Permission() != auth.OrgAdmin || scope.OrgID() != org || org == (model.ID{}) || project == (model.ID{}) {
+		return model.Fail(model.NotFound)
+	}
+	authority, ok := st.Orgs[org.String()]
+	if !ok {
+		return model.Fail(model.NotFound)
+	}
+	if _, ok := authority.Projects[project.String()]; !ok {
+		return model.Fail(model.NotFound)
+	}
+	if len(scope.ProjectIDs()) > 0 && !scope.AllowsProject(project) {
+		return model.Fail(model.NotFound)
+	}
+	return nil
+}
 func applyReleaseOperation(scope auth.Scope, st *State, cmd Command) (Effect, error) {
 	payload, e := decodeReleaseCommand(cmd)
 	if e != nil {

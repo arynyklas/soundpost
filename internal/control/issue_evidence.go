@@ -285,6 +285,14 @@ func issueProjectScope(scope auth.Scope, st *State, project model.ID) error {
 	if _, retired := st.RetiredProjects[org.String()+":"+project.String()]; retired {
 		return model.Fail(model.NotFound)
 	}
+	if scope.IsSystem() {
+		// The runner holds its role by construction (auth.AuthorizeSystem), not by
+		// membership or grant; it is still confined to the projects its scope names.
+		if (len(scope.ProjectIDs()) > 0 || scope.Permission() != auth.OrgAdmin) && !scope.AllowsProject(project) {
+			return model.Fail(model.NotFound)
+		}
+		return nil
+	}
 	principal := scope.PrincipalID()
 	if scope.Permission() == auth.OrgAdmin {
 		if !o.Admins[principal.String()] || len(scope.ProjectIDs()) > 0 && !scope.AllowsProject(project) {

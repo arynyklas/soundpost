@@ -10,7 +10,7 @@ import {readFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 
 export type Ns=bigint|string;
-export type Kind='metric'|'log'|'span';
+export type Kind='metric'|'log'|'span'|'job_attempt'|'error';
 export interface Reply{status:number;text:string;json:unknown}
 export interface Source{id:string;credential:string;producer:string;org:string;project:string;service:string;environment:string;build:string;instance:string;policyRevision:string;kinds:readonly Kind[];template?:LogTemplateWire}
 export interface Reader{id:string;email:string;password:string}
@@ -137,6 +137,8 @@ function ownerKey(r:RecordWire):string{
  case 'metric':return canon({name:r.payload.name,labels:r.payload.labels});
  case 'log':return canon(r.payload.stream_labels);
  case 'span':return String(r.payload.trace_id);
+ case 'job_attempt':return String(r.payload.run_id);
+ case 'error':return String(r.payload.occurrence_id);
  }
 }
 function routeSlot(org:string,project:string,r:RecordWire):number{
@@ -215,6 +217,45 @@ export async function ingestSpan(request:APIRequestContext,s:Source,sp:SpanInput
  const payload={trace_id:sp.trace,span_id:span,parent_id:null,span_kind:'server',operation:sp.operation??'op.request',start:clock(start,'1000000000'),end:clock(start+SECOND/100n,'1010000000'),status:'ok',dependency_alias:'',links:[],sample_probability:bitsOf(1),sample_decision:'keep'};
  await ingestBatch(request,s,[{id:id(),kind:'span',observed_at_ns:ns(sp.at),resource:resourceWire(s),payload}]);
  return span;
+}
+
+// ---- job attempts ----------------------------------------------------------------------------------------------
+/** A structured source admitting only job_attempt records (internal/model/telemetry.go JobAttemptEvent). */
+export function onboardJobSource(page:Page,org:string,project:string):Promise<Source>{
+ return onboard(page,org,project,{kinds:['job_attempt'],templates:[],labels:{},operations:[]});
+}
+export type JobAttemptState='started'|'succeeded'|'failed'|'cancelled';
+export interface JobAttemptInput{job:string;run:string;attempt:string;/** the schedule_occurrence identity; a manual execution uses any [A-Za-z0-9_.-] string */occurrence:string;ordinal:number;epoch:string;sequence:number;state:JobAttemptState;observed:Ns;terminal?:Ns;causeTrace?:string;causeError?:string}
+let lastRecordSeq=0n;
+/**
+ * A record ID that sorts after every ID this process made before it. The runner's job producer reads the journal in (event time, record ID,
+ * origin) order and covers each row once; a row ingested BEHIND the newest row it has covered is only found by its periodic sweep (minutes).
+ * Ingesting in that order, with increasing record IDs for equal event times, makes the first pass see everything, whenever it runs.
+ */
+function monotonicId():string{
+ const now=BigInt(Date.now())<<32n;
+ lastRecordSeq=now>lastRecordSeq?now:lastRecordSeq+1n;
+ return lastRecordSeq.toString(16).padStart(24,'0')+randomBytes(4).toString('hex');
+}
+/** One job_attempt event as its own real batch and a fresh record ID, like an SDK retry that resends an event it never saw acknowledged. */
+export async function ingestJobAttempt(request:APIRequestContext,s:Source,e:JobAttemptInput):Promise<void>{
+ const terminal=e.state==='started'?null:ns(e.terminal??e.observed);
+ const payload:Record<string,unknown>={job_id:e.job,run_id:e.run,attempt_id:e.attempt,schedule_occurrence:e.occurrence,ordinal:String(e.ordinal),producer_epoch:e.epoch,sequence:String(e.sequence),state:e.state,observed_ns:ns(e.observed),terminal_ns:terminal,...(e.causeTrace?{cause_trace:e.causeTrace}:{}),...(e.causeError?{cause_error:e.causeError}:{})};
+ await ingestBatch(request,s,[{id:monotonicId(),kind:'job_attempt',observed_at_ns:ns(e.observed),resource:resourceWire(s),payload}]);
+}
+
+// ---- error occurrences -----------------------------------------------------------------------------------------
+/** A structured source admitting only error occurrences (internal/model/telemetry.go ErrorOccurrence). */
+export function onboardErrorSource(page:Page,org:string,project:string):Promise<Source>{
+ return onboard(page,org,project,{kinds:['error'],templates:[],labels:{},operations:[]});
+}
+export interface ErrorInput{at:Ns;class?:string;handled?:boolean;fatal?:boolean}
+/** One frameless error occurrence as its own real batch; returns its occurrence ID. The issue producer groups it by class and mechanism. */
+export async function ingestError(request:APIRequestContext,s:Source,e:ErrorInput):Promise<string>{
+ const occurrence=id();
+ const payload:Record<string,unknown>={occurrence_id:occurrence,exception_class:e.class??'E2eFailure',mechanism:'manual',frames:[],code:null,build_id:s.build,handled:e.handled??false,fatal:e.fatal??true};
+ await ingestBatch(request,s,[{id:id(),kind:'error',observed_at_ns:ns(e.at),resource:resourceWire(s),payload}]);
+ return occurrence;
 }
 
 // ---- queries ---------------------------------------------------------------------------------------------------

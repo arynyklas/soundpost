@@ -10,6 +10,18 @@ func (s *Service) validateCredentialState(st model.ControlState, c Credential) e
 	if c.service != s {
 		return model.Fail(model.Unauthenticated)
 	}
+	if c.system {
+		// The runner's credential has no token, session or user record: it is valid
+		// only as the system principal; the organization checks are the scope's.
+		if !IsSystemPrincipal(c.user) || c.token != "" || c.machine {
+			return model.Fail(model.Unauthenticated)
+		}
+		return nil
+	}
+	if IsSystemPrincipal(c.user) {
+		// No session or token principal may carry a system principal ID.
+		return model.Fail(model.Unauthenticated)
+	}
 	if c.machine {
 		token, ok := st.ServerTokens[s.serverTokenDigest(c.token)]
 		user, exists := st.Users[c.user.String()]
@@ -37,6 +49,9 @@ func (scope Scope) ValidateControlState(st model.ControlState) error {
 	}
 	if scope.service == nil {
 		return model.Fail(model.Forbidden)
+	}
+	if scope.credential.system {
+		return scope.service.validateSystemState(st, scope)
 	}
 	if err := scope.service.validateCredentialState(st, scope.credential); err != nil {
 		return err

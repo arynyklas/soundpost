@@ -643,8 +643,13 @@ func applyDelivery(scope auth.Scope, st *State, cmd Command) (Effect, error) {
 	org := scope.OrgID()
 	// Scope and grants first: nothing about the target is looked up, parsed or
 	// answered for a scope that may not act in this project.
-	if err := releaseScope(scope, st, org, project); err != nil {
+	if err := projectAdminScope(scope, st, org, project); err != nil {
 		return Effect{}, err
+	}
+	if scope.IsSystem() && c.Operation == DeliveryOpCutover {
+		// Ownership cutover is an operator decision with its own authorization; the
+		// runner only follows the committed phase (SyncModes), it never commits one.
+		return Effect{}, model.Fail(model.Forbidden)
 	}
 	if c.Operation == DeliveryOpCutover {
 		// An operator command: it carries no worker lease and a lease on it is a

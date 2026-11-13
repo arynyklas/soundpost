@@ -3,13 +3,19 @@
 Copyright 2026 Aryn Yklas. SPDX-License-Identifier: Apache-2.0.
 
 These are the delivery adapters for the `notify.Sender` seam of the durable outbox
-(see [delivery semantics](delivery-semantics.md)). They exist as a package with
-tests, **not as a wired feature**: `soundpost serve` configures no `Sender`, starts
-no runner that sends, and registers no destination routes, so a served node sends
-no notification. Wiring them waits for the owner's worker-identity decision. The
-code is `internal/notify/providers/{provider,smtp,telegram,webhook}.go` and the
-destination registry `internal/notify/destinations.go`. The notification worker
-does not import the providers package; a future application composition would bind them.
+(see [delivery semantics](delivery-semantics.md)). `soundpost serve` wires them:
+its leader-only background runner (see [background workers](background-workers.md);
+it acts as the in-process `system:runner` principal, owner decision D1) routes the
+conditions and incidents of every project to every enabled destination of the
+project's organization and sends through these providers. The destinations are
+organization configuration written by the `destination` admin command; the node's own
+environment is the `--public-origin`, `--notify-*` and `--worker-interval` serve
+flags. The code is `internal/notify/providers/{provider,smtp,telegram,webhook}.go`,
+the destination registry `internal/notify/destinations.go` and the composition
+`internal/appcore/notification_wiring.go` (destination source and sealed-secret
+reader over control state, node-local attempt stamps, the channel multiplexer and the
+organization routing). The notification worker does not import the providers
+package; the composition binds them.
 
 ## Destinations and secrets
 

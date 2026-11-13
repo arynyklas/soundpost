@@ -1,10 +1,16 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
-import {test,expect,type Page,type BrowserContext} from '@playwright/test';
+import {test,expect,type APIRequestContext,type Page,type BrowserContext} from '@playwright/test';
 import {randomBytes} from 'node:crypto';
-// Two real browsers, one real server, one REAL incident created through the real incidents
-// service. A and B load revision 1; A assigns an owner; B acknowledges with the revision it saw:
+import {field,ingestError,onboardErrorSource,postJson} from './support/real';
+// Two real browsers, one real server, one REAL incident produced the product's own way: an error occurrence ingested through
+// POST /ingest/v1/batches with a real source credential -> the leader-only background runner (`soundpost serve`, issue producer, then
+// incident producer, acting as the in-process system principal) -> a system-origin incident, found through the real POST /api/v1/queue.
+// Nothing seeds a route. A and B load revision 1; A assigns an owner; B acknowledges with the revision it saw:
 // exactly one commit, B gets a conflict naming the current revision, nothing is retried or shown
 // as committed, and B's typed reason survives until B explicitly reloads and submits again.
+// What the real producer decides (and the spec asserts): an unhandled, non-fatal error opens the incident at severity major (a fatal one would
+// open at critical, leaving nothing worse to report) with one impact observation, source
+// firing with fresh data, no linked issue (the issue-workflow section says it is not available), delivery not available.
 const email=process.env.SOUNDPOST_SCOPE_EMAIL;
 const password=process.env.SOUNDPOST_SCOPE_PASSWORD;
 if(!email||!password)throw new Error('A real provisioned MFA-free instance-admin account (SOUNDPOST_SCOPE_EMAIL, SOUNDPOST_SCOPE_PASSWORD) is required');
@@ -12,22 +18,41 @@ const id=():string=>randomBytes(16).toString('hex');
 const origin=new URL(process.env.SOUNDPOST_TEST_ORIGIN??'').origin;
 interface View{version:string;status:string;owner?:string;ack?:{actor:string;current:boolean};timeline:{type:string;actor:string;origin:string}[];source_firing:boolean}
 async function csrf(page:Page):Promise<string>{return (await (await page.request.get('/api/v1/session')).json() as {csrf:string}).csrf;}
+// The admin revision can move between the read and the command (the background runner commits control state too): retry only that race.
 async function command(page:Page,org:string,kind:string,payload:Record<string,unknown>):Promise<void>{
- const token=await csrf(page);
- const read=await page.request.post('/api/v1/admin/read',{headers:{'X-CSRF-Token':token,Origin:origin},data:{kind:'organizations'}});
- expect(read.ok()).toBe(true);
- const {revision}=await read.json() as {revision:string};
- const response=await page.request.post('/api/v1/admin/commands',{headers:{'X-CSRF-Token':token,Origin:origin},data:{command_id:id(),expected_revision:revision,org_id:org,kind,payload:{...payload,reason:'Generic incident action acceptance'}}});
- expect(response.status(),`${kind}`).toBeLessThan(300);
+ for(let attempt=0;;attempt++){
+  const token=await csrf(page);
+  const read=await page.request.post('/api/v1/admin/read',{headers:{'X-CSRF-Token':token,Origin:origin},data:{kind:'organizations'}});
+  expect(read.ok()).toBe(true);
+  const {revision}=await read.json() as {revision:string};
+  const response=await page.request.post('/api/v1/admin/commands',{headers:{'X-CSRF-Token':token,Origin:origin},data:{command_id:id(),expected_revision:revision,org_id:org,kind,payload:{...payload,reason:'Generic incident action acceptance'}}});
+  if(response.status()===409&&attempt<4)continue;
+  expect(response.status(),`${kind}`).toBeLessThan(300);
+  return;
+ }
 }
 async function login(page:Page,who:string,secret:string):Promise<void>{
  await page.goto('/');await page.getByLabel('Email',{exact:true}).fill(who);await page.getByLabel('Password',{exact:true}).fill(secret);await page.getByRole('button',{name:'Sign in',exact:true}).click();await expect(page.getByRole('heading',{name:'Account access',exact:true})).toBeVisible();
 }
-const hash=(org:string,project:string,view:string,incident?:string):string=>`#${new URLSearchParams({org,projects:project,start:'1700000000000000000',end:'1700003600000000000',tz:'UTC',view,...(incident?{incident:`${project}:${incident}`}:{})})}`;
-async function seed(page:Page,org:string,project:string):Promise<string>{
- const incident=id();
- const response=await page.request.post('/api/v1/e2e-seed/incident',{headers:{'X-CSRF-Token':await csrf(page),Origin:origin},data:{org,project,incident,condition:id(),episode:id()}});
- expect(response.status(),'seeding a real incident through the real incidents service').toBe(200);
+const nsOf=(ms:number):string=>String(BigInt(ms)*1_000_000n);
+// The page window brackets "now" (an incident reads by id; the window only scopes the shell).
+const WINDOW={start:nsOf(Date.now()-3*3600_000),end:nsOf(Date.now()+3*3600_000)};
+const hash=(org:string,project:string,view:string,incident?:string):string=>`#${new URLSearchParams({org,projects:project,start:WINDOW.start,end:WINDOW.end,tz:'UTC',view,...(incident?{incident:`${project}:${incident}`}:{})})}`;
+/**
+ * Ingest one fatal error for a new source of the project and wait (real queue route) until the runner has turned it into an incident;
+ * returns the incident id taken from the queue.
+ */
+async function seed(page:Page,api:APIRequestContext,org:string,project:string):Promise<string>{
+ const source=await onboardErrorSource(page,org,project);
+ await ingestError(api,source,{at:nsOf(Date.now()),class:'IncidentE2eFailure',fatal:false,handled:false});
+ let incident='';
+ await expect.poll(async()=>{
+  const r=await postJson(page,'/api/v1/queue',{org,projects:[project],limit:50});
+  const entries=field(r.json,'entries');
+  const first=Array.isArray(entries)?field(entries[0],'incident_id'):undefined;
+  incident=typeof first==='string'?first:'';
+  return incident;
+ },{message:'the runner opens an incident for the ingested error',timeout:90_000,intervals:[250,500,1000]}).not.toBe('');
  return incident;
 }
 async function read(page:Page,org:string,project:string,incident:string):Promise<View>{
@@ -39,7 +64,7 @@ const outcome=(page:Page,kind:string)=>page.locator(`[data-outcome="${kind}"]`);
 async function choose(page:Page,action:string):Promise<void>{await page.getByRole('radio',{name:action,exact:true}).check();}
 async function submit(page:Page,action:string):Promise<void>{await page.getByRole('button',{name:`Submit: ${action}`,exact:true}).click();}
 
-test('two browsers act on one real incident without a silent overwrite',async({page,browser})=>{
+test('two browsers act on one real incident without a silent overwrite',async({page,browser,playwright})=>{
  test.setTimeout(240_000);
  await login(page,email,password);
  const org=id(),project=id();
@@ -54,7 +79,8 @@ test('two browsers act on one real incident without a silent overwrite',async({p
   people.push(p);
  }
  const [alpha,bravo]=people as [typeof people[0],typeof people[0]];
- const incident=await seed(page,org,project);
+ const api=await playwright.request.newContext();
+ const incident=await seed(page,api,org,project);
  const open=(c:BrowserContext)=>c.newPage();
  const ctxA=await browser.newContext(),ctxB=await browser.newContext();
  const pageA=await open(ctxA),pageB=await open(ctxB);
@@ -103,6 +129,8 @@ test('two browsers act on one real incident without a silent overwrite',async({p
  // Exactly one commit: the server holds A's assignment only, with no ACK and no hidden retry.
  const afterConflict=await read(pageB,org,project,incident);
  expect([afterConflict.version,afterConflict.owner,afterConflict.ack,afterConflict.timeline.map((e)=>e.type)]).toEqual(['2',alpha.id,undefined,['open','assign']]);
+ // The incident was opened by the runner, not by a person.
+ expect(afterConflict.timeline[0]?.origin).toBe('system');
 
  // Explicit reload keeps the draft, shows what changed and only then lets B submit again.
  await pageB.getByRole('button',{name:'Reload the current incident',exact:true}).click();
@@ -186,7 +214,7 @@ test('two browsers act on one real incident without a silent overwrite',async({p
  await ctxA.close();await ctxB.close();
 });
 
-test('a lost response is an unknown outcome and the same command ID returns the original result',async({page,browser})=>{
+test('a lost response is an unknown outcome and the same command ID returns the original result',async({page,browser,playwright})=>{
  test.setTimeout(180_000);
  await login(page,email,password);
  const org=id(),project=id();
@@ -196,7 +224,8 @@ test('a lost response is an unknown outcome and the same command ID returns the 
  await command(page,org,'create_user',{id:who.id,email:who.email,password:who.password});
  await command(page,org,'membership',{user_id:who.id,enabled:true});
  await command(page,org,'org_admin',{user_id:who.id,enabled:true});
- const incident=await seed(page,org,project);
+ const api=await playwright.request.newContext();
+ const incident=await seed(page,api,org,project);
  const ctx=await browser.newContext();
  const p=await ctx.newPage();
  await login(p,who.email,who.password);

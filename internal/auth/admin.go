@@ -126,7 +126,7 @@ func (s *Service) AdminCommand(ctx context.Context, c Credential, r AdminCommand
 			}
 			o = model.ControlOrg{ID: r.OrgID, Name: p.Name, Epoch: 1, Members: map[string]bool{}, Admins: map[string]bool{c.user.String(): true}, Projects: map[string]string{}, Grants: map[string][]string{}, Secrets: map[string]string{}, Settings: map[string]json.RawMessage{}}
 		case "create_user":
-			if p.ID == (model.ID{}) {
+			if p.ID == (model.ID{}) || IsSystemPrincipal(p.ID) {
 				return model.Fail(model.Invalid)
 			}
 			for _, u := range st.Users {

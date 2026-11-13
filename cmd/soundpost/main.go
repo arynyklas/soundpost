@@ -85,6 +85,7 @@ func run() error {
 	symbolicator := addSymbolicatorFlags(f)
 	scrape := addScrapeFlags(f)
 	authorityFlagSet := addAuthorityFlags(f)
+	workerOpts := addWorkerFlags(f)
 	if e := f.Parse(os.Args[2:]); e != nil {
 		return e
 	}
@@ -98,6 +99,10 @@ func run() error {
 	scrapeCfg, e := scrape.settings()
 	if e != nil {
 		fmt.Fprintln(os.Stderr, scrapeFailureNotice(e))
+		return e
+	}
+	workers, e := workerOpts.settings(*listen, *dir)
+	if e != nil {
 		return e
 	}
 	restoreAuthority, e := authorityFlagSet.open()
@@ -194,6 +199,12 @@ func run() error {
 	}
 	early.gate.Open(httpapi.NewServer(*listen, service, cfg, routes...).Handler)
 	go core.RunFences(ctx)
+	// The leader-only background runner (rules, conditions, issue/incident/job
+	// producers, notification delivery) acts as the in-process system principal of
+	// each organization: no human session, no stored token.
+	if e = startWorkers(ctx, core, workers); e != nil {
+		return e
+	}
 	e = <-early.done
 	if e == http.ErrServerClosed {
 		return nil

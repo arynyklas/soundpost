@@ -11,6 +11,7 @@ import (
 
 	"soundpost/internal/auth"
 	"soundpost/internal/conditions"
+	"soundpost/internal/incidents"
 	"soundpost/internal/model"
 	"soundpost/internal/notify"
 	"soundpost/internal/replica"
@@ -122,7 +123,7 @@ func (w *Workers) submitConditions(ctx context.Context, admin auth.Scope, projec
 			continue
 		}
 		budget--
-		n, err := w.decide(ctx, admin, project, binding, subject, state, known, evidence, lease)
+		n, err := w.decide(ctx, admin, project, binding, subject, state, known, evidenceEvent{seq: evidence.Seq, condition: &evidence}, lease)
 		submitted += n
 		if err != nil {
 			if deposed(err) {
@@ -130,6 +131,101 @@ func (w *Workers) submitConditions(ctx context.Context, admin auth.Scope, projec
 			}
 			// One condition's refusal (a policy conflict, an owner moved) must not
 			// starve the others; it is retried by the next pass.
+			report.Errors = append(report.Errors, StageError{Project: project, Stage: StageNotify, Code: code(err)})
+		}
+	}
+	return submitted, nil
+}
+
+// incidentEvidence maps a committed incident to the policy evidence it carries.
+// The source is the linked condition's state and freshness; the version is the
+// incident's committed version, which advances with every accepted action, so a
+// repeat decides nothing. ok is false for an incident whose state a deletion
+// erased or that carries nothing the policy accepts.
+func incidentEvidence(st incidents.State) (notify.IncidentEvidence, bool) {
+	if st.Erased || st.Version == 0 || st.ImpactRevision == 0 || st.Episode == (model.ID{}) {
+		return notify.IncidentEvidence{}, false
+	}
+	var status notify.HumanStatus
+	switch st.Status {
+	case incidents.StatusOpen:
+		status = notify.HumanOpen
+	case incidents.StatusResolved:
+		status = notify.HumanResolved
+	default:
+		return notify.IncidentEvidence{}, false
+	}
+	var source notify.SourceState
+	switch st.Condition.State {
+	case incidents.ConditionFiring:
+		source = notify.SourceFiring
+	case incidents.ConditionRecovered:
+		source = notify.SourceRecovered
+	default:
+		source = notify.SourceUnknown
+	}
+	freshness := notify.FreshnessUnknown
+	switch st.Condition.Freshness {
+	case incidents.FreshnessFresh:
+		freshness = notify.FreshnessFresh
+	case incidents.FreshnessStale:
+		freshness = notify.FreshnessStale
+	}
+	severity := notify.Severity(st.Severity)
+	if st.Severity < incidents.SeverityMinor || st.Severity > incidents.SeverityCritical {
+		return notify.IncidentEvidence{}, false
+	}
+	return notify.IncidentEvidence{Version: st.Version, Status: status, Severity: severity, ImpactRevision: st.ImpactRevision, Episode: st.Episode, Source: source, Freshness: freshness}, true
+}
+
+// submitIncidents decides the committed incidents of the project into the
+// delivery outbox, at most NotifyLimit per pass, exactly as submitConditions does
+// for conditions: the policy state remembers the incident version it applied, so
+// an incident already decided costs one read and commits nothing.
+func (w *Workers) submitIncidents(ctx context.Context, admin auth.Scope, project model.ID, lease replica.FenceToken, report *PassReport) (int, error) {
+	binding, found, err := w.cfg.Routing.Routing(ctx, admin, project)
+	if err != nil || !found {
+		return 0, err
+	}
+	records, err := w.app.Control.Incidents(ctx, admin, project)
+	if err != nil {
+		return 0, err
+	}
+	submitted := 0
+	budget := w.cfg.NotifyLimit
+	for _, rec := range records {
+		if budget <= 0 {
+			break
+		}
+		if err = ctx.Err(); err != nil {
+			return submitted, err
+		}
+		if rec.Erased() {
+			continue
+		}
+		var st incidents.State
+		if json.Unmarshal(rec.State, &st) != nil {
+			continue
+		}
+		evidence, ok := incidentEvidence(st)
+		if !ok {
+			continue
+		}
+		subject := notify.Entity{Kind: notify.EntityIncident, ID: rec.ID}
+		state, known, err := w.policyState(ctx, admin, project, binding.Policy, subject)
+		if err != nil {
+			return submitted, err
+		}
+		if known && state.IncidentVersion >= evidence.Version && recipientsMatch(state, binding.Recipients) {
+			continue
+		}
+		budget--
+		n, err := w.decide(ctx, admin, project, binding, subject, state, known, evidenceEvent{seq: uint64(evidence.Version), incident: &evidence}, lease)
+		submitted += n
+		if err != nil {
+			if deposed(err) {
+				return submitted, err
+			}
 			report.Errors = append(report.Errors, StageError{Project: project, Stage: StageNotify, Code: code(err)})
 		}
 	}
@@ -163,10 +259,19 @@ func recipientsMatch(state notify.PolicyState, want []model.ID) bool {
 	return true
 }
 
-// decide submits the missing recipients and then the condition evidence of one
-// condition. Every event's command ID derives from what it says, so retries
+// evidenceEvent is the one piece of source evidence a notification decision
+// carries: a condition's or an incident's snapshot, ordered by seq (the
+// condition's committed version, the incident's version).
+type evidenceEvent struct {
+	seq       uint64
+	condition *notify.ConditionEvidence
+	incident  *notify.IncidentEvidence
+}
+
+// decide submits the missing recipients and then the evidence of one condition
+// or incident. Every event's command ID derives from what it says, so retries
 // are no-ops.
-func (w *Workers) decide(ctx context.Context, admin auth.Scope, project model.ID, binding NotificationBinding, subject notify.Entity, state notify.PolicyState, known bool, evidence notify.ConditionEvidence, lease replica.FenceToken) (int, error) {
+func (w *Workers) decide(ctx context.Context, admin auth.Scope, project model.ID, binding NotificationBinding, subject notify.Entity, state notify.PolicyState, known bool, evidence evidenceEvent, lease replica.FenceToken) (int, error) {
 	org := admin.OrgID()
 	at := w.cfg.Clock.Now()
 	ref, ownerRevision := policyFraming(known, state, binding)
@@ -198,12 +303,16 @@ func (w *Workers) decide(ctx context.Context, admin auth.Scope, project model.ID
 		ref.Config = nil
 	}
 	var seq [8]byte
-	binary.BigEndian.PutUint64(seq[:], evidence.Seq)
-	ev := base(notify.EventCondition, policyCommand([]byte("condition"), org[:], project[:], binding.Policy[:], subject.ID[:], seq[:]))
+	binary.BigEndian.PutUint64(seq[:], evidence.seq)
+	kind, tag := notify.EventCondition, "condition"
+	if evidence.incident != nil {
+		kind, tag = notify.EventIncident, "incident"
+	}
+	ev := base(kind, policyCommand([]byte(tag), org[:], project[:], binding.Policy[:], subject.ID[:], seq[:]))
 	entity := subject
 	ev.Entity = &entity
 	ev.Mode = notify.ModeLive
-	ev.Condition = &evidence
+	ev.Condition, ev.Incident = evidence.condition, evidence.incident
 	sub, err := w.outbox.Submit(ctx, admin, lease, subject, ev, at)
 	if err != nil {
 		return submitted, err

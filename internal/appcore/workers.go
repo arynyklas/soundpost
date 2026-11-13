@@ -33,22 +33,37 @@ type systemWorkerClock struct{}
 
 func (systemWorkerClock) Now() model.UnixNano { return model.UnixNano(time.Now().UnixNano()) }
 
-// WorkerPrincipal names the organization a worker pass acts in and where it
-// gets the bearer token of the principal it acts as. Committing control state
-// (rule evaluations, condition state, delivery records) requires an
-// organization-administrator scope, and the auth package offers no other way to
-// obtain one than an organization administrator's own credential: a server token
-// cannot carry org.admin (it is not a grantable permission), and there is no
-// internal, privilege-minting worker scope, which this runner does not invent.
-// So the principal is an administrator's session. Sessions expire (12 hours), so
-// Token is asked on every pass and is where the process renews it; the principal
-// must also be an organization member holding a telemetry.read grant on the
-// projects served (the rule evaluator reads with the project-scoped read scope).
-// The token is authenticated afresh on every pass, so revoking it stops the
-// workers at once.
-type WorkerPrincipal struct {
-	Org   model.ID
-	Token func(ctx context.Context) (string, error)
+// The workers act as the in-process system principal of each organization they
+// serve (auth.Service.AuthorizeSystem, audit actor "system:runner"): no human
+// session, no stored token, nothing a client can present. Every pass derives its
+// scopes afresh, so an organization or project that has ended, or an
+// organization policy that moved, applies at the next pass.
+
+// ProducerScopes derives the runner's scopes for one project of one
+// organization. Each Scope call is a fresh auth.AuthorizeSystem derivation.
+type ProducerScopes struct {
+	authority *auth.Service
+	org       model.ID
+	project   model.ID
+}
+
+// Org and Project name what the scopes are for.
+func (p ProducerScopes) Org() model.ID     { return p.org }
+func (p ProducerScopes) Project() model.ID { return p.project }
+
+// Scope derives the system scope for one permission over exactly this project.
+// Only the runner's roles (read, org.admin, issues.write, policy.write) exist.
+func (p ProducerScopes) Scope(ctx context.Context, permission auth.Permission) (auth.Scope, error) {
+	return p.authority.AuthorizeSystem(ctx, p.org, []model.ID{p.project}, permission)
+}
+
+// Producer is a leader-only per-project stage that turns evidence the product
+// ingested into durable control state (issues, incidents, job health). Produce
+// is called under the pass's leadership lease, must be idempotent and bounded,
+// and returns how many records it committed. A produced record is the product's
+// own work, committed under the system scope the producer derives from scopes.
+type Producer interface {
+	Produce(ctx context.Context, scopes ProducerScopes, lease replica.FenceToken) (committed int, err error)
 }
 
 // RuleSource lists the active rule definitions of one project (the newest
@@ -71,8 +86,12 @@ type OutputAdmission interface {
 // WorkerConfig configures the background workers. Every optional seam that is
 // nil switches exactly that stage off; none is replaced by a stand-in.
 type WorkerConfig struct {
-	// Principals are the organizations to serve. Required.
-	Principals []WorkerPrincipal
+	// Orgs are the organizations to serve. Empty serves every organization in
+	// control state that has not been retired, listed again at every pass.
+	Orgs []model.ID
+	// Producers turn ingested evidence into control state (issues, incidents,
+	// jobs) for each project before conditions are consumed. Nil produces nothing.
+	Producers []Producer
 	// Fence defaults to the control group's replica group.
 	Fence LeaderFence
 	// Clock defaults to the system clock.
@@ -116,6 +135,7 @@ type WorkerConfig struct {
 const (
 	StageAuth     = "auth"
 	StageFence    = "fence"
+	StageProduce  = "produce"
 	StageRules    = "rules"
 	StageOutputs  = "outputs"
 	StageConsume  = "consume"
@@ -140,6 +160,8 @@ type PassReport struct {
 	Projects int
 	// Evaluated counts rule grid points committed (verbatim replays included).
 	Evaluated int
+	// Produced counts records the producers committed (issues, incidents, jobs).
+	Produced int
 	// Finalized counts recording outputs completed.
 	Finalized int
 	// Consumed counts condition outputs applied.
@@ -197,11 +219,8 @@ func positive[T int | time.Duration](v, fallback T) T {
 // are off; the rest are constructed with the leadership fence, so no
 // constructor can act for a deposed leader.
 func (a *App) NewWorkers(cfg WorkerConfig) (*Workers, error) {
-	if len(cfg.Principals) == 0 {
-		return nil, model.Fail(model.Invalid)
-	}
-	for _, p := range cfg.Principals {
-		if p.Org == (model.ID{}) || p.Token == nil {
+	for _, org := range cfg.Orgs {
+		if org == (model.ID{}) {
 			return nil, model.Fail(model.Invalid)
 		}
 	}
@@ -360,27 +379,46 @@ func (w *Workers) Tick(ctx context.Context) PassReport {
 		return report
 	}
 	report.Leader = true
-	for _, principal := range w.cfg.Principals {
+	orgs, err := w.orgs(ctx)
+	if err != nil {
+		report.Errors = append(report.Errors, StageError{Stage: StageAuth, Code: code(err)})
+		return report
+	}
+	for _, org := range orgs {
 		if ctx.Err() != nil || report.Deposed {
 			break
 		}
-		w.servePrincipal(ctx, principal, lease, &report)
+		w.serveOrg(ctx, org, lease, &report)
 	}
 	return report
 }
 
-func (w *Workers) servePrincipal(ctx context.Context, principal WorkerPrincipal, lease replica.FenceToken, report *PassReport) {
-	token, err := principal.Token(ctx)
-	if err != nil {
-		report.Errors = append(report.Errors, StageError{Stage: StageAuth, Code: code(err)})
-		return
+// orgs is the organizations this pass serves: the configured ones, or every
+// organization in control state that has not been retired, in a stable order.
+func (w *Workers) orgs(ctx context.Context) ([]model.ID, error) {
+	if len(w.cfg.Orgs) > 0 {
+		return w.cfg.Orgs, nil
 	}
-	credential, err := w.app.Auth.Authenticate(ctx, token)
-	if err != nil {
-		report.Errors = append(report.Errors, StageError{Stage: StageAuth, Code: code(err)})
-		return
-	}
-	projects, err := w.projects(ctx, principal.Org)
+	var out []model.ID
+	err := w.app.Control.View(ctx, func(st model.ControlState) error {
+		for key := range st.Orgs {
+			if _, retired := st.RetiredOrgs[key]; retired {
+				continue
+			}
+			id, err := model.ParseID(key)
+			if err != nil {
+				return model.Fail(model.Corrupt)
+			}
+			out = append(out, id)
+		}
+		return nil
+	})
+	sort.Slice(out, func(i, j int) bool { return out[i].String() < out[j].String() })
+	return out, err
+}
+
+func (w *Workers) serveOrg(ctx context.Context, org model.ID, lease replica.FenceToken, report *PassReport) {
+	projects, err := w.projects(ctx, org)
 	if err != nil {
 		report.Errors = append(report.Errors, StageError{Stage: StageAuth, Code: code(err)})
 		return
@@ -390,7 +428,7 @@ func (w *Workers) servePrincipal(ctx context.Context, principal WorkerPrincipal,
 			return
 		}
 		report.Projects++
-		w.serveProject(ctx, credential, principal.Org, project, lease, report)
+		w.serveProject(ctx, org, project, lease, report)
 	}
 }
 
@@ -462,17 +500,19 @@ func (w *Workers) still(ctx context.Context, lease replica.FenceToken, report *P
 	return false
 }
 
-func (w *Workers) serveProject(ctx context.Context, credential auth.Credential, org, project model.ID, lease replica.FenceToken, report *PassReport) {
+func (w *Workers) serveProject(ctx context.Context, org, project model.ID, lease replica.FenceToken, report *PassReport) {
 	if !w.still(ctx, lease, report) {
 		return
 	}
-	admin, err := w.app.Auth.Authorize(ctx, credential, org, []model.ID{project}, auth.OrgAdmin)
+	// The scopes are derived afresh for every project of every pass: an organization
+	// or project that ended, or a policy that moved, yields none from here on.
+	admin, err := w.app.Auth.AuthorizeSystem(ctx, org, []model.ID{project}, auth.OrgAdmin)
 	if err != nil {
 		report.Errors = append(report.Errors, StageError{Project: project, Stage: StageAuth, Code: code(err)})
 		return
 	}
 	if w.scheduler != nil {
-		read, err := w.app.Auth.Authorize(ctx, credential, org, []model.ID{project}, auth.Read)
+		read, err := w.app.Auth.AuthorizeSystem(ctx, org, []model.ID{project}, auth.Read)
 		if err != nil {
 			report.Errors = append(report.Errors, StageError{Project: project, Stage: StageAuth, Code: code(err)})
 		} else if w.scheduleRules(ctx, read, admin, project, lease, report) {
@@ -486,6 +526,14 @@ func (w *Workers) serveProject(ctx context.Context, credential auth.Credential, 
 			return
 		}
 	}
+	scopes := ProducerScopes{authority: w.app.Auth, org: org, project: project}
+	for _, producer := range w.cfg.Producers {
+		n, err := producer.Produce(ctx, scopes, lease)
+		report.Produced += n
+		if w.stop(ctx, project, StageProduce, err, report) {
+			return
+		}
+	}
 	consumed, err := w.consumer.Consume(ctx, admin, lease, w.cfg.ConsumeLimit)
 	report.Consumed += len(consumed.Applied)
 	if w.stop(ctx, project, StageConsume, err, report) {
@@ -493,6 +541,11 @@ func (w *Workers) serveProject(ctx context.Context, credential auth.Credential, 
 	}
 	if w.cfg.Routing != nil {
 		n, err := w.submitConditions(ctx, admin, project, lease, report)
+		report.Submitted += n
+		if w.stop(ctx, project, StageNotify, err, report) {
+			return
+		}
+		n, err = w.submitIncidents(ctx, admin, project, lease, report)
 		report.Submitted += n
 		if w.stop(ctx, project, StageNotify, err, report) {
 			return

@@ -115,7 +115,7 @@ func applyCondition(scope auth.Scope, st *State, cmd Command) (Effect, error) {
 	org := scope.OrgID()
 	// Scope and grants first: nothing about the target is looked up, parsed or
 	// answered for a scope that may not act in this project.
-	if err := releaseScope(scope, st, org, c.Project); err != nil {
+	if err := projectAdminScope(scope, st, org, c.Project); err != nil {
 		return Effect{}, err
 	}
 	if c.Condition == (model.ID{}) || c.At <= 0 || c.NewVersion != c.ExpectedVersion+1 || len(c.State) < 2 || len(c.State) > maxConditionStateBytes ||
