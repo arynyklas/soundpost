@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -458,6 +459,34 @@ func TestLicenseAllowList(t *testing.T) {
 	} {
 		if got := licenseApproved(expr); got != want {
 			t.Errorf("licenseApproved(%q) = %v, want %v", expr, got, want)
+		}
+	}
+}
+
+// TestApprovedSetIsExactlyTheDocumentedList pins the approved set to docs/releases/checklist.md.
+func TestApprovedSetIsExactlyTheDocumentedList(t *testing.T) {
+	want := []string{"0BSD", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "BlueOak-1.0.0", "CC-BY-4.0", "ISC", "LGPL-3.0-only", "MIT", "MIT-0", "MPL-2.0", "PSF-2.0", "Python-2.0", "Unlicense"}
+	var got []string
+	for id := range approvedLicenses {
+		got = append(got, id)
+	}
+	sort.Strings(got)
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("approved set = %v, want %v", got, want)
+	}
+	doc, err := os.ReadFile("../docs/releases/checklist.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := ""
+	for _, l := range strings.Split(string(doc), "\n") {
+		if strings.Contains(l, "`licenses`:") {
+			line = l
+		}
+	}
+	for _, id := range want {
+		if !strings.Contains(line, id) {
+			t.Errorf("checklist.md `licenses` line does not list %s", id)
 		}
 	}
 }

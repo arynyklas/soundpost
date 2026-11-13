@@ -41,7 +41,7 @@ the real release key and the approval decision are owner actions (Aryn Yklas).
 - [ ] `promised_surfaces`: all surfaces above delivered.
 - [ ] `evidence_language`, `evidence_runtime`, `evidence_privacy`, `evidence_node_loss`, `evidence_browser`: reports in the `soundpost-release-evidence/1` envelope (see `security.md`), every expected row `passed`, for exactly the release commit.
 - [ ] `dependency_inventory`: `build/dependencies/node-licenses.json` pins the current `pnpm-lock.yaml`. Stale pins are reported, never silently refreshed; refreshing is a reviewed change.
-- [ ] `licenses`: every in-scope component carries a committed license in the approved set (MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, 0BSD, BlueOak-1.0.0, CC-BY-4.0, Python-2.0, Unlicense, MIT-0). NOASSERTION blocks.
+- [ ] `licenses`: every in-scope component carries a committed license in the approved set (MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, 0BSD, BlueOak-1.0.0, CC-BY-4.0, Python-2.0, Unlicense, MIT-0, PSF-2.0, MPL-2.0, LGPL-3.0-only). NOASSERTION blocks. PSF-2.0 (typing-extensions), MPL-2.0 (certifi) and LGPL-3.0-only (psycopg, psycopg-binary) were added by owner decision: they are Python test/optional-integration dependencies that users install from PyPI and are never vendored or redistributed in Soundpost artifacts; MPL-2.0 is file-level copyleft and LGPL-3.0 applies to the unmodified library used at runtime.
 - [ ] `notices`: `THIRD_PARTY_NOTICES` equals `go run ./build notices` output and every in-scope component carries license/notice text.
 - [ ] `sbom`: CycloneDX 1.5 and SPDX 2.3 generated twice with identical sha256.
 - [ ] `checksums`: `SHA256SUMS` matches every artifact and `release.json` (reproducible, `--reproduce`).

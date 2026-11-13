@@ -48,6 +48,7 @@ type Component struct {
 	Scope         string `json:"scope"`
 	SHA512        string `json:"sha512,omitempty"`
 	NoticeText    bool   `json:"notice_text_carried"`
+	TextSHA256    string `json:"license_text_sha256,omitempty"`
 }
 
 // Inventory is the collected dependency set plus every finding that makes it untrustworthy.
@@ -78,6 +79,9 @@ func normLicense(s string) string {
 var approvedLicenses = map[string]bool{
 	"MIT": true, "Apache-2.0": true, "BSD-2-Clause": true, "BSD-3-Clause": true, "ISC": true,
 	"0BSD": true, "BlueOak-1.0.0": true, "CC-BY-4.0": true, "Python-2.0": true, "Unlicense": true, "MIT-0": true,
+	// Python test/optional-integration dependencies that users install from PyPI; never vendored
+	// or redistributed in Soundpost artifacts (docs/releases/checklist.md, `licenses`).
+	"PSF-2.0": true, "MPL-2.0": true, "LGPL-3.0-only": true,
 }
 
 // licenseApproved evaluates a flat SPDX expression: OR needs one approved alternative, AND
@@ -229,7 +233,10 @@ func collectGo(root string) ([]Component, error) {
 var pnpmKey = regexp.MustCompile(`^  '?([^\s']+)'?:$`)
 var pnpmIntegrity = regexp.MustCompile(`integrity: (sha512-[A-Za-z0-9+/=]+)`)
 
-type lockPackage struct{ name, version, sha512 string }
+type lockPackage struct {
+	name, version, sha512 string
+	os, cpu               []string
+}
 
 // parsePnpmLock reads the lock's `packages:` section (resolved packages only).
 func parsePnpmLock(text string) []lockPackage {
@@ -261,6 +268,17 @@ func parsePnpmLock(text string) []lockPackage {
 					out[cur].sha512 = hex.EncodeToString(b)
 				}
 			}
+			if k, v, ok := strings.Cut(strings.TrimSpace(line), ": ["); ok && (k == "os" || k == "cpu") && strings.HasSuffix(v, "]") {
+				var vals []string
+				for _, x := range strings.Split(strings.TrimSuffix(v, "]"), ",") {
+					vals = append(vals, strings.TrimSpace(x))
+				}
+				if k == "os" {
+					out[cur].os = vals
+				} else {
+					out[cur].cpu = vals
+				}
+			}
 		}
 	}
 	return out
@@ -270,30 +288,47 @@ func npmPURL(name, version string) string {
 	return "pkg:npm/" + strings.Replace(name, "@", "%40", 1) + "@" + version
 }
 
+// licenseTextPresent reports whether the committed deduplicated license text exists.
+func licenseTextPresent(root, sha string) bool {
+	if len(sha) != 64 {
+		return false
+	}
+	st, err := os.Stat(filepath.Join(root, "build", "dependencies", licenseTextsDir, sha+".txt"))
+	return err == nil && st.Size() > 0
+}
+
+// applyInventoryRecord copies a committed record onto a component. NOASSERTION records and
+// records without a license leave the license empty with the recorded reason.
+func applyInventoryRecord(root string, c *Component, license, reason, source, textSHA string) {
+	if l := normLicense(license); l != "" && l != NoAssertion {
+		c.License, c.LicenseSource = l, source
+	} else if reason != "" {
+		c.LicenseReason = reason
+	} else {
+		c.LicenseReason = "inventory record carries no license"
+	}
+	if licenseTextPresent(root, textSHA) {
+		c.NoticeText, c.TextSHA256 = true, textSHA
+	}
+}
+
 func collectNode(root string) ([]Component, []string, error) {
 	lockRaw, err := os.ReadFile(filepath.Join(root, "pnpm-lock.yaml"))
 	if err != nil {
 		return nil, nil, err
 	}
-	invRaw, err := os.ReadFile(filepath.Join(root, "build", "dependencies", "node-licenses.json"))
+	invRaw, err := os.ReadFile(filepath.Join(root, "build", "dependencies", nodeInventoryFile))
 	if err != nil {
 		return nil, nil, err
 	}
-	var inv struct {
-		LockSHA256 string `json:"lock_sha256"`
-		Packages   []struct {
-			Name    string `json:"name"`
-			Version string `json:"version"`
-			License string `json:"license_declared"`
-		} `json:"packages"`
-	}
+	var inv nodeInventory
 	if err = json.Unmarshal(invRaw, &inv); err != nil {
 		return nil, nil, fmt.Errorf("build/dependencies/node-licenses.json: %w", err)
 	}
 	lock := parsePnpmLock(strings.ReplaceAll(string(lockRaw), "\r\n", "\n"))
-	have := map[string]string{}
+	have := map[string]nodeEntry{}
 	for _, p := range inv.Packages {
-		have[p.Name+"@"+p.Version] = normLicense(p.License)
+		have[p.Name+"@"+p.Version] = p
 	}
 	var stale []string
 	sum := sha256.Sum256(lockRaw)
@@ -316,8 +351,8 @@ func collectNode(root string) ([]Component, []string, error) {
 	var out []Component
 	for _, p := range lock {
 		c := Component{Ecosystem: "npm", Name: p.name, Version: p.version, PURL: npmPURL(p.name, p.version), Scope: ScopeOptional, SHA512: p.sha512}
-		if l, ok := have[p.name+"@"+p.version]; ok && l != "" {
-			c.License, c.LicenseSource = l, "build/dependencies/node-licenses.json"
+		if e, ok := have[p.name+"@"+p.version]; ok {
+			applyInventoryRecord(root, &c, e.License, e.LicenseReason, "build/dependencies/node-licenses.json", e.LicenseTextSHA256)
 		} else {
 			c.LicenseReason = "not in build/dependencies/node-licenses.json (inventory does not cover the current pnpm-lock.yaml)"
 		}
@@ -328,29 +363,43 @@ func collectNode(root string) ([]Component, []string, error) {
 
 var pyPin = regexp.MustCompile(`^([A-Za-z0-9][A-Za-z0-9._-]*)==([^\s\\;]+)`)
 
-func collectPython(root string) ([]Component, error) {
-	seen := map[string]bool{}
-	var out []Component
-	for _, rel := range []string{"sdk/python/requirements-dev.lock", "sdk/python/requirements-integrations.lock"} {
-		text, err := readLF(filepath.Join(root, filepath.FromSlash(rel)))
-		if err != nil {
-			return nil, err
-		}
-		for _, line := range strings.Split(text, "\n") {
-			m := pyPin.FindStringSubmatch(line)
-			if m == nil {
-				continue
-			}
-			name := strings.ToLower(strings.NewReplacer("_", "-", ".", "-").Replace(m[1]))
-			if seen[name+"@"+m[2]] {
-				continue
-			}
-			seen[name+"@"+m[2]] = true
-			out = append(out, Component{Ecosystem: "pypi", Name: name, Version: m[2], PURL: "pkg:pypi/" + name + "@" + m[2], Scope: ScopeOptional,
-				LicenseReason: "no committed Python license inventory covers " + rel + " pins"})
+func collectPython(root string) ([]Component, []string, error) {
+	var texts []string
+	var stale []string
+	var inv pyInventory
+	invRaw, ierr := os.ReadFile(filepath.Join(root, "build", "dependencies", pythonInventoryFile))
+	if ierr == nil {
+		if err := json.Unmarshal(invRaw, &inv); err != nil {
+			return nil, nil, fmt.Errorf("build/dependencies/python-licenses.json: %w", err)
 		}
 	}
-	return out, nil
+	for _, n := range pythonLockFiles {
+		rel := "sdk/python/" + n
+		raw, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
+		if err != nil {
+			return nil, nil, err
+		}
+		texts = append(texts, strings.ReplaceAll(string(raw), "\r\n", "\n"))
+		sum := sha256.Sum256(raw)
+		if got := hex.EncodeToString(sum[:]); ierr == nil && inv.Locks[n] != got {
+			stale = append(stale, fmt.Sprintf("build/dependencies/python-licenses.json is stale: pins %s sha256 %s, current lock is %s", rel, inv.Locks[n], got))
+		}
+	}
+	have := map[string]pyEntry{}
+	for _, p := range inv.Packages {
+		have[p.Name+"@"+p.Version] = p
+	}
+	var out []Component
+	for _, p := range parsePyPins(texts...) {
+		c := Component{Ecosystem: "pypi", Name: p.name, Version: p.version, PURL: "pkg:pypi/" + p.name + "@" + p.version, Scope: ScopeOptional}
+		if e, ok := have[p.name+"@"+p.version]; ok {
+			applyInventoryRecord(root, &c, e.License, e.LicenseReason, "build/dependencies/python-licenses.json ("+e.LicenseSource+")", e.LicenseTextSHA256)
+		} else {
+			c.LicenseReason = "not in build/dependencies/python-licenses.json (no committed Python license inventory covers this pin)"
+		}
+		out = append(out, c)
+	}
+	return out, stale, nil
 }
 
 // spdxLead returns the leading SPDX-looking token of a provenance license field. The
@@ -443,7 +492,7 @@ func collectInventory(root string) (Inventory, error) {
 	if err != nil {
 		return inv, err
 	}
-	py, err := collectPython(root)
+	py, pyStale, err := collectPython(root)
 	if err != nil {
 		return inv, err
 	}
@@ -470,7 +519,7 @@ func collectInventory(root string) (Inventory, error) {
 		stdlib.LicenseReason = "third_party/format/go124/provenance.json has no license field for the Go distribution"
 	}
 	inv.Components = append(append(append(append(goc, node...), py...), vend...), stdlib)
-	inv.Stale = stale
+	inv.Stale = append(stale, pyStale...)
 	sort.Slice(inv.Components, func(i, j int) bool { return inv.Components[i].PURL < inv.Components[j].PURL })
 	for i := 1; i < len(inv.Components); i++ {
 		if inv.Components[i].PURL == inv.Components[i-1].PURL {
@@ -658,9 +707,9 @@ func renderNotices(root string, inv Inventory) ([]byte, error) {
 	b.WriteString("third_party/* and the committed license inventories. Do not edit by hand; `go run ./build notices --check` and the\n")
 	b.WriteString("release gate fail when this file differs from a fresh generation.\n\n")
 	b.WriteString("A component whose license reads NOASSERTION has no committed license record; no license is assumed for it.\n")
-	b.WriteString("\"text\" says whether the full license/notice text is carried in this file or in third_party/. npm and Python\n")
-	b.WriteString("dependencies are development/test lock inputs and are NOT bundled in the Go release archives; their license texts\n")
-	b.WriteString("have not been collected (distribution gate pending).\n")
+	b.WriteString("\"text\" says whether the full license/notice text is carried in this file (npm and Python texts come from\n")
+	b.WriteString("build/dependencies/license-texts, collected from each package's own distributed files) or in third_party/. npm and\n")
+	b.WriteString("Python dependencies are development/test lock inputs and are NOT bundled in the Go release archives.\n")
 	for _, eco := range []struct{ id, title string }{{"golang", "Go modules and runtime"}, {"generic", "Vendored data and primitives (third_party)"}, {"npm", "npm packages (pnpm-lock.yaml)"}, {"pypi", "Python packages (sdk/python/requirements-*.lock)"}} {
 		fmt.Fprintf(&b, "\n== %s ==\n", eco.title)
 		for _, c := range inv.Components {
@@ -710,6 +759,24 @@ func renderNotices(root string, inv Inventory) ([]byte, error) {
 	}
 	for _, body := range order {
 		b.WriteString("\n----- " + strings.Join(byBody[body], ", ") + " -----\n" + body)
+	}
+	byText := map[string][]string{}
+	var textOrder []string
+	for _, c := range inv.Components {
+		if c.TextSHA256 == "" {
+			continue
+		}
+		if _, ok := byText[c.TextSHA256]; !ok {
+			textOrder = append(textOrder, c.TextSHA256)
+		}
+		byText[c.TextSHA256] = append(byText[c.TextSHA256], c.Ecosystem+":"+c.Name+"@"+c.Version)
+	}
+	for _, sha := range textOrder {
+		body, err := readLF(filepath.Join(root, "build", "dependencies", licenseTextsDir, sha+".txt"))
+		if err != nil {
+			return nil, err
+		}
+		b.WriteString("\n----- " + strings.Join(byText[sha], ", ") + " -----\n" + strings.TrimRight(body, "\n") + "\n")
 	}
 	return []byte(b.String()), nil
 }

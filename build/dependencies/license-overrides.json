@@ -1,0 +1,54 @@
+{
+  "npm_text_parents": {
+    "@esbuild/": "esbuild",
+    "@rollup/rollup-": "rollup"
+  },
+  "npm_spdx_text": {
+    "bun-types@1.3.14": {
+      "url": "https://raw.githubusercontent.com/spdx/license-list-data/v3.27.0/text/MIT.txt",
+      "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5",
+      "reason": "spdx_canonical_text: upstream ships no license file"
+    },
+    "@napi-rs/lzma-linux-x64-gnu@1.5.1": {
+      "url": "https://raw.githubusercontent.com/spdx/license-list-data/v3.27.0/text/MIT.txt",
+      "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5",
+      "reason": "spdx_canonical_text: upstream ships no license file"
+    }
+  },
+  "npm_text_sources": {
+    "pg-types@2.2.0": {
+      "url": "https://raw.githubusercontent.com/brianc/node-pg-types/d9d9dfb87eb50914043cbc178c301b7dd3b0c50d/README.md",
+      "sha256": "ecda9bca71d3f0cee4e600d1dd2bef336213f39ef2e8fca6a1a1c1c8723f643a",
+      "heading": "## license",
+      "reason": "no LICENSE file in the npm package or in the repository at the locked version's gitHead d9d9dfb; the MIT text is the license section of the project's own README at that commit"
+    },
+    "pgpass@1.0.5": {
+      "url": "https://raw.githubusercontent.com/hoegaarden/pgpass/4230ed5e417ba6044ea7eb80b7c33db9ec301398/README.md",
+      "sha256": "62549909404b5a0dcb2b4b74c9a930baf8095dbcfa1543c4ffc79378acd22b57",
+      "heading": "## License",
+      "reason": "no LICENSE file in the npm package or in the repository at the locked version's gitHead 4230ed5; the MIT text is the license section of the project's own README at that commit"
+    }
+  },
+  "pypi_license": {
+    "colorama@0.4.6": {
+      "license": "BSD-3-Clause",
+      "evidence": "PyPI classifier is the ambiguous 'BSD License'; the wheel's license file is the three-clause BSD text (reviewed 2026-11-14)"
+    },
+    "itsdangerous@2.2.0": {
+      "license": "BSD-3-Clause",
+      "evidence": "PyPI classifier is the ambiguous 'BSD License'; the wheel's license file is the three-clause BSD text (reviewed 2026-11-14)"
+    },
+    "jinja2@3.1.6": {
+      "license": "BSD-3-Clause",
+      "evidence": "PyPI classifier is the ambiguous 'BSD License'; the wheel's license file is the three-clause BSD text (reviewed 2026-11-14)"
+    },
+    "psycopg@3.2.10": {
+      "license": "LGPL-3.0-only",
+      "evidence": "PyPI info.license and classifier both say 'GNU Lesser General Public License v3 (LGPLv3)' with no 'or later'; not in the approved set (reviewed 2026-11-14)"
+    },
+    "psycopg-binary@3.2.10": {
+      "license": "LGPL-3.0-only",
+      "evidence": "PyPI info.license and classifier both say 'GNU Lesser General Public License v3 (LGPLv3)' with no 'or later'; not in the approved set (reviewed 2026-11-14)"
+    }
+  }
+}
