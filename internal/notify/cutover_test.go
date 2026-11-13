@@ -896,6 +896,16 @@ func TestCutoverRollbackRacingWorkersAndDecisions(t *testing.T) {
 	var mu sync.Mutex
 	var failures []string
 	fail := func(f string, a ...any) { mu.Lock(); failures = append(failures, fmt.Sprintf(f, a...)); mu.Unlock() }
+	// Lost races are expected here: a conflict or stale answer, or a retryable
+	// unavailable whose every attempt lost the control revision to the other
+	// writers (nothing committed). Anything else is a failure.
+	expected := func(err error) bool {
+		if err == nil || code(err) == model.Conflict || code(err) == model.Stale {
+			return true
+		}
+		var f *model.Fault
+		return errors.As(err, &f) && f.Code == model.Unavailable && f.Retryable && f.SafeDetail == notify.DetailRevisionContention
+	}
 	for w := range 3 {
 		wg.Add(1)
 		go func() {
@@ -908,7 +918,7 @@ func TestCutoverRollbackRacingWorkersAndDecisions(t *testing.T) {
 				default:
 				}
 				// Each pass is its own instant so claims lapse and retry.
-				if _, err := wk.RunOnce(fx.ctx, fx.scope(), fx.clock.Now()+model.UnixNano(i)*sec, fx.lease()); err != nil && code(err) != model.Conflict && code(err) != model.Stale {
+				if _, err := wk.RunOnce(fx.ctx, fx.scope(), fx.clock.Now()+model.UnixNano(i)*sec, fx.lease()); !expected(err) {
 					fail("worker %d: %v", w, err)
 				}
 			}
@@ -924,7 +934,21 @@ func TestCutoverRollbackRacingWorkersAndDecisions(t *testing.T) {
 			default:
 			}
 			ev := fx.incidentEvent(model.Revision(i), notify.SeverityCritical, uint64(i))
-			if _, err := fx.submit(ev, fx.clock.Now()); err != nil && code(err) != model.Conflict && code(err) != model.Stale {
+			// As fx.submit, but without t.Fatal off the test goroutine.
+			rec, found, err := fx.store.PolicyRecord(fx.ctx, fx.scope(), fx.project, fx.policy, "incident:"+incident.ID.String())
+			if err != nil {
+				fail("decision: policy record: %v", err)
+				continue
+			}
+			if found {
+				var st notify.PolicyState
+				if err = json.Unmarshal(rec.State, &st); err != nil {
+					fail("decision: policy state: %v", err)
+					continue
+				}
+				ev.OwnerRevision = st.OwnerRevision
+			}
+			if _, err = fx.ob.Submit(fx.ctx, fx.scope(), fx.lease(), incident, ev, fx.clock.Now()); !expected(err) {
 				fail("decision: %v", err)
 			}
 			if i > 40 {
@@ -933,10 +957,22 @@ func TestCutoverRollbackRacingWorkersAndDecisions(t *testing.T) {
 		}
 	}()
 	time.Sleep(150 * time.Millisecond)
-	rolled := fx.advance(notify.CutoverRollbackQuiescing)
+	// The rollback races the same writers for the control revision: a lost race
+	// is retried from the state it lost to, as an operator would.
+	var rolled notify.CutoverState
+	var err error
+	for range 200 {
+		if rolled, err = fx.try(fx.command(notify.CutoverRollbackQuiescing)); err == nil || code(err) != model.Conflict {
+			break
+		}
+	}
 	time.Sleep(150 * time.Millisecond)
 	close(stop)
 	wg.Wait()
+	if err != nil || rolled.Phase != notify.CutoverRollbackQuiescing {
+		t.Fatalf("advance to %s: %v (state %s)", notify.CutoverRollbackQuiescing, err, rolled.Phase)
+	}
+	fx.clock.add(30 * sec)
 	if len(failures) != 0 {
 		t.Fatalf("failures: %v", failures)
 	}

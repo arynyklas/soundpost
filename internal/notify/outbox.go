@@ -135,8 +135,15 @@ func NewOutbox(store Store, fencer Fencer, clock Clock, opts ...Option) (*Outbox
 func (o *Outbox) LeaseTTL() time.Duration { return o.ttl }
 
 // maxRevisionRetries bounds the retries of one command that only lost the race
-// for the control revision, never a semantic conflict.
+// for the control revision, never a semantic conflict. Exhausting it answers a
+// retryable unavailable with SafeDetail DetailRevisionContention.
 const maxRevisionRetries = 16
+
+// DetailRevisionContention is the SafeDetail of the retryable unavailable a
+// command answers when every one of its maxRevisionRetries attempts lost the race
+// for the control revision to other writers. Nothing was committed; the caller
+// may retry the same command.
+const DetailRevisionContention = "revision_contention"
 
 // maxSubmitRetries bounds how often one decision is recomputed after another
 // worker advanced the same policy state.
@@ -229,6 +236,7 @@ func (o *Outbox) transact(ctx context.Context, scope auth.Scope, kind control.Co
 		return control.Result{}, err
 	}
 	fault := model.Fail(model.Unavailable)
+	fault.SafeDetail = DetailRevisionContention
 	fault.Retryable = true
 	return control.Result{}, fault
 }
