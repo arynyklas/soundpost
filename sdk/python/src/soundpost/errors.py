@@ -9,12 +9,17 @@ _CONTEXT=BaseException.__dict__["__context__"]
 _SUPPRESS=BaseException.__dict__["__suppress_context__"]
 _TRACEBACK=BaseException.__dict__["__traceback__"]
 _GROUP=BaseExceptionGroup.__dict__["exceptions"]
+_TYPE_NAME=type.__dict__["__name__"]
 
 def exception_class(error):
-    cls=type(error)
-    # Bypass custom exception __getattribute__ and metaclass descriptors.
-    name=type.__getattribute__(cls,"__name__") if type(cls) is type else "UnknownError"
-    if type(name) is not str or not name.isascii() or not name.isidentifier() or len(name)>128:return "UnknownError"
+    """Bare class name (never module, message or value), or None when it is not a safe ASCII identifier of at most 128 characters.
+
+    No allowlist: any custom or third-party class name that passes the identifier check is exported as-is. The name is read with
+    `type`'s own descriptor, so custom metaclasses (asyncpg and ORM exception hierarchies use them) and hostile
+    `__name__`/`__getattribute__` overrides on the class, its metaclass or the instance are never invoked."""
+    try:name=_TYPE_NAME.__get__(type(error))
+    except TypeError:return None
+    if type(name) is not str or not name.isascii() or not name.isidentifier() or len(name)>128:return None
     return name
 
 def extract_exception(error: BaseException, policy=None, *, project_root=None):
@@ -28,7 +33,9 @@ def extract_exception(error: BaseException, policy=None, *, project_root=None):
                 return index
         if len(nodes)>=16:reasons.add("node_limit");return None
         index=len(nodes);seen.append(current)
-        node={"id":index,"exception_class":exception_class(current),"frames":[],"context_suppressed":False}
+        name=exception_class(current)
+        if name is None:name="UnknownError";reasons.add("foreign_or_custom_error_class")
+        node={"id":index,"exception_class":name,"frames":[],"context_suppressed":False}
         nodes.append(node)
         if current is None:
             node["exception_class"]="UnknownError";reasons.add("unknown_throw");return index

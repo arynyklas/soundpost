@@ -7,6 +7,7 @@ EventID: TypeAlias = str
 Primitive: TypeAlias = str | int | bool | None
 ErrorMechanism: TypeAlias = Literal["manual","uncaught_exception","unhandled_rejection","thread_exception","asyncio_exception"]
 ExceptionEdgeKind: TypeAlias = Literal["cause","context","group"]
+SPAN_KINDS: tuple[str,...] = ("internal","server","client","producer","consumer")
 @dataclass(frozen=True)
 class SignedPolicy:
     version: int
@@ -92,6 +93,7 @@ class FlushReport:
     lost: int
     deadline_exceeded: bool
     receipts: tuple[dict, ...] = ()
+    dropped: int = 0
 
 class ErrorInput(TypedDict):
     kind: Literal["error"]

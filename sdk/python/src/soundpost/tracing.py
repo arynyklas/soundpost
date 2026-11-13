@@ -4,6 +4,7 @@ import asyncio
 import secrets
 import time
 from .context import TraceContext
+from .types import SPAN_KINDS
 
 class SpanContextManager:
     """One-use sync/async span scope with token restoration on every exit."""
@@ -12,7 +13,7 @@ class SpanContextManager:
             raise ValueError('operation must be registered')
         if dependency is not None and (type(dependency) is not str or dependency not in client._trace_dependencies):
             raise ValueError('dependency must be registered')
-        if kind not in ('internal', 'server', 'client', 'producer', 'consumer'):
+        if type(kind) is not str or kind not in SPAN_KINDS:
             raise ValueError('invalid span kind')
         self.client = client
         self.operation = operation
@@ -20,6 +21,21 @@ class SpanContextManager:
         self.kind = kind
         self.status = 'ok'
         self._entered = False
+        self._exited = False
+
+    def set_status(self, status: str) -> None:
+        """Set the outcome recorded when the scope exits: `ok` or `error` (cancellation/incomplete are automatic).
+
+        An exception leaving the scope still wins: it always records `error` (or `cancelled`)."""
+        if type(status) is not str or status not in ('ok', 'error'):
+            raise ValueError("span status must be 'ok' or 'error'")
+        if self._exited:
+            raise RuntimeError('span scope already exited')
+        self.status = status
+
+    def set_error(self) -> None:
+        """Mark this span failed without raising, e.g. a nonzero exit code or an HTTP 5xx handled by the caller."""
+        self.set_status('error')
 
     def _clock(self):
         wall=self.client._read_clock()
@@ -38,6 +54,7 @@ class SpanContextManager:
         return self
 
     def __exit__(self, exception_type, exception, traceback):
+        self._exited = True
         try:
             if exception_type is not None:
                 self.status = 'cancelled' if issubclass(exception_type, asyncio.CancelledError) else 'error'

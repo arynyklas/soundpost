@@ -77,7 +77,17 @@ class HttpsReceiptTransport:
             self._connections.add(connection)
         token=EXPORTING.set(True);response=None
         try:
+            # One deadline covers connection + TLS setup, request and response: re-arm the socket timeout from the
+            # remaining budget per phase so a slow first handshake cannot stretch the later phases past the deadline.
+            connection.connect()
+            sock=connection.sock
+            remaining=deadline-time.monotonic()
+            if sock is None or remaining<=0:return Outcome('ambiguous')
+            sock.settimeout(remaining)
             connection.request('POST',path,body=body,headers=self._headers)
+            remaining=deadline-time.monotonic()
+            if remaining<=0:return Outcome('ambiguous')
+            sock.settimeout(remaining)
             response=connection.getresponse()
             if response.status in (401,403):return Outcome('denied')
             if lookup and response.status==404:return Outcome('not_found')

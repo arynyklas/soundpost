@@ -5,7 +5,7 @@ import json
 import re
 from dataclasses import dataclass
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-from .types import Config, PolicyDecision, Template, CaptureInput, SafeRecord
+from .types import Config, PolicyDecision, Template, CaptureInput, SafeRecord, SPAN_KINDS
 
 def utf8_size(value: str) -> int:
     try:
@@ -155,7 +155,7 @@ def normalize_span(raw: dict) -> dict:
         if not valid_id(raw[name],length): raise ValueError("invalid span identity")
     if raw["parent_id"] is not None and not valid_id(raw["parent_id"],16): raise ValueError("invalid parent")
     if any(type(raw[name]) is not str for name in ("span_kind","status","sample_decision")): raise ValueError("invalid span state")
-    if raw["span_kind"] not in ("internal","server","client","producer","consumer") or raw["status"] not in ("ok","error","cancelled","incomplete") or raw["sample_decision"] not in ("keep","drop"): raise ValueError("invalid span state")
+    if raw["span_kind"] not in SPAN_KINDS or raw["status"] not in ("ok","error","cancelled","incomplete") or raw["sample_decision"] not in ("keep","drop"): raise ValueError("invalid span state")
     for name in ("operation","dependency_alias"):
         if type(raw[name]) is not str or (name=="operation" or raw[name]) and re.fullmatch(r"[A-Za-z0-9_.-]{1,128}",raw[name]) is None: raise ValueError("invalid span alias")
     bits=raw["sample_probability"]

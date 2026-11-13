@@ -26,7 +26,7 @@ class WSGIMiddleware:
             span.__enter__()
             try:
                 def start(status, headers, exc_info=None):
-                    if status[:3].isdigit() and int(status[:3]) >= 500: span.status = 'error'
+                    if status[:3].isdigit() and int(status[:3]) >= 500: span.set_error()
                     return start_response(status, headers, exc_info) if exc_info is not None else start_response(status, headers)
                 body = self.app(environ, start)
             except BaseException:

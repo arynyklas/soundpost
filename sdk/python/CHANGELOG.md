@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased — 11.06 adoption friction (additive except `close()` now returns a report)
+
+- Delivery: one flush deadline now covers connection and TLS setup, request and response (socket timeout re-armed per phase; previously a slow first handshake could stretch the response wait past the deadline).
+- `Client.close(timeout=2.0)` returns the final `FlushReport` and never drops buffered records silently: `FlushReport.dropped` (new, default 0) counts records destroyed by a spool-less close, `diagnostics()["closed_pending"]` accumulates them and a `RuntimeWarning` names the count. Invalid timeouts raise `ValueError` without closing; repeated `close()` returns the first report. `fixtures/sdk/python/short_process.py` runs fresh short-lived processes against a real server.
+- `span.set_error()` / `span.set_status("ok"|"error")` replace assigning `span.status`; ASGI/WSGI adapters use them. Calling after the scope exited raises `RuntimeError`.
+- `client.capture_handled(error, code=None)` = begin episode + capture + close in one call.
+- `client.span(..., kind=...)` accepts the adapter kinds (`internal` default, `server`, `client`, `producer`, `consumer`); the vocabulary is the shared `types.SPAN_KINDS`.
+- An error `code` outside the registered set is still exported as `null`, but is now counted as `diagnostics()["unregistered_code"]` (value never stored); free text is still refused.
+- Exception classes whose metaclass is a `type` subclass (asyncpg, ORM hierarchies) keep their class name instead of becoming `UnknownError`; the name is read through `type`'s own descriptor. A class whose name is not a safe identifier is `UnknownError` with the shared graph reason `foreign_or_custom_error_class`. No class-name allowlist exists.
+
 ## Unreleased — 03.09 runtime supplements (additive, qualification pending)
 
 - Add internal optional `soundpost.profile` (`start_profile(options, client) -> ProfileLease`; not exported, not public C09): explicit, off-by-default, <=60 s profiles with `python_monitoring` (deterministic `sys.monitoring` PY_START/PY_RESUME/PY_RETURN/PY_UNWIND counts per project code object on the first free tool ID of 2/3/4, never touching return/exception values) and `python_wall_samples` (`sys._current_frames()` sampler, leaf-first stacks <=128 deep, no locals/globals/thread names).

@@ -3,6 +3,7 @@
 import base64
 import hashlib
 import json
+from dataclasses import replace
 import random
 import secrets
 import threading
@@ -293,11 +294,16 @@ class DeliveryQueue:
         try:self.transport.close()
         finally:
             if self.spool:self.spool.close()
-    def close(self):
+    def close(self,timeout=2.0):
+        """Flush within `timeout`, release leases and return a FlushReport whose `dropped` counts records destroyed by this close.
+
+        Without a spool every record still pending after the bounded flush is destroyed and counted as `closed_pending`;
+        with a spool the encrypted work is retained for the next process and `dropped` is 0."""
         with self._lock:
-            if self._closed:return
+            if self._closed:return None
             self._closing=True
-        try:self.flush()
+        report=None;dropped=0
+        try:report=self.flush(timeout)
         finally:
             with self._lock:
                 self._closed=True
@@ -305,6 +311,8 @@ class DeliveryQueue:
                 finally:
                     self.release()
                     if not self.spool:
-                        self._loss('closed_pending',len(self._entries)+sum(bool(b['unbatched']) for b in self._loss_buckets.values()))
+                        dropped=len(self._entries)+sum(bool(b['unbatched']) for b in self._loss_buckets.values())
+                        self._loss('closed_pending',dropped)
                         for b in self._loss_buckets.values():b['unbatched']=0;b['start']=None;b['end']=None
                         self._entries.clear();self._batches.clear();self._bytes=512*len(self._loss_buckets)
+        return replace(report,lost=self._lost,dropped=dropped)

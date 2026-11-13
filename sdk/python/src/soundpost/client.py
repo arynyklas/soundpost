@@ -3,7 +3,8 @@
 import secrets
 import threading
 import time
-from .types import Config, Template, PolicyDecision, CaptureInput, ErrorMechanism
+import warnings
+from .types import Config, Template, PolicyDecision, CaptureInput, ErrorMechanism, FlushReport
 from .policy import resolve, approve_template, normalize_record, canonical_id, unix_nano, decimal
 from .errors import extract_exception, HandlingEpisode
 from .frames import normalize_root
@@ -40,7 +41,7 @@ class Client:
         self._templates={}
         self._jobs=JobProducer(self,config.job_registry)
         self._delivery=DeliveryQueue(config,config.transport or HttpsReceiptTransport(config));self._counts:dict[str,int]={}
-        self._closed=False;self._lock=threading.RLock()
+        self._closed=False;self._close_report=None;self._lock=threading.RLock()
         self._project_root=normalize_root(config.project_root);self._hook_leases=[]
         for template in config.templates:self.register_template(template)
     @property
@@ -74,6 +75,8 @@ class Client:
         if observed is None:return event
         graph=extract_exception(error,self._policy,project_root=self._project_root)
         safe_code=code if type(code) is str and code in self._codes else None
+        if code is not None and safe_code is None:
+            with self._lock:self._loss("unregistered_code")
         capture={"kind":"error","id":event,"observed_at_ns":observed,"exception_class":graph["nodes"][0]["exception_class"],"code":safe_code,"build_id":self._build,"exception_graph":graph,"handled":mechanism=="manual","fatal":fatal,"mechanism":mechanism}
         context=self._trace_context.current()
         if context is not None:capture.update(trace_id=context.trace_id,span_id=context.span_id)
@@ -81,8 +84,13 @@ class Client:
         if attempt is not None:capture["run_id"]=attempt.run_id
         self._admit(capture)
         return event
-    def span(self,operation:str,*,dependency:str|None=None)->SpanContextManager:
-        return SpanContextManager(self,operation,dependency=dependency)
+    def capture_handled(self,error:BaseException,*,code:str|None=None)->str:
+        """Capture one handled error as one logical occurrence: begin episode, capture, close, in a single call."""
+        episode=self.begin_handling_episode()
+        try:return episode.capture_exception(error,code=code)
+        finally:episode.close()
+    def span(self,operation:str,*,dependency:str|None=None,kind:str='internal')->SpanContextManager:
+        return SpanContextManager(self,operation,dependency=dependency,kind=kind)
     def job_attempt(self,job:str,run_id:str,ordinal:int)->AttemptContextManager:
         return self._jobs.attempt(job,run_id,ordinal)
     def _capture_span(self,payload:dict)->bool:
@@ -129,12 +137,22 @@ class Client:
     def flush(self,timeout:float=2.0):
         with self._trace_context.exporting():
             return self._delivery.flush(timeout)
-    def close(self)->None:
+    def close(self,timeout:float=2.0)->FlushReport|None:
+        """Flush within `timeout` seconds, release owned resources and return the final FlushReport.
+
+        Records still undelivered when the bounded flush ends are never dropped silently: the report's `dropped` counts them,
+        `diagnostics()["closed_pending"]` accumulates them and a RuntimeWarning names the count. With a spool nothing is dropped.
+        A repeated close returns the first report."""
+        if type(timeout) not in (int,float) or timeout<0 or timeout!=timeout or timeout==float("inf"):raise ValueError("invalid close deadline")
         with self._lock:
-            if self._closed:return
+            if self._closed:return self._close_report
             self._closed=True
             for lease in tuple(self._hook_leases):lease.close()
         with self._trace_context.exporting():
-            self._delivery.close()
+            report=self._delivery.close(timeout)
+        self._close_report=report
+        if report is not None and report.dropped:
+            warnings.warn(f"soundpost: close() discarded {report.dropped} undelivered record(s) after a {timeout}s flush; see FlushReport.dropped and diagnostics()['closed_pending']",RuntimeWarning,stacklevel=2)
+        return report
 
 def init(config:Config)->Client:return Client(config)

@@ -27,7 +27,7 @@ class ASGIMiddleware:
             async with SpanContextManager(self.client, self.operation, kind='server') as span:
                 async def observed_send(message):
                     if message['type'] == 'http.response.start' and message['status'] >= 500:
-                        span.status = 'error'
+                        span.set_error()
                     await send(message)
                 try:
                     return await self.app(scope, receive, observed_send)
