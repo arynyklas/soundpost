@@ -71,20 +71,32 @@ func (t voterTransport) Send(_ model.ID, message *pb.Message) error {
 	}
 }
 
-// ForwardPropose hands a follower's proposal to the leader, as the mTLS transport does.
+// ForwardPropose hands a follower's proposal to the leader, as the mTLS transport does. The
+// groups are read under mesh.mu but their Status is taken after it is released: a group's run
+// loop holds its own lock while it calls Send, which takes mesh.mu, so holding mesh.mu across
+// Status inverts that order and can deadlock.
 func (t voterTransport) ForwardPropose(ctx context.Context, _ model.ID, entry replica.Entry) (replica.CommittedEntry, error) {
 	t.mesh.mu.Lock()
-	var leader *replica.Group
 	if t.mesh.blocked[t.node] {
 		t.mesh.mu.Unlock()
 		return replica.CommittedEntry{}, replica.ErrUnavailable
 	}
+	groups := make(map[uint64]*replica.Group, len(t.mesh.groups))
 	for id, g := range t.mesh.groups {
-		if st := g.Status(); st.Leader == id && st.ID == id && !t.mesh.blocked[id] {
-			leader = g
-		}
+		groups[id] = g
 	}
 	t.mesh.mu.Unlock()
+	var leader *replica.Group
+	for id, g := range groups {
+		if st := g.Status(); st.Leader == id && st.ID == id {
+			t.mesh.mu.Lock()
+			up := !t.mesh.blocked[id]
+			t.mesh.mu.Unlock()
+			if up {
+				leader = g
+			}
+		}
+	}
 	if leader == nil {
 		return replica.CommittedEntry{}, replica.ErrUnavailable
 	}
