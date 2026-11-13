@@ -398,11 +398,11 @@ func verify(m QueryMatrix, artifactDir string, exits map[string]int) CampaignRep
 	required := map[key]string{}
 	for _, seed := range m.Seeds {
 		for _, id := range policy.AllProfiles {
-			required[key{kind: "release", profile: id, seed: seed}] = fmt.Sprintf("release/%s/seed/%d", id, seed)
+			required[key{kind: "release", profile: id, seed: seed}] = ReleaseRowID(id, seed)
 		}
 	}
 	for _, l := range RequiredLayouts {
-		required[key{kind: "smoke", layout: l}] = "smoke/" + l
+		required[key{kind: "smoke", layout: l}] = SmokeRowID(l)
 	}
 	seen := map[key]bool{}
 	ids := map[string]bool{}

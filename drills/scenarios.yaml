@@ -27,26 +27,33 @@ allowlist:
     - /etc
     - /boot
 scenarios:
-  # ---- real three-member cluster of the produced static binary ----
+  # ---- real three-member cluster of the produced static binary (the `node_loss` release evidence) ----
   - name: node-kill-restart
+    evidence: node_loss
     needs_binary: true
     description: SIGKILL one member of three real processes, keep acknowledging through the survivors, restart it, reconcile every ACKed id against the exact retained data on every member.
   - name: minority-pause
+    evidence: node_loss
     needs_binary: true
     description: SIGSTOP one member (a minority is unreachable but alive), acknowledge through the majority, SIGCONT, reconcile.
   - name: majority-pause
+    evidence: node_loss
     needs_binary: true
     description: SIGSTOP two members; the survivor must refuse acknowledgement (typed) and no ACK may exist for a refused batch; SIGCONT, retry the identical batch, reconcile.
   - name: network-partition
+    evidence: node_loss
     not_run: "needs iptables/tc/network namespaces (CAP_NET_ADMIN); the drill refuses to weaken host privileges. SIGSTOP rows (minority-pause, majority-pause) are the unprivileged substitute and are not claimed to prove link-level partition behaviour."
     description: Link-level minority/majority partition with both sides live.
   - name: power-loss
+    evidence: node_loss
     not_run: "no power control on this host: a process kill is not a power loss (page cache and the disk write cache survive SIGKILL), so it is never simulated as passed."
     description: Power loss on one member and on all members.
   - name: fsync-failure
+    evidence: node_loss
     not_run: "no failing disk or privilege to inject block-layer errors on this host; a replaced fsync in a test double is not evidence about a real disk and is not reported as a drill pass."
     description: Failed fsync must not acknowledge.
   - name: disk-disappearance
+    evidence: node_loss
     not_run: "removing a block device or unmounting a volume needs privilege this drill must not use; a deleted directory is not the same failure."
     description: A member's disk disappears while the other two keep their own.
   # ---- capacity ----

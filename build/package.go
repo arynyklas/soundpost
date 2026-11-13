@@ -26,6 +26,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"soundpost/internal/releaseevidence"
 )
 
 // Check names, stable for scripts.
@@ -40,7 +42,7 @@ const (
 	checkSignature  = "signature"
 	checkHandles    = "handle_check"
 	checkApproval   = "owner_approval"
-	evidenceSchema  = "soundpost-release-evidence/1"
+	evidenceSchema  = releaseevidence.Schema
 	handleSchema    = "soundpost-handle-check/1"
 	surfacesSchema  = "soundpost-promised-surfaces/1"
 	gateSchema      = "soundpost-release-gate/1"
@@ -49,26 +51,17 @@ const (
 
 // EvidenceKinds are the five reports the gate consumes. Producers: language = the 07.05 query
 // campaign, runtime = 07.06 qualification, privacy = 07.06 privacy canaries, node_loss = 07.07
-// drills, browser = 05/09 real-browser acceptance. Each must be written in the envelope below.
-var EvidenceKinds = []string{"language", "runtime", "privacy", "node_loss", "browser"}
+// drills, browser = 05/09 real-browser acceptance. Each must be written in the envelope of
+// internal/releaseevidence, which the exporters of the producers share with this gate.
+var EvidenceKinds = releaseevidence.Kinds
 
 // EvidenceReport is the narrow interface the gate reads. The gate recomputes the verdict from
 // Rows and Expected and ignores any producer-side summary, so a report cannot assert its own pass.
-type EvidenceReport struct {
-	Schema   string        `json:"schema"`
-	Kind     string        `json:"kind"`
-	Commit   string        `json:"commit"`
-	Expected []string      `json:"expected_rows"`
-	Rows     []EvidenceRow `json:"rows"`
-}
+type EvidenceReport = releaseevidence.Report
 
 // EvidenceRow is one measured row. Status "passed" is the only passing value; "skipped",
 // "not_run", "unqualified" and "failed" all block.
-type EvidenceRow struct {
-	ID     string `json:"id"`
-	Status string `json:"status"`
-	Detail string `json:"detail,omitempty"`
-}
+type EvidenceRow = releaseevidence.Row
 
 // Reports is everything the gate is given; every path is an explicit input.
 type Reports struct {

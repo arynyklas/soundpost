@@ -12,6 +12,12 @@
 // budget; 1 for a measured failure (a missed budget or check blocks the claim),
 // 2 for a usage or matrix error, and 10 when required rows were not exercised
 // (NOT a pass). It prints every unqualified required row and measured failure.
+//
+// The release gate reads the runtime and privacy suite reports through
+//
+//	qualify evidence --kind runtime|privacy --matrix <file> --commit <sha> --out <file> --report <suite-report.json> ...
+//
+// which only converts the written rows into the soundpost-release-evidence/1 envelope.
 package main
 
 import (
@@ -27,6 +33,9 @@ import (
 func main() { os.Exit(run(os.Args[1:])) }
 
 func run(args []string) int {
+	if len(args) > 0 && args[0] == "evidence" {
+		return runEvidence(args[1:], os.Stdout, os.Stderr)
+	}
 	fs := flag.NewFlagSet("qualify", flag.ContinueOnError)
 	suite := fs.String("suite", "", "runtime, privacy or overhead")
 	matrix := fs.String("matrix", "qualification/matrix.yaml", "qualification matrix")

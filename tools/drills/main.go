@@ -11,6 +11,10 @@
 //
 // Exit codes: 0 every selected scenario passed; 1 a scenario failed; 2 usage or a safety refusal;
 // 10 no scenario failed but at least one was recorded not_run (a not_run row is never a pass).
+//
+// `drills evidence --scenarios drills/scenarios.yaml --reports <dir> --commit <sha> --out <file>` converts
+// the written reports of the scenarios the manifest tags `evidence: node_loss` into the release gate's
+// node_loss envelope; it never runs a drill and never changes a row's status.
 package main
 
 import (
@@ -32,6 +36,9 @@ import (
 func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
 
 func run(args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 && args[0] == "evidence" {
+		return runEvidence(args[1:], stdout, stderr)
+	}
 	f := flag.NewFlagSet("drills", flag.ContinueOnError)
 	f.SetOutput(io.Discard)
 	scenario := f.String("scenario", "", "scenario name or `all`")
@@ -107,6 +114,8 @@ type ScenarioSpec struct {
 	NotRun string `yaml:"not_run"`
 	// NeedsBinary marks drills that start real processes of the produced static binary.
 	NeedsBinary bool `yaml:"needs_binary"`
+	// Evidence names the release gate report this scenario's result belongs to: `node_loss` or empty.
+	Evidence string `yaml:"evidence"`
 }
 
 // Manifest is drills/scenarios.yaml.
@@ -147,6 +156,9 @@ func ParseManifest(raw []byte) (*Manifest, error) {
 		seen[s.Name] = true
 		if s.NotRun == "" && s.Description == "" {
 			return nil, fmt.Errorf("scenario %q has no description", s.Name)
+		}
+		if s.Evidence != "" && s.Evidence != EvidenceNodeLoss {
+			return nil, fmt.Errorf("scenario %q names unknown release evidence %q", s.Name, s.Evidence)
 		}
 	}
 	return &m, nil
