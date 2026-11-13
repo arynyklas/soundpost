@@ -55,6 +55,10 @@ type Entry struct {
 	// command to a node (a statement a voter makes about its own store) checks it against this
 	// field. A command committed before the field existed has none.
 	Proposer *Proposer `json:"proposer,omitempty"`
+	// At is the time (Unix nanoseconds) the leader stamped into a command kept by digest
+	// (DigestRetryMachine) when it ordered it; it is the clock of the retry window and never
+	// taken from the caller. Zero on other commands and on commands committed before the field.
+	At int64 `json:"at,omitempty,string"`
 }
 
 // Proposer names the member that proposed an Entry: its node ID and its node identity, both as the
@@ -115,6 +119,26 @@ type Machine interface {
 	Restore([]byte, uint64) error
 }
 
+// SnapshotGate is optionally implemented by a Machine whose installed state can invalidate a
+// statement every other member relies on (the storage engine's erasure acknowledgements: a snapshot
+// that replays pre-erasure commands puts erased rows back). It orders that fact before the install:
+//
+//   - BeforeSnapshotSend runs on the sender, outside every group lock, before a snapshot message
+//     for member `to` leaves. What it commits through the replicated log is therefore ordered
+//     before the receiver can possibly apply the snapshot. Its token travels in the message's
+//     Context. An error withholds the message: the delivery is reported as failed and Raft sends
+//     the snapshot again.
+//   - AdmitSnapshot runs on the receiver, under the group lock, before the message is stepped. An
+//     error refuses the message (the sender sees a failed delivery). release is called once Step
+//     returned, whatever its outcome.
+//
+// A message without a token (its sender does not implement the gate, or declined to gate it) is
+// admitted with an empty token.
+type SnapshotGate interface {
+	BeforeSnapshotSend(ctx context.Context, to uint64) ([]byte, error)
+	AdmitSnapshot(token []byte) (release func(), err error)
+}
+
 // DigestRetryMachine is optionally implemented by a Machine whose commands of some kinds each
 // carry the machine's whole state (the control machine: a command is the next state plus the
 // revision it expects). For a kind it names, the retry table keeps, for every applied command,
@@ -150,6 +174,11 @@ type Config struct {
 	// by (default time.Now).
 	PinTTL time.Duration
 	Now    func() time.Time
+	// RetryWindow and RetryMax bound the retry table of a DigestRetryMachine (defaults
+	// DefaultRetryWindow, DefaultRetryMax); Cadence cuts and compacts on its own (default: never).
+	RetryWindow time.Duration
+	RetryMax    int
+	Cadence     Cadence
 }
 type proposalResult struct {
 	entry CommittedEntry
@@ -213,6 +242,20 @@ type Group struct {
 	now          func() time.Time
 	// retryDigest is Machine.RetryByDigest when the machine implements DigestRetryMachine.
 	retryDigest func(Kind) bool
+	// gate is Machine.SnapshotGate when the machine implements it; gateCtx bounds the sender-side
+	// goroutines gateWG tracks.
+	gate        SnapshotGate
+	gateCtx     context.Context
+	gateCancel  context.CancelFunc
+	gateWG      sync.WaitGroup
+	retryWindow time.Duration
+	retryMax    int
+	retryOrder  []model.ID
+	// cadence state: applied commands and entry bytes since the last cut.
+	cadence       Cadence
+	sinceCommands uint64
+	sinceBytes    int64
+	cadenceWake   chan struct{}
 }
 
 func Open(c Config) (*Group, error) {
@@ -274,6 +317,18 @@ func Open(c Config) (*Group, error) {
 	if m, ok := c.Machine.(DigestRetryMachine); ok {
 		g.retryDigest = m.RetryByDigest
 	}
+	if gate, ok := c.Machine.(SnapshotGate); ok {
+		g.gate = gate
+		g.gateCtx, g.gateCancel = context.WithCancel(context.Background())
+	}
+	g.retryWindow, g.retryMax = c.RetryWindow, c.RetryMax
+	if g.retryWindow <= 0 {
+		g.retryWindow = DefaultRetryWindow
+	}
+	if g.retryMax <= 0 {
+		g.retryMax = DefaultRetryMax
+	}
+	g.cadence, g.cadenceWake = c.Cadence, make(chan struct{}, 1)
 	g.logCommands = map[model.ID]CommittedEntry{}
 	hard, conf, err := memory.InitialState()
 	if err != nil {
@@ -314,6 +369,9 @@ func Open(c Config) (*Group, error) {
 	if c.TickInterval > 0 {
 		go g.run(c.TickInterval)
 	}
+	if g.cadence.Enabled() {
+		go g.cadenceLoop()
+	}
 	return g, nil
 }
 func (g *Group) run(interval time.Duration) {
@@ -330,6 +388,14 @@ func (g *Group) run(interval time.Duration) {
 }
 func (g *Group) Close() error {
 	g.closeOnce.Do(func() { close(g.stop) })
+	if g.gateCancel != nil {
+		g.gateCancel()
+	}
+	err := g.closeLocked()
+	g.gateWG.Wait() // the senders report through g.mu, which closeLocked has released
+	return err
+}
+func (g *Group) closeLocked() error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.closed {
@@ -387,6 +453,13 @@ func (g *Group) Step(ctx context.Context, m *pb.Message) error {
 	}
 	if m == nil || m.GetTo() != g.id {
 		return ErrInvalid
+	}
+	if g.gate != nil && m.GetType() == pb.MsgSnap {
+		release, err := g.gate.AdmitSnapshot(m.GetContext())
+		if err != nil {
+			return ErrUnavailable
+		}
+		defer release()
 	}
 	if err := g.raw.Step(m); err != nil {
 		return err
@@ -515,6 +588,11 @@ func (g *Group) propose(ctx context.Context, e Entry, from *Proposer) (Committed
 	if e.ApplicationIndex != 0 && e.ApplicationIndex != application+1 {
 		g.mu.Unlock()
 		return CommittedEntry{}, ErrStale
+	}
+	if g.digestKind(e.Kind) {
+		e.At = g.now().UnixNano()
+	} else {
+		e.At = 0
 	}
 	e.ApplicationIndex = application + 1
 	if e.Kind == Cancellation {

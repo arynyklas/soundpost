@@ -102,8 +102,59 @@ func (a *replayIndexingAppender) Append(ctx context.Context, scope auth.Scope, b
 	return receipt, nil
 }
 
+// ReceiptChunkReader is optionally implemented by the durable appender (*storage.Engine): the
+// replay chunks of the stored batch a receipt answers for.
+type ReceiptChunkReader interface {
+	ReceiptReplayChunks(ctx context.Context, scope auth.Scope, q model.ReceiptRequest, receipt model.Receipt) ([]model.ReplayChunk, error)
+}
+
+// LookupReceipt answers a historical receipt and, for a batch that carries replay records whose
+// deadline has not passed, pins its checkpoints first: the lookup is where a sender that lost the
+// acknowledgement between the append and the index step learns the batch is durable, and an
+// answer that left the checkpoint unpinned would let a competing chunk at that sequence be
+// settled differently. The pin is the same RecordScope step as admission, idempotent, with the
+// receipt's replay deadline; a conflict or an unavailable index is returned instead of the
+// receipt, exactly as admission returns it instead of an acknowledgement.
 func (a *replayIndexingAppender) LookupReceipt(ctx context.Context, scope auth.Scope, q model.ReceiptRequest) (model.Receipt, error) {
-	return a.inner.LookupReceipt(ctx, scope, q)
+	receipt, err := a.inner.LookupReceipt(ctx, scope, q)
+	if err != nil {
+		return model.Receipt{}, err
+	}
+	retain := model.UnixNano(0)
+	for _, d := range receipt.SignalDeadlines {
+		if d.Kind == model.Replay {
+			retain = d.RetainUntil
+		}
+	}
+	reader, ok := a.inner.(ReceiptChunkReader)
+	if retain == 0 || int64(retain) <= a.now().UnixNano() || !ok {
+		return receipt, nil
+	}
+	stored, err := reader.ReceiptReplayChunks(ctx, scope, q, receipt)
+	if err != nil {
+		return model.Receipt{}, indexFault(err)
+	}
+	if len(stored) == 0 {
+		return receipt, nil
+	}
+	chunks := make([]*model.ReplayChunk, len(stored))
+	for i := range stored {
+		chunks[i] = &stored[i]
+	}
+	indexed, err := indexedChunks(chunks)
+	if err != nil {
+		return model.Receipt{}, err
+	}
+	projects := scope.ProjectIDs()
+	if len(projects) != 1 {
+		return model.Receipt{}, model.Fail(model.Forbidden)
+	}
+	for _, c := range indexed {
+		if err = a.index.RecordScope(ctx, scope, projects[0], *c, retain); err != nil {
+			return model.Receipt{}, indexFault(err)
+		}
+	}
+	return receipt, nil
 }
 
 // indexFault reduces an index error to its bare code, so nothing but a typed

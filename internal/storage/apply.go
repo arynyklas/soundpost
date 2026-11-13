@@ -81,6 +81,7 @@ func (e *Engine) applyTx(tx *bolt.Tx, slot uint16, index uint64, entry walEntry)
 		if err := validateOrdered(tx, b); err != nil {
 			return err
 		}
+		e.noteApplied(b.Org, b.Project, b.Records, nil)
 		if tx.Bucket([]byte("cancelled")).Get([]byte(b.Reservation.ID.String())) != nil {
 			return model.Fail(model.Corrupt)
 		}
@@ -196,10 +197,15 @@ func (e *Engine) applyTx(tx *bolt.Tx, slot uint16, index uint64, entry walEntry)
 		if err := applyEraseUnackTx(tx, slot, entry); err != nil {
 			return err
 		}
+	case "erase_notice":
+		if err := applyEraseNoticeTx(tx, slot, index, entry); err != nil {
+			return err
+		}
 	case "artifact_fragment":
 		if entry.Artifact == nil || entry.Batch != nil || entry.Receipt != nil || entry.Cancel != nil || entry.Fence != nil || entry.ArtifactGC != nil {
 			return model.Fail(model.Corrupt)
 		}
+		e.noteApplied(entry.Artifact.Manifest.Org, entry.Artifact.Manifest.Project, nil, &entry.Artifact.Manifest)
 		if err := e.applyBlobFragment(tx, slot, index, *entry.Artifact); err != nil {
 			return err
 		}

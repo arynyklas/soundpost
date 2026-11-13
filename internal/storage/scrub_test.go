@@ -33,13 +33,19 @@ func applyFileHits(t *testing.T, e *Engine, canary string) int {
 // checkDatabase fails if bbolt's own structural check finds anything wrong.
 func checkDatabase(t *testing.T, e *Engine) {
 	t.Helper()
+	// Check walks the transaction from a goroutine of its own: drain it before the transaction
+	// ends, or it keeps reading a transaction (and a mapping) that is gone.
+	var found []error
 	if err := e.db.View(func(tx *bolt.Tx) error {
 		for err := range tx.Check() {
-			return err
+			found = append(found, err)
 		}
 		return nil
 	}); err != nil {
 		t.Fatalf("bbolt check: %v", err)
+	}
+	if len(found) > 0 {
+		t.Fatalf("bbolt check: %v", found)
 	}
 }
 

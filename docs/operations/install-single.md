@@ -75,6 +75,8 @@ The HTTPS listener starts before storage opens, so during recovery a probe gets 
 
 `serve --authority-keys FILE --authority-dir DIR` (or the `--authority-s3-*` set; both or neither, full keys only) connects deletions to the independent restore authority so a restore of an older backup cannot revive deleted data; see [backup-restore.md](backup-restore.md#the-deletion-authority-c12-restore-authority). Without them serve runs deletions with no authority checkpoint.
 
+`serve --trusted-proxy CIDR[,CIDR...]` names the reverse proxies whose `X-Forwarded-For` may identify the client. Only from a peer inside the list is the header read, and then the rightmost hop that is not itself in the list is the address the login throttle (and the per-address pending SSO login limit of 16 inside the global 1024) is keyed on; from any other peer the header is ignored. Without the flag the peer address is used, so behind a proxy all users share one throttle key: set it to the proxy's address.
+
 `soundpost ready [--json] [--url https://127.0.0.1:8443] [--ca-cert PEM | --data-dir DIR]` asks the **running** server's `/readyz` with TLS verification (`--data-dir` only selects that installation's public `server.crt` as the trust root) and exits **0 only when the answer is 200 with `ready: true`**. Every other outcome — not ready, unreachable, untrusted certificate, malformed or inconsistent answer — exits 1 with a closed reason (`unreachable` when the server could not be asked). It deliberately does not open the data directory: a second opener would contend for the running process's database locks, and a read-only open of a replicated store says nothing about quorum. The container health check is this command.
 
 ## 6. Native acquisition is opt-in and never server-wide root

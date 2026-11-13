@@ -18,10 +18,11 @@ type entryWire struct {
 	CommitSet     *CommitSetWatermark `json:"commit_set,omitempty"`
 	Original      *model.Hash         `json:"original,omitempty"`
 	Proposer      *Proposer           `json:"proposer,omitempty"`
+	At            model.Uint64        `json:"at,omitempty"`
 }
 
 func (w entryWire) entry() Entry {
-	return Entry{ID: w.ID, Kind: w.Kind, Payload: w.Payload, ReservationID: w.ReservationID, ApplicationIndex: uint64(w.Application), CommitSet: w.CommitSet, Original: w.Original, Proposer: w.Proposer}
+	return Entry{ID: w.ID, Kind: w.Kind, Payload: w.Payload, ReservationID: w.ReservationID, ApplicationIndex: uint64(w.Application), CommitSet: w.CommitSet, Original: w.Original, Proposer: w.Proposer, At: int64(w.At)}
 }
 
 func (p *Proposer) UnmarshalJSON(raw []byte) error {

@@ -23,6 +23,7 @@ type oidcState struct {
 	State, Nonce, Verifier, Binding, Issuer string
 	Expires                                 int64
 	ClientID, RedirectURL, Org, Provider    string
+	Source                                  string `json:",omitempty"`
 }
 
 func (s *Service) OIDCStart(ctx context.Context, cfg OIDCConfig, binding string) (string, error) {
@@ -45,13 +46,14 @@ func (s *Service) OIDCStart(ctx context.Context, cfg OIDCConfig, binding string)
 		}
 	}
 	now := s.now()
-	st := oidcState{State: randomToken(), Nonce: randomToken(), Verifier: oauth2.GenerateVerifier(), Binding: hashToken(binding), Issuer: cfg.Issuer, Expires: now.Add(5 * time.Minute).Unix(), ClientID: cfg.ClientID, RedirectURL: cfg.RedirectURL, Org: cfg.org, Provider: cfg.provider}
+	source := oidcSource(ctx)
+	st := oidcState{State: randomToken(), Nonce: randomToken(), Verifier: oauth2.GenerateVerifier(), Binding: hashToken(binding), Issuer: cfg.Issuer, Expires: now.Add(5 * time.Minute).Unix(), ClientID: cfg.ClientID, RedirectURL: cfg.RedirectURL, Org: cfg.org, Provider: cfg.provider, Source: source}
 	raw, _ := json.Marshal(st)
 	e = s.store.Update(ctx, func(state *model.ControlState) error {
 		// The expiry instant is the leader-supplied now above; the transition
 		// reads no clock, so replicas install identical state bytes.
 		sweepExpiredState(state, now.Unix())
-		if livePendingOIDC(*state, now.Unix()) >= pendingOIDCCap {
+		if livePendingOIDC(*state, now.Unix()) >= pendingOIDCCap || sourceFull(*state, now.Unix(), source) {
 			return errOIDCFull()
 		}
 		state.OIDC[hashToken(st.State)] = raw
@@ -135,6 +137,40 @@ const MaxPendingOIDC = 1024
 
 var pendingOIDCCap = MaxPendingOIDC
 
+// MaxPendingOIDCPerSource bounds the live pending logins one client address may hold inside the
+// global ceiling, so one address cannot fill MaxPendingOIDC and block everyone else. The address
+// is the one the login throttle uses (WithSource: the peer, or the forwarded client address
+// behind a trusted proxy); a request with no known source is bounded by the global ceiling only.
+const MaxPendingOIDCPerSource = 16
+
+var pendingOIDCSourceCap = MaxPendingOIDCPerSource
+
+// oidcSource is the digest stored on a pending record in place of the client address.
+func oidcSource(ctx context.Context) string {
+	s := SourceFrom(ctx)
+	if s == "" {
+		return ""
+	}
+	return hashToken("oidc-source\x00" + s)
+}
+
+func sourceFull(st model.ControlState, now int64, source string) bool {
+	if source == "" {
+		return false
+	}
+	n := 0
+	for k, raw := range st.OIDC {
+		if strings.Contains(k, ":") {
+			continue
+		}
+		var p oidcState
+		if json.Unmarshal(raw, &p) == nil && p.State != "" && hashToken(p.State) == k && p.Expires > now && p.Source == source {
+			n++
+		}
+	}
+	return n >= pendingOIDCSourceCap
+}
+
 const elevationKeyPrefix = "elevation:"
 
 func errOIDCFull() error {
@@ -194,7 +230,7 @@ func sweepExpiredState(st *model.ControlState, now int64) (removed int) {
 func (s *Service) OIDCCapacity(ctx context.Context) error {
 	now := s.now().Unix()
 	return s.store.View(ctx, func(st model.ControlState) error {
-		if livePendingOIDC(st, now) >= pendingOIDCCap {
+		if livePendingOIDC(st, now) >= pendingOIDCCap || sourceFull(st, now, oidcSource(ctx)) {
 			return errOIDCFull()
 		}
 		return nil

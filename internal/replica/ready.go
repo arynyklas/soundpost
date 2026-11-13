@@ -3,12 +3,14 @@
 package replica
 
 import (
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"hash/crc32"
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	raft "go.etcd.io/raft/v3"
 	pb "go.etcd.io/raft/v3/raftpb"
@@ -332,6 +334,10 @@ func (g *Group) processReady() error {
 			}
 		}
 		for _, m := range rd.Messages {
+			if g.gate != nil && m.GetType() == pb.MsgSnap {
+				g.sendGatedSnapshot(cloneMessage(m))
+				continue
+			}
 			if err := g.transport.Send(g.group, cloneMessage(m)); err != nil {
 				g.raw.ReportUnreachable(m.GetTo())
 				if m.GetType() == pb.MsgSnap {
@@ -454,6 +460,7 @@ func (g *Group) applyCommitted(ent *pb.Entry) error {
 			c = old
 		} else {
 			g.completed[c.Entry.ID] = g.retained(c)
+			g.trackRetry(c)
 		}
 		for _, ch := range g.pending[c.Entry.ID] {
 			ch <- proposalResult{entry: c, err: result}
@@ -465,6 +472,7 @@ func (g *Group) applyCommitted(ent *pb.Entry) error {
 			delete(g.logCommands, c.Entry.ID)
 		}
 	}
+	g.countApplied(len(ent.GetData()))
 	return nil
 }
 
@@ -536,6 +544,7 @@ func (g *Group) restoreSnapshot(snap *pb.Snapshot) error {
 		}
 		g.completed[c.Entry.ID] = g.retained(c)
 	}
+	g.rebuildRetryOrder()
 	g.proofWithdrawn()
 	return nil
 }
@@ -569,4 +578,30 @@ func (g *Group) Snapshot() error {
 		return err
 	}
 	return nil
+}
+
+// snapshotGateTimeout bounds what a sender waits for the machine to order its statement before
+// a snapshot leaves; a snapshot withheld that long is reported as failed and sent again.
+const snapshotGateTimeout = 15 * time.Second
+
+// sendGatedSnapshot sends a snapshot message once the machine's gate has ordered what the install
+// will invalidate. g.mu is held by the caller and must not be taken by the gate: the gate runs on
+// its own goroutine, and reports a failed delivery the way a failed Send does.
+func (g *Group) sendGatedSnapshot(m *pb.Message) {
+	g.gateWG.Add(1)
+	go func() {
+		defer g.gateWG.Done()
+		ctx, cancel := context.WithTimeout(g.gateCtx, snapshotGateTimeout)
+		token, err := g.gate.BeforeSnapshotSend(ctx, m.GetTo())
+		cancel()
+		if err == nil {
+			if len(token) > 0 {
+				m.Context = token
+			}
+			err = g.transport.Send(g.group, m)
+		}
+		if err != nil {
+			g.ReportDelivery(m.GetTo(), true, err)
+		}
+	}()
 }

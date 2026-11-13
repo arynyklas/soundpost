@@ -82,6 +82,7 @@ func run() error {
 	clusterConfig := f.String("cluster-config", "", "private mTLS node configuration JSON")
 	nodeID := f.Uint64("node-id", 0, "configured Raft node identity")
 	hold := f.String("startup-hold-file", "", "keep storage closed (GET /readyz reports startup_hold) until this file exists, e.g. a volume-mount sentinel")
+	trustedProxy := f.String("trusted-proxy", "", "comma-separated CIDRs of reverse proxies whose X-Forwarded-For names the client for the login throttle (default: none, the peer address is used)")
 	symbolicator := addSymbolicatorFlags(f)
 	scrape := addScrapeFlags(f)
 	authorityFlagSet := addAuthorityFlags(f)
@@ -91,6 +92,10 @@ func run() error {
 	}
 	if (*mode != "single" && *mode != "distributed") || *dir == "" || ((*cert == "") != (*key == "")) {
 		return fmt.Errorf("valid mode, data directory and paired TLS files required")
+	}
+	proxies, e := httpapi.ParseTrustedProxies(*trustedProxy)
+	if e != nil {
+		return e
 	}
 	symbolicateSettings, e := symbolicator.settings()
 	if e != nil {
@@ -197,7 +202,7 @@ func run() error {
 		}
 		routes = append(routes, register)
 	}
-	early.gate.Open(httpapi.NewServer(*listen, service, cfg, routes...).Handler)
+	early.gate.Open(httpapi.NewServerBehind(proxies, *listen, service, cfg, routes...).Handler)
 	go core.RunFences(ctx)
 	// The leader-only background runner (rules, conditions, issue/incident/job
 	// producers, notification delivery) acts as the in-process system principal of

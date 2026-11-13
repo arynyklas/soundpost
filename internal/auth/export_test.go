@@ -41,5 +41,12 @@ func SetPendingOIDCCap(n int) func() {
 	return func() { pendingOIDCCap = old }
 }
 
+// SetPendingOIDCSourceCap lowers the per-source pending-OIDC cap for a test.
+func SetPendingOIDCSourceCap(n int) func() {
+	old := pendingOIDCSourceCap
+	pendingOIDCSourceCap = n
+	return func() { pendingOIDCSourceCap = old }
+}
+
 // ExpiresAt exposes the elevation expiry (unix seconds) to tests.
 func (e Elevation) ExpiresAt() int64 { return e.expires.Unix() }

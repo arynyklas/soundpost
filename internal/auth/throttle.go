@@ -39,6 +39,12 @@ func WithSource(ctx context.Context, source string) context.Context {
 	return context.WithValue(ctx, sourceKey{}, source)
 }
 
+// SourceFrom is the source WithSource tagged ctx with, or "".
+func SourceFrom(ctx context.Context) string {
+	s, _ := ctx.Value(sourceKey{}).(string)
+	return s
+}
+
 type failureWindow struct {
 	times []time.Time
 }

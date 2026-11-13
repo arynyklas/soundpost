@@ -36,6 +36,7 @@ type Engine struct {
 	db           *bolt.DB
 	dir          string
 	identity     model.ID
+	incarnation  string // hex; the random id of this disk's data directory (ensureIncarnation)
 	files        [64]*os.File
 	indexes      [64]uint64
 	validator    Revalidator
@@ -73,7 +74,11 @@ type walEntry struct {
 	// installation epoch (Type "erase_unack", slot 0): its own stores took bytes in that an
 	// acknowledgement said were gone.
 	EraseUnack *eraseUnack `json:"erase_unack,omitempty"`
-	// Proposer is the member that proposed an erase_ack or erase_unack, copied from the replicated
+	// EraseNotice is a sender's statement, ordered before it sends a snapshot to the member it names
+	// (Type "erase_notice", slot 0): that member's earlier acknowledgements no longer stand, whatever
+	// the snapshot turns out to carry.
+	EraseNotice *eraseNotice `json:"erase_notice,omitempty"`
+	// Proposer is the member that proposed an erase_ack, erase_unack or erase_notice, copied from the replicated
 	// entry that carried it (replica.Entry.Proposer; the payload never carries it). The statement
 	// counts only when it names this member; a command committed before the field existed has
 	// none and is not attributed.
@@ -157,6 +162,9 @@ func Open(dir string, v Revalidator) (*Engine, error) {
 			}
 			return nil
 		})
+	}
+	if e == nil {
+		e = out.ensureIncarnation()
 	}
 	if e == nil {
 		e = out.validateReplicaNamespaces()

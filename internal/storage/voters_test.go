@@ -26,9 +26,12 @@ type testMesh struct {
 	groups  map[uint64]map[model.ID]*replica.Group
 	queues  map[meshQueueKey]chan meshMessage
 	blocked map[uint64]bool
-	stop    chan struct{}
-	wg      sync.WaitGroup
-	once    sync.Once
+	// holdSnap, per destination node, blocks the delivery of snapshot messages until it is closed:
+	// a snapshot the sender cut and sent that is still in transit.
+	holdSnap map[uint64]chan struct{}
+	stop     chan struct{}
+	wg       sync.WaitGroup
+	once     sync.Once
 }
 type meshQueueKey struct {
 	to    uint64
@@ -44,7 +47,7 @@ type meshTransport struct {
 }
 
 func newTestMesh() *testMesh {
-	return &testMesh{groups: map[uint64]map[model.ID]*replica.Group{}, queues: map[meshQueueKey]chan meshMessage{}, blocked: map[uint64]bool{}, stop: make(chan struct{})}
+	return &testMesh{groups: map[uint64]map[model.ID]*replica.Group{}, queues: map[meshQueueKey]chan meshMessage{}, blocked: map[uint64]bool{}, holdSnap: map[uint64]chan struct{}{}, stop: make(chan struct{})}
 }
 func (m *testMesh) register(node uint64, groups []*replica.Group) {
 	// Status takes the group mutex, which a ticking group holds while it calls
@@ -67,6 +70,17 @@ func (m *testMesh) partition(node uint64, down bool) {
 	m.blocked[node] = down
 	m.mu.Unlock()
 }
+
+// holdSnapshots keeps every snapshot message addressed to node in transit until the returned
+// function is called.
+func (m *testMesh) holdSnapshots(node uint64) (release func()) {
+	gate := make(chan struct{})
+	m.mu.Lock()
+	m.holdSnap[node] = gate
+	m.mu.Unlock()
+	var once sync.Once
+	return func() { once.Do(func() { close(gate) }) }
+}
 func (m *testMesh) close() {
 	m.once.Do(func() { close(m.stop) })
 	m.wg.Wait()
@@ -79,6 +93,12 @@ func (t meshTransport) Send(group model.ID, message *pb.Message) error {
 	t.mesh.mu.Lock()
 	queue := t.mesh.queues[key]
 	if queue == nil {
+		select {
+		case <-t.mesh.stop: // closed: a delivery goroutine started now would outlive close's Wait
+			t.mesh.mu.Unlock()
+			return replica.ErrUnavailable
+		default:
+		}
 		queue = make(chan meshMessage, 256)
 		t.mesh.queues[key] = queue
 		t.mesh.wg.Add(1)
@@ -101,6 +121,18 @@ func (m *testMesh) deliver(key meshQueueKey, queue <-chan meshMessage) {
 		case <-m.stop:
 			return
 		case in := <-queue:
+			if in.m.GetType() == pb.MsgSnap {
+				m.mu.Lock()
+				gate := m.holdSnap[key.to]
+				m.mu.Unlock()
+				if gate != nil {
+					select {
+					case <-gate:
+					case <-m.stop:
+						return
+					}
+				}
+			}
 			m.mu.Lock()
 			destination, source := m.groups[key.to][key.group], m.groups[in.from][key.group]
 			down := m.blocked[in.from] || m.blocked[key.to]

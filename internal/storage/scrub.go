@@ -100,9 +100,14 @@ func (e *Engine) scrubFreePages(ctx context.Context) (zeroed uint64, pending boo
 		return 0, true, err
 	}
 	defer file.Close()
-	pageSize := uint64(e.db.Info().PageSize)
-	var high uint64
-	if err = e.db.View(func(tx *bolt.Tx) error { high = uint64(tx.Size()) / pageSize; return nil }); err != nil {
+	// The page size is read inside a transaction: Info reads the mapping, which only a transaction
+	// keeps from being remapped.
+	var pageSize, high uint64
+	if err = e.db.View(func(tx *bolt.Tx) error {
+		pageSize = uint64(tx.DB().Info().PageSize)
+		high = uint64(tx.Size()) / pageSize
+		return nil
+	}); err != nil {
 		return 0, true, unavailableDB(err)
 	}
 	for first := uint64(2); first < high; first += uint64(cfg.chunkPages) {

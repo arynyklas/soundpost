@@ -76,6 +76,9 @@ func (s *Store) EnableReplication(c replica.Config) (*replica.Group, error) {
 	}
 	c.Machine = m
 	c.Validate = m.Validate
+	if !c.Cadence.Enabled() {
+		c.Cadence = DefaultJournalCadence
+	}
 	if c.Seed == nil {
 		if len(c.Members.Nodes) != 1 {
 			return nil, model.Fail(model.Invalid)

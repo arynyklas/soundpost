@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"sort"
 	"strconv"
 	"strings"
@@ -44,6 +45,24 @@ import (
 //
 // An acknowledgement written before attribution existed (value of one byte, no proposer in the
 // stored command) is never counted: the voter re-acknowledges once.
+//
+// Three more facts keep an acknowledgement from outliving the bytes it measured (task 11.04):
+//
+//   - the window between an install and its withdrawal: a snapshot that replays data commands is
+//     preceded by a replicated "erase_notice" the SENDER commits (replica.SnapshotGate:
+//     BeforeSnapshotSend), naming the receiver. Every acknowledgement the receiver made before the
+//     notice stops standing at once, on every voter, because an acknowledgement carries the notice
+//     counter its voter had applied when it measured (Basis) and stands only while that is still
+//     the voter's latest. The receiver itself does not acknowledge while a notice it has applied has
+//     not been settled by the snapshot it announced having been stepped (AdmitSnapshot), or by a
+//     grace period after which it refuses that snapshot instead (a token at or below the settled
+//     counter is refused, so a late message cannot install under a fresh acknowledgement);
+//   - the disk: every data directory carries a random incarnation (ensureIncarnation) and an
+//     acknowledgement stands only for the incarnation its voter last declared in the group, so a
+//     disk that replaced the old one under the same node id and identity never inherits its acks;
+//   - the version: the entries above are new shapes an older binary cannot decode, so nothing is
+//     proposed in them until every member of the committed configuration has declared the protocol
+//     (a capability statement in the shape an older binary applies harmlessly, see protocolReady).
 const (
 	// ResidualApplyDB names the data stores (apply.db, its free pages, the segments) of a voter
 	// that has not yet erased a completed deletion, or whose free pages still owe a scrub, as
@@ -53,6 +72,15 @@ const (
 
 	eraseAckSlot   uint16 = 0
 	maxEraseAckOps        = 64
+
+	// eraseProtocol is the erase protocol version a binary speaks: 1 is the attributed, epoch
+	// acknowledgement; 2 adds notices, incarnations and the basis of an acknowledgement.
+	eraseProtocol uint64 = 2
+	// noticeGrace is how long a voter that applied a notice naming it waits for the announced
+	// snapshot before it stops expecting it (and refuses it if it still arrives).
+	noticeGrace = 2 * time.Minute
+	// declareInterval is how often the erasure loop retries the declarations that need a leader.
+	declareInterval = 3 * time.Second
 
 	withdrawRetryMin = 50 * time.Millisecond
 	withdrawRetryMax = 2 * time.Second
@@ -66,12 +94,17 @@ type eraseAck struct {
 	// Epoch is the voter's installation epoch when it measured itself clean. The acknowledgement
 	// stops counting once a withdrawal of the same voter names a later epoch. It is omitted when
 	// zero, so a command written before the field existed encodes to the bytes it was stored as.
-	Epoch  model.Uint64 `json:"epoch,omitempty"`
-	Cursor model.Cursor `json:"cursor"`
+	Epoch model.Uint64 `json:"epoch,omitempty"`
+	// Basis is the notice counter of this voter in the replicated state the voter had applied when
+	// it measured, and Incarnation the random id of its disk. Both are omitted when empty, so an
+	// acknowledgement written by a binary that has neither encodes to the bytes it was stored as.
+	Basis       model.Uint64 `json:"basis,omitempty"`
+	Incarnation string       `json:"incarnation,omitempty"`
+	Cursor      model.Cursor `json:"cursor"`
 }
 
 func (a *eraseAck) valid() bool {
-	return a != nil && a.Node != 0 && a.Identity != "" && len(a.Operations) > 0 && len(a.Operations) <= maxEraseAckOps
+	return a != nil && a.Node != 0 && a.Identity != "" && len(a.Operations) > 0 && len(a.Operations) <= maxEraseAckOps && (a.Incarnation == "" || validIncarnation(a.Incarnation))
 }
 
 // eraseUnack is the closed DTO of one voter's withdrawal: every acknowledgement the voter made
@@ -80,11 +113,39 @@ type eraseUnack struct {
 	Node     model.Uint64 `json:"node"`
 	Identity string       `json:"identity"`
 	Epoch    model.Uint64 `json:"epoch"`
-	Cursor   model.Cursor `json:"cursor"`
+	// Incarnation, when set, declares the disk the voter now runs on. A declaration of an
+	// incarnation the group has not seen for this voter resets its floor to Epoch: nothing a
+	// previous disk acknowledged stands for this one.
+	Incarnation string       `json:"incarnation,omitempty"`
+	Cursor      model.Cursor `json:"cursor"`
 }
 
 func (u *eraseUnack) valid() bool {
-	return u != nil && u.Node != 0 && u.Identity != "" && u.Epoch != 0
+	return u != nil && u.Node != 0 && u.Identity != "" && (u.Epoch != 0 || validIncarnation(u.Incarnation))
+}
+
+// eraseNotice is the closed DTO of a sender's statement that it is about to send the named member a
+// snapshot (see replica.SnapshotGate). The proposer is the sender, whoever it is: a notice only
+// ever makes an acknowledgement stand less, so it needs no authority over its target.
+type eraseNotice struct {
+	Node     model.Uint64 `json:"node"`
+	Identity string       `json:"identity"`
+	Cursor   model.Cursor `json:"cursor"`
+}
+
+func (n *eraseNotice) valid() bool { return n != nil && n.Node != 0 && n.Identity != "" }
+
+// validIncarnation is the form ensureIncarnation writes: 32 lowercase hex digits.
+func validIncarnation(s string) bool {
+	if len(s) != 32 {
+		return false
+	}
+	for _, c := range []byte(s) {
+		if c < '0' || c > '9' && c < 'a' || c > 'f' {
+			return false
+		}
+	}
+	return true
 }
 
 // proposedBy reports whether the replicated entry was proposed by the member the statement names.
@@ -114,19 +175,81 @@ func installEpochKey() []byte { return metaKey(eraseAckSlot, "install-epoch") }
 // replicated floor of this voter reaches it.
 func unackOwedKey() []byte { return metaKey(eraseAckSlot, "unack-owed") }
 
-// ackStands reports whether the member's acknowledgement of the operation counts: it carries the
-// installation epoch it was made under (eight bytes; anything else is an acknowledgement from
-// before attribution and never counts) and no withdrawal of the member names a later one.
+// eraseIncKey is the replicated incarnation a voter last declared (its disk).
+func eraseIncKey(node uint64, identity string) []byte {
+	return metaKey(eraseAckSlot, "erase-inc:"+strconv.FormatUint(node, 10)+":"+identity)
+}
+
+// eraseNoticeKey is the replicated notice counter of a voter: the slot-0 index of the latest
+// notice that named it.
+func eraseNoticeKey(node uint64, identity string) []byte {
+	return metaKey(eraseAckSlot, "erase-notice:"+strconv.FormatUint(node, 10)+":"+identity)
+}
+
+// noticeSettledKey is this voter's own (node-local) highest notice counter that is no longer
+// expected to be followed by a snapshot: stepped, or given up after the grace period.
+func noticeSettledKey() []byte { return metaKey(eraseAckSlot, "notice-settled") }
+
+// capabilityOp is the reserved operation under which a voter declares the erase protocol it speaks:
+// an acknowledgement of this operation, in the shape every binary since attribution applies, whose
+// epoch field is the protocol version. An older binary stores it and ignores it (at worst it
+// withdraws its own acknowledgements once), which is why the declaration needs no gate itself.
+var capabilityOp = model.ID{'e', 'r', 'a', 's', 'e', '-', 'p', 'r', 'o', 't', 'o', 'c', 'o', 'l', '-', '1'}
+
+// capabilityOf is the protocol version the voter declared (zero: none).
+func capabilityOf(meta *bolt.Bucket, node uint64, identity string) uint64 {
+	raw := meta.Get(eraseAckKey(capabilityOp, node, identity))
+	if len(raw) != 8 {
+		return 0
+	}
+	return binary.BigEndian.Uint64(raw)
+}
+
+// ackValue is the stored form of an acknowledgement: epoch (8 bytes) as written since attribution,
+// or epoch, basis (8 bytes) and incarnation (16 bytes) when it has either of the two.
+func ackValue(a *eraseAck) []byte {
+	if a.Basis == 0 && a.Incarnation == "" {
+		var out [8]byte
+		binary.BigEndian.PutUint64(out[:], uint64(a.Epoch))
+		return out[:]
+	}
+	out := make([]byte, 32)
+	binary.BigEndian.PutUint64(out[:8], uint64(a.Epoch))
+	binary.BigEndian.PutUint64(out[8:16], uint64(a.Basis))
+	raw, _ := hex.DecodeString(a.Incarnation)
+	copy(out[16:], raw)
+	return out
+}
+
+// ackFields decodes a stored acknowledgement; ok is false for anything else (the one byte an
+// acknowledgement had before attribution).
+func ackFields(raw []byte) (epoch, basis uint64, incarnation string, ok bool) {
+	switch len(raw) {
+	case 8:
+		return binary.BigEndian.Uint64(raw), 0, "", true
+	case 32:
+		return binary.BigEndian.Uint64(raw[:8]), binary.BigEndian.Uint64(raw[8:16]), hex.EncodeToString(raw[16:]), true
+	}
+	return 0, 0, "", false
+}
+
+// ackStands reports whether the member's acknowledgement of the operation counts. It does when it
+// carries what a statement about the voter's own stores needs (an epoch; anything else is an
+// acknowledgement from before attribution and never counts), no withdrawal of the member names a
+// later epoch, no notice has named the member since the acknowledgement measured (its basis is the
+// member's latest notice counter) and it was made on the disk the member last declared.
 func ackStands(meta *bolt.Bucket, op model.ID, node uint64, identity string) bool {
-	raw := meta.Get(eraseAckKey(op, node, identity))
-	return len(raw) == 8 && binary.BigEndian.Uint64(raw) >= getUint(meta, eraseGenKey(node, identity))
+	epoch, basis, incarnation, ok := ackFields(meta.Get(eraseAckKey(op, node, identity)))
+	return ok && epoch >= getUint(meta, eraseGenKey(node, identity)) &&
+		basis == getUint(meta, eraseNoticeKey(node, identity)) &&
+		incarnation == string(meta.Get(eraseIncKey(node, identity)))
 }
 
 // applyEraseAckTx records the acknowledgement. It is deterministic: the same entry on every
 // voter writes the same keys. An acknowledgement that does not name the member that proposed it
 // (or whose entry carries no proposer, as one written before attribution) writes nothing.
 func applyEraseAckTx(tx *bolt.Tx, slot uint16, entry walEntry) error {
-	if slot != eraseAckSlot || !entry.EraseAck.valid() || entry.Batch != nil || entry.Receipt != nil || entry.EraseUnack != nil {
+	if slot != eraseAckSlot || !entry.EraseAck.valid() || entry.Batch != nil || entry.Receipt != nil || entry.EraseUnack != nil || entry.EraseNotice != nil {
 		return model.Fail(model.Corrupt)
 	}
 	meta := tx.Bucket([]byte("replica_data"))
@@ -137,24 +260,27 @@ func applyEraseAckTx(tx *bolt.Tx, slot uint16, entry walEntry) error {
 	if !proposedBy(entry.Proposer, a.Node, a.Identity) {
 		return nil
 	}
-	var epoch [8]byte
-	binary.BigEndian.PutUint64(epoch[:], uint64(a.Epoch))
+	value := ackValue(a)
 	for _, op := range a.Operations {
 		key := eraseAckKey(op, uint64(a.Node), a.Identity)
-		if old := meta.Get(key); len(old) == 8 && binary.BigEndian.Uint64(old) >= uint64(a.Epoch) {
-			continue
+		if old := meta.Get(key); len(old) == len(value) {
+			oe, ob, oi, _ := ackFields(old)
+			if ne, nb, ni, _ := ackFields(value); oi == ni && ob == nb && oe >= ne {
+				continue
+			}
 		}
-		if err := meta.Put(key, epoch[:]); err != nil {
+		if err := meta.Put(key, value); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// applyEraseUnackTx raises the voter's replicated floor. Like an acknowledgement it counts only
-// when the proposer is the voter it names.
+// applyEraseUnackTx raises the voter's replicated floor and, when it declares a disk the group has
+// not seen for the voter, replaces the declared incarnation and restarts the floor at the declared
+// epoch. Like an acknowledgement it counts only when the proposer is the voter it names.
 func applyEraseUnackTx(tx *bolt.Tx, slot uint16, entry walEntry) error {
-	if slot != eraseAckSlot || !entry.EraseUnack.valid() || entry.Batch != nil || entry.Receipt != nil || entry.EraseAck != nil {
+	if slot != eraseAckSlot || !entry.EraseUnack.valid() || entry.Batch != nil || entry.Receipt != nil || entry.EraseAck != nil || entry.EraseNotice != nil {
 		return model.Fail(model.Corrupt)
 	}
 	meta := tx.Bucket([]byte("replica_data"))
@@ -166,10 +292,38 @@ func applyEraseUnackTx(tx *bolt.Tx, slot uint16, entry walEntry) error {
 		return nil
 	}
 	key := eraseGenKey(uint64(u.Node), u.Identity)
+	if u.Incarnation != "" && string(meta.Get(eraseIncKey(uint64(u.Node), u.Identity))) != u.Incarnation {
+		if err := meta.Put(eraseIncKey(uint64(u.Node), u.Identity), []byte(u.Incarnation)); err != nil {
+			return err
+		}
+		return putUint(meta, key, uint64(u.Epoch))
+	}
 	if getUint(meta, key) >= uint64(u.Epoch) {
 		return nil
 	}
 	return putUint(meta, key, uint64(u.Epoch))
+}
+
+// applyEraseNoticeTx records that the proposer is about to send the named member a snapshot: the
+// member's notice counter becomes this entry's slot-0 index, so every acknowledgement it measured
+// before (a smaller basis) stops standing on every voter that applies the entry.
+func applyEraseNoticeTx(tx *bolt.Tx, slot uint16, index uint64, entry walEntry) error {
+	if slot != eraseAckSlot || !entry.EraseNotice.valid() || entry.Batch != nil || entry.Receipt != nil || entry.EraseAck != nil || entry.EraseUnack != nil {
+		return model.Fail(model.Corrupt)
+	}
+	meta := tx.Bucket([]byte("replica_data"))
+	if meta == nil {
+		return model.Fail(model.Corrupt)
+	}
+	if entry.Proposer == nil {
+		return nil // committed by no known member: states nothing
+	}
+	n := entry.EraseNotice
+	key := eraseNoticeKey(uint64(n.Node), n.Identity)
+	if getUint(meta, key) >= index {
+		return nil
+	}
+	return putUint(meta, key, index)
 }
 
 // invalidateErasureTx is what a snapshot install owes the erasure bookkeeping when it replayed
@@ -216,7 +370,23 @@ type erasureState struct {
 	// erasing is, per operation, the installation epoch the latest EraseDeleted call that named
 	// it started under: MarkErased refuses to certify an erasure an install interrupted.
 	mu      sync.Mutex
-	erasing map[model.ID]uint64
+	erasing map[model.ID]*eraseStart
+	// settled, refuseBelow, inStep, observed, observedAt and grace belong to the snapshot notices
+	// (erase_notice.go); all under mu.
+	settled, refuseBelow uint64
+	inStep               int
+	observed             uint64
+	observedAt           time.Time
+	grace                time.Duration
+	auto                 bool
+}
+
+// eraseStart is what an EraseDeleted call knew when it began: the installation epoch and the
+// predicate; dirty is set when a command the predicate covers was applied since.
+type eraseStart struct {
+	epoch uint64
+	pred  model.DeletePredicate
+	dirty bool
 }
 
 func (s *erasureState) cancelLoop() {
@@ -250,8 +420,13 @@ func (e *Engine) installEpoch() (uint64, error) {
 	return epoch, nil
 }
 
-// noteEraseStart records the installation epoch an erase of the operations starts under.
-func (e *Engine) noteEraseStart(ops []model.ID) error {
+// noteEraseStart records what an erase of the predicates starts under: the installation epoch, and
+// the predicates themselves, so that a covered command APPLIED from here on marks the erase dirty
+// (noteApplied). A voter that erases before it applied a slot's barrier can still apply, by catching
+// up on the log, commands ordered before that barrier that a predicate covers: they land live after
+// the erase read the state, so such an erase is never certified (MarkErased). A covered command
+// ordered after the barrier is rejected at apply and never reaches noteApplied.
+func (e *Engine) noteEraseStart(preds []model.DeletePredicate) error {
 	epoch, err := e.installEpoch()
 	if err != nil {
 		return err
@@ -259,12 +434,35 @@ func (e *Engine) noteEraseStart(ops []model.ID) error {
 	e.erasure.mu.Lock()
 	defer e.erasure.mu.Unlock()
 	if e.erasure.erasing == nil {
-		e.erasure.erasing = map[model.ID]uint64{}
+		e.erasure.erasing = map[model.ID]*eraseStart{}
 	}
-	for _, op := range ops {
-		e.erasure.erasing[op] = epoch
+	for _, p := range preds {
+		e.erasure.erasing[p.Operation] = &eraseStart{epoch: epoch, pred: p}
 	}
 	return nil
+}
+
+// noteApplied is called by the apply of a stored batch or artifact fragment, inside its
+// transaction: it marks dirty every erase in progress whose predicate covers the command.
+func (e *Engine) noteApplied(org, project model.ID, records []model.Record, blob *model.BlobManifest) {
+	s := &e.erasure
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, st := range s.erasing {
+		if st.dirty {
+			continue
+		}
+		if blob != nil && st.pred.CoversBlob(*blob) {
+			st.dirty = true
+			continue
+		}
+		for _, r := range records {
+			if st.pred.CoversRecord(org, project, r) {
+				st.dirty = true
+				break
+			}
+		}
+	}
 }
 
 // ErasedLocally reports whether this voter finished erasing the operation from its own stores.
@@ -283,7 +481,8 @@ func (e *Engine) ErasedLocally(op model.ID) bool {
 // own stores. The caller does so after the erase, the scrub and the journal cut succeeded. An
 // operation whose latest EraseDeleted started before a snapshot install (or was never started in
 // this process) is not marked and the call returns a conflict: the install can have put erased
-// rows back after the erase read them, so the voter erases again.
+// rows back after the erase read them, so the voter erases again. The same holds for an erase during which
+// a command its predicate covers was applied (noteEraseStart).
 func (e *Engine) MarkErased(ops []model.ID) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -299,7 +498,7 @@ func (e *Engine) MarkErased(ops []model.ID) error {
 		for _, op := range ops {
 			started, ok := e.erasure.erasing[op]
 			delete(e.erasure.erasing, op)
-			if !ok || started != epoch {
+			if !ok || started.epoch != epoch || started.dirty {
 				refused = true
 				continue
 			}
@@ -382,12 +581,28 @@ func (e *Engine) withdrawErasure(ctx context.Context) error {
 func (e *Engine) startErasureLoop() {
 	ctx, cancel := context.WithCancel(context.Background())
 	e.erasure.cancel, e.erasure.done = cancel, make(chan struct{})
+	e.erasure.auto = autoDeclare
+	if err := e.loadNoticeSettled(); err != nil {
+		e.erasure.auto = false // an unreadable settled counter keeps its zero: the grace period applies again
+	}
 	go func(wake <-chan struct{}, done chan<- struct{}) {
 		defer close(done)
+		tick := time.NewTicker(declareInterval)
+		defer tick.Stop()
+		if e.erasure.auto {
+			_ = e.declareErasure(ctx) // at once, not a tick from now
+		}
 		for {
 			select {
 			case <-ctx.Done():
 				return
+			case <-tick.C:
+				// The declarations need a leader (and every member's protocol declaration needs
+				// every member): one attempt per tick, the next tick tries again.
+				if e.erasure.auto {
+					_ = e.declareErasure(ctx)
+				}
+				continue
 			case <-wake:
 			}
 			for delay := withdrawRetryMin; ctx.Err() == nil; delay = min(2*delay, withdrawRetryMax) {
@@ -421,8 +636,8 @@ func (e *Engine) staleAcknowledgements(node uint64, identity string, dirty bool)
 				continue
 			}
 			op, err := model.ParseID(strings.TrimSuffix(rest, suffix))
-			if err != nil {
-				continue // another voter's key whose identity merely ends alike
+			if err != nil || op == capabilityOp {
+				continue // another voter's key whose identity merely ends alike; the protocol declaration
 			}
 			if ackStands(meta, op, node, identity) && (dirty || meta.Get(erasedKey(op)) == nil) {
 				stale = append(stale, op)
@@ -485,6 +700,21 @@ func (e *Engine) AckErasure(ctx context.Context) error {
 	if !ok {
 		return nil
 	}
+	// Once every member speaks the protocol an acknowledgement carries the disk it was made on and
+	// the notice counter this voter had applied when it measured; while a notice it applied has not
+	// been settled it does not acknowledge at all. The counter is read before anything is measured.
+	ready := e.protocolReady()
+	var basis uint64
+	held := false
+	if ready {
+		if err := e.declareErasure(ctx); err != nil {
+			return err
+		}
+		var err error
+		if basis, held, err = e.noticeHeld(node, identity); err != nil {
+			return err
+		}
+	}
 	if err := e.withdrawErasure(ctx); err != nil {
 		return err
 	}
@@ -505,7 +735,10 @@ func (e *Engine) AckErasure(ctx context.Context) error {
 	var epoch uint64
 	if err = e.db.View(func(tx *bolt.Tx) error {
 		meta := tx.Bucket([]byte("replica_data"))
-		epoch = max(getUint(meta, installEpochKey()), getUint(meta, eraseGenKey(node, identity)))
+		epoch = getUint(meta, installEpochKey())
+		if !ready {
+			epoch = max(epoch, getUint(meta, eraseGenKey(node, identity)))
+		}
 		prefix := metaKey(eraseAckSlot, "erased:")
 		c := meta.Cursor()
 		for k, _ := c.Seek(prefix); k != nil && strings.HasPrefix(string(k), string(prefix)); k, _ = c.Next() {
@@ -521,7 +754,7 @@ func (e *Engine) AckErasure(ctx context.Context) error {
 	}); err != nil {
 		return unavailableDB(err)
 	}
-	if len(owed) == 0 || dirty {
+	if len(owed) == 0 || dirty || held {
 		return nil
 	}
 	sort.Slice(owed, func(i, j int) bool { return owed[i].String() < owed[j].String() })
@@ -529,7 +762,11 @@ func (e *Engine) AckErasure(ctx context.Context) error {
 		owed = owed[:maxEraseAckOps]
 	}
 	return e.proposeSlotZero(ctx, func(cursor model.Cursor) walEntry {
-		return walEntry{Type: "erase_ack", EraseAck: &eraseAck{Node: model.Uint64(node), Identity: identity, Operations: owed, Epoch: model.Uint64(epoch), Cursor: cursor}}
+		ack := &eraseAck{Node: model.Uint64(node), Identity: identity, Operations: owed, Epoch: model.Uint64(epoch), Cursor: cursor}
+		if ready {
+			ack.Basis, ack.Incarnation = model.Uint64(basis), e.incarnation
+		}
+		return walEntry{Type: "erase_ack", EraseAck: ack}
 	})
 }
 

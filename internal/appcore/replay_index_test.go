@@ -28,6 +28,9 @@ func (c *countingAppender) Append(ctx context.Context, s auth.Scope, b model.Nor
 func (c *countingAppender) LookupReceipt(ctx context.Context, s auth.Scope, q model.ReceiptRequest) (model.Receipt, error) {
 	return c.inner.LookupReceipt(ctx, s, q)
 }
+func (c *countingAppender) ReceiptReplayChunks(ctx context.Context, s auth.Scope, q model.ReceiptRequest, r model.Receipt) ([]model.ReplayChunk, error) {
+	return c.inner.(appcore.ReceiptChunkReader).ReceiptReplayChunks(ctx, s, q, r)
+}
 
 // countingIndex counts the index reads and writes; skipCheck lets a test model a
 // chunk that raced past the pre-check.
@@ -301,5 +304,72 @@ func TestReplayIndexIsNotReadForBatchesWithoutReplayRecordsAndNotWrittenForRefus
 	}
 	if index.checks.Load() != 1 || index.records.Load() != 1 {
 		t.Fatalf("an admitted checkpoint: %d index reads and %d writes, want one each", index.checks.Load(), index.records.Load())
+	}
+}
+
+// A sender that lost the acknowledgement between the append and the index step asks for the receipt
+// instead of resending: the lookup that answers pins the checkpoint it answers for.
+func TestReceiptLookupPinsTheCheckpointItAnswersFor(t *testing.T) {
+	rig := newIndexRig(t)
+	store := &flakyStore{ReferenceStore: rig.app.Control}
+	store.down.Store(true)
+	before, _ := rig.decorate(store)
+	rec := newReplayRecorder()
+	cp := rec.cp()
+	batch := rig.replayBatch(cp)
+	cred, err := rig.app.Auth.AuthenticateSource(rig.ctx, rig.issued, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant, err := rig.svc().ResolveSource(rig.ctx, cred, batch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	normalized, err := policy.Normalize(grant, batch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = rig.admit(batch); codeOf(err) != model.Unavailable || before.appends.Load() != 1 {
+		t.Fatalf("fixture invalid: the batch must be durable and unacknowledged: %v", err)
+	}
+	if group, _ := rig.indexOf(rec.replay); group != nil {
+		t.Fatal("fixture invalid: the checkpoint is already indexed")
+	}
+
+	// The index is unreachable: the lookup does not answer without pinning.
+	if _, err = rig.lookup(batch, normalized.Hash); codeOf(err) != model.Unavailable {
+		t.Fatalf("a lookup answered although its checkpoint could not be pinned: %v", err)
+	}
+	store.down.Store(false)
+	receipt, err := rig.lookup(batch, normalized.Hash)
+	if err != nil || !receipt.Historical || receipt.BatchID != batch.ID {
+		t.Fatalf("lookup: %+v %v", receipt, err)
+	}
+	group, pin := rig.indexOf(rec.replay)
+	if group == nil || len(group.Checkpoints) != 1 || group.Checkpoints[0].Sequence != 1 {
+		t.Fatalf("the lookup left the checkpoint unpinned: %+v", group)
+	}
+	if want, _ := replays.ChunkHash(cp); group.Checkpoints[0].Hash != want {
+		t.Fatal("the pinned checkpoint is not the stored chunk")
+	}
+	var deadline model.UnixNano
+	for _, d := range receipt.SignalDeadlines {
+		if d.Kind == model.Replay {
+			deadline = d.RetainUntil
+		}
+	}
+	if deadline == 0 || pin.RetainUntil != deadline {
+		t.Fatalf("group deadline %d, receipt replay deadline %d", pin.RetainUntil, deadline)
+	}
+	if before.appends.Load() != 1 || rig.storedRows(rec.replay) != 1 {
+		t.Fatal("the lookup appended")
+	}
+	// A repeated lookup writes nothing more.
+	revision := rig.revision()
+	if _, err = rig.lookup(batch, normalized.Hash); err != nil {
+		t.Fatal(err)
+	}
+	if rig.revision() != revision {
+		t.Fatal("a repeated lookup wrote control state")
 	}
 }

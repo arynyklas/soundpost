@@ -149,9 +149,12 @@ func RegisterSessionRoutes(mux *http.ServeMux, s *auth.Service) {
 			reply(w, nil, e)
 			return
 		}
-		host, _, splitErr := net.SplitHostPort(r.RemoteAddr)
-		if splitErr != nil {
-			host = r.RemoteAddr
+		host := auth.SourceFrom(r.Context())
+		if host == "" {
+			var splitErr error
+			if host, _, splitErr = net.SplitHostPort(r.RemoteAddr); splitErr != nil {
+				host = r.RemoteAddr
+			}
 		}
 		v, e := s.Login(auth.WithSource(r.Context(), host), q.Email, q.Password, q.Code)
 		var limited *auth.RateLimitedError

@@ -34,6 +34,7 @@ type durableEntry struct {
 	CommitSet     *replica.CommitSetWatermark `json:"commit_set,omitempty"`
 	EraseAck      *eraseAck                   `json:"erase_ack,omitempty"`
 	EraseUnack    *eraseUnack                 `json:"erase_unack,omitempty"`
+	EraseNotice   *eraseNotice                `json:"erase_notice,omitempty"`
 	Proposer      *replica.Proposer           `json:"proposer,omitempty"`
 	Redaction     *redaction                  `json:"redaction,omitempty"`
 }
@@ -43,7 +44,7 @@ func (entry walEntry) MarshalJSON() ([]byte, error) { return encodeWAL(entry) }
 // encodeWAL is json.Marshal(entry) without the second validate-and-copy pass that json.Marshal
 // makes over the output of MarshalJSON; the bytes are the same.
 func encodeWAL(entry walEntry) ([]byte, error) {
-	wire := durableEntry{Type: entry.Type, Receipt: entry.Receipt, Cancel: entry.Cancel, Fence: entry.Fence, Artifact: entry.Artifact, ArtifactGC: entry.ArtifactGC, Rejection: entry.Rejection, CommitSet: entry.CommitSet, DeleteBarrier: entry.DeleteBarrier, EraseAck: entry.EraseAck, EraseUnack: entry.EraseUnack, Proposer: entry.Proposer, Redaction: entry.Redaction}
+	wire := durableEntry{Type: entry.Type, Receipt: entry.Receipt, Cancel: entry.Cancel, Fence: entry.Fence, Artifact: entry.Artifact, ArtifactGC: entry.ArtifactGC, Rejection: entry.Rejection, CommitSet: entry.CommitSet, DeleteBarrier: entry.DeleteBarrier, EraseAck: entry.EraseAck, EraseUnack: entry.EraseUnack, EraseNotice: entry.EraseNotice, Proposer: entry.Proposer, Redaction: entry.Redaction}
 	if b := entry.Batch; b != nil {
 		wire.Batch = &durableBatch{Org: b.Org, Hash: b.Hash, Canonical: b.Canonical, PolicyEpoch: b.PolicyEpoch, PolicyHash: b.PolicyHash, AdmissionAt: b.AdmissionAt, Deadlines: b.Deadlines, Reservation: b.Reservation}
 	}
@@ -69,7 +70,7 @@ func (entry *walEntry) UnmarshalJSON(raw []byte) error {
 		return model.Fail(model.Corrupt)
 	}
 	arms := 0
-	for _, present := range []bool{wire.Batch != nil, wire.Cancel != nil, wire.Fence != nil, wire.Artifact != nil, wire.ArtifactGC != nil, wire.Rejection != nil, wire.DeleteBarrier != nil, wire.EraseAck != nil, wire.EraseUnack != nil} {
+	for _, present := range []bool{wire.Batch != nil, wire.Cancel != nil, wire.Fence != nil, wire.Artifact != nil, wire.ArtifactGC != nil, wire.Rejection != nil, wire.DeleteBarrier != nil, wire.EraseAck != nil, wire.EraseUnack != nil, wire.EraseNotice != nil} {
 		if present {
 			arms++
 		}
@@ -80,10 +81,10 @@ func (entry *walEntry) UnmarshalJSON(raw []byte) error {
 	if wire.CommitSet != nil && (wire.Type != "cancel" || wire.Cancel == nil || wire.CommitSet.Reservation != wire.Cancel.ReservationID || wire.CommitSet.Group != wire.Cancel.OwnerGroup) {
 		return model.Fail(model.Corrupt)
 	}
-	if (wire.Type == "delete_barrier") != (wire.DeleteBarrier != nil) || (wire.Type == "erase_ack") != (wire.EraseAck != nil) || (wire.Type == "erase_unack") != (wire.EraseUnack != nil) {
+	if (wire.Type == "delete_barrier") != (wire.DeleteBarrier != nil) || (wire.Type == "erase_ack") != (wire.EraseAck != nil) || (wire.Type == "erase_unack") != (wire.EraseUnack != nil) || (wire.Type == "erase_notice") != (wire.EraseNotice != nil) {
 		return model.Fail(model.Corrupt)
 	}
-	if wire.Proposer != nil && wire.Type != "erase_ack" && wire.Type != "erase_unack" {
+	if wire.Proposer != nil && wire.Type != "erase_ack" && wire.Type != "erase_unack" && wire.Type != "erase_notice" {
 		return model.Fail(model.Corrupt)
 	}
 	if (wire.Type == "rejected") != (wire.Rejection != nil) || wire.Rejection != nil && (wire.Batch != nil || wire.Receipt != nil || wire.Cancel != nil || wire.Fence != nil || wire.Artifact != nil || wire.ArtifactGC != nil) {
@@ -92,7 +93,7 @@ func (entry *walEntry) UnmarshalJSON(raw []byte) error {
 	if (wire.Type == "artifact_fragment") != (wire.Artifact != nil) || (wire.Type == "artifact_gc") != (wire.ArtifactGC != nil) || wire.Artifact != nil && (wire.Batch != nil || wire.Receipt != nil || wire.Cancel != nil || wire.Fence != nil || wire.ArtifactGC != nil) || wire.ArtifactGC != nil && (wire.Batch != nil || wire.Receipt != nil || wire.Cancel != nil || wire.Fence != nil || wire.Artifact != nil) {
 		return model.Fail(model.Corrupt)
 	}
-	out := walEntry{Type: wire.Type, Receipt: wire.Receipt, Cancel: wire.Cancel, Fence: wire.Fence, Artifact: wire.Artifact, ArtifactGC: wire.ArtifactGC, Rejection: wire.Rejection, CommitSet: wire.CommitSet, DeleteBarrier: wire.DeleteBarrier, EraseAck: wire.EraseAck, EraseUnack: wire.EraseUnack, Proposer: wire.Proposer}
+	out := walEntry{Type: wire.Type, Receipt: wire.Receipt, Cancel: wire.Cancel, Fence: wire.Fence, Artifact: wire.Artifact, ArtifactGC: wire.ArtifactGC, Rejection: wire.Rejection, CommitSet: wire.CommitSet, DeleteBarrier: wire.DeleteBarrier, EraseAck: wire.EraseAck, EraseUnack: wire.EraseUnack, EraseNotice: wire.EraseNotice, Proposer: wire.Proposer}
 	if b := wire.Batch; b != nil {
 		if len(b.Canonical) > 4<<20 || model.HashCanonical(b.Canonical) != b.Hash {
 			return model.Fail(model.Corrupt)

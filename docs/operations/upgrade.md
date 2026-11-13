@@ -61,6 +61,15 @@ done
 
 Draining nodes: drain one node at a time and wait for the evicted member to become ready elsewhere before the next drain. Required anti-affinity means a member can only land on a node without another member; with exactly three eligible nodes the evicted member stays `Pending` until its node returns, which is correct (two voters keep serving).
 
+## Deletion receipts across an upgrade (erase protocol)
+
+The replicated acknowledgements a deletion receipt waits for (`docs/privacy/retention.md`, "Deletion") have three shapes: the attributed one of the release before this (`erase_ack` / `erase_unack` carrying a `proposer`), and the new ones (`erase_notice`, an acknowledgement with `basis` and `incarnation`, an `erase_unack` that declares a disk). A binary decodes these entries strictly, so a member that does not know a shape cannot apply it. The rule that keeps a rolling upgrade safe:
+
+1. Roll every voter and learner to the new binary, one at a time, as above. A binary older than the one that introduced `proposer` is not supported in a mixed installation at all.
+2. Until every member of the committed configuration has declared the protocol, the new binary proposes only the previous shapes; each upgraded member declares itself once it has a leader (an acknowledgement of a reserved operation in a shape the previous binary applies and ignores). A deletion receipt during that time behaves as it did before the upgrade: it names `data_apply_db` until every member acknowledged, and the protection against a snapshot install and a replaced disk (retention.md, limits (a) and (b2)) is not in force yet.
+3. Once the last member declared, the new shapes start on their own; every voter acknowledges its completed deletions once more (previous-shape acknowledgements of a voter that declared its disk never stand), so receipts name the data store again until each voter has.
+4. Never add a member that runs the older binary to an installation that already declared the protocol: it cannot apply the new entries and its group would fail. Upgrade a replacement before it joins.
+
 ## mTLS certificate rotation
 
 A member loads its certificate, key and CA once at start (`tls.LoadX509KeyPair`, one CA pool); rotation therefore replaces files and **restarts that member**, one at a time, under the rules above. Identities never change: the leaf's URI SAN stays `spiffe://soundpost/node/<identity>` and its DNS/IP SANs still cover the member's peer address. A certificate with another identity or without the exact peer name is refused by the other members.

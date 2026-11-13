@@ -444,7 +444,7 @@ func (e *Engine) commitReplicated(slot uint16, index uint64, entry walEntry) err
 		}
 		id := entry.Cancel.ReservationID
 		reservation = &id
-	case "fence", "delete_barrier", "erase_ack", "erase_unack":
+	case "fence", "delete_barrier", "erase_ack", "erase_unack", "erase_notice":
 		kind = replica.Barrier
 	case "artifact_fragment":
 		kind = replica.Artifact
@@ -485,7 +485,7 @@ func (m *slotMachine) adaptedEntry(c replica.CommittedEntry) (walEntry, error) {
 	if err != nil {
 		return entry, model.Fail(model.Corrupt)
 	}
-	if entry.Type == "erase_ack" || entry.Type == "erase_unack" {
+	if entry.Type == "erase_ack" || entry.Type == "erase_unack" || entry.Type == "erase_notice" {
 		// The author of a statement about a voter's own stores is the proposer the replica layer
 		// recorded, whatever the payload claimed; a command committed before attribution has none.
 		entry.Proposer = c.Entry.Proposer
@@ -737,6 +737,14 @@ func (m *slotMachine) Restore(raw []byte, physical uint64) error {
 	}
 	return err
 }
+
+// BeforeSnapshotSend and AdmitSnapshot make the slot machine a replica.SnapshotGate (erase_notice.go).
+func (m *slotMachine) BeforeSnapshotSend(ctx context.Context, to uint64) ([]byte, error) {
+	return m.engine.beforeSnapshotSend(ctx, to)
+}
+func (m *slotMachine) AdmitSnapshot(token []byte) (func(), error) {
+	return m.engine.admitSnapshot(token)
+}
 func (m *slotMachine) Validate(ctx context.Context, command replica.Entry) error {
 	entry, err := m.decode(command.Payload)
 	if err != nil || !m.validRouting(command, entry) {
@@ -785,6 +793,12 @@ func (m *slotMachine) Validate(ctx context.Context, command replica.Entry) error
 		}
 		if entry.Type == "erase_unack" {
 			if entry.EraseUnack == nil {
+				return model.Fail(model.Invalid)
+			}
+			break
+		}
+		if entry.Type == "erase_notice" {
+			if entry.EraseNotice == nil {
 				return model.Fail(model.Invalid)
 			}
 			break
@@ -976,6 +990,10 @@ func (m *slotMachine) validRouting(command replica.Entry, entry walEntry) bool {
 		if entry.Type == "erase_unack" {
 			u := entry.EraseUnack
 			return m.slot == eraseAckSlot && u.valid() && entry.EraseAck == nil && entry.Proposer == nil && proposedBy(command.Proposer, u.Node, u.Identity) && entry.Fence == nil && command.ReservationID == nil && u.Cursor == (model.Cursor{Group: owner, Index: index})
+		}
+		if entry.Type == "erase_notice" {
+			n := entry.EraseNotice
+			return m.slot == eraseAckSlot && n.valid() && entry.EraseAck == nil && entry.EraseUnack == nil && entry.Proposer == nil && command.Proposer != nil && entry.Fence == nil && command.ReservationID == nil && n.Cursor == (model.Cursor{Group: owner, Index: index})
 		}
 		return entry.Fence != nil && command.ReservationID == nil && len(entry.Fence.Barriers) == 1 && entry.Fence.Barriers[0].Group == owner && entry.Fence.Barriers[0].Index == index
 	case replica.Artifact:
