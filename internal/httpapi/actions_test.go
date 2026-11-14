@@ -567,6 +567,35 @@ func TestActionLifecycleOperationPhases(t *testing.T) {
 	}
 }
 
+// The LifecycleOperation answers the C11 shape {ID,Kind,Phase,Generation,Progress,SafeReason}
+// beside the fields the web client reads (safe_fault, pending_groups, applied_barriers).
+func TestActionLifecycleOperationMatchesContractShape(t *testing.T) {
+	e := newActEnv(t)
+	org := e.org("operations c11", model.NewID())
+	alice := e.user(org, "alice-c11@example.test")
+	e.admin(org, alice)
+	e.poller.org = org
+	physical := model.UnixNano(time.Now().Add(24 * time.Hour).UnixNano())
+	id := model.NewID()
+	e.poller.receipts[id] = retention.DeleteReceipt{OperationID: id, Mode: "historical_range", Phase: model.DeletePhaseFailed, Generation: 4, Progress: "10/64", Physical: "pending", PhysicalDeadline: physical, BackupDeadline: physical, SafeReason: "barrier_failed"}
+	status, raw := e.do(alice, "GET", "/api/v1/lifecycle/operations/"+id.String()+"?org="+org.String(), nil, nil)
+	if status != 200 {
+		t.Fatalf("poll: %d %s", status, raw)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatal(err)
+	}
+	for field, want := range map[string]string{"kind": "historical_range", "progress": "10/64", "safe_reason": "barrier_failed", "safe_fault": "barrier_failed", "phase": "failed"} {
+		if got, _ := body[field].(string); got != want {
+			t.Fatalf("%s = %q, want %q in %s", field, got, want, raw)
+		}
+	}
+	if got, _ := body["generation"].(string); got != "4" {
+		t.Fatalf("generation: %s", raw)
+	}
+}
+
 // The typed over_erased count of a receipt (CD-9) reaches the LifecycleOperation
 // body as it is: book names and decimal-string counts, omitted when empty.
 func TestActionLifecycleOperationCarriesOverErased(t *testing.T) {

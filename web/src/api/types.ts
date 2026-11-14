@@ -139,15 +139,18 @@ export interface QueueView {
 export type OperationPhase = 'fencing' | 'complete' | 'held' | 'failed';
 export interface LifecycleOperation {
  id: Id;
+ kind?: string;
  state: ViewState;
  reason?: string;
  phase?: OperationPhase;
  physical?: 'pending' | 'held' | 'done';
  generation: string;
+ progress?: string;
  pending_groups: number;
  applied_barriers: number;
  holds: number;
  safe_fault?: string;
+ safe_reason?: string;
  physical_deadline: string;
  backup_deadline: string;
  over_erased?: { book: 'incident' | 'condition' | 'job'; count: string }[];

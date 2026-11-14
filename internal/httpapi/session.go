@@ -175,7 +175,7 @@ func RegisterSessionRoutes(mux *http.ServeMux, s *auth.Service) {
 		}
 		reply(w, v, e)
 	})
-	mux.HandleFunc("GET /api/v1/session", func(w http.ResponseWriter, r *http.Request) { v, e := s.Session(r.Context(), token(r)); reply(w, v, e) })
+	mux.HandleFunc("GET /api/v1/session", func(w http.ResponseWriter, r *http.Request) { v, e := sessionWithRestore(r, s); reply(w, v, e) })
 	mux.HandleFunc("POST /api/v1/logout", func(w http.ResponseWriter, r *http.Request) {
 		_, e := protected(s, w, r)
 		if e == nil {
@@ -248,6 +248,7 @@ func RegisterSessionRoutes(mux *http.ServeMux, s *auth.Service) {
 		elev, e := s.Elevate(r.Context(), v, q.Reason, q.Orgs)
 		reply(w, elev, e)
 	})
+	registerRestoreRoutes(mux, s)
 }
 func RegisterOIDCRoutes(mux *http.ServeMux, s *auth.Service, cfg auth.OIDCConfig) {
 	mux.HandleFunc("POST /api/v1/oidc/start", func(w http.ResponseWriter, r *http.Request) {

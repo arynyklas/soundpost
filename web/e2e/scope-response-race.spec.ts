@@ -73,3 +73,46 @@ test('a stale response for the previous scope never paints after navigation',asy
  expect(page.url()).not.toMatch(/query|expression|token|csrf/i);
  expect(await page.evaluate(()=>({local:Object.keys(localStorage),session:Object.keys(sessionStorage)}))).toEqual({local:[],session:[]});
 });
+
+// The stale-response guard of the investigation hook (abort plus latest-only, src/app/context.ts) in a real browser, WITHOUT a remount:
+// the console remounts the whole app on every address change, so navigation cannot show the guard. Refreshing the SAME scope
+// changes only the hook's key (the generation), nothing remounts, and the first read is still in flight. Its late answer must neither
+// paint nor replace the newer read's state; if the guard is removed the late answer parks the held state on an old key and the view
+// is stuck on "Loading".
+test('a late answer of a superseded read does not replace the newer read when the same scope is read again without a remount',async({page})=>{
+ test.setTimeout(90_000);
+ await page.goto('/');await page.getByLabel('Email',{exact:true}).fill(email);await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();await expect(page.getByRole('heading',{name:'Account access'})).toBeVisible();
+ const user=(await (await page.request.get('/api/v1/session')).json() as {user:string}).user;
+ const org=id(),project=id(),service=id();
+ await command(page,org,'create_org',{id:org,name:'guard without remount'});
+ await command(page,org,'create_project',{id:project,name:'project'});
+ await command(page,org,'membership',{user_id:user,enabled:true});
+ await command(page,org,'grant',{user_id:user,project_id:project,enabled:true,permissions:['telemetry.read']});
+ let release=():void=>{};
+ const barrier=new Promise<void>((resolve)=>{release=resolve;});
+ let held=0,served=Promise.resolve();
+ const sent:number[]=[];
+ await page.route('**/api/v1/investigate',async(route)=>{
+  sent.push(Date.now());
+  if(held>0){await route.continue();return;}
+  held++;
+  const real=await route.fetch();
+  served=(async()=>{await barrier;await route.fulfill({response:real}).catch(()=>undefined);})();
+  await served;
+ });
+ await page.goto(`/${hashFor(org,project,service)}`);
+ await expect(page.getByTestId('visible-org')).toHaveText(org);
+ await expect(page.getByRole('status').filter({hasText:'Loading'})).toBeVisible();
+ expect(sent).toHaveLength(1);
+ // Refresh re-reads the same scope: same address, so no hashchange and no remount; the hook starts a second read under a new generation.
+ await page.getByRole('button',{name:'Refresh',exact:true}).click();
+ await expect(page.locator('[data-state="empty"], [data-state="incomplete"]').first()).toBeVisible();
+ expect(sent).toHaveLength(2);
+ await expect(page.getByRole('status').filter({hasText:'Loading'})).toHaveCount(0);
+ // Now the first read's real answer arrives late.
+ release();await served;await page.waitForTimeout(750);
+ await expect(page.getByRole('status').filter({hasText:'Loading'})).toHaveCount(0);
+ await expect(page.locator('[data-state="empty"], [data-state="incomplete"]').first()).toBeVisible();
+ await expect(page.getByTestId('visible-org')).toHaveText(org);
+ expect(sent).toHaveLength(2);
+});

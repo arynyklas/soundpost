@@ -233,15 +233,18 @@ type IncidentView struct {
 // the physical and backup deadlines are the real ones the control group holds.
 type LifecycleOperation struct {
 	ID               model.ID           `json:"id"`
+	Kind             string             `json:"kind,omitempty"`
 	State            ViewState          `json:"state"`
 	Reason           string             `json:"reason,omitempty"`
 	Phase            string             `json:"phase,omitempty"`
 	Physical         string             `json:"physical,omitempty"`
 	Generation       model.Uint64       `json:"generation"`
+	Progress         string             `json:"progress,omitempty"`
 	PendingGroups    uint32             `json:"pending_groups"`
 	AppliedBarriers  uint32             `json:"applied_barriers"`
 	Holds            uint32             `json:"holds"`
 	SafeFault        string             `json:"safe_fault,omitempty"`
+	SafeReason       string             `json:"safe_reason,omitempty"`
 	PhysicalDeadline model.Int64        `json:"physical_deadline"`
 	BackupDeadline   model.Int64        `json:"backup_deadline"`
 	OverErased       []model.OverErased `json:"over_erased,omitempty"`
@@ -668,8 +671,8 @@ func (a *Actions) GetOperation(ctx context.Context, scope auth.Scope, operation 
 	default:
 		return LifecycleOperation{}, model.Fail(model.Unavailable)
 	}
-	return LifecycleOperation{ID: r.OperationID, State: StateReady, Phase: r.Phase, Physical: r.Physical, Generation: model.Uint64(r.Generation), PendingGroups: uint32(slots - applied), AppliedBarriers: uint32(applied),
-		Holds: uint32(len(r.Holds)), SafeFault: r.SafeReason, PhysicalDeadline: model.Int64(r.PhysicalDeadline), BackupDeadline: model.Int64(r.BackupDeadline), OverErased: r.OverErased, ResidualStores: r.Residual}, nil
+	return LifecycleOperation{ID: r.OperationID, Kind: r.Mode, State: StateReady, Phase: r.Phase, Physical: r.Physical, Generation: model.Uint64(r.Generation), Progress: r.Progress, PendingGroups: uint32(slots - applied), AppliedBarriers: uint32(applied),
+		Holds: uint32(len(r.Holds)), SafeFault: r.SafeReason, SafeReason: r.SafeReason, PhysicalDeadline: model.Int64(r.PhysicalDeadline), BackupDeadline: model.Int64(r.BackupDeadline), OverErased: r.OverErased, ResidualStores: r.Residual}, nil
 }
 
 // ActionBody is the POST /api/v1/actions body. Org is a selector that

@@ -65,3 +65,58 @@ func TestElevationAuditsBeforeRead(t *testing.T) {
 		t.Fatal("closed audit authority released scope")
 	}
 }
+
+// Only an instance administrator elevates. An organization administrator and a project
+// administrator holding every project permission are refused with one Forbidden that is
+// identical for a real organization and for one that does not exist, and the refusal
+// writes no elevation audit, so nothing about an organization's existence is learned.
+func TestNonInstanceAdminsCannotElevateAndLearnNothingAboutOrgs(t *testing.T) {
+	f := newCacheFixture(t)
+	elevations := func() int {
+		n := 0
+		_ = f.store.View(f.ctx, func(st control.State) error {
+			for _, a := range st.Audits {
+				if a.Action == "elevate" {
+					n++
+				}
+			}
+			return nil
+		})
+		return n
+	}
+	// Control: the instance administrator's fresh session does elevate, so the
+	// refusals below are about the principal, not freshness or the request shape.
+	if _, err := f.service.Elevate(f.ctx, f.session, "control elevation", []model.ID{f.org}); err != nil {
+		t.Fatalf("instance administrator refused: %v", err)
+	}
+	base := elevations()
+
+	_, orgAdminID := f.reader("org-admin-user@example.test", auth.Read)
+	f.cmd("org_admin", auth.AdminPayload{UserID: orgAdminID, Enabled: true})
+	orgAdminLogin, err := f.service.Login(f.ctx, "org-admin-user@example.test", "cache reader password", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, projectAdminSession := f.readerSession("project-admin-no-elevate@example.test", auth.Read, auth.RawRead, auth.ArtifactRead, auth.ArtifactWrite, auth.PolicyWrite, auth.IssuesWrite)
+
+	missing := model.NewID()
+	var want error
+	for name, session := range map[string]auth.Session{"organization administrator": orgAdminLogin, "project administrator": projectAdminSession} {
+		_, real := f.service.Elevate(f.ctx, session, "must not elevate", []model.ID{f.org})
+		_, none := f.service.Elevate(f.ctx, session, "must not elevate", []model.ID{missing})
+		if code(real) != model.Forbidden || code(none) != model.Forbidden {
+			t.Fatalf("%s: real %v, missing %v; both must be Forbidden", name, real, none)
+		}
+		if !sameDenial(real, none) {
+			t.Fatalf("%s: refusal differs between a real and a missing organization: %v vs %v", name, real, none)
+		}
+		if want == nil {
+			want = real
+		} else if !sameDenial(real, want) {
+			t.Fatalf("%s: refusal is distinguishable from the other principal's: %v vs %v", name, real, want)
+		}
+	}
+	if got := elevations(); got != base {
+		t.Fatalf("a refused elevation wrote %d audit rows", got-base)
+	}
+}

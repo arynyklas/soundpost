@@ -356,6 +356,31 @@ func TestEvidenceFramesErrorMapping(t *testing.T) {
 			t.Fatalf("%s: status %d want %d: %s", code, status, want, raw)
 		}
 	}
+	// A uniform sandbox_unavailable answer (the served process could not start its
+	// sandbox) is a not_available symbolication section, not a partial mapping; a mix
+	// of sandbox_unavailable and any other reason stays incomplete frames_unmapped.
+	unavailable := func(frames []model.Frame, _ symbolicate.Options) ([]symbolicate.SymbolicatedFrame, error) {
+		out := make([]symbolicate.SymbolicatedFrame, len(frames))
+		for i, f := range frames {
+			out[i] = symbolicate.SymbolicatedFrame{Original: f, Reason: symbolicate.SandboxUnavailable}
+		}
+		return out, nil
+	}
+	resolver.answer = unavailable
+	status, raw := e.post(reader, "/api/v1/evidence/frames", framesBody(org, p, model.NewID(), false, frame(10, "f"), frame(11, "g")), nil)
+	v := decodeFrames(t, raw)
+	if status != 200 || v.State != httpapi.StateNotAvailable || v.Reason != string(symbolicate.SandboxUnavailable) || len(v.Sections) != 1 || v.Sections[0].Name != "symbolication" || v.Sections[0].State != httpapi.StateNotAvailable || v.Sections[0].Reason != string(symbolicate.SandboxUnavailable) || v.Frames[1].Original.Function != "g" || v.Frames[1].Reason != string(symbolicate.SandboxUnavailable) {
+		t.Fatalf("uniform sandbox_unavailable: %d %s", status, raw)
+	}
+	resolver.answer = func(frames []model.Frame, o symbolicate.Options) ([]symbolicate.SymbolicatedFrame, error) {
+		out, _ := unavailable(frames, o)
+		out[0].Reason = symbolicate.IdentityMismatch
+		return out, nil
+	}
+	status, raw = e.post(reader, "/api/v1/evidence/frames", framesBody(org, p, model.NewID(), false, frame(10, "f"), frame(11, "g")), nil)
+	if v = decodeFrames(t, raw); status != 200 || v.State != httpapi.StateIncomplete || v.Reason != "frames_unmapped" || v.Sections[0].State != httpapi.StateIncomplete {
+		t.Fatalf("mixed sandbox_unavailable: %d %s", status, raw)
+	}
 	// A resolver that returns a different number of frames is corruption, never a
 	// shorter successful view.
 	resolver.answer = func(frames []model.Frame, o symbolicate.Options) ([]symbolicate.SymbolicatedFrame, error) {

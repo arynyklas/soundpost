@@ -1,6 +1,6 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
 export type Id = string;
-export interface Session { csrf: string; user: Id; expires: string }
+export interface Session { csrf: string; user: Id; expires: string; /** Present only on a restored installation that still holds inactive items. */ restore?: { pending: number } }
 export class RequestFailure extends Error {
  constructor(public status: number, public requestId: string, route: string) {
   let message = 'The request was not accepted. Check your entries and try again.';

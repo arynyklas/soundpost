@@ -81,10 +81,16 @@ the process log and (in-process) every file of the live and restored data roots.
 calls `App.ConfigureSymbolicator` (flags `--symbolicate-sandbox`, `--symbolicate-config`,
 `--symbolicate-cgroup-root`; `docs/operations/symbolication.md`), which probes the sandbox
 and only then installs the real service. `appcore.Open` itself answers the typed
-`sandbox_unavailable` reason until then, never `symbolicator_not_wired`. On this
-development host the native sandbox cannot start unprivileged (probe
-`probe_file_sandbox_unavailable`), so the served-process row stays NOT SATISFIED unless an
-operator selects the OCI backend.
+`sandbox_unavailable` reason until then, never `symbolicator_not_wired`. Under a
+delegated cgroup subtree (the shipped `deploy/systemd/soundpost.service`, which carries
+`RestrictNamespaces=yes` and `SystemCallFilter=seccomp`) the native sandbox starts without
+privilege: when `clone3` into a cgroup is unusable the worker is staged (migrated into its
+cgroup, then released and exec'd), and `frame_real_mapping` is SATISFIED through the
+served native sandbox (`.superpowers/sdd/approved-product/10.22-report.md`, measured on
+systemd 255, amd64). Only a host that provides neither a delegated cgroup nor a usable
+OCI backend answers `sandbox_unavailable` (probe `probe_file_sandbox_unavailable`), and
+then the served-process row stays NOT SATISFIED. arm64 and the OCI backend under the
+staged launcher are not exercised.
 
 Replay admission runs the stateless closed-format gate before the durable append and
 `replays.Service.CheckIndex`/`RecordScope` around it (`appcore.NewReplayIndexingAppender`).

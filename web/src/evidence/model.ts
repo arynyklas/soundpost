@@ -111,4 +111,5 @@ export const EVIDENCE_REASON: Record<string, string> = {
  regression_explanation_view_not_built: 'No regression explanation is available: the stored explanations are not projected yet. A regression is never inferred from timestamps or release labels.',
  ancestry_unknown: 'Some release ancestry is unknown. Unknown ancestry is not a regression and is never guessed.',
  frames_unmapped: 'Some frames were not mapped; each lists its reason and keeps the original sanitized frame.',
+ sandbox_unavailable: 'Symbolication is not available: the sandbox that resolves source maps could not start on this server, so no map was read. The original sanitized frames are kept.',
 };

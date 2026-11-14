@@ -4,10 +4,13 @@ package httpapi_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"github.com/arynyklas/soundpost/internal/auth"
 	"github.com/arynyklas/soundpost/internal/control"
 	"github.com/arynyklas/soundpost/internal/httpapi"
+	"github.com/arynyklas/soundpost/internal/model"
+	"io"
 	"io/fs"
 	"net/http"
 	"net/http/cookiejar"
@@ -98,5 +101,89 @@ func TestSessionUI(t *testing.T) {
 		if _, err := httpapi.UIRoutes(assets); err == nil {
 			t.Fatal("invalid bundle accepted")
 		}
+	}
+}
+
+// An organization administrator who is not the instance administrator is refused
+// elevation over HTTP, and the refusal is the same answer for a real organization and
+// for one that does not exist: elevation is never an existence oracle.
+func TestElevationOverHTTPRefusesNonInstanceAdminsUniformly(t *testing.T) {
+	store, err := control.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	service, err := auth.NewService(auth.AuthDependencies{Control: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	activateHTTPControl(t, store, t.TempDir())
+	registrar, err := httpapi.UIRoutes(fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte(`<div id="root"></div><script type="module" src="/assets/main.js"></script>`)}, "assets/main.js": &fstest.MapFile{Data: []byte(`document.title='Soundpost'`)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewTLSServer(httpapi.NewServer("", service, nil, registrar).Handler)
+	defer server.Close()
+	boot, err := store.BootstrapToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownerSession, err := service.Bootstrap(context.Background(), boot, "elevation-owner@example.test", "elevation owner password 2026")
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := service.Authenticate(context.Background(), ownerSession.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	org, member := model.NewID(), model.NewID()
+	command := func(kind string, payload auth.AdminPayload) {
+		t.Helper()
+		var revision model.Revision
+		_ = store.View(context.Background(), func(st control.State) error { revision = st.Revision; return nil })
+		payload.Reason = "elevation refusal test"
+		raw, _ := json.Marshal(payload)
+		if _, e := service.AdminCommand(context.Background(), owner, auth.AdminCommandRequest{CommandID: model.NewID(), ExpectedRevision: revision, OrgID: org, Kind: kind, Payload: raw}); e != nil {
+			t.Fatal(kind, e)
+		}
+	}
+	command("create_org", auth.AdminPayload{Name: "elevation org"})
+	command("create_user", auth.AdminPayload{ID: member, Email: "org-admin-http@example.test", Password: "org admin http password"})
+	command("membership", auth.AdminPayload{UserID: member, Enabled: true})
+	command("org_admin", auth.AdminPayload{UserID: member, Enabled: true})
+
+	client := server.Client()
+	client.Jar, _ = cookiejar.New(nil)
+	post := func(route string, body any, csrf string) (int, []byte) {
+		t.Helper()
+		data, _ := json.Marshal(body)
+		req, _ := http.NewRequest("POST", server.URL+route, bytes.NewReader(data))
+		req.Header.Set("Origin", server.URL)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-CSRF-Token", csrf)
+		resp, e := client.Do(req)
+		if e != nil {
+			t.Fatal(e)
+		}
+		defer resp.Body.Close()
+		raw, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, raw
+	}
+	status, raw := post("/api/v1/login", map[string]string{"Email": "org-admin-http@example.test", "Password": "org admin http password"}, "")
+	var session auth.Session
+	if err = json.Unmarshal(raw, &session); status != 200 || err != nil || session.CSRF == "" {
+		t.Fatalf("login %d %s", status, raw)
+	}
+	answer := func(target model.ID) string {
+		t.Helper()
+		status, raw := post("/api/v1/elevation", map[string]any{"Reason": "org admin must not elevate", "Orgs": []model.ID{target}}, session.CSRF)
+		var fault model.Fault
+		if err := json.Unmarshal(raw, &fault); err != nil || status != http.StatusForbidden || fault.Code != model.Forbidden {
+			t.Fatalf("non-instance administrator elevated or got %d %s", status, raw)
+		}
+		return http.StatusText(status) + "/" + string(fault.Code) + "/" + fault.SafeDetail
+	}
+	if real, missing := answer(org), answer(model.NewID()); real != missing {
+		t.Fatalf("elevation distinguishes a real organization (%s) from a missing one (%s)", real, missing)
 	}
 }

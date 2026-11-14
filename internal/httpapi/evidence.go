@@ -248,10 +248,13 @@ func (e *Evidence) Frames(ctx context.Context, authority *auth.Service, credenti
 	if len(out) != len(body.Frames) {
 		return FramesView{}, auth.Scope{}, model.Fail(model.Corrupt)
 	}
-	mapped := 0
+	mapped, sandboxDown := 0, 0
 	for i, r := range out {
 		fe := &view.Frames[i]
 		fe.Reason = string(r.Reason)
+		if r.Reason == symbolicate.SandboxUnavailable {
+			sandboxDown++
+		}
 		if r.Reason == symbolicate.Resolved && r.Resolved != nil {
 			resolved := *r.Resolved
 			hash := r.MapSHA256
@@ -272,6 +275,12 @@ func (e *Evidence) Frames(ctx context.Context, authority *auth.Service, credenti
 	switch {
 	case mapped == len(out):
 		view.State = StateReady
+	case sandboxDown == len(out) && len(out) > 0:
+		// The served process could not start its sandbox for any frame: the section is
+		// not available, not a partial mapping; the original frames are kept.
+		view.State, view.Reason = StateNotAvailable, string(symbolicate.SandboxUnavailable)
+		view.Sections = []ViewSection{{Name: "symbolication", State: StateNotAvailable, Reason: string(symbolicate.SandboxUnavailable)}}
+		return view, scope, nil
 	default:
 		view.State, view.Reason = StateIncomplete, "frames_unmapped"
 	}
