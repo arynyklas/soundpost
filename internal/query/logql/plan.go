@@ -147,6 +147,7 @@ func (p *PipelinePlan) compile(ctx context.Context) error {
 		}
 		p.selectors = append(p.selectors, c)
 	}
+	p.Stages = hoistLineFilters(p.Stages)
 	for _, s := range p.Stages {
 		c := compiledStage{stage: s}
 		switch s.Kind {
@@ -214,4 +215,32 @@ func (p *PipelinePlan) compile(ctx context.Context) error {
 		p.compiled = append(p.compiled, c)
 	}
 	return nil
+}
+
+// hoistLineFilters reproduces Loki 3.5.2 MultiStageExpr.reorderStages: every line
+// filter moves to the head of its segment, a segment ending at a line_format or
+// unpack stage (the only stages Loki treats as rewriting the line). decolorize
+// rewrites the line without ending a segment, so a filter written after it is
+// evaluated on the original bytes. The result is stable and idempotent.
+func hoistLineFilters(stages []Stage) []Stage {
+	out := make([]Stage, 0, len(stages))
+	var filters, rest []Stage
+	flush := func() {
+		out = append(out, filters...)
+		out = append(out, rest...)
+		filters, rest = filters[:0], rest[:0]
+	}
+	for _, s := range stages {
+		switch s.Kind {
+		case "line_filter":
+			filters = append(filters, s)
+		case "line_format", "unpack":
+			flush()
+			out = append(out, s)
+		default:
+			rest = append(rest, s)
+		}
+	}
+	flush()
+	return out
 }

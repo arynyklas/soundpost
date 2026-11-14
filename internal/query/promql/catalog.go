@@ -129,6 +129,12 @@ func functionDiagnosticArg(e TypedExpr, id string, arg int) syntax.Diagnostic {
 					r = n.Children[arg].SourceRange()
 				}
 			}
+			// Aggregation annotations (other than the parameter ones and the
+			// k-selectors, which name the whole call) belong to the aggregated
+			// expression, the last child.
+			if n.Kind == "aggregate" && id != "InvalidQuantileWarning" && id != "InvalidRatioWarning" && n.Text != "topk" && n.Text != "bottomk" {
+				r = n.Children[len(n.Children)-1].SourceRange()
+			}
 		}
 	}
 	return syntax.Diagnostic{Category: id, Range: r, SafeMessage: functionAnnotationText(id)}

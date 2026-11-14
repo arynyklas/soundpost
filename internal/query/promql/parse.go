@@ -22,6 +22,8 @@ type parser struct {
 	i                        int
 	p                        profile.Profile
 	err                      error
+	lexErr                   error
+	signPos                  int // 1 + start of a unary sign owned by the duration keyword about to be parsed
 	depth                    int
 	durationMode, allowEmpty bool
 }
@@ -30,11 +32,11 @@ func Parse(s string, p profile.Profile) (Expr, error) {
 	if err := validateProfile(p); err != nil {
 		return nil, err
 	}
-	ts, err := lex(s)
-	if err != nil {
-		return nil, err
-	}
+	ts, lexErr := lex(s, p)
 	q := parser{s: s, ts: ts, p: p}
+	if lexErr != nil {
+		q.lexErr = lexErr
+	}
 	e := q.expr(0)
 	if q.err == nil && q.peek().kind != "eof" {
 		t := q.peek()
@@ -42,13 +44,25 @@ func Parse(s string, p profile.Profile) (Expr, error) {
 	}
 	return e, q.err
 }
-func (q *parser) peek() token { return q.ts[q.i] }
+
+// peek returns the next token. Reaching a lexical error token adopts the lexer's
+// error exactly when the pinned parser would pull that item from its lexer.
+func (q *parser) peek() token {
+	t := q.ts[q.i]
+	if t.kind == "lexerr" && q.err == nil {
+		q.err = q.lexErr
+	}
+	return t
+}
 func (q *parser) pop() token {
 	t := q.peek()
-	if t.kind != "eof" {
+	if t.kind != "eof" && t.kind != "lexerr" {
 		q.i++
 	}
 	return t
+}
+func (q *parser) failTok(t token, s string) {
+	q.failRange(syntax.Range(q.s, t.start, t.end), s)
 }
 func (q *parser) eat(s string) bool {
 	if q.peek().text == s {
@@ -113,8 +127,8 @@ func (q *parser) names() []string {
 			q.failRange(syntax.Range(q.s, t.start, t.end), "expected label name")
 			break
 		}
-		if t.value == "" || t.kind == "ident" && (!identifier(t.value) || strings.Contains(t.value, ":")) {
-			q.fail("invalid label name")
+		if t.value == "" {
+			q.failTok(t, "invalid label name")
 		}
 		names = append(names, t.value)
 		if q.eat(")") {
@@ -147,7 +161,8 @@ func (q *parser) expr(min int) Expr {
 			break
 		}
 		if q.durationMode && op.text != "+" && op.text != "-" && op.text != "*" && op.text != "/" && op.text != "%" && op.text != "^" {
-			q.fail("invalid duration operator")
+			q.failTok(op, "invalid duration operator")
+			break
 		}
 		chain++
 		if q.tooDeep(chain) {
@@ -160,35 +175,27 @@ func (q *parser) expr(min int) Expr {
 			n.Matching = &VectorMatching{On: t.text == "on", Labels: q.names()}
 			n.Matching.Range = syntax.Range(q.s, t.start, q.ts[q.i-1].end)
 		}
-		if q.peek().text == "group_left" || q.peek().text == "group_right" {
+		// group_left/group_right are only valid after on(...) or ignoring(...).
+		if n.Matching != nil && (q.peek().text == "group_left" || q.peek().text == "group_right") {
 			t := q.pop()
-			if n.Matching == nil {
-				n.Matching = &VectorMatching{}
-			}
 			n.Matching.Cardinality = t.text
 			if q.peek().text == "(" {
 				n.Matching.Include = q.names()
 			}
 			n.Matching.Range = syntax.Range(q.s, t.start, q.ts[q.i-1].end)
 		}
-		for q.peek().text == "fill" || q.peek().text == "fill_left" || q.peek().text == "fill_right" {
-			mode := q.pop().text
-			q.gate("promql-binop-fill-modifiers")
-			f := q.fillValue()
-			bits := math.Float64bits(f)
-			if mode == "fill" || mode == "fill_left" {
-				if n.FillLeft != nil {
-					q.fail("duplicate left fill")
+		// fill() | fill_left() | fill_right() | fill_left() fill_right() | fill_right() fill_left()
+		fillGated := false
+		if mode := q.fillKeyword(); mode != "" {
+			fillGated = q.fillClause(n, mode)
+			if mode != "fill" {
+				other := "fill_left"
+				if mode == "fill_left" {
+					other = "fill_right"
 				}
-				b := bits
-				n.FillLeft = &b
-			}
-			if mode == "fill" || mode == "fill_right" {
-				if n.FillRight != nil {
-					q.fail("duplicate right fill")
+				if q.fillKeyword() == other {
+					q.fillClause(n, other)
 				}
-				b := bits
-				n.FillRight = &b
 			}
 		}
 		n.OperatorRange = syntax.Range(q.s, op.start, q.ts[q.i-1].end)
@@ -197,13 +204,17 @@ func (q *parser) expr(min int) Expr {
 			next = prec
 		}
 		n.Children = append(n.Children, q.expr(next))
-		if q.durationMode {
+		if fillGated {
+			q.failRange(syntax.Range(q.s, left.SourceRange().StartByte, q.ts[q.i-1].end), "syntax requires enabled feature promql-binop-fill-modifiers")
+		}
+		if q.durationMode && q.err == nil {
+			q.durationGate(durationStart(left))
 			if n.Bool || n.Matching != nil || n.FillLeft != nil || n.FillRight != nil {
 				q.fail("duration operators do not permit vector modifiers")
 			}
 			if op.text == "/" || op.text == "%" {
-				if f, ok := constantNumber(n.Children[1].(*Node)); ok && f == 0 {
-					q.fail("duration division by zero")
+				if f, ok := literalNumber(n.Children[1].(*Node)); ok && f == 0 {
+					q.failTok(op, map[string]string{"/": "division by zero", "%": "modulo by zero"}[op.text])
 				}
 			}
 		}
@@ -212,8 +223,17 @@ func (q *parser) expr(min int) Expr {
 	}
 	return left
 }
+func isNumberToken(t token) bool {
+	return t.kind == "number" || t.kind == "duration" || t.kind == "ident" && (strings.EqualFold(t.text, "inf") || strings.EqualFold(t.text, "nan"))
+}
+
+// reservedOperand lists the keyword tokens that are not metric identifiers.
+var reservedOperand = map[string]bool{"on": true, "ignoring": true, "group_left": true, "group_right": true, "bool": true, "atan2": true}
+
 func (q *parser) primary() Expr {
 	t := q.pop()
+	signPos := q.signPos
+	q.signPos = 0
 	n := &Node{Text: t.value, Range: syntax.Range(q.s, t.start, t.end)}
 	switch {
 	case t.text == "+" || t.text == "-":
@@ -224,7 +244,10 @@ func (q *parser) primary() Expr {
 		n.Kind = "paren"
 		n.Children = []Expr{q.expr(0)}
 		q.need(")")
-	case t.kind == "number" || strings.EqualFold(t.text, "inf") || strings.EqualFold(t.text, "nan"):
+		if q.durationMode && q.err == nil {
+			q.durationGate(durationStart(n.Children[0]))
+		}
+	case isNumberToken(t):
 		n = q.number(t)
 	case t.kind == "string":
 		n.Kind = "string"
@@ -234,8 +257,13 @@ func (q *parser) primary() Expr {
 		q.selector(n, true)
 	case t.kind == "ident":
 		n.Kind = "selector"
+		if reservedOperand[t.text] {
+			q.failTok(t, "unexpected keyword")
+			break
+		}
 		if aggregates[t.text] && (q.peek().text == "(" || q.peek().text == "by" || q.peek().text == "without") {
 			n.Kind = "aggregate"
+			n.Text = t.text
 			if q.peek().text != "(" {
 				n.GroupWithout = q.pop().text == "without"
 				n.Labels = q.names()
@@ -248,15 +276,16 @@ func (q *parser) primary() Expr {
 				n.GroupWithout = q.pop().text == "without"
 				n.Labels = q.names()
 			}
-		} else if q.peek().text == "(" && !(q.p.ID == "promql-prometheus-3.1.0" && (t.text == "start" || t.text == "end")) {
+		} else if q.durationMode && q.p.ID == "promql-prometheus-3.13.5" && durationKeywords[t.text] && q.peek().text == "(" {
+			n.Kind = "duration_call"
+			n.Text = t.text
+			q.durationCall(n, signPos)
+		} else if q.peek().text == "(" && !(q.p.ID == "promql-prometheus-3.13.5" && (t.text == "fill" || t.text == "fill_left" || t.text == "fill_right")) && !(q.p.ID == "promql-prometheus-3.1.0" && (t.text == "start" || t.text == "end")) {
 			n.Kind = "call"
 			q.args(n)
+			q.checkKnownFunction(n)
 		} else if q.eat("{") {
 			q.selector(n, true)
-		}
-		if q.durationMode && n.Kind == "call" && (t.text == "step" || t.text == "range" || t.text == "min_of" || t.text == "max_of") {
-			n.Kind = "duration_call"
-			q.gate("promql-duration-expr")
 		}
 		if t.kind == "ident" && !identifier(t.text) {
 			q.fail("UTF-8 metric names must be quoted")
@@ -276,7 +305,7 @@ func (q *parser) primary() Expr {
 		}
 		switch q.peek().text {
 		case "[":
-			q.pop()
+			lb := q.pop()
 			r := &Node{Kind: "range", Children: []Expr{n}}
 			r.RangeExpr = q.durationExpr(true)
 			r.RangeText = durationText(r.RangeExpr)
@@ -288,11 +317,13 @@ func (q *parser) primary() Expr {
 				}
 			}
 			q.need("]")
-			if r.Kind == "range" && n.Kind != "selector" {
-				q.fail("range requires vector selector")
-			}
-			if n.Offset != "" || n.At != "" {
-				q.fail("range must precede time modifiers")
+			if q.err == nil && r.Kind == "range" {
+				bracket := syntax.Range(q.s, lb.start, q.ts[q.i-1].end)
+				if n.Kind != "selector" {
+					q.failRange(bracket, "ranges only allowed for vector selectors")
+				} else if n.Offset != "" || n.At != "" {
+					q.failRange(bracket, "no offset or @ modifiers allowed before range")
+				}
 			}
 			q.span(r, t.start)
 			n = r
@@ -302,47 +333,80 @@ func (q *parser) primary() Expr {
 			}
 		case "offset":
 			q.pop()
-			if n.Offset != "" {
-				q.fail("duplicate offset")
+			e := q.offsetValue()
+			if q.err == nil {
+				switch {
+				case n.Kind != "selector" && n.Kind != "range" && n.Kind != "subquery":
+					q.failRange(n.Range, "offset modifier must be preceded by an instant vector selector or range vector selector or a subquery")
+				case n.Offset != "":
+					q.failRange(n.Range, "offset may not be set multiple times")
+				}
 			}
-			n.OffsetExpr = q.offsetValue()
-			n.Offset = durationText(n.OffsetExpr)
+			n.OffsetExpr = e
+			n.Offset = durationText(e)
 			q.span(n, t.start)
 		case "@":
 			q.pop()
-			if n.At != "" {
-				q.failRange(n.Range, "duplicate @")
+			sign := ""
+			tk := q.peek()
+			if tk.text == "+" || tk.text == "-" {
+				sign = tk.text
+				q.pop()
+				tk = q.peek()
 			}
-			a := q.pop()
-			n.At = a.text
-			if a.text == "-" || a.text == "+" {
-				a = q.pop()
-				n.At += a.text
-			}
-			if a.text == "start" || a.text == "end" {
+			at := ""
+			switch {
+			case sign == "" && (tk.text == "start" || tk.text == "end"):
+				q.pop()
 				q.need("(")
 				q.need(")")
-				n.At += "()"
-			} else if a.kind != "number" {
-				q.fail("expected timestamp")
-			} else {
-				f, err := strconv.ParseFloat(n.At, 64)
-				if err != nil || math.IsInf(f, 0) || math.IsNaN(f) || f >= float64(math.MaxInt64) || f <= float64(math.MinInt64) {
-					q.failRange(n.Range, "timestamp out of bounds")
+				at = tk.text + "()"
+			case isNumberToken(tk):
+				q.pop()
+				unsigned := math.Float64frombits(q.number(tk).FloatBits)
+				f := unsigned
+				if sign == "-" {
+					f = -f
+				}
+				if q.err == nil {
+					if math.IsInf(f, 0) || math.IsNaN(f) || f >= float64(math.MaxInt64) || f <= float64(math.MinInt64) {
+						q.failRange(n.Range, "timestamp out of bounds for @ modifier")
+					}
+				}
+				// Keep decimal source text; hex, underscore, octal and duration forms use their value.
+				if pf, err := strconv.ParseFloat(tk.text, 64); tk.kind == "number" && err == nil && pf == unsigned {
+					at = sign + tk.text
+				} else {
+					at = strconv.FormatFloat(f, 'g', -1, 64)
+				}
+			default:
+				q.failTok(tk, "expected timestamp")
+			}
+			if q.err == nil {
+				switch {
+				case n.Kind != "selector" && n.Kind != "range" && n.Kind != "subquery":
+					q.failRange(n.Range, "@ modifier must be preceded by an instant vector selector or range vector selector or a subquery")
+				case n.At != "":
+					q.failRange(n.Range, "@ <timestamp> may not be set multiple times")
+				default:
+					n.At = at
 				}
 			}
 			q.span(n, t.start)
 		case "anchored", "smoothed":
+			if q.p.ID != "promql-prometheus-3.13.5" {
+				return n
+			}
 			ext := q.pop().text
-			q.gate("promql-extended-range-selectors")
-			if n.Kind == "subquery" {
+			switch {
+			case !enabled(q.p, "promql-extended-range-selectors"):
+				q.failRange(n.Range, ext+" modifier is experimental and not enabled")
+			case n.Kind == "subquery":
 				q.failCode(n.Range, "range.extension-subquery", ext+" modifier is not supported for subqueries")
-			}
-			if n.Extension != "" && n.Extension != ext {
-				q.fail("range extensions cannot be combined")
-			}
-			if n.Kind != "range" && n.Kind != "selector" && n.Kind != "subquery" {
-				q.fail("extension requires selector or subquery")
+			case n.Extension != "" && n.Extension != ext:
+				q.failRange(n.Range, "anchored and smoothed modifiers cannot be used together")
+			case n.Kind != "range" && n.Kind != "selector":
+				q.failRange(n.Range, ext+" modifier not implemented")
 			}
 			// The keyword is not part of the selector's source range.
 			n.Extension = ext
@@ -366,6 +430,24 @@ func (q *parser) args(n *Node) {
 			break
 		}
 		q.need(",")
+		if q.err == nil {
+			// function_call_args COMMA reduces as a trailing comma unless an expression follows.
+			if next := q.peek().text; next == ")" || next == "," {
+				q.failTok(q.ts[q.i-1], "trailing commas not allowed in function call args")
+			}
+		}
+	}
+}
+
+// checkKnownFunction raises the unknown-function error when a call is reduced,
+// as the pinned grammar action does, so it precedes any grammar error in later
+// tokens. It keeps its type category; the disabled-function check stays in Check.
+func (q *parser) checkKnownFunction(n *Node) {
+	if q.err != nil {
+		return
+	}
+	if _, ok := signatures[q.p.ID][n.Text]; !ok {
+		q.err = &syntax.LanguageError{Code: "function.unknown", Category: "type", Range: checkFunctionNameRange(n), SafeMessage: "unknown function"}
 	}
 }
 func (q *parser) selector(n *Node, opened bool) {
@@ -380,7 +462,7 @@ func (q *parser) selector(n *Node, opened bool) {
 		t := q.pop()
 		if t.kind == "string" && q.peek().text != "=" && q.peek().text != "!=" && q.peek().text != "=~" && q.peek().text != "!~" {
 			if n.Text != "" {
-				q.fail("metric name specified twice")
+				q.failRange(syntax.Range(q.s, n.Range.StartByte, t.end), "metric name specified twice")
 			}
 			n.Matchers = append(n.Matchers, Matcher{Name: "__name__", Op: "=", Value: t.value, Range: syntax.Range(q.s, t.start, t.end)})
 			nonempty = nonempty || t.value != ""
@@ -390,7 +472,7 @@ func (q *parser) selector(n *Node, opened bool) {
 				break
 			}
 			if t.value == "" || t.kind == "ident" && (!identifier(t.value) || strings.Contains(t.value, ":")) {
-				q.fail("invalid label name")
+				q.failTok(t, "invalid label name")
 			}
 			op := q.pop()
 			if op.text != "=" && op.text != "!=" && op.text != "=~" && op.text != "!~" {
@@ -416,7 +498,7 @@ func (q *parser) selector(n *Node, opened bool) {
 			nonempty = nonempty || !empty
 			n.Matchers = append(n.Matchers, m)
 			if t.value == "__name__" && n.Text != "" {
-				q.fail("metric name specified twice")
+				q.failRange(syntax.Range(q.s, n.Range.StartByte, v.end), "metric name specified twice")
 			}
 		}
 		if q.eat("}") {

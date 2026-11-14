@@ -201,6 +201,62 @@ for o in LEDGER:
         put(new_lq_metric, "logql-metric", lq_metric(inter, base, f"vector(2) {op} on() vector(3)", base["enabled_features"]))
         put(new_lq_syntax, "logql-syntax", lq_syntax(neg, f'{{app="api"}} {op} 1', False))
 
+# --- Extension modules ---------------------------------------------------------
+# Each conformance/query/author/ext_<name>.py defines build(ctx). ctx.put(file, row)
+# adds a case row to cases/<file>; ctx.declare(file, language, phase, header) declares
+# the file before the first put; ctx.bind(obligation_id, implementation, go_tests)
+# records the production binding for an obligation whose three ledger cases the
+# module authored. A module never records a verdict: the differential runners decide.
+import glob, importlib.util, types
+AUTHOR_DIR = os.path.dirname(os.path.abspath(__file__))
+ext_files = {}
+ext_bind = {}
+
+
+def _declare(name, language, phase, header=None):
+    cur = ext_files.setdefault(name, {"language": language, "phase": phase, "header": header or {}, "rows": []})
+    assert (cur["language"], cur["phase"]) == (language, phase), name
+    return cur
+
+
+def _put(name, row):
+    assert name in ext_files, "declare the case file first: " + name
+    assert row["id"] not in authored, row["id"]
+    authored[row["id"]] = name
+    ext_files[name]["rows"].append(row)
+
+
+def _bind(oid, implementation, go_tests):
+    assert oid in BY_ID, oid
+    assert oid not in ext_bind, oid
+    ext_bind[oid] = (implementation, list(go_tests))
+
+
+ctx = types.SimpleNamespace(LEDGER=LEDGER, BY_ID=BY_ID, role_ids=role_ids, load=load, erow=erow, put=_put, declare=_declare, bind=_bind,
+                            Q=Q, PROM=PROM, LOGQL=LOGQL, HIST=HIST, FLOAT_S=FLOAT_S, HIST_S=HIST_S, OPS=OPS, authored=authored)
+ONLY = sys.argv[sys.argv.index("--only") + 1] if "--only" in sys.argv else None
+for ext_path in sorted(glob.glob(os.path.join(AUTHOR_DIR, "ext_*.py"))):
+    if ONLY and os.path.basename(ext_path) != f"ext_{ONLY}.py":
+        continue
+    spec = importlib.util.spec_from_file_location(os.path.basename(ext_path)[:-3], ext_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.build(ctx)
+if ONLY:
+    # Iteration mode: write and content-lock only this module's case files; the
+    # manifest, the bindings and acceptance.json are produced by a full run.
+    import subprocess
+    written = []
+    for name, spec in sorted(ext_files.items()):
+        spec["rows"].sort(key=lambda c: c["id"])
+        with open(f"{Q}/{name}", "w", newline="\n") as f:
+            json.dump({**spec["header"], "cases": spec["rows"]}, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+        written.append(name)
+    subprocess.check_call([sys.executable, os.path.join(AUTHOR_DIR, "relock.py"), *written])
+    print("wrote and locked:", {n: len(ext_files[n]["rows"]) for n in written})
+    sys.exit(0)
+
 # --- Write -------------------------------------------------------------------
 HEADER = {"copyright": "Copyright 2026 Aryn Yklas", "license": "Apache-2.0"}
 
@@ -223,6 +279,9 @@ if new_lq_syntax:
     files["cases/release-logql-syntax.json"] = {"schema": "soundpost-authored-logql-cases-v1", **HEADER, "phases": ["syntax"], "cases": new_lq_syntax}
 if new_lq_metric:
     files["cases/release-logql-metric.json"] = {"schema": "soundpost-authored-logql-metric-cases-v1", **HEADER, "author": "Aryn Yklas", "phase": "logql-metric", "cases": new_lq_metric}
+for name, spec in sorted(ext_files.items()):
+    spec["rows"].sort(key=key)
+    files[name] = {**spec["header"], "cases": spec["rows"]}
 for name, doc in files.items():
     dump(f"{Q}/{name}", doc)
 
@@ -250,6 +309,8 @@ if "cases/release-logql-syntax.json" in files:
     manifest["files"].append({"path": "cases/release-logql-syntax.json", "language": "logql", "phase": "syntax"})
 if "cases/release-logql-metric.json" in files:
     manifest["files"].append({"path": "cases/release-logql-metric.json", "language": "logql", "phase": "logql-metric"})
+for name, spec in sorted(ext_files.items()):
+    manifest["files"].append({"path": name, "language": spec["language"], "phase": spec["phase"]})
 manifest["files"].append({"path": "cases/logql-templates.json", "language": "logql", "phase": "logql-template"})
 dump(f"{Q}/release-cases.json", manifest)
 
@@ -281,12 +342,23 @@ acc_path = f"{Q}/acceptance.json"
 acc = json.load(open(acc_path))
 bindings = []
 for o in bound:
-    if o["kind"] not in PROM_KINDS:
+    if o["kind"] not in PROM_KINDS or o["id"] in ext_bind:
         continue
     impl, tests = PROM_KINDS[o["kind"]]
     bindings.append({"obligation_id": o["id"], "implementation": impl,
                      "cases": o["positive_cases"] + o["negative_cases"] + o["interaction_cases"],
                      "go_tests": tests + ["TestReleaseBindingsResolveToLockedCaseRows"]})
+ext_unbound = []
+for oid, (impl, tests) in sorted(ext_bind.items()):
+    o = BY_ID[oid]
+    ids = o["positive_cases"] + o["negative_cases"] + o["interaction_cases"]
+    if not all(i in authored for i in ids):
+        ext_unbound.append(oid)
+        continue
+    bindings.append({"obligation_id": oid, "implementation": impl, "cases": ids,
+                     "go_tests": list(tests) + ["TestReleaseBindingsResolveToLockedCaseRows"]})
+if ext_unbound:
+    print("extension bindings skipped (cases not all authored):", ext_unbound)
 acc["production_bindings"] = bindings
 if "--observe" in sys.argv:
     # --observe <go test -json output> <command>: record the tests that passed in that exact output.

@@ -10,15 +10,18 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	q "github.com/arynyklas/soundpost/internal/conformance/query"
 	"github.com/arynyklas/soundpost/internal/conformance/query/smoke"
 )
 
-// runSmoke executes the declarative smoke case files against a real in-process
-// node. Anything it cannot run (distributed mode, flows without a runner) is
-// reported as NOT run and fails the command: it never counts as a pass.
+// runSmoke executes the declarative smoke case files against real installations:
+// one node (single) and three in-process voters joined over mTLS (distributed),
+// plus the cross-node scenario on the distributed layout. Anything it cannot run
+// (flows without a runner) is reported as NOT run and fails the command: it
+// never counts as a pass.
 func runSmoke(args []string) error {
 	f := flag.NewFlagSet("smoke", flag.ContinueOnError)
 	cases := f.String("cases", "", "comma-separated case files")
@@ -44,19 +47,29 @@ func runSmoke(args []string) error {
 	}
 	ctx := context.Background()
 	report := q.SmokeReport{Schema: "soundpost-smoke-report/1", Storage: "real", Control: "real"}
+	var layouts []smoke.Layout
 	for _, m := range strings.Split(*modes, ",") {
-		switch strings.TrimSpace(m) {
-		case "single":
-			report.Modes = append(report.Modes, "single")
-		case "distributed":
-			report.ModesNotRun = append(report.ModesNotRun, "distributed")
-			report.NotSatisfied = append(report.NotSatisfied, "distributed mode: this harness opens one single-node appcore; no committed multi-node smoke harness exists for the owned query paths, so nothing was run")
+		switch layout := smoke.Layout(strings.TrimSpace(m)); layout {
+		case smoke.Single, smoke.Distributed:
+			if !slices.Contains(layouts, layout) {
+				layouts = append(layouts, layout)
+				report.Modes = append(report.Modes, string(layout))
+			}
 		default:
 			return fmt.Errorf("unknown mode %q", m)
 		}
 	}
+	// A step of the single layout keeps its plain name; every other layout is
+	// namespaced, so one report can carry several layouts without aliasing.
+	named := func(layout smoke.Layout, name string) string {
+		if layout == smoke.Single {
+			return name
+		}
+		return string(layout) + "/" + name
+	}
 	var failed int
-	run := func(name string, steps []smoke.StepResult, err error) {
+	run := func(layout smoke.Layout, name string, steps []smoke.StepResult, err error) {
+		name = named(layout, name)
 		if err != nil {
 			failed++
 			report.Steps = append(report.Steps, q.ScenarioOutcome{Name: name, Passed: false, Detail: err.Error()})
@@ -70,44 +83,65 @@ func runSmoke(args []string) error {
 		}
 		failed += smoke.Failed(steps)
 	}
-	for _, path := range strings.Split(*cases, ",") {
-		path = strings.TrimSpace(path)
-		report.CaseFiles = append(report.CaseFiles, path)
-		var head struct {
-			Schema string `json:"schema"`
-		}
-		if err := q.ReadJSON(path, &head); err != nil {
-			return err
-		}
-		dir, err := os.MkdirTemp("", "soundpost-smoke-")
-		if err != nil {
-			return err
-		}
-		defer os.RemoveAll(dir)
-		base := filepath.Base(path)
-		switch head.Schema {
-		case "soundpost-owned-query-smoke/1":
-			steps, err := smoke.RunOwned(ctx, dir, path)
-			run(base, steps, err)
-		case "soundpost-live-smoke/1":
-			steps, notRun, err := smoke.RunLive(ctx, dir, path)
-			run(base, steps, err)
-			for _, n := range notRun {
-				report.NotSatisfied = append(report.NotSatisfied, base+": "+n)
+	seen := map[string]bool{}
+	for _, layout := range layouts {
+		for _, path := range strings.Split(*cases, ",") {
+			path = strings.TrimSpace(path)
+			if !seen[path] {
+				seen[path] = true
+				report.CaseFiles = append(report.CaseFiles, path)
 			}
-		case "soundpost-rule-smoke/1":
-			steps, err := smoke.RunRules(ctx, dir, path)
-			run(base, steps, err)
-		case "soundpost-persisted-path/1":
-			res, err := smoke.RunPersisted(ctx, dir, path)
-			run(base, res.Steps, err)
-			report.Persistence = append(report.Persistence, res.Persistence...)
-			report.Normalization = append(report.Normalization, res.Normalization...)
-		case "soundpost-profile-cross-products/1":
-			steps, err := smoke.RunCross(ctx, dir, path)
-			run(base, steps, err)
-		default:
-			return fmt.Errorf("%s: no smoke runner for schema %q", path, head.Schema)
+			var head struct {
+				Schema string `json:"schema"`
+			}
+			if err := q.ReadJSON(path, &head); err != nil {
+				return err
+			}
+			err := func() error {
+				dir, err := os.MkdirTemp("", "soundpost-smoke-")
+				if err != nil {
+					return err
+				}
+				defer os.RemoveAll(dir)
+				base := filepath.Base(path)
+				switch head.Schema {
+				case "soundpost-owned-query-smoke/1":
+					steps, err := smoke.RunOwned(ctx, layout, dir, path)
+					run(layout, base, steps, err)
+				case "soundpost-live-smoke/1":
+					steps, notRun, err := smoke.RunLive(ctx, layout, dir, path)
+					run(layout, base, steps, err)
+					for _, n := range notRun {
+						report.NotSatisfied = append(report.NotSatisfied, named(layout, base)+": "+n)
+					}
+				case "soundpost-rule-smoke/1":
+					steps, err := smoke.RunRules(ctx, layout, dir, path)
+					run(layout, base, steps, err)
+				case "soundpost-persisted-path/1":
+					res, err := smoke.RunPersisted(ctx, layout, dir, path)
+					run(layout, base, res.Steps, err)
+					report.Persistence = mergeOutcomes(report.Persistence, res.Persistence)
+					report.Normalization = append(report.Normalization, res.Normalization...)
+				case "soundpost-profile-cross-products/1":
+					steps, err := smoke.RunCross(ctx, layout, dir, path)
+					run(layout, base, steps, err)
+				default:
+					return fmt.Errorf("%s: no smoke runner for schema %q", path, head.Schema)
+				}
+				return nil
+			}()
+			if err != nil {
+				return err
+			}
+		}
+		if layout == smoke.Distributed {
+			dir, err := os.MkdirTemp("", "soundpost-smoke-")
+			if err != nil {
+				return err
+			}
+			steps, err := smoke.RunDistributed(ctx, dir)
+			_ = os.RemoveAll(dir)
+			run(layout, "cluster", steps, err)
 		}
 	}
 	if !*restart || !*compact {
@@ -190,4 +224,22 @@ func collateIsolation(steps []q.ScenarioOutcome) []q.ScenarioOutcome {
 	_, passed2 := find("complete-data-recovers")
 	out = append(out, q.ScenarioOutcome{Name: "complete-rules-never-use-partial-data", Passed: found && passed && passed2})
 	return out
+}
+
+// mergeOutcomes folds more outcomes into base by name. A scenario run on several
+// layouts passes only if it passed on every one of them.
+func mergeOutcomes(base, more []q.ScenarioOutcome) []q.ScenarioOutcome {
+	for _, o := range more {
+		merged := false
+		for i := range base {
+			if base[i].Name == o.Name {
+				base[i].Passed = base[i].Passed && o.Passed
+				merged = true
+			}
+		}
+		if !merged {
+			base = append(base, o)
+		}
+	}
+	return base
 }

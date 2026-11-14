@@ -382,9 +382,12 @@ func functionRange(ctx context.Context, call CallPlan, args []value.Result, inde
 				chosen := floats[0]
 				x = functionFloat(chosen)
 				minimum := strings.Contains(name, "min")
+				timestamp := strings.HasPrefix(name, "ts_of_")
 				for _, p := range floats[1:] {
 					y := functionFloat(p)
-					if math.IsNaN(x) || minimum && y <= x || !minimum && y >= x {
+					// A later sample replaces the choice only when strictly better (so equal-comparing
+					// signed zeros keep the first); the ts_of_* variants keep the latest of equals.
+					if math.IsNaN(x) || minimum && (y < x || timestamp && y == x) || !minimum && (y > x || timestamp && y == x) {
 						chosen = p
 						x = y
 					}
@@ -498,7 +501,9 @@ func functionRate(call CallPlan, s value.Series, start, end model.UnixNano, f Fr
 			baseline = histogramEmptyShape(*points[1].Histogram)
 			firstIgnored = true
 		}
-		counterInitial = math.Float64frombits(uint64(histogramView(baseline).Count))
+		// The start-edge zero cap measures the first sample itself, even when a
+		// reset makes its layout irrelevant to the delta baseline.
+		counterInitial = math.Float64frombits(uint64(histogramView(*first.Histogram).Count))
 		histogram, reason := histogramCombineForProfile(*last.Histogram, baseline, true, f.Profile.ID)
 		if reason != "" {
 			d = append(d, functionDiagnostic(call.Expr, reason))

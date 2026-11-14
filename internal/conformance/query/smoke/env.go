@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package smoke executes the declarative smoke case files against a REAL
-// in-process node: a real appcore (control Raft group, auth, C03 admission, C05
-// storage), real HTTPS ingest and the owned C06 routes. It lives beside the
+// installation: a real appcore (control Raft group, auth, C03 admission, C05
+// storage), real HTTPS ingest and the owned C06 routes, either as one node or
+// as three in-process voters joined over mTLS (Layout). It lives beside the
 // conformance harness, never in a production path, and contains no oracle.
 package smoke
 
@@ -28,6 +29,7 @@ import (
 	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/query"
 	"github.com/arynyklas/soundpost/internal/query/profile"
+	"github.com/arynyklas/soundpost/internal/smokecluster"
 	"github.com/arynyklas/soundpost/internal/storage"
 	"github.com/arynyklas/soundpost/profiles"
 )
@@ -144,10 +146,33 @@ func (c *countedRows) Close() error {
 	return c.RowIterator.Close()
 }
 
+// Layout is the persisted topology a smoke runs on.
+type Layout string
+
+const (
+	// Single is one node with a one-voter control group and local storage.
+	Single Layout = "single"
+	// Distributed is three real voters in this process: mTLS peer listeners, a
+	// replicated control group and 64 replicated data groups on three private
+	// directories, with the owned routes served on every node.
+	Distributed Layout = "distributed"
+)
+
+// surface is one node's public HTTPS routes and the client that trusts them.
+type surface struct {
+	app    *appcore.App
+	server *httptest.Server
+	client *http.Client
+}
+
 type Env struct {
 	ctx         context.Context
 	dir         string
+	layout      Layout
 	app         *appcore.App
+	cluster     *smokecluster.Cluster
+	seed        string
+	surfaces    map[uint64]*surface
 	owner       Person
 	org         model.ID
 	Projects    map[string]model.ID
@@ -172,9 +197,10 @@ func (e *Env) Engine() *query.Engine {
 	return e.engine
 }
 
-// NewEnv opens a fresh node in dir. Close it with Close.
-func NewEnv(ctx context.Context, dir string) (*Env, error) {
-	e := &Env{ctx: ctx, dir: dir, Projects: map[string]model.ID{}, People: map[string]*Person{}, Sources: map[string]*Source{}, Names: map[string]model.ID{}, Features: map[string]string{}}
+// NewEnv opens a fresh installation in dir on the given layout. Close it with
+// Close.
+func NewEnv(ctx context.Context, layout Layout, dir string) (*Env, error) {
+	e := &Env{ctx: ctx, dir: dir, layout: layout, surfaces: map[uint64]*surface{}, Projects: map[string]model.ID{}, People: map[string]*Person{}, Sources: map[string]*Source{}, Names: map[string]model.ID{}, Features: map[string]string{}}
 	e.Limits = query.DefaultLimits()
 	e.Limits.RevalidateInterval = 25 * time.Millisecond
 	files, err := profiles.Query()
@@ -199,67 +225,123 @@ func NewEnv(ctx context.Context, dir string) (*Env, error) {
 		}
 		e.Features[id] = p.FeatureSets[0].ID
 	}
-	if err = e.open(); err != nil {
-		return nil, err
-	}
-	boot, err := e.app.Control.BootstrapToken()
-	if err != nil {
-		return nil, err
-	}
-	session, err := e.app.Auth.Bootstrap(ctx, boot, "smoke-owner@example.test", "soundpost smoke owner password 2026")
-	if err != nil {
-		return nil, err
-	}
-	cred, err := e.app.Auth.Authenticate(ctx, session.Token)
-	if err != nil {
-		return nil, err
-	}
-	e.owner = Person{ID: session.User, Session: session, Cred: cred}
-	e.org = model.NewID()
-	if err = e.command(e.org, "create_org", auth.AdminPayload{Name: "smoke"}); err != nil {
-		return nil, err
+	switch layout {
+	case Single:
+		if err = e.open(); err != nil {
+			return nil, err
+		}
+		if err = e.bootstrap(); err != nil {
+			e.Close()
+			return nil, err
+		}
+	case Distributed:
+		// The three voters continue an installation exactly as an operator
+		// builds one: bootstrap the owner and the organization on a single
+		// node, export the authenticated cluster seed, then start the voters
+		// from that seed on three fresh directories.
+		if err = e.provisionSeed(); err != nil {
+			return nil, err
+		}
+		if err = e.open(); err != nil {
+			e.Close()
+			return nil, err
+		}
+		if err = e.reauthenticate(); err != nil {
+			e.Close()
+			return nil, err
+		}
+	default:
+		return nil, fmt.Errorf("unknown layout %q", layout)
 	}
 	return e, nil
 }
 
-// open (re)opens the node on e.dir and starts the owned routes. The query
-// engine is built over the gate so a scan can be held, failed or counted.
+// bootstrap creates the owner and the organization on the open node.
+func (e *Env) bootstrap() error {
+	boot, err := e.app.Control.BootstrapToken()
+	if err != nil {
+		return err
+	}
+	session, err := e.app.Auth.Bootstrap(e.ctx, boot, "smoke-owner@example.test", "soundpost smoke owner password 2026")
+	if err != nil {
+		return err
+	}
+	cred, err := e.app.Auth.Authenticate(e.ctx, session.Token)
+	if err != nil {
+		return err
+	}
+	e.owner = Person{ID: session.User, Session: session, Cred: cred}
+	e.org = model.NewID()
+	return e.command(e.org, "create_org", auth.AdminPayload{Name: "smoke"})
+}
+
+// open (re)opens the installation and starts the owned routes. The query
+// engine of the primary node is built over the gate so a scan can be held,
+// failed or counted.
 func (e *Env) open() error {
+	if e.layout == Distributed {
+		return e.openCluster()
+	}
 	app, err := appcore.Open(e.dir)
 	if err != nil {
 		return err
 	}
+	return e.attach(app)
+}
+
+// attach makes app the primary node: it binds rule evaluation, builds the
+// gated query engine and serves the owned routes.
+func (e *Env) attach(app *appcore.App) error {
 	e.app = app
-	if err = app.Control.BindRuleEvaluation(); err != nil {
+	if err := app.Control.BindRuleEvaluation(); err != nil {
 		var f *model.Fault
 		if !errors.As(err, &f) || f.Code != model.Conflict {
 			return err
 		}
 	}
 	e.gate = &gate{inner: app.Storage}
+	var err error
 	if e.engine, err = query.New(e.gate, app.Auth, e.registry, e.Limits, query.WithDeleteGenerations(app.Retention), query.WithTickets(app.Cache), query.WithResultCache(app.Cache)); err != nil {
 		return err
 	}
-	e.server = httptest.NewTLSServer(httpapi.NewServer("", app.Auth, nil, func(mux *http.ServeMux) {
-		httpapi.RegisterIngestRoutes(mux, app.Auth, app.Ingest)
-		httpapi.RegisterQueryRoutes(mux, app.Auth, e.engine)
-		httpapi.RegisterLiveRoutes(mux, app.Auth, app.Live)
-	}).Handler)
+	e.server = serveOwned(app, e.engine)
 	e.client = e.server.Client()
 	return nil
 }
 
-// Restart is a whole-node restart on the same directory: every session,
-// source credential and stored sample must survive it.
+// serveOwned serves ingest and the owned C06 query and live routes of one node.
+func serveOwned(app *appcore.App, engine *query.Engine) *httptest.Server {
+	return httptest.NewTLSServer(httpapi.NewServer("", app.Auth, nil, func(mux *http.ServeMux) {
+		httpapi.RegisterIngestRoutes(mux, app.Auth, app.Ingest)
+		httpapi.RegisterQueryRoutes(mux, app.Auth, engine)
+		httpapi.RegisterLiveRoutes(mux, app.Auth, app.Live)
+	}).Handler)
+}
+
+// Restart is a whole-node restart on the same directory (the whole cluster on
+// its three directories in the distributed layout): every session, source
+// credential and stored sample must survive it.
 func (e *Env) Restart() error {
-	e.server.Close()
-	if err := e.app.Close(); err != nil {
+	e.closeServers()
+	if e.layout == Distributed {
+		for _, id := range e.cluster.Running() {
+			if err := e.cluster.Stop(id); err != nil {
+				return err
+			}
+		}
+	} else if err := e.app.Close(); err != nil {
 		return err
 	}
 	e.app = nil
 	if err := e.open(); err != nil {
 		return err
 	}
+	return e.reauthenticate()
+}
+
+// reauthenticate presents every session and source credential the environment
+// holds to the open node.
+func (e *Env) reauthenticate() error {
 	cred, err := e.app.Auth.Authenticate(e.ctx, e.owner.Session.Token)
 	if err != nil {
 		return fmt.Errorf("owner session did not survive the restart: %w", err)
@@ -278,9 +360,24 @@ func (e *Env) Restart() error {
 	return nil
 }
 
-func (e *Env) Close() {
+// closeServers stops every owned-route server of every node.
+func (e *Env) closeServers() {
 	if e.server != nil {
 		e.server.Close()
+	}
+	for id, s := range e.surfaces {
+		if s.server != e.server {
+			s.server.Close()
+		}
+		delete(e.surfaces, id)
+	}
+}
+
+func (e *Env) Close() {
+	e.closeServers()
+	if e.cluster != nil {
+		e.cluster.Close()
+		return
 	}
 	if e.app != nil {
 		_ = e.app.Close()
@@ -398,24 +495,37 @@ func (e *Env) Name(symbol string) model.ID {
 
 // Ingest admits one batch over the real HTTPS route and returns the receipt cursor.
 func (e *Env) Ingest(s *Source, records ...model.Record) model.Receipt {
+	return e.IngestAt(0, s, records...)
+}
+
+// IngestAt admits one batch through the ingest route of node (0 is the primary
+// node) and requires an acknowledgement.
+func (e *Env) IngestAt(node uint64, s *Source, records ...model.Record) model.Receipt {
+	code, body, batch := e.SendBatch(node, s, records...)
+	checkf(code == 200, "ingest status %d: %s", code, trim(body))
+	var receipt model.Receipt
+	check(json.Unmarshal(body, &receipt))
+	checkf(receipt.BatchID == batch.ID, "receipt names a different batch")
+	return receipt
+}
+
+// SendBatch posts one batch to node's ingest route and returns the raw answer.
+func (e *Env) SendBatch(node uint64, s *Source, records ...model.Record) (int, []byte, model.Batch) {
 	project := e.Projects[s.Project]
 	batch := model.Batch{Version: 1, Project: project, Source: s.ID, Producer: model.NewID(), ID: model.NewID(), PolicyRevision: 1, Records: records}
 	var err error
 	batch.RouteSlot, err = model.OwnerSlot(e.org, project, s.ID, batch.Producer, records[0])
 	check(err)
 	raw, _ := json.Marshal(batch)
-	req, _ := http.NewRequest("POST", e.server.URL+"/ingest/v1/batches", bytes.NewReader(raw))
+	base, client := e.endpoint(node)
+	req, _ := http.NewRequest("POST", base+"/ingest/v1/batches", bytes.NewReader(raw))
 	req.Header.Set("Authorization", "Bearer "+s.Credential)
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := e.client.Do(req)
+	resp, err := client.Do(req)
 	check(err)
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
-	checkf(resp.StatusCode == 200, "ingest status %d: %s", resp.StatusCode, trim(body))
-	var receipt model.Receipt
-	check(json.Unmarshal(body, &receipt))
-	checkf(receipt.BatchID == batch.ID, "receipt names a different batch")
-	return receipt
+	return resp.StatusCode, body, batch
 }
 
 // MetricRecord builds one float metric record at time ns with exact value bits.
@@ -448,23 +558,43 @@ func sortStrings(a []string) {
 
 // Post issues a real HTTPS POST as a logged-in person (session cookie + CSRF).
 func (e *Env) Post(who *Person, path string, body any) (int, []byte) {
+	return e.PostAt(0, who, path, body)
+}
+
+// PostAt is Post to the owned routes of node (0 is the primary node).
+func (e *Env) PostAt(node uint64, who *Person, path string, body any) (int, []byte) {
 	raw, err := json.Marshal(body)
 	check(err)
-	return e.PostRaw(who, path, raw, nil)
+	return e.postRawAt(node, who, path, raw, nil)
 }
 
 func (e *Env) PostRaw(who *Person, path string, raw []byte, ctx context.Context) (int, []byte) {
+	return e.postRawAt(0, who, path, raw, ctx)
+}
+
+// endpoint resolves the base URL and client of node (0 is the primary node).
+func (e *Env) endpoint(node uint64) (string, *http.Client) {
+	if node == 0 {
+		return e.server.URL, e.client
+	}
+	s := e.surfaces[node]
+	checkf(s != nil, "node %d serves no owned routes", node)
+	return s.server.URL, s.client
+}
+
+func (e *Env) postRawAt(node uint64, who *Person, path string, raw []byte, ctx context.Context) (int, []byte) {
 	if ctx == nil {
 		ctx = e.ctx
 	}
-	req, _ := http.NewRequestWithContext(ctx, "POST", e.server.URL+path, bytes.NewReader(raw))
+	base, client := e.endpoint(node)
+	req, _ := http.NewRequestWithContext(ctx, "POST", base+path, bytes.NewReader(raw))
 	if who != nil && who.Session.Token != "" {
 		req.Header.Set("Cookie", "__Host-soundpost="+who.Session.Token)
 		req.Header.Set("X-CSRF-Token", who.Session.CSRF)
 	}
-	req.Header.Set("Origin", e.server.URL)
+	req.Header.Set("Origin", base)
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := e.client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return 0, []byte(err.Error())
 	}

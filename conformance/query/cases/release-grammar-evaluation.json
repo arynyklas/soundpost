@@ -1,0 +1,853 @@
+{
+  "phase": "evaluation",
+  "cases": [
+    {
+      "id": "promql-prometheus-3.1.0/fact/number-conversion/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "query": "0X_FF * 1_024 - 1e-3 + 010",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": []
+    },
+    {
+      "id": "promql-prometheus-3.1.0/fact/string-escapes/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "query": "\"a\\x41\\101\\u00e9\\U0001F600\\a\\b\\f\\n\\r\\t\\v\\\\\\\"z\"",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": []
+    },
+    {
+      "id": "promql-prometheus-3.1.0/fact/zero-numeric-range/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "query": "count_over_time(sig[0] offset 5s)",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "sig"
+            },
+            {
+              "name": "job",
+              "value": "g"
+            }
+          ],
+          "samples": [
+            {
+              "time": "10000000000",
+              "float_bits": "3ff0000000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "4000000000000000"
+            },
+            {
+              "time": "20000000000",
+              "float_bits": "4008000000000000"
+            },
+            {
+              "time": "30000000000",
+              "float_bits": "4018000000000000"
+            },
+            {
+              "time": "40000000000",
+              "float_bits": "4024000000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.1.0/fact/zero-numeric-range/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "query": "count_over_time(sig[0])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "sig"
+            },
+            {
+              "name": "job",
+              "value": "g"
+            }
+          ],
+          "samples": [
+            {
+              "time": "10000000000",
+              "float_bits": "3ff0000000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "4000000000000000"
+            },
+            {
+              "time": "20000000000",
+              "float_bits": "4008000000000000"
+            },
+            {
+              "time": "30000000000",
+              "float_bits": "4018000000000000"
+            },
+            {
+              "time": "40000000000",
+              "float_bits": "4024000000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/at_modifier_preprocessors/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "query": "sig @ end() - sig @ start()",
+      "kind": "range",
+      "start": "10000000000",
+      "end": "30000000000",
+      "step": "10000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "sig"
+            },
+            {
+              "name": "job",
+              "value": "g"
+            }
+          ],
+          "samples": [
+            {
+              "time": "10000000000",
+              "float_bits": "3ff0000000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "4000000000000000"
+            },
+            {
+              "time": "20000000000",
+              "float_bits": "4008000000000000"
+            },
+            {
+              "time": "30000000000",
+              "float_bits": "4018000000000000"
+            },
+            {
+              "time": "40000000000",
+              "float_bits": "4024000000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/bool_modifier/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "query": "(fl_total == bool 2) * 10 + (fl_total != bool 2)",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "fl_total"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "float_bits": "4000000000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/bool_modifier/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "query": "fl_total > bool 1",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "fl_total"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "float_bits": "4000000000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/number_duration_literal/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "query": "1h30m + 1w + 1ms",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": []
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/signed_number/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "query": "1 / -0",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": []
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/string_literal/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "query": "`line1\nline2\\n`",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": []
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/unary_expr/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "query": "-hs_total",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "hs_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.1.0/semantics/lexical/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "query": "0X1f + 1_0 + 5m + .5E1 + 1 / -iNf",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": []
+    },
+    {
+      "id": "promql-prometheus-3.1.0/semantics/precedence/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "query": "fl_total + 1 * 2 ^ 2 > bool 5",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "fl_total"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "float_bits": "4000000000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.1.0/semantics/precedence/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "query": "2 ^ 3 ^ 2 + -2 ^ 2",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": []
+    },
+    {
+      "id": "promql-prometheus-3.13.5/fact/duration-runtime/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-duration-expr"
+      ],
+      "query": "sum_over_time(sig[5m:step()] offset range())",
+      "kind": "range",
+      "start": "20000000000",
+      "end": "40000000000",
+      "step": "10000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "sig"
+            },
+            {
+              "name": "job",
+              "value": "g"
+            }
+          ],
+          "samples": [
+            {
+              "time": "0",
+              "float_bits": "3ff0000000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4000000000000000"
+            },
+            {
+              "time": "20000000000",
+              "float_bits": "4008000000000000"
+            },
+            {
+              "time": "30000000000",
+              "float_bits": "4010000000000000"
+            },
+            {
+              "time": "40000000000",
+              "float_bits": "4014000000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/fact/duration-runtime/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-duration-expr"
+      ],
+      "query": "sum_over_time(sig[step() * 2])",
+      "kind": "range",
+      "start": "20000000000",
+      "end": "40000000000",
+      "step": "10000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "sig"
+            },
+            {
+              "name": "job",
+              "value": "g"
+            }
+          ],
+          "samples": [
+            {
+              "time": "0",
+              "float_bits": "3ff0000000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4000000000000000"
+            },
+            {
+              "time": "20000000000",
+              "float_bits": "4008000000000000"
+            },
+            {
+              "time": "30000000000",
+              "float_bits": "4010000000000000"
+            },
+            {
+              "time": "40000000000",
+              "float_bits": "4014000000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/fact/number-conversion/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "0X_FF * 1_024 - 1e-3 + 010",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": []
+    },
+    {
+      "id": "promql-prometheus-3.13.5/fact/string-escapes/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "\"a\\x41\\101\\u00e9\\U0001F600\\a\\b\\f\\n\\r\\t\\v\\\\\\\"z\"",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": []
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/at_modifier_preprocessors/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "sig @ end() - sig @ start()",
+      "kind": "range",
+      "start": "10000000000",
+      "end": "30000000000",
+      "step": "10000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "sig"
+            },
+            {
+              "name": "job",
+              "value": "g"
+            }
+          ],
+          "samples": [
+            {
+              "time": "10000000000",
+              "float_bits": "3ff0000000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "4000000000000000"
+            },
+            {
+              "time": "20000000000",
+              "float_bits": "4008000000000000"
+            },
+            {
+              "time": "30000000000",
+              "float_bits": "4018000000000000"
+            },
+            {
+              "time": "40000000000",
+              "float_bits": "4024000000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/bool_modifier/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "(fl_total == bool 2) * 10 + (fl_total != bool 2)",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "fl_total"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "float_bits": "4000000000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/bool_modifier/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "fl_total > bool 1",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "fl_total"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "float_bits": "4000000000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/fill_value/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-binop-fill-modifiers"
+      ],
+      "query": "m1 + fill_right(Inf) m2",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "m1"
+            },
+            {
+              "name": "job",
+              "value": "a"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "float_bits": "4000000000000000"
+            }
+          ]
+        },
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "m1"
+            },
+            {
+              "name": "job",
+              "value": "b"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "float_bits": "4008000000000000"
+            }
+          ]
+        },
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "m2"
+            },
+            {
+              "name": "job",
+              "value": "a"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "float_bits": "4024000000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/number_duration_literal/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "1h30m + 1w + 1ms",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": []
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/signed_number/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "1 / -0",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": []
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/string_literal/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "`line1\nline2\\n`",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": []
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/unary_expr/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "-hs_total",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "hs_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantics/duration-expression/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-duration-expr"
+      ],
+      "query": "max_over_time(sig[min_of(range(), 1m):step()])",
+      "kind": "range",
+      "start": "20000000000",
+      "end": "40000000000",
+      "step": "10000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "sig"
+            },
+            {
+              "name": "job",
+              "value": "g"
+            }
+          ],
+          "samples": [
+            {
+              "time": "0",
+              "float_bits": "3ff0000000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4000000000000000"
+            },
+            {
+              "time": "20000000000",
+              "float_bits": "4008000000000000"
+            },
+            {
+              "time": "30000000000",
+              "float_bits": "4010000000000000"
+            },
+            {
+              "time": "40000000000",
+              "float_bits": "4014000000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantics/lexical/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "0X1f + 1_0 + 5m + .5E1 + 1 / -iNf",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": []
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantics/precedence/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "fl_total + 1 * 2 ^ 2 > bool 5",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "fl_total"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "float_bits": "4000000000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantics/precedence/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "2 ^ 3 ^ 2 + -2 ^ 2",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": []
+    }
+  ]
+}

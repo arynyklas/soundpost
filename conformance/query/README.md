@@ -140,3 +140,25 @@ Negative rows must fail with an error family the oracle driver already
 classifies (`oracles/evaluation/errors.go`); a native error with no projected
 family is an unclassified hard mismatch, and the pinned images are never rebuilt
 to add one.
+
+The driver loads every `author/ext_<name>.py` (`build(ctx)` declares its case
+files, puts rows and records `ctx.bind(obligation, package, go_tests)`); the
+modules are `grammar` (PromQL grammar, lexical, precedence, duration and fill
+syntax), `numeric` (function domains and numeric facts), `histogram` (native
+histogram layouts, annotations, start timestamps), `semantics` (selector, time
+modifier, matching, errors, regex primitives, engine options, sample budget) and
+`logql` (parsers, filters, mutation, ordering, binary, template primitives).
+`release-author.py --only <name>` writes and content-locks just that module's
+files; `author/run-phase.sh` runs one locked file against the pinned oracles.
+The Go tests a binding cites are listed per module in
+`author/observed-tests.d/*.txt` (`<package> <TestName>`). Their expectations come
+from the obligation text and IEEE/Go arithmetic, never from an oracle run, and
+they cover what one differential query cannot observe (cancellation, deadline,
+storage failure, budget exhaustion, engine option switches).
+
+Four obligations stay unbound: `configuration/protocols` and
+`configuration/scrape-inheritance` of both PromQL profiles. Their rule states
+that they "change materialized input acquisition, not fixed-input language
+evaluation": the owned product has no scrape-configuration implementation and the
+pinned oracle wrapper has no configuration-parsing phase (it is never rebuilt),
+so no differential row can observe them and none was fabricated.

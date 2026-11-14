@@ -55,6 +55,19 @@ scenario of the policy present and passing, and an empty NOT-satisfied list. A m
 profile or layout, a duplicate, a row bound to a report of another profile, kind, seed or layout, an
 absent or unparsable report, or a digest mismatch fails with the exact evidence named.
 
+The smoke layouts are real installations, not stand-ins. `single` is one node. `distributed` is three
+in-process voters (`internal/smokecluster`, `appcore.OpenDistributed`) on three private directories,
+joined over mTLS peer listeners from one authenticated cluster seed, with the owned ingest, query and
+live routes served on every voter. The five case files run unchanged on it (the persisted path
+restarts the whole cluster), and `internal/conformance/query/smoke.RunDistributed` adds the cross-node
+scenario: a write acknowledged through any voter is readable on all of them, the owned PromQL, LogQL,
+discovery and live routes answer on followers, isolation and revocation hold on every voter, losing
+the leader leaves the survivors answering completely and acknowledging (an election window yields
+errors without values, never an apparently complete empty answer), a voter without quorum
+acknowledges nothing and fails reads closed, and restarted voters converge on identical data with every
+original receipt unchanged. The voters share one host and one process, so this is a software
+failure-domain check, not the three-independent-hardware qualification (`docs/operations/distributed.md`).
+
 ## What it proves, and what it does not
 
 It proves that the locked release gate and smoke runner were executed for all three pinned

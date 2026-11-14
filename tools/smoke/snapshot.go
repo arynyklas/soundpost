@@ -26,6 +26,7 @@ import (
 	"github.com/arynyklas/soundpost/internal/httpapi"
 	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/replica"
+	"github.com/arynyklas/soundpost/internal/smokecluster"
 )
 
 // The snapshot-repair smoke drives real server processes. Compaction, snapshot
@@ -374,22 +375,22 @@ func runSnapshotRepairScenario(root string) (evidence snapshotRepairEvidence, re
 	if err != nil {
 		return evidence, err
 	}
-	ca, pairs, err := clusterCertificates(root)
+	ca, pairs, err := smokecluster.Certificates(root)
 	if err != nil {
 		return evidence, err
 	}
-	relays, err := newClusterRelays(1, 2, 3, 4)
+	relays, err := smokecluster.NewRelays(1, 2, 3, 4)
 	if err != nil {
 		return evidence, err
 	}
-	defer relays.close()
+	defer relays.Close()
 	targets := map[uint64]string{}
-	if err = assignClusterPeers(relays, targets, 1, 2, 3); err != nil {
+	if err = smokecluster.AssignPeers(relays, targets, 1, 2, 3); err != nil {
 		return evidence, err
 	}
 	members := replica.Members{Revision: 1}
 	for node := uint64(1); node <= 3; node++ {
-		members.Nodes = append(members.Nodes, replica.Member{ID: node, Address: "https://" + relays.listeners[node].Addr().String(), NodeIdentity: fmt.Sprintf("node-%d", node), FailureDomain: fmt.Sprintf("local-process-directory-%d", node)})
+		members.Nodes = append(members.Nodes, replica.Member{ID: node, Address: "https://" + relays.Address(node), NodeIdentity: fmt.Sprintf("node-%d", node), FailureDomain: fmt.Sprintf("local-process-directory-%d", node)})
 	}
 	processes := map[uint64]*clusterProcess{}
 	var all []*repairProcess
@@ -508,7 +509,7 @@ func runSnapshotRepairScenario(root string) (evidence snapshotRepairEvidence, re
 		}
 	}
 	stage = "repair_destroy_voter_disk"
-	relays.partition(3, true)
+	relays.Partition(3, true)
 	if err = processes[3].child.kill(); err != nil {
 		return evidence, err
 	}
@@ -529,12 +530,12 @@ func runSnapshotRepairScenario(root string) (evidence snapshotRepairEvidence, re
 	stage = "repair_add_learner"
 	learnerMembers := members
 	learnerMembers.Revision = 2
-	learnerMembers.Nodes = append(append([]replica.Member(nil), members.Nodes...), replica.Member{ID: 4, Address: "https://" + relays.listeners[4].Addr().String(), NodeIdentity: "node-4", FailureDomain: "local-process-directory-4", Learner: true})
+	learnerMembers.Nodes = append(append([]replica.Member(nil), members.Nodes...), replica.Member{ID: 4, Address: "https://" + relays.Address(4), NodeIdentity: "node-4", FailureDomain: "local-process-directory-4", Learner: true})
 	if err = changeClusterMembership(processes, statuses, learnerMembers); err != nil {
 		return evidence, err
 	}
 	stage = "repair_fresh_learner_from_snapshot"
-	if err = assignClusterPeers(relays, targets, 4); err != nil {
+	if err = smokecluster.AssignPeers(relays, targets, 4); err != nil {
 		return evidence, err
 	}
 	replacement, err := launch(4, learnerMembers)
@@ -593,7 +594,7 @@ func runSnapshotRepairScenario(root string) (evidence snapshotRepairEvidence, re
 	}
 	delete(processes, 1)
 	delete(repair, 1)
-	if err = assignClusterPeers(relays, targets, 1); err != nil {
+	if err = smokecluster.AssignPeers(relays, targets, 1); err != nil {
 		return evidence, err
 	}
 	restarted, err := launch(1, finalMembers)

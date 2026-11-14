@@ -248,8 +248,10 @@ func mutateLabels(ctx context.Context, e *LogEntry, s Stage, scope *regexcompat.
 	e.StreamLabels = drop(e.StreamLabels)
 	e.StructuredMetadata = drop(e.StructuredMetadata)
 	e.ParsedLabels = drop(e.ParsedLabels)
+	// Dropping the error label handles the failure: its details go with it.
 	if _, gone := del["__error__"]; gone {
 		e.languageError = ""
+		e.languageErrorDetails = ""
 	}
 	if _, gone := del["__error_details__"]; gone {
 		e.languageErrorDetails = ""

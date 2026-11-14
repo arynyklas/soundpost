@@ -373,7 +373,8 @@ func EvaluateLogsInterval(ctx context.Context, plan Plan, src scan.LogSource, or
 	if interval > 0 {
 		mergeLimit = math.MaxUint64
 	}
-	merged, err := MergeLogs(ctx, []EntryIterator{input}, order, mergeLimit, account)
+	// The pinned engine reads streams back without their hash: ties order by label string.
+	merged, err := mergeLogs(ctx, []EntryIterator{input}, order, mergeLimit, account, false)
 	if err != nil {
 		return result, err
 	}

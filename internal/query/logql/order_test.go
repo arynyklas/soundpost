@@ -75,7 +75,8 @@ func TestLogMergeAcrossPagesAndShards(t *testing.T) {
 		if count != 3 || len(ids) != 2 {
 			t.Fatalf("tie limit count=%d ids=%v", count, ids)
 		}
-		if order == Forward && ids[0] != 1 || order == Backward && ids[0] != 3 {
+		// Equal-time records of one stream keep identity (encounter) order in both directions.
+		if ids[0] != 1 || ids[1] != 2 {
 			t.Fatalf("direction=%s ids=%v", order, ids)
 		}
 		if a.Used() != 0 {

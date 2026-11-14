@@ -122,13 +122,13 @@ func (o *crashingOutbox) Settle(ctx context.Context, scope auth.Scope, lease rep
 	return o.Outbox.Settle(ctx, scope, lease, item, update)
 }
 
-// RunRules executes rule-smoke.json on a real node with real control.
-func RunRules(ctx context.Context, dir, path string) (steps []StepResult, err error) {
+// RunRules executes rule-smoke.json on a real installation with real control.
+func RunRules(ctx context.Context, layout Layout, dir, path string) (steps []StepResult, err error) {
 	defer recoverFailure(&err)
 	var file ruleFile
 	check(readJSON(path, &file))
 	checkf(file.Schema == "soundpost-rule-smoke/1", "unknown schema %s", file.Schema)
-	env, err := NewEnv(ctx, dir)
+	env, err := NewEnv(ctx, layout, dir)
 	check(err)
 	defer env.Close()
 	f := file.Fixture

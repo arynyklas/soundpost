@@ -407,9 +407,17 @@ func TestUnrunSkippedAndUnboundCountsPropagateAsFailure(t *testing.T) {
 	}
 	t.Run("smoke distributed counted not run", func(t *testing.T) {
 		dir := copyArtifacts(t)
+		path := filepath.Join(dir, "smoke-distributed.json")
 		var s q.SmokeReport
-		readJSON(t, filepath.Join(dir, "smoke-distributed.json"), &s)
-		got, _ := verifyErr(t, m, dir)
+		readJSON(t, path, &s)
+		// The real distributed run passes; a report that says the layout was not
+		// run (the state this campaign used to record) must still be counted.
+		s.Modes = nil
+		s.ModesNotRun = []string{"distributed"}
+		s.NotSatisfied = append(s.NotSatisfied, "distributed mode: not run")
+		writeJSON(t, path, s)
+		got, msg := verifyErr(t, m, dir)
+		mustContain(t, msg, "layout distributed did not run", "layout distributed recorded as not run")
 		if got.Counts.ModesNotRun < 1 || got.Counts.NotSatisfied < len(s.NotSatisfied) {
 			t.Fatalf("counts %+v do not carry smoke report (%d not satisfied)", got.Counts, len(s.NotSatisfied))
 		}
@@ -466,10 +474,11 @@ func TestUnrunSkippedAndUnboundCountsPropagateAsFailure(t *testing.T) {
 	})
 }
 
-// This test pins the honest state of THIS tree: the locked release gate has 366
-// unbound obligations (419 bound) and 1083 unrun cases (1272 matched against the
-// pinned oracles), the single layout smoke passes and distributed smoke was not
-// run. It must be updated, never relaxed, when the tree changes.
+// This test pins the honest state of THIS tree: the locked release gate has 4
+// unbound obligations (781 bound; the scrape-configuration facts of both PromQL
+// profiles cannot be observed by any query) and 12 unrun cases (2343 matched
+// against the pinned oracles), and both smoke layouts (single, three-voter distributed) run
+// and pass. It must be updated, never relaxed, when the tree changes.
 func TestCampaignReportsTheRealGateFaithfully(t *testing.T) {
 	realCampaign(t)
 	if campaignErr == nil || campaignReport.Verified {
@@ -486,20 +495,20 @@ func TestCampaignReportsTheRealGateFaithfully(t *testing.T) {
 		}
 		if r.ExitCode == nil {
 			t.Errorf("row %s has no recorded exit code", r.ID)
-		} else if (*r.ExitCode == 0) != (r.ID == "smoke/single") {
-			t.Errorf("row %s exit code %d: only the single smoke may exit 0", r.ID, *r.ExitCode)
+		} else if (*r.ExitCode == 0) != strings.HasPrefix(r.ID, "smoke/") {
+			t.Errorf("row %s exit code %d: only the smoke rows may exit 0", r.ID, *r.ExitCode)
 		}
 	}
 	if len(byID) != 8 {
 		t.Fatalf("%d rows, want 3 profiles x 2 seeds + 2 layouts = 8", len(byID))
 	}
 	for id, r := range byID {
-		if r.Verified != (id == "smoke/single") {
+		if r.Verified != strings.HasPrefix(id, "smoke/") {
 			t.Errorf("row %s verified=%v", id, r.Verified)
 		}
 	}
 	rel := byID["release/promql-prometheus-3.1.0/seed/20261110"]
-	mustContain(t, strings.Join(rel.Failures, "\n"), "obligations: 419 bound of 785, unbound 366", "cases: 1083 unrun (1272 matched of 2355 required)", "unresolved 1449")
+	mustContain(t, strings.Join(rel.Failures, "\n"), "obligations: 781 bound of 785, unbound 4", "cases: 12 unrun (2343 matched of 2355 required)", "unresolved 16")
 	if strings.Contains(strings.Join(rel.Failures, "\n"), "oracle observation") || strings.Contains(strings.Join(rel.Failures, "\n"), "provenance rejected") {
 		t.Errorf("the oracle was not run or provenance was rejected: %v", rel.Failures)
 	}
@@ -511,17 +520,17 @@ func TestCampaignReportsTheRealGateFaithfully(t *testing.T) {
 	}
 	c := campaignReport.Counts
 	// two release reports (one per seed): counts are summed over distinct reports.
-	if c.Unbound != 2*366 || c.Unrun != 2*1083 || c.Unresolved != 2*1449 || c.Skipped != 0 || c.Mismatches != 0 || c.NormalizationLoss != 0 || c.OracleUnavailable != 0 || c.ProvenanceRefused != 0 {
+	if c.Unbound != 2*4 || c.Unrun != 2*12 || c.Unresolved != 2*16 || c.Skipped != 0 || c.Mismatches != 0 || c.NormalizationLoss != 0 || c.OracleUnavailable != 0 || c.ProvenanceRefused != 0 {
 		t.Errorf("aggregate counts %+v", c)
 	}
-	mustContain(t, campaignErr.Error(), "TOTAL unbound 732, unrun 2166")
-	// smoke: single runs and passes every step and every requirement.
-	single := byID["smoke/single"]
-	if len(single.Failures) != 0 || !single.Verified {
-		t.Errorf("single smoke failures: %v", single.Failures)
+	mustContain(t, campaignErr.Error(), "TOTAL unbound 8, unrun 24")
+	// smoke: both layouts run and pass every step and every requirement.
+	for _, id := range []string{"smoke/single", "smoke/distributed"} {
+		if row := byID[id]; len(row.Failures) != 0 || !row.Verified {
+			t.Errorf("%s failures: %v", id, row.Failures)
+		}
 	}
-	mustContain(t, strings.Join(byID["smoke/distributed"].Failures, "\n"), "layout distributed did not run", "layout distributed recorded as not run", "distributed mode")
-	if c.FailingSteps != 0 || c.NotSatisfied != 1 || c.ModesNotRun != 1 {
+	if c.FailingSteps != 0 || c.NotSatisfied != 0 || c.ModesNotRun != 0 {
 		t.Errorf("failing steps %d not satisfied %d modes not run %d", c.FailingSteps, c.NotSatisfied, c.ModesNotRun)
 	}
 	// The report on disk equals what was returned.

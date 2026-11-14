@@ -13,7 +13,7 @@ func caseFile(name string) string {
 }
 
 func TestOwnedQuerySmokeRunsEveryStepOnARealNode(t *testing.T) {
-	steps, err := RunOwned(context.Background(), t.TempDir(), caseFile("owned-query-smoke.json"))
+	steps, err := RunOwned(context.Background(), Single, t.TempDir(), caseFile("owned-query-smoke.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,7 +26,7 @@ func TestOwnedQuerySmokeRunsEveryStepOnARealNode(t *testing.T) {
 }
 
 func TestPersistedPathAnswersAreIdenticalAtEveryStage(t *testing.T) {
-	res, err := RunPersisted(context.Background(), t.TempDir(), caseFile("persisted-path.json"))
+	res, err := RunPersisted(context.Background(), Single, t.TempDir(), caseFile("persisted-path.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestPersistedPathAnswersAreIdenticalAtEveryStage(t *testing.T) {
 }
 
 func TestRuleSmokeRunsEveryStepOnARealNodeWithRealControl(t *testing.T) {
-	steps, err := RunRules(context.Background(), t.TempDir(), caseFile("rule-smoke.json"))
+	steps, err := RunRules(context.Background(), Single, t.TempDir(), caseFile("rule-smoke.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestRuleSmokeRunsEveryStepOnARealNodeWithRealControl(t *testing.T) {
 }
 
 func TestLiveSmokeRunsEveryStepOnARealNode(t *testing.T) {
-	steps, notRun, err := RunLive(context.Background(), t.TempDir(), caseFile("live-smoke.json"))
+	steps, notRun, err := RunLive(context.Background(), Single, t.TempDir(), caseFile("live-smoke.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestLiveSmokeRunsEveryStepOnARealNode(t *testing.T) {
 }
 
 func TestProfileCrossProductsEachProfileKeepsItsOwnExpectation(t *testing.T) {
-	steps, err := RunCross(context.Background(), t.TempDir(), caseFile("profile-cross-products.json"))
+	steps, err := RunCross(context.Background(), Single, t.TempDir(), caseFile("profile-cross-products.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

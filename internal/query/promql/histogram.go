@@ -127,6 +127,11 @@ func histogramNativeFraction(lower, upper float64, h model.NativeHistogram, prof
 	lo, hi, population := 0.0, 0.0, 0.0
 	for _, bucket := range histogramObservationBuckets(h) {
 		population += bucket.count
+		if bucket.lower < 0 && bucket.upper > 0 {
+			// Custom buckets hold no negative observations: a bucket spanning
+			// zero extends only toward zero, like the zero bucket.
+			bucket.lower = 0
+		}
 		lo += float64(bucket.count * histogramBucketFraction(bucket, lower))
 		hi += float64(bucket.count * histogramBucketFraction(bucket, upper))
 	}
@@ -231,11 +236,17 @@ func histogramNativeVariance(h model.NativeHistogram, profileID string) float64 
 	buckets := histogramObservationBuckets(h)
 	terms := make([]float64, 0, len(buckets))
 	for _, bucket := range buckets {
+		if bucket.count == 0 {
+			continue
+		}
 		representative := (bucket.lower + bucket.upper) / 2
 		if profileID == "promql-prometheus-3.1.0" {
-			representative = math.Sqrt(bucket.lower * bucket.upper)
-			if bucket.upper < 0 {
-				representative = -representative
+			representative = 0
+			if !(bucket.lower <= 0 && bucket.upper >= 0) {
+				representative = math.Sqrt(bucket.lower * bucket.upper)
+				if bucket.upper < 0 {
+					representative = -representative
+				}
 			}
 		}
 		delta := representative - mean
@@ -518,7 +529,7 @@ func histogramBinaryProfile(op string, a, b value.Sample, p profile.Profile) (va
 			h, reason := histogramCombineForProfile(*a.Histogram, *b.Histogram, op == "-", p.ID)
 			var d []syntax.Diagnostic
 			if reason != "" {
-				if reason == "MixedExponentialCustomHistogramsWarning" {
+				if reason == "MixedExponentialCustomHistogramsWarning" && p.ID == "promql-prometheus-3.13.5" {
 					reason = "IncompatibleBucketLayoutInBinOpWarning"
 				}
 				if p.ID == "promql-prometheus-3.1.0" && reason == "MismatchedCustomBucketsHistogramsInfo" {
@@ -528,7 +539,10 @@ func histogramBinaryProfile(op string, a, b value.Sample, p profile.Profile) (va
 					d = append(d, functionDiagnostic(TypedExpr{}, reason))
 				}
 			}
-			return value.Sample{Time: a.Time, Histogram: &h}, h.Float != nil, d, nil
+			// A 3.13.5 explicit-reset plus explicit-not-reset pair cannot be
+			// reconciled in a binary operation: the element is omitted.
+			collided := reason == "HistogramCounterResetCollisionWarning" && p.ID == "promql-prometheus-3.13.5"
+			return value.Sample{Time: a.Time, Histogram: &h}, h.Float != nil && !collided, d, nil
 		default:
 			return incompatible()
 		}
@@ -542,11 +556,11 @@ func histogramBinaryProfile(op string, a, b value.Sample, p profile.Profile) (va
 		if h == nil {
 			return incompatible()
 		}
-		result := histogramScaleForProfile(*h, factor, p.ID)
+		result := value.CompactHistogramBuckets(histogramScaleForProfile(*h, factor, p.ID))
 		return value.Sample{Time: a.Time, Histogram: &result}, true, nil, nil
 	}
 	if op == "/" && a.Histogram != nil {
-		h := histogramDivideForProfile(*a.Histogram, functionFloat(b), p.ID)
+		h := value.CompactHistogramBuckets(histogramDivideForProfile(*a.Histogram, functionFloat(b), p.ID))
 		return value.Sample{Time: a.Time, Histogram: &h}, true, nil, nil
 	}
 	if (op == "</" || op == ">/") && a.Histogram != nil && b.Histogram == nil && p.ID == "promql-prometheus-3.13.5" {
@@ -554,6 +568,26 @@ func histogramBinaryProfile(op string, a, b value.Sample, p profile.Profile) (va
 		return value.Sample{Time: a.Time, Histogram: &h}, true, nil, nil
 	}
 	return incompatible()
+}
+
+// histogramWithoutExplicitResetHint returns h with an explicit reset or
+// not-reset hint set to unknown; gauge and unknown hints are kept. The input
+// is never mutated.
+func histogramWithoutExplicitResetHint(h *model.NativeHistogram) *model.NativeHistogram {
+	if h == nil {
+		return nil
+	}
+	if i := h.Integer; i != nil && (i.ResetHint == "reset" || i.ResetHint == "not_reset") {
+		clone := value.CloneHistogram(*h)
+		clone.Integer.ResetHint = "unknown"
+		return &clone
+	}
+	if f := h.Float; f != nil && (f.ResetHint == "reset" || f.ResetHint == "not_reset") {
+		clone := value.CloneHistogram(*h)
+		clone.Float.ResetHint = "unknown"
+		return &clone
+	}
+	return h
 }
 func histogramTrim(h model.NativeHistogram, bound float64, upper bool) model.NativeHistogram {
 	f := histogramView(h)
@@ -582,23 +616,16 @@ func histogramTrim(h model.NativeHistogram, bound float64, upper bool) model.Nat
 		}
 		return histogramTrimBucket(b, bound, upper, false)
 	}
-	for k, v := range positive {
-		n, s := trim(k, v, false)
-		if n != v {
-			changed = true
+	// Populations are accumulated zero bucket first, then positive buckets
+	// upward, then negative buckets from the smallest magnitude, so the
+	// recomputed sum never depends on map iteration order.
+	ordered := func(m map[int32]float64) []int32 {
+		keys := make([]int32, 0, len(m))
+		for k := range m {
+			keys = append(keys, k)
 		}
-		positive[k] = n
-		count += n
-		sum += s
-	}
-	for k, v := range negative {
-		n, s := trim(k, v, true)
-		if n != v {
-			changed = true
-		}
-		negative[k] = n
-		count += n
-		sum += s
+		sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+		return keys
 	}
 	zero := math.Float64frombits(uint64(f.ZeroCount))
 	if zero != 0 {
@@ -615,6 +642,26 @@ func histogramTrim(h model.NativeHistogram, bound float64, upper bool) model.Nat
 			changed = true
 		}
 		zero = n
+		count += n
+		sum += s
+	}
+	for _, k := range ordered(positive) {
+		v := positive[k]
+		n, s := trim(k, v, false)
+		if n != v {
+			changed = true
+		}
+		positive[k] = n
+		count += n
+		sum += s
+	}
+	for _, k := range ordered(negative) {
+		v := negative[k]
+		n, s := trim(k, v, true)
+		if n != v {
+			changed = true
+		}
+		negative[k] = n
 		count += n
 		sum += s
 	}
@@ -642,7 +689,7 @@ func histogramBucketRepresentative(b histogramObservationBucket) float64 {
 		return b.lower
 	}
 	if b.exponential {
-		mid := math.Sqrt(math.Abs(b.lower)) * math.Sqrt(math.Abs(b.upper))
+		mid := math.Sqrt(math.Abs(b.lower) * math.Abs(b.upper))
 		if b.upper < 0 {
 			return -mid
 		}

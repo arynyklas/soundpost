@@ -92,11 +92,9 @@ func (s *evaluationState) sampleBinary(n *Node, a, b value.Sample, at model.Unix
 	if a.Histogram != nil || b.Histogram != nil || n.Text == "</" || n.Text == ">/" {
 		p, keep, ds, e := histogramBinaryProfile(n.Text, a, b, s.plan.Profile)
 		for i := range ds {
-			ds[i].Range = n.OperatorRange
-			if ds[i].Category == "IncompatibleTypesInBinOpInfo" {
-				// The pinned engines anchor this annotation at the whole binary expression.
-				ds[i].Range = n.SourceRange()
-			}
+			// The pinned engines anchor every histogram binary-operator
+			// annotation at the whole binary expression.
+			ds[i].Range = n.SourceRange()
 		}
 		if n.Bool && comparison(n.Text) && e == nil && len(ds) == 0 {
 			p.Histogram = nil
@@ -197,6 +195,9 @@ func (s *evaluationState) binary(n *Node, a, b value.Result, at model.UnixNano) 
 			}
 		}
 	}
+	// 3.1.0 filters a comparison before it looks for repeated one-to-one matches.
+	legacyRepeat := s.plan.Profile.ID == "promql-prometheus-3.1.0"
+	matched := map[string]map[string]struct{}{}
 	emit := func(lhs, rhs value.Series) error {
 		if len(lhs.Samples) != 1 || len(rhs.Samples) != 1 {
 			return operatorError(n, "execution.invalid-vector", "invalid instant-vector sample count")
@@ -254,6 +255,25 @@ func (s *evaluationState) binary(n *Node, a, b value.Result, at model.UnixNano) 
 		if n.Bool && !modern && !delayed {
 			result.Labels = dropMetricSchemaLabels(result.Labels, s.plan.Profile)
 		}
+		// A repeated match is two RESULT samples of one match group: for one-to-one
+		// matching the group itself, for grouping modifiers identical output labels.
+		matchKey := matchingKey(lhs, n.Matching)
+		seen, exists := matched[matchKey]
+		if card == "" {
+			if exists {
+				return operatorError(n, "binary.matching-cardinality", "many-to-many or ambiguous vector matching is not allowed")
+			}
+			matched[matchKey] = nil
+		} else {
+			outputKey := value.LabelKey(result.Labels)
+			if !exists {
+				seen = map[string]struct{}{}
+				matched[matchKey] = seen
+			} else if _, duplicate := seen[outputKey]; duplicate {
+				return operatorError(n, "binary.matching-cardinality", "grouping labels must ensure unique matches")
+			}
+			seen[outputKey] = struct{}{}
+		}
 		out.Vector = append(out.Vector, result)
 		return nil
 	}
@@ -270,7 +290,7 @@ func (s *evaluationState) binary(n *Node, a, b value.Result, at model.UnixNano) 
 			}
 			continue
 		}
-		if len(matches) > 1 && card != "group_right" || len(left[key]) > 1 && card != "group_left" {
+		if len(matches) > 1 && card != "group_right" || len(left[key]) > 1 && card != "group_left" && !(legacyRepeat && card == "") {
 			return out, annotations, operatorError(n, "binary.matching-cardinality", "many-to-many or ambiguous vector matching is not allowed")
 		}
 		if card == "group_left" && len(matches) != 1 || card == "group_right" && len(left[key]) != 1 {

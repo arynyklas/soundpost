@@ -1,0 +1,26 @@
+# 11.15 logql worker: independent hand-authored tests for the LogQL parser/filter/mutation/ordering/temporal/binary/function/syntax/selector/primitive obligations
+./internal/query/logql TestReleaseLogQLParserStages
+./internal/query/logql TestReleaseLogQLFilterStages
+./internal/query/logql TestReleaseLogQLMutationStages
+./internal/query/logql TestReleaseLogQLLexicalAndUnwrapStages
+./internal/query/logql TestReleaseLogQLLineFilterHoistsOverDecolorize
+./internal/query/logql TestReleaseLogQLDropErrorLabelClearsDetails
+./internal/query/logql TestReleaseLogQLLabelFormatSnapshotIsTakenAtFirstTemplate
+./internal/query/logql TestReleaseLogQLSelectorsAndStructuredMetadata
+./internal/query/logql TestReleaseLogQLBinaryMatchingAndSetOperators
+./internal/query/logql TestReleaseLogQLVectorAndLabelReplace
+./internal/query/logql TestReleaseLogQLRangeWindowsAndTimeGrid
+./internal/query/logql TestReleaseLogQLFirstLastAndSampleIdentity
+./internal/query/logql TestReleaseLogQLLogOrderLimitAndInterval
+./internal/query/logql TestReleaseLogQLEntryMergeKeepsEncounterOrderOfTies
+./internal/query/logql TestReleaseLogQLEntryMergeTieBreaksByStreamHash
+./internal/query/logql TestReleaseLogQLEntryMergeInEnginePathOrdersTiesByLabels
+./internal/query/logql TestReleaseLogQLVariantsAndShardCapabilityDomain
+./internal/query/logql TestReleaseLogQLVariantsDisabledIsFeatureCategory
+./internal/query/logql TestReleaseLogQLApproxTopkParameterIsFunctionArguments
+./internal/query/logql TestReleaseLogQLTemplateCapabilities
+./internal/query/logql TestReleaseLogQLPrimitiveNumericAndStringSemantics
+./internal/query/logql TestReleaseLogQLPrimitiveRegexpEngineIdentity
+./internal/query/logql TestReleaseLogQLPrimitiveTemplateVersion
+./internal/query/logql TestReleaseLogQLPrimitiveTimeSemantics
+./internal/query/logql TestReleaseLogQLPrimitiveUnicodeEdition

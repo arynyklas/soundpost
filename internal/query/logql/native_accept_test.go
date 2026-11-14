@@ -109,10 +109,12 @@ func TestDuplicateAndOverlappingLabelsStayRejectedOutsideMatchingList(t *testing
 
 func TestDisabledCapabilitiesAreAcceptedBySyntaxAndRejectedAtPlanning(t *testing.T) {
 	p := testProfile(t)
-	for _, source := range []string{
-		`approx_topk(3,vector(1))`,
-		`variants(rate({app="api"}[2m]),count_over_time({app="api"}[2m])) of ({app="api"}[2m])`,
+	for _, tc := range []struct{ source, category string }{
+		{`approx_topk(3,vector(1))`, "type"},
+		// The pinned engine reports a disabled variants gate as a feature failure.
+		{`variants(rate({app="api"}[2m]),count_over_time({app="api"}[2m])) of ({app="api"}[2m])`, "feature"},
 	} {
+		source := tc.source
 		typed, err := parseCheck(t, source, p)
 		if err != nil || typed.Type != TypeVector {
 			t.Fatalf("native-accepted capability syntax: %s type=%s err=%v", source, typed.Type, err)
@@ -120,7 +122,7 @@ func TestDisabledCapabilitiesAreAcceptedBySyntaxAndRejectedAtPlanning(t *testing
 		// The tenant/config gate is still enforced before any plan exists.
 		_, err = BuildPlan(typed, value.Evaluation{Instant: true, Time: 2e9}, p)
 		var diagnostic *syntax.LanguageError
-		if !errors.As(err, &diagnostic) || diagnostic.Code != "function.feature-disabled" || diagnostic.Category != "type" {
+		if !errors.As(err, &diagnostic) || diagnostic.Code != "function.feature-disabled" || diagnostic.Category != tc.category {
 			t.Fatalf("disabled capability planned: %s %v", source, err)
 		}
 	}

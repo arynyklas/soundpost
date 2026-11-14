@@ -1,0 +1,15 @@
+# grammar partition (11.15): independent hand-authored expectations, internal/query/promql
+./internal/query/promql TestReleaseGrammarRuleTable
+./internal/query/promql TestReleaseGrammarDiagnosticStarts
+./internal/query/promql TestReleaseGrammarNumberLiterals
+./internal/query/promql TestReleaseGrammarCommentsAndNestedSigns
+./internal/query/promql TestReleaseGrammarKeywordsAndMetricNames
+./internal/query/promql TestReleaseGrammarAtModifierForms
+./internal/query/promql TestReleaseGrammarZeroNumericRange
+./internal/query/promql TestReleaseGrammarDurationExpressionFormat
+./internal/query/promql TestReleaseGrammarDurationLiteralsKeepTheirSpelling
+./internal/query/promql TestReleaseGrammarPrecedenceAndSignedValues
+./internal/query/promql TestReleaseGrammarStringEscapes
+./internal/query/promql TestReleaseGrammarUnknownFunctionKeepsTypeCategory
+./internal/query/promql TestReleaseGrammarDurationRuntime
+./internal/query/promql TestReleaseGrammarRegexAndLabelErrors

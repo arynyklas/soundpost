@@ -246,9 +246,8 @@ func observeOwnedEvaluation(ctx context.Context, c EvaluationCase, p profile.Pro
 		plan, e := promql.BuildPlan(typed, evaluation, p)
 		err = e
 		if err == nil {
-			if c.Lookback > 0 {
-				plan.Lookback = c.Lookback
-			}
+			// The per-query lookback is the engine's QueryOptions: <=0 inherits, >0 overrides.
+			plan = plan.WithQueryOptions(promql.QueryOptions{Lookback: c.Lookback})
 			if c.SubqueryStep > 0 {
 				plan.SubqueryStep = c.SubqueryStep
 			}

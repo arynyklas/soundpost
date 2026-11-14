@@ -205,9 +205,11 @@ func RunPipeline(ctx context.Context, plan PipelinePlan, record LogEntry, accoun
 				record.Line = line
 			}
 		case "label_format":
-			// All template assignments in one stage share the input label snapshot;
-			// renames mutate the builder and are not visible to sibling templates.
-			snapshot := combinedLabels(record)
+			// All template assignments in one stage share one label snapshot, taken
+			// when the first template is evaluated; renames mutate the builder at
+			// once, so only renames that precede that first template are visible.
+			var snapshot model.Labels
+			haveSnapshot := false
 			for i, a := range s.Assignments {
 				if a.Rename {
 					if v, ok := entryLabel(&record, a.Value); ok {
@@ -215,6 +217,9 @@ func RunPipeline(ctx context.Context, plan PipelinePlan, record LogEntry, accoun
 						record.set(a.Name, v)
 					}
 					continue
+				}
+				if !haveSnapshot {
+					snapshot, haveSnapshot = combinedLabels(record), true
 				}
 				text, e := c.templates[i].Execute(ctx, TemplateInput{Line: record.Line, Timestamp: record.Timestamp, Labels: snapshot, Fields: record.Fields}, account)
 				if e != nil {

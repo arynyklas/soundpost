@@ -46,13 +46,19 @@ func (s *evaluationState) selectionBounds(node *Node, window *Node, target int64
 		}
 	default:
 		width, e := durationNS(window.RangeExpr, window.RangeText, s.plan.Evaluation)
-		if e != nil || width <= 0 {
+		// 3.1.0 accepts the numeric range 0, where matrixIterSlice still returns a
+		// sample exactly at the right endpoint; 3.13.5 parses only positive ranges.
+		zero := width == 0 && s.plan.Profile.ID == "promql-prometheus-3.1.0"
+		if e != nil || width < 0 || width == 0 && !zero {
 			return b, timeError()
 		}
 		if b.left, err = checkedSub(target, width); err != nil {
 			return b, err
 		}
 		b.from = b.left
+		if zero {
+			b.from, err = checkedSub(b.left, 1)
+		}
 		switch window.Extension {
 		case "anchored":
 			b.from, err = checkedSub(b.left, s.plan.Lookback)
@@ -261,6 +267,14 @@ func (s *evaluationState) retain(series value.Series, picked []stamped, spare in
 		}
 		out[i] = sample
 	}
+	var loaded int64
+	for _, sample := range out {
+		loaded += SampleUnits(sample)
+	}
+	s.loaded += loaded
+	if e := s.reserveUnits(loaded + int64(spare)); e != nil {
+		return nil, e
+	}
 	return out, nil
 }
 
@@ -395,13 +409,17 @@ func (s *evaluationState) evalFunctionWindow(expr TypedExpr, at model.UnixNano) 
 	if e := s.account.Check(s.ctx); e != nil {
 		return value.Result{}, e
 	}
-	mark := s.reserved
+	mark, markUnits := s.reserved, s.units
 	n := expr.Expr.(*Node)
 	r, err := s.selectMetric(n.Children[0].(*Node), n, at, selectOptions{functionArg: true})
 	s.account.Release(s.reserved - mark)
 	s.reserved = mark
+	s.units = markUnits
 	if err == nil {
 		err = s.reserve(value.ResultBytes(r))
+	}
+	if err == nil {
+		err = s.reserveUnits(resultUnits(r))
 	}
 	return r, err
 }

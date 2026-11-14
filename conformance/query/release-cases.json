@@ -17,6 +17,61 @@
       "phase": "logql-metric"
     },
     {
+      "path": "cases/release-grammar-evaluation.json",
+      "language": "promql",
+      "phase": "evaluation"
+    },
+    {
+      "path": "cases/release-grammar-syntax.json",
+      "language": "promql",
+      "phase": "syntax"
+    },
+    {
+      "path": "cases/release-histogram.json",
+      "language": "promql",
+      "phase": "evaluation"
+    },
+    {
+      "path": "cases/release-logql-met.json",
+      "language": "logql",
+      "phase": "logql-metric"
+    },
+    {
+      "path": "cases/release-logql-pipe.json",
+      "language": "logql",
+      "phase": "pipeline"
+    },
+    {
+      "path": "cases/release-logql-syn.json",
+      "language": "logql",
+      "phase": "syntax"
+    },
+    {
+      "path": "cases/release-logql-tpl.json",
+      "language": "logql",
+      "phase": "logql-template"
+    },
+    {
+      "path": "cases/release-numeric-facts.json",
+      "language": "promql",
+      "phase": "evaluation"
+    },
+    {
+      "path": "cases/release-numeric-functions.json",
+      "language": "promql",
+      "phase": "evaluation"
+    },
+    {
+      "path": "cases/release-semantics-eval.json",
+      "language": "promql",
+      "phase": "evaluation"
+    },
+    {
+      "path": "cases/release-semantics-syntax.json",
+      "language": "promql",
+      "phase": "syntax"
+    },
+    {
       "path": "cases/logql-templates.json",
       "language": "logql",
       "phase": "logql-template"

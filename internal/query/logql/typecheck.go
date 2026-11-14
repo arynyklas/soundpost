@@ -84,7 +84,7 @@ func checkCapabilities(e Expr, p profile.Profile) error {
 		}
 	case *VariantsExpr:
 		if !enabled(p, "multi-variant-queries") {
-			return typeError(n, "multi-variant queries are disabled", "function.feature-disabled")
+			return languageErrorCode("function.feature-disabled", "feature", "multi-variant queries are disabled", n.Span())
 		}
 		for _, a := range n.Variants {
 			if err := checkCapabilities(a, p); err != nil {
@@ -248,7 +248,7 @@ func checkCall(n *CallExpr, p profile.Profile) (Type, error) {
 				return fail("grouping.unsupported", "approx_topk does not allow grouping")
 			}
 			if lit, ok := n.Args[0].(*LiteralExpr); ok && (lit.Value <= 0 || math.Trunc(lit.Value) != lit.Value) {
-				return fail("aggregate.parameter-invalid", "approx_topk requires positive integer")
+				return fail("function.arguments", "approx_topk requires positive integer")
 			}
 		}
 		return TypeVector, nil

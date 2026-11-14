@@ -9,6 +9,7 @@ import (
 	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/query/value"
 	"io"
+	"strconv"
 	"strings"
 )
 
@@ -32,6 +33,7 @@ type LogIterator = EntryIterator
 type orderedLog struct {
 	result     PipelineResult
 	streamHash uint64
+	labels     string
 }
 type orderedLogs struct {
 	rows       []orderedLog
@@ -79,7 +81,15 @@ func (i *orderedLogs) Next(ctx context.Context) (PipelineResult, error) {
 
 // MergeLogs accepts unsorted shard/page inputs. Equal text never identifies a
 // record. Multiplicity is conserved and a requested limit may split a run.
-func MergeLogs(ctx context.Context, inputs []EntryIterator, order LogOrder, limit uint64, account value.Account) (out LogIterator, err error) {
+// Timestamp ties between streams order by the original stream hash.
+func MergeLogs(ctx context.Context, inputs []EntryIterator, order LogOrder, limit uint64, account value.Account) (LogIterator, error) {
+	return mergeLogs(ctx, inputs, order, limit, account, true)
+}
+
+// mergeLogs orders timestamp ties between streams by original stream hash when
+// streamHash is set and otherwise, like the pinned engine whose readStreams loses
+// the hash, by the label string of the streams.
+func mergeLogs(ctx context.Context, inputs []EntryIterator, order LogOrder, limit uint64, account value.Account, streamHash bool) (out LogIterator, err error) {
 	defer func() { err = boundaryErr(err) }()
 	if ctx == nil || account == nil || order != Forward && order != Backward {
 		return nil, model.Fail(model.Invalid)
@@ -133,7 +143,10 @@ func MergeLogs(ctx context.Context, inputs []EntryIterator, order LogOrder, limi
 				r.Entry = cloneLogEntry(r.Entry)
 				r.Labels = value.CloneLabels(r.Labels)
 			}
-			scratch := int64(1024)
+			// Stream identity as the pinned engine compares it: the Prometheus
+			// label string {a="x", b="y"} of the query-visible labels.
+			labels := labelString(r.Labels)
+			scratch := int64(1024) + int64(len(labels))
 			for _, l := range r.OriginalStreamLabels {
 				scratch += int64(len(l.Name) + len(l.Value) + 2)
 			}
@@ -142,31 +155,44 @@ func MergeLogs(ctx context.Context, inputs []EntryIterator, order LogOrder, limi
 				return nil, err
 			}
 			m.indexBytes += scratch
-			hashBuffer = metricStreamHashBytes(hashBuffer, r.OriginalStreamLabels)
 			hash := uint64(0)
-			if len(r.OriginalStreamLabels) > 0 {
+			if streamHash && len(r.OriginalStreamLabels) > 0 {
+				hashBuffer = metricStreamHashBytes(hashBuffer, r.OriginalStreamLabels)
 				hash = metricXXH64(hashBuffer)
 			}
-			m.rows = append(m.rows, orderedLog{result: r, streamHash: hash})
+			m.rows = append(m.rows, orderedLog{result: r, streamHash: hash, labels: labels})
 		}
 		value.InheritMetadata(&m.metadata, value.Result{Watermarks: in.Watermarks(), Partial: in.Partial()})
 	}
 	if err = metricSort(m.rows, func(a, b int) bool {
-		left, right := m.rows[a], m.rows[b]
-		if left.result.Entry.Timestamp == right.result.Entry.Timestamp {
-			if left.streamHash != 0 && right.streamHash != 0 {
-				if left.streamHash != right.streamHash {
-					return left.streamHash < right.streamHash
-				}
-			} else if c := value.CompareLabels(left.result.Labels, right.result.Labels); c != 0 {
-				return c < 0
+		left, right := &m.rows[a], &m.rows[b]
+		lt, rt := left.result.Entry.Timestamp, right.result.Entry.Timestamp
+		if lt != rt {
+			if order == Backward {
+				return lt > rt
 			}
+			return lt < rt
 		}
-		c := compareLog(left.result, right.result)
-		if order == Backward {
-			return c > 0
+		// Equal timestamps: streams order by hash when both have one, else by label
+		// string, ascending in either direction.
+		if left.streamHash != 0 && right.streamHash != 0 {
+			if left.streamHash != right.streamHash {
+				return left.streamHash < right.streamHash
+			}
+			d := strings.Compare(left.labels, right.labels)
+			if order == Backward {
+				d = -d
+			}
+			if d != 0 {
+				return d < 0
+			}
+		} else if d := strings.Compare(left.labels, right.labels); d != 0 {
+			return d < 0
 		}
-		return c < 0
+		// Entries of one stream and timestamp keep the order they were encountered
+		// in (record identity order) whichever way time is traversed; text never
+		// orders them.
+		return compareLogEncounter(left.result, right.result) < 0
 	}, func() error { return account.Check(ctx) }); err != nil {
 		return nil, err
 	}
@@ -191,21 +217,30 @@ func MergeLogs(ctx context.Context, inputs []EntryIterator, order LogOrder, limi
 	m.rows = m.rows[:keep]
 	return m, nil
 }
-func compareLog(a, b PipelineResult) int {
-	if a.Entry.Timestamp < b.Entry.Timestamp {
-		return -1
+
+// labelString renders labels as Prometheus does: {name="value", name2="value2"}.
+func labelString(ls model.Labels) string {
+	var b strings.Builder
+	b.WriteByte('{')
+	for i, l := range ls {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteString(l.Name)
+		b.WriteByte('=')
+		b.WriteString(strconv.Quote(l.Value))
 	}
-	if a.Entry.Timestamp > b.Entry.Timestamp {
-		return 1
-	}
-	if c := value.CompareLabels(a.Labels, b.Labels); c != 0 {
-		return c
-	}
-	if c := strings.Compare(a.Entry.Line, b.Entry.Line); c != 0 {
-		return c
-	}
+	b.WriteByte('}')
+	return b.String()
+}
+
+// compareLogEncounter orders records of one stream and timestamp by identity.
+func compareLogEncounter(a, b PipelineResult) int {
 	if c := bytes.Compare(a.Entry.ID[:], b.Entry.ID[:]); c != 0 {
 		return c
 	}
-	return bytes.Compare(a.Entry.Source[:], b.Entry.Source[:])
+	if c := bytes.Compare(a.Entry.Source[:], b.Entry.Source[:]); c != 0 {
+		return c
+	}
+	return strings.Compare(a.Entry.Line, b.Entry.Line)
 }

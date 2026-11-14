@@ -98,15 +98,22 @@ type liveConn struct {
 }
 
 func (e *Env) openStream(who *Person, ticket, lastEventID string) *liveConn {
+	return e.openStreamAt(0, who, ticket, lastEventID)
+}
+
+// openStreamAt attaches an SSE stream to the live route of node (0 is the
+// primary node).
+func (e *Env) openStreamAt(node uint64, who *Person, ticket, lastEventID string) *liveConn {
 	ctx, cancel := context.WithCancel(e.ctx)
-	req, _ := http.NewRequestWithContext(ctx, "GET", e.server.URL+"/api/v1/live?ticket="+ticket, nil)
+	base, client := e.endpoint(node)
+	req, _ := http.NewRequestWithContext(ctx, "GET", base+"/api/v1/live?ticket="+ticket, nil)
 	req.Header.Set("Cookie", "__Host-soundpost="+who.Session.Token)
 	req.Header.Set("X-CSRF-Token", who.Session.CSRF)
-	req.Header.Set("Origin", e.server.URL)
+	req.Header.Set("Origin", base)
 	if lastEventID != "" {
 		req.Header.Set("Last-Event-ID", lastEventID)
 	}
-	resp, err := e.client.Do(req)
+	resp, err := client.Do(req)
 	c := &liveConn{cancel: cancel, events: make(chan sseEvent, 64), ended: make(chan struct{})}
 	if err != nil {
 		cancel()
@@ -173,12 +180,12 @@ func (c *liveConn) silent(window time.Duration) (sseEvent, bool) {
 
 // RunLive executes live-smoke.json against the production live service
 // (app.Live) behind the real HTTPS routes.
-func RunLive(ctx context.Context, dir, path string) (steps []StepResult, notRun []string, err error) {
+func RunLive(ctx context.Context, layout Layout, dir, path string) (steps []StepResult, notRun []string, err error) {
 	defer recoverFailure(&err)
 	var file liveFile
 	check(readJSON(path, &file))
 	checkf(file.Schema == "soundpost-live-smoke/1", "unknown schema %s", file.Schema)
-	env, err := NewEnv(ctx, dir)
+	env, err := NewEnv(ctx, layout, dir)
 	check(err)
 	defer env.Close()
 	for _, p := range file.Fixture.Projects {

@@ -1,0 +1,1365 @@
+{
+  "schema": "soundpost-authored-logql-cases-v1",
+  "copyright": "Copyright 2026 Aryn Yklas",
+  "license": "Apache-2.0",
+  "phases": [
+    "pipeline"
+  ],
+  "cases": [
+    {
+      "id": "logql-loki-3.5.2/decolorize/interaction",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"} | decolorize |= \"\\x1b[31merror\"",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "\u001b[31merror\u001b[0m: \u001b[1;32mok\u001b[0m done",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "error: ok done",
+        "labels_subset": [
+          {
+            "name": "app",
+            "value": "api"
+          }
+        ]
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/decolorize/positive",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"} | decolorize",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "\u001b[31merror\u001b[0m: \u001b[1;32mok\u001b[0m done",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "error: ok done",
+        "labels_subset": [
+          {
+            "name": "app",
+            "value": "api"
+          }
+        ]
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/drop-keep/interaction",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"} | json | drop __error__",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "not json",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "not json",
+        "labels_subset": [
+          {
+            "name": "app",
+            "value": "api"
+          }
+        ],
+        "absent_labels": [
+          "__error__",
+          "__error_details__"
+        ]
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/drop-keep/negative",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"} | logfmt | drop level=\"info\"",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "level=warn host=a",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "level=warn host=a",
+        "labels_subset": [
+          {
+            "name": "app",
+            "value": "api"
+          },
+          {
+            "name": "host",
+            "value": "a"
+          },
+          {
+            "name": "level",
+            "value": "warn"
+          }
+        ]
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/drop-keep/positive",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"} | logfmt | drop level, host=\"b\"",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "level=warn host=a msg=hi",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "level=warn host=a msg=hi",
+        "labels_subset": [
+          {
+            "name": "app",
+            "value": "api"
+          },
+          {
+            "name": "host",
+            "value": "a"
+          },
+          {
+            "name": "msg",
+            "value": "hi"
+          }
+        ],
+        "absent_labels": [
+          "level"
+        ]
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/ip/interaction",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"} | logfmt | addr = ip(\"10.0.0.1-10.0.0.9\")",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "addr=10.0.0.5 x=1",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "addr=10.0.0.5 x=1",
+        "labels_subset": [
+          {
+            "name": "addr",
+            "value": "10.0.0.5"
+          }
+        ]
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/ip/positive",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"} |= ip(\"192.168.0.0/16\")",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "conn from 192.168.4.7 ok",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "conn from 192.168.4.7 ok"
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/json/interaction",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"} | json first=\"items[0].name\", n=\"items[1].id\" | n >= 2",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "{\"items\":[{\"name\":\"x\"},{\"id\":3}]}",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "{\"items\":[{\"name\":\"x\"},{\"id\":3}]}",
+        "labels_subset": [
+          {
+            "name": "first",
+            "value": "x"
+          },
+          {
+            "name": "n",
+            "value": "3"
+          }
+        ]
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/json/negative",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"} | json",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "{bad json",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "{bad json",
+        "labels_subset": [
+          {
+            "name": "__error__",
+            "value": "JSONParserErr"
+          },
+          {
+            "name": "app",
+            "value": "api"
+          }
+        ]
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/json/positive",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"} | json",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "{\"user\":{\"name\":\"ann\",\"id\":7},\"ok\":true,\"app\":\"web\",\"tags\":[\"a\",\"b\"]}",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "{\"user\":{\"name\":\"ann\",\"id\":7},\"ok\":true,\"app\":\"web\",\"tags\":[\"a\",\"b\"]}",
+        "labels_subset": [
+          {
+            "name": "app",
+            "value": "api"
+          },
+          {
+            "name": "app_extracted",
+            "value": "web"
+          },
+          {
+            "name": "ok",
+            "value": "true"
+          },
+          {
+            "name": "user_id",
+            "value": "7"
+          },
+          {
+            "name": "user_name",
+            "value": "ann"
+          }
+        ],
+        "absent_labels": [
+          "tags"
+        ]
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/label-filter/interaction",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"} | json | status > 400 or app = \"api\"",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "{bad",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "{bad",
+        "labels_subset": [
+          {
+            "name": "__error__",
+            "value": "JSONParserErr"
+          },
+          {
+            "name": "app",
+            "value": "api"
+          }
+        ]
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/label-filter/negative",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"} | logfmt | status > 400",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "status=abc",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "status=abc",
+        "labels_subset": [
+          {
+            "name": "__error__",
+            "value": "LabelFilterErr"
+          },
+          {
+            "name": "status",
+            "value": "abc"
+          }
+        ]
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/label-filter/positive",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"} | logfmt | status >= 400 and method = \"GET\"",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "status=503 method=GET",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "status=503 method=GET",
+        "labels_subset": [
+          {
+            "name": "method",
+            "value": "GET"
+          },
+          {
+            "name": "status",
+            "value": "503"
+          }
+        ]
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/label-format/interaction",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"} | logfmt | label_format x=a, y=\"{{.a}}\"",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "a=1",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "a=1",
+        "labels_subset": [
+          {
+            "name": "x",
+            "value": "1"
+          },
+          {
+            "name": "y",
+            "value": ""
+          }
+        ],
+        "absent_labels": [
+          "a"
+        ]
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/label-format/positive",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"} | logfmt | label_format lvl=level | label_format msg=\"{{.lvl}}/{{.host}}\"",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "level=warn host=a",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "level=warn host=a",
+        "labels_subset": [
+          {
+            "name": "host",
+            "value": "a"
+          },
+          {
+            "name": "lvl",
+            "value": "warn"
+          },
+          {
+            "name": "msg",
+            "value": "warn/a"
+          }
+        ],
+        "absent_labels": [
+          "level"
+        ]
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/lexical/interaction",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"} |= `a\\tb`",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "a\\tb",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "a\\tb"
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/lexical/positive",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"} |= \"a\\tb\"",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "a\tb",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "a\tb"
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/line-filters/interaction",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"} |= \"GET\" or \"POST\" |> \"<_> /items <_>\"",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "POST /items 201",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "POST /items 201"
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/line-filters/positive",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"} |= \"GET\" != \"health\" |~ \"[0-9]{3}\"",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "GET /items 200",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "GET /items 200"
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/logfmt/interaction",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"} | logfmt --keep-empty lvl=\"level\", e=\"empty\"",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "level=warn empty= x=1",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "level=warn empty= x=1",
+        "labels_subset": [
+          {
+            "name": "e",
+            "value": ""
+          },
+          {
+            "name": "lvl",
+            "value": "warn"
+          }
+        ],
+        "absent_labels": [
+          "x"
+        ]
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/logfmt/negative",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"} | logfmt --strict",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "a=\"unterminated",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "a=\"unterminated",
+        "labels_subset": [
+          {
+            "name": "__error__",
+            "value": "LogfmtParserErr"
+          }
+        ]
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/logfmt/positive",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"} | logfmt",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "level=warn msg=\"hello world\" code=500 empty=",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "level=warn msg=\"hello world\" code=500 empty=",
+        "labels_subset": [
+          {
+            "name": "code",
+            "value": "500"
+          },
+          {
+            "name": "level",
+            "value": "warn"
+          },
+          {
+            "name": "msg",
+            "value": "hello world"
+          }
+        ],
+        "absent_labels": [
+          "empty"
+        ]
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/pattern/interaction",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"} | pattern \"<_> GET <path>\" | path = \"/a\"",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "xx GET /a",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "xx GET /a",
+        "labels_subset": [
+          {
+            "name": "path",
+            "value": "/a"
+          }
+        ]
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/pattern/negative",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"} | pattern \"GET <path>\"",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "x 1",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "x 1",
+        "labels_subset": [
+          {
+            "name": "app",
+            "value": "api"
+          }
+        ],
+        "absent_labels": [
+          "path"
+        ]
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/pattern/positive",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"} | pattern \"<ip> <_> <path> <status>\"",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "10.0.0.1 GET /index 200",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "10.0.0.1 GET /index 200",
+        "labels_subset": [
+          {
+            "name": "ip",
+            "value": "10.0.0.1"
+          },
+          {
+            "name": "path",
+            "value": "/index"
+          },
+          {
+            "name": "status",
+            "value": "200"
+          }
+        ]
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/pipeline-order/interaction",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"} | json | line_format \"got {{.a}}\" |= \"got 1\"",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "{\"a\":1}",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "got 1",
+        "labels_subset": [
+          {
+            "name": "a",
+            "value": "1"
+          }
+        ]
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/pipeline-order/negative",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"} | status = \"200\" | logfmt",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "ok status=200",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": false
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/pipeline-order/positive",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"} |= \"ok\" | logfmt | status = \"200\"",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "ok status=200",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "ok status=200",
+        "labels_subset": [
+          {
+            "name": "status",
+            "value": "200"
+          }
+        ]
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/regexp/interaction",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"} | regexp \"(?P<code>[0-9]+)\" | code = \"\"",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "nodigits",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "nodigits",
+        "labels_subset": [
+          {
+            "name": "app",
+            "value": "api"
+          }
+        ],
+        "absent_labels": [
+          "code"
+        ]
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/regexp/positive",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"} | regexp \"(?P<method>\\\\w+) (?P<path>/\\\\S+)\"",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "GET /items 200",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "GET /items 200",
+        "labels_subset": [
+          {
+            "name": "method",
+            "value": "GET"
+          },
+          {
+            "name": "path",
+            "value": "/items"
+          }
+        ]
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/structured-metadata/negative",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\", trace = \"abc\"}",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "hello",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [
+            {
+              "name": "trace",
+              "value": "abc"
+            }
+          ],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": false
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/structured-metadata/positive",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"} | trace = \"abc\"",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "hello",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [
+            {
+              "name": "trace",
+              "value": "abc"
+            }
+          ],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "hello",
+        "labels_subset": [
+          {
+            "name": "app",
+            "value": "api"
+          },
+          {
+            "name": "trace",
+            "value": "abc"
+          }
+        ]
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/unpack/interaction",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"} | unpack | json",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "{\"_entry\":\"{\\\"a\\\":\\\"1\\\"}\",\"stream\":\"x\"}",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "{\"a\":\"1\"}",
+        "labels_subset": [
+          {
+            "name": "a",
+            "value": "1"
+          },
+          {
+            "name": "stream",
+            "value": "x"
+          }
+        ]
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/unpack/negative",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"} | unpack",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "plain text",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "plain text",
+        "labels_subset": [
+          {
+            "name": "__error__",
+            "value": "JSONParserErr"
+          }
+        ]
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/unpack/positive",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"} | unpack",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "{\"_entry\":\"hello world\",\"region\":\"north\",\"code\":\"7\"}",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "hello world",
+        "labels_subset": [
+          {
+            "name": "code",
+            "value": "7"
+          },
+          {
+            "name": "region",
+            "value": "north"
+          }
+        ]
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/unwrap/positive",
+      "phase": "pipeline",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum_over_time({app=\"api\"} | logfmt | unwrap bytes(size) [1m])",
+        "entry": {
+          "timestamp_ns": "123",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "size=2KiB",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      },
+      "expected": {
+        "retained": true,
+        "line": "size=2KiB",
+        "labels_subset": [
+          {
+            "name": "app",
+            "value": "api"
+          }
+        ],
+        "unwrapped_bits": "40a0000000000000"
+      }
+    }
+  ]
+}

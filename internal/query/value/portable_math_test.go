@@ -57,20 +57,17 @@ func TestPortableMathAgainstStdlib(t *testing.T) {
 				t.Errorf("Log2(%x) = %x, math.Log2 = %x", math.Float64bits(x), math.Float64bits(got), math.Float64bits(want))
 			}
 		}
-		// amd64's assembly math.Log (and so math.Log10) returns wrong values for subnormal
-		// arguments (math.Log(5e-324) is -709.78, the true value is -744.44), unlike the pure Go
-		// algorithm and its ports, so there is nothing to agree with there; see
-		// TestPortableLogSubnormals.
-		if subnormal := x != 0 && math.Abs(x) < 0x1p-1022; !subnormal {
-			if got, want := Ln(x), math.Log(x); !sameBits(got, want) {
-				if bad++; bad <= 10 {
-					t.Errorf("Ln(%x) = %x, math.Log = %x", math.Float64bits(x), math.Float64bits(got), math.Float64bits(want))
-				}
+		// amd64's assembly math.Log (and so math.Log10) does not normalise a subnormal argument
+		// (math.Log(5e-324) is -709.09, the mathematical value is -744.44); Ln and Log10 reproduce
+		// that, see TestPortableLogSubnormals.
+		if got, want := Ln(x), math.Log(x); !sameBits(got, want) {
+			if bad++; bad <= 10 {
+				t.Errorf("Ln(%x) = %x, math.Log = %x", math.Float64bits(x), math.Float64bits(got), math.Float64bits(want))
 			}
-			if got, want := Log10(x), math.Log10(x); !sameBits(got, want) {
-				if bad++; bad <= 10 {
-					t.Errorf("Log10(%x) = %x, math.Log10 = %x", math.Float64bits(x), math.Float64bits(got), math.Float64bits(want))
-				}
+		}
+		if got, want := Log10(x), math.Log10(x); !sameBits(got, want) {
+			if bad++; bad <= 10 {
+				t.Errorf("Log10(%x) = %x, math.Log10 = %x", math.Float64bits(x), math.Float64bits(got), math.Float64bits(want))
 			}
 		}
 		if got, want := Exp2(x), math.Exp2(x); !sameBits(got, want) {
@@ -98,23 +95,27 @@ func TestPortableMathSpecialValues(t *testing.T) {
 	}
 }
 
-// TestPortableLogSubnormals: the portable Log is the pure Go algorithm, correct for subnormals, on
-// every architecture. The reference scales the argument into the normal range, where every
-// implementation agrees to within rounding.
+// TestPortableLogSubnormals: Ln and Log10 of a subnormal follow the pinned amd64 assembly (exponent
+// field read as 0, mantissa bits as the fraction of [0.5,1)), on every architecture; Log2 is
+// computed through the exported Frexp and stays the mathematical value. The Ln reference is
+// -1022*ln2 + ln(f1) with f1 = 0.5*(1+m/2^52), evaluated at normal arguments.
 func TestPortableLogSubnormals(t *testing.T) {
 	for _, x := range []float64{math.SmallestNonzeroFloat64, 3 * math.SmallestNonzeroFloat64, 0x1p-1050, 0x1p-1030, 1e-310, 2.2250738585072009e-308} {
-		scaled := x * 0x1p500
-		if got, want := Ln(x), math.Log(scaled)-500*math.Ln2; math.Abs(got-want) > 1e-9 {
-			t.Errorf("Ln(%v) = %v, want %v", x, got, want)
+		m := math.Float64bits(x)
+		f1 := 0.5 * (1 + float64(m)/(1<<52))
+		wantLn := -1022*math.Ln2 + math.Log(f1)
+		if got := Ln(x); math.Abs(got-wantLn) > 1e-9 {
+			t.Errorf("Ln(%v) = %v, want %v", x, got, wantLn)
 		}
-		if got, want := Log10(x), math.Log10(scaled)-500*math.Log10(2); math.Abs(got-want) > 1e-9 {
+		if got, want := Log10(x), wantLn/math.Ln10; math.Abs(got-want) > 1e-9 {
 			t.Errorf("Log10(%v) = %v, want %v", x, got, want)
 		}
+		scaled := x * 0x1p500
 		if got, want := Log2(x), math.Log2(scaled)-500; math.Abs(got-want) > 1e-9 {
 			t.Errorf("Log2(%v) = %v, want %v", x, got, want)
 		}
 	}
-	if got := Ln(math.SmallestNonzeroFloat64); math.Abs(got+744.4400719213812) > 1e-9 {
-		t.Errorf("Ln(smallest subnormal) = %v, want -744.4400719213812", got)
+	if got := Ln(math.SmallestNonzeroFloat64); got > -709 || got < -710 {
+		t.Errorf("Ln(smallest subnormal) = %v, want about -709.09 (not the mathematical -744.44)", got)
 	}
 }

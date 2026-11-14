@@ -11,10 +11,15 @@ import (
 )
 
 type Plan struct {
-	Expr                    TypedExpr
-	Evaluation              value.Evaluation
-	Profile                 profile.Profile
-	Lookback, SubqueryStep  int64
+	Expr                   TypedExpr
+	Evaluation             value.Evaluation
+	Profile                profile.Profile
+	Lookback, SubqueryStep int64
+	// MaxSamples is query.max-samples in sample units (see SampleUnits); it applies
+	// to plans made by BuildPlan.
+	MaxSamples              int64
+	Stats                   *QueryStatistics
+	budgeted, perStepStats  bool
 	Functions, Aggregations map[string]FunctionEvaluator
 }
 
@@ -46,9 +51,15 @@ func BuildPlan(expr TypedExpr, evaluation value.Evaluation, p profile.Profile) (
 			if err != nil || n < 0 || name == "default_subquery_step_ns" && n == 0 {
 				return out, timeError()
 			}
-			*dst = n
+			if name != "lookback_delta_ns" || n != 0 { // engine lookback 0 falls back to the 5m default
+				*dst = n
+			}
 		}
 	}
+	if err := validateEngineOptions(out.Expr.Expr, p, evaluation); err != nil {
+		return out, err
+	}
+	out.MaxSamples, out.budgeted = engineMaxSamples(p), true
 	out.Functions, out.Aggregations = functionEvaluators(out.Profile)
 	return out, nil
 }

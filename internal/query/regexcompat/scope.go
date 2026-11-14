@@ -145,6 +145,9 @@ func (s *Scope) MatchString(ctx context.Context, re *Regexp, input string) (bool
 	if err := s.admit(ctx, re, input, 1); err != nil {
 		return false, err
 	}
+	if re.fold != nil {
+		return re.fold.match(input), nil
+	}
 	matches, err := re.engine.ExecuteContext(ctx, input, 0, 0)
 	return matches != nil, err
 }

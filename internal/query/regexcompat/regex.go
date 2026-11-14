@@ -75,6 +75,7 @@ type Regexp struct {
 	owner   *Scope
 	pattern string
 	units   uint64
+	fold    *foldQuirk // 3.1.0 selector fast path, see foldQuirk
 }
 
 func Compile(p profile.Profile, pattern string) (*Regexp, error) { return compile(p, pattern, Search) }
@@ -91,6 +92,7 @@ func compile(p profile.Profile, pattern string, mode Mode) (*Regexp, error) {
 		return nil, errors.New("invalid regex matching mode")
 	}
 	var impl engine
+	var fold *foldQuirk
 	switch e {
 	case 1:
 		if mode == Label {
@@ -98,7 +100,9 @@ func compile(p profile.Profile, pattern string, mode Mode) (*Regexp, error) {
 			if err != nil {
 				return nil, err
 			}
-			pattern = "^(?s:" + tree.Simplify().String() + ")$"
+			simplified := tree.Simplify()
+			fold = foldQuirkFor(simplified)
+			pattern = "^(?s:" + simplified.String() + ")$"
 		}
 		impl, err = re123.Compile(pattern)
 	case 2:
@@ -123,10 +127,15 @@ func compile(p profile.Profile, pattern string, mode Mode) (*Regexp, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Regexp{engine: impl, pattern: original, units: impl.ProgramSize()}, nil
+	return &Regexp{engine: impl, pattern: original, units: impl.ProgramSize(), fold: fold}, nil
 }
-func (r *Regexp) String() string                         { return r.pattern }
-func (r *Regexp) MatchString(s string) bool              { return r.engine.MatchString(s) }
+func (r *Regexp) String() string { return r.pattern }
+func (r *Regexp) MatchString(s string) bool {
+	if r.fold != nil {
+		return r.fold.match(s)
+	}
+	return r.engine.MatchString(s)
+}
 func (r *Regexp) FindStringSubmatchIndex(s string) []int { return r.engine.FindStringSubmatchIndex(s) }
 func (r *Regexp) FindAllStringSubmatchIndex(s string, n int) [][]int {
 	return r.engine.FindAllStringSubmatchIndex(s, n)

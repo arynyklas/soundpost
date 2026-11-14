@@ -62,12 +62,12 @@ func featureSetFor(profileID string, enabled []string) (string, error) {
 
 // RunCross executes profile-cross-products.json: every query under each exact
 // profile with its own expectation, hot / flushed / compacted / restarted.
-func RunCross(ctx context.Context, dir, path string) (steps []StepResult, err error) {
+func RunCross(ctx context.Context, layout Layout, dir, path string) (steps []StepResult, err error) {
 	defer recoverFailure(&err)
 	var file crossFile
 	check(readJSON(path, &file))
 	checkf(file.Schema == "soundpost-profile-cross-products/1", "unknown schema %s", file.Schema)
-	env, err := NewEnv(ctx, dir)
+	env, err := NewEnv(ctx, layout, dir)
 	check(err)
 	defer env.Close()
 	file.Fixture.Load(env)

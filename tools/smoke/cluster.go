@@ -5,22 +5,15 @@ package main
 import (
 	"bufio"
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
-	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/json"
-	"encoding/pem"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"math"
-	"math/big"
-	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -28,7 +21,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -38,6 +30,7 @@ import (
 	"github.com/arynyklas/soundpost/internal/httpapi"
 	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/replica"
+	"github.com/arynyklas/soundpost/internal/smokecluster"
 	"github.com/arynyklas/soundpost/internal/storage"
 )
 
@@ -274,154 +267,6 @@ func (p *clusterProcess) command(c clusterCommand) (clusterAnswer, error) {
 	}
 }
 
-type relayLink struct {
-	source, target     uint64
-	incoming, outgoing net.Conn
-}
-type clusterRelays struct {
-	mu        sync.Mutex
-	blocked   map[uint64]bool
-	links     map[*relayLink]bool
-	ips       map[string]uint64
-	listeners map[uint64]net.Listener
-	targets   map[uint64]string
-	done      bool
-}
-
-// newClusterRelays opens one relay listener per node id and holds it for the
-// life of the scenario. Members dial these relay addresses, never the nodes'
-// own listeners, so a node can be killed, partitioned and replaced while every
-// address in the membership stays valid. Each node's real listen address is
-// attached later with retarget.
-func newClusterRelays(ids ...uint64) (*clusterRelays, error) {
-	r := &clusterRelays{blocked: map[uint64]bool{}, links: map[*relayLink]bool{}, ips: map[string]uint64{}, listeners: map[uint64]net.Listener{}, targets: map[uint64]string{}}
-	for _, id := range ids {
-		r.ips["127.0.0."+strconv.FormatUint(id+10, 10)] = id
-		listener, err := net.Listen("tcp", "127.0.0.1:0")
-		if err != nil {
-			r.close()
-			return nil, err
-		}
-		r.listeners[id] = listener
-		go r.accept(id, listener)
-	}
-	return r, nil
-}
-
-// retarget points a node's relay at the address that node will listen on.
-func (r *clusterRelays) retarget(id uint64, address string) {
-	r.mu.Lock()
-	r.targets[id] = address
-	r.mu.Unlock()
-}
-func (r *clusterRelays) accept(target uint64, listener net.Listener) {
-	for {
-		incoming, err := listener.Accept()
-		if err != nil {
-			return
-		}
-		host, _, _ := net.SplitHostPort(incoming.RemoteAddr().String())
-		r.mu.Lock()
-		source := r.ips[host]
-		blocked := r.done || source == 0 || r.blocked[source] || r.blocked[target]
-		destination := r.targets[target]
-		r.mu.Unlock()
-		if blocked {
-			incoming.Close()
-			continue
-		}
-		outgoing, err := net.DialTimeout("tcp", destination, time.Second)
-		if err != nil {
-			incoming.Close()
-			continue
-		}
-		link := &relayLink{source: source, target: target, incoming: incoming, outgoing: outgoing}
-		r.mu.Lock()
-		if r.done || r.blocked[source] || r.blocked[target] {
-			r.mu.Unlock()
-			incoming.Close()
-			outgoing.Close()
-			continue
-		}
-		r.links[link] = true
-		r.mu.Unlock()
-		go func() {
-			defer func() { incoming.Close(); outgoing.Close(); r.mu.Lock(); delete(r.links, link); r.mu.Unlock() }()
-			copied := make(chan struct{}, 1)
-			go func() { _, _ = io.Copy(outgoing, incoming); copied <- struct{}{} }()
-			_, _ = io.Copy(incoming, outgoing)
-			outgoing.Close()
-			incoming.Close()
-			<-copied
-		}()
-	}
-}
-func (r *clusterRelays) partition(id uint64, blocked bool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.blocked[id] = blocked
-	if blocked {
-		for link := range r.links {
-			if link.source == id || link.target == id {
-				link.incoming.Close()
-				link.outgoing.Close()
-			}
-		}
-	}
-}
-func (r *clusterRelays) close() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.done = true
-	for _, listener := range r.listeners {
-		listener.Close()
-	}
-	for link := range r.links {
-		link.incoming.Close()
-		link.outgoing.Close()
-	}
-}
-
-// reserveClusterAddresses picks n distinct loopback ports. Every listener stays
-// bound until all n are chosen, so the addresses cannot repeat one another or
-// any relay listener (those are held open for the whole scenario). The caller
-// should start the owning process immediately: between this release and that
-// process binding, another process on the machine could take the port, which is
-// why a node is assigned its address right before it starts rather than at
-// scenario start. A node that finds its port taken reports address_in_use.
-func reserveClusterAddresses(n int) ([]string, error) {
-	held := make([]net.Listener, 0, n)
-	defer func() {
-		for _, listener := range held {
-			listener.Close()
-		}
-	}()
-	addresses := make([]string, 0, n)
-	for range n {
-		listener, err := net.Listen("tcp", "127.0.0.1:0")
-		if err != nil {
-			return nil, err
-		}
-		held = append(held, listener)
-		addresses = append(addresses, listener.Addr().String())
-	}
-	return addresses, nil
-}
-
-// assignClusterPeers gives each node a fresh listen address and points its relay
-// at it. targets is the address table the node configurations are built from.
-func assignClusterPeers(relays *clusterRelays, targets map[uint64]string, nodes ...uint64) error {
-	addresses, err := reserveClusterAddresses(len(nodes))
-	if err != nil {
-		return err
-	}
-	for i, node := range nodes {
-		targets[node] = addresses[i]
-		relays.retarget(node, addresses[i])
-	}
-	return nil
-}
-
 // clusterChildFailureCode names a refused peer port precisely: the generic
 // classification reports every network error as "transport".
 func clusterChildFailureCode(err error) string {
@@ -429,49 +274,6 @@ func clusterChildFailureCode(err error) string {
 		return "address_in_use"
 	}
 	return classifySmokeError(err)
-}
-func clusterCertificates(dir string) (string, map[uint64][2]string, error) {
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		return "", nil, err
-	}
-	now := time.Now()
-	authority := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "Soundpost private smoke CA"}, NotBefore: now.Add(-time.Minute), NotAfter: now.Add(time.Hour), IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature}
-	der, err := x509.CreateCertificate(rand.Reader, authority, authority, &key.PublicKey, key)
-	if err != nil {
-		return "", nil, err
-	}
-	ca := filepath.Join(dir, "ca.pem")
-	if err = os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0600); err != nil {
-		return "", nil, err
-	}
-	pairs := map[uint64][2]string{}
-	for id := uint64(1); id <= 4; id++ {
-		private, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-		if err != nil {
-			return "", nil, err
-		}
-		identity, _ := url.Parse("spiffe://soundpost/node/node-" + strconv.FormatUint(id, 10))
-		certificate := &x509.Certificate{SerialNumber: big.NewInt(int64(id + 1)), Subject: pkix.Name{CommonName: "generic fixture node"}, NotBefore: now.Add(-time.Minute), NotAfter: now.Add(time.Hour), DNSNames: []string{"localhost"}, IPAddresses: []net.IP{net.ParseIP("127.0.0.1")}, URIs: []*url.URL{identity}, KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth}}
-		bytes, err := x509.CreateCertificate(rand.Reader, certificate, authority, &private.PublicKey, key)
-		if err != nil {
-			return "", nil, err
-		}
-		encoded, err := x509.MarshalPKCS8PrivateKey(private)
-		if err != nil {
-			return "", nil, err
-		}
-		certPath := filepath.Join(dir, fmt.Sprintf("node-%d.pem", id))
-		keyPath := filepath.Join(dir, fmt.Sprintf("node-%d.key", id))
-		if err = os.WriteFile(certPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: bytes}), 0600); err != nil {
-			return "", nil, err
-		}
-		if err = os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: encoded}), 0600); err != nil {
-			return "", nil, err
-		}
-		pairs[id] = [2]string{certPath, keyPath}
-	}
-	return ca, pairs, nil
 }
 
 type clusterFixture struct {
@@ -733,22 +535,22 @@ func runQuorumScenario(root string, lost uint64) (evidence quorumScenarioEvidenc
 	if err != nil {
 		return evidence, err
 	}
-	ca, pairs, err := clusterCertificates(root)
+	ca, pairs, err := smokecluster.Certificates(root)
 	if err != nil {
 		return evidence, err
 	}
-	relays, err := newClusterRelays(1, 2, 3, 4)
+	relays, err := smokecluster.NewRelays(1, 2, 3, 4)
 	if err != nil {
 		return evidence, err
 	}
-	defer relays.close()
+	defer relays.Close()
 	targets := map[uint64]string{}
-	if err = assignClusterPeers(relays, targets, 1, 2, 3); err != nil {
+	if err = smokecluster.AssignPeers(relays, targets, 1, 2, 3); err != nil {
 		return evidence, err
 	}
 	members := replica.Members{Revision: 1}
 	for node := uint64(1); node <= 3; node++ {
-		members.Nodes = append(members.Nodes, replica.Member{ID: node, Address: "https://" + relays.listeners[node].Addr().String(), NodeIdentity: fmt.Sprintf("node-%d", node), FailureDomain: fmt.Sprintf("local-process-directory-%d", node)})
+		members.Nodes = append(members.Nodes, replica.Member{ID: node, Address: "https://" + relays.Address(node), NodeIdentity: fmt.Sprintf("node-%d", node), FailureDomain: fmt.Sprintf("local-process-directory-%d", node)})
 	}
 	processes := map[uint64]*clusterProcess{}
 	all := []*clusterProcess{}
@@ -813,7 +615,7 @@ func runQuorumScenario(root string, lost uint64) (evidence quorumScenarioEvidenc
 	if err != nil || !fenceAnswer.OK || fenceAnswer.Fence == nil {
 		return evidence, errors.New("worker fence unavailable")
 	}
-	relays.partition(lost, true)
+	relays.Partition(lost, true)
 	majority := map[uint64]*clusterProcess{}
 	for node, process := range processes {
 		if node != lost {
@@ -842,7 +644,7 @@ func runQuorumScenario(root string, lost uint64) (evidence quorumScenarioEvidenc
 		return evidence, errors.New("partitioned worker fence accepted")
 	}
 	evidence.StaleWorkerDenied = true
-	relays.partition(lost, false)
+	relays.Partition(lost, false)
 	stage = "quorum_heal_original_values"
 	if err = verifyClusterValues(survivor, fixture, values); err != nil {
 		return evidence, err
@@ -864,7 +666,7 @@ func runQuorumScenario(root string, lost uint64) (evidence quorumScenarioEvidenc
 	evidence.ObservedControlLeaderLoss = true
 	evidence.ObservedStorageLeaderLoss = true
 	stage = "quorum_remove_leader_and_disk"
-	relays.partition(lost, true)
+	relays.Partition(lost, true)
 	if err = processes[lost].child.kill(); err != nil {
 		return evidence, err
 	}
@@ -884,12 +686,12 @@ func runQuorumScenario(root string, lost uint64) (evidence quorumScenarioEvidenc
 	stage = "quorum_add_replacement_learner"
 	learnerMembers := members
 	learnerMembers.Revision = 2
-	learnerMembers.Nodes = append(append([]replica.Member(nil), members.Nodes...), replica.Member{ID: 4, Address: "https://" + relays.listeners[4].Addr().String(), NodeIdentity: "node-4", FailureDomain: "local-process-directory-4", Learner: true})
+	learnerMembers.Nodes = append(append([]replica.Member(nil), members.Nodes...), replica.Member{ID: 4, Address: "https://" + relays.Address(4), NodeIdentity: "node-4", FailureDomain: "local-process-directory-4", Learner: true})
 	if err = changeClusterMembership(processes, statuses, learnerMembers); err != nil {
 		return evidence, err
 	}
 	stage = "quorum_start_replacement_learner"
-	if err = assignClusterPeers(relays, targets, 4); err != nil {
+	if err = smokecluster.AssignPeers(relays, targets, 4); err != nil {
 		return evidence, err
 	}
 	config, err := configFor(4, learnerMembers)

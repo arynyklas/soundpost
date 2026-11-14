@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/arynyklas/soundpost/internal/appcore"
 	"github.com/arynyklas/soundpost/internal/auth"
 	q "github.com/arynyklas/soundpost/internal/conformance/query"
 	"github.com/arynyklas/soundpost/internal/model"
@@ -54,9 +55,18 @@ type storedRow struct {
 }
 
 func (e *Env) scanMetrics(project string) []storedRow {
-	scope, err := e.app.Auth.Authorize(e.ctx, e.owner.Cred, e.org, []model.ID{e.Projects[project]}, auth.Read)
+	return e.scanMetricsOn(e.app, project, nil)
+}
+
+// scanMetricsOn is a raw owner scan of one project on the given node. min
+// fences the scan on acknowledged receipt cursors: a node that has not applied
+// them answers with an error, never with an apparently complete shorter result.
+func (e *Env) scanMetricsOn(app *appcore.App, project string, min []model.Cursor) []storedRow {
+	cred, err := app.Auth.Authenticate(e.ctx, e.owner.Session.Token)
 	check(err)
-	rows, err := e.app.Storage.Scan(e.ctx, scope, storage.ScanRequest{Projects: []model.ID{e.Projects[project]}, Signal: model.Metric, Start: math.MinInt64, End: math.MaxInt64})
+	scope, err := app.Auth.Authorize(e.ctx, cred, e.org, []model.ID{e.Projects[project]}, auth.Read)
+	check(err)
+	rows, err := app.Storage.Scan(e.ctx, scope, storage.ScanRequest{Projects: []model.ID{e.Projects[project]}, Signal: model.Metric, Start: math.MinInt64, End: math.MaxInt64, Fence: storage.ReadFence{Min: min}})
 	check(err)
 	defer rows.Close()
 	var out []storedRow
@@ -139,12 +149,12 @@ type PersistedResult struct {
 // hot, after a flush, with several segments, after a compaction, after a
 // restart and after a restart following compaction; admission receipts and
 // the stored distinct samples must reconcile with what was sent at each stage.
-func RunPersisted(ctx context.Context, dir, path string) (res PersistedResult, err error) {
+func RunPersisted(ctx context.Context, layout Layout, dir, path string) (res PersistedResult, err error) {
 	defer recoverFailure(&err)
 	var file persistedFile
 	check(readJSON(path, &file))
 	checkf(file.Schema == "soundpost-persisted-path/1", "unknown schema %s", file.Schema)
-	env, err := NewEnv(ctx, dir)
+	env, err := NewEnv(ctx, layout, dir)
 	check(err)
 	defer env.Close()
 	// The owner needs read on both projects to reconcile raw scans.
@@ -249,7 +259,7 @@ func RunPersisted(ctx context.Context, dir, path string) (res PersistedResult, e
 		sort.Slice(normalized, func(i, j int) bool { return canonicalKey(normalized[i]) < canonicalKey(normalized[j]) })
 		src := append([]q.InputRecord(nil), authored...)
 		sort.Slice(src, func(i, j int) bool { return canonicalKey(src[i]) < canonicalKey(src[j]) })
-		res.Normalization = append(res.Normalization, q.NormalizationCheck{ID: "persisted-path/" + stage, Profile: "promql-prometheus-3.13.5", Source: src, Normalized: normalized})
+		res.Normalization = append(res.Normalization, q.NormalizationCheck{ID: normalizationID(layout, stage), Profile: "promql-prometheus-3.13.5", Source: src, Normalized: normalized})
 		res.Persistence = append(res.Persistence, q.ScenarioOutcome{Name: stage + "-queries", Passed: failures == 0})
 		res.Persistence = append(res.Persistence, q.ScenarioOutcome{Name: stage + "-manifest", Passed: manifestOK})
 	}
@@ -308,6 +318,16 @@ func RunPersisted(ctx context.Context, dir, path string) (res PersistedResult, e
 		q.ScenarioOutcome{Name: "receipt-manifest-reconciles", Passed: pass("hot-manifest", "flush-manifest", "multi-segment-manifest", "compaction-manifest", "restart-manifest", "restart-after-compaction-manifest", "after-conflict-manifest")},
 	)
 	return res, nil
+}
+
+// normalizationID names one stage's input check. The single layout keeps the
+// identifiers the pinned release input digest was computed over; another layout
+// is namespaced so its checks never alias them.
+func normalizationID(layout Layout, stage string) string {
+	if layout == Single {
+		return "persisted-path/" + stage
+	}
+	return "persisted-path/" + string(layout) + "/" + stage
 }
 
 func inputOf(e *Env, p point) q.InputRecord {

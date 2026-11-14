@@ -78,6 +78,8 @@ type rangePoint struct {
 	v  float64
 	n  uint64
 	id model.ID
+	// hash is the original stream hash; samples with equal timestamps merge by it.
+	hash uint64
 }
 type rangeGroup struct {
 	labels model.Labels
@@ -142,6 +144,7 @@ func EvaluateRange(ctx context.Context, p RangePlan, input EntryIterator, frame 
 		}
 	}
 	groups := map[string]*rangeGroup{}
+	var hashBuffer []byte
 	anyEntry := false
 	for {
 		if e = a.Check(ctx); e != nil {
@@ -213,7 +216,12 @@ func EvaluateRange(ctx context.Context, p RangePlan, input EntryIterator, frame 
 		} else if p.Function == "bytes_rate" || p.Function == "bytes_over_time" {
 			v = float64(len(r.Entry.Line))
 		}
-		g.points = append(g.points, rangePoint{r.Entry.Timestamp, v, uint64(r.Entry.Multiplicity), r.Entry.ID})
+		hash := uint64(0)
+		if len(r.OriginalStreamLabels) > 0 {
+			hashBuffer = metricStreamHashBytes(hashBuffer, r.OriginalStreamLabels)
+			hash = metricXXH64(hashBuffer)
+		}
+		g.points = append(g.points, rangePoint{at: r.Entry.Timestamp, v: v, n: uint64(r.Entry.Multiplicity), id: r.Entry.ID, hash: hash})
 		a.Release(r.Bytes)
 		a.Release(scratch)
 		held -= scratch
@@ -238,7 +246,15 @@ func EvaluateRange(ctx context.Context, p RangePlan, input EntryIterator, frame 
 			return result, e
 		}
 		g := groups[k]
-		if e = metricSort(g.points, func(i, j int) bool { return g.points[i].at < g.points[j].at }, check); e != nil {
+		// Samples merge by timestamp, then by ascending stream hash when both have one;
+		// the sort is stable, so equal-stream equal-time samples keep their encounter order.
+		if e = metricSort(g.points, func(i, j int) bool {
+			a, b := g.points[i], g.points[j]
+			if a.at != b.at {
+				return a.at < b.at
+			}
+			return a.hash != 0 && b.hash != 0 && a.hash < b.hash
+		}, check); e != nil {
 			return result, e
 		}
 		v, ok, e := rangeStatistic(p.Function, g.points, p.Parameter, left, right, p.Range.Interval, budget, check)

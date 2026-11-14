@@ -195,15 +195,15 @@ func (e *Env) perProjectBits(raw []byte) map[string]string {
 	return out
 }
 
-// RunOwned executes owned-query-smoke.json on a fresh node. Language steps run
-// once per applicable pinned PromQL profile; steps are expectations authored
-// from the fixture (never from an upstream engine).
-func RunOwned(ctx context.Context, dir, path string) (steps []StepResult, err error) {
+// RunOwned executes owned-query-smoke.json on a fresh installation. Language
+// steps run once per applicable pinned PromQL profile; steps are expectations
+// authored from the fixture (never from an upstream engine).
+func RunOwned(ctx context.Context, layout Layout, dir, path string) (steps []StepResult, err error) {
 	defer recoverFailure(&err)
 	var file ownedFile
 	check(readJSON(path, &file))
 	checkf(file.Schema == "soundpost-owned-query-smoke/1", "unknown schema %s", file.Schema)
-	env, err := NewEnv(ctx, dir)
+	env, err := NewEnv(ctx, layout, dir)
 	check(err)
 	defer env.Close()
 	receipts := file.Fixture.Load(env)

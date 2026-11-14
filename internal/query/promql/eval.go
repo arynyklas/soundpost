@@ -10,17 +10,24 @@ import (
 	"github.com/arynyklas/soundpost/internal/query/scan"
 	"github.com/arynyklas/soundpost/internal/query/syntax"
 	"github.com/arynyklas/soundpost/internal/query/value"
+	"sort"
 )
 
 type evaluationState struct {
-	ctx         context.Context
-	plan        Plan
-	src         scan.MetricSource
-	account     value.Account
-	reserved    int64
-	annotations []syntax.Diagnostic
-	metadata    value.Result
-	regexScope  *regexcompat.Scope
+	ctx      context.Context
+	plan     Plan
+	src      scan.MetricSource
+	account  value.Account
+	reserved int64
+	// units are the retained sample units (see SampleUnits), peakUnits their peak, and
+	// loaded the units selectors loaded since the last evaluation step was recorded.
+	units, peakUnits, loaded int64
+	annotations              []syntax.Diagnostic
+	metadata                 value.Result
+	regexScope               *regexcompat.Scope
+	// gridStart is the first evaluation time of the grid being evaluated (the query grid or the
+	// enclosing subquery's grid). The 3.1.0 aggregation parameter is evaluated once, at this time.
+	gridStart model.UnixNano
 }
 
 func (s *evaluationState) reserve(n int64) error {
@@ -46,8 +53,14 @@ func Evaluate(ctx context.Context, plan Plan, src scan.MetricSource, account val
 		return result, nil, err
 	}
 	s := &evaluationState{ctx: ctx, plan: plan, src: src, account: account}
+	if plan.Stats != nil {
+		plan.Stats.PerStep = nil
+	}
 	defer func() {
 		value.InheritMetadata(&result, s.metadata)
+		if plan.Stats != nil {
+			plan.Stats.PeakSamples = s.peakUnits
+		}
 		account.Release(s.reserved)
 		err = engineBoundaryError(err)
 	}()
@@ -62,28 +75,44 @@ func Evaluate(ctx context.Context, plan Plan, src scan.MetricSource, account val
 	if e != nil {
 		return result, nil, e
 	}
+	if len(grid) > 0 {
+		s.gridStart = grid[0]
+	}
 	if plan.Evaluation.Instant {
 		result, err = s.eval(plan.Expr, grid[0])
+		s.recordStep(grid[0])
 		if err == nil {
 			err = finalizeNames(&result, plan.Profile)
+		}
+		if err != nil {
+			// A failed evaluation (budget, deadline, cancellation, storage, language
+			// error) never returns the value computed before the failure.
+			result = value.Result{}
 		}
 		return result, s.annotations, err
 	}
 	result.Type = "matrix"
 	index := map[string]int{}
+	legacyDelayed := plan.Profile.ID == "promql-prometheus-3.1.0" && enabled(plan.Profile, "promql-delayed-name-removal")
 	for _, at := range grid {
-		mark := s.reserved
+		mark, markUnits := s.reserved, s.units
 		r, e := s.eval(plan.Expr, at)
 		if e != nil {
 			return value.Result{}, s.annotations, e
 		}
-		if e = finalizeNames(&r, plan.Profile); e != nil {
+		if legacyDelayed {
+			e = checkDuplicates(r.Vector)
+		} else {
+			e = finalizeNames(&r, plan.Profile)
+		}
+		if e != nil {
 			return value.Result{}, s.annotations, e
 		}
+		s.recordStep(at)
 		if r.Type == "scalar" {
 			r.Vector = []value.Series{{Project: src.ProjectID(), Samples: []value.Sample{r.Scalar}}}
 		}
-		transient := s.reserved - mark
+		transient, transientUnits := s.reserved-mark, s.units-markUnits
 		for _, series := range r.Vector {
 			key := series.Project.String() + value.LabelKey(series.Labels)
 			i, ok := index[key]
@@ -94,30 +123,47 @@ func Evaluate(ctx context.Context, plan Plan, src scan.MetricSource, account val
 			for _, sample := range series.Samples {
 				cost += value.SampleBytes(sample)
 			}
-			if e = s.reserve(cost); e != nil {
+			if e = s.reserve(cost); e == nil {
+				e = s.reserveUnits(seriesUnits([]value.Series{series}))
+			}
+			if e != nil {
 				return value.Result{}, s.annotations, e
 			}
 			if !ok {
 				i = len(result.Matrix)
 				index[key] = i
-				result.Matrix = append(result.Matrix, value.Series{Project: series.Project, Labels: series.Labels})
+				result.Matrix = append(result.Matrix, value.Series{Project: series.Project, Labels: series.Labels, DropName: series.DropName})
 			}
 			result.Matrix[i].Samples = append(result.Matrix[i].Samples, series.Samples...)
 		}
 		s.account.Release(transient)
 		s.reserved -= transient
+		s.units -= transientUnits
 	}
+	if legacyDelayed {
+		// 3.1.0 strips the names of the whole result once, then rejects collisions
+		// between series that were present at different steps as well.
+		if e := finalizeNames(&result, plan.Profile); e != nil {
+			return value.Result{}, s.annotations, e
+		}
+	}
+	// Range results are ordered by label set, whatever order the operators produced the series in.
+	sort.SliceStable(result.Matrix, func(i, j int) bool { return value.CompareLabels(result.Matrix[i].Labels, result.Matrix[j].Labels) < 0 })
 	return result, s.annotations, nil
 }
 func (s *evaluationState) eval(expr TypedExpr, at model.UnixNano) (value.Result, error) {
-	mark := s.reserved
+	mark, markUnits := s.reserved, s.units
 	r, err := s.evalNode(expr, at)
 	// Child results and selector buffers are dead after their parent is produced.
 	// Charge only the retained parent on return, rather than cumulative work.
 	s.account.Release(s.reserved - mark)
 	s.reserved = mark
+	s.units = markUnits
 	if err == nil {
 		err = s.reserve(value.ResultBytes(r))
+	}
+	if err == nil {
+		err = s.reserveUnits(resultUnits(r))
 	}
 	return r, err
 }
@@ -198,12 +244,16 @@ func (s *evaluationState) evalNode(expr TypedExpr, at model.UnixNano) (value.Res
 				if !hasName {
 					selector.Text = "target_info"
 				}
-				r, e = s.selectMetric(&selector, nil, at, selectOptions{})
+				r, e = s.selectMetric(&selector, nil, at, selectOptions{preserveTime: true})
 			} else {
 				if raw.Expr.(*Node).Kind == "range" {
 					r, e = s.evalFunctionWindow(raw, at)
 				} else {
-					r, e = s.eval(c, at)
+					evalAt := at
+					if n.Kind == "aggregate" && i == 0 && len(expr.Children) > 1 && n.Text != "count_values" && s.plan.Profile.ID == "promql-prometheus-3.1.0" {
+						evalAt = s.gridStart // 3.1.0 evaluates the aggregation parameter once over the grid: its first step's value applies throughout
+					}
+					r, e = s.eval(c, evalAt)
 				}
 			}
 			if e != nil {
@@ -212,7 +262,7 @@ func (s *evaluationState) evalNode(expr TypedExpr, at model.UnixNano) (value.Res
 			args[i] = r
 		}
 		if n.Text == "info" && len(args) == 1 {
-			r, e := s.selectMetric(&Node{Kind: "selector", Text: "target_info"}, nil, at, selectOptions{})
+			r, e := s.selectMetric(&Node{Kind: "selector", Text: "target_info"}, nil, at, selectOptions{preserveTime: true})
 			if e != nil {
 				return r, e
 			}
@@ -400,14 +450,17 @@ func (s *evaluationState) subquery(expr TypedExpr, at model.UnixNano) (value.Res
 		return r, e
 	}
 	index := map[string]int{}
+	outerStart := s.gridStart
+	s.gridStart = model.UnixNano(start)
+	defer func() { s.gridStart = outerStart }()
 	for _, t := range grid {
-		mark := s.reserved
+		mark, markUnits := s.reserved, s.units
 		part, e := s.eval(expr.Children[0], t)
 		if e != nil {
 			return r, e
 		}
 		value.InheritMetadata(&r, part)
-		transient := s.reserved - mark
+		transient, transientUnits := s.reserved-mark, s.units-markUnits
 		for _, series := range part.Vector {
 			key := series.Project.String() + value.LabelKey(series.Labels)
 			i, ok := index[key]
@@ -419,7 +472,10 @@ func (s *evaluationState) subquery(expr TypedExpr, at model.UnixNano) (value.Res
 				sample.StartTimestamp = nil
 				cost += value.SampleBytes(sample)
 			}
-			if e = s.reserve(cost); e != nil {
+			if e = s.reserve(cost); e == nil {
+				e = s.reserveUnits(seriesUnits([]value.Series{series}))
+			}
+			if e != nil {
 				return r, e
 			}
 			if !ok {
@@ -429,11 +485,15 @@ func (s *evaluationState) subquery(expr TypedExpr, at model.UnixNano) (value.Res
 			}
 			for _, sample := range series.Samples {
 				sample.StartTimestamp = nil
+				if s.plan.Profile.ID == "promql-prometheus-3.13.5" {
+					sample.Histogram = histogramWithoutExplicitResetHint(sample.Histogram)
+				}
 				r.Matrix[i].Samples = append(r.Matrix[i].Samples, sample)
 			}
 		}
 		s.account.Release(transient)
 		s.reserved -= transient
+		s.units -= transientUnits
 	}
 	return r, nil
 }

@@ -123,6 +123,20 @@ func ScaleHistogram(h model.NativeHistogram, factor float64) model.NativeHistogr
 	return model.NativeHistogram{Float: &f}
 }
 
+// CompactHistogramBuckets re-encodes the buckets of a float histogram without empty buckets: a
+// bucket whose count is zero is dropped and the spans are rebuilt (a histogram with no
+// populated bucket has no spans). Counts that are NaN or infinite are not empty. The pinned
+// engines return scalar multiplication and division results in this form.
+func CompactHistogramBuckets(h model.NativeHistogram) model.NativeHistogram {
+	if h.Float == nil {
+		return h
+	}
+	f := *h.Float
+	f.PositiveSpans, f.PositiveBuckets = histogramEncode(HistogramBuckets(f.PositiveSpans, f.PositiveBuckets))
+	f.NegativeSpans, f.NegativeBuckets = histogramEncode(HistogramBuckets(f.NegativeSpans, f.NegativeBuckets))
+	return model.NativeHistogram{Float: &f}
+}
+
 // DivideHistogram performs the language division operation directly. Replacing
 // division with multiplication by a rounded reciprocal changes binary64 bits.
 func DivideHistogram(histogram model.NativeHistogram, divisor float64) model.NativeHistogram {

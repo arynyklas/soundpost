@@ -49,6 +49,9 @@ func Format(e Expr) string {
 		if math.IsInf(f, 1) {
 			s = "Inf"
 		}
+		if n.RangeText != "" { // a duration literal keeps its duration spelling
+			s = n.RangeText
+		}
 	case "string":
 		s = strconv.Quote(n.Text)
 	case "selector":

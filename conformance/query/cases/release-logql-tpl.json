@@ -1,0 +1,58 @@
+{
+  "phase": "logql-template",
+  "authorship": "Independently authored Apache-2.0 inputs by Aryn Yklas; no stored oracle answers.",
+  "clock_contract": "Rows in this file observe no wall clock.",
+  "cases": [
+    {
+      "id": "logql-loki-3.5.2/template-capabilities/interaction",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{ $m := fromJson \"{\\\"a\\\":[1,2]}\" }}{{ with .level }}{{ if and (eq . \"warn\") (gt (len $m.a) 1) }}{{ index $m.a 1 }}{{ else }}no{{ end }}{{ end }}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template-capabilities/negative",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{ env \"HOME\" }}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    },
+    {
+      "id": "logql-loki-3.5.2/template-capabilities/positive",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "source": "{{ and true (not false) }}/{{ printf \"%05.1f|%q\" 3.14159 .level }}/{{ len .level }}/{{ slice .level 1 3 }}/{{ html \"<a&b>\" }}/{{ urlquery \"a b\" }}",
+      "line": "line",
+      "timestamp_ns": "-1",
+      "labels": [
+        {
+          "name": "level",
+          "value": "warn"
+        }
+      ],
+      "fields": [],
+      "timezone": "UTC"
+    }
+  ]
+}

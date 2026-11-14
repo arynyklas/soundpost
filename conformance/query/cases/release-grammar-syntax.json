@@ -1,0 +1,4430 @@
+{
+  "schema": "soundpost-authored-syntax-cases-v1",
+  "phase": "syntax",
+  "cases": [
+    {
+      "id": "promql-prometheus-3.1.0/error/disabled-gate/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "1 + sum(limitk(2, rate(foo[5m])))"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/error/disabled-gate/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [
+        "promql-delayed-name-removal"
+      ],
+      "input": {
+        "expression": "limit_ratio(0.5, foo)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/error/disabled-gate/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "limit_ratio(0.5, foo)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/error/lexical/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum by (job) (rate(foo{a=\"b\"}[5x]))"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/error/lexical/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo{a=\"b\\q\"}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/error/lexical/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo # trailing comment"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/error/regex-label/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum(rate(foo{job=~\"a(b\"}[5m]))"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/error/regex-label/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo{job=~\"(\"}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/error/regex-label/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo{job=~\"a(b|c)+\"}"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/error/syntax/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum(rate(foo[5m]) / ignoring(job) bar))"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/error/syntax/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo + "
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/error/syntax/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo offset 5m @ 100"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/error/time-modifier/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum(rate(foo[5m] @ NaN))"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/error/time-modifier/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo @ 1 @ 2"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/error/time-modifier/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo offset -5m"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/error/type-arity/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum(foo[5m])"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/error/type-arity/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "clamp_min(foo)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/error/type-arity/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "clamp(foo, 0, 1)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/fact/number-conversion/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum(foo) * 1e309"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/fact/number-conversion/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "0x1.8p1"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/fact/string-escapes/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "count_values(\"v\\x41\\u00e9\", foo{job=\"a\\tb\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/fact/string-escapes/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "\"\\uD800\""
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/fact/zero-numeric-range/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sig[0s]"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/aggregate_expr/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "topk(2, sum without (instance) (rate(foo[5m])))"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/aggregate_expr/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum by (job) (foo) without (instance)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/aggregate_expr/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum(foo) by (job)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/aggregate_modifier/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "count by (job) (sum without (instance, __name__) (foo))"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/aggregate_modifier/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum by job (foo)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/aggregate_modifier/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum without () (foo)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/aggregate_op/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "topk(3, bottomk(5, sum by (job) (foo)))"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/aggregate_op/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "limitk(2, foo)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/aggregate_op/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "limitk(2, foo)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/at_modifier_preprocessors/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo @ start(1)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/at_modifier_preprocessors/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo @ start()"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/bin_modifier/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum(foo > bool ignoring(instance) group_right(zone) bar) by (job)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/bin_modifier/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo > on(job) bool bar"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/bin_modifier/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo > bool on(job) group_left(zone) bar"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/binary_expr/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo / on() group_left bar > bool 0.5"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/binary_expr/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo[5m] + bar"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/binary_expr/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo + bar * 2"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/bool_modifier/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo + bool 1"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/expr/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "quantile(0.9, rate(foo[5m:1m] offset 1m)) * scalar(bar)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/expr/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo bar"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/expr/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum(foo offset 5m) + (bar @ 10)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/function_call/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "histogram_quantile(0.9, sum by (le) (rate(foo_bucket[5m])))"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/function_call/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "rate(foo)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/function_call/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "round(foo, 0.5)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/function_call_args/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum by (job) (abs(foo,))"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/function_call_args/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "abs(foo,)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/function_call_args/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "label_join(foo, \"a\", \"-\", \"b\", \"c\")"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/function_call_body/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "vector(time()) + foo"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/function_call_body/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "abs(foo"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/function_call_body/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "time()"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "scalar"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/group_modifiers/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum(foo unless on(job) group_right bar) by (job)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/group_modifiers/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo / on(job) group_left(job) bar"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/group_modifiers/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo / on(job) group_left(zone) bar"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/grouping_label/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum without (\"a-b\", \"测\") (foo{\"a-b\"=\"x\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/grouping_label/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum by (\"\") (foo)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/grouping_label/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum by (on, bool, \"valid_name\") (foo)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/grouping_label_list/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum by (a, b) (count by (b, c) (foo))"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/grouping_label_list/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum by (a, , b) (foo)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/grouping_label_list/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum by (a, b, c) (foo)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/grouping_labels/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum without () (count by (a,) (foo))"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/grouping_labels/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum by (a,,) (foo)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/grouping_labels/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum by (a,) (foo)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/label_match_list/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum(rate(foo{a=~\"x.*\", a!~\"xy.*\", b!=\"\"}[5m]))"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/label_match_list/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo{a=\"1\" b=\"2\"}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/label_match_list/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo{a=\"1\", a!=\"2\", a=~\"1|3\"}"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/label_matcher/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum(rate({\"foo\", job=~\"a.*\"}[5m]))"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/label_matcher/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo{job=bar}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/label_matcher/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{\"foo\", job=\"x\"}"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/label_matchers/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum({job=\"a\"}) + sum(foo{})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/label_matchers/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{job=~\".*\", a=\"\"}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/label_matchers/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo{job=\"a\",}"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/match_op/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo{a!~\"x\"} == bool bar{b=~\"y\"}"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/match_op/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo{a==\"x\"}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/match_op/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo{a!~\"x.*\"}"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/matrix_selector/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "rate(foo{a=\"b\"}[5m] offset 1m)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/matrix_selector/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo offset 5m [5m]"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/matrix_selector/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo[5m]"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "matrix"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/maybe_grouping_labels/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo * ignoring() group_right() bar"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/maybe_grouping_labels/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo / on(job) group_left (zone bar"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/maybe_grouping_labels/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo / on(job) group_left bar"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/maybe_label/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo{on=\"1\", bool!=\"x\"} * ignoring(by) bar"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/maybe_label/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum by (1) (foo)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/maybe_label/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum by (on, ignoring, group_left, bool, offset, by) (foo)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/metric_identifier/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum(foo:bar:baz) / on(job) group_left bar:x"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/metric_identifier/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo{a:b=\"c\"}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/metric_identifier/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "job:requests:rate5m{a=\"b\"} + offset"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/number/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo * 1e309"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/number/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "0xFFFFFFFFFFFFFFFFF"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/number/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "0x7FFFFFFFFFFFFFFF + 1e3 + .5"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "scalar"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/number_duration_literal/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "rate(foo[1h30m]) * 2m"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/number_duration_literal/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "1M"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/offset_expr/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "rate(foo[5m] offset -1h)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/offset_expr/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum(foo) offset 5m"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/offset_expr/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo offset 5m"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/on_or_ignoring/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum(foo / ignoring() bar) by (job)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/on_or_ignoring/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo + ignoring job bar"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/on_or_ignoring/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo + on(job, zone) bar"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/paren_expr/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "((foo + bar)) * (1 + 2)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/paren_expr/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "()"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/paren_expr/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "(foo[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "matrix"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/signed_number/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum(foo @ -100.5) + sum(foo @ +100)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/signed_number/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo @ --5"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/signed_or_unsigned_number/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo @ -1.5e3 offset 1m"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/signed_or_unsigned_number/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo @ \"5\""
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/signed_or_unsigned_number/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo @ 5m"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/start/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum(foo) sum(bar)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/start/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": ""
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/start/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo  # c"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/step_invariant_expr/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum_over_time(foo[5m:1m] @ end())"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/step_invariant_expr/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo @ NaN"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/step_invariant_expr/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo @ start() offset 5m"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/string_identifier/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum(rate({\"foo\", \"job\"=\"a\"}[5m]))"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/string_identifier/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{\"foo\" \"bar\"}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/string_identifier/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{\"fo\\u006f\", job=\"a\"}"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/string_literal/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "label_replace(foo, 'd', \"$1\", `s`, \"(.*)\")"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/string_literal/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "\"abc"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/subquery_expr/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "max_over_time(rate(foo[5m])[30m:1m] offset 5m)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/subquery_expr/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo[5m:1m][1m:]"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/subquery_expr/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo[5m:1m]"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "matrix"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/unary_expr/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "-foo[5m]"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/unary_expr/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "-foo"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/unary_op/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum(+(-foo)) by (job)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/unary_op/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "!foo"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/unary_op/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "+foo"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/vector_selector/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{__name__=~\"foo.*\", job=\"a\"}"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/vector_selector/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo{__name__=\"bar\"}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/grammar/vector_selector/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo{job=\"a\"}"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/semantics/lexical/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo # c1\n + # c2\n bar"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/semantics/lexical/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "1__2"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.1.0/semantics/precedence/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "1 == 1 == 1"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/duration-form/max_of/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-duration-expr"
+      ],
+      "input": {
+        "expression": "foo[10m:max_of(step(), 30s)]"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "matrix"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/duration-form/max_of/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-duration-expr"
+      ],
+      "input": {
+        "expression": "max_of(1m, 2m)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/duration-form/max_of/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-duration-expr"
+      ],
+      "input": {
+        "expression": "foo[max_of(1m, 2m)]"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "matrix"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/duration-form/min_of/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-duration-expr"
+      ],
+      "input": {
+        "expression": "foo[min_of(5m, 1h):min_of(1m, 30s)]"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "matrix"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/duration-form/min_of/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "foo offset min_of(1h, 30m)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/duration-form/min_of/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-duration-expr"
+      ],
+      "input": {
+        "expression": "foo offset min_of(1h, 30m)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/duration-form/range/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-duration-expr"
+      ],
+      "input": {
+        "expression": "foo[range() / 2:step()]"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "matrix"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/duration-form/range/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-duration-expr"
+      ],
+      "input": {
+        "expression": "range()"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/duration-form/range/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-duration-expr"
+      ],
+      "input": {
+        "expression": "foo[range()]"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "matrix"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/duration-form/step/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-duration-expr"
+      ],
+      "input": {
+        "expression": "sum_over_time(foo[step() * 4])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/duration-form/step/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "foo[10m:step()]"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/duration-form/step/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-duration-expr"
+      ],
+      "input": {
+        "expression": "foo[10m:step()]"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "matrix"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/error/disabled-gate/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum(rate(foo[5m] smoothed))"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/error/disabled-gate/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-duration-expr"
+      ],
+      "input": {
+        "expression": "foo + fill(0) bar"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/error/disabled-gate/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-binop-fill-modifiers"
+      ],
+      "input": {
+        "expression": "foo + fill(0) bar"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/error/lexical/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum by (job) (rate(foo{a=\"b\"}[5x]))"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/error/lexical/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo{a=\"b\\q\"}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/error/lexical/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo # trailing comment"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/error/regex-label/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum(rate(foo{job=~\"a(b\"}[5m]))"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/error/regex-label/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo{job=~\"(\"}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/error/regex-label/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo{job=~\"a(b|c)+\"}"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/error/syntax/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum(rate(foo[5m]) / ignoring(job) bar))"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/error/syntax/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo + "
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/error/syntax/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo offset 5m @ 100"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/error/time-modifier/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum(rate(foo[5m] @ NaN))"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/error/time-modifier/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo @ 1 @ 2"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/error/time-modifier/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo offset -5m"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/error/type-arity/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum(foo[5m])"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/error/type-arity/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "clamp_min(foo)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/error/type-arity/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "clamp(foo, 0, 1)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/fact/duration-runtime/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-duration-expr"
+      ],
+      "input": {
+        "expression": "foo[step() / 0]"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/fact/number-conversion/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum(foo) * 1e309"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/fact/number-conversion/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "0x1.8p1"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/fact/string-escapes/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "count_values(\"v\\x41\\u00e9\", foo{job=\"a\\tb\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/fact/string-escapes/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "\"\\uD800\""
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/aggregate_expr/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "topk(2, sum without (instance) (rate(foo[5m])))"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/aggregate_expr/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum by (job) (foo) without (instance)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/aggregate_expr/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum(foo) by (job)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/aggregate_modifier/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "count by (job) (sum without (instance, __name__) (foo))"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/aggregate_modifier/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum by job (foo)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/aggregate_modifier/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum without () (foo)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/aggregate_op/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "topk(3, bottomk(5, sum by (job) (foo)))"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/aggregate_op/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "limitk(2, foo)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/aggregate_op/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "input": {
+        "expression": "limitk(2, foo)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/anchored_expr/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-extended-range-selectors"
+      ],
+      "input": {
+        "expression": "sum by (job) (increase(foo[5m] anchored offset 1m))"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/anchored_expr/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-extended-range-selectors"
+      ],
+      "input": {
+        "expression": "foo[5m] anchored smoothed"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/anchored_expr/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-extended-range-selectors"
+      ],
+      "input": {
+        "expression": "changes(foo[5m] anchored)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/at_modifier_preprocessors/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo @ start(1)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/at_modifier_preprocessors/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo @ start()"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/bin_modifier/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum(foo > bool ignoring(instance) group_right(zone) bar) by (job)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/bin_modifier/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-binop-fill-modifiers"
+      ],
+      "input": {
+        "expression": "foo + fill(0) on(job) bar"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/bin_modifier/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-binop-fill-modifiers"
+      ],
+      "input": {
+        "expression": "foo > bool on(job) group_left(zone) fill_left(0) fill_right(1) bar"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/binary_expr/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo / on() group_left bar > bool 0.5"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/binary_expr/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo[5m] + bar"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/binary_expr/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo + bar * 2"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/bool_modifier/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo + bool 1"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/duration_expr/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-duration-expr"
+      ],
+      "input": {
+        "expression": "foo[10m:step()] offset (range() / 2)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "matrix"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/duration_expr/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo[5m + 1m]"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/duration_expr/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-duration-expr"
+      ],
+      "input": {
+        "expression": "foo[(1m + 30s) * 2]"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "matrix"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/expr/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "quantile(0.9, rate(foo[5m:1m] offset 1m)) * scalar(bar)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/expr/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo bar"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/expr/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-duration-expr"
+      ],
+      "input": {
+        "expression": "sum(foo offset (1m * 2)) + (bar @ 10)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/fill_modifiers/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-binop-fill-modifiers"
+      ],
+      "input": {
+        "expression": "sum(foo * on(job) group_left fill(0) bar) by (job)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/fill_modifiers/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-binop-fill-modifiers"
+      ],
+      "input": {
+        "expression": "foo + fill(0) fill_left(1) bar"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/fill_modifiers/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-binop-fill-modifiers"
+      ],
+      "input": {
+        "expression": "foo + fill_left(0) fill_right(1) bar"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/fill_value/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-binop-fill-modifiers"
+      ],
+      "input": {
+        "expression": "foo + fill(bar) baz"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/fill_value/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-binop-fill-modifiers"
+      ],
+      "input": {
+        "expression": "foo + fill(-1.5) bar"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/function_call/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "histogram_quantile(0.9, sum by (le) (rate(foo_bucket[5m])))"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/function_call/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "rate(foo)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/function_call/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "round(foo, 0.5)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/function_call_args/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum by (job) (abs(foo,))"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/function_call_args/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "abs(foo,)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/function_call_args/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "label_join(foo, \"a\", \"-\", \"b\", \"c\")"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/function_call_body/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "vector(time()) + foo"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/function_call_body/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "abs(foo"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/function_call_body/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "time()"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "scalar"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/group_modifiers/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum(foo unless on(job) group_right bar) by (job)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/group_modifiers/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo / on(job) group_left(job) bar"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/group_modifiers/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo / on(job) group_left(zone) bar"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/grouping_label/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum without (\"a-b\", \"测\") (foo{\"a-b\"=\"x\"})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/grouping_label/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum by (\"\") (foo)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/grouping_label/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum by (on, bool, \"valid_name\") (foo)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/grouping_label_list/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum by (a, b) (count by (b, c) (foo))"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/grouping_label_list/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum by (a, , b) (foo)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/grouping_label_list/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum by (a, b, c) (foo)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/grouping_labels/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum without () (count by (a,) (foo))"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/grouping_labels/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum by (a,,) (foo)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/grouping_labels/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum by (a,) (foo)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/label_match_list/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum(rate(foo{a=~\"x.*\", a!~\"xy.*\", b!=\"\"}[5m]))"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/label_match_list/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo{a=\"1\" b=\"2\"}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/label_match_list/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo{a=\"1\", a!=\"2\", a=~\"1|3\"}"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/label_matcher/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum(rate({\"foo\", job=~\"a.*\"}[5m]))"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/label_matcher/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo{job=bar}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/label_matcher/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{\"foo\", job=\"x\"}"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/label_matchers/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum({job=\"a\"}) + sum(foo{})"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/label_matchers/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{job=~\".*\", a=\"\"}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/label_matchers/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo{job=\"a\",}"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/match_op/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo{a!~\"x\"} == bool bar{b=~\"y\"}"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/match_op/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo{a==\"x\"}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/match_op/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo{a!~\"x.*\"}"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/matrix_selector/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "rate(foo{a=\"b\"}[5m] offset 1m)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/matrix_selector/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo offset 5m [5m]"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/matrix_selector/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo[5m]"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "matrix"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/max_of_min_of/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-duration-expr"
+      ],
+      "input": {
+        "expression": "foo[10m:min_of(step(), 30s)] offset max_of(1m, range())"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "matrix"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/max_of_min_of/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-duration-expr"
+      ],
+      "input": {
+        "expression": "foo[min_of(1m, 2m, 3m)]"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/max_of_min_of/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-duration-expr"
+      ],
+      "input": {
+        "expression": "foo[max_of(1m, 2m)]"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "matrix"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/maybe_grouping_labels/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo * ignoring() group_right() bar"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/maybe_grouping_labels/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo / on(job) group_left (zone bar"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/maybe_grouping_labels/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo / on(job) group_left bar"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/maybe_label/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo{on=\"1\", bool!=\"x\"} * ignoring(by) bar"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/maybe_label/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum by (1) (foo)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/maybe_label/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum by (on, ignoring, group_left, bool, offset, by) (foo)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/metric_identifier/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum(foo:bar:baz) / on(job) group_left bar:x"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/metric_identifier/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo{a:b=\"c\"}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/metric_identifier/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "job:requests:rate5m{a=\"b\"} + offset"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/number/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo * 1e309"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/number/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "0xFFFFFFFFFFFFFFFFF"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/number/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "0x7FFFFFFFFFFFFFFF + 1e3 + .5"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "scalar"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/number_duration_literal/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "rate(foo[1h30m]) * 2m"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/number_duration_literal/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "1M"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/offset_duration_expr/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-duration-expr"
+      ],
+      "input": {
+        "expression": "sum(foo offset -(5m * 2))"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/offset_duration_expr/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo offset 106752d"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/offset_duration_expr/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-duration-expr"
+      ],
+      "input": {
+        "expression": "foo offset (1h - 2h)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/offset_expr/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-duration-expr"
+      ],
+      "input": {
+        "expression": "rate(foo[5m] offset (2 * 1h))"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/offset_expr/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum(foo) offset 5m"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/offset_expr/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo offset 5m"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/on_or_ignoring/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum(foo / ignoring() bar) by (job)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/on_or_ignoring/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo + ignoring job bar"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/on_or_ignoring/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo + on(job, zone) bar"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/paren_duration_expr/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-duration-expr"
+      ],
+      "input": {
+        "expression": "foo offset (((1m)))"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/paren_duration_expr/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo[(5m)]"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/paren_duration_expr/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-duration-expr"
+      ],
+      "input": {
+        "expression": "foo[(5m)]"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "matrix"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/paren_expr/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "((foo + bar)) * (1 + 2)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/paren_expr/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "()"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/paren_expr/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "(foo[5m])"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "matrix"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/positive_duration_expr/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-duration-expr"
+      ],
+      "input": {
+        "expression": "foo[5m - 5m]"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "matrix"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/positive_duration_expr/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo[5m:0s]"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/positive_duration_expr/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo[1ms:1ms]"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "matrix"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/signed_number/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum(foo @ -100.5) + sum(foo @ +100)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/signed_number/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo @ --5"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/signed_or_unsigned_number/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo @ -1.5e3 offset 1m"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/signed_or_unsigned_number/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo @ \"5\""
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/signed_or_unsigned_number/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo @ 5m"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/smoothed_expr/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-extended-range-selectors"
+      ],
+      "input": {
+        "expression": "sum(delta(foo[5m] smoothed)) / 2"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/smoothed_expr/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-extended-range-selectors"
+      ],
+      "input": {
+        "expression": "foo[5m:1m] smoothed"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/smoothed_expr/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-extended-range-selectors"
+      ],
+      "input": {
+        "expression": "rate(foo[5m] smoothed)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/start/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum(foo) sum(bar)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/start/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": ""
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/start/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo  # c"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/step_invariant_expr/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum_over_time(foo[5m:1m] @ end())"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/step_invariant_expr/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo @ NaN"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/step_invariant_expr/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo @ start() offset 5m"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/string_identifier/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum(rate({\"foo\", \"job\"=\"a\"}[5m]))"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/string_identifier/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{\"foo\" \"bar\"}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/string_identifier/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{\"fo\\u006f\", job=\"a\"}"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/string_literal/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "label_replace(foo, 'd', \"$1\", `s`, \"(.*)\")"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/string_literal/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "\"abc"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/subquery_expr/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "max_over_time(rate(foo[5m])[30m:1m] offset 5m)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/subquery_expr/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo[5m:1m][1m:]"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/subquery_expr/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo[5m:1m]"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "matrix"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/unary_expr/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "-foo[5m]"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/unary_expr/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "-foo"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/unary_op/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "sum(+(-foo)) by (job)"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/unary_op/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "!foo"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/unary_op/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "+foo"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/vector_selector/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{__name__=~\"foo.*\", job=\"a\"}"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/vector_selector/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo{__name__=\"bar\"}"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/grammar/vector_selector/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo{job=\"a\"}"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/modifier/fill-typecheck/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-binop-fill-modifiers"
+      ],
+      "input": {
+        "expression": "sum(foo or fill(0) bar)"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/modifier/fill-typecheck/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-binop-fill-modifiers"
+      ],
+      "input": {
+        "expression": "foo + fill(0) 1"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/modifier/fill-typecheck/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-binop-fill-modifiers"
+      ],
+      "input": {
+        "expression": "foo + fill(0) bar"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantics/duration-expression/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-duration-expr"
+      ],
+      "input": {
+        "expression": "foo[1m % 0]"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantics/duration-expression/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-duration-expr"
+      ],
+      "input": {
+        "expression": "foo[10m:step() * 2]"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "matrix"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantics/lexical/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "foo # c1\n + # c2\n bar"
+      },
+      "expected": {
+        "accepted": true,
+        "type": "vector"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantics/lexical/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "1__2"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "syntax"
+      }
+    },
+    {
+      "id": "promql-prometheus-3.13.5/semantics/precedence/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "1 == 1 == 1"
+      },
+      "expected": {
+        "accepted": false,
+        "category": "type"
+      }
+    }
+  ]
+}
