@@ -5,8 +5,8 @@
 package regexp
 
 import (
-	"github.com/arynyklas/soundpost/third_party/regex/go126/stdsyntax"
 	"io"
+	"github.com/arynyklas/soundpost/third_party/regex/go126/stdsyntax"
 	"sync"
 )
 
@@ -43,7 +43,7 @@ type machine struct {
 	matched  bool         // whether a match was found
 	matchcap []int        // capture information for the match
 
-	inputs  inputs
+	inputs inputs
 	checked checkedInput // Soundpost: pooled cancellable string input.
 }
 
