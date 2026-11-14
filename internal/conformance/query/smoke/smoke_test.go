@@ -65,7 +65,10 @@ func TestLiveSmokeRunsEveryStepOnARealNode(t *testing.T) {
 		t.Logf("%v %s %s", s.Passed, s.Name, s.Detail)
 	}
 	for _, n := range notRun {
-		t.Logf("NOT RUN: %s", n)
+		t.Errorf("NOT RUN: %s", n)
+	}
+	if NotRunCount(steps) != 0 {
+		t.Errorf("%d live steps were not measured", NotRunCount(steps))
 	}
 	if Failed(steps) != 0 || len(steps) < 10 {
 		t.Fatalf("%d failing of %d steps", Failed(steps), len(steps))

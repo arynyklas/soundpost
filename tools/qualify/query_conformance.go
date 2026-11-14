@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -170,11 +171,20 @@ func RunQueryConformance(ctx context.Context, matrix QueryMatrix, artifactDir st
 		}
 	}
 	var execErrs []string
+	// The no-oracle-in-production check reads the symbol table of the very binary a
+	// release would ship, so the campaign builds it from the module under test.
+	binary, err := buildProductionBinary(ctx, matrix, artifactDir)
+	if err != nil {
+		execErrs = append(execErrs, "production binary: "+err.Error())
+	}
 	layouts := sortedKeys(smokeFor)
 	for _, layout := range layouts {
 		out := filepath.Join(artifactDir, smokeFor[layout])
 		args := []string{"smoke", "--storage", "real", "--control", "real", "--own-http", "--restart", "--compact",
 			"--modes", layout, "--module-root", matrix.Root, "--cases", casesArg(matrix), "--report", out}
+		if binary != "" {
+			args = append(args, "--production-binary", binary)
+		}
 		code, err := runTool(ctx, matrix, args, artifactDir)
 		if err != nil {
 			execErrs = append(execErrs, fmt.Sprintf("smoke %s: %v", layout, err))
@@ -294,6 +304,25 @@ func runTool(ctx context.Context, m QueryMatrix, args []string, dir string) (int
 	default:
 		return -1, err
 	}
+}
+
+// buildProductionBinary builds cmd/soundpost from the module under test next to
+// the campaign artifacts. The smoke runner reads its symbol table to prove no
+// production path reaches an oracle or a harness.
+func buildProductionBinary(ctx context.Context, m QueryMatrix, dir string) (string, error) {
+	out, err := filepath.Abs(filepath.Join(dir, "soundpost-production"))
+	if err != nil {
+		return "", err
+	}
+	if runtime.GOOS == "windows" {
+		out += ".exe"
+	}
+	cmd := exec.CommandContext(ctx, "go", "build", "-trimpath", "-o", out, "./cmd/soundpost")
+	cmd.Dir = m.Root
+	if raw, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("go build ./cmd/soundpost: %w: %s", err, strings.TrimSpace(string(raw)))
+	}
+	return out, nil
 }
 
 func argValue(args []string, name, def string) string {

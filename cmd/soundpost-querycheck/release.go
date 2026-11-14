@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -20,6 +21,8 @@ func runRelease(args []string) error {
 	smokePath := f.String("smoke-report", "", "report written by `soundpost-querycheck smoke --report`")
 	reportPath := f.String("report", "", "write the machine-readable report here as well as stdout")
 	runtime := f.String("runtime", "", "absolute OCI runtime executable; without it no oracle is available")
+	profileDir := f.String("profile-dir", "profiles/query", "factual profile manifest directory")
+	detailPath := f.String("detail", "", "write every phase outcome (including mismatch text) here")
 	seed := f.Uint64("seed", 20261110, "generator seed")
 	all := f.Bool("all-profiles", false, "require all pinned profiles")
 	sets := f.Bool("all-feature-sets", false, "require every registered feature set")
@@ -45,12 +48,24 @@ func runRelease(args []string) error {
 		return err
 	}
 	if *runtime != "" {
-		cfg.Oracle = func(ctx context.Context, p q.SourceProfile, c q.ReleaseCase) (q.SemanticResult, error) {
-			configuration, err := os.ReadFile(p.ConfigurationPath)
+		queryDir := filepath.Dir(*policyPath)
+		manifest, err := q.LoadReleaseCaseManifest(filepath.Join(queryDir, "release-cases.json"))
+		if err != nil {
+			return err
+		}
+		results, runErr := q.RunReleasePhases(context.Background(), cfg.Lock, queryDir, *profileDir, *runtime, manifest)
+		if runErr != nil {
+			fmt.Fprintln(os.Stderr, "release phases:", runErr)
+		}
+		cfg.Oracle, cfg.Own = results.PhaseOracle(), results.PhaseOwn()
+		if *detailPath != "" {
+			raw, err := json.MarshalIndent(results, "", "  ")
 			if err != nil {
-				return q.SemanticResult{}, err
+				return err
 			}
-			return q.RunOracle(ctx, q.OracleRun{Profile: p, Input: c.Input, Configuration: configuration, Runtime: *runtime})
+			if err = os.WriteFile(*detailPath, append(raw, '\n'), 0o644); err != nil {
+				return err
+			}
 		}
 	}
 	report, gateErr := q.ReleaseGate(context.Background(), cfg)

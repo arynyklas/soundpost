@@ -237,7 +237,7 @@
   "ledger_sha256": "1f7c2799fda0cf489a8ce990d6c8c6b8961dd79c1e46f01696461d3a29ae0dc9",
   "inventory_files": {
     "flags.json": "d47316a20492ba5fa1fffa0d59575aa228e4f6220e88ce7a5ca016d981ba7953",
-    "provenance.json": "26cf6b39936f1c6157f34280e220dbce0f2be2115b5e2b71e1b1deedfd235de6",
+    "provenance.json": "d0748e44e307e3ae4e93bfd6a91a392535e739c9fd6dd20f1c9d0db991243ede",
     "semantic-scope.json": "e6d72eee373eb64eb557e21a4840896acde71752d5548451b32ac4c3a98db148",
     "version-diff.json": "681e3d11c84a26b663454eaa2d07eee3d590f98a5dc468cc2367195d8038f2ad",
     "gate-domains.json": "d88c0fcc3f192f489d5ddf60872a6a0d4485ef992b65c9e6d53a5d32bbaffe67",
@@ -262,6 +262,9 @@
     "cases/logql-syntax-pipeline.json": "88a74606c34f8a8260c09f3fbb246e083224de63be0f6c15da675a0902aadc28",
     "cases/logql-templates.json": "762bfe4da659abec401a45beb09287766891e5bd787916962efe672cf27ba8c6",
     "cases/logql-metrics-order.json": "7c9d0b3bcc9dc40e6c847834a45b6b30cda5b8a1d686fedeb85d07ca650dd0d9",
+    "cases/release-promql-evaluation.json": "c0eaf631cf328cf436b7ec6bcb0c496c5ae5bbb46e03362952e93a6c9cfd4b89",
+    "cases/release-logql-syntax.json": "6563907636a0e451db5f093395accbb9f64ee72b03813985983f39347481fe13",
+    "cases/release-logql-metric.json": "248178b2735656d94bd12bd4f32b535c6feb87a6dfc2720035ff42b1c425bbc7",
     "cases/logql-pipeline-differential.json": "b5912344964aa139148cf3e875f876ac4ab25a544b2f1d819d93e5508363ea2a",
     "cases/logql-json-path-syntax.json": "4f39cd310ecb7d51cd0fa0aa6fc54138e4cd03ef47c05feb8085a6357b35f746",
     "cases/input-normalization.json": "46fee92f622a54e91d600cf0b5d8bf0ce5e24fba42165f5d1181709d7b020701",

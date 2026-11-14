@@ -34,11 +34,11 @@ func TestReleaseRefusesAWeakerGateThanThePolicy(t *testing.T) {
 	}
 }
 
-// The real ledger is still entirely pending-bound: the gate must say so with
-// exact counts and a nonzero outcome, never pass.
-func TestReleaseFailsOnTheRealPendingLedger(t *testing.T) {
+// The real ledger is not fully bound and no oracle runtime is given: the gate
+// must say so with counts and a nonzero outcome, never pass.
+func TestReleaseFailsOnTheRealPartlyBoundLedger(t *testing.T) {
 	err := runRelease([]string{"--policy", queryDir("release-policy.json"), "--all-profiles", "--all-feature-sets", "--require-locked", "--require-zero-unbound", "--require-zero-skips", "--require-zero-mismatches"})
-	if err == nil || !strings.Contains(err.Error(), "release gate rejected") || !strings.Contains(err.Error(), "unbound 785") {
-		t.Fatalf("the pending ledger passed or the count is wrong: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "release gate rejected") || !strings.Contains(err.Error(), "unbound ") || strings.Contains(err.Error(), "unbound 0,") {
+		t.Fatalf("the partly bound ledger passed or the count is wrong: %v", err)
 	}
 }

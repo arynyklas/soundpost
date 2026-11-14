@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/query"
 	"github.com/arynyklas/soundpost/internal/retention"
 )
 
@@ -319,6 +320,15 @@ func RunLive(ctx context.Context, dir, path string) (steps []StepResult, notRun 
 			case st.Route == "/api/v1/live":
 				ticket := fmt.Sprint(st.Query["ticket"])
 				ticket = saved[strings.TrimPrefix(ticket, "$")]
+				preOpen := false
+				if st.Stream {
+					if v, ok := jsonBool(st.Expect, "no_record_for_data_committed_before_open"); ok && v {
+						// Commit a record before the stream opens; it must never be delivered.
+						src := file.Fixture.Sources[0]
+						appendLine(src.ID, src.Template.Values[len(src.Template.Values)-1])
+						preOpen = true
+					}
+				}
 				c := env.openStream(who, ticket, "")
 				if st.Stream {
 					checkf(c.status == 200, "open status %d", c.status)
@@ -327,6 +337,11 @@ func RunLive(ctx context.Context, dir, path string) (steps []StepResult, notRun 
 					saved[st.Save] = ev.Data.StreamID
 					conns[st.Save] = c
 					current = c
+					if preOpen {
+						if late, got := c.silent(500 * time.Millisecond); got {
+							checkf(false, "data committed before the stream opened was delivered: %s %+v", late.Event, late.Data)
+						}
+					}
 				} else {
 					checkf(c.status == 404, "a copied ticket answered %d, want 404", c.status)
 					c.cancel()
@@ -418,16 +433,51 @@ func RunLive(ctx context.Context, dir, path string) (steps []StepResult, notRun 
 					}
 				}
 			case st.Disconnect == "" && len(st.Append) == 0 && st.Route == "":
-				// Only counter expectations (open iterators, subscriptions, memory,
-				// streams, goroutines): the production live service exposes none.
-				result.NotRun = true
-				result.Detail = "no counter is exposed by the live service: nothing was measured"
-				return
+				// Only counter expectations: every attachment is closed, then every
+				// live-service and storage counter must drain to zero.
+				for _, c := range conns {
+					c.cancel()
+					<-c.ended
+				}
+				if current != nil {
+					current.cancel()
+					<-current.ended
+				}
+				var u query.LiveUsage
+				var iterators uint64
+				deadline := time.Now().Add(10 * time.Second)
+				for {
+					u, iterators = env.app.Live.Usage(), env.app.Storage.Stats().ActiveIterators
+					if u.OpenIterators == 0 && u.MemoryUsed == 0 && u.Streams == 0 && u.Goroutines == 0 && iterators == 0 && env.gate.openCount() == 0 {
+						break
+					}
+					checkf(time.Now().Before(deadline), "teardown did not release everything: live %+v, storage iterators %d, gate %d", u, iterators, env.gate.openCount())
+					time.Sleep(50 * time.Millisecond)
+				}
+				result.Detail = fmt.Sprintf("open_iterators=%d open_subscriptions=%d accounted_memory_bytes=%d live_streams=%d goroutines_owned_by_live_service=%d", iterators, u.OpenIterators, u.MemoryUsed, u.Streams, u.Goroutines)
 			case st.Disconnect != "":
 				c := conns[st.Disconnect]
 				checkf(c != nil, "unknown stream %s", st.Disconnect)
 				c.cancel()
 				<-c.ended
+			}
+			for _, expect := range []map[string]json.RawMessage{st.Expect, st.StreamExpect} {
+				if n, ok := jsonInt(expect, "feed_subscriptions_opened"); ok {
+					u := env.app.Live.Usage()
+					checkf(u.OpenIterators == n, "feed subscriptions open: %d, want %d (streams %d)", u.OpenIterators, n, u.Streams)
+				}
+				if n, ok := jsonInt(expect, "steady_state_scan_polls"); ok {
+					before := env.app.Storage.Stats()
+					time.Sleep(1500 * time.Millisecond)
+					after := env.app.Storage.Stats()
+					polls := int64(after.IndexLookups-before.IndexLookups) + int64(after.PagesRead-before.PagesRead)
+					checkf(polls == n, "scan polls in a 1.5 s steady state: %d, want %d", polls, n)
+				}
+				if n, ok := jsonInt(expect, "stream_retained_for_replay_seconds"); ok {
+					checkf(query.DefaultLiveLimits().ReplayWindow == time.Duration(n)*time.Second, "the replay window is %v, want %ds", query.DefaultLiveLimits().ReplayWindow, n)
+					time.Sleep(2 * time.Second)
+					checkf(env.app.Live.Usage().Streams == 1, "the stream is not retained after the disconnect: %+v", env.app.Live.Usage())
+				}
 			}
 			result.Passed = true
 		}()
@@ -436,13 +486,17 @@ func RunLive(ctx context.Context, dir, path string) (steps []StepResult, notRun 
 	for _, c := range conns {
 		c.cancel()
 	}
-	notRun = []string{
-		"live-smoke teardown counters (open_iterators, open_subscriptions, accounted_memory_bytes, live_streams, goroutines_owned_by_live_service): the production live service exposes no counter to the harness",
-		"live-smoke feed_subscriptions_opened and steady_state_scan_polls: the production service's feed is not instrumented by the harness",
-		"live-smoke no_record_for_data_committed_before_open: the file commits no record before the stream opens",
-		"live-smoke stream_retained_for_replay_seconds=60: not waited for",
+	return steps, nil, nil
+}
+
+func jsonInt(m map[string]json.RawMessage, key string) (int64, bool) {
+	raw, ok := m[key]
+	if !ok {
+		return 0, false
 	}
-	return steps, notRun, nil
+	var v int64
+	check(json.Unmarshal(raw, &v))
+	return v, true
 }
 
 func jsonBool(m map[string]json.RawMessage, key string) (bool, bool) {

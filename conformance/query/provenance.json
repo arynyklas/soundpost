@@ -924,7 +924,7 @@
   "accepted_audits": [
     {
       "path": "audits/promql.json",
-      "sha256": "65c927205eb1dd292f26bac1c8bb0a35e9c10e7c1370d4f856e3a939259c3717",
+      "sha256": "6033b9778c09a6daf0168b4d4b2ae544cf19e00e1c1a5160f1c91d05e19ba9b1",
       "policy": "Independently authored rules; factual upstream names/signatures/source-location hashes only."
     },
     {

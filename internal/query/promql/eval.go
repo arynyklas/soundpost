@@ -130,7 +130,7 @@ func (s *evaluationState) evalNode(expr TypedExpr, at model.UnixNano) (value.Res
 	case "number":
 		return value.Result{Type: "scalar", Scalar: value.Sample{Time: at, Float: model.FloatBits(n.FloatBits)}}, nil
 	case "string":
-		return value.Result{Type: "string", String: n.Text}, nil
+		return value.Result{Type: "string", String: n.Text, Scalar: value.Sample{Time: at}}, nil
 	case "paren":
 		return s.eval(expr.Children[0], at)
 	case "selector":

@@ -6,6 +6,8 @@
 # The release seed is not recorded inside a release report; it is bound by the campaign invocation.
 schema: soundpost-query-matrix/1
 root: ..
+# Absolute OCI runtime that runs the digest-pinned oracle images (Linux host).
+runtime: /usr/bin/docker
 policy: conformance/query/release-policy.json
 profiles_dir: profiles/query
 input_normalization_identity: 6a7d20174e66b42478b90be6c39544dfd68d79fef03541661e12ed947d767f6b

@@ -108,6 +108,13 @@ func LoadReleaseConfig(queryDir, policyPath string, smoke *SmokeReport, seed uin
 		cfg.Bindings = append(cfg.Bindings, Binding{ObligationID: b.ObligationID, Implementation: b.Implementation, Cases: b.Cases, GoTests: b.GoTests})
 	}
 	cfg.Tests = acceptance.Tests
+	manifest, err := LoadReleaseCaseManifest(filepath.Join(queryDir, "release-cases.json"))
+	if err != nil {
+		return cfg, err
+	}
+	if cfg.Cases, err = ReleaseCasesFromManifest(cfg.Lock, queryDir, manifest); err != nil {
+		return cfg, fmt.Errorf("release cases: %w", err)
+	}
 	if cfg.Provenance, err = ProvenanceDecisions(queryDir); err != nil {
 		return cfg, err
 	}

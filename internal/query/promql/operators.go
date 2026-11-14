@@ -93,6 +93,10 @@ func (s *evaluationState) sampleBinary(n *Node, a, b value.Sample, at model.Unix
 		p, keep, ds, e := histogramBinaryProfile(n.Text, a, b, s.plan.Profile)
 		for i := range ds {
 			ds[i].Range = n.OperatorRange
+			if ds[i].Category == "IncompatibleTypesInBinOpInfo" {
+				// The pinned engines anchor this annotation at the whole binary expression.
+				ds[i].Range = n.SourceRange()
+			}
 		}
 		if n.Bool && comparison(n.Text) && e == nil && len(ds) == 0 {
 			p.Histogram = nil

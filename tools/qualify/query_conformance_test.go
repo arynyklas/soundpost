@@ -466,8 +466,9 @@ func TestUnrunSkippedAndUnboundCountsPropagateAsFailure(t *testing.T) {
 	})
 }
 
-// This test pins the honest state of THIS tree: the locked release gate has
-// 785 unbound obligations and 2355 unrun cases and distributed smoke was not
+// This test pins the honest state of THIS tree: the locked release gate has 366
+// unbound obligations (419 bound) and 1083 unrun cases (1272 matched against the
+// pinned oracles), the single layout smoke passes and distributed smoke was not
 // run. It must be updated, never relaxed, when the tree changes.
 func TestCampaignReportsTheRealGateFaithfully(t *testing.T) {
 	realCampaign(t)
@@ -483,20 +484,25 @@ func TestCampaignReportsTheRealGateFaithfully(t *testing.T) {
 		if r.ReportSHA256 == "" || r.Report == "" {
 			t.Errorf("row %s lacks its bound report digest", r.ID)
 		}
-		if r.ExitCode == nil || *r.ExitCode == 0 {
-			t.Errorf("row %s exit code %v, want recorded nonzero", r.ID, r.ExitCode)
+		if r.ExitCode == nil {
+			t.Errorf("row %s has no recorded exit code", r.ID)
+		} else if (*r.ExitCode == 0) != (r.ID == "smoke/single") {
+			t.Errorf("row %s exit code %d: only the single smoke may exit 0", r.ID, *r.ExitCode)
 		}
 	}
 	if len(byID) != 8 {
 		t.Fatalf("%d rows, want 3 profiles x 2 seeds + 2 layouts = 8", len(byID))
 	}
 	for id, r := range byID {
-		if r.Verified {
-			t.Errorf("row %s verified", id)
+		if r.Verified != (id == "smoke/single") {
+			t.Errorf("row %s verified=%v", id, r.Verified)
 		}
 	}
 	rel := byID["release/promql-prometheus-3.1.0/seed/20261110"]
-	mustContain(t, strings.Join(rel.Failures, "\n"), "obligations: 0 bound of 785, unbound 785", "cases: 2355 unrun (0 matched of 2355 required)", "unresolved 3141", "oracle observation: runs 0")
+	mustContain(t, strings.Join(rel.Failures, "\n"), "obligations: 419 bound of 785, unbound 366", "cases: 1083 unrun (1272 matched of 2355 required)", "unresolved 1449")
+	if strings.Contains(strings.Join(rel.Failures, "\n"), "oracle observation") || strings.Contains(strings.Join(rel.Failures, "\n"), "provenance rejected") {
+		t.Errorf("the oracle was not run or provenance was rejected: %v", rel.Failures)
+	}
 	if rel.ProfileCommit == "" || rel.OracleConfigSHA256 == "" || rel.InputNormalizationID == "" || rel.Build == "" || rel.FeatureSets != 4 {
 		t.Errorf("row digests not carried: %+v", rel)
 	}
@@ -505,23 +511,18 @@ func TestCampaignReportsTheRealGateFaithfully(t *testing.T) {
 	}
 	c := campaignReport.Counts
 	// two release reports (one per seed): counts are summed over distinct reports.
-	if c.Unbound != 2*785 || c.Unrun != 2*2355 || c.Unresolved != 2*3141 || c.Skipped != 0 || c.Mismatches != 0 || c.NormalizationLoss != 0 {
+	if c.Unbound != 2*366 || c.Unrun != 2*1083 || c.Unresolved != 2*1449 || c.Skipped != 0 || c.Mismatches != 0 || c.NormalizationLoss != 0 || c.OracleUnavailable != 0 || c.ProvenanceRefused != 0 {
 		t.Errorf("aggregate counts %+v", c)
 	}
-	mustContain(t, campaignErr.Error(), "TOTAL unbound 1570, unrun 4710")
-	// smoke: single runs and passes every step; only the unsatisfied list fails it.
+	mustContain(t, campaignErr.Error(), "TOTAL unbound 732, unrun 2166")
+	// smoke: single runs and passes every step and every requirement.
 	single := byID["smoke/single"]
-	var s q.SmokeReport
-	readJSON(t, filepath.Join(campaignDir, single.Report), &s)
-	if c.FailingSteps != 0 || len(s.NotSatisfied) == 0 {
-		t.Errorf("single smoke: failing steps %d, not satisfied %d", c.FailingSteps, len(s.NotSatisfied))
-	}
-	if !strings.Contains(strings.Join(single.Failures, "\n"), "NOT satisfied") || strings.Contains(strings.Join(single.Failures, "\n"), "failing smoke steps") {
+	if len(single.Failures) != 0 || !single.Verified {
 		t.Errorf("single smoke failures: %v", single.Failures)
 	}
 	mustContain(t, strings.Join(byID["smoke/distributed"].Failures, "\n"), "layout distributed did not run", "layout distributed recorded as not run", "distributed mode")
-	if c.ModesNotRun != 1 {
-		t.Errorf("modes not run %d", c.ModesNotRun)
+	if c.FailingSteps != 0 || c.NotSatisfied != 1 || c.ModesNotRun != 1 {
+		t.Errorf("failing steps %d not satisfied %d modes not run %d", c.FailingSteps, c.NotSatisfied, c.ModesNotRun)
 	}
 	// The report on disk equals what was returned.
 	var disk CampaignReport

@@ -1,0 +1,25 @@
+{
+  "schema": "soundpost-query-release-cases/1",
+  "files": [
+    {
+      "path": "cases/release-promql-evaluation.json",
+      "language": "promql",
+      "phase": "evaluation"
+    },
+    {
+      "path": "cases/release-logql-syntax.json",
+      "language": "logql",
+      "phase": "syntax"
+    },
+    {
+      "path": "cases/release-logql-metric.json",
+      "language": "logql",
+      "phase": "logql-metric"
+    },
+    {
+      "path": "cases/logql-templates.json",
+      "language": "logql",
+      "phase": "logql-template"
+    }
+  ]
+}
