@@ -563,6 +563,34 @@ func TestHandleCheckNotRunAndResultsBlock(t *testing.T) {
 	}
 }
 
+// A handle this project already published exists in its registry: listed in build/owned-handles.json with
+// evidence it passes; the same state for an unlisted handle (someone else's name) still blocks.
+func TestAnOwnedHandleMayExistAndAnUnownedOneBlocks(t *testing.T) {
+	f := newFixture(t).signed()
+	r := f.reports()
+	r.ApprovalPath = f.approve(testCommit)
+	hs, _ := DeriveHandles(f.root)
+	rep, err := RunHandleChecks(context.Background(), fakeChecker{"npm/@soundpost/core": HandleExists, "pypi/soundpost-test": HandleExists}, hs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Handles = &rep
+	write(t, filepath.Join(f.root, "build", "owned-handles.json"), `{"owned":[{"ecosystem":"npm","name":"@soundpost/core","evidence":"published by this project"}]}`)
+	m, _ := Release(context.Background(), testCommit, r)
+	joined := strings.Join(m.Blocking, "\n")
+	if strings.Contains(joined, "@soundpost/core") {
+		t.Fatalf("an owned existing handle blocked: %v", m.Blocking)
+	}
+	if !strings.Contains(joined, "pypi soundpost-test is exists") {
+		t.Fatalf("an unowned existing handle did not block: %v", m.Blocking)
+	}
+	write(t, filepath.Join(f.root, "build", "owned-handles.json"), `{"owned":[{"ecosystem":"npm","name":"@soundpost/core"}]}`)
+	m, _ = Release(context.Background(), testCommit, r)
+	if !strings.Contains(strings.Join(m.Blocking, "\n"), "cannot read owned handles") {
+		t.Fatalf("an entry without evidence was accepted: %v", m.Blocking)
+	}
+}
+
 func TestStaleDependencyInventoryIsReported(t *testing.T) {
 	f := newFixture(t)
 	lockPath := filepath.Join(f.root, "pnpm-lock.yaml")

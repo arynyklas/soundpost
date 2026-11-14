@@ -533,6 +533,11 @@ func checkHandlesOf(r Reports) Check {
 		c.Blocking = []string{"cannot derive handles: " + err.Error()}
 		return c
 	}
+	owned, err := loadOwnedHandles(r.Root)
+	if err != nil {
+		c.Blocking = []string{"cannot read owned handles: " + err.Error()}
+		return c
+	}
 	got := map[Handle]string{}
 	if r.Handles.Schema != handleSchema {
 		c.Blocking = append(c.Blocking, fmt.Sprintf("result schema %q, want %q", r.Handles.Schema, handleSchema))
@@ -544,11 +549,46 @@ func checkHandlesOf(r Reports) Check {
 		switch st, ok := got[h]; {
 		case !ok:
 			c.Blocking = append(c.Blocking, fmt.Sprintf("%s %s was not checked", h.Ecosystem, h.Name))
+		case st == HandleExists && owned[h]:
+			// Already published by this project (recorded in build/owned-handles.json): existing is the expected state.
 		case st != HandleUnclaimed:
 			c.Blocking = append(c.Blocking, fmt.Sprintf("%s %s is %s", h.Ecosystem, h.Name, st))
 		}
 	}
 	return c
+}
+
+// ownedHandlesFile records handles this project has already claimed, each with the evidence of ownership. A
+// handle listed here may exist in its registry; any other existing handle still blocks (someone else's name).
+const ownedHandlesFile = "build/owned-handles.json"
+
+type ownedHandle struct {
+	Handle
+	Evidence string `json:"evidence"`
+}
+
+func loadOwnedHandles(root string) (map[Handle]bool, error) {
+	raw, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(ownedHandlesFile)))
+	if errors.Is(err, os.ErrNotExist) {
+		return map[Handle]bool{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var doc struct {
+		Owned []ownedHandle `json:"owned"`
+	}
+	if err = decodeStrict(raw, &doc); err != nil {
+		return nil, fmt.Errorf("%s: %w", ownedHandlesFile, err)
+	}
+	out := map[Handle]bool{}
+	for _, o := range doc.Owned {
+		if o.Ecosystem == "" || o.Name == "" || o.Evidence == "" {
+			return nil, fmt.Errorf("%s: every entry needs ecosystem, name and evidence", ownedHandlesFile)
+		}
+		out[o.Handle] = true
+	}
+	return out, nil
 }
 
 // Release runs every gate check. The returned manifest is always populated; the error is a

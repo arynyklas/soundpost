@@ -1,0 +1,9 @@
+{
+  "owned": [
+    {
+      "ecosystem": "go",
+      "name": "github.com/arynyklas/soundpost",
+      "evidence": "module path of this repository, https://github.com/arynyklas/soundpost (owner arynyklas); go.mod module line"
+    }
+  ]
+}

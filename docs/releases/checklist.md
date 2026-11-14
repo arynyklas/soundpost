@@ -46,6 +46,6 @@ the real release key and the approval decision are owner actions (Aryn Yklas).
 - [ ] `sbom`: CycloneDX 1.5 and SPDX 2.3 generated twice with identical sha256.
 - [ ] `checksums`: `SHA256SUMS` matches every artifact and `release.json` (reproducible, `--reproduce`).
 - [ ] `signature`: detached Ed25519 signature over the `release.json` digest verifies against the published public key (`not_signed` blocks).
-- [ ] `handle_check`: npm/PyPI/Go handles checked unclaimed (`not_run` blocks).
+- [ ] `handle_check`: npm/PyPI/Go handles checked unclaimed (`not_run` blocks). A handle this project has already published is listed in `build/owned-handles.json` with its evidence and may exist; any other existing handle blocks.
 - [ ] `owner_approval`: signed owner approval for this exact version, commit and manifest digest.
 - [ ] Fresh install-single and install-distributed smokes plus UI/SDK/native/reference smokes run against the produced artifacts.
