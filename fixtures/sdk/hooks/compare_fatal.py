@@ -32,7 +32,7 @@ def qualify(runtime,command,modes):
         if mode not in ("thread","asyncio","application-handler","capture-callback","episode-cross"):assert baseline[0]!=0, "fatal path did not exit"
         assert len(owned[3])==1, f"{runtime}/{mode}: missing test-only safe observation"
         snapshot=owned[3][0];records=snapshot["records"]
-        expected=0 if runtime=="bun" or mode in ("closed","replaced","capture-failure") else 1
+        expected=0 if (runtime=="bun" and mode in ("rejection","closed")) or mode in ("closed","replaced","capture-failure") else 1
         if mode=="episode-cross":expected=2
         assert len(records)==expected, f"{runtime}/{mode}: expected {expected} actual safe captures, got {len(records)}"
         if runtime=="node" and mode in ("episode","episode-callback","episode-cross"):
@@ -49,7 +49,7 @@ def qualify(runtime,command,modes):
             assert payload["exception_class"] in ("ValueError","TypeError","RangeError")
             assert payload["mechanism"] in ("manual","uncaught_exception","unhandled_rejection","thread_exception","asyncio_exception")
             if mode not in ("episode","episode-callback","episode-cross","thread","asyncio"):assert payload["fatal"] is True
-        if runtime=="bun":assert snapshot["capabilities"]["reason"]=="bun_fatal_monitor_unavailable"
+        if runtime=="bun":assert snapshot["capabilities"]["reason"]=="bun_unhandled_rejection_monitor_unavailable" and snapshot["capabilities"]["fatalMonitor"] is True
         rows.append({"runtime":runtime,"mode":mode,"exit":owned[0],"safe_captures":len(records),"sdk_canaries":0,"native_stderr_canary":CANARY.encode() in baseline[2]})
     return rows
 
@@ -59,6 +59,6 @@ def main():
     if args.node:
         if not args.node_fixture:parser.error("--node requires --node-fixture bundled local .mjs artifact")
         rows+=qualify("node",[args.node,"--unhandled-rejections=strict",args.node_fixture],["throw","rejection","episode","episode-callback","episode-cross","closed","replaced","application-handler","capture-callback","capture-failure"])
-    if args.bun:rows+=qualify("bun",[args.bun,str(ROOT/"fixtures/sdk/hooks/bun-fatal.ts")],["throw","rejection","closed"])
+    if args.bun:rows+=qualify("bun",[args.bun,str(ROOT/"fixtures/sdk/hooks/bun-fatal.ts")],["throw","timer","rejection","closed"])
     print(json.dumps(rows,sort_keys=True))
 if __name__=="__main__":main()

@@ -4083,5 +4083,119 @@
         "reason": "only this one workstation was used; no pinned Linux/macOS/Windows runner class matrix."
       }
     ]
-  }
+  },
+  "observed_rows": [
+    {
+      "id": "hooks-browser-chrome-142.0.7444.59-linux-x64",
+      "task": "03.02",
+      "criterion": "[03.02-W3]",
+      "target": "Chrome 142.0.7444.59",
+      "status": "observed",
+      "browser_build": "142.0.7444.59 (Google Chrome for Testing, headless, Linux x86_64)",
+      "executable_sha256": "98ec535a17335079259ce74ac2eccc18f0f6811728d6933d9953859c65d72f29",
+      "archive_sha256": "342d848409c9500d581baae5e6b096c4dbacbf473105d80f0661c123f7de7e05",
+      "driver": "playwright-core 1.64.1 chromium.launch(executablePath)",
+      "fixture": "fixtures/sdk/hooks/browser.ts via fixtures/sdk/hooks/browser-run.mjs",
+      "bundle_sha256": "bc51159d2756b72c743ee4320b58a30189e7c8c83a60f49575d1454c27123951",
+      "observed": {
+        "safe_captures": 5,
+        "sdk_canaries": 0,
+        "prior": [
+          "error",
+          "rejection",
+          "rejection",
+          "error"
+        ],
+        "fatalMonitor": false
+      },
+      "evidence": ".superpowers/sdd/approved-product/l4w1-evidence/03.02-W3-chrome142.txt",
+      "limits": "Headless Linux only; a Windows/macOS row is not implied."
+    },
+    {
+      "id": "hooks-browser-edge-142.0.3595.53-linux-x64",
+      "task": "03.02",
+      "criterion": "[03.02-W3]",
+      "target": "Edge 142.0.3595.53",
+      "status": "observed",
+      "browser_build": "142.0.3595.53 (Microsoft Edge stable .deb, headless, Linux x86_64)",
+      "executable_sha256": "2e224151e4b6acb12e9836e5bb2842a4c95cf2e2510b52575727b93f1bf5dbb7",
+      "archive_sha256": "71248a5b122441ef23aefee02f9957d82b3dae853c783d8c207b8b190327c9c3",
+      "driver": "playwright-core 1.64.1 chromium.launch(executablePath)",
+      "fixture": "fixtures/sdk/hooks/browser.ts via fixtures/sdk/hooks/browser-run.mjs",
+      "bundle_sha256": "bc51159d2756b72c743ee4320b58a30189e7c8c83a60f49575d1454c27123951",
+      "observed": {
+        "safe_captures": 5,
+        "sdk_canaries": 0,
+        "prior": [
+          "error",
+          "rejection",
+          "rejection",
+          "error"
+        ],
+        "fatalMonitor": false
+      },
+      "evidence": ".superpowers/sdd/approved-product/l4w1-evidence/03.02-W3-edge142.txt",
+      "limits": "Headless Linux only; a Windows/macOS row is not implied."
+    },
+    {
+      "id": "python-suite-cpython-3.12.3-linux-x64",
+      "task": "03.04",
+      "criterion": "[03.04-W1]",
+      "status": "observed",
+      "runtime": "CPython 3.12.3",
+      "observed": "18 passed (test_context, test_integrations incl. real HTTP+PostgreSQL16.14 critical path, test_framework_adapters)",
+      "evidence": ".superpowers/sdd/approved-product/l4w1-evidence/03.04-W1-pytest-linux.txt",
+      "limits": "Approved row is 3.12.12; 3.12.3 is the distro build. fixtures/sdk/python/critical_path.py (HTTPS ingest + independent verifier) not run: no verifier adapter in repo."
+    },
+    {
+      "id": "python-suite-cpython-3.13.18-linux-x64",
+      "task": "03.04",
+      "criterion": "[03.04-W1]",
+      "status": "observed",
+      "runtime": "CPython 3.13.18 (python-build-standalone)",
+      "observed": "18 passed (same suites, real PostgreSQL16.14)",
+      "evidence": ".superpowers/sdd/approved-product/l4w1-evidence/03.04-W1-pytest-linux.txt",
+      "limits": "Approved row is 3.13.9; patch differs."
+    },
+    {
+      "id": "python-suite-cpython-3.14.10-linux-x64",
+      "task": "03.04",
+      "criterion": "[03.04-W1]",
+      "status": "observed",
+      "runtime": "CPython 3.14.10 (python-build-standalone)",
+      "observed": "18 passed (same suites, real PostgreSQL16.14)",
+      "evidence": ".superpowers/sdd/approved-product/l4w1-evidence/03.04-W1-pytest-linux.txt",
+      "limits": "Approved row is 3.14.0; patch differs."
+    },
+    {
+      "id": "python-suite-cpython-3.12.12-windows-x64",
+      "task": "03.04",
+      "criterion": "[03.04-W2]",
+      "status": "observed",
+      "runtime": "CPython 3.12.12 (uv)",
+      "observed": "18 passed (same suites, real PostgreSQL16.14 via WSL port)",
+      "evidence": ".superpowers/sdd/approved-product/l4w1-evidence/03.04-W2-pytest-windows312.txt",
+      "limits": "CPython 3.13 on Windows not installed here: not run."
+    },
+    {
+      "id": "delivery-node-22.23.4-linux-x64-real-go-backend",
+      "task": "03.03",
+      "criterion": "[03.03-W2]",
+      "status": "observed",
+      "runtime": "Node 22.23.4",
+      "observed": "backend.ts --lost-response: sends1 lookups1 pending0 lost0 historical receipt, TLS verified, real Go single-node backend",
+      "evidence": ".superpowers/sdd/approved-product/l4w1-evidence/03.03-W2-node-lost-response.txt",
+      "limits": "Approved row is Node 22.21.1; --native-loss not run (provisioned sources have loss:false)."
+    },
+    {
+      "id": "delivery-node-24.22.3-linux-x64-real-go-backend",
+      "task": "03.03",
+      "criterion": "[03.03-W2]",
+      "status": "observed",
+      "runtime": "Node 24.22.3",
+      "observed": "backend.ts --lost-response: sends1 lookups1 pending0 lost0 historical receipt, TLS verified, real Go single-node backend",
+      "evidence": ".superpowers/sdd/approved-product/l4w1-evidence/03.03-W2-node-lost-response.txt",
+      "limits": "Approved row is Node 24.11.0; --native-loss not run."
+    }
+  ]
 }

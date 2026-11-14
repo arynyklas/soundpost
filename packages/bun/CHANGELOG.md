@@ -4,6 +4,7 @@
 
 - Expose policy-first native error graph capture and explicit bounded leases.
 - Report absent qualified Bun fatal monitoring without installing consuming handlers or changing default exit/rejection behavior.
+- Install the non-consuming `uncaughtExceptionMonitor` on Bun 1.3.14 (probed: it fires for synchronous uncaught throws and never for unhandled promise rejections, and exit codes are unchanged); capabilities report `fatalMonitor: true`, `unhandledRejectionMonitor: false`, `reason: "bun_unhandled_rejection_monitor_unavailable"`, and `useEpisode` arms a handled episode like Node. Supersedes the line above.
 - Align the explicit episode method signature and shared exception vocabulary; unsupported fatal association still rejects without changing runtime behavior.
 - Add native HTTPS delivery/receipt-aware flush/close, own exporter context and explicit encrypted backend spool; keep independent Bun qualification and fatal-monitor limits.
 - Add independent Bun AsyncLocalStorage/clock, Bun.serve streaming/cancel, HTTP/fetch/pg8 and explicit closed worker-context adapters.

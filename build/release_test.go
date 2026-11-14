@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -237,5 +238,39 @@ func TestStaticELFCheckRefusesNonELF(t *testing.T) {
 	write(t, path, "#!/bin/sh\n")
 	if static, err := isStaticELF(path); err == nil && static {
 		t.Fatal("a shell script was reported as a static ELF")
+	}
+}
+
+// The three operator-facing refusals of a missing compiler, a missing archive and an offline
+// module cache must each name what to do, so they are triggered through verifyInputs itself.
+func TestVerifyInputsMissingToolchainMessages(t *testing.T) {
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+		t.Skip("verifyInputs only runs on linux/amd64")
+	}
+	files := map[string]string{"bin/go": "compiler"}
+	archive, sum := goArchive(t, files)
+	root := t.TempDir()
+	write(t, filepath.Join(root, "build", "toolchains.json"), `{"go":{"version":"1.27.3","linux_amd64":{"url":"u","sha256":"`+sum+`"}}}`)
+	write(t, filepath.Join(root, "go.mod"), "module x\n")
+	write(t, filepath.Join(root, "go.sum"), "")
+
+	t.Setenv("SOUNDPOST_GO", filepath.Join(root, "no-such-go"))
+	if _, err := verifyInputs(root, archive); err == nil || !strings.Contains(err.Error(), "pinned Go toolchain missing") || !strings.Contains(err.Error(), "SOUNDPOST_GO") || !strings.Contains(err.Error(), "install-single.md") {
+		t.Fatalf("missing compiler message: %v", err)
+	}
+
+	goroot := filepath.Join(root, "goroot")
+	write(t, filepath.Join(goroot, "bin", "go"), "compiler")
+	fake := filepath.Join(root, "fake-go")
+	script := "#!/bin/sh\ncase \"$1\" in\nenv) echo '" + goroot + "';;\nversion) echo 'go version go1.27.3 linux/amd64';;\nmod) echo 'go: example.com/m@v1.0.0: module lookup disabled by GOPROXY=off'; exit 1;;\nesac\n"
+	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SOUNDPOST_GO", fake)
+	if _, err := verifyInputs(root, filepath.Join(root, "no-such-archive.tar.gz")); err == nil || !strings.Contains(err.Error(), "pinned Go archive missing") || !strings.Contains(err.Error(), "--archive") {
+		t.Fatalf("missing archive message: %v", err)
+	}
+	if _, err := verifyInputs(root, archive); err == nil || !strings.Contains(err.Error(), "go mod verify failed") || !strings.Contains(err.Error(), "GOPROXY=off") || !strings.Contains(err.Error(), "go mod download") {
+		t.Fatalf("offline module cache message: %v", err)
 	}
 }

@@ -273,7 +273,7 @@
             "payload": {
               "replay_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
               "session_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-              "recorder_version": "soundpost1",
+              "recorder_version": "1",
               "sequence": "0",
               "previous_hash": "0000000000000000000000000000000000000000000000000000000000000000",
               "checkpoint_sequence": "0",
@@ -297,8 +297,8 @@
           }
         ]
       },
-      "canonical_utf8": "{\"id\":\"00000000000000000000000000000019\",\"policy_revision\":\"1\",\"producer\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"project\":\"22222222222222222222222222222222\",\"records\":[{\"id\":\"0000000000000000000000000000000d\",\"kind\":\"replay_chunk\",\"observed_at_ns\":\"9007199254740993\",\"payload\":{\"capture_policy_revision\":\"1\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"0\",\"clock\":{\"domain\":{\"boot\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"host\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"runtime\":\"cccccccccccccccccccccccccccccccc\"},\"mono_ns\":\"9007199254740993\",\"uncertainty_ns\":\"0\",\"wall_ns\":\"9007199254740993\"},\"events\":[],\"gap\":true,\"loss\":\"0\",\"nodes\":[],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"soundpost1\",\"replay_id\":\"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\",\"sequence\":\"0\",\"session_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},\"resource\":{\"build_id\":\"44444444444444444444444444444444\",\"environment_id\":\"77777777777777777777777777777777\",\"instance_pseudonym\":\"worker-1\",\"labels\":[],\"service_id\":\"66666666666666666666666666666666\"}}],\"route_slot\":3,\"source\":\"33333333333333333333333333333333\",\"version\":1}",
-      "sha256": "81fd782b2bc3c52adcd08e1e83895af41984468a4f76a99393df8450497c1861"
+      "canonical_utf8": "{\"id\":\"00000000000000000000000000000019\",\"policy_revision\":\"1\",\"producer\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"project\":\"22222222222222222222222222222222\",\"records\":[{\"id\":\"0000000000000000000000000000000d\",\"kind\":\"replay_chunk\",\"observed_at_ns\":\"9007199254740993\",\"payload\":{\"capture_policy_revision\":\"1\",\"checkpoint_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"checkpoint_sequence\":\"0\",\"clock\":{\"domain\":{\"boot\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"host\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"runtime\":\"cccccccccccccccccccccccccccccccc\"},\"mono_ns\":\"9007199254740993\",\"uncertainty_ns\":\"0\",\"wall_ns\":\"9007199254740993\"},\"events\":[],\"gap\":true,\"loss\":\"0\",\"nodes\":[],\"previous_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"recorder_version\":\"1\",\"replay_id\":\"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\",\"sequence\":\"0\",\"session_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},\"resource\":{\"build_id\":\"44444444444444444444444444444444\",\"environment_id\":\"77777777777777777777777777777777\",\"instance_pseudonym\":\"worker-1\",\"labels\":[],\"service_id\":\"66666666666666666666666666666666\"}}],\"route_slot\":3,\"source\":\"33333333333333333333333333333333\",\"version\":1}",
+      "sha256": "bc6b514969c51b1d43a63e2325539a2a32e680b9cfd64b20ea6aa9f15b7e01b9"
     },
     {
       "batch": {
