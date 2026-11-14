@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -214,11 +215,13 @@ func newControlVoters(t *testing.T) *controlVoters {
 }
 
 // voterTick is the fixture's Raft tick. The race detector slows every goroutine several times
-// over; with the 20 ms tick a delayed heartbeat then expires followers' election timers, the
-// lead moves off voter 1 mid-fixture and its leader-bound steps answer stale. The longer tick
-// under -race keeps the fixture's leadership assumptions; the product's timing is not changed.
+// over, and a 2-vCPU host (a stock CI runner) running three voters plus the test is starved the
+// same way; with the 20 ms tick a delayed heartbeat then expires followers' election timers, the
+// lead moves off voter 1 mid-fixture and its leader-bound steps answer stale or unavailable. The
+// longer tick on such hosts keeps the fixture's leadership assumptions; the product's timing is
+// not changed.
 func voterTick() time.Duration {
-	if raceEnabled {
+	if raceEnabled || runtime.NumCPU() <= 2 {
 		return 100 * time.Millisecond
 	}
 	return 20 * time.Millisecond

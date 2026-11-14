@@ -37,16 +37,25 @@ func (v *controlVoters) receiptOn(id uint64) []string {
 func (v *controlVoters) erasedWithVoter3Idle(canary string) {
 	v.t.Helper()
 	leader := v.fx[1]
-	for range 40 { // the replaced state spans freed pages that later writes do not all reuse
+	// The fixture writes through voter 1, so each write phase starts with voter 1 confirmed as the leader: on a slow
+	// host (a 2-vCPU CI runner) a delayed heartbeat can move the lead between phases, and a write sent to a voter
+	// that stopped leading answers unavailable. The assertions are unchanged; only the fixture's precondition is
+	// re-established.
+	for round := range 40 { // the replaced state spans freed pages that later writes do not all reuse
+		if round%10 == 0 {
+			v.leaderIs(1)
+		}
 		leader.seedAll(leader.newSeed(leader.project, canary), 50)
 	}
 	for _, id := range []uint64{2, 3} {
 		v.await(id, v.mustRevision(1))
 	}
+	v.leaderIs(1)
 	leader.saga(control.DeleteScope{Mode: model.DeleteRetireProject, Projects: []model.ID{leader.project}})
 	for _, id := range []uint64{2, 3} {
 		v.await(id, v.mustRevision(1))
 	}
+	v.leaderIs(1)
 	leader.pass()
 	v.fx[2].pass()
 	if err := v.stores[2].ScrubErased(context.Background()); err != nil {
