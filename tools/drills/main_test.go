@@ -69,22 +69,26 @@ func TestCommittedManifestMatchesImplementations(t *testing.T) {
 }
 
 func TestRunRefusesOtherTargetsAndWritesNotRunRows(t *testing.T) {
-	manifest := filepath.Join("..", "..", "drills", "scenarios.yaml")
 	dir := t.TempDir()
+	manifest := filepath.Join(dir, "scenarios.yaml")
+	if err := os.WriteFile(manifest, []byte(goodManifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	reports := t.TempDir()
 	for _, target := range []string{"production", "default", "", "Isolated", "isolated "} {
 		var out, errOut bytes.Buffer
-		if code := run([]string{"--scenario", "power-loss", "--target", target, "--report", dir, "--scenarios", manifest}, &out, &errOut); code != 2 {
+		if code := run([]string{"--scenario", "b", "--target", target, "--report", reports, "--scenarios", manifest}, &out, &errOut); code != 2 {
 			t.Errorf("target %q exited %d, want 2 (%s)", target, code, errOut.String())
 		}
 	}
-	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+	if entries, _ := os.ReadDir(reports); len(entries) != 0 {
 		t.Errorf("a refused run wrote %d report files", len(entries))
 	}
 	var out, errOut bytes.Buffer
-	if code := run([]string{"--scenario", "power-loss", "--target", "isolated", "--report", dir, "--scenarios", manifest}, &out, &errOut); code != 10 {
+	if code := run([]string{"--scenario", "b", "--target", "isolated", "--report", reports, "--scenarios", manifest}, &out, &errOut); code != 10 {
 		t.Fatalf("a not_run row exited %d, want 10: %s %s", code, out.String(), errOut.String())
 	}
-	raw, err := os.ReadFile(filepath.Join(dir, "power-loss.json"))
+	raw, err := os.ReadFile(filepath.Join(reports, "b.json"))
 	if err != nil || !bytes.Contains(raw, []byte(`"status": "not_run"`)) || bytes.Contains(raw, []byte(`"status": "passed"`)) {
 		t.Fatalf("not_run report: %v %s", err, raw)
 	}

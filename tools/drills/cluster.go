@@ -678,10 +678,23 @@ func dcFreeAddress() (string, error) {
 }
 
 // dcLog keeps the first MiB of a process's output for liveness diagnostics. It is never written to
-// a report: a report carries ids, digests and statuses only.
+// a report: a report carries ids, digests and statuses only. With SOUNDPOST_DRILL_LOG_DIR set the
+// output is also appended to <dir>/<name>.log, a debugging aid for a drill developer that a run
+// for evidence leaves unset.
 type dcLog struct {
-	mu sync.Mutex
-	b  bytes.Buffer
+	mu  sync.Mutex
+	b   bytes.Buffer
+	tee *os.File
+}
+
+func newDCLog(name string) *dcLog {
+	l := &dcLog{}
+	if dir := os.Getenv("SOUNDPOST_DRILL_LOG_DIR"); dir != "" {
+		if f, err := os.OpenFile(filepath.Join(dir, name+".log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600); err == nil {
+			l.tee = f
+		}
+	}
+	return l
 }
 
 func (s *dcLog) Write(p []byte) (int, error) {
@@ -689,6 +702,9 @@ func (s *dcLog) Write(p []byte) (int, error) {
 	defer s.mu.Unlock()
 	if s.b.Len() < 1<<20 {
 		s.b.Write(p)
+	}
+	if s.tee != nil {
+		_, _ = s.tee.Write(p)
 	}
 	return len(p), nil
 }
@@ -703,6 +719,10 @@ type dcProc struct {
 // dcCluster is a real three-member mTLS cluster of the produced binary on loopback, all state under
 // env.Work (an allowlisted isolated root).
 type dcCluster struct {
+	opts   dcOptions
+	link   *dcNet
+	disks  map[uint64]*dcDisk
+	dial   map[uint64]string // the address the other members dial (peer, or its proxy)
 	env    *Env
 	binary string
 	work   string
@@ -723,9 +743,18 @@ type dcCluster struct {
 	quitOnce sync.Once
 }
 
-// newDCCluster lays out the PKI, the typed configuration and the data directories and APPROVES
+// dcOptions selects the failure machinery a drill needs beyond plain processes.
+type dcOptions struct {
+	proxy  bool // peer traffic runs through the drill's own proxies (link-level partitions)
+	inject bool // members run under the storage fault injector (fsync failure, power loss, vanishing disk)
+}
+
+// newDCCluster is newDCClusterWith with no extra machinery.
+func newDCCluster(env *Env) (*dcCluster, error) { return newDCClusterWith(env, dcOptions{}) }
+
+// newDCClusterWith lays out the PKI, the typed configuration and the data directories and APPROVES
 // every directory and loopback address against the allowlist before anything is created.
-func newDCCluster(env *Env) (*dcCluster, error) {
+func newDCClusterWith(env *Env, opts dcOptions) (*dcCluster, error) {
 	if env.Binary == "" {
 		return nil, errors.New("this drill needs --binary (the produced static soundpost binary)")
 	}
@@ -733,7 +762,7 @@ func newDCCluster(env *Env) (*dcCluster, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &dcCluster{env: env, binary: binary, work: env.Work, public: map[uint64]string{}, peer: map[uint64]string{}, data: map[uint64]string{},
+	c := &dcCluster{env: env, binary: binary, work: env.Work, public: map[uint64]string{}, peer: map[uint64]string{}, dial: map[uint64]string{}, data: map[uint64]string{}, opts: opts, disks: map[uint64]*dcDisk{},
 		logs: map[uint64]*dcLog{}, procs: map[uint64]*dcProc{}, sites: map[uint64]*dcSite{}, sessions: map[uint64]auth.Session{}, down: map[uint64]bool{}, quit: make(chan struct{})}
 	pki := filepath.Join(c.work, "pki")
 	dirs := []string{pki, filepath.Join(c.work, "bootstrap")}
@@ -744,11 +773,19 @@ func newDCCluster(env *Env) (*dcCluster, error) {
 		if e1 != nil || e2 != nil {
 			return nil, errors.Join(e1, e2)
 		}
-		c.public[n.id], c.peer[n.id] = pub, peer
+		c.public[n.id], c.peer[n.id], c.dial[n.id] = pub, peer, peer
+		if opts.proxy {
+			if c.link == nil {
+				c.link = newDCNet()
+			}
+			if c.dial[n.id], err = c.link.listen(n.id, peer); err != nil {
+				return nil, err
+			}
+		}
 		c.data[n.id] = filepath.Join(c.work, "node-"+n.name)
-		c.logs[n.id] = &dcLog{}
+		c.logs[n.id] = newDCLog("member-" + n.name)
 		dirs = append(dirs, c.data[n.id])
-		addrs = append(addrs, pub, peer)
+		addrs = append(addrs, pub, peer, c.dial[n.id])
 	}
 	if err = env.Approve(dirs, addrs); err != nil {
 		return nil, err
@@ -764,7 +801,7 @@ func newDCCluster(env *Env) (*dcCluster, error) {
 	c.seed = filepath.Join(c.work, "cluster.seed")
 	var nodes []config.Node
 	for _, n := range dcMembers {
-		nodes = append(nodes, config.Node{ID: n.id, Identity: n.identity, FailureDomain: "process-directory-" + n.name, PeerAddress: config.Endpoint("https://" + c.peer[n.id]), PeerListen: c.peer[n.id],
+		nodes = append(nodes, config.Node{ID: n.id, Identity: n.identity, FailureDomain: "process-directory-" + n.name, PeerAddress: config.Endpoint("https://" + c.dial[n.id]), PeerListen: c.peer[n.id],
 			Disk: config.Disk{ID: "directory-" + n.name, Volume: "directory-" + n.name, Path: c.data[n.id], CapacityBytes: 1 << 30}, Certificate: certs[n.id], PrivateKey: config.NewSecretRef("file:" + keys[n.id])})
 	}
 	c.cfg = config.InstallConfig{
@@ -880,6 +917,19 @@ func (c *dcCluster) bootstrapAndStart() error {
 		return err
 	}
 	for id, content := range files {
+		if c.opts.proxy {
+			// Each member dials its peers from its own loopback address 127.0.0.<id>; the drill's proxy
+			// tells the dialers apart by it.
+			var node map[string]any
+			if err = json.Unmarshal(content, &node); err != nil {
+				return err
+			}
+			node["peer_source_ip"] = fmt.Sprintf("127.0.0.%d", id)
+			if content, err = json.MarshalIndent(node, "", "  "); err != nil {
+				return err
+			}
+			content = append(content, '\n')
+		}
 		if err = os.WriteFile(filepath.Join(c.work, fmt.Sprintf("node-%d.json", id)), content, 0o600); err != nil {
 			return err
 		}
@@ -918,11 +968,33 @@ func (c *dcCluster) start(id uint64) error {
 	if c.procs[id] != nil {
 		return errors.New("member already running")
 	}
-	cmd := exec.Command(c.binary, "serve", "--mode=distributed", "--node-id", strconv.FormatUint(id, 10), "--cluster-config", filepath.Join(c.work, fmt.Sprintf("node-%d.json", id)), "--data-dir", c.data[id], "--listen", c.public[id])
-	cmd.Stdout, cmd.Stderr = c.logs[id], c.logs[id]
-	cmd.Env = []string{"PATH=" + os.Getenv("PATH")}
-	if err := cmd.Start(); err != nil {
-		return err
+	args := []string{"serve", "--mode=distributed", "--node-id", strconv.FormatUint(id, 10), "--cluster-config", filepath.Join(c.work, fmt.Sprintf("node-%d.json", id)), "--data-dir", c.data[id], "--listen", c.public[id]}
+	var cmd *exec.Cmd
+	if c.opts.inject {
+		if err := os.MkdirAll(c.data[id], 0o700); err != nil {
+			return err
+		}
+		disk := c.disks[id]
+		if disk == nil {
+			var err error
+			if disk, err = newDCDisk(c.data[id], filepath.Join(c.work, fmt.Sprintf("shadow-%d", id))); err != nil {
+				return err
+			}
+			c.disks[id] = disk
+		}
+		disk.stop()
+		var err error
+		if cmd, err = dcSpawnFaulted(disk, c.binary, args, c.logs[id]); err != nil {
+			return err
+		}
+	} else {
+		cmd = exec.Command(c.binary, args...)
+		cmd.Stdout, cmd.Stderr = c.logs[id], c.logs[id]
+		cmd.Env = []string{"PATH=" + os.Getenv("PATH")}
+		dcOwnGroup(cmd)
+		if err := cmd.Start(); err != nil {
+			return err
+		}
 	}
 	done := make(chan struct{})
 	go func() { _ = cmd.Wait(); close(done) }()
@@ -1042,6 +1114,12 @@ func (c *dcCluster) live() []uint64 {
 func (c *dcCluster) close() {
 	c.quitOnce.Do(func() { close(c.quit) })
 	c.killAll()
+	if c.link != nil {
+		c.link.close()
+	}
+	for _, d := range c.disks {
+		d.stop()
+	}
 }
 
 func (c *dcCluster) killAll() {
@@ -1675,6 +1753,12 @@ type dcFaultSpec struct {
 	Victim  uint64
 	Inject  func() error // takes the victim down
 	Restore func() error // brings the victim back (start or SIGCONT); the member must then become ready
+	During  func() error // optional: runs while the fault is active, after the survivors acknowledged, before Restore
+	// Degraded says the survivors are NOT required to keep acknowledging while the fault lasts (a
+	// member that is up but unusable may keep leading groups; see the fsync-failure drill). What stays
+	// required: no acknowledgement through the victim without durability, every acknowledgement
+	// reconciled, and a full recovery after Restore.
+	Degraded bool
 }
 
 // dcRunStreamFault is one fault phase while writes stream: write, inject the fault mid-stream, make
@@ -1719,23 +1803,46 @@ func dcRunStreamFault(c *dcCluster, w *dcWriter, rep *Report, spec dcFaultSpec) 
 		return err
 	}
 	rep.Timeline().Fail(subject, "probe write to the down member was not acknowledged: "+detail)
-	via, err := w.deliver(probe, c.live, 120*time.Second, p+"_probe")
-	if err != nil {
-		return rep.Require(p+"_refused_write_retried_unchanged_to_ack", false, err.Error())
+	limit := 120 * time.Second
+	if spec.Degraded {
+		limit = 20 * time.Second
 	}
-	rep.Fact(p+"/probe_acknowledged_by_member", via)
-	c.env.Logf("%s: probe batch acknowledged by member %d", p, via)
-	rep.Timeline().Deliver("ingest", fmt.Sprintf("the refused probe batch was retried unchanged and acknowledged by member %d", via))
+	probeAcked := true
+	via, err := w.deliver(probe, c.live, limit, p+"_probe")
+	switch {
+	case err != nil && spec.Degraded:
+		probeAcked = false
+		rep.Fact(p+"/probe_acknowledged_by_survivors_while_degraded", false)
+		c.env.Logf("%s: probe batch not acknowledged by the survivors within %s (degraded phase); it is retried after the restore", p, limit)
+	case err != nil:
+		return rep.Require(p+"_refused_write_retried_unchanged_to_ack", false, err.Error()+"; cluster at the failure: "+c.diagnose())
+	default:
+		rep.Fact(p+"/probe_acknowledged_by_member", via)
+		c.env.Logf("%s: probe batch acknowledged by member %d", p, via)
+		rep.Timeline().Deliver("ingest", fmt.Sprintf("the refused probe batch was retried unchanged and acknowledged by member %d", via))
+	}
 
-	if err = w.waitAcks(8, faulted, 120*time.Second); err != nil {
-		return rep.Require(p+"_acks_through_survivors_while_victim_down", false, err.Error())
+	var latency time.Duration
+	if spec.Degraded {
+		time.Sleep(10 * time.Second)
+		rep.Fact(p+"/acks_during_degraded_window", dcAcksBetween(w.Times(), faulted, time.Now()))
+	} else {
+		if err = w.waitAcks(8, faulted, 120*time.Second); err != nil {
+			return rep.Require(p+"_acks_through_survivors_while_victim_down", false, err.Error()+"; cluster at the failure: "+c.diagnose())
+		}
+		var ok bool
+		latency, ok = dcFirstAckAfter(w.Times(), faulted)
+		if err = rep.Require(p+"_first_ack_after_fault", ok, "an acknowledgement of a request started after the fault completed"); err != nil {
+			return err
+		}
+		rep.Fact(p+"/first_ack_after_fault_ms", latency.Milliseconds())
 	}
-	latency, ok := dcFirstAckAfter(w.Times(), faulted)
-	if err = rep.Require(p+"_first_ack_after_fault", ok, "an acknowledgement of a request started after the fault completed"); err != nil {
-		return err
-	}
-	rep.Fact(p+"/first_ack_after_fault_ms", latency.Milliseconds())
 
+	if spec.During != nil {
+		if err = spec.During(); err != nil {
+			return rep.Require(p+"_checks_while_faulted", false, err.Error())
+		}
+	}
 	c.env.Logf("%s: first ack after the fault %dms; restoring member %d", p, latency.Milliseconds(), spec.Victim)
 	restoreAt := time.Now()
 	if err = spec.Restore(); err != nil {
@@ -1745,6 +1852,12 @@ func dcRunStreamFault(c *dcCluster, w *dcWriter, rep *Report, spec dcFaultSpec) 
 		return rep.Require(p+"_victim_ready_after_restore", false, err.Error())
 	}
 	readyAt := time.Now()
+	if !probeAcked {
+		if _, err = w.deliver(probe, c.live, 120*time.Second, p+"_probe_after_restore"); err != nil {
+			return rep.Require(p+"_refused_write_retried_unchanged_to_ack", false, err.Error()+"; cluster at the failure: "+c.diagnose())
+		}
+		rep.Timeline().Deliver("ingest", "the refused probe batch was retried unchanged after the restore and acknowledged")
+	}
 	c.env.Logf("%s: member %d ready %dms after restore", p, spec.Victim, readyAt.Sub(restoreAt).Milliseconds())
 	rep.Fact(p+"/ready_after_restore_ms", readyAt.Sub(restoreAt).Milliseconds())
 	rep.Fact(p+"/acks_between_fault_and_ready", dcAcksBetween(w.Times(), faulted, readyAt))

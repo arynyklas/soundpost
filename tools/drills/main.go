@@ -33,7 +33,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
+func main() {
+	if os.Getenv(dcFaultExecEnv) != "" {
+		os.Exit(dcFaultExecMain())
+	}
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+}
 
 func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 && args[0] == "evidence" {

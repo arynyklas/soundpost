@@ -71,10 +71,42 @@ entry, `facts` and `not_run_items`. No secret or raw telemetry content is writte
 | `backup-predates-deletion` | encrypted backup older than a completed deletion, independent authority HEAD | run |
 | `restore-authority-unavailable` | restore with the authority unreachable, uninitialised, wrong, rolled back: fail closed | run (one part not run, below) |
 | `evidence-gap-after-retention` | retention worker after expiry; explicit evidence gap on the read path | run |
-| `network-partition` | link-level partition | **not_run**: needs `iptables`/`tc`/network namespaces (privilege) |
-| `power-loss` | power loss of one/all members | **not_run**: no power control; SIGKILL is not power loss |
-| `fsync-failure` | failing fsync on a real disk | **not_run**: no failing disk; a hook is not a disk |
-| `disk-disappearance` | a member's disk disappears | **not_run**: needs privilege to remove or unmount a device |
+| `network-partition` | three real processes; peer traffic runs through the drill's own loopback TCP proxies (each member binds `127.0.0.<id>` as its peer source address); member 1 (initial leader) is isolated with DROPPED packets, member 3 with RESET links, both sides alive and the isolated member still reachable by clients; it must never acknowledge, the majority keeps acknowledging, every ACK reconciled on every member after the heal | run |
+| `power-loss` | three real processes under the unprivileged storage fault injector; one member (initial leader, then member 3 with a torn tail) and then ALL members are power-cut inside an fsync (every fsync held, process group SIGKILLed, then every byte and directory entry the members had not fsynced rolled back); restart; every ACK reconciled | run (emulated power cut, see below) |
+| `fsync-failure` | same injector; every fsync of one member (initial leader, then member 3) answers EIO while writes stream; the member is restarted on its disk; every ACK reconciled | run |
+| `disk-disappearance` | same injector; one member's data directory is moved away under the running process and every fsync and path operation on it answers EIO (initial leader, member 3); then member 2's disk is replaced with a blank one and finally the original returns; every ACK reconciled | run |
+
+### How the four storage and link drills inject their faults (no host privilege)
+
+* **No privilege.** No sysctl, capability, iptables/tc, mount, network namespace or
+  privileged container. The partition is a user-space proxy the drill owns; the
+  storage faults are a seccomp filter with `SECCOMP_RET_USER_NOTIF` installed by
+  the drill on the real produced binary (`PR_SET_NO_NEW_PRIVS` is all it needs;
+  `tools/drills/faultfs_linux_amd64.go`). The drills binary re-executes itself
+  (`SOUNDPOST_DRILL_FAULT_EXEC`) to install the filter and exec the member, so the
+  member is the unmodified binary. Linux amd64 only; elsewhere the drills fail
+  with a typed "injector unavailable" error (they are never reported passed).
+* **What is trapped.** `fsync`, `fdatasync`, `open*`, `creat`, `mkdir*`, `unlink*`,
+  `rmdir`, `rename*` of the member. Everything else runs natively. The drill
+  answers `EIO` (failing fsync, vanished disk) or lets the kernel run the call.
+  The same stream is the durability ledger the power cut uses: bytes covered by an
+  fsync, directory entries covered by a directory fsync, renames covered by an fsync
+  of both directories.
+* **Power loss is emulated, not performed.** The member's whole process group is
+  SIGKILLed while every fsync is held (so writes that were issued and not yet synced
+  exist), then the drill rolls the disk back to the ledger: unsynced file tails are
+  truncated (or, with a torn tail, half of the unsynced tail is kept), directory
+  entries not published by a directory fsync are removed, renames not published are
+  undone. It does **not** model write reordering in a disk cache, torn sectors,
+  filesystem journal replay, or a real power cut: the kernel page cache is not dropped,
+  and unsynced loss is applied by the drill. A physical power cut still needs a
+  machine whose power can be cut (a VM the hypervisor can hard-reset, or a PDU).
+* **Network partition is member-to-member only.** The proxy sits on the peer
+  transport between members; clients reach every member directly. It models link
+  failure between members (packets vanish, or connections reset and refused) but not
+  switch, routing, MTU or asymmetric-path failure.
+* **Debugging.** `SOUNDPOST_DRILL_LOG_DIR=/dir` also appends each member's output to
+  `/dir/member-<a|b|c>.log`; unset for evidence runs. Reports never carry member output.
 
 ### What the run does NOT prove
 

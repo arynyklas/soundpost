@@ -42,20 +42,20 @@ scenarios:
     description: SIGSTOP two members; the survivor must refuse acknowledgement (typed) and no ACK may exist for a refused batch; SIGCONT, retry the identical batch, reconcile.
   - name: network-partition
     evidence: node_loss
-    not_run: "needs iptables/tc/network namespaces (CAP_NET_ADMIN); the drill refuses to weaken host privileges. SIGSTOP rows (minority-pause, majority-pause) are the unprivileged substitute and are not claimed to prove link-level partition behaviour."
-    description: Link-level minority/majority partition with both sides live.
+    needs_binary: true
+    description: Link-level partition with both sides live, through the drill's own loopback proxy transport (no iptables/tc/netns, no host privilege). One member is isolated from the other two (initial leader with dropped packets, then member 3 with reset links), stays reachable by clients and must never acknowledge; the majority keeps acknowledging; after the heal every ACK is reconciled on every member.
   - name: power-loss
     evidence: node_loss
-    not_run: "no power control on this host: a process kill is not a power loss (page cache and the disk write cache survive SIGKILL), so it is never simulated as passed."
-    description: Power loss on one member and on all members.
+    needs_binary: true
+    description: Power cut of one member (initial leader; member 3 with a torn tail) and of all three at once, emulated as SIGKILL of the whole process group plus rollback of every byte and directory entry the member never fsynced (observed through an unprivileged seccomp user-notification ledger of its own fsync/rename calls); restart; every ACK reconciled on every member. Not a physical power cut.
   - name: fsync-failure
     evidence: node_loss
-    not_run: "no failing disk or privilege to inject block-layer errors on this host; a replaced fsync in a test double is not evidence about a real disk and is not reported as a drill pass."
-    description: Failed fsync must not acknowledge.
+    needs_binary: true
+    description: Every fsync of one member answers EIO (injected by the unprivileged seccomp user-notification seam under the real binary) while writes stream; nothing is acknowledged without durability, the member restarts and rejoins, every ACK reconciled.
   - name: disk-disappearance
     evidence: node_loss
-    not_run: "removing a block device or unmounting a volume needs privilege this drill must not use; a deleted directory is not the same failure."
-    description: A member's disk disappears while the other two keep their own.
+    needs_binary: true
+    description: A member's data directory vanishes under the running process (moved away; fsync and path operations answer EIO) while the other two keep their own disks, then a blank replacement disk, then the original returns; no false ACK, every ACK reconciled.
   # ---- capacity ----
   - name: capacity-faults
     description: Failed sync, slow apply and full disk through the committed fault hooks of the replica and retention layers; nothing acknowledged without durability, every ACK reconciled.
