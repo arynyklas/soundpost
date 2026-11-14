@@ -59,6 +59,9 @@ jobs:
           go vet ./tools/... ./internal/conformance/... ./cmd/soundpost-querycheck
 
       - name: Campaign tests (race)
+        # The race detector needs cgo; release binaries stay CGO_ENABLED=0 (workflow env).
+        env:
+          CGO_ENABLED: "1"
         run: go test -race -count=1 ./tools/qualify/... ./internal/conformance/... ./cmd/soundpost-querycheck
 
       # Runs soundpost-querycheck release (every seed in the matrix, all profiles, all FeatureSets)

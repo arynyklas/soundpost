@@ -58,6 +58,9 @@ jobs:
           .tools/linux/go/bin/go vet ./cmd/... ./internal/... ./build ./tools/...
 
       - name: Tests (race) for readiness and the serving process
+        # The race detector needs cgo; release binaries stay CGO_ENABLED=0 (workflow env).
+        env:
+          CGO_ENABLED: "1"
         run: .tools/linux/go/bin/go test -race -count=1 ./internal/health ./internal/httpapi ./cmd/soundpost ./build
 
   distribution:

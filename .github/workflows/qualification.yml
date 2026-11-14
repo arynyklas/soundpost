@@ -84,6 +84,9 @@ jobs:
           go vet ./tools/...
 
       - name: Qualification tests (race)
+        # The race detector needs cgo; release binaries stay CGO_ENABLED=0 (workflow env).
+        env:
+          CGO_ENABLED: "1"
         run: go test -race -count=1 -run 'TestQualification|TestPrivacyCanary' ./tools/qualify
 
       # Exits 0 only when every required row of the suite is exercised and within budget; 1 for a measured
