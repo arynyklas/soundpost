@@ -131,13 +131,7 @@ func (h *Helper) serveConnection(parent context.Context, c *net.UnixConn) {
 		deny(e)
 		return
 	}
-	// Read actual peer RSS, never trust the request's baseline assertion.
-	helperRSS, e := processRSS(os.Getpid())
-	if e != nil {
-		deny(ErrResources)
-		return
-	}
-	exportRSS, e := processRSS(int(peer.PID))
+	usage, e := chargeableMemory(os.Getpid(), int(peer.PID), processRSS)
 	if e != nil {
 		deny(ErrResources)
 		return
@@ -157,7 +151,7 @@ func (h *Helper) serveConnection(parent context.Context, c *net.UnixConn) {
 		deny(ErrResources)
 		return
 	}
-	lease, e := h.Budget.Reserve(a, req.Config, Topology{CPUs: uint64(len(cpus)), FDLimit: limit.Cur, OpenFDs: uint64(len(fds)), PageBytes: uint64(os.Getpagesize())}, MemoryUsage{HelperRSS: helperRSS, ExportRSS: exportRSS})
+	lease, e := h.Budget.Reserve(a, req.Config, Topology{CPUs: uint64(len(cpus)), FDLimit: limit.Cur, OpenFDs: uint64(len(fds)), PageBytes: uint64(os.Getpagesize())}, usage)
 	if e != nil {
 		deny(e)
 		return
@@ -226,6 +220,25 @@ func helperCaptureContext(parent context.Context, c *net.UnixConn, expires time.
 	stop := context.AfterFunc(ctx, func() { c.Close() })
 	release := func() { cancel(); stop(); c.Close() }
 	return ctx, release, nil
+}
+
+// chargeableMemory reads the actual resident sizes of the helper and its peer,
+// never trusting the request's baseline assertion. rss is injectable for tests.
+// A peer that is the helper's own process (the helper embedded in the exporting
+// process) is one address space: it is charged once, as HelperRSS.
+func chargeableMemory(helperPID, peerPID int, rss func(int) (uint64, error)) (MemoryUsage, error) {
+	helperRSS, e := rss(helperPID)
+	if e != nil {
+		return MemoryUsage{}, e
+	}
+	if peerPID == helperPID {
+		return MemoryUsage{HelperRSS: helperRSS}, nil
+	}
+	exportRSS, e := rss(peerPID)
+	if e != nil {
+		return MemoryUsage{}, e
+	}
+	return MemoryUsage{HelperRSS: helperRSS, ExportRSS: exportRSS}, nil
 }
 func processRSS(pid int) (uint64, error) {
 	b, e := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/statm")
