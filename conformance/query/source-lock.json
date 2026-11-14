@@ -262,6 +262,7 @@
     "cases/logql-syntax-pipeline.json": "88a74606c34f8a8260c09f3fbb246e083224de63be0f6c15da675a0902aadc28",
     "cases/logql-templates.json": "762bfe4da659abec401a45beb09287766891e5bd787916962efe672cf27ba8c6",
     "cases/logql-metrics-order.json": "7c9d0b3bcc9dc40e6c847834a45b6b30cda5b8a1d686fedeb85d07ca650dd0d9",
+    "cases/logql-wave2-divergences.json": "67d7115c64d9cffbcb29193c285ea68ae9b0910fd25149ca7c41064274ad6283",
     "cases/release-numeric-facts.json": "1370982e0f979a9401e923939ed5b23f25c2a9dd7d5b2259384346a323f1e430",
     "cases/release-logql-tpl.json": "1b83f3857f567e88192d9b67cbc768f826073daf7ef9a51a983c76ba9a4736d8",
     "cases/release-logql-syn.json": "657725e3937b649187d027561f267677a434083ce1b078e6384712fa05918528",

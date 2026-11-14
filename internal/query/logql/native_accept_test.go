@@ -66,14 +66,16 @@ func TestNativeAcceptsLabelMatchingAgainstScalarOperand(t *testing.T) {
 		t.Fatalf("scalar/vector arithmetic changed by matching modifier: %g", got)
 	}
 }
-func TestNativeStillRejectsInvalidScalarVectorMatching(t *testing.T) {
+
+// The reference refuses only a scalar leg of a set operator; every matching
+// modifier and bool on a scalar/vector arithmetic or comparison is accepted
+// and ignored (recorded observations; see native_wave2_test.go).
+func TestNativeRefusesOnlyScalarSetOperatorLegs(t *testing.T) {
 	p := testProfile(t)
 	for _, tc := range []struct{ source, code string }{
-		{`1 + on(app) group_left vector(2)`, "binary.matching-invalid"},
-		{`vector(2) + ignoring(app) group_right 1`, "binary.matching-invalid"},
-		{`1 + on(app) 2`, "binary.matching-invalid"},
 		{`1 and on(app) vector(2)`, "binary.set-invalid"},
-		{`1 + bool on(app) vector(2)`, "binary.bool-invalid"},
+		{`vector(2) or on(app) group_left 1`, "binary.set-invalid"},
+		{`1 and bool vector(2)`, "binary.set-invalid"},
 	} {
 		_, err := parseCheck(t, tc.source, p)
 		if err == nil || languageCode(t, err) != tc.code {
@@ -93,11 +95,9 @@ func TestNativeAcceptsDuplicateMatchingLabels(t *testing.T) {
 		t.Fatalf("duplicate on() labels changed matching result: %g", got)
 	}
 }
-func TestDuplicateAndOverlappingLabelsStayRejectedOutsideMatchingList(t *testing.T) {
+func TestGroupingDuplicateLabelsStayRejected(t *testing.T) {
 	p := testProfile(t)
 	for _, tc := range []struct{ source, code string }{
-		{`vector(1) + on(app) group_left(zone,zone) vector(2)`, "binary.matching-labels"},
-		{`vector(1) + on(app,app) group_left(app) vector(2)`, "binary.matching-overlap"},
 		{`sum by(app,app)(vector(1))`, "grouping.labels-invalid"},
 	} {
 		_, err := parseCheck(t, tc.source, p)
@@ -162,7 +162,9 @@ func TestCapabilityStructureIsValidatedEvenWhenDisabled(t *testing.T) {
 	for _, tc := range []struct{ source, code string }{
 		{`variants({app="api"}) of ({app="api"}[2m])`, "variants.input-invalid"},
 		{`approx_topk by(app) (3,vector(1))`, "grouping.unsupported"},
-		{`approx_topk(vector(1),vector(1))`, "function.arguments"},
+		// Same grammar production as topk: a non-NUMBER first operand makes the comma
+		// the unexpected token (wave2-approx2off-s-off-vec, with the gate off too).
+		{`approx_topk(vector(1),vector(1))`, "syntax.unexpected-token"},
 	} {
 		_, err := parseCheck(t, tc.source, p)
 		if err == nil || languageCode(t, err) != tc.code {

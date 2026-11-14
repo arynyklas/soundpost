@@ -57,15 +57,23 @@ func TestReservedFunctionsHaveContextualGates(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// The operator-part errors (scalar comparison without bool, ON/GROUP overlap)
+// end at the last character of the operator part, as the pinned checkAST's
+// opRange does (Go-level observation: `1 < 2` -> 2..2); origins listed with
+// inclusive=true drop their final byte.
 func TestLanguageFailuresRetainSemanticOrigins(t *testing.T) {
-	for _, tc := range []struct{ text, origin string }{
-		{`{job=~".*"}`, `{job=~".*"}`},
-		{`fixture_metric[0s]`, `0s`},
-		{`fixture_metric{job=~"["}`, `job=~"["`},
-		{`fixture_metric @ 1 @ 2`, `fixture_metric @ 1`},
-		{`1 < 2`, `<`},
-		{`fixture_left + on(job) group_right(job) fixture_right`, `+ on(job) group_right(job)`},
-		{`fixture_left or on(job) group_left(instance) fixture_right`, `fixture_left or on(job) group_left(instance) fixture_right`},
+	for _, tc := range []struct {
+		text, origin string
+		inclusive    bool
+	}{
+		{`{job=~".*"}`, `{job=~".*"}`, false},
+		{`fixture_metric[0s]`, `0s`, false},
+		{`fixture_metric{job=~"["}`, `job=~"["`, false},
+		{`fixture_metric @ 1 @ 2`, `fixture_metric @ 1`, false},
+		{`1 < 2`, `<`, true},
+		{`fixture_left + on(job) group_right(job) fixture_right`, `+ on(job) group_right(job)`, true},
+		{`fixture_left or on(job) group_left(instance) fixture_right`, `fixture_left or on(job) group_left(instance) fixture_right`, false},
 	} {
 		e, err := Parse(tc.text, testProfile())
 		if err == nil {
@@ -76,7 +84,11 @@ func TestLanguageFailuresRetainSemanticOrigins(t *testing.T) {
 			t.Fatalf("%s: %v", tc.text, err)
 		}
 		start := strings.Index(tc.text, tc.origin)
-		want := syntax.Range(tc.text, start, start+len(tc.origin))
+		end := start + len(tc.origin)
+		if tc.inclusive {
+			end--
+		}
+		want := syntax.Range(tc.text, start, end)
 		if le.Range != want {
 			t.Errorf("%s: got %+v want semantic origin %+v", tc.text, le.Range, want)
 		}

@@ -28,6 +28,9 @@ type evaluationState struct {
 	// gridStart is the first evaluation time of the grid being evaluated (the query grid or the
 	// enclosing subquery's grid). The 3.1.0 aggregation parameter is evaluated once, at this time.
 	gridStart model.UnixNano
+	// statsOnly marks the selectors the reference decodes without buckets
+	// (histogram_stats.go); it is fixed for the plan.
+	statsOnly map[*Node]bool
 }
 
 func (s *evaluationState) reserve(n int64) error {
@@ -52,7 +55,7 @@ func Evaluate(ctx context.Context, plan Plan, src scan.MetricSource, account val
 	if err != nil {
 		return result, nil, err
 	}
-	s := &evaluationState{ctx: ctx, plan: plan, src: src, account: account}
+	s := &evaluationState{ctx: ctx, plan: plan, src: src, account: account, statsOnly: statsOnlySelectors(plan.Expr, plan.Profile.ID)}
 	if plan.Stats != nil {
 		plan.Stats.PerStep = nil
 	}

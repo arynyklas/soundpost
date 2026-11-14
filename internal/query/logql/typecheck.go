@@ -122,8 +122,10 @@ func checkExpr(e Expr, p profile.Profile) (Type, error) {
 		}
 		return TypeLogs, nil
 	case *RangeExpr:
-		if n.Interval <= 0 {
-			return "", typeError(e, "range must be positive", "range.duration-invalid")
+		// A zero-length range ([0s]) is accepted by the reference and selects
+		// nothing; only a negative duration (never produced by the lexer) is refused.
+		if n.Interval < 0 {
+			return "", typeError(e, "range must not be negative", "range.duration-invalid")
 		}
 		if _, err := checkExpr(n.Log, p); err != nil {
 			return "", err
@@ -151,30 +153,14 @@ func checkExpr(e Expr, p profile.Profile) (Type, error) {
 			return "", typeError(e, "binary operators require scalar or vector operands", "binary.operands-invalid")
 		}
 		set := n.Op == "and" || n.Op == "or" || n.Op == "unless"
-		comparison := n.Op == "==" || n.Op == "!=" || n.Op == ">" || n.Op == "<" || n.Op == ">=" || n.Op == "<="
-		if set && (a != TypeVector || b != TypeVector || n.Bool || n.Matching.Cardinality != "") {
+		// The reference accepts `bool` and the on/ignoring and group_left/group_right
+		// modifiers on every operator and operand type: bool is ignored unless the
+		// operator is a comparison, set operators ignore the cardinality and its
+		// include list, scalar operands ignore the matching clause, and repeated or
+		// on(...)-overlapping include labels are not an error. Only a scalar leg of
+		// a set operator is refused.
+		if set && (a != TypeVector || b != TypeVector) {
 			return "", typeError(e, "invalid set-operator operands or modifiers", "binary.set-invalid")
-		}
-		if n.Bool && !comparison {
-			return "", typeError(e, "bool requires comparison", "binary.bool-invalid")
-		}
-		matchesLabels := n.Matching.Labels != nil
-		if n.Matching.Cardinality != "" && (a != TypeVector || b != TypeVector) || matchesLabels && a != TypeVector && b != TypeVector {
-			return "", typeError(e, "vector matching requires two vectors", "binary.matching-invalid")
-		}
-		// The pinned engine accepts repeated labels in an on/ignoring list;
-		// only the group_left/group_right include list stays unique.
-		if !uniqueNames(n.Matching.Include) {
-			return "", typeError(e, "invalid vector matching labels", "binary.matching-labels")
-		}
-		if n.Matching.On {
-			for _, x := range n.Matching.Labels {
-				for _, y := range n.Matching.Include {
-					if x == y {
-						return "", typeError(e, "matching and grouping labels overlap", "binary.matching-overlap")
-					}
-				}
-			}
 		}
 		if a == TypeVector || b == TypeVector {
 			return TypeVector, nil

@@ -194,13 +194,16 @@ func (r *parser) binary(left Expr, min int) (Expr, error) {
 			if err != nil {
 				return nil, err
 			}
-		}
-		if r.is("group_left") || r.is("group_right") {
-			b.Matching.Cardinality = r.take().text
-			if r.is("(") {
-				b.Matching.Include, err = r.names()
-				if err != nil {
-					return nil, err
+			// The reference grammar has group_left/group_right only after an
+			// on(...)/ignoring(...) clause (a bare modifier is an unexpected token
+			// at the keyword), and it takes them on any operator.
+			if r.is("group_left") || r.is("group_right") {
+				b.Matching.Cardinality = r.take().text
+				if r.is("(") {
+					b.Matching.Include, err = r.names()
+					if err != nil {
+						return nil, err
+					}
 				}
 			}
 		}
@@ -381,7 +384,7 @@ func (r *parser) vectorCall(start syntax.SourceRange) (Expr, error) {
 	if err = r.expect("("); err != nil {
 		return nil, err
 	}
-	if c.Name == "topk" || c.Name == "bottomk" {
+	if c.Name == "topk" || c.Name == "bottomk" || c.Name == "approx_topk" {
 		if err = r.rankedOperands(c); err != nil {
 			return nil, err
 		}
@@ -394,7 +397,7 @@ func (r *parser) vectorCall(start syntax.SourceRange) (Expr, error) {
 	if err = r.expect(")"); err != nil {
 		return nil, err
 	}
-	if c.Name == "topk" || c.Name == "bottomk" {
+	if c.Name == "topk" || c.Name == "bottomk" || c.Name == "approx_topk" {
 		r.checkRankedParameter(c)
 	}
 	if r.is("by") || r.is("without") {
@@ -410,7 +413,7 @@ func (r *parser) vectorCall(start syntax.SourceRange) (Expr, error) {
 }
 
 // operandList reads the comma-separated operands of every aggregation except
-// topk and bottomk.
+// topk, bottomk and approx_topk.
 func (r *parser) operandList(c *CallExpr) error {
 	for {
 		arg, err := r.metricExpr()
@@ -424,7 +427,8 @@ func (r *parser) operandList(c *CallExpr) error {
 	}
 }
 
-// rankedOperands reads the operands of topk and bottomk. The reference grammar
+// rankedOperands reads the operands of topk, bottomk and approx_topk (one
+// grammar production in the reference). The reference grammar
 // has a parameter production only for a single NUMBER token directly followed
 // by a comma; every other first operand (a sign, a parenthesis, an arithmetic
 // expression, vector(..)) is the one metric operand, so the comma after it is

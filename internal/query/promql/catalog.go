@@ -114,6 +114,7 @@ func functionDiagnostic(e TypedExpr, id string) syntax.Diagnostic {
 // functionDiagnosticArg anchors an annotation at one argument of a call. A
 // negative arg selects the argument the pinned engines attach id to.
 func functionDiagnosticArg(e TypedExpr, id string, arg int) syntax.Diagnostic {
+	id, operation := splitAnnotationOperation(id)
 	var r syntax.SourceRange
 	if e.Expr != nil {
 		r = e.Expr.SourceRange()
@@ -137,7 +138,7 @@ func functionDiagnosticArg(e TypedExpr, id string, arg int) syntax.Diagnostic {
 			}
 		}
 	}
-	return syntax.Diagnostic{Category: id, Range: r, SafeMessage: functionAnnotationText(id)}
+	return syntax.Diagnostic{Category: id, Range: r, SafeMessage: functionAnnotationText(id) + operation}
 }
 
 // histogramAnnotationArg is the argument each histogram function attaches an

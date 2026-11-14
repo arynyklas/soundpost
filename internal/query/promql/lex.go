@@ -23,6 +23,9 @@ func lex(s string, p profile.Profile) ([]token, *syntax.LanguageError) {
 	l := lexer{s: s, v310: p.ID == "promql-prometheus-3.1.0"}
 	if err := l.run(); err != nil {
 		l.out = append(l.out, token{start: err.Range.StartByte, end: err.Range.EndByte, kind: "lexerr"})
+		// The pinned parser reports a lexical error from its start to the end of
+		// the whole input (Lex: PositionRange{Start: lex.start, End: len(input)}).
+		err.Range = syntax.Range(s, err.Range.StartByte, len(s))
 		return l.out, err
 	}
 	l.out = append(l.out, token{start: len(s), end: len(s), kind: "eof"})

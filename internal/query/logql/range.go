@@ -90,7 +90,7 @@ type rangeGroup struct {
 // the raw source's [start,end). A surviving error is not an absent sample.
 func EvaluateRange(ctx context.Context, p RangePlan, input EntryIterator, frame Frame) (result value.Result, err error) {
 	defer func() { err = boundaryErr(err) }()
-	if ctx == nil || input == nil || frame.Account == nil || p.Range == nil || p.Range.Log == nil || p.Range.Interval <= 0 || frame.Project == (model.ID{}) || !rangeNames[p.Function] {
+	if ctx == nil || input == nil || frame.Account == nil || p.Range == nil || p.Range.Log == nil || p.Range.Interval < 0 || frame.Project == (model.ID{}) || !rangeNames[p.Function] {
 		if input != nil {
 			input.Close()
 		}

@@ -475,11 +475,13 @@ func TestAggregateMemoryAcrossProjectsAndQueries(t *testing.T) {
 	pooled.idle(t)
 }
 
-// The raw-log merge keeps every matched row until it is ordered, so its memory
-// is charged to the one query account: a query whose matches do not fit fails
-// with Quota rather than allocating past its budget, and an explicit page size
-// does not change that bound.
-func TestRawLogMergeIsBoundedByTheAccount(t *testing.T) {
+// The raw-log merge is bounded by the page size, not by the matches: it holds
+// only the entries that can still be among the first LogLimit, charged to the
+// one query account. A page whose own entries fit the budget therefore succeeds
+// over any number of matches, and a budget the page itself cannot fit, or a
+// result with no page size at all, is still the typed Quota rather than a
+// silently trimmed answer.
+func TestRawLogMergeIsBoundedByTheLimitNotTheMatches(t *testing.T) {
 	f, e, scope, project := oneProject(t, testLimits())
 	line := strings.Repeat("x", 300)
 	rows := make([]trow, 4000)
@@ -490,19 +492,37 @@ func TestRawLogMergeIsBoundedByTheAccount(t *testing.T) {
 	q := logReq(`{app="web"}`, testEpoch, testEpoch+10_000, project)
 	q.LogLimit = 10
 	q.Budget.MemoryBytes = 600_000
-	_, err := e.engine.Execute(f.ctx, scope, q)
+	res, err := e.engine.Execute(f.ctx, scope, q)
+	if err != nil {
+		t.Fatalf("limit 10 over %d matches must fit a %d byte budget: %v", len(rows), 600_000, err)
+	}
+	stats := res.Projects[0].Stats
+	entries := res.Projects[0].Value.Streams[0].Entries
+	if stats.LogsReturned != 10 || !stats.LimitReached || len(entries) != 10 || entries[0].Line != line {
+		t.Fatalf("the page is exact: %+v %d", stats, len(entries))
+	}
+	if peak := stats.PeakMemoryBytes; peak > 100_000 {
+		t.Fatalf("peak %d for a page of 10 follows the %d matched bytes, not the limit", peak, len(rows)*len(line))
+	}
+	e.idle(t)
+	// A page the budget cannot hold, and an unpaged result larger than the
+	// budget, stay the typed Quota.
+	q.LogLimit = 3500
+	_, err = e.engine.Execute(f.ctx, scope, q)
 	requireCode(t, err, model.Quota)
 	if peak := e.engine.Usage().MemoryPeak; peak > 600_000 {
 		t.Fatalf("merge allocated %d bytes past its %d byte budget", peak, 600_000)
 	}
 	e.idle(t)
+	q.LogLimit = 0
+	_, err = e.engine.Execute(f.ctx, scope, q)
+	requireCode(t, err, model.Quota)
+	e.idle(t)
 	q.Budget.MemoryBytes = 0
-	res, err := e.engine.Execute(f.ctx, scope, q)
+	q.LogLimit = 10
+	res, err = e.engine.Execute(f.ctx, scope, q)
 	if err != nil || res.Projects[0].Stats.LogsReturned != 10 || !res.Projects[0].Stats.LimitReached {
 		t.Fatalf("with room the page is exact: %v %+v", err, res.Projects[0].Stats)
-	}
-	if peak := res.Projects[0].Stats.PeakMemoryBytes; peak < 4000*300 {
-		t.Fatalf("peak %d does not account the %d bytes the merge actually holds", peak, 4000*300)
 	}
 	e.idle(t)
 }

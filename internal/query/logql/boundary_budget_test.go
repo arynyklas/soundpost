@@ -5,6 +5,8 @@ package logql
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"math"
 	"testing"
 	"time"
@@ -100,11 +102,113 @@ func TestCancellationIsTypedAtEngineBoundary(t *testing.T) {
 			t.Fatalf("%s: leaked %d", c.name, account.Used())
 		}
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	account := value.NewBoundedAccount(1 << 20)
-	var fault *model.Fault
-	if _, err := MergeLogs(ctx, nil, Forward, 10, &cancelAccount{BoundedAccount: account, cancelAt: -1, cancel: func() {}}); err != nil && (!errors.As(err, &fault) || fault.Code != model.Cancelled || !errors.Is(err, context.Canceled)) {
-		t.Fatalf("MergeLogs: %#v", err)
+}
+
+// interruptedShard serves ok rows and then fails its read with failure, first
+// running onFail (a cancel func, say), as a shard whose context ended mid-read.
+type interruptedShard struct {
+	ok      int
+	failure func() error
+	onFail  func()
+	reads   int
+	closed  int
+}
+
+func (s *interruptedShard) Next(context.Context) (PipelineResult, error) {
+	if s.reads >= s.ok {
+		if s.onFail != nil {
+			s.onFail()
+		}
+		return PipelineResult{}, s.failure()
+	}
+	s.reads++
+	return limitRow(s.reads), nil
+}
+func (s *interruptedShard) Watermarks() []model.Cursor { return nil }
+func (s *interruptedShard) Partial() bool              { return false }
+func (s *interruptedShard) Close() error               { s.closed++; return nil }
+
+// A merge interrupted in the middle of a multi-shard read, by a shard whose Next
+// returns the context error, leaves as the typed fault that still answers to
+// the context sentinel; every shard is closed and nothing stays charged.
+func TestMergeLogsMidReadInterruptionIsTyped(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		fail func(cancel context.CancelFunc) (failure func() error, onFail func())
+		is   error
+		code model.Code
+	}{
+		{"canceled", func(cancel context.CancelFunc) (func() error, func()) {
+			return func() error { return context.Canceled }, cancel
+		}, context.Canceled, model.Cancelled},
+		{"deadline", func(cancel context.CancelFunc) (func() error, func()) {
+			return func() error { return fmt.Errorf("shard read: %w", context.DeadlineExceeded) }, nil
+		}, context.DeadlineExceeded, model.Timeout},
+	} {
+		for _, limit := range []uint64{3, math.MaxUint64} {
+			ctx, cancel := context.WithCancel(context.Background())
+			failure, onFail := c.fail(cancel)
+			first := &interruptedShard{ok: 50, failure: func() error { return io.EOF }}
+			second := &interruptedShard{ok: 7, failure: failure, onFail: onFail}
+			third := &interruptedShard{ok: 50, failure: func() error { return io.EOF }}
+			account := value.NewBoundedAccount(1 << 30)
+			out, err := MergeLogs(ctx, []EntryIterator{first, second, third}, Forward, limit, account)
+			cancel()
+			var fault *model.Fault
+			if !errors.As(err, &fault) || fault.Code != c.code || !errors.Is(err, c.is) {
+				t.Fatalf("%s limit=%d: err=%#v", c.name, limit, err)
+			}
+			if out != nil {
+				t.Fatalf("%s limit=%d: a failed merge returned an iterator", c.name, limit)
+			}
+			if first.reads != 50 || second.reads != 7 || third.reads != 0 {
+				t.Fatalf("%s limit=%d: the read was not in progress when it failed: %d %d %d", c.name, limit, first.reads, second.reads, third.reads)
+			}
+			if first.closed != 1 || second.closed != 1 || third.closed != 1 {
+				t.Fatalf("%s limit=%d: shards left open: %d %d %d", c.name, limit, first.closed, second.closed, third.closed)
+			}
+			if account.Used() != 0 {
+				t.Fatalf("%s limit=%d: leaked %d", c.name, limit, account.Used())
+			}
+		}
+	}
+}
+
+// Reading a merge after the context ended is typed too, and releases what the
+// merge still held.
+func TestMergeLogsNextAfterInterruptionIsTyped(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		ctx  func() (context.Context, context.CancelFunc)
+		is   error
+		code model.Code
+	}{
+		{"canceled", func() (context.Context, context.CancelFunc) {
+			c, f := context.WithCancel(context.Background())
+			f()
+			return c, f
+		}, context.Canceled, model.Cancelled},
+		{"deadline", func() (context.Context, context.CancelFunc) {
+			return context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+		}, context.DeadlineExceeded, model.Timeout},
+	} {
+		account := value.NewBoundedAccount(1 << 30)
+		it, err := MergeLogs(context.Background(), []EntryIterator{&genIter{n: 20, row: limitRow}}, Forward, 5, account)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if account.Used() == 0 {
+			t.Fatal("the merge holds nothing: the release below proves nothing")
+		}
+		ctx, cancel := c.ctx()
+		_, err = it.Next(ctx)
+		cancel()
+		var fault *model.Fault
+		if !errors.As(err, &fault) || fault.Code != c.code || !errors.Is(err, c.is) {
+			t.Fatalf("%s: err=%#v", c.name, err)
+		}
+		if account.Used() != 0 {
+			t.Fatalf("%s: leaked %d", c.name, account.Used())
+		}
 	}
 }

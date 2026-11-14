@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -191,6 +192,47 @@ func TestLogQLOwnedObservationExecutesPipelineNotSource(t *testing.T) {
 	}
 	if o.Error != nil || o.Pipeline == nil || !o.Pipeline.Retained || o.Pipeline.Line != "first-second" {
 		t.Fatalf("full actual owned pipeline not executed: %#v", o)
+	}
+}
+
+// A typed cancellation, deadline or budget abort classifies by its fault code,
+// wrapped or not; any other fault stays an unclassified operational failure.
+func TestOwnedLogQLErrorClassifiesTypedFaults(t *testing.T) {
+	for _, code := range []model.Code{model.Cancelled, model.Timeout, model.Quota} {
+		for name, err := range map[string]error{"bare": model.Fail(code), "wrapped": fmt.Errorf("evaluate: %w", model.Fail(code))} {
+			got := ownedLogQLError(err)
+			if got.Semantic != "fault:"+string(code) || got.Category != "fault" || !got.CategoryExposed {
+				t.Fatalf("%s %s: %+v", name, code, got)
+			}
+		}
+	}
+	for _, code := range []model.Code{model.Invalid, model.Corrupt, model.Unavailable} {
+		if got := ownedLogQLError(model.Fail(code)); got.Semantic != "" {
+			t.Fatalf("%s fault classified as %q", code, got.Semantic)
+		}
+	}
+	if got := ownedLogQLError(errors.New("plain")); got.Semantic != "" {
+		t.Fatalf("plain error classified as %q", got.Semantic)
+	}
+}
+
+// The engine's own typed cancellation, leaving a real owned evaluation, is an
+// observation of that fault rather than the unclassified failure that aborts
+// the case.
+func TestLogQLOwnedObservationClassifiesEngineCancellation(t *testing.T) {
+	p, e := resolveLogQLProfile("../../../profiles/query", nil)
+	if e != nil {
+		t.Fatal(e)
+	}
+	c := LogQLCase{ID: "cancelled-pipeline", Phase: "logql-template", Kind: "pipeline", Profiles: []string{logQLProfile}, PipelineQuery: `{app="api"}|line_format "x"`, Line: "original", Timestamp: 1, Labels: model.Labels{{Name: "app", Value: "api"}}, Timezone: "UTC"}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	o, e := observeOwnedLogQL(ctx, c, p)
+	if e != nil {
+		t.Fatalf("a typed cancellation was reported as an unclassified failure: %v", e)
+	}
+	if o.Error == nil || o.Error.Semantic != "fault:cancelled" || o.Accepted {
+		t.Fatalf("observation=%+v", o)
 	}
 }
 func TestLogQLComparisonPreservesErrorDetailLanguageData(t *testing.T) {

@@ -172,7 +172,7 @@ func extendedHistogramRate(call CallPlan, samples []value.Sample, start, end int
 	}
 	result, reason := histogramCombineForProfile(right, left, true, profileID)
 	if reason != "" && reason != "HistogramCounterResetCollisionWarning" {
-		note(reason)
+		note(qualifyReconciliation(reason, true))
 	}
 	if result.Float == nil {
 		return value.Sample{}, false, notes
@@ -190,7 +190,7 @@ func extendedHistogramRate(call CallPlan, samples []value.Sample, start, end int
 			hint := adjustedHint(histogramHint(result), histogramHint(*correction))
 			sum, reason := histogramCombineForProfile(result, *correction, false, profileID)
 			if reason != "" && reason != "HistogramCounterResetCollisionWarning" {
-				note(reason)
+				note(qualifyReconciliation(reason, false))
 			}
 			if sum.Float == nil {
 				return value.Sample{}, false, notes
@@ -231,7 +231,7 @@ func histogramResetCorrection(samples []value.Sample, first, last int, left, rig
 		hint := adjustedHint(histogramHint(*correction), histogramHint(h))
 		sum, reason := histogramCombineForProfile(*correction, h, false, profileID)
 		if reason != "" && reason != "HistogramCounterResetCollisionWarning" {
-			reasons = append(reasons, reason)
+			reasons = append(reasons, qualifyReconciliation(reason, false))
 		}
 		if sum.Float == nil {
 			return false
@@ -291,20 +291,20 @@ func interpolateHistogram(a value.Sample, t1 int64, b value.Sample, t2, t int64,
 		return scaled, nil, true
 	}
 	var reasons []string
-	keep := func(reason string) {
+	keep := func(reason string, subtract bool) {
 		if reason != "" && reason != "HistogramCounterResetCollisionWarning" {
-			reasons = append(reasons, reason)
+			reasons = append(reasons, qualifyReconciliation(reason, subtract))
 		}
 	}
 	difference, reason := histogramCombineForProfile(*b.Histogram, *a.Histogram, true, profileID)
-	keep(reason)
+	keep(reason, true)
 	if difference.Float == nil {
 		return model.NativeHistogram{}, reasons, false
 	}
 	hint := adjustedHint(histogramHint(*b.Histogram), histogramHint(*a.Histogram))
 	scaled := histogramScaleForProfile(difference, fraction, profileID)
 	sum, reason := histogramCombineForProfile(scaled, *a.Histogram, false, profileID)
-	keep(reason)
+	keep(reason, false)
 	if sum.Float == nil {
 		return model.NativeHistogram{}, reasons, false
 	}

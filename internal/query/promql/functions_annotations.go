@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 package promql
 
+import "strings"
+
 // Category carries the pinned annotation identity; its Info/Warning suffix is
 // the severity. Messages intentionally contain no series names or query text.
 func functionAnnotationText(id string) string {
@@ -52,4 +54,30 @@ func functionAnnotationText(id string) string {
 		return "mismatched custom buckets were reconciled"
 	}
 	return id
+}
+
+// The reference names the histogram operation that reconciled mismatched custom
+// bounds (its message is "... reconciled during addition|subtraction"), so one
+// interpolation can raise both. Owned reasons carry the operation as an id
+// suffix ("MismatchedCustomBucketsHistogramsInfo/subtraction"); the Category
+// stays the bare identity and only the safe message gains the operation, which
+// keeps the two annotations distinct under the once-per-occurrence rule.
+func splitAnnotationOperation(id string) (string, string) {
+	base, operation, found := strings.Cut(id, "/")
+	if !found {
+		return id, ""
+	}
+	return base, " during " + operation
+}
+
+// qualifyReconciliation attaches the histogram operation to a custom-bounds
+// reconciliation reason; every other reason is returned unchanged.
+func qualifyReconciliation(reason string, subtract bool) string {
+	if reason != "MismatchedCustomBucketsHistogramsInfo" {
+		return reason
+	}
+	if subtract {
+		return reason + "/subtraction"
+	}
+	return reason + "/addition"
 }

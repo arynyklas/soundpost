@@ -167,14 +167,25 @@ func check(e Expr, p profile.Profile) (TypedExpr, error) {
 		operatorFail := func(code, msg string) (TypedExpr, error) {
 			return v, &syntax.LanguageError{Code: code, Category: "type", Range: n.OperatorRange, SafeMessage: msg}
 		}
+		// The pinned checkAST reports bool/scalar-comparison/ON-GROUP errors at
+		// opRange(), whose End is the index of the LAST character of the operator
+		// part (not one past it).
+		operatorPartFail := func(code, msg string) (TypedExpr, error) {
+			r := n.OperatorRange
+			if r.EndByte > r.StartByte {
+				r.EndByte--
+				r.EndRune--
+			}
+			return v, &syntax.LanguageError{Code: code, Category: "type", Range: r, SafeMessage: msg}
+		}
 		if (n.Text == "</" || n.Text == ">/") && p.ID != "promql-prometheus-3.13.5" {
 			return operatorFail("binary.operator-profile", "operator is not in the pinned profile")
 		}
 		if n.Bool && !cmp {
-			return operatorFail("binary.bool-modifier", "bool only applies to comparison")
+			return operatorPartFail("binary.bool-modifier", "bool only applies to comparison")
 		}
 		if a == Scalar && b == Scalar && cmp && !n.Bool {
-			return operatorFail("binary.scalar-comparison-bool", "scalar comparison requires bool")
+			return operatorPartFail("binary.scalar-comparison-bool", "scalar comparison requires bool")
 		}
 		if set && (a != Vector || b != Vector) {
 			return fail("binary.operand-type", "set operator requires instant vectors")
@@ -196,7 +207,7 @@ func check(e Expr, p profile.Profile) (TypedExpr, error) {
 				for _, x := range m.Labels {
 					for _, y := range m.Include {
 						if x == y {
-							return operatorFail("binary.matching-label-overlap", "label appears in matching and grouping")
+							return operatorPartFail("binary.matching-label-overlap", "label appears in matching and grouping")
 						}
 					}
 				}

@@ -272,7 +272,9 @@ func binaryMetric(n *BinaryExpr, a, b value.Result, at model.UnixNano, project m
 	}
 	left, right := a.Vector, b.Vector
 	set := n.Op == "and" || n.Op == "or" || n.Op == "unless"
-	swap := n.Matching.Cardinality == "group_right"
+	// Set operators ignore the cardinality modifier (observed on the reference):
+	// only arithmetic and comparison swap the legs for group_right.
+	swap := !set && n.Matching.Cardinality == "group_right"
 	if swap {
 		left, right = right, left
 	}

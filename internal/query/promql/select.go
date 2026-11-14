@@ -22,6 +22,8 @@ type selectOptions struct {
 	// function. With an extension modifier the function receives the raw
 	// samples of the extended window and applies the extension itself.
 	functionArg bool
+	// statsOnly is set by selectMetric for a selector decoded without buckets.
+	statsOnly bool
 }
 
 // selectionBounds is the span of nanosecond timestamps a selector may read:
@@ -73,6 +75,7 @@ func (s *evaluationState) selectionBounds(node *Node, window *Node, target int64
 
 func (s *evaluationState) selectMetric(sel, window *Node, at model.UnixNano, opts selectOptions) (r value.Result, err error) {
 	node := sel
+	opts.statsOnly = s.statsOnly[sel]
 	if window != nil {
 		node = window
 	}
@@ -216,7 +219,7 @@ func (s *evaluationState) pickSamples(series value.Series, node, window *Node, b
 			if t <= b.from || samples[i].Stale() {
 				break
 			}
-			out, err := s.retain(series, []stamped{{t, i}}, 0)
+			out, err := s.retain(series, []stamped{{t, i}}, 0, opts.statsOnly)
 			if err != nil {
 				return nil, err
 			}
@@ -232,15 +235,17 @@ func (s *evaluationState) pickSamples(series value.Series, node, window *Node, b
 		return nil, nil
 	}
 	if window.Extension == "" || opts.functionArg {
-		return s.retain(series, picked, 0)
+		return s.retain(series, picked, 0, opts.statsOnly)
 	}
 	return s.extendWindow(series, window, picked, b)
 }
 
 // retain copies the picked samples into the result, with cloned start
 // timestamps and float histograms. spare is the number of additional samples
-// the caller will add; their accounting is reserved here.
-func (s *evaluationState) retain(series value.Series, picked []stamped, spare int) ([]value.Sample, error) {
+// the caller will add; their accounting is reserved here. statsOnly reduces the
+// histograms to what the reference decodes for a selector that only feeds
+// histogram_count/histogram_sum/histogram_avg (see histogram_stats.go).
+func (s *evaluationState) retain(series value.Series, picked []stamped, spare int, statsOnly bool) ([]value.Sample, error) {
 	cost := value.SeriesBytes(value.Series{Labels: series.Labels}) + int64(spare)*value.SampleBytes(value.Sample{})
 	for _, p := range picked {
 		cost += value.SampleBytes(series.Samples[p.index])
@@ -266,6 +271,9 @@ func (s *evaluationState) retain(series value.Series, picked []stamped, spare in
 			sample.Histogram = &model.NativeHistogram{Float: &histogram}
 		}
 		out[i] = sample
+	}
+	if statsOnly {
+		statsOnlySequence(out)
 	}
 	var loaded int64
 	for _, sample := range out {
@@ -318,7 +326,7 @@ func (s *evaluationState) smoothInstant(series value.Series, node *Node, b selec
 	default:
 		return nil, nil
 	}
-	out, err := s.retain(series, chosen, 0)
+	out, err := s.retain(series, chosen, 0, s.statsOnly[node])
 	if err != nil {
 		return nil, err
 	}
@@ -342,9 +350,10 @@ func (s *evaluationState) smoothInstant(series value.Series, node *Node, b selec
 		}
 		result.Histogram = &h
 	} else if chosen[0].t != b.target {
-		// Carried forward: the hint described the step to a sample no longer used.
+		// Carried forward: the hint described the step to a sample no longer used,
+		// so the histogram stops being a gauge too (its flavor follows the hint).
 		carried := value.CloneHistogram(*result.Histogram)
-		carried.Float.ResetHint = "unknown"
+		setHistogramHint(&carried, "unknown")
 		result.Histogram = &carried
 	}
 	result.Time = at
@@ -386,7 +395,7 @@ func (s *evaluationState) extendWindow(series value.Series, window *Node, picked
 	if first <= last {
 		interior = picked[first : last+1]
 	}
-	retained, err := s.retain(series, interior, 2)
+	retained, err := s.retain(series, interior, 2, false)
 	if err != nil {
 		return nil, err
 	}
@@ -400,7 +409,8 @@ func floatBitsOf(f float64) model.FloatBits { return model.FloatBits(math.Float6
 
 // rangeDiagnostic is an annotation attached to an explicit source range.
 func rangeDiagnostic(r syntax.SourceRange, id string) syntax.Diagnostic {
-	return syntax.Diagnostic{Category: id, Range: r, SafeMessage: functionAnnotationText(id)}
+	id, operation := splitAnnotationOperation(id)
+	return syntax.Diagnostic{Category: id, Range: r, SafeMessage: functionAnnotationText(id) + operation}
 }
 
 // evalFunctionWindow evaluates a range selector that is the argument of a

@@ -369,26 +369,26 @@ func EvaluateLogsInterval(ctx context.Context, plan Plan, src scan.LogSource, or
 	if err != nil {
 		return result, err
 	}
-	mergeLimit := limit
+	// The merge keeps only the prefix of the total order that can still reach the
+	// limit. With an interval each emitted entry stands for one row (multiplicity
+	// is forced to 1 below) and thinning discards rows, so the prefix is measured
+	// in rows and grown, rescanning, until the thinned prefix yields the limit or
+	// covers every match.
+	bound := logBound{units: limit}
 	if interval > 0 {
-		mergeLimit = math.MaxUint64
-	}
-	// The pinned engine reads streams back without their hash: ties order by label string.
-	merged, err := mergeLogs(ctx, []EntryIterator{input}, order, mergeLimit, account, false)
-	if err != nil {
-		return result, err
+		bound.perRow = true
 	}
 	result.Type = "streams"
+	var merged *orderedLogs
 	held := int64(0)
-	var emitted uint64
-	var previous model.UnixNano
-	havePrevious := false
 	defer func() {
-		closeErr := merged.Close()
-		if err == nil {
-			err = closeErr
+		if merged != nil {
+			closeErr := merged.Close()
+			if err == nil {
+				err = closeErr
+			}
+			value.InheritMetadata(&result, value.Result{Partial: merged.Partial(), Watermarks: merged.Watermarks()})
 		}
-		value.InheritMetadata(&result, value.Result{Partial: merged.Partial(), Watermarks: merged.Watermarks()})
 		account.Release(held)
 		if err == nil {
 			err = account.Check(ctx)
@@ -397,16 +397,53 @@ func EvaluateLogsInterval(ctx context.Context, plan Plan, src scan.LogSource, or
 			err = account.Reserve(value.ResultBytes(result))
 		}
 	}()
-	if limit == 0 {
-		return result, nil
+	for {
+		// The pinned engine reads streams back without their hash: ties order by label string.
+		merged, err = mergeBounded(ctx, []EntryIterator{input}, order, bound, account, false)
+		if err != nil {
+			merged = nil
+			return result, err
+		}
+		if limit == 0 {
+			return result, nil
+		}
+		emitted, e := s.emitLogs(ctx, merged, order, limit, interval, &result, &held)
+		if e != nil {
+			return result, e
+		}
+		if interval == 0 || emitted == limit || !merged.truncated {
+			return result, nil
+		}
+		// The kept prefix ran out before the thinned entries reached the limit:
+		// start over with a larger prefix.
+		merged.Close()
+		merged = nil
+		account.Release(held)
+		held = 0
+		result.Logs = nil
+		if bound.units > math.MaxUint64/4 {
+			bound.units = math.MaxUint64
+		} else {
+			bound.units *= 4
+		}
+		if input, err = s.selectEntries(p, start, end); err != nil {
+			return result, err
+		}
 	}
+}
+
+// emitLogs drains merged into result, thinning by interval and cutting at limit.
+func (s *metricState) emitLogs(ctx context.Context, merged *orderedLogs, order LogOrder, limit uint64, interval int64, result *value.Result, held *int64) (emitted uint64, err error) {
+	account := s.account
+	var previous model.UnixNano
+	havePrevious := false
 	for {
 		r, e := merged.Next(ctx)
 		if errors.Is(e, io.EOF) {
 			break
 		}
 		if e != nil {
-			return result, e
+			return emitted, e
 		}
 		if interval > 0 && havePrevious {
 			distance := uint64(r.Entry.Timestamp) - uint64(previous)
@@ -424,13 +461,13 @@ func EvaluateLogsInterval(ctx context.Context, plan Plan, src scan.LogSource, or
 		if limit > 0 && uint64(r.Entry.Multiplicity) > limit-emitted {
 			r.Entry.Multiplicity = model.Uint64(limit - emitted)
 		}
-		l := value.Log{Project: src.ProjectID(), ID: r.Entry.ID, Source: r.Entry.Source, Timestamp: r.Entry.Timestamp, Multiplicity: r.Entry.Multiplicity, Line: r.Entry.Line, Labels: r.Labels, StreamLabels: r.OriginalStreamLabels, StructuredMetadata: r.OriginalStructuredMetadata}
+		l := value.Log{Project: s.src.ProjectID(), ID: r.Entry.ID, Source: r.Entry.Source, Timestamp: r.Entry.Timestamp, Multiplicity: r.Entry.Multiplicity, Line: r.Entry.Line, Labels: r.Labels, StreamLabels: r.OriginalStreamLabels, StructuredMetadata: r.OriginalStructuredMetadata}
 		cost := value.LogBytes(l) + 64
 		if e = account.Reserve(cost); e != nil {
 			account.Release(r.Bytes)
-			return result, e
+			return emitted, e
 		}
-		held += cost
+		*held += cost
 		l.Labels = value.CloneLabels(l.Labels)
 		l.StreamLabels = value.CloneLabels(l.StreamLabels)
 		l.StructuredMetadata = value.CloneLabels(l.StructuredMetadata)
@@ -443,7 +480,7 @@ func EvaluateLogsInterval(ctx context.Context, plan Plan, src scan.LogSource, or
 			break
 		}
 	}
-	return result, nil
+	return emitted, nil
 }
 
 // The pinned engine label-orders final instant vectors except sample trees

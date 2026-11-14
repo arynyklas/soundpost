@@ -36,6 +36,17 @@ func ownedLogQLError(err error) *LogQLError {
 	if errors.As(err, &template) {
 		return &LogQLError{Semantic: template.SemanticCode(), Category: "template", CategoryExposed: true, Message: err.Error(), LanguageDetail: template.LanguageDetail()}
 	}
+	// A cancellation, deadline or budget abort is the engine's typed refusal to
+	// finish, not a LogQL observation: it classifies by its fault code so it can
+	// never compare equal to a language error, and never as the empty semantic
+	// an unclassified failure carries. Other faults stay operational failures.
+	var fault *model.Fault
+	if errors.As(err, &fault) {
+		switch fault.Code {
+		case model.Cancelled, model.Timeout, model.Quota:
+			return &LogQLError{Semantic: "fault:" + string(fault.Code), Category: "fault", CategoryExposed: true, Message: err.Error()}
+		}
+	}
 	// Unknown operational failures do not masquerade as language observations.
 	var pipeline *logql.MetricPipelineError
 	if errors.As(err, &pipeline) {

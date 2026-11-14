@@ -76,7 +76,7 @@ func TestEveryLogQLErrorFamilyIsAssignedAtOrigin(t *testing.T) {
 		{`{app="api"}|regexp "["`, "regex.invalid"}, {`{app="api"}|regexp "(x)"`, "regexp.capture-required"},
 		{`{app="api"}|pattern "<a><b>"`, "pattern.invalid"}, {`{app="api"}|line_format "{{ env }}"`, "template.invalid"},
 		{`sort by(app)(vector(1))`, "grouping.unsupported"}, {`sum_over_time({app="api"}[1m])`, "range.unwrap-incompatible"},
-		{`{app="api"}|unwrap n`, "syntax.unexpected-token"}, {`1 + on(app) group_left vector(2)`, "binary.matching-invalid"},
+		{`{app="api"}|unwrap n`, "syntax.unexpected-token"}, {`1 + group_left vector(2)`, "syntax.unexpected-token"},
 		{`vector(1) or 2`, "binary.set-invalid"},
 		{`{app="api"}|label_format x=a,x=b`, "label-format.duplicate"}, {`{app="api"}|label_format __error__="x"`, "label-format.reserved"},
 		{`{app="api"}|=ip("bad")`, "ip.pattern-invalid"}, {`{app="api"}|json x="a["`, "syntax.unexpected-token"},
