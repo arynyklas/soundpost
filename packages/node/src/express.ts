@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import type {IncomingMessage,ServerResponse} from "node:http";
 import type {Client} from "@soundpost/core";
-import {parsePropagation} from "./workers.ts";
+import {requestPropagation} from "./workers.ts";
 export type ExpressHandler=(request:IncomingMessage,response:ServerResponse,next:(error?:unknown)=>void)=>unknown;
 const installed=new WeakMap<Client,ExpressLease>();
 export class ExpressLease {
@@ -14,7 +14,7 @@ export class ExpressLease {
   const lease=this;
   return function(this:unknown,request,response,next):unknown {
    if(lease.closed)return Reflect.apply(handler,this,[request,response,next]);
-   const existing=lease.client.traceContext(),parent=existing??parsePropagation(request.headers.traceparent,request.headers["x-soundpost-context"]),span=lease.client.startSpan(operation,{kind:"server",parent:parent??null});let ended=false;
+   const existing=lease.client.traceContext(),parent=existing??requestPropagation(request),span=lease.client.startSpan(operation,{kind:"server",parent:parent??null});let ended=false;
    const end=(status:"ok"|"error"|"cancelled"|"incomplete"):void=>{if(ended)return;ended=true;response.removeListener("finish",finish);response.removeListener("close",close);lease.pending.delete(incomplete);span.end(status);},finish=():void=>end(response.statusCode>=400?"error":"ok"),close=():void=>end(response.writableFinished?(response.statusCode>=400?"error":"ok"):"cancelled"),incomplete=():void=>end("incomplete");
    if(lease.pending.size>=1024){span.end("incomplete");return Reflect.apply(handler,this,[request,response,next]);}
    lease.pending.add(incomplete);response.once("finish",finish);response.once("close",close);

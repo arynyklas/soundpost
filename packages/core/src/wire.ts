@@ -4,7 +4,16 @@ import {canonical,canonicalId,decimal,unixNano,utf8Compare,utf8Size} from './pol
 export function object(value:unknown):Record<string,unknown>{if(!value||typeof value!=='object'||Array.isArray(value))throw Error('native object required');return value as Record<string,unknown>;}
 export function text(value:unknown):string{if(typeof value!=='string')throw Error('native string required');return value;}
 export function array(value:unknown):unknown[]{if(!Array.isArray(value))throw Error('native array required');return value;}
-function fields(value:unknown,required:string,optional=''):Record<string,unknown>{const o=object(value),names=required.split(' ').filter(Boolean),extras=optional.split(' ').filter(Boolean),allowed=new Set([...names,...extras]);if(names.some(k=>!Object.hasOwn(o,k))||Object.keys(o).some(k=>!allowed.has(k)))throw Error('closed native fields required');for(const k of extras){const v=o[k];if(v===null||Array.isArray(v)&&v.length===0)delete o[k];}return o;}
+type FieldSpec={readonly names:readonly string[];readonly extras:readonly string[];readonly allowed:ReadonlySet<string>};
+const specs=new Map<string,Map<string,FieldSpec>>();
+/** The closed field list parsed once per literal (required, optional) pair; the call sites pass constants. */
+function spec(required:string,optional:string):FieldSpec{
+ let byOptional=specs.get(required);if(!byOptional){byOptional=new Map();specs.set(required,byOptional);}
+ let found=byOptional.get(optional);
+ if(!found){const names=required.split(' ').filter(Boolean),extras=optional.split(' ').filter(Boolean);found={names,extras,allowed:new Set([...names,...extras])};byOptional.set(optional,found);}
+ return found;
+}
+function fields(value:unknown,required:string,optional=''):Record<string,unknown>{const o=object(value),{names,extras,allowed}=spec(required,optional);if(names.some(k=>!Object.hasOwn(o,k))||Object.keys(o).some(k=>!allowed.has(k)))throw Error('closed native fields required');for(const k of extras){const v=o[k];if(v===null||Array.isArray(v)&&v.length===0)delete o[k];}return o;}
 export interface NativeRecord {id:string;kind:string;observed_at_ns:string;policy_revision:string;payload:Record<string,unknown>}
 const payloadFields:Readonly<Record<string,readonly [string,string]>>={
  metric:['name labels sample_kind unit type','value histogram start_timestamp_ns exemplar_trace exemplar_span'],
@@ -62,11 +71,11 @@ function nativeProfile(p:Record<string,unknown>,revision:string):void{
  }
  for(const value of array(p.intervals)){const i=object(value),tid=nativeTask(i.native_task,boot);if(i.thread!==String(tid)||i.unit!=='nanoseconds'||i.reason!==undefined&&!Object.hasOwn(nativeProfileReasons,text(i.reason))||i.kind==='unknown_offcpu'&&i.reason===undefined||i.censored===true&&i.reason===undefined)throw Error('invalid native interval');}
 }
+const structureStrings:Readonly<Record<string,readonly string[]>>={metric:'name sample_kind unit type'.split(' '),log:'severity template_id line source_class'.split(' '),span:'span_kind operation status dependency_alias sample_decision'.split(' '),error:'exception_class mechanism'.split(' '),job_attempt:'schedule_occurrence state'.split(' '),replay_chunk:['recorder_version'],profile_chunk:'method units'.split(' '),capability:'runtime version build os arch signal method status reason'.split(' '),loss:'signal reason'.split(' '),condition:'status severity'.split(' ')};
+const structureIds:Readonly<Record<string,readonly string[]>>={metric:['exemplar_trace'],log:'trace_id run_id'.split(' '),span:'trace_id job_id replay_id profile_id'.split(' '),error:'occurrence_id build_id release_id trace_id replay_id profile_id run_id'.split(' '),job_attempt:'job_id run_id attempt_id producer_epoch cause_trace cause_error'.split(' '),replay_chunk:'replay_id session_id'.split(' '),profile_chunk:'profile_id process_id capability_id'.split(' '),loss:'source producer producer_epoch'.split(' '),condition:'condition_id epoch'.split(' ')};
 function structures(kind:string,p:Record<string,unknown>,revision:string):void{
- const strings:Readonly<Record<string,string>>={metric:'name sample_kind unit type',log:'severity template_id line source_class',span:'span_kind operation status dependency_alias sample_decision',error:'exception_class mechanism',job_attempt:'schedule_occurrence state',replay_chunk:'recorder_version',profile_chunk:'method units',capability:'runtime version build os arch signal method status reason',loss:'signal reason',condition:'status severity'};
- for(const key of (strings[kind]??'').split(' '))if(key)text(p[key]);if(kind==='error'){if(p.code!==null)text(p.code);if(p.template_id!==undefined)text(p.template_id);}if(kind==='log'&&p.timestamp_ns!==undefined)unixNano(p.timestamp_ns);
- const ids:Readonly<Record<string,string>>={metric:'exemplar_trace',log:'trace_id run_id',span:'trace_id job_id replay_id profile_id',error:'occurrence_id build_id release_id trace_id replay_id profile_id run_id',job_attempt:'job_id run_id attempt_id producer_epoch cause_trace cause_error',replay_chunk:'replay_id session_id',profile_chunk:'profile_id process_id capability_id',loss:'source producer producer_epoch',condition:'condition_id epoch'};
- for(const key of (ids[kind]??'').split(' '))if(key&&p[key]!==undefined)canonicalId(p[key]);
+ for(const key of structureStrings[kind]??[])text(p[key]);if(kind==='error'){if(p.code!==null)text(p.code);if(p.template_id!==undefined)text(p.template_id);}if(kind==='log'&&p.timestamp_ns!==undefined)unixNano(p.timestamp_ns);
+ for(const key of structureIds[kind]??[])if(p[key]!==undefined)canonicalId(p[key]);
  for(const key of ['span_id','exemplar_span'])if(p[key]!==undefined){bits(p[key]);if(text(p[key])==='0'.repeat(16))throw Error('invalid span ID');}
  if(kind==='metric'){
   labels(p.labels);if(p.value!==undefined)bits(p.value);

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import {checkedTraceContext,type Client} from "@soundpost/core";
 import type {TraceContext,WorkerContext} from "@soundpost/core/types";
+import type {IncomingMessage} from "node:http";
 import {types} from "node:util";
 /** A closed causal envelope. It cannot carry project, credentials or message data. */
 export function serializeWorkerContext(context:TraceContext):WorkerContext {
@@ -30,4 +31,17 @@ export function parsePropagation(traceparent:unknown,companion:unknown):TraceCon
  const parent=/^00-([0-9a-f]{32})-([0-9a-f]{16})-(00|01)$/.exec(traceparent),parts=/^v1\.([0-9a-f]{16})\.([0-9a-f]{32})\.([0-9a-f]{32})\.([0-9a-f]{32})$/.exec(companion);
  if(!parent||!parts)return undefined;
  try{return checkedTraceContext({traceId:parent[1],spanId:parent[2],sampled:parent[3]==="01",probability:parts[1],clockDomain:{host:parts[2],boot:parts[3],runtime:parts[4]}});}catch{return undefined;}
+}
+/** The parent context an incoming request carries, found in its raw header list so Node never has to build the lazy `headers` object for requests that carry no trace.
+ * Answers exactly what parsePropagation answers over `headers`: Node joins a repeated header with ", ", which fails the strict shapes, so a repeat yields no parent here too. */
+export function requestPropagation(request:IncomingMessage):TraceContext|undefined {
+ const raw=request.rawHeaders;
+ if(!Array.isArray(raw))return parsePropagation(request.headers.traceparent,request.headers["x-soundpost-context"]);
+ let parent:string|undefined,companion:string|undefined,repeated=false;
+ for(let index=0;index+1<raw.length;index+=2){
+  const name=raw[index]!;
+  if(name.length===11&&name.toLowerCase()==="traceparent"){if(parent!==undefined)repeated=true;parent=raw[index+1];}
+  else if(name.length===19&&name.toLowerCase()==="x-soundpost-context"){if(companion!==undefined)repeated=true;companion=raw[index+1];}
+ }
+ return repeated?undefined:parsePropagation(parent,companion);
 }

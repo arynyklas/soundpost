@@ -41,4 +41,4 @@ test("capture ends after the 65536th chunk and never resumes", () => {
  recorder.setConsent(false); recorder.setConsent(true);
  stage.pointer("html", 1, 1); stage.fire(FLUSH_MS);
  expect(chunks).toHaveLength(MAX_SEQUENCE);
-});
+}, 60_000); // 65,556 real flushes: 8-11 s on Linux bun 1.3.14, past bun's 5 s default.

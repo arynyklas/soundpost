@@ -16,3 +16,4 @@
 ## Unreleased — runtime supplement
 
 - Add explicit `startProfile` / `ProfileHandle.stop` (C09): single-owner in-process inspector session over V8's sampler, `runtime_engine_samples` with engine time deltas (no CPU unit), capability status/reason/coverage/loss/clock in a typed `ProfileReport`, bounded duration/size/commands with always-run cleanup, code-identity-only frames under an explicit project root, separate non-profile event-loop delay, no ACK path yet (`not_available`). Real Node 22.23.4 fixture `fixtures/sdk/profiles/node.mjs`.
+- Cut per-request cost of the HTTP/Express server spans (11.17): the incoming trace context is read from the raw header list, so Node no longer builds its lazy `headers` object for every request (a repeated trace header still yields no parent, as before).

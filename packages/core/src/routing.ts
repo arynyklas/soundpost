@@ -5,10 +5,26 @@ import {canonical,canonicalId,decimal,utf8Compare,utf8Size} from './policy.ts';
 import type {RoutingDescriptor,Resource} from './types.ts';
 import {object,text} from './wire.ts';
 export const kinds=['metric','log','span','error','job_attempt','replay_chunk','profile_chunk','capability','loss','condition'] as const;
-export function nativeCanonical(value:unknown):string{return canonical(value).replace(/\u2028/g,'\\u2028').replace(/\u2029/g,'\\u2029');}
-export function hashBytes(value:string):string{return Array.from(sha256(new TextEncoder().encode(value)),b=>b.toString(16).padStart(2,'0')).join('');}
+const lineSeparators=/[\u2028\u2029]/,encoder=new TextEncoder();
+export function nativeCanonical(value:unknown):string{const out=canonical(value);return lineSeparators.test(out)?out.replace(/\u2028/g,'\\u2028').replace(/\u2029/g,'\\u2029'):out;}
+type BuiltinCrypto={createHash(name:string):{update(data:string,encoding:'utf8'):{digest(encoding:'hex'):string}}};
+interface NodeHost {readonly versions?:{readonly node?:string};getBuiltinModule?(id:string):unknown}
+function isBuiltinCrypto(value:unknown):value is BuiltinCrypto{return typeof value==='object'&&value!==null&&'createHash' in value&&typeof value.createHash==='function';}
+/** The runtime's native SHA-256 when this is Node or Bun (batch bodies are hundreds of KiB; the pure-JS hash is the slower path there). Same digest either way. */
+const nativeCrypto:BuiltinCrypto|undefined=(()=>{
+ try{
+  const host:NodeHost|undefined=Reflect.get(globalThis,'process');
+  const found:unknown=host?.versions?.node!==undefined?host.getBuiltinModule?.('node:crypto'):undefined;
+  return isBuiltinCrypto(found)?found:undefined;
+ }catch{return undefined;}
+})();
+export function hashBytes(value:string):string{
+ if(nativeCrypto&&value.length>=1024)return nativeCrypto.createHash('sha256').update(value,'utf8').digest('hex');
+ return Array.from(sha256(encoder.encode(value)),b=>b.toString(16).padStart(2,'0')).join('');
+}
+const validated=new WeakSet<RoutingDescriptor>();
 export function validateDescriptor(d:RoutingDescriptor):RoutingDescriptor{
- if(d.version!==1||d.routing_version!==1||d.slots!==64)throw Error('invalid routing descriptor');for(const id of [d.org,d.project,d.source])canonicalId(id);decimal(d.policy_revision);return Object.freeze({...d});
+ if(d.version!==1||d.routing_version!==1||d.slots!==64)throw Error('invalid routing descriptor');for(const id of [d.org,d.project,d.source])canonicalId(id);decimal(d.policy_revision);const frozen=Object.freeze({...d});validated.add(frozen);return frozen;
 }
 export function resourceWire(r:Resource|undefined,build:string):Record<string,unknown>{
  if(!r)throw Error('resource required');for(const id of [r.service_id,r.environment_id,r.build_id])canonicalId(id);
@@ -37,8 +53,8 @@ export function ownerKey(record:unknown,descriptor:RoutingDescriptor,producer:st
  return new TextEncoder().encode(owner);
 }
 export function routeRecord(record:unknown,descriptor:RoutingDescriptor,producer:string):number{
- const r=object(typeof record==='string'?JSON.parse(record):record),d=validateDescriptor(descriptor);canonicalId(producer);
- const encoder=new TextEncoder(),parts=[encoder.encode(d.org),encoder.encode(d.project),encoder.encode(text(r.kind)),ownerKey(r,d,producer)];
+ const r=object(typeof record==='string'?JSON.parse(record):record),d=validated.has(descriptor)?descriptor:validateDescriptor(descriptor);canonicalId(producer);
+ const parts=[encoder.encode(d.org),encoder.encode(d.project),encoder.encode(text(r.kind)),ownerKey(r,d,producer)];
  const length=parts.reduce((n,p)=>n+4+p.length,0),input=new Uint8Array(length),view=new DataView(input.buffer);let at=0;
  for(const p of parts){view.setUint32(at,p.length,false);at+=4;input.set(p,at);at+=p.length;}
  const hash=sha256(input);return hash[7]!%64;

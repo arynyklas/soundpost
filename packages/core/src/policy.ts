@@ -4,7 +4,10 @@ import {ed25519} from "@noble/curves/ed25519";
 import type {Config,PolicyDecision,Template,Primitive,CaptureInput,SafeRecord} from "./types.ts";
 import {normalizeAttempt} from "./jobs.ts";
 export interface SourcePolicy {readonly decision:PolicyDecision;readonly expiresNs:string}
+const asciiOnly=/^[\x00-\x7f]*$/,zeroId="0".repeat(32),idShape=/^[0-9a-f]{32}$/;
 export function utf8Size(value:string):number{
+ // ASCII is one byte per UTF-16 unit and can hold no surrogate; only other text needs the code point walk.
+ if(asciiOnly.test(value))return value.length;
  let bytes=0;
  for(const character of value){
   const point=character.codePointAt(0)!;
@@ -14,18 +17,29 @@ export function utf8Size(value:string):number{
  return bytes;
 }
 export function canonicalId(value:unknown):string{
- if(typeof value!=="string"||value.length!==32||! /^[0-9a-f]{32}$/.test(value)||value==="0".repeat(32))throw Error("invalid opaque ID");
+ if(typeof value!=="string"||value.length!==32||!idShape.test(value)||value===zeroId)throw Error("invalid opaque ID");
  return value;
 }
+const unsignedShape=/^(0|[1-9][0-9]{0,19})$/,signedShape=/^(0|-?[1-9][0-9]{0,18})$/;
 export function decimal(value:unknown):string{
- if(typeof value!=="string"||! /^(0|[1-9][0-9]{0,19})$/.test(value))throw Error("invalid uint64");
- const number=BigInt(value);if(number>18446744073709551615n||number.toString()!==value)throw Error("invalid uint64");
+ if(typeof value!=="string"||!unsignedShape.test(value))throw Error("invalid uint64");
+ // The shape has no leading zero, so the range is decided by length and, only at 20 digits, by digit order against 2^64-1.
+ if(value.length===20&&value>"18446744073709551615")throw Error("invalid uint64");
  return value;
 }
 export function unixNano(value:unknown):string{
- if(typeof value!=="string"||! /^(0|-?[1-9][0-9]{0,18})$/.test(value))throw Error("invalid UnixNano");
- const number=BigInt(value);if(number< -9223372036854775808n||number>9223372036854775807n||number.toString()!==value)throw Error("invalid UnixNano");
+ if(typeof value!=="string"||!signedShape.test(value))throw Error("invalid UnixNano");
+ // Same reasoning against the int64 bounds; equal-length digit strings order like their numbers.
+ const negative=value.charCodeAt(0)===45;
+ if(value.length-(negative?1:0)===19&&value.slice(negative?1:0)>(negative?"9223372036854775808":"9223372036854775807"))throw Error("invalid UnixNano");
  return value;
+}
+/** Numeric order of two canonical decimal integers (optional leading minus, no leading zeros), as -1, 0 or 1, without BigInt. */
+export function compareNano(a:string,b:string):number{
+ const negativeA=a.charCodeAt(0)===45,negativeB=b.charCodeAt(0)===45;
+ if(negativeA!==negativeB)return negativeA?-1:1;
+ const magnitude=a.length!==b.length?(a.length<b.length?-1:1):a<b?-1:a>b?1:0;
+ return negativeA&&magnitude!==0?-magnitude:magnitude;
 }
 function decode(v:string):Uint8Array{
  if(typeof v!=="string"||! /^[A-Za-z0-9_-]+$/.test(v))throw Error("invalid policy encoding");
@@ -33,15 +47,45 @@ function decode(v:string):Uint8Array{
  const result=Uint8Array.from(raw,c=>c.charCodeAt(0));
  if(btoa(raw).replace(/=/g,"").replace(/\+/g,"-").replace(/\//g,"_")!==v)throw Error("invalid policy encoding");return result;
 }
+const surrogate=/[\ud800-\udfff]/,keyMemo=new Map<string,string>();
+/** A key's canonical form, remembered: record shapes repeat, so this skips the surrogate scan and JSON.stringify. Bounded so hostile key sets cannot grow it. */
+function canonicalKey(key:string):string{
+ let known=keyMemo.get(key);
+ if(known===undefined){if(surrogate.test(key))utf8Size(key);known=JSON.stringify(key);if(keyMemo.size<2048)keyMemo.set(key,known);}
+ return known;
+}
 export function canonical(v:unknown):string{
+ if(typeof v==="string"){if(surrogate.test(v))utf8Size(v);return JSON.stringify(v);}
  if(v===null||typeof v==="boolean")return JSON.stringify(v);
- if(typeof v==="string"){utf8Size(v);return JSON.stringify(v);}
  if(typeof v==="number"&&Number.isSafeInteger(v))return String(v);
- if(Array.isArray(v)){const values:string[]=[];for(let i=0;i<v.length;i++){const d=Object.getOwnPropertyDescriptor(v,String(i));if(!d||!("value" in d))throw Error("noncanonical accessor");values.push(canonical(d.value));}return "["+values.join(",")+"]";}
- if(typeof v==="object"&&v!==null)return "{"+Object.keys(v).sort(utf8Compare).map(k=>{const d=Object.getOwnPropertyDescriptor(v,k);if(!d||!("value" in d))throw Error("noncanonical accessor");return canonical(k)+":"+canonical(d.value);}).join(",")+"}";
+ if(Array.isArray(v)){
+  let out="[";
+  for(let i=0;i<v.length;i++){const d=Object.getOwnPropertyDescriptor(v,i);if(!d||!("value" in d))throw Error("noncanonical accessor");out+=(i===0?"":",")+canonical(d.value);}
+  return out+"]";
+ }
+ if(typeof v==="object"){
+  const keys=Object.keys(v);if(keys.length>1)keys.sort(utf8Compare);
+  let out="{";
+  for(let i=0;i<keys.length;i++){const key=keys[i]!,d=Object.getOwnPropertyDescriptor(v,key);if(!d||!("value" in d))throw Error("noncanonical accessor");out+=(i===0?"":",")+canonicalKey(key)+":"+canonical(d.value);}
+  return out+"}";
+ }
  throw Error("noncanonical value");
 }
-export function utf8Compare(a:string,b:string):number{const x=new TextEncoder().encode(a),y=new TextEncoder().encode(b);for(let i=0;i<Math.min(x.length,y.length);i++)if(x[i]!==y[i])return x[i]!-y[i]!;return x.length-y.length;}
+/** Byte-wise UTF-8 order without encoding: code point order, which differs from UTF-16 unit order only where a surrogate meets U+E000..U+FFFF. */
+export function utf8Compare(a:string,b:string):number{
+ const length=a.length<b.length?a.length:b.length;
+ for(let i=0;i<length;i++){
+  let x=a.charCodeAt(i),y=b.charCodeAt(i);
+  if(x!==y){
+   if(x>=0xd800&&y>=0xd800){x=x>=0xe000?x-0x800:x+0x2000;y=y>=0xe000?y-0x800:y+0x2000;}
+   return x-y;
+  }
+ }
+ return a.length-b.length;
+}
+// noble's default 8-bit base-point window builds a ~4 MB table on first use (about 50 ms, and it grows V8's young generation, which lengthens GC pauses for the whole host
+// application). A 4-bit window needs a table 8x smaller and ~4x less start-up work; checking a signature costs the same, and the check itself ({zip215:false}) is unchanged.
+try{ed25519.Point.BASE.precompute(4);}catch{/* a noble without this tuning point keeps its own default */}
 export function resolve(config:Config):SourcePolicy{
  try{
   const e=config.policy;if(e.version!==1||e.algorithm!=="Ed25519")throw Error();
@@ -73,11 +117,16 @@ export function approveTemplate(t:Template):Template{
  if(/[{}]/.test(stripped))throw Error("invalid placeholder");
  return Object.freeze({id:t.id,revision:t.revision,line:t.line,fields:Object.freeze(fields),severity:t.severity});
 }
+/** Why the signed policy refuses a record of `kind` observed at `observedNs` before any serialization (expiry first, then the signal switch), or undefined when it may proceed. */
+export function policyRefusal(policy:SourcePolicy,kind:CaptureInput["kind"],observedNs:string):"policy_expired"|"policy_disabled"|undefined{
+ if(compareNano(observedNs,policy.expiresNs)>=0)return "policy_expired";
+ if(!(kind==="error"?policy.decision.errors:kind==="span"?policy.decision.traces:kind==="job_attempt"?policy.decision.jobs:kind==="log"?policy.decision.logs:kind==="replay_chunk"?policy.decision.replay:kind==="profile_chunk"||kind==="capability"?policy.decision.profiles:false))return "policy_disabled";
+ return undefined;
+}
 export function normalizeRecord(policy:SourcePolicy,input:CaptureInput,templates:ReadonlyMap<string,Template>):{record?:SafeRecord;reason?:string}{
  try{canonicalId(input.id);if(input.kind==="error")canonicalId(input.build_id);}catch{return {reason:"invalid_id"};}
  try{unixNano(input.observed_at_ns);}catch{return {reason:"invalid_clock"};}
- if(BigInt(input.observed_at_ns)>=BigInt(policy.expiresNs))return {reason:"policy_expired"};
- if(!(input.kind==="error"?policy.decision.errors:input.kind==="span"?policy.decision.traces:input.kind==="job_attempt"?policy.decision.jobs:input.kind==="log"?policy.decision.logs:input.kind==="replay_chunk"?policy.decision.replay:input.kind==="profile_chunk"||input.kind==="capability"?policy.decision.profiles:false))return {reason:"policy_disabled"};
+ const refusal=policyRefusal(policy,input.kind,input.observed_at_ns);if(refusal!==undefined)return {reason:refusal};
  let payload:Record<string,unknown>;
  if(input.kind==="span")payload={trace_id:input.span.trace_id,span_id:input.span.span_id,parent_id:input.span.parent_id,span_kind:input.span.span_kind,operation:input.span.operation,start:input.span.start,end:input.span.end,status:input.span.status,dependency_alias:input.span.dependency_alias,links:input.span.links,sample_probability:input.span.sample_probability,sample_decision:input.span.sample_decision};
  else if(input.kind==="job_attempt"){try{payload={...normalizeAttempt(input.payload)};}catch{return {reason:"invalid_job_attempt"};}}

@@ -4,7 +4,7 @@ import {request as httpRequest,ClientRequest,type IncomingMessage,type ServerRes
 import {request as httpsRequest} from "node:https";
 import {errorMonitor} from "node:events";
 import type {Client} from "@soundpost/core";
-import {parsePropagation,propagationHeaders} from "./workers.ts";
+import {requestPropagation,propagationHeaders} from "./workers.ts";
 export interface HttpIntegrationConfig {readonly operation:string;readonly origins?:readonly Readonly<{origin:string;dependency:string}>[]}
 const installed=new WeakMap<Client,HttpLease>();
 const propagationNames:Readonly<Record<string,true>>={baggage:true,traceparent:true,tracestate:true,"x-soundpost-context":true};
@@ -17,7 +17,7 @@ export class HttpLease {
   const lease=this;
   return function(this:unknown,request:IncomingMessage,response:ServerResponse):void{
    if(lease.closed){Reflect.apply(handler,this,[request,response]);return;}
-   const parent=parsePropagation(request.headers.traceparent,request.headers["x-soundpost-context"]),span=lease.client.startSpan(lease.operation,{kind:"server",parent:parent??null});
+   const parent=requestPropagation(request),span=lease.client.startSpan(lease.operation,{kind:"server",parent:parent??null});
    let ended=false;
    const cleanup=():void=>{response.removeListener("finish",finish);response.removeListener("close",close);request.removeListener("aborted",cancel);lease.pending.delete(incomplete);};
    const end=(status:"ok"|"error"|"cancelled"|"incomplete"):void=>{if(ended)return;ended=true;cleanup();span.end(status);};

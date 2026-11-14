@@ -5,8 +5,8 @@ Limits are pinned in `qualification/workloads.yaml` from design section 13 and a
 
 | Budget | Limit | Status (qualification run, shared WSL2/Windows host) |
 |---|---|---|
-| Server SDK p95 latency, core capture | <=5% | **FAILED**: Node 22 Linux +69% (3-hash handler) and +79% (100-hash); Windows +182%/+101% |
-| Server SDK CPU per request | <=5% | **FAILED**: Node 22 Linux +219%/+129%; Windows +384%/+126% |
+| Server SDK p95 latency, core capture | <=5% | **FAILED**: after 11.17 on the Linux 6.1 2 vCPU VM, Node 22 +26% (3-hash) / +299% (100-hash), Node 24 +10% / +298%; the 100-hash p95 is GC-dominated (SDK load grows V8's young generation), see `.superpowers/sdd/approved-product/11.17-report.md`. Earlier: Node 22 Linux +69% / +79%; Windows +182%/+101% |
+| Server SDK CPU per request | <=5% | **FAILED**: after 11.17 on the same VM (queue saturated, fixture never flushes), Node 22 +26% (3-hash) / +15% (100-hash), Node 24 +27% / +12% (before: +253% / +127% and +268% / +137%). Earlier: Node 22 Linux +219%/+129%; Windows +384%/+126% |
 | SDK queue | <=2 MiB | met (881,686 B acking and stalled) |
 | Browser core gzip | <=40 KiB | **FAILED**: 46,570 B (index re-exports replay; no core-only entry) |
 | Browser replay gzip | <=60 KiB | met (5,882 B) |

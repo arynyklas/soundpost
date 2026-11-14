@@ -1,14 +1,14 @@
 // Copyright 2026 Aryn Yklas
 // SPDX-License-Identifier: Apache-2.0
 import type {Config,EventId,Template,PolicyDecision,CaptureInput,CapabilityInput,ProfileInput,HookMechanism,OwnedHookLease,ExportContext} from "./types.ts";
-import {resolve,approveTemplate,normalizeRecord,canonical,canonicalId,unixNano,type SourcePolicy} from "./policy.ts";
+import {resolve,approveTemplate,normalizeRecord,policyRefusal,canonical,canonicalId,unixNano,type SourcePolicy} from "./policy.ts";
 import {object} from "./wire.ts";
 import {extractException,type ErrorBoundary} from "./errors.ts";
 export type {ErrorBoundary} from "./errors.ts";
 import {DeliveryQueue} from "./queue.ts";
 import {HttpsReceiptTransport} from "./transport.ts";
 import type {FlushReport} from "./types.ts";
-import {SpanRecorder,createSynchronousMetadataContext,signalAborted} from "./tracing.ts";
+import {SpanRecorder,createSynchronousMetadataContext,signalAborted,randomHex} from "./tracing.ts";
 import type {MetadataContext,TraceContext,SpanOptions,ActiveSpan} from "./tracing.ts";
 import {JobRecorder} from "./jobs.ts";
 export {checkedTraceContext,createTraceClock} from "./tracing.ts";
@@ -33,7 +33,7 @@ export class Client {
   this.policy=resolve(config);this.clock=config.clockNs??(()=>String(BigInt(Date.now())*1000000n));this.build=config.build;this.codes=new Set(config.operations??[]);
   this.jobs=new JobRecorder(metadataContext,config.jobRegistry,{clock:()=>this.readClock(),emit:(payload,observed)=>{this.admit({kind:"job_attempt",id:this.id(),observed_at_ns:observed,payload});},capture:error=>this.captureException(error),loss:reason=>this.loss(reason),nativeError:error=>this.errorBoundary!==undefined&&this.errorBoundary.isProxy?.(error)!==true&&this.errorBoundary.isNativeError(error),timerCancellation:error=>this.errorBoundary?.timerCancellation?.(error)??Promise.resolve(false)});
   this.delivery=new DeliveryQueue(config,config.transport??new HttpsReceiptTransport(config),{context:this.exportContext});
-  this.spans=new SpanRecorder(metadataContext,config.operations??[],config.dependencies??[],config.traceSampleProbability,()=>!this.closed&&this.policy.decision.traces&&!this.exportContext.active(),span=>{this.admit({kind:"span",id:this.id(),observed_at_ns:span.start.wall_ns,span});},reason=>{
+  this.spans=new SpanRecorder(metadataContext,config.operations??[],config.dependencies??[],config.traceSampleProbability,()=>!this.closed&&this.policy.decision.traces&&!this.exportContext.active(),span=>{if(this.spanDroppedByFullQueue(span.start.wall_ns))return;this.admit({kind:"span",id:this.id(),observed_at_ns:span.start.wall_ns,span});},reason=>{
    this.loss(reason);if(!this.policy.decision.loss||this.closed||this.exportContext.active())return;const nativeReason=reason==="trace_sampled_out"?"policy":reason==="trace_active_limit"?"queue_full":undefined;if(nativeReason===undefined)return;const at=this.readClock();if(at!==undefined&&BigInt(at)<BigInt(this.policy.expiresNs))this.delivery.recordSignalLoss("span",nativeReason,1n,at);
   });
   for(const template of config.templates??[])this.registerTemplate(template);
@@ -45,12 +45,18 @@ export class Client {
   if(this.closed)throw Error("client closed");const safe=approveTemplate(template),old=this.templates.get(safe.id);
   if(old&&BigInt(old.revision)>=BigInt(safe.revision))throw Error("template revision must increase");this.templates.set(safe.id,safe);
  }
+ /** admit() would reach the queue's own queue_full drop for this span after encoding, hashing and routing it; answer that case first, counted identically by the queue. Anything else (closed, recursion, policy, clock) is left to admit() so its reasons and order are unchanged. */
+ private spanDroppedByFullQueue(observed:string):boolean{
+  if(this.closed||this.exportContext.active())return false;
+  try{unixNano(observed);if(policyRefusal(this.policy,"span",observed)!==undefined)return false;}catch{return false;}
+  return this.delivery.rejectsWhenFull("span");
+ }
  private admit(input:CaptureInput):boolean{
   if(this.closed){this.loss("closed");return false;}if(this.exportContext.active()){this.loss("exporter_recursion");return false;}const result=normalizeRecord(this.policy,input,this.templates);
   if(!result.record){this.loss(result.reason??"policy_rejected");return false;}
   return this.delivery.enqueue(canonical(result.record));
  }
- private id():string{return Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,"0")).join("");}
+ private id():string{return randomHex(16);}
  captureException(error:unknown,options?:{code?:string}):EventId{
   return this.captureError(error,options,"manual",false);
  }
