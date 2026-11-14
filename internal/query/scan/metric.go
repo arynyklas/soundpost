@@ -131,7 +131,9 @@ func (s *metricSource) Select(ctx context.Context, r MetricSelection) (out Serie
 		if page.Partial && !s.fence.AllowPartial {
 			return nil, model.Fail(model.Unavailable)
 		}
-		if err = it.mergeMetadata(rows.Watermarks(), page.Partial); err != nil {
+		// The cut is the same for every page and is certified at EOF; the page
+		// itself was certified when storage released it.
+		if err = it.mergeMetadata(nil, page.Partial); err != nil {
 			return nil, err
 		}
 		for j := range n {

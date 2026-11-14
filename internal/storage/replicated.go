@@ -850,17 +850,43 @@ func (m *slotMachine) Validate(ctx context.Context, command replica.Entry) error
 		return nil
 	})
 }
+
+// readIndexEach runs one ReadIndex round on every listed group, at most
+// fenceParallelism at a time, and returns the cut and the error of each, in the
+// order of groups. The rounds are independent quorum confirmations of different
+// groups, so a fence over 64 groups costs a few rounds, not the sum of 64; the
+// bound keeps a burst of 64 simultaneous heartbeat rounds off the peer
+// transport.
+const fenceParallelism = 8
+
+func readIndexEach(ctx context.Context, groups []*replica.Group) ([]model.Cursor, []error) {
+	cuts := make([]model.Cursor, len(groups))
+	errs := make([]error, len(groups))
+	var wg sync.WaitGroup
+	slots := make(chan struct{}, fenceParallelism)
+	for i, group := range groups {
+		slots <- struct{}{}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() { <-slots }()
+			cuts[i], errs[i] = group.ReadIndex(ctx)
+		}()
+	}
+	wg.Wait()
+	return cuts, errs
+}
 func (e *Engine) replicaReadFence(ctx context.Context, minimum []model.Cursor, allowPartial bool) ([]model.Cursor, bool, error) {
 	if e.repl == nil {
 		return nil, false, model.Fail(model.Unavailable)
 	}
+	cuts, errs := readIndexEach(ctx, e.repl.groups[:])
 	marks := make([]model.Cursor, 0, 64)
 	partial := false
-	for _, group := range e.repl.groups {
-		mark, err := group.ReadIndex(ctx)
-		if err != nil {
+	for i, mark := range cuts {
+		if errs[i] != nil {
 			if !allowPartial {
-				return nil, false, storageReplicaFault(err)
+				return nil, false, storageReplicaFault(errs[i])
 			}
 			partial = true
 			continue
@@ -895,22 +921,24 @@ func (e *Engine) replicaReleaseFenceLocked(ctx context.Context, marks []model.Cu
 	}
 	e.mu.Unlock()
 	defer e.mu.Lock()
-	for _, mark := range marks {
-		var owner *replica.Group
+	owners := make([]*replica.Group, len(marks))
+	for i, mark := range marks {
 		for slot, group := range e.repl.groups {
 			if e.group(uint16(slot)) == mark.Group {
-				owner = group
+				owners[i] = group
 				break
 			}
 		}
-		if owner == nil {
+		if owners[i] == nil {
 			return model.Fail(model.Stale)
 		}
-		cut, err := owner.ReadIndex(ctx)
-		if err != nil {
-			return storageReplicaFault(err)
+	}
+	cuts, errs := readIndexEach(ctx, owners)
+	for i, mark := range marks {
+		if errs[i] != nil {
+			return storageReplicaFault(errs[i])
 		}
-		if cut.Index < mark.Index {
+		if cuts[i].Index < mark.Index {
 			return model.Fail(model.Stale)
 		}
 	}

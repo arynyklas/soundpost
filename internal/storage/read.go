@@ -90,28 +90,35 @@ func compileMatchers(ms []Matcher) ([]compiledMatcher, error) {
 const profilesRead auth.Permission = "profiles.read"
 
 func (e *Engine) authorizeRead(ctx context.Context, s auth.Scope, projects []model.ID, signal model.Kind) error {
+	_, err := e.authorizeReadDeletions(ctx, s, projects, signal)
+	return err
+}
+
+// authorizeReadDeletions is authorizeRead that also returns the deletion
+// predicates it fetched as its last step, so a caller that needs both (the page
+// builder) pays one control read, not two.
+func (e *Engine) authorizeReadDeletions(ctx context.Context, s auth.Scope, projects []model.ID, signal model.Kind) ([]model.DeletePredicate, error) {
 	if ctx.Err() != nil {
-		return model.Fail(model.Cancelled)
+		return nil, model.Fail(model.Cancelled)
 	}
 	permitted := s.Permission() == auth.Read || s.Permission() == auth.RawRead || s.Permission() == profilesRead && (signal == model.Profile || signal == model.CapabilityKind || signal == model.Loss)
 	if !permitted || len(projects) == 0 || len(projects) > 128 {
-		return model.Fail(model.Forbidden)
+		return nil, model.Fail(model.Forbidden)
 	}
 	seen := map[model.ID]bool{}
 	for _, p := range projects {
 		if !s.AllowsProject(p) {
-			return model.Fail(model.NotFound)
+			return nil, model.Fail(model.NotFound)
 		}
 		if seen[p] {
-			return model.Fail(model.Invalid)
+			return nil, model.Fail(model.Invalid)
 		}
 		seen[p] = true
 	}
 	if err := e.validator.Revalidate(ctx, s); err != nil {
-		return err
+		return nil, err
 	}
-	_, err := e.readDeletions(ctx, s.OrgID(), projects)
-	return err
+	return e.readDeletions(ctx, s.OrgID(), projects)
 }
 func readPrefixes(s auth.Scope, projects []model.ID, kind model.Kind, selectors []Matcher) ([][]byte, error) {
 	var source model.ID
@@ -205,7 +212,7 @@ func (e *Engine) Stats() StorageStats {
 func (it *rowIterator) Watermarks() []model.Cursor {
 	it.e.mu.Lock()
 	defer it.e.mu.Unlock()
-	if it.certifyLocked(it.ctx, true) != nil {
+	if _, err := it.certifyLocked(it.ctx, true); err != nil {
 		return nil
 	}
 	return append([]model.Cursor(nil), it.marks...)
@@ -262,29 +269,32 @@ func (it *rowIterator) Next(ctx context.Context) (Page, error) {
 		it.closeLocked()
 		return Page{}, it.terminal
 	}
-	if err := e.authorizeRead(ctx, it.scope, it.req.Projects, it.req.Signal); err != nil {
+	delPreds, err := e.authorizeReadDeletions(ctx, it.scope, it.req.Projects, it.req.Signal)
+	if err != nil {
 		it.terminal = err
 		it.closeLocked()
 		return Page{}, err
 	}
 	for it.partition < len(it.prefixes) {
 		prefix := it.prefixes[it.partition]
+		// Predicates are fetched fresh when a chunk starts; the release barrier
+		// then fetches them again and the chunk is rebuilt if they differ.
+		if _, err = e.authorizeReadDeletions(ctx, it.scope, it.req.Projects, it.req.Signal); err != nil {
+			it.terminal = err
+			it.closeLocked()
+			return Page{}, err
+		}
+		if delPreds, err = e.readDeletions(ctx, it.scope.OrgID(), it.req.Projects); err != nil {
+			it.terminal = err
+			it.closeLocked()
+			return Page{}, err
+		}
 		var selected Page
 		var current model.ID
 		var decoded Page
+		var chunkBytes uint64
 		startPartition, startLast := it.partition, append([]byte(nil), it.last...)
-		if err := e.authorizeRead(ctx, it.scope, it.req.Projects, it.req.Signal); err != nil {
-			it.terminal = err
-			it.closeLocked()
-			return Page{}, err
-		}
-		delPreds, err := e.readDeletions(ctx, it.scope.OrgID(), it.req.Projects)
-		if err != nil {
-			it.terminal = err
-			it.closeLocked()
-			return Page{}, err
-		}
-		err = e.db.View(func(tx *bolt.Tx) error {
+		err := e.db.View(func(tx *bolt.Tx) error {
 			e.storageStats.IndexLookups++
 			name := "scan_time"
 			if it.posting != "" {
@@ -335,11 +345,7 @@ func (it *rowIterator) Next(ctx context.Context) (Page, error) {
 				}
 				var id model.ID
 				copy(id[:], v[:16])
-				if current != (model.ID{}) && current != id {
-					return nil
-				}
-				it.last = append(it.last[:0], k...)
-				if current == (model.ID{}) {
+				if id != current {
 					raw := tx.Bucket([]byte("scan_pages")).Get(id[:])
 					if raw == nil {
 						return model.Fail(model.Corrupt)
@@ -358,6 +364,13 @@ func (it *rowIterator) Next(ctx context.Context) (Page, error) {
 					if !bytes.Equal(expected, prefix) {
 						return model.Fail(model.Corrupt)
 					}
+					// A chunk spans batches, because every release costs a quorum
+					// barrier. It stays within the page bounds (128 rows, 4 MiB):
+					// it is closed before this batch's page when that page could
+					// not fit, and this row is then left for the next chunk.
+					if selected.Len() > 0 && (selected.Len()+int(ref.Count) > pageRows || chunkBytes+uint64(ref.Length) > pageByteLimit) {
+						return nil
+					}
 					resources, payload := scanColumns(it.req)
 					if entityPredicateActive(delPreds) && (it.req.Signal == model.Replay || it.req.Signal == model.Profile) {
 						payload = true
@@ -370,7 +383,9 @@ func (it *rowIterator) Next(ctx context.Context) (Page, error) {
 						return err
 					}
 					current = id
+					chunkBytes += decoded.Bytes
 				}
+				it.last = append(it.last[:0], k...)
 				row := int(binary.BigEndian.Uint16(v[16:18]))
 				if row >= decoded.Len() {
 					return model.Fail(model.Corrupt)
@@ -393,7 +408,8 @@ func (it *rowIterator) Next(ctx context.Context) (Page, error) {
 			return Page{}, err
 		}
 		if selected.Len() > 0 {
-			if err = it.certifyLocked(ctx, false); err != nil {
+			certified, err := it.certifyLocked(ctx, false)
+			if err != nil {
 				it.terminal = err
 				it.closeLocked()
 				return Page{}, err
@@ -403,25 +419,21 @@ func (it *rowIterator) Next(ctx context.Context) (Page, error) {
 			// accumulated, and its entity form may need payload columns this page
 			// did not decode, so the page is discarded and rebuilt from the same
 			// cursor under the new predicates instead of being patched.
-			latest, cerr := e.readDeletions(ctx, it.scope.OrgID(), it.req.Projects)
-			if cerr != nil {
-				it.terminal = cerr
-				it.closeLocked()
-				return Page{}, cerr
-			}
+			latest := certified
 			if deletionsChanged(delPreds, latest) {
+				delPreds = latest
 				it.partition, it.last = startPartition, append(it.last[:0], startLast...)
 				continue
 			}
 			projectPage(&selected, it.req.Projection, it.req.Signal)
 			selected.Partial = it.partial
-			selected.Bytes = decoded.Bytes
+			selected.Bytes = chunkBytes
 			it.page = selected
 			e.storageStats.BorrowedPages++
 			return it.page, nil
 		}
 	}
-	if err := it.certifyLocked(ctx, false); err != nil {
+	if _, err := it.certifyLocked(ctx, false); err != nil {
 		it.terminal = err
 		it.closeLocked()
 		return Page{}, err
@@ -568,8 +580,15 @@ func scanColumns(req ScanRequest) (resources, payload bool) {
 	}
 	return
 }
-func (it *rowIterator) certifyLocked(ctx context.Context, allowEOF bool) error {
-	check := func() error {
+
+// certifyLocked is the release barrier of a page, EOF or watermark report: the
+// quorum barrier over every group of the cut, then the current authorization,
+// which is the last word on whether the scope may still read. Authorization is
+// judged once, after the barrier (whatever it concluded before the barrier is
+// superseded by it), and the deletion predicates it fetched at that point are
+// returned for the caller's rebuild check.
+func (it *rowIterator) certifyLocked(ctx context.Context, allowEOF bool) ([]model.DeletePredicate, error) {
+	state := func() error {
 		if ctx.Err() != nil || it.ctx.Err() != nil {
 			return model.Fail(model.Cancelled)
 		}
@@ -579,15 +598,18 @@ func (it *rowIterator) certifyLocked(ctx context.Context, allowEOF bool) error {
 		if it.closed && !(allowEOF && it.terminal == io.EOF) {
 			return it.terminal
 		}
-		return it.e.authorizeRead(ctx, it.scope, it.req.Projects, it.req.Signal)
+		return nil
 	}
-	if err := check(); err != nil {
-		return err
+	if err := state(); err != nil {
+		return nil, err
 	}
 	if err := it.e.replicaReleaseFenceLocked(ctx, it.marks); err != nil {
-		return err
+		return nil, err
 	}
-	return check()
+	if err := state(); err != nil {
+		return nil, err
+	}
+	return it.e.authorizeReadDeletions(ctx, it.scope, it.req.Projects, it.req.Signal)
 }
 
 // deletionsChanged reports whether the active deletion set differs, which is
