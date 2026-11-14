@@ -44,6 +44,16 @@ jobs:
           tar -C .tools/linux -xzf "$archive"
           echo "$PWD/.tools/linux/go/bin" >> "$GITHUB_PATH"
 
+      - name: Cache Go modules and build outputs (test results are never reused, -count=1)
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-${{ hashFiles('build/toolchains.json') }}-${{ hashFiles('go.sum') }}-conformance-${{ github.sha }}
+          restore-keys: |
+            go-${{ hashFiles('build/toolchains.json') }}-${{ hashFiles('go.sum') }}-
+
       - name: Prove the inputs and the locked conformance inventory
         run: |
           set -eu
