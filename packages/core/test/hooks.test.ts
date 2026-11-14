@@ -22,3 +22,21 @@ test("hook leases are explicitly capped and client close owns cleanup",async()=>
  await c.close();for(const lease of leases)lease.close();
  expect(()=>installBunHooks(c)).toThrow("client closed");
 });
+test("the fatal hook path stores original frames and never runs a user formatter or getter",async()=>{
+ const here=import.meta.dir;
+ const c=init({...config(),artifactRoot:here,artifactIds:{"hooks.test.ts":"0123456789abcdef0123456789abcdef"}});
+ let calls=0;
+ const plain=new Error("CANARY_MESSAGE");
+ const hostile=new Error("CANARY_MESSAGE");
+ Object.defineProperty(hostile,"stack",{get(){calls++;return "";},configurable:true});
+ c.captureHook(plain,"uncaught_exception",true);
+ c.captureHook(hostile,"uncaught_exception",true);
+ const [first,second]=c.bufferedRecords().map(text=>JSON.parse(text) as {payload:{frames:{artifact_id:string;module_id:string;function:string;line:number}[]}});
+ expect(first!.payload.frames.length).toBeGreaterThan(0);
+ expect(first!.payload.frames[0]!.artifact_id).toBe("0123456789abcdef0123456789abcdef");
+ expect(first!.payload.frames[0]!.module_id).toBe("hooks.test.ts");
+ expect(second!.payload.frames).toHaveLength(0);
+ expect(calls).toBe(0);
+ expect(c.bufferedRecords().join("")).not.toContain("CANARY_MESSAGE");
+ await c.close();
+});

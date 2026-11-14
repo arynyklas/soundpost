@@ -207,7 +207,7 @@ def parse_safe_record(serialized):
                 if edge['kind'] not in ('cause','context','group'):raise ValueError('invalid edge')
                 if edge['kind']=='group':_integer(edge.get('ordinal'),0,15)
                 elif 'ordinal' in edge:raise ValueError('invalid edge ordinal')
-            if any(reason not in ('cycle','node_limit','frame_limit','group_limit','unknown_throw','project_root_unconfigured','frame_not_project_safe','foreign_or_custom_error_class','safe_original_stack_unavailable','native_brand_unavailable','cause_accessor','group_accessor','safe_group_boundary_unavailable','unsafe_group_container') for reason in reasons):raise ValueError('invalid graph reason')
+            if any(reason not in ('cycle','node_limit','frame_limit','group_limit','unknown_throw','project_root_unconfigured','frame_not_project_safe','foreign_or_custom_error_class','safe_original_stack_unavailable', 'stack_formatter_hooked', 'stack_not_plain', 'stack_unparsed','native_brand_unavailable','cause_accessor','group_accessor','safe_group_boundary_unavailable','unsafe_group_container') for reason in reasons):raise ValueError('invalid graph reason')
     if kind=='log':
         decimal(p['template_revision'])
         if any(type(p[k]) is not str for k in ('template_id','line','severity','source_class')):raise ValueError('invalid log')

@@ -19,7 +19,7 @@ test("native cause/group topology is bounded and stack formatters never execute"
   const graph=extractException(root,policy,boundary);
   expect(graph.nodes.map(n=>n.exception_class)).toEqual(["AggregateError","TypeError"]);
   expect(graph.reasons).toContain("cycle");
-  expect(graph.reasons).toContain("safe_original_stack_unavailable");
+  expect(graph.reasons).toContain("stack_formatter_hooked");
   expect(calls).toBe(0);expect(JSON.stringify(graph)).not.toContain("CANARY");
  }finally{Error.prepareStackTrace=old;}
 });

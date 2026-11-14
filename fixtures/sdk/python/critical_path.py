@@ -128,7 +128,7 @@ def verify_http(config, report, expected, start, end):
     reader=os.environ['SOUNDPOST_FIXTURE_READ_CREDENTIAL']
     parsed=urlsplit(endpoint)
     if parsed.scheme!='https' or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment: raise ValueError('invalid_verifier_endpoint')
-    body={'org_id':config.org,'project_id':config.project,'batch_ids':list(report.acknowledged_batch_ids),'minimum_receipts':[{'batch_id':receipt['batch_id'],'cursor':receipt['cursor']} for receipt in report.receipts],'trace_ids':sorted({record['payload']['trace_id'] for record in expected if record['kind']=='span'}),'start_ns':str(start),'end_ns':str(end)}
+    body={'org_id':config.org,'project_id':config.project,'batch_ids':list(report.acknowledged_batch_ids),'minimum_receipts':[{'batch_id':receipt['batch_id'],'cursor':receipt['cursor']} for receipt in report.receipts],'signals':['span','error','loss'],'trace_ids':sorted({record['payload']['trace_id'] for record in expected if record['kind']=='span'}),'start_ns':str(start),'end_ns':str(end)}
     connection=http.client.HTTPSConnection(parsed.hostname,parsed.port or 443,timeout=10,context=ssl.create_default_context(cafile=config.ca_file))
     try:
         connection.request('POST',parsed.path or '/',body=json.dumps(body).encode(),headers={'Authorization':'Bearer '+reader,'Content-Type':'application/json'})
@@ -138,10 +138,9 @@ def verify_http(config, report, expected, start, end):
         result=json.loads(raw)
     finally: connection.close()
     if result['partial'] is not False: raise AssertionError('partial_verifier_result')
-    watermarks={value['group']:int(value['index']) for value in result['watermarks']}
-    for receipt in report.receipts:
-        cursor=receipt['cursor']
-        if watermarks.get(cursor['group'],-1)<int(cursor['index']): raise AssertionError('minimum_receipt_not_visible')
+    # Decision D8: the independent verifier reads the product's own read route, which exposes no ingest cursor or
+    # batch id. Visibility is therefore matched by record id (the caller checks every expected id below).
+    if result.get('batch_matching')!='record_id': raise AssertionError('admitted_records_missing')
     return result['records'],set(body['trace_ids'])
 
 def main():

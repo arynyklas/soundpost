@@ -328,7 +328,7 @@ func ValidateRecord(r *Record, p SourcePolicy) error {
 				}
 			}
 			for _, reason := range g.Reasons {
-				if !oneOf(reason, "cycle", "node_limit", "frame_limit", "group_limit", "unknown_throw", "project_root_unconfigured", "frame_not_project_safe", "foreign_or_custom_error_class", "safe_original_stack_unavailable", "native_brand_unavailable", "cause_accessor", "group_accessor", "safe_group_boundary_unavailable", "unsafe_group_container") {
+				if !oneOf(reason, "cycle", "node_limit", "frame_limit", "group_limit", "unknown_throw", "project_root_unconfigured", "frame_not_project_safe", "foreign_or_custom_error_class", "safe_original_stack_unavailable", "stack_formatter_hooked", "stack_not_plain", "stack_unparsed", "native_brand_unavailable", "cause_accessor", "group_accessor", "safe_group_boundary_unavailable", "unsafe_group_container") {
 					return Fail(Invalid)
 				}
 			}

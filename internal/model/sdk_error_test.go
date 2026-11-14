@@ -26,7 +26,7 @@ func TestSDKGraphVocabularyAndNullableColumns(t *testing.T) {
 		}
 	}
 	occurrence.Mechanism = "manual"
-	for _, reason := range []string{"cycle", "node_limit", "frame_limit", "group_limit", "unknown_throw", "project_root_unconfigured", "frame_not_project_safe", "foreign_or_custom_error_class", "safe_original_stack_unavailable", "native_brand_unavailable", "cause_accessor", "group_accessor", "safe_group_boundary_unavailable", "unsafe_group_container"} {
+	for _, reason := range []string{"cycle", "node_limit", "frame_limit", "group_limit", "unknown_throw", "project_root_unconfigured", "frame_not_project_safe", "foreign_or_custom_error_class", "safe_original_stack_unavailable", "stack_formatter_hooked", "stack_not_plain", "stack_unparsed", "native_brand_unavailable", "cause_accessor", "group_accessor", "safe_group_boundary_unavailable", "unsafe_group_container"} {
 		occurrence.Graph.Reasons = []string{reason}
 		if e := ValidateRecord(&record, policy); e != nil {
 			t.Fatalf("SDK reason %s: %v", reason, e)

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Original JS exception frames (D7): descriptor-only, formatter-safe stack read with a bounded V8/JavaScriptCore/SpiderMonkey parser, `Config.artifactRoot`/`Config.artifactIds`, and the graph reasons `stack_formatter_hooked`, `stack_not_plain`, `stack_unparsed`.
+
 ## 0.1.0 — 2026-11-03
 
 - Add installation-trusted signed policy admission and bounded immutable safe error/log capture.

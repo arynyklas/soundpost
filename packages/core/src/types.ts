@@ -24,6 +24,10 @@ export interface Config {
  readonly deploymentErrors?:boolean;readonly deploymentLogs?:boolean;readonly deploymentReplay?:boolean;readonly deploymentBodies?:boolean;readonly deploymentTraces?:boolean;readonly deploymentJobs?:boolean;readonly deploymentLoss?:boolean;
  /** Deployment opt-in for delivering profile_chunk/capability records (off by default). There is no signed-policy flag for profiles: the source policy's Kinds is enforced by the server, so enable this only for a source whose policy lists both profile_chunk and capability. */
  readonly deploymentProfiles?:boolean;
+ /** Where error-frame artifact paths are relative to: an absolute directory (Node/Bun file URLs and paths) or an http(s) URL prefix (browsers; default is the URL path). Frames outside it, or any frame when a file path has no root, are withheld with a named reason. */
+ readonly artifactRoot?:string;
+ /** Build-receipt association `artifact path -> 32-hex ArtifactID` (soundpostVite/soundpostWebpack onReceipt). A frame whose path is listed carries the real ArtifactID, which is what the server's frame resolver requires; any other frame keeps its artifact-relative path and stays unresolved. */
+ readonly artifactIds?:Readonly<Record<string,string>>;
  readonly maxRecords?:number;readonly maxBytes?:number;readonly clockNs?:()=>string;
  readonly traceSampleProbability?:string;
  readonly resource:Resource;readonly descriptor?:RoutingDescriptor;readonly producer?:string;readonly sourceClass?:"private"|"browser";

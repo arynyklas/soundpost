@@ -1,6 +1,6 @@
 // Copyright 2026 Aryn Yklas
 // SPDX-License-Identifier: Apache-2.0
-import {originalStackLimitation,type SafeFrame} from "./frames.ts";
+import {readStackFrames,type FrameNaming,type SafeFrame} from "./frames.ts";
 import type {SourcePolicy} from "./policy.ts";
 import type {ExceptionEdgeKind} from "./types.ts";
 /** Supplied only by owned runtime entrypoints, never discovered on thrown values. */
@@ -13,24 +13,29 @@ const prototypes:readonly (readonly [object,string])[]=[
  [ReferenceError.prototype,"ReferenceError"],[SyntaxError.prototype,"SyntaxError"],[URIError.prototype,"URIError"],
  [EvalError.prototype,"EvalError"],[AggregateError.prototype,"AggregateError"]
 ];
-export function extractException(error:unknown,_policy:SourcePolicy,boundary?:ErrorBoundary):ExceptionGraph {
+/** `naming`: see Config.artifactRoot and Config.artifactIds. */
+export function extractException(error:unknown,_policy:SourcePolicy,boundary?:ErrorBoundary,naming:FrameNaming={}):ExceptionGraph {
  const nodes:ErrorNode[]=[],edges:ErrorEdge[]=[],reasons=new Set<string>(),seen:unknown[]=[];
+ let frameTotal=0;
  const visit=(value:unknown,ancestors:ReadonlySet<number>):number|undefined=>{
   const prior=seen.findIndex(v=>v===value);
   if(prior!==-1){if(ancestors.has(prior))reasons.add("cycle");return prior;}
   if(nodes.length===16){reasons.add("node_limit");return;}
   const id=nodes.length;seen.push(value);
   const native=boundary?.isNativeError(value)===true;
-  let name="UnknownError";
+  let name="UnknownError",frames:readonly SafeFrame[]=[];
   if(native){
    // isNativeError rejects proxies; a true native object has no proxy internal methods.
    // Inspect exactly one prototype, never traverse a possibly hostile prototype chain.
    const proto:unknown=Object.getPrototypeOf(value);
    name=prototypes.find(([p])=>p===proto)?.[1]??"Error";
    if(!prototypes.some(([p])=>p===proto))reasons.add("foreign_or_custom_error_class");
-   reasons.add(originalStackLimitation);
+   // Descriptor-only read of an engine-owned stack; never a getter, formatter, name/message accessor or proxy trap.
+   const read=readStackFrames(value as object,boundary??{},naming,128-frameTotal);
+   frames=read.frames;frameTotal+=frames.length;
+   for(const reason of read.reasons)reasons.add(reason);
   }else reasons.add(boundary?"unknown_throw":"native_brand_unavailable");
-  nodes.push(Object.freeze({id,exception_class:name,frames:Object.freeze([]),context_suppressed:false}));
+  nodes.push(Object.freeze({id,exception_class:name,frames,context_suppressed:false}));
   if(!native)return id;
   const link=(child:unknown,kind:"cause"|"group",ordinal?:number):void=>{
    const to=visit(child,new Set([...ancestors,id]));

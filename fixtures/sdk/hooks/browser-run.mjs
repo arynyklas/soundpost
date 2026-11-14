@@ -15,6 +15,8 @@ import {fileURLToPath} from "node:url";
 const here=dirname(fileURLToPath(import.meta.url)),root=resolve(here,"../../..");
 const args=process.argv.slice(2),option=(name,fallback)=>{const i=args.indexOf(name);return i>=0&&i+1<args.length?args[i+1]:fallback;};
 const executable=option("--executable",""),bun=option("--bun","bun"),label=option("--label","browser");
+// Any module exporting an async function that returns JSON-able evidence can run in the real browser: --fixture <repo-relative .ts> --export <name>.
+const fixture=option("--fixture","fixtures/sdk/hooks/browser.ts"),exportName=option("--export","runBrowserHooksFixture");
 if(!executable)throw Error("--executable is required");
 const requireFrom=path=>{try{return createRequire(path)("playwright-core");}catch{return undefined;}};
 const playwright=requireFrom(join(root,"web/package.json"))??requireFrom(join(root,"node_modules/.pnpm/playwright-core@1.64.1/node_modules/x.js"));
@@ -22,12 +24,12 @@ if(!playwright)throw Error("playwright-core is not installed (pnpm install)");
 const {chromium}=playwright;
 
 const dir=mkdtempSync(join(tmpdir(),"soundpost-hooks-"));
-const built=spawnSync(bun,["build",join(root,"fixtures/sdk/hooks/browser.ts"),"--target=browser","--format=esm","--outfile",join(dir,"hooks.js")],{encoding:"utf8"});
+const built=spawnSync(bun,["build",join(root,fixture),"--target=browser","--format=esm","--outfile",join(dir,"hooks.js")],{encoding:"utf8"});
 if(built.status!==0)throw Error("bun build failed: "+built.stderr);
 const bundle=readFileSync(join(dir,"hooks.js"));
 const page=`<!doctype html><meta charset="utf-8"><script type="module">
-import {runBrowserHooksFixture} from "/hooks.js";
-window.__result=runBrowserHooksFixture().then(value=>({ok:true,value}),error=>({ok:false,error:String(error&&error.message||error)}));
+import {${exportName} as run} from "/hooks.js";
+window.__result=run().then(value=>({ok:true,value}),error=>({ok:false,error:String(error&&error.message||error)}));
 </script>`;
 const server=createServer((request,response)=>{
  if(request.url==="/hooks.js"){response.writeHead(200,{"content-type":"text/javascript"});response.end(bundle);}
@@ -46,6 +48,6 @@ try{
  outcome=await tab.evaluate(()=>window.__result);
 }finally{await browser.close();server.close();}
 const sha256=bytes=>createHash("sha256").update(bytes).digest("hex");
-const evidence={label,ok:outcome.ok,browser_version:version,user_agent:userAgent,executable_size:statSync(executable).size,bundle_sha256:sha256(bundle),fixture:"fixtures/sdk/hooks/browser.ts",result:outcome.ok?outcome.value:undefined,error:outcome.ok?undefined:outcome.error};
+const evidence={label,ok:outcome.ok,browser_version:version,user_agent:userAgent,executable_size:statSync(executable).size,bundle_sha256:sha256(bundle),fixture,result:outcome.ok?outcome.value:undefined,error:outcome.ok?undefined:outcome.error};
 process.stdout.write("SOUNDPOST_HOOKS_EVIDENCE "+JSON.stringify(evidence)+"\n");
 process.exit(outcome.ok?0:1);

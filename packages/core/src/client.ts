@@ -4,6 +4,7 @@ import type {Config,EventId,Template,PolicyDecision,CaptureInput,CapabilityInput
 import {resolve,approveTemplate,normalizeRecord,policyRefusal,canonical,canonicalId,unixNano,type SourcePolicy} from "./policy.ts";
 import {object} from "./wire.ts";
 import {extractException,type ErrorBoundary} from "./errors.ts";
+import type {FrameNaming} from "./frames.ts";
 export type {ErrorBoundary} from "./errors.ts";
 import {DeliveryQueue} from "./queue.ts";
 import {HttpsReceiptTransport} from "./transport.ts";
@@ -13,6 +14,22 @@ import type {MetadataContext,TraceContext,SpanOptions,ActiveSpan} from "./tracin
 import {JobRecorder} from "./jobs.ts";
 export {checkedTraceContext,createTraceClock} from "./tracing.ts";
 export {createTimerCancellationBoundary} from "./jobs.ts";
+function frameNaming(config:Config):FrameNaming{
+ const root=config.artifactRoot;
+ if(root!==undefined&&(typeof root!=="string"||root.length>1024||root.includes("\0")))throw Error("invalid artifactRoot");
+ const ids=new Map<string,string>();
+ if(config.artifactIds!==undefined){
+  const source=config.artifactIds,keys=Object.keys(source);
+  if(typeof source!=="object"||source===null||keys.length>1024)throw Error("invalid artifactIds");
+  for(const path of keys){
+   const descriptor=Object.getOwnPropertyDescriptor(source,path);
+   const id:unknown=descriptor&&"value" in descriptor?descriptor.value:undefined;
+   if(typeof id!=="string")throw Error("invalid artifactIds");
+   ids.set(path,canonicalId(id));
+  }
+ }
+ return {...(root===undefined?{}:{root}),ids};
+}
 type RuntimeErrorBoundary=ErrorBoundary&{readonly timerCancellation?:(error:unknown)=>Promise<boolean>};
 export class Client {
  private readonly delivery:DeliveryQueue;
@@ -20,7 +37,7 @@ export class Client {
  private readonly policy:SourcePolicy;
  private readonly templates=new Map<string,Template>();
  private readonly clock:()=>string;
- private readonly build:string;private readonly codes:ReadonlySet<string>;private closed=false;
+ private readonly build:string;private readonly frameNaming:FrameNaming;private readonly codes:ReadonlySet<string>;private closed=false;
  private readonly hookLeases=new Set<OwnedHookLease>();
  private readonly spans:SpanRecorder;
  private readonly jobs:JobRecorder;
@@ -30,7 +47,7 @@ export class Client {
   for(const identity of [config.org,config.project,config.source,config.build])canonicalId(identity);
   for(const flag of [config.deploymentErrors,config.deploymentLogs,config.deploymentReplay,config.deploymentBodies,config.deploymentTraces,config.deploymentJobs,config.deploymentLoss,config.deploymentProfiles])if(flag!==undefined&&typeof flag!=="boolean")throw Error("deployment permissions must be boolean");
   if(config.integrations?.length)throw Error("integrations not available");
-  this.policy=resolve(config);this.clock=config.clockNs??(()=>String(BigInt(Date.now())*1000000n));this.build=config.build;this.codes=new Set(config.operations??[]);
+  this.policy=resolve(config);this.clock=config.clockNs??(()=>String(BigInt(Date.now())*1000000n));this.build=config.build;this.frameNaming=frameNaming(config);this.codes=new Set(config.operations??[]);
   this.jobs=new JobRecorder(metadataContext,config.jobRegistry,{clock:()=>this.readClock(),emit:(payload,observed)=>{this.admit({kind:"job_attempt",id:this.id(),observed_at_ns:observed,payload});},capture:error=>this.captureException(error),loss:reason=>this.loss(reason),nativeError:error=>this.errorBoundary!==undefined&&this.errorBoundary.isProxy?.(error)!==true&&this.errorBoundary.isNativeError(error),timerCancellation:error=>this.errorBoundary?.timerCancellation?.(error)??Promise.resolve(false)});
   this.delivery=new DeliveryQueue(config,config.transport??new HttpsReceiptTransport(config),{context:this.exportContext});
   this.spans=new SpanRecorder(metadataContext,config.operations??[],config.dependencies??[],config.traceSampleProbability,()=>!this.closed&&this.policy.decision.traces&&!this.exportContext.active(),span=>{if(this.spanDroppedByFullQueue(span.start.wall_ns))return;this.admit({kind:"span",id:this.id(),observed_at_ns:span.start.wall_ns,span});},reason=>{
@@ -65,7 +82,7 @@ export class Client {
   const observed=this.readClock();if(observed===undefined)return id;
   const descriptor=options&&Object.getOwnPropertyDescriptor(options,"code");const value:unknown=descriptor&&"value" in descriptor?descriptor.value:undefined;
   const code=typeof value==="string"&&this.codes.has(value)?value:null;
-  const graph=extractException(error,this.policy,this.errorBoundary);
+  const graph=extractException(error,this.policy,this.errorBoundary,this.frameNaming);
   const context=this.spans.current(),job=this.metadataContext.jobCurrent();
   this.admit({kind:"error",id,observed_at_ns:observed,exception_class:graph.nodes[0]?.exception_class??"UnknownError",code,build_id:this.build,exception_graph:graph,handled:mechanism==="manual",fatal,mechanism,...(context?{trace_id:context.traceId,span_id:context.spanId}:{}),...(job?{run_id:job.runId}:{})});return id;
  }
