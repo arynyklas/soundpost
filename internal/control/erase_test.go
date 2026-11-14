@@ -15,8 +15,8 @@ import (
 	"strings"
 	"testing"
 
-	"soundpost/internal/control"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // The control books carry payloads derived from telemetry (rule evaluation

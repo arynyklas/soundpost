@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package retention
 
-import "soundpost/internal/model"
+import "github.com/arynyklas/soundpost/internal/model"
 
 // references is the installed References source (nil: none is bound yet).
 func (s *Service) references() References {

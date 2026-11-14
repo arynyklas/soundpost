@@ -4,8 +4,8 @@ package httpapi
 
 import (
 	"encoding/json"
+	"github.com/arynyklas/soundpost/internal/auth"
 	"net/http"
-	"soundpost/internal/auth"
 )
 
 type AdminCommandRequest = auth.AdminCommandRequest

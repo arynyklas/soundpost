@@ -16,13 +16,13 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/appcore"
-	"soundpost/internal/artifacts"
-	"soundpost/internal/auth"
-	"soundpost/internal/httpapi"
-	"soundpost/internal/model"
-	"soundpost/internal/retention"
-	"soundpost/internal/storage"
+	"github.com/arynyklas/soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/artifacts"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/httpapi"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/retention"
+	"github.com/arynyklas/soundpost/internal/storage"
 )
 
 // The tests below drive the REAL application (appcore.Open: real storage, real

@@ -12,8 +12,8 @@ import (
 	"strconv"
 	"strings"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // Cutover phases. They are the closed set of notification ownership states of

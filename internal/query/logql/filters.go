@@ -5,8 +5,8 @@ package logql
 import (
 	"context"
 	"errors"
+	"github.com/arynyklas/soundpost/internal/query/regexcompat"
 	"net/netip"
-	"soundpost/internal/query/regexcompat"
 	"strconv"
 	"strings"
 	"time"

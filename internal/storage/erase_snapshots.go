@@ -5,8 +5,8 @@ package storage
 import (
 	"context"
 
+	"github.com/arynyklas/soundpost/internal/model"
 	bolt "go.etcd.io/bbolt"
-	"soundpost/internal/model"
 )
 
 // DropSupersededSnapshots removes every snapshot directory older than the selected one in every

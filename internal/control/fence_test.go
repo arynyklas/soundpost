@@ -6,10 +6,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/model"
 	"path/filepath"
-	"soundpost/internal/auth"
-	"soundpost/internal/control"
-	"soundpost/internal/model"
 	"testing"
 	"time"
 )

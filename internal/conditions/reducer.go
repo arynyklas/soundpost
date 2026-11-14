@@ -8,7 +8,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // The event statuses: the C04 telemetry vocabulary (firing, recovered, unknown)

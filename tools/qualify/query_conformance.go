@@ -26,7 +26,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	q "soundpost/internal/conformance/query"
+	q "github.com/arynyklas/soundpost/internal/conformance/query"
 )
 
 // Required layouts of the persisted path.
@@ -509,7 +509,7 @@ func verifyRelease(res *RowResult, raw []byte, pin MatrixProfile, m QueryMatrix,
 	} else if r.InputNormalizationID != m.InputNormalizationIdentity {
 		fail("input-normalization identity: matrix %s, report %s", m.InputNormalizationIdentity, r.InputNormalizationID)
 	}
-	if r.Build.Module != "soundpost" || r.Build.GoVersion == "" {
+	if r.Build.Module != "github.com/arynyklas/soundpost" || r.Build.GoVersion == "" {
 		fail("build identity incomplete: %+v", r.Build)
 	}
 	if len(r.Profiles) != len(m.Profiles) {

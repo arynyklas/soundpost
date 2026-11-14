@@ -3,7 +3,7 @@
 package artifacts
 
 import (
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 	"sync"
 )
 

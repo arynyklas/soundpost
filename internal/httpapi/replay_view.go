@@ -10,9 +10,9 @@ import (
 	"net/http"
 	"time"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
-	"soundpost/internal/replays"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replays"
 )
 
 // This file is the C11 replay read: the committed replays.Service stream of one

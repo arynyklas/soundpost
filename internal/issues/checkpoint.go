@@ -4,9 +4,9 @@ package issues
 
 import (
 	"context"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
 	"reflect"
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
 )
 
 // Checkpoint is the highest data-journal cursor (per data group) whose

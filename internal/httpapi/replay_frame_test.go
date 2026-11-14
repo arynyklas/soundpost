@@ -11,7 +11,7 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"soundpost/internal/httpapi"
+	"github.com/arynyklas/soundpost/internal/httpapi"
 )
 
 func frameFS(frame string) fstest.MapFS {

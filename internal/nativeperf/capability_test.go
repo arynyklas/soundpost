@@ -4,7 +4,7 @@ package nativeperf
 
 import (
 	"context"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 	"testing"
 )
 

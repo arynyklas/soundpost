@@ -3,8 +3,8 @@
 package promql
 
 import (
+	"github.com/arynyklas/soundpost/internal/query/syntax"
 	"reflect"
-	"soundpost/internal/query/syntax"
 	"testing"
 )
 

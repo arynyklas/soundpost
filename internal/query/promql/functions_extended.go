@@ -5,9 +5,9 @@ package promql
 import (
 	"sort"
 
-	"soundpost/internal/model"
-	"soundpost/internal/query/syntax"
-	"soundpost/internal/query/value"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/query/syntax"
+	"github.com/arynyklas/soundpost/internal/query/value"
 )
 
 // Range functions over a selector with the anchored or smoothed modifier

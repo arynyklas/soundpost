@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // A range tombstone restored from the deletion authority erases the restored

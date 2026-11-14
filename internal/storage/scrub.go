@@ -8,8 +8,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/arynyklas/soundpost/internal/model"
 	bolt "go.etcd.io/bbolt"
-	"soundpost/internal/model"
 )
 
 // bbolt is copy-on-write and never zeroes a page it frees, so an erasure that only deletes keys

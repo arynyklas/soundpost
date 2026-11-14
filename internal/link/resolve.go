@@ -4,10 +4,10 @@ package link
 
 import (
 	"context"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/storage"
 	"math"
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
-	"soundpost/internal/storage"
 )
 
 const (

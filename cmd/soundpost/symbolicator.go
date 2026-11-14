@@ -6,8 +6,8 @@ import (
 	"flag"
 	"fmt"
 
-	"soundpost/internal/appcore"
-	"soundpost/internal/symbolicate"
+	"github.com/arynyklas/soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/symbolicate"
 )
 
 // The default symbolication sandbox re-executes this same binary, so the release

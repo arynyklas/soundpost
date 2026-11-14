@@ -4,8 +4,8 @@ package artifacts
 
 import (
 	"encoding/json"
-	"soundpost/internal/model"
-	"soundpost/internal/sourcemap"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/sourcemap"
 )
 
 // transformMap reuses the owned v3 decoder's path/section/index/CPU budgets,

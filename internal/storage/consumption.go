@@ -5,8 +5,8 @@ package storage
 import (
 	"context"
 	"encoding/json"
+	"github.com/arynyklas/soundpost/internal/model"
 	bolt "go.etcd.io/bbolt"
-	"soundpost/internal/model"
 )
 
 func (e *Engine) VerifyFinalization(ctx context.Context, r model.FinalizeAdmission) error {

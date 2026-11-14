@@ -6,9 +6,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/arynyklas/soundpost/internal/model"
 	"io"
 	"os"
-	"soundpost/internal/model"
 	"time"
 )
 

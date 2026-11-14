@@ -11,9 +11,9 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
-	"soundpost/internal/retention"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/retention"
 )
 
 // Deleter is the one C11 call that BEGINS a deletion. *retention.Service

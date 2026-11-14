@@ -29,13 +29,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"soundpost/internal/agent"
-	"soundpost/internal/appcore"
-	"soundpost/internal/auth"
-	"soundpost/internal/httpapi"
-	"soundpost/internal/model"
-	"soundpost/internal/sources"
-	"soundpost/internal/storage"
+	"github.com/arynyklas/soundpost/internal/agent"
+	"github.com/arynyklas/soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/httpapi"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/sources"
+	"github.com/arynyklas/soundpost/internal/storage"
 )
 
 // The host-collection smoke starts a real node (control Raft, auth, C03

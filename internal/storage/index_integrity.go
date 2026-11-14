@@ -6,10 +6,10 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
+	"github.com/arynyklas/soundpost/internal/model"
 	bolt "go.etcd.io/bbolt"
 	"hash"
 	"hash/crc32"
-	"soundpost/internal/model"
 )
 
 // Entry CRCs detect damaged keys/values. This independently persisted counted

@@ -13,7 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"soundpost/internal/releaseevidence"
+	"github.com/arynyklas/soundpost/internal/releaseevidence"
 )
 
 // EvidenceNodeLoss is the manifest value (`evidence: node_loss`) that puts a scenario into the

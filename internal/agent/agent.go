@@ -13,9 +13,9 @@ import (
 	"sync"
 	"time"
 
-	"soundpost/internal/host"
-	"soundpost/internal/model"
-	"soundpost/internal/sources"
+	"github.com/arynyklas/soundpost/internal/host"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/sources"
 )
 
 // Build is the agent build string carried in capability records (set by the

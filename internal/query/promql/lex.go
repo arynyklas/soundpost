@@ -3,7 +3,7 @@
 package promql
 
 import (
-	"soundpost/internal/query/syntax"
+	"github.com/arynyklas/soundpost/internal/query/syntax"
 	"strconv"
 	"strings"
 	"unicode/utf8"

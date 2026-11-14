@@ -37,11 +37,11 @@ import (
 	"syscall"
 	"time"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/config"
-	"soundpost/internal/model"
-	"soundpost/internal/query"
-	"soundpost/profiles"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/config"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/query"
+	"github.com/arynyklas/soundpost/profiles"
 )
 
 // This file is the shared real-cluster driver of the node-loss and pause drills. It starts the

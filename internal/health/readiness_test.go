@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // secretCanary stands in for a credential, a path or a token that a failing dependency

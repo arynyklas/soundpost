@@ -4,8 +4,8 @@ package value
 
 import (
 	"encoding/binary"
+	"github.com/arynyklas/soundpost/internal/model"
 	"sort"
-	"soundpost/internal/model"
 	"strings"
 )
 

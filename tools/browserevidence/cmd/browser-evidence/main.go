@@ -17,8 +17,8 @@ import (
 	"fmt"
 	"os"
 
-	"soundpost/internal/releaseevidence"
-	"soundpost/tools/browserevidence"
+	"github.com/arynyklas/soundpost/internal/releaseevidence"
+	"github.com/arynyklas/soundpost/tools/browserevidence"
 )
 
 func main() {

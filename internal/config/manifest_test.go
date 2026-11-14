@@ -17,10 +17,10 @@ import (
 	"testing"
 	"text/template"
 
+	"github.com/arynyklas/soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replica"
 	"gopkg.in/yaml.v3"
-	"soundpost/internal/appcore"
-	"soundpost/internal/model"
-	"soundpost/internal/replica"
 )
 
 // ---- YAML navigation (the manifests are parsed, never grepped) ----

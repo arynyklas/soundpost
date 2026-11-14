@@ -11,10 +11,10 @@ import (
 	"sort"
 	"strings"
 
-	"soundpost/internal/auth"
-	q "soundpost/internal/conformance/query"
-	"soundpost/internal/model"
-	"soundpost/internal/storage"
+	"github.com/arynyklas/soundpost/internal/auth"
+	q "github.com/arynyklas/soundpost/internal/conformance/query"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/storage"
 )
 
 type persistedFile struct {

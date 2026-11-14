@@ -19,7 +19,7 @@ import (
 	"path/filepath"
 	"strconv"
 
-	"soundpost/internal/config"
+	"github.com/arynyklas/soundpost/internal/config"
 )
 
 func main() {

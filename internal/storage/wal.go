@@ -7,11 +7,11 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"github.com/arynyklas/soundpost/internal/model"
 	"hash/crc32"
 	"io"
 	"os"
 	"path/filepath"
-	"soundpost/internal/model"
 )
 
 const walHeader = 40

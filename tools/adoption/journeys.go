@@ -13,9 +13,9 @@ import (
 	"sort"
 	"time"
 
-	"soundpost/internal/httpapi"
-	"soundpost/internal/model"
-	"soundpost/internal/query"
+	"github.com/arynyklas/soundpost/internal/httpapi"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/query"
 )
 
 // Task 08.03: verify the application journeys from product evidence.

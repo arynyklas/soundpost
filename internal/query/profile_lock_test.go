@@ -7,10 +7,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/arynyklas/soundpost/profiles"
 	"io/fs"
 	"os"
 	"path"
-	"soundpost/profiles"
 	"testing"
 )
 

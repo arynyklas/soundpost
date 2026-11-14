@@ -18,7 +18,7 @@ import (
 	"strings"
 	"time"
 
-	"soundpost/fixtures/nativeperf/privacy/scan"
+	"github.com/arynyklas/soundpost/fixtures/nativeperf/privacy/scan"
 )
 
 // Names of the inspected surfaces.

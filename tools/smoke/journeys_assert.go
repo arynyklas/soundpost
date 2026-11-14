@@ -8,9 +8,9 @@ import (
 	"fmt"
 	"strings"
 
-	"soundpost/internal/httpapi"
-	"soundpost/internal/model"
-	"soundpost/internal/traces"
+	"github.com/arynyklas/soundpost/internal/httpapi"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/traces"
 )
 
 // This file holds the assertion logic of the reference journeys and nothing else: pure

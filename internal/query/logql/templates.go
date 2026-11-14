@@ -6,19 +6,19 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	fmt "github.com/arynyklas/soundpost/third_party/format/go124/fmt"
+	strconv "github.com/arynyklas/soundpost/third_party/format/go124/strconv"
 	"math"
 	"sort"
-	fmt "soundpost/third_party/format/go124/fmt"
-	strconv "soundpost/third_party/format/go124/strconv"
 	"strings"
 	"text/template"
 	"text/template/parse"
 	"time"
 
-	"soundpost/internal/model"
-	"soundpost/internal/query/profile"
-	"soundpost/internal/query/regexcompat"
-	"soundpost/internal/query/value"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/query/profile"
+	"github.com/arynyklas/soundpost/internal/query/regexcompat"
+	"github.com/arynyklas/soundpost/internal/query/value"
 )
 
 // TemplateRuntime deliberately contains no evaluator timestamp or ambient capabilities.

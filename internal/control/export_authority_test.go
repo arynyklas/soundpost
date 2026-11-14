@@ -5,8 +5,8 @@ package control
 import (
 	"encoding/json"
 
+	"github.com/arynyklas/soundpost/internal/model"
 	bolt "go.etcd.io/bbolt"
-	"soundpost/internal/model"
 )
 
 // writeStateForTest replaces the committed control state bytes without a control transition. It

@@ -6,11 +6,11 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/policy"
 	bolt "go.etcd.io/bbolt"
 	"os"
 	"reflect"
-	"soundpost/internal/model"
-	"soundpost/internal/policy"
 	"sync"
 	"testing"
 )

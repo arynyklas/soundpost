@@ -9,7 +9,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 type BearerPurpose string

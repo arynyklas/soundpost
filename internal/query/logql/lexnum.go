@@ -7,7 +7,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"soundpost/internal/query/syntax"
+	"github.com/arynyklas/soundpost/internal/query/syntax"
 )
 
 // The reference reads a number with the Go scanner's number grammar and then

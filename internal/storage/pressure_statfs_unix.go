@@ -8,7 +8,7 @@ package storage
 import (
 	"syscall"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 type statfsMeter struct{}

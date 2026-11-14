@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/jobs"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/jobs"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 var (

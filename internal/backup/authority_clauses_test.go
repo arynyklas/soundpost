@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // checkAuthorityCoversControl is the only thing that stops a backup from being

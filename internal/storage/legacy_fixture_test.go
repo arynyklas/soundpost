@@ -5,11 +5,11 @@ package storage
 import (
 	"encoding/binary"
 	"encoding/json"
+	"github.com/arynyklas/soundpost/internal/durablefs"
+	"github.com/arynyklas/soundpost/internal/model"
 	"io"
 	"os"
 	"path/filepath"
-	"soundpost/internal/durablefs"
-	"soundpost/internal/model"
 )
 
 // This is an image generator, not an ACK-producing proposer. The Engine must be

@@ -4,10 +4,10 @@ package logql
 
 import (
 	"context"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/query/scan"
+	"github.com/arynyklas/soundpost/internal/query/value"
 	"math"
-	"soundpost/internal/model"
-	"soundpost/internal/query/scan"
-	"soundpost/internal/query/value"
 	"testing"
 )
 

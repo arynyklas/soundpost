@@ -12,9 +12,9 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"soundpost/internal/ingest"
-	"soundpost/internal/model"
-	"soundpost/internal/policy"
+	"github.com/arynyklas/soundpost/internal/ingest"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/policy"
 )
 
 // DecodeOpenMetrics parses one OpenMetrics text exposition (which must end with

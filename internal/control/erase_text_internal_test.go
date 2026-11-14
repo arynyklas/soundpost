@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // CD-8 (decision D6): the free-text fields of control records inside a deleted

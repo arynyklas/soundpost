@@ -8,9 +8,9 @@ import (
 	"sync"
 	"testing"
 
-	"soundpost/internal/model"
-	"soundpost/internal/retention"
-	"soundpost/internal/storage"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/retention"
+	"github.com/arynyklas/soundpost/internal/storage"
 )
 
 // voterHook turns a fixture's plane into the data plane of a voter that did NOT run the erasure

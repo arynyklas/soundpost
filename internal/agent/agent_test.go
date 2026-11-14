@@ -20,9 +20,9 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/ingest"
-	"soundpost/internal/model"
-	"soundpost/internal/sources"
+	"github.com/arynyklas/soundpost/internal/ingest"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/sources"
 )
 
 const (

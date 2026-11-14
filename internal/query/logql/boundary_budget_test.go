@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/model"
-	"soundpost/internal/query/scan"
-	"soundpost/internal/query/value"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/query/scan"
+	"github.com/arynyklas/soundpost/internal/query/value"
 )
 
 // A stored multiplicity is attacker-sized CPU for the bit-exact accumulators;

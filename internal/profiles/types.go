@@ -1,7 +1,7 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
 package profiles
 
-import "soundpost/internal/model"
+import "github.com/arynyklas/soundpost/internal/model"
 
 type Window struct {
 	Start      model.UnixNano `json:"start_ns"`

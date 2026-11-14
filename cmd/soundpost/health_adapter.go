@@ -4,10 +4,10 @@ package main
 
 import (
 	"context"
-	"soundpost/internal/appcore"
-	"soundpost/internal/health"
-	"soundpost/internal/model"
-	"soundpost/internal/storage"
+	"github.com/arynyklas/soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/health"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/storage"
 	"sync"
 )
 

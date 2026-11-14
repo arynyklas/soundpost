@@ -16,10 +16,10 @@ import (
 	"sync"
 	"time"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
-	"soundpost/internal/notify"
-	"soundpost/internal/notify/providers"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/notify"
+	"github.com/arynyklas/soundpost/internal/notify/providers"
 )
 
 // SMTPSettings is the operator's SMTP submission relay. The destination's address

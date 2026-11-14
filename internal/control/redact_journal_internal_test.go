@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // The redaction must never change the command that establishes the current state: the machine

@@ -4,8 +4,8 @@ package exports
 
 import (
 	"errors"
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
 	"testing"
 	"time"
 )

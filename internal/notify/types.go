@@ -21,8 +21,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // EntityKind is the closed set of notifiable entities. They stay distinct:

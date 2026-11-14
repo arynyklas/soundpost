@@ -6,7 +6,7 @@ import (
 	"context"
 	"os"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // ResignForTest re-authenticates a manifest a test edited, so the restore's

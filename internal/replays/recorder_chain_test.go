@@ -5,8 +5,8 @@ package replays
 import (
 	"testing"
 
-	recorderfixtures "soundpost/fixtures/replays/recorder"
-	"soundpost/internal/model"
+	recorderfixtures "github.com/arynyklas/soundpost/fixtures/replays/recorder"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // The stateful half of the recorder contract: chunks the real browser recorder emitted are admitted

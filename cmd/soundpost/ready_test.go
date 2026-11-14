@@ -17,9 +17,9 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/health"
-	"soundpost/internal/httpapi"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/health"
+	"github.com/arynyklas/soundpost/internal/httpapi"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 const readyCanary = "SOUNDPOST_READY_CLI_CANARY"

@@ -4,7 +4,7 @@ package nativeperf
 import (
 	"context"
 	"errors"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 var ErrProgressRequired = errors.New("native profiling: explicit acquisition progress consumer required")

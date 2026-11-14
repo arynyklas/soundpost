@@ -4,8 +4,8 @@ package httpapi_test
 
 import (
 	"context"
+	"github.com/arynyklas/soundpost/internal/control"
 	"path/filepath"
-	"soundpost/internal/control"
 	"testing"
 	"time"
 )

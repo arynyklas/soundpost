@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/model"
-	"soundpost/internal/storage"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/storage"
 )
 
 type lateRefs struct {

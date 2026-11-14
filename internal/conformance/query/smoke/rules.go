@@ -10,13 +10,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/control"
-	"soundpost/internal/model"
-	"soundpost/internal/policy"
-	"soundpost/internal/query/profile"
-	"soundpost/internal/replica"
-	"soundpost/internal/rules"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/policy"
+	"github.com/arynyklas/soundpost/internal/query/profile"
+	"github.com/arynyklas/soundpost/internal/replica"
+	"github.com/arynyklas/soundpost/internal/rules"
 )
 
 type ruleFile struct {

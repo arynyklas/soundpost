@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/model"
-	"soundpost/internal/replica"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replica"
 )
 
 // startupReopens is how many times each state is closed and reopened; every reopen

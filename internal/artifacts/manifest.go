@@ -3,8 +3,8 @@
 package artifacts
 
 import (
+	"github.com/arynyklas/soundpost/internal/model"
 	"path"
-	"soundpost/internal/model"
 	"strings"
 	"unicode"
 	"unicode/utf8"

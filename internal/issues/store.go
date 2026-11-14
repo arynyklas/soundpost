@@ -9,9 +9,9 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/control"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // Control is the consumer-owned view of the C05 control authority the lifecycle

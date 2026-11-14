@@ -6,13 +6,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/query/regexcompat"
+	"github.com/arynyklas/soundpost/internal/query/scan"
+	"github.com/arynyklas/soundpost/internal/query/syntax"
+	"github.com/arynyklas/soundpost/internal/query/value"
 	"io"
 	"math"
-	"soundpost/internal/model"
-	"soundpost/internal/query/regexcompat"
-	"soundpost/internal/query/scan"
-	"soundpost/internal/query/syntax"
-	"soundpost/internal/query/value"
 	"strconv"
 )
 

@@ -20,12 +20,12 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/httpapi"
-	"soundpost/internal/jobs"
-	"soundpost/internal/model"
-	"soundpost/internal/profiles"
-	"soundpost/internal/symbolicate"
-	"soundpost/internal/traces"
+	"github.com/arynyklas/soundpost/internal/httpapi"
+	"github.com/arynyklas/soundpost/internal/jobs"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/profiles"
+	"github.com/arynyklas/soundpost/internal/symbolicate"
+	"github.com/arynyklas/soundpost/internal/traces"
 )
 
 // These tests prove the consumer-side verdict logic of the journey verifier

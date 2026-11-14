@@ -3,8 +3,8 @@
 package appcore
 
 import (
-	"soundpost/internal/model"
-	"soundpost/internal/symbolicate"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/symbolicate"
 )
 
 // NewSymbolicator composes the real protected artifact reader with explicitly

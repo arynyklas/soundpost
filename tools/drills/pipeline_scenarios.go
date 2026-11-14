@@ -9,10 +9,10 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"soundpost/internal/control"
-	"soundpost/internal/incidents"
-	"soundpost/internal/model"
-	"soundpost/internal/notify"
+	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/incidents"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/notify"
 )
 
 func init() {

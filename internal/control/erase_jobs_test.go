@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 func jobTestRecord(org, project, job model.ID, version model.Revision, state string) json.RawMessage {

@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/appcore"
-	"soundpost/internal/model"
-	"soundpost/internal/replays"
-	"soundpost/internal/storage"
+	"github.com/arynyklas/soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replays"
+	"github.com/arynyklas/soundpost/internal/storage"
 )
 
 // The production wiring: a node opened the way a served process is opened admits a

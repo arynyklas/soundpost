@@ -5,12 +5,12 @@ package storage
 import (
 	"context"
 	"errors"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/model"
 	"io"
 	"os"
 	"reflect"
-	"soundpost/internal/auth"
-	"soundpost/internal/control"
-	"soundpost/internal/model"
 	"testing"
 )
 

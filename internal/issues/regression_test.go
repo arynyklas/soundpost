@@ -3,10 +3,10 @@
 package issues_test
 
 import (
+	"github.com/arynyklas/soundpost/internal/issues"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/releases"
 	"reflect"
-	"soundpost/internal/issues"
-	"soundpost/internal/model"
-	"soundpost/internal/releases"
 	"strings"
 	"testing"
 )

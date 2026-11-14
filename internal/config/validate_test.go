@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/arynyklas/soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/replica"
 	"gopkg.in/yaml.v3"
-	"soundpost/internal/appcore"
-	"soundpost/internal/replica"
 )
 
 // validDistributed is a generic, reserved-name three-node installation with no customer data.

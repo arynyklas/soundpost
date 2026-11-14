@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // The stash is the bookkeeping of one restore: discarding it removes exactly that

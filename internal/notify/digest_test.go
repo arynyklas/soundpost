@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 func utc(y int, m time.Month, d, hh, mm, ss, ns int) model.UnixNano {

@@ -34,8 +34,8 @@ import (
 	"time"
 	"unsafe"
 
-	"soundpost/internal/model"
-	"soundpost/internal/nativeperf"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/nativeperf"
 )
 
 // ---- host facts ----

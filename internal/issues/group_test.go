@@ -3,8 +3,8 @@
 package issues_test
 
 import (
-	"soundpost/internal/issues"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/issues"
+	"github.com/arynyklas/soundpost/internal/model"
 	"testing"
 )
 

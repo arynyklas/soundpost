@@ -10,8 +10,8 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/arynyklas/soundpost/internal/model"
 	bolt "go.etcd.io/bbolt"
-	"soundpost/internal/model"
 )
 
 // The control bucket's local_scrub key says that a build with the marker has seen this file.

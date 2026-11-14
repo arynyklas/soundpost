@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/appcore"
 )
 
 // The default Open builds the replay stream and profile view handlers over the

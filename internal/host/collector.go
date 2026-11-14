@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 const maxFilesystems = 16

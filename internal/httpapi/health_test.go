@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/health"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/health"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 const healthCanary = "SOUNDPOST_HEALTH_ROUTE_CANARY"

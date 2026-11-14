@@ -7,8 +7,8 @@ import (
 	"math"
 	"testing"
 
-	"soundpost/internal/model"
-	"soundpost/internal/query/syntax"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/query/syntax"
 )
 
 // 3.13.5 rejects the largest binary64 below 2^63 (and every value from there

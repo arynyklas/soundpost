@@ -16,8 +16,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"soundpost/internal/model"
-	"soundpost/internal/notify"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/notify"
 )
 
 // PolicyClass is the closed classification of one legacy/canonical difference.

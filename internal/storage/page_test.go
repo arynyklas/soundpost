@@ -3,8 +3,8 @@
 package storage
 
 import (
+	"github.com/arynyklas/soundpost/internal/model"
 	"reflect"
-	"soundpost/internal/model"
 	"testing"
 )
 

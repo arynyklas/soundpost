@@ -4,7 +4,7 @@
 
 package syntax
 
-import "soundpost/third_party/regex/go123/unicode"
+import "github.com/arynyklas/soundpost/third_party/regex/go123/unicode"
 
 // A patchList is a list of instruction pointers that need to be filled in (patched).
 // Because the pointers haven't been filled in yet, we can reuse their storage

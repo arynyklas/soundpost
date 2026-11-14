@@ -3,8 +3,8 @@
 package control
 
 import (
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // Handler performs deterministic leaf-state transitions only: all random IDs,

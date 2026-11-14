@@ -4,7 +4,7 @@ package nativeperf
 import (
 	"container/heap"
 	"errors"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 var ErrCorrelationLate = errors.New("native correlation record outside committed prefix")

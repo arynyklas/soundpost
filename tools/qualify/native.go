@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"soundpost/fixtures/nativeperf/qual"
+	"github.com/arynyklas/soundpost/fixtures/nativeperf/qual"
 )
 
 // initialPIDNamespaceInode is the inode of the initial PID namespace; raw

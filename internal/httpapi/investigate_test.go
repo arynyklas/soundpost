@@ -5,13 +5,13 @@ package httpapi_test
 import (
 	"context"
 	"encoding/json"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/httpapi"
+	"github.com/arynyklas/soundpost/internal/link"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/query"
 	"net/http"
 	"net/http/httptest"
-	"soundpost/internal/auth"
-	"soundpost/internal/httpapi"
-	"soundpost/internal/link"
-	"soundpost/internal/model"
-	"soundpost/internal/query"
 	"strings"
 	"testing"
 )

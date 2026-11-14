@@ -24,14 +24,14 @@ import (
 	"strings"
 	"time"
 
-	"soundpost/internal/adapters/queryinput"
-	"soundpost/internal/appcore"
-	"soundpost/internal/auth"
-	"soundpost/internal/conditions"
-	"soundpost/internal/model"
-	"soundpost/internal/notify"
-	"soundpost/internal/policy"
-	"soundpost/internal/sources"
+	"github.com/arynyklas/soundpost/internal/adapters/queryinput"
+	"github.com/arynyklas/soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/conditions"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/notify"
+	"github.com/arynyklas/soundpost/internal/policy"
+	"github.com/arynyklas/soundpost/internal/sources"
 )
 
 // This file is the generic, customer-agnostic no-send shadow ingestion of plan 08

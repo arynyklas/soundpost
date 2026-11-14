@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/arynyklas/soundpost/internal/model"
 	bolt "go.etcd.io/bbolt"
-	"soundpost/internal/model"
 )
 
 // These tests attack the node-local scrub marker from the outside: they read the raw bytes of

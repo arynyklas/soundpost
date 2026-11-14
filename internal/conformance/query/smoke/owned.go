@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"soundpost/internal/model"
-	"soundpost/internal/query"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/query"
 )
 
 // ownedFile mirrors cases/owned-query-smoke.json.

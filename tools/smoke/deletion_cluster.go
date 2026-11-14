@@ -21,12 +21,12 @@ import (
 	"strings"
 	"time"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/config"
-	"soundpost/internal/httpapi"
-	"soundpost/internal/model"
-	"soundpost/internal/query"
-	"soundpost/internal/storage"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/config"
+	"github.com/arynyklas/soundpost/internal/httpapi"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/query"
+	"github.com/arynyklas/soundpost/internal/storage"
 )
 
 // RunDeletionCluster drives the per-voter erasure of a deletion through THREE REAL

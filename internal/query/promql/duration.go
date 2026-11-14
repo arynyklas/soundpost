@@ -3,9 +3,9 @@
 package promql
 
 import (
+	"github.com/arynyklas/soundpost/internal/query/syntax"
 	"math"
 	"regexp"
-	"soundpost/internal/query/syntax"
 	"strconv"
 	"strings"
 )

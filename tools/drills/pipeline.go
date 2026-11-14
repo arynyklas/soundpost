@@ -13,8 +13,8 @@ import (
 	"sort"
 	"strings"
 
-	"soundpost/internal/control"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // This file holds the pure decision logic of the pipeline drills (provider-failure-outage,

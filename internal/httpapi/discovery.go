@@ -3,9 +3,9 @@
 package httpapi
 
 import (
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/query"
 	"net/http"
-	"soundpost/internal/auth"
-	"soundpost/internal/query"
 )
 
 // DiscoveryBody is the POST /api/v1/discover body: the scope fields and the C06

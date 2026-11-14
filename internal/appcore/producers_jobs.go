@@ -11,11 +11,11 @@ import (
 	"sync"
 	"time"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/jobs"
-	"soundpost/internal/model"
-	"soundpost/internal/replica"
-	"soundpost/internal/storage"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/jobs"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replica"
+	"github.com/arynyklas/soundpost/internal/storage"
 )
 
 // The job producer folds the job_attempt records the product ingested into the

@@ -5,8 +5,8 @@ package auth_test
 import (
 	"context"
 	"errors"
-	"soundpost/internal/auth"
-	"soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/control"
 	"testing"
 )
 

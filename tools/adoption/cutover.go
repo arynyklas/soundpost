@@ -21,10 +21,10 @@ import (
 	"strings"
 	"time"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/control"
-	"soundpost/internal/model"
-	"soundpost/internal/notify"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/notify"
 )
 
 // Task 08.06: one-owner cutover. The ownership state machine, its barrier

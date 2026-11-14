@@ -12,8 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	q "soundpost/internal/conformance/query"
-	"soundpost/internal/conformance/query/smoke"
+	q "github.com/arynyklas/soundpost/internal/conformance/query"
+	"github.com/arynyklas/soundpost/internal/conformance/query/smoke"
 )
 
 // runSmoke executes the declarative smoke case files against a real in-process
@@ -117,10 +117,10 @@ func runSmoke(args []string) error {
 	report.Isolation = collateIsolation(report.Steps)
 	// No production path starts or contacts an oracle: import/identifier closure.
 	closure := q.ScenarioOutcome{Name: "no-production-path-reaches-an-oracle"}
-	roots, err := q.ProductionRoots(*moduleRoot, "soundpost")
+	roots, err := q.ProductionRoots(*moduleRoot, "github.com/arynyklas/soundpost")
 	if err == nil {
 		var rep q.ClosureReport
-		if rep, err = q.ProductionClosure(*moduleRoot, "soundpost", roots); err == nil {
+		if rep, err = q.ProductionClosure(*moduleRoot, "github.com/arynyklas/soundpost", roots); err == nil {
 			closure.Passed = len(rep.Violation) == 0
 			closure.Detail = fmt.Sprintf("%d production packages, %d files; violations: %v", len(rep.Packages), rep.Files, rep.Violation)
 		}
@@ -132,7 +132,7 @@ func runSmoke(args []string) error {
 		out, nmErr := exec.Command(*goTool, "tool", "nm", *binary).Output()
 		if nmErr != nil {
 			closure.Passed, closure.Detail = false, "binary symbol check failed: "+nmErr.Error()
-		} else if bad := q.ForbiddenBinarySymbols(string(out), "soundpost"); len(bad) > 0 {
+		} else if bad := q.ForbiddenBinarySymbols(string(out), "github.com/arynyklas/soundpost"); len(bad) > 0 {
 			closure.Passed, closure.Detail = false, fmt.Sprintf("binary carries harness/upstream symbols: %v", bad)
 		} else {
 			closure.Detail += "; binary symbol table clean"

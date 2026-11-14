@@ -3,8 +3,8 @@
 package promql
 
 import (
+	"github.com/arynyklas/soundpost/internal/query/syntax"
 	"math"
-	"soundpost/internal/query/syntax"
 )
 
 // Offset's unparenthesized operand stops before exponentiation. Thus the outer

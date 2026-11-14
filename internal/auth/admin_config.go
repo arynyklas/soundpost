@@ -5,8 +5,8 @@ package auth
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/arynyklas/soundpost/internal/model"
 	"net/url"
-	"soundpost/internal/model"
 )
 
 type SourcePolicyConfig struct {

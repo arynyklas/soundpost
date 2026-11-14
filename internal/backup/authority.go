@@ -18,10 +18,10 @@ import (
 	"strconv"
 	"time"
 
-	"soundpost/internal/durablefs"
-	"soundpost/internal/model"
-	"soundpost/internal/replica"
-	"soundpost/internal/retention"
+	"github.com/arynyklas/soundpost/internal/durablefs"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replica"
+	"github.com/arynyklas/soundpost/internal/retention"
 )
 
 // The restore authority (C12) is an independently durable, versioned journal of

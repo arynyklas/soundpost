@@ -5,12 +5,12 @@ package storage
 import (
 	"bytes"
 	"encoding/binary"
+	"github.com/arynyklas/soundpost/internal/model"
 	"hash/crc32"
 	"io"
 	"os"
 	"path"
 	"path/filepath"
-	"soundpost/internal/model"
 	"strconv"
 	"strings"
 )

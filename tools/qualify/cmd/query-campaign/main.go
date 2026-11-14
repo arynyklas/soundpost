@@ -12,7 +12,7 @@ import (
 	"fmt"
 	"os"
 
-	"soundpost/tools/qualify"
+	"github.com/arynyklas/soundpost/tools/qualify"
 )
 
 func main() {

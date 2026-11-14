@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // The decorator is proved here against doubles that record every call; the real

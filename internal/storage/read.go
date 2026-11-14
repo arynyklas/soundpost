@@ -6,12 +6,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
 	bolt "go.etcd.io/bbolt"
 	"io"
 	"reflect"
 	"regexp"
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
 )
 
 type compiledMatcher struct {

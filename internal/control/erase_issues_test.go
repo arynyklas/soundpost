@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/control"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // Issue evidence (State.GroupingIssues + State.IssueBooks) is derived from error

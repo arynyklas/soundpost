@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"io"
 
-	"soundpost/internal/releaseevidence"
-	"soundpost/tools/qualify"
+	"github.com/arynyklas/soundpost/internal/releaseevidence"
+	"github.com/arynyklas/soundpost/tools/qualify"
 )
 
 // runEvidence converts a written campaign-report.json into the "language" release evidence:

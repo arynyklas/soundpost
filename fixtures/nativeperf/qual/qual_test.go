@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"testing"
 
-	"soundpost/internal/model"
-	"soundpost/internal/nativeperf"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/nativeperf"
 )
 
 const testTGID = 4242

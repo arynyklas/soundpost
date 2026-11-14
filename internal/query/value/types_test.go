@@ -4,7 +4,7 @@ package value
 
 import (
 	"context"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 	"testing"
 )
 

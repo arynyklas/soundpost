@@ -6,7 +6,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/base64"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 func (s *Service) AllowsBrowserOrigin(ctx context.Context, origin string) bool {

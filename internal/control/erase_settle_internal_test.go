@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // A scrub covers exactly the erasures committed before it read the state: an

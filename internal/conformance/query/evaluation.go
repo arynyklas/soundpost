@@ -14,14 +14,14 @@ import (
 	"sort"
 	"strings"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
-	"soundpost/internal/query/profile"
-	"soundpost/internal/query/promql"
-	"soundpost/internal/query/scan"
-	"soundpost/internal/query/syntax"
-	"soundpost/internal/query/value"
-	"soundpost/internal/storage"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/query/profile"
+	"github.com/arynyklas/soundpost/internal/query/promql"
+	"github.com/arynyklas/soundpost/internal/query/scan"
+	"github.com/arynyklas/soundpost/internal/query/syntax"
+	"github.com/arynyklas/soundpost/internal/query/value"
+	"github.com/arynyklas/soundpost/internal/storage"
 )
 
 // EvaluationCase is independently authored fixture input, not a stored oracle

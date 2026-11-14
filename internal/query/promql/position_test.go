@@ -4,9 +4,9 @@ package promql
 
 import (
 	"errors"
+	"github.com/arynyklas/soundpost/internal/query/profile"
+	"github.com/arynyklas/soundpost/internal/query/syntax"
 	"os"
-	"soundpost/internal/query/profile"
-	"soundpost/internal/query/syntax"
 	"testing"
 )
 

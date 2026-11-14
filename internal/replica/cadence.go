@@ -7,7 +7,7 @@ import (
 	"sort"
 	"time"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // Decision D4 (2026-11-13). Two bounds that keep a group that never deletes anything from growing

@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/conditions"
-	"soundpost/internal/model"
-	"soundpost/internal/notify"
-	"soundpost/internal/replica"
+	"github.com/arynyklas/soundpost/internal/conditions"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/notify"
+	"github.com/arynyklas/soundpost/internal/replica"
 )
 
 func TestWorkerDelayBacksOffAndCaps(t *testing.T) {

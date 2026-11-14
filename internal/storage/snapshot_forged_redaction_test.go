@@ -8,7 +8,7 @@ import (
 	"io"
 	"testing"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // restoreForged seals a real backup of the batches from mk, lets forge rewrite

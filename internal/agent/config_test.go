@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/model"
-	"soundpost/internal/sources"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/sources"
 )
 
 func validConfigJSON(t *testing.T) (map[string]any, string) {

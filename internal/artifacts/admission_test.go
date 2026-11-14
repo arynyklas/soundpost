@@ -4,7 +4,7 @@ package artifacts
 
 import (
 	"errors"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 	"sync"
 	"testing"
 )

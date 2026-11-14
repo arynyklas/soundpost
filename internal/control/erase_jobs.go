@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"sort"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // eraseJobBooks is the deletion hook's half for the job books (plan 06 task 03),

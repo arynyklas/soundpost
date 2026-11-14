@@ -3,10 +3,10 @@
 package logql
 
 import (
+	"github.com/arynyklas/soundpost/internal/query/profile"
+	"github.com/arynyklas/soundpost/internal/query/regexcompat"
+	"github.com/arynyklas/soundpost/internal/query/syntax"
 	"math"
-	"soundpost/internal/query/profile"
-	"soundpost/internal/query/regexcompat"
-	"soundpost/internal/query/syntax"
 )
 
 func Check(e Expr, p profile.Profile) (TypedExpr, []syntax.Diagnostic, error) {

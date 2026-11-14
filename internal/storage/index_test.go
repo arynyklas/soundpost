@@ -4,9 +4,9 @@ package storage
 
 import (
 	"context"
+	"github.com/arynyklas/soundpost/internal/model"
 	bolt "go.etcd.io/bbolt"
 	"io"
-	"soundpost/internal/model"
 	"testing"
 )
 

@@ -5,7 +5,7 @@ package control
 import (
 	"sort"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // eraseCutoverBooks is the deletion hook's half for the notification ownership

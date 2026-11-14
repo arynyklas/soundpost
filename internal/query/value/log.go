@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package value
 
-import "soundpost/internal/model"
+import "github.com/arynyklas/soundpost/internal/model"
 
 // Log preserves record identity and repetitions independently of rendered text.
 // Labels are the resulting query labels; original metadata stays separate.

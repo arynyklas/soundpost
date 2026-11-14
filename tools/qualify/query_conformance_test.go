@@ -14,7 +14,7 @@ import (
 	"sync"
 	"testing"
 
-	q "soundpost/internal/conformance/query"
+	q "github.com/arynyklas/soundpost/internal/conformance/query"
 )
 
 // The campaign runs the REAL soundpost-querycheck release and smoke commands

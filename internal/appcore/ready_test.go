@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replica"
 	pb "go.etcd.io/raft/v3/raftpb"
-	"soundpost/internal/model"
-	"soundpost/internal/replica"
 )
 
 // lateWire delivers between three in-process groups, but only once opened. Until

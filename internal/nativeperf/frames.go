@@ -6,9 +6,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
 	"io"
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
 	"time"
 )
 

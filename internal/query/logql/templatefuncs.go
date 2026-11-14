@@ -6,20 +6,20 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	strconv "github.com/arynyklas/soundpost/third_party/format/go124/strconv"
 	"math"
 	"math/big"
 	"net/url"
 	"sort"
-	strconv "soundpost/third_party/format/go124/strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
 
-	"soundpost/internal/query/profile"
-	"soundpost/internal/query/regexcompat"
-	u15 "soundpost/third_party/regex/go124/unicode"
-	"soundpost/third_party/templateprimitives/humanize"
-	timezone "soundpost/third_party/timezone/go124"
+	"github.com/arynyklas/soundpost/internal/query/profile"
+	"github.com/arynyklas/soundpost/internal/query/regexcompat"
+	u15 "github.com/arynyklas/soundpost/third_party/regex/go124/unicode"
+	"github.com/arynyklas/soundpost/third_party/templateprimitives/humanize"
+	timezone "github.com/arynyklas/soundpost/third_party/timezone/go124"
 )
 
 // This is the individually enumerated pinned whitelist, not a Sprig FuncMap.

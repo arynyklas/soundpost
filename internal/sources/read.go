@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"time"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // Read acquires the next range of a source and returns its admissible log

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"testing"
 
-	"soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/auth"
 )
 
 // Decision D6: the pending-login cap is per client address inside the global ceiling, so one

@@ -6,8 +6,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"github.com/arynyklas/soundpost/internal/model"
 	"reflect"
-	"soundpost/internal/model"
 	"testing"
 )
 

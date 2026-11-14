@@ -9,10 +9,10 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replica"
 	bolt "go.etcd.io/bbolt"
-	"soundpost/internal/control"
-	"soundpost/internal/model"
-	"soundpost/internal/replica"
 )
 
 func activateTestControl(t *testing.T, authority *control.Store) error {

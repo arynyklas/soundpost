@@ -21,12 +21,12 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/fixtures/nativeperf/privacy/privnode"
-	"soundpost/fixtures/nativeperf/privacy/scan"
-	"soundpost/internal/model"
-	"soundpost/internal/nativeperf"
-	"soundpost/internal/policy"
-	"soundpost/internal/profiles"
+	"github.com/arynyklas/soundpost/fixtures/nativeperf/privacy/privnode"
+	"github.com/arynyklas/soundpost/fixtures/nativeperf/privacy/scan"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/nativeperf"
+	"github.com/arynyklas/soundpost/internal/policy"
+	"github.com/arynyklas/soundpost/internal/profiles"
 )
 
 const privacyPolicyFile = "../../fixtures/nativeperf/privacy/policy.json"

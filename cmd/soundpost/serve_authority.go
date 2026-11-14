@@ -7,9 +7,9 @@ import (
 	"flag"
 	"fmt"
 
-	"soundpost/internal/appcore"
-	"soundpost/internal/backup"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/backup"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // The static reasons serve prints for an unusable restore-authority configuration. They

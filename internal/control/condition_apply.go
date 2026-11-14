@@ -9,9 +9,9 @@ import (
 	"sort"
 	"strings"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
-	"soundpost/internal/replica"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replica"
 )
 
 // This file is the C05 half of C07/C08 condition lifecycle: the

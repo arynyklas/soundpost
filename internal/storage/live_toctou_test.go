@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // liveFirstPage subscribes, commits rows, arms the view and returns the first page

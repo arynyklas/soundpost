@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"soundpost/internal/model"
-	"soundpost/internal/replica"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replica"
 )
 
 // The control Raft journal redaction (RedactRetainedControlCommands) and the control.db scrub

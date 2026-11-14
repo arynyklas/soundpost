@@ -15,9 +15,9 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
-	"soundpost/internal/policy"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/policy"
 )
 
 func reasonOf(err error) Reason {

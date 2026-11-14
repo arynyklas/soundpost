@@ -16,10 +16,10 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/arynyklas/soundpost/internal/durablefs"
+	"github.com/arynyklas/soundpost/internal/model"
 	pb "go.etcd.io/raft/v3/raftpb"
 	"google.golang.org/protobuf/proto"
-	"soundpost/internal/durablefs"
-	"soundpost/internal/model"
 )
 
 // Redaction crash hooks (see install.go for the semantics of a hook error).

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 func fragmentWAL(fill byte, size int) walEntry {

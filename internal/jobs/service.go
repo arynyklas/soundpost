@@ -9,8 +9,8 @@ import (
 	"encoding/json"
 	"time"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // UpdateKind names the C05 UpdateJob transition an UpdateCommand carries.

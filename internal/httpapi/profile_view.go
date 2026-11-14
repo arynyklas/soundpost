@@ -7,10 +7,10 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
-	"soundpost/internal/profiles"
-	"soundpost/internal/query"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/profiles"
+	"github.com/arynyklas/soundpost/internal/query"
 )
 
 // ProfilesRead is the separate grant a profile read needs.

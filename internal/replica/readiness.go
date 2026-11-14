@@ -5,9 +5,9 @@ package replica
 import (
 	"context"
 	"encoding/json"
+	"github.com/arynyklas/soundpost/internal/model"
 	"io"
 	"net/http"
-	"soundpost/internal/model"
 	"strings"
 	"time"
 )

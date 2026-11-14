@@ -9,7 +9,7 @@ import (
 	"sync"
 	"unicode/utf8"
 
-	"soundpost/internal/query/profile"
+	"github.com/arynyklas/soundpost/internal/query/profile"
 )
 
 type Mode uint8

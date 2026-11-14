@@ -17,7 +17,7 @@ import (
 	"sort"
 	"strings"
 
-	"soundpost/internal/releaseevidence"
+	"github.com/arynyklas/soundpost/internal/releaseevidence"
 )
 
 // JourneyRowIDs are the rows `tools/smoke journeys` must report (all required), in assertion order.

@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // leadOnNode1 makes node 1 the leader of group 0 and waits until it answers reads.

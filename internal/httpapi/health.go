@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"soundpost/internal/health"
+	"github.com/arynyklas/soundpost/internal/health"
 )
 
 // ReadyFunc is the node's readiness decision (health.Ready bound to its local state).

@@ -9,8 +9,8 @@ import (
 	"sort"
 	"strings"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // This file is the read half of the committed job books for the investigation

@@ -6,7 +6,7 @@ import (
 	"bytes"
 	"sort"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // Reduce folds one evaluation into the committed state. It is pure: no clock, no

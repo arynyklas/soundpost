@@ -6,7 +6,7 @@ import (
 	"bytes"
 	"time"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // parseSyslog frames one syslog line written by a local syslog daemon: RFC 3164

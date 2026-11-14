@@ -5,11 +5,11 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
 	"net/http"
 	"net/url"
 	"slices"
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
 )
 
 // readCredential authenticates a safe (GET) read: a narrow server token via

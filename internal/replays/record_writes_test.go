@@ -3,7 +3,7 @@
 package replays
 
 import (
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 	"testing"
 	"time"
 )

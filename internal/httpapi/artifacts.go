@@ -5,13 +5,13 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"github.com/arynyklas/soundpost/internal/artifacts"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
 	"io"
 	"mime"
 	"net/http"
 	"os"
-	"soundpost/internal/artifacts"
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
 	"strconv"
 )
 

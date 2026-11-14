@@ -5,8 +5,8 @@ package nativeperf
 import (
 	"context"
 	"encoding/json"
+	"github.com/arynyklas/soundpost/internal/model"
 	"runtime"
-	"soundpost/internal/model"
 	"strings"
 	"testing"
 )

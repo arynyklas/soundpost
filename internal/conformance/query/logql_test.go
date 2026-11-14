@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/model"
-	"soundpost/internal/query/profile"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/query/profile"
 )
 
 // Removing strict row accounting must never turn a missing native row into PASS.

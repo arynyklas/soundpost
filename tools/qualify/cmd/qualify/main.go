@@ -27,7 +27,7 @@ import (
 	"os"
 	"os/signal"
 
-	"soundpost/tools/qualify"
+	"github.com/arynyklas/soundpost/tools/qualify"
 )
 
 func main() { os.Exit(run(os.Args[1:])) }

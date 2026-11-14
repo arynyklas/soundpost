@@ -12,7 +12,7 @@ import (
 	"slices"
 	"sort"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // NewState starts the policy state of one notification subject. The subject

@@ -5,10 +5,10 @@ package artifacts
 import (
 	"context"
 	"errors"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/storage"
 	"math"
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
-	"soundpost/internal/storage"
 )
 
 // retainedForever is what LatestReference answers while something outside the

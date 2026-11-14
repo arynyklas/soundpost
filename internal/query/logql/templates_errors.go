@@ -4,8 +4,8 @@ package logql
 
 import (
 	"errors"
-	fmt "soundpost/third_party/format/go124/fmt"
-	strconv "soundpost/third_party/format/go124/strconv"
+	fmt "github.com/arynyklas/soundpost/third_party/format/go124/fmt"
+	strconv "github.com/arynyklas/soundpost/third_party/format/go124/strconv"
 	"strings"
 	"text/template/parse"
 	"time"

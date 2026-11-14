@@ -4,8 +4,8 @@ package replica
 
 import (
 	"context"
+	"github.com/arynyklas/soundpost/internal/model"
 	pb "go.etcd.io/raft/v3/raftpb"
-	"soundpost/internal/model"
 	"sync"
 )
 

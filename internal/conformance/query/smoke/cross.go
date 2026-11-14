@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"soundpost/profiles"
+	"github.com/arynyklas/soundpost/profiles"
 )
 
 type crossFile struct {

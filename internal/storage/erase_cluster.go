@@ -13,9 +13,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replica"
 	bolt "go.etcd.io/bbolt"
-	"soundpost/internal/model"
-	"soundpost/internal/replica"
 )
 
 // Physical erasure of a deletion is per voter: every voter holds its own apply.db, segments and

@@ -10,10 +10,10 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
-	"soundpost/internal/releases"
-	"soundpost/internal/symbolicate"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/releases"
+	"github.com/arynyklas/soundpost/internal/symbolicate"
 )
 
 // This file is the C11 error-investigation surface of the UI: symbolicated

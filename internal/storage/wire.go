@@ -4,8 +4,8 @@ package storage
 
 import (
 	"encoding/json"
-	"soundpost/internal/model"
-	"soundpost/internal/replica"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replica"
 )
 
 // The canonical input is stored once. Encoding both Batch and its canonical

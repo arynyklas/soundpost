@@ -10,8 +10,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"soundpost/internal/query/profile"
-	"soundpost/profiles"
+	"github.com/arynyklas/soundpost/internal/query/profile"
+	"github.com/arynyklas/soundpost/profiles"
 )
 
 // SmokeReport is what the smoke runner observed on a real persisted path. The

@@ -10,10 +10,10 @@ import (
 	"reflect"
 	"testing"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/control"
-	"soundpost/internal/model"
-	"soundpost/internal/replica"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replica"
 )
 
 // memOutbox is an in-memory Outbox that applies the same transition table

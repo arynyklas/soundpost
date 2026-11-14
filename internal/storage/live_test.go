@@ -4,11 +4,11 @@ package storage
 
 import (
 	"context"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/model"
 	"io"
 	"reflect"
-	"soundpost/internal/auth"
-	"soundpost/internal/control"
-	"soundpost/internal/model"
 	"sync"
 	"testing"
 	"time"

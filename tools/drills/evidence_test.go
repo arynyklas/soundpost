@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"soundpost/internal/releaseevidence"
+	"github.com/arynyklas/soundpost/internal/releaseevidence"
 )
 
 const drillCommit = "0123456789abcdef0123456789abcdef01234567"

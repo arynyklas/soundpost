@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"soundpost/internal/jobs"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/jobs"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 func drMetric(project model.ID, at int64, name string, value uint64) model.Record {

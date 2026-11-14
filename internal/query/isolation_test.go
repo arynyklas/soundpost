@@ -5,9 +5,9 @@ package query
 import (
 	"context"
 	"errors"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
 	"math"
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
 	"testing"
 	"time"
 )

@@ -5,8 +5,8 @@ package auth
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/arynyklas/soundpost/internal/model"
 	"io"
-	"soundpost/internal/model"
 )
 
 func (p AdminPayload) MarshalJSON() ([]byte, error) {

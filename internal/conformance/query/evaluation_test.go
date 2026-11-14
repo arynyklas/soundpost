@@ -13,10 +13,10 @@ import (
 	"strings"
 	"testing"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
-	"soundpost/internal/query/profile"
-	"soundpost/internal/storage"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/query/profile"
+	"github.com/arynyklas/soundpost/internal/storage"
 )
 
 func evaluationProfile(t *testing.T) profile.Profile {

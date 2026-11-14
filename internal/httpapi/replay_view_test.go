@@ -18,10 +18,10 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/httpapi"
-	"soundpost/internal/model"
-	"soundpost/internal/replays"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/httpapi"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replays"
 )
 
 // scriptedStream is a labelled test double of replays.ReplayStream. It does NOT

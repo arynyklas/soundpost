@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/appcore"
 )
 
 // The default Open mounts the deletion route over its retention service. Without a

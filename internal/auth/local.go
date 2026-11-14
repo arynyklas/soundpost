@@ -10,7 +10,7 @@ import (
 	"encoding/base32"
 	"encoding/binary"
 	"fmt"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 	"time"
 )
 

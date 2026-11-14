@@ -5,8 +5,8 @@ package releases
 import (
 	"context"
 	"encoding/json"
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // Store and ScopeAuthorizer are consumer-owned seams. Composition binds the

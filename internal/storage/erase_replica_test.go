@@ -12,9 +12,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replica"
 	bolt "go.etcd.io/bbolt"
-	"soundpost/internal/model"
-	"soundpost/internal/replica"
 )
 
 // reopenDelete restarts an engine that accepts delete barriers (a crash and restart).

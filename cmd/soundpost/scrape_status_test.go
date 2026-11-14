@@ -9,8 +9,8 @@ import (
 	"runtime"
 	"testing"
 
-	"soundpost/internal/appcore"
-	"soundpost/internal/httpapi"
+	"github.com/arynyklas/soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/httpapi"
 )
 
 // serve registers the scrape status route exactly when it hosts scrapers, over

@@ -6,10 +6,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
 	"io"
 	"sort"
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
 	"strings"
 )
 

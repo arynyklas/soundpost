@@ -3,12 +3,12 @@
 package appcore
 
 import (
+	"github.com/arynyklas/soundpost/internal/artifacts"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/httpapi"
+	"github.com/arynyklas/soundpost/internal/storage"
 	"net/http"
-	"soundpost/internal/artifacts"
-	"soundpost/internal/auth"
-	"soundpost/internal/control"
-	"soundpost/internal/httpapi"
-	"soundpost/internal/storage"
 )
 
 func NewArtifactService(store *control.Store, authorizer *auth.Service, engine *storage.Engine) (*artifacts.Service, error) {

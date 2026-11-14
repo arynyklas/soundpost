@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package logql
 
-import "soundpost/internal/query/syntax"
+import "github.com/arynyklas/soundpost/internal/query/syntax"
 
 type token struct {
 	kind, text, value string

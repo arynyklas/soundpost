@@ -7,10 +7,10 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
 	bolt "go.etcd.io/bbolt"
 	"sort"
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
 )
 
 func applyPolicyChange(scope auth.Scope, st *State, cmd Command) (Effect, error) {

@@ -10,7 +10,7 @@ import (
 	"maps"
 	"strings"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // AuthorityRevision (model.ControlState.AuthorityRevision) is the control Revision of the last

@@ -58,12 +58,12 @@ func TestProductionClosureFlagsEveryWayToReachAnOracle(t *testing.T) {
 }
 
 func TestBinarySymbolCheckNamesHarnessAndUpstreamSymbols(t *testing.T) {
-	nm := " 4a0 T soundpost/internal/query.(*Engine).Execute\n 5b0 T soundpost/internal/conformance/query.RunOracle\n 6c0 T github.com/prometheus/prometheus/promql.NewEngine\n"
-	bad := ForbiddenBinarySymbols(nm, "soundpost")
+	nm := " 4a0 T github.com/arynyklas/soundpost/internal/query.(*Engine).Execute\n 5b0 T github.com/arynyklas/soundpost/internal/conformance/query.RunOracle\n 6c0 T github.com/prometheus/prometheus/promql.NewEngine\n"
+	bad := ForbiddenBinarySymbols(nm, "github.com/arynyklas/soundpost")
 	if len(bad) != 2 || !strings.Contains(strings.Join(bad, " "), "RunOracle") {
 		t.Fatalf("%v", bad)
 	}
-	if len(ForbiddenBinarySymbols(" 4a0 T soundpost/internal/query.(*Engine).Execute\n", "soundpost")) != 0 {
+	if len(ForbiddenBinarySymbols(" 4a0 T github.com/arynyklas/soundpost/internal/query.(*Engine).Execute\n", "github.com/arynyklas/soundpost")) != 0 {
 		t.Fatal("a production symbol was flagged")
 	}
 }
@@ -72,11 +72,11 @@ func TestBinarySymbolCheckNamesHarnessAndUpstreamSymbols(t *testing.T) {
 // engine or an oracle runtime.
 func TestRealProductionTreeReachesNoOracle(t *testing.T) {
 	root := filepath.Join("..", "..", "..")
-	roots, err := ProductionRoots(root, "soundpost")
+	roots, err := ProductionRoots(root, "github.com/arynyklas/soundpost")
 	if err != nil || len(roots) < 20 {
 		t.Fatalf("production roots: %v (%d)", err, len(roots))
 	}
-	rep, err := ProductionClosure(root, "soundpost", roots)
+	rep, err := ProductionClosure(root, "github.com/arynyklas/soundpost", roots)
 	if err != nil {
 		t.Fatal(err)
 	}

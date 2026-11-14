@@ -5,7 +5,7 @@ package storage
 import (
 	"encoding/hex"
 	"encoding/json"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 	"strconv"
 )
 

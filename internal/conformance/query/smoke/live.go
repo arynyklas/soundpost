@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"soundpost/internal/model"
-	"soundpost/internal/retention"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/retention"
 )
 
 type liveFile struct {

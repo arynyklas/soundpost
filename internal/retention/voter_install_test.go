@@ -6,9 +6,9 @@ import (
 	"context"
 	"testing"
 
-	"soundpost/internal/model"
-	"soundpost/internal/retention"
-	"soundpost/internal/storage"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/retention"
+	"github.com/arynyklas/soundpost/internal/storage"
 )
 
 // A snapshot install can put erased rows back into a voter's live buckets, and the storage layer

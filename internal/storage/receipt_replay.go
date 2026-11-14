@@ -5,9 +5,9 @@ package storage
 import (
 	"context"
 
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
 	bolt "go.etcd.io/bbolt"
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
 )
 
 // ReceiptReplayChunks returns the replay chunks of the stored batch a receipt answers for, read

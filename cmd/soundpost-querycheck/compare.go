@@ -7,10 +7,10 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	q "github.com/arynyklas/soundpost/internal/conformance/query"
 	"os"
 	"path/filepath"
 	"sort"
-	q "soundpost/internal/conformance/query"
 	"strings"
 )
 

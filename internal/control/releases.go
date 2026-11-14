@@ -5,11 +5,11 @@ package control
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
 	"io"
 	"reflect"
 	"sort"
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
 	"strings"
 	"unicode"
 	"unicode/utf8"

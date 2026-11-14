@@ -9,12 +9,12 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
 	bolt "go.etcd.io/bbolt"
 	"io"
 	"os"
 	"path/filepath"
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
 	"strconv"
 )
 

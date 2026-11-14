@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/appcore"
 )
 
 const installYAML = `

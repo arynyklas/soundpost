@@ -14,8 +14,8 @@ import (
 	"sort"
 	"sync"
 
-	"soundpost/internal/durablefs"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/durablefs"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // Position names the next unread byte (file/syslog) or the last consumed entry

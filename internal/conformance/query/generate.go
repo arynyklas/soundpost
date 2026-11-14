@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"soundpost/internal/query/profile"
+	"github.com/arynyklas/soundpost/internal/query/profile"
 )
 
 // GenerationSpec is conformance/query/generation.json: the declared feature

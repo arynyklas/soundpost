@@ -7,11 +7,11 @@ import (
 	"encoding/json"
 	"testing"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/conditions"
-	"soundpost/internal/control"
-	"soundpost/internal/model"
-	"soundpost/internal/rules"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/conditions"
+	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/rules"
 )
 
 // A deletion that covers a condition's evidence replaces its state by a

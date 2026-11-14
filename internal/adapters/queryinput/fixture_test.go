@@ -19,11 +19,11 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/appcore"
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
-	"soundpost/internal/policy"
-	"soundpost/internal/storage"
+	"github.com/arynyklas/soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/policy"
+	"github.com/arynyklas/soundpost/internal/storage"
 )
 
 // ---- real application fixture: control plane, auth, source onboarding, storage ----

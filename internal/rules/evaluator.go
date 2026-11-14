@@ -8,11 +8,11 @@ import (
 	"sort"
 	"time"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
-	"soundpost/internal/query"
-	"soundpost/internal/query/syntax"
-	"soundpost/internal/replica"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/query"
+	"github.com/arynyklas/soundpost/internal/query/syntax"
+	"github.com/arynyklas/soundpost/internal/replica"
 )
 
 // QueryExecutor is C06's Execute, exactly (satisfied by *query.Engine).

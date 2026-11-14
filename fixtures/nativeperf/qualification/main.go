@@ -29,7 +29,7 @@ import (
 	"sort"
 	"strings"
 
-	"soundpost/fixtures/nativeperf/qual"
+	"github.com/arynyklas/soundpost/fixtures/nativeperf/qual"
 )
 
 type manifest struct {

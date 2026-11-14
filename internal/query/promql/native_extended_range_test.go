@@ -7,8 +7,8 @@ import (
 	"reflect"
 	"testing"
 
-	"soundpost/internal/query/syntax"
-	"soundpost/internal/query/value"
+	"github.com/arynyklas/soundpost/internal/query/syntax"
+	"github.com/arynyklas/soundpost/internal/query/value"
 )
 
 const extendedGate = "promql-extended-range-selectors"

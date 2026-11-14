@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 	"slices"
 
-	"soundpost/internal/model"
-	"soundpost/internal/replica"
-	"soundpost/internal/storage"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replica"
+	"github.com/arynyklas/soundpost/internal/storage"
 )
 
 // reservationKey mirrors the control store's idempotency key of an admission

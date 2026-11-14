@@ -5,7 +5,7 @@ package backup_test
 import (
 	"testing"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // The restore authority protects a completed deletion only when the retention service

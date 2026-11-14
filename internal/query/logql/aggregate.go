@@ -5,12 +5,12 @@ package logql
 import (
 	"container/heap"
 	"encoding/json"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/query/profile"
+	"github.com/arynyklas/soundpost/internal/query/regexcompat"
+	"github.com/arynyklas/soundpost/internal/query/value"
 	"hash/fnv"
 	"math"
-	"soundpost/internal/model"
-	"soundpost/internal/query/profile"
-	"soundpost/internal/query/regexcompat"
-	"soundpost/internal/query/value"
 	"strconv"
 )
 

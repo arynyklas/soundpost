@@ -5,10 +5,10 @@ package policy
 import (
 	"context"
 	"encoding/json"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
 	"math"
 	"sort"
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
 	"strconv"
 	"time"
 )

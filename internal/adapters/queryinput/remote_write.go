@@ -9,9 +9,9 @@ import (
 	"io"
 	"unicode/utf8"
 
-	"soundpost/internal/ingest"
-	"soundpost/internal/model"
-	"soundpost/internal/policy"
+	"github.com/arynyklas/soundpost/internal/ingest"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/policy"
 )
 
 // Field numbers follow the published Apache-2.0 prometheus.WriteRequest and

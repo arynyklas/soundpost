@@ -5,8 +5,8 @@ package promql
 import (
 	"math"
 
-	"soundpost/internal/model"
-	promhistbounds "soundpost/third_party/promhistbounds/v1"
+	"github.com/arynyklas/soundpost/internal/model"
+	promhistbounds "github.com/arynyklas/soundpost/third_party/promhistbounds/v1"
 )
 
 // Exponential bucket geometry.

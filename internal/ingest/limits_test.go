@@ -7,7 +7,7 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"errors"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 	"strings"
 	"testing"
 )

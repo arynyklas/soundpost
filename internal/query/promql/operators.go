@@ -3,10 +3,10 @@
 package promql
 
 import (
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/query/syntax"
+	"github.com/arynyklas/soundpost/internal/query/value"
 	"math"
-	"soundpost/internal/model"
-	"soundpost/internal/query/syntax"
-	"soundpost/internal/query/value"
 )
 
 func floatOperator(op string, a, b float64) (float64, bool, bool) {

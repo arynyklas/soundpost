@@ -10,8 +10,8 @@ import (
 	"sort"
 	"strings"
 
-	"soundpost/internal/model"
-	"soundpost/internal/notify"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/notify"
 )
 
 // The private notification ledger records what one side actually decided and

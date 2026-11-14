@@ -3,7 +3,7 @@
 package appcore
 
 import (
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 	"time"
 )
 

@@ -6,9 +6,9 @@ import "sort"
 import "bytes"
 import (
 	"context"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
 	"math"
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
 )
 
 type ReserveAdmission = model.ReserveAdmission

@@ -5,8 +5,8 @@ package storage
 import (
 	"bytes"
 	"encoding/binary"
+	"github.com/arynyklas/soundpost/internal/model"
 	"hash/crc32"
-	"soundpost/internal/model"
 )
 
 var pageCRC = crc32.MakeTable(crc32.Castagnoli)

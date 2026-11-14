@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
-	"soundpost/internal/replica"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replica"
 )
 
 // This file is the C05 half of C08's durable notification outbox: the closed

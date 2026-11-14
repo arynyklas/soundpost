@@ -32,9 +32,9 @@ import (
 	"syscall"
 	"time"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
-	"soundpost/internal/notify"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/notify"
 )
 
 // SecretRef and SecretReader are the notify-owned seam; see notify.SecretReader.

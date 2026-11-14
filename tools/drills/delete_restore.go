@@ -24,17 +24,17 @@ import (
 	"sync/atomic"
 	"time"
 
-	"soundpost/internal/appcore"
-	"soundpost/internal/auth"
-	"soundpost/internal/backup"
-	"soundpost/internal/control"
-	"soundpost/internal/ingest"
-	"soundpost/internal/jobs"
-	"soundpost/internal/model"
-	"soundpost/internal/policy"
-	"soundpost/internal/replica"
-	"soundpost/internal/retention"
-	"soundpost/internal/storage"
+	"github.com/arynyklas/soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/backup"
+	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/ingest"
+	"github.com/arynyklas/soundpost/internal/jobs"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/policy"
+	"github.com/arynyklas/soundpost/internal/replica"
+	"github.com/arynyklas/soundpost/internal/retention"
+	"github.com/arynyklas/soundpost/internal/storage"
 )
 
 // ---- pure verifiers (no I/O; unit-tested in delete_restore_test.go) ----

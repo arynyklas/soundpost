@@ -14,8 +14,8 @@ import (
 	"strings"
 	"testing"
 
-	"soundpost/internal/model"
-	"soundpost/internal/nativeperf"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/nativeperf"
 )
 
 // realWorkload compiles the acceptance workload with the approved flags, starts

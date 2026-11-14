@@ -11,10 +11,10 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/arynyklas/soundpost/internal/durablefs"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replica"
 	bolt "go.etcd.io/bbolt"
-	"soundpost/internal/durablefs"
-	"soundpost/internal/model"
-	"soundpost/internal/replica"
 )
 
 // Legacy WAL redaction crash hooks, in the order redactLegacyWAL reaches them.

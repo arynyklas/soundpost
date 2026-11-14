@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 const sec = model.UnixNano(time.Second)

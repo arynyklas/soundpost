@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"testing"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 func benchState() *State {

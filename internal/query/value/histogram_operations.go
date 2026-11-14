@@ -3,9 +3,9 @@
 package value
 
 import (
+	"github.com/arynyklas/soundpost/internal/model"
 	"math"
 	"sort"
-	"soundpost/internal/model"
 )
 
 func histogramFloat(v model.FloatBits) float64 { return math.Float64frombits(uint64(v)) }

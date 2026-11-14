@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/appcore"
 )
 
 // The default Open mounts the job list and job view routes over the durable job

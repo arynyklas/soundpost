@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/appcore"
 )
 
 // The default Open wires the owned C06 engine and its four routes. The engine

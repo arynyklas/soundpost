@@ -6,7 +6,7 @@
 // pressure, policy-fence freshness, schema), never from a listening socket.
 package health
 
-import "soundpost/internal/model"
+import "github.com/arynyklas/soundpost/internal/model"
 
 // Reason is the closed set of safe unready reasons. A reason names a class of failure
 // only: it never carries an error string, path, address, identifier of a tenant or

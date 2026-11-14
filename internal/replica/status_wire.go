@@ -4,7 +4,7 @@ package replica
 
 import (
 	"encoding/json"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 type statusWire struct {

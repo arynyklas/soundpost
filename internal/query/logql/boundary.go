@@ -6,7 +6,7 @@ import (
 	"context"
 	"errors"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // boundaryError is the typed form of a cancellation or deadline leaving the

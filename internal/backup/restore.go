@@ -17,13 +17,13 @@ import (
 	"sync"
 	"time"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/control"
-	"soundpost/internal/durablefs"
-	"soundpost/internal/model"
-	"soundpost/internal/replica"
-	"soundpost/internal/retention"
-	"soundpost/internal/storage"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/durablefs"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replica"
+	"github.com/arynyklas/soundpost/internal/retention"
+	"github.com/arynyklas/soundpost/internal/storage"
 )
 
 // MaxRetention is the design's upper bound on backup lifetime (C12/§12).

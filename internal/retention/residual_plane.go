@@ -6,7 +6,7 @@ import (
 	"context"
 	"sort"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // ResidualSource names the local stores that can still hold a copy of deleted

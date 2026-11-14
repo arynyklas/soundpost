@@ -7,8 +7,8 @@ import (
 	"errors"
 	"testing"
 
-	"soundpost/internal/artifacts"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/artifacts"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 func fixedPins(n int, err error) func() (int, error) { return func() (int, error) { return n, err } }

@@ -10,7 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 const (

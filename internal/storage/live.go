@@ -6,10 +6,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
 	bolt "go.etcd.io/bbolt"
 	"io"
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
 	"strconv"
 )
 

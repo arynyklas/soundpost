@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/model"
-	"soundpost/internal/retention"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/retention"
 )
 
 // Every intake admission (ReserveAdmission) is a control transition, so it moves the one global

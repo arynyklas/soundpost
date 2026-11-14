@@ -4,7 +4,7 @@ package auth
 
 import (
 	"context"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 func (s *Service) SourceFenceFor(ctx context.Context, c Credential, source model.ID) (model.SourceFence, error) {

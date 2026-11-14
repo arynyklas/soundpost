@@ -20,9 +20,9 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/appcore"
-	"soundpost/internal/model"
-	"soundpost/internal/sources"
+	"github.com/arynyklas/soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/sources"
 )
 
 const scrapeCmdCanary = "CANARY-cmd-secret-5b7e1f0c93"

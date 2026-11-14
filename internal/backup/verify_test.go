@@ -5,8 +5,8 @@ package backup
 import (
 	"testing"
 
-	"soundpost/internal/model"
-	"soundpost/internal/storage"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/storage"
 )
 
 type gapCase struct {

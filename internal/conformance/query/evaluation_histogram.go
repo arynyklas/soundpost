@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package query
 
-import "soundpost/internal/model"
+import "github.com/arynyklas/soundpost/internal/model"
 
 // Histogram allocation form is not language value semantics: nil and a slice
 // allocated with length zero both contain no spans/buckets/bounds. Only that

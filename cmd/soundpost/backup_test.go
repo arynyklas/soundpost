@@ -14,11 +14,11 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/appcore"
-	"soundpost/internal/artifacts"
-	"soundpost/internal/auth"
-	"soundpost/internal/backup"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/artifacts"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/backup"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 const (

@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/health"
-	"soundpost/internal/model"
-	"soundpost/internal/replica"
+	"github.com/arynyklas/soundpost/internal/health"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replica"
 )
 
 func TestCapacityClassifyTypedRefusals(t *testing.T) {

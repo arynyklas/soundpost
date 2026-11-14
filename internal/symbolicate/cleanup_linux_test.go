@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // fakeDocker is an absolute-path OCIRuntime script that records its argv and

@@ -23,9 +23,9 @@ import (
 	"syscall"
 	"time"
 
-	"soundpost/internal/adapters/queryinput"
-	"soundpost/internal/model"
-	"soundpost/internal/policy"
+	"github.com/arynyklas/soundpost/internal/adapters/queryinput"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/policy"
 )
 
 // SecretRef names a locally stored secret; it is never a secret itself.

@@ -13,9 +13,9 @@ import (
 	"strconv"
 	"unicode/utf8"
 
-	"soundpost/internal/ingest"
-	"soundpost/internal/model"
-	"soundpost/internal/policy"
+	"github.com/arynyklas/soundpost/internal/ingest"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/policy"
 )
 
 // DecodeLokiPush decodes one Loki push body (JSON, gzip JSON or snappy protobuf,

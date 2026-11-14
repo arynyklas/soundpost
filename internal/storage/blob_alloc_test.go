@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/control"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // writeBlobAllocBound is the cumulative-allocation ceiling of one replicated WriteBlob, as a

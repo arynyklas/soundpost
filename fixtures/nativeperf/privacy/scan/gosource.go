@@ -53,7 +53,7 @@ func AuditGoSource(p Policy, filename, src string, printOK func(*ast.CallExpr) b
 	}
 	forbiddenImport := stringSet(sp.SourceForbiddenImp)
 	for _, imp := range file.Imports {
-		if path, _ := strconv.Unquote(imp.Path.Value); forbiddenImport[path] || strings.HasPrefix(path, "soundpost/fixtures") {
+		if path, _ := strconv.Unquote(imp.Path.Value); forbiddenImport[path] || strings.HasPrefix(path, "github.com/arynyklas/soundpost/fixtures") {
 			add(imp.Pos(), "forbidden_import", path)
 		}
 	}

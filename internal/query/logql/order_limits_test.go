@@ -4,8 +4,8 @@ package logql
 
 import (
 	"context"
-	"soundpost/internal/query/scan"
-	"soundpost/internal/query/value"
+	"github.com/arynyklas/soundpost/internal/query/scan"
+	"github.com/arynyklas/soundpost/internal/query/value"
 	"testing"
 )
 

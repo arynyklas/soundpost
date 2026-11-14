@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/storage"
+	"github.com/arynyklas/soundpost/internal/storage"
 )
 
 const dcTestCanary = "deletion_cluster_canary_00112233445566778899aabbccddeeff"

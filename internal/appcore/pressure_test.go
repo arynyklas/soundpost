@@ -6,8 +6,8 @@ import (
 	"context"
 	"testing"
 
-	"soundpost/internal/appcore"
-	"soundpost/internal/storage"
+	"github.com/arynyklas/soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/storage"
 )
 
 // The default Open must give the host a working disk meter (or, where the

@@ -13,7 +13,7 @@ import (
 	"strconv"
 	"time"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // Type is the closed set of incident actions. snooze/unsnooze and

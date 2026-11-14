@@ -23,8 +23,8 @@ import (
 	"strings"
 	"testing"
 
-	"soundpost/internal/model"
-	"soundpost/internal/replays"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replays"
 )
 
 const vectorFile = "chain-vectors.json"

@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // ledgerMachine is the replica-level fixture: rows plus a deletion ledger that

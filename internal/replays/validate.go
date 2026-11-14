@@ -3,8 +3,8 @@
 package replays
 
 import (
-	"soundpost/internal/model"
-	"soundpost/internal/policy"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/policy"
 )
 
 // Validate is the closed-format check run before durable admission. It never

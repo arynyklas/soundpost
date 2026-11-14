@@ -19,8 +19,8 @@ import (
 	"strings"
 	"sync"
 
-	"soundpost/internal/durablefs"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/durablefs"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // Crash hooks. Each runs immediately before the named durability step; a hook

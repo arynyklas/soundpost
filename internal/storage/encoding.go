@@ -6,10 +6,10 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"github.com/arynyklas/soundpost/internal/model"
 	"io"
 	"reflect"
 	"sort"
-	"soundpost/internal/model"
 )
 
 // The v1 schema is the ordered C04 Go field layout, not Go's gob format or JSON.

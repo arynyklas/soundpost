@@ -5,9 +5,9 @@
 package syntax
 
 import (
+	"github.com/arynyklas/soundpost/third_party/regex/go126/unicode"
 	"strconv"
 	"strings"
-	"soundpost/third_party/regex/go126/unicode"
 	"unicode/utf8"
 )
 

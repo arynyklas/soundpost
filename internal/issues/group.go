@@ -5,9 +5,9 @@ package issues
 import (
 	"crypto/sha256"
 	"encoding/binary"
+	"github.com/arynyklas/soundpost/internal/model"
 	"hash"
 	"path"
-	"soundpost/internal/model"
 	"strings"
 	"unicode"
 	"unicode/utf8"

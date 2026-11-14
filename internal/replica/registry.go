@@ -4,7 +4,7 @@ package replica
 
 import (
 	"context"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // Node is the injected consensus facade shared by storage, control and workers;

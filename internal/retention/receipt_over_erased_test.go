@@ -9,9 +9,9 @@ import (
 	"reflect"
 	"testing"
 
-	"soundpost/internal/control"
-	"soundpost/internal/model"
-	"soundpost/internal/retention"
+	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/retention"
 )
 
 // CD-9 (decision D3): a range deletion erases an opaque incident state exactly

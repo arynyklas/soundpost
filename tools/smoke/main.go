@@ -8,6 +8,10 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/httpapi"
+	"github.com/arynyklas/soundpost/internal/model"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -15,10 +19,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"soundpost/internal/auth"
-	"soundpost/internal/control"
-	"soundpost/internal/httpapi"
-	"soundpost/internal/model"
 )
 
 func main() {

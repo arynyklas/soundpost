@@ -15,7 +15,7 @@
 package regexp
 
 import (
-	"soundpost/third_party/regex/go126/stdsyntax"
+	"github.com/arynyklas/soundpost/third_party/regex/go126/stdsyntax"
 	"sync"
 )
 

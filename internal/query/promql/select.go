@@ -8,10 +8,10 @@ import (
 	"math"
 	"sort"
 
-	"soundpost/internal/model"
-	"soundpost/internal/query/scan"
-	"soundpost/internal/query/syntax"
-	"soundpost/internal/query/value"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/query/scan"
+	"github.com/arynyklas/soundpost/internal/query/syntax"
+	"github.com/arynyklas/soundpost/internal/query/value"
 )
 
 // selectOptions refine how selectMetric returns a selector's samples.

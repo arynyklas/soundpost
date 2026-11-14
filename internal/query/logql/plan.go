@@ -4,9 +4,9 @@ package logql
 
 import (
 	"context"
-	"soundpost/internal/query/profile"
-	"soundpost/internal/query/regexcompat"
-	"soundpost/internal/query/value"
+	"github.com/arynyklas/soundpost/internal/query/profile"
+	"github.com/arynyklas/soundpost/internal/query/regexcompat"
+	"github.com/arynyklas/soundpost/internal/query/value"
 	"time"
 )
 

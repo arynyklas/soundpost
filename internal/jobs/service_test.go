@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/appcore"
-	"soundpost/internal/auth"
-	"soundpost/internal/jobs"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/jobs"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // ---------------------------------------------------------------- fixture

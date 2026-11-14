@@ -6,8 +6,8 @@ import (
 	"errors"
 	"testing"
 
-	"soundpost/internal/appcore"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // The default Open installs the closed rule-evaluation dispatcher on the control

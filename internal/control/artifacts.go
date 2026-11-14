@@ -5,8 +5,8 @@ package control
 import (
 	"bytes"
 	"context"
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // The states of an artifact intent. "retired" is written by the artifact lifecycle in the

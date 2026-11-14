@@ -43,15 +43,15 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/arynyklas/soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/health"
+	"github.com/arynyklas/soundpost/internal/httpapi"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replica"
+	"github.com/arynyklas/soundpost/internal/retention"
+	"github.com/arynyklas/soundpost/internal/storage"
 	bolt "go.etcd.io/bbolt"
-	"soundpost/internal/appcore"
-	"soundpost/internal/auth"
-	"soundpost/internal/health"
-	"soundpost/internal/httpapi"
-	"soundpost/internal/model"
-	"soundpost/internal/replica"
-	"soundpost/internal/retention"
-	"soundpost/internal/storage"
 )
 
 func init() { register("capacity-faults", capacityFaults) }

@@ -5,8 +5,8 @@ package storage
 import (
 	"context"
 	"encoding/json"
-	"soundpost/internal/model"
-	"soundpost/internal/policy"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/policy"
 	"testing"
 )
 

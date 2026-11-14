@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"soundpost/internal/model"
-	"soundpost/internal/policy"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/policy"
 )
 
 // GrantFunc resolves a fresh source grant. Grants are short-lived (they expire

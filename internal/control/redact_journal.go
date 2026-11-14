@@ -6,8 +6,8 @@ import (
 	"bytes"
 	"context"
 
-	"soundpost/internal/model"
-	"soundpost/internal/replica"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replica"
 )
 
 // Every control command carries the whole control state, so each command the control Raft

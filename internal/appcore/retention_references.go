@@ -4,11 +4,11 @@ package appcore
 
 import (
 	"context"
-	"soundpost/internal/artifacts"
-	"soundpost/internal/model"
-	"soundpost/internal/replays"
-	"soundpost/internal/retention"
-	"soundpost/internal/storage"
+	"github.com/arynyklas/soundpost/internal/artifacts"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replays"
+	"github.com/arynyklas/soundpost/internal/retention"
+	"github.com/arynyklas/soundpost/internal/storage"
 )
 
 // gatedReference is one References source and the candidates it is asked about.

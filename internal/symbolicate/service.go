@@ -5,11 +5,11 @@ package symbolicate
 import (
 	"context"
 	"errors"
+	"github.com/arynyklas/soundpost/internal/artifacts"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
 	"io"
 	"slices"
-	"soundpost/internal/artifacts"
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
 )
 
 type Service struct {

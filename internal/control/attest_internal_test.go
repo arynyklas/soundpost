@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"testing"
 
-	"soundpost/internal/model"
-	"soundpost/internal/replica"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replica"
 )
 
 func attestMembers(ids ...uint64) replica.Members {

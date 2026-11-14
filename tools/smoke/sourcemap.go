@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/arynyklas/soundpost/internal/sourcemap"
 	"os"
 	"path/filepath"
-	"soundpost/internal/sourcemap"
 	"strings"
 )
 

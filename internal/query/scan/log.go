@@ -5,13 +5,13 @@ package scan
 import (
 	"context"
 	"errors"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/query/profile"
+	"github.com/arynyklas/soundpost/internal/query/regexcompat"
+	"github.com/arynyklas/soundpost/internal/query/value"
+	"github.com/arynyklas/soundpost/internal/storage"
 	"io"
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
-	"soundpost/internal/query/profile"
-	"soundpost/internal/query/regexcompat"
-	"soundpost/internal/query/value"
-	"soundpost/internal/storage"
 	"strings"
 )
 

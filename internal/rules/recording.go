@@ -5,8 +5,8 @@ package rules
 import (
 	"sort"
 
-	"soundpost/internal/ingest"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/ingest"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // maxBatchRecords is the C03 per-batch record limit.

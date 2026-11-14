@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"soundpost/internal/appcore"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // The default Open installs the closed incident-action dispatcher on the control

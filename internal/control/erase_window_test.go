@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"testing"
 
-	"soundpost/internal/control"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // The erasure runs in the transition that begins the deletion, not at its

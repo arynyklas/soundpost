@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"soundpost/internal/releaseevidence"
+	"github.com/arynyklas/soundpost/internal/releaseevidence"
 )
 
 // The producers' exporters write through internal/releaseevidence; the gate must read exactly that

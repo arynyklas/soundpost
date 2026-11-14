@@ -7,10 +7,10 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/storage"
 	"io"
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
-	"soundpost/internal/storage"
 	"sync"
 	"time"
 )

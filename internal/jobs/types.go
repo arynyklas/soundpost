@@ -15,7 +15,7 @@ package jobs
 import (
 	"time"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 
 	// The zone database is embedded so that DST folds and gaps resolve identically
 	// on every node and on hosts without an installed tz database.

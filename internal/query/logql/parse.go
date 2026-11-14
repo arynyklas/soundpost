@@ -4,9 +4,9 @@ package logql
 
 import (
 	"errors"
+	"github.com/arynyklas/soundpost/internal/query/profile"
+	"github.com/arynyklas/soundpost/internal/query/syntax"
 	"math"
-	"soundpost/internal/query/profile"
-	"soundpost/internal/query/syntax"
 	"strconv"
 	"strings"
 	"time"

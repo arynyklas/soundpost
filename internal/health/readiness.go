@@ -6,7 +6,7 @@ import (
 	"context"
 	"errors"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // MaxApplyLag is how many committed-but-unapplied entries a group may hold before the

@@ -21,8 +21,8 @@ import (
 	"runtime"
 	"strings"
 
-	"soundpost/internal/durablefs"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/durablefs"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // Backup objects are AES-256-GCM in 1 MiB chunks (STREAM construction). Every

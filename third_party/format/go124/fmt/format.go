@@ -5,7 +5,7 @@
 package fmt
 
 import (
-	"soundpost/third_party/format/go124/strconv"
+	"github.com/arynyklas/soundpost/third_party/format/go124/strconv"
 	"unicode/utf8"
 )
 

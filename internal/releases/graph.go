@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package releases
 
-import "soundpost/internal/model"
+import "github.com/arynyklas/soundpost/internal/model"
 
 type Release = model.Release
 type DebugArtifact = model.ReleaseDebugArtifact

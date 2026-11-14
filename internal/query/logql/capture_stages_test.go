@@ -4,9 +4,9 @@ package logql
 
 import (
 	"context"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/query/value"
 	"sort"
-	"soundpost/internal/model"
-	"soundpost/internal/query/value"
 	"strings"
 	"testing"
 )

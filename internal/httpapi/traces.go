@@ -8,11 +8,11 @@ import (
 	"io"
 	"net/http"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
-	"soundpost/internal/query"
-	"soundpost/internal/storage"
-	"soundpost/internal/traces"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/query"
+	"github.com/arynyklas/soundpost/internal/storage"
+	"github.com/arynyklas/soundpost/internal/traces"
 )
 
 // This file is the C11 trace view of the investigation UI: the spans of one

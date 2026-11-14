@@ -6,11 +6,11 @@ import (
 	"context"
 	"time"
 
-	"soundpost/internal/artifacts"
-	"soundpost/internal/control"
-	"soundpost/internal/model"
-	"soundpost/internal/retention"
-	"soundpost/internal/storage"
+	"github.com/arynyklas/soundpost/internal/artifacts"
+	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/retention"
+	"github.com/arynyklas/soundpost/internal/storage"
 )
 
 // artifactReadCacheBytes is the budget of the visibility-bound fragment cache the

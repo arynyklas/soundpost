@@ -2,8 +2,8 @@
 package profiles
 
 import (
+	"github.com/arynyklas/soundpost/internal/model"
 	"math"
-	"soundpost/internal/model"
 )
 
 func sameNativeDomain(a, b *model.ProfileNativeDomain) bool {

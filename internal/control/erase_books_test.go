@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"testing"
 
-	"soundpost/internal/control"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // Job books and cutover records are covered by the real deletion path, not only

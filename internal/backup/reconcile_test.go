@@ -5,8 +5,8 @@ package backup
 import (
 	"testing"
 
-	"soundpost/internal/model"
-	"soundpost/internal/storage"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/storage"
 )
 
 func reservation(org, project, source model.ID, bytes uint64, state string, series ...string) model.AdmissionReservation {

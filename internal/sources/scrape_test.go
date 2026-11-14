@@ -22,11 +22,11 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/adapters/queryinput"
-	"soundpost/internal/appcore"
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
-	"soundpost/internal/policy"
+	"github.com/arynyklas/soundpost/internal/adapters/queryinput"
+	"github.com/arynyklas/soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/policy"
 )
 
 // ---- real policy fixture (same construction as the queryinput fixture) ----

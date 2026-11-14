@@ -5,7 +5,7 @@ package query
 import (
 	"container/list"
 	"context"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 	"sync"
 	"time"
 )

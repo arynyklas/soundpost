@@ -31,7 +31,7 @@ import (
 	"encoding/binary"
 	"errors"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // Phase is the last definite lifecycle phase the source reported. The empty

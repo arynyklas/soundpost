@@ -8,10 +8,10 @@ package syntax
 // In this package, re is always a *Regexp and r is always a rune.
 
 import (
+	"github.com/arynyklas/soundpost/third_party/regex/go123/unicode"
 	"slices"
 	"strconv"
 	"strings"
-	"soundpost/third_party/regex/go123/unicode"
 )
 
 // A Regexp is a node in a regular expression syntax tree.

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 func classifyOne(t *testing.T, p SourcePolicy, msg string) (model.LogRecord, string) {

@@ -3,8 +3,8 @@
 package main
 
 import (
+	"github.com/arynyklas/soundpost/internal/symbolicate"
 	"os"
-	"soundpost/internal/symbolicate"
 )
 
 func main() {

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // Disaster restore (C12) installs a control state taken at some earlier

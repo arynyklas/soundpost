@@ -9,12 +9,12 @@ import (
 	"encoding/json"
 	"strings"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/conditions"
-	"soundpost/internal/incidents"
-	"soundpost/internal/model"
-	"soundpost/internal/notify"
-	"soundpost/internal/replica"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/conditions"
+	"github.com/arynyklas/soundpost/internal/incidents"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/notify"
+	"github.com/arynyklas/soundpost/internal/replica"
 )
 
 // NotificationBinding is the notification policy a project's conditions are

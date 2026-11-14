@@ -12,7 +12,7 @@ import (
 	"io/fs"
 	"os"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // entry is one transient acquired message. Its bytes are zeroed as soon as it

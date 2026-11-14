@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"soundpost/internal/model"
-	timezone "soundpost/third_party/timezone/go124"
+	"github.com/arynyklas/soundpost/internal/model"
+	timezone "github.com/arynyklas/soundpost/third_party/timezone/go124"
 )
 
 // DigestHour is the local hour of the daily digest: 09:00 in the recipient's

@@ -4,12 +4,12 @@ package httpapi
 
 import (
 	"context"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/link"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/query"
 	"net/http"
 	"slices"
-	"soundpost/internal/auth"
-	"soundpost/internal/link"
-	"soundpost/internal/model"
-	"soundpost/internal/query"
 )
 
 // SourceLister, Discoverer and TargetResolver are the owned services the

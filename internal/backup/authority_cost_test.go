@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // The authority journal stores the WHOLE tombstone ledger in every record, so it

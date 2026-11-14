@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replica"
 	bolt "go.etcd.io/bbolt"
-	"soundpost/internal/model"
-	"soundpost/internal/replica"
 )
 
 // legacyEraseAck and legacyEraseEntry are the wire shape commit 1fd9bc1 wrote: no epoch, no

@@ -6,9 +6,9 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
+	"github.com/arynyklas/soundpost/internal/model"
 	"math"
 	"sort"
-	"soundpost/internal/model"
 )
 
 // WorkingReservation is an exclusive portion of the acquisition's aggregate

@@ -3,7 +3,7 @@
 package value
 
 import (
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 func histogramUintEqual(a, b map[int32]uint64) bool {

@@ -14,10 +14,10 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/arynyklas/soundpost/internal/durablefs"
+	"github.com/arynyklas/soundpost/internal/model"
 	raft "go.etcd.io/raft/v3"
 	"google.golang.org/protobuf/proto"
-	"soundpost/internal/durablefs"
-	"soundpost/internal/model"
 )
 
 var (

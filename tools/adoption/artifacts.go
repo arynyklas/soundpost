@@ -17,8 +17,8 @@ import (
 	"time"
 	"unicode"
 
-	"soundpost/internal/httpapi"
-	"soundpost/internal/sourcemap"
+	"github.com/arynyklas/soundpost/internal/httpapi"
+	"github.com/arynyklas/soundpost/internal/sourcemap"
 )
 
 // This file is how the journey verifier acquires evidence: scoped, read-only

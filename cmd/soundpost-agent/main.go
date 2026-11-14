@@ -16,7 +16,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"soundpost/internal/agent"
+	"github.com/arynyklas/soundpost/internal/agent"
 )
 
 func main() { os.Exit(run(os.Args[1:])) }

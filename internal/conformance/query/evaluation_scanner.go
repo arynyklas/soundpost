@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"io"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
-	"soundpost/internal/query/scan"
-	"soundpost/internal/storage"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/query/scan"
+	"github.com/arynyklas/soundpost/internal/storage"
 )
 
 // InMemoryEvaluationScanner is development fixture storage implementing the

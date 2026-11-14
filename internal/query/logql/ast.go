@@ -3,8 +3,8 @@
 package logql
 
 import (
-	"soundpost/internal/model"
-	"soundpost/internal/query/syntax"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/query/syntax"
 )
 
 // Expr is an owned syntax tree; metric execution is supplied by task 02.07.

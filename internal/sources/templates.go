@@ -21,7 +21,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // Kind selects the acquisition adapter.

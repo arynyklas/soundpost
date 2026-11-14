@@ -8,10 +8,10 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/arynyklas/soundpost/internal/nativeperf"
 	"io"
 	"os"
 	"os/signal"
-	"soundpost/internal/nativeperf"
 	"syscall"
 )
 

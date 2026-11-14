@@ -3,9 +3,9 @@
 package logql
 
 import (
-	"soundpost/internal/query/profile"
-	"soundpost/internal/query/regexcompat"
-	"soundpost/internal/query/syntax"
+	"github.com/arynyklas/soundpost/internal/query/profile"
+	"github.com/arynyklas/soundpost/internal/query/regexcompat"
+	"github.com/arynyklas/soundpost/internal/query/syntax"
 	"strconv"
 	"strings"
 	"unicode"

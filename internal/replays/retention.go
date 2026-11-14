@@ -5,11 +5,11 @@ package replays
 import (
 	"context"
 	"encoding/json"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/policy"
+	"github.com/arynyklas/soundpost/internal/storage"
 	"slices"
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
-	"soundpost/internal/policy"
-	"soundpost/internal/storage"
 	"time"
 )
 

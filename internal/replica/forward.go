@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 const proposalPath = "/internal/raft/v1/propose/"

@@ -14,10 +14,10 @@ import (
 	"runtime"
 	"strings"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/httpapi"
-	"soundpost/internal/model"
-	"soundpost/internal/symbolicate"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/httpapi"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/symbolicate"
 )
 
 // SymbolicatorState is the closed vocabulary of what the served process can say

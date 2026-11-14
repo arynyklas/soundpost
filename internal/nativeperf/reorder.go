@@ -3,7 +3,7 @@ package nativeperf
 
 import (
 	"container/heap"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // The charge includes the owned event, its maximum 128-entry switch stack,

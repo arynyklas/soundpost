@@ -3,11 +3,11 @@
 package logql
 
 import (
+	fmt "github.com/arynyklas/soundpost/third_party/format/go124/fmt"
+	strconv "github.com/arynyklas/soundpost/third_party/format/go124/strconv"
+	u15 "github.com/arynyklas/soundpost/third_party/regex/go124/unicode"
 	"math"
 	"net/url"
-	fmt "soundpost/third_party/format/go124/fmt"
-	strconv "soundpost/third_party/format/go124/strconv"
-	u15 "soundpost/third_party/regex/go124/unicode"
 	"strings"
 	"text/template"
 	"time"

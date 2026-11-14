@@ -7,12 +7,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/query"
+	"github.com/arynyklas/soundpost/internal/query/syntax"
 	"io"
 	"net/http"
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
-	"soundpost/internal/query"
-	"soundpost/internal/query/syntax"
 )
 
 // QueryService is the owned C06 engine as the HTTP layer consumes it.

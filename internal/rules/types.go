@@ -31,12 +31,12 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"soundpost/internal/model"
-	"soundpost/internal/query"
-	"soundpost/internal/query/logql"
-	"soundpost/internal/query/profile"
-	"soundpost/internal/query/promql"
-	"soundpost/internal/replica"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/query"
+	"github.com/arynyklas/soundpost/internal/query/logql"
+	"github.com/arynyklas/soundpost/internal/query/profile"
+	"github.com/arynyklas/soundpost/internal/query/promql"
+	"github.com/arynyklas/soundpost/internal/replica"
 )
 
 // Kind is what a rule does with the instant vector its expression yields.

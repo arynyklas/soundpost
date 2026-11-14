@@ -23,7 +23,7 @@ import (
 	"syscall"
 	"time"
 
-	"soundpost/internal/nativeperf"
+	"github.com/arynyklas/soundpost/internal/nativeperf"
 )
 
 // runPeer is the sacrificial socket peer of the peer-death drill. It authenticates

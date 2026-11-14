@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"soundpost/internal/query/profile"
+	"github.com/arynyklas/soundpost/internal/query/profile"
 )
 
 // TestOwnedMatchesRecordedNativeMetricObservations replays recorded observations

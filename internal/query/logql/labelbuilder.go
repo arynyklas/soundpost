@@ -3,8 +3,8 @@
 package logql
 
 import (
+	"github.com/arynyklas/soundpost/internal/model"
 	"slices"
-	"soundpost/internal/model"
 )
 
 // Label builder: how the json, logfmt, regexp, pattern and unpack stages write

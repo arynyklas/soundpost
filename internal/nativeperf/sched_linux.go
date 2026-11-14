@@ -5,11 +5,11 @@ package nativeperf
 
 import (
 	"context"
+	"github.com/arynyklas/soundpost/internal/model"
 	"io"
 	"os"
 	"reflect"
 	"runtime"
-	"soundpost/internal/model"
 	"strings"
 	"sync"
 	"syscall"

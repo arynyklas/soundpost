@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
 	"os"
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
 	"strings"
 	"testing"
 )

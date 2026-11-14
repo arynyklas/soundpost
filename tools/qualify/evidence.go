@@ -20,8 +20,8 @@ import (
 	"sort"
 	"strings"
 
-	q "soundpost/internal/conformance/query"
-	"soundpost/internal/releaseevidence"
+	q "github.com/arynyklas/soundpost/internal/conformance/query"
+	"github.com/arynyklas/soundpost/internal/releaseevidence"
 )
 
 const campaignSchema = "soundpost-query-campaign/1"

@@ -22,9 +22,9 @@ import (
 	"strings"
 	"time"
 
-	"soundpost/internal/host"
-	"soundpost/internal/model"
-	"soundpost/internal/sources"
+	"github.com/arynyklas/soundpost/internal/host"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/sources"
 )
 
 // Duration is a JSON string such as "30s".

@@ -7,10 +7,10 @@ import (
 	"encoding/json"
 	"testing"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/control"
-	"soundpost/internal/jobs"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/jobs"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // A job whose evidence is after a completed range deletion's end is not derived

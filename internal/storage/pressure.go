@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // PressureLevel is the disk-pressure admission level (design section 12).

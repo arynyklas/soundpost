@@ -4,8 +4,8 @@ package promql
 
 import (
 	"encoding/json"
+	"github.com/arynyklas/soundpost/internal/query/profile"
 	"os"
-	"soundpost/internal/query/profile"
 	"testing"
 )
 

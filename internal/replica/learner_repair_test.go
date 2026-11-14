@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // A replacement voter is a fresh learner added with a new member id after the

@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replica"
 	bolt "go.etcd.io/bbolt"
-	"soundpost/internal/model"
-	"soundpost/internal/replica"
 )
 
 // canaryByteCount counts the forms of the canary in the raw bytes.

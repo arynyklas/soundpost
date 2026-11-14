@@ -9,12 +9,12 @@ import (
 	"slices"
 	"strings"
 
-	"soundpost/internal/httpapi"
-	"soundpost/internal/jobs"
-	"soundpost/internal/model"
-	"soundpost/internal/query"
-	"soundpost/internal/symbolicate"
-	"soundpost/internal/traces"
+	"github.com/arynyklas/soundpost/internal/httpapi"
+	"github.com/arynyklas/soundpost/internal/jobs"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/query"
+	"github.com/arynyklas/soundpost/internal/symbolicate"
+	"github.com/arynyklas/soundpost/internal/traces"
 )
 
 // The decision logic of the journey verifier. Every function here is pure over

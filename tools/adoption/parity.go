@@ -12,11 +12,11 @@ import (
 	"sort"
 	"strings"
 
-	"soundpost/internal/model"
-	"soundpost/internal/notify"
-	"soundpost/internal/query"
-	"soundpost/internal/query/syntax"
-	"soundpost/profiles"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/notify"
+	"github.com/arynyklas/soundpost/internal/query"
+	"github.com/arynyklas/soundpost/internal/query/syntax"
+	"github.com/arynyklas/soundpost/profiles"
 )
 
 // Parity compares meaningful answers, never counts alone: the exact IEEE bits

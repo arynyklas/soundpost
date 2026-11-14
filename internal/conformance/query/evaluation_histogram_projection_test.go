@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 func histogramProjectionObservation(h *model.NativeHistogram) EvaluationObservation {

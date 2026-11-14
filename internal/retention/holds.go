@@ -5,9 +5,9 @@ package retention
 import (
 	"context"
 	"encoding/json"
-	"soundpost/internal/auth"
-	"soundpost/internal/control"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // HoldRequest places a legal hold. An active hold blocks Begin (receipt phase

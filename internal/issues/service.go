@@ -7,10 +7,10 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/releases"
 	"sort"
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
-	"soundpost/internal/releases"
 	"unicode"
 	"unicode/utf8"
 )

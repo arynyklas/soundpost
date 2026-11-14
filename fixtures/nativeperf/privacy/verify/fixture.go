@@ -31,10 +31,10 @@ import (
 	"time"
 	"unsafe"
 
-	"soundpost/fixtures/nativeperf/privacy/privnode"
-	"soundpost/fixtures/nativeperf/privacy/scan"
-	"soundpost/internal/model"
-	"soundpost/internal/nativeperf"
+	"github.com/arynyklas/soundpost/fixtures/nativeperf/privacy/privnode"
+	"github.com/arynyklas/soundpost/fixtures/nativeperf/privacy/scan"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/nativeperf"
 )
 
 type stageStat struct {

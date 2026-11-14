@@ -5,9 +5,9 @@ package storage
 import (
 	"context"
 	"encoding/json"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
 	bolt "go.etcd.io/bbolt"
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
 	"strconv"
 )
 

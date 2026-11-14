@@ -7,10 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/arynyklas/soundpost/internal/model"
 	"io"
 	"net"
 	"os"
-	"soundpost/internal/model"
 	"syscall"
 )
 

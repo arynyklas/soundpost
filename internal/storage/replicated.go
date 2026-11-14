@@ -15,9 +15,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replica"
 	bolt "go.etcd.io/bbolt"
-	"soundpost/internal/model"
-	"soundpost/internal/replica"
 )
 
 type replicatedEngine struct{ groups [64]*replica.Group }

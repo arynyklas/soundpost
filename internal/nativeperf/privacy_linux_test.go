@@ -39,9 +39,9 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/fixtures/nativeperf/privacy/scan"
-	"soundpost/internal/ingest"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/fixtures/nativeperf/privacy/scan"
+	"github.com/arynyklas/soundpost/internal/ingest"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 type (
@@ -2007,7 +2007,7 @@ func TestPrivacyStaticAuditFlagsForbiddenSources(t *testing.T) {
 		"stack_user_flag":   prelude + "\t_ = 1 << 13\n\tvar PERF_SAMPLE_STACK_USER = 1 << 13\n\t_ = PERF_SAMPLE_STACK_USER\n}\n",
 		"exec_import":       "package x\nimport _ \"os/exec\"\n",
 		"log_import":        "package x\nimport _ \"log\"\n",
-		"fixture_import":    "package x\nimport _ \"soundpost/fixtures/nativeperf/privacy/scan\"\n",
+		"fixture_import":    "package x\nimport _ \"github.com/arynyklas/soundpost/fixtures/nativeperf/privacy/scan\"\n",
 		"prints_a_value":    "package x\nimport \"fmt\"\nfunc f(v any) { fmt.Println(v) }\n",
 		"prints_to_stderr":  "package x\nimport (\"fmt\"\n\"os\")\nfunc f(v any) { fmt.Fprintf(os.Stderr, \"%v\", v) }\n",
 		"perf_data_literal": "package x\nvar _ = \"/var/lib/perf.data\"\n",

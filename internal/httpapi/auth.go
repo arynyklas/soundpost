@@ -3,9 +3,9 @@
 package httpapi
 
 import (
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
 	"net/http"
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
 	"strings"
 )
 

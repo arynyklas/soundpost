@@ -7,10 +7,10 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/policy"
 	"io"
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
-	"soundpost/internal/policy"
 )
 
 type Batch = model.Batch

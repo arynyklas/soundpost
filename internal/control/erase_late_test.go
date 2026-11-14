@@ -7,8 +7,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"soundpost/internal/control"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // An effect that commits AFTER a deletion completed (a worker that read its

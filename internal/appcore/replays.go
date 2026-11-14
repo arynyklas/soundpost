@@ -3,10 +3,10 @@
 package appcore
 
 import (
-	"soundpost/internal/auth"
-	"soundpost/internal/control"
-	"soundpost/internal/replays"
-	"soundpost/internal/storage"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/replays"
+	"github.com/arynyklas/soundpost/internal/storage"
 )
 
 // NewReplayService binds the replay chain validator and authorized reader over

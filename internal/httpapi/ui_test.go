@@ -3,12 +3,12 @@
 package httpapi_test
 
 import (
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/httpapi"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"soundpost/internal/auth"
-	"soundpost/internal/control"
-	"soundpost/internal/httpapi"
 	"strings"
 	"testing"
 	"testing/fstest"

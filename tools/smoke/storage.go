@@ -7,6 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"github.com/arynyklas/soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/httpapi"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/storage"
 	"io"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -14,11 +19,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"soundpost/internal/appcore"
-	"soundpost/internal/auth"
-	"soundpost/internal/httpapi"
-	"soundpost/internal/model"
-	"soundpost/internal/storage"
 	"time"
 )
 

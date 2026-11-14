@@ -47,4 +47,4 @@ Each producer keeps writing its own result files; a thin exporter converts them 
 
 ## Known limits
 
-Public handle availability is only a point-in-time registry observation; it does not establish trademark clearance. The Go module path is `soundpost`, which is not a fetchable public module path, so the handle check marks it `invalid` until the owner chooses a published path.
+Public handle availability is only a point-in-time registry observation; it does not establish trademark clearance. The Go module path is `github.com/arynyklas/soundpost`; the handle check derives the Go handle from the `module` line of `go.mod` and asks the module proxy whether it is claimed.

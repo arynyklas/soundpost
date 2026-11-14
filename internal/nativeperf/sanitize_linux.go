@@ -3,7 +3,7 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
 package nativeperf
 
-import "soundpost/internal/model"
+import "github.com/arynyklas/soundpost/internal/model"
 
 // decodeScheduler reads only allowlisted numeric positions in the borrowed ring.
 // TID bookkeeping identifies the waker, not the woken task, and is never exported.

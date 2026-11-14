@@ -11,8 +11,8 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"github.com/arynyklas/soundpost/internal/model"
 	"sort"
-	"soundpost/internal/model"
 	"sync"
 	"time"
 )

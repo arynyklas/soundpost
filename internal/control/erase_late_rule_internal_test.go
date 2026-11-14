@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // stateErasedLate decides, for the late re-erasure only, whether an opaque

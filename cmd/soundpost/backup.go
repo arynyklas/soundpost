@@ -14,10 +14,10 @@ import (
 	"strings"
 	"time"
 
-	"soundpost/internal/appcore"
-	"soundpost/internal/backup"
-	"soundpost/internal/control"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/backup"
+	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 const backupUsage = `usage: soundpost backup <command> [flags]

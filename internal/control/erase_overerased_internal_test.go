@@ -7,7 +7,7 @@ import (
 	"reflect"
 	"testing"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // CD-9 (decision D3): begin, completion and import erase exactly what

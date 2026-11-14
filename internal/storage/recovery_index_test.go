@@ -5,10 +5,10 @@ package storage
 import (
 	"context"
 	"encoding/json"
+	"github.com/arynyklas/soundpost/internal/model"
 	bolt "go.etcd.io/bbolt"
 	"os"
 	"path/filepath"
-	"soundpost/internal/model"
 	"testing"
 	"time"
 )

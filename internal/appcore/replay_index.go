@@ -5,10 +5,10 @@ package appcore
 import (
 	"context"
 	"errors"
-	"soundpost/internal/auth"
-	"soundpost/internal/ingest"
-	"soundpost/internal/model"
-	"soundpost/internal/replays"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/ingest"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replays"
 	"time"
 )
 

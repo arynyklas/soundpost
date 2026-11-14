@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"sort"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // controlTextErased replaces the free text of a control record that a deletion

@@ -6,9 +6,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"github.com/arynyklas/soundpost/internal/model"
 	"io"
 	"math"
-	"soundpost/internal/model"
 	"strings"
 )
 

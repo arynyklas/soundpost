@@ -3,8 +3,8 @@
 package releases_test
 
 import (
-	"soundpost/internal/model"
-	"soundpost/internal/releases"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/releases"
 	"testing"
 )
 

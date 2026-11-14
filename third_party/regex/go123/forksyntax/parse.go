@@ -5,9 +5,9 @@
 package syntax
 
 import (
+	"github.com/arynyklas/soundpost/third_party/regex/go123/unicode"
 	"sort"
 	"strings"
-	"soundpost/third_party/regex/go123/unicode"
 	"unicode/utf8"
 )
 

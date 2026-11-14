@@ -4,7 +4,7 @@ package query
 
 import (
 	"context"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 	"sync"
 	"sync/atomic"
 	"time"

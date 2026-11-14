@@ -5,9 +5,9 @@ package artifacts
 import (
 	"context"
 	"encoding/json"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
 	"slices"
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
 	"time"
 )
 

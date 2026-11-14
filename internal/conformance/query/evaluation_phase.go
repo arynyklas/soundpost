@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"soundpost/internal/query/profile"
+	"github.com/arynyklas/soundpost/internal/query/profile"
 )
 
 type EvaluationCaseComparison struct {

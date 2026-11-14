@@ -3,8 +3,8 @@
 package issues
 
 import (
-	"soundpost/internal/model"
-	"soundpost/internal/releases"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/releases"
 )
 
 // RegressionDecision explains why one deduplicated occurrence did or did not

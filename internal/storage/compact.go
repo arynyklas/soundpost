@@ -4,8 +4,8 @@ package storage
 
 import (
 	"context"
+	"github.com/arynyklas/soundpost/internal/model"
 	"sort"
-	"soundpost/internal/model"
 )
 
 // Compact streams one bounded page at a time. It preserves every page identity,

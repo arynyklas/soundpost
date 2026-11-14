@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package control
 
-import "soundpost/internal/replica"
+import "github.com/arynyklas/soundpost/internal/replica"
 
 // DefaultJournalCadence is decision D4: the control Raft journal is cut onto a snapshot and
 // compacted every 4096 commands or 64 MiB of journal, whether or not anything was deleted. The

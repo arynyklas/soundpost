@@ -16,8 +16,8 @@ import (
 	"strings"
 	"time"
 
-	"soundpost/internal/query/profile"
-	timezone "soundpost/third_party/timezone/go124"
+	"github.com/arynyklas/soundpost/internal/query/profile"
+	timezone "github.com/arynyklas/soundpost/third_party/timezone/go124"
 )
 
 // Named locations must come from the exact selected compiler dataset, never the

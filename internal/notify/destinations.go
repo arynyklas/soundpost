@@ -13,8 +13,8 @@ import (
 	"regexp"
 	"strings"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // Channel is the closed set of delivery channels.

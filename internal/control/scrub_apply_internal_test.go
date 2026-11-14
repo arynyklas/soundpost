@@ -7,8 +7,8 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/arynyklas/soundpost/internal/model"
 	bolt "go.etcd.io/bbolt"
-	"soundpost/internal/model"
 )
 
 // A commit that adds an erasing audit frees the pages that held what it erased, on every voter

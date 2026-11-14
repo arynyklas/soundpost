@@ -16,8 +16,8 @@ import (
 	"strings"
 	"time"
 
-	"soundpost/internal/appcore"
-	"soundpost/internal/notify/providers"
+	"github.com/arynyklas/soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/notify/providers"
 )
 
 // workerOptions is the serve flag surface of the leader-only background runner:

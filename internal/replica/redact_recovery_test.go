@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // The journal is compacted onto a cut at the applied index A (it begins with a sealed snapshot

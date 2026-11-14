@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 func TestHostMeterReportsTheVolumeHoldingTheDirectory(t *testing.T) {

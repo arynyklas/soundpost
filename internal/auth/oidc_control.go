@@ -5,7 +5,7 @@ package auth
 import (
 	"context"
 	"encoding/json"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // ConfiguredOIDC selects one explicitly administered provider in one organization.

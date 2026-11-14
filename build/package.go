@@ -27,7 +27,7 @@ import (
 	"strings"
 	"time"
 
-	"soundpost/internal/releaseevidence"
+	"github.com/arynyklas/soundpost/internal/releaseevidence"
 )
 
 // Check names, stable for scripts.
@@ -706,7 +706,11 @@ func (n NetHandleChecker) Check(ctx context.Context, h Handle) (string, error) {
 	case "pypi":
 		target = "https://pypi.org/pypi/" + url.PathEscape(h.Name) + "/json"
 	case "go":
-		target = "https://proxy.golang.org/" + url.PathEscape(strings.ToLower(h.Name)) + "/@v/list"
+		segs := strings.Split(strings.ToLower(h.Name), "/")
+		for i, s := range segs {
+			segs[i] = url.PathEscape(s)
+		}
+		target = "https://proxy.golang.org/" + strings.Join(segs, "/") + "/@v/list"
 	default:
 		return "", fmt.Errorf("unknown ecosystem %q", h.Ecosystem)
 	}

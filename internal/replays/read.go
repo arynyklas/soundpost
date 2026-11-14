@@ -5,11 +5,11 @@ package replays
 import (
 	"context"
 	"errors"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/storage"
 	"io"
 	"math"
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
-	"soundpost/internal/storage"
 )
 
 var errContextDone = errors.New("context done")

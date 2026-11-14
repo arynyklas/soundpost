@@ -5,8 +5,8 @@ package control_test
 import (
 	"testing"
 
-	"soundpost/internal/control"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // A voter that was cut off holds a payload in its own control.db. The leader erases it, scrubs

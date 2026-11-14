@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	recorderfixtures "soundpost/fixtures/replays/recorder"
-	"soundpost/internal/model"
-	"soundpost/internal/replays"
+	recorderfixtures "github.com/arynyklas/soundpost/fixtures/replays/recorder"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replays"
 )
 
 // Every chunk the real recorder emitted is admitted by the closed Go validator

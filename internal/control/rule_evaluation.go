@@ -10,9 +10,9 @@ import (
 	"sort"
 	"strconv"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
-	"soundpost/internal/replica"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replica"
 )
 
 // This file is the C05 half of C07 rule evaluation: the KindApplyRuleEvaluation

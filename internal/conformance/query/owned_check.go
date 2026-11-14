@@ -6,10 +6,10 @@ import (
 	"errors"
 	"fmt"
 
-	"soundpost/internal/query/logql"
-	"soundpost/internal/query/profile"
-	"soundpost/internal/query/promql"
-	"soundpost/internal/query/syntax"
+	"github.com/arynyklas/soundpost/internal/query/logql"
+	"github.com/arynyklas/soundpost/internal/query/profile"
+	"github.com/arynyklas/soundpost/internal/query/promql"
+	"github.com/arynyklas/soundpost/internal/query/syntax"
 )
 
 // OwnedOutcome is the owned parser and type checker's verdict on an expression.

@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // An issue book that cannot be read cannot be attributed from its content, but

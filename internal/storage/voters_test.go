@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replica"
 	pb "go.etcd.io/raft/v3/raftpb"
-	"soundpost/internal/auth"
-	"soundpost/internal/control"
-	"soundpost/internal/model"
-	"soundpost/internal/replica"
 )
 
 // testMesh is an in-process wire between the three voters' 64 data groups. It

@@ -5,8 +5,8 @@ package storage
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/arynyklas/soundpost/internal/model"
 	bolt "go.etcd.io/bbolt"
-	"soundpost/internal/model"
 	"strconv"
 )
 

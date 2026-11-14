@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/appcore"
 )
 
 func parseSymbolicatorFlags(t *testing.T, args ...string) (appcore.SymbolicatorSettings, error) {

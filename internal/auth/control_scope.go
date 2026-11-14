@@ -3,7 +3,7 @@
 package auth
 
 import (
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 func (s *Service) validateCredentialState(st model.ControlState, c Credential) error {

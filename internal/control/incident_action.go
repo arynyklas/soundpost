@@ -8,8 +8,8 @@ import (
 	"encoding/json"
 	"sort"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // This file is the C05 half of C08 incident response: the KindIncidentAction

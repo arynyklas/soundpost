@@ -14,9 +14,9 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/arynyklas/soundpost/internal/model"
 	pb "go.etcd.io/raft/v3/raftpb"
 	"google.golang.org/protobuf/proto"
-	"soundpost/internal/model"
 )
 
 // Residue names reported by MachineResidue besides ResidueJournal and ResidueSnapshots.

@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/control"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 func (f *fenceFx) indexKeys(st *control.State, n int) {

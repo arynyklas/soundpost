@@ -6,10 +6,10 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
 	"net/url"
-	"soundpost/internal/model"
 	"strings"
 	"time"
 )

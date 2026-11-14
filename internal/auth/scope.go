@@ -5,8 +5,8 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"github.com/arynyklas/soundpost/internal/model"
 	"sort"
-	"soundpost/internal/model"
 	"time"
 )
 

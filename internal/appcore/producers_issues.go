@@ -11,13 +11,13 @@ import (
 	"math"
 	"sort"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/incidents"
-	"soundpost/internal/issues"
-	"soundpost/internal/model"
-	"soundpost/internal/releases"
-	"soundpost/internal/replica"
-	"soundpost/internal/storage"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/incidents"
+	"github.com/arynyklas/soundpost/internal/issues"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/releases"
+	"github.com/arynyklas/soundpost/internal/replica"
+	"github.com/arynyklas/soundpost/internal/storage"
 )
 
 // The issue pipeline of a served process:

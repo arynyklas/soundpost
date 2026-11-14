@@ -31,12 +31,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/backup"
+	"github.com/arynyklas/soundpost/internal/config"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/query"
 	"gopkg.in/yaml.v3"
-	"soundpost/internal/auth"
-	"soundpost/internal/backup"
-	"soundpost/internal/config"
-	"soundpost/internal/model"
-	"soundpost/internal/query"
 )
 
 // RunInstallDistributed starts the PRODUCED distribution as a real three-member cluster and

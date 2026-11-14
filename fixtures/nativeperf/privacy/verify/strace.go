@@ -15,7 +15,7 @@ import (
 	"strconv"
 	"strings"
 
-	"soundpost/fixtures/nativeperf/privacy/scan"
+	"github.com/arynyklas/soundpost/fixtures/nativeperf/privacy/scan"
 )
 
 type syscallReport struct {

@@ -3,8 +3,8 @@
 package replays
 
 import (
+	"github.com/arynyklas/soundpost/internal/model"
 	"slices"
-	"soundpost/internal/model"
 )
 
 // ChunkHash is the chain hash of a chunk: SHA-256 over its canonical JSON

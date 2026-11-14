@@ -5,7 +5,7 @@ package auth
 import (
 	"context"
 	"crypto/sha256"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // SystemRunner is the actor name of the in-process background runner. It is not

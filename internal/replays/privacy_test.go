@@ -5,10 +5,10 @@ package replays
 import (
 	"encoding/json"
 	"errors"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/storage"
 	"io"
 	"math"
-	"soundpost/internal/model"
-	"soundpost/internal/storage"
 	"strconv"
 	"strings"
 	"testing"

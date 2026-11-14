@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // The durable checkpoint advances only with the receipts of the pending range.

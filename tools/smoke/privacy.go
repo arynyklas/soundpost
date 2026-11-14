@@ -7,9 +7,9 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"errors"
+	"github.com/arynyklas/soundpost/internal/model"
 	"io"
 	"net/http"
-	"soundpost/internal/model"
 	"strconv"
 )
 

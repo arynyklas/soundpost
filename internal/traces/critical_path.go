@@ -9,7 +9,7 @@ import (
 	"math"
 	"slices"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // Analysis bounds. Input past either bound is refused with a typed error, never

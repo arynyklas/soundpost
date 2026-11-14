@@ -4,8 +4,8 @@ package replays
 
 import (
 	"context"
-	"soundpost/internal/control"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/model"
 	"testing"
 	"time"
 )

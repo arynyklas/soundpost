@@ -8,7 +8,7 @@ package storage
 import (
 	"golang.org/x/sys/windows"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 type windowsMeter struct{}

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"soundpost/tools/browserevidence"
+	"github.com/arynyklas/soundpost/tools/browserevidence"
 )
 
 // The browser release evidence expects fixed row lists of the two smokes. These tests pin them to

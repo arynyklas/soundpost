@@ -13,11 +13,11 @@ import (
 	"sync"
 	"testing"
 
-	"soundpost/internal/appcore"
-	"soundpost/internal/auth"
-	"soundpost/internal/control"
-	"soundpost/internal/jobs"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/jobs"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // These tests run jobs.Service over the real adapter on a real control store

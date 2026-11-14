@@ -8,7 +8,7 @@ import (
 	"io"
 	"testing"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // A batch of which SOME records were physically erased (an erased metric beside

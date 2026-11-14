@@ -3,9 +3,9 @@
 package httpapi
 
 import (
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
-	"soundpost/internal/query"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/query"
 )
 
 // InvestigationKind is the closed set of investigation views. A kind whose

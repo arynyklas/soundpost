@@ -5,12 +5,12 @@ package promql
 import (
 	"context"
 	"encoding/binary"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/query/syntax"
+	"github.com/arynyklas/soundpost/internal/query/value"
 	"math"
 	"math/bits"
 	"sort"
-	"soundpost/internal/model"
-	"soundpost/internal/query/syntax"
-	"soundpost/internal/query/value"
 )
 
 // EvalAggregation reduces the project-local group assembled by the plan. The

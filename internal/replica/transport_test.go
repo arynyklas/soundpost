@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // gateMachine is a testMachine whose Apply can be parked, standing in for a

@@ -5,9 +5,9 @@ package logql
 import (
 	"encoding/json"
 	"errors"
+	"github.com/arynyklas/soundpost/internal/query/syntax"
 	"math"
 	"os"
-	"soundpost/internal/query/syntax"
 	"strings"
 	"testing"
 )

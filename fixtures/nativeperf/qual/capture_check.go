@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 
-	"soundpost/internal/nativeperf"
+	"github.com/arynyklas/soundpost/internal/nativeperf"
 )
 
 // Rejections of a capture that cannot support release qualification.

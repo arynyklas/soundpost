@@ -9,7 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
-	q "soundpost/internal/conformance/query"
+	q "github.com/arynyklas/soundpost/internal/conformance/query"
 )
 
 // runRelease is the persisted-path release gate. Every --require flag is

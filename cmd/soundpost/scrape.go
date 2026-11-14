@@ -9,9 +9,9 @@ import (
 	"net/http"
 	"strconv"
 
-	"soundpost/internal/appcore"
-	"soundpost/internal/httpapi"
-	"soundpost/internal/sources"
+	"github.com/arynyklas/soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/httpapi"
+	"github.com/arynyklas/soundpost/internal/sources"
 )
 
 // scrapeOptions is the serve flag surface of OpenMetrics scraping: a private

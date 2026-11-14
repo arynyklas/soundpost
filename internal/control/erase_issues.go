@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // eraseIssueBooks is the issues half of the deletion hook (eraseControlBooks

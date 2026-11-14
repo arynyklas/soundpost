@@ -4,8 +4,8 @@ package replica
 
 import (
 	"context"
+	"github.com/arynyklas/soundpost/internal/model"
 	raft "go.etcd.io/raft/v3"
-	"soundpost/internal/model"
 )
 
 type FenceToken struct {

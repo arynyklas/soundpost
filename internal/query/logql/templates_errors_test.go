@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/query/value"
+	"github.com/arynyklas/soundpost/internal/query/value"
 )
 
 func TestTemplateLanguageDetailsAreNotDefaultDiagnostics(t *testing.T) {

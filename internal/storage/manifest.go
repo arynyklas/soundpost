@@ -6,13 +6,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"github.com/arynyklas/soundpost/internal/durablefs"
+	"github.com/arynyklas/soundpost/internal/model"
 	bolt "go.etcd.io/bbolt"
 	"hash"
 	"os"
 	"path/filepath"
 	"reflect"
-	"soundpost/internal/durablefs"
-	"soundpost/internal/model"
 )
 
 type SegmentManifest struct {

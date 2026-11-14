@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"os"
 
-	"soundpost/fixtures/nativeperf/qual"
-	"soundpost/internal/nativeperf"
+	"github.com/arynyklas/soundpost/fixtures/nativeperf/qual"
+	"github.com/arynyklas/soundpost/internal/nativeperf"
 )
 
 // runSchedulerScenarios runs the blocking and pinned-contention workloads under

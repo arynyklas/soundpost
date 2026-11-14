@@ -3,8 +3,8 @@
 package control_test
 
 import (
-	"soundpost/internal/control"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/model"
 	"strings"
 	"testing"
 )

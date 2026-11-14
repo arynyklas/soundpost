@@ -6,9 +6,9 @@ package main
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"github.com/arynyklas/soundpost/internal/nativeperf"
 	"os"
 	"path/filepath"
-	"soundpost/internal/nativeperf"
 	"testing"
 	"time"
 )

@@ -23,12 +23,12 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/appcore"
-	"soundpost/internal/auth"
-	"soundpost/internal/control"
-	"soundpost/internal/incidents"
-	"soundpost/internal/model"
-	"soundpost/internal/notify/providers"
+	"github.com/arynyklas/soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/incidents"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/notify/providers"
 )
 
 // privateHostAddress is a non-loopback private IPv4 address of this host: the

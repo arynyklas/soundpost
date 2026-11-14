@@ -9,8 +9,8 @@ import (
 	"encoding/hex"
 	"time"
 
+	"github.com/arynyklas/soundpost/internal/model"
 	bolt "go.etcd.io/bbolt"
-	"soundpost/internal/model"
 )
 
 // autoDeclare tells the erasure loop to declare this voter's protocol version and disk

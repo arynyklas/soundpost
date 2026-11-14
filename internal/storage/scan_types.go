@@ -4,8 +4,8 @@ package storage
 
 import (
 	"context"
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // Kind is the leaf model kind; ingest.Kind aliases the same closed type.

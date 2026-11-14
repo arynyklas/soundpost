@@ -5,8 +5,8 @@ package releases_test
 import (
 	"context"
 	"encoding/json"
-	"soundpost/internal/model"
-	"soundpost/internal/releases"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/releases"
 	"strings"
 	"testing"
 )

@@ -8,15 +8,15 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/appcore"
-	"soundpost/internal/auth"
-	"soundpost/internal/control"
-	"soundpost/internal/httpapi"
-	"soundpost/internal/incidents"
-	"soundpost/internal/issues"
-	"soundpost/internal/model"
-	"soundpost/internal/releases"
-	"soundpost/internal/replica"
+	"github.com/arynyklas/soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/httpapi"
+	"github.com/arynyklas/soundpost/internal/incidents"
+	"github.com/arynyklas/soundpost/internal/issues"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/releases"
+	"github.com/arynyklas/soundpost/internal/replica"
 )
 
 // issueRig is a worker node with a real source credential that ingests error

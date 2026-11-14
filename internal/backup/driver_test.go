@@ -12,11 +12,11 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/backup"
-	"soundpost/internal/model"
-	"soundpost/internal/replica"
-	"soundpost/internal/storage"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/backup"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replica"
+	"github.com/arynyklas/soundpost/internal/storage"
 )
 
 // ---- fakes: the real engine is exercised by restore_test.go; these pin the

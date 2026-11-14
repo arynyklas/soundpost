@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"soundpost/fixtures/nativeperf/qual"
+	"github.com/arynyklas/soundpost/fixtures/nativeperf/qual"
 )
 
 func exercisedRow(budgets ...BudgetResult) Row {

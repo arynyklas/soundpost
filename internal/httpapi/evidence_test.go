@@ -13,10 +13,10 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/httpapi"
-	"soundpost/internal/model"
-	"soundpost/internal/symbolicate"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/httpapi"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/symbolicate"
 )
 
 // fakeResolver is a labelled test double for C07 symbolication: it needs a

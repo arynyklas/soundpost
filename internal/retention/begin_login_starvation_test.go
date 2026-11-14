@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/model"
-	"soundpost/internal/retention"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/retention"
 )
 
 // Same question as TestDeleteBeginDoesNotStarveUnderSaturatingIntake for the other hot path: busy

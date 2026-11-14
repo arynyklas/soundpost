@@ -26,12 +26,12 @@ import (
 	"syscall"
 	"time"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/httpapi"
-	"soundpost/internal/model"
-	"soundpost/internal/replays"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/httpapi"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replays"
 
-	recorderfixtures "soundpost/fixtures/replays/recorder"
+	recorderfixtures "github.com/arynyklas/soundpost/fixtures/replays/recorder"
 )
 
 // RunEvidence is the 09.06 protected-application-investigation smoke against a REAL

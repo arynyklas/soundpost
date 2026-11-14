@@ -6,8 +6,8 @@ package qual
 import (
 	"testing"
 
-	"soundpost/internal/model"
-	"soundpost/internal/nativeperf"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/nativeperf"
 )
 
 // These tests exercise the comparator arithmetic with hand-made intervals. They

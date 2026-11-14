@@ -16,7 +16,7 @@ import (
 	"runtime"
 	"testing"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 func testKey(t *testing.T, id string) Key {

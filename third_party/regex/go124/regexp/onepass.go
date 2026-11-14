@@ -5,10 +5,10 @@
 package regexp
 
 import (
-	"soundpost/third_party/regex/go124/stdsyntax"
+	"github.com/arynyklas/soundpost/third_party/regex/go124/stdsyntax"
+	"github.com/arynyklas/soundpost/third_party/regex/go124/unicode"
 	"slices"
 	"strings"
-	"soundpost/third_party/regex/go124/unicode"
 	"unicode/utf8"
 )
 

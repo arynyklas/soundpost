@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"soundpost/internal/durablefs"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/durablefs"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // identity is the agent's stable pseudonymous identity, created once in the

@@ -3,9 +3,9 @@
 package promql
 
 import (
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/query/value"
 	"math"
-	"soundpost/internal/model"
-	"soundpost/internal/query/value"
 	"testing"
 )
 

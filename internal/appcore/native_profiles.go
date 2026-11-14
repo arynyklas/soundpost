@@ -4,14 +4,14 @@ package appcore
 import (
 	"context"
 	"encoding/json"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/ingest"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/nativeperf"
+	"github.com/arynyklas/soundpost/internal/profiles"
+	"github.com/arynyklas/soundpost/internal/storage"
 	"io"
 	"math"
-	"soundpost/internal/auth"
-	"soundpost/internal/ingest"
-	"soundpost/internal/model"
-	"soundpost/internal/nativeperf"
-	"soundpost/internal/profiles"
-	"soundpost/internal/storage"
 )
 
 // NewNativeProfiles constructs the real C05/C02 read composition. The caller

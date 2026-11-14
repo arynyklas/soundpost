@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/incidents"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/incidents"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 var (

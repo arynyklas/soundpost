@@ -4,7 +4,7 @@ package logql
 
 import (
 	"errors"
-	"soundpost/internal/query/syntax"
+	"github.com/arynyklas/soundpost/internal/query/syntax"
 	"strings"
 	"testing"
 )

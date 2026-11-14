@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/arynyklas/soundpost/internal/model"
 	bolt "go.etcd.io/bbolt"
-	"soundpost/internal/model"
 )
 
 // treeHits lists every regular file of the node (the apply database, the segments, the legacy

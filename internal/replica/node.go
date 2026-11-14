@@ -11,10 +11,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/arynyklas/soundpost/internal/model"
 	raft "go.etcd.io/raft/v3"
 	pb "go.etcd.io/raft/v3/raftpb"
 	"google.golang.org/protobuf/proto"
-	"soundpost/internal/model"
 )
 
 var (

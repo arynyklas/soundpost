@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/conditions"
-	"soundpost/internal/model"
-	"soundpost/internal/rules"
+	"github.com/arynyklas/soundpost/internal/conditions"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/rules"
 )
 
 var (

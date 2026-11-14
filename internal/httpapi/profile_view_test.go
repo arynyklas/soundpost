@@ -15,11 +15,11 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/httpapi"
-	"soundpost/internal/model"
-	"soundpost/internal/nativeperf"
-	"soundpost/internal/profiles"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/httpapi"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/nativeperf"
+	"github.com/arynyklas/soundpost/internal/profiles"
 )
 
 // fakeProfiles is a labelled test double for the profile read seam. The real

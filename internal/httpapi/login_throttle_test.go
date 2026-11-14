@@ -5,11 +5,11 @@ package httpapi_test
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/httpapi"
 	"net/http"
 	"net/http/httptest"
-	"soundpost/internal/auth"
-	"soundpost/internal/control"
-	"soundpost/internal/httpapi"
 	"strconv"
 	"testing"
 )

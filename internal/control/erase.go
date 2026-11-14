@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/arynyklas/soundpost/internal/model"
 	bolt "go.etcd.io/bbolt"
-	"soundpost/internal/model"
 )
 
 // This file is what makes a committed deletion reach the control books that

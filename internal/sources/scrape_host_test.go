@@ -23,11 +23,11 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
-	"soundpost/internal/policy"
-	"soundpost/internal/query"
-	"soundpost/profiles"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/policy"
+	"github.com/arynyklas/soundpost/internal/query"
+	"github.com/arynyklas/soundpost/profiles"
 )
 
 // ---------------------------------------------------------------- rig

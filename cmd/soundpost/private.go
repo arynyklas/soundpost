@@ -4,10 +4,10 @@ package main
 
 import (
 	"errors"
+	"github.com/arynyklas/soundpost/internal/durablefs"
 	"os"
 	"path/filepath"
 	"runtime"
-	"soundpost/internal/durablefs"
 )
 
 // errInsecureMode means a directory or key that must be private is reachable by other users.

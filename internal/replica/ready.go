@@ -12,11 +12,11 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/arynyklas/soundpost/internal/durablefs"
+	"github.com/arynyklas/soundpost/internal/model"
 	raft "go.etcd.io/raft/v3"
 	pb "go.etcd.io/raft/v3/raftpb"
 	"google.golang.org/protobuf/proto"
-	"soundpost/internal/durablefs"
-	"soundpost/internal/model"
 )
 
 var readyCRC = crc32.MakeTable(crc32.Castagnoli)

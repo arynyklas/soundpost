@@ -8,8 +8,8 @@ import (
 	"errors"
 	"fmt"
 
-	"soundpost/internal/model"
-	"soundpost/internal/nativeperf"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/nativeperf"
 )
 
 // These builders make DELIBERATELY CONTAMINATED captures (the negative controls

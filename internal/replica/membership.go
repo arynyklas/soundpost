@@ -9,9 +9,9 @@ import (
 	"sort"
 	"time"
 
+	"github.com/arynyklas/soundpost/internal/model"
 	raft "go.etcd.io/raft/v3"
 	pb "go.etcd.io/raft/v3/raftpb"
-	"soundpost/internal/model"
 )
 
 type Member struct {

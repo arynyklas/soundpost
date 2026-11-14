@@ -6,7 +6,7 @@ import (
 	"errors"
 	"testing"
 
-	"soundpost/internal/query/syntax"
+	"github.com/arynyklas/soundpost/internal/query/syntax"
 )
 
 func parseThenCheck(t *testing.T, source string) error {

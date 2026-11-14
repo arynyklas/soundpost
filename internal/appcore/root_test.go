@@ -3,9 +3,9 @@
 package appcore_test
 
 import (
+	"github.com/arynyklas/soundpost/internal/appcore"
 	"os"
 	"path/filepath"
-	"soundpost/internal/appcore"
 	"testing"
 )
 

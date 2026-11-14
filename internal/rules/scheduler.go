@@ -6,9 +6,9 @@ import (
 	"context"
 	"errors"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
-	"soundpost/internal/replica"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replica"
 )
 
 // DefaultMaxBackfill bounds how many late grid points one scheduling pass

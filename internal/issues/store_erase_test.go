@@ -7,10 +7,10 @@ import (
 	"encoding/json"
 	"testing"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/control"
-	"soundpost/internal/issues"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/issues"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // A historical-range deletion of the error signal erases issue evidence in

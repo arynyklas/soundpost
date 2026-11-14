@@ -7,9 +7,9 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"github.com/arynyklas/soundpost/internal/model"
 	bolt "go.etcd.io/bbolt"
 	"hash/crc32"
-	"soundpost/internal/model"
 )
 
 var signalKinds = []model.Kind{model.Metric, model.Log, model.SpanKind, model.ErrorKind, model.JobAttempt, model.Replay, model.Profile, model.CapabilityKind, model.Loss, model.Condition}

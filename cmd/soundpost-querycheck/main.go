@@ -8,8 +8,8 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	q "github.com/arynyklas/soundpost/internal/conformance/query"
 	"os"
-	q "soundpost/internal/conformance/query"
 )
 
 func main() {

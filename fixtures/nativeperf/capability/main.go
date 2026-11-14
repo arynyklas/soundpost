@@ -7,9 +7,9 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/arynyklas/soundpost/internal/nativeperf"
 	"os"
 	"runtime"
-	"soundpost/internal/nativeperf"
 )
 
 func main() {

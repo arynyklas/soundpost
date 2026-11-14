@@ -5,7 +5,7 @@ package model_test
 import (
 	"context"
 	"encoding/json"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 	"testing"
 )
 

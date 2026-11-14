@@ -22,10 +22,10 @@ import (
 
 	"crypto/tls"
 	"crypto/x509"
-	"soundpost/internal/appcore"
-	"soundpost/internal/httpapi"
-	"soundpost/internal/model"
-	"soundpost/internal/replica"
+	"github.com/arynyklas/soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/httpapi"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replica"
 )
 
 // The snapshot-repair smoke drives real server processes. Compaction, snapshot

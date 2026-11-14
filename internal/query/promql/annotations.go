@@ -6,9 +6,9 @@ import (
 	"context"
 	"errors"
 
-	"soundpost/internal/model"
-	"soundpost/internal/query/regexcompat"
-	"soundpost/internal/query/syntax"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/query/regexcompat"
+	"github.com/arynyklas/soundpost/internal/query/syntax"
 )
 
 func timeError() error {

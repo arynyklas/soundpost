@@ -26,7 +26,7 @@ import (
 	"syscall"
 	"time"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // journeyID derives a deterministic identity from a name, so the expected IDs are known before

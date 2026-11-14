@@ -5,10 +5,10 @@ package query
 import (
 	"context"
 	"encoding/json"
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
-	"soundpost/internal/query/profile"
-	"soundpost/internal/query/value"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/query/profile"
+	"github.com/arynyklas/soundpost/internal/query/value"
 )
 
 // cacheTicket carries the miss's authorization proof to the store, which only

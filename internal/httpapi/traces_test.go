@@ -13,12 +13,12 @@ import (
 	"sync"
 	"testing"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/httpapi"
-	"soundpost/internal/model"
-	"soundpost/internal/query"
-	"soundpost/internal/storage"
-	"soundpost/internal/traces"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/httpapi"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/query"
+	"github.com/arynyklas/soundpost/internal/storage"
+	"github.com/arynyklas/soundpost/internal/traces"
 )
 
 // fakeSpans is a labelled test double for the span read seam: it records what the

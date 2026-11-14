@@ -7,12 +7,12 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"soundpost/internal/appcore"
-	"soundpost/internal/auth"
-	"soundpost/internal/ingest"
-	"soundpost/internal/model"
-	"soundpost/internal/policy"
-	"soundpost/internal/replays"
+	"github.com/arynyklas/soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/ingest"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/policy"
+	"github.com/arynyklas/soundpost/internal/replays"
 )
 
 // countingAppender counts what reaches the durable appender.

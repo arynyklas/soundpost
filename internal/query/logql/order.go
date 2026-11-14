@@ -6,9 +6,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/query/value"
 	"io"
-	"soundpost/internal/model"
-	"soundpost/internal/query/value"
 	"strings"
 )
 

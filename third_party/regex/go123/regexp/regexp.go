@@ -69,12 +69,12 @@ package regexp
 
 import (
 	"bytes"
+	"github.com/arynyklas/soundpost/third_party/regex/go123/stdsyntax"
+	"github.com/arynyklas/soundpost/third_party/regex/go123/unicode"
 	"io"
-	"soundpost/third_party/regex/go123/stdsyntax"
 	"strconv"
 	"strings"
 	"sync"
-	"soundpost/third_party/regex/go123/unicode"
 	"unicode/utf8"
 )
 

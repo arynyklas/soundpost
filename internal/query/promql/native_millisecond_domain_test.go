@@ -5,8 +5,8 @@ package promql
 import (
 	"testing"
 
-	"soundpost/internal/model"
-	"soundpost/internal/query/value"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/query/value"
 )
 
 // The pinned engines evaluate in milliseconds: evaluation instants and sample

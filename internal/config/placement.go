@@ -10,9 +10,9 @@ import (
 	"path"
 	"strings"
 
-	"soundpost/internal/appcore"
-	"soundpost/internal/model"
-	"soundpost/internal/replica"
+	"github.com/arynyklas/soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replica"
 )
 
 // validatePlacement rejects every way three nodes can silently be fewer than three: a shared

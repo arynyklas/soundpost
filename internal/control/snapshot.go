@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 	"sort"
 
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replica"
 	bolt "go.etcd.io/bbolt"
-	"soundpost/internal/model"
-	"soundpost/internal/replica"
 )
 
 // DeletionLedger lets the control group take and truncate to verified snapshots.

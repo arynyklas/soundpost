@@ -5,9 +5,9 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"github.com/arynyklas/soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/model"
 	"os"
-	"soundpost/internal/appcore"
-	"soundpost/internal/model"
 	"strings"
 	"testing"
 )

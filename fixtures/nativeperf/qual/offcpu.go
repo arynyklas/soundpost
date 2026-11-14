@@ -6,7 +6,7 @@ package qual
 import (
 	"fmt"
 
-	"soundpost/internal/nativeperf"
+	"github.com/arynyklas/soundpost/internal/nativeperf"
 )
 
 // BlockedTolerance is the approved +-25 percent window and MinBlockedIntervals

@@ -5,7 +5,7 @@ package ingest
 import (
 	"bytes"
 	"compress/gzip"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 	"strings"
 	"testing"
 )

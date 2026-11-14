@@ -18,10 +18,10 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/arynyklas/soundpost/internal/durablefs"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replica"
 	bolt "go.etcd.io/bbolt"
-	"soundpost/internal/durablefs"
-	"soundpost/internal/model"
-	"soundpost/internal/replica"
 )
 
 // snapshotState is the engine's snapshot bookkeeping. Its zero value is usable.

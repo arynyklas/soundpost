@@ -5,10 +5,10 @@ package logql
 import (
 	"context"
 	"encoding/json"
+	"github.com/arynyklas/soundpost/internal/query/value"
 	"math"
 	"os"
 	"sort"
-	"soundpost/internal/query/value"
 	"strings"
 	"testing"
 )

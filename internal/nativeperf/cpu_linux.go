@@ -3,7 +3,7 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
 package nativeperf
 
-import "soundpost/internal/model"
+import "github.com/arynyklas/soundpost/internal/model"
 
 type DecodeContext struct {
 	Method    SamplingMethod

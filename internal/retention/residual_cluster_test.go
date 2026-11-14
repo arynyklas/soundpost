@@ -6,9 +6,9 @@ import (
 	"reflect"
 	"testing"
 
-	"soundpost/internal/control"
-	"soundpost/internal/model"
-	"soundpost/internal/retention"
+	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/retention"
 )
 
 // fakeCluster answers for itself with one list and for the cluster with another.

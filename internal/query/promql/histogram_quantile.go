@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"soundpost/internal/model"
-	"soundpost/internal/query/value"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/query/value"
 )
 
 // quantileBuckets enumerates every bucket of the histogram, empty ones

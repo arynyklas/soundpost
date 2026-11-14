@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // Task 10.13. A Control command carries the whole state of its machine, so a retry table that

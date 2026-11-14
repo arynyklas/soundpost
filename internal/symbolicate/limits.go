@@ -4,8 +4,8 @@ package symbolicate
 
 import (
 	"errors"
+	"github.com/arynyklas/soundpost/internal/model"
 	"io"
-	"soundpost/internal/model"
 	"time"
 )
 

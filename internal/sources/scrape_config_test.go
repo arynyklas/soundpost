@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/adapters/queryinput"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/adapters/queryinput"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 type cfgDoc = map[string]any

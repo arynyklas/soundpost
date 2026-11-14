@@ -13,9 +13,9 @@ import (
 	"strings"
 	"testing"
 
-	"soundpost/internal/appcore"
-	"soundpost/internal/control"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 func serveFixture(t *testing.T) (work, keys, restricted string) {

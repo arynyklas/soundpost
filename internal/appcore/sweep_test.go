@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/appcore"
-	"soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/control"
 )
 
 // The serving process's background loop (RunFences) sweeps expired pending login

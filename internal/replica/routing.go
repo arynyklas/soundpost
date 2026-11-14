@@ -5,7 +5,7 @@ package replica
 import (
 	"crypto/sha256"
 	"encoding/binary"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 const RouteSlots = 64

@@ -3,8 +3,8 @@
 package value
 
 import (
+	"github.com/arynyklas/soundpost/internal/model"
 	"reflect"
-	"soundpost/internal/model"
 )
 
 func CloneHistogram(h model.NativeHistogram) model.NativeHistogram {

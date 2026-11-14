@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"soundpost/fixtures/nativeperf/qual"
-	"soundpost/internal/nativeperf"
+	"github.com/arynyklas/soundpost/fixtures/nativeperf/qual"
+	"github.com/arynyklas/soundpost/internal/nativeperf"
 )
 
 // assert applies the per-scenario acceptance assertions.

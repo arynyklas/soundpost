@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // fakeJournal is a real executable standing in for journalctl: it honours

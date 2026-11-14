@@ -4,10 +4,10 @@ package main
 
 import (
 	"flag"
+	"github.com/arynyklas/soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/model"
 	"io"
 	"os"
-	"soundpost/internal/appcore"
-	"soundpost/internal/model"
 )
 
 func openConfiguredCore(dir, mode, configuration string, nodeID uint64) (*appcore.App, error) {

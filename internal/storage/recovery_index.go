@@ -6,11 +6,11 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"github.com/arynyklas/soundpost/internal/model"
 	bolt "go.etcd.io/bbolt"
 	"io"
 	"os"
 	"path/filepath"
-	"soundpost/internal/model"
 )
 
 // migrateIndexes reads only the already-applied WAL prefix. The frozen recovery

@@ -3,8 +3,8 @@
 package httpapi
 
 import (
+	"github.com/arynyklas/soundpost/internal/model"
 	"net/http/httptest"
-	"soundpost/internal/model"
 	"testing"
 )
 

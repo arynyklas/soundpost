@@ -10,9 +10,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/control"
-	"soundpost/internal/httpapi"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/httpapi"
 )
 
 func TestClientAddrReadsForwardedForOnlyFromTrustedPeers(t *testing.T) {

@@ -3,7 +3,7 @@
 
 package value
 
-import portablemath "soundpost/third_party/portablemath/go127"
+import portablemath "github.com/arynyklas/soundpost/third_party/portablemath/go127"
 
 // Ln is the natural logarithm (math.Log) and Log10 the decimal logarithm, with every product rounded
 // separately (see Log2).

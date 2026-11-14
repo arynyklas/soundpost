@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // drain runs cycles until nothing more is read or hopped.

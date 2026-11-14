@@ -1,11 +1,11 @@
 package humanize
 
 import (
-	"soundpost/third_party/format/go124/fmt"
+	"github.com/arynyklas/soundpost/third_party/format/go124/fmt"
+	"github.com/arynyklas/soundpost/third_party/format/go124/strconv"
+	"github.com/arynyklas/soundpost/third_party/regex/go124/unicode"
 	"math"
-	"soundpost/third_party/format/go124/strconv"
 	"strings"
-	"soundpost/third_party/regex/go124/unicode"
 )
 
 // IEC Sizes.

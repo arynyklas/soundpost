@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 func openAuthorityStore(t *testing.T) (*Store, string) {

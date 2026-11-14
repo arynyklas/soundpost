@@ -16,8 +16,8 @@ import (
 	"sort"
 	"time"
 
-	"soundpost/internal/adapters/queryinput"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/adapters/queryinput"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // Scrape configuration failure reasons. They are static codes that serve may

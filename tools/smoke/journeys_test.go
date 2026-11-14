@@ -13,9 +13,9 @@ import (
 	"strings"
 	"testing"
 
-	"soundpost/internal/httpapi"
-	"soundpost/internal/model"
-	"soundpost/internal/traces"
+	"github.com/arynyklas/soundpost/internal/httpapi"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/traces"
 )
 
 // The journey assertions are checked against KNOWN application behavior: the gateway call has a

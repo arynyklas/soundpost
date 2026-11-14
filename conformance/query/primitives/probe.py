@@ -224,7 +224,7 @@ def main():
                 check_identity(reference["identity"], pin["compiler"], pin["module"], goos, goarch)
                 owndir = work / pin["edition"] / "owned"
                 owndir.mkdir(parents=True)
-                (owndir / "go.mod").write_text("module soundpost/conformance/primitiveprobe\n\ngo 1.27.3\n\nrequire soundpost v0.0.0\nreplace soundpost => " + json.dumps(ROOT.as_posix()) + "\n", encoding="utf-8")
+                (owndir / "go.mod").write_text("module github.com/arynyklas/soundpost/conformance/primitiveprobe\n\ngo 1.27.3\n\nrequire github.com/arynyklas/soundpost v0.0.0\nreplace github.com/arynyklas/soundpost => " + json.dumps(ROOT.as_posix()) + "\n", encoding="utf-8")
                 own = run_worker(own_go, own_go.parent.parent, owndir, "own.go.txt", request, cache / "go1.27.3")
                 if own["identity"].get("compiler") != "go1.27.3" or own["identity"].get("implementation") != "soundpost/regexcompat":
                     raise ValueError("owned worker compiler/adapter identity mismatch")

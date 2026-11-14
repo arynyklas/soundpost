@@ -5,11 +5,11 @@
 package fmt
 
 import (
-	"soundpost/third_party/format/go124/internal/fmtsort"
+	"github.com/arynyklas/soundpost/third_party/format/go124/internal/fmtsort"
+	"github.com/arynyklas/soundpost/third_party/format/go124/strconv"
 	"io"
 	"os"
 	"reflect"
-	"soundpost/third_party/format/go124/strconv"
 	"unicode/utf8"
 )
 

@@ -4,7 +4,7 @@ package replays
 
 import (
 	"errors"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 	"time"
 )
 

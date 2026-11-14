@@ -22,14 +22,14 @@ import (
 	"sync"
 	"time"
 
-	"soundpost/internal/appcore"
-	"soundpost/internal/auth"
-	"soundpost/internal/httpapi"
-	"soundpost/internal/model"
-	"soundpost/internal/query"
-	"soundpost/internal/query/profile"
-	"soundpost/internal/storage"
-	"soundpost/profiles"
+	"github.com/arynyklas/soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/httpapi"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/query"
+	"github.com/arynyklas/soundpost/internal/query/profile"
+	"github.com/arynyklas/soundpost/internal/storage"
+	"github.com/arynyklas/soundpost/profiles"
 )
 
 // failure aborts a smoke step; Run recovers it into an error.

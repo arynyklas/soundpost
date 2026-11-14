@@ -9,9 +9,9 @@ import (
 	"net/http"
 	"sort"
 
-	"soundpost/internal/auth"
-	"soundpost/internal/jobs"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/jobs"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // This file is the C11 job view of the investigation UI: the project job

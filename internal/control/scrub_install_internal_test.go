@@ -11,8 +11,8 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/arynyklas/soundpost/internal/model"
 	bolt "go.etcd.io/bbolt"
-	"soundpost/internal/model"
 )
 
 // The control.db scrub debt has two halves. The replicated one is derived from the audit log

@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // Client submits batches to POST /ingest/v1/batches with the source credential

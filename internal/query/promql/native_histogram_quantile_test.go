@@ -7,8 +7,8 @@ import (
 	"reflect"
 	"testing"
 
-	"soundpost/internal/model"
-	"soundpost/internal/query/value"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/query/value"
 )
 
 // quantileHistogram has exponential buckets (0.5,1] (1,2] (2,4] holding 1, 2

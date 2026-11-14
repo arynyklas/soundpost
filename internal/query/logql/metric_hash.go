@@ -4,8 +4,8 @@ package logql
 
 import (
 	"encoding/binary"
+	"github.com/arynyklas/soundpost/internal/model"
 	"math/bits"
-	"soundpost/internal/model"
 )
 
 // metricLabelBytes is the pinned label byte identity: FE prefix, FF between

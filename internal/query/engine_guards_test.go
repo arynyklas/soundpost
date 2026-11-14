@@ -5,11 +5,11 @@ package query
 import (
 	"context"
 	"fmt"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/query/syntax"
+	"github.com/arynyklas/soundpost/internal/query/value"
 	"math"
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
-	"soundpost/internal/query/syntax"
-	"soundpost/internal/query/value"
 	"testing"
 )
 

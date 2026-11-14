@@ -7,8 +7,8 @@ import (
 	"reflect"
 	"strings"
 
-	"soundpost/internal/model"
-	"soundpost/internal/query/logql"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/query/logql"
 )
 
 const logQLProfile = "logql-loki-3.5.2"

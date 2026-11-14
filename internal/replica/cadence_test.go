@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // Decision D4: the retry table of a digest machine is bounded by age and by count, and a group

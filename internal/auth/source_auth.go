@@ -8,8 +8,8 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"github.com/arynyklas/soundpost/internal/model"
 	"net/url"
-	"soundpost/internal/model"
 	"strings"
 	"time"
 )

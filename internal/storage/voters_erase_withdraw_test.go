@@ -6,10 +6,10 @@ import (
 	"context"
 	"testing"
 
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/model"
 	bolt "go.etcd.io/bbolt"
-	"soundpost/internal/auth"
-	"soundpost/internal/control"
-	"soundpost/internal/model"
 )
 
 // withdrawFixture is canaryVoters(6) that keeps what is needed to append more batches outside

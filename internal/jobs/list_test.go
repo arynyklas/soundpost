@@ -9,11 +9,11 @@ import (
 	"reflect"
 	"testing"
 
-	"soundpost/internal/appcore"
-	"soundpost/internal/auth"
-	ctl "soundpost/internal/control"
-	"soundpost/internal/jobs"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/auth"
+	ctl "github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/jobs"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // These tests run the read methods over the real adapter on a real control

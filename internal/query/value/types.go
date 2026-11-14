@@ -6,8 +6,8 @@ package value
 import (
 	"bytes"
 	"context"
+	"github.com/arynyklas/soundpost/internal/model"
 	"sort"
-	"soundpost/internal/model"
 	"sync"
 )
 

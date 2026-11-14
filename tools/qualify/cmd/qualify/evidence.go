@@ -9,8 +9,8 @@ import (
 	"io"
 	"strings"
 
-	"soundpost/internal/releaseevidence"
-	"soundpost/tools/qualify"
+	"github.com/arynyklas/soundpost/internal/releaseevidence"
+	"github.com/arynyklas/soundpost/tools/qualify"
 )
 
 type stringList []string

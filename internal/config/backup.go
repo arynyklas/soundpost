@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"soundpost/internal/backup"
+	"github.com/arynyklas/soundpost/internal/backup"
 )
 
 // BackupLabel is the only honest name of what a configured backup is. A copy on the

@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/artifacts"
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
-	"soundpost/internal/retention"
+	"github.com/arynyklas/soundpost/internal/artifacts"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/retention"
 )
 
 // Artifact reference traffic (Reference extends a retained map's ledger on every error occurrence

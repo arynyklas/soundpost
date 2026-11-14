@@ -6,11 +6,11 @@ package nativeperf
 import (
 	"bytes"
 	"context"
+	"github.com/arynyklas/soundpost/internal/model"
 	"io"
 	"os"
 	"reflect"
 	"sort"
-	"soundpost/internal/model"
 	"strconv"
 	"strings"
 	"sync"

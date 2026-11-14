@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/control"
-	"soundpost/internal/model"
-	"soundpost/internal/retention"
+	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/retention"
 )
 
 // The three hot writers of a running installation at once: intake admissions

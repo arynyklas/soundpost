@@ -6,9 +6,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/arynyklas/soundpost/internal/query/regexcompat"
+	jsonparser "github.com/arynyklas/soundpost/third_party/jsonparser/v1.1.1"
 	"runtime"
-	"soundpost/internal/query/regexcompat"
-	jsonparser "soundpost/third_party/jsonparser/v1.1.1"
 	"strconv"
 	"strings"
 )

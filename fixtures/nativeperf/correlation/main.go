@@ -6,11 +6,11 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/nativeperf"
 	"math/rand/v2"
 	"os"
 	"reflect"
-	"soundpost/internal/model"
-	"soundpost/internal/nativeperf"
 )
 
 type summary struct {

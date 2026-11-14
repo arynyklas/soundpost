@@ -5,7 +5,7 @@ package symbolicate
 import (
 	"bytes"
 	"container/list"
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 	"sync"
 )
 

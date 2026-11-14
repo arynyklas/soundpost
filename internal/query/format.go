@@ -4,14 +4,14 @@ package query
 
 import (
 	"context"
+	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/query/logql"
+	"github.com/arynyklas/soundpost/internal/query/promql"
+	"github.com/arynyklas/soundpost/internal/query/syntax"
+	"github.com/arynyklas/soundpost/internal/query/value"
 	"math"
 	"reflect"
-	"soundpost/internal/auth"
-	"soundpost/internal/model"
-	"soundpost/internal/query/logql"
-	"soundpost/internal/query/promql"
-	"soundpost/internal/query/syntax"
-	"soundpost/internal/query/value"
 	"strings"
 	"unicode/utf8"
 )

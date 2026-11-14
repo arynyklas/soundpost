@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // snapshotWith cuts a snapshot of a fresh history of one group: tombstones deletion-ledger entries

@@ -3,7 +3,7 @@
 package logql
 
 import (
-	u15 "soundpost/third_party/regex/go124/unicode"
+	u15 "github.com/arynyklas/soundpost/third_party/regex/go124/unicode"
 	"strings"
 	"text/template/parse"
 )

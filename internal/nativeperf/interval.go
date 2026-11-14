@@ -2,8 +2,8 @@
 package nativeperf
 
 import (
+	"github.com/arynyklas/soundpost/internal/model"
 	"sort"
-	"soundpost/internal/model"
 )
 
 type correlationProcess struct {

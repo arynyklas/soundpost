@@ -3,10 +3,10 @@
 package regexcompat
 
 import (
-	"soundpost/internal/query/profile"
-	u123 "soundpost/third_party/regex/go123/unicode"
-	u124 "soundpost/third_party/regex/go124/unicode"
-	u126 "soundpost/third_party/regex/go126/unicode"
+	"github.com/arynyklas/soundpost/internal/query/profile"
+	u123 "github.com/arynyklas/soundpost/third_party/regex/go123/unicode"
+	u124 "github.com/arynyklas/soundpost/third_party/regex/go124/unicode"
+	u126 "github.com/arynyklas/soundpost/third_party/regex/go126/unicode"
 )
 
 // Classification follows the locked compiler edition, not the host toolchain.
