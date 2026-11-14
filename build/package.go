@@ -581,10 +581,23 @@ func loadOwnedHandles(root string) (map[Handle]bool, error) {
 	if err = decodeStrict(raw, &doc); err != nil {
 		return nil, fmt.Errorf("%s: %w", ownedHandlesFile, err)
 	}
+	modules := map[string]bool{}
+	if derived, err := DeriveHandles(root); err == nil {
+		for _, h := range derived {
+			if h.Ecosystem == "go" {
+				modules[h.Name] = true
+			}
+		}
+	}
 	out := map[Handle]bool{}
 	for _, o := range doc.Owned {
 		if o.Ecosystem == "" || o.Name == "" || o.Evidence == "" {
 			return nil, fmt.Errorf("%s: every entry needs ecosystem, name and evidence", ownedHandlesFile)
+		}
+		// A Go handle is owned only as this tree's own module path (the go.mod module line); any other Go
+		// path listed here is someone else's module, never this project's.
+		if o.Ecosystem == "go" && !modules[o.Name] {
+			return nil, fmt.Errorf("%s: go %s is not this tree's module path", ownedHandlesFile, o.Name)
 		}
 		out[o.Handle] = true
 	}

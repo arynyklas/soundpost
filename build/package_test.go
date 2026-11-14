@@ -589,6 +589,11 @@ func TestAnOwnedHandleMayExistAndAnUnownedOneBlocks(t *testing.T) {
 	if !strings.Contains(strings.Join(m.Blocking, "\n"), "cannot read owned handles") {
 		t.Fatalf("an entry without evidence was accepted: %v", m.Blocking)
 	}
+	write(t, filepath.Join(f.root, "build", "owned-handles.json"), `{"owned":[{"ecosystem":"go","name":"github.com/someone/else","evidence":"claimed"}]}`)
+	m, _ = Release(context.Background(), testCommit, r)
+	if !strings.Contains(strings.Join(m.Blocking, "\n"), "is not this tree's module path") {
+		t.Fatalf("a foreign Go module was accepted as owned: %v", m.Blocking)
+	}
 }
 
 func TestStaleDependencyInventoryIsReported(t *testing.T) {
