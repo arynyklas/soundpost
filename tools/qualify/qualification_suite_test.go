@@ -668,7 +668,7 @@ func TestQualificationPlaywrightRowStates(t *testing.T) {
 	rc := overheadCtx(t)
 	rc.matrix.Builds["chrome"] = BuildSpec{Family: "chrome", Version: "156", OS: "linux", Arch: "amd64", Absent: "x"}
 	rc.probes["chrome"] = &probeResult{Found: true, Path: "/x/chrome", Build: Build{Family: "chrome", Version: "156.0.8078.80", OS: "linux", Arch: "amd64", ID: "sha256:c"}}
-	rc.cache["pw:cfg:spec.ts"] = &pwRun{Command: "playwright", Tests: []pwTest{
+	rc.cache["pw:/x/chrome:cfg:spec.ts"] = &pwRun{Command: "playwright", Tests: []pwTest{
 		{Title: "with the Document-Policy header: genuine samples", Status: "expected", Stdout: `SOUNDPOST_PROFILE_EVIDENCE {"with_header":{"sample_count":30,"requested_us":5000,"achieved_us":10100}}`},
 		{Title: "without the Document-Policy header: refusal", Status: "expected"},
 		{Title: "Profiler removed (Firefox/Safari emulation)", Status: "expected"},
@@ -701,6 +701,18 @@ func TestQualificationPlaywrightRowStates(t *testing.T) {
 	tests, errs, err := parsePlaywright(`{"suites":[{"title":"a","specs":[{"title":"t1","tests":[{"status":"expected","results":[{"stdout":[{"text":"hello"}]}]}]}],"suites":[{"title":"b","specs":[{"title":"t2","tests":[{"status":"unexpected","results":[]}]}]}]}],"errors":[{"message":"boom"}]}`)
 	if err != nil || len(tests) != 2 || tests[0].Stdout != "hello" || tests[1].Status != "unexpected" || len(errs) != 1 {
 		t.Errorf("parsePlaywright: %+v %v %v", tests, errs, err)
+	}
+}
+
+// One spec run per browser build: a pass in one browser must never be read as a pass in another build that shares the spec.
+func TestQualificationPlaywrightResultIsNeverSharedAcrossBuilds(t *testing.T) {
+	rc := overheadCtx(t)
+	rc.matrix.Builds["chrome142"] = BuildSpec{Family: "chrome", Version: "142.0.7444.59", OS: "linux", Arch: "amd64", Absent: "x"}
+	rc.probes["chrome142"] = &probeResult{Found: true, Path: "/y/chrome142", Build: Build{Family: "chrome", Version: "142.0.7444.59", OS: "linux", Arch: "amd64", ID: "sha256:d"}}
+	rc.cache["pw:/x/chrome156:cfg:spec.ts"] = &pwRun{Command: "playwright", Tests: []pwTest{{Title: "t", Status: "expected"}}}
+	row := runPlaywrightTest(rc, RowSpec{ID: "c142", Suite: SuiteRuntime, Build: "chrome142", Params: map[string]string{"config": "cfg", "spec": "spec.ts", "title": "t", "on_pass": "exercised"}})
+	if row.State == StateExercised {
+		t.Fatalf("Chrome 142 must not take the result recorded for another build: %+v", row)
 	}
 }
 

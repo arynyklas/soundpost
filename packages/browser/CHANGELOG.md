@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Breaking: split the replay recorder and the profiler out of the core entry so the core bundle meets its design 13 budget (<=40 KiB gzip; measured 36,411 B, was 47,728 B with replay and profiler inlined). `@soundpost/browser` no longer exports `createRecorder`, `ReplayStream`, `startProfile` or the replay/profile types, and `Client` no longer has `startReplay`, `setReplayConsent`, `startProfile` or `submitProfile`. Use `@soundpost/browser/replay` (`startReplay(client, config, tap?)`, `setReplayConsent(client, enabled)`, `createRecorder`, `ReplayStream`) and `@soundpost/browser/profile` (`startProfile`, `startClientProfile(client, options)`, `submitProfile(client, report)`, `createProfiler`). Closing a client still closes its recorder.
+
 ## 0.1.0 — 2026-11-03
 
 - Expose policy-first error graphs and explicit non-destructive global error/rejection listener leases.

@@ -6,6 +6,7 @@
 import {test, expect} from "bun:test";
 import {createHash} from "node:crypto";
 import {init, type Client} from "../src/index.ts";
+import {setReplayConsent, startReplay} from "../src/replay.ts";
 import {canonicalJSON} from "../src/replay/policy.ts";
 import {FLUSH_MS, scriptedPage} from "./recorded-session.ts";
 import {config as coreConfig} from "../../core/test/fixture.ts";
@@ -35,13 +36,13 @@ function rig(over: Record<string, unknown> = {}, enable = true) {
 
 test("recorder chunks are enqueued by the client itself, flushed with receipts, and chain exactly as recorded", async () => {
  const {ledger, client, stage} = rig();
- client.startReplay(stage.config);
- client.setReplayConsent(true);
+ startReplay(client, stage.config);
+ setReplayConsent(client, true);
  stage.pointer("button", 123, 45); stage.fire(FLUSH_MS);
  stage.grow("SECRET-LATE-TEXT");
  expect(queued(client).map(record => record.kind)).toEqual(["replay_chunk", "replay_chunk", "replay_chunk"]);
  const report = await client.flush(2000);
- client.setReplayConsent(false);
+ setReplayConsent(client, false);
  expect(report.pending).toBe(0); expect(report.lost).toBe(0); expect(report.receipts.length).toBeGreaterThan(0);
  const records = sent(ledger);
  expect(records.map(record => record.kind)).toEqual(["replay_chunk", "replay_chunk", "replay_chunk"]);
@@ -60,11 +61,11 @@ test("recorder chunks are enqueued by the client itself, flushed with receipts, 
 test("the optional tap sees every chunk, and its own failure does not break delivery", async () => {
  const {ledger, client, stage} = rig();
  const tapped: ReplayChunk[] = [];
- client.startReplay(stage.config, chunk => { tapped.push(chunk); throw Error("viewer broke"); });
- client.setReplayConsent(true);
+ startReplay(client, stage.config, chunk => { tapped.push(chunk); throw Error("viewer broke"); });
+ setReplayConsent(client, true);
  stage.pointer("html", 8, 8); stage.fire(FLUSH_MS);
  await client.flush(2000);
- client.setReplayConsent(false);
+ setReplayConsent(client, false);
  expect(tapped.map(chunk => chunk.sequence)).toEqual(["1", "2"]);
  expect(sent(ledger).map(record => record.payload.sequence)).toEqual(["1", "2"]);
  await client.close();
@@ -72,8 +73,8 @@ test("the optional tap sees every chunk, and its own failure does not break deli
 
 test("without the deployment's replay opt-in nothing is observed or queued", async () => {
  const {ledger, client, stage} = rig({}, false);
- client.startReplay(stage.config);
- client.setReplayConsent(true);
+ startReplay(client, stage.config);
+ setReplayConsent(client, true);
  stage.pointer("button", 1, 1); stage.fire(FLUSH_MS);
  expect(client.bufferedRecords()).toEqual([]);
  await client.flush(500);
@@ -83,18 +84,18 @@ test("without the deployment's replay opt-in nothing is observed or queued", asy
 
 test("revoking consent destroys the replay chunks still waiting in the queue and leaves every other record alone", async () => {
  const {ledger, client, stage} = rig();
- client.startReplay(stage.config);
+ startReplay(client, stage.config);
  client.captureException(Error("BEFORE"));
- client.setReplayConsent(true);
+ setReplayConsent(client, true);
  stage.pointer("button", 5, 5); stage.fire(FLUSH_MS);
  expect(queued(client).filter(record => record.kind === "replay_chunk")).toHaveLength(2);
- client.setReplayConsent(false);
+ setReplayConsent(client, false);
  expect(queued(client).map(record => record.kind)).toEqual(["error"]);
  client.captureException(Error("AFTER"));
  await client.flush(2000);
  expect(sent(ledger).map(record => record.kind)).toEqual(["error", "error"]);
  // A resumed recording restarts with a gap-marked checkpoint that continues the sequence: the destroyed chunks are a visible hole.
- client.setReplayConsent(true);
+ setReplayConsent(client, true);
  await client.flush(2000);
  const resumed = sent(ledger).filter(record => record.kind === "replay_chunk").map(record => record.payload);
  expect(resumed).toHaveLength(1);
@@ -105,8 +106,8 @@ test("revoking consent destroys the replay chunks still waiting in the queue and
 test("a full queue refuses the chunk to the recorder, which counts the loss and heals with a gap-marked checkpoint", async () => {
  const {ledger, client, stage} = rig({maxRecords: 2});
  client.captureException(Error("ONE")); client.captureException(Error("TWO"));
- client.startReplay(stage.config);
- client.setReplayConsent(true); // checkpoint 1 refused: queue_full
+ startReplay(client, stage.config);
+ setReplayConsent(client, true); // checkpoint 1 refused: queue_full
  expect(client.diagnostics().queue_full).toBeGreaterThan(0);
  await client.flush(2000); // room again
  stage.fire(FLUSH_MS); // recovery checkpoint

@@ -480,6 +480,17 @@ def test_monitoring_coexists_with_occupied_tool_ids_and_leaves_their_state_intac
         MON.set_events(2, 0); MON.register_callback(2, MON.events.PY_START, None); MON.free_tool_id(2)
 
 @needs_monitoring
+def test_monitoring_frees_its_tool_id_on_interpreters_without_clear_tool_id(work, client, monkeypatch):
+    # sys.monitoring.clear_tool_id exists only from CPython 3.14; on 3.12/3.13 the stop path must still free the ID.
+    monkeypatch.delattr(MON, "clear_tool_id", raising=False)
+    lease = start_profile(options(work, method=MONITORING), client)
+    assert lease.active
+    work.app.busy(5)
+    report = lease.stop()
+    assert rows(report)[("busy", "PY_START")] == 1 and "foreign_state" not in {loss["reason"] for loss in report["losses"]}
+    assert [MON.get_tool(tool) for tool in (2, 3, 4)] == [None, None, None]
+
+@needs_monitoring
 def test_monitoring_refuses_when_every_allowed_tool_id_is_occupied(work, client):
     fired = []
     for tool in (2, 3, 4):

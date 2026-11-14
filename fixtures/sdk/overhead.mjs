@@ -249,10 +249,10 @@ print(json.dumps({"runtime_version": sys.version.split()[0], "rows": rows}))
   if(only.includes("bundle")){
    const gz=file=>gzipSync(readFileSync(file),{level:9}).length,raw=file=>readFileSync(file).length;
    const core=buildBundle(bun,`export * from ${fwd(join(root,"packages/browser/src/index.ts"))};\n`,dir,"browsercore","browser",["--minify"]);
-   const replay=buildBundle(bun,`export {createRecorder} from ${fwd(join(root,"packages/browser/src/replay/recorder.ts"))};\nexport {ReplayStream} from ${fwd(join(root,"packages/browser/src/replay/stream.ts"))};\n`,dir,"browserreplay","browser",["--minify"]);
-   const profile=existsSync(join(root,"packages/browser/src/profile.ts"))?buildBundle(bun,`export {startProfile} from ${fwd(join(root,"packages/browser/src/profile.ts"))};\n`,dir,"browserprofile","browser",["--minify"]):undefined;
-   result.rows.browser_bundle_sizes={method:"bun build --target=browser --minify (pinned Bun), zlib gzip level 9 of the single output file; the browser index re-exports replay, so core is measured as the index minus nothing: see note",
-    note:"packages/browser/src/index.ts currently re-exports the replay recorder, so `browser_index` includes replay code; `replay_only` is the recorder+stream entry measured alone. Budget: core <=40 KiB gzip, replay separate <=60 KiB gzip. A core-only entry that excludes replay does not exist yet, so the core budget row is measured on the full index (upper bound).",
+   const replay=buildBundle(bun,`export * from ${fwd(join(root,"packages/browser/src/replay.ts"))};\n`,dir,"browserreplay","browser",["--minify"]);
+   const profile=existsSync(join(root,"packages/browser/src/profile.ts"))?buildBundle(bun,`export * from ${fwd(join(root,"packages/browser/src/profile.ts"))};\n`,dir,"browserprofile","browser",["--minify"]):undefined;
+   result.rows.browser_bundle_sizes={method:"bun build --target=browser --minify (pinned Bun), zlib gzip level 9 of the single output file, one bundle per published entry: `@soundpost/browser` (core), `@soundpost/browser/replay`, `@soundpost/browser/profile`",
+    note:"The core entry (packages/browser/src/index.ts) imports neither the replay recorder nor the profiler; each is its own entry an application opts into, and the replay bundle measured here is the replay entry alone. Budget: core <=40 KiB gzip, replay separate <=60 KiB gzip.",
     browser_index:{raw_bytes:raw(core),gzip_bytes:gz(core),budget_gzip_bytes:BUDGET.browser_core_gzip_bytes,within_budget:gz(core)<=BUDGET.browser_core_gzip_bytes},
     replay_only:{raw_bytes:raw(replay),gzip_bytes:gz(replay),budget_gzip_bytes:BUDGET.browser_replay_gzip_bytes,within_budget:gz(replay)<=BUDGET.browser_replay_gzip_bytes},
     profile_module:profile?{raw_bytes:raw(profile),gzip_bytes:gz(profile)}:{not_measured:"packages/browser/src/profile.ts absent"}};

@@ -30,6 +30,8 @@ export function referenceConfig(build: ReferenceBuild) {
     resolve: {
       alias: [
         {find: /^@soundpost\/browser$/, replacement: packages + "browser/src/index.ts"},
+        {find: /^@soundpost\/browser\/replay$/, replacement: packages + "browser/src/replay.ts"},
+        {find: /^@soundpost\/browser\/profile$/, replacement: packages + "browser/src/profile.ts"},
         {find: /^@soundpost\/core\/types$/, replacement: packages + "core/src/types.ts"},
         {find: /^@soundpost\/core$/, replacement: packages + "core/src/client.ts"},
       ],

@@ -57,11 +57,11 @@ Two consecutive runs of the committed smoke ended with the same outcome (exit st
 passed and two did not. Run output: `.superpowers/sdd/approved-product/07.04-evidence/`.
 
 * `replay_masked_interaction_real_recorder`: **satisfied** after task 11.02 (it was NOT satisfied, `sdk_recorder_chunks_not_enqueued`).
-  The recorder now emits the server's closed schema (decision D2) and `client.startReplay` enqueues every chunk itself. The reference
+  The recorder now emits the server's closed schema (decision D2) and `startReplay(client, ...)` (`@soundpost/browser/replay`) enqueues every chunk itself. The reference
   page records while the driver types the canary note into the textarea, clicks it and writes the same text into a text node;
   the run on Linux Chrome 156 stored 3 replay chunks with no canary anywhere. Contract: `packages/browser/README.md`.
 * `profile_linkage_with_capability_truth`: **satisfied** after task 10.17 (it was NOT satisfied, `sdk_profile_not_delivered`, because
-  `startProfile` returned a local report and nothing enqueued it). The reference page now starts the run with `client.startProfile`
+  `startProfile` returned a local report and nothing enqueued it). The reference page now starts the run with `startClientProfile(client, ...)`
   (`deploymentProfiles: true`) and the SDK queues one `capability` record and the `profile_chunk`(s) through its ordinary queue. Two
   consecutive runs on Linux Chrome 156 with `Document-Policy: js-profiling` stored 1 profile row (33 and 32 samples, equal to the
   report's `sample_count`) and 1 linked capability record; the smoke now also requires every stored chunk to name a stored capability

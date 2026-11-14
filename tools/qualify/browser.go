@@ -109,7 +109,7 @@ func (rc *runCtx) bunForBundling() (string, string) {
 
 // playwright runs one spec file once per RunSuite and caches the result.
 func (rc *runCtx) playwright(config, specFile, chromePath string) (*pwRun, string) {
-	key := "pw:" + config + ":" + specFile
+	key := "pw:" + chromePath + ":" + config + ":" + specFile
 	if v, ok := rc.cache[key]; ok {
 		return v.(*pwRun), ""
 	}
@@ -174,7 +174,7 @@ func runPlaywrightTest(rc *runCtx, spec RowSpec) Row {
 		failures = append(failures, "no matching test ran: "+strings.Join(run.Errors, "; "))
 	}
 	row.Series = []Series{{Name: "tests_passed", Unit: "count", Values: []float64{float64(passed)}}, {Name: "tests_matched", Unit: "count", Values: []float64{float64(len(matched))}}}
-	row.Evidence = []string{fmt.Sprintf("%d/%d Playwright tests passed in real Chrome %s (%s)", passed, len(matched), p.Build.Version, spec.Params["spec"])}
+	row.Evidence = []string{fmt.Sprintf("%d/%d Playwright tests passed in real %s %s (%s)", passed, len(matched), p.Build.Family, p.Build.Version, spec.Params["spec"])}
 	if key := spec.Params["evidence_key"]; key != "" {
 		var series []Series
 		var iv IntervalReport
@@ -194,7 +194,7 @@ func runPlaywrightTest(rc *runCtx, spec RowSpec) Row {
 		}
 		row.Loss = strings.Join(loss, "; ")
 	}
-	row.Limits = []string{"Chrome 156 is the build installed here; the frozen qualification target is Chrome 142 and is a separate not-exercised row", "headless Linux Chrome only; no headed run, no other browser"}
+	row.Limits = []string{fmt.Sprintf("this row is the %s %s build only; every other browser or version is its own row", p.Build.Family, p.Build.Version), "headless Linux build only; no headed run"}
 	if len(failures) > 0 {
 		row.State, row.Outcome, row.Failures = StateExercised, OutcomeFailed, failures
 		return row

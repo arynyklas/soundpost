@@ -361,8 +361,8 @@ func runOverheadBundle(rc *runCtx, spec RowSpec) Row {
 		{Name: "replay_only_raw", Unit: "bytes", Values: []float64{b.Replay.Raw}},
 	}
 	row.Budgets = []BudgetResult{
-		rc.budget("browser_core_gzip_bytes", b.Index.Gzip, "gzip -9 of the minified browser index (it re-exports replay, so this is an upper bound of core)"),
-		rc.budget("browser_replay_gzip_bytes", b.Replay.Gzip, "gzip -9 of the minified recorder+stream entry"),
+		rc.budget("browser_core_gzip_bytes", b.Index.Gzip, "gzip -9 of the minified core entry @soundpost/browser (it imports neither the replay recorder nor the profiler)"),
+		rc.budget("browser_replay_gzip_bytes", b.Replay.Gzip, "gzip -9 of the minified replay entry @soundpost/browser/replay (recorder, stream and client delivery)"),
 	}
 	row.Outcome = OutcomePassed
 	for _, br := range row.Budgets {
@@ -370,7 +370,7 @@ func runOverheadBundle(rc *runCtx, spec RowSpec) Row {
 			row.Outcome = OutcomeFailed
 		}
 	}
-	row.Limits = []string{"packages/browser/src/index.ts re-exports the replay recorder and no core-only entry exists, so the core budget is measured on the whole index; the budget is not adjusted for that"}
+	row.Limits = []string{"each budget is measured on its own published entry bundled alone; an application that imports several entries ships their sum"}
 	return row
 }
 

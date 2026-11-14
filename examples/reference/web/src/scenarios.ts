@@ -3,6 +3,8 @@
 // Diagnostic scenarios driven by drive.mjs. Each one uses its OWN client, so nothing here can change what the order
 // page's client has queued or acknowledged. No page content, note text or chunk content is returned.
 import {init} from "@soundpost/browser";
+import {startClientProfile} from "@soundpost/browser/profile";
+import {setReplayConsent, startReplay} from "@soundpost/browser/replay";
 import {sdkConfig} from "./config.ts";
 import type {PublicConfig} from "./config.ts";
 
@@ -17,11 +19,11 @@ export interface ProfileOutcome {
   readonly diagnostics: Readonly<Record<string, number>>;
 }
 
-// The profile is delivered by the SDK itself: client.startProfile hands the finished report (a refusal included) to this client's queue.
+// The profile is delivered by the SDK itself: startClientProfile hands the finished report (a refusal included) to this client's queue.
 export async function profileFor(raw: PublicConfig, durationMs: number): Promise<ProfileOutcome> {
   const client = init(sdkConfig(raw, {deploymentProfiles: true}));
   try {
-    const handle = await client.startProfile({durationMs: 5000, intervalUs: 10_000, scope: "main"});
+    const handle = await startClientProfile(client, {durationMs: 5000, intervalUs: 10_000, scope: "main"});
     const end = performance.now() + durationMs;
     let spin = 0;
     while (performance.now() < end) spin = (spin + Math.sqrt(spin + 1)) % 1000003;
@@ -62,19 +64,19 @@ export interface ReplaySession {
   finish(): Promise<ReplayOutcome>;
 }
 
-// The replay is delivered by the SDK itself: client.startReplay hands every chunk to this client's queue, and the closed
+// The replay is delivered by the SDK itself: startReplay hands every chunk to this client's queue, and the closed
 // masked schema is the server's own, so nothing here converts or filters. `emitted` counts the local tap only.
 export function replayFor(raw: PublicConfig): ReplaySession {
   const client = init(sdkConfig(raw, {deploymentReplay: true}));
   let emitted = 0;
-  const recorder = client.startReplay({
+  const recorder = startReplay(client, {
     root: document.documentElement,
     replayId: randomId(), sessionId: randomId(), capturePolicyRevision: policyRevision(raw),
     domain: {host: randomId(), boot: randomId(), runtime: randomId()},
     clock: () => ({wall_ns: String(BigInt(Date.now()) * 1000000n), mono_ns: String(BigInt(Math.round(performance.now() * 1e6))), uncertainty_ns: "1000000"}),
     viewport: () => ({w: innerWidth, h: innerHeight, x: scrollX, y: scrollY}),
   }, () => { emitted++; });
-  client.setReplayConsent(true);
+  setReplayConsent(client, true);
   return {
     async finish() {
       try {

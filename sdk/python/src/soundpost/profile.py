@@ -253,9 +253,10 @@ class _MonitoringEngine:
             counts, frames, errors = dict(self._counts), list(self._frames.frames), self._errors
             dropped_rows, full, uncached = len(self._dropped_rows), self._frames.full_codes, self._frames.uncached_full
         try:
-            if owned or orphan:
+            clear = getattr(monitoring, "clear_tool_id", None)  # CPython 3.14+ only; 3.12/3.13 rely on the callback reset above
+            if (owned or orphan) and clear is not None:
                 # An orphaned (externally freed, still unclaimed) ID may carry our leftover callbacks; a claimed one is never touched.
-                monitoring.clear_tool_id(self.tool)
+                clear(self.tool)
             if owned:
                 monitoring.free_tool_id(self.tool)
         except Exception:

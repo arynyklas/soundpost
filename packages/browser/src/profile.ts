@@ -10,6 +10,9 @@
 // Frames are code identities only: origin-relative script path (never a query, fragment or absolute URL), a conservative-regex function
 // name, or the `external` placeholder. No arguments, locals, source text, thread names or error values exist in the trace to begin with.
 
+import type {Client} from "./index.ts";
+import {profileWire} from "./profile_wire.ts";
+
 export const profileReasons = [
  "ok", "profiler_owned", "isolate_scope_mismatch", "monitoring_tool_ids_occupied", "document_policy_missing", "permission_denied", "invalid_options",
  "inspector_unavailable", "profiler_api_unavailable", "sys_monitoring_unavailable", "js_self_profiling_unavailable", "free_threaded_unqualified", "runtime_unsupported",
@@ -442,3 +445,24 @@ export function globalProfilerEnv(): ProfilerEnv {
 
 /** Starts one bounded JS Self-Profiling run on the calling global. Never throws: refusals are reports with a status and reason. */
 export function startProfile(options: ProfileOptions): Promise<ProfileHandle> { return createProfiler(globalProfilerEnv()).startProfile(options); }
+
+const processIds = new WeakMap<Client, string>();
+function randomId(): string { for (;;) { const id = Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, "0")).join(""); if (id !== "0".repeat(32)) return id; } }
+
+/** Maps a finished report to wire records and enqueues them on `client`. Returns true only when everything was queued. */
+export function submitProfile(client: Client, report: ProfileReport): boolean {
+ let queued: boolean;
+ try { const wire = profileWire(report, {process: processIds.get(client) ?? (processIds.set(client, randomId()), processIds.get(client)!), id: randomId}); queued = client.captureProfile(wire.capability, wire.chunks); }
+ catch { client.profileFailed(); queued = false; }
+ // Samples the profiler dropped from this run are a recorded loss whether or not the retained part was queued.
+ try {
+  let truncated = 0n; for (const loss of report.losses) if (loss.reason === "truncated") truncated += BigInt(loss.count);
+  if (truncated > 0n) client.captureProfileLoss(truncated, BigInt(report.clock.wall_end_ns) >= BigInt(report.clock.wall_start_ns) ? report.clock.wall_end_ns : report.clock.wall_start_ns);
+ } catch { client.profileFailed(); }
+ return queued;
+}
+
+/** Starts one bounded JS Self-Profiling run whose finished report (including a refusal) is delivered through `client`'s queue:
+ * the capability truth record always, the profile chunk(s) only when the sampler genuinely ran. Requires `deploymentProfiles: true`
+ * and a source policy that lists profile_chunk and capability; otherwise nothing is enqueued and the drop is counted in diagnostics(). */
+export function startClientProfile(client: Client, options: ProfileOptions): Promise<ProfileHandle> { return createProfiler(globalProfilerEnv(), report => { submitProfile(client, report); }).startProfile(options); }

@@ -79,7 +79,7 @@ test("with the Document-Policy header: genuine samples from a real busy loop, sa
   named_first_party: [...named].sort(), frame_modules: [...new Set(report.frames.map(f => f.module_id))].sort(), frame_list: report.frames.map(f => `${f.module_id}#${f.function}@${f.line}:${f.column}`), inner_stack: inner, visibility: report.scope.visibility, stopped_by: report.stopped_by};
  expect(errors).toEqual([]);
  expect(report.capability.status).toBe("supported"); expect(report.capability.reason).toBe("ok");
- expect(report.capability.runtime).toMatch(/^Chrom(e|ium)\/156\.0\.8078\.80$/); // brand token from userAgentData: Playwright's emulated metadata lists only "Chromium"
+ expect(report.capability.runtime).toMatch(new RegExp("^(Chrome|Chromium|Edge)/" + browser.version().replaceAll(".", "\\.") + "$")); // brand token from userAgentData (Playwright's emulated metadata lists only "Chromium") plus the version of the build that was launched
  expect(report.sample_count).toBeGreaterThan(0); expect(report.samples.length).toBe(report.sample_count);
  expect(named.has("innerSpin")).toBe(true); expect(named.has("outerWork")).toBe(true);
  expect(inner.slice(0, 2)).toEqual(["innerSpin", "outerWork"]); // leaf-first

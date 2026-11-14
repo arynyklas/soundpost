@@ -5,6 +5,8 @@
     "types": [],
     "paths": {
       "@soundpost/browser": ["../../../packages/browser/src/index.ts"],
+      "@soundpost/browser/replay": ["../../../packages/browser/src/replay.ts"],
+      "@soundpost/browser/profile": ["../../../packages/browser/src/profile.ts"],
       "@soundpost/core": ["../../../packages/core/src/client.ts"],
       "@soundpost/core/types": ["../../../packages/core/src/types.ts"]
     }

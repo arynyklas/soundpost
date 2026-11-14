@@ -6,7 +6,7 @@
 // What the real server stores for these records is observed by the journeys smoke on Linux Chrome, not here.
 import {test, expect} from "bun:test";
 import {init, type Client, type Config} from "../src/index.ts";
-import {createProfiler, type ProfileOptions, type ProfileReport, type ProfilerEnv} from "../src/profile.ts";
+import {createProfiler, submitProfile, type ProfileOptions, type ProfileReport, type ProfilerEnv} from "../src/profile.ts";
 import {config as coreConfig, signed, ORG, PROJECT, SOURCE} from "../../core/test/fixture.ts";
 import {parseSafeRecord} from "../../core/src/wire.ts";
 import type {FrozenBatch, Outcome, ReceiptTransport} from "../../core/src/transport.ts";
@@ -71,7 +71,7 @@ function delivering(enable = true) {
 }
 /** One profile run through the real profiler with the delivery sink bound to the client, then a real flush. */
 async function profileRun(rg: Rig, client: Client, options: ProfileOptions, trace?: Trace, stop = true) {
- const api = createProfiler(rg.env, report => client.submitProfile(report));
+ const api = createProfiler(rg.env, report => submitProfile(client, report));
  const handle = await api.startProfile(options);
  rg.trace = trace;
  const report: ProfileReport | undefined = stop ? await handle.stop() : undefined;
@@ -207,7 +207,7 @@ test("without the deployment opt-in nothing is enqueued and the refusal is count
 test("a duration-timer finish delivers exactly once, and a later stop() does not deliver again", async () => {
  const {ledger, client} = delivering();
  const rg = rig();
- const api = createProfiler(rg.env, report => client.submitProfile(report));
+ const api = createProfiler(rg.env, report => submitProfile(client, report));
  const handle = await api.startProfile({durationMs: 500, intervalUs: 10_000, scope: "main"});
  rg.trace = simpleTrace();
  await rg.timers.advance(500); await settle();
@@ -250,7 +250,7 @@ test("a large profile is split into bounded chunks that each stay under the queu
 test("a closed client counts the profile as lost and never throws into the application", async () => {
  const {ledger, client} = delivering();
  await client.close();
- const api = createProfiler(rig().env, report => client.submitProfile(report));
+ const api = createProfiler(rig().env, report => submitProfile(client, report));
  const handle = await api.startProfile(OPTIONS);
  await expect(handle.stop()).resolves.toBeDefined();
  expect(ledger.bodies).toEqual([]);

@@ -34,7 +34,7 @@ Parent-run boundary tests: `bun test packages/browser/test/jobs.test.ts`. Actual
 
 `createRecorder(config, emit)` records only an owned, masked structure: ids, the server's closed tag enum and the constant `"[masked]"` text mask. Text content, input values, attributes, ids, classes, CSS, layout, pseudo-content, canvas/media pixels, clipboard, console and key events are never read. Frames, editable regions, textarea/select and media are one opaque node. `ReplayStream` is the bounded `AsyncIterable<ReplayChunk>` shared with the renderer. Closed shadow roots are not observable by page script: their content is simply unreachable, and the recorder cannot mark the host opaque (an optional `dom.closedShadow` hook exists for platforms that can detect it).
 
-`client.startReplay(config, tap?)` plus `client.setReplayConsent(enabled)` is the delivery path: every chunk the recorder emits is enqueued by the client itself on its ordinary queue (closed wire validation, batching, retry, receipts; `deploymentReplay: true` and a source policy with replay on are both required), so a chunk the queue refuses is the recorder's counted loss, healed by a gap-marked checkpoint. `tap` is an optional local consumer (for example a `ReplayStream` feeding a viewer) that sees every chunk; its failure never affects delivery. Revoking consent stops capture at once and destroys this client's replay chunks that are queued but not yet part of a batch; acknowledged chunks are not recalled and a resumed recording starts with a gap-marked checkpoint.
+Replay is its own entry, `@soundpost/browser/replay` (design 13 budgets the core entry `@soundpost/browser` at <=40 KiB gzip and replay separately at <=60 KiB; the core entry imports no recorder and no profiler, so an application opts in by importing the entry it needs). `startReplay(client, config, tap?)` plus `setReplayConsent(client, enabled)` is the delivery path: every chunk the recorder emits is enqueued by the client itself on its ordinary queue (closed wire validation, batching, retry, receipts; `deploymentReplay: true` and a source policy with replay on are both required), so a chunk the queue refuses is the recorder's counted loss, healed by a gap-marked checkpoint. `tap` is an optional local consumer (for example a `ReplayStream` feeding a viewer) that sees every chunk; its failure never affects delivery. Closing the client closes the recorder. Revoking consent stops capture at once and destroys this client's replay chunks that are queued but not yet part of a batch; acknowledged chunks are not recalled and a resumed recording starts with a gap-marked checkpoint.
 
 Parent-run checks: `bun test packages/browser packages/replay-viewer packages/core`; real browser: `playwright test -c fixtures/sdk/replay/playwright.config.ts --project=chromium --grep "pre-buffer canaries|consent revocation"` (`SOUNDPOST_BUN` = bun binary used to bundle the recorder, `SOUNDPOST_CHROME` = optional Chrome executable).
 
@@ -55,7 +55,7 @@ Cross-language contract tests: `packages/browser/test/replay-wire.test.ts` drive
 ## Browser JS Self-Profiling (optional, off by default)
 
 ```ts
-import {startProfile} from "@soundpost/browser";
+import {startProfile} from "@soundpost/browser/profile";
 const handle = await startProfile({durationMs: 5000, intervalUs: 10_000, scope: "main", longTasks: true});
 // ...application work...
 const report = await handle.stop(); // idempotent, bounded, never rejects
@@ -84,18 +84,20 @@ Honest timing: `interval.requested_us` is what you asked for; `interval.achieved
 
 Checks: `bun test packages/browser/test/profile.test.ts` (fakes only); real Chrome: `playwright test -c fixtures/sdk/profiles/playwright.config.ts --project=chromium` (`SOUNDPOST_BUN` bundles `src/profile.ts`, `SOUNDPOST_CHROME` optional executable); the spec prints one `SOUNDPOST_PROFILE_EVIDENCE {...}` JSON line. Not qualified: Firefox, Safari, Edge, Chrome 142, Windows/macOS Chrome, headed runs.
 
-### Delivering a profile (`client.startProfile`)
+### Delivering a profile (`startClientProfile`)
 
 The module-level `startProfile` above returns a local report and sends nothing. To deliver, start the run on a client:
 
 ```ts
+import {init} from "@soundpost/browser";
+import {startClientProfile} from "@soundpost/browser/profile";
 const client = init({...config, deploymentProfiles: true});
-const handle = await client.startProfile({durationMs: 5000, scope: "main"});
+const handle = await startClientProfile(client, {durationMs: 5000, scope: "main"});
 // ...
 await handle.stop();   // the finished report is already queued; client.flush() sends it
 ```
 
-The finished report (a refusal at start, a caller `stop()`, the duration timer or the stop timeout; exactly once per run) goes through the client's ordinary queue and transport: same batching, retry, durable-receipt ACK and loss counters as errors and spans. There is no second transport. `client.submitProfile(report)` does the same for a report you already hold (`createProfiler(env, report => client.submitProfile(report))` is the test seam).
+The finished report (a refusal at start, a caller `stop()`, the duration timer or the stop timeout; exactly once per run) goes through the client's ordinary queue and transport: same batching, retry, durable-receipt ACK and loss counters as errors and spans. There is no second transport. `submitProfile(client, report)` does the same for a report you already hold (`createProfiler(env, report => submitProfile(client, report))` is the test seam).
 
 What is sent, by `src/profile_wire.ts`:
 

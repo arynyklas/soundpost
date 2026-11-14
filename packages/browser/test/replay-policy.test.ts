@@ -3,6 +3,7 @@
 import {test, expect} from "bun:test";
 import {createHash} from "node:crypto";
 import {init} from "../src/index.ts";
+import {setReplayConsent, startReplay} from "../src/replay.ts";
 import {createRecorder} from "../src/replay/recorder.ts";
 import {ReplayStream} from "../src/replay/stream.ts";
 import {captureDomAccessors, fitSubtrees} from "../src/replay/tree.ts";
@@ -379,17 +380,17 @@ test("client.setReplayConsent delegates under policy, and revocation leaves non-
   for (const [client, expectCapture] of [[allowed, true], [denied, false]] as const) {
    const r = {chunks: [] as ReplayChunk[]}; FObserver.instances = [];
    const {root} = canaryTree();
-   const recorder = client.startReplay({root, replayId: "a".repeat(32), sessionId: "b".repeat(32), capturePolicyRevision: "1", domain: {host: "c".repeat(32), boot: "d".repeat(32), runtime: "e".repeat(32)}, clock: () => ({wall_ns: "1", mono_ns: "1", uncertainty_ns: "0"}), dom, observer: FObserver, eventTarget: new FTarget()}, chunk => { r.chunks.push(chunk); });
+   const recorder = startReplay(client, {root, replayId: "a".repeat(32), sessionId: "b".repeat(32), capturePolicyRevision: "1", domain: {host: "c".repeat(32), boot: "d".repeat(32), runtime: "e".repeat(32)}, clock: () => ({wall_ns: "1", mono_ns: "1", uncertainty_ns: "0"}), dom, observer: FObserver, eventTarget: new FTarget()}, chunk => { r.chunks.push(chunk); });
    expect(recorder).toBeDefined();
    client.captureException(Error("CANARY_BEFORE"));
    const before = client.bufferedRecords().length;
-   client.setReplayConsent(true);
+   setReplayConsent(client, true);
    expect(r.chunks.length > 0).toBe(expectCapture);
-   client.setReplayConsent(false);
+   setReplayConsent(client, false);
    client.captureException(Error("CANARY_AFTER"));
    expect(client.bufferedRecords().length).toBe(before + 1);
    expect(client.bufferedRecords().join("")).not.toContain("CANARY");
-   if (expectCapture) { expect(FObserver.instances[0]!.disconnected).toBe(true); expect(() => client.startReplay({} as never, () => "accepted")).toThrow(); }
+   if (expectCapture) { expect(FObserver.instances[0]!.disconnected).toBe(true); expect(() => startReplay(client, {} as never, () => "accepted")).toThrow(); }
   }
  } finally { await allowed.close(); await denied.close(); }
 });

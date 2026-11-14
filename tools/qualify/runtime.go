@@ -49,6 +49,7 @@ var runners = map[string]runner{
 	"build_probe":              runBuildProbe,
 	"sdk_profile":              runSDKProfile,
 	"unmeasured":               runUnmeasured,
+	"journeys_smoke_row":       runJourneysRow,
 	"native_capability":        runNativeCapability,
 	"native_identity":          runNativeIdentity,
 	"native_gap":               runNativeGap,
