@@ -73,6 +73,19 @@ jobs:
             go-${{ hashFiles('build/toolchains.json') }}-${{ hashFiles('go.sum') }}-${{ matrix.shard.name }}-
             go-${{ hashFiles('build/toolchains.json') }}-${{ hashFiles('go.sum') }}-
 
+      - name: Install the pinned Node and generate the real source-map fixture (rest shard)
+        if: matrix.shard.name == 'rest'
+        run: |
+          set -eu
+          curl --fail --location --silent --show-error --output node.tar.gz "$(jq -r .node.linux_22.url build/toolchains.json)"
+          echo "$(jq -r .node.linux_22.sha256 build/toolchains.json)  node.tar.gz" | sha256sum --check --strict -
+          mkdir -p .tools/node && tar -C .tools/node --strip-components=1 -xzf node.tar.gz
+          export PATH="$PWD/.tools/node/bin:$PATH"
+          corepack enable
+          pnpm install --frozen-lockfile --ignore-scripts
+          node fixtures/artifacts/generate.mjs "$RUNNER_TEMP/smfix"
+          echo "SOUNDPOST_SOURCEMAP_FIXTURE_DIR=$RUNNER_TEMP/smfix" >> "$GITHUB_ENV"
+
       - name: Test
         env:
           ARGS: ${{ matrix.shard.args }}
@@ -83,5 +96,9 @@ jobs:
             # Every package not covered by a named shard.
             ARGS=$(go list ./... | grep -v -E '^github.com/arynyklas/soundpost/(internal/(storage|control|appcore|replica|retention|backup|query|conformance)(/|$)|cmd/soundpost-querycheck$|tools/)' | tr '\n' ' ')
           fi
+          SKIP=""
+          # The real language campaign needs the locally pinned oracle images, which CI never pulls or builds; it is
+          # owned by conformance.yml, where it runs and fails honestly until the gate is met. Everything else runs here.
+          case "$ARGS" in *./tools/...*) SKIP='^TestCampaignReportsTheRealGateFaithfully$' ;; esac
           # shellcheck disable=SC2086
-          go test -count=1 -p 2 -timeout 110m $ARGS
+          go test -count=1 -p 2 -timeout 110m ${SKIP:+-skip "$SKIP"} $ARGS
