@@ -2,8 +2,8 @@ Soundpost configuration and tooling dependencies
 Copyright 2026 Aryn Yklas
 First-party code: Apache-2.0
 
-gopkg.in/yaml.v3 is linked into internal/config (typed InstallConfig parsing), tools/smoke,
-internal/config/cmd/soundpost-config and their tests. It is NOT linked into cmd/soundpost today
+gopkg.in/yaml.v3 is linked into internal/config (typed InstallConfig parsing), tools/smoke, tools/drills,
+tools/qualify, internal/config/cmd/soundpost-config and their tests. It is NOT linked into cmd/soundpost today
 (`go list -deps ./cmd/soundpost` lists no gopkg.in module); if a `soundpost config` subcommand
 is added to the server binary, this notice ships with it.
 

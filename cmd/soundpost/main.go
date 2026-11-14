@@ -47,6 +47,15 @@ func failureLine(args []string, err error) string {
 	if len(args) >= 2 && args[1] == "ready" {
 		return "soundpost: not ready"
 	}
+	if len(args) >= 2 && args[1] == "membership" {
+		if errors.Is(err, errMembershipIncomplete) {
+			return "soundpost: membership step incomplete (see the per-group result above)"
+		}
+		if errors.Is(err, errMembershipUsage) {
+			return err.Error()
+		}
+		return "soundpost: membership command failed (is the node running and the data directory its own?)"
+	}
 	if len(args) >= 2 && args[1] == "serve" {
 		if reason := startupReason(err); reason != "" {
 			return "soundpost: startup or service failed (reason=" + reason + ")"
@@ -76,6 +85,9 @@ func run() error {
 	}
 	if len(os.Args) >= 2 && os.Args[1] == "ready" {
 		return runReady(os.Args[2:], os.Stdout)
+	}
+	if len(os.Args) >= 2 && os.Args[1] == "membership" {
+		return runMembership(os.Args[2:], os.Stdout)
 	}
 	if len(os.Args) < 2 || os.Args[1] != "serve" {
 		return fmt.Errorf("usage: soundpost serve --mode=single --data-dir PATH --listen ADDRESS --tls-cert PATH --tls-key PATH")
@@ -216,6 +228,12 @@ func run() error {
 	}
 	early.gate.Open(httpapi.NewServerBehind(proxies, *listen, service, cfg, routes...).Handler)
 	go core.RunFences(ctx)
+	// The operator socket of a distributed node (`soundpost membership`); none on single host.
+	if admin, e := serveMembership(*dir, core); e != nil {
+		fmt.Fprintln(os.Stderr, "soundpost: membership socket not started")
+	} else if admin != nil {
+		defer admin.Close()
+	}
 	// The leader-only background runner (rules, conditions, issue/incident/job
 	// producers, notification delivery) acts as the in-process system principal of
 	// each organization: no human session, no stored token.

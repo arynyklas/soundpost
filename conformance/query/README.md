@@ -9,8 +9,13 @@ images; they are never a production fallback.
 
 ## Locked files are byte-exact and LF-only
 
-`source-lock.json` pins every case file, audit file and profile file by the
-SHA-256 of its raw bytes. Git normalises line endings (`core.autocrlf=input`),
+`source-lock.json` pins every case file (`cases/`), every audit result file
+(`audits/*.json`) and every profile file (the repository's `profiles/query/*.json`) by the
+SHA-256 of its raw bytes. It does **not** pin: the two audit generator scripts
+`audits/promql-author.py` and `audits/promql-details.py` (they are inputs to the
+accepted audits; the audit files they produced are what is locked),
+`acceptance.json`, `obligations.json`, `fixtures/adapters/*`, `primitives/*` and
+`oracles/*`. Git normalises line endings (`core.autocrlf=input`),
 so a file that is CRLF in a Windows working tree hashes differently from the
 blob a clean checkout receives. Every locked file MUST be written with LF line
 endings before its hash is recorded. After editing any locked file:
@@ -22,12 +27,15 @@ endings before its hash is recorded. After editing any locked file:
 A mutated or unlocked case file hard-fails; `compared: 0` is a failure, never a
 pass.
 
-## Expected values are native observations
+## Inputs are authored, expected values are native observations
 
-Rows in `cases/logql-pipeline-differential.json` and
-`cases/logql-json-path-syntax.json`, and rows in
-`internal/query/logql/testdata/native-syntax-errors.json`, record what the
-pinned Loki 3.5.2 reference returned. They are not authored predictions. Rows
+The inputs of every case file are authored by this project (the files carry
+`"schema":"soundpost-authored-logql-cases-v1"` and an Apache-2.0 header). In
+`cases/logql-pipeline-differential.json` and `cases/logql-json-path-syntax.json`,
+and in `internal/query/logql/testdata/native-syntax-errors.json`, the expected
+outcomes are not authored: they record what the pinned Loki 3.5.2 reference
+returned for those inputs, and each row's `binding_scope` says so. They are not
+authored predictions. Rows
 whose reference output is nondeterministic are excluded (below), and rows whose
 native error text has no projected semantic family are excluded until the
 oracle driver (`oracles/logql-native/classify.go`) classifies them.

@@ -29,6 +29,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -623,6 +624,19 @@ type dcMember struct {
 
 var dcMembers = []dcMember{{1, "a", "node-a"}, {2, "b", "node-b"}, {3, "c", "node-c"}}
 
+// dcSpare is the fourth identity of the membership-replace drill: it gets a certificate from the same
+// CA but is not part of the installation until it is added as a learner.
+var dcSpare = dcMember{4, "d", "node-d"}
+
+// ids is the members the drill talks to: the three installed ones, and the spare once it joined.
+func (c *dcCluster) ids() []uint64 {
+	out := []uint64{1, 2, 3}
+	if c.spare {
+		out = append(out, dcSpare.id)
+	}
+	return out
+}
+
 // dcPKI writes a throwaway cluster CA and one certificate per member. Each certificate carries the
 // member's URI SAN spiffe://soundpost/node/<identity> and loopback dial names.
 func dcPKI(dir string) (ca string, certs, keys map[uint64]string, err error) {
@@ -641,7 +655,7 @@ func dcPKI(dir string) (ca string, certs, keys map[uint64]string, err error) {
 		return
 	}
 	certs, keys = map[uint64]string{}, map[uint64]string{}
-	for _, n := range dcMembers {
+	for _, n := range append(slices.Clone(dcMembers), dcSpare) {
 		var private *ecdsa.PrivateKey
 		if private, err = ecdsa.GenerateKey(elliptic.P256(), rand.Reader); err != nil {
 			return
@@ -755,6 +769,10 @@ type dcCluster struct {
 	data   map[uint64]string
 	logs   map[uint64]*dcLog
 	fx     *dcFixture
+	ca     string
+	certs  map[uint64]string
+	keys   map[uint64]string
+	spare  bool // member 4 was added (membership-replace)
 
 	mu       sync.Mutex
 	procs    map[uint64]*dcProc
@@ -818,6 +836,7 @@ func newDCClusterWith(env *Env, opts dcOptions) (*dcCluster, error) {
 		return nil, err
 	}
 	ca, certs, keys, err := dcPKI(pki)
+	c.ca, c.certs, c.keys = ca, certs, keys
 	if err != nil {
 		return nil, err
 	}
@@ -1125,9 +1144,9 @@ func (c *dcCluster) live() []uint64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	var out []uint64
-	for _, n := range dcMembers {
-		if c.procs[n.id] != nil && !c.down[n.id] {
-			out = append(out, n.id)
+	for _, id := range c.ids() {
+		if c.procs[id] != nil && !c.down[id] {
+			out = append(out, id)
 		}
 	}
 	return out
@@ -1303,9 +1322,9 @@ func (c *dcCluster) members() []uint64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	var out []uint64
-	for _, n := range dcMembers {
-		if !c.retired[n.id] {
-			out = append(out, n.id)
+	for _, id := range c.ids() {
+		if !c.retired[id] {
+			out = append(out, id)
 		}
 	}
 	return out

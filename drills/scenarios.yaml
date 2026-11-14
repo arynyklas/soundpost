@@ -56,6 +56,9 @@ scenarios:
     evidence: node_loss
     needs_binary: true
     description: A member's data directory vanishes under the running process (moved away; fsync and path operations answer EIO) while the other two keep their own disks and keep acknowledging inside the scenario window in both phases, then a blank replacement disk, then the original returns. The original disk holds less than the member acknowledged on the blank one, so the member must refuse to rejoin with reason=journal_behind_acknowledged (never become ready) while the other two keep acknowledging; a replacement is a new identity. No false ACK, every ACK reconciled on the remaining members.
+  - name: membership-replace
+    needs_binary: true
+    description: Operator replacement of a voter on three real processes of the produced binary through `soundpost membership` (status, add-learner for a fourth node, start it, replace the stopped member 3 by member 4) while a write stream keeps being acknowledged; the new voter serves every acknowledged batch and carries a majority with member 1 while member 2 is stopped; a re-add is idempotent, an add that does not fit is refused, and the socket and its directory are private (a real second uid is not available on the drill host, so that refusal is covered per connection by a unit test and recorded as not run here).
   # ---- capacity ----
   - name: capacity-faults
     description: Failed sync and slow apply through the replica journal hook and through the running storage.Engine (storage.Engine.SetFaultHook over HTTPS ingest, restart, retry of the same batches), and full disk through the committed storage.DiskMeter admission gate; nothing acknowledged without durability, every ACK reconciled. The real operating-system errors (EIO, ENOSPC) at the engine are the fsync-failure scenario.

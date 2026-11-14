@@ -86,6 +86,11 @@ func openReadyWAL(dir string, group model.ID, node uint64, members Members, seed
 			return fail(e)
 		}
 		if string(header[:4]) != "SPR1" || binary.BigEndian.Uint32(header[12:]) != crc32.Checksum(header[:12], readyCRC) {
+			if torn, e := w.tornFinal(offset, 0); e != nil {
+				return fail(e)
+			} else if torn {
+				break
+			}
 			return fail(ErrInvalid)
 		}
 		length := binary.BigEndian.Uint32(header[4:8])
@@ -102,6 +107,11 @@ func openReadyWAL(dir string, group model.ID, node uint64, members Members, seed
 			return fail(e)
 		}
 		if crc32.Checksum(raw, readyCRC) != binary.BigEndian.Uint32(header[8:12]) {
+			if torn, e := w.tornFinal(offset, int64(16+length)); e != nil {
+				return fail(e)
+			} else if torn {
+				break
+			}
 			return fail(ErrInvalid)
 		}
 		var r readyRecord
@@ -188,6 +198,62 @@ func (w *readyWAL) truncate(offset int64) error {
 		return err
 	}
 	return w.file.Sync()
+}
+
+// tornFinal applies decision D16: the bad frame at offset is dropped only when it provably never
+// reached the disk whole, and nothing verifiable follows it. frame is the frame's declared length
+// when its header was readable (0 when it was not). A complete record that fails its checksum, or
+// unreadable header bytes that are not zero, is corruption and is refused: a synced record may have
+// been acknowledged. The rule, applied to the bytes from offset to the end of the file:
+//
+//   - a readable header must describe a frame that ends exactly at the end of the file (a header
+//     that declares more than the file holds is the short tail handled by the caller);
+//   - the header's sector (the bytes up to the next 512-byte boundary) is entirely zero, or at
+//     least one 512-byte sector-aligned chunk lying inside the record is entirely zero (an unwritten
+//     sector, the rule etcd uses for torn writes);
+//   - no verifiable frame header begins after offset.
+func (w *readyWAL) tornFinal(offset, frame int64) (bool, error) {
+	info, err := w.file.Stat()
+	if err != nil {
+		return false, err
+	}
+	size := info.Size()
+	if frame > 0 && offset+frame != size {
+		return false, nil
+	}
+	if frame == 0 && size-offset > 16+maxReadyBytes {
+		return false, nil
+	}
+	rest := make([]byte, size-offset)
+	if _, err = w.file.ReadAt(rest, offset); err != nil {
+		return false, err
+	}
+	allZero := func(b []byte) bool {
+		for _, c := range b {
+			if c != 0 {
+				return false
+			}
+		}
+		return true
+	}
+	const sector = 512
+	headerEnd := min(int64(len(rest)), sector-offset%sector)
+	unwritten := allZero(rest[:headerEnd])
+	for start := (offset + sector - 1) / sector * sector; !unwritten && start+sector <= size; start += sector {
+		unwritten = allZero(rest[start-offset : start-offset+sector])
+	}
+	if !unwritten {
+		return false, nil
+	}
+	for i := 1; i+16 <= len(rest); i++ {
+		if string(rest[i:i+4]) == "SPR1" && binary.BigEndian.Uint32(rest[i+12:i+16]) == crc32.Checksum(rest[i:i+12], readyCRC) {
+			return false, nil
+		}
+	}
+	if err = w.truncate(offset); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 func (w *readyWAL) Close() error { return w.file.Close() }
 func (w *readyWAL) persist(rd raft.Ready) error {

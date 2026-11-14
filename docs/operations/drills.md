@@ -68,18 +68,19 @@ entry, `facts` and `not_run_items`. No secret or raw telemetry content is writte
 | `node-kill-restart` | three real mTLS processes of the produced static binary; SIGKILL the configured initial leader and a follower while writers stream; survivors keep acknowledging; restart; every member reconciled | run |
 | `minority-pause` | same cluster; SIGSTOP one member (alive, unresponsive), SIGCONT | run |
 | `majority-pause` | SIGSTOP two members; the survivor refuses with a typed 503 and the refused batch is never ACKed; SIGCONT, identical retry | run |
-| `capacity-faults` | real replica journal with the committed `replica.Config.Fault` hook (failed sync, slow sync/apply) and the real application with an injected `storage.DiskMeter` (full disk) | run |
+| `capacity-faults` | real replica journal with the committed `replica.Config.Fault` hook (failed sync, slow sync/apply); the running application's `storage.Engine` through `SetFaultHook` over HTTPS ingest (failed `wal_sync`, group latch, restart, retry of the same batches, slow `before_apply`; builds tagged `soundpost_faults` only); and the application with an injected `storage.DiskMeter` (full disk) | run |
 | `provider-failure-outage` | real node, outbox, worker, incident service with recording senders | run |
 | `external-deadman` | the 06.09 observer as a separate OS process while every Soundpost component is stopped | run |
 | `owner-cutover-rollback` | `notify.AdvanceCutover` activation, rollback, crash between phases, stale owner | run |
 | `stale-policy-delete-barrier` | real in-process engine; all-shard delete barrier raced by legitimate, stale, replaying and cached-policy writers | run |
 | `backup-predates-deletion` | encrypted backup older than a completed deletion, independent authority HEAD | run |
-| `restore-authority-unavailable` | restore with the authority unreachable, uninitialised, wrong, rolled back: fail closed | run (one part not run, below) |
+| `restore-authority-unavailable` | restore with the authority unreachable, uninitialised, wrong, rolled back: fail closed; and, on a post-deletion backup, restore and activation with the authority available | run |
 | `evidence-gap-after-retention` | retention worker after expiry; explicit evidence gap on the read path | run |
 | `network-partition` | three real processes; peer traffic runs through the drill's own loopback TCP proxies (each member binds `127.0.0.<id>` as its peer source address); member 1 (initial leader) is isolated with DROPPED packets, member 3 with RESET links, both sides alive and the isolated member still reachable by clients; it must never acknowledge, the majority keeps acknowledging, every ACK reconciled on every member after the heal | run |
 | `power-loss` | three real processes under the unprivileged storage fault injector; one member (initial leader, then member 3 with a torn tail) and then ALL members are power-cut inside an fsync (every fsync held, process group SIGKILLed, then every byte and directory entry the members had not fsynced rolled back); restart; every ACK reconciled | run (emulated power cut, see below) |
-| `fsync-failure` | same injector; every fsync of one member (initial leader, then member 3) answers EIO while writes stream; that member fails stop in every group (it stops leading and voting, then exits), the other two keep acknowledging inside the scenario window in both phases (no phase is exempt), the member is restarted on its disk and rejoins; every ACK reconciled | run |
+| `fsync-failure` | same injector; every fsync of one member answers a real errno while writes stream: EIO on the initial leader and on member 3 (a failing disk), ENOSPC on member 2 (a full filesystem); that member fails stop in every group (it stops leading and voting, then exits), the other two keep acknowledging inside the scenario window in all three phases, the member is restarted on its disk and rejoins; every ACK reconciled | run |
 | `disk-disappearance` | same injector; one member's data directory is moved away under the running process and every fsync and path operation on it answers EIO (initial leader, member 3), the survivors keep acknowledging inside the scenario window in both phases; then member 2's disk is replaced with a blank one and finally the original returns; every ACK reconciled | run |
+| `membership-replace` | three real processes plus a fourth; `soundpost membership status`, a refused add of an existing voter, `add-learner` for member 4 (and its idempotent repeat), start member 4, stop member 3, `replace --remove 3 --promote 4`, all while a write stream is acknowledged; members 1, 2 and 4 each retain every acknowledged batch and 1 and 4 acknowledge with 2 stopped | run (the refusal of a real second uid is not run: no second user on the host; unit-tested per connection) |
 
 ### How the four storage and link drills inject their faults (no host privilege)
 
@@ -131,19 +132,21 @@ entry, `facts` and `not_run_items`. No secret or raw telemetry content is writte
   The destination is a loopback receiver; no SMS, Telegram or webhook third party is contacted.
 * The scenarios of the deletion group run the real engine in process, not the
   produced binary.
-* A backup taken **after** a deletion whose erased rows carried a series no
-  retained row has is not restorable (`Engine.CommitQuotaReconciliation` returns a
-  typed `corrupt`: the quota series digest still counts the erased series). It
-  fails closed; the fixture of `restore-authority-unavailable` therefore shares a
-  series, and this case is recorded not run. It is a product defect to be fixed.
+* The restore case of `restore-authority-unavailable` is no longer a not-run part: its
+  fixture deletes rows whose series no retained row carries (the case dc732a8 fixed), restore
+  fails closed with the authority unavailable, and with the authority available the same
+  restore and activation succeed and no deleted row is readable.
 
 ### Product findings surfaced by the drills
 
 1. A capacity-refused batch (retryable 503) retried after a project deletion
-   changed the policy epoch gets a permanent `403`, because the first attempt left a
+   changed the policy epoch got a permanent `403`, because the first attempt left a
    `reserved` reservation bound to the older epoch (`internal/auth/source_reservation.go`).
-   Possible quota leak from the same reservation: not checked.
-2. Post-deletion backups cannot be activated in the case above.
+   **Fixed** (b4263ca); the drills no longer record it. Whether the same reservation could
+   have leaked quota before the fix was not checked.
+2. Post-deletion backups could not be activated in the case below. **Fixed** (dc732a8):
+   `restore-authority-unavailable` now runs on a backup taken after a deletion whose erased
+   rows carried a series no retained row has, and its restore and activation checks pass.
 3. With an old backup, only the independent current authority HEAD protects
    against a rolled-back authority journal: the negative control of
    `backup-predates-deletion` shows a pre-deletion journal copy brings back the
@@ -179,7 +182,7 @@ entry, `facts` and `not_run_items`. No secret or raw telemetry content is writte
 6. **A node whose storage failed kept leading groups (fixed, 11.14).** With every fsync of the initial leader answering EIO, the two healthy members answered 503 for more than 120 s while the failed member stayed up (`/readyz` `state_unavailable`). Cause: only the group that noticed the failed write failed closed; every other group of that node (control and the 64 data groups) kept ticking and answering heartbeats, so the survivors never elected a replacement, while each proposal reaching the zombie leader was refused by its validator (its control state was unreadable) before anything was persisted, so those groups never failed either. The same cause stopped the survivors when member 3's disk vanished after member 3 had become the leader of some groups. Fix: `replica.FailDomain`, see `distributed.md`; red test `TestAStorageFailureInOneGroupFailStopsEveryGroupOfTheNode` (and the engine tests in `internal/storage/failstop_test.go`). The drills no longer exempt the leader phase: the survivors must acknowledge inside the scenario window in every phase.
 7. **Restart after a failed fsync (11.14).** The member now exits non-zero after a fail-stop with one typed line (`soundpost: storage failure (reason=... group=...)`), and its restart re-verifies the journal: the Ready journal is read after the kernel is asked to drop its cached pages, every frame is CRC-verified, and the file is synced once more (`wal_open_sync`); a journal that cannot be verified or synced is refused, never reused. A restart that failed with the generic "startup or service failed" was a startup step giving up at its first five second freshness window while the member was still catching up under load (`model.Fault` `stale`): the post-ready startup reads now retry while stale within the startup budget, and a refused start prints `(reason=<closed code>)` instead of the generic line alone. Limits: the injector answers EIO but does not drop pages, so these drills cannot show a real lost page; the verification covers the Ready journals, while the other files verify themselves as far as their formats do (bbolt meta checksums, snapshot and segment hashes).
 8. **Drill harness (11.14).** The write stream of a phase had a fixed budget of 100 batches; a restored member that needed 10 s to become ready (as happens) outlived it, and the check "6 acknowledgements after the member was ready" then timed out although the cluster was healthy. The stream now gets 30 more batches once the member is ready; the check itself is unchanged.
-9. **Open: a voter whose disk went back in time cannot rejoin (11.14).** `disk-disappearance` phase 3 puts a blank disk under member 2, lets it run (it acknowledges), then puts the original disk back. The original journal is shorter than what the leaders recorded for member 2: raft panics on every heartbeat (`tocommit(N) is out of range [lastIndex(M)]`, recovered per request) and the member exits after its 60 s startup budget with `reason=stale`. The product has no refusal for a voter whose journal is behind its own last acknowledgement; the documented remedy is a new identity and a joint replacement. The drill phase is unchanged and the scenario is `failed` until that is decided.
+9. **A voter whose disk went back in time cannot rejoin; the remedy is a command (11.14, 07.07-W5).** `disk-disappearance` phase 3 puts a blank disk under member 2, lets it run (it acknowledges), then puts the original disk back. The original journal is shorter than what the leaders recorded for member 2. Before 11.14 raft panicked on every heartbeat and the member exited after its 60 s startup budget with `reason=stale`. Now the member refuses to rejoin with `reason=journal_behind_acknowledged` (`replica.ErrJournalBehind`, `docs/operations/distributed.md`) and the phase requires exactly that typed refusal while the other two keep acknowledging. The replacement of such a voter (new identity, learner, joint change) is `soundpost membership add-learner` / `replace` on the running nodes (`distributed.md`, "Replacing a voter"); the `membership-replace` scenario drives that on the produced binary with a fourth process.
 
 ## Preparing the produced binary
 
@@ -195,6 +198,11 @@ minutes each (read-back through the query API dominates).
 
 ## After recovery: the reference journeys
 
-`go run ./tools/smoke journeys ...` (Docker PostgreSQL, about 70 s) exercises the
-three reference journeys against a recovered system; see `07.04-report.md` for the
-arguments. It exits 1 by design while two rows are unsatisfied.
+`go run ./tools/smoke journeys ...` (a Docker PostgreSQL container, about 70 s) exercises the
+three reference journeys against a recovered system; `docs/acceptance/reference-journeys.md`
+lists the rows and what is satisfied (the replay and profile rows are satisfied since 11.02 and
+10.17; the remaining unsatisfied rows are named there). The smoke needs Docker, a local
+PostgreSQL 16 image, Linux Chrome and a built UI, so it is **not** part of a drills run and was **not**
+re-run against a cluster recovered by these drills (07.07-W3): the drill machine used for the last
+full run (07.07-W4 below) has no Docker. Until it is run there, the claim is limited to what
+the drills themselves reconcile (every ACKed id on every member, through the query API).

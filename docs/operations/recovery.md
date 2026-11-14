@@ -4,6 +4,8 @@ Copyright 2026 Aryn Yklas. SPDX-License-Identifier: Apache-2.0.
 
 This describes task 01.07: full-byte snapshots, installation, repair, Raft journal truncation and the C12 backup/restore certificates. Nothing here is a power-loss, distinct-hardware or at-scale qualification. The `snapshot-repair` smoke (`tools/smoke/snapshot.go`) drives real local processes with separate private directories; after the follow-up described under "Local maintenance on every voter" and "Repairing a learner added after a truncation" it passed five consecutive local runs (three voters, three maintenance cycles per node with live receipt retries, destruction of one voter's disk, a fresh learner under a new member id repaired from a snapshot, promotion, restart from truncated journals, exact ACK/value reconciliation).
 
+The per-run records of those five runs live in the private development ledger (`.superpowers/`, gitignored): **private-ledger evidence, not shipped with the repository.** A reader of a fresh clone can re-derive the claim by running the smoke; the five-run count states what was recorded, not something the clone contains.
+
 ## What a snapshot is
 
 Every owned group (control and the 64 data slots) cuts its own snapshot at its current applied index, under the group lock, so state, receipts and ledger agree. A snapshot is a directory under `<group directory>/snapshots/`:

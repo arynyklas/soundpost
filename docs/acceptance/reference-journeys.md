@@ -55,6 +55,7 @@ reported with the admitted one and finds the direct request's trace as the only 
 
 Two consecutive runs of the committed smoke ended with the same outcome (exit status 1): twelve rows
 passed and two did not. Run output: `.superpowers/sdd/approved-product/07.04-evidence/`.
+(That directory is part of the private development ledger, gitignored: **private-ledger evidence, not shipped with the repository.** The smoke itself is committed and repeats the run.)
 
 * `replay_masked_interaction_real_recorder`: **satisfied** after task 11.02 (it was NOT satisfied, `sdk_recorder_chunks_not_enqueued`).
   The recorder now emits the server's closed schema (decision D2) and `startReplay(client, ...)` (`@soundpost/browser/replay`) enqueues every chunk itself. The reference

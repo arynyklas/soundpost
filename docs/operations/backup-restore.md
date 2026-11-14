@@ -168,6 +168,8 @@ Operating the authority: initialize it once when enabling off-host backup (`auth
 
 ## Measured RPO and timings (one local drill)
 
+> The three runs below, their timings and the ledger hashes are **private-ledger evidence, not shipped with the repository** (the run artifacts live in the private ledger, `.superpowers/`, which is gitignored). A fresh clone can repeat the drill with the command in the next paragraph, but cannot re-derive these numbers from what it contains.
+
 `tools/smoke/backup.go` (`go run ./tools/smoke backup-restore --artifact-dir <dir>`) drives a live installation process over HTTPS while the backup copies, ACKs more batches after the seal, completes a historical-range deletion (which only completes after the authority checkpointed it), kills the process, restores into a clean root, serves the root from a second clean process and compares results. Three consecutive runs on one WSL/Linux host, one local disk, loopback only, built through a temporary overlay registration (artifacts `backup-restore.json`, no secrets, ACK ledger hashes below). The host was shared with other test jobs (load average about 5 on 32 CPUs), which is the only explanation offered for the spread; it was not investigated further.
 
 | Measurement | Run A | Run B | Run C |
