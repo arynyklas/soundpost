@@ -27,14 +27,15 @@ test('provision the accounts and the OIDC provider the suite needs',async({page}
  const org=await createOrg(page,'e2e provisioned org');
  await createProject(page,org,'e2e provisioned project');
  const local={id:id(),email:`auth-${id().slice(0,8)}@example.test`,password:password()};
+ const keyboard={id:id(),email:`kbd-${id().slice(0,8)}@example.test`,password:password()};
  const mapped={id:id(),email:`oidc-${id().slice(0,8)}@example.test`,password:password()};
- for(const user of [local,mapped]){
+ for(const user of [local,keyboard,mapped]){
   await adminCommand(page,org,'create_user',{id:user.id,email:user.email,password:user.password});
   await adminCommand(page,org,'membership',{user_id:user.id,enabled:true});
  }
  const provider=id();
  await adminCommand(page,org,'sso',{id:provider,config:{Issuer:issuer,ClientID:'soundpost-browser',RedirectURL:`${origin()}/api/v1/oidc/callback`,Subjects:{'mapped-subject':mapped.id}}});
- const values:[string,string][]=[['SOUNDPOST_TEST_EMAIL',local.email],['SOUNDPOST_TEST_PASSWORD',local.password],['SOUNDPOST_TEST_ORG',org],['SOUNDPOST_TEST_PROVIDER',provider],['SOUNDPOST_ELEVATION_EMAIL',o.email],['SOUNDPOST_ELEVATION_PASSWORD',o.password]];
+ const values:[string,string][]=[['SOUNDPOST_TEST_EMAIL',local.email],['SOUNDPOST_TEST_PASSWORD',local.password],['SOUNDPOST_KEYBOARD_EMAIL',keyboard.email],['SOUNDPOST_KEYBOARD_PASSWORD',keyboard.password],['SOUNDPOST_TEST_ORG',org],['SOUNDPOST_TEST_PROVIDER',provider],['SOUNDPOST_ELEVATION_EMAIL',o.email],['SOUNDPOST_ELEVATION_PASSWORD',o.password]];
  writeFileSync(out,values.map(([k,v])=>`export ${k}='${v}'\n`).join(''),{mode:0o600});
- expect(values.length).toBe(6);
+ expect(values.length).toBe(8);
 });

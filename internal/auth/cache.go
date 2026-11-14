@@ -12,6 +12,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"github.com/arynyklas/soundpost/internal/model"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -396,18 +397,40 @@ func sourceState(src model.SourceAuthority, now time.Time) string {
 	return SourceActive
 }
 
+// sourceView is one visible source with the policy facts the derived service
+// catalogue needs. It never leaves this package.
+type sourceView struct {
+	VisibleSource
+	services     []model.ID
+	environments []model.ID
+	builds       []model.ID
+	dependencies []string
+}
+
 // VisibleSources lists the sources the scope may actually read, whatever their lifecycle state:
 // structured sources of its projects for telemetry.read, and restricted-raw sources only for a
 // raw.read scope whose principal is a named reader. A restricted-raw source whose clock window
 // has closed is the one exception (decision D6: raw eligibility ends by clock).
 func (s *Service) VisibleSources(ctx context.Context, scope Scope) ([]VisibleSource, error) {
+	views, err := s.visibleSourceViews(ctx, scope)
+	if err != nil {
+		return nil, err
+	}
+	var out []VisibleSource
+	for _, v := range views {
+		out = append(out, v.VisibleSource)
+	}
+	return out, nil
+}
+
+func (s *Service) visibleSourceViews(ctx context.Context, scope Scope) ([]sourceView, error) {
 	if scope.service != s || scope.sourceCredential != nil || scope.action != Read && scope.action != RawRead {
 		return nil, model.Fail(model.NotFound)
 	}
 	if err := s.Revalidate(ctx, scope); err != nil {
 		return nil, err
 	}
-	var out []VisibleSource
+	var out []sourceView
 	err := s.store.View(ctx, func(st model.ControlState) error {
 		if err := scope.ValidateControlState(st); err != nil {
 			return err
@@ -435,7 +458,11 @@ func (s *Service) VisibleSources(ctx context.Context, scope Scope) ([]VisibleSou
 					continue
 				}
 			}
-			out = append(out, VisibleSource{ID: src.ID, Project: src.Project, Class: src.Policy.Class, Kinds: append([]model.Kind(nil), src.Policy.Kinds...), Replay: src.Policy.Replay, PolicyRevision: src.Policy.Revision, State: sourceState(src, s.now())})
+			out = append(out, sourceView{
+				VisibleSource: VisibleSource{ID: src.ID, Project: src.Project, Class: src.Policy.Class, Kinds: append([]model.Kind(nil), src.Policy.Kinds...), Replay: src.Policy.Replay, PolicyRevision: src.Policy.Revision, State: sourceState(src, s.now())},
+				services:      append([]model.ID(nil), src.Policy.Resources.Services...), environments: append([]model.ID(nil), src.Policy.Resources.Environments...),
+				builds: append([]model.ID(nil), src.Policy.Resources.Builds...), dependencies: append([]string(nil), src.Policy.Dependencies...),
+			})
 		}
 		return nil
 	})
@@ -444,4 +471,78 @@ func (s *Service) VisibleSources(ctx context.Context, scope Scope) ([]VisibleSou
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID.String() < out[j].ID.String() })
 	return out, nil
+}
+
+// VisibleService is one service the scope's sources are allowed to emit for
+// (D9): there is no separate registry, so a service exists exactly while an
+// active source policy of a project the scope may read lists its ID among the
+// resources it admits. Everything here is a fact of those policies, never an
+// observation: Dependencies are the dependency names the policies declare.
+type VisibleService struct {
+	ID           model.ID   `json:"id"`
+	Project      model.ID   `json:"project_id"`
+	Sources      []model.ID `json:"sources"`
+	Environments []model.ID `json:"environments"`
+	Builds       []model.ID `json:"builds"`
+	Dependencies []string   `json:"dependencies"`
+}
+
+// VisibleServices derives the service catalogue of the scope from its visible
+// sources, ordered by project then service ID. Each list is sorted and unique.
+func (s *Service) VisibleServices(ctx context.Context, scope Scope) ([]VisibleService, error) {
+	views, err := s.visibleSourceViews(ctx, scope)
+	if err != nil {
+		return nil, err
+	}
+	type key struct{ project, service model.ID }
+	byKey := map[key]*VisibleService{}
+	for _, v := range views {
+		// D9: a service exists while an ACTIVE source policy admits it. D11 keeps a revoked, retired,
+		// closing, disabled or expired source listed and readable, but its policy no longer defines services.
+		if v.State != SourceActive {
+			continue
+		}
+		for _, svc := range v.services {
+			k := key{v.Project, svc}
+			e := byKey[k]
+			if e == nil {
+				e = &VisibleService{ID: svc, Project: v.Project, Sources: []model.ID{}, Environments: []model.ID{}, Builds: []model.ID{}, Dependencies: []string{}}
+				byKey[k] = e
+			}
+			e.Sources = addID(e.Sources, v.ID)
+			for _, id := range v.environments {
+				e.Environments = addID(e.Environments, id)
+			}
+			for _, id := range v.builds {
+				e.Builds = addID(e.Builds, id)
+			}
+			for _, name := range v.dependencies {
+				if !slices.Contains(e.Dependencies, name) {
+					e.Dependencies = append(e.Dependencies, name)
+				}
+			}
+		}
+	}
+	out := make([]VisibleService, 0, len(byKey))
+	for _, e := range byKey {
+		slices.SortFunc(e.Sources, func(a, b model.ID) int { return slices.Compare(a[:], b[:]) })
+		slices.SortFunc(e.Environments, func(a, b model.ID) int { return slices.Compare(a[:], b[:]) })
+		slices.SortFunc(e.Builds, func(a, b model.ID) int { return slices.Compare(a[:], b[:]) })
+		slices.Sort(e.Dependencies)
+		out = append(out, *e)
+	}
+	slices.SortFunc(out, func(a, b VisibleService) int {
+		if c := slices.Compare(a.Project[:], b.Project[:]); c != 0 {
+			return c
+		}
+		return slices.Compare(a.ID[:], b.ID[:])
+	})
+	return out, nil
+}
+
+func addID(ids []model.ID, id model.ID) []model.ID {
+	if slices.Contains(ids, id) {
+		return ids
+	}
+	return append(ids, id)
 }

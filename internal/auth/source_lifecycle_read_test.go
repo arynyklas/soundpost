@@ -133,4 +133,28 @@ func TestRevokedRetiredAndClosingSourcesStayReadable(t *testing.T) {
 	if got := sourceState(t, f, telemetry, auth.Read, retired); got != "retired" {
 		t.Fatalf("retired source listed with state %q, want retired", got)
 	}
+
+	// D9 with D11: a closing or retired source stays listed and readable, but its policy no longer
+	// defines a service; an active one does.
+	active := f.structuredSource()
+	scope, err := f.service.Authorize(f.ctx, telemetry, f.org, []model.ID{f.project}, auth.Read)
+	if err != nil {
+		t.Fatal(err)
+	}
+	services, err := f.service.VisibleServices(f.ctx, scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	from := map[model.ID]bool{}
+	for _, s := range services {
+		for _, src := range s.Sources {
+			from[src] = true
+		}
+	}
+	if !from[active] {
+		t.Fatalf("the active source defines no service: %+v", services)
+	}
+	if from[closing] || from[retired] {
+		t.Fatalf("a closing or retired source still defines a service: %+v", services)
+	}
 }

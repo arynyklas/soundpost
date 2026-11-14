@@ -48,6 +48,10 @@ type InvestigationRequest struct {
 	// Cursor resumes a previous page of the same request; it is authenticated
 	// and bound to the caller's visibility and the project set by the engine.
 	Cursor string `json:"cursor,omitempty"`
+	// Environment narrows a service view to the services an active source
+	// policy admits in that environment (D9). It is a selector: an environment
+	// no visible policy lists answers like an absent target.
+	Environment *model.ID `json:"environment,omitempty"`
 }
 
 // ViewState is the server side of the browser's LoadState. unauthorized,
@@ -68,12 +72,24 @@ const (
 	ReasonServiceNotBuilt = "service_not_built"
 	ReasonGrantNotBuilt   = "separate_grant_not_built"
 	ReasonViewNotBuilt    = "view_not_built"
-	ReasonRegistryAbsent  = "service_registry_not_built"
 	ReasonSectionsAbsent  = "sections_not_available"
 	ReasonShardsMissing   = "shards_missing"
 	ReasonFreshnessStale  = "freshness_stale"
 	ReasonNoSources       = "no_visible_sources"
 	ReasonRestrictedScope = "restricted_source_discovery_unavailable"
+	// ReasonServiceNotSelected: a per-service section of a list view.
+	ReasonServiceNotSelected = "service_not_selected"
+	// ReasonResourceFilter: the query engine has no service or environment
+	// dimension, so a project-wide answer is not given for a narrowed view.
+	ReasonResourceFilter = "resource_filter_unavailable"
+	// ReasonHealthNotWired, ReasonHealthNotAuthorized and ReasonHealthUnreadable
+	// say why the health of a service is not stated; it is never read as healthy.
+	ReasonHealthNotWired      = "health_source_not_wired"
+	ReasonHealthNotAuthorized = "health_not_authorized"
+	ReasonHealthUnreadable    = "health_evidence_unreadable"
+	// ReasonReleaseRecordsAdmin: release records (labels, ancestry) are read
+	// through the release view with an organization-admin scope.
+	ReasonReleaseRecordsAdmin = "release_records_need_org_admin"
 )
 
 // ProjectEvidence lists the active sources of one requested project that this
@@ -114,4 +130,42 @@ type InvestigationView struct {
 	Freshness   *query.Freshness  `json:"freshness,omitempty"`
 	Sections    []ViewSection     `json:"sections"`
 	Link        *TargetLink       `json:"link,omitempty"`
+	// Services (service kind only) are the services the active source policies
+	// of the requested projects admit (D9), narrowed by Target and Environment.
+	Services []auth.VisibleService `json:"services,omitempty"`
+	// Health is the stored-evidence health of the one targeted service.
+	Health *ServiceHealth `json:"health,omitempty"`
+}
+
+// HealthStatus is D9: failing = an open incident links the service, degraded =
+// only active conditions name it, healthy = neither exists. There is no other
+// value and nothing is inferred.
+type HealthStatus string
+
+const (
+	HealthHealthy  HealthStatus = "healthy"
+	HealthDegraded HealthStatus = "degraded"
+	HealthFailing  HealthStatus = "failing"
+)
+
+// ServiceHealth lists the stored evidence behind a status; each entry names the
+// project and the ID of the incident or condition that the page links to.
+type ServiceHealth struct {
+	Status     HealthStatus      `json:"status"`
+	Incidents  []HealthIncident  `json:"incidents"`
+	Conditions []HealthCondition `json:"conditions"`
+	Truncated  bool              `json:"truncated,omitempty"`
+}
+type HealthIncident struct {
+	Project  model.ID     `json:"project_id"`
+	ID       model.ID     `json:"incident_id"`
+	Severity string       `json:"severity"`
+	Version  model.Uint64 `json:"version"`
+}
+type HealthCondition struct {
+	Project   model.ID `json:"project_id"`
+	ID        model.ID `json:"condition_id"`
+	Phase     string   `json:"phase"`
+	Severity  string   `json:"severity"`
+	Freshness string   `json:"freshness"`
 }

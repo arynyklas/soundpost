@@ -57,6 +57,9 @@ func TestOpenWiresTheInvestigateRoute(t *testing.T) {
 	if app.Investigator == nil {
 		t.Fatal("the investigator is not wired")
 	}
+	if !app.Investigator.HealthWired() {
+		t.Fatal("the investigator has no health source: every service would answer health_source_not_wired")
+	}
 	mux := http.NewServeMux()
 	app.Register(mux)
 	rec := httptest.NewRecorder()

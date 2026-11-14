@@ -225,6 +225,7 @@ func openWith(dir string, options *replicationOptions, meter storage.DiskMeter, 
 	if e != nil {
 		return fail(e)
 	}
+	investigator.WithHealth(c) // D9: service health from stored incidents and conditions
 	incidentService, e := incidents.New(c, releaseActionClock{})
 	if e != nil {
 		return fail(e)

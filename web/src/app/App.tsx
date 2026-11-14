@@ -12,7 +12,7 @@ import { ProfilePage } from '../profiles/ProfilePage';
 import { QueuePage } from '../queue/QueuePage';
 import { ProjectSettings } from '../settings/ProjectSettings';
 import { SessionContext } from '../auth/ElevationDialog';
-import { ServicePage } from '../services/ServicePage';
+import { ServiceList, ServicePage } from '../services/ServicePage';
 import { JobsPage } from '../jobs/JobsPage';
 import { MAX_PROJECTS, SECTIONS, decodeHash, encodeHash, formatNs, isId, scopeKey, useInvestigation, validTimezone, windowEndingAt, type IncidentRef, type SectionId, type ViewContext } from './context';
 import { SectionList, StatusPanel } from './StatusPanel';
@@ -39,6 +39,7 @@ const WINDOWS: readonly { minutes: number; label: string }[] = [{ minutes: 15, l
 function ScopeForm(props: { current: ViewContext | null; apply: (next: Omit<ViewContext, 'generation'>) => void }): React.JSX.Element {
  const [org, setOrg] = React.useState(props.current?.org ?? '');
  const [projects, setProjects] = React.useState(props.current?.projects.join(', ') ?? '');
+ const [environment, setEnvironment] = React.useState(props.current?.environment ?? '');
  const [timezone, setTimezone] = React.useState(props.current?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone);
  const [minutes, setMinutes] = React.useState(60);
  const [error, setError] = React.useState('');
@@ -48,13 +49,15 @@ function ScopeForm(props: { current: ViewContext | null; apply: (next: Omit<View
   if (!isId(org.trim())) return setError('Organization ID must be 32 lowercase hexadecimal characters.');
   if (list.length === 0 || list.length > MAX_PROJECTS || !list.every(isId) || new Set(list).size !== list.length) return setError(`Enter 1 to ${MAX_PROJECTS} distinct project IDs, each 32 lowercase hexadecimal characters.`);
   if (!validTimezone(timezone.trim())) return setError('Time zone must be a valid IANA name such as UTC or Europe/Berlin.');
+  if (environment.trim() !== '' && !isId(environment.trim())) return setError('Environment ID must be empty (all environments) or 32 lowercase hexadecimal characters.');
   setError('');
-  props.apply({ org: org.trim(), projects: list, environment: '', timezone: timezone.trim(), ...windowEndingAt(Date.now(), minutes) });
+  props.apply({ org: org.trim(), projects: list, environment: environment.trim(), timezone: timezone.trim(), ...windowEndingAt(Date.now(), minutes) });
  };
  return (
   <form onSubmit={submit} aria-label="Select scope" className="scope-form">
    <label>Organization ID <input value={org} onChange={(e) => setOrg(e.target.value)} autoComplete="off" spellCheck={false} /></label>
    <label>Project IDs (comma separated) <input value={projects} onChange={(e) => setProjects(e.target.value)} autoComplete="off" spellCheck={false} /></label>
+   <label>Environment ID (optional) <input value={environment} onChange={(e) => setEnvironment(e.target.value)} autoComplete="off" spellCheck={false} /></label>
    <label>Time zone <input value={timezone} onChange={(e) => setTimezone(e.target.value)} autoComplete="off" spellCheck={false} /></label>
    <label>Window <select value={minutes} onChange={(e) => setMinutes(Number(e.target.value))}>{WINDOWS.map((w) => <option key={w.minutes} value={w.minutes}>{w.label}</option>)}</select></label>
    <button type="submit" className="primary">Apply scope</button>
@@ -70,7 +73,7 @@ function ScopeBar(props: { context: ViewContext }): React.JSX.Element {
   <dl className="scope-bar" aria-label="Current scope">
    <dt>Organization</dt><dd data-testid="visible-org"><code>{c.org}</code></dd>
    <dt>Projects</dt><dd data-testid="visible-projects"><code>{c.projects.join(', ')}</code></dd>
-   <dt>Environment</dt><dd>All environments (no environment filter is available yet)</dd>
+   <dt>Environment</dt><dd data-testid="visible-environment">{c.environment === '' ? 'All environments' : <code>{c.environment}</code>}{c.environment !== '' && ' (the server narrows the Services view to it; sections that cannot be narrowed say so)'}</dd>
    <dt>Time zone</dt><dd>{c.timezone}</dd>
    <dt>Window</dt><dd>{formatNs(c.start, c.timezone)} to {formatNs(c.end, c.timezone)} (end excluded)</dd>
   </dl>
@@ -116,7 +119,7 @@ function ServiceEntry(props: { context: ViewContext; service: Id; open: (id: Id)
     <button type="submit">Open service</button>
     {error && <p role="alert" className="error">{error}</p>}
    </form>
-   {props.service ? <div data-entity><ServicePage id={props.service} context={props.context} /></div> : <KindView context={props.context} kind="service" label="Services" />}
+   {props.service ? <div data-entity><ServicePage id={props.service} context={props.context} /></div> : <ServiceList context={props.context} open={props.open} />}
   </div>
  );
 }

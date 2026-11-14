@@ -103,7 +103,7 @@ export async function adminCommand(page:Page,org:string,kind:string,payload:Reco
   const revision=field(read.json,'revision');
   if(read.status!==200||typeof revision!=='string')throw Error(`admin read: HTTP ${read.status} ${read.text}`);
   const r=await postJson(page,'/api/v1/admin/commands',{command_id:id(),expected_revision:revision,org_id:org,kind,payload:{...payload,reason:'Explore e2e fixture'}});
-  if(r.status===409&&attempt<4)continue;
+  if(r.status===409&&attempt<10)continue;
   if(r.status>=300)throw Error(`admin ${kind}: HTTP ${r.status} ${r.text}`);
   return r.json;
  }

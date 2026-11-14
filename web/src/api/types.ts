@@ -16,9 +16,11 @@ export interface InvestigationRequest {
  window: TimeRange;
  limit: number;
  cursor?: string;
+ /** Narrows a service view to the services an active source policy admits in this environment. */
+ environment?: Id;
 }
 export type ViewState = 'ready' | 'empty' | 'incomplete' | 'stale' | 'not_available';
-export interface VisibleSource { id: Id; project: Id; class: string; kinds: string[]; replay: boolean; policy_revision: string | number }
+export interface VisibleSource { id: Id; project: Id; class: string; kinds: string[]; replay: boolean; policy_revision: string | number; state: string }
 export interface ProjectEvidence { project_id: Id; sources: VisibleSource[] }
 export interface ViewSection { name: string; state: ViewState; reason?: string }
 export interface TargetLink { kind: string; project_id: Id; id: Id; available: boolean }
@@ -36,7 +38,17 @@ export interface InvestigationView {
  freshness?: Freshness;
  sections: ViewSection[];
  link?: TargetLink;
+ /** Service view only: the services the active source policies admit (D9). */
+ services?: VisibleService[];
+ health?: ServiceHealth;
 }
+/** A service derived from the active source policies: IDs and declared dependency names, never observations. */
+export interface VisibleService { id: Id; project_id: Id; sources: Id[]; environments: Id[]; builds: Id[]; dependencies: string[] }
+export type HealthStatus = 'healthy' | 'degraded' | 'failing';
+export const HEALTH_STATUSES: readonly HealthStatus[] = ['healthy', 'degraded', 'failing'];
+export interface HealthIncident { project_id: Id; incident_id: Id; severity: string; version: string }
+export interface HealthCondition { project_id: Id; condition_id: Id; phase: string; severity: string; freshness: string }
+export interface ServiceHealth { status: HealthStatus; incidents: HealthIncident[]; conditions: HealthCondition[]; truncated?: boolean }
 /** A typed failure: the C01 code, request ID and approved static detail only. */
 export class ApiFault extends Error {
  constructor(readonly status: number, readonly code: string, readonly requestId: string, readonly detail: string) {

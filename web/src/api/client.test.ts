@@ -17,6 +17,29 @@ describe('parseView accepts only the requested scope', () => {
  test('unknown state is refused', () => { expect(() => parseView(view({ state: 'healthy' }), req())).toThrow(ApiFault); });
 });
 
+describe('service views state only what their evidence supports', () => {
+ const E = 'e'.repeat(32), S = '5'.repeat(32), I = '6'.repeat(32), C = '7'.repeat(32);
+ const svc = (over: Record<string, unknown> = {}): Record<string, unknown> => ({ id: S, project_id: P, sources: [], environments: [E], builds: [], dependencies: [], ...over });
+ const health = (status: string, incidents: unknown[] = [], conditions: unknown[] = []): Record<string, unknown> => ({ status, incidents, conditions });
+ const incident = { project_id: P, incident_id: I, severity: 'major', version: '2' };
+ const condition = { project_id: P, condition_id: C, phase: 'firing', severity: 'critical', freshness: 'fresh' };
+ test('services and health of the requested service are accepted', () => {
+  expect(parseView(view({ services: [svc()], health: health('failing', [incident]) }), req({ target: S })).health?.status).toBe('failing');
+  expect(parseView(view({ services: [svc()], health: health('degraded', [], [condition]) }), req({ target: S, environment: E })).health?.status).toBe('degraded');
+  expect(parseView(view({ services: [svc()], health: health('healthy') }), req({ target: S })).health?.status).toBe('healthy');
+ });
+ test('a status stronger or weaker than its evidence is refused', () => {
+  for (const h of [health('failing'), health('healthy', [incident]), health('healthy', [], [condition]), health('degraded'), health('degraded', [incident], [condition]), health('fine')]) expect(() => parseView(view({ health: h }), req({ target: S }))).toThrow(ApiFault);
+ });
+ test('health without a target, for another project, or a service of another target or environment is refused', () => {
+  expect(() => parseView(view({ health: health('healthy') }), req())).toThrow(ApiFault);
+  expect(() => parseView(view({ health: health('failing', [{ ...incident, project_id: Q }]) }), req({ target: S }))).toThrow(ApiFault);
+  expect(() => parseView(view({ services: [svc({ id: B })] }), req({ target: S }))).toThrow(ApiFault);
+  expect(() => parseView(view({ services: [svc({ environments: [B] })] }), req({ environment: E }))).toThrow(ApiFault);
+  expect(() => parseView(view({ services: [svc({ id: 'x' })] }), req())).toThrow(ApiFault);
+ });
+});
+
 describe('state mapping never turns a gap into success', () => {
  const states: ViewState[] = ['ready', 'empty', 'incomplete', 'stale', 'not_available'];
  test.each(states)('view state %s', (state) => {

@@ -8,6 +8,7 @@ import { parseProfileResponse } from '../profiles/model';
 import type { ProfileResponse } from '../profiles/types';
 import { JOB_ATTEMPT_STATES, JOB_HEALTH_STATUSES, JOB_OBSERVER_STATES, JOB_RUN_STATUSES, type JobAttemptState, type JobAttemptView, type JobDefinition, type JobHealth, type JobObserverEvidence, type JobRunDetail, type JobRunView, type JobsListView, type JobView, type ViewSection as JobViewSection } from './types';
 
+import { HEALTH_STATUSES, type HealthStatus } from './types';
 // The CSRF token lives only here, in memory, handed over by the session
 // boundary. It is never persisted and never placed in a URL.
 let csrf = '';
@@ -52,6 +53,24 @@ export function parseView(raw: unknown, req: InvestigationRequest): Investigatio
  if (!raw.metric_names.every((n): boolean => typeof n === 'string')) return bad();
  if (isRecord(raw.window) && (raw.window.start !== req.window.start || raw.window.end !== req.window.end)) return bad();
  if (isRecord(raw.link) && (typeof raw.link.id !== 'string' || (req.target !== undefined && raw.link.id !== req.target) || typeof raw.link.project_id !== 'string' || !req.projects.includes(raw.link.project_id))) return bad();
+ const hex = (v: unknown): boolean => typeof v === 'string' && /^[0-9a-f]{32}$/.test(v);
+ const hexList = (v: unknown): boolean => Array.isArray(v) && v.every(hex);
+ if (raw.services !== undefined) {
+  if (req.kind !== 'service' || !Array.isArray(raw.services)) return bad();
+  for (const s of raw.services) {
+   if (!isRecord(s) || !hex(s.id) || typeof s.project_id !== 'string' || !req.projects.includes(s.project_id) || (req.target !== undefined && s.id !== req.target)) return bad();
+   if (!hexList(s.sources) || !hexList(s.environments) || !hexList(s.builds) || !Array.isArray(s.dependencies) || !s.dependencies.every((d): boolean => typeof d === 'string')) return bad();
+   if (req.environment !== undefined && !(s.environments as string[]).includes(req.environment)) return bad();
+  }
+ }
+ if (raw.health !== undefined) {
+  const h = raw.health;
+  if (req.kind !== 'service' || req.target === undefined || !isRecord(h) || !HEALTH_STATUSES.includes(h.status as HealthStatus) || !Array.isArray(h.incidents) || !Array.isArray(h.conditions)) return bad();
+  if (!h.incidents.every((i): boolean => isRecord(i) && hex(i.incident_id) && typeof i.project_id === 'string' && req.projects.includes(i.project_id) && typeof i.severity === 'string')) return bad();
+  if (!h.conditions.every((c): boolean => isRecord(c) && hex(c.condition_id) && typeof c.project_id === 'string' && req.projects.includes(c.project_id) && typeof c.phase === 'string' && typeof c.freshness === 'string')) return bad();
+  // Failing needs an open incident, degraded needs a condition and nothing else: the status is never stronger or weaker than its evidence.
+  if ((h.status === 'failing') !== (h.incidents.length > 0) || (h.status === 'degraded') !== (h.incidents.length === 0 && h.conditions.length > 0)) return bad();
+ }
  return raw as unknown as InvestigationView;
 }
 

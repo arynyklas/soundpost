@@ -8,7 +8,7 @@ import type { Id, InvestigationKind, InvestigationRequest, InvestigationView, Lo
 export interface ViewContext {
  org: Id;
  projects: Id[];
- /** No environment filter exists on the server yet, so this is always ''. */
+ /** The selected environment ID, or '' for all. The server narrows service views to it; other sections ignore it and say so. */
  environment: Id | '';
  /** Half-open [start,end) nanoseconds since the epoch, canonical decimal strings. */
  start: string;
@@ -58,13 +58,14 @@ export function formatNs(ns: string, timezone: string): string {
 /** The identity of what data may be shown: changing any part discards held data.
  * Timezone only changes presentation, so it is not part of it. */
 export function scopeKey(c: ViewContext): string {
- return [c.org, c.projects.join(','), c.start, c.end].join('|');
+ return [c.org, c.projects.join(','), c.environment, c.start, c.end].join('|');
 }
 
 /** The URL carries only stable IDs, nanosecond strings, the timezone name and the
  * section: never telemetry text, queries or credentials. */
 export function encodeHash(c: ViewContext, section: SectionId, service = '', incident: IncidentRef | null = null, target: IncidentRef | null = null): string {
  const params = new URLSearchParams({ org: c.org, projects: c.projects.join(','), start: c.start, end: c.end, tz: c.timezone, view: section });
+ if (c.environment) params.set('env', c.environment);
  if (service) params.set('service', service);
  if (incident) params.set('incident', `${incident.project}:${incident.id}`);
  if (target) params.set('target', `${target.project}:${target.id}`);
@@ -81,16 +82,17 @@ export function decodeHash(hash: string, generation: number): Navigation {
  const org = params.get('org') ?? '', start = params.get('start') ?? '', end = params.get('end') ?? '', tz = params.get('tz') ?? '';
  const projects = (params.get('projects') ?? '').split(',').filter((p) => p !== '');
  if (!isId(org) || projects.length === 0 || projects.length > MAX_PROJECTS || !projects.every(isId) || new Set(projects).size !== projects.length) return none;
- if (!validWindow(start, end) || !validTimezone(tz) || (service !== '' && !isId(service))) return none;
+ const environment = params.get('env') ?? '';
+ if (!validWindow(start, end) || !validTimezone(tz) || (service !== '' && !isId(service)) || (environment !== '' && !isId(environment))) return none;
  const refOf = (name: string): IncidentRef | null => {
   const [rproject = '', rid = ''] = (params.get(name) ?? '').split(':');
   return isId(rproject) && isId(rid) && projects.includes(rproject) ? { project: rproject, id: rid } : null;
  };
- return { context: { org, projects, environment: '', start, end, timezone: tz, generation }, section, service, incident: refOf('incident'), target: refOf('target') };
+ return { context: { org, projects, environment, start, end, timezone: tz, generation }, section, service, incident: refOf('incident'), target: refOf('target') };
 }
 
 export function requestFor(c: ViewContext, kind: InvestigationKind, target?: Id): InvestigationRequest {
- return { org: c.org, kind, projects: c.projects, ...(target ? { target } : {}), window: { start: c.start, end: c.end }, limit: PAGE_LIMIT };
+ return { org: c.org, kind, projects: c.projects, ...(target ? { target } : {}), ...(c.environment && kind === 'service' ? { environment: c.environment } : {}), window: { start: c.start, end: c.end }, limit: PAGE_LIMIT };
 }
 
 /** Only the most recent begun read may publish. begin() aborts the previous read;
