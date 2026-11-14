@@ -196,20 +196,22 @@ func (s *Store) ValidateArtifactReferences(ctx context.Context) error {
 		return err
 	}
 	var refs []model.BlobReceipt
-	if err = s.View(ctx, func(st State) error {
-		for key, r := range st.ArtifactIntents {
-			if err := validateArtifactReference(st, key, r); err != nil {
-				return err
+	if err = model.RetryWhileStale(ctx, func() error {
+		return s.View(ctx, func(st State) error {
+			for key, r := range st.ArtifactIntents {
+				if err := validateArtifactReference(st, key, r); err != nil {
+					return err
+				}
+				if r.State == artifactRetired {
+					continue
+				}
+				refs = append(refs, r.Map)
+				if r.Sources != nil {
+					refs = append(refs, *r.Sources)
+				}
 			}
-			if r.State == artifactRetired {
-				continue
-			}
-			refs = append(refs, r.Map)
-			if r.Sources != nil {
-				refs = append(refs, *r.Sources)
-			}
-		}
-		return nil
+			return nil
+		})
 	}); err != nil {
 		return err
 	}

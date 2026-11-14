@@ -190,24 +190,24 @@ func (g *Group) CompactJournal(ctx context.Context) (CompactionResult, error) {
 		}
 	}
 	if err = g.trip(HookCompactBegin); err != nil {
-		g.fail()
+		g.failStop(FailMaintenance)
 		return CompactionResult{}, err
 	}
 	archived, err := g.archivePinsLocked(cut)
 	if err != nil {
-		g.fail()
+		g.failStop(FailMaintenance)
 		return CompactionResult{}, err
 	}
 	if err = g.rewriteJournalLocked(cut); err != nil {
-		g.fail()
+		g.failStop(FailMaintenance)
 		return CompactionResult{}, err
 	}
 	if err = g.trip(HookCompactMemory); err != nil {
-		g.fail()
+		g.failStop(FailMaintenance)
 		return CompactionResult{}, err
 	}
 	if err = g.memory.Compact(cut); err != nil && !errors.Is(err, raft.ErrCompacted) {
-		g.fail()
+		g.failStop(FailMaintenance)
 		return CompactionResult{}, err
 	}
 	first, _ = g.memory.FirstIndex()

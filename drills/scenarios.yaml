@@ -51,11 +51,11 @@ scenarios:
   - name: fsync-failure
     evidence: node_loss
     needs_binary: true
-    description: Every fsync of one member answers EIO (injected by the unprivileged seccomp user-notification seam under the real binary) while writes stream; nothing is acknowledged without durability, the member restarts and rejoins, every ACK reconciled.
+    description: Every fsync of one member answers EIO (injected by the unprivileged seccomp user-notification seam under the real binary) while writes stream; the member fails stop in every group (stops leading and voting, exits), the other two keep acknowledging inside the scenario window in both phases (initial leader, member 3), nothing is acknowledged without durability, the member restarts on re-verified journals and rejoins, every ACK reconciled.
   - name: disk-disappearance
     evidence: node_loss
     needs_binary: true
-    description: A member's data directory vanishes under the running process (moved away; fsync and path operations answer EIO) while the other two keep their own disks, then a blank replacement disk, then the original returns; no false ACK, every ACK reconciled.
+    description: A member's data directory vanishes under the running process (moved away; fsync and path operations answer EIO) while the other two keep their own disks and keep acknowledging inside the scenario window in both phases, then a blank replacement disk, then the original returns. The original disk holds less than the member acknowledged on the blank one, so the member must refuse to rejoin with reason=journal_behind_acknowledged (never become ready) while the other two keep acknowledging; a replacement is a new identity. No false ACK, every ACK reconciled on the remaining members.
   # ---- capacity ----
   - name: capacity-faults
     description: Failed sync, slow apply and full disk through the committed fault hooks of the replica and retention layers; nothing acknowledged without durability, every ACK reconciled.

@@ -54,6 +54,12 @@ func openReadyWAL(dir string, group model.ID, node uint64, members Members, seed
 	if err != nil {
 		return nil, nil, err
 	}
+	if !fresh {
+		// A journal that exists was written by an earlier run, possibly one that ended in a failed
+		// fsync: the kernel then keeps serving the pages it could not write from memory. Read what
+		// the device holds, verify every frame below, then sync once more before trusting it.
+		durablefs.DropCachedPages(f)
+	}
 	fail := func(e error) (*readyWAL, *raft.MemoryStorage, error) { f.Close(); return nil, nil, e }
 	if fresh {
 		if err = durablefs.SyncFileAndDir(path); err != nil {
@@ -111,6 +117,19 @@ func openReadyWAL(dir string, group model.ID, node uint64, members Members, seed
 	}
 	if !fresh && records == 0 {
 		return fail(ErrInvalid)
+	}
+	if !fresh {
+		// Every frame verified. What was read must now be durable too: a node that acknowledges an
+		// entry on the strength of bytes that live only in the page cache breaks the majority
+		// guarantee when the machine loses power. A journal that cannot be synced is refused.
+		if fault != nil {
+			if err = fault("wal_open_sync"); err != nil {
+				return fail(err)
+			}
+		}
+		if err = f.Sync(); err != nil {
+			return fail(err)
+		}
 	}
 	if fresh {
 		conf := &pb.ConfState{}
@@ -277,7 +296,7 @@ func installRecord(memory *raft.MemoryStorage, r readyRecord) error {
 		}
 		last, _ := memory.LastIndex()
 		if hard.GetCommit() > last {
-			return ErrInvalid
+			return ErrJournalBehind
 		}
 		if err := memory.SetHardState(hard); err != nil {
 			return err
@@ -295,40 +314,40 @@ func (g *Group) processReady() error {
 		priorLast, _ := g.memory.LastIndex()
 		if len(rd.Entries) > 0 || rd.HardState != nil || rd.Snapshot != nil {
 			if err := g.disk.persist(rd); err != nil {
-				g.fail()
+				g.failStop(FailJournal)
 				return ErrUnavailable
 			}
 		}
 		snapshotChanged := !raft.IsEmptySnap(rd.Snapshot)
 		if snapshotChanged {
 			if err := g.memory.ApplySnapshot(rd.Snapshot); err != nil {
-				g.fail()
+				g.failStop(FailState)
 				return err
 			}
 			if err := g.restoreSnapshot(rd.Snapshot); err != nil {
-				g.fail()
+				g.failStop(FailState)
 				return err
 			}
 		}
 		if err := g.memory.Append(rd.Entries); err != nil {
-			g.fail()
+			g.failStop(FailState)
 			return err
 		}
 		if !raft.IsEmptyHardState(rd.HardState) {
 			if err := g.memory.SetHardState(rd.HardState); err != nil {
-				g.fail()
+				g.failStop(FailState)
 				return err
 			}
 		}
 		if snapshotChanged || len(rd.Entries) > 0 && rd.Entries[0].GetIndex() <= priorLast {
 			if err := g.rebuildKnown(); err != nil {
-				g.fail()
+				g.failStop(FailState)
 				return err
 			}
 		} else {
 			for _, entry := range rd.Entries {
 				if err := g.remember(entry, 0); err != nil {
-					g.fail()
+					g.failStop(FailState)
 					return err
 				}
 			}
@@ -347,7 +366,7 @@ func (g *Group) processReady() error {
 		}
 		for _, ent := range rd.CommittedEntries {
 			if err := g.applyCommitted(ent); err != nil {
-				g.fail()
+				g.failStop(FailApply)
 				return err
 			}
 		}
@@ -574,7 +593,7 @@ func (g *Group) Snapshot() error {
 		return err
 	}
 	if err = g.disk.persist(raft.Ready{Snapshot: snap}); err != nil {
-		g.fail()
+		g.failStop(FailJournal)
 		return err
 	}
 	return nil

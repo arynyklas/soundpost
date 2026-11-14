@@ -294,7 +294,7 @@ func dcMajorityPhase(c *dcCluster, w *dcWriter, rep *Report, survivor uint64, pa
 	if err = dcRecordCursors(c, rep, p); err != nil {
 		return err
 	}
-	if err = dcCheckRetries(w, rep, p, "including the batch that was refused during the outage", x.ID.String()); err != nil {
+	if err = dcCheckRetries(c, w, rep, p, "including the batch that was refused during the outage", x.ID.String()); err != nil {
 		return err
 	}
 	if _, err = dcVerifyMembers(c, w, rep, p, 120*time.Second); err != nil {

@@ -179,17 +179,17 @@ func (g *Group) RedactCompleted(ctx context.Context, requests []Redaction) (Reda
 		if res.Journal, err = g.rewriteJournalRedacted(targets); err != nil {
 			var torn *tornError
 			if errors.As(err, &torn) {
-				g.fail()
+				g.failStop(FailMaintenance)
 				return RedactResult{}, torn.error
 			}
 			return RedactResult{}, err
 		}
 		if err = g.trip(HookRedactMemory); err != nil {
-			g.fail()
+			g.failStop(FailMaintenance)
 			return RedactResult{}, err
 		}
 		if err = g.swapLogLocked(memory); err != nil {
-			g.fail()
+			g.failStop(FailMaintenance)
 			return RedactResult{}, err
 		}
 	}

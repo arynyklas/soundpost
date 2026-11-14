@@ -22,6 +22,10 @@ var (
 	ErrConflict    = errors.New("replica conflict")
 	ErrInvalid     = errors.New("invalid replica command")
 	ErrStale       = errors.New("replica freshness fence not reached")
+	// ErrJournalBehind: the journal holds less than this node acknowledged (its persisted commit
+	// or applied index is beyond the end of the journal, or a leader committed beyond it). The
+	// member must be removed and re-added; it never rejoins as a voter under this identity.
+	ErrJournalBehind = errors.New("replica journal is behind what this node acknowledged")
 )
 
 type Kind string
@@ -179,6 +183,9 @@ type Config struct {
 	RetryWindow time.Duration
 	RetryMax    int
 	Cadence     Cadence
+	// Domain is the node's FailDomain, shared by every group of the node: a storage failure of
+	// any of them fails them all closed. Nil: the group fails alone.
+	Domain *FailDomain
 }
 type proposalResult struct {
 	entry CommittedEntry
@@ -256,6 +263,7 @@ type Group struct {
 	sinceCommands uint64
 	sinceBytes    int64
 	cadenceWake   chan struct{}
+	domain        *FailDomain
 }
 
 func Open(c Config) (*Group, error) {
@@ -347,9 +355,9 @@ func Open(c Config) (*Group, error) {
 			return nil, err
 		}
 	}
-	if c.Machine.Applied() > hard.GetCommit() {
+	if last, _ := memory.LastIndex(); c.Machine.Applied() > hard.GetCommit() || hard.GetCommit() > last {
 		disk.Close()
-		return nil, ErrInvalid
+		return nil, ErrJournalBehind
 	}
 	// Rebuild command identity and known reservations from the entire durable log,
 	// including committed-but-unapplied and uncommitted entries before intake.
@@ -365,6 +373,13 @@ func Open(c Config) (*Group, error) {
 	if err = g.processReady(); err != nil {
 		disk.Close()
 		return nil, err
+	}
+	if c.Domain != nil {
+		if err = c.Domain.add(g); err != nil {
+			disk.Close()
+			return nil, err
+		}
+		g.domain = c.Domain
 	}
 	if c.TickInterval > 0 {
 		go g.run(c.TickInterval)
@@ -442,12 +457,13 @@ func (g *Group) Campaign() error {
 	}
 	return g.processReady()
 }
-func (g *Group) Step(ctx context.Context, m *pb.Message) error {
+func (g *Group) Step(ctx context.Context, m *pb.Message) (err error) {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	defer g.recoverBehind(&err)
 	if g.failed || g.closed {
 		return ErrUnavailable
 	}

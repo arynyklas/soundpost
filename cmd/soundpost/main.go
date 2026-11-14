@@ -40,8 +40,17 @@ func failureLine(args []string, err error) string {
 	if errors.Is(err, errInsecureMode) {
 		return "soundpost: the data directory or TLS private key is accessible to other users; it must be mode 0700 and the key 0600"
 	}
+	var failStop *storageFailStopError
+	if errors.As(err, &failStop) {
+		return failStop.Error()
+	}
 	if len(args) >= 2 && args[1] == "ready" {
 		return "soundpost: not ready"
+	}
+	if len(args) >= 2 && args[1] == "serve" {
+		if reason := startupReason(err); reason != "" {
+			return "soundpost: startup or service failed (reason=" + reason + ")"
+		}
 	}
 	return "soundpost: startup or service failed"
 }
@@ -150,6 +159,9 @@ func run() error {
 		return e
 	}
 	defer core.Close()
+	// A storage failure fails every replication group closed; this process then exits non-zero so
+	// its supervisor restarts it and the restart re-verifies the journal.
+	storageFailed := watchStorage(ctx, core, stop)
 	// The restore authority must be installed before any route can begin a deletion.
 	if e = installServeAuthority(core, restoreAuthority); e != nil {
 		fmt.Fprintln(os.Stderr, serveAuthorityNotice(e))
@@ -212,6 +224,9 @@ func run() error {
 	}
 	e = <-early.done
 	if e == http.ErrServerClosed {
+		if f := storageFailed.Load(); f != nil {
+			return &storageFailStopError{failure: *f}
+		}
 		return nil
 	}
 	return e

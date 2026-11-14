@@ -137,7 +137,7 @@ func (e *Engine) publishCommittedLocked(slot uint16, index uint64, entry walEntr
 			return json.Unmarshal(bucket.Get(commitKey(cursor)), &event.Pages)
 		})
 		if err != nil {
-			e.failed = true
+			e.failLocked()
 			e.closeSubscribersLocked()
 			return
 		}

@@ -682,9 +682,10 @@ func dcFreeAddress() (string, error) {
 // output is also appended to <dir>/<name>.log, a debugging aid for a drill developer that a run
 // for evidence leaves unset.
 type dcLog struct {
-	mu  sync.Mutex
-	b   bytes.Buffer
-	tee *os.File
+	mu     sync.Mutex
+	b      bytes.Buffer
+	tee    *os.File
+	reason string // last closed reason token printed by the current incarnation (reset at each start)
 }
 
 func newDCLog(name string) *dcLog {
@@ -700,6 +701,9 @@ func newDCLog(name string) *dcLog {
 func (s *dcLog) Write(p []byte) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if m := dcExitReason.FindAllSubmatch(p, -1); len(m) > 0 {
+		s.reason = string(m[len(m)-1][1])
+	}
 	if s.b.Len() < 1<<20 {
 		s.b.Write(p)
 	}
@@ -707,6 +711,24 @@ func (s *dcLog) Write(p []byte) (int, error) {
 		_, _ = s.tee.Write(p)
 	}
 	return len(p), nil
+}
+
+// dcExitReason matches the one closed reason token soundpost serve prints when it refuses or fail-stops
+// (`(reason=<code>)` or `reason=<code> `); nothing else of the output is read.
+var dcExitReason = regexp.MustCompile(`reason=([a-z][a-z0-9_]{0,63})`)
+
+// newIncarnation forgets the reason of the previous process of this member.
+func (s *dcLog) newIncarnation() {
+	s.mu.Lock()
+	s.reason = ""
+	s.mu.Unlock()
+}
+
+// lastReason is the last closed reason token the current incarnation printed, or "".
+func (s *dcLog) lastReason() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.reason
 }
 
 // ---- the three-process cluster ----
@@ -739,6 +761,7 @@ type dcCluster struct {
 	sites    map[uint64]*dcSite
 	sessions map[uint64]auth.Session
 	down     map[uint64]bool // killed or paused: known not to answer
+	retired  map[uint64]bool // refused to rejoin and left out for the rest of the drill
 	quit     chan struct{}
 	quitOnce sync.Once
 }
@@ -969,6 +992,7 @@ func (c *dcCluster) start(id uint64) error {
 		return errors.New("member already running")
 	}
 	args := []string{"serve", "--mode=distributed", "--node-id", strconv.FormatUint(id, 10), "--cluster-config", filepath.Join(c.work, fmt.Sprintf("node-%d.json", id)), "--data-dir", c.data[id], "--listen", c.public[id]}
+	c.logs[id].newIncarnation()
 	var cmd *exec.Cmd
 	if c.opts.inject {
 		if err := os.MkdirAll(c.data[id], 0o700); err != nil {
@@ -1234,20 +1258,74 @@ func (c *dcCluster) waitReady(id uint64, limit time.Duration) error {
 	return &dcFailure{Stage: "member_ready", Code: "timeout_" + dcSafeToken(last)}
 }
 
+// waitReadyOrRefused waits until the restarted member either becomes ready or exits on its own with exactly the
+// closed reason refusal. It returns "ready" or "refused"; any other exit, or neither within limit, is an error.
+func (c *dcCluster) waitReadyOrRefused(id uint64, refusal string, limit time.Duration) (string, string, error) {
+	p, err := c.proc(id)
+	if err != nil {
+		return "", "", err
+	}
+	deadline := time.After(limit)
+	for {
+		select {
+		case <-p.done:
+			got := c.logs[id].lastReason()
+			if got != refusal {
+				return "", got, &dcFailure{Stage: "member_restart", Code: "exited_reason_" + dcSafeToken(got)}
+			}
+			return "refused", got, nil
+		case <-deadline:
+			return "", "", &dcFailure{Stage: "member_restart", Code: "neither_ready_nor_refused"}
+		case <-time.After(200 * time.Millisecond):
+			if code, st, rerr := c.readiness(id, 2*time.Second); rerr == nil && code == 200 && st.Ready {
+				return "ready", "", nil
+			}
+		}
+	}
+}
+
+// retire removes an exited member from the cluster bookkeeping for the rest of the drill: it is never written to,
+// read from or waited for again (its replacement would be a new identity, which these drills do not add).
+func (c *dcCluster) retire(id uint64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.procs, id)
+	delete(c.sites, id)
+	c.down[id] = true
+	if c.retired == nil {
+		c.retired = map[uint64]bool{}
+	}
+	c.retired[id] = true
+}
+
+// members is the set of members still in the drill (every member except retired ones).
+func (c *dcCluster) members() []uint64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var out []uint64
+	for _, n := range dcMembers {
+		if !c.retired[n.id] {
+			out = append(out, n.id)
+		}
+	}
+	return out
+}
+
 // converged waits until every member is ready and reports the same control applied index, and
 // returns the cursors.
 func (c *dcCluster) converged(limit time.Duration) (map[uint64]uint64, error) {
 	deadline := time.Now().Add(limit)
+	ids := c.members()
 	for time.Now().Before(deadline) {
 		seen := map[uint64]uint64{}
-		for _, n := range dcMembers {
-			code, st, err := c.readiness(n.id, 3*time.Second)
+		for _, id := range ids {
+			code, st, err := c.readiness(id, 3*time.Second)
 			if err != nil || code != 200 || !st.Ready || st.Applied == nil {
 				break
 			}
-			seen[n.id] = uint64(st.Applied.Index)
+			seen[id] = uint64(st.Applied.Index)
 		}
-		if dcSameCursor(seen, len(dcMembers)) {
+		if dcSameCursor(seen, len(ids)) {
 			return seen, nil
 		}
 		time.Sleep(300 * time.Millisecond)
@@ -1398,6 +1476,9 @@ type dcWriter struct {
 	wg       sync.WaitGroup
 	abort    chan struct{}
 	err      error
+
+	claimed atomic.Int64 // batches the running stream has issued
+	allowed atomic.Int64 // batches the running stream may issue
 }
 
 func newDCWriter(c *dcCluster, led *Ledger, max int) *dcWriter {
@@ -1541,11 +1622,12 @@ func (w *dcWriter) rotate(i int) func() []uint64 {
 // startStream runs `workers` concurrent writers. Each writes one new batch after another (pace
 // apart), through a rotating live member, retrying the SAME batch until it is acknowledged. Several
 // concurrent writers make it likely that a fault lands while a request is in flight. At most
-// `budget` batches are issued in this stream (the series pool is finite); a worker past the budget
-// idles until the stream is stopped.
+// `budget` batches are issued in this stream (the series pool is finite) unless grantBudget adds
+// to it; a worker past the budget idles until the stream is stopped or the budget grows.
 func (w *dcWriter) startStream(workers int, pace time.Duration, budget int, label string) {
 	w.stop, w.failed, w.err, w.failOnce = make(chan struct{}), make(chan struct{}), nil, sync.Once{}
-	var issued atomic.Int64
+	w.claimed.Store(0)
+	w.allowed.Store(int64(budget))
 	for k := range workers {
 		w.wg.Add(1)
 		go func() {
@@ -1556,7 +1638,7 @@ func (w *dcWriter) startStream(workers int, pace time.Duration, budget int, labe
 					return
 				default:
 				}
-				if int(issued.Add(1)) <= budget {
+				if w.claim() {
 					b, err := w.next()
 					if err == nil {
 						_, err = w.deliver(b, w.rotate(i), 150*time.Second, label)
@@ -1575,6 +1657,25 @@ func (w *dcWriter) startStream(workers int, pace time.Duration, budget int, labe
 		}()
 	}
 }
+
+// claim takes one batch of the running stream's budget; false once the budget is spent.
+func (w *dcWriter) claim() bool {
+	for {
+		n := w.claimed.Load()
+		if n >= w.allowed.Load() {
+			return false
+		}
+		if w.claimed.CompareAndSwap(n, n+1) {
+			return true
+		}
+	}
+}
+
+// grantBudget lets the idle workers of the running stream issue n more batches. A restored member
+// can take longer than the stream's budget lasts to become ready (it was 11 s for a 100 batch
+// budget); the acknowledgements the drill requires AFTER the restore still have to come from a
+// stream that is running, never from a stream that went idle while the member was starting.
+func (w *dcWriter) grantBudget(n int) { w.allowed.Add(int64(n)) }
 
 // stopStream stops the stream after every batch in flight is acknowledged and returns its error.
 func (w *dcWriter) stopStream() error {
@@ -1632,6 +1733,9 @@ func (w *dcWriter) waitAcks(n int, from time.Time, limit time.Duration) error {
 
 // resend posts an already acknowledged batch again to one member and returns the verdict; the
 // receipt consistency is enforced by attempt (same hash and cursor as the first acknowledgement).
+// A typed retryable answer (503: the member is catching up) is what a client retries with the identical
+// body, so it is retried for up to 60 s; anything else is returned as is, and a retry that never
+// acknowledges still fails the check.
 func (w *dcWriter) resend(member uint64, id string) (dcVerdict, error) {
 	w.mu.Lock()
 	b, ok := w.batches[id]
@@ -1639,8 +1743,14 @@ func (w *dcWriter) resend(member uint64, id string) (dcVerdict, error) {
 	if !ok {
 		return dcMalformed, errors.New("unknown batch")
 	}
-	v, _, err := w.attempt(member, b, 20*time.Second, "resend")
-	return v, err
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		v, _, err := w.attempt(member, b, 20*time.Second, "resend")
+		if err != nil || v != dcTypedRefusal || time.Now().After(deadline) {
+			return v, err
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
 }
 
 // lookupReceipt asks one member for the receipt of an acknowledged batch and compares it with the
@@ -1682,14 +1792,20 @@ func dcVerifyMembers(c *dcCluster, w *dcWriter, rep *Report, phase string, limit
 		c.env.Logf("%s: member %d read back in %dms", phase, member, time.Since(began).Milliseconds())
 		return digests, counts, err
 	}
-	return dcVerifyWith(read, w.Issued(), rep, phase)
+	return dcVerifyWith(read, w.Issued(), rep, phase, c.members()...)
 }
 
 // dcVerifyWith records, for every member, exact reconciliation of the ledger against the data read
 // back, single-copy storage and absence of ids this drill never issued, and then requires identical
 // content across members. It returns the retained digests (one map for all members when they agree)
 // and the first failure.
-func dcVerifyWith(read dcReadFunc, issued map[string]bool, rep *Report, phase string) (map[string]string, error) {
+// members is the set to verify; empty means every member (a retired member is never read back).
+func dcVerifyWith(read dcReadFunc, issued map[string]bool, rep *Report, phase string, members ...uint64) (map[string]string, error) {
+	if len(members) == 0 {
+		for _, n := range dcMembers {
+			members = append(members, n.id)
+		}
+	}
 	retained := map[uint64]map[string]string{}
 	var first error
 	keep := func(err error) {
@@ -1697,14 +1813,14 @@ func dcVerifyWith(read dcReadFunc, issued map[string]bool, rep *Report, phase st
 			first = err
 		}
 	}
-	for _, n := range dcMembers {
-		digests, counts, err := read(n.id)
-		name := fmt.Sprintf("%s_member_%d", phase, n.id)
+	for _, id := range members {
+		digests, counts, err := read(id)
+		name := fmt.Sprintf("%s_member_%d", phase, id)
 		if digests == nil {
 			keep(rep.Require(name+"_readable", false, fmt.Sprint(err)))
 			continue
 		}
-		retained[n.id] = digests
+		retained[id] = digests
 		_, rerr := Reconcile(rep.Ledger(), digests)
 		detail := fmt.Sprintf("%d acknowledged ids retained with identical semantic data", rep.Ledger().Len())
 		if rerr != nil {
@@ -1724,14 +1840,14 @@ func dcVerifyWith(read dcReadFunc, issued map[string]bool, rep *Report, phase st
 		return nil, first
 	}
 	ierr := dcIdenticalMembers(retained)
-	detail := fmt.Sprintf("all %d members retain the same %d ids with identical content", len(retained), len(retained[dcMembers[0].id]))
+	detail := fmt.Sprintf("all %d members retain the same %d ids with identical content", len(retained), len(retained[members[0]]))
 	if ierr != nil {
 		detail = ierr.Error()
 	}
 	if err := rep.Require(phase+"_members_identical", ierr == nil, detail); err != nil {
 		return nil, err
 	}
-	return retained[dcMembers[0].id], nil
+	return retained[members[0]], nil
 }
 
 // dcRecordCursors converges the cluster and records the control applied index of every member.
@@ -1754,11 +1870,13 @@ type dcFaultSpec struct {
 	Inject  func() error // takes the victim down
 	Restore func() error // brings the victim back (start or SIGCONT); the member must then become ready
 	During  func() error // optional: runs while the fault is active, after the survivors acknowledged, before Restore
-	// Degraded says the survivors are NOT required to keep acknowledging while the fault lasts (a
-	// member that is up but unusable may keep leading groups; see the fsync-failure drill). What stays
-	// required: no acknowledgement through the victim without durability, every acknowledgement
-	// reconciled, and a full recovery after Restore.
-	Degraded bool
+	// MayRefuseAs, when set, is the one closed reason with which the restored member may refuse to rejoin instead of
+	// becoming ready: a voter whose journal is behind what its identity acknowledged must refuse
+	// (docs/operations/distributed.md), and whether it is behind can depend on what an intervening incarnation
+	// acknowledged, which the drill cannot see. Exactly one of the two outcomes must happen: ready (then every
+	// restored-member check below applies) or that exit (then the survivors must keep acknowledging, the member is
+	// left out for the rest of the drill and verification covers the survivors). Any other exit fails.
+	MayRefuseAs string
 }
 
 // dcRunStreamFault is one fault phase while writes stream: write, inject the fault mid-stream, make
@@ -1803,40 +1921,22 @@ func dcRunStreamFault(c *dcCluster, w *dcWriter, rep *Report, spec dcFaultSpec) 
 		return err
 	}
 	rep.Timeline().Fail(subject, "probe write to the down member was not acknowledged: "+detail)
-	limit := 120 * time.Second
-	if spec.Degraded {
-		limit = 20 * time.Second
-	}
-	probeAcked := true
-	via, err := w.deliver(probe, c.live, limit, p+"_probe")
-	switch {
-	case err != nil && spec.Degraded:
-		probeAcked = false
-		rep.Fact(p+"/probe_acknowledged_by_survivors_while_degraded", false)
-		c.env.Logf("%s: probe batch not acknowledged by the survivors within %s (degraded phase); it is retried after the restore", p, limit)
-	case err != nil:
+	via, err := w.deliver(probe, c.live, 120*time.Second, p+"_probe")
+	if err != nil {
 		return rep.Require(p+"_refused_write_retried_unchanged_to_ack", false, err.Error()+"; cluster at the failure: "+c.diagnose())
-	default:
-		rep.Fact(p+"/probe_acknowledged_by_member", via)
-		c.env.Logf("%s: probe batch acknowledged by member %d", p, via)
-		rep.Timeline().Deliver("ingest", fmt.Sprintf("the refused probe batch was retried unchanged and acknowledged by member %d", via))
 	}
+	rep.Fact(p+"/probe_acknowledged_by_member", via)
+	c.env.Logf("%s: probe batch acknowledged by member %d", p, via)
+	rep.Timeline().Deliver("ingest", fmt.Sprintf("the refused probe batch was retried unchanged and acknowledged by member %d", via))
 
-	var latency time.Duration
-	if spec.Degraded {
-		time.Sleep(10 * time.Second)
-		rep.Fact(p+"/acks_during_degraded_window", dcAcksBetween(w.Times(), faulted, time.Now()))
-	} else {
-		if err = w.waitAcks(8, faulted, 120*time.Second); err != nil {
-			return rep.Require(p+"_acks_through_survivors_while_victim_down", false, err.Error()+"; cluster at the failure: "+c.diagnose())
-		}
-		var ok bool
-		latency, ok = dcFirstAckAfter(w.Times(), faulted)
-		if err = rep.Require(p+"_first_ack_after_fault", ok, "an acknowledgement of a request started after the fault completed"); err != nil {
-			return err
-		}
-		rep.Fact(p+"/first_ack_after_fault_ms", latency.Milliseconds())
+	if err = w.waitAcks(8, faulted, 120*time.Second); err != nil {
+		return rep.Require(p+"_acks_through_survivors_while_victim_down", false, err.Error()+"; cluster at the failure: "+c.diagnose())
 	}
+	latency, ok := dcFirstAckAfter(w.Times(), faulted)
+	if err = rep.Require(p+"_first_ack_after_fault", ok, "an acknowledgement of a request started after the fault completed"); err != nil {
+		return err
+	}
+	rep.Fact(p+"/first_ack_after_fault_ms", latency.Milliseconds())
 
 	if spec.During != nil {
 		if err = spec.During(); err != nil {
@@ -1848,39 +1948,66 @@ func dcRunStreamFault(c *dcCluster, w *dcWriter, rep *Report, spec dcFaultSpec) 
 	if err = spec.Restore(); err != nil {
 		return rep.Require(p+"_victim_restored", false, err.Error())
 	}
-	if err = c.waitReady(spec.Victim, 180*time.Second); err != nil {
-		return rep.Require(p+"_victim_ready_after_restore", false, err.Error())
-	}
-	readyAt := time.Now()
-	if !probeAcked {
-		if _, err = w.deliver(probe, c.live, 120*time.Second, p+"_probe_after_restore"); err != nil {
-			return rep.Require(p+"_refused_write_retried_unchanged_to_ack", false, err.Error()+"; cluster at the failure: "+c.diagnose())
+	outcome := "ready"
+	if spec.MayRefuseAs != "" {
+		got := ""
+		var rerr error
+		outcome, got, rerr = c.waitReadyOrRefused(spec.Victim, spec.MayRefuseAs, 180*time.Second)
+		rep.Fact(p+"/restart_outcome", outcome)
+		if err = rep.Require(p+"_victim_ready_or_refuses_typed", rerr == nil, fmt.Sprintf("member %d: outcome %q, exit reason %q (allowed: ready, or refused with %s); err=%v", spec.Victim, outcome, got, spec.MayRefuseAs, rerr)); err != nil {
+			return err
 		}
-		rep.Timeline().Deliver("ingest", "the refused probe batch was retried unchanged after the restore and acknowledged")
 	}
-	c.env.Logf("%s: member %d ready %dms after restore", p, spec.Victim, readyAt.Sub(restoreAt).Milliseconds())
-	rep.Fact(p+"/ready_after_restore_ms", readyAt.Sub(restoreAt).Milliseconds())
-	rep.Fact(p+"/acks_between_fault_and_ready", dcAcksBetween(w.Times(), faulted, readyAt))
-	if err = w.waitAcks(6, readyAt, 120*time.Second); err != nil {
-		return rep.Require(p+"_acks_after_restore", false, err.Error())
-	}
-	c.env.Logf("%s: 6 acks after the member was ready; stopping the stream", p)
-	stopped = true
-	if err = w.stopStream(); err != nil {
-		return rep.Require(p+"_stream_ended_cleanly", false, err.Error())
-	}
-	// The restored member must itself acknowledge a fresh write again.
-	last, err := w.next()
-	if err != nil {
-		return err
-	}
-	by, err := w.deliver(last, func() []uint64 { return []uint64{spec.Victim} }, 90*time.Second, p+"_restored")
-	if err = rep.Require(p+"_restored_member_acknowledges", err == nil && by == spec.Victim, fmt.Sprintf("a fresh write sent only to member %d was acknowledged by it", spec.Victim)); err != nil {
-		return err
-	}
-	rep.Timeline().Deliver(subject, "the restored member acknowledged a fresh write")
-	if err = rep.Timeline().Recover(subject); err != nil {
-		return rep.Require(p+"_outage_recovered", false, err.Error())
+	if outcome == "refused" {
+		// The member refused to rejoin with exactly the allowed closed reason and never became ready; the survivors
+		// must keep acknowledging. It stays out of the drill (a replacement is a new identity, not this disk).
+		refusedAt := time.Now()
+		c.retire(spec.Victim)
+		rep.Fact(p+"/victim_retired", spec.Victim)
+		rep.Fact(p+"/refused_after_restore_ms", refusedAt.Sub(restoreAt).Milliseconds())
+		w.grantBudget(30)
+		if err = w.waitAcks(6, refusedAt, 120*time.Second); err != nil {
+			return rep.Require(p+"_acks_through_survivors_after_refusal", false, err.Error()+"; cluster at the failure: "+c.diagnose())
+		}
+		stopped = true
+		if err = w.stopStream(); err != nil {
+			return rep.Require(p+"_stream_ended_cleanly", false, err.Error())
+		}
+		rep.Timeline().Deliver("ingest", fmt.Sprintf("the survivors kept acknowledging after member %d refused to rejoin", spec.Victim))
+		// The service outage is over (deliveries after the last failure); member spec.Victim is not: it is retired.
+		if err = rep.Timeline().Recover("cluster"); err != nil {
+			return rep.Require(p+"_outage_recovered", false, err.Error())
+		}
+	} else {
+		if err = c.waitReady(spec.Victim, 180*time.Second); err != nil {
+			return rep.Require(p+"_victim_ready_after_restore", false, err.Error())
+		}
+		readyAt := time.Now()
+		w.grantBudget(30) // the stream may have spent its budget while the member started; see grantBudget
+		c.env.Logf("%s: member %d ready %dms after restore", p, spec.Victim, readyAt.Sub(restoreAt).Milliseconds())
+		rep.Fact(p+"/ready_after_restore_ms", readyAt.Sub(restoreAt).Milliseconds())
+		rep.Fact(p+"/acks_between_fault_and_ready", dcAcksBetween(w.Times(), faulted, readyAt))
+		if err = w.waitAcks(6, readyAt, 120*time.Second); err != nil {
+			return rep.Require(p+"_acks_after_restore", false, err.Error())
+		}
+		c.env.Logf("%s: 6 acks after the member was ready; stopping the stream", p)
+		stopped = true
+		if err = w.stopStream(); err != nil {
+			return rep.Require(p+"_stream_ended_cleanly", false, err.Error())
+		}
+		// The restored member must itself acknowledge a fresh write again.
+		last, err := w.next()
+		if err != nil {
+			return err
+		}
+		by, err := w.deliver(last, func() []uint64 { return []uint64{spec.Victim} }, 90*time.Second, p+"_restored")
+		if err = rep.Require(p+"_restored_member_acknowledges", err == nil && by == spec.Victim, fmt.Sprintf("a fresh write sent only to member %d was acknowledged by it", spec.Victim)); err != nil {
+			return err
+		}
+		rep.Timeline().Deliver(subject, "the restored member acknowledged a fresh write")
+		if err = rep.Timeline().Recover(subject); err != nil {
+			return rep.Require(p+"_outage_recovered", false, err.Error())
+		}
 	}
 
 	c.env.Logf("%s: converging control cursors", p)
@@ -1888,7 +2015,7 @@ func dcRunStreamFault(c *dcCluster, w *dcWriter, rep *Report, spec dcFaultSpec) 
 		return err
 	}
 	c.env.Logf("%s: retrying acknowledged batches on every member", p)
-	if err = dcCheckRetries(w, rep, p, fmt.Sprintf("including the restored member %d", spec.Victim), probe.ID.String()); err != nil {
+	if err = dcCheckRetries(c, w, rep, p, fmt.Sprintf("including the restored member %d", spec.Victim), probe.ID.String()); err != nil {
 		return err
 	}
 	c.env.Logf("%s: verifying every member", p)
@@ -1906,20 +2033,20 @@ func dcRunStreamFault(c *dcCluster, w *dcWriter, rep *Report, spec dcFaultSpec) 
 // dcCheckRetries re-posts three already acknowledged batches (the first of the drill, the probe
 // that was refused and re-sent during the outage, the newest) to every member and requires the
 // SAME receipt each time; the receipt lookup must agree.
-func dcCheckRetries(w *dcWriter, rep *Report, phase, note, probeID string) error {
+func dcCheckRetries(c *dcCluster, w *dcWriter, rep *Report, phase, note, probeID string) error {
 	acks := rep.Ledger().Acks()
 	ids := []string{acks[0].ID, probeID, acks[len(acks)-1].ID}
 	same := 0
 	for _, id := range ids {
-		for _, n := range dcMembers {
-			v, err := w.resend(n.id, id)
+		for _, member := range c.members() {
+			v, err := w.resend(member, id)
 			if err != nil {
 				return rep.Require(phase+"_retry_returns_same_receipt", false, err.Error())
 			}
 			if v != dcAcked {
-				return rep.Require(phase+"_retry_returns_same_receipt", false, fmt.Sprintf("retry of an acknowledged batch on member %d answered %s", n.id, v))
+				return rep.Require(phase+"_retry_returns_same_receipt", false, fmt.Sprintf("retry of an acknowledged batch on member %d answered %s", member, v))
 			}
-			if err = w.lookupReceipt(n.id, id); err != nil {
+			if err = w.lookupReceipt(member, id); err != nil {
 				return rep.Require(phase+"_retry_returns_same_receipt", false, err.Error())
 			}
 			same++

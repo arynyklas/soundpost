@@ -26,13 +26,15 @@ func (s *Service) DrainSourceFences(ctx context.Context) error {
 		return model.Fail(model.Unavailable)
 	}
 	var pending []model.SourceFence
-	if e := s.store.View(ctx, func(st model.ControlState) error {
-		for _, f := range st.SourceFences {
-			if f.Phase == "fencing" {
-				pending = append(pending, f)
+	if e := model.RetryWhileStale(ctx, func() error {
+		return s.store.View(ctx, func(st model.ControlState) error {
+			for _, f := range st.SourceFences {
+				if f.Phase == "fencing" {
+					pending = append(pending, f)
+				}
 			}
-		}
-		return nil
+			return nil
+		})
 	}); e != nil {
 		return e
 	}

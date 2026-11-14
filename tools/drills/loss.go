@@ -9,8 +9,6 @@ import (
 	"strings"
 	"syscall"
 	"time"
-
-	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // The four node_loss drills that need more than a signal: a link-level partition, a power cut, a
@@ -61,7 +59,10 @@ func dcStartInjected(env *Env, rep *Report, opts dcOptions, scope string) (*dcCl
 // dcFinish is the common end of a drill: every member reconciled once more, cursors converged and
 // the outage timeline verified.
 func dcFinish(c *dcCluster, w *dcWriter, rep *Report, phases int) error {
-	retained, err := dcVerifyMembers(c, w, rep, "final", 120*time.Second)
+	// The final read-back covers every acknowledged batch of every phase; a member's full scan grows with the data
+	// (35-55 s at the end of disk-disappearance on the test host, 150 s once), so it gets twice a phase's budget. The
+	// read-back time of each member is still recorded; this bounds the harness, not the product.
+	retained, err := dcVerifyMembers(c, w, rep, "final", 240*time.Second)
 	if err != nil {
 		return err
 	}
@@ -201,10 +202,9 @@ func (c *dcCluster) powerCut(rep *Report, phase string, ids []uint64, torn bool)
 // dcProbeVictim sends n fresh batches straight to the victim while its fault is active. With strict
 // no acknowledgement is allowed (it cannot reach a quorum); otherwise an acknowledgement is
 // recorded in the ledger and must survive the final reconciliation. Every batch that was not
-// acknowledged is retried unchanged through the other members until acknowledged; when degraded
-// the other members may be unable to acknowledge (see dcFaultSpec.Degraded) and such a batch is
-// returned instead, for the caller to retry after the restore.
-func dcProbeVictim(c *dcCluster, w *dcWriter, rep *Report, phase string, victim uint64, n int, strict, degraded bool) ([]model.Batch, error) {
+// acknowledged is retried unchanged through the other members until acknowledged: the survivors
+// keep acknowledging while the victim's fault lasts.
+func dcProbeVictim(c *dcCluster, w *dcWriter, rep *Report, phase string, victim uint64, n int, strict bool) error {
 	others := func() []uint64 {
 		var out []uint64
 		for _, m := range c.live() {
@@ -214,50 +214,30 @@ func dcProbeVictim(c *dcCluster, w *dcWriter, rep *Report, phase string, victim 
 		}
 		return out
 	}
-	limit := 120 * time.Second
-	if degraded {
-		limit = 10 * time.Second
-	}
-	var pending []model.Batch
 	acked, refused := 0, 0
 	for range n {
 		b, err := w.next()
 		if err != nil {
-			return nil, err
+			return err
 		}
 		verdict, detail, err := w.attempt(victim, b, 5*time.Second, phase+"_victim_probe")
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if verdict == dcAcked {
 			acked++
 			if strict {
-				return nil, fmt.Errorf("the isolated member %d acknowledged batch %s (%s) without a quorum", victim, b.ID, detail)
+				return fmt.Errorf("the isolated member %d acknowledged batch %s (%s) without a quorum", victim, b.ID, detail)
 			}
 			continue
 		}
 		refused++
-		if _, err = w.deliver(b, others, limit, phase+"_victim_probe_retry"); err != nil {
-			if !degraded {
-				return nil, fmt.Errorf("%w; cluster at the failure: %s", err, c.diagnose())
-			}
-			pending = append(pending, b)
+		if _, err = w.deliver(b, others, 120*time.Second, phase+"_victim_probe_retry"); err != nil {
+			return fmt.Errorf("%w; cluster at the failure: %s", err, c.diagnose())
 		}
 	}
 	rep.Fact(phase+"/victim_probe_acknowledged", acked)
 	rep.Fact(phase+"/victim_probe_refused", refused)
-	rep.Fact(phase+"/victim_probe_retried_after_restore", len(pending))
-	return pending, nil
-}
-
-// retryPending retries unchanged, until acknowledged, the batches a degraded phase could not get
-// acknowledged while its fault lasted.
-func retryPending(c *dcCluster, w *dcWriter, phase string, pending []model.Batch) error {
-	for _, b := range pending {
-		if _, err := w.deliver(b, c.live, 150*time.Second, phase+"_pending_after_restore"); err != nil {
-			return fmt.Errorf("%w; cluster at the failure: %s", err, c.diagnose())
-		}
-	}
 	return nil
 }
 
@@ -314,7 +294,7 @@ func runNetworkPartition(env *Env, rep *Report) error {
 				if st := c.exited(victim); st != "running" {
 					return fmt.Errorf("the isolated member is not running: %s", st)
 				}
-				if _, err := dcProbeVictim(c, w, rep, ph.name, victim, 4, true, false); err != nil {
+				if err := dcProbeVictim(c, w, rep, ph.name, victim, 4, true); err != nil {
 					return err
 				}
 				rep.Fact(ph.name+"/isolated_member_process", c.exited(victim))
@@ -433,7 +413,7 @@ func dcPowerCutAll(c *dcCluster, w *dcWriter, rep *Report) error {
 	if err = dcRecordCursors(c, rep, p); err != nil {
 		return err
 	}
-	if err = dcCheckRetries(w, rep, p, "after every member lost its unsynced data", probe.ID.String()); err != nil {
+	if err = dcCheckRetries(c, w, rep, p, "after every member lost its unsynced data", probe.ID.String()); err != nil {
 		return err
 	}
 	if _, err = dcVerifyMembers(c, w, rep, p, 180*time.Second); err != nil {
@@ -460,25 +440,22 @@ func runFsyncFailure(env *Env, rep *Report) error {
 		return err
 	}
 	defer c.close()
-	// The initial leader leads groups; a leader whose fsync fails stays up and keeps leading the groups
-	// that have not tried to write yet, so the survivors are not required to acknowledge in that phase
-	// (Degraded: see the report's findings). A follower must not stop the majority.
+	// Both phases require the survivors to keep acknowledging: a member whose storage failed stops
+	// leading and voting in every group (replica.FailDomain), so the other two elect among
+	// themselves, whether the victim led the groups (the initial leader) or not (member 3).
 	phases := []struct {
-		name     string
-		victim   uint64
-		degraded bool
-	}{{"fsync_fails_initial_leader_member_1", 1, true}, {"fsync_fails_member_3", 3, false}}
+		name   string
+		victim uint64
+	}{{"fsync_fails_initial_leader_member_1", 1}, {"fsync_fails_member_3", 3}}
 	for _, ph := range phases {
 		victim := ph.victim
 		disk := c.disks[victim]
 		failedBefore := disk.Stats().SyncsFailed
-		var pending []model.Batch
 		spec := dcFaultSpec{
-			Phase: ph.name, Kind: "fsync_eio", Victim: victim, Degraded: ph.degraded,
+			Phase: ph.name, Kind: "fsync_eio", Victim: victim,
 			Inject: func() error { disk.setFailSync(true); return nil },
 			During: func() error {
-				var err error
-				if pending, err = dcProbeVictim(c, w, rep, ph.name, victim, 4, false, ph.degraded); err != nil {
+				if err := dcProbeVictim(c, w, rep, ph.name, victim, 4, false); err != nil {
 					return err
 				}
 				failed := disk.Stats().SyncsFailed - failedBefore
@@ -491,10 +468,7 @@ func runFsyncFailure(env *Env, rep *Report) error {
 					return err
 				}
 				disk.setFailSync(false)
-				if err := c.start(victim); err != nil {
-					return err
-				}
-				return retryPending(c, w, ph.name, pending)
+				return c.start(victim)
 			},
 		}
 		if err = dcRunStreamFault(c, w, rep, spec); err != nil {
@@ -516,23 +490,21 @@ func runDiskDisappearance(env *Env, rep *Report) error {
 	}
 	defer c.close()
 	phases := []struct {
-		name     string
-		victim   uint64
-		replace  bool
-		degraded bool
-	}{{"disk_gone_initial_leader_member_1", 1, false, true}, {"disk_gone_member_3", 3, false, false}, {"disk_replaced_by_empty_disk_member_2", 2, true, false}}
+		name    string
+		victim  uint64
+		replace bool
+	}{{"disk_gone_initial_leader_member_1", 1, false}, {"disk_gone_member_3", 3, false}, {"disk_replaced_by_empty_disk_member_2", 2, true}}
 	for _, ph := range phases {
 		victim := ph.victim
 		disk := c.disks[victim]
 		away := filepath.Join(c.work, fmt.Sprintf("disk-%d-away", victim))
 		before := disk.Stats()
-		var pending []model.Batch
+		const behind = "journal_behind_acknowledged"
 		spec := dcFaultSpec{
-			Phase: ph.name, Kind: "disk_gone", Victim: victim, Degraded: ph.degraded,
+			Phase: ph.name, Kind: "disk_gone", Victim: victim,
 			Inject: func() error { return disk.detach(away) },
 			During: func() error {
-				var err error
-				if pending, err = dcProbeVictim(c, w, rep, ph.name, victim, 4, false, ph.degraded); err != nil {
+				if err := dcProbeVictim(c, w, rep, ph.name, victim, 4, false); err != nil {
 					return err
 				}
 				after := disk.Stats()
@@ -558,11 +530,18 @@ func runDiskDisappearance(env *Env, rep *Report) error {
 					return err
 				}
 				time.Sleep(10 * time.Second)
-				rep.Fact(ph.name+"/member_on_blank_disk", c.exited(victim))
-				if c.exited(victim) == "running" {
-					if _, err := dcProbeVictim(c, w, rep, ph.name+"_blank", victim, 3, false, false); err != nil {
+				state := c.exited(victim)
+				rep.Fact(ph.name+"/member_on_blank_disk", state)
+				if state != "running" {
+					// A blank disk under an identity that already acknowledged entries holds less than it acknowledged:
+					// the only acceptable exit is that typed refusal.
+					reason := c.logs[victim].lastReason()
+					rep.Fact(ph.name+"/blank_disk_exit_reason", reason)
+					if err := rep.Require(ph.name+"_blank_disk_exit_is_typed", reason == behind, fmt.Sprintf("member %d on the blank disk exited with reason=%q (allowed: %s)", victim, reason, behind)); err != nil {
 						return err
 					}
+				} else if err := dcProbeVictim(c, w, rep, ph.name+"_blank", victim, 3, false); err != nil {
+					return err
 				}
 				if _, err := c.stop(victim); err != nil {
 					return err
@@ -576,11 +555,14 @@ func runDiskDisappearance(env *Env, rep *Report) error {
 				if err := disk.reattachOriginal(away); err != nil {
 					return err
 				}
-				if err := c.start(victim); err != nil {
-					return err
-				}
-				return retryPending(c, w, ph.name, pending)
+				return c.start(victim)
 			},
+		}
+		if ph.replace {
+			// What the identity acknowledged while on the blank disk decides whether the original disk is behind it: if
+			// it is, the voter must refuse to rejoin (docs/operations/distributed.md; a replacement is a new identity);
+			// if not, it must rejoin and acknowledge like any restart. Exactly one of the two, typed.
+			spec.MayRefuseAs = behind
 		}
 		if err = dcRunStreamFault(c, w, rep, spec); err != nil {
 			return err

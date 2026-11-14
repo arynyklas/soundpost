@@ -53,6 +53,9 @@ type replicatedApp struct {
 	server    *http.Server
 	groups    []*replica.Group
 	node      *replica.Node
+	// domain is the fate shared by the control group and the 64 data groups of this node: a
+	// storage failure of any of them fails them all closed (replica.FailDomain).
+	domain *replica.FailDomain
 }
 
 // awaitReady waits for one ReadIndex quorum round on a group. Each round has
@@ -132,7 +135,15 @@ func openControl(dir string, options *replicationOptions) (*control.Store, error
 	}
 	return control.Open(dir)
 }
-func (a *App) enableReplication(ctx context.Context, dir string, options *replicationOptions) error {
+func (a *App) enableReplication(ctx context.Context, dir string, options *replicationOptions) (err error) {
+	// A node whose journal is behind what it acknowledged fails closed while it starts (a peer's heartbeat
+	// commits beyond its journal); the startup step that notices it next only sees unavailable or stale.
+	// Report the cause, so the operator gets reason=journal_behind_acknowledged.
+	defer func() {
+		if a.replication != nil {
+			err = a.replication.domain.Cause(err)
+		}
+	}()
 	var installation model.ID
 	if err := a.Control.View(ctx, func(st model.ControlState) error { installation = st.Installation; return nil }); err != nil {
 		return err
@@ -164,6 +175,8 @@ func (a *App) enableReplication(ctx context.Context, dir string, options *replic
 			return err
 		}
 	}
+	lifecycle.domain = replica.NewFailDomain()
+	cfg.Domain = lifecycle.domain
 	a.replication = lifecycle
 	controlGroup, err := a.Control.EnableReplication(cfg)
 	if err != nil {
@@ -205,7 +218,7 @@ func (a *App) enableReplication(ctx context.Context, dir string, options *replic
 		}
 	}
 	if controlGroup.Status().Leader == cfg.ID {
-		if err = a.Control.ReconcileAdmissions(ctx); err != nil {
+		if err = model.RetryWhileStale(ctx, func() error { return a.Control.ReconcileAdmissions(ctx) }); err != nil {
 			return err
 		}
 	}
@@ -275,6 +288,25 @@ func (a *App) ReplicaNode() *replica.Node {
 		return nil
 	}
 	return a.replication.node
+}
+
+// StorageFailStop is closed when the storage of this node failed and every replication group of
+// it was failed closed, so the node neither leads nor votes in any group until it is restarted.
+// It is nil (never ready) when the application is not replicated.
+func (a *App) StorageFailStop() <-chan struct{} {
+	if a.replication == nil || a.replication.domain == nil {
+		return nil
+	}
+	return a.replication.domain.Done()
+}
+
+// StorageFailure is the first storage failure of this node: the group that hit it and the closed
+// reason. False while the storage is healthy.
+func (a *App) StorageFailure() (replica.FailStop, bool) {
+	if a.replication == nil || a.replication.domain == nil {
+		return replica.FailStop{}, false
+	}
+	return a.replication.domain.Failure()
 }
 func (n *NodeConfig) UnmarshalJSON(raw []byte) error {
 	var wire struct {

@@ -77,6 +77,18 @@ func storageReplicaFault(err error) error {
 	}
 	return model.Fail(model.Unavailable)
 }
+
+// failLocked marks the engine failed; e.mu is held. One engine backs all 64 data groups of the
+// node, so a failed engine can apply nothing for any of them: the node's replica groups are
+// failed closed with it (replica.FailDomain), from another goroutine because the caller holds
+// e.mu and a group lock is never taken under it. Without that, a group that has not tried to
+// apply yet keeps answering heartbeats and keeps its leadership of a node that serves nothing.
+func (e *Engine) failLocked() {
+	e.failed = true
+	if r := e.repl; r != nil {
+		go r.groups[0].FailStop(replica.FailEngine)
+	}
+}
 func metaKey(slot uint16, name string) []byte {
 	return append(append([]byte(nil), slotKey(slot)...), []byte(name)...)
 }
@@ -581,7 +593,7 @@ func (m *slotMachine) Apply(c replica.CommittedEntry) error {
 			}
 		}
 		if err = e.trip("before_apply"); err != nil {
-			e.failed = true
+			e.failLocked()
 			return err
 		}
 	}
@@ -613,7 +625,7 @@ func (m *slotMachine) Apply(c replica.CommittedEntry) error {
 		return nil
 	})
 	if err != nil {
-		e.failed = true
+		e.failLocked()
 		return err
 	}
 	if c.Entry.Kind != replica.Noop {

@@ -356,7 +356,7 @@ func (e *Engine) publishManifestLocalLocked(ctx context.Context, groupID model.I
 		return tx.Bucket([]byte("meta")).Put([]byte("segment_manifest"), raw)
 	})
 	if err != nil {
-		e.failed = true
+		e.failLocked()
 		return 0, err
 	}
 	e.catalog = state

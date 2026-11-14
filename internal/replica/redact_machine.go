@@ -180,18 +180,18 @@ func (g *Group) RedactMachineCommands(ctx context.Context, ruleSet uint64, redac
 		if res.Journal, err = g.rewriteJournalRedacted(targets); err != nil {
 			var torn *tornError
 			if errors.As(err, &torn) {
-				g.fail()
+				g.failStop(FailMaintenance)
 				return MachineRedactResult{}, torn.error
 			}
 			return MachineRedactResult{}, err
 		}
 		if len(memory) > 0 {
 			if err = g.trip(HookRedactMemory); err != nil {
-				g.fail()
+				g.failStop(FailMaintenance)
 				return MachineRedactResult{}, err
 			}
 			if err = g.swapLogLocked(memory); err != nil {
-				g.fail()
+				g.failStop(FailMaintenance)
 				return MachineRedactResult{}, err
 			}
 		}
