@@ -1,0 +1,303 @@
+{
+  "schema": "soundpost-rule-smoke/1",
+  "description": "Authored smoke flow for fenced own rule evaluation (plan 02 task 11) over real admitted metric data, the real C05 storage and the real C05 control machine: an alert rule and a recording rule on a fixed 60 s grid, a recording outbox crash after the durable ACK with a node restart, a leadership fence change, an unavailable shard that must read as unknown and never as recovery, and full recovery once the data is complete again. It names only generic projects, sources and series. Expected values are authored from the fixture, never observed from an upstream engine, and no upstream rule evaluator is involved.",
+  "runner": {
+    "command": "soundpost-querycheck smoke",
+    "storage": "real",
+    "control": "real",
+    "restart_workers": true,
+    "profiles": [
+      "promql-prometheus-3.13.5"
+    ],
+    "status": "the soundpost-querycheck smoke command does not exist yet; this flow is exercised in process by internal/rules/integration_test.go (TestRulesOverRealStorageAndControl), which is not a substitute for the command"
+  },
+  "fixture": {
+    "project": "project-a",
+    "source": {
+      "id": "source-a",
+      "class": "structured",
+      "kinds": [
+        "metric"
+      ],
+      "labels": {
+        "job": [
+          "api",
+          "worker"
+        ],
+        "env": [
+          "prod"
+        ]
+      }
+    },
+    "metric_points": [
+      {
+        "name": "queue_depth",
+        "labels": {
+          "job": "api"
+        },
+        "time_ns": "30000000000",
+        "value_bits": "4024000000000000"
+      },
+      {
+        "name": "queue_depth",
+        "labels": {
+          "job": "api"
+        },
+        "time_ns": "90000000000",
+        "value_bits": "4024000000000000"
+      },
+      {
+        "name": "queue_depth",
+        "labels": {
+          "job": "api"
+        },
+        "time_ns": "150000000000",
+        "value_bits": "4024000000000000"
+      },
+      {
+        "name": "queue_depth",
+        "labels": {
+          "job": "api"
+        },
+        "time_ns": "210000000000",
+        "value_bits": "4024000000000000"
+      },
+      {
+        "name": "queue_depth",
+        "labels": {
+          "job": "api"
+        },
+        "time_ns": "270000000000",
+        "value_bits": "3ff0000000000000"
+      },
+      {
+        "name": "queue_depth",
+        "labels": {
+          "job": "api"
+        },
+        "time_ns": "330000000000",
+        "value_bits": "3ff0000000000000"
+      }
+    ],
+    "principals": [
+      {
+        "id": "rule-reader",
+        "grants": {
+          "project-a": [
+            "telemetry.read"
+          ]
+        }
+      },
+      {
+        "id": "rule-worker",
+        "grants": {
+          "project-a": [
+            "org.admin"
+          ]
+        },
+        "note": "project-scoped worker principal: reads with telemetry.read, commits with its project-scoped control scope"
+      }
+    ],
+    "rules": [
+      {
+        "id": "queue-alert",
+        "kind": "alert",
+        "profile": "promql-prometheus-3.13.5",
+        "expression": "queue_depth > 5",
+        "interval_ns": "60000000000",
+        "for_ns": "0",
+        "recovery_hold_ns": "0",
+        "missing_data": "unknown",
+        "severity": "page",
+        "version": "1"
+      },
+      {
+        "id": "queue-recording",
+        "kind": "recording",
+        "profile": "promql-prometheus-3.13.5",
+        "expression": "sum by (job) (queue_depth)",
+        "interval_ns": "60000000000",
+        "record_name": "job:queue_depth:sum",
+        "labels": {
+          "env": "prod"
+        },
+        "version": "1"
+      }
+    ]
+  },
+  "steps": [
+    {
+      "id": "first-evaluation",
+      "now_ns": "65000000000",
+      "run": [
+        "queue-alert",
+        "queue-recording"
+      ],
+      "expect": {
+        "queue-alert": {
+          "scheduled_ns": [
+            "60000000000"
+          ],
+          "series": [
+            {
+              "labels": {
+                "job": "api"
+              },
+              "phase": "firing"
+            }
+          ],
+          "health": "ok",
+          "state_revision": 1
+        },
+        "queue-recording": {
+          "scheduled_ns": [
+            "60000000000"
+          ],
+          "outbox": {
+            "pending": 1
+          }
+        }
+      }
+    },
+    {
+      "id": "recording-crash-after-durable-ack",
+      "flush": "queue-recording",
+      "crash": "after the data group acknowledged the batch and before the outbox records the receipt",
+      "expect": {
+        "stored_samples": {
+          "job:queue_depth:sum": 1
+        },
+        "outbox": {
+          "pending": 1,
+          "finalized": 0
+        }
+      }
+    },
+    {
+      "id": "restart-and-fence-change",
+      "restart": "whole node on the same directory",
+      "expect": {
+        "leadership_term": "greater than before the restart",
+        "committed_evaluation_returned_verbatim": {
+          "rule": "queue-alert",
+          "scheduled_ns": "60000000000",
+          "observed_ns": "65000000000"
+        }
+      }
+    },
+    {
+      "id": "recording-recovers-exactly-once",
+      "flush": "queue-recording",
+      "expect": {
+        "stored_samples": {
+          "job:queue_depth:sum": 1
+        },
+        "outbox": {
+          "pending": 0,
+          "finalized": 1
+        },
+        "finalized_provenance": {
+          "receipt_cursor": "equals the cursor of the admitted batch",
+          "input_cursors": "non-empty: the evaluation's committed input watermarks"
+        }
+      }
+    },
+    {
+      "id": "deposed-leader-is-fenced",
+      "now_ns": "185000000000",
+      "run_as": "the lease held before the restart",
+      "run": [
+        "queue-alert"
+      ],
+      "expect": {
+        "committed": false,
+        "error": "stale"
+      }
+    },
+    {
+      "id": "evaluations-under-the-new-lease",
+      "now_ns": "185000000000",
+      "run": [
+        "queue-alert"
+      ],
+      "expect": {
+        "queue-alert": {
+          "series": [
+            {
+              "labels": {
+                "job": "api"
+              },
+              "phase": "firing"
+            }
+          ],
+          "state_revision": 3
+        }
+      }
+    },
+    {
+      "id": "unavailable-shard-is-unknown-not-recovery",
+      "now_ns": "245000000000",
+      "scan": "unavailable",
+      "run": [
+        "queue-alert"
+      ],
+      "expect": {
+        "queue-alert": {
+          "scheduled_ns": [
+            "240000000000"
+          ],
+          "series": [
+            {
+              "labels": {
+                "job": "api"
+              },
+              "phase": "firing"
+            }
+          ],
+          "health": "unknown",
+          "reason": "unavailable",
+          "state_revision": 4
+        }
+      }
+    },
+    {
+      "id": "complete-data-recovers",
+      "now_ns": "305000000000",
+      "scan": "available",
+      "run": [
+        "queue-alert"
+      ],
+      "expect": {
+        "queue-alert": {
+          "scheduled_ns": [
+            "300000000000"
+          ],
+          "series": [],
+          "health": "ok",
+          "state_revision": 5
+        }
+      }
+    }
+  ],
+  "final": {
+    "condition_history": {
+      "queue-alert": [
+        {
+          "status": "firing",
+          "scheduled_ns": "60000000000",
+          "notify": true
+        },
+        {
+          "status": "resolved",
+          "scheduled_ns": "300000000000",
+          "notify": true
+        }
+      ]
+    }
+  },
+  "forbidden": {
+    "upstream_rule_evaluators": "none: a smoke run that observes any outbound connection to a Prometheus or Loki process fails",
+    "implicit_recovery": "an unknown or error evaluation never changes a phase, never clears a human acknowledgement and never produces a resolved condition",
+    "retroactive_notification": "a backfilled evaluation never carries a notifying intent without a committed operator replay declaration"
+  }
+}

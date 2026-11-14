@@ -1,0 +1,80 @@
+<!doctype html>
+<!-- Copyright 2026 Aryn Yklas -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<html lang="en">
+<head>
+<title>CANARY_TITLE_ZZZZ</title>
+<style>
+ #pseudo::before { content: "CANARY_PSEUDO_CONTENT_QQQQQQQ"; }
+ #urlbox { background-image: url("https://canary.invalid/CANARY_CSS_URL_PATH.png"); width: 40px; height: 22px; }
+ .CANARY_CLASS_NAME_RRRRRRRRRRRR { color: red; }
+</style>
+</head>
+<body>
+<main id="CANARY_ID_VALUE_SSS" class="CANARY_CLASS_NAME_RRRRRRRRRRRR" data-secret="CANARY_DATA_ATTRIBUTE_TTTTTTTTTT">
+ <p>CANARY_TEXT_A</p>
+ <p>CANARY_TEXT_LONGER_B_UUUUUUUUUUUUUUUUUUUU</p>
+ <span id="pseudo"></span>
+ <div id="urlbox"></div>
+ <input id="i-text" type="text" value="CANARY_INPUT_TEXT_VALUE">
+ <input type="password" value="CANARY_PASSWORD_VV">
+ <input type="email" value="canary.email.value@canary.invalid">
+ <input type="number" value="918273645">
+ <input type="search" value="CANARY_SEARCH">
+ <input type="tel" value="5550100999">
+ <input type="url" value="https://canary.invalid/CANARY_URL_INPUT">
+ <input type="date" value="2001-02-03">
+ <input type="color" value="#123456">
+ <input type="range" value="37">
+ <input type="hidden" value="CANARY_HIDDEN_VALUE">
+ <input type="checkbox" checked>
+ <input type="radio" checked>
+ <input type="file">
+ <textarea id="i-area">CANARY_TEXTAREA_VALUE_WWWWWWWWWWWWW</textarea>
+ <select><option selected>CANARY_SELECT_OPTION_XX</option></select>
+ <div id="editable" contenteditable="true">CANARY_CONTENTEDITABLE_YYYY</div>
+ <svg width="120" height="30"><text x="0" y="20">CANARY_SVG_TEXT_ZZZZZZZZZZZZZZZZ</text></svg>
+ <canvas id="canvas" width="200" height="40"></canvas>
+ <video id="media" src="https://canary.invalid/CANARY_MEDIA_SRC.mp4" poster="https://canary.invalid/CANARY_POSTER.png"></video>
+ <iframe id="frame" srcdoc="<p>CANARY_FRAME_TEXT_AAAAAAAAAA</p>"></iframe>
+ <div id="open-host"></div>
+ <div id="closed-host"></div>
+ <div id="trapped"><span>CANARY_TRAPPED_TEXT</span></div>
+ <div id="burst"></div>
+ <button id="button">CANARY_BUTTON_LABEL</button>
+</main>
+<script>
+ const open = document.getElementById("open-host").attachShadow({mode: "open"});
+ open.innerHTML = "<p>CANARY_OPEN_SHADOW_TEXT_BBBBBBBB</p><input value='CANARY_OPEN_SHADOW_INPUT'>";
+ const closed = document.getElementById("closed-host").attachShadow({mode: "closed"});
+ closed.innerHTML = "<p>CANARY_CLOSED_SHADOW_TEXT_CCCCCC</p>";
+ const context = document.getElementById("canvas").getContext("2d");
+ context.font = "14px sans-serif"; context.fillText("CANARY_CANVAS_PIXELS_DDDDDD", 4, 24);
+ // Getter traps on the page's own nodes: any read by the recorder is recorded and fails the run.
+ window.__traps = 0;
+ for (const node of document.querySelectorAll("#trapped, #trapped span")) {
+  for (const name of ["firstChild", "nextSibling", "parentNode", "childNodes", "localName", "tagName", "shadowRoot", "textContent", "innerHTML", "outerHTML", "attributes", "nodeType", "isContentEditable"]) {
+   Object.defineProperty(node, name, {configurable: true, get() { window.__traps++; throw new Error("CANARY_TRAP_" + name); }});
+  }
+  Object.defineProperty(node, "getBoundingClientRect", {configurable: true, value() { window.__traps++; throw new Error("CANARY_TRAP_RECT"); }});
+ }
+ console.log("CANARY_CONSOLE_ARGUMENT_EEEEEEEE");
+ document.addEventListener("copy", event => { event.clipboardData.setData("text/plain", "CANARY_CLIPBOARD_FFFFFFFFFF"); event.preventDefault(); });
+</script>
+<script type="module">
+ import {createRecorder} from "/recorder.js";
+ import {ReplayStream} from "/stream.js";
+ window.__chunks = [];
+ window.__stream = new ReplayStream(4096);
+ window.__revoked = 0;
+ window.__replay = createRecorder({
+  projectPolicy: true, deploymentOptIn: window.__deployment !== false, root: document.documentElement,
+  replayId: "a".repeat(32), sessionId: "b".repeat(32), capturePolicyRevision: "1", domain: {host: "c".repeat(32), boot: "d".repeat(32), runtime: "e".repeat(32)},
+  clock: () => ({wall_ns: String(BigInt(Date.now()) * 1000000n), mono_ns: String(BigInt(Math.round(performance.now() * 1e6))), uncertainty_ns: "1000000"}),
+  viewport: () => ({w: innerWidth, h: innerHeight, x: scrollX, y: scrollY}),
+  onRevoked: () => { window.__revoked++; window.__stream.clear(); },
+ }, chunk => { window.__chunks.push(JSON.stringify(chunk)); return window.__stream.push(chunk); });
+ window.__ready = true;
+</script>
+</body>
+</html>

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status: DRAFT — design and implementation plan only.** Execution is gated on Aryn Yklas's full-design approval, approval of the shared contracts and an explicit execution-method choice. No product code, dependency installation, deployment or exercised runtime capability is represented by this document.
+**Status:** APPROVED for implementation by Aryn Yklas on 2026-11-03 with m1 implementers and m2 reviewers. Planned interfaces and commands are requirements, not implemented or exercised capabilities.
 
 **Goal:** Deliver a native, authorized investigation experience that takes a real failure through queue, incident, release, query, critical path, job, masked replay and correctly qualified profile evidence.
 
@@ -51,7 +51,7 @@ All browser components below return `React.JSX.Element`. `ViewContext` in `web/s
 
 **Files — Create:** `internal/httpapi/session_ui_test.go`, `web/src/auth/SessionBoundary.tsx`, `web/src/auth/LoginPage.tsx`, `web/src/auth/ElevationDialog.tsx`, `web/e2e/auth.spec.ts`, `docs/user/access.md`. Core plan Task 1 owns planned `internal/auth/service.go` and `internal/httpapi/session.go`; consume them, do not create a second route/auth implementation.
 
-Fold `web/package.json`, `web/tsconfig.json`, `web/vite.config.ts`, `web/index.html` and `web/src/main.tsx` into this real first login feature. Consume the root pnpm workspace/lock from SDK plan03 Task1; extend the same lock, not a second package-manager convention. No separate scaffold milestone.
+Fold `web/package.json`, `web/tsconfig.json`, `web/vite.config.ts`, `web/playwright.config.ts`, `web/index.html` and `web/src/main.tsx` into this real first login feature. The initial Playwright config defines the actual Chromium project used by Task1; Task9 extends it for the complete suite rather than recreating it. Consume the root pnpm workspace/lock from SDK plan03 Task1; extend the same lock, not a second package-manager convention. No separate scaffold milestone.
 
 **Interfaces:** Consume core `*auth.Service` in `internal/auth/service.go` and `RegisterSessionRoutes(mux *http.ServeMux, service *auth.Service)` in `internal/httpapi/session.go`, backed by C02 `Authorize(ctx context.Context, credential Credential, org model.ID, projects []model.ID, action Permission) (Scope,error)`, `Revalidate(ctx context.Context, scope Scope) error`, and `Elevate(ctx, session Session, reason string, orgs []model.ID) (Elevation,error)`. Produce `SessionBoundary(props: {children: React.ReactNode}): React.JSX.Element`, `LoginPage()` and `ElevationDialog(props: {orgs: Id[]; onElevated: () => void})`. C11 routes are POST `/api/v1/login`, GET `/api/v1/session`, POST `/api/v1/logout`, POST `/api/v1/oidc/start`, GET `/api/v1/oidc/callback`, POST `/api/v1/elevation`. Core owns cryptography, credentials, OIDC and policy state; this task proves real browser flows, not another login service.
 

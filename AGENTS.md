@@ -2,7 +2,7 @@
 
 Before design or implementation work, read the selected requirements, architecture and contracts linked from README.md. Direct owner clarification: own contracts throughout; full PromQL/LogQL language semantics remain, upstream product HTTP/API compatibility does not. The research archive is historical evidence, not an executable requirements list.
 
-Current authorization is initialization + design only. Product code, dependency installation and deployment require owner approval of the full design and an execution-method choice. Subsystem plans are drafts until then; they are not proof of implemented capabilities.
+The owner approved the complete design/contracts and subagent-driven implementation on 2026-11-03. Use m1 (GPT-6.1 Sol) implementers and m2 (Qwen 3.8 Flash Next) reviewers, with one integration owner and cumulative real-smoke gates. GitHub publication, customer infrastructure changes and disruptive customer drills require separate authorization. Attribute first-party work to Aryn Yklas under Apache-2.0.
 
 Public product material contains generic fixtures and public upstream references. Keep customer inventory, credentials, addresses and private adoption evidence outside this repository. Verify every promised language semantic and durable-ACK failure guarantee; a vertical milestone is not whole-product completion.
 

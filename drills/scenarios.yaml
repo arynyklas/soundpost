@@ -1,0 +1,77 @@
+# Copyright 2026 Aryn Yklas
+# SPDX-License-Identifier: Apache-2.0
+#
+# Failure drills for task 07.07. `go run ./tools/drills --scenario NAME|all --target isolated --report DIR`.
+# The allowlist is explicit: a drill refuses any data directory outside data_roots, any directory that is
+# or contains a forbidden production/default location, and any address that is not a loopback literal
+# listed in hosts. Production execution is a separate owner action and is not implemented.
+version: 1
+allowlist:
+  data_roots:
+    - /tmp/soundpost-drills
+  hosts:
+    - 127.0.0.1
+    - localhost
+  forbidden_data_dirs:
+    - /var/lib/soundpost
+    - /var/lib
+    - /var/log
+    - /etc/soundpost
+    - /opt/soundpost
+    - /srv
+    - /data
+    - /home
+    - /root
+    - /mnt
+    - /usr
+    - /etc
+    - /boot
+scenarios:
+  # ---- real three-member cluster of the produced static binary (the `node_loss` release evidence) ----
+  - name: node-kill-restart
+    evidence: node_loss
+    needs_binary: true
+    description: SIGKILL one member of three real processes, keep acknowledging through the survivors, restart it, reconcile every ACKed id against the exact retained data on every member.
+  - name: minority-pause
+    evidence: node_loss
+    needs_binary: true
+    description: SIGSTOP one member (a minority is unreachable but alive), acknowledge through the majority, SIGCONT, reconcile.
+  - name: majority-pause
+    evidence: node_loss
+    needs_binary: true
+    description: SIGSTOP two members; the survivor must refuse acknowledgement (typed) and no ACK may exist for a refused batch; SIGCONT, retry the identical batch, reconcile.
+  - name: network-partition
+    evidence: node_loss
+    needs_binary: true
+    description: Link-level partition with both sides live, through the drill's own loopback proxy transport (no iptables/tc/netns, no host privilege). One member is isolated from the other two (initial leader with dropped packets, then member 3 with reset links), stays reachable by clients and must never acknowledge; the majority keeps acknowledging; after the heal every ACK is reconciled on every member.
+  - name: power-loss
+    evidence: node_loss
+    needs_binary: true
+    description: Power cut of one member (initial leader; member 3 with a torn tail) and of all three at once, emulated as SIGKILL of the whole process group plus rollback of every byte and directory entry the member never fsynced (observed through an unprivileged seccomp user-notification ledger of its own fsync/rename calls); restart; every ACK reconciled on every member. Not a physical power cut.
+  - name: fsync-failure
+    evidence: node_loss
+    needs_binary: true
+    description: Every fsync of one member answers EIO (injected by the unprivileged seccomp user-notification seam under the real binary) while writes stream; the member fails stop in every group (stops leading and voting, exits), the other two keep acknowledging inside the scenario window in both phases (initial leader, member 3), nothing is acknowledged without durability, the member restarts on re-verified journals and rejoins, every ACK reconciled.
+  - name: disk-disappearance
+    evidence: node_loss
+    needs_binary: true
+    description: A member's data directory vanishes under the running process (moved away; fsync and path operations answer EIO) while the other two keep their own disks and keep acknowledging inside the scenario window in both phases, then a blank replacement disk, then the original returns. The original disk holds less than the member acknowledged on the blank one, so the member must refuse to rejoin with reason=journal_behind_acknowledged (never become ready) while the other two keep acknowledging; a replacement is a new identity. No false ACK, every ACK reconciled on the remaining members.
+  # ---- capacity ----
+  - name: capacity-faults
+    description: Failed sync, slow apply and full disk through the committed fault hooks of the replica and retention layers; nothing acknowledged without durability, every ACK reconciled.
+  # ---- pipeline, outage, deadman, cutover ----
+  - name: provider-failure-outage
+    description: Failed provider attempts, outage and recovery with the recording senders; recovery never erases the outage or the failed attempts and never sends retroactive backlog as new emergencies; retries keep id and receipt.
+  - name: external-deadman
+    description: The independent observer process delivers while every Soundpost process is stopped, keeps the outage after recovery and announces no retroactive backlog.
+  - name: owner-cutover-rollback
+    description: Canonical notification owner cutover and rollback with exactly one active owner and no stale sender.
+  # ---- deletion, backup, restore, evidence ----
+  - name: stale-policy-delete-barrier
+    description: A stale policy revision and the all-shard delete barrier race; no stale worker sends or remaps source states.
+  - name: backup-predates-deletion
+    description: A backup older than a completed deletion, with an independent authority HEAD, must not resurrect the deleted data.
+  - name: restore-authority-unavailable
+    description: Restore with the authority unavailable fails closed.
+  - name: evidence-gap-after-retention
+    description: After retention expiry the missing evidence is an explicit gap, never an empty success.

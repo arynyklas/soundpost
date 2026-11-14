@@ -1,0 +1,3533 @@
+{
+  "schema": "soundpost-authored-logql-metric-cases-v1",
+  "copyright": "Copyright 2026 Aryn Yklas",
+  "license": "Apache-2.0",
+  "author": "Aryn Yklas",
+  "phase": "logql-metric",
+  "cases": [
+    {
+      "id": "logql-loki-3.5.2/binary-matching/interaction",
+      "phase": "logql-metric",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "configuration": {
+        "count_min_sketch_heap_size": "10000",
+        "instant_log_lookback_ns": "30000000000"
+      },
+      "config_identity": "resolved-profile-manifest-default",
+      "query": "count_over_time({app=\"api\"}[2s]) < bool on(host) group_left sum by (host) (count_over_time({app=\"web\"}[2s]))",
+      "kind": "instant",
+      "time_ns": "2000000000",
+      "start_ns": "0",
+      "end_ns": "2000000000",
+      "step_ns": "1000000000",
+      "direction": "forward",
+      "limit": "0",
+      "interval_ns": "0",
+      "entries": [
+        {
+          "timestamp_ns": "1000000000",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=1",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1500000000",
+          "id": "02000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=2",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1000000000",
+          "id": "03000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=3",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "b"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "500000000",
+          "id": "04000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=4",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1200000000",
+          "id": "05000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=5",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1800000000",
+          "id": "06000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=6",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1100000000",
+          "id": "07000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=7",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "c"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "id": "logql-loki-3.5.2/binary-matching/positive",
+      "phase": "logql-metric",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "configuration": {
+        "count_min_sketch_heap_size": "10000",
+        "instant_log_lookback_ns": "30000000000"
+      },
+      "config_identity": "resolved-profile-manifest-default",
+      "query": "sum by (host) (count_over_time({app=\"api\"}[2s])) / on(host) sum by (host) (count_over_time({app=\"web\"}[2s]))",
+      "kind": "instant",
+      "time_ns": "2000000000",
+      "start_ns": "0",
+      "end_ns": "2000000000",
+      "step_ns": "1000000000",
+      "direction": "forward",
+      "limit": "0",
+      "interval_ns": "0",
+      "entries": [
+        {
+          "timestamp_ns": "1000000000",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=1",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1500000000",
+          "id": "02000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=2",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1000000000",
+          "id": "03000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=3",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "b"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "500000000",
+          "id": "04000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=4",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1200000000",
+          "id": "05000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=5",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1800000000",
+          "id": "06000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=6",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1100000000",
+          "id": "07000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=7",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "c"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "id": "logql-loki-3.5.2/first-last-ties/interaction",
+      "phase": "logql-metric",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "configuration": {
+        "count_min_sketch_heap_size": "10000",
+        "instant_log_lookback_ns": "30000000000"
+      },
+      "config_identity": "resolved-profile-manifest-default",
+      "query": "first_over_time({app=\"api\"} | logfmt | unwrap n [2s]) by (app)",
+      "kind": "instant",
+      "time_ns": "2000000000",
+      "start_ns": "0",
+      "end_ns": "2000000000",
+      "step_ns": "1000000000",
+      "direction": "forward",
+      "limit": "0",
+      "interval_ns": "0",
+      "entries": [
+        {
+          "timestamp_ns": "1000000000",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=5",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1000000000",
+          "id": "02000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=100",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "c"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "id": "logql-loki-3.5.2/first-last-ties/negative",
+      "phase": "logql-metric",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "configuration": {
+        "count_min_sketch_heap_size": "10000",
+        "instant_log_lookback_ns": "30000000000"
+      },
+      "config_identity": "resolved-profile-manifest-default",
+      "query": "last_over_time({app=\"api\"} | logfmt | unwrap n [2s])",
+      "kind": "instant",
+      "time_ns": "2000000000",
+      "start_ns": "0",
+      "end_ns": "2000000000",
+      "step_ns": "1000000000",
+      "direction": "forward",
+      "limit": "0",
+      "interval_ns": "0",
+      "entries": [
+        {
+          "timestamp_ns": "1000000000",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=5",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1000000000",
+          "id": "02000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=9",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1000000000",
+          "id": "03000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=7",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "id": "logql-loki-3.5.2/first-last-ties/positive",
+      "phase": "logql-metric",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "configuration": {
+        "count_min_sketch_heap_size": "10000",
+        "instant_log_lookback_ns": "30000000000"
+      },
+      "config_identity": "resolved-profile-manifest-default",
+      "query": "first_over_time({app=\"api\", host=\"a\"} | logfmt | unwrap n [2s])",
+      "kind": "instant",
+      "time_ns": "2000000000",
+      "start_ns": "0",
+      "end_ns": "2000000000",
+      "step_ns": "1000000000",
+      "direction": "forward",
+      "limit": "0",
+      "interval_ns": "0",
+      "entries": [
+        {
+          "timestamp_ns": "1000000000",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=5",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1000000000",
+          "id": "02000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=7",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1000000000",
+          "id": "03000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=3",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1500000000",
+          "id": "04000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=9",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1000000000",
+          "id": "05000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=100",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "b"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "id": "logql-loki-3.5.2/iterator-entry-merge/interaction",
+      "phase": "logql-metric",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "configuration": {
+        "count_min_sketch_heap_size": "10000",
+        "instant_log_lookback_ns": "30000000000"
+      },
+      "config_identity": "resolved-profile-manifest-default",
+      "query": "{app=\"api\"}",
+      "kind": "range",
+      "time_ns": "2000000000",
+      "start_ns": "0",
+      "end_ns": "3000000000",
+      "step_ns": "1000000000",
+      "direction": "backward",
+      "limit": "3",
+      "interval_ns": "0",
+      "entries": [
+        {
+          "timestamp_ns": "1000000000",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "same",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1000000000",
+          "id": "02000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "same",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1000000000",
+          "id": "03000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "x",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1000000000",
+          "id": "04000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "B",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "b"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "id": "logql-loki-3.5.2/iterator-entry-merge/negative",
+      "phase": "logql-metric",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "configuration": {
+        "count_min_sketch_heap_size": "10000",
+        "instant_log_lookback_ns": "30000000000"
+      },
+      "config_identity": "resolved-profile-manifest-default",
+      "query": "{app=\"api\"}",
+      "kind": "range",
+      "time_ns": "2000000000",
+      "start_ns": "0",
+      "end_ns": "3000000000",
+      "step_ns": "1000000000",
+      "direction": "forward",
+      "limit": "10",
+      "interval_ns": "0",
+      "entries": [
+        {
+          "timestamp_ns": "1000000000",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "same",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1000000000",
+          "id": "02000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "same",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "b"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "2000000000",
+          "id": "03000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "same",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "id": "logql-loki-3.5.2/iterator-entry-merge/positive",
+      "phase": "logql-metric",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "configuration": {
+        "count_min_sketch_heap_size": "10000",
+        "instant_log_lookback_ns": "30000000000"
+      },
+      "config_identity": "resolved-profile-manifest-default",
+      "query": "{app=\"api\"}",
+      "kind": "range",
+      "time_ns": "2000000000",
+      "start_ns": "0",
+      "end_ns": "3000000000",
+      "step_ns": "1000000000",
+      "direction": "forward",
+      "limit": "10",
+      "interval_ns": "0",
+      "entries": [
+        {
+          "timestamp_ns": "1000000000",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "x",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1000000000",
+          "id": "02000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "same",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1000000000",
+          "id": "03000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "A",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "b"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1000000000",
+          "id": "04000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "C",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "c"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "id": "logql-loki-3.5.2/iterator-sample-merge/interaction",
+      "phase": "logql-metric",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "configuration": {
+        "count_min_sketch_heap_size": "10000",
+        "instant_log_lookback_ns": "30000000000"
+      },
+      "config_identity": "resolved-profile-manifest-default",
+      "query": "sum by (host) (count_over_time({app=\"api\"}[2s]))",
+      "kind": "instant",
+      "time_ns": "2000000000",
+      "start_ns": "0",
+      "end_ns": "2000000000",
+      "step_ns": "1000000000",
+      "direction": "forward",
+      "limit": "0",
+      "interval_ns": "0",
+      "entries": [
+        {
+          "timestamp_ns": "1000000000",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "same",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1000000000",
+          "id": "02000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "same",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1000000000",
+          "id": "03000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "same",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "b"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "id": "logql-loki-3.5.2/iterator-sample-merge/negative",
+      "phase": "logql-metric",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "configuration": {
+        "count_min_sketch_heap_size": "10000",
+        "instant_log_lookback_ns": "30000000000"
+      },
+      "config_identity": "resolved-profile-manifest-default",
+      "query": "count_over_time({app=\"api\"}[2s])",
+      "kind": "instant",
+      "time_ns": "2000000000",
+      "start_ns": "0",
+      "end_ns": "2000000000",
+      "step_ns": "1000000000",
+      "direction": "forward",
+      "limit": "0",
+      "interval_ns": "0",
+      "entries": [
+        {
+          "timestamp_ns": "1000000000",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "same",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1000000000",
+          "id": "02000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "same",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1000000000",
+          "id": "03000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "same",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "id": "logql-loki-3.5.2/iterator-sample-merge/positive",
+      "phase": "logql-metric",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "configuration": {
+        "count_min_sketch_heap_size": "10000",
+        "instant_log_lookback_ns": "30000000000"
+      },
+      "config_identity": "resolved-profile-manifest-default",
+      "query": "last_over_time({app=\"api\"} | logfmt | unwrap n [2s]) by (app)",
+      "kind": "instant",
+      "time_ns": "2000000000",
+      "start_ns": "0",
+      "end_ns": "2000000000",
+      "step_ns": "1000000000",
+      "direction": "forward",
+      "limit": "0",
+      "interval_ns": "0",
+      "entries": [
+        {
+          "timestamp_ns": "1500000000",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=3",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1500000000",
+          "id": "02000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=2",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "c"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1000000000",
+          "id": "03000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=1",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "id": "logql-loki-3.5.2/label-replace/interaction",
+      "phase": "logql-metric",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "configuration": {
+        "count_min_sketch_heap_size": "10000",
+        "instant_log_lookback_ns": "30000000000"
+      },
+      "config_identity": "resolved-profile-manifest-default",
+      "query": "sum by (h) (label_replace(count_over_time({app=\"api\"}[2s]), \"h\", \"$1\", \"host\", \"(a|b)\"))",
+      "kind": "instant",
+      "time_ns": "2000000000",
+      "start_ns": "0",
+      "end_ns": "2000000000",
+      "step_ns": "1000000000",
+      "direction": "forward",
+      "limit": "0",
+      "interval_ns": "0",
+      "entries": [
+        {
+          "timestamp_ns": "1000000000",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=1",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1500000000",
+          "id": "02000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=2",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1000000000",
+          "id": "03000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=3",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "b"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "500000000",
+          "id": "04000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=4",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1200000000",
+          "id": "05000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=5",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1800000000",
+          "id": "06000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=6",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1100000000",
+          "id": "07000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=7",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "c"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "id": "logql-loki-3.5.2/label-replace/positive",
+      "phase": "logql-metric",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "configuration": {
+        "count_min_sketch_heap_size": "10000",
+        "instant_log_lookback_ns": "30000000000"
+      },
+      "config_identity": "resolved-profile-manifest-default",
+      "query": "label_replace(count_over_time({app=\"api\"}[2s]), \"h\", \"host-$1\", \"host\", \"(.*)\")",
+      "kind": "instant",
+      "time_ns": "2000000000",
+      "start_ns": "0",
+      "end_ns": "2000000000",
+      "step_ns": "1000000000",
+      "direction": "forward",
+      "limit": "0",
+      "interval_ns": "0",
+      "entries": [
+        {
+          "timestamp_ns": "1000000000",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=1",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1500000000",
+          "id": "02000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=2",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1000000000",
+          "id": "03000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=3",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "b"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "500000000",
+          "id": "04000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=4",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1200000000",
+          "id": "05000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=5",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1800000000",
+          "id": "06000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=6",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1100000000",
+          "id": "07000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=7",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "c"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "id": "logql-loki-3.5.2/log-order-limit/interaction",
+      "phase": "logql-metric",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "configuration": {
+        "count_min_sketch_heap_size": "10000",
+        "instant_log_lookback_ns": "30000000000"
+      },
+      "config_identity": "resolved-profile-manifest-default",
+      "query": "{app=\"api\"} | logfmt",
+      "kind": "range",
+      "time_ns": "2000000000",
+      "start_ns": "0",
+      "end_ns": "5000000000",
+      "step_ns": "1000000000",
+      "direction": "forward",
+      "limit": "4",
+      "interval_ns": "1000000000",
+      "entries": [
+        {
+          "timestamp_ns": "1000000000",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "a1",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1000000000",
+          "id": "02000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "b1",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "b"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "2000000000",
+          "id": "03000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "a2",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "2000000000",
+          "id": "04000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "b2",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "b"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "3000000000",
+          "id": "05000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "c1",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "c"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "id": "logql-loki-3.5.2/log-order-limit/negative",
+      "phase": "logql-metric",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "configuration": {
+        "count_min_sketch_heap_size": "10000",
+        "instant_log_lookback_ns": "30000000000"
+      },
+      "config_identity": "resolved-profile-manifest-default",
+      "query": "{app=\"api\"} | logfmt | n > 1",
+      "kind": "range",
+      "time_ns": "2000000000",
+      "start_ns": "0",
+      "end_ns": "5000000000",
+      "step_ns": "1000000000",
+      "direction": "forward",
+      "limit": "2",
+      "interval_ns": "0",
+      "entries": [
+        {
+          "timestamp_ns": "1000000000",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=1",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1000000000",
+          "id": "02000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=2",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "b"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "2000000000",
+          "id": "03000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=0",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "3000000000",
+          "id": "04000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=3",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "4000000000",
+          "id": "05000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=4",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "c"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "id": "logql-loki-3.5.2/log-order-limit/positive",
+      "phase": "logql-metric",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "configuration": {
+        "count_min_sketch_heap_size": "10000",
+        "instant_log_lookback_ns": "30000000000"
+      },
+      "config_identity": "resolved-profile-manifest-default",
+      "query": "{app=\"api\"}",
+      "kind": "range",
+      "time_ns": "2000000000",
+      "start_ns": "0",
+      "end_ns": "5000000000",
+      "step_ns": "1000000000",
+      "direction": "backward",
+      "limit": "3",
+      "interval_ns": "0",
+      "entries": [
+        {
+          "timestamp_ns": "1000000000",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "a1",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1000000000",
+          "id": "02000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "b1",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "b"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "2000000000",
+          "id": "03000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "a2",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "2000000000",
+          "id": "04000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "b2",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "b"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "3000000000",
+          "id": "05000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "c1",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "c"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "id": "logql-loki-3.5.2/range-time/interaction",
+      "phase": "logql-metric",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "configuration": {
+        "count_min_sketch_heap_size": "10000",
+        "instant_log_lookback_ns": "30000000000"
+      },
+      "config_identity": "resolved-profile-manifest-default",
+      "query": "sum(count_over_time({app=\"api\"}[2s]))",
+      "kind": "instant",
+      "time_ns": "2000000000",
+      "start_ns": "0",
+      "end_ns": "2000000000",
+      "step_ns": "1000000000",
+      "direction": "forward",
+      "limit": "0",
+      "interval_ns": "0",
+      "entries": [
+        {
+          "timestamp_ns": "0",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "a",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1",
+          "id": "02000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "b",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "2000000000",
+          "id": "03000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "c",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "2000000001",
+          "id": "04000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "d",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "id": "logql-loki-3.5.2/range-time/positive",
+      "phase": "logql-metric",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "configuration": {
+        "count_min_sketch_heap_size": "10000",
+        "instant_log_lookback_ns": "30000000000"
+      },
+      "config_identity": "resolved-profile-manifest-default",
+      "query": "count_over_time({app=\"api\"}[2s] offset 1s)",
+      "kind": "range",
+      "time_ns": "2000000000",
+      "start_ns": "2000000000",
+      "end_ns": "5000000000",
+      "step_ns": "1000000000",
+      "direction": "forward",
+      "limit": "0",
+      "interval_ns": "0",
+      "entries": [
+        {
+          "timestamp_ns": "0",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=1",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1000000000",
+          "id": "02000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=2",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1500000000",
+          "id": "03000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=3",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1700000000",
+          "id": "04000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=4",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "4000000000",
+          "id": "05000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=5",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "id": "logql-loki-3.5.2/selectors/interaction",
+      "phase": "logql-metric",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "configuration": {
+        "count_min_sketch_heap_size": "10000",
+        "instant_log_lookback_ns": "30000000000"
+      },
+      "config_identity": "resolved-profile-manifest-default",
+      "query": "{app=\"api\"} | level = \"warn\"",
+      "kind": "range",
+      "time_ns": "2000000000",
+      "start_ns": "0",
+      "end_ns": "3000000000",
+      "step_ns": "1000000000",
+      "direction": "forward",
+      "limit": "10",
+      "interval_ns": "0",
+      "entries": [
+        {
+          "timestamp_ns": "1000000000",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "hello",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [
+            {
+              "name": "level",
+              "value": "warn"
+            }
+          ],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1500000000",
+          "id": "02000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "other",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [
+            {
+              "name": "level",
+              "value": "info"
+            }
+          ],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "id": "logql-loki-3.5.2/selectors/positive",
+      "phase": "logql-metric",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "configuration": {
+        "count_min_sketch_heap_size": "10000",
+        "instant_log_lookback_ns": "30000000000"
+      },
+      "config_identity": "resolved-profile-manifest-default",
+      "query": "{app=\"api\", host=~\"a|\"}",
+      "kind": "range",
+      "time_ns": "2000000000",
+      "start_ns": "0",
+      "end_ns": "3000000000",
+      "step_ns": "1000000000",
+      "direction": "forward",
+      "limit": "10",
+      "interval_ns": "0",
+      "entries": [
+        {
+          "timestamp_ns": "1000000000",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "x",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1000000000",
+          "id": "02000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "y",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "ab"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1000000000",
+          "id": "03000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "z",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1000000000",
+          "id": "04000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "w",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "id": "logql-loki-3.5.2/set-operators/interaction",
+      "phase": "logql-metric",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "configuration": {
+        "count_min_sketch_heap_size": "10000",
+        "instant_log_lookback_ns": "30000000000"
+      },
+      "config_identity": "resolved-profile-manifest-default",
+      "query": "sum by (host) (count_over_time({app=\"api\"}[2s])) or sum by (host) (count_over_time({app=\"web\"}[2s]))",
+      "kind": "instant",
+      "time_ns": "2000000000",
+      "start_ns": "0",
+      "end_ns": "2000000000",
+      "step_ns": "1000000000",
+      "direction": "forward",
+      "limit": "0",
+      "interval_ns": "0",
+      "entries": [
+        {
+          "timestamp_ns": "1000000000",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=1",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1500000000",
+          "id": "02000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=2",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1000000000",
+          "id": "03000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=3",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "b"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "500000000",
+          "id": "04000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=4",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1200000000",
+          "id": "05000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=5",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1800000000",
+          "id": "06000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=6",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1100000000",
+          "id": "07000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=7",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "c"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "id": "logql-loki-3.5.2/set-operators/positive",
+      "phase": "logql-metric",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "configuration": {
+        "count_min_sketch_heap_size": "10000",
+        "instant_log_lookback_ns": "30000000000"
+      },
+      "config_identity": "resolved-profile-manifest-default",
+      "query": "count_over_time({app=\"api\"}[2s]) and on(host) count_over_time({app=\"web\"}[2s])",
+      "kind": "instant",
+      "time_ns": "2000000000",
+      "start_ns": "0",
+      "end_ns": "2000000000",
+      "step_ns": "1000000000",
+      "direction": "forward",
+      "limit": "0",
+      "interval_ns": "0",
+      "entries": [
+        {
+          "timestamp_ns": "1000000000",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=1",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1500000000",
+          "id": "02000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=2",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1000000000",
+          "id": "03000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=3",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "b"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "500000000",
+          "id": "04000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=4",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1200000000",
+          "id": "05000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=5",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1800000000",
+          "id": "06000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=6",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1100000000",
+          "id": "07000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=7",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "c"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "id": "logql-loki-3.5.2/shard-capability-domain/interaction",
+      "phase": "logql-metric",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [
+        "shard-first_over_time",
+        "shard-last_over_time",
+        "shard-quantile_over_time"
+      ],
+      "configuration": {
+        "count_min_sketch_heap_size": "10000",
+        "instant_log_lookback_ns": "30000000000"
+      },
+      "config_identity": "resolved-profile-manifest-default",
+      "query": "approx_topk(1, count_over_time({app=\"api\"}[2s]))",
+      "kind": "instant",
+      "time_ns": "2000000000",
+      "start_ns": "0",
+      "end_ns": "2000000000",
+      "step_ns": "1000000000",
+      "direction": "forward",
+      "limit": "0",
+      "interval_ns": "0",
+      "entries": [
+        {
+          "timestamp_ns": "1000000000",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=1",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1500000000",
+          "id": "02000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=2",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1000000000",
+          "id": "03000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=3",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "b"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "500000000",
+          "id": "04000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=4",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1200000000",
+          "id": "05000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=5",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1800000000",
+          "id": "06000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=6",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1100000000",
+          "id": "07000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=7",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "c"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "id": "logql-loki-3.5.2/shard-capability-domain/positive",
+      "phase": "logql-metric",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [
+        "approx_topk",
+        "shard-first_over_time"
+      ],
+      "configuration": {
+        "count_min_sketch_heap_size": "10000",
+        "instant_log_lookback_ns": "30000000000"
+      },
+      "config_identity": "resolved-profile-manifest-default",
+      "query": "approx_topk(2, first_over_time({app=\"api\"} | logfmt | unwrap n [2s]) by (host))",
+      "kind": "instant",
+      "time_ns": "2000000000",
+      "start_ns": "0",
+      "end_ns": "2000000000",
+      "step_ns": "1000000000",
+      "direction": "forward",
+      "limit": "0",
+      "interval_ns": "0",
+      "entries": [
+        {
+          "timestamp_ns": "1000000000",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=5",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1000000000",
+          "id": "02000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=7",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1000000000",
+          "id": "03000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=3",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1500000000",
+          "id": "04000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=9",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1000000000",
+          "id": "05000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=100",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "b"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "id": "logql-loki-3.5.2/structured-metadata/interaction",
+      "phase": "logql-metric",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "configuration": {
+        "count_min_sketch_heap_size": "10000",
+        "instant_log_lookback_ns": "30000000000"
+      },
+      "config_identity": "resolved-profile-manifest-default",
+      "query": "sum by (trace) (count_over_time({app=\"api\"}[2s]))",
+      "kind": "instant",
+      "time_ns": "2000000000",
+      "start_ns": "0",
+      "end_ns": "2000000000",
+      "step_ns": "1000000000",
+      "direction": "forward",
+      "limit": "0",
+      "interval_ns": "0",
+      "entries": [
+        {
+          "timestamp_ns": "1000000000",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "x",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [
+            {
+              "name": "trace",
+              "value": "abc"
+            }
+          ],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1500000000",
+          "id": "02000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "y",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [
+            {
+              "name": "trace",
+              "value": "def"
+            }
+          ],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1600000000",
+          "id": "03000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "z",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [
+            {
+              "name": "trace",
+              "value": "abc"
+            }
+          ],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "id": "logql-loki-3.5.2/unwrap/interaction",
+      "phase": "logql-metric",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "configuration": {
+        "count_min_sketch_heap_size": "10000",
+        "instant_log_lookback_ns": "30000000000"
+      },
+      "config_identity": "resolved-profile-manifest-default",
+      "query": "sum_over_time({app=\"api\"} | logfmt | unwrap n | __error__ = \"\" [2s])",
+      "kind": "instant",
+      "time_ns": "2000000000",
+      "start_ns": "0",
+      "end_ns": "2000000000",
+      "step_ns": "1000000000",
+      "direction": "forward",
+      "limit": "0",
+      "interval_ns": "0",
+      "entries": [
+        {
+          "timestamp_ns": "1000000000",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=abc",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1200000000",
+          "id": "02000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=3",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "id": "logql-loki-3.5.2/unwrap/negative",
+      "phase": "logql-metric",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "configuration": {
+        "count_min_sketch_heap_size": "10000",
+        "instant_log_lookback_ns": "30000000000"
+      },
+      "config_identity": "resolved-profile-manifest-default",
+      "query": "sum_over_time({app=\"api\"} | logfmt | unwrap n [2s])",
+      "kind": "instant",
+      "time_ns": "2000000000",
+      "start_ns": "0",
+      "end_ns": "2000000000",
+      "step_ns": "1000000000",
+      "direction": "forward",
+      "limit": "0",
+      "interval_ns": "0",
+      "entries": [
+        {
+          "timestamp_ns": "1000000000",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=abc",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1200000000",
+          "id": "02000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=3",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "id": "logql-loki-3.5.2/variants/interaction",
+      "phase": "logql-metric",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [
+        "multi-variant-queries"
+      ],
+      "configuration": {
+        "count_min_sketch_heap_size": "10000",
+        "instant_log_lookback_ns": "30000000000"
+      },
+      "config_identity": "resolved-profile-manifest-default",
+      "query": "variants(sum by (host) (count_over_time({app=\"api\"}[2s])),rate({app=\"api\"}[2s])) of ({app=\"api\"}[2s])",
+      "kind": "instant",
+      "time_ns": "2000000000",
+      "start_ns": "0",
+      "end_ns": "2000000000",
+      "step_ns": "1000000000",
+      "direction": "forward",
+      "limit": "0",
+      "interval_ns": "0",
+      "entries": [
+        {
+          "timestamp_ns": "1000000000",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=1",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1500000000",
+          "id": "02000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=2",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1000000000",
+          "id": "03000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=3",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "b"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "500000000",
+          "id": "04000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=4",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1200000000",
+          "id": "05000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=5",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1800000000",
+          "id": "06000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=6",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1100000000",
+          "id": "07000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=7",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "c"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "id": "logql-loki-3.5.2/variants/negative",
+      "phase": "logql-metric",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "configuration": {
+        "count_min_sketch_heap_size": "10000",
+        "instant_log_lookback_ns": "30000000000"
+      },
+      "config_identity": "resolved-profile-manifest-default",
+      "query": "variants(count_over_time({app=\"api\"}[2s])) of ({app=\"api\"}[2s])",
+      "kind": "instant",
+      "time_ns": "2000000000",
+      "start_ns": "0",
+      "end_ns": "2000000000",
+      "step_ns": "1000000000",
+      "direction": "forward",
+      "limit": "0",
+      "interval_ns": "0",
+      "entries": [
+        {
+          "timestamp_ns": "1000000000",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=1",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1500000000",
+          "id": "02000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=2",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1000000000",
+          "id": "03000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=3",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "b"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "500000000",
+          "id": "04000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=4",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1200000000",
+          "id": "05000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=5",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1800000000",
+          "id": "06000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=6",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1100000000",
+          "id": "07000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=7",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "c"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "id": "logql-loki-3.5.2/variants/positive",
+      "phase": "logql-metric",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [
+        "multi-variant-queries"
+      ],
+      "configuration": {
+        "count_min_sketch_heap_size": "10000",
+        "instant_log_lookback_ns": "30000000000"
+      },
+      "config_identity": "resolved-profile-manifest-default",
+      "query": "variants(count_over_time({app=\"api\"}[2s]),bytes_over_time({app=\"api\"}[2s])) of ({app=\"api\"}[2s])",
+      "kind": "instant",
+      "time_ns": "2000000000",
+      "start_ns": "0",
+      "end_ns": "2000000000",
+      "step_ns": "1000000000",
+      "direction": "forward",
+      "limit": "0",
+      "interval_ns": "0",
+      "entries": [
+        {
+          "timestamp_ns": "1000000000",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=1",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1500000000",
+          "id": "02000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=2",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1000000000",
+          "id": "03000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=3",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "b"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "500000000",
+          "id": "04000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=4",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1200000000",
+          "id": "05000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=5",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1800000000",
+          "id": "06000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=6",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1100000000",
+          "id": "07000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=7",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "c"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "id": "logql-loki-3.5.2/vector/interaction",
+      "phase": "logql-metric",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "configuration": {
+        "count_min_sketch_heap_size": "10000",
+        "instant_log_lookback_ns": "30000000000"
+      },
+      "config_identity": "resolved-profile-manifest-default",
+      "query": "sum(count_over_time({app=\"api\"}[2s])) + on() vector(10)",
+      "kind": "instant",
+      "time_ns": "2000000000",
+      "start_ns": "0",
+      "end_ns": "2000000000",
+      "step_ns": "1000000000",
+      "direction": "forward",
+      "limit": "0",
+      "interval_ns": "0",
+      "entries": [
+        {
+          "timestamp_ns": "1000000000",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=1",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1500000000",
+          "id": "02000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=2",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1000000000",
+          "id": "03000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=3",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "b"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "500000000",
+          "id": "04000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=4",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1200000000",
+          "id": "05000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=5",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1800000000",
+          "id": "06000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=6",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1100000000",
+          "id": "07000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=7",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "c"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      ]
+    },
+    {
+      "id": "logql-loki-3.5.2/vector/positive",
+      "phase": "logql-metric",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "configuration": {
+        "count_min_sketch_heap_size": "10000",
+        "instant_log_lookback_ns": "30000000000"
+      },
+      "config_identity": "resolved-profile-manifest-default",
+      "query": "vector(3)",
+      "kind": "instant",
+      "time_ns": "2000000000",
+      "start_ns": "0",
+      "end_ns": "2000000000",
+      "step_ns": "1000000000",
+      "direction": "forward",
+      "limit": "0",
+      "interval_ns": "0",
+      "entries": [
+        {
+          "timestamp_ns": "1000000000",
+          "id": "01000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=1",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1500000000",
+          "id": "02000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=2",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1000000000",
+          "id": "03000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=3",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "api"
+            },
+            {
+              "name": "host",
+              "value": "b"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "500000000",
+          "id": "04000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=4",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1200000000",
+          "id": "05000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=5",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1800000000",
+          "id": "06000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=6",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "a"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        },
+        {
+          "timestamp_ns": "1100000000",
+          "id": "07000000000000000000000000000000",
+          "multiplicity": "1",
+          "line": "n=7",
+          "stream_labels": [
+            {
+              "name": "app",
+              "value": "web"
+            },
+            {
+              "name": "host",
+              "value": "c"
+            }
+          ],
+          "structured_metadata": [],
+          "fields": []
+        }
+      ]
+    }
+  ]
+}

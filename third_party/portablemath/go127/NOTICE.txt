@@ -1,0 +1,5 @@
+Portable, unfused ports of the pure-Go math.Log, math.Log10, math.Log2 and math.Exp2 algorithms from Go 1.27.3.
+Copyright 2009-2021 The Go Authors. All rights reserved.
+Redistributed under the BSD-3-Clause terms in LICENSE.
+The only adaptation is that every floating-point product is wrapped in an explicit float64 conversion so that no architecture fuses it into a multiply-add; exact source URLs and SHA-256 hashes are recorded in provenance.json.
+These are generic numeric primitives, not telemetry query code. No Go compiler/runtime, upstream telemetry implementation or AGPL source is vendored here.

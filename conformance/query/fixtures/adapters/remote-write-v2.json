@@ -1,0 +1,91 @@
+{
+  "version": 2,
+  "note": "Independently authored semantic input. The test harness encodes it to the io.prometheus.write.v2.Request wire format (protobuf, snappy block); uint64/int64 values are decimal strings and float values are IEEE-754 bit patterns in hex.",
+  "timeseries": [
+    {
+      "labels": {"__name__": "requests_total", "job": "api"},
+      "metadata": {"type": "counter", "unit": "requests", "help": "Requests served."},
+      "samples": [
+        {"bits": "4028000000000000", "timestamp_ms": "1700000000123", "start_timestamp_ms": "1699999000500"}
+      ],
+      "exemplars": [
+        {"labels": {"trace_id": "0af7651916cd43dd8448eb211c80319c", "span_id": "b7ad6b7169203331"}, "value_bits": "3ff0000000000000", "timestamp_ms": "1700000000123"}
+      ]
+    },
+    {
+      "labels": {"__name__": "temperature", "job": "worker"},
+      "metadata": {"type": "gauge"},
+      "samples": [
+        {"bits": "7ff8000000000123", "timestamp_ms": "1700000000000"},
+        {"bits": "7ff0000000000002", "timestamp_ms": "1700000001000"}
+      ]
+    },
+    {
+      "labels": {"__name__": "latency", "job": "api"},
+      "metadata": {"type": "histogram"},
+      "histograms": [
+        {
+          "count_int": "27021597764222982",
+          "zero_count_int": "3",
+          "sum_bits": "4059000000000000",
+          "zero_threshold_bits": "3f50624dd2f1a9fc",
+          "schema": 3,
+          "positive_spans": [[0, 2], [1, 1]],
+          "positive_deltas": ["9007199254740993", "-1", "-5"],
+          "negative_spans": [[-1, 1]],
+          "negative_deltas": ["7"],
+          "reset_hint": 1,
+          "timestamp_ms": "1700000000000",
+          "start_timestamp_ms": "1699999000000"
+        }
+      ]
+    },
+    {
+      "labels": {"__name__": "latency_custom", "job": "api"},
+      "metadata": {"type": "histogram"},
+      "histograms": [
+        {
+          "count_int": "9",
+          "zero_count_int": "0",
+          "sum_bits": "4014000000000000",
+          "zero_threshold_bits": "0000000000000000",
+          "schema": -53,
+          "positive_spans": [[0, 3]],
+          "positive_deltas": ["3", "1", "-2"],
+          "custom_values_bits": ["3fe0000000000000", "3ff0000000000000"],
+          "reset_hint": 0,
+          "timestamp_ms": "1700000000000"
+        }
+      ]
+    },
+    {
+      "labels": {"__name__": "size_distribution", "job": "worker"},
+      "metadata": {"type": "gauge_histogram"},
+      "histograms": [
+        {
+          "count_float_bits": "4024000000000000",
+          "zero_count_float_bits": "4000000000000000",
+          "sum_bits": "4044000000000000",
+          "zero_threshold_bits": "0000000000000000",
+          "schema": 0,
+          "positive_spans": [[0, 2]],
+          "positive_counts_bits": ["4008000000000000", "4014000000000000"],
+          "reset_hint": 3,
+          "timestamp_ms": "1700000000000"
+        }
+      ]
+    },
+    {
+      "labels": {"__name__": "gone_distribution", "job": "worker"},
+      "metadata": {"type": "histogram"},
+      "histograms": [
+        {
+          "count_int": "0",
+          "sum_bits": "7ff0000000000002",
+          "schema": 0,
+          "timestamp_ms": "1700000002000"
+        }
+      ]
+    }
+  ]
+}

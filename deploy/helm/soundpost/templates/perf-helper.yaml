@@ -1,0 +1,80 @@
+# Copyright 2026 Aryn Yklas
+# SPDX-License-Identifier: Apache-2.0
+{{- if .Values.perfHelper.enabled }}
+{{- $name := default "soundpost" .Values.nameOverride }}
+{{- $image := required "perfHelper.image.repository is required when perfHelper.enabled" .Values.perfHelper.image.repository }}
+{{- if .Values.perfHelper.image.digest }}{{ $image = printf "%s@%s" $image .Values.perfHelper.image.digest }}{{ else }}{{ $image = printf "%s:%s" $image (required "perfHelper.image.tag or digest is required" .Values.perfHelper.image.tag) }}{{ end }}
+# OPTIONAL native acquisition helper. This is the only workload that may hold CAP_PERFMON, and
+# it holds exactly that, together with the audited Localhost seccomp profile. There is no
+# privileged, unconfined, SYS_ADMIN or hostNetwork fallback. Operator setup that Kubernetes
+# cannot do for you (docs/operations/distributed.md): install the profile on each node, create the
+# root-owned 0700 /run/soundpost-perf directory on each node (a host-path
+# exception), create the operator policy Secret, and decide whether the helper may see host PIDs
+# (hostPID). With hostPID false the helper cannot see workloads and native acquisition stays
+# DENIED; the platform reports that as unavailable, never as zero or complete data.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ $name }}-perf-helper
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}-perf-helper
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: perf-helper
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}-perf-helper
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ $name }}-perf-helper
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: perf-helper
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      hostNetwork: false
+      hostIPC: false
+      hostPID: {{ .Values.perfHelper.hostPID }}
+{{- if .Values.perfHelper.nodeSelector }}
+      nodeSelector: {{ toJson .Values.perfHelper.nodeSelector }}
+{{- end }}
+      # The helper container runs as uid 0 holding ONLY CAP_PERFMON: a non-root container process
+      # gets no effective capability from `capabilities.add` (Kubernetes has no ambient
+      # capabilities), so runAsNonRoot would leave PERFMON unusable.
+      securityContext:
+        runAsUser: 0
+        seccompProfile:
+          type: Localhost
+          localhostProfile: {{ .Values.perfHelper.seccompProfile }}
+      containers:
+        - name: helper
+          image: {{ $image }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            privileged: false
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsUser: 0
+            capabilities:
+              drop: [ALL]
+              add: [PERFMON]
+          resources:
+            limits: {memory: 64Mi}
+          volumeMounts:
+            - {name: socket, mountPath: /run/soundpost-perf}
+            - {name: policy, mountPath: /etc/soundpost, readOnly: true}
+      volumes:
+        - name: socket
+          hostPath: {path: /run/soundpost-perf, type: Directory}
+        - name: policy
+          secret:
+            secretName: {{ .Values.perfHelper.policySecret }}
+            defaultMode: 0444
+            items:
+              - {key: perf-policy.json, path: perf-policy.json}
+{{- end }}

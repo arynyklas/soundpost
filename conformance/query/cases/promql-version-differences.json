@@ -1,0 +1,3275 @@
+{
+  "phase": "evaluation",
+  "cases": [
+    {
+      "id": "promql-version/end",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "query": "end()",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "3ff0000000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4008000000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "4020000000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/first_over_time",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "query": "first_over_time(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "3ff0000000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4008000000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "4020000000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/histogram_quantiles",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "query": "histogram_quantiles(hist_total,\"label\",.5,.5)",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "hist_total"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/max_of",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "query": "max_of(.5,.5)",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "3ff0000000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4008000000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "4020000000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/min_of",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "query": "min_of(.5,.5)",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "3ff0000000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4008000000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "4020000000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/range",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "query": "range()",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "3ff0000000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4008000000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "4020000000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "query": "start()",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "3ff0000000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4008000000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "4020000000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/step",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "query": "step()",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "3ff0000000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4008000000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "4020000000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/ts_of_first_over_time",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "query": "ts_of_first_over_time(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "3ff0000000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4008000000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "4020000000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/ts_of_last_over_time",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "query": "ts_of_last_over_time(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "3ff0000000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4008000000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "4020000000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/ts_of_max_over_time",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "query": "ts_of_max_over_time(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "3ff0000000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4008000000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "4020000000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/ts_of_min_over_time",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "promql-experimental-functions"
+      ],
+      "query": "ts_of_min_over_time(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "3ff0000000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4008000000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "4020000000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/scalar-mixed",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "scalar(metric_total or hist_total)",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "3ff0000000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4008000000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "4020000000000000"
+            }
+          ]
+        },
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "hist_total"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "15000000000",
+              "histogram": {
+                "integer": {
+                  "flavor": "counter",
+                  "schema": 0,
+                  "zero_threshold": "0000000000000000",
+                  "sum": "4018000000000000",
+                  "count": "4",
+                  "zero_count": "0",
+                  "positive_spans": [
+                    {
+                      "offset": 1,
+                      "length": 1
+                    }
+                  ],
+                  "negative_spans": [],
+                  "positive_counts": [
+                    "4"
+                  ],
+                  "reset_hint": "unknown"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/sort-range",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "sort(metric_total)",
+      "kind": "range",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "3ff0000000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4008000000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "4020000000000000"
+            }
+          ]
+        }
+      ],
+      "start": "10000000000",
+      "end": "20000000000",
+      "step": "5000000000"
+    },
+    {
+      "id": "promql-version/start-timestamps/positive/resets/on",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "use-start-timestamps"
+      ],
+      "query": "resets(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "6000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "6000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/positive/resets/off",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "resets(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "6000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "6000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/positive/increase/on",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "use-start-timestamps"
+      ],
+      "query": "increase(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "6000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "6000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/positive/increase/off",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "increase(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "6000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "6000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/positive/rate/on",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "use-start-timestamps"
+      ],
+      "query": "rate(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "6000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "6000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/positive/rate/off",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "rate(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "6000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "6000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/positive/irate/on",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "use-start-timestamps"
+      ],
+      "query": "irate(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "6000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "6000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/positive/irate/off",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "irate(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "6000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "6000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/future/resets/on",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "use-start-timestamps"
+      ],
+      "query": "resets(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "11000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "11000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/future/resets/off",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "resets(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "11000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "11000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/future/increase/on",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "use-start-timestamps"
+      ],
+      "query": "increase(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "11000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "11000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/future/increase/off",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "increase(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "11000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "11000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/future/rate/on",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "use-start-timestamps"
+      ],
+      "query": "rate(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "11000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "11000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/future/rate/off",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "rate(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "11000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "11000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/future/irate/on",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "use-start-timestamps"
+      ],
+      "query": "irate(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "11000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "11000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/future/irate/off",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "irate(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "11000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "11000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/zero/resets/on",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "use-start-timestamps"
+      ],
+      "query": "resets(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "0"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "0"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/zero/resets/off",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "resets(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "0"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "0"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/zero/increase/on",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "use-start-timestamps"
+      ],
+      "query": "increase(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "0"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "0"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/zero/increase/off",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "increase(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "0"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "0"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/zero/rate/on",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "use-start-timestamps"
+      ],
+      "query": "rate(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "0"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "0"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/zero/rate/off",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "rate(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "0"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "0"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/zero/irate/on",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "use-start-timestamps"
+      ],
+      "query": "irate(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "0"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "0"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/zero/irate/off",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "irate(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "0"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "0"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/equal-known/resets/on",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "use-start-timestamps"
+      ],
+      "query": "resets(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "5000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "5000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/equal-known/resets/off",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "resets(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "5000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "5000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/equal-known/increase/on",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "use-start-timestamps"
+      ],
+      "query": "increase(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "5000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "5000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/equal-known/increase/off",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "increase(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "5000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "5000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/equal-known/rate/on",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "use-start-timestamps"
+      ],
+      "query": "rate(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "5000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "5000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/equal-known/rate/off",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "rate(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "5000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "5000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/equal-known/irate/on",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "use-start-timestamps"
+      ],
+      "query": "irate(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "5000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "5000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/equal-known/irate/off",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "irate(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "5000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "5000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/equal-unknown/resets/on",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "use-start-timestamps"
+      ],
+      "query": "resets(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "5000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "5000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/equal-unknown/resets/off",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "resets(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "5000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "5000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/equal-unknown/increase/on",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "use-start-timestamps"
+      ],
+      "query": "increase(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "5000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "5000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/equal-unknown/increase/off",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "increase(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "5000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "5000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/equal-unknown/rate/on",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "use-start-timestamps"
+      ],
+      "query": "rate(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "5000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "5000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/equal-unknown/rate/off",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "rate(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "5000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "5000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/equal-unknown/irate/on",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "use-start-timestamps"
+      ],
+      "query": "irate(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "5000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "5000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/equal-unknown/irate/off",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "irate(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "5000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "5000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/negative/resets/on",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "use-start-timestamps"
+      ],
+      "query": "resets(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "-1000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "-1000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/negative/resets/off",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "resets(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "-1000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "-1000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/negative/increase/on",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "use-start-timestamps"
+      ],
+      "query": "increase(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "-1000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "-1000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/negative/increase/off",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "increase(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "-1000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "-1000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/negative/rate/on",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "use-start-timestamps"
+      ],
+      "query": "rate(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "-1000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "-1000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/negative/rate/off",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "rate(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "-1000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "-1000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/negative/irate/on",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "use-start-timestamps"
+      ],
+      "query": "irate(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "-1000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "-1000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/negative/irate/off",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "irate(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "-1000000000"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "-1000000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/large/resets/on",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "use-start-timestamps"
+      ],
+      "query": "resets(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "9007199254740993"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "9007199254740993"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/large/resets/off",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "resets(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "9007199254740993"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "9007199254740993"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/large/increase/on",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "use-start-timestamps"
+      ],
+      "query": "increase(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "9007199254740993"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "9007199254740993"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/large/increase/off",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "increase(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "9007199254740993"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "9007199254740993"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/large/rate/on",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "use-start-timestamps"
+      ],
+      "query": "rate(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "9007199254740993"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "9007199254740993"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/large/rate/off",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "rate(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "9007199254740993"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "9007199254740993"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/large/irate/on",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [
+        "use-start-timestamps"
+      ],
+      "query": "irate(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "9007199254740993"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "9007199254740993"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promql-version/start-timestamps/large/irate/off",
+      "profiles": [
+        "promql-prometheus-3.1.0",
+        "promql-prometheus-3.13.5"
+      ],
+      "enabled_features": [],
+      "query": "irate(metric_total[20s])",
+      "kind": "instant",
+      "time": "20000000000",
+      "series": [
+        {
+          "labels": [
+            {
+              "name": "__name__",
+              "value": "metric_total"
+            },
+            {
+              "name": "instance",
+              "value": "generic-a"
+            },
+            {
+              "name": "job",
+              "value": "generic"
+            }
+          ],
+          "samples": [
+            {
+              "time": "5000000000",
+              "float_bits": "4024000000000000",
+              "start_timestamp_ns": "1000000000"
+            },
+            {
+              "time": "10000000000",
+              "float_bits": "4034000000000000",
+              "start_timestamp_ns": "9007199254740993"
+            },
+            {
+              "time": "15000000000",
+              "float_bits": "403e000000000000",
+              "start_timestamp_ns": "9007199254740993"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

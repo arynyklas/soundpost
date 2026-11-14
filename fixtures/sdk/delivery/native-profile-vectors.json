@@ -1,0 +1,349 @@
+{
+  "version": 1,
+  "vectors": [
+    {
+      "batch": {
+        "version": 1,
+        "project": "22222222222222222222222222222222",
+        "source": "33333333333333333333333333333333",
+        "producer": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "id": "00000000000000000000000000000028",
+        "policy_revision": "1",
+        "route_slot": 44,
+        "records": [
+          {
+            "id": "0000000000000000000000000000001e",
+            "kind": "profile_chunk",
+            "observed_at_ns": "9007199254740993",
+            "resource": {
+              "service_id": "66666666666666666666666666666666",
+              "environment_id": "77777777777777777777777777777777",
+              "build_id": "44444444444444444444444444444444",
+              "instance_pseudonym": "worker-1",
+              "labels": []
+            },
+            "payload": {
+              "profile_id": "ffffffffffffffffffffffffffffffff",
+              "process_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "capability_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "method": "native_cpu",
+              "units": "samples",
+              "start_ns": "9007199254740993",
+              "end_ns": "9007199254740994",
+              "clock": {
+                "wall_ns": "9007199254740993",
+                "mono_ns": "9007199254740993",
+                "domain": {
+                  "host": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "boot": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "runtime": "cccccccccccccccccccccccccccccccc"
+                },
+                "uncertainty_ns": "0"
+              },
+              "frames": [
+                {
+                  "module_id": "",
+                  "function": "",
+                  "artifact_id": "",
+                  "offset": "0",
+                  "reason": "frame_unresolved"
+                }
+              ],
+              "stacks": [
+                {
+                  "frames": [
+                    0
+                  ]
+                }
+              ],
+              "samples": [
+                {
+                  "at_ns": "9007199254740993",
+                  "stack": 0,
+                  "count": "1",
+                  "thread": "17",
+                  "native": {
+                    "task": {
+                      "boot_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                      "pid_namespace": "9007199254740993",
+                      "tgid": 16,
+                      "tid": 17,
+                      "process_start_ns": "9007199254740993",
+                      "generation": "9007199254740993"
+                    },
+                    "method": "software_cpu_clock",
+                    "unit": "cpu_clock_nanoseconds",
+                    "requested_hz": 99,
+                    "period": "9007199254740993",
+                    "truncation": "frame_unresolved",
+                    "coverage": "frame_unresolved",
+                    "throttle_reason": "throttled",
+                    "throttle_event_id": "9007199254740993",
+                    "throttle_stream_id": "18446744073709551615"
+                  }
+                }
+              ],
+              "intervals": [],
+              "loss": "9007199254740993",
+              "truncated": false,
+              "native_domain": {
+                "host_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "boot_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+              },
+              "policy_revision": "1",
+              "sequence": "9007199254740993",
+              "native_capabilities": [
+                "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "cccccccccccccccccccccccccccccccc",
+                "dddddddddddddddddddddddddddddddd"
+              ],
+              "native_loss": [
+                {
+                  "at_ns": "9007199254740993",
+                  "cpu": 0,
+                  "count": "9007199254740993",
+                  "reason": "records_lost"
+                },
+                {
+                  "at_ns": "9007199254740994",
+                  "cpu": 0,
+                  "count": "0",
+                  "reason": "throttled",
+                  "throttle_event_id": "9007199254740993",
+                  "throttle_stream_id": "18446744073709551615"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "canonical_utf8": "{\"id\":\"00000000000000000000000000000028\",\"policy_revision\":\"1\",\"producer\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"project\":\"22222222222222222222222222222222\",\"records\":[{\"id\":\"0000000000000000000000000000001e\",\"kind\":\"profile_chunk\",\"observed_at_ns\":\"9007199254740993\",\"payload\":{\"capability_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"clock\":{\"domain\":{\"boot\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"host\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"runtime\":\"cccccccccccccccccccccccccccccccc\"},\"mono_ns\":\"9007199254740993\",\"uncertainty_ns\":\"0\",\"wall_ns\":\"9007199254740993\"},\"end_ns\":\"9007199254740994\",\"frames\":[{\"artifact_id\":\"\",\"function\":\"\",\"module_id\":\"\",\"offset\":\"0\",\"reason\":\"frame_unresolved\"}],\"intervals\":[],\"loss\":\"9007199254740993\",\"method\":\"native_cpu\",\"native_capabilities\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"cccccccccccccccccccccccccccccccc\",\"dddddddddddddddddddddddddddddddd\"],\"native_domain\":{\"boot_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"host_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},\"native_loss\":[{\"at_ns\":\"9007199254740993\",\"count\":\"9007199254740993\",\"cpu\":0,\"reason\":\"records_lost\"},{\"at_ns\":\"9007199254740994\",\"count\":\"0\",\"cpu\":0,\"reason\":\"throttled\",\"throttle_event_id\":\"9007199254740993\",\"throttle_stream_id\":\"18446744073709551615\"}],\"policy_revision\":\"1\",\"process_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"profile_id\":\"ffffffffffffffffffffffffffffffff\",\"samples\":[{\"at_ns\":\"9007199254740993\",\"count\":\"1\",\"native\":{\"coverage\":\"frame_unresolved\",\"method\":\"software_cpu_clock\",\"period\":\"9007199254740993\",\"requested_hz\":99,\"task\":{\"boot_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"generation\":\"9007199254740993\",\"pid_namespace\":\"9007199254740993\",\"process_start_ns\":\"9007199254740993\",\"tgid\":16,\"tid\":17},\"throttle_event_id\":\"9007199254740993\",\"throttle_reason\":\"throttled\",\"throttle_stream_id\":\"18446744073709551615\",\"truncation\":\"frame_unresolved\",\"unit\":\"cpu_clock_nanoseconds\"},\"stack\":0,\"thread\":\"17\"}],\"sequence\":\"9007199254740993\",\"stacks\":[{\"frames\":[0]}],\"start_ns\":\"9007199254740993\",\"truncated\":false,\"units\":\"samples\"},\"resource\":{\"build_id\":\"44444444444444444444444444444444\",\"environment_id\":\"77777777777777777777777777777777\",\"instance_pseudonym\":\"worker-1\",\"labels\":[],\"service_id\":\"66666666666666666666666666666666\"}}],\"route_slot\":44,\"source\":\"33333333333333333333333333333333\",\"version\":1}",
+      "sha256": "03830c78ff0be31d389a036285b20fac70f4d6ac1f6dd3449d870d9d1bb2360e"
+    },
+    {
+      "batch": {
+        "version": 1,
+        "project": "22222222222222222222222222222222",
+        "source": "33333333333333333333333333333333",
+        "producer": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "id": "00000000000000000000000000000029",
+        "policy_revision": "1",
+        "route_slot": 44,
+        "records": [
+          {
+            "id": "0000000000000000000000000000001f",
+            "kind": "profile_chunk",
+            "observed_at_ns": "9007199254740993",
+            "resource": {
+              "service_id": "66666666666666666666666666666666",
+              "environment_id": "77777777777777777777777777777777",
+              "build_id": "44444444444444444444444444444444",
+              "instance_pseudonym": "worker-1",
+              "labels": []
+            },
+            "payload": {
+              "profile_id": "ffffffffffffffffffffffffffffffff",
+              "process_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "capability_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "method": "native_cpu",
+              "units": "samples",
+              "start_ns": "9007199254740993",
+              "end_ns": "9007199254740994",
+              "clock": {
+                "wall_ns": "9007199254740993",
+                "mono_ns": "9007199254740993",
+                "domain": {
+                  "host": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "boot": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "runtime": "cccccccccccccccccccccccccccccccc"
+                },
+                "uncertainty_ns": "0"
+              },
+              "frames": [
+                {
+                  "module_id": "",
+                  "function": "",
+                  "artifact_id": "",
+                  "offset": "0",
+                  "reason": "frame_unresolved"
+                }
+              ],
+              "stacks": [
+                {
+                  "frames": [
+                    0
+                  ]
+                }
+              ],
+              "samples": [
+                {
+                  "at_ns": "9007199254740993",
+                  "stack": 0,
+                  "count": "1",
+                  "thread": "17",
+                  "native": {
+                    "task": {
+                      "boot_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                      "pid_namespace": "9007199254740993",
+                      "tgid": 16,
+                      "tid": 17,
+                      "process_start_ns": "9007199254740993",
+                      "generation": "9007199254740993"
+                    },
+                    "method": "hardware_cycles",
+                    "unit": "hardware_cycles",
+                    "requested_hz": 99,
+                    "period": "9007199254740993",
+                    "truncation": "frame_unresolved",
+                    "coverage": "frame_unresolved",
+                    "throttle_reason": "throttled",
+                    "throttle_event_id": "9007199254740993",
+                    "throttle_stream_id": "18446744073709551615"
+                  }
+                }
+              ],
+              "intervals": [],
+              "loss": "2",
+              "truncated": false,
+              "native_domain": {
+                "host_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "boot_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+              },
+              "policy_revision": "1",
+              "sequence": "9007199254740993",
+              "native_capabilities": [
+                "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "cccccccccccccccccccccccccccccccc",
+                "dddddddddddddddddddddddddddddddd"
+              ],
+              "native_loss": [
+                {
+                  "at_ns": "9007199254740993",
+                  "cpu": 0,
+                  "count": "2",
+                  "reason": "samples_lost"
+                },
+                {
+                  "at_ns": "9007199254740994",
+                  "cpu": 0,
+                  "count": "0",
+                  "reason": "unthrottled",
+                  "throttle_event_id": "9007199254740993",
+                  "throttle_stream_id": "18446744073709551615"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "canonical_utf8": "{\"id\":\"00000000000000000000000000000029\",\"policy_revision\":\"1\",\"producer\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"project\":\"22222222222222222222222222222222\",\"records\":[{\"id\":\"0000000000000000000000000000001f\",\"kind\":\"profile_chunk\",\"observed_at_ns\":\"9007199254740993\",\"payload\":{\"capability_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"clock\":{\"domain\":{\"boot\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"host\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"runtime\":\"cccccccccccccccccccccccccccccccc\"},\"mono_ns\":\"9007199254740993\",\"uncertainty_ns\":\"0\",\"wall_ns\":\"9007199254740993\"},\"end_ns\":\"9007199254740994\",\"frames\":[{\"artifact_id\":\"\",\"function\":\"\",\"module_id\":\"\",\"offset\":\"0\",\"reason\":\"frame_unresolved\"}],\"intervals\":[],\"loss\":\"2\",\"method\":\"native_cpu\",\"native_capabilities\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"cccccccccccccccccccccccccccccccc\",\"dddddddddddddddddddddddddddddddd\"],\"native_domain\":{\"boot_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"host_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},\"native_loss\":[{\"at_ns\":\"9007199254740993\",\"count\":\"2\",\"cpu\":0,\"reason\":\"samples_lost\"},{\"at_ns\":\"9007199254740994\",\"count\":\"0\",\"cpu\":0,\"reason\":\"unthrottled\",\"throttle_event_id\":\"9007199254740993\",\"throttle_stream_id\":\"18446744073709551615\"}],\"policy_revision\":\"1\",\"process_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"profile_id\":\"ffffffffffffffffffffffffffffffff\",\"samples\":[{\"at_ns\":\"9007199254740993\",\"count\":\"1\",\"native\":{\"coverage\":\"frame_unresolved\",\"method\":\"hardware_cycles\",\"period\":\"9007199254740993\",\"requested_hz\":99,\"task\":{\"boot_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"generation\":\"9007199254740993\",\"pid_namespace\":\"9007199254740993\",\"process_start_ns\":\"9007199254740993\",\"tgid\":16,\"tid\":17},\"throttle_event_id\":\"9007199254740993\",\"throttle_reason\":\"throttled\",\"throttle_stream_id\":\"18446744073709551615\",\"truncation\":\"frame_unresolved\",\"unit\":\"hardware_cycles\"},\"stack\":0,\"thread\":\"17\"}],\"sequence\":\"9007199254740993\",\"stacks\":[{\"frames\":[0]}],\"start_ns\":\"9007199254740993\",\"truncated\":false,\"units\":\"samples\"},\"resource\":{\"build_id\":\"44444444444444444444444444444444\",\"environment_id\":\"77777777777777777777777777777777\",\"instance_pseudonym\":\"worker-1\",\"labels\":[],\"service_id\":\"66666666666666666666666666666666\"}}],\"route_slot\":44,\"source\":\"33333333333333333333333333333333\",\"version\":1}",
+      "sha256": "b6e0a5e0c62f37958300b644a9afef8e546409d3bcefe4e8f8906a7b27d833f2"
+    },
+    {
+      "batch": {
+        "version": 1,
+        "project": "22222222222222222222222222222222",
+        "source": "33333333333333333333333333333333",
+        "producer": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "id": "0000000000000000000000000000002a",
+        "policy_revision": "1",
+        "route_slot": 44,
+        "records": [
+          {
+            "id": "00000000000000000000000000000020",
+            "kind": "profile_chunk",
+            "observed_at_ns": "9007199254740993",
+            "resource": {
+              "service_id": "66666666666666666666666666666666",
+              "environment_id": "77777777777777777777777777777777",
+              "build_id": "44444444444444444444444444444444",
+              "instance_pseudonym": "worker-1",
+              "labels": []
+            },
+            "payload": {
+              "profile_id": "ffffffffffffffffffffffffffffffff",
+              "process_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "capability_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "method": "native_offcpu",
+              "units": "nanoseconds",
+              "start_ns": "9007199254740993",
+              "end_ns": "9007199254740994",
+              "clock": {
+                "wall_ns": "9007199254740993",
+                "mono_ns": "9007199254740993",
+                "domain": {
+                  "host": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "boot": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "runtime": "cccccccccccccccccccccccccccccccc"
+                },
+                "uncertainty_ns": "0"
+              },
+              "frames": [
+                {
+                  "module_id": "",
+                  "function": "",
+                  "artifact_id": "",
+                  "offset": "0",
+                  "reason": "frame_unresolved"
+                }
+              ],
+              "stacks": [
+                {
+                  "frames": [
+                    0
+                  ]
+                }
+              ],
+              "samples": [],
+              "intervals": [
+                {
+                  "start_ns": "9007199254740993",
+                  "end_ns": "9007199254740994",
+                  "stack": 0,
+                  "kind": "unknown_offcpu",
+                  "thread": "17",
+                  "censored": true,
+                  "native_task": {
+                    "boot_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                    "pid_namespace": "9007199254740993",
+                    "tgid": 16,
+                    "tid": 17,
+                    "process_start_ns": "9007199254740993",
+                    "generation": "9007199254740993"
+                  },
+                  "unit": "nanoseconds",
+                  "reason": "missing_switch_callchain"
+                }
+              ],
+              "loss": "0",
+              "truncated": false,
+              "native_domain": {
+                "host_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "boot_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+              },
+              "policy_revision": "1",
+              "sequence": "9007199254740994",
+              "native_capabilities": [
+                "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "cccccccccccccccccccccccccccccccc",
+                "dddddddddddddddddddddddddddddddd"
+              ],
+              "native_loss": [
+                {
+                  "at_ns": "9007199254740994",
+                  "cpu": 0,
+                  "count": "0",
+                  "reason": "throttled",
+                  "throttle_event_id": "9007199254740993",
+                  "throttle_stream_id": "18446744073709551615"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "canonical_utf8": "{\"id\":\"0000000000000000000000000000002a\",\"policy_revision\":\"1\",\"producer\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"project\":\"22222222222222222222222222222222\",\"records\":[{\"id\":\"00000000000000000000000000000020\",\"kind\":\"profile_chunk\",\"observed_at_ns\":\"9007199254740993\",\"payload\":{\"capability_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"clock\":{\"domain\":{\"boot\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"host\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"runtime\":\"cccccccccccccccccccccccccccccccc\"},\"mono_ns\":\"9007199254740993\",\"uncertainty_ns\":\"0\",\"wall_ns\":\"9007199254740993\"},\"end_ns\":\"9007199254740994\",\"frames\":[{\"artifact_id\":\"\",\"function\":\"\",\"module_id\":\"\",\"offset\":\"0\",\"reason\":\"frame_unresolved\"}],\"intervals\":[{\"censored\":true,\"end_ns\":\"9007199254740994\",\"kind\":\"unknown_offcpu\",\"native_task\":{\"boot_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"generation\":\"9007199254740993\",\"pid_namespace\":\"9007199254740993\",\"process_start_ns\":\"9007199254740993\",\"tgid\":16,\"tid\":17},\"reason\":\"missing_switch_callchain\",\"stack\":0,\"start_ns\":\"9007199254740993\",\"thread\":\"17\",\"unit\":\"nanoseconds\"}],\"loss\":\"0\",\"method\":\"native_offcpu\",\"native_capabilities\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"cccccccccccccccccccccccccccccccc\",\"dddddddddddddddddddddddddddddddd\"],\"native_domain\":{\"boot_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"host_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},\"native_loss\":[{\"at_ns\":\"9007199254740994\",\"count\":\"0\",\"cpu\":0,\"reason\":\"throttled\",\"throttle_event_id\":\"9007199254740993\",\"throttle_stream_id\":\"18446744073709551615\"}],\"policy_revision\":\"1\",\"process_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"profile_id\":\"ffffffffffffffffffffffffffffffff\",\"samples\":[],\"sequence\":\"9007199254740994\",\"stacks\":[{\"frames\":[0]}],\"start_ns\":\"9007199254740993\",\"truncated\":false,\"units\":\"nanoseconds\"},\"resource\":{\"build_id\":\"44444444444444444444444444444444\",\"environment_id\":\"77777777777777777777777777777777\",\"instance_pseudonym\":\"worker-1\",\"labels\":[],\"service_id\":\"66666666666666666666666666666666\"}}],\"route_slot\":44,\"source\":\"33333333333333333333333333333333\",\"version\":1}",
+      "sha256": "741dc88978610d4af9e0e4889f2763ce1b8ba806ec172058abe0d1814e8b1116"
+    }
+  ]
+}

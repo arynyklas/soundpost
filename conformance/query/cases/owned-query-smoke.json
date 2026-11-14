@@ -1,0 +1,352 @@
+{
+  "schema": "soundpost-owned-query-smoke/1",
+  "description": "Authored smoke flow for the owned C06 surfaces over real admitted data and the real C05 storage: discovery, paged labels, exemplars, format and query as POSTs to Soundpost routes only, revocation during compute, and cancellation with nothing left behind. It names only generic projects, sources and series. Expected values are authored from the fixture, never observed from an upstream engine, and the flow needs no upstream route or client.",
+  "runner": {
+    "command": "soundpost-querycheck smoke",
+    "storage": "real",
+    "http": "own",
+    "profiles": [
+      "promql-prometheus-3.1.0",
+      "promql-prometheus-3.13.5",
+      "logql-loki-3.5.2"
+    ]
+  },
+  "fixture": {
+    "projects": [
+      "project-a",
+      "project-b"
+    ],
+    "sources": [
+      {
+        "id": "source-a",
+        "project": "project-a",
+        "class": "structured",
+        "kinds": [
+          "metric"
+        ],
+        "labels": {
+          "job": [
+            "api"
+          ],
+          "version": [
+            "1.2"
+          ]
+        }
+      },
+      {
+        "id": "source-b",
+        "project": "project-b",
+        "class": "structured",
+        "kinds": [
+          "metric"
+        ],
+        "labels": {
+          "job": [
+            "api"
+          ]
+        }
+      }
+    ],
+    "metric_points": [
+      {
+        "source": "source-a",
+        "name": "up",
+        "labels": {
+          "job": "api"
+        },
+        "time_ns": "10000000000",
+        "value_bits": "3ff0000000000000",
+        "exemplar_trace": "trace-a"
+      },
+      {
+        "source": "source-b",
+        "name": "up",
+        "labels": {
+          "job": "api"
+        },
+        "time_ns": "10000000000",
+        "value_bits": "4000000000000000"
+      },
+      {
+        "source": "source-a",
+        "name": "build_info",
+        "labels": {
+          "version": "1.2"
+        },
+        "time_ns": "10000000000",
+        "value_bits": "3ff0000000000000"
+      },
+      {
+        "source": "source-a",
+        "name": "other_total",
+        "labels": {
+          "job": "api"
+        },
+        "time_ns": "10000000000",
+        "value_bits": "4014000000000000"
+      }
+    ],
+    "principals": [
+      {
+        "id": "reader",
+        "grants": {
+          "project-a": [
+            "telemetry.read"
+          ],
+          "project-b": [
+            "telemetry.read"
+          ]
+        }
+      },
+      {
+        "id": "sibling-reader",
+        "grants": {
+          "project-a": [
+            "telemetry.read"
+          ]
+        }
+      }
+    ]
+  },
+  "steps": [
+    {
+      "id": "discover-metric-names",
+      "method": "POST",
+      "route": "/api/v1/discover",
+      "as": "reader",
+      "body": {
+        "projects": [
+          "project-a",
+          "project-b"
+        ],
+        "signal": "metric",
+        "kind": "metric_names",
+        "matchers": [],
+        "time": {
+          "start": "9999999000",
+          "end": "10000001000"
+        },
+        "limit": 100
+      },
+      "expect": {
+        "status": 200,
+        "items": [
+          "build_info",
+          "other_total",
+          "up"
+        ],
+        "more": false,
+        "completeness": "complete"
+      }
+    },
+    {
+      "id": "discover-label-names-paged",
+      "method": "POST",
+      "route": "/api/v1/discover",
+      "as": "reader",
+      "body": {
+        "projects": [
+          "project-a"
+        ],
+        "signal": "metric",
+        "kind": "label_names",
+        "matchers": [],
+        "time": {
+          "start": "9999999000",
+          "end": "10000001000"
+        },
+        "limit": 1
+      },
+      "pages": {
+        "follow": "next_cursor",
+        "expect_items_in_order": [
+          "__name__",
+          "job",
+          "version"
+        ],
+        "expect_more_exactly_when_cursor": true
+      }
+    },
+    {
+      "id": "exemplars",
+      "method": "POST",
+      "route": "/api/v1/exemplars",
+      "as": "reader",
+      "body": {
+        "projects": [
+          "project-a",
+          "project-b"
+        ],
+        "expression": "up",
+        "window": {
+          "start": "9999999000",
+          "end": "10000001000"
+        },
+        "limit": 10
+      },
+      "expect": {
+        "status": 200,
+        "exemplar_traces": [
+          "trace-a"
+        ],
+        "exemplar_projects": [
+          "project-a"
+        ]
+      }
+    },
+    {
+      "id": "format",
+      "method": "POST",
+      "route": "/api/v1/query/format",
+      "as": "reader",
+      "body": {
+        "language": "promql",
+        "expression": "sum   (up )"
+      },
+      "expect": {
+        "status": 200,
+        "formatted": "sum(up)"
+      }
+    },
+    {
+      "id": "query-project-partitioned",
+      "method": "POST",
+      "route": "/api/v1/query",
+      "as": "reader",
+      "body": {
+        "language": "promql",
+        "expression": "sum(up)",
+        "evaluation": {
+          "instant": true,
+          "time": "10001000000"
+        },
+        "projects": [
+          "project-a",
+          "project-b"
+        ]
+      },
+      "expect": {
+        "status": 200,
+        "completeness": "complete",
+        "per_project_float_bits": {
+          "project-a": "3ff0000000000000",
+          "project-b": "4000000000000000"
+        },
+        "never_merged_value_bits": "4008000000000000"
+      }
+    },
+    {
+      "id": "query-foreign-project-is-guessed-project",
+      "method": "POST",
+      "route": "/api/v1/query",
+      "as": "sibling-reader",
+      "body": {
+        "language": "promql",
+        "expression": "up",
+        "evaluation": {
+          "instant": true,
+          "time": "10001000000"
+        },
+        "projects": [
+          "project-b"
+        ]
+      },
+      "expect": {
+        "status": 404,
+        "code": "not_found",
+        "same_body_as_nonexistent_project": true
+      }
+    },
+    {
+      "id": "returned-budget-is-an-error",
+      "method": "POST",
+      "route": "/api/v1/query",
+      "as": "reader",
+      "body": {
+        "language": "promql",
+        "expression": "up",
+        "evaluation": {
+          "instant": true,
+          "time": "10001000000"
+        },
+        "projects": [
+          "project-a",
+          "project-b"
+        ],
+        "budget": {
+          "max_returned": "1"
+        }
+      },
+      "expect": {
+        "status": 429,
+        "code": "quota",
+        "no_value_in_body": true
+      }
+    },
+    {
+      "id": "revocation-during-compute",
+      "method": "POST",
+      "route": "/api/v1/query",
+      "as": "reader",
+      "hold_scan": true,
+      "then": "revoke reader grant on project-a",
+      "body": {
+        "language": "promql",
+        "expression": "up",
+        "evaluation": {
+          "instant": true,
+          "time": "10001000000"
+        },
+        "projects": [
+          "project-a"
+        ]
+      },
+      "expect": {
+        "status": 404,
+        "code": "not_found",
+        "no_value_in_body": true,
+        "completes_without_the_scan_being_released": true
+      }
+    },
+    {
+      "id": "cancellation-releases-everything",
+      "method": "POST",
+      "route": "/api/v1/query",
+      "as": "reader",
+      "hold_scan": true,
+      "then": "client disconnects",
+      "body": {
+        "language": "promql",
+        "expression": "up",
+        "evaluation": {
+          "instant": true,
+          "time": "10001000000"
+        },
+        "projects": [
+          "project-a"
+        ]
+      },
+      "expect": {
+        "open_iterators": 0,
+        "accounted_memory_bytes": 0,
+        "temporary_spill_files": 0,
+        "outstanding_rpc": 0
+      }
+    }
+  ],
+  "forbidden": {
+    "get_query_routes": [
+      "/api/v1/query",
+      "/api/v1/discover",
+      "/api/v1/exemplars",
+      "/api/v1/query/format"
+    ],
+    "upstream_shaped_routes": [
+      "/api/v1/query_range",
+      "/api/v1/labels",
+      "/api/v1/series",
+      "/loki/api/v1/query"
+    ],
+    "upstream_engine_clients": "none: a smoke run that observes any outbound connection to a Prometheus or Loki process fails"
+  }
+}

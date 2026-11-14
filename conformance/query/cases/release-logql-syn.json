@@ -1,0 +1,194 @@
+{
+  "schema": "soundpost-authored-logql-cases-v1",
+  "copyright": "Copyright 2026 Aryn Yklas",
+  "license": "Apache-2.0",
+  "phases": [
+    "syntax"
+  ],
+  "cases": [
+    {
+      "id": "logql-loki-3.5.2/binary-matching/negative",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "count_over_time({app=\"api\"}[2s]) + on(host) group_left group_right count_over_time({app=\"web\"}[2s])"
+      },
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/decolorize/negative",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"} | decolorize \"x\""
+      },
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/ip/negative",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"} |= ip(\"192.168.0.300\")"
+      },
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/label-format/negative",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"} | label_format a=b, a=c"
+      },
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/label-replace/negative",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "label_replace(count_over_time({app=\"api\"}[2s]), \"h\", \"$1\", \"host\", \"(\")"
+      },
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/lexical/negative",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"} |= \"\\q\""
+      },
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/line-filters/negative",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"} |~ \"(\""
+      },
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/range-time/negative",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "count_over_time({app=\"api\"} offset 1s [2s])"
+      },
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/regexp/negative",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=\"api\"} | regexp \"(\\\\w+)\""
+      },
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/selectors/negative",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "{app=~\".*\"}"
+      },
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/set-operators/negative",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "count_over_time({app=\"api\"}[2s]) and 1"
+      },
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/shard-capability-domain/negative",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [
+        "approx_topk"
+      ],
+      "input": {
+        "expression": "approx_topk(0, count_over_time({app=\"api\"}[2s]))"
+      },
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "id": "logql-loki-3.5.2/vector/negative",
+      "phase": "syntax",
+      "profiles": [
+        "logql-loki-3.5.2"
+      ],
+      "enabled_features": [],
+      "input": {
+        "expression": "vector({app=\"api\"})"
+      },
+      "expected": {
+        "accepted": false
+      }
+    }
+  ]
+}

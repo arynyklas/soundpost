@@ -1,0 +1,107 @@
+# Copyright 2026 Aryn Yklas
+# SPDX-License-Identifier: Apache-2.0
+#
+# Verification and dry-run ONLY. This workflow has no publish step, no registry credentials, no
+# signing key and no `contents: write`: it builds the release artifacts, generates the SBOMs,
+# checks notices and runs the whole-product gate, then uploads the gate report. A red gate is the
+# correct outcome until every plan task, evidence report, signature and the owner approval exist.
+# Publication (GitHub release, npm, PyPI, Go module) and signing are owner actions performed
+# outside this workflow after the gate passes with an explicit owner approval input.
+# Not executed anywhere yet: it has never run, locally or on GitHub.
+name: release-dry-run
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version to dry-run
+        required: true
+      created:
+        description: RFC 3339 timestamp recorded in the SBOMs
+        required: true
+      ledger:
+        description: Path in the checkout to a copy of the plan ledger (tasks.json)
+        required: true
+      evidence_dir:
+        description: Directory in the checkout holding language/runtime/privacy/node_loss/browser .json reports
+        required: true
+      approval:
+        description: Optional path to the signed owner approval envelope (never needed to dry-run)
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+env:
+  GOTOOLCHAIN: local
+  CGO_ENABLED: "0"
+  # Dispatch inputs reach the shell only through the environment, never by interpolation.
+  VERSION: ${{ inputs.version }}
+  CREATED: ${{ inputs.created }}
+  LEDGER: ${{ inputs.ledger }}
+  EVIDENCE_DIR: ${{ inputs.evidence_dir }}
+  APPROVAL: ${{ inputs.approval }}
+  COMMIT: ${{ github.sha }}
+
+jobs:
+  gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned Go toolchain
+        run: |
+          set -eu
+          version=$(jq -r .go.version build/toolchains.json)
+          url=$(jq -r .go.linux_amd64.url build/toolchains.json)
+          sum=$(jq -r .go.linux_amd64.sha256 build/toolchains.json)
+          archive=".tools/go${version}.linux-amd64.tar.gz"
+          mkdir -p .tools/linux
+          curl --fail --location --silent --show-error --output "$archive" "$url"
+          echo "${sum}  ${archive}" | sha256sum --check --strict -
+          tar -C .tools/linux -xzf "$archive"
+          echo "$PWD/.tools/linux/go/bin" >> "$GITHUB_PATH"
+
+      - name: Prove the inputs and build reproducibly
+        run: |
+          set -eu
+          go mod download
+          go run ./build verify
+          go test ./build -count=1
+          go run ./build release --out dist/release --version "$VERSION" --commit "$COMMIT" --reproduce
+
+      - name: SBOM and notices
+        run: |
+          set -eu
+          go run ./build sbom --version "$VERSION" --created "$CREATED" --out dist/sbom
+          go run ./build sbom --version "$VERSION" --created "$CREATED" --out dist/sbom-again
+          cmp dist/sbom/soundpost.cdx.json dist/sbom-again/soundpost.cdx.json
+          cmp dist/sbom/soundpost.spdx.json dist/sbom-again/soundpost.spdx.json
+          go run ./build notices --check
+
+      - name: Whole-product gate (dry run; expected to block until the owner inputs exist)
+        run: |
+          set -u
+          set -- --version "$VERSION" --commit "$COMMIT" --created "$CREATED" --ledger "$LEDGER" --artifacts dist/release --json
+          for k in language runtime privacy node_loss browser; do
+            set -- "$@" --evidence "$k=$EVIDENCE_DIR/$k.json"
+          done
+          if [ -n "$APPROVAL" ]; then set -- "$@" --approval "$APPROVAL"; fi
+          go run ./build gate "$@" | tee dist/gate.json
+          exit "${PIPESTATUS[0]}"
+        shell: bash
+
+      - name: Upload the gate report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-gate-report
+          path: |
+            dist/gate.json
+            dist/sbom
+            dist/release/SHA256SUMS
+            dist/release/release.json

@@ -1,0 +1,14 @@
+// Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
+import * as React from 'react';
+import { request, type Id, type Session } from './api';
+export interface ElevationState { id:string; expires:string; orgs:Id[] }
+export const SessionContext=React.createContext<{session:Session;refresh:()=>Promise<void>;elevate:(value:ElevationState)=>void}|null>(null);
+export function ElevationDialog(props:{orgs:Id[];onElevated:()=>void}):React.JSX.Element {
+ const context=React.useContext(SessionContext); const [open,setOpen]=React.useState(false);const [busy,setBusy]=React.useState(false);const [error,setError]=React.useState('');const ref=React.useRef<HTMLParagraphElement>(null);
+ React.useEffect(()=>{if(error)ref.current?.focus();},[error]);
+ async function submit(event:React.FormEvent<HTMLFormElement>):Promise<void>{
+  event.preventDefault();if(!context)return;const form=event.currentTarget;const data=new FormData(form);const reason=String(data.get('reason')??'');if(!reason||new TextEncoder().encode(reason).length>512){setError('Reason must contain 1–512 UTF-8 bytes.');return;}setBusy(true);setError('');
+  try{const session=await request<Session>('reauthenticate',{Password:String(data.get('password')??''),Code:String(data.get('code')??'')},context.session.csrf);await context.refresh();const orgs=data.getAll('org').map(String);const result=await request<{id:string;expires:string}>('elevation',{Reason:reason,Orgs:orgs},session.csrf);context.elevate({...result,orgs});form.reset();setOpen(false);props.onElevated();}catch(e){setError(e instanceof Error?e.message:'Elevation was not confirmed.');}finally{setBusy(false);}
+ }
+ return <section aria-label="Instance elevation"><button onClick={()=>setOpen(!open)} aria-expanded={open}>Request scoped elevation</button>{open&&<form onSubmit={event=>{void submit(event);}} aria-busy={busy} className="panel"><h2>Audited instance access</h2><p>Instance administrators only. Fresh password and MFA verification rotates your session. Access expires after fifteen minutes and never grants wildcard access.</p><fieldset><legend>Select authorized organizations</legend>{props.orgs.length===0?<p>No organizations are available for this account.</p>:props.orgs.map(org=><label className="check" key={org}><input type="checkbox" name="org" value={org}/><code>{org}</code></label>)}</fieldset><label>Reason<textarea name="reason" required maxLength={512}/></label><label>Current password<input type="password" name="password" required autoComplete="current-password"/></label><label>Authenticator or recovery code<input name="code" autoComplete="one-time-code"/></label>{error&&<p role="alert" tabIndex={-1} ref={ref} className="error">{error}</p>}<button className="primary" disabled={busy||props.orgs.length===0}>{busy?'Committing audited request…':'Reauthenticate and elevate'}</button><button type="button" disabled={busy} onClick={()=>setOpen(false)}>Cancel</button></form>}</section>;
+}

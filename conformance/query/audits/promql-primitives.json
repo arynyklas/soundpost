@@ -1,0 +1,3529 @@
+{
+  "schema": "soundpost-promql-versioned-primitives-v1",
+  "author": "Aryn Yklas",
+  "license": "Apache-2.0",
+  "complete": true,
+  "provenance": {
+    "references": [
+      {
+        "profile": "promql-prometheus-3.1.0",
+        "go_version": "go1.23.4",
+        "unicode_version": "15.0.0",
+        "regexp_module": "github.com/grafana/regexp",
+        "regexp_module_version": "v0.0.0-20240518133315-a468a5bfb3bc",
+        "regexp_go_sum": "h1:GN2Lv3MGO7AS6PrRoT6yV5+wkrOpcszoIsO4+4ds248=",
+        "normalization_module": "golang.org/x/text",
+        "normalization_version": "v0.21.0",
+        "selected_normalization_unicode": "15.0.0",
+        "source_refs": [
+          {
+            "url": "https://raw.githubusercontent.com/golang/go/go1.23.4/src/unicode/tables.go",
+            "sha256": "80a109e5dd4ed40a85d69ddf95175f647bbd68c577d27eb475cda63790bb2487",
+            "line": 6
+          },
+          {
+            "url": "https://raw.githubusercontent.com/grafana/regexp/a468a5bfb3bc/syntax/parse.go",
+            "sha256": "881ab9e6e7a7e00af93357d1f13f53ac7b1fdbd0b25b67ffa842f9f530fb4545",
+            "line": 1646
+          },
+          {
+            "url": "https://raw.githubusercontent.com/grafana/regexp/a468a5bfb3bc/syntax/doc.go",
+            "sha256": "51e7c5718bbb80a6c21d2b5a8ab991a3a80cc215ec4971a2454e45b94187ca88",
+            "line": 1
+          },
+          {
+            "url": "https://raw.githubusercontent.com/grafana/regexp/a468a5bfb3bc/regexp.go",
+            "sha256": "7a9cf2620aead6b42221d7187543aea3877afc2d7d2b8f9274844fa47d4f9b4a",
+            "line": 926
+          },
+          {
+            "url": "https://raw.githubusercontent.com/golang/go/go1.23.4/src/unicode/letter.go",
+            "sha256": "6be2e26975e7e4bfe167e7c1f8698cb919729f1e3a76aa75cdabc7afb96ef8d7",
+            "line": 340
+          },
+          {
+            "url": "https://raw.githubusercontent.com/golang/go/go1.23.4/src/strings/strings.go",
+            "sha256": "829f0b0af2869d7158d59f5a5d7946273d01fe4952c04b623b65c7b6e0563993",
+            "line": 1137
+          },
+          {
+            "url": "https://raw.githubusercontent.com/golang/text/v0.21.0/unicode/norm/tables15.0.0.go",
+            "sha256": "61f78dd80390fdfff02b4e49aea4feac75dde7919b9a5d9c63042ab3e2dc1d6e",
+            "line": 11
+          }
+        ],
+        "prometheus_source_refs": [
+          "go.mod:35@52a7e514099594a3381b549f913b6ce2d4c31e87d84fca40b7e200d5a623ae7e",
+          "go.sum:222@ef1a86c6da59cf838ef484be0090d01d282aa569f2685446fc3308a9611f672a",
+          "model/labels/regexp.go:66@a7521f99883d73bc327fb3cc05d37669ccc496ff7f1fa2f7e52c16a69cfb3441"
+        ],
+        "regexp_file_hashes": {
+          "backtrack.go": "ac5a1e4cf49b1c7f4372c0a7c2e8d156100c17d3a114fcf9539f55d223d06092",
+          "exec.go": "cc9fda63ad7056d4c4abaaa49c00470f726be35ccee53f1c3fe73259e9634dd5",
+          "onepass.go": "4af92ba759a365e26ce71c677583c13ad7c0ee5305f6a4adfee3ed8ac19f3528",
+          "regexp.go": "7a9cf2620aead6b42221d7187543aea3877afc2d7d2b8f9274844fa47d4f9b4a",
+          "syntax/compile.go": "2e1f753be77bf1fa54aed2a7f98932394324b82c91109e19d93283f482f7ee01",
+          "syntax/doc.go": "51e7c5718bbb80a6c21d2b5a8ab991a3a80cc215ec4971a2454e45b94187ca88",
+          "syntax/op_string.go": "391e4d0f59334da7c36c0a32f0a661139f181aecb2f7c209ca63280b030dfa0a",
+          "syntax/parse.go": "881ab9e6e7a7e00af93357d1f13f53ac7b1fdbd0b25b67ffa842f9f530fb4545",
+          "syntax/perl_groups.go": "62c4757955ddf046fd7831919bd02e9ec2e2569b1ac036a6d0e3b3f715379603",
+          "syntax/prog.go": "7a24ebd22eec504ceaeffbd33641ae330d3ca666d54f6a29ce6d96fc127e6c64",
+          "syntax/regexp.go": "e167ec4e162fe319c2d749f492b0a583ffa64ec40ef1e67e98657cdbf197b950",
+          "syntax/simplify.go": "d22b48ecde668bc22cd8998492c752ec088da5d027d61b7f04f7a9298796eec0"
+        },
+        "category_keys": [
+          "C",
+          "Cc",
+          "Cf",
+          "Co",
+          "Cs",
+          "L",
+          "Ll",
+          "Lm",
+          "Lo",
+          "Lt",
+          "Lu",
+          "M",
+          "Mc",
+          "Me",
+          "Mn",
+          "N",
+          "Nd",
+          "Nl",
+          "No",
+          "P",
+          "Pc",
+          "Pd",
+          "Pe",
+          "Pf",
+          "Pi",
+          "Po",
+          "Ps",
+          "S",
+          "Sc",
+          "Sk",
+          "Sm",
+          "So",
+          "Z",
+          "Zl",
+          "Zp",
+          "Zs"
+        ],
+        "script_keys_sha256": "772e02da15dc537d5c262031f41a0230d38f1016a0248497f45d26f950f5c244",
+        "new_owned_scripts_not_reference_accepted": [
+          "Beria_Erfe",
+          "Garay",
+          "Gurung_Khema",
+          "Kirat_Rai",
+          "Ol_Onal",
+          "Sidetic",
+          "Sunuwar",
+          "Tai_Yo",
+          "Todhri",
+          "Tolong_Siki",
+          "Tulu_Tigalari"
+        ]
+      },
+      {
+        "profile": "promql-prometheus-3.13.5",
+        "go_version": "go1.26.10",
+        "unicode_version": "15.0.0",
+        "regexp_module": "github.com/grafana/regexp",
+        "regexp_module_version": "v0.0.0-20250905093917-f7b3be9d1853",
+        "regexp_go_sum": "h1:cLN4IBkmkYZNnk7EAJ0BHIethd+J6LqxFNw5mSiI2bM=",
+        "normalization_module": "golang.org/x/text",
+        "normalization_version": "v0.42.0",
+        "selected_normalization_unicode": "15.0.0",
+        "source_refs": [
+          {
+            "url": "https://raw.githubusercontent.com/golang/go/go1.26.10/src/unicode/tables.go",
+            "sha256": "6a88d48746c4b2c471cc04ae40559694b734770212e6f5ea5f1962adb0c0bdb1",
+            "line": 6
+          },
+          {
+            "url": "https://raw.githubusercontent.com/grafana/regexp/f7b3be9d1853/syntax/parse.go",
+            "sha256": "c821d029b622d474fa87c9df8f1e9471fd2298b6c6965c6db09130a58b80c5b7",
+            "line": 1644
+          },
+          {
+            "url": "https://raw.githubusercontent.com/grafana/regexp/f7b3be9d1853/syntax/doc.go",
+            "sha256": "51e7c5718bbb80a6c21d2b5a8ab991a3a80cc215ec4971a2454e45b94187ca88",
+            "line": 1
+          },
+          {
+            "url": "https://raw.githubusercontent.com/grafana/regexp/f7b3be9d1853/regexp.go",
+            "sha256": "3c6b372bf6e658c167d100093f946741ddd4bfb2717d71455d2bf6a4c515b406",
+            "line": 922
+          },
+          {
+            "url": "https://raw.githubusercontent.com/golang/go/go1.26.10/src/unicode/letter.go",
+            "sha256": "b35a6d259313cef88d07e9e4027b8bd72c60ae140418f5be2c41a2ecea6074fe",
+            "line": 354
+          },
+          {
+            "url": "https://raw.githubusercontent.com/golang/go/go1.26.10/src/strings/strings.go",
+            "sha256": "ba9478be775d11b6956c828ebf870a8f8e7b7318ee382834f1e741f02d1336ef",
+            "line": 1187
+          },
+          {
+            "url": "https://raw.githubusercontent.com/golang/text/v0.42.0/unicode/norm/tables15.0.0.go",
+            "sha256": "9e29fbffef687d6d2191c999c466729dff2f394d8dcbec377a2fc14336f33cdb",
+            "line": 11
+          }
+        ],
+        "prometheus_source_refs": [
+          "go.mod:43@904b816c1dde9c59fd715068d48071fc8377dd721381cc861695e94a31f79e4c",
+          "go.sum:277@12e818e280b64bb3db4ed1b8d2b3d398de558031eb229e15b5d4f989fac598b5",
+          "model/labels/regexp.go:69@b8aad51580cab4b71adc747f23a09baf09745f82c5f0e875882369540b68e8f3"
+        ],
+        "regexp_file_hashes": {
+          "backtrack.go": "ac5a1e4cf49b1c7f4372c0a7c2e8d156100c17d3a114fcf9539f55d223d06092",
+          "exec.go": "cc9fda63ad7056d4c4abaaa49c00470f726be35ccee53f1c3fe73259e9634dd5",
+          "onepass.go": "fd0e29803438c6ea3021c78227d4f69de163f693e82c155dc62d721eaacbd24b",
+          "regexp.go": "3c6b372bf6e658c167d100093f946741ddd4bfb2717d71455d2bf6a4c515b406",
+          "syntax/compile.go": "2e1f753be77bf1fa54aed2a7f98932394324b82c91109e19d93283f482f7ee01",
+          "syntax/doc.go": "51e7c5718bbb80a6c21d2b5a8ab991a3a80cc215ec4971a2454e45b94187ca88",
+          "syntax/op_string.go": "391e4d0f59334da7c36c0a32f0a661139f181aecb2f7c209ca63280b030dfa0a",
+          "syntax/parse.go": "c821d029b622d474fa87c9df8f1e9471fd2298b6c6965c6db09130a58b80c5b7",
+          "syntax/perl_groups.go": "d060a0645b60b210eaec7c3dba6d554dc297c14fe71cdbcc9c25b4fc7562c3a4",
+          "syntax/prog.go": "7a24ebd22eec504ceaeffbd33641ae330d3ca666d54f6a29ce6d96fc127e6c64",
+          "syntax/regexp.go": "bccc8fe5bf53c9e34aee2df851c05052f9b0d447310d151501dfbca7a8ee7fcb",
+          "syntax/simplify.go": "d22b48ecde668bc22cd8998492c752ec088da5d027d61b7f04f7a9298796eec0"
+        },
+        "category_keys": [
+          "C",
+          "Cc",
+          "Cf",
+          "Cn",
+          "Co",
+          "Cs",
+          "L",
+          "LC",
+          "Ll",
+          "Lm",
+          "Lo",
+          "Lt",
+          "Lu",
+          "M",
+          "Mc",
+          "Me",
+          "Mn",
+          "N",
+          "Nd",
+          "Nl",
+          "No",
+          "P",
+          "Pc",
+          "Pd",
+          "Pe",
+          "Pf",
+          "Pi",
+          "Po",
+          "Ps",
+          "S",
+          "Sc",
+          "Sk",
+          "Sm",
+          "So",
+          "Z",
+          "Zl",
+          "Zp",
+          "Zs"
+        ],
+        "script_keys_sha256": "772e02da15dc537d5c262031f41a0230d38f1016a0248497f45d26f950f5c244",
+        "new_owned_scripts_not_reference_accepted": [
+          "Beria_Erfe",
+          "Garay",
+          "Gurung_Khema",
+          "Kirat_Rai",
+          "Ol_Onal",
+          "Sidetic",
+          "Sunuwar",
+          "Tai_Yo",
+          "Todhri",
+          "Tolong_Siki",
+          "Tulu_Tigalari"
+        ]
+      }
+    ],
+    "owned_toolchain": {
+      "go_version": "go1.27.3",
+      "unicode_version": "17.0.0",
+      "source": {
+        "url": "https://raw.githubusercontent.com/golang/go/go1.27.3/src/unicode/tables.go",
+        "sha256": "ac0e5d5d1b58ed4b02d7cb4a0085bdefbdb4f7aae6fadddbc9477f8463da8bd8",
+        "line": 6
+      }
+    },
+    "binary_identity_evidence": {
+      "path": ".superpowers/sdd/approved-product/02.01-loki-stage-trace.txt",
+      "sha256": "0fe2b2913ce32c3f5bfedd734d25ad16276ce787d398b8642df815790776f32f",
+      "prometheus_3_1_0_line": 5,
+      "prometheus_3_13_5_line": 27
+    },
+    "owned_unicode_evidence": {
+      "path": ".superpowers/sdd/approved-product/02.01-own-go-unicode-version.txt",
+      "sha256": "f1f592566b8bbbb6f75126f002a615ee57ada1bbbce770d7455ee1739123adb3",
+      "line": 3
+    },
+    "scope": "Source and actual binary-build identity facts; no upstream corpus reuse, source-table copying or primitive implementation. No regex/oracle execution performed by this worker.",
+    "owned_stdlib_parser_sources": [
+      {
+        "url": "https://raw.githubusercontent.com/golang/go/go1.23.4/src/regexp/syntax/parse.go",
+        "sha256": "9f8170163c527645a9c6ec9d7721ca83c4b5858e1569d720e4e186ef9318ee68",
+        "line": 1644
+      },
+      {
+        "url": "https://raw.githubusercontent.com/golang/go/go1.26.10/src/regexp/syntax/parse.go",
+        "sha256": "d0f657113901da39d6118e4172206a0358b71c96ef43051cc0a741a0a4d04820",
+        "line": 1715
+      },
+      {
+        "url": "https://raw.githubusercontent.com/golang/go/go1.27.3/src/regexp/syntax/parse.go",
+        "sha256": "f93b85f4b63a6f6ecb5c1452a6c0ded1fef5953f9c73e5d814dfc08207e7d1b6",
+        "line": 1720
+      }
+    ],
+    "regex_dependency_changes": [
+      {
+        "path": "onepass.go",
+        "old_sha256": "4af92ba759a365e26ce71c677583c13ad7c0ee5305f6a4adfee3ed8ac19f3528",
+        "new_sha256": "fd0e29803438c6ea3021c78227d4f69de163f693e82c155dc62d721eaacbd24b",
+        "classification": "one-pass eligibility optimization; no new declared query syntax"
+      },
+      {
+        "path": "regexp.go",
+        "old_sha256": "7a9cf2620aead6b42221d7187543aea3877afc2d7d2b8f9274844fa47d4f9b4a",
+        "new_sha256": "3c6b372bf6e658c167d100093f946741ddd4bfb2717d71455d2bf6a4c515b406",
+        "classification": "public AppendText helper outside PromQL matching"
+      },
+      {
+        "path": "syntax/parse.go",
+        "old_sha256": "881ab9e6e7a7e00af93357d1f13f53ac7b1fdbd0b25b67ffa842f9f530fb4545",
+        "new_sha256": "c821d029b622d474fa87c9df8f1e9471fd2298b6c6965c6db09130a58b80c5b7",
+        "classification": "source refactor/generation-comment change; same property dispatch and declared syntax"
+      },
+      {
+        "path": "syntax/perl_groups.go",
+        "old_sha256": "62c4757955ddf046fd7831919bd02e9ec2e2569b1ac036a6d0e3b3f715379603",
+        "new_sha256": "d060a0645b60b210eaec7c3dba6d554dc297c14fe71cdbcc9c25b4fc7562c3a4",
+        "classification": "source refactor/generation-comment change; same property dispatch and declared syntax"
+      },
+      {
+        "path": "syntax/regexp.go",
+        "old_sha256": "e167ec4e162fe319c2d749f492b0a583ffa64ec40ef1e67e98657cdbf197b950",
+        "new_sha256": "bccc8fe5bf53c9e34aee2df851c05052f9b0d447310d151501dfbca7a8ee7fcb",
+        "classification": "source refactor/generation-comment change; same property dispatch and declared syntax"
+      }
+    ]
+  },
+  "obligations": [
+    {
+      "id": "promql-prometheus-3.1.0/primitive/backend-dialect",
+      "kind": "versioned-primitive-semantics",
+      "profile": "promql-prometheus-3.1.0",
+      "gate": "",
+      "signature": "PromQL primitive/backend-dialect",
+      "semantic_rule": "The reference uses Grafana regexp v0.0.0-20240518133315-a468a5bfb3bc, NOT the Go go1.23.4 regexp parser and not the owned Go1.27.3 regexp parser. Pin Perl-mode RE2 syntax: alternation/concatenation, greedy/lazy repetition, named/numbered/noncapturing groups, scoped i/m/s/U flags, anchors and ASCII word boundaries. Backreferences, lookaround and possessive quantifiers are rejected. Counted repetition bounds above1000 and excessive nested repeats are parse errors; unlimited * and + are not capped by the counted-repeat syntax limit. New syntax in owned stdlib is not enabled implicitly.",
+      "source_refs": [
+        "https://raw.githubusercontent.com/golang/go/go1.23.4/src/unicode/tables.go:6@80a109e5dd4ed40a85d69ddf95175f647bbd68c577d27eb475cda63790bb2487",
+        "https://raw.githubusercontent.com/grafana/regexp/a468a5bfb3bc/syntax/parse.go:1646@881ab9e6e7a7e00af93357d1f13f53ac7b1fdbd0b25b67ffa842f9f530fb4545",
+        "https://raw.githubusercontent.com/grafana/regexp/a468a5bfb3bc/syntax/doc.go:1@51e7c5718bbb80a6c21d2b5a8ab991a3a80cc215ec4971a2454e45b94187ca88",
+        "https://raw.githubusercontent.com/grafana/regexp/a468a5bfb3bc/regexp.go:926@7a9cf2620aead6b42221d7187543aea3877afc2d7d2b8f9274844fa47d4f9b4a",
+        "https://raw.githubusercontent.com/golang/go/go1.23.4/src/unicode/letter.go:340@6be2e26975e7e4bfe167e7c1f8698cb919729f1e3a76aa75cdabc7afb96ef8d7",
+        "https://raw.githubusercontent.com/golang/go/go1.23.4/src/strings/strings.go:1137@829f0b0af2869d7158d59f5a5d7946273d01fe4952c04b623b65c7b6e0563993",
+        "https://raw.githubusercontent.com/golang/text/v0.21.0/unicode/norm/tables15.0.0.go:11@61f78dd80390fdfff02b4e49aea4feac75dde7919b9a5d9c63042ab3e2dc1d6e",
+        "model/labels/regexp.go:1@a7521f99883d73bc327fb3cc05d37669ccc496ff7f1fa2f7e52c16a69cfb3441"
+      ],
+      "implementation": "pending-versioned-primitive-binding",
+      "positive_cases": [
+        "promql-prometheus-3.1.0/primitive/backend-dialect/positive"
+      ],
+      "negative_cases": [
+        "promql-prometheus-3.1.0/primitive/backend-dialect/negative"
+      ],
+      "interaction_cases": [
+        "promql-prometheus-3.1.0/primitive/backend-dialect/interaction"
+      ],
+      "primitive_probes": [
+        {
+          "pattern": "(?P<group>a+)",
+          "input": "aaa",
+          "expected": "accepted named group"
+        },
+        {
+          "pattern": "a{1000}",
+          "expected": "accepted counted bound"
+        },
+        {
+          "pattern": "a{1001}",
+          "expected": "repeat-size error"
+        },
+        {
+          "pattern": "(?<=a)b",
+          "expected": "unsupported lookbehind error"
+        },
+        {
+          "pattern": "(a)\\1",
+          "expected": "unsupported backreference error"
+        },
+        {
+          "pattern": "a++",
+          "expected": "invalid nested repetition"
+        }
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.1.0/primitive/property-name-acceptance",
+      "kind": "versioned-primitive-semantics",
+      "profile": "promql-prometheus-3.1.0",
+      "gate": "",
+      "signature": "PromQL primitive/property-name-acceptance",
+      "semantic_rule": "Pinned Grafana syntax unicodeTable accepts exact case-sensitive keys from runtime unicode.Categories and unicode.Scripts, plus special Any. It does NOT consult unicode.Properties or CategoryAliases, normalize case/separators, or recognize Assigned/ASCII aliases. Therefore raw owned Go1.26/1.27 stdlib regex is not a compatible substitute even when unicode.Version happened to agree. Go1.23.4 lacks Cn and LC keys, so these property patterns are errors.",
+      "source_refs": [
+        "https://raw.githubusercontent.com/golang/go/go1.23.4/src/unicode/tables.go:6@80a109e5dd4ed40a85d69ddf95175f647bbd68c577d27eb475cda63790bb2487",
+        "https://raw.githubusercontent.com/grafana/regexp/a468a5bfb3bc/syntax/parse.go:1646@881ab9e6e7a7e00af93357d1f13f53ac7b1fdbd0b25b67ffa842f9f530fb4545",
+        "https://raw.githubusercontent.com/grafana/regexp/a468a5bfb3bc/syntax/doc.go:1@51e7c5718bbb80a6c21d2b5a8ab991a3a80cc215ec4971a2454e45b94187ca88",
+        "https://raw.githubusercontent.com/grafana/regexp/a468a5bfb3bc/regexp.go:926@7a9cf2620aead6b42221d7187543aea3877afc2d7d2b8f9274844fa47d4f9b4a",
+        "https://raw.githubusercontent.com/golang/go/go1.23.4/src/unicode/letter.go:340@6be2e26975e7e4bfe167e7c1f8698cb919729f1e3a76aa75cdabc7afb96ef8d7",
+        "https://raw.githubusercontent.com/golang/go/go1.23.4/src/strings/strings.go:1137@829f0b0af2869d7158d59f5a5d7946273d01fe4952c04b623b65c7b6e0563993",
+        "https://raw.githubusercontent.com/golang/text/v0.21.0/unicode/norm/tables15.0.0.go:11@61f78dd80390fdfff02b4e49aea4feac75dde7919b9a5d9c63042ab3e2dc1d6e",
+        "model/labels/regexp.go:1@a7521f99883d73bc327fb3cc05d37669ccc496ff7f1fa2f7e52c16a69cfb3441"
+      ],
+      "implementation": "pending-versioned-primitive-binding",
+      "positive_cases": [
+        "promql-prometheus-3.1.0/primitive/property-name-acceptance/positive"
+      ],
+      "negative_cases": [
+        "promql-prometheus-3.1.0/primitive/property-name-acceptance/negative"
+      ],
+      "interaction_cases": [
+        "promql-prometheus-3.1.0/primitive/property-name-acceptance/interaction"
+      ],
+      "primitive_probes": [
+        {
+          "pattern": "\\p{Greek}",
+          "expected": "accepted exact script name"
+        },
+        {
+          "pattern": "\\p{greek}",
+          "expected": "unknown property error"
+        },
+        {
+          "pattern": "\\p{Letter}",
+          "expected": "unknown property error despite stdlib alias support"
+        },
+        {
+          "pattern": "\\p{Old Italic}",
+          "expected": "unknown property error"
+        },
+        {
+          "pattern": "\\p{White_Space}",
+          "expected": "unknown property error: Properties map not consulted"
+        },
+        {
+          "pattern": "\\p{Assigned}",
+          "expected": "unknown property error"
+        },
+        {
+          "pattern": "\\p{ASCII}",
+          "expected": "unknown property error"
+        },
+        {
+          "pattern": "\\p{Cn}",
+          "expected": "unknown property error"
+        },
+        {
+          "pattern": "\\p{LC}",
+          "expected": "unknown property error"
+        },
+        {
+          "pattern": "\\p{Lc}",
+          "expected": "unknown property error"
+        }
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.1.0/primitive/unicode-table-membership",
+      "kind": "versioned-primitive-semantics",
+      "profile": "promql-prometheus-3.1.0",
+      "gate": "",
+      "signature": "PromQL primitive/unicode-table-membership",
+      "semantic_rule": "Use the exact hashed go1.23.4 Unicode15 tables, not the version string alone and not Unicode17 tables. C excludes unassigned codepoints; Cn is not an accepted key. Relative to owned Unicode17, both references reject newer script names and retain older category membership. These table differences affect positive/negative character classes, regex acceptance and case-insensitive classes.",
+      "source_refs": [
+        "https://raw.githubusercontent.com/golang/go/go1.23.4/src/unicode/tables.go:6@80a109e5dd4ed40a85d69ddf95175f647bbd68c577d27eb475cda63790bb2487",
+        "https://raw.githubusercontent.com/grafana/regexp/a468a5bfb3bc/syntax/parse.go:1646@881ab9e6e7a7e00af93357d1f13f53ac7b1fdbd0b25b67ffa842f9f530fb4545",
+        "https://raw.githubusercontent.com/grafana/regexp/a468a5bfb3bc/syntax/doc.go:1@51e7c5718bbb80a6c21d2b5a8ab991a3a80cc215ec4971a2454e45b94187ca88",
+        "https://raw.githubusercontent.com/grafana/regexp/a468a5bfb3bc/regexp.go:926@7a9cf2620aead6b42221d7187543aea3877afc2d7d2b8f9274844fa47d4f9b4a",
+        "https://raw.githubusercontent.com/golang/go/go1.23.4/src/unicode/letter.go:340@6be2e26975e7e4bfe167e7c1f8698cb919729f1e3a76aa75cdabc7afb96ef8d7",
+        "https://raw.githubusercontent.com/golang/go/go1.23.4/src/strings/strings.go:1137@829f0b0af2869d7158d59f5a5d7946273d01fe4952c04b623b65c7b6e0563993",
+        "https://raw.githubusercontent.com/golang/text/v0.21.0/unicode/norm/tables15.0.0.go:11@61f78dd80390fdfff02b4e49aea4feac75dde7919b9a5d9c63042ab3e2dc1d6e",
+        "model/labels/regexp.go:1@a7521f99883d73bc327fb3cc05d37669ccc496ff7f1fa2f7e52c16a69cfb3441"
+      ],
+      "implementation": "pending-versioned-primitive-binding",
+      "positive_cases": [
+        "promql-prometheus-3.1.0/primitive/unicode-table-membership/positive"
+      ],
+      "negative_cases": [
+        "promql-prometheus-3.1.0/primitive/unicode-table-membership/negative"
+      ],
+      "interaction_cases": [
+        "promql-prometheus-3.1.0/primitive/unicode-table-membership/interaction"
+      ],
+      "primitive_probes": [
+        {
+          "pattern": "\\p{C}",
+          "input_codepoints": [
+            "U+0378"
+          ],
+          "expected_match": false
+        },
+        {
+          "pattern": "\\p{L}",
+          "input_codepoints": [
+            "U+088F"
+          ],
+          "expected_match": false,
+          "owned_unicode17_match": true
+        },
+        {
+          "pattern": "\\p{Ll}",
+          "input_codepoints": [
+            "U+0295"
+          ],
+          "expected_match": true,
+          "owned_unicode17_match": false
+        },
+        {
+          "pattern": "\\p{Garay}",
+          "expected": "unknown property error",
+          "owned_unicode17_accepts": true
+        },
+        {
+          "pattern": "\\p{Nd}",
+          "input_codepoints": [
+            "U+10D40"
+          ],
+          "expected_match": false,
+          "owned_unicode17_match": true
+        }
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.1.0/primitive/simple-fold-version",
+      "kind": "versioned-primitive-semantics",
+      "profile": "promql-prometheus-3.1.0",
+      "gate": "",
+      "signature": "PromQL primitive/simple-fold-version",
+      "semantic_rule": "Case-insensitive matching uses the reference Unicode simple-fold equivalence orbit, not locale-sensitive case mapping or Unicode17 folding. The same pinned fold domain must govern compiled regex, strings.EqualFold optimizations, prefix/suffix scans and rune canonicalization. Kelvin K/k/U+212A and long-s S/s/U+017F are stable reference folds, but Unicode17-added U+A7CB<->U+0264 must not leak into either reference.",
+      "source_refs": [
+        "https://raw.githubusercontent.com/golang/go/go1.23.4/src/unicode/tables.go:6@80a109e5dd4ed40a85d69ddf95175f647bbd68c577d27eb475cda63790bb2487",
+        "https://raw.githubusercontent.com/grafana/regexp/a468a5bfb3bc/syntax/parse.go:1646@881ab9e6e7a7e00af93357d1f13f53ac7b1fdbd0b25b67ffa842f9f530fb4545",
+        "https://raw.githubusercontent.com/grafana/regexp/a468a5bfb3bc/syntax/doc.go:1@51e7c5718bbb80a6c21d2b5a8ab991a3a80cc215ec4971a2454e45b94187ca88",
+        "https://raw.githubusercontent.com/grafana/regexp/a468a5bfb3bc/regexp.go:926@7a9cf2620aead6b42221d7187543aea3877afc2d7d2b8f9274844fa47d4f9b4a",
+        "https://raw.githubusercontent.com/golang/go/go1.23.4/src/unicode/letter.go:340@6be2e26975e7e4bfe167e7c1f8698cb919729f1e3a76aa75cdabc7afb96ef8d7",
+        "https://raw.githubusercontent.com/golang/go/go1.23.4/src/strings/strings.go:1137@829f0b0af2869d7158d59f5a5d7946273d01fe4952c04b623b65c7b6e0563993",
+        "https://raw.githubusercontent.com/golang/text/v0.21.0/unicode/norm/tables15.0.0.go:11@61f78dd80390fdfff02b4e49aea4feac75dde7919b9a5d9c63042ab3e2dc1d6e",
+        "model/labels/regexp.go:1@a7521f99883d73bc327fb3cc05d37669ccc496ff7f1fa2f7e52c16a69cfb3441"
+      ],
+      "implementation": "pending-versioned-primitive-binding",
+      "positive_cases": [
+        "promql-prometheus-3.1.0/primitive/simple-fold-version/positive"
+      ],
+      "negative_cases": [
+        "promql-prometheus-3.1.0/primitive/simple-fold-version/negative"
+      ],
+      "interaction_cases": [
+        "promql-prometheus-3.1.0/primitive/simple-fold-version/interaction"
+      ],
+      "primitive_probes": [
+        {
+          "pattern": "(?i:k)",
+          "input_codepoints": [
+            "U+212A"
+          ],
+          "expected_match": true
+        },
+        {
+          "pattern": "(?i:s)",
+          "input_codepoints": [
+            "U+017F"
+          ],
+          "expected_match": true
+        },
+        {
+          "pattern": "(?i:\\x{A7CB})",
+          "input_codepoints": [
+            "U+0264"
+          ],
+          "expected_match": false,
+          "owned_unicode17_match": true
+        },
+        {
+          "pattern": "(?i:ss)",
+          "input_codepoints": [
+            "U+00DF"
+          ],
+          "expected_match": false,
+          "reason": "simple fold is not full multi-character case folding"
+        }
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.1.0/primitive/ascii-classes-boundaries",
+      "kind": "versioned-primitive-semantics",
+      "profile": "promql-prometheus-3.1.0",
+      "gate": "",
+      "signature": "PromQL primitive/ascii-classes-boundaries",
+      "semantic_rule": "Perl \\d, \\s, \\w and POSIX bracket classes are their pinned ASCII class tables; they do not expand to Unicode category sets. \\b and \\B use ASCII word membership. With i flag, ASCII class rune sets can gain Unicode simple-fold equivalents such as Kelvin and long-s, but digits do not acquire Unicode17 decimal digits.",
+      "source_refs": [
+        "https://raw.githubusercontent.com/golang/go/go1.23.4/src/unicode/tables.go:6@80a109e5dd4ed40a85d69ddf95175f647bbd68c577d27eb475cda63790bb2487",
+        "https://raw.githubusercontent.com/grafana/regexp/a468a5bfb3bc/syntax/parse.go:1646@881ab9e6e7a7e00af93357d1f13f53ac7b1fdbd0b25b67ffa842f9f530fb4545",
+        "https://raw.githubusercontent.com/grafana/regexp/a468a5bfb3bc/syntax/doc.go:1@51e7c5718bbb80a6c21d2b5a8ab991a3a80cc215ec4971a2454e45b94187ca88",
+        "https://raw.githubusercontent.com/grafana/regexp/a468a5bfb3bc/regexp.go:926@7a9cf2620aead6b42221d7187543aea3877afc2d7d2b8f9274844fa47d4f9b4a",
+        "https://raw.githubusercontent.com/golang/go/go1.23.4/src/unicode/letter.go:340@6be2e26975e7e4bfe167e7c1f8698cb919729f1e3a76aa75cdabc7afb96ef8d7",
+        "https://raw.githubusercontent.com/golang/go/go1.23.4/src/strings/strings.go:1137@829f0b0af2869d7158d59f5a5d7946273d01fe4952c04b623b65c7b6e0563993",
+        "https://raw.githubusercontent.com/golang/text/v0.21.0/unicode/norm/tables15.0.0.go:11@61f78dd80390fdfff02b4e49aea4feac75dde7919b9a5d9c63042ab3e2dc1d6e",
+        "model/labels/regexp.go:1@a7521f99883d73bc327fb3cc05d37669ccc496ff7f1fa2f7e52c16a69cfb3441"
+      ],
+      "implementation": "pending-versioned-primitive-binding",
+      "positive_cases": [
+        "promql-prometheus-3.1.0/primitive/ascii-classes-boundaries/positive"
+      ],
+      "negative_cases": [
+        "promql-prometheus-3.1.0/primitive/ascii-classes-boundaries/negative"
+      ],
+      "interaction_cases": [
+        "promql-prometheus-3.1.0/primitive/ascii-classes-boundaries/interaction"
+      ],
+      "primitive_probes": [
+        {
+          "pattern": "\\d",
+          "input_codepoints": [
+            "U+10D40"
+          ],
+          "expected_match": false
+        },
+        {
+          "pattern": "\\p{Nd}",
+          "input": "7",
+          "expected_match": true
+        },
+        {
+          "pattern": "\\w",
+          "input_codepoints": [
+            "U+212A"
+          ],
+          "expected_match": false
+        },
+        {
+          "pattern": "(?i:\\w)",
+          "input_codepoints": [
+            "U+212A"
+          ],
+          "expected_match": true
+        },
+        {
+          "pattern": "[[:alpha:]]",
+          "input_codepoints": [
+            "U+03B1"
+          ],
+          "expected_match": false
+        },
+        {
+          "pattern": "\\s",
+          "input_codepoints": [
+            "U+00A0"
+          ],
+          "expected_match": false
+        }
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.1.0/primitive/matcher-optimization-fold-length",
+      "kind": "versioned-primitive-semantics",
+      "profile": "promql-prometheus-3.1.0",
+      "gate": "",
+      "signature": "PromQL primitive/matcher-optimization-fold-length",
+      "semantic_rule": "3.1.0 optimized case-insensitive prefix/suffix matcher compares a byte slice of len(pattern literal) using strings.EqualFold, then slices the residual using the same literal byte length. Fold-equivalent runes with different UTF8 encoded lengths can fail this optimized path even though the compiled regex would match. Preserve this reference path distinction; label_replace directly uses compiled regexp, not the FastRegexMatcher optimizer.",
+      "source_refs": [
+        "https://raw.githubusercontent.com/golang/go/go1.23.4/src/unicode/tables.go:6@80a109e5dd4ed40a85d69ddf95175f647bbd68c577d27eb475cda63790bb2487",
+        "https://raw.githubusercontent.com/grafana/regexp/a468a5bfb3bc/syntax/parse.go:1646@881ab9e6e7a7e00af93357d1f13f53ac7b1fdbd0b25b67ffa842f9f530fb4545",
+        "https://raw.githubusercontent.com/grafana/regexp/a468a5bfb3bc/syntax/doc.go:1@51e7c5718bbb80a6c21d2b5a8ab991a3a80cc215ec4971a2454e45b94187ca88",
+        "https://raw.githubusercontent.com/grafana/regexp/a468a5bfb3bc/regexp.go:926@7a9cf2620aead6b42221d7187543aea3877afc2d7d2b8f9274844fa47d4f9b4a",
+        "https://raw.githubusercontent.com/golang/go/go1.23.4/src/unicode/letter.go:340@6be2e26975e7e4bfe167e7c1f8698cb919729f1e3a76aa75cdabc7afb96ef8d7",
+        "https://raw.githubusercontent.com/golang/go/go1.23.4/src/strings/strings.go:1137@829f0b0af2869d7158d59f5a5d7946273d01fe4952c04b623b65c7b6e0563993",
+        "https://raw.githubusercontent.com/golang/text/v0.21.0/unicode/norm/tables15.0.0.go:11@61f78dd80390fdfff02b4e49aea4feac75dde7919b9a5d9c63042ab3e2dc1d6e",
+        "model/labels/regexp.go:1@a7521f99883d73bc327fb3cc05d37669ccc496ff7f1fa2f7e52c16a69cfb3441"
+      ],
+      "implementation": "pending-versioned-primitive-binding",
+      "positive_cases": [
+        "promql-prometheus-3.1.0/primitive/matcher-optimization-fold-length/positive"
+      ],
+      "negative_cases": [
+        "promql-prometheus-3.1.0/primitive/matcher-optimization-fold-length/negative"
+      ],
+      "interaction_cases": [
+        "promql-prometheus-3.1.0/primitive/matcher-optimization-fold-length/interaction"
+      ],
+      "primitive_probes": [
+        {
+          "context": "selector optimized prefix",
+          "pattern": "(?i:k).*",
+          "input_codepoints": [
+            "U+212A",
+            "U+0078"
+          ],
+          "expected_match": false
+        },
+        {
+          "context": "selector optimized suffix",
+          "pattern": ".*(?i:s)",
+          "input_codepoints": [
+            "U+0078",
+            "U+017F"
+          ],
+          "expected_match": false
+        },
+        {
+          "context": "label_replace compiled regexp",
+          "pattern": "(?i:k).*",
+          "input_codepoints": [
+            "U+212A",
+            "U+0078"
+          ],
+          "expected_match": true
+        }
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.1.0/primitive/normalization-version-selection",
+      "kind": "versioned-primitive-semantics",
+      "profile": "promql-prometheus-3.1.0",
+      "gate": "",
+      "signature": "PromQL primitive/normalization-version-selection",
+      "semantic_rule": "FastRegexMatcher optimization normalizes indexed strings using norm.NFKD plus unicode.ToLower. Pin BOTH the x/text module v0.21.0 and its selected Unicode15 table under go1.23.4. x/text v0.42.0 selects tables15.0.0.go under !go1.27, but tables17.0.0.go under go1.27. Recompiling the same dependency with owned Go1.27.3 therefore changes normalization data automatically; exact module version alone is insufficient primitive identity. Optimized lookup must preserve the pinned final matcher behavior and not become Unicode normalization of label identity.",
+      "source_refs": [
+        "https://raw.githubusercontent.com/golang/go/go1.23.4/src/unicode/tables.go:6@80a109e5dd4ed40a85d69ddf95175f647bbd68c577d27eb475cda63790bb2487",
+        "https://raw.githubusercontent.com/grafana/regexp/a468a5bfb3bc/syntax/parse.go:1646@881ab9e6e7a7e00af93357d1f13f53ac7b1fdbd0b25b67ffa842f9f530fb4545",
+        "https://raw.githubusercontent.com/grafana/regexp/a468a5bfb3bc/syntax/doc.go:1@51e7c5718bbb80a6c21d2b5a8ab991a3a80cc215ec4971a2454e45b94187ca88",
+        "https://raw.githubusercontent.com/grafana/regexp/a468a5bfb3bc/regexp.go:926@7a9cf2620aead6b42221d7187543aea3877afc2d7d2b8f9274844fa47d4f9b4a",
+        "https://raw.githubusercontent.com/golang/go/go1.23.4/src/unicode/letter.go:340@6be2e26975e7e4bfe167e7c1f8698cb919729f1e3a76aa75cdabc7afb96ef8d7",
+        "https://raw.githubusercontent.com/golang/go/go1.23.4/src/strings/strings.go:1137@829f0b0af2869d7158d59f5a5d7946273d01fe4952c04b623b65c7b6e0563993",
+        "https://raw.githubusercontent.com/golang/text/v0.21.0/unicode/norm/tables15.0.0.go:11@61f78dd80390fdfff02b4e49aea4feac75dde7919b9a5d9c63042ab3e2dc1d6e",
+        "model/labels/regexp.go:1@a7521f99883d73bc327fb3cc05d37669ccc496ff7f1fa2f7e52c16a69cfb3441",
+        "https://raw.githubusercontent.com/golang/text/v0.42.0/unicode/norm/tables17.0.0.go@dade3c78c0b36426a6966f46926f2ab61c484ae425feb175a07fbe1ee8f855fa"
+      ],
+      "implementation": "pending-versioned-primitive-binding",
+      "positive_cases": [
+        "promql-prometheus-3.1.0/primitive/normalization-version-selection/positive"
+      ],
+      "negative_cases": [
+        "promql-prometheus-3.1.0/primitive/normalization-version-selection/negative"
+      ],
+      "interaction_cases": [
+        "promql-prometheus-3.1.0/primitive/normalization-version-selection/interaction"
+      ],
+      "primitive_probes": [
+        {
+          "context": "label identity",
+          "inputs": [
+            "\u00e9",
+            "e\u0301"
+          ],
+          "expected": "distinct byte strings/labels, not canonically merged"
+        },
+        {
+          "context": "indexed case-insensitive alternatives",
+          "inputs": [
+            "k",
+            "K",
+            "\u212a"
+          ],
+          "expected": "use pinned normalization/final matching, with optimizer context distinctions above"
+        },
+        {
+          "context": "build selection",
+          "reference_table": "15.0.0",
+          "owned_go127_xtext042_table": "17.0.0"
+        }
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.1.0/primitive/anchoring-captures-replacement",
+      "kind": "versioned-primitive-semantics",
+      "profile": "promql-prometheus-3.1.0",
+      "gate": "",
+      "signature": "PromQL primitive/anchoring-captures-replacement",
+      "semantic_rule": "Selector regex and label_replace compile whole-value anchored (?s:pattern) expressions; default dot therefore crosses newline in these callers. Inline flags can locally disable s. Captures use leftmost-first RE2 choice, not POSIX longest-submatch selection. Replacement expands $name/${name}/$number, $$ literal dollar; longest alphanumeric name wins, so $1x differs from ${1}x. Unknown/unmatched groups expand empty. Preserve pinned regex capture indices through Unicode UTF8 matching.",
+      "source_refs": [
+        "https://raw.githubusercontent.com/golang/go/go1.23.4/src/unicode/tables.go:6@80a109e5dd4ed40a85d69ddf95175f647bbd68c577d27eb475cda63790bb2487",
+        "https://raw.githubusercontent.com/grafana/regexp/a468a5bfb3bc/syntax/parse.go:1646@881ab9e6e7a7e00af93357d1f13f53ac7b1fdbd0b25b67ffa842f9f530fb4545",
+        "https://raw.githubusercontent.com/grafana/regexp/a468a5bfb3bc/syntax/doc.go:1@51e7c5718bbb80a6c21d2b5a8ab991a3a80cc215ec4971a2454e45b94187ca88",
+        "https://raw.githubusercontent.com/grafana/regexp/a468a5bfb3bc/regexp.go:926@7a9cf2620aead6b42221d7187543aea3877afc2d7d2b8f9274844fa47d4f9b4a",
+        "https://raw.githubusercontent.com/golang/go/go1.23.4/src/unicode/letter.go:340@6be2e26975e7e4bfe167e7c1f8698cb919729f1e3a76aa75cdabc7afb96ef8d7",
+        "https://raw.githubusercontent.com/golang/go/go1.23.4/src/strings/strings.go:1137@829f0b0af2869d7158d59f5a5d7946273d01fe4952c04b623b65c7b6e0563993",
+        "https://raw.githubusercontent.com/golang/text/v0.21.0/unicode/norm/tables15.0.0.go:11@61f78dd80390fdfff02b4e49aea4feac75dde7919b9a5d9c63042ab3e2dc1d6e",
+        "model/labels/regexp.go:1@a7521f99883d73bc327fb3cc05d37669ccc496ff7f1fa2f7e52c16a69cfb3441"
+      ],
+      "implementation": "pending-versioned-primitive-binding",
+      "positive_cases": [
+        "promql-prometheus-3.1.0/primitive/anchoring-captures-replacement/positive"
+      ],
+      "negative_cases": [
+        "promql-prometheus-3.1.0/primitive/anchoring-captures-replacement/negative"
+      ],
+      "interaction_cases": [
+        "promql-prometheus-3.1.0/primitive/anchoring-captures-replacement/interaction"
+      ],
+      "primitive_probes": [
+        {
+          "context": "selector",
+          "pattern": "a.b",
+          "input": "a\nb",
+          "expected_match": true
+        },
+        {
+          "context": "label_replace",
+          "pattern": "(a|aa)(a?)",
+          "input": "aa",
+          "replacement": "$1-$2",
+          "expected_output": "a-a"
+        },
+        {
+          "context": "label_replace",
+          "pattern": "(a)",
+          "input": "a",
+          "replacement": "$1x",
+          "expected_output": ""
+        },
+        {
+          "context": "label_replace",
+          "pattern": "(a)",
+          "input": "a",
+          "replacement": "${1}x",
+          "expected_output": "ax"
+        },
+        {
+          "pattern": "(?-s:a.b)",
+          "input": "a\nb",
+          "expected_match": false
+        }
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.1.0/primitive/utf8-runtime-semantics",
+      "kind": "versioned-primitive-semantics",
+      "profile": "promql-prometheus-3.1.0",
+      "gate": "",
+      "signature": "PromQL primitive/utf8-runtime-semantics",
+      "semantic_rule": "Pin UTF8 decode/validation semantics at regex and query-input boundaries: malformed UTF8 in a regex pattern is a compile error; regexp text iteration decodes each malformed byte as RuneError U+FFFD, not Latin1 or byte-wise Unicode characters. PromQL label/query validators may reject malformed encodings before regex execution; keep that layer distinct from the primitive. Own Go1.27.3 has matching utf8.go source bytes to Go1.26.10, but that fact does not prove regexp or Unicode table compatibility.",
+      "source_refs": [
+        "https://raw.githubusercontent.com/golang/go/go1.23.4/src/unicode/tables.go:6@80a109e5dd4ed40a85d69ddf95175f647bbd68c577d27eb475cda63790bb2487",
+        "https://raw.githubusercontent.com/grafana/regexp/a468a5bfb3bc/syntax/parse.go:1646@881ab9e6e7a7e00af93357d1f13f53ac7b1fdbd0b25b67ffa842f9f530fb4545",
+        "https://raw.githubusercontent.com/grafana/regexp/a468a5bfb3bc/syntax/doc.go:1@51e7c5718bbb80a6c21d2b5a8ab991a3a80cc215ec4971a2454e45b94187ca88",
+        "https://raw.githubusercontent.com/grafana/regexp/a468a5bfb3bc/regexp.go:926@7a9cf2620aead6b42221d7187543aea3877afc2d7d2b8f9274844fa47d4f9b4a",
+        "https://raw.githubusercontent.com/golang/go/go1.23.4/src/unicode/letter.go:340@6be2e26975e7e4bfe167e7c1f8698cb919729f1e3a76aa75cdabc7afb96ef8d7",
+        "https://raw.githubusercontent.com/golang/go/go1.23.4/src/strings/strings.go:1137@829f0b0af2869d7158d59f5a5d7946273d01fe4952c04b623b65c7b6e0563993",
+        "https://raw.githubusercontent.com/golang/text/v0.21.0/unicode/norm/tables15.0.0.go:11@61f78dd80390fdfff02b4e49aea4feac75dde7919b9a5d9c63042ab3e2dc1d6e",
+        "model/labels/regexp.go:1@a7521f99883d73bc327fb3cc05d37669ccc496ff7f1fa2f7e52c16a69cfb3441"
+      ],
+      "implementation": "pending-versioned-primitive-binding",
+      "positive_cases": [
+        "promql-prometheus-3.1.0/primitive/utf8-runtime-semantics/positive"
+      ],
+      "negative_cases": [
+        "promql-prometheus-3.1.0/primitive/utf8-runtime-semantics/negative"
+      ],
+      "interaction_cases": [
+        "promql-prometheus-3.1.0/primitive/utf8-runtime-semantics/interaction"
+      ],
+      "primitive_probes": [
+        {
+          "context": "regex primitive input",
+          "input_bytes_hex": "ff",
+          "pattern": "\\x{FFFD}",
+          "expected_match": true
+        },
+        {
+          "context": "regex primitive pattern",
+          "pattern_bytes_hex": "ff",
+          "expected": "invalid UTF8 compile error"
+        },
+        {
+          "context": "query/label admission",
+          "input_bytes_hex": "ff",
+          "expected": "apply earlier UTF8 validation; do not bypass validation because regex primitive can decode RuneError"
+        }
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/primitive/backend-dialect",
+      "kind": "versioned-primitive-semantics",
+      "profile": "promql-prometheus-3.13.5",
+      "gate": "",
+      "signature": "PromQL primitive/backend-dialect",
+      "semantic_rule": "The reference uses Grafana regexp v0.0.0-20250905093917-f7b3be9d1853, NOT the Go go1.26.10 regexp parser and not the owned Go1.27.3 regexp parser. Pin Perl-mode RE2 syntax: alternation/concatenation, greedy/lazy repetition, named/numbered/noncapturing groups, scoped i/m/s/U flags, anchors and ASCII word boundaries. Backreferences, lookaround and possessive quantifiers are rejected. Counted repetition bounds above1000 and excessive nested repeats are parse errors; unlimited * and + are not capped by the counted-repeat syntax limit. New syntax in owned stdlib is not enabled implicitly.",
+      "source_refs": [
+        "https://raw.githubusercontent.com/golang/go/go1.26.10/src/unicode/tables.go:6@6a88d48746c4b2c471cc04ae40559694b734770212e6f5ea5f1962adb0c0bdb1",
+        "https://raw.githubusercontent.com/grafana/regexp/f7b3be9d1853/syntax/parse.go:1644@c821d029b622d474fa87c9df8f1e9471fd2298b6c6965c6db09130a58b80c5b7",
+        "https://raw.githubusercontent.com/grafana/regexp/f7b3be9d1853/syntax/doc.go:1@51e7c5718bbb80a6c21d2b5a8ab991a3a80cc215ec4971a2454e45b94187ca88",
+        "https://raw.githubusercontent.com/grafana/regexp/f7b3be9d1853/regexp.go:922@3c6b372bf6e658c167d100093f946741ddd4bfb2717d71455d2bf6a4c515b406",
+        "https://raw.githubusercontent.com/golang/go/go1.26.10/src/unicode/letter.go:354@b35a6d259313cef88d07e9e4027b8bd72c60ae140418f5be2c41a2ecea6074fe",
+        "https://raw.githubusercontent.com/golang/go/go1.26.10/src/strings/strings.go:1187@ba9478be775d11b6956c828ebf870a8f8e7b7318ee382834f1e741f02d1336ef",
+        "https://raw.githubusercontent.com/golang/text/v0.42.0/unicode/norm/tables15.0.0.go:11@9e29fbffef687d6d2191c999c466729dff2f394d8dcbec377a2fc14336f33cdb",
+        "model/labels/regexp.go:1@b8aad51580cab4b71adc747f23a09baf09745f82c5f0e875882369540b68e8f3"
+      ],
+      "implementation": "pending-versioned-primitive-binding",
+      "positive_cases": [
+        "promql-prometheus-3.13.5/primitive/backend-dialect/positive"
+      ],
+      "negative_cases": [
+        "promql-prometheus-3.13.5/primitive/backend-dialect/negative"
+      ],
+      "interaction_cases": [
+        "promql-prometheus-3.13.5/primitive/backend-dialect/interaction"
+      ],
+      "primitive_probes": [
+        {
+          "pattern": "(?P<group>a+)",
+          "input": "aaa",
+          "expected": "accepted named group"
+        },
+        {
+          "pattern": "a{1000}",
+          "expected": "accepted counted bound"
+        },
+        {
+          "pattern": "a{1001}",
+          "expected": "repeat-size error"
+        },
+        {
+          "pattern": "(?<=a)b",
+          "expected": "unsupported lookbehind error"
+        },
+        {
+          "pattern": "(a)\\1",
+          "expected": "unsupported backreference error"
+        },
+        {
+          "pattern": "a++",
+          "expected": "invalid nested repetition"
+        }
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/primitive/property-name-acceptance",
+      "kind": "versioned-primitive-semantics",
+      "profile": "promql-prometheus-3.13.5",
+      "gate": "",
+      "signature": "PromQL primitive/property-name-acceptance",
+      "semantic_rule": "Pinned Grafana syntax unicodeTable accepts exact case-sensitive keys from runtime unicode.Categories and unicode.Scripts, plus special Any. It does NOT consult unicode.Properties or CategoryAliases, normalize case/separators, or recognize Assigned/ASCII aliases. Therefore raw owned Go1.26/1.27 stdlib regex is not a compatible substitute even when unicode.Version happened to agree. Go1.26.10 has exact Cn and LC keys: these patterns are accepted. Lc remains unknown because the fork does not canonicalize property names.",
+      "source_refs": [
+        "https://raw.githubusercontent.com/golang/go/go1.26.10/src/unicode/tables.go:6@6a88d48746c4b2c471cc04ae40559694b734770212e6f5ea5f1962adb0c0bdb1",
+        "https://raw.githubusercontent.com/grafana/regexp/f7b3be9d1853/syntax/parse.go:1644@c821d029b622d474fa87c9df8f1e9471fd2298b6c6965c6db09130a58b80c5b7",
+        "https://raw.githubusercontent.com/grafana/regexp/f7b3be9d1853/syntax/doc.go:1@51e7c5718bbb80a6c21d2b5a8ab991a3a80cc215ec4971a2454e45b94187ca88",
+        "https://raw.githubusercontent.com/grafana/regexp/f7b3be9d1853/regexp.go:922@3c6b372bf6e658c167d100093f946741ddd4bfb2717d71455d2bf6a4c515b406",
+        "https://raw.githubusercontent.com/golang/go/go1.26.10/src/unicode/letter.go:354@b35a6d259313cef88d07e9e4027b8bd72c60ae140418f5be2c41a2ecea6074fe",
+        "https://raw.githubusercontent.com/golang/go/go1.26.10/src/strings/strings.go:1187@ba9478be775d11b6956c828ebf870a8f8e7b7318ee382834f1e741f02d1336ef",
+        "https://raw.githubusercontent.com/golang/text/v0.42.0/unicode/norm/tables15.0.0.go:11@9e29fbffef687d6d2191c999c466729dff2f394d8dcbec377a2fc14336f33cdb",
+        "model/labels/regexp.go:1@b8aad51580cab4b71adc747f23a09baf09745f82c5f0e875882369540b68e8f3"
+      ],
+      "implementation": "pending-versioned-primitive-binding",
+      "positive_cases": [
+        "promql-prometheus-3.13.5/primitive/property-name-acceptance/positive"
+      ],
+      "negative_cases": [
+        "promql-prometheus-3.13.5/primitive/property-name-acceptance/negative"
+      ],
+      "interaction_cases": [
+        "promql-prometheus-3.13.5/primitive/property-name-acceptance/interaction"
+      ],
+      "primitive_probes": [
+        {
+          "pattern": "\\p{Greek}",
+          "expected": "accepted exact script name"
+        },
+        {
+          "pattern": "\\p{greek}",
+          "expected": "unknown property error"
+        },
+        {
+          "pattern": "\\p{Letter}",
+          "expected": "unknown property error despite stdlib alias support"
+        },
+        {
+          "pattern": "\\p{Old Italic}",
+          "expected": "unknown property error"
+        },
+        {
+          "pattern": "\\p{White_Space}",
+          "expected": "unknown property error: Properties map not consulted"
+        },
+        {
+          "pattern": "\\p{Assigned}",
+          "expected": "unknown property error"
+        },
+        {
+          "pattern": "\\p{ASCII}",
+          "expected": "unknown property error"
+        },
+        {
+          "pattern": "\\p{Cn}",
+          "expected": "accepted; matches U+0378"
+        },
+        {
+          "pattern": "\\p{LC}",
+          "expected": "accepted; matches A but not1"
+        },
+        {
+          "pattern": "\\p{Lc}",
+          "expected": "unknown property error"
+        }
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/primitive/unicode-table-membership",
+      "kind": "versioned-primitive-semantics",
+      "profile": "promql-prometheus-3.13.5",
+      "gate": "",
+      "signature": "PromQL primitive/unicode-table-membership",
+      "semantic_rule": "Use the exact hashed go1.26.10 Unicode15 tables, not the version string alone and not Unicode17 tables. C includes unassigned Cn codepoints; Cn and LC were added although UnicodeVersion remains15.0.0. Relative to owned Unicode17, both references reject newer script names and retain older category membership. These table differences affect positive/negative character classes, regex acceptance and case-insensitive classes.",
+      "source_refs": [
+        "https://raw.githubusercontent.com/golang/go/go1.26.10/src/unicode/tables.go:6@6a88d48746c4b2c471cc04ae40559694b734770212e6f5ea5f1962adb0c0bdb1",
+        "https://raw.githubusercontent.com/grafana/regexp/f7b3be9d1853/syntax/parse.go:1644@c821d029b622d474fa87c9df8f1e9471fd2298b6c6965c6db09130a58b80c5b7",
+        "https://raw.githubusercontent.com/grafana/regexp/f7b3be9d1853/syntax/doc.go:1@51e7c5718bbb80a6c21d2b5a8ab991a3a80cc215ec4971a2454e45b94187ca88",
+        "https://raw.githubusercontent.com/grafana/regexp/f7b3be9d1853/regexp.go:922@3c6b372bf6e658c167d100093f946741ddd4bfb2717d71455d2bf6a4c515b406",
+        "https://raw.githubusercontent.com/golang/go/go1.26.10/src/unicode/letter.go:354@b35a6d259313cef88d07e9e4027b8bd72c60ae140418f5be2c41a2ecea6074fe",
+        "https://raw.githubusercontent.com/golang/go/go1.26.10/src/strings/strings.go:1187@ba9478be775d11b6956c828ebf870a8f8e7b7318ee382834f1e741f02d1336ef",
+        "https://raw.githubusercontent.com/golang/text/v0.42.0/unicode/norm/tables15.0.0.go:11@9e29fbffef687d6d2191c999c466729dff2f394d8dcbec377a2fc14336f33cdb",
+        "model/labels/regexp.go:1@b8aad51580cab4b71adc747f23a09baf09745f82c5f0e875882369540b68e8f3"
+      ],
+      "implementation": "pending-versioned-primitive-binding",
+      "positive_cases": [
+        "promql-prometheus-3.13.5/primitive/unicode-table-membership/positive"
+      ],
+      "negative_cases": [
+        "promql-prometheus-3.13.5/primitive/unicode-table-membership/negative"
+      ],
+      "interaction_cases": [
+        "promql-prometheus-3.13.5/primitive/unicode-table-membership/interaction"
+      ],
+      "primitive_probes": [
+        {
+          "pattern": "\\p{C}",
+          "input_codepoints": [
+            "U+0378"
+          ],
+          "expected_match": true
+        },
+        {
+          "pattern": "\\p{L}",
+          "input_codepoints": [
+            "U+088F"
+          ],
+          "expected_match": false,
+          "owned_unicode17_match": true
+        },
+        {
+          "pattern": "\\p{Ll}",
+          "input_codepoints": [
+            "U+0295"
+          ],
+          "expected_match": true,
+          "owned_unicode17_match": false
+        },
+        {
+          "pattern": "\\p{Garay}",
+          "expected": "unknown property error",
+          "owned_unicode17_accepts": true
+        },
+        {
+          "pattern": "\\p{Nd}",
+          "input_codepoints": [
+            "U+10D40"
+          ],
+          "expected_match": false,
+          "owned_unicode17_match": true
+        }
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/primitive/simple-fold-version",
+      "kind": "versioned-primitive-semantics",
+      "profile": "promql-prometheus-3.13.5",
+      "gate": "",
+      "signature": "PromQL primitive/simple-fold-version",
+      "semantic_rule": "Case-insensitive matching uses the reference Unicode simple-fold equivalence orbit, not locale-sensitive case mapping or Unicode17 folding. The same pinned fold domain must govern compiled regex, strings.EqualFold optimizations, prefix/suffix scans and rune canonicalization. Kelvin K/k/U+212A and long-s S/s/U+017F are stable reference folds, but Unicode17-added U+A7CB<->U+0264 must not leak into either reference.",
+      "source_refs": [
+        "https://raw.githubusercontent.com/golang/go/go1.26.10/src/unicode/tables.go:6@6a88d48746c4b2c471cc04ae40559694b734770212e6f5ea5f1962adb0c0bdb1",
+        "https://raw.githubusercontent.com/grafana/regexp/f7b3be9d1853/syntax/parse.go:1644@c821d029b622d474fa87c9df8f1e9471fd2298b6c6965c6db09130a58b80c5b7",
+        "https://raw.githubusercontent.com/grafana/regexp/f7b3be9d1853/syntax/doc.go:1@51e7c5718bbb80a6c21d2b5a8ab991a3a80cc215ec4971a2454e45b94187ca88",
+        "https://raw.githubusercontent.com/grafana/regexp/f7b3be9d1853/regexp.go:922@3c6b372bf6e658c167d100093f946741ddd4bfb2717d71455d2bf6a4c515b406",
+        "https://raw.githubusercontent.com/golang/go/go1.26.10/src/unicode/letter.go:354@b35a6d259313cef88d07e9e4027b8bd72c60ae140418f5be2c41a2ecea6074fe",
+        "https://raw.githubusercontent.com/golang/go/go1.26.10/src/strings/strings.go:1187@ba9478be775d11b6956c828ebf870a8f8e7b7318ee382834f1e741f02d1336ef",
+        "https://raw.githubusercontent.com/golang/text/v0.42.0/unicode/norm/tables15.0.0.go:11@9e29fbffef687d6d2191c999c466729dff2f394d8dcbec377a2fc14336f33cdb",
+        "model/labels/regexp.go:1@b8aad51580cab4b71adc747f23a09baf09745f82c5f0e875882369540b68e8f3"
+      ],
+      "implementation": "pending-versioned-primitive-binding",
+      "positive_cases": [
+        "promql-prometheus-3.13.5/primitive/simple-fold-version/positive"
+      ],
+      "negative_cases": [
+        "promql-prometheus-3.13.5/primitive/simple-fold-version/negative"
+      ],
+      "interaction_cases": [
+        "promql-prometheus-3.13.5/primitive/simple-fold-version/interaction"
+      ],
+      "primitive_probes": [
+        {
+          "pattern": "(?i:k)",
+          "input_codepoints": [
+            "U+212A"
+          ],
+          "expected_match": true
+        },
+        {
+          "pattern": "(?i:s)",
+          "input_codepoints": [
+            "U+017F"
+          ],
+          "expected_match": true
+        },
+        {
+          "pattern": "(?i:\\x{A7CB})",
+          "input_codepoints": [
+            "U+0264"
+          ],
+          "expected_match": false,
+          "owned_unicode17_match": true
+        },
+        {
+          "pattern": "(?i:ss)",
+          "input_codepoints": [
+            "U+00DF"
+          ],
+          "expected_match": false,
+          "reason": "simple fold is not full multi-character case folding"
+        }
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/primitive/ascii-classes-boundaries",
+      "kind": "versioned-primitive-semantics",
+      "profile": "promql-prometheus-3.13.5",
+      "gate": "",
+      "signature": "PromQL primitive/ascii-classes-boundaries",
+      "semantic_rule": "Perl \\d, \\s, \\w and POSIX bracket classes are their pinned ASCII class tables; they do not expand to Unicode category sets. \\b and \\B use ASCII word membership. With i flag, ASCII class rune sets can gain Unicode simple-fold equivalents such as Kelvin and long-s, but digits do not acquire Unicode17 decimal digits.",
+      "source_refs": [
+        "https://raw.githubusercontent.com/golang/go/go1.26.10/src/unicode/tables.go:6@6a88d48746c4b2c471cc04ae40559694b734770212e6f5ea5f1962adb0c0bdb1",
+        "https://raw.githubusercontent.com/grafana/regexp/f7b3be9d1853/syntax/parse.go:1644@c821d029b622d474fa87c9df8f1e9471fd2298b6c6965c6db09130a58b80c5b7",
+        "https://raw.githubusercontent.com/grafana/regexp/f7b3be9d1853/syntax/doc.go:1@51e7c5718bbb80a6c21d2b5a8ab991a3a80cc215ec4971a2454e45b94187ca88",
+        "https://raw.githubusercontent.com/grafana/regexp/f7b3be9d1853/regexp.go:922@3c6b372bf6e658c167d100093f946741ddd4bfb2717d71455d2bf6a4c515b406",
+        "https://raw.githubusercontent.com/golang/go/go1.26.10/src/unicode/letter.go:354@b35a6d259313cef88d07e9e4027b8bd72c60ae140418f5be2c41a2ecea6074fe",
+        "https://raw.githubusercontent.com/golang/go/go1.26.10/src/strings/strings.go:1187@ba9478be775d11b6956c828ebf870a8f8e7b7318ee382834f1e741f02d1336ef",
+        "https://raw.githubusercontent.com/golang/text/v0.42.0/unicode/norm/tables15.0.0.go:11@9e29fbffef687d6d2191c999c466729dff2f394d8dcbec377a2fc14336f33cdb",
+        "model/labels/regexp.go:1@b8aad51580cab4b71adc747f23a09baf09745f82c5f0e875882369540b68e8f3"
+      ],
+      "implementation": "pending-versioned-primitive-binding",
+      "positive_cases": [
+        "promql-prometheus-3.13.5/primitive/ascii-classes-boundaries/positive"
+      ],
+      "negative_cases": [
+        "promql-prometheus-3.13.5/primitive/ascii-classes-boundaries/negative"
+      ],
+      "interaction_cases": [
+        "promql-prometheus-3.13.5/primitive/ascii-classes-boundaries/interaction"
+      ],
+      "primitive_probes": [
+        {
+          "pattern": "\\d",
+          "input_codepoints": [
+            "U+10D40"
+          ],
+          "expected_match": false
+        },
+        {
+          "pattern": "\\p{Nd}",
+          "input": "7",
+          "expected_match": true
+        },
+        {
+          "pattern": "\\w",
+          "input_codepoints": [
+            "U+212A"
+          ],
+          "expected_match": false
+        },
+        {
+          "pattern": "(?i:\\w)",
+          "input_codepoints": [
+            "U+212A"
+          ],
+          "expected_match": true
+        },
+        {
+          "pattern": "[[:alpha:]]",
+          "input_codepoints": [
+            "U+03B1"
+          ],
+          "expected_match": false
+        },
+        {
+          "pattern": "\\s",
+          "input_codepoints": [
+            "U+00A0"
+          ],
+          "expected_match": false
+        }
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/primitive/matcher-optimization-fold-length",
+      "kind": "versioned-primitive-semantics",
+      "profile": "promql-prometheus-3.13.5",
+      "gate": "",
+      "signature": "PromQL primitive/matcher-optimization-fold-length",
+      "semantic_rule": "3.13.5 optimized case-insensitive prefix/suffix matching walks runes through reference SimpleFold and uses the ACTUAL consumed input byte length for the residual. This fixes the 3.1.0 fixed-byte-length behavior; do not transplant the old optimizer bug or assume all regex caller contexts were always equivalent.",
+      "source_refs": [
+        "https://raw.githubusercontent.com/golang/go/go1.26.10/src/unicode/tables.go:6@6a88d48746c4b2c471cc04ae40559694b734770212e6f5ea5f1962adb0c0bdb1",
+        "https://raw.githubusercontent.com/grafana/regexp/f7b3be9d1853/syntax/parse.go:1644@c821d029b622d474fa87c9df8f1e9471fd2298b6c6965c6db09130a58b80c5b7",
+        "https://raw.githubusercontent.com/grafana/regexp/f7b3be9d1853/syntax/doc.go:1@51e7c5718bbb80a6c21d2b5a8ab991a3a80cc215ec4971a2454e45b94187ca88",
+        "https://raw.githubusercontent.com/grafana/regexp/f7b3be9d1853/regexp.go:922@3c6b372bf6e658c167d100093f946741ddd4bfb2717d71455d2bf6a4c515b406",
+        "https://raw.githubusercontent.com/golang/go/go1.26.10/src/unicode/letter.go:354@b35a6d259313cef88d07e9e4027b8bd72c60ae140418f5be2c41a2ecea6074fe",
+        "https://raw.githubusercontent.com/golang/go/go1.26.10/src/strings/strings.go:1187@ba9478be775d11b6956c828ebf870a8f8e7b7318ee382834f1e741f02d1336ef",
+        "https://raw.githubusercontent.com/golang/text/v0.42.0/unicode/norm/tables15.0.0.go:11@9e29fbffef687d6d2191c999c466729dff2f394d8dcbec377a2fc14336f33cdb",
+        "model/labels/regexp.go:1@b8aad51580cab4b71adc747f23a09baf09745f82c5f0e875882369540b68e8f3"
+      ],
+      "implementation": "pending-versioned-primitive-binding",
+      "positive_cases": [
+        "promql-prometheus-3.13.5/primitive/matcher-optimization-fold-length/positive"
+      ],
+      "negative_cases": [
+        "promql-prometheus-3.13.5/primitive/matcher-optimization-fold-length/negative"
+      ],
+      "interaction_cases": [
+        "promql-prometheus-3.13.5/primitive/matcher-optimization-fold-length/interaction"
+      ],
+      "primitive_probes": [
+        {
+          "context": "selector optimized prefix",
+          "pattern": "(?i:k).*",
+          "input_codepoints": [
+            "U+212A",
+            "U+0078"
+          ],
+          "expected_match": true
+        },
+        {
+          "context": "selector optimized suffix",
+          "pattern": ".*(?i:s)",
+          "input_codepoints": [
+            "U+0078",
+            "U+017F"
+          ],
+          "expected_match": true
+        },
+        {
+          "context": "label_replace compiled regexp",
+          "pattern": "(?i:k).*",
+          "input_codepoints": [
+            "U+212A",
+            "U+0078"
+          ],
+          "expected_match": true
+        }
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/primitive/normalization-version-selection",
+      "kind": "versioned-primitive-semantics",
+      "profile": "promql-prometheus-3.13.5",
+      "gate": "",
+      "signature": "PromQL primitive/normalization-version-selection",
+      "semantic_rule": "FastRegexMatcher optimization normalizes indexed strings using norm.NFKD plus unicode.ToLower. Pin BOTH the x/text module v0.42.0 and its selected Unicode15 table under go1.26.10. x/text v0.42.0 selects tables15.0.0.go under !go1.27, but tables17.0.0.go under go1.27. Recompiling the same dependency with owned Go1.27.3 therefore changes normalization data automatically; exact module version alone is insufficient primitive identity. Optimized lookup must preserve the pinned final matcher behavior and not become Unicode normalization of label identity.",
+      "source_refs": [
+        "https://raw.githubusercontent.com/golang/go/go1.26.10/src/unicode/tables.go:6@6a88d48746c4b2c471cc04ae40559694b734770212e6f5ea5f1962adb0c0bdb1",
+        "https://raw.githubusercontent.com/grafana/regexp/f7b3be9d1853/syntax/parse.go:1644@c821d029b622d474fa87c9df8f1e9471fd2298b6c6965c6db09130a58b80c5b7",
+        "https://raw.githubusercontent.com/grafana/regexp/f7b3be9d1853/syntax/doc.go:1@51e7c5718bbb80a6c21d2b5a8ab991a3a80cc215ec4971a2454e45b94187ca88",
+        "https://raw.githubusercontent.com/grafana/regexp/f7b3be9d1853/regexp.go:922@3c6b372bf6e658c167d100093f946741ddd4bfb2717d71455d2bf6a4c515b406",
+        "https://raw.githubusercontent.com/golang/go/go1.26.10/src/unicode/letter.go:354@b35a6d259313cef88d07e9e4027b8bd72c60ae140418f5be2c41a2ecea6074fe",
+        "https://raw.githubusercontent.com/golang/go/go1.26.10/src/strings/strings.go:1187@ba9478be775d11b6956c828ebf870a8f8e7b7318ee382834f1e741f02d1336ef",
+        "https://raw.githubusercontent.com/golang/text/v0.42.0/unicode/norm/tables15.0.0.go:11@9e29fbffef687d6d2191c999c466729dff2f394d8dcbec377a2fc14336f33cdb",
+        "model/labels/regexp.go:1@b8aad51580cab4b71adc747f23a09baf09745f82c5f0e875882369540b68e8f3",
+        "https://raw.githubusercontent.com/golang/text/v0.42.0/unicode/norm/tables17.0.0.go@dade3c78c0b36426a6966f46926f2ab61c484ae425feb175a07fbe1ee8f855fa"
+      ],
+      "implementation": "pending-versioned-primitive-binding",
+      "positive_cases": [
+        "promql-prometheus-3.13.5/primitive/normalization-version-selection/positive"
+      ],
+      "negative_cases": [
+        "promql-prometheus-3.13.5/primitive/normalization-version-selection/negative"
+      ],
+      "interaction_cases": [
+        "promql-prometheus-3.13.5/primitive/normalization-version-selection/interaction"
+      ],
+      "primitive_probes": [
+        {
+          "context": "label identity",
+          "inputs": [
+            "\u00e9",
+            "e\u0301"
+          ],
+          "expected": "distinct byte strings/labels, not canonically merged"
+        },
+        {
+          "context": "indexed case-insensitive alternatives",
+          "inputs": [
+            "k",
+            "K",
+            "\u212a"
+          ],
+          "expected": "use pinned normalization/final matching, with optimizer context distinctions above"
+        },
+        {
+          "context": "build selection",
+          "reference_table": "15.0.0",
+          "owned_go127_xtext042_table": "17.0.0"
+        }
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/primitive/anchoring-captures-replacement",
+      "kind": "versioned-primitive-semantics",
+      "profile": "promql-prometheus-3.13.5",
+      "gate": "",
+      "signature": "PromQL primitive/anchoring-captures-replacement",
+      "semantic_rule": "Selector regex and label_replace compile whole-value anchored (?s:pattern) expressions; default dot therefore crosses newline in these callers. Inline flags can locally disable s. Captures use leftmost-first RE2 choice, not POSIX longest-submatch selection. Replacement expands $name/${name}/$number, $$ literal dollar; longest alphanumeric name wins, so $1x differs from ${1}x. Unknown/unmatched groups expand empty. Preserve pinned regex capture indices through Unicode UTF8 matching.",
+      "source_refs": [
+        "https://raw.githubusercontent.com/golang/go/go1.26.10/src/unicode/tables.go:6@6a88d48746c4b2c471cc04ae40559694b734770212e6f5ea5f1962adb0c0bdb1",
+        "https://raw.githubusercontent.com/grafana/regexp/f7b3be9d1853/syntax/parse.go:1644@c821d029b622d474fa87c9df8f1e9471fd2298b6c6965c6db09130a58b80c5b7",
+        "https://raw.githubusercontent.com/grafana/regexp/f7b3be9d1853/syntax/doc.go:1@51e7c5718bbb80a6c21d2b5a8ab991a3a80cc215ec4971a2454e45b94187ca88",
+        "https://raw.githubusercontent.com/grafana/regexp/f7b3be9d1853/regexp.go:922@3c6b372bf6e658c167d100093f946741ddd4bfb2717d71455d2bf6a4c515b406",
+        "https://raw.githubusercontent.com/golang/go/go1.26.10/src/unicode/letter.go:354@b35a6d259313cef88d07e9e4027b8bd72c60ae140418f5be2c41a2ecea6074fe",
+        "https://raw.githubusercontent.com/golang/go/go1.26.10/src/strings/strings.go:1187@ba9478be775d11b6956c828ebf870a8f8e7b7318ee382834f1e741f02d1336ef",
+        "https://raw.githubusercontent.com/golang/text/v0.42.0/unicode/norm/tables15.0.0.go:11@9e29fbffef687d6d2191c999c466729dff2f394d8dcbec377a2fc14336f33cdb",
+        "model/labels/regexp.go:1@b8aad51580cab4b71adc747f23a09baf09745f82c5f0e875882369540b68e8f3"
+      ],
+      "implementation": "pending-versioned-primitive-binding",
+      "positive_cases": [
+        "promql-prometheus-3.13.5/primitive/anchoring-captures-replacement/positive"
+      ],
+      "negative_cases": [
+        "promql-prometheus-3.13.5/primitive/anchoring-captures-replacement/negative"
+      ],
+      "interaction_cases": [
+        "promql-prometheus-3.13.5/primitive/anchoring-captures-replacement/interaction"
+      ],
+      "primitive_probes": [
+        {
+          "context": "selector",
+          "pattern": "a.b",
+          "input": "a\nb",
+          "expected_match": true
+        },
+        {
+          "context": "label_replace",
+          "pattern": "(a|aa)(a?)",
+          "input": "aa",
+          "replacement": "$1-$2",
+          "expected_output": "a-a"
+        },
+        {
+          "context": "label_replace",
+          "pattern": "(a)",
+          "input": "a",
+          "replacement": "$1x",
+          "expected_output": ""
+        },
+        {
+          "context": "label_replace",
+          "pattern": "(a)",
+          "input": "a",
+          "replacement": "${1}x",
+          "expected_output": "ax"
+        },
+        {
+          "pattern": "(?-s:a.b)",
+          "input": "a\nb",
+          "expected_match": false
+        }
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/primitive/utf8-runtime-semantics",
+      "kind": "versioned-primitive-semantics",
+      "profile": "promql-prometheus-3.13.5",
+      "gate": "",
+      "signature": "PromQL primitive/utf8-runtime-semantics",
+      "semantic_rule": "Pin UTF8 decode/validation semantics at regex and query-input boundaries: malformed UTF8 in a regex pattern is a compile error; regexp text iteration decodes each malformed byte as RuneError U+FFFD, not Latin1 or byte-wise Unicode characters. PromQL label/query validators may reject malformed encodings before regex execution; keep that layer distinct from the primitive. Own Go1.27.3 has matching utf8.go source bytes to Go1.26.10, but that fact does not prove regexp or Unicode table compatibility.",
+      "source_refs": [
+        "https://raw.githubusercontent.com/golang/go/go1.26.10/src/unicode/tables.go:6@6a88d48746c4b2c471cc04ae40559694b734770212e6f5ea5f1962adb0c0bdb1",
+        "https://raw.githubusercontent.com/grafana/regexp/f7b3be9d1853/syntax/parse.go:1644@c821d029b622d474fa87c9df8f1e9471fd2298b6c6965c6db09130a58b80c5b7",
+        "https://raw.githubusercontent.com/grafana/regexp/f7b3be9d1853/syntax/doc.go:1@51e7c5718bbb80a6c21d2b5a8ab991a3a80cc215ec4971a2454e45b94187ca88",
+        "https://raw.githubusercontent.com/grafana/regexp/f7b3be9d1853/regexp.go:922@3c6b372bf6e658c167d100093f946741ddd4bfb2717d71455d2bf6a4c515b406",
+        "https://raw.githubusercontent.com/golang/go/go1.26.10/src/unicode/letter.go:354@b35a6d259313cef88d07e9e4027b8bd72c60ae140418f5be2c41a2ecea6074fe",
+        "https://raw.githubusercontent.com/golang/go/go1.26.10/src/strings/strings.go:1187@ba9478be775d11b6956c828ebf870a8f8e7b7318ee382834f1e741f02d1336ef",
+        "https://raw.githubusercontent.com/golang/text/v0.42.0/unicode/norm/tables15.0.0.go:11@9e29fbffef687d6d2191c999c466729dff2f394d8dcbec377a2fc14336f33cdb",
+        "model/labels/regexp.go:1@b8aad51580cab4b71adc747f23a09baf09745f82c5f0e875882369540b68e8f3"
+      ],
+      "implementation": "pending-versioned-primitive-binding",
+      "positive_cases": [
+        "promql-prometheus-3.13.5/primitive/utf8-runtime-semantics/positive"
+      ],
+      "negative_cases": [
+        "promql-prometheus-3.13.5/primitive/utf8-runtime-semantics/negative"
+      ],
+      "interaction_cases": [
+        "promql-prometheus-3.13.5/primitive/utf8-runtime-semantics/interaction"
+      ],
+      "primitive_probes": [
+        {
+          "context": "regex primitive input",
+          "input_bytes_hex": "ff",
+          "pattern": "\\x{FFFD}",
+          "expected_match": true
+        },
+        {
+          "context": "regex primitive pattern",
+          "pattern_bytes_hex": "ff",
+          "expected": "invalid UTF8 compile error"
+        },
+        {
+          "context": "query/label admission",
+          "input_bytes_hex": "ff",
+          "expected": "apply earlier UTF8 validation; do not bypass validation because regex primitive can decode RuneError"
+        }
+      ]
+    }
+  ],
+  "case_descriptions": [
+    {
+      "id": "promql-prometheus-3.1.0/primitive/backend-dialect/positive",
+      "profile": "promql-prometheus-3.1.0",
+      "purpose": "positive",
+      "description": "Observe exact versioned primitive rule: The reference uses Grafana regexp v0.0.0-20240518133315-a468a5bfb3bc, NOT the Go go1.23.4 regexp parser and not the owned Go1.27.3 regexp parser. Pin Perl-mode RE2 syntax: alternation/concatenation, greedy/lazy repetition, named/numbered/noncapturing groups, scoped i/m/s/U flags, anchors and ASCII word boundaries. Backreferences, lookaround and possessive quantifiers are rejected. Counted repetition bounds above1000 and excessive nested repeats are parse errors; unlimited * and + are not capped by the counted-repeat syntax limit. New syntax in owned stdlib is not enabled implicitly.",
+      "probes": [
+        {
+          "pattern": "(?P<group>a+)",
+          "input": "aaa",
+          "expected": "accepted named group"
+        },
+        {
+          "pattern": "a{1000}",
+          "expected": "accepted counted bound"
+        },
+        {
+          "pattern": "a{1001}",
+          "expected": "repeat-size error"
+        },
+        {
+          "pattern": "(?<=a)b",
+          "expected": "unsupported lookbehind error"
+        },
+        {
+          "pattern": "(a)\\1",
+          "expected": "unsupported backreference error"
+        },
+        {
+          "pattern": "a++",
+          "expected": "invalid nested repetition"
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/primitive/backend-dialect/negative",
+      "profile": "promql-prometheus-3.1.0",
+      "purpose": "negative",
+      "description": "Reject unsupported property/syntax or retain reference nonmatch instead of silently inheriting owned Go1.27.3 acceptance for backend-dialect",
+      "probes": [
+        {
+          "pattern": "(?P<group>a+)",
+          "input": "aaa",
+          "expected": "accepted named group"
+        },
+        {
+          "pattern": "a{1000}",
+          "expected": "accepted counted bound"
+        },
+        {
+          "pattern": "a{1001}",
+          "expected": "repeat-size error"
+        },
+        {
+          "pattern": "(?<=a)b",
+          "expected": "unsupported lookbehind error"
+        },
+        {
+          "pattern": "(a)\\1",
+          "expected": "unsupported backreference error"
+        },
+        {
+          "pattern": "a++",
+          "expected": "invalid nested repetition"
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/primitive/backend-dialect/interaction",
+      "profile": "promql-prometheus-3.1.0",
+      "purpose": "interaction",
+      "description": "Exercise selector matcher, optimized matcher and label_replace independently; use source-derived probe partitions below without claiming executed goldens.",
+      "probes": [
+        {
+          "pattern": "(?P<group>a+)",
+          "input": "aaa",
+          "expected": "accepted named group"
+        },
+        {
+          "pattern": "a{1000}",
+          "expected": "accepted counted bound"
+        },
+        {
+          "pattern": "a{1001}",
+          "expected": "repeat-size error"
+        },
+        {
+          "pattern": "(?<=a)b",
+          "expected": "unsupported lookbehind error"
+        },
+        {
+          "pattern": "(a)\\1",
+          "expected": "unsupported backreference error"
+        },
+        {
+          "pattern": "a++",
+          "expected": "invalid nested repetition"
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/primitive/property-name-acceptance/positive",
+      "profile": "promql-prometheus-3.1.0",
+      "purpose": "positive",
+      "description": "Observe exact versioned primitive rule: Pinned Grafana syntax unicodeTable accepts exact case-sensitive keys from runtime unicode.Categories and unicode.Scripts, plus special Any. It does NOT consult unicode.Properties or CategoryAliases, normalize case/separators, or recognize Assigned/ASCII aliases. Therefore raw owned Go1.26/1.27 stdlib regex is not a compatible substitute even when unicode.Version happened to agree. Go1.23.4 lacks Cn and LC keys, so these property patterns are errors.",
+      "probes": [
+        {
+          "pattern": "\\p{Greek}",
+          "expected": "accepted exact script name"
+        },
+        {
+          "pattern": "\\p{greek}",
+          "expected": "unknown property error"
+        },
+        {
+          "pattern": "\\p{Letter}",
+          "expected": "unknown property error despite stdlib alias support"
+        },
+        {
+          "pattern": "\\p{Old Italic}",
+          "expected": "unknown property error"
+        },
+        {
+          "pattern": "\\p{White_Space}",
+          "expected": "unknown property error: Properties map not consulted"
+        },
+        {
+          "pattern": "\\p{Assigned}",
+          "expected": "unknown property error"
+        },
+        {
+          "pattern": "\\p{ASCII}",
+          "expected": "unknown property error"
+        },
+        {
+          "pattern": "\\p{Cn}",
+          "expected": "unknown property error"
+        },
+        {
+          "pattern": "\\p{LC}",
+          "expected": "unknown property error"
+        },
+        {
+          "pattern": "\\p{Lc}",
+          "expected": "unknown property error"
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/primitive/property-name-acceptance/negative",
+      "profile": "promql-prometheus-3.1.0",
+      "purpose": "negative",
+      "description": "Reject unsupported property/syntax or retain reference nonmatch instead of silently inheriting owned Go1.27.3 acceptance for property-name-acceptance",
+      "probes": [
+        {
+          "pattern": "\\p{Greek}",
+          "expected": "accepted exact script name"
+        },
+        {
+          "pattern": "\\p{greek}",
+          "expected": "unknown property error"
+        },
+        {
+          "pattern": "\\p{Letter}",
+          "expected": "unknown property error despite stdlib alias support"
+        },
+        {
+          "pattern": "\\p{Old Italic}",
+          "expected": "unknown property error"
+        },
+        {
+          "pattern": "\\p{White_Space}",
+          "expected": "unknown property error: Properties map not consulted"
+        },
+        {
+          "pattern": "\\p{Assigned}",
+          "expected": "unknown property error"
+        },
+        {
+          "pattern": "\\p{ASCII}",
+          "expected": "unknown property error"
+        },
+        {
+          "pattern": "\\p{Cn}",
+          "expected": "unknown property error"
+        },
+        {
+          "pattern": "\\p{LC}",
+          "expected": "unknown property error"
+        },
+        {
+          "pattern": "\\p{Lc}",
+          "expected": "unknown property error"
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/primitive/property-name-acceptance/interaction",
+      "profile": "promql-prometheus-3.1.0",
+      "purpose": "interaction",
+      "description": "Exercise selector matcher, optimized matcher and label_replace independently; use source-derived probe partitions below without claiming executed goldens.",
+      "probes": [
+        {
+          "pattern": "\\p{Greek}",
+          "expected": "accepted exact script name"
+        },
+        {
+          "pattern": "\\p{greek}",
+          "expected": "unknown property error"
+        },
+        {
+          "pattern": "\\p{Letter}",
+          "expected": "unknown property error despite stdlib alias support"
+        },
+        {
+          "pattern": "\\p{Old Italic}",
+          "expected": "unknown property error"
+        },
+        {
+          "pattern": "\\p{White_Space}",
+          "expected": "unknown property error: Properties map not consulted"
+        },
+        {
+          "pattern": "\\p{Assigned}",
+          "expected": "unknown property error"
+        },
+        {
+          "pattern": "\\p{ASCII}",
+          "expected": "unknown property error"
+        },
+        {
+          "pattern": "\\p{Cn}",
+          "expected": "unknown property error"
+        },
+        {
+          "pattern": "\\p{LC}",
+          "expected": "unknown property error"
+        },
+        {
+          "pattern": "\\p{Lc}",
+          "expected": "unknown property error"
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/primitive/unicode-table-membership/positive",
+      "profile": "promql-prometheus-3.1.0",
+      "purpose": "positive",
+      "description": "Observe exact versioned primitive rule: Use the exact hashed go1.23.4 Unicode15 tables, not the version string alone and not Unicode17 tables. C excludes unassigned codepoints; Cn is not an accepted key. Relative to owned Unicode17, both references reject newer script names and retain older category membership. These table differences affect positive/negative character classes, regex acceptance and case-insensitive classes.",
+      "probes": [
+        {
+          "pattern": "\\p{C}",
+          "input_codepoints": [
+            "U+0378"
+          ],
+          "expected_match": false
+        },
+        {
+          "pattern": "\\p{L}",
+          "input_codepoints": [
+            "U+088F"
+          ],
+          "expected_match": false,
+          "owned_unicode17_match": true
+        },
+        {
+          "pattern": "\\p{Ll}",
+          "input_codepoints": [
+            "U+0295"
+          ],
+          "expected_match": true,
+          "owned_unicode17_match": false
+        },
+        {
+          "pattern": "\\p{Garay}",
+          "expected": "unknown property error",
+          "owned_unicode17_accepts": true
+        },
+        {
+          "pattern": "\\p{Nd}",
+          "input_codepoints": [
+            "U+10D40"
+          ],
+          "expected_match": false,
+          "owned_unicode17_match": true
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/primitive/unicode-table-membership/negative",
+      "profile": "promql-prometheus-3.1.0",
+      "purpose": "negative",
+      "description": "Reject unsupported property/syntax or retain reference nonmatch instead of silently inheriting owned Go1.27.3 acceptance for unicode-table-membership",
+      "probes": [
+        {
+          "pattern": "\\p{C}",
+          "input_codepoints": [
+            "U+0378"
+          ],
+          "expected_match": false
+        },
+        {
+          "pattern": "\\p{L}",
+          "input_codepoints": [
+            "U+088F"
+          ],
+          "expected_match": false,
+          "owned_unicode17_match": true
+        },
+        {
+          "pattern": "\\p{Ll}",
+          "input_codepoints": [
+            "U+0295"
+          ],
+          "expected_match": true,
+          "owned_unicode17_match": false
+        },
+        {
+          "pattern": "\\p{Garay}",
+          "expected": "unknown property error",
+          "owned_unicode17_accepts": true
+        },
+        {
+          "pattern": "\\p{Nd}",
+          "input_codepoints": [
+            "U+10D40"
+          ],
+          "expected_match": false,
+          "owned_unicode17_match": true
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/primitive/unicode-table-membership/interaction",
+      "profile": "promql-prometheus-3.1.0",
+      "purpose": "interaction",
+      "description": "Exercise selector matcher, optimized matcher and label_replace independently; use source-derived probe partitions below without claiming executed goldens.",
+      "probes": [
+        {
+          "pattern": "\\p{C}",
+          "input_codepoints": [
+            "U+0378"
+          ],
+          "expected_match": false
+        },
+        {
+          "pattern": "\\p{L}",
+          "input_codepoints": [
+            "U+088F"
+          ],
+          "expected_match": false,
+          "owned_unicode17_match": true
+        },
+        {
+          "pattern": "\\p{Ll}",
+          "input_codepoints": [
+            "U+0295"
+          ],
+          "expected_match": true,
+          "owned_unicode17_match": false
+        },
+        {
+          "pattern": "\\p{Garay}",
+          "expected": "unknown property error",
+          "owned_unicode17_accepts": true
+        },
+        {
+          "pattern": "\\p{Nd}",
+          "input_codepoints": [
+            "U+10D40"
+          ],
+          "expected_match": false,
+          "owned_unicode17_match": true
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/primitive/simple-fold-version/positive",
+      "profile": "promql-prometheus-3.1.0",
+      "purpose": "positive",
+      "description": "Observe exact versioned primitive rule: Case-insensitive matching uses the reference Unicode simple-fold equivalence orbit, not locale-sensitive case mapping or Unicode17 folding. The same pinned fold domain must govern compiled regex, strings.EqualFold optimizations, prefix/suffix scans and rune canonicalization. Kelvin K/k/U+212A and long-s S/s/U+017F are stable reference folds, but Unicode17-added U+A7CB<->U+0264 must not leak into either reference.",
+      "probes": [
+        {
+          "pattern": "(?i:k)",
+          "input_codepoints": [
+            "U+212A"
+          ],
+          "expected_match": true
+        },
+        {
+          "pattern": "(?i:s)",
+          "input_codepoints": [
+            "U+017F"
+          ],
+          "expected_match": true
+        },
+        {
+          "pattern": "(?i:\\x{A7CB})",
+          "input_codepoints": [
+            "U+0264"
+          ],
+          "expected_match": false,
+          "owned_unicode17_match": true
+        },
+        {
+          "pattern": "(?i:ss)",
+          "input_codepoints": [
+            "U+00DF"
+          ],
+          "expected_match": false,
+          "reason": "simple fold is not full multi-character case folding"
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/primitive/simple-fold-version/negative",
+      "profile": "promql-prometheus-3.1.0",
+      "purpose": "negative",
+      "description": "Reject unsupported property/syntax or retain reference nonmatch instead of silently inheriting owned Go1.27.3 acceptance for simple-fold-version",
+      "probes": [
+        {
+          "pattern": "(?i:k)",
+          "input_codepoints": [
+            "U+212A"
+          ],
+          "expected_match": true
+        },
+        {
+          "pattern": "(?i:s)",
+          "input_codepoints": [
+            "U+017F"
+          ],
+          "expected_match": true
+        },
+        {
+          "pattern": "(?i:\\x{A7CB})",
+          "input_codepoints": [
+            "U+0264"
+          ],
+          "expected_match": false,
+          "owned_unicode17_match": true
+        },
+        {
+          "pattern": "(?i:ss)",
+          "input_codepoints": [
+            "U+00DF"
+          ],
+          "expected_match": false,
+          "reason": "simple fold is not full multi-character case folding"
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/primitive/simple-fold-version/interaction",
+      "profile": "promql-prometheus-3.1.0",
+      "purpose": "interaction",
+      "description": "Exercise selector matcher, optimized matcher and label_replace independently; use source-derived probe partitions below without claiming executed goldens.",
+      "probes": [
+        {
+          "pattern": "(?i:k)",
+          "input_codepoints": [
+            "U+212A"
+          ],
+          "expected_match": true
+        },
+        {
+          "pattern": "(?i:s)",
+          "input_codepoints": [
+            "U+017F"
+          ],
+          "expected_match": true
+        },
+        {
+          "pattern": "(?i:\\x{A7CB})",
+          "input_codepoints": [
+            "U+0264"
+          ],
+          "expected_match": false,
+          "owned_unicode17_match": true
+        },
+        {
+          "pattern": "(?i:ss)",
+          "input_codepoints": [
+            "U+00DF"
+          ],
+          "expected_match": false,
+          "reason": "simple fold is not full multi-character case folding"
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/primitive/ascii-classes-boundaries/positive",
+      "profile": "promql-prometheus-3.1.0",
+      "purpose": "positive",
+      "description": "Observe exact versioned primitive rule: Perl \\d, \\s, \\w and POSIX bracket classes are their pinned ASCII class tables; they do not expand to Unicode category sets. \\b and \\B use ASCII word membership. With i flag, ASCII class rune sets can gain Unicode simple-fold equivalents such as Kelvin and long-s, but digits do not acquire Unicode17 decimal digits.",
+      "probes": [
+        {
+          "pattern": "\\d",
+          "input_codepoints": [
+            "U+10D40"
+          ],
+          "expected_match": false
+        },
+        {
+          "pattern": "\\p{Nd}",
+          "input": "7",
+          "expected_match": true
+        },
+        {
+          "pattern": "\\w",
+          "input_codepoints": [
+            "U+212A"
+          ],
+          "expected_match": false
+        },
+        {
+          "pattern": "(?i:\\w)",
+          "input_codepoints": [
+            "U+212A"
+          ],
+          "expected_match": true
+        },
+        {
+          "pattern": "[[:alpha:]]",
+          "input_codepoints": [
+            "U+03B1"
+          ],
+          "expected_match": false
+        },
+        {
+          "pattern": "\\s",
+          "input_codepoints": [
+            "U+00A0"
+          ],
+          "expected_match": false
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/primitive/ascii-classes-boundaries/negative",
+      "profile": "promql-prometheus-3.1.0",
+      "purpose": "negative",
+      "description": "Reject unsupported property/syntax or retain reference nonmatch instead of silently inheriting owned Go1.27.3 acceptance for ascii-classes-boundaries",
+      "probes": [
+        {
+          "pattern": "\\d",
+          "input_codepoints": [
+            "U+10D40"
+          ],
+          "expected_match": false
+        },
+        {
+          "pattern": "\\p{Nd}",
+          "input": "7",
+          "expected_match": true
+        },
+        {
+          "pattern": "\\w",
+          "input_codepoints": [
+            "U+212A"
+          ],
+          "expected_match": false
+        },
+        {
+          "pattern": "(?i:\\w)",
+          "input_codepoints": [
+            "U+212A"
+          ],
+          "expected_match": true
+        },
+        {
+          "pattern": "[[:alpha:]]",
+          "input_codepoints": [
+            "U+03B1"
+          ],
+          "expected_match": false
+        },
+        {
+          "pattern": "\\s",
+          "input_codepoints": [
+            "U+00A0"
+          ],
+          "expected_match": false
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/primitive/ascii-classes-boundaries/interaction",
+      "profile": "promql-prometheus-3.1.0",
+      "purpose": "interaction",
+      "description": "Exercise selector matcher, optimized matcher and label_replace independently; use source-derived probe partitions below without claiming executed goldens.",
+      "probes": [
+        {
+          "pattern": "\\d",
+          "input_codepoints": [
+            "U+10D40"
+          ],
+          "expected_match": false
+        },
+        {
+          "pattern": "\\p{Nd}",
+          "input": "7",
+          "expected_match": true
+        },
+        {
+          "pattern": "\\w",
+          "input_codepoints": [
+            "U+212A"
+          ],
+          "expected_match": false
+        },
+        {
+          "pattern": "(?i:\\w)",
+          "input_codepoints": [
+            "U+212A"
+          ],
+          "expected_match": true
+        },
+        {
+          "pattern": "[[:alpha:]]",
+          "input_codepoints": [
+            "U+03B1"
+          ],
+          "expected_match": false
+        },
+        {
+          "pattern": "\\s",
+          "input_codepoints": [
+            "U+00A0"
+          ],
+          "expected_match": false
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/primitive/matcher-optimization-fold-length/positive",
+      "profile": "promql-prometheus-3.1.0",
+      "purpose": "positive",
+      "description": "Observe exact versioned primitive rule: 3.1.0 optimized case-insensitive prefix/suffix matcher compares a byte slice of len(pattern literal) using strings.EqualFold, then slices the residual using the same literal byte length. Fold-equivalent runes with different UTF8 encoded lengths can fail this optimized path even though the compiled regex would match. Preserve this reference path distinction; label_replace directly uses compiled regexp, not the FastRegexMatcher optimizer.",
+      "probes": [
+        {
+          "context": "selector optimized prefix",
+          "pattern": "(?i:k).*",
+          "input_codepoints": [
+            "U+212A",
+            "U+0078"
+          ],
+          "expected_match": false
+        },
+        {
+          "context": "selector optimized suffix",
+          "pattern": ".*(?i:s)",
+          "input_codepoints": [
+            "U+0078",
+            "U+017F"
+          ],
+          "expected_match": false
+        },
+        {
+          "context": "label_replace compiled regexp",
+          "pattern": "(?i:k).*",
+          "input_codepoints": [
+            "U+212A",
+            "U+0078"
+          ],
+          "expected_match": true
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/primitive/matcher-optimization-fold-length/negative",
+      "profile": "promql-prometheus-3.1.0",
+      "purpose": "negative",
+      "description": "Reject unsupported property/syntax or retain reference nonmatch instead of silently inheriting owned Go1.27.3 acceptance for matcher-optimization-fold-length",
+      "probes": [
+        {
+          "context": "selector optimized prefix",
+          "pattern": "(?i:k).*",
+          "input_codepoints": [
+            "U+212A",
+            "U+0078"
+          ],
+          "expected_match": false
+        },
+        {
+          "context": "selector optimized suffix",
+          "pattern": ".*(?i:s)",
+          "input_codepoints": [
+            "U+0078",
+            "U+017F"
+          ],
+          "expected_match": false
+        },
+        {
+          "context": "label_replace compiled regexp",
+          "pattern": "(?i:k).*",
+          "input_codepoints": [
+            "U+212A",
+            "U+0078"
+          ],
+          "expected_match": true
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/primitive/matcher-optimization-fold-length/interaction",
+      "profile": "promql-prometheus-3.1.0",
+      "purpose": "interaction",
+      "description": "Exercise selector matcher, optimized matcher and label_replace independently; use source-derived probe partitions below without claiming executed goldens.",
+      "probes": [
+        {
+          "context": "selector optimized prefix",
+          "pattern": "(?i:k).*",
+          "input_codepoints": [
+            "U+212A",
+            "U+0078"
+          ],
+          "expected_match": false
+        },
+        {
+          "context": "selector optimized suffix",
+          "pattern": ".*(?i:s)",
+          "input_codepoints": [
+            "U+0078",
+            "U+017F"
+          ],
+          "expected_match": false
+        },
+        {
+          "context": "label_replace compiled regexp",
+          "pattern": "(?i:k).*",
+          "input_codepoints": [
+            "U+212A",
+            "U+0078"
+          ],
+          "expected_match": true
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/primitive/normalization-version-selection/positive",
+      "profile": "promql-prometheus-3.1.0",
+      "purpose": "positive",
+      "description": "Observe exact versioned primitive rule: FastRegexMatcher optimization normalizes indexed strings using norm.NFKD plus unicode.ToLower. Pin BOTH the x/text module v0.21.0 and its selected Unicode15 table under go1.23.4. x/text v0.42.0 selects tables15.0.0.go under !go1.27, but tables17.0.0.go under go1.27. Recompiling the same dependency with owned Go1.27.3 therefore changes normalization data automatically; exact module version alone is insufficient primitive identity. Optimized lookup must preserve the pinned final matcher behavior and not become Unicode normalization of label identity.",
+      "probes": [
+        {
+          "context": "label identity",
+          "inputs": [
+            "\u00e9",
+            "e\u0301"
+          ],
+          "expected": "distinct byte strings/labels, not canonically merged"
+        },
+        {
+          "context": "indexed case-insensitive alternatives",
+          "inputs": [
+            "k",
+            "K",
+            "\u212a"
+          ],
+          "expected": "use pinned normalization/final matching, with optimizer context distinctions above"
+        },
+        {
+          "context": "build selection",
+          "reference_table": "15.0.0",
+          "owned_go127_xtext042_table": "17.0.0"
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/primitive/normalization-version-selection/negative",
+      "profile": "promql-prometheus-3.1.0",
+      "purpose": "negative",
+      "description": "Reject unsupported property/syntax or retain reference nonmatch instead of silently inheriting owned Go1.27.3 acceptance for normalization-version-selection",
+      "probes": [
+        {
+          "context": "label identity",
+          "inputs": [
+            "\u00e9",
+            "e\u0301"
+          ],
+          "expected": "distinct byte strings/labels, not canonically merged"
+        },
+        {
+          "context": "indexed case-insensitive alternatives",
+          "inputs": [
+            "k",
+            "K",
+            "\u212a"
+          ],
+          "expected": "use pinned normalization/final matching, with optimizer context distinctions above"
+        },
+        {
+          "context": "build selection",
+          "reference_table": "15.0.0",
+          "owned_go127_xtext042_table": "17.0.0"
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/primitive/normalization-version-selection/interaction",
+      "profile": "promql-prometheus-3.1.0",
+      "purpose": "interaction",
+      "description": "Exercise selector matcher, optimized matcher and label_replace independently; use source-derived probe partitions below without claiming executed goldens.",
+      "probes": [
+        {
+          "context": "label identity",
+          "inputs": [
+            "\u00e9",
+            "e\u0301"
+          ],
+          "expected": "distinct byte strings/labels, not canonically merged"
+        },
+        {
+          "context": "indexed case-insensitive alternatives",
+          "inputs": [
+            "k",
+            "K",
+            "\u212a"
+          ],
+          "expected": "use pinned normalization/final matching, with optimizer context distinctions above"
+        },
+        {
+          "context": "build selection",
+          "reference_table": "15.0.0",
+          "owned_go127_xtext042_table": "17.0.0"
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/primitive/anchoring-captures-replacement/positive",
+      "profile": "promql-prometheus-3.1.0",
+      "purpose": "positive",
+      "description": "Observe exact versioned primitive rule: Selector regex and label_replace compile whole-value anchored (?s:pattern) expressions; default dot therefore crosses newline in these callers. Inline flags can locally disable s. Captures use leftmost-first RE2 choice, not POSIX longest-submatch selection. Replacement expands $name/${name}/$number, $$ literal dollar; longest alphanumeric name wins, so $1x differs from ${1}x. Unknown/unmatched groups expand empty. Preserve pinned regex capture indices through Unicode UTF8 matching.",
+      "probes": [
+        {
+          "context": "selector",
+          "pattern": "a.b",
+          "input": "a\nb",
+          "expected_match": true
+        },
+        {
+          "context": "label_replace",
+          "pattern": "(a|aa)(a?)",
+          "input": "aa",
+          "replacement": "$1-$2",
+          "expected_output": "a-a"
+        },
+        {
+          "context": "label_replace",
+          "pattern": "(a)",
+          "input": "a",
+          "replacement": "$1x",
+          "expected_output": ""
+        },
+        {
+          "context": "label_replace",
+          "pattern": "(a)",
+          "input": "a",
+          "replacement": "${1}x",
+          "expected_output": "ax"
+        },
+        {
+          "pattern": "(?-s:a.b)",
+          "input": "a\nb",
+          "expected_match": false
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/primitive/anchoring-captures-replacement/negative",
+      "profile": "promql-prometheus-3.1.0",
+      "purpose": "negative",
+      "description": "Reject unsupported property/syntax or retain reference nonmatch instead of silently inheriting owned Go1.27.3 acceptance for anchoring-captures-replacement",
+      "probes": [
+        {
+          "context": "selector",
+          "pattern": "a.b",
+          "input": "a\nb",
+          "expected_match": true
+        },
+        {
+          "context": "label_replace",
+          "pattern": "(a|aa)(a?)",
+          "input": "aa",
+          "replacement": "$1-$2",
+          "expected_output": "a-a"
+        },
+        {
+          "context": "label_replace",
+          "pattern": "(a)",
+          "input": "a",
+          "replacement": "$1x",
+          "expected_output": ""
+        },
+        {
+          "context": "label_replace",
+          "pattern": "(a)",
+          "input": "a",
+          "replacement": "${1}x",
+          "expected_output": "ax"
+        },
+        {
+          "pattern": "(?-s:a.b)",
+          "input": "a\nb",
+          "expected_match": false
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/primitive/anchoring-captures-replacement/interaction",
+      "profile": "promql-prometheus-3.1.0",
+      "purpose": "interaction",
+      "description": "Exercise selector matcher, optimized matcher and label_replace independently; use source-derived probe partitions below without claiming executed goldens.",
+      "probes": [
+        {
+          "context": "selector",
+          "pattern": "a.b",
+          "input": "a\nb",
+          "expected_match": true
+        },
+        {
+          "context": "label_replace",
+          "pattern": "(a|aa)(a?)",
+          "input": "aa",
+          "replacement": "$1-$2",
+          "expected_output": "a-a"
+        },
+        {
+          "context": "label_replace",
+          "pattern": "(a)",
+          "input": "a",
+          "replacement": "$1x",
+          "expected_output": ""
+        },
+        {
+          "context": "label_replace",
+          "pattern": "(a)",
+          "input": "a",
+          "replacement": "${1}x",
+          "expected_output": "ax"
+        },
+        {
+          "pattern": "(?-s:a.b)",
+          "input": "a\nb",
+          "expected_match": false
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/primitive/utf8-runtime-semantics/positive",
+      "profile": "promql-prometheus-3.1.0",
+      "purpose": "positive",
+      "description": "Observe exact versioned primitive rule: Pin UTF8 decode/validation semantics at regex and query-input boundaries: malformed UTF8 in a regex pattern is a compile error; regexp text iteration decodes each malformed byte as RuneError U+FFFD, not Latin1 or byte-wise Unicode characters. PromQL label/query validators may reject malformed encodings before regex execution; keep that layer distinct from the primitive. Own Go1.27.3 has matching utf8.go source bytes to Go1.26.10, but that fact does not prove regexp or Unicode table compatibility.",
+      "probes": [
+        {
+          "context": "regex primitive input",
+          "input_bytes_hex": "ff",
+          "pattern": "\\x{FFFD}",
+          "expected_match": true
+        },
+        {
+          "context": "regex primitive pattern",
+          "pattern_bytes_hex": "ff",
+          "expected": "invalid UTF8 compile error"
+        },
+        {
+          "context": "query/label admission",
+          "input_bytes_hex": "ff",
+          "expected": "apply earlier UTF8 validation; do not bypass validation because regex primitive can decode RuneError"
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/primitive/utf8-runtime-semantics/negative",
+      "profile": "promql-prometheus-3.1.0",
+      "purpose": "negative",
+      "description": "Reject unsupported property/syntax or retain reference nonmatch instead of silently inheriting owned Go1.27.3 acceptance for utf8-runtime-semantics",
+      "probes": [
+        {
+          "context": "regex primitive input",
+          "input_bytes_hex": "ff",
+          "pattern": "\\x{FFFD}",
+          "expected_match": true
+        },
+        {
+          "context": "regex primitive pattern",
+          "pattern_bytes_hex": "ff",
+          "expected": "invalid UTF8 compile error"
+        },
+        {
+          "context": "query/label admission",
+          "input_bytes_hex": "ff",
+          "expected": "apply earlier UTF8 validation; do not bypass validation because regex primitive can decode RuneError"
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.1.0/primitive/utf8-runtime-semantics/interaction",
+      "profile": "promql-prometheus-3.1.0",
+      "purpose": "interaction",
+      "description": "Exercise selector matcher, optimized matcher and label_replace independently; use source-derived probe partitions below without claiming executed goldens.",
+      "probes": [
+        {
+          "context": "regex primitive input",
+          "input_bytes_hex": "ff",
+          "pattern": "\\x{FFFD}",
+          "expected_match": true
+        },
+        {
+          "context": "regex primitive pattern",
+          "pattern_bytes_hex": "ff",
+          "expected": "invalid UTF8 compile error"
+        },
+        {
+          "context": "query/label admission",
+          "input_bytes_hex": "ff",
+          "expected": "apply earlier UTF8 validation; do not bypass validation because regex primitive can decode RuneError"
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/primitive/backend-dialect/positive",
+      "profile": "promql-prometheus-3.13.5",
+      "purpose": "positive",
+      "description": "Observe exact versioned primitive rule: The reference uses Grafana regexp v0.0.0-20250905093917-f7b3be9d1853, NOT the Go go1.26.10 regexp parser and not the owned Go1.27.3 regexp parser. Pin Perl-mode RE2 syntax: alternation/concatenation, greedy/lazy repetition, named/numbered/noncapturing groups, scoped i/m/s/U flags, anchors and ASCII word boundaries. Backreferences, lookaround and possessive quantifiers are rejected. Counted repetition bounds above1000 and excessive nested repeats are parse errors; unlimited * and + are not capped by the counted-repeat syntax limit. New syntax in owned stdlib is not enabled implicitly.",
+      "probes": [
+        {
+          "pattern": "(?P<group>a+)",
+          "input": "aaa",
+          "expected": "accepted named group"
+        },
+        {
+          "pattern": "a{1000}",
+          "expected": "accepted counted bound"
+        },
+        {
+          "pattern": "a{1001}",
+          "expected": "repeat-size error"
+        },
+        {
+          "pattern": "(?<=a)b",
+          "expected": "unsupported lookbehind error"
+        },
+        {
+          "pattern": "(a)\\1",
+          "expected": "unsupported backreference error"
+        },
+        {
+          "pattern": "a++",
+          "expected": "invalid nested repetition"
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/primitive/backend-dialect/negative",
+      "profile": "promql-prometheus-3.13.5",
+      "purpose": "negative",
+      "description": "Reject unsupported property/syntax or retain reference nonmatch instead of silently inheriting owned Go1.27.3 acceptance for backend-dialect",
+      "probes": [
+        {
+          "pattern": "(?P<group>a+)",
+          "input": "aaa",
+          "expected": "accepted named group"
+        },
+        {
+          "pattern": "a{1000}",
+          "expected": "accepted counted bound"
+        },
+        {
+          "pattern": "a{1001}",
+          "expected": "repeat-size error"
+        },
+        {
+          "pattern": "(?<=a)b",
+          "expected": "unsupported lookbehind error"
+        },
+        {
+          "pattern": "(a)\\1",
+          "expected": "unsupported backreference error"
+        },
+        {
+          "pattern": "a++",
+          "expected": "invalid nested repetition"
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/primitive/backend-dialect/interaction",
+      "profile": "promql-prometheus-3.13.5",
+      "purpose": "interaction",
+      "description": "Exercise selector matcher, optimized matcher and label_replace independently; use source-derived probe partitions below without claiming executed goldens.",
+      "probes": [
+        {
+          "pattern": "(?P<group>a+)",
+          "input": "aaa",
+          "expected": "accepted named group"
+        },
+        {
+          "pattern": "a{1000}",
+          "expected": "accepted counted bound"
+        },
+        {
+          "pattern": "a{1001}",
+          "expected": "repeat-size error"
+        },
+        {
+          "pattern": "(?<=a)b",
+          "expected": "unsupported lookbehind error"
+        },
+        {
+          "pattern": "(a)\\1",
+          "expected": "unsupported backreference error"
+        },
+        {
+          "pattern": "a++",
+          "expected": "invalid nested repetition"
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/primitive/property-name-acceptance/positive",
+      "profile": "promql-prometheus-3.13.5",
+      "purpose": "positive",
+      "description": "Observe exact versioned primitive rule: Pinned Grafana syntax unicodeTable accepts exact case-sensitive keys from runtime unicode.Categories and unicode.Scripts, plus special Any. It does NOT consult unicode.Properties or CategoryAliases, normalize case/separators, or recognize Assigned/ASCII aliases. Therefore raw owned Go1.26/1.27 stdlib regex is not a compatible substitute even when unicode.Version happened to agree. Go1.26.10 has exact Cn and LC keys: these patterns are accepted. Lc remains unknown because the fork does not canonicalize property names.",
+      "probes": [
+        {
+          "pattern": "\\p{Greek}",
+          "expected": "accepted exact script name"
+        },
+        {
+          "pattern": "\\p{greek}",
+          "expected": "unknown property error"
+        },
+        {
+          "pattern": "\\p{Letter}",
+          "expected": "unknown property error despite stdlib alias support"
+        },
+        {
+          "pattern": "\\p{Old Italic}",
+          "expected": "unknown property error"
+        },
+        {
+          "pattern": "\\p{White_Space}",
+          "expected": "unknown property error: Properties map not consulted"
+        },
+        {
+          "pattern": "\\p{Assigned}",
+          "expected": "unknown property error"
+        },
+        {
+          "pattern": "\\p{ASCII}",
+          "expected": "unknown property error"
+        },
+        {
+          "pattern": "\\p{Cn}",
+          "expected": "accepted; matches U+0378"
+        },
+        {
+          "pattern": "\\p{LC}",
+          "expected": "accepted; matches A but not1"
+        },
+        {
+          "pattern": "\\p{Lc}",
+          "expected": "unknown property error"
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/primitive/property-name-acceptance/negative",
+      "profile": "promql-prometheus-3.13.5",
+      "purpose": "negative",
+      "description": "Reject unsupported property/syntax or retain reference nonmatch instead of silently inheriting owned Go1.27.3 acceptance for property-name-acceptance",
+      "probes": [
+        {
+          "pattern": "\\p{Greek}",
+          "expected": "accepted exact script name"
+        },
+        {
+          "pattern": "\\p{greek}",
+          "expected": "unknown property error"
+        },
+        {
+          "pattern": "\\p{Letter}",
+          "expected": "unknown property error despite stdlib alias support"
+        },
+        {
+          "pattern": "\\p{Old Italic}",
+          "expected": "unknown property error"
+        },
+        {
+          "pattern": "\\p{White_Space}",
+          "expected": "unknown property error: Properties map not consulted"
+        },
+        {
+          "pattern": "\\p{Assigned}",
+          "expected": "unknown property error"
+        },
+        {
+          "pattern": "\\p{ASCII}",
+          "expected": "unknown property error"
+        },
+        {
+          "pattern": "\\p{Cn}",
+          "expected": "accepted; matches U+0378"
+        },
+        {
+          "pattern": "\\p{LC}",
+          "expected": "accepted; matches A but not1"
+        },
+        {
+          "pattern": "\\p{Lc}",
+          "expected": "unknown property error"
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/primitive/property-name-acceptance/interaction",
+      "profile": "promql-prometheus-3.13.5",
+      "purpose": "interaction",
+      "description": "Exercise selector matcher, optimized matcher and label_replace independently; use source-derived probe partitions below without claiming executed goldens.",
+      "probes": [
+        {
+          "pattern": "\\p{Greek}",
+          "expected": "accepted exact script name"
+        },
+        {
+          "pattern": "\\p{greek}",
+          "expected": "unknown property error"
+        },
+        {
+          "pattern": "\\p{Letter}",
+          "expected": "unknown property error despite stdlib alias support"
+        },
+        {
+          "pattern": "\\p{Old Italic}",
+          "expected": "unknown property error"
+        },
+        {
+          "pattern": "\\p{White_Space}",
+          "expected": "unknown property error: Properties map not consulted"
+        },
+        {
+          "pattern": "\\p{Assigned}",
+          "expected": "unknown property error"
+        },
+        {
+          "pattern": "\\p{ASCII}",
+          "expected": "unknown property error"
+        },
+        {
+          "pattern": "\\p{Cn}",
+          "expected": "accepted; matches U+0378"
+        },
+        {
+          "pattern": "\\p{LC}",
+          "expected": "accepted; matches A but not1"
+        },
+        {
+          "pattern": "\\p{Lc}",
+          "expected": "unknown property error"
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/primitive/unicode-table-membership/positive",
+      "profile": "promql-prometheus-3.13.5",
+      "purpose": "positive",
+      "description": "Observe exact versioned primitive rule: Use the exact hashed go1.26.10 Unicode15 tables, not the version string alone and not Unicode17 tables. C includes unassigned Cn codepoints; Cn and LC were added although UnicodeVersion remains15.0.0. Relative to owned Unicode17, both references reject newer script names and retain older category membership. These table differences affect positive/negative character classes, regex acceptance and case-insensitive classes.",
+      "probes": [
+        {
+          "pattern": "\\p{C}",
+          "input_codepoints": [
+            "U+0378"
+          ],
+          "expected_match": true
+        },
+        {
+          "pattern": "\\p{L}",
+          "input_codepoints": [
+            "U+088F"
+          ],
+          "expected_match": false,
+          "owned_unicode17_match": true
+        },
+        {
+          "pattern": "\\p{Ll}",
+          "input_codepoints": [
+            "U+0295"
+          ],
+          "expected_match": true,
+          "owned_unicode17_match": false
+        },
+        {
+          "pattern": "\\p{Garay}",
+          "expected": "unknown property error",
+          "owned_unicode17_accepts": true
+        },
+        {
+          "pattern": "\\p{Nd}",
+          "input_codepoints": [
+            "U+10D40"
+          ],
+          "expected_match": false,
+          "owned_unicode17_match": true
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/primitive/unicode-table-membership/negative",
+      "profile": "promql-prometheus-3.13.5",
+      "purpose": "negative",
+      "description": "Reject unsupported property/syntax or retain reference nonmatch instead of silently inheriting owned Go1.27.3 acceptance for unicode-table-membership",
+      "probes": [
+        {
+          "pattern": "\\p{C}",
+          "input_codepoints": [
+            "U+0378"
+          ],
+          "expected_match": true
+        },
+        {
+          "pattern": "\\p{L}",
+          "input_codepoints": [
+            "U+088F"
+          ],
+          "expected_match": false,
+          "owned_unicode17_match": true
+        },
+        {
+          "pattern": "\\p{Ll}",
+          "input_codepoints": [
+            "U+0295"
+          ],
+          "expected_match": true,
+          "owned_unicode17_match": false
+        },
+        {
+          "pattern": "\\p{Garay}",
+          "expected": "unknown property error",
+          "owned_unicode17_accepts": true
+        },
+        {
+          "pattern": "\\p{Nd}",
+          "input_codepoints": [
+            "U+10D40"
+          ],
+          "expected_match": false,
+          "owned_unicode17_match": true
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/primitive/unicode-table-membership/interaction",
+      "profile": "promql-prometheus-3.13.5",
+      "purpose": "interaction",
+      "description": "Exercise selector matcher, optimized matcher and label_replace independently; use source-derived probe partitions below without claiming executed goldens.",
+      "probes": [
+        {
+          "pattern": "\\p{C}",
+          "input_codepoints": [
+            "U+0378"
+          ],
+          "expected_match": true
+        },
+        {
+          "pattern": "\\p{L}",
+          "input_codepoints": [
+            "U+088F"
+          ],
+          "expected_match": false,
+          "owned_unicode17_match": true
+        },
+        {
+          "pattern": "\\p{Ll}",
+          "input_codepoints": [
+            "U+0295"
+          ],
+          "expected_match": true,
+          "owned_unicode17_match": false
+        },
+        {
+          "pattern": "\\p{Garay}",
+          "expected": "unknown property error",
+          "owned_unicode17_accepts": true
+        },
+        {
+          "pattern": "\\p{Nd}",
+          "input_codepoints": [
+            "U+10D40"
+          ],
+          "expected_match": false,
+          "owned_unicode17_match": true
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/primitive/simple-fold-version/positive",
+      "profile": "promql-prometheus-3.13.5",
+      "purpose": "positive",
+      "description": "Observe exact versioned primitive rule: Case-insensitive matching uses the reference Unicode simple-fold equivalence orbit, not locale-sensitive case mapping or Unicode17 folding. The same pinned fold domain must govern compiled regex, strings.EqualFold optimizations, prefix/suffix scans and rune canonicalization. Kelvin K/k/U+212A and long-s S/s/U+017F are stable reference folds, but Unicode17-added U+A7CB<->U+0264 must not leak into either reference.",
+      "probes": [
+        {
+          "pattern": "(?i:k)",
+          "input_codepoints": [
+            "U+212A"
+          ],
+          "expected_match": true
+        },
+        {
+          "pattern": "(?i:s)",
+          "input_codepoints": [
+            "U+017F"
+          ],
+          "expected_match": true
+        },
+        {
+          "pattern": "(?i:\\x{A7CB})",
+          "input_codepoints": [
+            "U+0264"
+          ],
+          "expected_match": false,
+          "owned_unicode17_match": true
+        },
+        {
+          "pattern": "(?i:ss)",
+          "input_codepoints": [
+            "U+00DF"
+          ],
+          "expected_match": false,
+          "reason": "simple fold is not full multi-character case folding"
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/primitive/simple-fold-version/negative",
+      "profile": "promql-prometheus-3.13.5",
+      "purpose": "negative",
+      "description": "Reject unsupported property/syntax or retain reference nonmatch instead of silently inheriting owned Go1.27.3 acceptance for simple-fold-version",
+      "probes": [
+        {
+          "pattern": "(?i:k)",
+          "input_codepoints": [
+            "U+212A"
+          ],
+          "expected_match": true
+        },
+        {
+          "pattern": "(?i:s)",
+          "input_codepoints": [
+            "U+017F"
+          ],
+          "expected_match": true
+        },
+        {
+          "pattern": "(?i:\\x{A7CB})",
+          "input_codepoints": [
+            "U+0264"
+          ],
+          "expected_match": false,
+          "owned_unicode17_match": true
+        },
+        {
+          "pattern": "(?i:ss)",
+          "input_codepoints": [
+            "U+00DF"
+          ],
+          "expected_match": false,
+          "reason": "simple fold is not full multi-character case folding"
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/primitive/simple-fold-version/interaction",
+      "profile": "promql-prometheus-3.13.5",
+      "purpose": "interaction",
+      "description": "Exercise selector matcher, optimized matcher and label_replace independently; use source-derived probe partitions below without claiming executed goldens.",
+      "probes": [
+        {
+          "pattern": "(?i:k)",
+          "input_codepoints": [
+            "U+212A"
+          ],
+          "expected_match": true
+        },
+        {
+          "pattern": "(?i:s)",
+          "input_codepoints": [
+            "U+017F"
+          ],
+          "expected_match": true
+        },
+        {
+          "pattern": "(?i:\\x{A7CB})",
+          "input_codepoints": [
+            "U+0264"
+          ],
+          "expected_match": false,
+          "owned_unicode17_match": true
+        },
+        {
+          "pattern": "(?i:ss)",
+          "input_codepoints": [
+            "U+00DF"
+          ],
+          "expected_match": false,
+          "reason": "simple fold is not full multi-character case folding"
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/primitive/ascii-classes-boundaries/positive",
+      "profile": "promql-prometheus-3.13.5",
+      "purpose": "positive",
+      "description": "Observe exact versioned primitive rule: Perl \\d, \\s, \\w and POSIX bracket classes are their pinned ASCII class tables; they do not expand to Unicode category sets. \\b and \\B use ASCII word membership. With i flag, ASCII class rune sets can gain Unicode simple-fold equivalents such as Kelvin and long-s, but digits do not acquire Unicode17 decimal digits.",
+      "probes": [
+        {
+          "pattern": "\\d",
+          "input_codepoints": [
+            "U+10D40"
+          ],
+          "expected_match": false
+        },
+        {
+          "pattern": "\\p{Nd}",
+          "input": "7",
+          "expected_match": true
+        },
+        {
+          "pattern": "\\w",
+          "input_codepoints": [
+            "U+212A"
+          ],
+          "expected_match": false
+        },
+        {
+          "pattern": "(?i:\\w)",
+          "input_codepoints": [
+            "U+212A"
+          ],
+          "expected_match": true
+        },
+        {
+          "pattern": "[[:alpha:]]",
+          "input_codepoints": [
+            "U+03B1"
+          ],
+          "expected_match": false
+        },
+        {
+          "pattern": "\\s",
+          "input_codepoints": [
+            "U+00A0"
+          ],
+          "expected_match": false
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/primitive/ascii-classes-boundaries/negative",
+      "profile": "promql-prometheus-3.13.5",
+      "purpose": "negative",
+      "description": "Reject unsupported property/syntax or retain reference nonmatch instead of silently inheriting owned Go1.27.3 acceptance for ascii-classes-boundaries",
+      "probes": [
+        {
+          "pattern": "\\d",
+          "input_codepoints": [
+            "U+10D40"
+          ],
+          "expected_match": false
+        },
+        {
+          "pattern": "\\p{Nd}",
+          "input": "7",
+          "expected_match": true
+        },
+        {
+          "pattern": "\\w",
+          "input_codepoints": [
+            "U+212A"
+          ],
+          "expected_match": false
+        },
+        {
+          "pattern": "(?i:\\w)",
+          "input_codepoints": [
+            "U+212A"
+          ],
+          "expected_match": true
+        },
+        {
+          "pattern": "[[:alpha:]]",
+          "input_codepoints": [
+            "U+03B1"
+          ],
+          "expected_match": false
+        },
+        {
+          "pattern": "\\s",
+          "input_codepoints": [
+            "U+00A0"
+          ],
+          "expected_match": false
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/primitive/ascii-classes-boundaries/interaction",
+      "profile": "promql-prometheus-3.13.5",
+      "purpose": "interaction",
+      "description": "Exercise selector matcher, optimized matcher and label_replace independently; use source-derived probe partitions below without claiming executed goldens.",
+      "probes": [
+        {
+          "pattern": "\\d",
+          "input_codepoints": [
+            "U+10D40"
+          ],
+          "expected_match": false
+        },
+        {
+          "pattern": "\\p{Nd}",
+          "input": "7",
+          "expected_match": true
+        },
+        {
+          "pattern": "\\w",
+          "input_codepoints": [
+            "U+212A"
+          ],
+          "expected_match": false
+        },
+        {
+          "pattern": "(?i:\\w)",
+          "input_codepoints": [
+            "U+212A"
+          ],
+          "expected_match": true
+        },
+        {
+          "pattern": "[[:alpha:]]",
+          "input_codepoints": [
+            "U+03B1"
+          ],
+          "expected_match": false
+        },
+        {
+          "pattern": "\\s",
+          "input_codepoints": [
+            "U+00A0"
+          ],
+          "expected_match": false
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/primitive/matcher-optimization-fold-length/positive",
+      "profile": "promql-prometheus-3.13.5",
+      "purpose": "positive",
+      "description": "Observe exact versioned primitive rule: 3.13.5 optimized case-insensitive prefix/suffix matching walks runes through reference SimpleFold and uses the ACTUAL consumed input byte length for the residual. This fixes the 3.1.0 fixed-byte-length behavior; do not transplant the old optimizer bug or assume all regex caller contexts were always equivalent.",
+      "probes": [
+        {
+          "context": "selector optimized prefix",
+          "pattern": "(?i:k).*",
+          "input_codepoints": [
+            "U+212A",
+            "U+0078"
+          ],
+          "expected_match": true
+        },
+        {
+          "context": "selector optimized suffix",
+          "pattern": ".*(?i:s)",
+          "input_codepoints": [
+            "U+0078",
+            "U+017F"
+          ],
+          "expected_match": true
+        },
+        {
+          "context": "label_replace compiled regexp",
+          "pattern": "(?i:k).*",
+          "input_codepoints": [
+            "U+212A",
+            "U+0078"
+          ],
+          "expected_match": true
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/primitive/matcher-optimization-fold-length/negative",
+      "profile": "promql-prometheus-3.13.5",
+      "purpose": "negative",
+      "description": "Reject unsupported property/syntax or retain reference nonmatch instead of silently inheriting owned Go1.27.3 acceptance for matcher-optimization-fold-length",
+      "probes": [
+        {
+          "context": "selector optimized prefix",
+          "pattern": "(?i:k).*",
+          "input_codepoints": [
+            "U+212A",
+            "U+0078"
+          ],
+          "expected_match": true
+        },
+        {
+          "context": "selector optimized suffix",
+          "pattern": ".*(?i:s)",
+          "input_codepoints": [
+            "U+0078",
+            "U+017F"
+          ],
+          "expected_match": true
+        },
+        {
+          "context": "label_replace compiled regexp",
+          "pattern": "(?i:k).*",
+          "input_codepoints": [
+            "U+212A",
+            "U+0078"
+          ],
+          "expected_match": true
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/primitive/matcher-optimization-fold-length/interaction",
+      "profile": "promql-prometheus-3.13.5",
+      "purpose": "interaction",
+      "description": "Exercise selector matcher, optimized matcher and label_replace independently; use source-derived probe partitions below without claiming executed goldens.",
+      "probes": [
+        {
+          "context": "selector optimized prefix",
+          "pattern": "(?i:k).*",
+          "input_codepoints": [
+            "U+212A",
+            "U+0078"
+          ],
+          "expected_match": true
+        },
+        {
+          "context": "selector optimized suffix",
+          "pattern": ".*(?i:s)",
+          "input_codepoints": [
+            "U+0078",
+            "U+017F"
+          ],
+          "expected_match": true
+        },
+        {
+          "context": "label_replace compiled regexp",
+          "pattern": "(?i:k).*",
+          "input_codepoints": [
+            "U+212A",
+            "U+0078"
+          ],
+          "expected_match": true
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/primitive/normalization-version-selection/positive",
+      "profile": "promql-prometheus-3.13.5",
+      "purpose": "positive",
+      "description": "Observe exact versioned primitive rule: FastRegexMatcher optimization normalizes indexed strings using norm.NFKD plus unicode.ToLower. Pin BOTH the x/text module v0.42.0 and its selected Unicode15 table under go1.26.10. x/text v0.42.0 selects tables15.0.0.go under !go1.27, but tables17.0.0.go under go1.27. Recompiling the same dependency with owned Go1.27.3 therefore changes normalization data automatically; exact module version alone is insufficient primitive identity. Optimized lookup must preserve the pinned final matcher behavior and not become Unicode normalization of label identity.",
+      "probes": [
+        {
+          "context": "label identity",
+          "inputs": [
+            "\u00e9",
+            "e\u0301"
+          ],
+          "expected": "distinct byte strings/labels, not canonically merged"
+        },
+        {
+          "context": "indexed case-insensitive alternatives",
+          "inputs": [
+            "k",
+            "K",
+            "\u212a"
+          ],
+          "expected": "use pinned normalization/final matching, with optimizer context distinctions above"
+        },
+        {
+          "context": "build selection",
+          "reference_table": "15.0.0",
+          "owned_go127_xtext042_table": "17.0.0"
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/primitive/normalization-version-selection/negative",
+      "profile": "promql-prometheus-3.13.5",
+      "purpose": "negative",
+      "description": "Reject unsupported property/syntax or retain reference nonmatch instead of silently inheriting owned Go1.27.3 acceptance for normalization-version-selection",
+      "probes": [
+        {
+          "context": "label identity",
+          "inputs": [
+            "\u00e9",
+            "e\u0301"
+          ],
+          "expected": "distinct byte strings/labels, not canonically merged"
+        },
+        {
+          "context": "indexed case-insensitive alternatives",
+          "inputs": [
+            "k",
+            "K",
+            "\u212a"
+          ],
+          "expected": "use pinned normalization/final matching, with optimizer context distinctions above"
+        },
+        {
+          "context": "build selection",
+          "reference_table": "15.0.0",
+          "owned_go127_xtext042_table": "17.0.0"
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/primitive/normalization-version-selection/interaction",
+      "profile": "promql-prometheus-3.13.5",
+      "purpose": "interaction",
+      "description": "Exercise selector matcher, optimized matcher and label_replace independently; use source-derived probe partitions below without claiming executed goldens.",
+      "probes": [
+        {
+          "context": "label identity",
+          "inputs": [
+            "\u00e9",
+            "e\u0301"
+          ],
+          "expected": "distinct byte strings/labels, not canonically merged"
+        },
+        {
+          "context": "indexed case-insensitive alternatives",
+          "inputs": [
+            "k",
+            "K",
+            "\u212a"
+          ],
+          "expected": "use pinned normalization/final matching, with optimizer context distinctions above"
+        },
+        {
+          "context": "build selection",
+          "reference_table": "15.0.0",
+          "owned_go127_xtext042_table": "17.0.0"
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/primitive/anchoring-captures-replacement/positive",
+      "profile": "promql-prometheus-3.13.5",
+      "purpose": "positive",
+      "description": "Observe exact versioned primitive rule: Selector regex and label_replace compile whole-value anchored (?s:pattern) expressions; default dot therefore crosses newline in these callers. Inline flags can locally disable s. Captures use leftmost-first RE2 choice, not POSIX longest-submatch selection. Replacement expands $name/${name}/$number, $$ literal dollar; longest alphanumeric name wins, so $1x differs from ${1}x. Unknown/unmatched groups expand empty. Preserve pinned regex capture indices through Unicode UTF8 matching.",
+      "probes": [
+        {
+          "context": "selector",
+          "pattern": "a.b",
+          "input": "a\nb",
+          "expected_match": true
+        },
+        {
+          "context": "label_replace",
+          "pattern": "(a|aa)(a?)",
+          "input": "aa",
+          "replacement": "$1-$2",
+          "expected_output": "a-a"
+        },
+        {
+          "context": "label_replace",
+          "pattern": "(a)",
+          "input": "a",
+          "replacement": "$1x",
+          "expected_output": ""
+        },
+        {
+          "context": "label_replace",
+          "pattern": "(a)",
+          "input": "a",
+          "replacement": "${1}x",
+          "expected_output": "ax"
+        },
+        {
+          "pattern": "(?-s:a.b)",
+          "input": "a\nb",
+          "expected_match": false
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/primitive/anchoring-captures-replacement/negative",
+      "profile": "promql-prometheus-3.13.5",
+      "purpose": "negative",
+      "description": "Reject unsupported property/syntax or retain reference nonmatch instead of silently inheriting owned Go1.27.3 acceptance for anchoring-captures-replacement",
+      "probes": [
+        {
+          "context": "selector",
+          "pattern": "a.b",
+          "input": "a\nb",
+          "expected_match": true
+        },
+        {
+          "context": "label_replace",
+          "pattern": "(a|aa)(a?)",
+          "input": "aa",
+          "replacement": "$1-$2",
+          "expected_output": "a-a"
+        },
+        {
+          "context": "label_replace",
+          "pattern": "(a)",
+          "input": "a",
+          "replacement": "$1x",
+          "expected_output": ""
+        },
+        {
+          "context": "label_replace",
+          "pattern": "(a)",
+          "input": "a",
+          "replacement": "${1}x",
+          "expected_output": "ax"
+        },
+        {
+          "pattern": "(?-s:a.b)",
+          "input": "a\nb",
+          "expected_match": false
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/primitive/anchoring-captures-replacement/interaction",
+      "profile": "promql-prometheus-3.13.5",
+      "purpose": "interaction",
+      "description": "Exercise selector matcher, optimized matcher and label_replace independently; use source-derived probe partitions below without claiming executed goldens.",
+      "probes": [
+        {
+          "context": "selector",
+          "pattern": "a.b",
+          "input": "a\nb",
+          "expected_match": true
+        },
+        {
+          "context": "label_replace",
+          "pattern": "(a|aa)(a?)",
+          "input": "aa",
+          "replacement": "$1-$2",
+          "expected_output": "a-a"
+        },
+        {
+          "context": "label_replace",
+          "pattern": "(a)",
+          "input": "a",
+          "replacement": "$1x",
+          "expected_output": ""
+        },
+        {
+          "context": "label_replace",
+          "pattern": "(a)",
+          "input": "a",
+          "replacement": "${1}x",
+          "expected_output": "ax"
+        },
+        {
+          "pattern": "(?-s:a.b)",
+          "input": "a\nb",
+          "expected_match": false
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/primitive/utf8-runtime-semantics/positive",
+      "profile": "promql-prometheus-3.13.5",
+      "purpose": "positive",
+      "description": "Observe exact versioned primitive rule: Pin UTF8 decode/validation semantics at regex and query-input boundaries: malformed UTF8 in a regex pattern is a compile error; regexp text iteration decodes each malformed byte as RuneError U+FFFD, not Latin1 or byte-wise Unicode characters. PromQL label/query validators may reject malformed encodings before regex execution; keep that layer distinct from the primitive. Own Go1.27.3 has matching utf8.go source bytes to Go1.26.10, but that fact does not prove regexp or Unicode table compatibility.",
+      "probes": [
+        {
+          "context": "regex primitive input",
+          "input_bytes_hex": "ff",
+          "pattern": "\\x{FFFD}",
+          "expected_match": true
+        },
+        {
+          "context": "regex primitive pattern",
+          "pattern_bytes_hex": "ff",
+          "expected": "invalid UTF8 compile error"
+        },
+        {
+          "context": "query/label admission",
+          "input_bytes_hex": "ff",
+          "expected": "apply earlier UTF8 validation; do not bypass validation because regex primitive can decode RuneError"
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/primitive/utf8-runtime-semantics/negative",
+      "profile": "promql-prometheus-3.13.5",
+      "purpose": "negative",
+      "description": "Reject unsupported property/syntax or retain reference nonmatch instead of silently inheriting owned Go1.27.3 acceptance for utf8-runtime-semantics",
+      "probes": [
+        {
+          "context": "regex primitive input",
+          "input_bytes_hex": "ff",
+          "pattern": "\\x{FFFD}",
+          "expected_match": true
+        },
+        {
+          "context": "regex primitive pattern",
+          "pattern_bytes_hex": "ff",
+          "expected": "invalid UTF8 compile error"
+        },
+        {
+          "context": "query/label admission",
+          "input_bytes_hex": "ff",
+          "expected": "apply earlier UTF8 validation; do not bypass validation because regex primitive can decode RuneError"
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    },
+    {
+      "id": "promql-prometheus-3.13.5/primitive/utf8-runtime-semantics/interaction",
+      "profile": "promql-prometheus-3.13.5",
+      "purpose": "interaction",
+      "description": "Exercise selector matcher, optimized matcher and label_replace independently; use source-derived probe partitions below without claiming executed goldens.",
+      "probes": [
+        {
+          "context": "regex primitive input",
+          "input_bytes_hex": "ff",
+          "pattern": "\\x{FFFD}",
+          "expected_match": true
+        },
+        {
+          "context": "regex primitive pattern",
+          "pattern_bytes_hex": "ff",
+          "expected": "invalid UTF8 compile error"
+        },
+        {
+          "context": "query/label admission",
+          "input_bytes_hex": "ff",
+          "expected": "apply earlier UTF8 validation; do not bypass validation because regex primitive can decode RuneError"
+        }
+      ],
+      "status": "independently-authored-source-derived-requirements; not executed"
+    }
+  ],
+  "version_changes": [
+    {
+      "kind": "primitive-profile-identity",
+      "profile": "promql-prometheus-3.1.0",
+      "description": "go1.23.4 / Unicode15.0.0 / grafana-regexp v0.0.0-20240518133315-a468a5bfb3bc / xtext v0.21.0 selected Unicode15; owned Go1.27.3 / Unicode17 is not equivalent."
+    },
+    {
+      "kind": "primitive-profile-identity",
+      "profile": "promql-prometheus-3.13.5",
+      "description": "go1.26.10 / Unicode15.0.0 / grafana-regexp v0.0.0-20250905093917-f7b3be9d1853 / xtext v0.42.0 selected Unicode15; owned Go1.27.3 / Unicode17 is not equivalent."
+    },
+    {
+      "kind": "primitive-semantic-difference",
+      "description": "Go1.23.4 and Go1.26.10 both report Unicode15.0.0, but newer C includes unassigned codepoints and adds exact Cn/LC category names."
+    },
+    {
+      "kind": "owned-primitive-drift",
+      "description": "Go1.26/1.27 stdlib regex accepts canonicalized/aliased property names, Assigned and ASCII; both pinned Grafana regex parsers do not."
+    },
+    {
+      "kind": "owned-primitive-drift",
+      "description": "Unicode17 adds eleven script keys, 10615 formerly unassigned codepoints, new fold pairs and category reassignments. Do not use owned Unicode17 tables for either reference."
+    },
+    {
+      "kind": "primitive-semantic-difference",
+      "description": "Prometheus3.13.5 case-insensitive optimized prefix/suffix scans account for unequal UTF8 fold lengths, unlike3.1.0 fixed-byte slicing."
+    },
+    {
+      "kind": "transitive-primitive-drift",
+      "description": "x/text0.42 selects Unicode17 normalization tables when rebuilt under Go1.27; referenceGo1.26 selects Unicode15 despite same x/text module pin."
+    }
+  ],
+  "unresolved": []
+}

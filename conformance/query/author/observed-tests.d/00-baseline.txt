@@ -1,0 +1,10 @@
+# 11.11 baseline
+./internal/query/promql TestAuthoredSignatureArityTypeAndGateCases
+./internal/query/promql TestEveryFunctionOverload
+./internal/query/promql TestAggregationSemantics
+./internal/query/promql TestEveryPromQLOperator
+./internal/query/promql TestVectorOperatorValuesAndNameRules
+./internal/query/logql TestEveryLogQLMetricObligation
+./internal/query/logql TestEveryLogQLMetricInventoryBinding
+./internal/query/logql TestTemplateEveryHelper
+./internal/conformance/query TestReleaseBindingsResolveToLockedCaseRows

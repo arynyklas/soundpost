@@ -1,0 +1,1067 @@
+{
+  "observation": {
+    "expected": {
+      "org": "e3e629977d4bee3cfb066bd07872f759",
+      "project": "3fc3bcde3bdd8277f7dde1409274cd54",
+      "other_org": "ed913997b1d495bb0202174b6e4cc73b",
+      "other_project": "1773b5bb4fac13ee49f57256ede11cf2",
+      "web_source": "5db2d5a79ff644195e5da29804029c4e",
+      "web_build": "893b5f18e4958052c1d24a99deff1d89",
+      "job": "bb06f0be745e818fc0459f2fb7527f65",
+      "run": "638309dea3cb1bcf411d6591f8d9a89b",
+      "throw_source": "src/receipt.ts",
+      "throw_line": 24,
+      "throw_column": 10,
+      "unpriced_item": "sku-404",
+      "canaries": [
+        "CANARY_BODY_7f3a",
+        "CANARY_PROMPT_9b2f",
+        "CANARY_SQL_LITERAL_5d1e"
+      ],
+      "required_versions": [
+        "go",
+        "bun",
+        "node_linux",
+        "node_windows_vite",
+        "python",
+        "chrome",
+        "postgres",
+        "docker_server",
+        "soundpost"
+      ]
+    },
+    "direct_trace": "b28ffb1aa06ecc69c21fe6a3284ca8ba",
+    "ui_trace": "651759e9d5c4fe6287a3f6ed2de02647",
+    "reads": [
+      {
+        "actor": "reader-a",
+        "org_sent": "e3e629977d4bee3cfb066bd07872f759",
+        "project_sent": "3fc3bcde3bdd8277f7dde1409274cd54",
+        "trace": "b28ffb1aa06ecc69c21fe6a3284ca8ba",
+        "status": 200,
+        "body": {
+          "org": "e3e629977d4bee3cfb066bd07872f759",
+          "project": "3fc3bcde3bdd8277f7dde1409274cd54",
+          "trace": "b28ffb1aa06ecc69c21fe6a3284ca8ba",
+          "state": "ready",
+          "partial": false,
+          "path": {
+            "trace_id": "b28ffb1aa06ecc69c21fe6a3284ca8ba",
+            "span_count": 6,
+            "spans": [
+              {
+                "span_id": "68a73de8e55a9170",
+                "parent_id": null,
+                "span_kind": "server",
+                "operation": "request",
+                "status": "ok",
+                "start_wall_ns": "1794320798619000000",
+                "end_wall_ns": "1794320799016000000",
+                "duration": {
+                  "known": true,
+                  "min_ns": "396308387",
+                  "max_ns": "396308387",
+                  "basis": "same_domain_monotonic"
+                },
+                "flags": [],
+                "sample_probability": 1,
+                "sample_decision": "keep",
+                "links": []
+              },
+              {
+                "span_id": "72a98de573570c76",
+                "parent_id": "68a73de8e55a9170",
+                "span_kind": "client",
+                "operation": "http.call",
+                "status": "ok",
+                "dependency_alias": "api",
+                "start_wall_ns": "1794320798620000000",
+                "end_wall_ns": "1794320799012000000",
+                "duration": {
+                  "known": true,
+                  "min_ns": "391680635",
+                  "max_ns": "391680635",
+                  "basis": "same_domain_monotonic"
+                },
+                "flags": [],
+                "sample_probability": 1,
+                "sample_decision": "keep",
+                "links": []
+              },
+              {
+                "span_id": "234be493ff1b9039",
+                "parent_id": "72a98de573570c76",
+                "span_kind": "server",
+                "operation": "request",
+                "status": "ok",
+                "start_wall_ns": "1794320798624108870",
+                "end_wall_ns": "1794320799011668397",
+                "duration": {
+                  "known": true,
+                  "min_ns": "387556707",
+                  "max_ns": "387556707",
+                  "basis": "same_domain_monotonic"
+                },
+                "flags": [],
+                "sample_probability": 1,
+                "sample_decision": "keep",
+                "links": []
+              },
+              {
+                "span_id": "245d8b77317b758c",
+                "parent_id": "234be493ff1b9039",
+                "span_kind": "client",
+                "operation": "db.execute",
+                "status": "ok",
+                "dependency_alias": "postgres",
+                "start_wall_ns": "1794320798951785179",
+                "end_wall_ns": "1794320798953012114",
+                "duration": {
+                  "known": true,
+                  "min_ns": "1227885",
+                  "max_ns": "1227885",
+                  "basis": "same_domain_monotonic"
+                },
+                "flags": [
+                  "dependency_boundary"
+                ],
+                "sample_probability": 1,
+                "sample_decision": "keep",
+                "links": []
+              },
+              {
+                "span_id": "34efc9d0010527d5",
+                "parent_id": "234be493ff1b9039",
+                "span_kind": "client",
+                "operation": "db.execute",
+                "status": "ok",
+                "dependency_alias": "postgres",
+                "start_wall_ns": "1794320798953363647",
+                "end_wall_ns": "1794320798954047545",
+                "duration": {
+                  "known": true,
+                  "min_ns": "688195",
+                  "max_ns": "688195",
+                  "basis": "same_domain_monotonic"
+                },
+                "flags": [
+                  "dependency_boundary"
+                ],
+                "sample_probability": 1,
+                "sample_decision": "keep",
+                "links": []
+              },
+              {
+                "span_id": "2fe4102591218b4d",
+                "parent_id": "234be493ff1b9039",
+                "span_kind": "client",
+                "operation": "http.call",
+                "status": "ok",
+                "dependency_alias": "dependency",
+                "start_wall_ns": "1794320798954286911",
+                "end_wall_ns": "1794320799011229484",
+                "duration": {
+                  "known": true,
+                  "min_ns": "56952018",
+                  "max_ns": "56952018",
+                  "basis": "same_domain_monotonic"
+                },
+                "flags": [
+                  "dependency_boundary"
+                ],
+                "sample_probability": 1,
+                "sample_decision": "keep",
+                "links": []
+              }
+            ],
+            "trees": [
+              {
+                "root_span_id": "68a73de8e55a9170",
+                "orphan": false,
+                "duration": {
+                  "known": true,
+                  "min_ns": "396308387",
+                  "max_ns": "396308387",
+                  "basis": "same_domain_monotonic"
+                },
+                "segments": [
+                  {
+                    "span_id": "68a73de8e55a9170",
+                    "depth": 0,
+                    "self": {
+                      "known": true,
+                      "min_ns": "4627752",
+                      "max_ns": "4627752",
+                      "basis": "same_domain_monotonic"
+                    },
+                    "ambiguous": false,
+                    "parallel_siblings_off_path": 0,
+                    "async_children_off_path": 0
+                  },
+                  {
+                    "span_id": "72a98de573570c76",
+                    "depth": 1,
+                    "self": {
+                      "known": true,
+                      "min_ns": "4123928",
+                      "max_ns": "4123928",
+                      "basis": "same_domain_monotonic"
+                    },
+                    "ambiguous": false,
+                    "parallel_siblings_off_path": 0,
+                    "async_children_off_path": 0
+                  },
+                  {
+                    "span_id": "234be493ff1b9039",
+                    "depth": 2,
+                    "self": {
+                      "known": true,
+                      "min_ns": "328688609",
+                      "max_ns": "328688609",
+                      "basis": "same_domain_monotonic"
+                    },
+                    "ambiguous": false,
+                    "parallel_siblings_off_path": 0,
+                    "async_children_off_path": 0
+                  },
+                  {
+                    "span_id": "245d8b77317b758c",
+                    "depth": 3,
+                    "self": {
+                      "known": true,
+                      "min_ns": "1227885",
+                      "max_ns": "1227885",
+                      "basis": "same_domain_monotonic"
+                    },
+                    "ambiguous": false,
+                    "parallel_siblings_off_path": 0,
+                    "async_children_off_path": 0
+                  },
+                  {
+                    "span_id": "34efc9d0010527d5",
+                    "depth": 3,
+                    "self": {
+                      "known": true,
+                      "min_ns": "688195",
+                      "max_ns": "688195",
+                      "basis": "same_domain_monotonic"
+                    },
+                    "ambiguous": false,
+                    "parallel_siblings_off_path": 0,
+                    "async_children_off_path": 0
+                  },
+                  {
+                    "span_id": "2fe4102591218b4d",
+                    "depth": 3,
+                    "self": {
+                      "known": true,
+                      "min_ns": "56952018",
+                      "max_ns": "56952018",
+                      "basis": "same_domain_monotonic"
+                    },
+                    "ambiguous": false,
+                    "parallel_siblings_off_path": 0,
+                    "async_children_off_path": 0
+                  }
+                ]
+              }
+            ],
+            "observed": {
+              "known": true,
+              "min_ns": "396308387",
+              "max_ns": "396308387",
+              "basis": "same_domain_monotonic"
+            },
+            "edges": [],
+            "clock_issues": [
+              {
+                "span_id": "234be493ff1b9039",
+                "parent_id": "72a98de573570c76",
+                "kind": "starts_before_parent",
+                "certain": false,
+                "cross_domain": true,
+                "uncertainty_ns": "9223372036854775807"
+              },
+              {
+                "span_id": "234be493ff1b9039",
+                "parent_id": "72a98de573570c76",
+                "kind": "ends_after_parent",
+                "certain": false,
+                "cross_domain": true,
+                "uncertainty_ns": "9223372036854775807"
+              }
+            ],
+            "unlike_clock_domains": true,
+            "max_uncertainty_ns": "4611686018427387904",
+            "sampling": {
+              "kept": 6,
+              "dropped": 0,
+              "min_probability": 1,
+              "sampled": false,
+              "invalid_probability": 0
+            },
+            "complete": false,
+            "reasons": [
+              "clock_uncertain"
+            ]
+          },
+          "sections": [
+            {
+              "name": "spans",
+              "state": "ready"
+            }
+          ]
+        }
+      },
+      {
+        "actor": "reader-b",
+        "org_sent": "ed913997b1d495bb0202174b6e4cc73b",
+        "project_sent": "3fc3bcde3bdd8277f7dde1409274cd54",
+        "trace": "b28ffb1aa06ecc69c21fe6a3284ca8ba",
+        "status": 404,
+        "body": {
+          "code": "not_found",
+          "retryable": false,
+          "detail": "not_found",
+          "request_id": "17bcf4c2c96c6e8b5449ed637bd77fba"
+        }
+      },
+      {
+        "actor": "reader-b",
+        "org_sent": "e3e629977d4bee3cfb066bd07872f759",
+        "project_sent": "3fc3bcde3bdd8277f7dde1409274cd54",
+        "trace": "b28ffb1aa06ecc69c21fe6a3284ca8ba",
+        "status": 404,
+        "body": {
+          "code": "not_found",
+          "retryable": false,
+          "detail": "not_found",
+          "request_id": "5165d672df5fa4515f5030b05bde7f20"
+        }
+      },
+      {
+        "actor": "reader-a",
+        "org_sent": "e3e629977d4bee3cfb066bd07872f759",
+        "project_sent": "3fc3bcde3bdd8277f7dde1409274cd54",
+        "trace": "651759e9d5c4fe6287a3f6ed2de02647",
+        "status": 200,
+        "body": {
+          "org": "e3e629977d4bee3cfb066bd07872f759",
+          "project": "3fc3bcde3bdd8277f7dde1409274cd54",
+          "trace": "651759e9d5c4fe6287a3f6ed2de02647",
+          "state": "ready",
+          "partial": false,
+          "path": {
+            "trace_id": "651759e9d5c4fe6287a3f6ed2de02647",
+            "span_count": 8,
+            "spans": [
+              {
+                "span_id": "b2e3e227aa244745",
+                "parent_id": null,
+                "span_kind": "internal",
+                "operation": "ui.action",
+                "status": "error",
+                "start_wall_ns": "1794320809096000000",
+                "end_wall_ns": "1794320809165000000",
+                "duration": {
+                  "known": true,
+                  "min_ns": "68500000",
+                  "max_ns": "68500000",
+                  "basis": "same_domain_monotonic"
+                },
+                "flags": [],
+                "sample_probability": 1,
+                "sample_decision": "keep",
+                "links": []
+              },
+              {
+                "span_id": "ff1b7e669f6de8ba",
+                "parent_id": "b2e3e227aa244745",
+                "span_kind": "client",
+                "operation": "http.call",
+                "status": "ok",
+                "dependency_alias": "gateway",
+                "start_wall_ns": "1794320809098000000",
+                "end_wall_ns": "1794320809162000000",
+                "duration": {
+                  "known": true,
+                  "min_ns": "64099999",
+                  "max_ns": "64099999",
+                  "basis": "same_domain_monotonic"
+                },
+                "flags": [],
+                "sample_probability": 1,
+                "sample_decision": "keep",
+                "links": []
+              },
+              {
+                "span_id": "26b2afa101a6316a",
+                "parent_id": "ff1b7e669f6de8ba",
+                "span_kind": "server",
+                "operation": "request",
+                "status": "ok",
+                "start_wall_ns": "1794320809102000000",
+                "end_wall_ns": "1794320809160000000",
+                "duration": {
+                  "known": true,
+                  "min_ns": "58655483",
+                  "max_ns": "58655483",
+                  "basis": "same_domain_monotonic"
+                },
+                "flags": [],
+                "sample_probability": 1,
+                "sample_decision": "keep",
+                "links": []
+              },
+              {
+                "span_id": "3241b2601f076035",
+                "parent_id": "26b2afa101a6316a",
+                "span_kind": "client",
+                "operation": "http.call",
+                "status": "ok",
+                "dependency_alias": "api",
+                "start_wall_ns": "1794320809102000000",
+                "end_wall_ns": "1794320809159000000",
+                "duration": {
+                  "known": true,
+                  "min_ns": "57367769",
+                  "max_ns": "57367769",
+                  "basis": "same_domain_monotonic"
+                },
+                "flags": [],
+                "sample_probability": 1,
+                "sample_decision": "keep",
+                "links": []
+              },
+              {
+                "span_id": "7ba1bad859241297",
+                "parent_id": "3241b2601f076035",
+                "span_kind": "server",
+                "operation": "request",
+                "status": "ok",
+                "start_wall_ns": "1794320809104580474",
+                "end_wall_ns": "1794320809159676481",
+                "duration": {
+                  "known": true,
+                  "min_ns": "55091889",
+                  "max_ns": "55091889",
+                  "basis": "same_domain_monotonic"
+                },
+                "flags": [],
+                "sample_probability": 1,
+                "sample_decision": "keep",
+                "links": []
+              },
+              {
+                "span_id": "ab49a76a5377652a",
+                "parent_id": "7ba1bad859241297",
+                "span_kind": "client",
+                "operation": "db.execute",
+                "status": "ok",
+                "dependency_alias": "postgres",
+                "start_wall_ns": "1794320809111982989",
+                "end_wall_ns": "1794320809113031037",
+                "duration": {
+                  "known": true,
+                  "min_ns": "1051449",
+                  "max_ns": "1051449",
+                  "basis": "same_domain_monotonic"
+                },
+                "flags": [
+                  "dependency_boundary"
+                ],
+                "sample_probability": 1,
+                "sample_decision": "keep",
+                "links": []
+              },
+              {
+                "span_id": "6915668f3a9fd182",
+                "parent_id": "7ba1bad859241297",
+                "span_kind": "client",
+                "operation": "db.execute",
+                "status": "ok",
+                "dependency_alias": "postgres",
+                "start_wall_ns": "1794320809113282634",
+                "end_wall_ns": "1794320809113935812",
+                "duration": {
+                  "known": true,
+                  "min_ns": "660966",
+                  "max_ns": "660966",
+                  "basis": "same_domain_monotonic"
+                },
+                "flags": [
+                  "dependency_boundary"
+                ],
+                "sample_probability": 1,
+                "sample_decision": "keep",
+                "links": []
+              },
+              {
+                "span_id": "5259bdb4bbf05738",
+                "parent_id": "7ba1bad859241297",
+                "span_kind": "client",
+                "operation": "http.call",
+                "status": "ok",
+                "dependency_alias": "dependency",
+                "start_wall_ns": "1794320809114237637",
+                "end_wall_ns": "1794320809159256708",
+                "duration": {
+                  "known": true,
+                  "min_ns": "45030089",
+                  "max_ns": "45030089",
+                  "basis": "same_domain_monotonic"
+                },
+                "flags": [
+                  "dependency_boundary"
+                ],
+                "sample_probability": 1,
+                "sample_decision": "keep",
+                "links": []
+              }
+            ],
+            "trees": [
+              {
+                "root_span_id": "b2e3e227aa244745",
+                "orphan": false,
+                "duration": {
+                  "known": true,
+                  "min_ns": "68500000",
+                  "max_ns": "68500000",
+                  "basis": "same_domain_monotonic"
+                },
+                "segments": [
+                  {
+                    "span_id": "b2e3e227aa244745",
+                    "depth": 0,
+                    "self": {
+                      "known": true,
+                      "min_ns": "4400001",
+                      "max_ns": "4400001",
+                      "basis": "same_domain_monotonic"
+                    },
+                    "ambiguous": false,
+                    "parallel_siblings_off_path": 0,
+                    "async_children_off_path": 0
+                  },
+                  {
+                    "span_id": "ff1b7e669f6de8ba",
+                    "depth": 1,
+                    "self": {
+                      "known": true,
+                      "min_ns": "5444516",
+                      "max_ns": "5444516",
+                      "basis": "same_domain_monotonic"
+                    },
+                    "ambiguous": false,
+                    "parallel_siblings_off_path": 0,
+                    "async_children_off_path": 0
+                  },
+                  {
+                    "span_id": "26b2afa101a6316a",
+                    "depth": 2,
+                    "self": {
+                      "known": true,
+                      "min_ns": "1287714",
+                      "max_ns": "1287714",
+                      "basis": "same_domain_monotonic"
+                    },
+                    "ambiguous": false,
+                    "parallel_siblings_off_path": 0,
+                    "async_children_off_path": 0
+                  },
+                  {
+                    "span_id": "3241b2601f076035",
+                    "depth": 3,
+                    "self": {
+                      "known": true,
+                      "min_ns": "2275880",
+                      "max_ns": "2275880",
+                      "basis": "same_domain_monotonic"
+                    },
+                    "ambiguous": false,
+                    "parallel_siblings_off_path": 0,
+                    "async_children_off_path": 0
+                  },
+                  {
+                    "span_id": "7ba1bad859241297",
+                    "depth": 4,
+                    "self": {
+                      "known": true,
+                      "min_ns": "8349385",
+                      "max_ns": "8349385",
+                      "basis": "same_domain_monotonic"
+                    },
+                    "ambiguous": false,
+                    "parallel_siblings_off_path": 0,
+                    "async_children_off_path": 0
+                  },
+                  {
+                    "span_id": "ab49a76a5377652a",
+                    "depth": 5,
+                    "self": {
+                      "known": true,
+                      "min_ns": "1051449",
+                      "max_ns": "1051449",
+                      "basis": "same_domain_monotonic"
+                    },
+                    "ambiguous": false,
+                    "parallel_siblings_off_path": 0,
+                    "async_children_off_path": 0
+                  },
+                  {
+                    "span_id": "6915668f3a9fd182",
+                    "depth": 5,
+                    "self": {
+                      "known": true,
+                      "min_ns": "660966",
+                      "max_ns": "660966",
+                      "basis": "same_domain_monotonic"
+                    },
+                    "ambiguous": false,
+                    "parallel_siblings_off_path": 0,
+                    "async_children_off_path": 0
+                  },
+                  {
+                    "span_id": "5259bdb4bbf05738",
+                    "depth": 5,
+                    "self": {
+                      "known": true,
+                      "min_ns": "45030089",
+                      "max_ns": "45030089",
+                      "basis": "same_domain_monotonic"
+                    },
+                    "ambiguous": false,
+                    "parallel_siblings_off_path": 0,
+                    "async_children_off_path": 0
+                  }
+                ]
+              }
+            ],
+            "observed": {
+              "known": true,
+              "min_ns": "68500000",
+              "max_ns": "68500000",
+              "basis": "same_domain_monotonic"
+            },
+            "edges": [],
+            "clock_issues": [
+              {
+                "span_id": "26b2afa101a6316a",
+                "parent_id": "ff1b7e669f6de8ba",
+                "kind": "starts_before_parent",
+                "certain": false,
+                "cross_domain": true,
+                "uncertainty_ns": "9223372036854775807"
+              },
+              {
+                "span_id": "26b2afa101a6316a",
+                "parent_id": "ff1b7e669f6de8ba",
+                "kind": "ends_after_parent",
+                "certain": false,
+                "cross_domain": true,
+                "uncertainty_ns": "9223372036854775807"
+              },
+              {
+                "span_id": "7ba1bad859241297",
+                "parent_id": "3241b2601f076035",
+                "kind": "starts_before_parent",
+                "certain": false,
+                "cross_domain": true,
+                "uncertainty_ns": "9223372036854775807"
+              },
+              {
+                "span_id": "7ba1bad859241297",
+                "parent_id": "3241b2601f076035",
+                "kind": "ends_after_parent",
+                "certain": false,
+                "cross_domain": true,
+                "uncertainty_ns": "9223372036854775807"
+              }
+            ],
+            "unlike_clock_domains": true,
+            "max_uncertainty_ns": "4611686018427387904",
+            "sampling": {
+              "kept": 8,
+              "dropped": 0,
+              "min_probability": 1,
+              "sampled": false,
+              "invalid_probability": 0
+            },
+            "complete": false,
+            "reasons": [
+              "clock_uncertain"
+            ]
+          },
+          "sections": [
+            {
+              "name": "spans",
+              "state": "ready"
+            }
+          ]
+        }
+      },
+      {
+        "actor": "reader-b",
+        "org_sent": "ed913997b1d495bb0202174b6e4cc73b",
+        "project_sent": "3fc3bcde3bdd8277f7dde1409274cd54",
+        "trace": "651759e9d5c4fe6287a3f6ed2de02647",
+        "status": 404,
+        "body": {
+          "code": "not_found",
+          "retryable": false,
+          "detail": "not_found",
+          "request_id": "98dbde102288f98668e168facd26a1d5"
+        }
+      },
+      {
+        "actor": "reader-b",
+        "org_sent": "e3e629977d4bee3cfb066bd07872f759",
+        "project_sent": "3fc3bcde3bdd8277f7dde1409274cd54",
+        "trace": "651759e9d5c4fe6287a3f6ed2de02647",
+        "status": 404,
+        "body": {
+          "code": "not_found",
+          "retryable": false,
+          "detail": "not_found",
+          "request_id": "afe5ad1b73603676cf64c74c66fdc80d"
+        }
+      }
+    ],
+    "errors": [
+      {
+        "source": "5db2d5a79ff644195e5da29804029c4e",
+        "record": {
+          "occurrence_id": "81dabb1c144d43b22f9aa7096b32aefd",
+          "exception_class": "Error",
+          "mechanism": "manual",
+          "frames": [],
+          "exception_graph": {
+            "nodes": [
+              {
+                "id": 0,
+                "exception_class": "Error",
+                "frames": [],
+                "context_suppressed": false
+              }
+            ],
+            "edges": [],
+            "reasons": [
+              "foreign_or_custom_error_class",
+              "safe_original_stack_unavailable"
+            ]
+          },
+          "code": null,
+          "build_id": "893b5f18e4958052c1d24a99deff1d89",
+          "handled": true,
+          "fatal": false,
+          "trace_id": "651759e9d5c4fe6287a3f6ed2de02647",
+          "span_id": "b2e3e227aa244745"
+        }
+      },
+      {
+        "source": "10fd21a8d56c4db51cee29d669b868c8",
+        "record": {
+          "occurrence_id": "71b3cbedb37a933b66400793df4b41df",
+          "exception_class": "DependencyUnavailable",
+          "mechanism": "manual",
+          "frames": [
+            {
+              "module_id": "jobs/run.py",
+              "function": "run_attempt",
+              "artifact_id": "jobs/run.py",
+              "line": 46,
+              "column": null,
+              "in_app": true,
+              "async": false
+            },
+            {
+              "module_id": "jobs/run.py",
+              "function": "work",
+              "artifact_id": "jobs/run.py",
+              "line": 32,
+              "column": null,
+              "in_app": true,
+              "async": false
+            }
+          ],
+          "exception_graph": {
+            "nodes": [
+              {
+                "id": 0,
+                "exception_class": "DependencyUnavailable",
+                "frames": [
+                  {
+                    "module_id": "jobs/run.py",
+                    "function": "run_attempt",
+                    "artifact_id": "jobs/run.py",
+                    "line": 46,
+                    "column": null,
+                    "in_app": true,
+                    "async": false
+                  },
+                  {
+                    "module_id": "jobs/run.py",
+                    "function": "work",
+                    "artifact_id": "jobs/run.py",
+                    "line": 32,
+                    "column": null,
+                    "in_app": true,
+                    "async": false
+                  }
+                ],
+                "context_suppressed": false
+              }
+            ],
+            "edges": [],
+            "reasons": []
+          },
+          "code": null,
+          "build_id": "4f8fc5793edf739798c4b101802c04b5",
+          "handled": true,
+          "fatal": false,
+          "trace_id": "e93b13a31bca9db28f3202492f253d5a",
+          "span_id": "cdc488959c7e3866",
+          "run_id": "638309dea3cb1bcf411d6591f8d9a89b"
+        }
+      }
+    ],
+    "jobs": [
+      {
+        "source": "10fd21a8d56c4db51cee29d669b868c8",
+        "event": {
+          "job_id": "bb06f0be745e818fc0459f2fb7527f65",
+          "run_id": "638309dea3cb1bcf411d6591f8d9a89b",
+          "attempt_id": "440ad821ad68168a6a5513bf5fda2e4d",
+          "schedule_occurrence": "manual.638309dea3cb1bcf411d6591f8d9a89b",
+          "ordinal": "1",
+          "producer_epoch": "8a7e18b5e9aae41161f0023f98c298c8",
+          "sequence": "2",
+          "state": "failed",
+          "observed_ns": "1794320813394284479",
+          "terminal_ns": "1794320813843796633",
+          "cause_trace": "e93b13a31bca9db28f3202492f253d5a",
+          "cause_error": "71b3cbedb37a933b66400793df4b41df"
+        }
+      },
+      {
+        "source": "10fd21a8d56c4db51cee29d669b868c8",
+        "event": {
+          "job_id": "bb06f0be745e818fc0459f2fb7527f65",
+          "run_id": "638309dea3cb1bcf411d6591f8d9a89b",
+          "attempt_id": "440ad821ad68168a6a5513bf5fda2e4d",
+          "schedule_occurrence": "manual.638309dea3cb1bcf411d6591f8d9a89b",
+          "ordinal": "1",
+          "producer_epoch": "8a7e18b5e9aae41161f0023f98c298c8",
+          "sequence": "1",
+          "state": "started",
+          "observed_ns": "1794320813394284479",
+          "terminal_ns": null,
+          "cause_trace": "e93b13a31bca9db28f3202492f253d5a"
+        }
+      },
+      {
+        "source": "10fd21a8d56c4db51cee29d669b868c8",
+        "event": {
+          "job_id": "bb06f0be745e818fc0459f2fb7527f65",
+          "run_id": "638309dea3cb1bcf411d6591f8d9a89b",
+          "attempt_id": "8f036ed0c5d68ad8ae309d2dff9750ca",
+          "schedule_occurrence": "manual.638309dea3cb1bcf411d6591f8d9a89b",
+          "ordinal": "2",
+          "producer_epoch": "8a7e18b5e9aae41161f0023f98c298c8",
+          "sequence": "4",
+          "state": "succeeded",
+          "observed_ns": "1794320814094139115",
+          "terminal_ns": "1794320814144939690",
+          "cause_trace": "99d56990fa486ac5f94caa7c4b37609e"
+        }
+      },
+      {
+        "source": "10fd21a8d56c4db51cee29d669b868c8",
+        "event": {
+          "job_id": "bb06f0be745e818fc0459f2fb7527f65",
+          "run_id": "638309dea3cb1bcf411d6591f8d9a89b",
+          "attempt_id": "8f036ed0c5d68ad8ae309d2dff9750ca",
+          "schedule_occurrence": "manual.638309dea3cb1bcf411d6591f8d9a89b",
+          "ordinal": "2",
+          "producer_epoch": "8a7e18b5e9aae41161f0023f98c298c8",
+          "sequence": "3",
+          "state": "started",
+          "observed_ns": "1794320814094139115",
+          "terminal_ns": null,
+          "cause_trace": "99d56990fa486ac5f94caa7c4b37609e"
+        }
+      }
+    ],
+    "artifact": {
+      "uploaded": true,
+      "build": "893b5f18e4958052c1d24a99deff1d89",
+      "debug_id": "6472829283759c5226db0115c71de843",
+      "artifact_id": "6f091219705304cab54a3035a6496b1f",
+      "bundle_has_sourcemap_reference": false
+    },
+    "symbolication": {
+      "reason": "resolved",
+      "source": "src/receipt.ts",
+      "line": 24,
+      "column": 10,
+      "build": "893b5f18e4958052c1d24a99deff1d89",
+      "generated_position_from_real_page_error": true
+    },
+    "canary_flows": [
+      {
+        "canary": "CANARY_BODY_7f3a",
+        "reached": [
+          "dependency_prompt_counter",
+          "database_row"
+        ]
+      },
+      {
+        "canary": "CANARY_PROMPT_9b2f",
+        "reached": [
+          "dependency_prompt_counter"
+        ]
+      },
+      {
+        "canary": "CANARY_SQL_LITERAL_5d1e",
+        "reached": [
+          "postgres_statement_log"
+        ]
+      }
+    ],
+    "canary_leaks": null,
+    "replay": {
+      "attempted": true,
+      "admitted_chunks": 0,
+      "refusal": "sdk_recorder_chunks_not_enqueued",
+      "recorder_chunks": 1,
+      "stored_replay_rows": 0
+    },
+    "profile": {
+      "attempted": true,
+      "capability_status": "supported",
+      "capability_reason": "ok",
+      "stored_profile_rows": 0,
+      "sdk_enqueues_profile": false
+    },
+    "versions": {
+      "bun": "1.3.14",
+      "chrome": "156.0.8078.80",
+      "docker_server": "29.9.2",
+      "go": "go version go1.27.3 linux/amd64",
+      "kernel": "6.6.87.2-microsoft-standard-WSL2",
+      "node_linux": "v22.23.4",
+      "node_windows_vite": "v22.23.4",
+      "postgres": "PostgreSQL 16.14 (Debian 16.14-1.pgdg12+1) on x86_64-pc-linux-gnu, compiled by gcc (Debian 12.2.0-14+deb12u1) 12.2.0, 64-bit",
+      "postgres_image_id": "sha256:92620daddcd947f8d5ab5ba66e848702fe443d87fed30c4cea8e389fd78dfc55",
+      "python": "Python 3.12.3",
+      "python_cryptography": "41.0.7",
+      "python_httpx": "0.28.1",
+      "python_psycopg": "3.2.10",
+      "python_python": "3.12.3",
+      "soundpost": "0.0.0-journeys f135485 linux/amd64 built with ",
+      "soundpost_binary_sha256": "98076724770e4e1c797fb1924d69148079e2c59dcb46d7a01a81f1d917fd78d4",
+      "symbolicate_image_id": "sha256:f17b484080a9318209f91cf0e0d2c7bf922ba881f0bf6128ef8cbeccbffd6309"
+    },
+    "unsafe_storage_hits": null
+  },
+  "rows": [
+    {
+      "name": "gateway_dependency_child_span",
+      "required": true,
+      "satisfied": true,
+      "reason": "ok",
+      "detail": "trace=b28ffb1aa06ecc69c21fe6a3284ca8ba spans=6"
+    },
+    {
+      "name": "frontend_request_api_db_chain",
+      "required": true,
+      "satisfied": true,
+      "reason": "ok",
+      "detail": "trace=651759e9d5c4fe6287a3f6ed2de02647 spans=8"
+    },
+    {
+      "name": "error_admitted_with_known_build",
+      "required": true,
+      "satisfied": true,
+      "reason": "ok",
+      "detail": "1 error(s) with build 893b5f18e4958052c1d24a99deff1d89"
+    },
+    {
+      "name": "error_linked_to_request_trace",
+      "required": true,
+      "satisfied": true,
+      "reason": "ok",
+      "detail": "error 81dabb1c144d43b22f9aa7096b32aefd trace 651759e9d5c4fe6287a3f6ed2de02647"
+    },
+    {
+      "name": "build_source_map_uploaded",
+      "required": true,
+      "satisfied": true,
+      "reason": "ok",
+      "detail": "build=893b5f18e4958052c1d24a99deff1d89 debug=6472829283759c5226db0115c71de843 artifact=6f091219705304cab54a3035a6496b1f"
+    },
+    {
+      "name": "mapped_frame_at_known_location",
+      "required": true,
+      "satisfied": true,
+      "reason": "ok",
+      "detail": "src/receipt.ts:24:10 build=893b5f18e4958052c1d24a99deff1d89"
+    },
+    {
+      "name": "job_failed_attempt_retained_then_success",
+      "required": true,
+      "satisfied": true,
+      "reason": "ok",
+      "detail": "run=638309dea3cb1bcf411d6591f8d9a89b attempts=2"
+    },
+    {
+      "name": "same_trace_in_wrong_org_denied",
+      "required": true,
+      "satisfied": true,
+      "reason": "ok",
+      "detail": "4 denied probes"
+    },
+    {
+      "name": "canaries_absent_everywhere",
+      "required": true,
+      "satisfied": true,
+      "reason": "ok",
+      "detail": "3 canaries flowed, none stored"
+    },
+    {
+      "name": "db_span_safe_operation_only",
+      "required": true,
+      "satisfied": true,
+      "reason": "ok",
+      "detail": "4 postgres spans carry only db.execute"
+    },
+    {
+      "name": "replay_masked_interaction_real_recorder",
+      "required": true,
+      "satisfied": false,
+      "reason": "sdk_recorder_chunks_not_enqueued",
+      "detail": "recorder emitted 1 chunk(s); 0 admitted, 0 stored"
+    },
+    {
+      "name": "profile_linkage_with_capability_truth",
+      "required": true,
+      "satisfied": false,
+      "reason": "sdk_profile_not_delivered",
+      "detail": "capability=supported/ok; the SDK profiler returns a local report and enqueues nothing; 0 profile rows stored"
+    },
+    {
+      "name": "actual_ids_equal_expected",
+      "required": true,
+      "satisfied": true,
+      "reason": "ok",
+      "detail": "build=893b5f18e4958052c1d24a99deff1d89 job=bb06f0be745e818fc0459f2fb7527f65 run=638309dea3cb1bcf411d6591f8d9a89b traces=b28ffb1aa06ecc69c21fe6a3284ca8ba,651759e9d5c4fe6287a3f6ed2de02647"
+    },
+    {
+      "name": "actual_versions_recorded",
+      "required": true,
+      "satisfied": true,
+      "reason": "ok",
+      "detail": "9 components"
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+# Copyright 2026 Aryn Yklas
+# SPDX-License-Identifier: Apache-2.0
+#
+# Single-host, non-HA Soundpost. Persistent data lives in the named volume; nothing is
+# published beyond the loopback interface unless you change SOUNDPOST_PUBLISH. There is no
+# default password: the first start writes a one-time bootstrap token to
+# <data>/bootstrap.token (0600; only its path is logged, never the token; see
+# docs/operations/install-single.md). Required: SOUNDPOST_IMAGE, the image you built with
+# deploy/Dockerfile (there is no moving "latest" tag).
+name: soundpost
+
+services:
+  soundpost:
+    image: ${SOUNDPOST_IMAGE:?set SOUNDPOST_IMAGE to the soundpost image you built, pinned by tag or digest}
+    # Nonroot, no capabilities, immutable root filesystem. The data directory is the volume.
+    user: "65532:65532"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 512
+    restart: unless-stopped
+    stop_grace_period: 30s
+    ports:
+      - "${SOUNDPOST_PUBLISH:-127.0.0.1:8443}:8443"
+    volumes:
+      # Persistent disk. The image pre-creates it as 0700 for uid 65532, so a fresh volume
+      # inherits that mode; the server refuses to start on a directory it cannot make private.
+      - soundpost-data:/var/lib/soundpost
+    tmpfs:
+      - /tmp:size=64m,mode=0700,uid=65532,gid=65532
+    healthcheck:
+      test: ["CMD", "/soundpost", "ready", "--data-dir", "/var/lib/soundpost", "--timeout", "5s"]
+      interval: 10s
+      timeout: 6s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  soundpost-data:
+    name: ${SOUNDPOST_VOLUME:-soundpost-data}

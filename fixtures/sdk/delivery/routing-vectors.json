@@ -1,0 +1,162 @@
+{
+  "version": 1,
+  "org": "11111111111111111111111111111111",
+  "project": "22222222222222222222222222222222",
+  "source": "33333333333333333333333333333333",
+  "producer": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "vectors": [
+    {
+      "record": {
+        "kind": "metric",
+        "id": "88888888888888888888888888888888",
+        "observed_at_ns": "9007199254740993",
+        "payload": {
+          "name": "latency_😀",
+          "labels": [
+            {
+              "name": "a",
+              "value": "é"
+            },
+            {
+              "name": "",
+              "value": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+            },
+            {
+              "name": "𐀀",
+              "value": "雪"
+            }
+          ],
+          "sample_kind": "integer_histogram",
+          "histogram": {
+            "integer": {
+              "flavor": "counter",
+              "schema": 0,
+              "zero_threshold": "0000000000000000",
+              "sum": "0000000000000000",
+              "count": "9007199254740993",
+              "zero_count": "9007199254740993",
+              "positive_spans": [],
+              "negative_spans": [],
+              "positive_buckets": [],
+              "negative_buckets": [],
+              "reset_hint": "unknown"
+            }
+          },
+          "unit": "seconds",
+          "type": "histogram"
+        }
+      },
+      "owner_utf8_hex": "7b226c6162656c73223a5b7b226e616d65223a2261222c2276616c7565223a22c3a9227d2c7b226e616d65223a22ee8080222c2276616c7565223a2278787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878227d2c7b226e616d65223a22f0908080222c2276616c7565223a22e99baa227d5d2c226e616d65223a226c6174656e63795ff09f9880227d",
+      "slot": 15
+    },
+    {
+      "record": {
+        "kind": "log",
+        "id": "88888888888888888888888888888888",
+        "observed_at_ns": "9007199254740993",
+        "payload": {
+          "stream_labels": [
+            {
+              "name": "region",
+              "value": "雪😀"
+            }
+          ]
+        }
+      },
+      "owner_utf8_hex": "5b7b226e616d65223a22726567696f6e222c2276616c7565223a22e99baaf09f9880227d5d",
+      "slot": 38
+    },
+    {
+      "record": {
+        "kind": "span",
+        "id": "88888888888888888888888888888888",
+        "observed_at_ns": "9007199254740993",
+        "payload": {
+          "trace_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "owner_utf8_hex": "6262626262626262626262626262626262626262626262626262626262626262",
+      "slot": 23
+    },
+    {
+      "record": {
+        "kind": "error",
+        "id": "88888888888888888888888888888888",
+        "observed_at_ns": "9007199254740993",
+        "payload": {
+          "occurrence_id": "cccccccccccccccccccccccccccccccc"
+        }
+      },
+      "owner_utf8_hex": "6363636363636363636363636363636363636363636363636363636363636363",
+      "slot": 11
+    },
+    {
+      "record": {
+        "kind": "job_attempt",
+        "id": "88888888888888888888888888888888",
+        "observed_at_ns": "9007199254740993",
+        "payload": {
+          "run_id": "dddddddddddddddddddddddddddddddd"
+        }
+      },
+      "owner_utf8_hex": "6464646464646464646464646464646464646464646464646464646464646464",
+      "slot": 5
+    },
+    {
+      "record": {
+        "kind": "replay_chunk",
+        "id": "88888888888888888888888888888888",
+        "observed_at_ns": "9007199254740993",
+        "payload": {
+          "replay_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        }
+      },
+      "owner_utf8_hex": "6565656565656565656565656565656565656565656565656565656565656565",
+      "slot": 3
+    },
+    {
+      "record": {
+        "kind": "profile_chunk",
+        "id": "88888888888888888888888888888888",
+        "observed_at_ns": "9007199254740993",
+        "payload": {
+          "profile_id": "ffffffffffffffffffffffffffffffff"
+        }
+      },
+      "owner_utf8_hex": "6666666666666666666666666666666666666666666666666666666666666666",
+      "slot": 44
+    },
+    {
+      "record": {
+        "kind": "condition",
+        "id": "88888888888888888888888888888888",
+        "observed_at_ns": "9007199254740993",
+        "payload": {
+          "condition_id": "99999999999999999999999999999999"
+        }
+      },
+      "owner_utf8_hex": "3939393939393939393939393939393939393939393939393939393939393939",
+      "slot": 53
+    },
+    {
+      "record": {
+        "kind": "capability",
+        "id": "88888888888888888888888888888888",
+        "observed_at_ns": "9007199254740993",
+        "payload": {}
+      },
+      "owner_utf8_hex": "333333333333333333333333333333333333333333333333333333333333333361616161616161616161616161616161616161616161616161616161616161616361706162696c697479",
+      "slot": 14
+    },
+    {
+      "record": {
+        "kind": "loss",
+        "id": "88888888888888888888888888888888",
+        "observed_at_ns": "9007199254740993",
+        "payload": {}
+      },
+      "owner_utf8_hex": "333333333333333333333333333333333333333333333333333333333333333361616161616161616161616161616161616161616161616161616161616161616c6f7373",
+      "slot": 6
+    }
+  ]
+}

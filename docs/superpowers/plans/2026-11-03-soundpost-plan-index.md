@@ -1,11 +1,11 @@
 # Soundpost shared plan index
 
-Date: 2026-11-03. **DRAFT — implementation not authorized.** Aryn Yklas selected repository initialization and design first. Approve the [complete design](../specs/2026-11-03-soundpost-design.md) and [contracts](../specs/2026-11-03-soundpost-contracts.md), then select an execution method before product code, dependency installation or deployment. No execution method is already selected.
+Date: 2026-11-03. **APPROVED FOR IMPLEMENTATION.** Aryn Yklas approved the [complete design](../specs/2026-11-03-soundpost-design.md) and [contracts](../specs/2026-11-03-soundpost-contracts.md), selecting subagent-driven execution with m1 implementers and m2 reviewers. Approval permits product implementation and dependency installation, not public publication or customer infrastructure changes.
 
 ## Sources of truth and direct clarification
 
 1. [Selected requirements](../specs/2026-11-03-soundpost-requirements.md), including this session's direct owner clarifications.
-2. Shared design and C01–C12 contracts. Technical choices and numerical defaults remain proposals for approval, not inherited owner choices.
+2. Approved shared design and C01–C12 contracts. Technical choices and numerical defaults are implementation requirements pending real qualification, not measured capabilities.
 3. The subsystem plans below decide concrete implementation paths/tests from those contracts.
 4. [Active research digest](../../research/2026-11-03-primary-source-research.md); archived comparisons are not work items.
 
@@ -105,11 +105,10 @@ This diagram is module-level integration, not a demand that SDK initialization w
 
 Every subsystem release gate is cumulative: no placeholders, unimplemented replay/SSO/native sampling, fake source-map output, hidden cross-org lookups, subset language claim or partial architecture can be reported as the whole product. If a numerical budget or required environment fails, optimize or obtain explicit requirement revision; do not silently narrow scope.
 
-## Owner decision requested
+## Owner approval and execution
 
-Review the complete design/contracts, including the proposed Go/React stack, embedded replicated metadata,64-slot ownership, profile versions, browser/native limits, privacy/retention/restore contract and numerical policies/budgets. Approve or name changes. Execution options after approval:
+Aryn Yklas approved the complete design/contracts on 2026-11-03, including the Go/React stack, embedded replicated metadata, 64-slot ownership, profile versions, browser/native limits, privacy/retention/restore contract and numerical policies/budgets.
 
-- **Subagent-driven (recommended):** independent task and reviewer contexts at privacy/durability/language seams, with one integration owner and cumulative real-smoke gates.
-- **Native:** implement in this session with one final independent branch review; interfaces and acceptance obligations are identical.
+Execution: **Subagent-driven**, using **m1 (GPT-6.1 Sol)** implementers and **m2 (Qwen 3.8 Flash Next)** reviewers, with one integration owner and cumulative real-smoke gates.
 
 No GitHub repository/remote has been created or published by this design task. Local design history is separate from architecture approval and public release authorization.

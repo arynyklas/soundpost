@@ -1,0 +1,87 @@
+# Copyright 2026 Aryn Yklas
+# SPDX-License-Identifier: Apache-2.0
+# Single-host Soundpost server. Install as /etc/systemd/system/soundpost.service after
+# creating the unprivileged account (docs/operations/install-single.md):
+#   useradd --system --home-dir /var/lib/soundpost --shell /usr/sbin/nologin soundpost
+# The TLS key (if you bring your own certificate) is a systemd credential: systemd copies it
+# to a file in a private per-service directory, mode 0440 owned by root:root, and gives only
+# this service's user read access through an ACL (the group bits are the ACL mask). Serve accepts that file
+# because no "other" bit is set and its group is root; a key with an "other" bit, or in any
+# non-root group, is refused.
+[Unit]
+Description=Soundpost server (single host)
+Documentation=file:///usr/share/doc/soundpost/install-single.md
+After=network-online.target local-fs.target
+Wants=network-online.target
+# Soundpost needs a durable local disk. Refuse to start if the data volume is not mounted.
+RequiresMountsFor=/var/lib/soundpost
+
+[Service]
+Type=simple
+User=soundpost
+Group=soundpost
+# /var/lib/soundpost, created 0700 and owned by the service user; UMask keeps every file it
+# creates private (the server itself writes control.db, keys and tokens as 0600).
+StateDirectory=soundpost
+StateDirectoryMode=0700
+UMask=0077
+# Optional BYO certificate; remove both lines and the two --tls flags to let first boot
+# generate a stable self-signed identity in the data directory instead.
+LoadCredential=tls.crt:/etc/soundpost/tls/server.crt
+LoadCredential=tls.key:/etc/soundpost/tls/server.key
+# Off-host backup (docs/operations/backup-restore.md): to make deletions checkpoint to the
+# independent restore authority, add --authority-keys=<full key file, mode 0600> and
+# --authority-dir=<journal dir> (or the --authority-s3-* set) to ExecStart below; both or
+# neither. Not enabled here: it needs keys and a destination only the operator has.
+ExecStart=/usr/local/bin/soundpost serve --mode=single --data-dir=/var/lib/soundpost --listen=127.0.0.1:8443 --tls-cert=%d/tls.crt --tls-key=%d/tls.key --symbolicate-cgroup-root=/sys/fs/cgroup/system.slice/soundpost.service
+# Native symbolication sandbox (docs/operations/symbolication.md): systemd delegates this
+# unit's cgroup to the service user and keeps the server itself in the "main" sub-cgroup,
+# so the delegated parent holds no processes and the launcher may create private
+# per-request child groups there. Delegating memory and pids is all it needs.
+Delegate=memory pids
+DelegateSubgroup=main
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=30s
+KillSignal=SIGTERM
+
+# The unit grants no privilege at all: no capability, no new privileges, a read-only system,
+# a private /tmp and only the state directory writable. Native acquisition is a separate,
+# opt-in unit (soundpost-agent.service); the server itself is never root and never gets CAP_PERFMON.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+# ProtectControlGroups=yes mounts /sys/fs/cgroup read-only; only this unit's own delegated
+# cgroup is made writable again, which is all the sandbox launcher writes.
+ProtectControlGroups=yes
+ReadWritePaths=/sys/fs/cgroup/system.slice/soundpost.service
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+# The symbolication worker installs its own seccomp allowlist (docs/operations/symbolication.md).
+# seccomp(2) is in systemd's @sandbox group, not in @system-service, so without this line the
+# worker's install fails with EPERM and the startup probe reports probe_*_sandbox_unavailable.
+# With NoNewPrivileges=yes the call can only further restrict the calling process.
+SystemCallFilter=seccomp
+SystemCallErrorNumber=EPERM
+LimitNOFILE=65536
+TasksMax=4096
+
+[Install]
+WantedBy=multi-user.target

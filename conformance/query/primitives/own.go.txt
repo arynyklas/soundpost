@@ -1,0 +1,25 @@
+// Copyright 2026 Aryn Yklas
+// SPDX-License-Identifier: Apache-2.0
+package main
+import (
+ "fmt"
+ "github.com/arynyklas/soundpost/internal/query/profile"
+ "github.com/arynyklas/soundpost/internal/query/regexcompat"
+)
+var pinned profile.Profile
+func initialize(id,commit string){pinned=profile.Profile{ID:id,Commit:commit}}
+func compilePrimitive(pattern,mode string)(regex,string,error){
+ switch mode {
+ case "search":r,err:=regexcompat.Compile(pinned,pattern);return r,"",err
+ case "label":r,err:=regexcompat.CompileLabel(pinned,pattern);return r,"",err
+ default:panic("unknown regex mode")
+ }
+}
+func errorCode(err error)string{
+ if code,ok:=regexcompat.PatternErrorCode(err);ok{return code}
+ panic(fmt.Sprintf("unclassified owned error %T: %v",err,err))
+}
+func upper(s string)string{v,err:=regexcompat.ToUpper(pinned,s);if err!=nil{panic(err)};return v}
+func lower(s string)string{v,err:=regexcompat.ToLower(pinned,s);if err!=nil{panic(err)};return v}
+func fold(r rune)rune{v,err:=regexcompat.SimpleFold(pinned,r);if err!=nil{panic(err)};return v}
+func primitiveIdentity()map[string]string{return map[string]string{"implementation":"soundpost/regexcompat","unicode":"profile-pinned; see source manifest"}}

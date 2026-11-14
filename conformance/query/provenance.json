@@ -1,0 +1,956 @@
+{
+  "manifest_version": 1,
+  "policy": "Names and source-location hashes only; no upstream grammar, evaluator, test or documentation bodies reproduced. Apache first-party authored cases. Loki separately acquired artifacts remain AGPL-3.0-only.",
+  "files": [
+    {
+      "profile": "promql-prometheus-3.1.0",
+      "path": "cmd/prometheus/main.go",
+      "sha256": "be22f139cb76427f545266b1cc2cfab7aab513a61e8160f2d9df8476c5b581b2",
+      "url": "https://github.com/prometheus/prometheus/blob/7086161a93b262aa0949dbf2aba15a5a7b13e0a3/cmd/prometheus/main.go"
+    },
+    {
+      "profile": "promql-prometheus-3.1.0",
+      "path": "promql/engine.go",
+      "sha256": "d0b276d5dfeb5e984ed72fbaaca0ddbf1e9fb237c1d45193fa066c38a3d558d8",
+      "url": "https://github.com/prometheus/prometheus/blob/7086161a93b262aa0949dbf2aba15a5a7b13e0a3/promql/engine.go"
+    },
+    {
+      "profile": "promql-prometheus-3.1.0",
+      "path": "promql/functions.go",
+      "sha256": "45b3833dd4574a9947fadeabf5365e9f73185061284f7f350f9f7c18ba7c7568",
+      "url": "https://github.com/prometheus/prometheus/blob/7086161a93b262aa0949dbf2aba15a5a7b13e0a3/promql/functions.go"
+    },
+    {
+      "profile": "promql-prometheus-3.1.0",
+      "path": "promql/fuzz.go",
+      "sha256": "f201fc990adc378bdeeb492d8d3f5689d659142a1df663a10b3b65855efcf2b4",
+      "url": "https://github.com/prometheus/prometheus/blob/7086161a93b262aa0949dbf2aba15a5a7b13e0a3/promql/fuzz.go"
+    },
+    {
+      "profile": "promql-prometheus-3.1.0",
+      "path": "promql/histogram_stats_iterator.go",
+      "sha256": "a35d66e21b7cd261d56aea267f403bf35de1e234cce5f3652adc3fcb959d64c8",
+      "url": "https://github.com/prometheus/prometheus/blob/7086161a93b262aa0949dbf2aba15a5a7b13e0a3/promql/histogram_stats_iterator.go"
+    },
+    {
+      "profile": "promql-prometheus-3.1.0",
+      "path": "promql/info.go",
+      "sha256": "1778c92c889e2f9f0562763b2767f6b8e718a91b680268d0a54a2b911146f88f",
+      "url": "https://github.com/prometheus/prometheus/blob/7086161a93b262aa0949dbf2aba15a5a7b13e0a3/promql/info.go"
+    },
+    {
+      "profile": "promql-prometheus-3.1.0",
+      "path": "promql/parser/ast.go",
+      "sha256": "decf96e7d253a7c955ba005c2b7a63388d9045068c279edc7ed92b59ec447796",
+      "url": "https://github.com/prometheus/prometheus/blob/7086161a93b262aa0949dbf2aba15a5a7b13e0a3/promql/parser/ast.go"
+    },
+    {
+      "profile": "promql-prometheus-3.1.0",
+      "path": "promql/parser/functions.go",
+      "sha256": "11c6ce500ce42a8974f8bb1001cb2fc46886473bb32652c4ce453aecc293f366",
+      "url": "https://github.com/prometheus/prometheus/blob/7086161a93b262aa0949dbf2aba15a5a7b13e0a3/promql/parser/functions.go"
+    },
+    {
+      "profile": "promql-prometheus-3.1.0",
+      "path": "promql/parser/generated_parser.y",
+      "sha256": "d9b4a2db3aa58c3feabd970cf7e15ba50e438397ad5684d7221254e5191932c7",
+      "url": "https://github.com/prometheus/prometheus/blob/7086161a93b262aa0949dbf2aba15a5a7b13e0a3/promql/parser/generated_parser.y"
+    },
+    {
+      "profile": "promql-prometheus-3.1.0",
+      "path": "promql/parser/lex.go",
+      "sha256": "f5b2a20d9707a203245784c0003bc8534fb9d887684e1f31b686cf3e79b822bf",
+      "url": "https://github.com/prometheus/prometheus/blob/7086161a93b262aa0949dbf2aba15a5a7b13e0a3/promql/parser/lex.go"
+    },
+    {
+      "profile": "promql-prometheus-3.1.0",
+      "path": "promql/parser/parse.go",
+      "sha256": "80f600f4b76804d4a55223f5a8d045e5894bc61a13b5296a729c60a724d1b51e",
+      "url": "https://github.com/prometheus/prometheus/blob/7086161a93b262aa0949dbf2aba15a5a7b13e0a3/promql/parser/parse.go"
+    },
+    {
+      "profile": "promql-prometheus-3.1.0",
+      "path": "promql/parser/posrange/posrange.go",
+      "sha256": "230c87a46a2a7dc0c45a90891d2640b2ad517ea1dcabca3d6d8061d2e790fdb1",
+      "url": "https://github.com/prometheus/prometheus/blob/7086161a93b262aa0949dbf2aba15a5a7b13e0a3/promql/parser/posrange/posrange.go"
+    },
+    {
+      "profile": "promql-prometheus-3.1.0",
+      "path": "promql/parser/prettier.go",
+      "sha256": "1d56c35ea228f5c568a6b0c463bed8eaf0b887c394414711c041c3f9d9731fc3",
+      "url": "https://github.com/prometheus/prometheus/blob/7086161a93b262aa0949dbf2aba15a5a7b13e0a3/promql/parser/prettier.go"
+    },
+    {
+      "profile": "promql-prometheus-3.1.0",
+      "path": "promql/parser/printer.go",
+      "sha256": "f4c9e346af9b795f2632c59b675edb90c193977ef60d55a1bc440a64e9674535",
+      "url": "https://github.com/prometheus/prometheus/blob/7086161a93b262aa0949dbf2aba15a5a7b13e0a3/promql/parser/printer.go"
+    },
+    {
+      "profile": "promql-prometheus-3.1.0",
+      "path": "promql/parser/value.go",
+      "sha256": "b0a8f816e14ff7b47d81696626f424e783da8077067f26fa6bc74beacee10c9d",
+      "url": "https://github.com/prometheus/prometheus/blob/7086161a93b262aa0949dbf2aba15a5a7b13e0a3/promql/parser/value.go"
+    },
+    {
+      "profile": "promql-prometheus-3.1.0",
+      "path": "promql/promqltest/test.go",
+      "sha256": "4954c339e3fd61c9ab36ad5cd5be9bc2f36cc43e5e2977225a229388e85a98c5",
+      "url": "https://github.com/prometheus/prometheus/blob/7086161a93b262aa0949dbf2aba15a5a7b13e0a3/promql/promqltest/test.go"
+    },
+    {
+      "profile": "promql-prometheus-3.1.0",
+      "path": "promql/quantile.go",
+      "sha256": "16bef79cdcc2b5b7d51582c88ce23bffba2a45627a81a44f1ead16fa83c0cec9",
+      "url": "https://github.com/prometheus/prometheus/blob/7086161a93b262aa0949dbf2aba15a5a7b13e0a3/promql/quantile.go"
+    },
+    {
+      "profile": "promql-prometheus-3.1.0",
+      "path": "promql/query_logger.go",
+      "sha256": "fc90317fd907224a5747532ee19a48614d0ca8edf7cf45d3f3a80a3066b43be1",
+      "url": "https://github.com/prometheus/prometheus/blob/7086161a93b262aa0949dbf2aba15a5a7b13e0a3/promql/query_logger.go"
+    },
+    {
+      "profile": "promql-prometheus-3.1.0",
+      "path": "promql/value.go",
+      "sha256": "f306e0688acab0d9fa8706010d72179d45919738b4dff8874b87f19a272a8b05",
+      "url": "https://github.com/prometheus/prometheus/blob/7086161a93b262aa0949dbf2aba15a5a7b13e0a3/promql/value.go"
+    },
+    {
+      "profile": "promql-prometheus-3.1.0",
+      "path": "util/annotations/annotations.go",
+      "sha256": "15170d92e303191ac11cb6fb639b18a95554d2ef0fe257bfe358ad3a0aef6530",
+      "url": "https://github.com/prometheus/prometheus/blob/7086161a93b262aa0949dbf2aba15a5a7b13e0a3/util/annotations/annotations.go"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "path": "cmd/prometheus/main.go",
+      "sha256": "1ed01d530b9c053ab4e3d7700b50ec5690e15fa63b0347a0e0dad6496c040228",
+      "url": "https://github.com/prometheus/prometheus/blob/f497435984d1ca1d84cda5ed309387ac2eb1f8f6/cmd/prometheus/main.go"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "path": "promql/durations.go",
+      "sha256": "4f8c17844ec2b650dec93b6f0c0d5616962c06a78e8583725b9a9c93763a6c73",
+      "url": "https://github.com/prometheus/prometheus/blob/f497435984d1ca1d84cda5ed309387ac2eb1f8f6/promql/durations.go"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "path": "promql/engine.go",
+      "sha256": "783f764225cfbca3c8d6b55f0fba1760ea55b87bd6a9f8ac3b7905f9c212c10b",
+      "url": "https://github.com/prometheus/prometheus/blob/f497435984d1ca1d84cda5ed309387ac2eb1f8f6/promql/engine.go"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "path": "promql/functions.go",
+      "sha256": "8ebaeaab8678b1a8c01500ab5005332f5a16bacbe699cab35f6fa54d5aa3e175",
+      "url": "https://github.com/prometheus/prometheus/blob/f497435984d1ca1d84cda5ed309387ac2eb1f8f6/promql/functions.go"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "path": "promql/histogram_stats_iterator.go",
+      "sha256": "2cdd0742c501ca720710139200a3248203653cb152489de0fd9438e77e78a8a4",
+      "url": "https://github.com/prometheus/prometheus/blob/f497435984d1ca1d84cda5ed309387ac2eb1f8f6/promql/histogram_stats_iterator.go"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "path": "promql/info.go",
+      "sha256": "c34745c72c32bb2118ebeb5b6814144563d7b7f5e7bcc0382e02f673710dc0b5",
+      "url": "https://github.com/prometheus/prometheus/blob/f497435984d1ca1d84cda5ed309387ac2eb1f8f6/promql/info.go"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "path": "promql/parser/ast.go",
+      "sha256": "fa13978756be79fae4b72bd3ce0282b1a5d66be03fd07afab68c946a4bdc1a7a",
+      "url": "https://github.com/prometheus/prometheus/blob/f497435984d1ca1d84cda5ed309387ac2eb1f8f6/promql/parser/ast.go"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "path": "promql/parser/features.go",
+      "sha256": "2846244486fadd4cfd61036372b28e9d783268fb3d130402ba8f85a7aa76536c",
+      "url": "https://github.com/prometheus/prometheus/blob/f497435984d1ca1d84cda5ed309387ac2eb1f8f6/promql/parser/features.go"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "path": "promql/parser/functions.go",
+      "sha256": "d78b281888308eb1e1c44afee392ed06d1047c8d8ab1e6f036ea37428e77195b",
+      "url": "https://github.com/prometheus/prometheus/blob/f497435984d1ca1d84cda5ed309387ac2eb1f8f6/promql/parser/functions.go"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "path": "promql/parser/generated_parser.y",
+      "sha256": "299268003cee3f5d1329294c894db7a769848e6d7b6c29bfc3eb231b738b350e",
+      "url": "https://github.com/prometheus/prometheus/blob/f497435984d1ca1d84cda5ed309387ac2eb1f8f6/promql/parser/generated_parser.y"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "path": "promql/parser/lex.go",
+      "sha256": "5ddb072d7b3352184095eb84235c6c3bd792f8b43ae3270e46e55ed808efb68c",
+      "url": "https://github.com/prometheus/prometheus/blob/f497435984d1ca1d84cda5ed309387ac2eb1f8f6/promql/parser/lex.go"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "path": "promql/parser/parse.go",
+      "sha256": "a87f3be702b89394724a7b30f70ed989ff147185d1f16fed48051b7b5657538b",
+      "url": "https://github.com/prometheus/prometheus/blob/f497435984d1ca1d84cda5ed309387ac2eb1f8f6/promql/parser/parse.go"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "path": "promql/parser/posrange/posrange.go",
+      "sha256": "11534f13914e8e3a71b0562916bc1ce5ecbef978f4375afbabb12ac73beb4e02",
+      "url": "https://github.com/prometheus/prometheus/blob/f497435984d1ca1d84cda5ed309387ac2eb1f8f6/promql/parser/posrange/posrange.go"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "path": "promql/parser/prettier.go",
+      "sha256": "088b4a34d68fdbfba10516d89ed4cd3845564088e498f4ae9758105420edb4b8",
+      "url": "https://github.com/prometheus/prometheus/blob/f497435984d1ca1d84cda5ed309387ac2eb1f8f6/promql/parser/prettier.go"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "path": "promql/parser/printer.go",
+      "sha256": "bc899670d81dde8dab18085d3dc900276d31ccf38d4eb102025f36f07b941d88",
+      "url": "https://github.com/prometheus/prometheus/blob/f497435984d1ca1d84cda5ed309387ac2eb1f8f6/promql/parser/printer.go"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "path": "promql/parser/value.go",
+      "sha256": "bb7ae6b89acad9c7bf8cb684c6be32943a3c9edc3d73656e4ef4c85c1e93b3b2",
+      "url": "https://github.com/prometheus/prometheus/blob/f497435984d1ca1d84cda5ed309387ac2eb1f8f6/promql/parser/value.go"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "path": "promql/promqltest/cmd/migrate/main.go",
+      "sha256": "c355628efb6938df385931ea5c04f5e087bea12e0e8bf21e488ebb64d0ffc8ba",
+      "url": "https://github.com/prometheus/prometheus/blob/f497435984d1ca1d84cda5ed309387ac2eb1f8f6/promql/promqltest/cmd/migrate/main.go"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "path": "promql/promqltest/test.go",
+      "sha256": "0aca086a1d48f6d5d9e2c8b6c86e274b1c6f82680a776af3038835b1fab6a5b0",
+      "url": "https://github.com/prometheus/prometheus/blob/f497435984d1ca1d84cda5ed309387ac2eb1f8f6/promql/promqltest/test.go"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "path": "promql/promqltest/test_migrate.go",
+      "sha256": "02d4789541ecd847567eea54fcd964d4c303a5154413d8c2541ee41cab5b050d",
+      "url": "https://github.com/prometheus/prometheus/blob/f497435984d1ca1d84cda5ed309387ac2eb1f8f6/promql/promqltest/test_migrate.go"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "path": "promql/quantile.go",
+      "sha256": "018e9a84087e0462e3146d95328661d9e3b22ff31ae03a927a4fc545a954b2ce",
+      "url": "https://github.com/prometheus/prometheus/blob/f497435984d1ca1d84cda5ed309387ac2eb1f8f6/promql/quantile.go"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "path": "promql/query_logger.go",
+      "sha256": "a776827434f7267c719a19cb5bcdc62e7982371fd4c63cb9955b6178a81af5de",
+      "url": "https://github.com/prometheus/prometheus/blob/f497435984d1ca1d84cda5ed309387ac2eb1f8f6/promql/query_logger.go"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "path": "promql/value.go",
+      "sha256": "dac5178d42dceadc46ad34f95d1b854b49cd6e63b49394dbf09770224b240c45",
+      "url": "https://github.com/prometheus/prometheus/blob/f497435984d1ca1d84cda5ed309387ac2eb1f8f6/promql/value.go"
+    },
+    {
+      "profile": "promql-prometheus-3.13.5",
+      "path": "util/annotations/annotations.go",
+      "sha256": "f419ed2a4857e82752674922e8334f7bf9717a20bd5cc86e96b3c1b083fb5bdc",
+      "url": "https://github.com/prometheus/prometheus/blob/f497435984d1ca1d84cda5ed309387ac2eb1f8f6/util/annotations/annotations.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "cmd/loki/main.go",
+      "sha256": "7b53f62f3bd1c9993dbd2fcf6741ecf46b0a9a917bb9827eb20d0de5ad58c458",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/cmd/loki/main.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/accumulator.go",
+      "sha256": "2acb5519efcd7d1d7f623aa6d6872c41e743c88e0d671c4cc23cc4e01c751343",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/accumulator.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/bench/cmd/bench/main.go",
+      "sha256": "14f6b645a0f3ca61291e18749a8d1e7c6c90e655346a05645177bf3f97d8b35e",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/bench/cmd/bench/main.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/bench/cmd/bench/views/list.go",
+      "sha256": "052fca7209afe59d5f70fe05eacf3becfd3704efeadd815a07675eabcdd8ebc0",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/bench/cmd/bench/views/list.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/bench/cmd/bench/views/run.go",
+      "sha256": "8f5a5b3a5c5fdcf3240e70f306a6cfae8238c238500aaecc28d311ba90fa9d85",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/bench/cmd/bench/views/run.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/bench/cmd/bench/views/types.go",
+      "sha256": "5244bc6c31b532c811a27f391735924e4587fcf5a08d1817b514e651c8356af7",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/bench/cmd/bench/views/types.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/bench/cmd/generate/main.go",
+      "sha256": "25eec391ed05f3595a330b33a28fe2c944a2072aeb481ae8d2478779bd4fa81c",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/bench/cmd/generate/main.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/bench/cmd/stream/main.go",
+      "sha256": "56010f6680ba7d84ed957fd803277de4ace6ce585e4c0d60648c11b297865144",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/bench/cmd/stream/main.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/bench/faker.go",
+      "sha256": "7932de5ca91050943324c67a0d0a0f571a72a117c9789eaa5352d415a4477fa4",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/bench/faker.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/bench/generator.go",
+      "sha256": "d14f0c1c2771b0402145718b316a54d7e18f7456e2e695e107c563e02a884dd8",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/bench/generator.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/bench/generator_query.go",
+      "sha256": "e059fd1a831cd830fd964b77f603e266e85e99bb53691342a09752b863358c4e",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/bench/generator_query.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/bench/store.go",
+      "sha256": "6fad9d32b96cd5c0a016149829e4c9db37137f15f5b669ef364695de3bdebb5e",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/bench/store.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/bench/store_chunk.go",
+      "sha256": "531bdde9a346e88d0d258351a2710331234dbd1ecab1c1357787872f7c722e1c",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/bench/store_chunk.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/bench/store_dataobj.go",
+      "sha256": "62f41e4cf5fcca10542fdbdc1ff9c06e3320eb58d8ebff8a11e66f4395001b21",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/bench/store_dataobj.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/blocker.go",
+      "sha256": "f16701c6ae75dddb8581569599b0fdd1e7d652844d2c058601b9524bde8fa66e",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/blocker.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/count_min_sketch.go",
+      "sha256": "35a5bbca94d6140e8bf0a7afc7359b4961cc6384939ff8dfdab6d13351100aca",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/count_min_sketch.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/downstream.go",
+      "sha256": "dc34ce2e6138d18c7d850d47440c024e9bb0900d711574b58f337d29fdeaaf6f",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/downstream.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/engine.go",
+      "sha256": "208d82afb768b4f59461529952d13c9b85cdbe4013d5eddb007657cb145994d2",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/engine.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/evaluator.go",
+      "sha256": "207893d2ddf2ffd2f28640c46649ed407ae98d6475e9adeff8e041c98267273a",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/evaluator.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/explain.go",
+      "sha256": "9d77fe71d722e5ce5ed92923799200632beefee6e0f14d02e77d7ee6b13b5c99",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/explain.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/first_last_over_time.go",
+      "sha256": "8cf01644297a3592f6992bdc4c58b89f24d6d7114cde5516448f77050ab114fe",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/first_last_over_time.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/limits.go",
+      "sha256": "f580b2ff28383e3c20f87b2027f2b277b9734debfc0fdf4f902180bc744e46bf",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/limits.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/log/drop_labels.go",
+      "sha256": "691cf8c3cd183b73034c96107d32d6249b199f88c313adaf85e81708d5c40c75",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/log/drop_labels.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/log/error.go",
+      "sha256": "8e2b03c625587eec6510382758e538d262606b5e995767663b4f842699d833ed",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/log/error.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/log/filter.go",
+      "sha256": "229196d3f13a1131a95cc8605814c4f00f96897fc125443e9d4a3b0745903be1",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/log/filter.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/log/fmt.go",
+      "sha256": "65beeb56487e1af5c5d1fa7e2f367eddbc32786c8d68430248bdb9e58697caf5",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/log/fmt.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/log/ip.go",
+      "sha256": "4729f97dbcf93c79c307e53568b088a49844e9a38fa382211a7177f9df0c4ada",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/log/ip.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/log/jsonexpr/jsonexpr.y",
+      "sha256": "044e4b9184083d7ccc3185b3f1ad3f52e35306416f89203a3b1c9d942a8fa452",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/log/jsonexpr/jsonexpr.y"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/log/jsonexpr/lexer.go",
+      "sha256": "7aed220c87f4b14faa0ff255595be2579c28b03f36b6080244ba674193796666",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/log/jsonexpr/lexer.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/log/jsonexpr/parser.go",
+      "sha256": "8dc2e6cc58c76e76e90708d451026c2751bea175faa17db85b05be5565328b91",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/log/jsonexpr/parser.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/log/keep_labels.go",
+      "sha256": "b37d9af29ca1b45411da0b04041704bf84a6d0a3efeac11db75e160a407d40d2",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/log/keep_labels.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/log/label_extraction_expr.go",
+      "sha256": "3189670192dca184620dbd5dad9874ff1e2348ffb9724d141f3c64e999dba355",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/log/label_extraction_expr.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/log/label_filter.go",
+      "sha256": "0f100df71b5c70c36dd9a7d1d0b828fd3696969fea383a0a1fec0c8e9a1bd4dd",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/log/label_filter.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/log/labels.go",
+      "sha256": "26bc59beb5e2ef9a352efc09d00b56637b80ae575098925a842a02a904b4dd97",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/log/labels.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/log/logfmt/decode.go",
+      "sha256": "2a0daf412effd4c8cd20a549d6bce9f0fac2c0c2281150e283a9421df9ed8614",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/log/logfmt/decode.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/log/logfmt/jsonstring.go",
+      "sha256": "6199f8e6b263117d128af3afffecfd0650f640716804b524cffc333013470b24",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/log/logfmt/jsonstring.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/log/logfmt/lexer.go",
+      "sha256": "3c55120b42909b95a003c671e9a366e55df3aaaad62057ab13f3d7d3e9a60d66",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/log/logfmt/lexer.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/log/logfmt/logfmtexpr.y",
+      "sha256": "c87491c6f93192635df046267acd6f3dad9da17c92d30086160e89b1023f8c3b",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/log/logfmt/logfmtexpr.y"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/log/logfmt/parser.go",
+      "sha256": "7badf3121a95a6265925d8d1c5eb868234671f2f24d50b066c8b5a4da729d2b2",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/log/logfmt/parser.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/log/metrics_extraction.go",
+      "sha256": "ae6b7c077245f6bc298b81caf355396fc86784d518a47460b79e584b0983a0f6",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/log/metrics_extraction.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/log/parser.go",
+      "sha256": "10b4c1e2f8e6c1b39309bbec790db8bc438618d32f8d14a4e61d13837c2d7520",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/log/parser.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/log/parser_hints.go",
+      "sha256": "4e6de8b072e4285934c1e32718ed3ea73a8e3698431feea4e4d4576ec7aa6b4d",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/log/parser_hints.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/log/pattern/ast.go",
+      "sha256": "d2a417f0d87baad603b4993e355756ed9b1fb72e6e35ee4c2ff3332c9d7f8024",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/log/pattern/ast.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/log/pattern/expr.y",
+      "sha256": "f2028fb489b666dca36d6beb5a64340491d5769028146803c8169dec612075bf",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/log/pattern/expr.y"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/log/pattern/lexer.go",
+      "sha256": "74a727526708d3201da6250918fe45523ebc7432e670d99c45deb1422549d434",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/log/pattern/lexer.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/log/pattern/lexer.rl.go",
+      "sha256": "23bf8e409cffea16b182688f768931fb8e3d5ebf5300414ab547c0a4c9f3c2bb",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/log/pattern/lexer.rl.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/log/pattern/parser.go",
+      "sha256": "b8f550a04c07618dcc89feb69587f8391d1a7a8b37e956fa72cdb6a66f0364f8",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/log/pattern/parser.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/log/pattern/pattern.go",
+      "sha256": "77dd0860a5e8cfb2751dcbd0e40f400248ca32d041b68cf3df5ec43da252e160",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/log/pattern/pattern.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/log/pipeline.go",
+      "sha256": "2e24003ac841a5e6bfe779591d8b5c6ac1957d726c4c84382094c74a0aed09fb",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/log/pipeline.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/log/util.go",
+      "sha256": "b311596b884c70f5f266608393bceb74d749b6c122487d3c7666d8d9fc246c14",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/log/util.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/log/vector.go",
+      "sha256": "90e0ff63db965821635fada8dee2b991ab875534378b800515942d4041c3c3ab",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/log/vector.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/mapper_metrics.go",
+      "sha256": "0619a12b700c004b3bb426dd6b9b2fe87b528b93052c65d87ac062879daccf75",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/mapper_metrics.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/mapper_stats.go",
+      "sha256": "2fb43d0bfc66a7cba9f6c0d690a9e968556a824d5d665c26e735831eacb646d4",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/mapper_stats.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/matchers.go",
+      "sha256": "e7bd3be47c4001f6508d8d782ae5d61bda7e6a0c1bd132899869ec34c03cc79b",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/matchers.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/matrix.go",
+      "sha256": "f0075a9f0fff41d7652bbeebeaa84a5cd02c8b02493466700c61d7b653a29219",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/matrix.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/metrics.go",
+      "sha256": "8f165e6dac8f84f8764e14dee36b34e4db531082f460d8d9a0191e1fd875536a",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/metrics.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/optimize.go",
+      "sha256": "33304fce585ad5ee9627ae70ade85e2d4632c1c291c6b1857a2a6d9660f310b0",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/optimize.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/quantile_over_time_sketch.go",
+      "sha256": "4bf64eaa951b09cf2d471b657bcc350d0573a1cd55e16f5bfe749dcf9b967f91",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/quantile_over_time_sketch.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/range_vector.go",
+      "sha256": "1b73200708f63571f0c375b5da83f124d0e2edd2f6a2aac6f09962691a9ffed7",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/range_vector.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/rangemapper.go",
+      "sha256": "8641f3929e82ae849084872001627be43a7c3aad889d43dce72b175e6b7aa56f",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/rangemapper.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/shardmapper.go",
+      "sha256": "11bfdd0318a345400975eb1f545eb3a4c1efb909eaa8600cc33d91333b07ab1b",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/shardmapper.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/shards.go",
+      "sha256": "96815992de6a1a7e2f5d341c06ae979e4263dfac5c79efd81ba65473d74f6fc6",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/shards.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/sketch/cms.go",
+      "sha256": "2c605add4fbf2f63791d610a0ceedf2e7adc399841cb9817644243683b5506dd",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/sketch/cms.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/sketch/hash.go",
+      "sha256": "ce0ad100b717e9eca0d03ef5feffb854558cd139c17287d8ac852f3958a0798a",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/sketch/hash.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/sketch/heap.go",
+      "sha256": "c52430ef6cadd196378d22fffecd94e36e0de0f425587a1c29dfc8f9ded1251d",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/sketch/heap.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/sketch/quantile.go",
+      "sha256": "96322a83c699c1ec13104df26c229f6fafb7eb229f5266962f805a505f07053c",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/sketch/quantile.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/sketch/series.go",
+      "sha256": "e0e760504141327b11d146480a54c78a8610ecf8685778920c017f366518763c",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/sketch/series.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/sketch/topk.go",
+      "sha256": "933397d3e06f78355ff01442dc341f6c45a860aa534273b074df87bf37026dc4",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/sketch/topk.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/step_evaluator.go",
+      "sha256": "1b7981f7fb515f9d88d60a60cfd9cc10de551af4e1102a27a56502ea3cc94da2",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/step_evaluator.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/syntax/ast.go",
+      "sha256": "4a2d8808230c4545d1ff9742c90e87abad301239cd864d92e3a4eb23cbdc4782",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/syntax/ast.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/syntax/clone.go",
+      "sha256": "e5b683ddf6c5e2d082e51e7d0dced7ea1c1a95698712f75703cd223752e6074c",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/syntax/clone.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/syntax/extractor.go",
+      "sha256": "03073deae66ca8f45b36601ae95264f2778c907d272db4cb1c04e7d634ff1041",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/syntax/extractor.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/syntax/fuzz.go",
+      "sha256": "b0f96931c38f63f0068c6a1d19a43929f59eea8069abeeb8de188894d36e1a6c",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/syntax/fuzz.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/syntax/lex.go",
+      "sha256": "09445fce16eab0911378a58d93992f3a780f9e7585c0dcb5116e363858d4ae8a",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/syntax/lex.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/syntax/linefilter.go",
+      "sha256": "2c87b5709f681b3680c0d22ab3c9b4643a99cd267b9e52a06bcf69a5d5914813",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/syntax/linefilter.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/syntax/parser.go",
+      "sha256": "cf8441cbe84f798d64e5a69cce92629f0ab91c52cb73bab1b78d0986fb5b7c43",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/syntax/parser.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/syntax/prettier.go",
+      "sha256": "2e34cec03b0426dd37f8310a61813937cfa04594d51ac2fed385ccdbc4697d3c",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/syntax/prettier.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/syntax/query_scanner.go",
+      "sha256": "d344145614c8580f169fe0d02b80c6e339bc7c311478c9d5eae2ea528a7781a5",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/syntax/query_scanner.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/syntax/serialize.go",
+      "sha256": "993652599109acca2d3d7368133526d7f304780352c4e33bf37e75dfb8774d52",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/syntax/serialize.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/syntax/syntax.y",
+      "sha256": "cf3e7a35661a4301778efcc75b95616b3d35ed9bc80fa99e517acf681903ccd0",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/syntax/syntax.y"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/syntax/test_utils.go",
+      "sha256": "34a04b54d6579bec39d218ed7724558bfb2006aeeefd604409c46b10bac6c375",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/syntax/test_utils.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/syntax/visit.go",
+      "sha256": "378e4c2f4f21a6a09fa302ecb8796018d857f45155f2769aa76a51e8f4c5dcc2",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/syntax/visit.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/syntax/walk.go",
+      "sha256": "2ffa5a5a8130f765b796c3fefc06206310a1803107e6ac73e0c13e6346e3f77c",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/syntax/walk.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/test_utils.go",
+      "sha256": "f75d5a6c94bfd27eb7fd4f53509099ecaecc9556fafa9a0d247342a6488bbb1f",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/test_utils.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/tree_printer.go",
+      "sha256": "df80d04a54d50ac1feae02fd35cf771b09266daa28c728c8bc6a80a8f5817f1b",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/tree_printer.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/vector.go",
+      "sha256": "960b8d070046d06e87d2218536fd90c625e1bcd7917ca6521949c33a9a0fb454",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/vector.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logql/vector/heap.go",
+      "sha256": "23370f6753e09e902d82f09a3155f56557ecf132970c6ec6bc43689f7a055c90",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logql/vector/heap.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logqlmodel/error.go",
+      "sha256": "f481d2720f4b53c54c841b4eac2fa3dc6603c4e0aee8aa7e3f73a64c36cf85fe",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logqlmodel/error.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logqlmodel/logqlmodel.go",
+      "sha256": "cc9f0e96c82022f7fb5f52782ebe949903887819e22c72a02bf6afcd9b44cc11",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logqlmodel/logqlmodel.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logqlmodel/metadata/context.go",
+      "sha256": "2afd9cc89ce2b3dc16af542561e037ef1adcaade29e95475394a0a9d5d769357",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logqlmodel/metadata/context.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logqlmodel/stats/context.go",
+      "sha256": "0e8a180d0b24cb68a38dc535be047b77839a1d6b00760efff084a7d668b7fd1e",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logqlmodel/stats/context.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/logqlmodel/stats/stats.pb.go",
+      "sha256": "2ce1d31fa95d4a9473c2b2919ef64b029178b06f5992fde16a0a7afae4edbfbd",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/logqlmodel/stats/stats.pb.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/loki/common/common.go",
+      "sha256": "404dd539e055541e5cea6857286648aaba6c6fc5aaaf25b2901c5e0e2f76ca93",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/loki/common/common.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/loki/config_compat.go",
+      "sha256": "4132713ec2a86ddbffb69cdc5e2be7fedc3237153c2bb606c4e6dcff52228c08",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/loki/config_compat.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/loki/config_handler.go",
+      "sha256": "99e0c6d857b9181f4d03bf558ee10de555ee05998c81b0b6c47db8fa72c34966",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/loki/config_handler.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/loki/config_wrapper.go",
+      "sha256": "27306dbf258fcbd2032780221ccb9f705d652c33892931fc5dad3727f946ff8e",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/loki/config_wrapper.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/loki/delete_store_listener.go",
+      "sha256": "e3dca5ed1e52508809fe0d814ce011c7d4f03b85832d5a2ee531cd1d682b6d1a",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/loki/delete_store_listener.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/loki/format_query_handler.go",
+      "sha256": "d3109c550370f0f30224a5c5d6c375229496efdfb98711f1548733d244b61e7e",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/loki/format_query_handler.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/loki/loki.go",
+      "sha256": "aa44e76763039ecef0d8177efc0e65b5e295a7a2b7c2e763d6d3f8445a634b78",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/loki/loki.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/loki/modules.go",
+      "sha256": "b87530e3706d062c2b7486ed552ede2483d9afbc255ac2cda52a9350cd18ed44",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/loki/modules.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/loki/profiling_config.go",
+      "sha256": "26a58c84644c5d0fb8c90aef010fc4ff0a2285188a92a1129956b76e4ce7b44a",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/loki/profiling_config.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/loki/runtime_config.go",
+      "sha256": "10dad7b4092708b2c2f0b52a6c600801d48ab4f851dac7a056adf3f6f9cb9398",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/loki/runtime_config.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/loki/status.go",
+      "sha256": "1860b1f5b132eaf0c264f83f2b1feac00c60bf12a3b0aca785901ba6365b2bad",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/loki/status.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/loki/validation.go",
+      "sha256": "b17c6e71333b14f949bbb15dcf48c9004d00a453d5a7ced44193d639b811e7ea",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/loki/validation.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/loki/version_handler.go",
+      "sha256": "137e20f86be7995f350fbc94df56f48cb9180f36892258c7b386923f45537674",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/loki/version_handler.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/validation/exporter.go",
+      "sha256": "6a783fb4dfd0a60d488e447f5970f057f3aa38a71bdae1736b2b8818025da404",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/validation/exporter.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/validation/ingestion_policies.go",
+      "sha256": "205772f6322e05fbb56cd3806f7ce10d59f36d4aa789732eaacd207634547c5a",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/validation/ingestion_policies.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/validation/limits.go",
+      "sha256": "394c813df26a6161aa4d897af129237c228b2c63f6effe863800ba209fa4b7fd",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/validation/limits.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/validation/rate.go",
+      "sha256": "2bcad206af8f4300f80bbbd960afe68a3f12c7dc94fa00c80181937b88a85ee5",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/validation/rate.go"
+    },
+    {
+      "profile": "logql-loki-3.5.2",
+      "path": "pkg/validation/validate.go",
+      "sha256": "82cc78940ef1442a8d8fd4942b36cd88a9055bde78149ef050d2d767c7c1257a",
+      "url": "https://github.com/grafana/loki/blob/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/validation/validate.go"
+    }
+  ],
+  "accepted_audits": [
+    {
+      "path": "audits/promql.json",
+      "sha256": "6033b9778c09a6daf0168b4d4b2ae544cf19e00e1c1a5160f1c91d05e19ba9b1",
+      "policy": "Independently authored rules; factual upstream names/signatures/source-location hashes only."
+    },
+    {
+      "path": "audits/promql-primitives.json",
+      "sha256": "7ef60a7f685b9b29f2e2a12ef5a15531672060b1ab43427dcfa8d9ec673fa769",
+      "policy": "Independently authored rules; factual upstream names/signatures/source-location hashes only."
+    },
+    {
+      "path": "audits/logql.json",
+      "sha256": "e1b1e36b5364299615007ea7052e9b6c33afff83ffba26775b1878a354df32e4",
+      "policy": "Independently authored rules; factual upstream names/signatures/source-location hashes only."
+    },
+    {
+      "path": "audits/logql-configuration-evidence.json",
+      "sha256": "0362151d19b0dfd284d11e6ad7fa4396cef0be3d90001c9dba8c2250937695b8",
+      "policy": "Independently authored rules; factual upstream names/signatures/source-location hashes only."
+    },
+    {
+      "path": "audits/logql-template-evidence.json",
+      "sha256": "8872af47f235cf9b0f2bafe086b261743267ef794f4042a3befd152f309dc981",
+      "policy": "Independently authored rules; factual upstream names/signatures/source-location hashes only."
+    },
+    {
+      "path": "audits/logql-primitive-evidence.json",
+      "sha256": "ca66dd2de12674ed76bb4fbdb1743ef54e48421e46b53398de349404a5693826",
+      "policy": "Independently authored rules; factual upstream names/signatures/source-location hashes only."
+    }
+  ]
+}

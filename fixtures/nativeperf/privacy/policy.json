@@ -1,0 +1,182 @@
+{
+  "version": 1,
+  "comment": "Public synthetic privacy-canary policy for Soundpost task 04.08. Sentinels are generated per run from this pattern; only the fixture verifier and its tests know the nonce. No product code reads this file.",
+  "marker": "SPCNRY-",
+  "sentinel_pattern": "SPCNRY-%s-%s",
+  "nonce_hex_len": 6,
+  "kinds": [
+    {"id": "comm", "token": "C", "placement": "comm", "max_len": 15},
+    {"id": "stack", "token": "STACK", "placement": "stack_local"},
+    {"id": "heap", "token": "HEAP", "placement": "heap"},
+    {"id": "env", "token": "ENV", "placement": "environment"},
+    {"id": "argv", "token": "ARGV", "placement": "command_line"},
+    {"id": "path", "token": "PATH", "placement": "file_path"},
+    {"id": "input", "token": "INPUT", "placement": "input_string"},
+    {"id": "db", "token": "DB", "placement": "db_string"}
+  ],
+  "stages": [
+    "owned_sanitized_staging",
+    "acquisition_socket",
+    "exporter_queue",
+    "wire_compressed",
+    "wire_decompressed",
+    "admitted_storage",
+    "profile_read",
+    "profile_export",
+    "diagnostics"
+  ],
+  "syscalls": {
+    "forbidden": [
+      "ptrace",
+      "process_vm_readv",
+      "process_vm_writev",
+      "bpf",
+      "kcmp",
+      "userfaultfd",
+      "pidfd_getfd",
+      "seccomp",
+      "init_module",
+      "finit_module",
+      "kexec_load",
+      "kexec_file_load",
+      "mount",
+      "setns",
+      "unshare"
+    ],
+    "forbidden_open_path_regex": [
+      "^/proc/(self|thread-self|[0-9]+)(/task/[0-9]+)?/(mem|pagemap|clear_refs|kpagecount|kpageflags|environ|cmdline|syscall|stack|coredump_filter)$",
+      "^/proc/kcore$",
+      "^/proc/kallsyms$",
+      "^/sys/kernel/(debug/)?tracing/(trace|trace_pipe|trace_marker|set_event|events/.*/(enable|trigger|filter))$",
+      "^/sys/kernel/(debug/)?tracing/(kprobe_events|uprobe_events|dynamic_events)$",
+      "^/sys/kernel/debug/(kprobes|bpf)",
+      "^/sys/fs/bpf"
+    ],
+    "forbidden_open_name_regex": [
+      "(^|/)perf\\.data(\\.old)?$",
+      "(^|/)core(\\.[0-9]+)?$",
+      "\\.core$",
+      "(^|/)core\\.[A-Za-z0-9_-]+\\.[0-9]+$"
+    ],
+    "perf_event_open": {
+      "cpu": {
+        "types": ["PERF_TYPE_SOFTWARE", "PERF_TYPE_HARDWARE"],
+        "sample_type": [
+          "PERF_SAMPLE_IP",
+          "PERF_SAMPLE_TID",
+          "PERF_SAMPLE_TIME",
+          "PERF_SAMPLE_CALLCHAIN",
+          "PERF_SAMPLE_CPU",
+          "PERF_SAMPLE_PERIOD"
+        ],
+        "must_be_one_fields": ["disabled", "exclude_kernel", "exclude_hv", "sample_id_all", "use_clockid", "exclude_callchain_kernel"]
+      },
+      "scheduler": {
+        "types": ["PERF_TYPE_TRACEPOINT"],
+        "sample_type": [
+          "PERF_SAMPLE_TID",
+          "PERF_SAMPLE_TIME",
+          "PERF_SAMPLE_CALLCHAIN",
+          "PERF_SAMPLE_CPU",
+          "PERF_SAMPLE_RAW"
+        ],
+        "must_be_one_fields": ["disabled", "sample_id_all", "use_clockid"]
+      },
+      "must_be_zero_fields": [
+        "inherit",
+        "mmap",
+        "mmap2",
+        "mmap_data",
+        "inherit_stat",
+        "enable_on_exec",
+        "exclude_user",
+        "exclude_idle",
+        "context_switch",
+        "namespaces",
+        "ksymbol",
+        "bpf_event",
+        "aux_output",
+        "cgroup",
+        "text_poke",
+        "build_id",
+        "sample_regs_user",
+        "sample_stack_user",
+        "sample_regs_intr",
+        "branch_sample_type",
+        "aux_sample_size",
+        "sig_data",
+        "config1",
+        "config2",
+        "bp_type",
+        "bp_addr",
+        "bp_len"
+      ]
+    },
+    "ioctl_allow": ["PERF_EVENT_IOC_ENABLE", "PERF_EVENT_IOC_DISABLE"],
+    "source_allowed_syscall_numbers": {
+      "comment": "numeric syscall arguments inside the Go acquisition sources: pidfd_open, pidfd_send_signal",
+      "numbers": [424, 434]
+    },
+    "source_allowed_syscall_constants": [
+      "SYS_PERF_EVENT_OPEN",
+      "SYS_IOCTL",
+      "SYS_CLOCK_GETTIME"
+    ],
+    "source_allowed_ioctl_requests": [9216, 9217],
+    "source_allowed_syscall_symbol_regex": "^(Open|Openat|Close|Fstat|Dup|Mmap|Munmap|Getrlimit|Umask|GetsockoptUcred|Syscall|Syscall6|Stat_t|Rlimit|Ucred|Timespec|O_[A-Z]+|PROT_(READ|WRITE)|MAP_SHARED|S_IF(REG|MT)|SIG(INT|TERM)|E(PERM|ACCES|NOENT|NOSYS|NODEV|INVAL|OPNOTSUPP)|SO_PEERCRED|SOL_SOCKET|RLIMIT_NOFILE|SYS_(PERF_EVENT_OPEN|IOCTL|CLOCK_GETTIME))$",
+    "source_forbidden_identifiers": [
+      "SYS_PTRACE",
+      "SYS_PROCESS_VM_READV",
+      "SYS_PROCESS_VM_WRITEV",
+      "SYS_BPF",
+      "SYS_KCMP",
+      "SYS_USERFAULTFD",
+      "SYS_PIDFD_GETFD",
+      "PtraceAttach",
+      "PtraceSeize",
+      "PtracePeekData",
+      "PtracePeekText",
+      "PtraceGetRegs",
+      "PtraceSetRegs",
+      "PtraceCont",
+      "PtraceSyscall",
+      "PTRACE_ATTACH",
+      "PTRACE_SEIZE",
+      "PTRACE_PEEKDATA",
+      "PTRACE_GETREGS",
+      "PERF_SAMPLE_STACK_USER",
+      "PERF_SAMPLE_REGS_USER",
+      "PERF_SAMPLE_REGS_INTR",
+      "PERF_SAMPLE_BRANCH_STACK",
+      "PERF_SAMPLE_AUX",
+      "BPF_PROG_LOAD",
+      "PERF_EVENT_IOC_SET_BPF"
+    ],
+    "source_forbidden_string_regex": [
+      "/mem[\"'`]?$",
+      "/proc/[^ ]*/mem",
+      "perf\\.data",
+      "kcore",
+      "core_pattern",
+      "/bpf"
+    ],
+    "source_forbidden_imports": ["os/exec", "plugin", "golang.org/x/sys/unix", "runtime/pprof", "runtime/trace", "log", "log/slog", "net/http"]
+  },
+  "dump_policy": {
+    "systemd_unit": "packaging/systemd/soundpost-perf-acquire.service",
+    "required_directives": {"LimitCORE": "0"},
+    "forbidden_syscall_filter_tokens": ["ptrace", "process_vm_readv", "process_vm_writev", "bpf", "kcmp", "userfaultfd", "pidfd_getfd"]
+  },
+  "reason_vocabulary": [
+    "authorization_denied",
+    "topology_changed",
+    "source_canceled",
+    "resource_limit",
+    "thread_coverage_changed",
+    "generation_changed",
+    "loss",
+    "event_unavailable",
+    "permission_denied",
+    "acquisition_failed"
+  ]
+}

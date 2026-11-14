@@ -1,0 +1,4 @@
+# Third-party license and notice texts are kept byte for byte as published upstream;
+# their trailing whitespace is part of the text, not a style error.
+/THIRD_PARTY_NOTICES -whitespace
+/build/dependencies/license-texts/** -whitespace

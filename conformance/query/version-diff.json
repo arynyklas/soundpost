@@ -1,0 +1,134 @@
+{
+  "complete": true,
+  "changes": [
+    {
+      "kind": "function-signature-added",
+      "signature": "end()->scalar; variadic=0"
+    },
+    {
+      "kind": "function-signature-added",
+      "signature": "first_over_time(matrix)->vector; variadic=0"
+    },
+    {
+      "kind": "function-signature-added",
+      "signature": "histogram_quantiles(vector,string,scalar,scalar)->vector; variadic=9"
+    },
+    {
+      "kind": "function-signature-added",
+      "signature": "max_of(scalar,scalar)->scalar; variadic=0"
+    },
+    {
+      "kind": "function-signature-added",
+      "signature": "min_of(scalar,scalar)->scalar; variadic=0"
+    },
+    {
+      "kind": "function-signature-added",
+      "signature": "range()->scalar; variadic=0"
+    },
+    {
+      "kind": "function-signature-added",
+      "signature": "start()->scalar; variadic=0"
+    },
+    {
+      "kind": "function-signature-added",
+      "signature": "step()->scalar; variadic=0"
+    },
+    {
+      "kind": "function-signature-added",
+      "signature": "ts_of_first_over_time(matrix)->vector; variadic=0"
+    },
+    {
+      "kind": "function-signature-added",
+      "signature": "ts_of_last_over_time(matrix)->vector; variadic=0"
+    },
+    {
+      "kind": "function-signature-added",
+      "signature": "ts_of_max_over_time(matrix)->vector; variadic=0"
+    },
+    {
+      "kind": "function-signature-added",
+      "signature": "ts_of_min_over_time(matrix)->vector; variadic=0"
+    },
+    {
+      "kind": "semantic-change",
+      "description": "3.13.5 adds duration expression, extended range, binary fill, type/unit diagnostics and start timestamp engine contexts."
+    },
+    {
+      "kind": "semantic-change",
+      "description": "native-histograms and ooo-native-histograms switches become no-ops; native scrape configuration controls acquisition in 3.13.5."
+    },
+    {
+      "kind": "semantic-change",
+      "description": "3.13.5 annotation categories add histogram mixed-range, sort-in-range, NaN quantile/fraction, reset-collision and custom-bucket-reconciliation observations."
+    },
+    {
+      "kind": "semantic-change",
+      "description": "3.13.5 introduces histogram trim operators </ and >/; overload and finite/zero/infinite boundary rules are independently classified."
+    },
+    {
+      "kind": "profile-fact",
+      "profile": "promql-prometheus-3.1.0",
+      "description": "Grammar/token declarations, every binary feature switch and registration, every function signature and every named annotation are source-classified; private declarations map to responsibility families rather than demanded helper implementations."
+    },
+    {
+      "kind": "profile-fact",
+      "profile": "promql-prometheus-3.13.5",
+      "description": "Grammar/token declarations, every binary feature switch and registration, every function signature and every named annotation are source-classified; private declarations map to responsibility families rather than demanded helper implementations."
+    },
+    {
+      "kind": "semantic-change",
+      "description": "Both pins exclude exact lookback lower boundary; earlier inclusive wording was corrected from vectorSelectorSingle."
+    },
+    {
+      "kind": "semantic-change",
+      "description": "3.1.0 irate/idelta ignore histograms and take latest two floats; 3.13.5 takes latest two globally across kinds."
+    },
+    {
+      "kind": "semantic-change",
+      "description": "3.1.0 sort retains histogram samples and orders by float field; 3.13.5 filters histogram samples."
+    },
+    {
+      "kind": "semantic-change",
+      "description": "3.13.5 ts_of_first/last consider both float and histogram observation timestamps."
+    },
+    {
+      "kind": "semantic-change",
+      "description": "3.13.5 histogram custom variance representatives become arithmetic midpoints, unlike 3.1.0 geometric custom midpoint behavior."
+    },
+    {
+      "kind": "semantic-change",
+      "description": "3.13.5 native counter extrapolation caps start gap using histogram zero-count estimate; subquery histogram explicit reset hints become unknown."
+    },
+    {
+      "kind": "primitive-profile-identity",
+      "profile": "promql-prometheus-3.1.0",
+      "description": "go1.23.4 / Unicode15.0.0 / grafana-regexp v0.0.0-20240518133315-a468a5bfb3bc / xtext v0.21.0 selected Unicode15; owned Go1.27.3 / Unicode17 is not equivalent."
+    },
+    {
+      "kind": "primitive-profile-identity",
+      "profile": "promql-prometheus-3.13.5",
+      "description": "go1.26.10 / Unicode15.0.0 / grafana-regexp v0.0.0-20250905093917-f7b3be9d1853 / xtext v0.42.0 selected Unicode15; owned Go1.27.3 / Unicode17 is not equivalent."
+    },
+    {
+      "kind": "primitive-semantic-difference",
+      "description": "Go1.23.4 and Go1.26.10 both report Unicode15.0.0, but newer C includes unassigned codepoints and adds exact Cn/LC category names."
+    },
+    {
+      "kind": "owned-primitive-drift",
+      "description": "Go1.26/1.27 stdlib regex accepts canonicalized/aliased property names, Assigned and ASCII; both pinned Grafana regex parsers do not."
+    },
+    {
+      "kind": "owned-primitive-drift",
+      "description": "Unicode17 adds eleven script keys, 10615 formerly unassigned codepoints, new fold pairs and category reassignments. Do not use owned Unicode17 tables for either reference."
+    },
+    {
+      "kind": "primitive-semantic-difference",
+      "description": "Prometheus3.13.5 case-insensitive optimized prefix/suffix scans account for unequal UTF8 fold lengths, unlike3.1.0 fixed-byte slicing."
+    },
+    {
+      "kind": "transitive-primitive-drift",
+      "description": "x/text0.42 selects Unicode17 normalization tables when rebuilt under Go1.27; referenceGo1.26 selects Unicode15 despite same x/text module pin."
+    }
+  ],
+  "expected_answers_shared": false
+}

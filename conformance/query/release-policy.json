@@ -1,0 +1,29 @@
+{
+  "schema": "soundpost-query-release-policy/1",
+  "require_locked": true,
+  "require_zero_unbound": true,
+  "require_zero_skips": true,
+  "require_zero_mismatches": true,
+  "require_zero_unrun": true,
+  "require_oracle_observation": true,
+  "require_lossless_input_normalization": true,
+  "all_profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5",
+    "logql-loki-3.5.2"
+  ],
+  "required_persistence": [
+    "hot-read",
+    "flush",
+    "compaction",
+    "restart",
+    "receipt-manifest-reconciles"
+  ],
+  "required_isolation": [
+    "foreign-project-fails-closed",
+    "revocation-during-compute",
+    "cancellation-releases-everything",
+    "complete-rules-never-use-partial-data",
+    "no-production-path-reaches-an-oracle"
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ESNext"],
+    "types": ["bun-types"],
+    "typeRoots": ["../../../packages/bun/node_modules", "../../../packages/bun/node_modules/@types"],
+    "paths": {
+      "@soundpost/core": ["../../../packages/core/src/client.ts"],
+      "@soundpost/core/types": ["../../../packages/core/src/types.ts"],
+      "@soundpost/core/spool": ["../../../packages/core/src/spool.ts"]
+    }
+  },
+  "include": ["server.ts"]
+}

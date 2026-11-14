@@ -1,0 +1,25 @@
+{
+  "dataset": "Go1.24.5-distributed timezone archive",
+  "license": "BSD-3-Clause (Go distribution; IANA time-zone data is public domain)",
+  "upstream_release": "go1.24.5",
+  "approved_by": "Main, approved02.06 explicit pinned timezone dataset approval",
+  "archive_url": "https://go.dev/dl/go1.24.5.windows-amd64.zip",
+  "local_archive": ".tools/primitive-probe/archives/go1.24.5.windows-amd64.zip",
+  "files": [
+    {
+      "path": "zoneinfo.zip",
+      "source_url": "https://raw.githubusercontent.com/golang/go/go1.24.5/lib/time/zoneinfo.zip",
+      "original_sha256": "58b3770b2c2216eaa856c18464dcac90bcb8547764e40ef660ef3b0f19cd43d0",
+      "adapted_sha256": "58b3770b2c2216eaa856c18464dcac90bcb8547764e40ef660ef3b0f19cd43d0",
+      "adaptations": []
+    },
+    {
+      "path": "LICENSE",
+      "source_url": "https://raw.githubusercontent.com/golang/go/go1.24.5/LICENSE",
+      "original_sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad",
+      "adapted_sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad",
+      "adaptations": []
+    }
+  ],
+  "qualification": "The owned loader and native oracle must use these exact same bytes under an explicitly locked configuration. No claim is made that an unconfigured stock Loki artifact uses this dataset or that host Go/OS data is equivalent."
+}

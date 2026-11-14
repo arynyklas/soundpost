@@ -1,0 +1,9 @@
+# Copyright 2026 Aryn Yklas
+# SPDX-License-Identifier: Apache-2.0
+apiVersion: v2
+name: soundpost
+description: Three-voter (replication factor 3) Soundpost installation. Three independent members, one persistent volume each.
+type: application
+version: 0.1.0
+appVersion: "unset"
+kubeVersion: ">=1.25.0-0"

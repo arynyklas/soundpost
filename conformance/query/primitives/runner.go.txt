@@ -1,0 +1,98 @@
+// Copyright 2026 Aryn Yklas
+// SPDX-License-Identifier: Apache-2.0
+// Development-only source; assembled in an ignored private module by probe.py.
+package main
+
+import (
+ "encoding/base64"
+ "encoding/json"
+ "fmt"
+ "os"
+ "runtime"
+)
+
+type testCase struct {
+ ID string `json:"id"`
+ Operation string `json:"operation"`
+ Mode string `json:"mode"`
+ Pattern string `json:"pattern_b64"`
+ Input string `json:"input_b64"`
+ Replacement string `json:"replacement"`
+ Limit int `json:"limit"`
+ Runes []int32 `json:"runes"`
+}
+type request struct {
+ Profile string `json:"profile"`
+ Commit string `json:"commit"`
+ Cases []testCase `json:"cases"`
+}
+type regex interface {
+ MatchString(string) bool
+ FindStringSubmatchIndex(string) []int
+ FindAllStringSubmatchIndex(string,int) [][]int
+ ReplaceAllString(string,string) string
+ SubexpNames() []string
+ NumSubexp() int
+}
+type observation struct {
+ Accepted bool `json:"accepted"`
+ ErrorCode string `json:"error_code,omitempty"`
+ Match bool `json:"match"`
+ First []int `json:"first"`
+ All [][]int `json:"all"`
+ Names []string `json:"names"`
+ Captures int `json:"captures"`
+ Replacement string `json:"replacement_b64"`
+ Upper string `json:"upper_b64"`
+ Lower string `json:"lower_b64"`
+ Folds []int32 `json:"folds"`
+}
+type row struct {
+ ID string `json:"id"`
+ Normalized string `json:"normalized,omitempty"`
+ Observation observation `json:"observation"`
+}
+func decode(s string) string {
+ b,err:=base64.StdEncoding.DecodeString(s);if err!=nil{panic(err)};return string(b)
+}
+func encode(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
+func main() {
+ var q request
+ d:=json.NewDecoder(os.Stdin);d.DisallowUnknownFields()
+ if err:=d.Decode(&q);err!=nil{panic(err)}
+ initialize(q.Profile,q.Commit)
+ rows:=make([]row,0,len(q.Cases))
+ seen:=map[string]bool{}
+ for _,c:=range q.Cases {
+  if c.ID==""||seen[c.ID]{panic("empty or duplicate case ID")};seen[c.ID]=true
+  input:=decode(c.Input)
+  r:=row{ID:c.ID}
+  switch c.Operation {
+  case "regex":
+   re,normalized,err:=compilePrimitive(decode(c.Pattern),c.Mode)
+   r.Normalized=normalized
+   if err!=nil { r.Observation.ErrorCode=errorCode(err) } else {
+    r.Observation.Accepted=true
+    r.Observation.Match=re.MatchString(input)
+    r.Observation.First=re.FindStringSubmatchIndex(input)
+    r.Observation.All=re.FindAllStringSubmatchIndex(input,c.Limit)
+    r.Observation.Names=re.SubexpNames()
+    r.Observation.Captures=re.NumSubexp()
+    r.Observation.Replacement=encode(re.ReplaceAllString(input,c.Replacement))
+   }
+  case "case":
+   r.Observation.Accepted=true
+   r.Observation.Upper=encode(upper(input))
+   r.Observation.Lower=encode(lower(input))
+   r.Observation.Folds=make([]int32,len(c.Runes))
+   for i,v:=range c.Runes{r.Observation.Folds[i]=fold(v)}
+  default: panic("unknown operation")
+  }
+  rows=append(rows,r)
+ }
+ identity:=primitiveIdentity()
+ identity["compiler"]=runtime.Version();identity["goos"]=runtime.GOOS;identity["goarch"]=runtime.GOARCH
+ identity["profile"]=q.Profile;identity["commit"]=q.Commit
+ result:=struct{Identity map[string]string `json:"identity"`; Results []row `json:"results"`}{identity,rows}
+ if err:=json.NewEncoder(os.Stdout).Encode(result);err!=nil{fmt.Fprintln(os.Stderr,err);os.Exit(1)}
+}

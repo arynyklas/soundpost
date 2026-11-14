@@ -1,0 +1,19 @@
+# Copyright 2026 Aryn Yklas
+# SPDX-License-Identifier: Apache-2.0
+[build-system]
+requires = ["setuptools==84.1.0"]
+build-backend = "setuptools.build_meta"
+[project]
+name = "soundpost"
+version = "0.1.0rc1"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+authors = [{name = "Aryn Yklas"}]
+readme = "README.md"
+# A library states the oldest cryptography it works with (Ed25519 verification and AES-GCM), never an exact pin: an
+# exact pin forces every adopting application onto one release. The dev and integration locks still pin for tests.
+dependencies = ["cryptography>=41"]
+[project.optional-dependencies]
+test = ["pytest==9.0.3"]
+[tool.pytest.ini_options]
+pythonpath = ["src"]

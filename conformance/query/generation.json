@@ -1,0 +1,57 @@
+{
+  "schema": "soundpost-query-generation/1",
+  "languages": [
+    {
+      "language": "promql",
+      "profiles": ["promql-prometheus-3.1.0", "promql-prometheus-3.13.5"],
+      "axes": [
+        {"id": "sample_kind", "values": ["float", "native_histogram", "stale", "nan"]},
+        {"id": "time_window", "values": ["none", "offset", "at_modifier", "range_window", "subquery"]},
+        {"id": "metadata_mutation", "values": ["none", "metadata"]},
+        {"id": "order_duplicates", "values": ["none", "duplicate_timestamp", "tie_limit", "ordering"]}
+      ]
+    },
+    {
+      "language": "logql",
+      "profiles": ["logql-loki-3.5.2"],
+      "axes": [
+        {"id": "sample_kind", "values": ["plain_line", "structured_metadata", "newline_label"]},
+        {"id": "time_window", "values": ["none", "offset", "range_window"]},
+        {"id": "template_parse", "values": ["none", "template"]},
+        {"id": "metadata_mutation", "values": ["none", "metadata", "mutation"]},
+        {"id": "order_duplicates", "values": ["none", "duplicate_timestamp", "stage_order"]}
+      ]
+    }
+  ],
+  "excluded_combinations": [
+    {"language": "promql", "pair": ["sample_kind=native_histogram", "order_duplicates=tie_limit"], "reason": "topk and bottomk ignore native histogram samples; the combination yields an annotation, not an ordering interaction"},
+    {"language": "promql", "pair": ["sample_kind=native_histogram", "order_duplicates=ordering"], "reason": "sort functions ignore native histogram samples; the combination yields an annotation, not an ordering interaction"}
+  ],
+  "higher_order": [
+    {"language": "promql", "tuple": ["sample_kind=native_histogram", "time_window=range_window", "order_duplicates=duplicate_timestamp"]},
+    {"language": "promql", "tuple": ["sample_kind=stale", "time_window=subquery", "metadata_mutation=metadata"]},
+    {"language": "promql", "tuple": ["sample_kind=nan", "time_window=at_modifier", "order_duplicates=ordering"]},
+    {"language": "promql", "tuple": ["sample_kind=float", "time_window=offset", "order_duplicates=tie_limit", "metadata_mutation=metadata"]},
+    {"language": "logql", "tuple": ["sample_kind=newline_label", "template_parse=template", "metadata_mutation=mutation"]},
+    {"language": "logql", "tuple": ["sample_kind=structured_metadata", "time_window=range_window", "order_duplicates=stage_order"]},
+    {"language": "logql", "tuple": ["template_parse=template", "metadata_mutation=metadata", "order_duplicates=duplicate_timestamp", "time_window=offset"]}
+  ],
+  "negative_forms": [
+    {"id": "trailing-operator", "language": "promql", "wrap": "%s +", "category": "syntax"},
+    {"id": "unclosed-paren", "language": "promql", "wrap": "(%s", "category": "syntax"},
+    {"id": "trailing-operator", "language": "logql", "wrap": "%s |=", "category": "syntax"},
+    {"id": "unclosed-brace", "language": "logql", "wrap": "{%s", "category": "syntax"}
+  ],
+  "gate_probes": [
+    {"profile": "promql-prometheus-3.13.5", "gate": "promql-extended-range-selectors", "expression": "m[5m] smoothed", "category": "syntax"},
+    {"profile": "promql-prometheus-3.13.5", "gate": "promql-binop-fill-modifiers", "expression": "m + fill(0) m", "category": "syntax"}
+  ],
+  "special_arguments": {
+    "info": ["m", "{job=\"api\"}"]
+  },
+  "semantic_only_gates": {
+    "promql-delayed-name-removal": "changes name-drop timing, not syntax: no parser-visible rejection",
+    "type-and-unit-labels": "changes label semantics, not syntax",
+    "use-start-timestamps": "changes counter-reset evaluation, not syntax"
+  }
+}

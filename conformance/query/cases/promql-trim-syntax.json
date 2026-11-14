@@ -1,0 +1,15 @@
+{
+ "schema":"soundpost-authored-syntax-cases-v1",
+ "phase":"syntax",
+ "cases":[
+  {"id":"owned-trim-upper-vector-scalar","profiles":["promql-prometheus-3.13.5"],"enabled_features":[],"input":{"expression":"fixture_metric </ 2"},"expected":{"accepted":true,"type":"vector"},"obligation":"promql-prometheus-3.13.5/operator/trim-upper"},
+  {"id":"owned-trim-lower-vector-scalar","profiles":["promql-prometheus-3.13.5"],"enabled_features":[],"input":{"expression":"fixture_metric >/ 2"},"expected":{"accepted":true,"type":"vector"},"obligation":"promql-prometheus-3.13.5/operator/trim-lower"},
+  {"id":"owned-trim-scalar-parse-not-runtime","profiles":["promql-prometheus-3.13.5"],"enabled_features":[],"input":{"expression":"1 </ 2"},"expected":{"accepted":true,"type":"scalar"},"obligation":"promql-prometheus-3.13.5/operator/trim-upper"},
+  {"id":"owned-trim-tier-left-associative","profiles":["promql-prometheus-3.13.5"],"enabled_features":[],"input":{"expression":"fixture_metric + 1 </ 2 == 3"},"expected":{"accepted":true,"type":"vector"},"obligation":"promql-prometheus-3.13.5/operator/trim-upper"},
+  {"id":"owned-trim-vector-matching","profiles":["promql-prometheus-3.13.5"],"enabled_features":[],"input":{"expression":"fixture_left >/ on(job) group_left(zone) fixture_right"},"expected":{"accepted":true,"type":"vector"},"obligation":"promql-prometheus-3.13.5/operator/trim-lower"},
+  {"id":"owned-trim-upper-no-bool","profiles":["promql-prometheus-3.13.5"],"enabled_features":[],"input":{"expression":"fixture_metric </ bool 2"},"expected":{"accepted":false,"category":"type"},"obligation":"promql-prometheus-3.13.5/operator/trim-upper"},
+  {"id":"owned-trim-lower-no-string","profiles":["promql-prometheus-3.13.5"],"enabled_features":[],"input":{"expression":"fixture_metric >/ \"bad\""},"expected":{"accepted":false,"category":"type"},"obligation":"promql-prometheus-3.13.5/operator/trim-lower"},
+  {"id":"owned-trim-upper-old-profile","profiles":["promql-prometheus-3.1.0"],"enabled_features":[],"input":{"expression":"fixture_metric </ 2"},"expected":{"accepted":false,"category":"syntax"}},
+  {"id":"owned-trim-lower-old-profile","profiles":["promql-prometheus-3.1.0"],"enabled_features":[],"input":{"expression":"fixture_metric >/ 2"},"expected":{"accepted":false,"category":"syntax"}}
+ ]
+}

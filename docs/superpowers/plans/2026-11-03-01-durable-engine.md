@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status:** DRAFT. No step is authorized until the owner approves the full design and selects an execution method. No command below has been exercised; source paths are planned Create operations.
+**Status:** APPROVED for implementation by Aryn Yklas on 2026-11-03 with m1 implementers and m2 reviewers. Planned commands are acceptance instructions, not executed results. Source paths are Create operations until implemented.
 
 **Goal:** Deliver an actual authenticated, privacy-checked, durable single-host/distributed telemetry engine with scope-enforced scans and retention/deletion.
 
@@ -39,6 +39,8 @@
 
 `auth.Service` is the injected owner of session/login/local/OIDC/elevation operations; `httpapi.RegisterSessionRoutes(mux,*auth.Service)` owns real C11 routes. UI plan05 consumes it rather than creates a second auth backend. The later Raft cutover removes the obsolete local-only write path, with no compatibility adapter retained.
 
+Keep the C02/C05 seam opaque and acyclic: plain control state/command/result DTOs belong in the shared model leaf; auth consumes a narrow store interface over those DTOs, while control accepts the exact `auth.Scope` at `Transact`. Do not replace it with a caller-implementable authorization interface. Task1 declares the closed C05 command kinds and generates the complete authorization VisibilityFingerprint, including named restricted-source grants. Add a behavioral same-org/disjoint-source-grants isolation case. Later command owners explicitly extend the shared control DTO/apply files:01.02 quotas,01.08 fences/deletion/evidence gaps,02.11 rule evaluation,06.01–05 evidence/releases/jobs/conditions/incidents and06.07–09 delivery/cutover. Those edits remain coordinated by the integration owner; control never imports feature implementations.
+
 Task1 also creates `internal/httpapi/admin.go`, `internal/httpapi/admin_test.go`, C11 `AdminCommandRequest`/`AdminReadRequest` and real closed `/api/v1/admin/commands`/`admin/read` routes. `TestAdminCannotGrantOutsideOrgOrReadSecrets` proves instance-only org creation, scoped org/team/project/membership/source-policy/SSO management, write-only secrets, reauthentication/audit and ordinary-member denial through actual HTTP. UI consumes these routes; no CLI-only hidden onboarding requirement.
 
 - [ ] Write `TestBootstrapTokenConsumedOnce`, `TestProjectGrantNotOrgMembership`, `TestOIDCIssuerStateNonceAndPKCE`, `TestElevationAuditsBeforeRead`, `TestRevocationStopsLiveResult` with real temp storage/server and local signed OIDC fixture. Assert bootstrap second use is unauthorized; an org member without a project grant receives not-found for its object; forged issuer/nonce and reused state reject; failed audit commit yields no elevated result.
@@ -49,13 +51,14 @@ Task1 also creates `internal/httpapi/admin.go`, `internal/httpapi/admin_test.go`
 
 ### Task 2: Typed admission and privacy contract
 
-**Files:** Create `internal/ingest/{types,codec,canonical,service,routing,receipts}.go`, `internal/policy/{source,templates,quota}.go`, `internal/control/quota.go`, `internal/httpapi/ingest.go`, `internal/ingest/admission_test.go`, `docs/protocol/ingestion-v1.md`.
+**Files:** Create `internal/model/telemetry.go`, `internal/ingest/{types,codec,canonical,service,routing,receipts}.go`, `internal/policy/{source,templates,quota}.go`, `internal/control/quota.go`, `internal/httpapi/ingest.go`, `internal/ingest/admission_test.go`, `docs/protocol/ingestion-v1.md`; extend shared leaf control command DTOs/apply under the integration owner.
 
 **Interfaces:** Consume auth/control and C01; produce C03 `Batch`, `Record`, `Receipt`, `ResolveSource`, `Normalize`, `Admit`, C04 closed typed payloads in `internal/model/telemetry.go`. `Payload` uses typed concrete variants, not an arbitrary object bag. `SourceGrant` is opaque and credential-bound.
 
 - [ ] Write `TestAdmissionAtomicPolicyAndLimits`: a 513-record batch, gzip expansion over 4 MiB, duplicate JSON key, mismatched project, unknown template and mixed payload tag each produce a terminal safe error and zero accepted records. Approved template fields survive; unknown optional keys disappear before canonical bytes. Assert float stale bits/native integer histogram counts survive exactly.
 - [ ] Write `TestBrowserSourceKeyCannotReadOrElevate` and `TestQuotaReservationIsAtomic`: a public source key can only append its project, and concurrent reservations cannot exceed a hard cap then acknowledge rejected excess.
 - [ ] Write `TestOwnerRoutingAndConcurrentMetricConflict` and `TestReservationNotRefundedOnAmbiguousAppend`: fixed64 owner routing maps same metric across producers to one slot; mixed-slot batch admits zero; equal same-series/time/type/value collapses and different value conflicts at ordered apply, not only preflight. A timeout/router death leaves quota charged until a committed cancellation fence plus owner-group no-commit proof.
+- [ ] Exercise browser-source HTTP admission with `X-Soundpost-Source`, exact configured CORS origins, exposed retry/receipt headers and no ingestion cookies. Reject foreign origins and wildcard-with-cookie behavior. Assert the C12 `CancelReservation` DTO and its committed cancellation fence, not a TTL-only refund.
 - [ ] Run `go test ./internal/ingest ./internal/policy -run 'TestAdmission|TestBrowserSource|TestQuota' -count=1`; expect missing behavior failures.
 - [ ] Implement C03/C04 codec, canonical hashing, fixed64 owner routing and C12 durable global quota reservations. Source descriptors expose routing identity only, not read grants. Preserve integer histogram counts above2^53, immutable native template-revision log line, stream-label/structured-metadata separation and per-signal retention deadlines. Policy changes use the C12 barrier, not ReadIndex-only cross-group assumptions. Bounded decompression/errors never log rejected payloads.
 - [ ] Rerun tests and `go run ./tools/smoke privacy-admission --artifact-dir <temp>` with canary strings across forbidden fields and failed batches; expected no canary in admitted records, diagnostic output or persisted files. Document policy/retry semantics; commit `feat(ingest): Enforce typed atomic source admission`.
@@ -67,7 +70,7 @@ Task1 also creates `internal/httpapi/admin.go`, `internal/httpapi/admin_test.go`
 **Interfaces:** Produce C03 `Append(ctx,scope,NormalizedBatch)(Receipt,error)` and exact durable receipt; WAL header version/length/CRC32C/term/index. Stable dedup key/hash/retention decisions persist with applied cursor. Store infrastructure exposes injectable syscall faults only in internal tests; no consumer-visible bypass.
 
 - [ ] Write `TestRetryReturnsOriginalReceiptAcrossRestart`: append batch B, lose response, restart, retry B and assert original hash/cursor/retention/dedup times and exactly one logical event. Same ID/different content must return conflict without changing B.
-- [ ] Write `TestHistoricalReceiptLookupAfterPolicyDeleteAndRevocation`: C03 LookupReceipt with current valid source returns unchanged receipt/hash/deadlines after restrictive policy/historical deletion without normalization/reservation/append; invalid/revoked credentials or retired scope deny. Receipt lookup is not post-fence new admission and cannot resurrect data.
+- [ ] Write `TestHistoricalReceiptLookupAfterPolicyDeleteAndRevocation`: C03 LookupReceipt with current valid source returns unchanged receipt/hash/deadlines and `historical:true` after restrictive policy/historical deletion without normalization/reservation/append; invalid/revoked credentials or retired scope deny. Receipt lookup is not post-fence new admission and cannot resurrect data.
 - [ ] Write `TestSyncFailureNeverAcknowledges`, `TestTornTailRecovery`, `TestInteriorCorruptionRefusesRead`; inject failure at write/sync/receipt/apply points and assert never return a durable receipt before its required writes, tail truncation only, interior corruption explicit fault.
 - [ ] Run `go test ./internal/storage -run 'TestRetry|TestSync|TestTorn|TestInterior' -count=1`; verify red behavior.
 - [ ] Implement owned WAL and crash-consistent receipt/applied-cursor bbolt transactions with explicit write/sync/directory-fsync/rename ordering. Use the one-voter group interface that Task 6 wires to the same state machine. No blanket success after enqueue and no unacknowledged post-ACK drop.
@@ -144,6 +147,8 @@ Also produce C05 `(*Engine).Subscribe(ctx,scope,SubscribeRequest)(ChangeIterator
 **Files:** Create `internal/backup/{manifest,encrypt,object,authority,restore,reconcile}.go`, `internal/auth/restore.go`, `cmd/soundpost/backup.go`, `internal/backup/restore_test.go`, `tools/smoke/backup.go`, `docs/operations/backup-restore.md`.
 
 **Interfaces:** `Backup(ctx,Scope,SnapshotSet,Destination)(BackupManifest,error)`, `Restore(ctx,BackupManifest,DestinationRoot,DeletionLedger)(RestoreReport,error)`; manifests include hash/size/cursors/retention/delete generation and encryption key IDs. Optional S3-compatible destination is a backup/export primitive; local retained replicas remain authoritative.
+
+Implement the exact C12 authority seam `CheckpointDeletion(ctx,LedgerGeneration)(AuthorityReceipt,error)` and `CurrentDeletionLedger(ctx)(Ledger,error)`; consumers use those names rather than a second backup/deletion authority protocol.
 
 - [ ] Write `TestRestoreRequiresCurrentDeletionLedger`, `TestRestoreDisablesSourcesAndSenders`, `TestMissingObjectAndWrongKeyFailClosed`: restore must not reemit notifications or revive source secrets, omit ACKed data silently, or serve old deleted content.
 - [ ] Write `TestAuthorityFailurePreventsCompletedDeletion` and `TestRestoreNeverReactivatesRevokedIdentity`: backup precedes deletion/token revoke/account demotion; current independently durable authority suppresses deleted data, missing authority fails closed, all old sessions/API/source/MFA/OIDC-derived privileges remain inactive under fresh auth generation. Fresh login cannot restore former grants before audited reauthorization.

@@ -1,0 +1,5 @@
+Timezone database distributed with Go 1.24.5.
+Go distribution copyright The Go Authors; BSD-3-Clause terms retained in LICENSE.
+IANA time-zone data is public domain; this is a byte-for-byte distribution artifact, not an independently inferred IANA release identity.
+Exact source URLs, original/adapted SHA-256 and controlled-configuration qualification are in provenance.json.
+The adjacent owned LoadLocation implementation is independently authored Apache-2.0 by Aryn Yklas.

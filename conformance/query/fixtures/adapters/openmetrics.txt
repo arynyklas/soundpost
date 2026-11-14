@@ -1,0 +1,16 @@
+# TYPE http_requests counter
+# UNIT http_requests requests
+# HELP http_requests Total requests served.
+http_requests_total{job="api"} 12 1700000000.123456789 # {trace_id="0af7651916cd43dd8448eb211c80319c",span_id="b7ad6b7169203331"} 1 1700000000.1
+http_requests_created{job="api"} 1699999000.5
+# TYPE queue_depth gauge
+queue_depth{job="worker"} NaN 1700000000
+queue_depth{job="api"} -0 1700000000
+queue_depth{job="api"} +Inf 1700000001
+# TYPE latency histogram
+latency_bucket{job="api",le="0.5"} 3 1700000000
+latency_bucket{job="api",le="+Inf"} 4 1700000000
+latency_count{job="api"} 4 1700000000
+latency_sum{job="api"} 1.5 1700000000
+latency_created{job="api"} 1699999000.5
+# EOF
