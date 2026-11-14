@@ -36,6 +36,10 @@ type Scraper struct {
 	// Attempts bounds the admission retries of one batch within a cycle; the
 	// batch identifiers are deterministic, so a retry is idempotent. Zero is 3.
 	Attempts int
+	// Revision, when set, supplies the source policy revision of the grant the
+	// last Grant call resolved; the cycle's batches are stamped with it. Zero
+	// keeps the target's configured revision.
+	Revision func() model.Revision
 
 	mu       sync.Mutex
 	previous []SeriesRef
@@ -72,6 +76,11 @@ func (s *Scraper) Once(ctx context.Context) (ScrapeResult, error) {
 	grant, err := s.Grant(ctx)
 	if err != nil {
 		return ScrapeResult{}, err
+	}
+	if s.Revision != nil {
+		if rev := s.Revision(); rev != 0 {
+			target.Profile.PolicyRevision = rev
+		}
 	}
 	res, err := FetchScrape(ctx, grant, target)
 	if err != nil {

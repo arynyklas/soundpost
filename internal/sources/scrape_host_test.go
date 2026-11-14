@@ -209,6 +209,35 @@ func (r *hostRig) writeConfig(mutate func(target map[string]any)) {
 // in-process exporter on 127.0.0.1 is reachable (production can never lift it).
 func (r *hostRig) start(t *testing.T, loopback bool) *ScrapeHost {
 	t.Helper()
+	return r.startWith(t, loopback, nil)
+}
+
+// startFollow is start with the live policy reader supplied (followed targets need it).
+func (r *hostRig) startFollow(t *testing.T, loopback bool) *ScrapeHost {
+	t.Helper()
+	return r.startWith(t, loopback, r.f.app.Auth)
+}
+
+// specsFromConfig loads the rig configuration through the real loader.
+func (r *hostRig) specsFromConfig(t *testing.T) (ScrapeConfig, []ScrapeTargetSpec) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "scrape.json")
+	if err := os.WriteFile(path, r.configRaw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadScrapeConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	specs, err := cfg.Specs(r.reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cfg, specs
+}
+
+func (r *hostRig) startWith(t *testing.T, loopback bool, policies SourcePolicyReader) *ScrapeHost {
+	t.Helper()
 	path := filepath.Join(t.TempDir(), "scrape.json")
 	if err := os.WriteFile(path, r.configRaw, 0o600); err != nil {
 		t.Fatal(err)
@@ -226,7 +255,7 @@ func (r *hostRig) start(t *testing.T, loopback bool) *ScrapeHost {
 		adjust = func(tg *ScrapeTarget) { tg.Egress.loopbackOK = true }
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	h, err := startScrapeHost(ctx, ScrapeHostDeps{Auth: r.f.app.Auth, Ingest: r.ingest, Secrets: r.reader}, specs, adjust)
+	h, err := startScrapeHost(ctx, ScrapeHostDeps{Auth: r.f.app.Auth, Ingest: r.ingest, Secrets: r.reader, Policies: policies}, specs, adjust)
 	if err != nil {
 		cancel()
 		t.Fatal(err)
@@ -512,7 +541,7 @@ func TestScrapeGrantIsResolvedFreshPerAttempt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	grant := scrapeGrantFunc(ScrapeHostDeps{Auth: r.f.app.Auth, Ingest: r.ingest, Secrets: r.reader}, specs[0])
+	grant := scrapeGrantFunc(ScrapeHostDeps{Auth: r.f.app.Auth, Ingest: r.ingest, Secrets: r.reader}, specs[0], new(atomic.Uint64))
 	first, err := grant(r.f.ctx)
 	if err != nil {
 		t.Fatal(err)

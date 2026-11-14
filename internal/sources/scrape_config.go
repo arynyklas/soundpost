@@ -100,12 +100,15 @@ type ScrapeConfigProfile struct {
 // target never carries an identity of its own: it uses a source credential the
 // operator provisioned, stored under CredentialSecret in the secrets directory.
 type ScrapeConfigSource struct {
-	Project          string               `json:"project"`
-	Source           string               `json:"source"`
-	Producer         string               `json:"producer"`
-	PolicyRevision   uint64               `json:"policy_revision"`
-	CredentialSecret string               `json:"credential_secret"`
-	Resource         ScrapeConfigResource `json:"resource"`
+	Project        string `json:"project"`
+	Source         string `json:"source"`
+	Producer       string `json:"producer"`
+	PolicyRevision uint64 `json:"policy_revision"`
+	// FollowPolicyRevision derives the revision from the live source policy at
+	// every attempt instead of pinning it; exactly one of the two is given.
+	FollowPolicyRevision bool                 `json:"follow_policy_revision"`
+	CredentialSecret     string               `json:"credential_secret"`
+	Resource             ScrapeConfigResource `json:"resource"`
 }
 
 // ScrapeConfigResource is the resource identity every sample is attributed to.
@@ -137,9 +140,12 @@ func (d *scrapeConfigDuration) UnmarshalJSON(b []byte) error {
 type ScrapeTargetSpec struct {
 	Target ScrapeTarget
 	// Source is the project/source/policy revision the grant must cover.
-	Project          model.ID
-	Source           model.ID
-	PolicyRevision   model.Revision
+	Project        model.ID
+	Source         model.ID
+	PolicyRevision model.Revision
+	// FollowPolicy: PolicyRevision is zero and every attempt uses the revision
+	// of the source's live policy (the node must supply ScrapeHostDeps.Policies).
+	FollowPolicy     bool
 	CredentialSecret SecretRef
 }
 
@@ -252,8 +258,13 @@ func (t ScrapeConfigTarget) spec(secrets SecretReader) (ScrapeTargetSpec, error)
 	service, ok4 := scrapeConfigID(s.Resource.Service)
 	environment, ok5 := scrapeConfigID(s.Resource.Environment)
 	build, ok6 := scrapeConfigID(s.Resource.Build)
-	if !(ok1 && ok2 && ok3 && ok4 && ok5 && ok6) || s.PolicyRevision == 0 || s.Resource.Instance == "" || !ValidSecretRef(SecretRef(s.CredentialSecret)) {
+	if !(ok1 && ok2 && ok3 && ok4 && ok5 && ok6) || (s.PolicyRevision == 0) == !s.FollowPolicyRevision || s.Resource.Instance == "" || !ValidSecretRef(SecretRef(s.CredentialSecret)) {
 		return ScrapeTargetSpec{}, bad
+	}
+	profileRevision := model.Revision(s.PolicyRevision)
+	if s.FollowPolicyRevision {
+		// Placeholder only: the host replaces it with the live revision before any decode.
+		profileRevision = 1
 	}
 	labels := make(model.Labels, 0, len(s.Resource.Labels))
 	for k, v := range s.Resource.Labels {
@@ -262,7 +273,7 @@ func (t ScrapeConfigTarget) spec(secrets SecretReader) (ScrapeTargetSpec, error)
 	sort.Slice(labels, func(i, j int) bool { return labels[i].Name < labels[j].Name })
 
 	profile := queryinput.InputProfile{
-		Project: project, Source: source, Producer: producer, PolicyRevision: model.Revision(s.PolicyRevision),
+		Project: project, Source: source, Producer: producer, PolicyRevision: profileRevision,
 		Resource: model.Resource{Service: service, Environment: environment, Build: build, Instance: s.Resource.Instance, Labels: labels},
 		Limits:   queryinput.DefaultLimits(), DefaultUnit: t.Profile.DefaultUnit,
 	}
@@ -286,7 +297,7 @@ func (t ScrapeConfigTarget) spec(secrets SecretReader) (ScrapeTargetSpec, error)
 	if _, err := target.validate(); err != nil {
 		return ScrapeTargetSpec{}, bad
 	}
-	return ScrapeTargetSpec{Target: target, Project: project, Source: source, PolicyRevision: profile.PolicyRevision, CredentialSecret: SecretRef(s.CredentialSecret)}, nil
+	return ScrapeTargetSpec{Target: target, Project: project, Source: source, PolicyRevision: model.Revision(s.PolicyRevision), FollowPolicy: s.FollowPolicyRevision, CredentialSecret: SecretRef(s.CredentialSecret)}, nil
 }
 
 // pick maps a configured word to one of the closed vocabulary values.

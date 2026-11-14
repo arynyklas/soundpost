@@ -69,7 +69,7 @@ func (s scrapeSettings) start(ctx context.Context, core *appcore.App) (*sources.
 	if len(s.specs) == 0 {
 		return nil, nil
 	}
-	return sources.StartScrapeHost(ctx, sources.ScrapeHostDeps{Auth: core.Auth, Ingest: core.Ingest, Secrets: s.secrets}, s.specs)
+	return sources.StartScrapeHost(ctx, sources.ScrapeHostDeps{Auth: core.Auth, Ingest: core.Ingest, Secrets: s.secrets, Policies: core.Auth}, s.specs)
 }
 
 // scrapeFailureNotice is the one stderr line serve prints when the scrape

@@ -150,11 +150,50 @@ it admits into. Each target answers its alias, `last_attempt_at`, `cycles`,
 `stale_markers` and `admit_failures`. It never carries a URL, a secret reference
 or secret, a header, a response body, or a project or source identifier.
 
+## Restart
+
+The carried series set (what stale markers are computed against) is deliberately
+**not persisted**. After a restart the first cycle has nothing to compare with, so:
+
+* a series that disappeared while the node was down gets no stale marker; its last
+  sample ends at the query lookback like after any scrape gap (the same behaviour
+  as a Prometheus restart);
+* the new process never invents or repeats a marker, and from its first healthy
+  cycle it carries and marks exactly like an uninterrupted scraper;
+* a cycle whose batches could not be admitted does not advance the set, so no
+  marker is lost to an admission failure.
+
+`TestScrapeRestartForgetsCarriedSeriesWithoutInventingMarkers` pins this.
+
+## Policy revision
+
+`source.policy_revision` pins the revision: after the source's policy changes,
+cycles fail typed as `policy_stale` until the file is edited. Instead give
+`"follow_policy_revision": true` (and no `policy_revision`) and every attempt reads
+the revision of the source's live policy and stamps the batches with it, so a policy
+change needs no configuration change. Exactly one of the two must be given. While a
+policy change is still fencing the source, an attempt is refused as `policy_stale`
+and the next attempt after the fence drains succeeds. There is no SIGHUP reload of
+the file: the file is read at startup.
+
+## Verifying a non-loopback scrape
+
+The egress policy has no loopback exception, so a node cannot scrape an exporter on
+`127.0.0.1`. `go test -run 'TestServeScrapesANonLoopbackExporter|TestServeDoesNotScrapeANonLoopback' ./cmd/soundpost`
+starts the real `soundpost serve` child, an exporter bound to a private IPv4 address
+of the host (skipped when the host has none) and a configuration allowing exactly that
+`/32`; it reads the scraped sample back through the query engine after serve stopped,
+and shows that without the allow prefix the exporter is never contacted.
+
+## Windows
+
+The mode, symbolic-link and directory-access checks of the configuration file and the
+secrets directory are POSIX modes. On Windows they are not enforced (the tests skip) and
+directory ACLs are **not checked**: protect the configuration file and the secrets
+directory with an ACL that grants only the service account, as for the data directory.
+Windows is outside the release scope (linux/amd64 only).
+
 ## Limits of this release
 
 * The status route is read-only and per organization; there is no CLI form and no
   history (it answers the last cycle of each target since the node started).
-* The carried series set (what stale markers are computed against) is in memory: a
-  restart forgets it, so series that disappeared while the node was down get no
-  stale marker.
-* Policy revisions are static in the file (no automatic follow).

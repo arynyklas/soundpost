@@ -8,6 +8,7 @@ import (
 	"errors"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/arynyklas/soundpost/internal/auth"
@@ -35,6 +36,15 @@ type ScrapeHostDeps struct {
 	Auth    SourceAuthenticator
 	Ingest  ScrapeIngest
 	Secrets SecretReader
+	// Policies reads the live source policy (in production *auth.Service). It
+	// is required only by targets that follow the live policy revision.
+	Policies SourcePolicyReader
+}
+
+// SourcePolicyReader answers the live authority of a source, including its
+// current policy revision.
+type SourcePolicyReader interface {
+	SourceAuthority(ctx context.Context, c auth.SourceCredential, admission bool) (model.SourceAuthority, error)
 }
 
 // ScrapeReason is the closed set of per-target reasons a cycle did not
@@ -109,6 +119,8 @@ type scrapeHosted struct {
 	// secret failure produces no ScrapeResult time).
 	lastAttempt time.Time
 	reason      ScrapeReason
+	// revision is the live policy revision of the last grant (follow mode).
+	revision atomic.Uint64
 }
 
 // StartScrapeHost starts one scrape schedule per spec under ctx. It validates
@@ -130,6 +142,9 @@ func startScrapeHost(ctx context.Context, deps ScrapeHostDeps, specs []ScrapeTar
 		if _, err := specs[i].Target.validate(); err != nil || seen[specs[i].Target.Alias] || !ValidSecretRef(specs[i].CredentialSecret) {
 			return nil, scrapeInvalid("scrape target")
 		}
+		if specs[i].FollowPolicy && (deps.Policies == nil || specs[i].PolicyRevision != 0) {
+			return nil, scrapeInvalid("scrape policy revision")
+		}
 		seen[specs[i].Target.Alias] = true
 	}
 	runCtx, cancel := context.WithCancel(ctx)
@@ -137,9 +152,12 @@ func startScrapeHost(ctx context.Context, deps ScrapeHostDeps, specs []ScrapeTar
 	for _, spec := range specs {
 		t := &scrapeHosted{alias: spec.Target.Alias, project: spec.Project, scraper: &Scraper{
 			Target: spec.Target,
-			Grant:  scrapeGrantFunc(deps, spec),
 			Admit:  deps.Ingest.Admit,
 		}}
+		t.scraper.Grant = scrapeGrantFunc(deps, spec, &t.revision)
+		if spec.FollowPolicy {
+			t.scraper.Revision = func() model.Revision { return model.Revision(t.revision.Load()) }
+		}
 		h.targets = append(h.targets, t)
 		h.wg.Add(1)
 		go func() {
@@ -155,7 +173,7 @@ func startScrapeHost(ctx context.Context, deps ScrapeHostDeps, specs []ScrapeTar
 // the configured project, source and policy revision through the same
 // ingest.Service.ResolveSource the HTTP route uses. Nothing is kept between
 // calls (a grant lives a few seconds, and a credential may be revoked at any time).
-func scrapeGrantFunc(deps ScrapeHostDeps, spec ScrapeTargetSpec) GrantFunc {
+func scrapeGrantFunc(deps ScrapeHostDeps, spec ScrapeTargetSpec, live *atomic.Uint64) GrantFunc {
 	return func(ctx context.Context) (policy.SourceGrant, error) {
 		raw, err := deps.Secrets.ReadSecret(ctx, spec.CredentialSecret)
 		if err != nil || len(raw) == 0 {
@@ -171,7 +189,19 @@ func scrapeGrantFunc(deps ScrapeHostDeps, spec ScrapeTargetSpec) GrantFunc {
 		if err != nil {
 			return policy.SourceGrant{}, &scrapeGrantError{scrapeGrantReason(ctx, err)}
 		}
-		g, err := deps.Ingest.ResolveSource(ctx, cred, model.Batch{Project: spec.Project, Source: spec.Source, PolicyRevision: spec.PolicyRevision})
+		rev := spec.PolicyRevision
+		if spec.FollowPolicy {
+			// The revision is read from the live policy at this attempt; a policy
+			// change between this read and the resolve is a typed policy_stale
+			// for this one attempt and the next attempt follows it.
+			src, err := deps.Policies.SourceAuthority(ctx, cred, true)
+			if err != nil {
+				return policy.SourceGrant{}, &scrapeGrantError{scrapeGrantReason(ctx, err)}
+			}
+			rev = src.Policy.Revision
+			live.Store(uint64(rev))
+		}
+		g, err := deps.Ingest.ResolveSource(ctx, cred, model.Batch{Project: spec.Project, Source: spec.Source, PolicyRevision: rev})
 		if err != nil {
 			return policy.SourceGrant{}, &scrapeGrantError{scrapeGrantReason(ctx, err)}
 		}
