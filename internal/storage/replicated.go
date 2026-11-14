@@ -851,29 +851,18 @@ func (m *slotMachine) Validate(ctx context.Context, command replica.Entry) error
 	})
 }
 
-// readIndexEach runs one ReadIndex round on every listed group, at most
-// fenceParallelism at a time, and returns the cut and the error of each, in the
-// order of groups. The rounds are independent quorum confirmations of different
-// groups, so a fence over 64 groups costs a few rounds, not the sum of 64; the
-// bound keeps a burst of 64 simultaneous heartbeat rounds off the peer
-// transport.
-const fenceParallelism = 8
-
+// readIndexEach runs one ReadIndex round on every listed group and returns the cut and the error of
+// each, in the order of groups. The rounds run one after another: running them concurrently (64 or
+// 8 at a time) made a voter that had just led or rejoined refuse its erasure checkpoint as unavailable
+// for over 30 s (TestAcknowledgementIsWithdrawnWhenTheStoresTurnDirty locally 1 in 4,
+// TestAnEraseAckProposedByAnotherVoterIsRefused on a 2-vCPU CI runner), with the cause not isolated.
+// A read's cost is dominated by per-chunk release, not by this fence.
 func readIndexEach(ctx context.Context, groups []*replica.Group) ([]model.Cursor, []error) {
 	cuts := make([]model.Cursor, len(groups))
 	errs := make([]error, len(groups))
-	var wg sync.WaitGroup
-	slots := make(chan struct{}, fenceParallelism)
 	for i, group := range groups {
-		slots <- struct{}{}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			defer func() { <-slots }()
-			cuts[i], errs[i] = group.ReadIndex(ctx)
-		}()
+		cuts[i], errs[i] = group.ReadIndex(ctx)
 	}
-	wg.Wait()
 	return cuts, errs
 }
 func (e *Engine) replicaReadFence(ctx context.Context, minimum []model.Cursor, allowPartial bool) ([]model.Cursor, bool, error) {
