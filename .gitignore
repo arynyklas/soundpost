@@ -24,6 +24,9 @@ __pycache__/
 *.egg-info/
 /conformance/query/oracles/querycheck-linux-amd64
 /fixtures/artifacts/generated/
+test-results/
+playwright-report/
+/sdk/python/build/
 
 # Isolated implementation and task evidence
 /.worktrees/
