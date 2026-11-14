@@ -132,3 +132,50 @@ func validateAdminConfig(kind string, p AdminPayload, o *model.ControlOrg) error
 	}
 	return nil
 }
+
+// retentionSignalKinds maps the admin vocabulary of a retention setting to the signal kinds the
+// retention policy versions are keyed by. "audit" has no signal kind: the audit period is not a
+// per-record admission deadline and stays a stored setting (01.08-W2 owns audit expiry).
+func retentionSignalKinds(signal string) []model.Kind {
+	switch signal {
+	case "metrics":
+		return []model.Kind{model.Metric}
+	case "logs":
+		return []model.Kind{model.Log}
+	case "traces":
+		return []model.Kind{model.SpanKind}
+	case "errors":
+		return []model.Kind{model.ErrorKind, model.Condition, model.JobAttempt}
+	case "replay":
+		return []model.Kind{model.Replay}
+	case "profiles":
+		return []model.Kind{model.Profile}
+	}
+	return nil
+}
+
+// appendRetentionVersion makes an applied admin "retention" command effective: it appends an
+// audited, append-only version to the project's retention history, which admission resolves
+// (retention.Resolve) for every batch admitted from then on. The command was validated by
+// validateAdminConfig; an earlier version is never edited and receipts keep their deadlines.
+func appendRetentionVersion(st *model.ControlState, org, actor model.ID, p AdminPayload, at int64) error {
+	var cfg RetentionConfig
+	if err := strictConfig(p.Config, &cfg); err != nil {
+		return err
+	}
+	kinds := retentionSignalKinds(cfg.Signal)
+	if len(kinds) == 0 {
+		return nil
+	}
+	days := make(map[model.Kind]uint32, len(kinds))
+	for _, k := range kinds {
+		days[k] = cfg.Days
+	}
+	key := org.String() + ":" + cfg.ProjectID.String()
+	if st.RetentionPolicies == nil {
+		st.RetentionPolicies = map[string][]model.RetentionPolicyVersion{}
+	}
+	project := cfg.ProjectID
+	st.RetentionPolicies[key] = append(st.RetentionPolicies[key], model.RetentionPolicyVersion{Org: org, Project: &project, Version: model.Uint64(len(st.RetentionPolicies[key]) + 1), Days: days, Effective: model.UnixNano(at), Actor: actor, Reason: p.Reason, At: model.UnixNano(at)})
+	return nil
+}

@@ -120,6 +120,10 @@ func (e *Engine) initStorage() error {
 		if err != nil {
 			return err
 		}
+		if e.recordHasSegment(s) {
+			continue // verified at the record's point; the background pass re-hashes it
+		}
+		e.ver.hashed.Add(1)
 		h, err := hashFile(path)
 		if err != nil || h != s.Checksum {
 			return model.Fail(model.Corrupt)
@@ -142,7 +146,22 @@ func (e *Engine) initStorage() error {
 	if err != nil {
 		return err
 	}
-	return e.db.View(validateIndexIntegrity)
+	return e.db.View(func(tx *bolt.Tx) error {
+		if e.ver.rec != nil {
+			if err := e.validateIndexTail(tx); err != nil {
+				return err
+			}
+		} else if err := validateIndexIntegrity(tx); err != nil {
+			return err
+		}
+		pending, err := e.buildVerifiedRecord(tx, e.catalog)
+		if err != nil {
+			return err
+		}
+		e.ver.pending = pending
+		e.ver.starting.Store(true)
+		return nil
+	})
 }
 func (e *Engine) Publish(ctx context.Context, groupID model.ID, expected model.Revision, replacement Manifest) (model.Revision, error) {
 	if ctx.Err() != nil {
@@ -194,7 +213,7 @@ func (e *Engine) publishManifestLocalLocked(ctx context.Context, groupID model.I
 	if err := ctx.Err(); err != nil {
 		return 0, model.Fail(model.Cancelled)
 	}
-	if e.closed || e.failed {
+	if e.closed || e.failed || e.closing.Load() {
 		return 0, model.Fail(model.Unavailable)
 	}
 	old := e.catalog.Manifest
@@ -209,7 +228,7 @@ func (e *Engine) publishManifestLocalLocked(ctx context.Context, groupID model.I
 	covered := map[model.ID]SegmentManifest{}
 	files, carried := map[string]bool{}, map[string]bool{}
 	for _, s := range replacement.Segments {
-		if ctx.Err() != nil {
+		if ctx.Err() != nil || e.closing.Load() {
 			return 0, model.Fail(model.Cancelled)
 		}
 		if s.Format != 1 || s.PolicyRevision == 0 || !validSubject(s.Signal, s.Subject) || s.File != segmentName(s.Org, s.Project, s.Signal, s.Start, s.ID) || files[s.File] || len(s.Pages) == 0 {
@@ -250,7 +269,7 @@ func (e *Engine) publishManifestLocalLocked(ctx context.Context, groupID model.I
 	seen := 0
 	err := e.db.View(func(tx *bolt.Tx) error {
 		return tx.Bucket([]byte("scan_pages")).ForEach(func(_, b []byte) error {
-			if ctx.Err() != nil {
+			if ctx.Err() != nil || e.closing.Load() {
 				return model.Fail(model.Cancelled)
 			}
 			p, err := parsePageRef(b)
@@ -360,7 +379,9 @@ func (e *Engine) publishManifestLocalLocked(ctx context.Context, groupID model.I
 		return 0, err
 	}
 	retired := e.catalog.File
+	oldDigest := e.catalog.Hash
 	e.catalog = state
+	e.rebindVerifiedLocked(oldDigest, state)
 	// The retired manifest is unreachable once the pointer is durable (a snapshot cut that
 	// pinned it keeps it until release); failing to remove it only leaves an orphan, never a
 	// wrong catalog.

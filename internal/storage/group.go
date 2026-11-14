@@ -55,6 +55,8 @@ type Engine struct {
 	scrub        scrubConfig
 	redact       redactState
 	erasure      erasureState
+	ver          verifyState // bounded startup verification (D15)
+	closing      atomic.Bool // set when Close starts: long publications stop at their next check
 }
 type walEntry struct {
 	Type       string                      `json:"type"`
@@ -169,6 +171,7 @@ func Open(dir string, v Revalidator) (*Engine, error) {
 		e = out.ensureIncarnation()
 	}
 	if e == nil {
+		out.loadVerifiedRecord()
 		e = out.validateReplicaNamespaces()
 	}
 	if e == nil {
@@ -184,9 +187,30 @@ func Open(dir string, v Revalidator) (*Engine, error) {
 		out.Close()
 		return nil, e
 	}
+	out.commitVerifiedStart()
+	out.startBackgroundVerify()
 	return out, nil
 }
+
+// closeDeadline bounds how long Close waits for a running publication (it holds e.mu for a whole
+// segment rewrite). A publication also notices e.closing and stops at its next check, so the wait
+// is normally short; past the deadline Close reports model.Timeout and may be called again.
+var closeDeadline = 30 * time.Second
+
+// lockWithin takes e.mu, giving up after d.
+func (e *Engine) lockWithin(d time.Duration) bool {
+	deadline := time.Now().Add(d)
+	for !e.mu.TryLock() {
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(time.Millisecond)
+	}
+	return true
+}
 func (e *Engine) Close() error {
+	e.closing.Store(true)
+	e.stopBackgroundVerify()
 	e.erasure.cancelLoop()
 	if e.repl != nil {
 		for _, group := range e.repl.groups {
@@ -194,7 +218,9 @@ func (e *Engine) Close() error {
 		}
 	}
 	e.erasure.waitLoop()
-	e.mu.Lock()
+	if !e.lockWithin(closeDeadline) {
+		return model.Fail(model.Timeout)
+	}
 	defer e.mu.Unlock()
 	if e.closed {
 		return nil

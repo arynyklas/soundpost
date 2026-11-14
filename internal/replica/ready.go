@@ -386,11 +386,15 @@ func (g *Group) processReady() error {
 		}
 		snapshotChanged := !raft.IsEmptySnap(rd.Snapshot)
 		if snapshotChanged {
-			if err := g.memory.ApplySnapshot(rd.Snapshot); err != nil {
+			if err := g.memory.ApplySnapshot(rd.Snapshot); err == raft.ErrSnapOutOfDate && g.sameIndexSnapshot(rd.Snapshot) {
+				// The journal head record and a later record can carry the same-index snapshot
+				// (a compaction rewrite copies the in-memory one); installRecord tolerates that at
+				// open, so the running group does too. Its state is already in place.
+				snapshotChanged = false
+			} else if err != nil {
 				g.failStop(FailState)
 				return err
-			}
-			if err := g.restoreSnapshot(rd.Snapshot); err != nil {
+			} else if err := g.restoreSnapshot(rd.Snapshot); err != nil {
 				g.failStop(FailState)
 				return err
 			}
@@ -446,6 +450,13 @@ func (g *Group) processReady() error {
 		g.notify()
 	}
 	return nil
+}
+
+// sameIndexSnapshot reports whether snap sits at exactly the index of the snapshot the in-memory
+// log already holds. An older snapshot is still refused.
+func (g *Group) sameIndexSnapshot(snap *pb.Snapshot) bool {
+	current, err := g.memory.Snapshot()
+	return err == nil && current.GetMetadata().GetIndex() == snap.GetMetadata().GetIndex()
 }
 func (g *Group) rebuildKnown() error {
 	g.known = map[model.ID]map[uint64]struct{}{}

@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/arynyklas/soundpost/internal/model"
@@ -118,47 +119,65 @@ func putUint(b *bolt.Bucket, key []byte, value uint64) error {
 // imported. Its loss is corruption, not permission to create a new authority.
 func (e *Engine) validateReplicaNamespaces() error {
 	return e.db.View(func(tx *bolt.Tx) error {
-		marker := tx.Bucket([]byte("meta")).Get([]byte("replica_format"))
-		meta, commands := tx.Bucket([]byte("replica_data")), tx.Bucket([]byte("replica_commands"))
-		if marker == nil {
-			if meta != nil || commands != nil {
-				return model.Fail(model.Corrupt)
-			}
-			return nil
-		}
-		if !bytes.Equal(marker, []byte{1}) || meta == nil || commands == nil {
-			return model.Fail(model.Corrupt)
-		}
-		var expected uint64
-		for slot := range uint16(64) {
-			for _, name := range []string{"legacy", "physical", "application", "term"} {
-				if len(meta.Get(metaKey(slot, name))) != 8 {
-					return model.Fail(model.Corrupt)
-				}
-			}
-			applied := getUint(meta, metaKey(slot, "application"))
-			cursor := tx.Bucket([]byte("cursors")).Get(slotKey(slot))
-			if applied != 0 && (len(cursor) != 8 || binary.BigEndian.Uint64(cursor) != applied) || applied == 0 && len(cursor) != 0 && getUint(tx.Bucket([]byte("cursors")), slotKey(slot)) != 0 {
-				return model.Fail(model.Corrupt)
-			}
-			if applied < getUint(meta, metaKey(slot, "legacy")) || applied > ^uint64(0)-expected || getUint(meta, metaKey(slot, "physical")) == 0 && applied > getUint(meta, metaKey(slot, "legacy")) {
-				return model.Fail(model.Corrupt)
-			}
-			expected += applied
-			for index := uint64(1); index <= applied; index++ {
-				if commands.Get(commandKey(slot, index)) == nil {
-					return model.Fail(model.Corrupt)
-				}
-				if index == ^uint64(0) {
-					return model.Fail(model.Corrupt)
-				}
-			}
-		}
-		if uint64(commands.Stats().KeyN) != expected {
+		return validateReplicaNamespacesTx(tx, e.verifiedFrom, &e.ver.commands, e.ver.rec != nil)
+	})
+}
+
+// validateReplicaNamespacesTx checks the replica namespaces. With bounded set, only commands from
+// from(slot, applied) up to the slot's applied index are looked up and the global key count is not
+// re-derived: the verified record vouches for the prefix and the background pass re-checks it.
+func validateReplicaNamespacesTx(tx *bolt.Tx, from func(uint16, uint64) uint64, count *atomic.Uint64, bounded ...bool) error {
+	limited := len(bounded) > 0 && bounded[0]
+	marker := tx.Bucket([]byte("meta")).Get([]byte("replica_format"))
+	meta, commands := tx.Bucket([]byte("replica_data")), tx.Bucket([]byte("replica_commands"))
+	if marker == nil {
+		if meta != nil || commands != nil {
 			return model.Fail(model.Corrupt)
 		}
 		return nil
-	})
+	}
+	if !bytes.Equal(marker, []byte{1}) || meta == nil || commands == nil {
+		return model.Fail(model.Corrupt)
+	}
+	var expected uint64
+	for slot := range uint16(64) {
+		for _, name := range []string{"legacy", "physical", "application", "term"} {
+			if len(meta.Get(metaKey(slot, name))) != 8 {
+				return model.Fail(model.Corrupt)
+			}
+		}
+		applied := getUint(meta, metaKey(slot, "application"))
+		cursor := tx.Bucket([]byte("cursors")).Get(slotKey(slot))
+		if applied != 0 && (len(cursor) != 8 || binary.BigEndian.Uint64(cursor) != applied) || applied == 0 && len(cursor) != 0 && getUint(tx.Bucket([]byte("cursors")), slotKey(slot)) != 0 {
+			return model.Fail(model.Corrupt)
+		}
+		if applied < getUint(meta, metaKey(slot, "legacy")) || applied > ^uint64(0)-expected || getUint(meta, metaKey(slot, "physical")) == 0 && applied > getUint(meta, metaKey(slot, "legacy")) {
+			return model.Fail(model.Corrupt)
+		}
+		expected += applied
+		first := uint64(1)
+		if limited && from != nil {
+			first = from(slot, applied)
+		}
+		for index := first; index <= applied; index++ {
+			if commands.Get(commandKey(slot, index)) == nil {
+				return model.Fail(model.Corrupt)
+			}
+			if count != nil {
+				count.Add(1)
+			}
+			if index == ^uint64(0) {
+				return model.Fail(model.Corrupt)
+			}
+		}
+		if limited && commands.Get(commandKey(slot, applied+1)) != nil {
+			return model.Fail(model.Corrupt)
+		}
+	}
+	if !limited && uint64(commands.Stats().KeyN) != expected {
+		return model.Fail(model.Corrupt)
+	}
+	return nil
 }
 func (e *Engine) replicatedLegacyCut(slot uint16) (bool, uint64, error) {
 	var replicated bool
@@ -340,6 +359,7 @@ func (e *Engine) InstallReplicationIdentity(identity model.ID) error {
 	return nil
 }
 func (e *Engine) EnableReplication(c replica.Config, seed *ReplicationSeed, authority ReplicatedAuthority) ([]*replica.Group, error) {
+	defer e.ver.starting.Store(false)
 	e.proposalMu.Lock()
 	defer e.proposalMu.Unlock()
 	if e.repl != nil || authority == nil {
@@ -389,7 +409,7 @@ func (e *Engine) EnableReplication(c replica.Config, seed *ReplicationSeed, auth
 			cfg.SeedIndex = uint64(seed.Physical[slot]) + 1
 			cfg.SeedTerm = uint64(seed.Terms[slot]) + 1
 		} else {
-			cfg.Seed, err = machine.Snapshot()
+			cfg.SeedFunc = machine.Snapshot // only a fresh journal needs the whole history
 			cfg.Application = e.indexes[slot]
 		}
 		if err != nil {
@@ -403,6 +423,7 @@ func (e *Engine) EnableReplication(c replica.Config, seed *ReplicationSeed, auth
 		out = append(out, group)
 	}
 	e.repl = r
+	e.seedSnapshotCoverage(out)
 	// Every slot is reconciled once at open: an erasure whose redaction a crash cut short, and a
 	// node whose retry table came from a cut older than the commands it has redacted, converge
 	// before any snapshot is cut or proposal accepted.
@@ -668,10 +689,17 @@ func (m *slotMachine) VerifySnapshot(raw []byte) error {
 	}
 	return e.db.View(func(tx *bolt.Tx) error {
 		commands := tx.Bucket([]byte("replica_commands"))
-		for index, raw := range snapshot.Entries {
-			if !sameCommand(commands.Get(commandKey(m.slot, uint64(index+1))), raw) {
+		// At startup the verified record vouches for the commands up to its index (the
+		// background pass re-checks them); a snapshot received while running is compared whole.
+		first := 0
+		if e.ver.starting.Load() {
+			first = int(e.verifiedFrom(m.slot, e.indexes[m.slot])) - 1
+		}
+		for index := first; index < len(snapshot.Entries); index++ {
+			if !sameCommand(commands.Get(commandKey(m.slot, uint64(index+1))), snapshot.Entries[index]) {
 				return model.Fail(model.Corrupt)
 			}
+			e.ver.commands.Add(1)
 		}
 		return nil
 	})

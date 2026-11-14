@@ -170,6 +170,13 @@ func openWith(dir string, options *replicationOptions, meter storage.DiskMeter, 
 	if e != nil {
 		return fail(e)
 	}
+	admission, e := retention.NewAdmissionResolver(c)
+	if e != nil {
+		return fail(e)
+	}
+	if e = p.BindRetention(admission); e != nil {
+		return fail(e)
+	}
 	replayService, e := NewReplayService(engine, a, c)
 	if e != nil {
 		return fail(e)

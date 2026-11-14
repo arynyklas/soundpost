@@ -10,6 +10,7 @@ import (
 	"math"
 	"sort"
 	"strconv"
+	"sync/atomic"
 	"time"
 )
 
@@ -20,10 +21,38 @@ type SourceGrant struct {
 	scope      auth.Scope
 	source     model.SourceAuthority
 	deadline   time.Time
+	retention  *Retention // the design s12 retention in force when the grant was resolved; nil when none is bound
 }
 type Service struct {
-	auth *auth.Service
-	now  func() time.Time
+	auth      *auth.Service
+	now       func() time.Time
+	retention atomic.Pointer[RetentionResolver]
+}
+
+// Retention is the effective retention of one project at one instant, in whole days: the
+// defaults of design section 12 layered with the audited organization and project versions in
+// force then. RawDays applies to restricted_raw sources.
+type Retention struct {
+	Days    map[model.Kind]uint32
+	RawDays uint32
+}
+
+// RetentionResolver resolves the retention in force for (org, project) at an instant. It is
+// implemented by the retention package over the control state; policy takes it as an interface so
+// admission does not import the deletion machinery.
+type RetentionResolver interface {
+	ResolveRetention(ctx context.Context, org, project model.ID, at model.UnixNano) (Retention, error)
+}
+
+// BindRetention makes admission take receipt deadlines from the resolver instead of from the
+// retention days a source policy carries. Call it while wiring, before intake opens; it is safe
+// to call at any time (grants resolved earlier keep what they resolved).
+func (s *Service) BindRetention(r RetentionResolver) error {
+	if r == nil {
+		return model.Fail(model.Invalid)
+	}
+	s.retention.Store(&r)
+	return nil
 }
 
 func New(a *auth.Service, now func() time.Time) (*Service, error) {
@@ -50,7 +79,17 @@ func (s *Service) ResolveSource(ctx context.Context, c SourceCredential, project
 	if e != nil {
 		return SourceGrant{}, e
 	}
-	return SourceGrant{service: s, credential: c, scope: scope, source: src, deadline: s.now().Add(5 * time.Second)}, nil
+	grant := SourceGrant{service: s, credential: c, scope: scope, source: src, deadline: s.now().Add(5 * time.Second)}
+	if r := s.retention.Load(); r != nil {
+		// Resolved here, once, at the instant the batch is admitted: Normalize stamps absolute
+		// deadlines from it and a later policy version never recomputes them.
+		eff, e := (*r).ResolveRetention(ctx, src.Org, src.Project, model.UnixNano(s.now().UnixNano()))
+		if e != nil {
+			return SourceGrant{}, e
+		}
+		grant.retention = &eff
+	}
+	return grant, nil
 }
 func (g SourceGrant) Scope() (auth.Scope, error) {
 	if g.service == nil || !g.service.now().Before(g.deadline) {
@@ -133,6 +172,12 @@ func Normalize(g SourceGrant, input model.Batch) (model.NormalizedBatch, error) 
 	deadlines := make([]model.SignalDeadline, 0, len(kinds))
 	for k := range kinds {
 		days := src.Policy.RetentionDays[k]
+		if g.retention != nil {
+			days = g.retention.Days[k]
+			if src.Policy.Class == "restricted_raw" && g.retention.RawDays != 0 {
+				days = g.retention.RawDays
+			}
+		}
 		duration := int64(days) * int64(24*time.Hour)
 		if days == 0 || days > 3650 || now > math.MaxInt64-duration {
 			return model.NormalizedBatch{}, model.Fail(model.Invalid)

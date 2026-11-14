@@ -212,6 +212,29 @@ func (e *Engine) CompactJournals(ctx context.Context) error {
 	return nil
 }
 
+// seedSnapshotCoverage restores, after a restart, the coverage CreateSnapshots last recorded: every
+// group's selected snapshot is on disk, so the next publication must not report "nothing
+// snapshotted". Only the cheap structural read of the CURRENT pointer is used; the cut is verified
+// whenever it is used to truncate a journal.
+func (e *Engine) seedSnapshotCoverage(groups []*replica.Group) {
+	coverage, any := make([]model.Cursor, len(groups)), false
+	for slot, group := range groups {
+		coverage[slot] = model.Cursor{Group: e.group(uint16(slot))}
+		if snapshot, ok := group.Snapshots().Current(); ok {
+			coverage[slot].Index = snapshot.Manifest.Cursor.Index
+			any = true
+		}
+	}
+	if !any {
+		return
+	}
+	e.mu.Lock()
+	if e.snap.coverage == nil {
+		e.snap.coverage = coverage
+	}
+	e.mu.Unlock()
+}
+
 func (e *Engine) snapshotCoverageLocked() []model.Cursor {
 	return append([]model.Cursor(nil), e.snap.coverage...)
 }

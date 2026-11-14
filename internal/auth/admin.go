@@ -181,6 +181,11 @@ func (s *Service) AdminCommand(ctx context.Context, c Credential, r AdminCommand
 				return err
 			}
 			o.Settings[r.Kind+":"+p.ID.String()] = append(json.RawMessage(nil), p.Config...)
+			if r.Kind == "retention" {
+				if err := appendRetentionVersion(st, r.OrgID, c.user, p, audit.Time); err != nil {
+					return err
+				}
+			}
 			if r.Kind == "source_policy" {
 				if src, active := st.Sources[p.ID.String()]; active {
 					if src.Closing {

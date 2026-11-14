@@ -169,11 +169,14 @@ type Config struct {
 	Transport    Transport
 	TickInterval time.Duration
 	Seed         []byte
-	Application  uint64
-	SeedIndex    uint64
-	SeedTerm     uint64
-	Validate     func(context.Context, Entry) error
-	Fault        func(string) error
+	// SeedFunc supplies Seed when, and only when, a fresh journal is created from the machine's own
+	// state: opening an existing journal must not pay for a snapshot of the whole history it ignores.
+	SeedFunc    func() ([]byte, error)
+	Application uint64
+	SeedIndex   uint64
+	SeedTerm    uint64
+	Validate    func(context.Context, Entry) error
+	Fault       func(string) error
 	// PinTTL is the lease of a journal pin (default DefaultPinTTL); Now is the clock it is judged
 	// by (default time.Now).
 	PinTTL time.Duration
@@ -307,7 +310,15 @@ func Open(c Config) (*Group, error) {
 			return nil, err
 		}
 	}
-	disk, memory, err := openReadyWAL(c.Directory, c.Group, c.ID, c.Members, c.Seed, c.Application, c.SeedIndex, c.SeedTerm, c.Fault, installed)
+	seed := c.Seed
+	if seed == nil && installed == nil && c.SeedFunc != nil {
+		if _, statErr := os.Stat(filepath.Join(c.Directory, "ready.wal")); os.IsNotExist(statErr) {
+			if seed, err = c.SeedFunc(); err != nil {
+				return nil, err
+			}
+		}
+	}
+	disk, memory, err := openReadyWAL(c.Directory, c.Group, c.ID, c.Members, seed, c.Application, c.SeedIndex, c.SeedTerm, c.Fault, installed)
 	if err != nil {
 		return nil, err
 	}

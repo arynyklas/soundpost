@@ -3,8 +3,10 @@
 package retention
 
 import (
+	"context"
 	"github.com/arynyklas/soundpost/internal/control"
 	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/policy"
 	"time"
 )
 
@@ -82,4 +84,32 @@ func Resolve(st control.State, org model.ID, project *model.ID, at model.UnixNan
 // unprocessed expiry must be declared as a gap (C05).
 func evidenceKind(k model.Kind) bool {
 	return k == model.ErrorKind || k == model.Condition || k == model.JobAttempt
+}
+
+// AdmissionResolver resolves the retention admission stamps into receipt deadlines (design section
+// 12): the defaults layered with the audited organization and project versions in force at the
+// instant of admission, read from the control state. It implements policy.RetentionResolver.
+type AdmissionResolver struct {
+	control interface {
+		View(context.Context, func(control.State) error) error
+	}
+}
+
+// NewAdmissionResolver reads versions from c, normally the installation's control store.
+func NewAdmissionResolver(c *control.Store) (*AdmissionResolver, error) {
+	if c == nil {
+		return nil, model.Fail(model.Invalid)
+	}
+	return &AdmissionResolver{control: c}, nil
+}
+
+// ResolveRetention implements policy.RetentionResolver.
+func (r *AdmissionResolver) ResolveRetention(ctx context.Context, org, project model.ID, at model.UnixNano) (policy.Retention, error) {
+	var out policy.Retention
+	err := r.control.View(ctx, func(st control.State) error {
+		p := Resolve(st, org, &project, at)
+		out = policy.Retention{Days: p.Days, RawDays: p.RawDays}
+		return nil
+	})
+	return out, err
 }
