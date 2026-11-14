@@ -8,6 +8,8 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -161,5 +163,59 @@ func TestPartitionProxyDropsResetsAndHeals(t *testing.T) {
 	n.heal()
 	if n.mode(1, 2) != dcLinkOpen || n.mode(3, 1) != dcLinkOpen {
 		t.Fatal("heal reopens every link")
+	}
+}
+
+// [07.07-W1] The kernel-visible error is the injected one: a real dd whose fsync is answered ENOSPC
+// reports "No space left on device", one answered EIO reports "Input/output error", and the injector
+// counts them apart.
+func TestInjectorAnswersRealENOSPCAndEIOToFsync(t *testing.T) {
+	if _, err := os.Stat("/bin/dd"); err != nil {
+		t.Skip("no dd")
+	}
+	root := filepath.Join(t.TempDir(), "disk")
+	if err := os.Mkdir(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	d, err := newDCDisk(root, filepath.Join(t.TempDir(), "shadow"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := func(name string) (string, error) {
+		var out bytes.Buffer
+		cmd, err := dcSpawnFaulted(d, "/bin/dd", []string{"if=/dev/zero", "of=" + filepath.Join(root, name), "bs=1k", "count=1", "conv=fsync"}, &out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan error, 1)
+		go func() { done <- cmd.Wait() }()
+		select {
+		case err = <-done:
+		case <-time.After(30 * time.Second):
+			_ = dcKillGroup(cmd)
+			t.Fatal("child did not finish")
+		}
+		d.stop()
+		return out.String(), err
+	}
+	d.setSyncErrno(syscall.ENOSPC)
+	out, err := run("full")
+	if err == nil || !strings.Contains(out, "No space left on device") {
+		t.Fatalf("dd under an ENOSPC fsync: err=%v output=%q", err, out)
+	}
+	if st := d.Stats(); st.SyncsNoSpace < 1 || st.SyncsFailed < st.SyncsNoSpace {
+		t.Errorf("ENOSPC answers not counted: %+v", st)
+	}
+	d.setSyncErrno(syscall.EIO)
+	before := d.Stats().SyncsNoSpace
+	if out, err = run("bad"); err == nil || !strings.Contains(out, "Input/output error") {
+		t.Fatalf("dd under an EIO fsync: err=%v output=%q", err, out)
+	}
+	if st := d.Stats(); st.SyncsNoSpace != before {
+		t.Errorf("an EIO answer was counted as ENOSPC: %+v", st)
+	}
+	d.setSyncErrno(0)
+	if out, err = run("healed"); err != nil {
+		t.Fatalf("dd after the disk healed: %v %q", err, out)
 	}
 }

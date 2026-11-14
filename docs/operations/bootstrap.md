@@ -1,7 +1,7 @@
 <!-- Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0 -->
 # First boot and local administration
 
-Soundpost single mode is durable but not highly available. Store its data directory on a local, encrypted, durable volume with restricted OS access. On Unix it creates the directory with mode 0700 and authority/key/token files with mode 0600. On Windows configure an equivalent account-only ACL; POSIX modes do not establish Windows ACL isolation.
+Soundpost single mode is durable but not highly available. Store its data directory on a local, encrypted, durable volume with restricted OS access. On Unix it creates the directory with mode 0700 and authority/key/token files with mode 0600. On Windows `serve` reads the data directory's ACL and, when it admits any account other than the current user, SYSTEM and Administrators, replaces it with exactly those (inherited); an operator TLS key whose ACL admits other accounts is refused, as the POSIX group/other check does.
 
 Start with a certificate trusted by your clients and a separately protected private key:
 

@@ -7,7 +7,7 @@
 
 ## Trust boundaries and what is synthetic
 
-- Every input and the full `PolicyReport` are **private**. They name entities, keyed recipient pseudonyms and approvals. They belong in the operator-controlled private directory used by intake (outside every checkout, restrictive permissions; on Windows add `--private-directory-acl-confirmed` only after verifying the NTFS ACL).
+- Every input and the full `PolicyReport` are **private**. They name entities, keyed recipient pseudonyms and approvals. They belong in the operator-controlled private directory used by intake (outside every checkout, restrictive permissions; on Windows the tool reads the NTFS ACL and refuses a directory that admits other accounts).
 - Only `PolicyPublicSummary` may be published: integers, a `by_reason` map from a closed reason enum to a count, and a verdict enum. It has no entity, recipient key, approver, reason text or identifier. `customer_acceptance` is always `false`.
 - Recipients appear **only as keyed pseudonyms**. `LedgerRecipientKey(key, rawHandle)` is HMAC-SHA-256 (domain-separated, truncated to a `model.ID`); the key (at least 32 bytes) and the raw handles never leave the operator. The ledger has no field that can hold an address and a raw address fails JSON decoding of a recipient key. Register canonical destinations with the same pseudonym as their destination ID, so both sides name a recipient identically. The tool cannot verify that an ID was derived with the operator's key.
 - Human reason text (approvals, control supersessions, maintenance reasons) is private input. It is validated and bounded but never copied into the report or summary.
@@ -72,7 +72,7 @@ Verdicts, in precedence order: `blocked` (any missing urgency, blocker finding o
 The parent wires `policy-compare` to `runPolicyCompare(ctx, args)` with the arguments after the subcommand:
 
 ```
-go run ./tools/adoption policy-compare --legacy <legacy.json> --canonical <canonical.json> --approved-policy <approved.json> --private-output <external-private-directory> --public-summary <new-summary-file> [--private-directory-acl-confirmed] [--timeout 2m]
+go run ./tools/adoption policy-compare --legacy <legacy.json> --canonical <canonical.json> --approved-policy <approved.json> --private-output <external-private-directory> --public-summary <new-summary-file> [--timeout 2m]
 ```
 
 It writes `policy-report.json` (private, exclusive, mode 0600) into the private directory and the closed public summary to a new file, then exits non-zero unless the verdict is `reconciled`; the evidence is written in either case. Existing files are never overwritten. The private directory checks are the intake tool's and need a valid local Git context.

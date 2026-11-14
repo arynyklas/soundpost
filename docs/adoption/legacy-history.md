@@ -7,7 +7,7 @@
 
 ## Trust boundaries and what is synthetic
 
-- The input (`HistoryObligations`) and the full `HistoryReport` are **private operator material**. They belong in the operator-controlled private directory used by the other adoption subcommands (outside every checkout, restrictive permissions; on Windows add `--private-directory-acl-confirmed` only after verifying the NTFS ACL). Actual retained history and any export stay in the owning environment's private storage; the tool reads digests of records, never history content.
+- The input (`HistoryObligations`) and the full `HistoryReport` are **private operator material**. They belong in the operator-controlled private directory used by the other adoption subcommands (outside every checkout, restrictive permissions; on Windows the tool reads the NTFS ACL and refuses a directory that admits other accounts). Actual retained history and any export stay in the owning environment's private storage; the tool reads digests of records, never history content.
 - The clock is the caller's. `HistoryObligations.Now` is not part of the JSON file (a file that tries to supply `now` is refused as an unknown field); the CLI uses the process UTC clock and the library takes whatever the caller sets. Evidence age is bounded by `max_evidence_age_seconds` (1 second to 30 days). Future-dated and stale observations are blockers, never "corrected".
 - Reader identities appear **only as keyed hashes**: `HistoryReaderKey(key, identity)` is domain-separated HMAC-SHA-256 in lowercase hex. The key (at least 32 bytes) and raw identities never leave the operator. A grant whose `reader_key` is not 64 lowercase hex characters (for example a raw address) is a blocker.
 - Digests (`*_digest`) are SHA-256 hex of records that stay private (origin proof, authorization, audit entry, boundary metadata, retention/export records). The tool checks the format only; it does not fetch or verify the underlying record.
@@ -53,7 +53,7 @@ Retention and export are required exactly once each; holds are optional and may 
 
 ```
 go run ./tools/adoption closure --mode history --ledger <private-history.json> \
-  --private-output <external-private-directory> --public-summary <new-summary-file> [--private-directory-acl-confirmed]
+  --private-output <external-private-directory> --public-summary <new-summary-file>
 ```
 
 Writes `history.json` (private, exclusive creation) and the public summary; a blocked status is written and then returns a non-zero error. The subcommand is `runClosure`; see [closure.md](closure.md) for the whole flag set.

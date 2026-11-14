@@ -618,7 +618,6 @@ type ClosureTrust struct {
 //	--trusted-keys FILE             close only: ClosureTrust JSON, separate from the ledger
 //	--private-output DIRECTORY      existing external private directory (history.json / closure.json)
 //	--public-summary FILE           new closed public summary file
-//	--private-directory-acl-confirmed  operator verified a restrictive NTFS ACL (Windows)
 //	--timeout 2m                    operator deadline (0 < t <= 1h)
 //
 // The clock is the process's UTC clock at the call. Outputs are created
@@ -630,7 +629,6 @@ func runClosure(ctx context.Context, args []string) error {
 	trustPath := fs.String("trusted-keys", "", "close mode: trusted deadman keys JSON")
 	output := fs.String("private-output", "", "external private directory")
 	summaryPath := fs.String("public-summary", "", "new public summary file")
-	acl := fs.Bool("private-directory-acl-confirmed", false, "operator verified restrictive NTFS ACL")
 	timeout := fs.Duration("timeout", 2*time.Minute, "overall operator deadline (positive, at most 1h)")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -647,7 +645,7 @@ func runClosure(ctx context.Context, args []string) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, *timeout)
 	defer cancel()
-	resolved, err := privateDirectory(ctx, *output, nil, *acl)
+	resolved, err := privateDirectory(ctx, *output, nil)
 	if err != nil {
 		return err
 	}

@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/arynyklas/soundpost/internal/privacl"
 )
 
 // privateTempDir is a temporary directory only its owner can access. The tool
@@ -16,7 +18,7 @@ import (
 func privateTempDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	if err := os.Chmod(dir, 0o700); err != nil {
+	if err := privacl.Restrict(dir); err != nil {
 		t.Fatal(err)
 	}
 	return dir
@@ -25,14 +27,14 @@ func privateTempDir(t *testing.T) string {
 func TestPrivateOutputRejectsRepositoryAndOverwrite(t *testing.T) {
 	targets, _ := fixture(t)
 	root := targets.Targets[0].Repository
-	if err := writePrivate(context.Background(), root, []string{root}, true, PrivateIntake{}); err == nil {
+	if err := writePrivate(context.Background(), root, []string{root}, PrivateIntake{}); err == nil {
 		t.Fatal("allowed private evidence in repository")
 	}
 	outside := privateTempDir(t)
-	if err := writePrivate(context.Background(), outside, []string{root}, true, PrivateIntake{}); err != nil {
+	if err := writePrivate(context.Background(), outside, []string{root}, PrivateIntake{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := writePrivate(context.Background(), outside, []string{root}, true, PrivateIntake{}); err == nil {
+	if err := writePrivate(context.Background(), outside, []string{root}, PrivateIntake{}); err == nil {
 		t.Fatal("overwrote private evidence")
 	}
 	if _, err := os.Stat(filepath.Join(outside, "intake.json")); err != nil {
@@ -53,7 +55,7 @@ func TestSyntheticLocalIntakeCommandSmoke(t *testing.T) {
 	if err := writeExclusive(grantPath, grant); err != nil {
 		t.Fatal(err)
 	}
-	args := []string{"intake", "--targets", targetPath, "--authorization", grantPath, "--private-output", private, "--public-summary", summary, "--private-directory-acl-confirmed"}
+	args := []string{"intake", "--targets", targetPath, "--authorization", grantPath, "--private-output", private, "--public-summary", summary}
 	if err := run(context.Background(), args); err != nil {
 		t.Fatal(err)
 	}

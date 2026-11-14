@@ -731,7 +731,6 @@ func journeyLoadMap(path string) ([]byte, error) {
 //	--public-summary FILE           new file for the closed public projection
 //	--bearer-env NAME               environment variable holding the bearer
 //	                                (default SOUNDPOST_JOURNEY_BEARER)
-//	--private-directory-acl-confirmed  operator verified the NTFS ACL (Windows)
 //	--timeout DURATION              overall deadline, positive, at most 1h (default 2m)
 func runJourneys(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("journeys", flag.ContinueOnError)
@@ -743,7 +742,6 @@ func runJourneys(ctx context.Context, args []string) error {
 	output := fs.String("private-output", "", "external private directory")
 	summaryPath := fs.String("public-summary", "", "new public summary file")
 	bearerEnv := fs.String("bearer-env", "SOUNDPOST_JOURNEY_BEARER", "environment variable holding the bearer token")
-	acl := fs.Bool("private-directory-acl-confirmed", false, "operator verified restrictive NTFS ACL")
 	timeout := fs.Duration("timeout", 2*time.Minute, "overall operator deadline (positive, at most 1h)")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -771,7 +769,7 @@ func runJourneys(ctx context.Context, args []string) error {
 		}
 		links.Frontend.MapBytes = raw
 	}
-	resolved, err := privateDirectory(ctx, *output, nil, *acl)
+	resolved, err := privateDirectory(ctx, *output, nil)
 	if err != nil {
 		return err
 	}

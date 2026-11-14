@@ -5,6 +5,7 @@ package main
 import (
 	"errors"
 	"github.com/arynyklas/soundpost/internal/durablefs"
+	"github.com/arynyklas/soundpost/internal/privacl"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -19,13 +20,15 @@ var errInsecureMode = errors.New("insecure file mode")
 // key that group or other users can read (it is shared material this process must not chmod).
 // The files the process creates itself (envelope keys, bootstrap.token, generated server.key)
 // are already 0600; the directory mode is what keeps them unreachable. POSIX modes say nothing
-// about Windows ACLs, so the check does not apply there (docs/operations/bootstrap.md).
+// about Windows ACLs, so there the directory's DACL is read instead and, when it grants
+// anyone but the owner, SYSTEM and Administrators access, replaced with exactly that
+// (docs/operations/bootstrap.md).
 func preparePrivate(dir, tlsKey string) error {
 	if err := durablefs.MkdirAll(dir); err != nil {
 		return err
 	}
 	if runtime.GOOS == "windows" {
-		return nil
+		return preparePrivateACL(dir, tlsKey)
 	}
 	dir = filepath.Clean(dir)
 	info, err := os.Stat(dir)
@@ -67,4 +70,27 @@ func keyModePrivate(perm os.FileMode, gid uint32, gidKnown bool) bool {
 		return false
 	}
 	return perm&0o070 == 0 || (gidKnown && gid == 0)
+}
+
+// preparePrivateACL is preparePrivate for Windows: the Windows counterpart of the 0700
+// tightening. A data directory whose DACL admits other users is restricted to the current
+// user, SYSTEM and Administrators; one that cannot be made private is refused, and so is an
+// operator-supplied TLS private key whose DACL admits anyone else (shared material this
+// process must not re-ACL).
+func preparePrivateACL(dir, tlsKey string) error {
+	dir = filepath.Clean(dir)
+	if privacl.Check(dir) != nil {
+		if err := privacl.Restrict(dir); err != nil || privacl.Check(dir) != nil {
+			return errInsecureMode
+		}
+	}
+	if tlsKey != "" {
+		if _, err := os.Stat(tlsKey); err != nil {
+			return err
+		}
+		if privacl.Check(tlsKey) != nil {
+			return errInsecureMode
+		}
+	}
+	return nil
 }

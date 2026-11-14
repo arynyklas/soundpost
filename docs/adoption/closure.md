@@ -64,7 +64,7 @@ History blockers are listed in [legacy-history.md](legacy-history.md) and appear
 ```
 go run ./tools/adoption closure --mode close --ledger <private-closure-ledger.json> --trusted-keys <trust.json> \
   --private-output <external-private-directory> --public-summary <new-summary-file> \
-  [--private-directory-acl-confirmed] [--timeout 2m]
+  [--timeout 2m]
 go run ./tools/adoption closure --mode history --ledger <private-history.json> \
   --private-output <external-private-directory> --public-summary <new-summary-file>
 ```

@@ -1391,7 +1391,6 @@ func cutoverReadKey(path string) (ed25519.PublicKey, error) {
 //	--authorization FILE            private grant: not read-only, one scope naming the plan's scope, collector "cutover"
 //	--private-directory DIRECTORY   existing operator-private directory holding the run's state and receipts
 //	--public-summary FILE           new file for the closed public projection
-//	--private-directory-acl-confirmed  operator verified the NTFS ACL (Windows)
 //	--timeout DURATION              overall deadline, positive, at most 1h (default 10m)
 //
 // The state file is DIRECTORY/cutover-RUNID.state.json and each invocation
@@ -1404,7 +1403,6 @@ func runCutover(ctx context.Context, args []string) error {
 	grantPath := fs.String("authorization", "", "private authorization JSON")
 	dir := fs.String("private-directory", "", "existing operator-private directory")
 	summaryPath := fs.String("public-summary", "", "new public summary file")
-	acl := fs.Bool("private-directory-acl-confirmed", false, "operator verified restrictive NTFS ACL")
 	timeout := fs.Duration("timeout", 10*time.Minute, "overall deadline (positive, at most 1h)")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -1430,7 +1428,7 @@ func runCutover(ctx context.Context, args []string) error {
 	if plan.StatePath != "" || !cutoverRunIDPattern.MatchString(plan.RunID) {
 		return errors.New("the plan must carry a valid run id and no state path: the state file lives in the private directory")
 	}
-	resolved, err := privateDirectory(ctx, *dir, nil, *acl)
+	resolved, err := privateDirectory(ctx, *dir, nil)
 	if err != nil {
 		return err
 	}

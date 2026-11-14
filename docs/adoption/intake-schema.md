@@ -1,7 +1,7 @@
 <!-- Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0 -->
 # Generic intake schema
 
-Run `go run ./tools/adoption intake --targets <private-targets.json> --authorization <private-grant.json> --private-output <external-directory> --public-summary <new-summary-file>` only with environment authorization. On Windows add `--private-directory-acl-confirmed` only after the operator has restricted and verified the external directory ACL. The private filename is `intake.json` and must not already exist. Public summary also uses exclusive creation.
+Run `go run ./tools/adoption intake --targets <private-targets.json> --authorization <private-grant.json> --private-output <external-directory> --public-summary <new-summary-file>` only with environment authorization. On Windows the tool reads the external directory's ACL and refuses one that admits any account other than the owner, SYSTEM and Administrators. The private filename is `intake.json` and must not already exist. Public summary also uses exclusive creation.
 
 JSON names match the exported Go field names. Unknown fields are rejected on targets, grants and live evidence. Targets is `{ "Targets": [...] }`. Each target has `ID`, `Repository`, `ExpectedRef`, `EvidenceURL`, and optional `SecretReferences` containing only `external:` references. Repository must be an existing local Git checkout; endpoint must be an authorized HTTP(S) URL without user info, query or fragment. No arbitrary commands or request headers are accepted.
 

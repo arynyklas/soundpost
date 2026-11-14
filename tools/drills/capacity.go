@@ -1876,17 +1876,15 @@ func mustReceipt(p *capPart, id string) capReceipt {
 func capacityFaults(env *Env, rep *Report) error {
 	rep.Fact("injection", map[string]string{
 		"failed_sync": "replica.Config.Fault hook \"wal_sync\" of the committed replica journal, called immediately before the real fsync",
+		"engine":      "storage.Engine.SetFaultHook on the running application: \"wal_sync\" refuses or delays the real fsync, \"before_apply\" delays the state machine; driven over HTTPS ingest, restart and retry of the same batches",
 		"slow_apply":  "the drill's durable bbolt state machine sleeps inside Apply; slow sync: the same hook delays before the real fsync",
 		"full_disk":   "storage.DiskMeter bound with BindPressure through appcore.OpenWithPressure: the 80/90/95 admission gate reads an injected usage",
 		"honesty":     "hook-injected failures are NOT a failing disk: no EIO or ENOSPC was produced by the operating system and the real fsync was never replaced",
 	})
-	rep.NotRun("engine-level failed sync and slow apply (storage.Engine / appcore)",
-		"the engine's fault hook storage.Engine.fault (\"wal_sync\", \"before_apply\", \"receipt_write\", \"applied_cursor\") is an unexported field set only by in-package tests (internal/storage/wal_test.go TestSyncFailureNeverAcknowledges); EnableReplication overwrites replica.Config.Fault with it, so no exported seam reaches it from a drill; failed sync and slow apply were therefore driven through the exported replica.Config.Fault hook of the replica journal with a drill-owned durable state machine, not through the full storage engine")
-	rep.NotRun("real out-of-space (ENOSPC) and real I/O errors (EIO)",
-		"filling a real size-limited filesystem needs a mount (tmpfs/loop), which needs privilege this drill must not use, and /tmp is a large shared volume that must not be filled; the full-disk behaviour was driven through the committed storage.DiskMeter seam only, which exercises the admission gate and not the operating system's write failure path")
+	rep.Fact("real_errno", "the real operating-system errors at the engine (EIO, ENOSPC answered to the real fsync of the real produced binary at the system-call boundary) are the fsync-failure scenario; no filesystem is filled here or there (filling one needs a privileged mount and /tmp is a large shared volume)")
 
 	retained := map[string]string{}
-	for _, part := range []func(*Env, *Report) (map[string]string, error){capFailedSync, capSlowApply, capFullDisk} {
+	for _, part := range []func(*Env, *Report) (map[string]string, error){capFailedSync, capSlowApply, capEngineFaults, capFullDisk} {
 		got, err := part(env, rep)
 		for id, d := range got {
 			retained[id] = d

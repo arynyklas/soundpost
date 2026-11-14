@@ -128,6 +128,7 @@ type dcDisk struct {
 
 	mu       sync.Mutex
 	failSync bool
+	syncErr  syscall.Errno // what a failing fsync answers (EIO unless set)
 	gone     bool
 	roots    []string // root and, once the disk is detached, where it was moved to
 	files    map[string]int64
@@ -151,7 +152,7 @@ type dcRename struct {
 
 // dcDiskStats counts what the injector did; it goes into the report.
 type dcDiskStats struct {
-	Syncs, SyncsFailed, SyncsOnGone, PathOpsDenied, DirSyncs, Renames int
+	Syncs, SyncsFailed, SyncsNoSpace, SyncsOnGone, PathOpsDenied, DirSyncs, Renames int
 }
 
 func newDCDisk(root, shadow string) (*dcDisk, error) {
@@ -210,7 +211,21 @@ func dirNames(p string) (map[string]struct{}, error) {
 	return out, nil
 }
 
-func (d *dcDisk) setFailSync(on bool) { d.mu.Lock(); d.failSync = on; d.mu.Unlock() }
+func (d *dcDisk) setFailSync(on bool) {
+	if on {
+		d.setSyncErrno(syscall.EIO)
+		return
+	}
+	d.setSyncErrno(0)
+}
+
+// setSyncErrno makes every fsync/fdatasync of the member answer errno (0 = healthy): EIO is a failing
+// disk, ENOSPC the answer of a full filesystem whose delayed allocation cannot be written out.
+func (d *dcDisk) setSyncErrno(errno syscall.Errno) {
+	d.mu.Lock()
+	d.failSync, d.syncErr = errno != 0, errno
+	d.mu.Unlock()
+}
 
 // detach makes the disk vanish: the directory is moved away (a path walk now finds nothing) and every
 // durability point and path operation of the running member answers EIO.
@@ -434,7 +449,10 @@ func (d *dcDisk) decide(n *scNotif) syscall.Errno {
 		}
 		if d.failSync {
 			d.stats.SyncsFailed++
-			return syscall.EIO
+			if d.syncErr == syscall.ENOSPC {
+				d.stats.SyncsNoSpace++
+			}
+			return d.syncErr
 		}
 		d.stats.Syncs++
 		d.recordSync(n.PID, int32(a[0]), path)

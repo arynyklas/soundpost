@@ -1516,7 +1516,6 @@ func runPolicyCompare(ctx context.Context, args []string) error {
 	approvedPath := fs.String("approved-policy", "", "private ApprovedPolicy JSON")
 	output := fs.String("private-output", "", "external private directory for policy-report.json")
 	summaryPath := fs.String("public-summary", "", "new public summary file")
-	acl := fs.Bool("private-directory-acl-confirmed", false, "operator verified restrictive NTFS ACL")
 	timeout := fs.Duration("timeout", 2*time.Minute, "overall operator deadline (positive, at most 1h)")
 	if err := fs.Parse(args); err != nil {
 		return errors.New("usage: adoption policy-compare --legacy FILE --canonical FILE --approved-policy FILE --private-output DIRECTORY --public-summary FILE")
@@ -1535,7 +1534,7 @@ func runPolicyCompare(ctx context.Context, args []string) error {
 	if readInput(*legacyPath, &legacy) != nil || readInput(*canonicalPath, &canonical) != nil || readInput(*approvedPath, &approved) != nil {
 		return errors.New("invalid private operator input")
 	}
-	dir, err := privateDirectory(ctx, *output, nil, *acl)
+	dir, err := privateDirectory(ctx, *output, nil)
 	if err != nil {
 		return err
 	}

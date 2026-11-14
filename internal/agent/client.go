@@ -12,12 +12,12 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/privacl"
 )
 
 // Client submits batches to POST /ingest/v1/batches with the source credential
@@ -34,21 +34,19 @@ type Client struct {
 
 const maxReceiptBytes = 1 << 20
 
-// ReadCredential reads the source credential file. On POSIX systems a file
-// readable by group or others is refused: the credential is a secret and the
-// reference to it is only a path.
+// ReadCredential reads the source credential file. A file other users can read
+// is refused (POSIX group/other mode bits; on Windows the file's DACL): the
+// credential is a secret and the reference to it is only a path.
 func ReadCredential(path string) ([]byte, error) {
-	if runtime.GOOS != "windows" {
-		st, err := os.Stat(path)
-		if err != nil {
-			return nil, errors.New("agent: credential file unreadable")
-		}
-		if st.Mode().Perm()&0o077 != 0 {
-			return nil, errors.New("agent: credential file must not be readable by group or others")
-		}
-		if !st.Mode().IsRegular() {
-			return nil, errors.New("agent: credential file is not a regular file")
-		}
+	st, err := os.Stat(path)
+	if err != nil {
+		return nil, errors.New("agent: credential file unreadable")
+	}
+	if !st.Mode().IsRegular() {
+		return nil, errors.New("agent: credential file is not a regular file")
+	}
+	if privacl.Check(path) != nil {
+		return nil, errors.New("agent: credential file must not be readable by other users")
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {

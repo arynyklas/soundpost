@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -41,6 +42,7 @@ type Engine struct {
 	indexes      [64]uint64
 	validator    Revalidator
 	fault        func(string) error
+	injected     atomic.Pointer[func(string) error]
 	failed       bool
 	closed       bool
 	catalog      manifestState
@@ -215,6 +217,9 @@ func (e *Engine) Close() error {
 func (e *Engine) trip(at string) error {
 	if e.fault != nil {
 		return e.fault(at)
+	}
+	if h := e.injected.Load(); h != nil {
+		return (*h)(at)
 	}
 	return nil
 }

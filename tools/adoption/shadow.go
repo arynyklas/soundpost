@@ -1580,6 +1580,11 @@ func runShadow(ctx context.Context, args []string) error {
 	if err != nil || !info.IsDir() {
 		return errors.New("workdir must be an existing directory")
 	}
+	// The full report is private evidence: its directory gets the same checks as every other
+	// private output (outside every repository and worktree, reachable by its owner alone).
+	if _, err := privateDirectory(ctx, filepath.Dir(*reportPath), nil); err != nil {
+		return err
+	}
 	// Verify the mapping and policy before anything is provisioned.
 	if err := p.validate(); err != nil {
 		return err

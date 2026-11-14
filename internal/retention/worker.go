@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/jobs"
 	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/storage"
 	"sort"
@@ -499,7 +500,7 @@ func (s *Service) expire(ctx context.Context) (uint64, error) {
 				}
 				processed = p
 			}
-			if uint64(c.Cursor.Index) > processed && !covered(c) {
+			if uint64(c.Cursor.Index) > processed && !covered(c) && !projected(&state, c) {
 				if planning {
 					k := runKey{c.Org, c.Project, c.Cursor.Group}
 					if entries[k] == nil {
@@ -621,6 +622,29 @@ func (s *Service) expire(ctx context.Context) (uint64, error) {
 	s.status.HeldByLegal += report.Held
 	s.mu.Unlock()
 	return report.Records + report.Blobs, errors.Join(errs...)
+}
+
+// projected reports whether a projection's committed control state proves the
+// candidate's lifecycle evidence processed: an error occurrence at or below the
+// project's issue checkpoint of its data group, a job attempt record whose
+// attempt command (derived from its origin) the job book holds. Everything
+// else, including evidence no projection reads, is not provably processed and
+// expires only behind a gap. State read earlier is only ever behind the
+// present, so a stale read can only be conservative.
+func projected(st *control.State, c storage.EraseCandidate) bool {
+	switch c.Kind {
+	case model.ErrorKind:
+		checkpoint, err := control.IssueCheckpointOf(st, c.Org, c.Project, c.Cursor.Group)
+		return err == nil && uint64(c.Cursor.Index) <= checkpoint
+	case model.JobAttempt:
+		if c.Record == nil || c.Record.Payload.Job == nil {
+			return false
+		}
+		command := jobs.AttemptCommandID(c.Org, c.Project, c.Cursor, c.Record.ID)
+		applied, err := control.JobCommandApplied(st, c.Org, c.Project, c.Record.Payload.Job.Job, command)
+		return err == nil && applied
+	}
+	return false
 }
 
 func contains(ids []model.ID, id model.ID) bool {

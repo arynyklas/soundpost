@@ -1300,7 +1300,7 @@ func closureCLIFixture(t *testing.T, now time.Time) (ledger, trust, private, sum
 
 func TestClosureCLIWritesPrivateReportAndClosedSummary(t *testing.T) {
 	ledger, trust, private, summary := closureCLIFixture(t, time.Now().UTC())
-	args := []string{"--mode", "close", "--ledger", ledger, "--trusted-keys", trust, "--private-output", private, "--public-summary", summary, "--private-directory-acl-confirmed"}
+	args := []string{"--mode", "close", "--ledger", ledger, "--trusted-keys", trust, "--private-output", private, "--public-summary", summary}
 	if err := runClosure(context.Background(), args); err != nil {
 		t.Fatal(err)
 	}
@@ -1326,7 +1326,7 @@ func TestClosureCLIBlockedDecisionIsNonzeroButWritesEvidence(t *testing.T) {
 	if err := writeExclusive(trust, ClosureTrust{Keys: map[string]ed25519.PublicKey{closureTestKeyID: closureTestKey("someone-else").Public().(ed25519.PublicKey)}}); err != nil {
 		t.Fatal(err)
 	}
-	args := []string{"--mode", "close", "--ledger", ledger, "--trusted-keys", trust, "--private-output", private, "--public-summary", summary, "--private-directory-acl-confirmed"}
+	args := []string{"--mode", "close", "--ledger", ledger, "--trusted-keys", trust, "--private-output", private, "--public-summary", summary}
 	if err := runClosure(context.Background(), args); err == nil || !strings.Contains(err.Error(), "blocked") {
 		t.Fatalf("a blocked closure must be an error: %v", err)
 	}
@@ -1347,7 +1347,7 @@ func TestClosureCLIHistoryModeAndUsage(t *testing.T) {
 	if err := writeExclusive(hPath, h); err != nil {
 		t.Fatal(err)
 	}
-	args := []string{"--mode", "history", "--ledger", hPath, "--private-output", private, "--public-summary", summary, "--private-directory-acl-confirmed"}
+	args := []string{"--mode", "history", "--ledger", hPath, "--private-output", private, "--public-summary", summary}
 	if err := runClosure(context.Background(), args); err != nil {
 		t.Fatal(err)
 	}
@@ -1364,7 +1364,7 @@ func TestClosureCLIHistoryModeAndUsage(t *testing.T) {
 	if err := writeExclusive(hPath2, h); err != nil {
 		t.Fatal(err)
 	}
-	args2 := []string{"--mode", "history", "--ledger", hPath2, "--private-output", private2, "--public-summary", summary2, "--private-directory-acl-confirmed"}
+	args2 := []string{"--mode", "history", "--ledger", hPath2, "--private-output", private2, "--public-summary", summary2}
 	if err := runClosure(context.Background(), args2); err == nil {
 		t.Fatal("a blocked history must be an error")
 	}
@@ -1441,7 +1441,7 @@ func TestClosureCLIHistoryModeAndUsage(t *testing.T) {
 	}
 	// Private evidence must stay out of the repository.
 	cwd, _ := os.Getwd()
-	if err := runClosure(context.Background(), []string{"--mode", "history", "--ledger", hPath, "--private-output", cwd, "--public-summary", filepath.Join(inputs, "i.json"), "--private-directory-acl-confirmed"}); err == nil {
+	if err := runClosure(context.Background(), []string{"--mode", "history", "--ledger", hPath, "--private-output", cwd, "--public-summary", filepath.Join(inputs, "i.json")}); err == nil {
 		t.Fatal("private output inside the checkout accepted")
 	}
 }

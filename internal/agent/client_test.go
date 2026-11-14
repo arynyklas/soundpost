@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/privacl"
 )
 
 func testBatch() model.Batch {
@@ -181,6 +182,9 @@ func TestClientRefusesAnUntrustedServerCertificate(t *testing.T) {
 
 func TestReadCredentialRefusesLooseOrMalformedFiles(t *testing.T) {
 	dir := t.TempDir()
+	if err := privacl.Restrict(dir); err != nil { // the host's temp access list may name other accounts
+		t.Fatal(err)
+	}
 	write := func(name, content string, mode os.FileMode) string {
 		p := filepath.Join(dir, name)
 		if err := os.WriteFile(p, []byte(content), mode); err != nil {

@@ -1468,7 +1468,7 @@ func TestComparisonCommand(t *testing.T) {
 	}
 	lp, cp, ap := write("legacy.json", l), write("canonical.json", c), write("approved.json", a)
 	run := func(private, summary string, extra ...string) error {
-		args := []string{"--legacy", lp, "--canonical", cp, "--approved-policy", ap, "--private-output", private, "--public-summary", summary, "--private-directory-acl-confirmed"}
+		args := []string{"--legacy", lp, "--canonical", cp, "--approved-policy", ap, "--private-output", private, "--public-summary", summary}
 		return runPolicyCompare(context.Background(), append(args, extra...))
 	}
 	t.Run("reconciled window writes private report and closed summary", func(t *testing.T) {
@@ -1498,7 +1498,7 @@ func TestComparisonCommand(t *testing.T) {
 		blocked := write("legacy-blocked.json", l2)
 		private := privateTempDir(t)
 		summary := filepath.Join(inputs, "blocked-summary.json")
-		args := []string{"--legacy", blocked, "--canonical", cp, "--approved-policy", ap, "--private-output", private, "--public-summary", summary, "--private-directory-acl-confirmed"}
+		args := []string{"--legacy", blocked, "--canonical", cp, "--approved-policy", ap, "--private-output", private, "--public-summary", summary}
 		if err := runPolicyCompare(context.Background(), args); err == nil || !strings.Contains(err.Error(), string(policyVerdictBlocked)) {
 			t.Fatalf("blocked comparison exited cleanly: %v", err)
 		}
@@ -1531,7 +1531,7 @@ func TestComparisonCommand(t *testing.T) {
 		if err := os.WriteFile(junk, []byte(`{"ledger": 1, "unknown": true}`), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		args := []string{"--legacy", junk, "--canonical", cp, "--approved-policy", ap, "--private-output", private, "--public-summary", filepath.Join(inputs, "s4.json"), "--private-directory-acl-confirmed"}
+		args := []string{"--legacy", junk, "--canonical", cp, "--approved-policy", ap, "--private-output", private, "--public-summary", filepath.Join(inputs, "s4.json")}
 		if err := runPolicyCompare(context.Background(), args); err == nil {
 			t.Fatal("malformed input accepted")
 		}
@@ -1540,7 +1540,7 @@ func TestComparisonCommand(t *testing.T) {
 		}
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		args = []string{"--legacy", lp, "--canonical", cp, "--approved-policy", ap, "--private-output", private, "--public-summary", filepath.Join(inputs, "s5.json"), "--private-directory-acl-confirmed"}
+		args = []string{"--legacy", lp, "--canonical", cp, "--approved-policy", ap, "--private-output", private, "--public-summary", filepath.Join(inputs, "s5.json")}
 		if err := runPolicyCompare(ctx, args); err == nil {
 			t.Fatal("cancelled context ignored")
 		}

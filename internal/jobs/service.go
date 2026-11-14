@@ -214,6 +214,24 @@ func digest(domain string, parts ...any) (model.Hash, error) {
 	return out, nil
 }
 
+// AttemptCommandID is the command ID ApplyAttempt commits a journal record
+// under: a function of the record's origin only, so the same record can never
+// take effect twice and a control read can tell that it was applied.
+func AttemptCommandID(org, project model.ID, origin model.Cursor, record model.ID) model.ID {
+	sum := sha256.New()
+	sum.Write([]byte("soundpost.jobs.attempt-command\x00"))
+	sum.Write(org[:])
+	sum.Write(project[:])
+	sum.Write(origin.Group[:])
+	var index [8]byte
+	binary.BigEndian.PutUint64(index[:], uint64(origin.Index))
+	sum.Write(index[:])
+	sum.Write(record[:])
+	var command model.ID
+	copy(command[:], sum.Sum(nil))
+	return command
+}
+
 // ApplyAttempt folds one journal record into the job's state. The command ID is
 // derived from the record's origin (group, index, record ID) so the same
 // journal record can never take effect twice, whatever crashes or retries
@@ -237,18 +255,7 @@ func (s *Service) ApplyAttempt(ctx context.Context, scope auth.Scope, evidence A
 	if evidence.Event.Observed > limit || evidence.Event.Terminal != nil && *evidence.Event.Terminal > limit || isScheduled && scheduledAt > limit {
 		return JobState{}, "", model.Fail(model.Invalid)
 	}
-	sum := sha256.New()
-	sum.Write([]byte("soundpost.jobs.attempt-command\x00"))
-	org := scope.OrgID()
-	sum.Write(org[:])
-	sum.Write(evidence.Project[:])
-	sum.Write(evidence.Cursor.Group[:])
-	var index [8]byte
-	binary.BigEndian.PutUint64(index[:], uint64(evidence.Cursor.Index))
-	sum.Write(index[:])
-	sum.Write(evidence.Record[:])
-	var command model.ID
-	copy(command[:], sum.Sum(nil))
+	command := AttemptCommandID(scope.OrgID(), evidence.Project, evidence.Cursor, evidence.Record)
 	input, err := digest("attempt", evidence.Event)
 	if err != nil {
 		return JobState{}, "", err

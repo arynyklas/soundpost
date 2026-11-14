@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -2456,7 +2457,7 @@ func (w *cutoverWorld) cliEnv() *cutoverCLIEnv {
 	env := &cutoverCLIEnv{inputs: inputs, private: privateTempDir(w.t), summary: filepath.Join(inputs, "public.json")}
 	env.grant = write("grant.json", w.grant)
 	env.args = []string{"--gate", write("gate.json", w.gate), "--gate-public-key", keyPath, "--plan", write("plan.json", plan), "--authorization", env.grant,
-		"--private-directory", env.private, "--private-directory-acl-confirmed", "--public-summary", env.summary}
+		"--private-directory", env.private, "--public-summary", env.summary}
 	return env
 }
 
@@ -2520,7 +2521,7 @@ func TestCutoverCLIRunsTheJourneyAndWritesClosedOutputs(t *testing.T) {
 
 	rsum := filepath.Join(env.inputs, "rollback-public.json")
 	rargs := []string{"--receipt", receipts[0], "--authorization", env.grant, "--reason-code", RollbackReasonOperator, "--reason-text", "drill through the command line",
-		"--private-directory", env.private, "--private-directory-acl-confirmed", "--public-summary", rsum}
+		"--private-directory", env.private, "--public-summary", rsum}
 	if err := runRollback(w.ctx, append(slices.Clone(rargs), "--timeout", "1h")); err != nil {
 		t.Fatal(err)
 	}
@@ -2601,7 +2602,7 @@ func TestCutoverCLIWritesOutputsForAnIncompleteRunAndResumes(t *testing.T) {
 	}
 	rsum := filepath.Join(env.inputs, "rb1.json")
 	rargs := []string{"--receipt", latest, "--authorization", env.grant, "--reason-code", RollbackReasonDestination, "--reason-text", "unknown outcomes",
-		"--private-directory", env.private, "--private-directory-acl-confirmed", "--public-summary", rsum}
+		"--private-directory", env.private, "--public-summary", rsum}
 	if err = runRollback(w.ctx, rargs); err == nil || !strings.Contains(err.Error(), "incomplete") {
 		t.Fatalf("%v", err)
 	}
@@ -2704,8 +2705,12 @@ func TestCutoverCLIRefusesBadInputsBeforeAnyChange(t *testing.T) {
 		}},
 	)
 	if runtime.GOOS == "windows" {
-		cases = append(cases, mutation{"unconfirmed Windows ACL", "ACL", true, func(w *cutoverWorld, env *cutoverCLIEnv) []string {
-			return slices.DeleteFunc(slices.Clone(env.args), func(a string) bool { return a == "--private-directory-acl-confirmed" })
+		// The ACL is read, not asserted: a private directory Everyone can read is refused.
+		cases = append(cases, mutation{"private directory readable by everyone", "deny access to other users", true, func(w *cutoverWorld, env *cutoverCLIEnv) []string {
+			if out, err := exec.Command("icacls", env.private, "/grant", "Everyone:(OI)(CI)R").CombinedOutput(); err != nil {
+				t.Fatalf("icacls: %v %s", err, out)
+			}
+			return env.args
 		}})
 	}
 	for _, c := range cases {
@@ -2787,7 +2792,7 @@ func TestRollbackCLIRefusesBadInputsBeforeAnyChange(t *testing.T) {
 			}
 			rsum := filepath.Join(env.inputs, "rb.json")
 			args := []string{"--receipt", receipt, "--authorization", env.grant, "--reason-code", RollbackReasonOperator, "--reason-text", "drill",
-				"--private-directory", env.private, "--private-directory-acl-confirmed", "--public-summary", rsum}
+				"--private-directory", env.private, "--public-summary", rsum}
 			before := w.snapshot()
 			err := runRollback(w.ctx, c.mutate(w, args, receipt, env.inputs))
 			if err == nil || !strings.Contains(err.Error(), c.want) {

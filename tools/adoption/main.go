@@ -12,17 +12,18 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/arynyklas/soundpost/internal/privacl"
 )
 
 func inside(path, root string) bool {
 	rel, err := filepath.Rel(root, path)
 	return err == nil && (rel == "." || rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel))
 }
-func privateDirectory(ctx context.Context, dir string, roots []string, acl bool) (string, error) {
+func privateDirectory(ctx context.Context, dir string, roots []string) (string, error) {
 	resolved, err := canonical(dir)
 	if err != nil {
 		return "", errors.New("private directory must already exist")
@@ -31,12 +32,10 @@ func privateDirectory(ctx context.Context, dir string, roots []string, acl bool)
 	if err != nil || !info.IsDir() {
 		return "", errors.New("invalid private directory")
 	}
-	if runtime.GOOS == "windows" {
-		if !acl {
-			return "", errors.New("verified restrictive private directory ACL required")
-		}
-	} else if info.Mode().Perm()&0077 != 0 {
-		return "", errors.New("private directory must deny group and other access")
+	// The access list is read here, never asserted by the operator: POSIX mode bits, or on
+	// Windows the DACL, must leave the directory reachable by its owner alone.
+	if privacl.Check(resolved) != nil {
+		return "", errors.New("private directory must deny access to other users")
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -117,8 +116,8 @@ func writeExclusive(path string, value any) error {
 	ok = true
 	return nil
 }
-func writePrivate(ctx context.Context, dir string, roots []string, acl bool, intake PrivateIntake) error {
-	resolved, err := privateDirectory(ctx, dir, roots, acl)
+func writePrivate(ctx context.Context, dir string, roots []string, intake PrivateIntake) error {
+	resolved, err := privateDirectory(ctx, dir, roots)
 	if err != nil {
 		return err
 	}
@@ -167,7 +166,6 @@ func runIntake(ctx context.Context, args []string) error {
 	grantPath := fs.String("authorization", "", "private grant JSON")
 	output := fs.String("private-output", "", "external private directory")
 	summaryPath := fs.String("public-summary", "", "new public summary file")
-	acl := fs.Bool("private-directory-acl-confirmed", false, "operator verified restrictive NTFS ACL")
 	timeout := fs.Duration("timeout", 2*time.Minute, "overall operator deadline (positive, at most 1h)")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -189,7 +187,7 @@ func runIntake(ctx context.Context, args []string) error {
 	for _, t := range targets.Targets {
 		roots = append(roots, t.Repository)
 	}
-	if _, err := privateDirectory(ctx, *output, roots, *acl); err != nil {
+	if _, err := privateDirectory(ctx, *output, roots); err != nil {
 		return err
 	}
 	intake, err := CollectIntake(ctx, targets, grant)
@@ -203,7 +201,7 @@ func runIntake(ctx context.Context, args []string) error {
 	if ctx.Err() != nil {
 		return errors.New("intake cancelled or deadline exceeded")
 	}
-	if err := writePrivate(ctx, *output, roots, *acl, intake); err != nil {
+	if err := writePrivate(ctx, *output, roots, intake); err != nil {
 		return errors.New("private output creation failed")
 	}
 	if err := writeExclusive(*summaryPath, summary); err != nil {

@@ -1241,7 +1241,7 @@ func TestRunJourneysCLIWritesPrivateReportAndClosedSummary(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("SOUNDPOST_JOURNEY_BEARER", "synthetic-bearer")
-	args := []string{"--server", srv.URL, "--org", w.org.String(), "--project", w.project.String(), "--expected", expectedPath, "--authorization", grantPath, "--private-output", private, "--public-summary", summary, "--private-directory-acl-confirmed"}
+	args := []string{"--server", srv.URL, "--org", w.org.String(), "--project", w.project.String(), "--expected", expectedPath, "--authorization", grantPath, "--private-output", private, "--public-summary", summary}
 	if err := runJourneys(context.Background(), args); err != nil {
 		t.Fatal(err)
 	}
@@ -1283,7 +1283,7 @@ func TestRunJourneysCLIFailedAcceptanceIsNonzeroButWritesEvidence(t *testing.T) 
 		t.Fatal(err)
 	}
 	t.Setenv("SOUNDPOST_JOURNEY_BEARER", "synthetic-bearer")
-	err := runJourneys(context.Background(), []string{"--server", srv.URL, "--org", w.org.String(), "--project", w.project.String(), "--expected", expectedPath, "--authorization", grantPath, "--private-output", private, "--public-summary", summary, "--private-directory-acl-confirmed"})
+	err := runJourneys(context.Background(), []string{"--server", srv.URL, "--org", w.org.String(), "--project", w.project.String(), "--expected", expectedPath, "--authorization", grantPath, "--private-output", private, "--public-summary", summary})
 	if err == nil || !strings.Contains(err.Error(), "journey acceptance failed") {
 		t.Fatalf("failed acceptance must be an error: %v", err)
 	}
@@ -1329,7 +1329,7 @@ func TestRunJourneysCLIRefusesWithoutExactAuthorization(t *testing.T) {
 			t.Fatal(err)
 		}
 		summary := filepath.Join(inputs, strings.ReplaceAll(name, " ", "-")+".summary.json")
-		err := runJourneys(context.Background(), []string{"--server", srv.URL, "--org", w.org.String(), "--project", w.project.String(), "--expected", expectedPath, "--authorization", grantPath, "--private-output", private, "--public-summary", summary, "--private-directory-acl-confirmed"})
+		err := runJourneys(context.Background(), []string{"--server", srv.URL, "--org", w.org.String(), "--project", w.project.String(), "--expected", expectedPath, "--authorization", grantPath, "--private-output", private, "--public-summary", summary})
 		if err == nil {
 			t.Fatalf("%s: accepted", name)
 		}
@@ -1348,7 +1348,7 @@ func TestRunJourneysCLIRefusesWithoutExactAuthorization(t *testing.T) {
 	if err := writeExclusive(grantPath, base); err != nil {
 		t.Fatal(err)
 	}
-	if err := runJourneys(context.Background(), []string{"--server", srv.URL, "--org", w.org.String(), "--project", w.project.String(), "--expected", expectedPath, "--authorization", grantPath, "--private-output", private, "--public-summary", filepath.Join(inputs, "t.json"), "--timeout", "2h", "--private-directory-acl-confirmed"}); err == nil {
+	if err := runJourneys(context.Background(), []string{"--server", srv.URL, "--org", w.org.String(), "--project", w.project.String(), "--expected", expectedPath, "--authorization", grantPath, "--private-output", private, "--public-summary", filepath.Join(inputs, "t.json"), "--timeout", "2h"}); err == nil {
 		t.Fatal("unbounded timeout accepted")
 	}
 }

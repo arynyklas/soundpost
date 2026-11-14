@@ -1791,11 +1791,11 @@ func (f *drFixture) put(label string, p *drProject, at int64, base string, slot 
 }
 
 // drFixtureOpts selects the history of a fixture: After takes a second backup once the deletion
-// completed; ShareSeries makes every deleted row share its metric series with a retained row
-// (otherwise each deleted row carries a series no retained row has).
+// completed. Every deleted row carries a metric series no retained row has, so a backup taken after
+// the deletion is one whose erased rows left a series behind in the quota certificate.
 type drFixtureOpts struct {
-	After, ShareSeries bool
-	Tag                string // subdirectory of the work directory ("" = the work directory itself)
+	After bool
+	Tag   string // subdirectory of the work directory ("" = the work directory itself)
 }
 
 func drBuildFixture(env *Env, rep *Report, opts drFixtureOpts) (*drFixture, error) {
@@ -1833,11 +1833,7 @@ func drBuildFixture(env *Env, rep *Report, opts drFixtureOpts) (*drFixture, erro
 		if err = f.put("outside the range, same project", f.doom, 5000+int64(i), keptName, i*4); err != nil {
 			return nil, err
 		}
-		doomedBase, doomedSlot := doomedName, i*4+1
-		if opts.ShareSeries {
-			doomedBase, doomedSlot = keptName, i*4
-		}
-		if err = f.put("in the range, same project (will be deleted)", f.doom, drFixtureLo+int64(i), doomedBase, doomedSlot); err != nil {
+		if err = f.put("in the range, same project (will be deleted)", f.doom, drFixtureLo+int64(i), doomedName, i*4+1); err != nil {
 			return nil, err
 		}
 	}
@@ -2279,7 +2275,7 @@ func drBackupPredatesDeletion(env *Env, rep *Report) error {
 // restore, with the authority available, succeeds and retains every acknowledged batch exactly.
 func drRestoreAuthorityUnavailable(env *Env, rep *Report) error {
 	ctx := env.Ctx
-	f, err := drBuildFixture(env, rep, drFixtureOpts{After: true, ShareSeries: true})
+	f, err := drBuildFixture(env, rep, drFixtureOpts{After: true})
 	if err != nil {
 		return err
 	}
@@ -2487,38 +2483,13 @@ func drRestoreAuthorityUnavailable(env *Env, rep *Report) error {
 	if err = rep.Require("deleted_data_not_resurrected", len(resurrected) == 0, fmt.Sprintf("the tombstone detector flags %d resurrected rows", len(resurrected))); err != nil {
 		return err
 	}
-	// ---- a finding of this drill, recorded not asserted: a backup taken AFTER a deletion whose
-	// erased rows carried a series no retained row has ----
-	g, err := drBuildFixture(env, &Report{}, drFixtureOpts{After: true, Tag: "finding"})
-	if err != nil {
-		return fmt.Errorf("finding probe fixture: %w", err)
-	}
-	g.rig.site.close()
-	rootF := filepath.Join(env.Work, "finding-restored")
-	if err = env.Approve([]string{rootF}, nil); err != nil {
-		return err
-	}
-	fr, err := g.restorer(g.rig.dest)
-	if err != nil {
-		return err
-	}
-	finding := map[string]any{"backup": "taken after the deletion completed; every deleted row carried a series no retained row carries"}
-	if _, rerr := fr.Restore(ctx, g.after, backup.DestinationRoot(rootF), g.rig.authority); rerr != nil {
-		finding["restore_fault"] = string(drFault(rerr))
-	} else if fs, oerr := g.openRestored(env, rootF); oerr != nil {
-		finding["open_fault"] = string(drFault(oerr))
-	} else {
-		_, aerr := backup.Activate(ctx, backup.DestinationRoot(rootF), fs.app, g.rig.authority, time.Now)
-		finding["activation_fault"] = string(drFault(aerr))
-		finding["engine_ready_after"] = fs.app.Storage.RestoreReady() == nil
-		finding["activated_marker"] = drActivated(rootF)
-		fs.close()
-		if aerr != nil {
-			rep.NotRun("restore + activation of a backup taken after a deletion whose erased rows carried a series no retained row carries",
-				"activation fails closed with typed `corrupt` from storage.(*Engine).CommitQuotaReconciliation: the series set recomputed from the surviving rows of the restored index differs from the quota certificate's series digest, which (storage.ReconcileQuota) still lists the series of the erased batches; found by this drill, the restore authority flow above therefore uses a post-deletion backup whose erased rows share their series with retained rows")
-		}
-	}
-	rep.Fact("finding_post_deletion_backup_with_erased_only_series", finding)
+	// The backup under test was taken AFTER the deletion completed and every deleted row carried a series
+	// no retained row has (product fix dc732a8: the quota reconciliation drops the series of erased
+	// batches). Restore, every activation refusal and the activation above ran on exactly that history.
+	rep.Fact("post_deletion_backup_with_erased_only_series", map[string]any{
+		"backup":               "taken after the deletion completed; every deleted row carried a series no retained row carries",
+		"restore_and_activate": "required to succeed with the authority available (same_restore_succeeds_with_the_authority_available, activation_succeeds_with_the_authority_available) and to leave no deleted row readable (deleted_data_not_resurrected)",
+	})
 	rep.Fact("refusal_cases", cases)
 	rep.Fact("successful_restore", map[string]any{"authority_sequence": report.AuthoritySequence, "tombstones": report.Tombstones, "objects": report.Objects})
 	rep.Cursor("authority_head_current", drHeadFacts(f.headAfter.Head))

@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/arynyklas/soundpost/internal/adapters/queryinput"
+	"github.com/arynyklas/soundpost/internal/egress"
 	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/policy"
 )
@@ -581,11 +582,12 @@ func scrapeStaleBatches(t ScrapeTarget, cfg queryinput.InputProfile, org model.I
 
 // ---------------------------------------------------------------- egress
 
-// The block below mirrors internal/notify/providers.EgressPolicy (same ranges,
-// same any-blocked-answer refusal, same Control re-check). That package is not
-// imported because its dialer and policy methods are unexported, it depends on
-// notify/auth, and its loopback test seam is private; importing it would drag
-// notification delivery into the host agent.
+// The block below follows internal/notify/providers.EgressPolicy (same any-blocked-answer
+// refusal, same Control re-check); the address ranges themselves are the one
+// internal/egress table both use. That package is not imported because its dialer
+// and policy methods are unexported, it depends on notify/auth, and its loopback
+// test seam is private; importing it would drag notification delivery into the
+// host agent.
 
 // Resolver resolves a host name to addresses.
 type Resolver interface {
@@ -607,77 +609,22 @@ type EgressPolicy struct {
 
 var errScrapeEgress = errors.New("sources: scrape egress blocked")
 
-func scrapeMP(s ...string) []netip.Prefix {
-	out := make([]netip.Prefix, len(s))
-	for i, v := range s {
-		out[i] = netip.MustParsePrefix(v)
-	}
-	return out
-}
-
-// scrapeNeverAllowed can not be lifted by any allow-list entry.
-var scrapeNeverAllowed = scrapeMP(
-	"0.0.0.0/8", "127.0.0.0/8", "169.254.0.0/16", "224.0.0.0/4", "240.0.0.0/4",
-	"100.100.100.200/32", "168.63.129.16/32", "192.0.0.192/32",
-	"::/96", "::1/128", "fe80::/10", "ff00::/8", "fd00:ec2::254/128", "64:ff9b::/96", "64:ff9b:1::/48", "2002::/16",
-)
-
-// scrapeBlockedByDefault is lifted only by an explicit allow-list entry.
-var scrapeBlockedByDefault = scrapeMP(
-	"10.0.0.0/8", "100.64.0.0/10", "172.16.0.0/12", "192.0.0.0/24", "192.0.2.0/24", "192.88.99.0/24",
-	"192.168.0.0/16", "198.18.0.0/15", "198.51.100.0/24", "203.0.113.0/24",
-	"100::/64", "2001::/32", "2001:2::/48", "2001:10::/28", "2001:db8::/32", "fc00::/7", "fec0::/10",
-)
-
-func scrapeNormPrefix(p netip.Prefix) netip.Prefix {
-	if p.Addr().Is4In6() && p.Bits() >= 96 {
-		return netip.PrefixFrom(p.Addr().Unmap(), p.Bits()-96)
-	}
-	return p
-}
-
 func (p EgressPolicy) validate() error {
-	for _, a := range p.AllowPrefixes {
-		a = scrapeNormPrefix(a)
-		if !a.IsValid() || a.Addr().Zone() != "" {
-			return errors.New("sources: invalid egress allow prefix")
-		}
-		for _, n := range scrapeNeverAllowed {
-			if a.Overlaps(n) {
-				return errors.New("sources: egress allow prefix covers a never-allowed range")
-			}
-		}
+	if !egress.ValidAllowList(p.AllowPrefixes) {
+		return errors.New("sources: invalid egress allow list")
 	}
 	return nil
 }
 
 // check validates one concrete address. It is applied to every resolved
 // address and again, by the dialer's Control hook, to the address the kernel is
-// about to connect to.
+// about to connect to. The ranges are internal/egress, shared with the
+// notification providers.
 func (p EgressPolicy) check(a netip.Addr) error {
-	if !a.IsValid() || a.Zone() != "" {
-		return errScrapeEgress
-	}
-	a = a.Unmap()
-	if p.loopbackOK && a.IsLoopback() {
+	if p.loopbackOK && a.IsValid() && a.Zone() == "" && a.Unmap().IsLoopback() {
 		return nil
 	}
-	for _, n := range scrapeNeverAllowed {
-		if n.Contains(a) {
-			return errScrapeEgress
-		}
-	}
-	for _, n := range p.AllowPrefixes {
-		if scrapeNormPrefix(n).Contains(a) {
-			return nil
-		}
-	}
-	for _, n := range scrapeBlockedByDefault {
-		if n.Contains(a) {
-			return errScrapeEgress
-		}
-	}
-	if a.IsUnspecified() || a.IsMulticast() || a.IsLinkLocalUnicast() || a.IsLoopback() {
+	if !egress.Allowed(a, p.AllowPrefixes) {
 		return errScrapeEgress
 	}
 	return nil

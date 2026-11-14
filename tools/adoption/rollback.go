@@ -422,7 +422,6 @@ func RollbackPublicSummary(r RollbackReceipt) RollbackPublic {
 //	--unknown-reviewed              attest that the recorded unknown provider outcomes were reviewed
 //	--private-directory DIRECTORY   the operator-private directory holding the run's state file
 //	--public-summary FILE           new file for the closed public projection
-//	--private-directory-acl-confirmed  operator verified the NTFS ACL (Windows)
 //	--timeout DURATION              overall deadline, positive, at most 1h (default 10m)
 //
 // Each invocation writes DIRECTORY/rollback-RUNID.receipt-vN.json (N is the
@@ -436,7 +435,6 @@ func runRollback(ctx context.Context, args []string) error {
 	reviewed := fs.Bool("unknown-reviewed", false, "unknown provider outcomes were reviewed")
 	dir := fs.String("private-directory", "", "existing operator-private directory")
 	summaryPath := fs.String("public-summary", "", "new public summary file")
-	acl := fs.Bool("private-directory-acl-confirmed", false, "operator verified restrictive NTFS ACL")
 	timeout := fs.Duration("timeout", 10*time.Minute, "overall deadline (positive, at most 1h)")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -454,7 +452,7 @@ func runRollback(ctx context.Context, args []string) error {
 	if readInput(*receiptPath, &receipt) != nil || readInput(*grantPath, &grant) != nil {
 		return errors.New("invalid private operator input")
 	}
-	resolved, err := privateDirectory(ctx, *dir, nil, *acl)
+	resolved, err := privateDirectory(ctx, *dir, nil)
 	if err != nil {
 		return err
 	}

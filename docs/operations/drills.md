@@ -10,8 +10,13 @@ exercised on the current host is reported `not_run` with its exact reason, never
 simulated as passed.
 
 ```
-go run ./tools/drills --scenario NAME|all --target isolated --report DIR [--binary PATH] [--root .]
+go run -tags soundpost_faults ./tools/drills --scenario NAME|all --target isolated --report DIR [--binary PATH] [--root .]
 ```
+
+The `soundpost_faults` tag compiles the storage engine's fault seam (`storage.Engine.SetFaultHook`) into the
+drills binary only; the released `soundpost` binary is built without it, so no consumer can install a fault
+hook. Without the tag every scenario still runs except the engine part of `capacity-faults`, which then fails
+with that reason instead of passing.
 
 ## Safety: isolated targets only
 
@@ -114,10 +119,10 @@ entry, `facts` and `not_run_items`. No secret or raw telemetry content is writte
   an unresponsive peer, not link-level partition behaviour with both sides live.
   Which member leads the data groups is not observable, so "initial leader" means
   the configured `initial_leader`.
-* `capacity-faults`: the fault hook is the replica layer's own seam and it is
-  **not** a real failing disk. `storage.Engine`'s own fault field is unexported, so
-  failed-sync and slow-apply run on the replica layer with a drill-owned state
-  machine. Real ENOSPC/EIO need a mounted size-limited filesystem (privileged).
+* `capacity-faults`: the hooks are the replica layer's own seam and, in builds tagged
+  `soundpost_faults`, the storage engine's `SetFaultHook` on the running application; neither is a
+  real failing disk (the real EIO/ENOSPC errnos are the `fsync-failure` scenario's seccomp
+  injection).
 * `external-deadman` runs the observer on the **same host**: it proves that a
   separate process with its own state and credentials keeps detecting and
   delivering while all Soundpost processes are stopped, not that it survives a

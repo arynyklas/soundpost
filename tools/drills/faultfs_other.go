@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"os/exec"
+	"syscall"
 	"time"
 )
 
@@ -20,7 +21,7 @@ func dcFaultExecMain() int { return 3 }
 type dcDisk struct{}
 
 type dcDiskStats struct {
-	Syncs, SyncsFailed, SyncsOnGone, PathOpsDenied, DirSyncs, Renames int
+	Syncs, SyncsFailed, SyncsNoSpace, SyncsOnGone, PathOpsDenied, DirSyncs, Renames int
 }
 
 type dcCutStats struct {
@@ -30,6 +31,7 @@ type dcCutStats struct {
 
 func newDCDisk(root, shadow string) (*dcDisk, error) { return nil, errNoInjector }
 func (d *dcDisk) setFailSync(bool)                   {}
+func (d *dcDisk) setSyncErrno(syscall.Errno)         {}
 func (d *dcDisk) detach(string) error                { return errNoInjector }
 func (d *dcDisk) reattachOriginal(string) error      { return errNoInjector }
 func (d *dcDisk) reattachBlank(string) error         { return errNoInjector }

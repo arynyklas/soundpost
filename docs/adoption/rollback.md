@@ -61,7 +61,7 @@ No code path of the rollback or the cutover deletes or reconfigures a legacy sys
 ```
 adoption rollback --receipt FILE --authorization FILE --reason-code CODE --reason-text TEXT \
   --private-directory DIRECTORY --public-summary NEWFILE \
-  [--unknown-reviewed] [--private-directory-acl-confirmed] [--timeout 10m]
+  [--unknown-reviewed] [--timeout 10m]
 ```
 
 `--receipt` is a cutover receipt JSON; its state file must be in `--private-directory`. Each invocation writes `DIRECTORY/rollback-RUNID.receipt-vN.json` and the new public summary and exits non-zero unless the rollback is `done`. The same `--timeout` and exclusive-output rules as the cutover apply; the wait for the new owner to drain ends with the deadline.

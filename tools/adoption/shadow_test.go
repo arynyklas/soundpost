@@ -28,6 +28,7 @@ import (
 
 	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/notify"
+	"github.com/arynyklas/soundpost/internal/privacl"
 )
 
 // ---- synthetic fixture: isolated in-process destination, no customer data ----
@@ -1572,6 +1573,9 @@ func TestShadowCLIEndToEnd(t *testing.T) {
 	fx.deliver(ShadowAdapterRemoteWriteV1, "rw", shadowRW(shadowTestSeries{labels: shadowLabels("queue_depth", "api"), samples: []shadowTestSample{{shadowT0ms + 100, shadowF(7)}}}))
 	fx.dest.Feed.Parity = &ShadowParitySpec{Conditions: []ShadowConditionExpectation{{Condition: "cli-condition-name", SourceVersion: 1, Phase: "firing"}}}
 	dir := t.TempDir()
+	if err := privacl.Restrict(dir); err != nil {
+		t.Fatal(err)
+	}
 	write := func(name string, v any) string {
 		raw, err := json.Marshal(v)
 		if err != nil {
@@ -1591,6 +1595,20 @@ func TestShadowCLIEndToEnd(t *testing.T) {
 	}
 	args := func(report, summary string) []string {
 		return []string{"--mapping", mapping, "--policy", policyPath, "--source-policy", sourcePolicy, "--capture", capture, "--workdir", work, "--report", report, "--public-summary", summary}
+	}
+	// [09.06x-W4 / M-4] The full report is private evidence: a report path inside the checkout is
+	// refused before anything is provisioned or written, like every other private output.
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	inCheckout := filepath.Join(cwd, "shadow-report-must-not-exist.json")
+	if err := runShadow(context.Background(), args(inCheckout, filepath.Join(dir, "summary-never.json"))); err == nil {
+		t.Fatal("a private shadow report inside the checkout was accepted")
+	}
+	if _, err := os.Stat(inCheckout); err == nil {
+		os.Remove(inCheckout)
+		t.Fatal("a shadow report was written inside the checkout")
 	}
 	report, summary := filepath.Join(dir, "report.json"), filepath.Join(dir, "summary.json")
 	if err := runShadow(context.Background(), args(report, summary)); err != nil {

@@ -29,7 +29,7 @@ A dependency's `third_party_internals` declares, with a mandatory reason, that s
 - **Credential.** One bearer, read from an environment variable named by `--bearer-env` (default `SOUNDPOST_JOURNEY_BEARER`), never accepted in a file or flag, never printed, never in any report. It is sent only to the exact `--server` origin, over https or over http to a loopback host. Redirects are not followed (a redirect is a failed read), proxies are not used, responses are size-bounded, and a failed response contributes only a status class (`target_not_found`, `credential_denied`, `read_failed`), never its body.
 - **Scope.** Every read is made under the `--org`/`--project` you name and every response must echo exactly that org, project and requested ID (`scope_mismatch` otherwise). Another tenant's IDs are the product's one indistinguishable not-found. The token needs: `telemetry.read` (traces, jobs), organization admin (release registry and issue evidence), `artifacts.read` (symbolication), `replay.read` and `profiles.read`. A view the credential cannot see is `view_not_ready`, never an empty pass.
 - **Authorization.** `adoption journeys` requires `--authorization`: a private read-only grant (same `Authorization` shape as intake) with a validity interval, an `Authority`, and **exactly one** scope whose `EvidenceURL` equals `--server` and whose only collector is `product-journey-read`. Anything else is refused before any read or output. A grant is an operator assertion, not cryptographic identity; authenticate its issuer outside this tool.
-- **Private vs public.** `journeys.json` (the detailed `JourneyReport`: IDs, reasons, per-check detail) goes to the exclusive-create `--private-output` directory under the same containment rules as intake (outside every repository, owner-only; on Windows the operator confirms the NTFS ACL with `--private-directory-acl-confirmed`). Only `JourneyPublicSummary` may leave it: section pass/fail enums, check counts, row-status counts, counts per closed failure code, and `CustomerAcceptance`, which is always `false`. It has no identifier or free-text field; the projection re-selects kinds and codes from fixed enums and drops anything else.
+- **Private vs public.** `journeys.json` (the detailed `JourneyReport`: IDs, reasons, per-check detail) goes to the exclusive-create `--private-output` directory under the same containment rules as intake (outside every repository, owner-only; on Windows the tool reads the directory's ACL and refuses one that admits anyone but the owner, SYSTEM and Administrators). Only `JourneyPublicSummary` may leave it: section pass/fail enums, check counts, row-status counts, counts per closed failure code, and `CustomerAcceptance`, which is always `false`. It has no identifier or free-text field; the projection re-selects kinds and codes from fixed enums and drops anything else.
 - **Failures are reports.** A failed acceptance writes both outputs and exits non-zero. A cancelled or timed-out run is an error with no report.
 
 ## Running
@@ -39,7 +39,7 @@ SOUNDPOST_JOURNEY_BEARER=<token> adoption journeys \
   --server https://<soundpost-host> --org <org-id> --project <project-id> \
   --expected <private-expected-links.json> --authorization <private-grant.json> \
   --private-output <external-private-directory> --public-summary <new-summary-file> \
-  [--private-directory-acl-confirmed] [--timeout 2m]
+  [--timeout 2m]
 ```
 
 (The parent dispatches `journeys` to `runJourneys` with the flags that follow it.) `--timeout` is positive and at most one hour.

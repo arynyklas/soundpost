@@ -96,7 +96,7 @@ Re-running `Cutover` on a `reconciliation_blocked` run repeats the reconciliatio
 ```
 adoption cutover --gate FILE --gate-public-key FILE --plan FILE --authorization FILE \
   --private-directory DIRECTORY --public-summary NEWFILE \
-  [--private-directory-acl-confirmed] [--timeout 10m]
+  [--timeout 10m]
 ```
 
 `--gate` is the signed `ReadyGate` JSON; `--gate-public-key` a file with the hex 32-byte ed25519 public key; `--plan` the plan JSON with **no** `state_path` and a valid `run_id`; `--authorization` the grant JSON; `--private-directory` an existing operator-private directory outside every repository (the same containment, mode and Windows ACL rules as [intake](authorization.md)). The state file is `DIRECTORY/cutover-RUNID.state.json`; each invocation writes the private receipt `DIRECTORY/cutover-RUNID.receipt-vN.json` (N is the state version) and the new public summary, then exits non-zero unless the run is `done`. A repeated `--public-summary` path is never overwritten. `--timeout` is positive and at most one hour and bounds the whole call (a deadline mid-run is `incomplete`, not `done`). A second invocation of a finished run refuses (`already done`) and writes nothing.

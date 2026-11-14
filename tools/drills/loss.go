@@ -26,7 +26,7 @@ func init() {
 const (
 	dcPartitionScope = "partition = every link of one member to the other two is cut in both directions while all three processes keep running and clients can still reach the isolated member; the cut is the drill's own loopback TCP proxy (drop = packets vanish and connections hang, reset = connections are reset and refused), not iptables/tc/network namespaces, so it models link failure between members but not a switch, routing or asymmetric-path failure"
 	dcPowerScope     = "power loss = the member's whole process group is SIGKILLed, then every byte and directory entry the member had not fsynced (as observed through the member's own fsync/rename system calls) is rolled back on disk; with torn the first half of the unsynced file tail survives. It does not model reordered writes inside the disk write cache, torn sectors or a real power cut; the kernel page cache is not dropped, the unsynced loss is applied by the drill"
-	dcFsyncScope     = "fsync failure = every fsync/fdatasync of the member on its data directory answers EIO from the unprivileged injector while the member runs; the real kernel and filesystem are untouched"
+	dcFsyncScope     = "fsync failure = every fsync/fdatasync of the member on its data directory answers a kernel errno from the unprivileged injector while the member runs: EIO (a failing disk) and ENOSPC (a full filesystem); the member sees the real errno of the real system call, the real kernel and filesystem are untouched and nothing is filled"
 	dcDiskScope      = "disk disappearance = the member's data directory is moved away under the running process and every fsync and path operation on it answers EIO (a pulled disk); the member's page-cache writes to already open files still succeed, as they do on a vanished block device until writeback fails"
 )
 
@@ -429,45 +429,58 @@ func dcPowerCutAll(c *dcCluster, w *dcWriter, rep *Report) error {
 
 // ---- fsync-failure ----
 
-// runFsyncFailure makes every fsync of one member fail with EIO while writes stream (the initial
-// leader, then member 3). A member whose disk will not take a sync must not acknowledge on its own
-// say: any acknowledgement through it must still be durable on a quorum (the final reconciliation
-// reads every id back from every member). The member is then restarted on its disk (its failed
-// sync state is never trusted) and has to rejoin.
+// runFsyncFailure makes every fsync of one member fail with a real kernel error while writes stream: EIO (a
+// failing disk) on the initial leader and on member 3, then ENOSPC (a full filesystem) on member 2. The
+// member is the real produced binary, so the error reaches storage.Engine and the replica journal as the
+// operating system's errno of the real fsync call (injected at the system-call boundary by the unprivileged
+// seccomp injector; no filesystem is filled). A member whose disk will not take a sync must not acknowledge
+// on its own say: any acknowledgement through it must still be durable on a quorum (the final reconciliation
+// reads every id back from every member). The member is then restarted on its disk (its failed sync state is
+// never trusted) and has to rejoin.
 func runFsyncFailure(env *Env, rep *Report) error {
 	c, w, err := dcStartInjected(env, rep, dcOptions{inject: true}, dcFsyncScope)
 	if err != nil {
 		return err
 	}
 	defer c.close()
-	// Both phases require the survivors to keep acknowledging: a member whose storage failed stops
+	// Every phase requires the survivors to keep acknowledging: a member whose storage failed stops
 	// leading and voting in every group (replica.FailDomain), so the other two elect among
-	// themselves, whether the victim led the groups (the initial leader) or not (member 3).
+	// themselves, whether the victim led the groups (the initial leader) or not (members 2 and 3).
 	phases := []struct {
 		name   string
+		kind   string
 		victim uint64
-	}{{"fsync_fails_initial_leader_member_1", 1}, {"fsync_fails_member_3", 3}}
+		errno  syscall.Errno
+	}{
+		{"fsync_fails_initial_leader_member_1", "fsync_eio", 1, syscall.EIO},
+		{"fsync_fails_member_3", "fsync_eio", 3, syscall.EIO},
+		{"fsync_enospc_member_2", "fsync_enospc", 2, syscall.ENOSPC},
+	}
 	for _, ph := range phases {
 		victim := ph.victim
 		disk := c.disks[victim]
-		failedBefore := disk.Stats().SyncsFailed
+		failedBefore, noSpaceBefore := disk.Stats().SyncsFailed, disk.Stats().SyncsNoSpace
 		spec := dcFaultSpec{
-			Phase: ph.name, Kind: "fsync_eio", Victim: victim,
-			Inject: func() error { disk.setFailSync(true); return nil },
+			Phase: ph.name, Kind: ph.kind, Victim: victim,
+			Inject: func() error { disk.setSyncErrno(ph.errno); return nil },
 			During: func() error {
 				if err := dcProbeVictim(c, w, rep, ph.name, victim, 4, false); err != nil {
 					return err
 				}
 				failed := disk.Stats().SyncsFailed - failedBefore
-				rep.Fact(ph.name+"/fsync_calls_failed_with_eio", failed)
+				rep.Fact(ph.name+"/fsync_calls_failed_with_"+strings.ToLower(ph.errno.Error()), failed)
 				rep.Fact(ph.name+"/victim_process_after_failed_fsync", c.exited(victim))
-				return rep.Require(ph.name+"_failing_fsync_was_exercised", failed > 0, fmt.Sprintf("%d fsync calls of member %d answered EIO", failed, victim))
+				if err := rep.Require(ph.name+"_failing_fsync_was_exercised", failed > 0, fmt.Sprintf("%d fsync calls of member %d answered %v", failed, victim, ph.errno)); err != nil {
+					return err
+				}
+				noSpace := disk.Stats().SyncsNoSpace - noSpaceBefore
+				return rep.Require(ph.name+"_errno_was_the_injected_one", (ph.errno == syscall.ENOSPC) == (noSpace > 0), fmt.Sprintf("%d of the failed fsync calls answered ENOSPC (injected errno %v)", noSpace, ph.errno))
 			},
 			Restore: func() error {
 				if _, err := c.stop(victim); err != nil {
 					return err
 				}
-				disk.setFailSync(false)
+				disk.setSyncErrno(0)
 				return c.start(victim)
 			},
 		}

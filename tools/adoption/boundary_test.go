@@ -47,7 +47,7 @@ func TestClockDiscrepancyPreservesIncompleteObservation(t *testing.T) {
 }
 
 func TestPrivateOutputFailsClosedWithoutGitContext(t *testing.T) {
-	if _, err := privateDirectory(context.Background(), t.TempDir(), []string{t.TempDir()}, true); err == nil {
+	if _, err := privateDirectory(context.Background(), t.TempDir(), []string{t.TempDir()}); err == nil {
 		t.Fatal("ignored worktree discovery error")
 	}
 }
@@ -74,7 +74,7 @@ func TestCLIContextCancelsBlockedEvidenceAndWritesNothing(t *testing.T) {
 	defer cancel()
 	result := make(chan error, 1)
 	go func() {
-		result <- run(ctx, []string{"intake", "--targets", targetPath, "--authorization", grantPath, "--private-output", private, "--public-summary", summary, "--private-directory-acl-confirmed", "--timeout", "10s"})
+		result <- run(ctx, []string{"intake", "--targets", targetPath, "--authorization", grantPath, "--private-output", private, "--public-summary", summary, "--timeout", "10s"})
 	}()
 	select {
 	case <-entered:
@@ -123,7 +123,7 @@ func TestExecutedSyntheticCLI(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	command := exec.CommandContext(ctx, binary, "intake", "--targets", targetPath, "--authorization", grantPath, "--private-output", private, "--public-summary", summary, "--private-directory-acl-confirmed", "--timeout", "20s")
+	command := exec.CommandContext(ctx, binary, "intake", "--targets", targetPath, "--authorization", grantPath, "--private-output", private, "--public-summary", summary, "--timeout", "20s")
 	command.Env = cleanGitEnvironment()
 	if out, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("executed synthetic CLI: %v %s", err, out)
@@ -159,7 +159,7 @@ func TestOperatorTimeoutBoundsBlockedEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	started := time.Now()
-	err := run(context.Background(), []string{"intake", "--targets", targetPath, "--authorization", grantPath, "--private-output", private, "--public-summary", summary, "--private-directory-acl-confirmed", "--timeout", "300ms"})
+	err := run(context.Background(), []string{"intake", "--targets", targetPath, "--authorization", grantPath, "--private-output", private, "--public-summary", summary, "--timeout", "300ms"})
 	if err == nil || time.Since(started) > 3*time.Second {
 		t.Fatal("operator deadline failed to bound blocked collection")
 	}
