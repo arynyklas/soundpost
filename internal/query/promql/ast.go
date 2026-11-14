@@ -56,11 +56,17 @@ type TypedExpr struct {
 	Children                                             []TypedExpr
 }
 
+// Walk visits e and every descendant in source order. visit is called for any
+// Expr, including one this package does not build; Walk only descends through
+// *Node values and never panics on a foreign implementation.
 func Walk(e Expr, visit func(Expr) bool) {
 	if e == nil || !visit(e) {
 		return
 	}
-	n := e.(*Node)
+	n, ok := e.(*Node)
+	if !ok {
+		return
+	}
 	for _, c := range n.Children {
 		Walk(c, visit)
 	}

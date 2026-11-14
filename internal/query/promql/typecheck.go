@@ -21,6 +21,12 @@ func enabled(p profile.Profile, gate string) bool {
 	}
 	return false
 }
+
+// Check types e against p. Rejections are returned only as a *syntax.LanguageError
+// and are never duplicated as diagnostics. The diagnostics slice is the advisory
+// channel for static, non-fatal findings; the pinned grammars define no such
+// finding at type-check time (annotations arise during evaluation), so it is
+// empty today and callers must rely on the error for acceptance.
 func Check(e Expr, p profile.Profile) (TypedExpr, []syntax.Diagnostic, error) {
 	if err := validateProfile(p); err != nil {
 		return TypedExpr{}, nil, err

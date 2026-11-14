@@ -868,9 +868,8 @@ func (r *parser) lineFilter(start syntax.SourceRange) (Stage, error) {
 		if !r.accept("or") {
 			break
 		}
-		if isLineOp(r.peek().kind) {
-			op = r.take().kind
-		}
+		// Native orFilter is a bare STRING or ip(STRING): the operator is inherited,
+		// so an operator here fails in r.str() as it does in the reference grammar.
 	}
 	s.Node = r.node(start)
 	return s, nil

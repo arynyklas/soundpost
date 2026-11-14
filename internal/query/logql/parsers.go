@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/arynyklas/soundpost/internal/query/regexcompat"
 	jsonparser "github.com/arynyklas/soundpost/third_party/jsonparser/v1.1.1"
+	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
@@ -257,29 +258,62 @@ type scannerFault struct {
 	nested bool
 }
 
+// scannerPackage is the import path of the vendored scanner as the runtime
+// names it in stack frames, derived from one of its exported functions so a
+// vendored version bump cannot leave a stale hard-coded path behind.
+var scannerPackage = func() string {
+	name := runtime.FuncForPC(reflect.ValueOf(jsonparser.EachKey).Pointer()).Name()
+	return name[:strings.LastIndex(name, ".")]
+}()
+
 // guardScanner runs one call into the vendored scanner and reports whether it
-// panicked. No scanner fault may leave the query engine.
+// faulted. Only a Go runtime error (index out of range, nil dereference, ...)
+// raised by a frame of the scanner package counts: a panic raised by our own
+// code, including the callback the scanner invokes, or any non-runtime panic is
+// a bug and is re-raised unchanged instead of being reported as malformed input.
 func guardScanner(fn func()) (fault scannerFault) {
 	defer func() {
-		if recover() == nil {
+		r := recover()
+		if r == nil {
 			return
 		}
-		fault.happened = true
-		pcs := make([]uintptr, 32)
-		frames := runtime.CallersFrames(pcs[:runtime.Callers(2, pcs)])
-		for {
-			frame, more := frames.Next()
-			if strings.HasSuffix(frame.Function, "jsonparser/v1%2e1%2e1.searchKeys") {
-				fault.nested = true
-				break
-			}
-			if !more {
-				break
-			}
+		if _, runtimeFault := r.(runtime.Error); !runtimeFault {
+			panic(r)
 		}
+		origin, nested := panicOrigin()
+		if !strings.HasPrefix(origin, scannerPackage+".") {
+			panic(r)
+		}
+		fault.happened = true
+		fault.nested = nested
 	}()
 	fn()
 	return fault
+}
+
+// panicOrigin returns the function that raised the panic being handled (the
+// first frame above the runtime's panic machinery) and whether the scanner's
+// recursive key search is on the stack. It must be called from the deferred
+// function that recovers.
+func panicOrigin() (origin string, nested bool) {
+	pcs := make([]uintptr, 64)
+	frames := runtime.CallersFrames(pcs[:runtime.Callers(2, pcs)])
+	inPanic := false
+	for {
+		frame, more := frames.Next()
+		switch {
+		case !inPanic:
+			inPanic = frame.Function == "runtime.gopanic"
+		case origin == "" && !strings.HasPrefix(frame.Function, "runtime."):
+			origin = frame.Function
+		}
+		if strings.HasPrefix(frame.Function, scannerPackage+".") && strings.HasSuffix(frame.Function, ".searchKeys") {
+			nested = true
+		}
+		if !more {
+			return origin, nested
+		}
+	}
 }
 
 // jsonWalker is the plain `| json` walk. Names are composed in one reusable

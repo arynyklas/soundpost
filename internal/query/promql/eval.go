@@ -91,6 +91,9 @@ func Evaluate(ctx context.Context, plan Plan, src scan.MetricSource, account val
 		}
 		return result, s.annotations, err
 	}
+	if e = s.validateRangeAggregationParameters(grid); e != nil {
+		return value.Result{}, s.annotations, e
+	}
 	result.Type = "matrix"
 	index := map[string]int{}
 	legacyDelayed := plan.Profile.ID == "promql-prometheus-3.1.0" && enabled(plan.Profile, "promql-delayed-name-removal")

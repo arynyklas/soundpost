@@ -119,3 +119,28 @@ func TestLockedSyntaxCasesRetainPhaseBothPinsAndNonemptyGuards(t *testing.T) {
 		}
 	}
 }
+
+func TestSyntaxPhaseRejectsAlternateProfileDirectoryWithUnlockedManifest(t *testing.T) {
+	lock, directory := syntaxContentLockFixture(t)
+	cases := filepath.Join(directory, "cases", "promql-syntax.json")
+	alternate := t.TempDir()
+	for _, p := range lock.Profiles {
+		raw, err := os.ReadFile(filepath.Join(directory, "..", "..", "profiles", "query", p.ID+".json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p.ID == "promql-prometheus-3.13.5" {
+			raw = append(raw, ' ') // Same JSON, different consumed bytes: must not inherit the default directory's lock.
+		}
+		if err = os.WriteFile(filepath.Join(alternate, p.ID+".json"), raw, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	report, err := RunSyntaxPhase(context.Background(), lock, cases, alternate, "no-reference-runtime")
+	if err == nil || !strings.Contains(err.Error(), "consumed evaluation profile content is not locked: promql-prometheus-3.13.5") {
+		t.Fatalf("alternate profile directory must be hash-checked before use: %v", err)
+	}
+	if report.Compared != 0 || len(report.Cases) != 0 {
+		t.Fatal("unlocked profile directory produced observations")
+	}
+}

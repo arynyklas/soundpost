@@ -71,10 +71,10 @@ func run() error {
 	f := flag.NewFlagSet(os.Args[1], flag.ContinueOnError)
 	lockPath := f.String("lock", "conformance/query/source-lock.json", "source lock")
 	ledgerPath := f.String("ledger", "conformance/query/obligations.json", "obligation ledger")
-	check := f.Bool("check", false, "require accepted complete inventory")
+	check := f.Bool("check", false, "inventory: print only the accepted totals; validation (locks, completeness, gate closure) always runs and always fails closed")
 	casesPath := f.String("cases", "conformance/query/cases/oracle-sanity.json", "authored cases")
 	all := f.Bool("all-profiles", false, "require all locked profiles")
-	locked := f.Bool("require-locked", false, "require digest locks")
+	locked := f.Bool("require-locked", false, "assert digest locks; oracle refuses to run without it and every run validates locks regardless")
 	runtime := f.String("runtime", "", "absolute OCI runtime executable")
 	if err := f.Parse(os.Args[2:]); err != nil {
 		return err
@@ -94,7 +94,12 @@ func run() error {
 			return err
 		}
 		if *check {
-			return json.NewEncoder(os.Stdout).Encode(l)
+			// Assertion mode: Inventory above already refused anything incomplete or relocked;
+			// emit only the accepted totals, not the 785-row ledger.
+			return json.NewEncoder(os.Stdout).Encode(struct {
+				Complete    bool `json:"complete"`
+				Obligations int  `json:"obligations"`
+			}{l.Complete, len(l.Obligations)})
 		}
 		return json.NewEncoder(os.Stdout).Encode(l)
 	case "oracle":

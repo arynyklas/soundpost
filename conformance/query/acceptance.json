@@ -11020,9 +11020,20 @@
     }
   ],
   "blockers": [
-    "Production evaluator bindings and positive/negative/interaction execution pending",
-    "Versioned primitive compatibility implementations and cross-profile observations pending",
-    "Reference HTTP does not expose end ranges/full private error taxonomy; independent expanded location qualification remains required"
+    "Production bindings: 781 of 785 ledger obligations are bound and matched (11.15-report.md; release gate: matched 2343 of 2355 required cases, mismatches 0). Unbound: promql-prometheus-3.1.0/configuration/protocols, promql-prometheus-3.1.0/configuration/scrape-inheritance, promql-prometheus-3.13.5/configuration/protocols, promql-prometheus-3.13.5/configuration/scrape-inheritance (12 unrun cases); closing them needs scrape-configuration semantics plus an oracle configuration phase, or an owner reclassification out of the language ledger (02.12-W1).",
+    "Reference HTTP does not expose end ranges/full private error taxonomy; only the start position is compared against the reference. Owned end ranges are covered by unit tests only. Qualifying them needs a Go-level reference observation (rebuilt oracle image) or recorded owner acceptance of start-only comparison (02.02-W1)."
+  ],
+  "closed_blockers": [
+    {
+      "blocker": "Versioned primitive compatibility implementations and cross-profile observations pending",
+      "closed_by": "commit 533f498 (third_party/{regex,format,timezone,templateprimitives}); Unicode lexical-class rows (promql-unicode-syntax.json, 26 rows) pass on both pins",
+      "evidence": ".superpowers/sdd/approved-product/11.15-report.md"
+    },
+    {
+      "blocker": "Positive/negative/interaction execution pending for bound obligations",
+      "closed_by": "11.15 release campaign: 781 bound obligations, 2343 matched required cases, 0 mismatches, 0 normalization loss",
+      "evidence": ".superpowers/sdd/approved-product/11.15-report.md"
+    }
   ],
   "production_coverage_complete": false,
   "oracle_sanity_complete": true,

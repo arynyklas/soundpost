@@ -108,6 +108,12 @@ func RunSyntaxPhase(ctx context.Context, lock SourceLock, casesPath, profilesPat
 	if err != nil {
 		return report, err
 	}
+	snapshot, cleanup, err := snapshotEvaluationProfiles(lock, profilesPath)
+	if err != nil {
+		return report, err
+	}
+	defer cleanup()
+	profilesPath = snapshot
 	registry, err := profile.Load(os.DirFS(profilesPath))
 	if err != nil {
 		return report, err
