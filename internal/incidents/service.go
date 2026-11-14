@@ -111,7 +111,7 @@ func (s *Service) Act(ctx context.Context, scope auth.Scope, action Action, at m
 		at = s.clock.Now()
 	}
 	// Grants are checked before the target is looked up.
-	if scope.Permission() != auth.OrgAdmin {
+	if p := scope.Permission(); p != auth.OrgAdmin && p != auth.IncidentsWrite {
 		return State{}, model.Fail(model.Forbidden)
 	}
 	action.Actor, action.Target.Org, action.MaxWindow = scope.PrincipalID(), scope.OrgID(), s.maxWindow

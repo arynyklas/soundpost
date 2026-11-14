@@ -24,9 +24,15 @@ export function operationWords(op: LifecycleOperation, tz: string): { label: str
  }
 }
 
+/** Whether an operation can still change on its own: it is fencing, or logically complete with the
+ * physical erasure still pending. Held, failed and a finished erasure do not change by themselves. */
+export function keepPolling(op: LifecycleOperation): boolean {
+ return op.state === 'ready' && (op.phase === 'fencing' || (op.phase === 'complete' && op.physical === 'pending'));
+}
+
 const POLL_MS = 2000;
 /** Polls one operation (scoped by the server to this organization's administrators) until it
- * reaches a phase that will not change on its own. */
+ * reaches a state that will not change on its own (see keepPolling). */
 function OperationPanel(props: { context: ViewContext }): React.JSX.Element {
  const c = props.context;
  const [value, setValue] = React.useState('');
@@ -44,7 +50,7 @@ function OperationPanel(props: { context: ViewContext }): React.JSX.Element {
     (op) => {
      if (ctl.signal.aborted) return;
      setState({ key, load: op.state === 'ready' ? { kind: 'ready', data: op } : { kind: 'unsupported', reason: op.reason ?? 'lifecycle_operation_store_not_wired', data: op } });
-     if (op.state === 'ready' && op.phase === 'fencing') timer = window.setTimeout(poll, POLL_MS);
+     if (keepPolling(op)) timer = window.setTimeout(poll, POLL_MS);
     },
     (e: unknown) => { if (!ctl.signal.aborted && !isAbort(e)) setState({ key, load: stateOfFault(e) }); },
    );

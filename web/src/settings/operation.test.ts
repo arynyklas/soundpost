@@ -1,7 +1,7 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
 import { describe, expect, test } from 'bun:test';
 import type { LifecycleOperation } from '../api/types';
-import { operationWords } from './ProjectSettings';
+import { keepPolling, operationWords } from './ProjectSettings';
 
 const op = (over: Partial<LifecycleOperation>): LifecycleOperation => ({ id: 'a'.repeat(32), state: 'ready', phase: 'fencing', physical: 'pending', generation: '9', pending_groups: 1, applied_barriers: 63, holds: 0, physical_deadline: '1800000000000000000', backup_deadline: '1800086400000000000', ...over });
 
@@ -40,5 +40,19 @@ describe('operation progress is never reported as success early', () => {
   const bare = operationWords({ id: 'a'.repeat(32), state: 'not_available', reason: 'lifecycle_operation_store_not_wired', generation: '0', pending_groups: 0, applied_barriers: 0, holds: 0, physical_deadline: '0', backup_deadline: '0' }, 'UTC');
   expect(bare.success).toBe(false);
   expect(bare.label).toBe('Not available');
+ });
+});
+
+describe('the console keeps polling while the operation can still change', () => {
+ test('fencing and logically complete with pending erasure keep polling', () => {
+  expect(keepPolling(op({}))).toBe(true);
+  expect(keepPolling(op({ phase: 'complete', physical: 'pending', pending_groups: 0, applied_barriers: 64 }))).toBe(true);
+ });
+ test('a finished erasure, a hold, a failure and a missing store stop polling', () => {
+  expect(keepPolling(op({ phase: 'complete', physical: 'done', pending_groups: 0, applied_barriers: 64 }))).toBe(false);
+  expect(keepPolling(op({ phase: 'complete', physical: 'held' }))).toBe(false);
+  expect(keepPolling(op({ phase: 'held', physical: 'held', holds: 1 }))).toBe(false);
+  expect(keepPolling(op({ phase: 'failed', safe_fault: 'barrier_failed' }))).toBe(false);
+  expect(keepPolling({ id: 'a'.repeat(32), state: 'not_available', reason: 'lifecycle_operation_store_not_wired', generation: '0', pending_groups: 0, applied_barriers: 0, holds: 0, physical_deadline: '0', backup_deadline: '0' })).toBe(false);
  });
 });

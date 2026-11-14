@@ -6,7 +6,7 @@ import { ApiFault, OutcomeUnknown, VersionConflict, type ActionRequest } from '.
 const A = 'a'.repeat(32), B = 'b'.repeat(32), P = '1'.repeat(32), Q = '2'.repeat(32), I = '3'.repeat(32), C = '4'.repeat(32), U = '5'.repeat(32);
 const incident = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
  incident_id: I, org: A, project_id: P, version: '2', status: 'open', condition: { id: C, state: 'firing', freshness: 'fresh', observed_at: '1' }, episode_id: C, severity: 'major', impact_revision: '1', source_firing: true,
- notification: { reminders_paused: false, worse_impact_eligible: true, delivery: { name: 'delivery', state: 'not_available' } }, links: [], observed_impacts: 1, last_activity: '1',
+ notification: { reminders_paused: false, worse_impact_eligible: true, urgency: { state: 'empty', reason: 'no_notification_policy_state' }, delivery: { state: 'empty', reason: 'no_delivery_created', attention: 'none' }, digest: { state: 'empty', reason: 'no_notification_policy_state', sent: 0 }, unread_change: { state: 'empty', reason: 'no_notification_policy_state', changed: false, queue_revision: '0', seen_revision: '0' } }, links: [], observed_impacts: 1, last_activity: '1',
  timeline: [{ version: '1', at: '1', type: 'open', origin: 'system', actor: U }, { version: '2', at: '2', type: 'ack', origin: 'human', actor: U }], ...over,
 });
 const req = (over: Partial<ActionRequest> = {}): ActionRequest => ({ org: A, command_id: 'c'.repeat(32), expected_version: '1', project_id: P, target_id: I, entity_kind: 'incident', kind: 'ack', payload: {}, ...over });
@@ -98,5 +98,18 @@ describe('act() maps the server answer without hiding or inventing a result', ()
   expect(await getIncident(B, P, I, signal).catch((e: unknown) => e)).toBeInstanceOf(ApiFault);
   respond(200, { id: B, state: 'ready', phase: 'fencing', physical_deadline: '1', backup_deadline: '2', applied_barriers: 1, pending_groups: 63, generation: '1', holds: 0 });
   expect(await getOperation(A, I, signal).catch((e: unknown) => e)).toBeInstanceOf(ApiFault);
+ });
+});
+
+describe('notification state is accepted only in a shape the product can show', () => {
+ const ready = (entries: unknown[], attention = 'failed'): Record<string, unknown> => incident({ notification: { ...(incident().notification as object), delivery: { state: 'ready', attention, counts: { failed: 1 }, entries } } });
+ const entry = { id: C, kind: 'open', route: 'immediate', phase: 'failed', status: 'failed', attempts: 1, eligible_at: '5' };
+ test('a ready delivery with a known entry is accepted', () => { expect(parseIncident(ready([entry]), { org: A, project: P, id: I }).notification.delivery.entries?.[0]?.status).toBe('failed'); });
+ test('an unknown delivery status, a bad entry id or a section without a state is refused', () => {
+  for (const raw of [ready([{ ...entry, status: 'delivered' }]), ready([{ ...entry, id: 'x' }]), ready([entry], 'great'), incident({ notification: { reminders_paused: false, worse_impact_eligible: true } })]) expect(() => parseIncident(raw, { org: A, project: P, id: I })).toThrow(ApiFault);
+ });
+ test('a ready urgency needs a known tier', () => {
+  const n = incident().notification as Record<string, unknown>;
+  expect(() => parseIncident(incident({ notification: { ...n, urgency: { state: 'ready', tier: 'loud' } } }), { org: A, project: P, id: I })).toThrow(ApiFault);
  });
 });

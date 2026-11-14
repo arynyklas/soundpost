@@ -130,6 +130,8 @@ const SEVERITIES = ['minor', 'major', 'critical'];
 const CONDITION_STATES = ['firing', 'recovered', 'unknown'];
 const FRESHNESS = ['fresh', 'stale', 'unknown'];
 const idLike = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-f]{32}$/.test(v);
+const DELIVERY_ATTENTION = ['none', 'accepted', 'pending', 'held', 'uncertain', 'failed'];
+const DELIVERY_STATUS = ['accepted', 'failed', 'uncertain', 'retrying', 'sending', 'pending', 'queued', 'suppressed', 'cancelled'];
 const decLike = (v: unknown): v is string => typeof v === 'string' && DEC.test(v);
 const badResponse = (): never => { throw new ApiFault(200, 'invalid_response', '', 'response does not match the request'); };
 
@@ -142,7 +144,15 @@ export function parseIncident(raw: unknown, want: { org: Id; project: Id; id: Id
  if (!isRecord(c) || !idLike(c.id) || !CONDITION_STATES.includes(c.state as string) || !FRESHNESS.includes(c.freshness as string) || !decLike(c.observed_at)) return badResponse();
  if (c.state === 'firing' !== raw.source_firing) return badResponse();
  const n = raw.notification;
- if (!isRecord(n) || typeof n.reminders_paused !== 'boolean' || typeof n.worse_impact_eligible !== 'boolean' || !isRecord(n.delivery) || !VIEW_STATES.includes(n.delivery.state as ViewState)) return badResponse();
+ if (!isRecord(n) || typeof n.reminders_paused !== 'boolean' || typeof n.worse_impact_eligible !== 'boolean') return badResponse();
+ for (const key of ['urgency', 'delivery', 'digest', 'unread_change']) {
+  const s = n[key];
+  if (!isRecord(s) || !VIEW_STATES.includes(s.state as ViewState)) return badResponse();
+ }
+ const delivery = n.delivery as Record<string, unknown>, urgency = n.urgency as Record<string, unknown>;
+ if (urgency.state === 'ready' && urgency.tier !== 'urgent' && urgency.tier !== 'queue' && urgency.tier !== 'none') return badResponse();
+ if (delivery.state === 'ready' && (!Array.isArray(delivery.entries) || !isRecord(delivery.counts) || !DELIVERY_ATTENTION.includes(delivery.attention as string))) return badResponse();
+ for (const entry of Array.isArray(delivery.entries) ? delivery.entries : []) if (!isRecord(entry) || !idLike(entry.id) || !DELIVERY_STATUS.includes(entry.status as string) || typeof entry.attempts !== 'number' || !decLike(entry.eligible_at)) return badResponse();
  if (raw.owner !== undefined && !idLike(raw.owner)) return badResponse();
  if (raw.timeline !== undefined) {
   if (!Array.isArray(raw.timeline) || raw.timeline.length !== Number(raw.version)) return badResponse();
@@ -230,9 +240,9 @@ export function parseOperation(raw: unknown, id: Id): LifecycleOperation {
  return raw as unknown as LifecycleOperation;
 }
 
-/** GET /api/v1/lifecycle/operations/{id}: scoped polling of one deletion/restriction operation. */
+/** GET /api/v1/operations/{id}?org=: the C11 contract path, scoped by the server to this organization's administrators; a deletion operation answers its LifecycleOperation. */
 export async function getOperation(org: Id, id: Id, signal: AbortSignal): Promise<LifecycleOperation> {
- const response = await fetch(`/api/v1/lifecycle/operations/${id}?${new URLSearchParams({ org })}`, { credentials: 'same-origin', cache: 'no-store', signal, headers: { Accept: 'application/json' } });
+ const response = await fetch(`/api/v1/operations/${id}?${new URLSearchParams({ org })}`, { credentials: 'same-origin', cache: 'no-store', signal, headers: { Accept: 'application/json' } });
  if (!response.ok) throw await apiFault(response);
  return parseOperation(await response.json() as unknown, id);
 }

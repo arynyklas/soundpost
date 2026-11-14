@@ -59,3 +59,21 @@ func TestOpenWiresTheOperationsRoute(t *testing.T) {
 		t.Fatalf("GET %s without a credential answered %d, want 401", path, rec.Code)
 	}
 }
+
+// The default Open mounts the C11 policy route (POST only). Without a credential
+// it must answer a refusal (401, or 403 from the cross-site check that runs first
+// on a POST), never a 404/405 (the route is missing) or a view.
+func TestOpenWiresThePolicyRoute(t *testing.T) {
+	app, err := appcore.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.Close()
+	mux := http.NewServeMux()
+	app.Register(mux)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/policies", strings.NewReader("{}")))
+	if rec.Code != http.StatusUnauthorized && rec.Code != http.StatusForbidden {
+		t.Fatalf("POST /api/v1/policies without a credential answered %d, want 401 or 403", rec.Code)
+	}
+}

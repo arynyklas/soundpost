@@ -25,7 +25,7 @@ pki() {
 	rm -rf "$PKI"; mkdir -p "$PKI"; cd "$PKI"
 	openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -keyout ca.key -out ca.pem -days 2 -subj "/CN=Soundpost l3w2 e2e private CA" -addext "basicConstraints=critical,CA:TRUE" -addext "keyUsage=critical,keyCertSign,cRLSign" 2>/dev/null
 	openssl req -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -keyout leaf.key -out leaf.csr -subj "/CN=localhost" 2>/dev/null
-	printf "subjectAltName=DNS:localhost,IP:127.0.0.1\nextendedKeyUsage=serverAuth\nbasicConstraints=CA:FALSE\nkeyUsage=digitalSignature\n" >ext.cnf
+	printf "subjectAltName=DNS:localhost,IP:127.0.0.1${E2E_NOTIFY_IP:+,IP:$E2E_NOTIFY_IP}\nextendedKeyUsage=serverAuth\nbasicConstraints=CA:FALSE\nkeyUsage=digitalSignature\n" >ext.cnf
 	openssl x509 -req -in leaf.csr -CA ca.pem -CAkey ca.key -CAcreateserial -out leaf.pem -days 2 -extfile ext.cnf 2>/dev/null
 	openssl x509 -in leaf.pem -pubkey -noout | openssl pkey -pubin -outform der | openssl dgst -sha256 -binary | base64 >spki.txt
 	cd "$ROOT"
@@ -67,7 +67,11 @@ up() {
 		echo $! >"$T/oidc.pid"; sleep 2
 	fi
 	rm -rf "$DATA"; mkdir -p "$DATA"
-	SSL_CERT_FILE=$PKI/ca.pem setsid nohup "$BIN" serve --mode single --data-dir "$DATA" --listen 127.0.0.1:$PORT --tls-cert "$PKI/leaf.pem" --tls-key "$PKI/leaf.key" --web-dir "$ROOT/web/dist" ${SERVE_ARGS:-} >"$T/server.log" 2>&1 </dev/null &
+	notify_args=""
+	# E2E_NOTIFY_IP (a private address of this host): the notification worker may reach exactly that address, trusts the private CA
+	# and gives up on a send after 3s, so a receiver that never answers yields a real uncertain delivery.
+	[ -n "${E2E_NOTIFY_IP:-}" ] && notify_args="--notify-egress-allow $E2E_NOTIFY_IP/32 --notify-ca-file $PKI/ca.pem --notify-send-timeout 3s"
+	SSL_CERT_FILE=$PKI/ca.pem setsid nohup "$BIN" serve --mode single --data-dir "$DATA" --listen 127.0.0.1:$PORT --tls-cert "$PKI/leaf.pem" --tls-key "$PKI/leaf.key" --web-dir "$ROOT/web/dist" $notify_args ${SERVE_ARGS:-} >"$T/server.log" 2>&1 </dev/null &
 	echo $! >"$T/server.pid"
 	i=0
 	until [ "$(curl -s --cacert "$PKI/ca.pem" -o /dev/null -w '%{http_code}' "$ORIGIN/readyz")" = 200 ]; do

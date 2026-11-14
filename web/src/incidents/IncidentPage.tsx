@@ -5,7 +5,7 @@ import type { ApiFault, Id, IncidentView, LoadState, TimelineEntry, WindowView }
 import { formatNs, latestOnly, scopeKey, type Latest, type ViewContext } from '../app/context';
 import { StatusPanel } from '../app/StatusPanel';
 import { ActionForm } from './ActionForm';
-import { describeReason, msUntilExpiry, rateText, responseWords, sourceWords, splitTimeline } from './model';
+import { deliveryEntryText, deliveryHeadline, describeReason, digestText, msUntilExpiry, rateText, responseWords, sourceWords, splitTimeline, unreadText, urgencyText } from './model';
 
 interface Loaded { state: LoadState<IncidentView>; view: IncidentView | undefined; reload: () => void; reloading: boolean; refreshFault: ApiFault | null; adopt: (view: IncidentView) => void }
 
@@ -143,7 +143,13 @@ export function IncidentPage(props: { id: Id; project: Id; context: ViewContext 
       <ul>
        <li data-testid="reminders">{view.notification.reminders_paused ? `Reminders are paused by ${view.notification.paused_by === 'ack+snooze' ? 'the acknowledgement and the snooze' : view.notification.paused_by === 'snooze' ? 'the snooze' : 'the acknowledgement'}.` : 'Reminders are not paused.'}</li>
        <li data-testid="worse-impact">{view.notification.worse_impact_eligible ? 'A worse impact is eligible to notify: acknowledging or snoozing does not suppress it.' : `A worse impact is not eligible to notify: ${view.notification.suppressed_by === 'maintenance' ? 'an active maintenance window suppresses new notifications' : 'the incident is resolved, so a worse impact proposes a new linked incident'}.`}</li>
-       <li data-testid="delivery">Delivery: not available. {describeReason(view.notification.delivery.reason ?? 'notification_outbox_not_built')}</li>
+       <li data-testid="urgency">{urgencyText(view.notification.urgency)}</li>
+       <li data-testid="delivery" data-attention={view.notification.delivery.attention ?? view.notification.delivery.state}>{deliveryHeadline(view.notification.delivery)}
+        {(view.notification.delivery.entries ?? []).length > 0 && <ul data-testid="delivery-entries">{(view.notification.delivery.entries ?? []).map((d) => <li key={d.id} data-status={d.status}>{deliveryEntryText(d, (ns) => formatNs(ns, tz))}</li>)}</ul>}
+        {view.notification.delivery.truncated && <p>Older deliveries are not listed.</p>}
+       </li>
+       <li data-testid="digest">{digestText(view.notification.digest, (ns) => formatNs(ns, tz))}</li>
+       <li data-testid="unread">{unreadText(view.notification.unread_change)}</li>
       </ul>
      </section>
 

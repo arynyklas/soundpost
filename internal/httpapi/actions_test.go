@@ -344,7 +344,7 @@ func TestActionResolveImpactAndWindows(t *testing.T) {
 	// ACK pauses reminders but a worse impact stays eligible and voids the ACK.
 	acked, condition, episode := e.open(org, p1, incidents.SeverityMajor)
 	r = e.respond(e.post(alice, "/api/v1/actions", act(org, p1, acked, "ack", 1, nil)))
-	if v := *r.Incident; !v.Notification.RemindersPaused || v.Notification.PausedBy != "ack" || !v.Notification.WorseImpactEligible || v.Notification.Delivery.State != httpapi.StateNotAvailable {
+	if v := *r.Incident; !v.Notification.RemindersPaused || v.Notification.PausedBy != "ack" || !v.Notification.WorseImpactEligible || v.Notification.Delivery.State != httpapi.StateEmpty || v.Notification.Delivery.Reason != httpapi.ReasonNoDeliveries {
 		t.Fatalf("acked: %+v", v.Notification)
 	}
 	worse := map[string]any{"impact": map[string]any{"condition": condition.String(), "episode": episode.String(), "severity": "critical", "state": "firing", "freshness": "fresh"}}
@@ -435,13 +435,14 @@ func TestActionQueueIsScopedAndTruthfulAboutMissingOwners(t *testing.T) {
 	if len(order) != 3 || order[0] != critical || order[1] != minor || order[2] != done {
 		t.Fatalf("order must be open first then severity: %v", order)
 	}
-	// Delivery, digest, urgency and unread state have no owner yet: each is its
-	// own not_available section and the view is never ready.
+	// The control store is the outbox reader: with no policy evaluation yet each
+	// notification section is ready (not not_available) and the rows say why they
+	// carry no tier or delivery.
 	states := map[string]httpapi.ViewState{}
 	for _, s := range v.Sections {
 		states[s.Name] = s.State
 	}
-	if v.State != httpapi.StateIncomplete || states["incidents"] != httpapi.StateReady || states["delivery"] != httpapi.StateNotAvailable || states["digest"] != httpapi.StateNotAvailable || states["urgency"] != httpapi.StateNotAvailable || states["unread_change"] != httpapi.StateNotAvailable {
+	if v.State != httpapi.StateReady || states["incidents"] != httpapi.StateReady || states["delivery"] != httpapi.StateReady || states["digest"] != httpapi.StateReady || states["urgency"] != httpapi.StateReady || states["unread_change"] != httpapi.StateReady {
 		t.Fatalf("sections: %+v state %s", v.Sections, v.State)
 	}
 	// A page smaller than the answer says so.

@@ -15,6 +15,7 @@ import (
 	"github.com/arynyklas/soundpost/internal/control"
 	"github.com/arynyklas/soundpost/internal/incidents"
 	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/notify"
 	"github.com/arynyklas/soundpost/internal/retention"
 )
 
@@ -22,9 +23,8 @@ import (
 // thin, scope-first handler over owned services: it dispatches by closed entity
 // kind and implements no reducer of its own. Incident actions go to the C08
 // incidents.Service (which owns validation, the version compare-and-set, the
-// actor and the audit); issue actions, queue delivery/digest state and nothing
-// else that has no owner yet are explicit not_available answers, never an empty
-// success and never invented data.
+// actor and the audit); issue actions with no owner yet are an explicit
+// not_available answer, never an empty success and never invented data.
 
 // ActionEntity is the closed set of entities a human action may target.
 type ActionEntity string
@@ -111,10 +111,6 @@ const (
 // Reason codes of the action surface: a closed vocabulary of static strings.
 const (
 	ReasonIssueActionsNotBuilt = "issue_control_handler_not_built"
-	ReasonDeliveryNotBuilt     = "notification_outbox_not_built"
-	ReasonDigestNotBuilt       = "digest_policy_not_built"
-	ReasonUrgencyNotBuilt      = "urgency_policy_not_built"
-	ReasonUnreadNotBuilt       = "unread_change_tracking_not_built"
 	ReasonLifecycleNotWired    = "lifecycle_operation_store_not_wired"
 )
 
@@ -186,17 +182,19 @@ type TimelineEntry struct {
 	Link    *incidents.Link `json:"link,omitempty"`
 }
 
-// NotificationView is what C08 says about notification eligibility. Reminders
-// pause for a current ACK or an active snooze; a worse impact stays eligible
-// unless an active maintenance window suppresses it. Delivery itself is a
-// separate owner (the durable outbox): while it does not exist it is reported
-// not_available and no delivery outcome is invented.
+// NotificationView is what C08 says about notification eligibility plus what the
+// durable outbox and the notification policy state hold for this incident (see
+// queue_delivery.go). Reminders pause for a current ACK or an active snooze; a
+// worse impact stays eligible unless an active maintenance window suppresses it.
 type NotificationView struct {
-	RemindersPaused     bool        `json:"reminders_paused"`
-	PausedBy            string      `json:"paused_by,omitempty"`
-	WorseImpactEligible bool        `json:"worse_impact_eligible"`
-	SuppressedBy        string      `json:"suppressed_by,omitempty"`
-	Delivery            ViewSection `json:"delivery"`
+	RemindersPaused     bool                `json:"reminders_paused"`
+	PausedBy            string              `json:"paused_by,omitempty"`
+	WorseImpactEligible bool                `json:"worse_impact_eligible"`
+	SuppressedBy        string              `json:"suppressed_by,omitempty"`
+	Urgency             UrgencyView         `json:"urgency"`
+	Delivery            DeliverySummaryView `json:"delivery"`
+	Digest              DigestView          `json:"digest"`
+	Unread              UnreadView          `json:"unread_change"`
 }
 
 // IncidentView keeps the alert condition, the human incident-response status and
@@ -286,6 +284,7 @@ type Actions struct {
 	lister    IncidentLister
 	directory Directory
 	deletions DeletionPoller
+	notices   NotificationReader
 	clock     ActionClock
 }
 
@@ -295,7 +294,12 @@ func NewActions(svc IncidentService, lister IncidentLister, directory Directory,
 	if svc == nil || lister == nil || directory == nil || clock == nil {
 		return nil, model.Fail(model.Invalid)
 	}
-	return &Actions{incidents: svc, lister: lister, directory: directory, deletions: deletions, clock: clock}, nil
+	a := &Actions{incidents: svc, lister: lister, directory: directory, deletions: deletions, clock: clock}
+	// The control store also holds the notification outbox and policy state; a
+	// lister that cannot read them (a test double) leaves the sections explicitly
+	// not_available rather than empty.
+	a.notices, _ = lister.(NotificationReader)
+	return a, nil
 }
 
 func invalid(detail string) error {
@@ -343,7 +347,7 @@ func (a *Actions) Act(ctx context.Context, scope auth.Scope, req ActionRequest) 
 	if err := validActionShape(req); err != nil {
 		return ActionResponse{}, err
 	}
-	if scope.Permission() != auth.OrgAdmin {
+	if p := scope.Permission(); p != auth.OrgAdmin && p != actionGrants(req)[0] {
 		return ActionResponse{}, model.Fail(model.Forbidden)
 	}
 	if len(scope.ProjectIDs()) > 0 && !scope.AllowsProject(req.ProjectID) {
@@ -363,7 +367,11 @@ func (a *Actions) Act(ctx context.Context, scope auth.Scope, req ActionRequest) 
 	if err != nil {
 		return ActionResponse{}, err
 	}
-	view := a.view(state, true)
+	facts, err := a.notificationFacts(ctx, scope, req.ProjectID)
+	if err != nil {
+		return ActionResponse{}, err
+	}
+	view := a.view(state, true, facts)
 	return ActionResponse{State: ActionCommitted, EntityKind: req.EntityKind, Kind: req.Kind, TargetID: req.TargetID, Revision: &view.Version, Incident: &view}, nil
 }
 
@@ -456,10 +464,26 @@ func (a *Actions) GetIncident(ctx context.Context, scope auth.Scope, project, in
 		f.SafeDetail = incidents.DetailErased
 		return IncidentView{}, f
 	}
-	return a.view(state, true), nil
+	facts, err := a.notificationFacts(ctx, scope, project)
+	if err != nil {
+		return IncidentView{}, err
+	}
+	return a.view(state, true, facts), nil
 }
 
-func (a *Actions) view(st incidents.State, timeline bool) IncidentView {
+// urgencyRank orders the queue by the canonical tier the policy computed; an
+// incident no policy evaluated ranks with none.
+func urgencyRank(v IncidentView) int {
+	switch notify.Tier(v.Notification.Urgency.Tier) {
+	case notify.TierUrgent:
+		return 2
+	case notify.TierQueue:
+		return 1
+	}
+	return 0
+}
+
+func (a *Actions) view(st incidents.State, timeline bool, facts notificationFacts) IncidentView {
 	now := a.clock.Now()
 	v := IncidentView{
 		ID: st.ID, Org: st.Org, Project: st.Project, Version: model.Uint64(st.Version), Status: string(st.Status), Owner: st.Owner,
@@ -496,8 +520,8 @@ func (a *Actions) view(st incidents.State, timeline bool) IncidentView {
 	if st.Status == incidents.StatusOpen && st.Snooze.Active(now) {
 		pausedBy = append(pausedBy, "snooze")
 	}
-	v.Notification = NotificationView{RemindersPaused: st.ReminderPaused(now), PausedBy: strings.Join(pausedBy, "+"), WorseImpactEligible: st.Status == incidents.StatusOpen && !st.Maintenance.Active(now),
-		Delivery: ViewSection{Name: "delivery", State: StateNotAvailable, Reason: ReasonDeliveryNotBuilt}}
+	v.Notification = NotificationView{RemindersPaused: st.ReminderPaused(now), PausedBy: strings.Join(pausedBy, "+"), WorseImpactEligible: st.Status == incidents.StatusOpen && !st.Maintenance.Active(now)}
+	facts.apply(&v)
 	switch {
 	case st.Status != incidents.StatusOpen:
 		v.Notification.SuppressedBy = "resolved"
@@ -535,11 +559,11 @@ type QueueRequest struct {
 }
 
 // QueueView is the shared incident queue. Every entry is a real committed
-// incident. The canonical urgency, delivery state, digest state and unread-change
-// state belong to the notification policy and outbox, which do not exist yet:
-// they are listed as not_available sections and never as empty or healthy. The
-// order is deterministic (open first, then impact severity, then most recent
-// activity, then ID) and is NOT the canonical urgency order.
+// incident with the urgency tier, delivery state, digest state and unread-change
+// state the notification policy and the durable outbox hold for it (see
+// queue_delivery.go); a section whose reader is not wired is not_available and
+// never empty or healthy. The order is deterministic: open first, then the
+// canonical urgency tier, then impact severity, then most recent activity, then ID.
 type QueueView struct {
 	Org       model.ID       `json:"org"`
 	Projects  []model.ID     `json:"projects"`
@@ -572,6 +596,10 @@ func (a *Actions) Queue(ctx context.Context, scope auth.Scope, req QueueRequest)
 		if err != nil {
 			return QueueView{}, err
 		}
+		facts, err := a.notificationFacts(ctx, scope, p)
+		if err != nil {
+			return QueueView{}, err
+		}
 		for _, rec := range records {
 			if rec.Erased() {
 				continue // a deletion erased its state: nothing to queue, and not storage damage
@@ -580,12 +608,18 @@ func (a *Actions) Queue(ctx context.Context, scope auth.Scope, req QueueRequest)
 			if err != nil {
 				return QueueView{}, err
 			}
-			all = append(all, a.view(st, false))
+			all = append(all, a.view(st, false, facts))
 		}
 	}
 	slices.SortFunc(all, func(x, y IncidentView) int {
 		if (x.Status == string(incidents.StatusOpen)) != (y.Status == string(incidents.StatusOpen)) {
 			if x.Status == string(incidents.StatusOpen) {
+				return -1
+			}
+			return 1
+		}
+		if rx, ry := urgencyRank(x), urgencyRank(y); rx != ry {
+			if rx > ry {
 				return -1
 			}
 			return 1
@@ -601,23 +635,33 @@ func (a *Actions) Queue(ctx context.Context, scope auth.Scope, req QueueRequest)
 		}
 		return strings.Compare(x.ID.String(), y.ID.String())
 	})
-	out := QueueView{Org: scope.OrgID(), Projects: req.Projects, Entries: []IncidentView{}, Sections: []ViewSection{
-		{Name: "incidents", State: StateReady},
-		{Name: "urgency", State: StateNotAvailable, Reason: ReasonUrgencyNotBuilt},
-		{Name: "delivery", State: StateNotAvailable, Reason: ReasonDeliveryNotBuilt},
-		{Name: "digest", State: StateNotAvailable, Reason: ReasonDigestNotBuilt},
-		{Name: "unread_change", State: StateNotAvailable, Reason: ReasonUnreadNotBuilt},
-	}}
+	sections := []ViewSection{{Name: "incidents", State: StateReady}}
+	for _, name := range []string{"urgency", "delivery", "digest", "unread_change"} {
+		s := ViewSection{Name: name, State: StateReady}
+		if a.notices == nil {
+			s.State, s.Reason = StateNotAvailable, ReasonOutboxNotWired
+		}
+		sections = append(sections, s)
+	}
+	out := QueueView{Org: scope.OrgID(), Projects: req.Projects, Entries: []IncidentView{}, Sections: sections}
 	if len(all) > int(req.Limit) {
 		all, out.Truncated = all[:req.Limit], true
 	}
 	if len(all) == 0 {
-		out.Sections[0].State = StateEmpty
+		for i := range out.Sections {
+			if out.Sections[i].State == StateReady {
+				out.Sections[i].State = StateEmpty
+			}
+		}
 		out.State = StateEmpty
 		return out, nil
 	}
 	out.Entries = all
-	out.State, out.Reason = StateIncomplete, ReasonSectionsAbsent
+	if a.notices == nil {
+		out.State, out.Reason = StateIncomplete, ReasonSectionsAbsent
+	} else {
+		out.State = StateReady
+	}
 	return out, nil
 }
 
@@ -698,9 +742,9 @@ type QueueBody struct {
 }
 
 // readScope derives the scope an incident read runs under: telemetry.read on
-// every named project, or organization admin (an admin who can act on an incident
-// can read it). Both come from the caller's own credential; failing both is the
-// one not-found.
+// every named project, or incidents.write on every named project (a person who
+// may act on an incident may read it, decision D19), or organization admin. All
+// come from the caller's own credential; failing every one is the one not-found.
 func readScope(ctx context.Context, s *auth.Service, c auth.Credential, org model.ID, projects []model.ID) (auth.Scope, error) {
 	if org == (model.ID{}) || len(projects) == 0 {
 		return auth.Scope{}, model.Fail(model.Invalid)
@@ -708,8 +752,10 @@ func readScope(ctx context.Context, s *auth.Service, c auth.Credential, org mode
 	scope, err := s.Authorize(ctx, c, org, projects, auth.Read)
 	var f *model.Fault
 	if err != nil && errors.As(err, &f) && f.Code == model.NotFound {
-		if admin, e := s.Authorize(ctx, c, org, projects, auth.OrgAdmin); e == nil {
-			return admin, nil
+		for _, fallback := range []auth.Permission{auth.IncidentsWrite, auth.OrgAdmin} {
+			if granted, e := s.Authorize(ctx, c, org, projects, fallback); e == nil {
+				return granted, nil
+			}
 		}
 	}
 	return scope, err
@@ -767,7 +813,7 @@ func RegisterActionRoutes(mux *http.ServeMux, authority *auth.Service, actions *
 			queryReply(w, nil, invalid("action_ids_required"))
 			return
 		}
-		scope, err := authority.Authorize(r.Context(), credential, body.Org, []model.ID{body.ProjectID}, auth.OrgAdmin)
+		scope, err := authority.AuthorizeWrite(r.Context(), credential, body.Org, body.ProjectID, actionGrants(body.ActionRequest)...)
 		if err != nil {
 			queryReply(w, nil, err)
 			return

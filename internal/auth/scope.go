@@ -18,6 +18,13 @@ const (
 	OrgAdmin      Permission = "org.admin"
 	InstanceAdmin Permission = "instance.admin"
 	PolicyWrite   Permission = "policy.write"
+	// IncidentsWrite is the human incident-response grant: assign, ack, resolve,
+	// link, impact, snooze and maintenance of the incidents of the granted
+	// projects (decision D19, internal/auth/write.go).
+	IncidentsWrite Permission = "incidents.write"
+	// RulesWrite is reserved for rule-definition writes. No human route needs it
+	// yet; it is grantable and, by itself, authorizes no action.
+	RulesWrite Permission = "rules.write"
 )
 
 type Scope struct {
@@ -72,7 +79,15 @@ func (s Scope) ControlAuthorize(ctx context.Context, kind string) error {
 	if e := s.service.Revalidate(ctx, s); e != nil {
 		return e
 	}
-	if s.action != OrgAdmin && s.action != InstanceAdmin {
+	switch s.action {
+	case OrgAdmin, InstanceAdmin:
+	case IncidentsWrite:
+		// The one non-administrator write the control store accepts: the human
+		// incident action, and nothing else (decision D19).
+		if kind != IncidentActionKind {
+			return model.Fail(model.Forbidden)
+		}
+	default:
 		return model.Fail(model.Forbidden)
 	}
 	return nil

@@ -119,11 +119,22 @@ func loadIncident(st *State, key string) (IncidentRecord, bool, error) {
 }
 
 // incidentActionScope admits the scope to the incident action. An organization
-// administrator acts as before. The in-process system runner (not a member,
-// holds org.admin by construction) is admitted only for the two system-origin
-// observations, open and impact, on a live project its scope names; it can
-// never take a human decision.
+// administrator acts as before; a member holding incidents.write on the project
+// acts as a person (decision D19, auth.AuthorizeWrite). The in-process system
+// runner (not a member, holds org.admin by construction) is admitted only for
+// the two system-origin observations, open and impact, on a live project its
+// scope names; it can never take a human decision.
 func incidentActionScope(scope auth.Scope, st *State, org model.ID, c IncidentCommand) error {
+	if scope.Permission() == auth.IncidentsWrite && !scope.IsSystem() {
+		authority, ok := st.Orgs[org.String()]
+		if !ok || scope.OrgID() != org || !authority.Members[scope.PrincipalID().String()] || !scope.AllowsProject(c.Project) || len(scope.ProjectIDs()) != 1 {
+			return model.Fail(model.NotFound)
+		}
+		if _, ok := authority.Projects[c.Project.String()]; !ok {
+			return model.Fail(model.NotFound)
+		}
+		return nil
+	}
 	if !scope.IsSystem() {
 		return releaseScope(scope, st, org, c.Project)
 	}

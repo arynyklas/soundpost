@@ -1,5 +1,5 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
-import type { ActionPayload, ActionRequest, ConditionFreshness, ConditionState, Id, IncidentActionKind, IncidentView, LinkKind, Severity, TimelineEntry } from '../api/types';
+import type { ActionPayload, ActionRequest, ConditionFreshness, ConditionState, DeliveryEntryView, DeliverySummaryView, DigestView, Id, IncidentActionKind, IncidentView, LinkKind, Severity, TimelineEntry, UnreadView, UrgencyView } from '../api/types';
 
 export const ACTION_LABEL: Record<IncidentActionKind, string> = {
  assign: 'Assign owner', ack: 'Acknowledge', resolve: 'Resolve', link: 'Link evidence', impact: 'Report impact',
@@ -157,12 +157,57 @@ export function msUntilExpiry(view: IncidentView, nowMs: number): number | null 
 
 const REASONS: Record<string, string> = {
  issue_control_handler_not_built: 'Issue actions are not available: the issue service has no control handler in this installation yet. Nothing was changed.',
- notification_outbox_not_built: 'Delivery attempts are not available: the durable notification outbox is not built yet. No delivery is claimed, whether sent, failed or uncertain.',
- digest_policy_not_built: 'Digest state is not available: the digest policy is not built yet. Entries are shown immediately, not held for a digest.',
- urgency_policy_not_built: 'Urgency is not available: the canonical urgency policy is not built yet. The order below is by status, then impact severity, then recent activity.',
- unread_change_tracking_not_built: 'Unread changes are not available: change tracking is not built yet. Nothing is marked read or unread.',
+ notification_outbox_not_wired: 'Notification state is not available: the notification outbox is not wired in this installation. No delivery is claimed, whether sent, failed or uncertain.',
+ no_notification_policy_state: 'No notification policy has evaluated this incident yet (for instance no enabled destination exists), so it has no urgency tier, delivery or digest state.',
+ no_delivery_created: 'No delivery has been created for this incident.',
+ no_digest_recipient: 'No enabled recipient is configured, so no digest is scheduled.',
  lifecycle_operation_store_not_wired: 'Operation progress is not available: the lifecycle operation store is not wired in this installation.',
  sections_not_available: 'Some parts of this view are not available yet; the parts shown are real.',
 };
 /** Plain-language text for a closed reason code; an unknown code is never shown raw. */
 export function describeReason(reason: string): string { return REASONS[reason] ?? 'Not available.'; }
+
+const TIER_WORDS: Record<string, string> = { urgent: 'urgent, notifies immediately', queue: 'queue, visible here now and a daily digest candidate', none: 'none, no notifiable evidence' };
+/** The policy's urgency tier in words, or why there is none. */
+export function urgencyText(u: UrgencyView): string {
+ if (u.state !== 'ready') return `Urgency: ${describeReason(u.reason ?? '')}`;
+ return `Urgency: ${TIER_WORDS[u.tier ?? ''] ?? 'unknown'}${u.mode === 'shadow' ? ' (shadow mode: nothing leaves the product)' : ''}`;
+}
+
+const STATUS_WORDS: Record<string, string> = {
+ accepted: 'accepted by the provider', failed: 'failed', uncertain: 'uncertain: the provider may have accepted a message the product could not confirm',
+ retrying: 'retrying after a failed attempt', sending: 'being sent', pending: 'pending, not sent yet', queued: 'in the in-product queue only, never sent',
+ suppressed: 'suppressed, not sent', cancelled: 'cancelled, not sent',
+};
+/** One delivery, with its attempt outcome. Failed and uncertain are never softened. */
+export function deliveryEntryText(d: DeliveryEntryView, fmt: (ns: string) => string): string {
+ const parts = [`${d.kind.replace(/_/g, ' ')} (${d.route}): ${STATUS_WORDS[d.status] ?? d.status}`];
+ if (d.code) parts.push(`reason ${d.code}`);
+ parts.push(`${d.attempts} attempt${d.attempts === 1 ? '' : 's'}`);
+ if (d.last_outcome) parts.push(`last attempt ${d.last_outcome}${d.last_code ? ` (${d.last_code})` : ''}${d.last_at ? ` at ${fmt(d.last_at)}` : ''}`);
+ if (d.hold) parts.push(`held: ${d.hold.replace(/_/g, ' ')}`);
+ if (d.possible_duplicate) parts.push('the recipient may have received it more than once');
+ return parts.join('; ');
+}
+
+const ATTENTION_WORDS: Record<string, string> = {
+ failed: 'Delivery failed', uncertain: 'Delivery uncertain: the provider may have accepted a message the product could not confirm', held: 'Delivery held',
+ pending: 'Delivery pending', accepted: 'Delivery accepted by the provider', none: 'No delivery',
+};
+/** The headline of the delivery summary, or why there is no summary. */
+export function deliveryHeadline(d: DeliverySummaryView): string {
+ if (d.state === 'ready') return ATTENTION_WORDS[d.attention ?? 'none'] ?? 'Delivery state unknown';
+ return `Delivery: ${describeReason(d.reason ?? '')}`;
+}
+
+export function digestText(d: DigestView, fmt: (ns: string) => string): string {
+ if (d.state !== 'ready') return `Digest: ${describeReason(d.reason ?? '')}`;
+ const next = d.next_at && d.next_at !== '0' ? `next digest ${fmt(d.next_at)}` : 'next digest not scheduled';
+ return `Digest: ${d.pending ? 'not covered by a digest yet, but already visible here' : 'covered'}; ${next}; ${d.sent} digest${d.sent === 1 ? '' : 's'} accepted`;
+}
+
+/** Digest coverage, not a per-reader read marker: Soundpost records none. */
+export function unreadText(u: UnreadView): string {
+ if (u.state !== 'ready') return `Unread change: ${describeReason(u.reason ?? '')}`;
+ return u.changed ? `Unread change: changed since the last digest covered it (queue revision ${u.queue_revision}, digest saw ${u.seen_revision})` : 'Unread change: none since the last digest';
+}

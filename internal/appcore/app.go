@@ -49,6 +49,7 @@ type App struct {
 	Traces            *httpapi.Traces
 	Replays           *httpapi.Replays
 	Profiles          *httpapi.Profiles
+	Policies          *httpapi.Policies
 	replication       *replicatedApp
 }
 
@@ -242,12 +243,16 @@ func openWith(dir string, options *replicationOptions, meter storage.DiskMeter, 
 	if e != nil {
 		return fail(e)
 	}
+	policies, e := httpapi.NewPolicies(c)
+	if e != nil {
+		return fail(e)
+	}
 	// The frame resolver is never nil: until `soundpost serve` applies the operator
 	// sandbox configuration (ConfigureSymbolicator) every frame answers the typed
 	// sandbox_unavailable reason with its original frame kept.
 	evidence := httpapi.NewEvidence(sandboxUnavailable{}, r, r)
 	traces := httpapi.NewTraces(httpapi.NewStorageSpanSource(engine))
-	out := &App{Control: c, Auth: a, Storage: engine, Ingest: i, Releases: r, Artifacts: artifactService, ArtifactLifecycle: artifactLifecycle, Cache: cache, Exports: exportService, Retention: ret, Query: queryEngine, Live: liveService, Investigator: investigator, Incidents: incidentService, Jobs: jobService, Actions: actions, Evidence: evidence, Traces: traces, Replays: httpapi.NewReplays(replayService)}
+	out := &App{Control: c, Auth: a, Storage: engine, Ingest: i, Releases: r, Artifacts: artifactService, ArtifactLifecycle: artifactLifecycle, Cache: cache, Exports: exportService, Retention: ret, Query: queryEngine, Live: liveService, Investigator: investigator, Incidents: incidentService, Jobs: jobService, Actions: actions, Policies: policies, Evidence: evidence, Traces: traces, Replays: httpapi.NewReplays(replayService)}
 	// Built once: the profile service keys its cursors per instance.
 	out.Profiles = httpapi.NewProfiles(out.NewNativeProfiles())
 	startupTimeout := 20 * time.Second
@@ -336,6 +341,7 @@ func (a *App) Register(mux *http.ServeMux) {
 	httpapi.RegisterInvestigateRoutes(mux, a.Auth, a.Investigator)
 	httpapi.RegisterActionRoutes(mux, a.Auth, a.Actions)
 	httpapi.RegisterOperationRoutes(mux, a.Auth, a.Actions)
+	httpapi.RegisterPolicyRoutes(mux, a.Auth, a.Policies)
 	httpapi.RegisterDeletionRoutes(mux, a.Auth, a.Retention)
 	httpapi.RegisterEvidenceRoutes(mux, a.Auth, a.Evidence)
 	httpapi.RegisterTraceRoutes(mux, a.Auth, a.Traces)

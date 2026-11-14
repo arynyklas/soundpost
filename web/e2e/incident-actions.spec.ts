@@ -145,7 +145,8 @@ test('two browsers act on one real incident without a silent overwrite',async({p
  await expect(pageB.getByTestId('source-badge')).toHaveText('Source firing, fresh data');
  await expect(pageB.getByTestId('reminders')).toContainText('paused by the acknowledgement');
  await expect(pageB.getByTestId('worse-impact')).toContainText('eligible to notify');
- await expect(pageB.getByTestId('delivery')).toContainText('Delivery: not available');
+ await expect(pageB.getByTestId('urgency')).toContainText('No notification policy has evaluated this incident');
+ await expect(pageB.getByTestId('delivery')).toContainText('No delivery has been created');
  // The typed reason is plain text: no element was created and no handler ran.
  await expect(pageB.locator('.timeline li[data-type="ack"]')).toContainText('<img src=x');
  expect(await pageB.locator('.timeline img').count()).toBe(0);
@@ -188,16 +189,17 @@ test('two browsers act on one real incident without a silent overwrite',async({p
  await expect(pageB.getByTestId('unresolved-source')).toBeVisible();
  await expect(pageB.getByTestId('source-badge')).toHaveText('Source firing, fresh data');
 
- // The shared queue shows the committed incident immediately; urgency, delivery, digest and unread state are not available, never empty or sent.
+ // The shared queue shows the committed incident immediately. No destination exists in this org, so no policy evaluated the incident:
+ // the row says so (no tier, no delivery) instead of showing a state, and no section is listed as "not available" or sent.
  await pageA.goto(`/${hash(org,project,'queue')}`);
  const row=pageA.locator(`tr[data-incident="${incident}"]`);
  await expect(row).toContainText('Resolved by a person');
  await expect(row).toContainText('Source firing');
  await expect(row).toContainText('Rate unknown');
- await expect(row).toContainText('Delivery: not available');
- await expect(pageA.locator('[data-section="digest"]')).toContainText('Not available');
- await expect(pageA.locator('[data-section="delivery"]')).toContainText('Not available');
- await expect(pageA.locator('[data-section="urgency"]')).toContainText('Not available');
+ await expect(row.locator('[data-cell="urgency"]')).toContainText('No notification policy has evaluated this incident');
+ await expect(row.locator('[data-cell="delivery"]')).toContainText('No delivery has been created');
+ await expect(row.locator('[data-cell="unread"]')).toContainText('Unread change: No notification policy');
+ await expect(pageA.locator('[data-section="delivery"]')).toHaveCount(0);
  await expect(pageA.getByText('not at a scheduled digest time')).toBeVisible();
  expect(await pageA.locator('.investigation').innerText()).not.toMatch(/\b0\s*%/);
 

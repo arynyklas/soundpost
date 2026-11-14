@@ -4,7 +4,7 @@ import { getQueue, isAbort, stateOfFault } from '../api/client';
 import type { IncidentView, LoadState, QueueView } from '../api/types';
 import { PAGE_LIMIT, encodeHash, formatNs, latestOnly, scopeKey, type Latest, type ViewContext } from '../app/context';
 import { StatusPanel } from '../app/StatusPanel';
-import { describeReason, rateText, responseWords, sourceWords } from '../incidents/model';
+import { deliveryEntryText, deliveryHeadline, describeReason, digestText, rateText, responseWords, sourceWords, unreadText, urgencyText } from '../incidents/model';
 
 function stateOfQueue(view: QueueView): LoadState<QueueView> {
  switch (view.state) {
@@ -46,15 +46,23 @@ function Row(props: { entry: IncidentView; context: ViewContext }): React.JSX.El
    <td>{sourceWords(e)}<br />{rateText(e, (ns) => formatNs(ns, tz))}</td>
    <td>{e.owner ? <>Owner <code>{e.owner}</code></> : 'Unassigned'}</td>
    <td><ul>{responseWords(e).filter((w) => !w.startsWith('Owner') && w !== 'Unassigned' && w !== 'Open').map((w) => <li key={w}>{w}</li>)}</ul>{e.ack === undefined && e.status === 'open' && !e.snooze?.active && !e.maintenance?.active && 'Not acknowledged'}</td>
-   <td>Last activity {formatNs(e.last_activity, tz)}<br />Unread change: not available</td>
-   <td data-cell="delivery">Delivery: not available<br />{e.notification.worse_impact_eligible ? 'Worse impact eligible' : 'Worse impact not eligible'}</td>
+  <td data-cell="activity">Last activity {formatNs(e.last_activity, tz)}<br /><span data-cell="unread">{unreadText(e.notification.unread_change)}</span></td>
+  <td data-cell="notifications">
+   <span data-cell="urgency">{urgencyText(e.notification.urgency)}</span><br />
+   <strong data-cell="delivery" data-attention={e.notification.delivery.attention ?? e.notification.delivery.state}>{deliveryHeadline(e.notification.delivery)}</strong>
+   {(e.notification.delivery.entries ?? []).length > 0 && <ul data-cell="delivery-entries">{(e.notification.delivery.entries ?? []).map((d) => <li key={d.id} data-status={d.status}>{deliveryEntryText(d, (ns) => formatNs(ns, tz))}</li>)}</ul>}
+   {e.notification.delivery.truncated && <p>Older deliveries are not listed.</p>}
+   <span data-cell="digest">{digestText(e.notification.digest, (ns) => formatNs(ns, tz))}</span><br />
+   {e.notification.worse_impact_eligible ? 'Worse impact eligible' : 'Worse impact not eligible'}
+  </td>
   </tr>
  );
 }
 
 /** The shared incident queue: every row is a real committed incident, shown as soon as it is
- * committed. Urgency, delivery attempts, the digest and unread changes belong to services that do
- * not exist yet and are listed as not available, never as empty, sent or healthy. */
+ * committed, with the urgency tier, every delivery (failed and uncertain ones named as such),
+ * the digest state and the digest-coverage change state the notification policy and the durable
+ * outbox hold for it. A part whose reader is not wired is listed as not available, never as sent. */
 export function QueuePage(props: { context: ViewContext }): React.JSX.Element {
  const state = useQueue(props.context);
  const view = 'data' in state ? state.data : undefined;
@@ -64,18 +72,20 @@ export function QueuePage(props: { context: ViewContext }): React.JSX.Element {
    <StatusPanel state={state} />
    {view && (
     <>
-     <ul className="sections" aria-label="Queue sections">
-      {view.sections.map((s) => (
-       <li key={s.name} data-section={s.name} data-state={s.state}><strong>{SECTION_TITLE[s.name] ?? s.name}</strong>: {SECTION_LABEL[s.state] ?? 'Unknown'}{s.reason ? ` — ${describeReason(s.reason)}` : ''}</li>
-      ))}
-     </ul>
-     <p>New incidents appear here as soon as they are committed, not at a scheduled digest time.</p>
+   {view.sections.some((s) => s.state === 'not_available' || s.state === 'incomplete' || s.state === 'stale') && (
+    <ul className="sections" aria-label="Queue sections">
+     {view.sections.filter((s) => s.state === 'not_available' || s.state === 'incomplete' || s.state === 'stale').map((s) => (
+      <li key={s.name} data-section={s.name} data-state={s.state}><strong>{SECTION_TITLE[s.name] ?? s.name}</strong>: {SECTION_LABEL[s.state] ?? 'Unknown'}{s.reason ? ` — ${describeReason(s.reason)}` : ''}</li>
+     ))}
+    </ul>
+   )}
+   <p>New incidents appear here as soon as they are committed, not at a scheduled digest time.</p>
      {view.entries.length === 0
       ? <p>No incident was found in the selected projects.</p>
       : (
        <table className="queue-table">
-        <caption>Incidents in the selected projects, open first, then by impact severity and recent activity (this is not the canonical urgency order)</caption>
-        <thead><tr><th scope="col">Incident</th><th scope="col">Response status</th><th scope="col">Alert condition</th><th scope="col">Owner</th><th scope="col">Acknowledgement, snooze, maintenance</th><th scope="col">Activity</th><th scope="col">Notifications</th></tr></thead>
+       <caption>Incidents in the selected projects: open first, then by urgency tier, impact severity and recent activity</caption>
+       <thead><tr><th scope="col">Incident</th><th scope="col">Response status</th><th scope="col">Alert condition</th><th scope="col">Owner</th><th scope="col">Acknowledgement, snooze, maintenance</th><th scope="col">Activity and changes</th><th scope="col">Notifications</th></tr></thead>
         <tbody>{view.entries.map((e) => <Row key={`${e.project_id}:${e.incident_id}`} entry={e} context={props.context} />)}</tbody>
        </table>
       )}

@@ -98,7 +98,21 @@ export interface AckView { actor: Id; at: string; impact_revision: string; versi
 export interface WindowView { actor: Id; reason: string; from: string; until: string; ended?: string; version: string; active: boolean }
 export interface ImpactView { condition: Id; episode: Id; severity: Severity; state: ConditionState; freshness: ConditionFreshness }
 export interface TimelineEntry { version: string; at: string; type: string; origin: 'human' | 'system'; actor: Id; reason?: string; owner?: Id; until?: string; impact?: ImpactView; link?: IncidentLink }
-export interface NotificationView { reminders_paused: boolean; paused_by?: string; worse_impact_eligible: boolean; suppressed_by?: string; delivery: ViewSection }
+export type DeliveryTier = 'urgent' | 'queue' | 'none';
+export interface UrgencyView { state: ViewState; reason?: string; tier?: DeliveryTier; mode?: 'active' | 'shadow'; episode_open?: boolean }
+export interface DeliveryEntryView {
+ id: Id; kind: string; route: string; phase: string;
+ status: 'accepted' | 'failed' | 'uncertain' | 'retrying' | 'sending' | 'pending' | 'queued' | 'suppressed' | 'cancelled';
+ code?: string; hold?: string; attempts: number; last_outcome?: string; last_code?: string; last_at?: string; next_at?: string; eligible_at: string;
+ recipient?: Id; uncertain?: boolean; possible_duplicate?: boolean;
+}
+export interface DeliverySummaryView { state: ViewState; reason?: string; attention?: 'none' | 'accepted' | 'pending' | 'held' | 'uncertain' | 'failed'; counts?: Record<string, number>; entries?: DeliveryEntryView[]; truncated?: boolean }
+export interface DigestView { state: ViewState; reason?: string; next_at?: string; pending?: boolean; sent: number }
+export interface UnreadView { state: ViewState; reason?: string; changed: boolean; queue_revision: string; seen_revision: string }
+export interface NotificationView {
+ reminders_paused: boolean; paused_by?: string; worse_impact_eligible: boolean; suppressed_by?: string;
+ urgency: UrgencyView; delivery: DeliverySummaryView; digest: DigestView; unread_change: UnreadView;
+}
 export interface IncidentView {
  incident_id: Id;
  org: Id;

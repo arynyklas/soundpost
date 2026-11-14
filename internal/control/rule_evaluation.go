@@ -933,7 +933,7 @@ func ruleReadScope(scope auth.Scope, st State, project model.ID) error {
 		return model.Fail(model.Invalid)
 	}
 	switch scope.Permission() {
-	case auth.Read, auth.PolicyWrite, auth.OrgAdmin:
+	case auth.Read, auth.PolicyWrite, auth.IncidentsWrite, auth.OrgAdmin:
 	default:
 		return model.Fail(model.Forbidden)
 	}

@@ -1,12 +1,12 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
 import { describe, expect, test } from 'bun:test';
 import type { IncidentView } from '../api/types';
-import { availableActions, buildRequest, emptyDraft, faultText, msUntilExpiry, newCommandId, rateText, responseWords, splitTimeline } from './model';
+import { availableActions, buildRequest, deliveryEntryText, deliveryHeadline, digestText, emptyDraft, faultText, msUntilExpiry, newCommandId, rateText, responseWords, splitTimeline, unreadText, urgencyText } from './model';
 
 const A = 'a'.repeat(32), P = '1'.repeat(32), I = '2'.repeat(32), C = '3'.repeat(32), E = '4'.repeat(32), U = '5'.repeat(32);
 const view = (over: Partial<IncidentView> = {}): IncidentView => ({
  incident_id: I, org: A, project_id: P, version: '7', status: 'open', condition: { id: C, state: 'firing', freshness: 'fresh', observed_at: '1700000000000000000' }, episode_id: E, severity: 'major', impact_revision: '1', source_firing: true,
- notification: { reminders_paused: false, worse_impact_eligible: true, delivery: { name: 'delivery', state: 'not_available', reason: 'notification_outbox_not_built' } }, links: [], observed_impacts: 1, last_activity: '1700000000000000000', ...over,
+ notification: { reminders_paused: false, worse_impact_eligible: true, urgency: { state: 'empty', reason: 'no_notification_policy_state' }, delivery: { state: 'empty', reason: 'no_delivery_created', attention: 'none' }, digest: { state: 'empty', reason: 'no_notification_policy_state', sent: 0 }, unread_change: { state: 'empty', reason: 'no_notification_policy_state', changed: false, queue_revision: '0', seen_revision: '0' } }, links: [], observed_impacts: 1, last_activity: '1700000000000000000', ...over,
 });
 const id = 'c'.repeat(32);
 const now = 1_700_000_000_123;
@@ -96,5 +96,32 @@ describe('what the workspace offers and says', () => {
   expect(faultText('<img src=x onerror=alert(1)>', 400)).not.toContain('<');
   expect(faultText('incident_resolved', 409)).toContain('resolved');
   expect(faultText('', 401)).toContain('session');
+ });
+});
+
+describe('notification words never soften a failed or uncertain delivery', () => {
+ const fmt = (ns: string): string => `t${ns}`;
+ const entry = { id: C, kind: 'worse_impact', route: 'immediate', phase: 'pending', status: 'uncertain' as const, attempts: 2, last_outcome: 'unknown', last_code: 'timeout', last_at: '9', eligible_at: '5', uncertain: true, possible_duplicate: true };
+ test('uncertain says the provider may have accepted it, and duplicates are named', () => {
+  const text = deliveryEntryText(entry, fmt);
+  expect(text).toContain('worse impact (immediate): uncertain: the provider may have accepted a message the product could not confirm');
+  expect(text).toContain('2 attempts; last attempt unknown (timeout) at t9');
+  expect(text).toContain('more than once');
+  expect(text).not.toMatch(/accepted by the provider/);
+ });
+ test('the headline follows the most urgent attention and a failure is never called accepted', () => {
+  expect(deliveryHeadline({ state: 'ready', attention: 'failed' })).toBe('Delivery failed');
+  expect(deliveryHeadline({ state: 'ready', attention: 'uncertain' })).toContain('may have accepted');
+  expect(deliveryHeadline({ state: 'ready', attention: 'pending' })).toBe('Delivery pending');
+  expect(deliveryHeadline({ state: 'not_available', reason: 'notification_outbox_not_wired' })).toContain('not wired');
+ });
+ test('urgency, digest and unread come from the policy; no policy means no invented tier', () => {
+  expect(urgencyText({ state: 'ready', tier: 'urgent', mode: 'active' })).toBe('Urgency: urgent, notifies immediately');
+  expect(urgencyText({ state: 'ready', tier: 'queue', mode: 'shadow' })).toContain('shadow mode: nothing leaves the product');
+  expect(urgencyText({ state: 'empty', reason: 'no_notification_policy_state' })).toContain('No notification policy has evaluated');
+  expect(digestText({ state: 'ready', pending: true, next_at: '7', sent: 1 }, fmt)).toBe('Digest: not covered by a digest yet, but already visible here; next digest t7; 1 digest accepted');
+  expect(digestText({ state: 'ready', next_at: '0', sent: 0 }, fmt)).toContain('next digest not scheduled');
+  expect(unreadText({ state: 'ready', changed: true, queue_revision: '4', seen_revision: '1' })).toContain('changed since the last digest covered it');
+  expect(unreadText({ state: 'ready', changed: false, queue_revision: '4', seen_revision: '4' })).toBe('Unread change: none since the last digest');
  });
 });
