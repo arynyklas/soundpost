@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased — 03.06 Celery documentation
+
+- Document `soundpost.celery.instrument` (README "Celery 5 job attempts"); the README no longer says a Celery adapter is not implemented.
+- Development/qualification only: the Celery 5.7.0 / kombu 5.7.0 closure is now pinned with hashes in `requirements-integrations.lock` (not a package dependency).
+
 ## Unreleased — 11.06 adoption friction (additive except `close()` now returns a report)
 
 - Delivery: one flush deadline now covers connection and TLS setup, request and response (socket timeout re-armed per phase; previously a slow first handshake could stretch the response wait past the deadline).

@@ -1,7 +1,7 @@
 // Copyright 2026 Aryn Yklas
 // SPDX-License-Identifier: Apache-2.0
 import type {DomAccessors, EnqueueResult, MutationObserverLike, ReplayChunk, ReplayConfig, ReplayEvent, ReplayEventTargetLike, ReplayNode, ReplayRecorder, ReplayTimers} from "./types.ts";
-import {CHECKPOINT_INTERVAL_MS, EVENT_FLUSH_MS, GAP_EVENT_BYTES, MAX_CHECKPOINTS, MAX_CHUNK_BYTES, MAX_CHUNK_NODES, MAX_MUTATION_RECORDS, MAX_MUTATION_ROOTS, MAX_NODE_ID, MAX_PENDING_EVENTS, MAX_DEPTH, MAX_SEQUENCE, RECORDER_VERSION, ZERO_HASH, canonicalJSON, captureAllowed, quantize, sha256Hex} from "./policy.ts";
+import {CHECKPOINT_INTERVAL_MS, EVENT_FLUSH_MS, GAP_EVENT_BYTES, MAX_CHECKPOINTS, MAX_CHUNK_BYTES, MAX_CHUNK_NODES, MAX_MUTATION_RECORDS, MAX_MUTATION_ROOTS, MAX_NODE_ID, MAX_PENDING_EVENTS, MAX_DEPTH, MAX_NODES, MAX_SEQUENCE, RECORDER_VERSION, ZERO_HASH, canonicalJSON, captureAllowed, quantize, sha256Hex} from "./policy.ts";
 import {captureDomAccessors, fitSubtrees, newWalkState, walk, type DomGlobals} from "./tree.ts";
 
 const OBSERVE = {childList: true, characterData: true, attributes: true, subtree: true} as const;
@@ -98,7 +98,9 @@ class Recorder implements ReplayRecorder {
   if (this.target !== undefined) { for (const [type, listener] of this.listeners) this.target.removeEventListener(type, listener, LISTEN); this.target = undefined; }
   for (const handle of [this.flushTimer, this.checkpointTimer, this.recoverTimer]) if (handle !== undefined) this.timers.clear(handle);
   this.flushTimer = this.checkpointTimer = this.recoverTimer = undefined;
-  this.pending = []; this.ids = new WeakMap(); this.shadowRoots = new WeakSet(); this.suppressed = new Set(); this.dom = undefined;
+  this.pending = []; this.ids = new WeakMap(); this.shadowRoots = new WeakSet(); this.suppressed = new Set();
+  try { this.dom?.release?.(); } catch { /* a page that re-wrapped the platform hook cannot make stop() throw */ }
+  this.dom = undefined;
   if (wasActive) this.needGap = true;
  }
 
@@ -162,7 +164,11 @@ class Recorder implements ReplayRecorder {
    }
    if (full) { this.flushEvents(); this.checkpoint(); return; }
    if (dirty.size === 0) return;
-   const state = newWalkState(this.ids, this.allocate, this.observeShadow), events: ReplayEvent[] = [], at = this.now().mono_ns;
+   // Running total: ids come from one counter that restarts only at a checkpoint, so every node of the live tree was allocated
+   // since then and a delta may add at most MAX_NODES minus what the counter already holds. A delta that would pass the cap is
+   // discarded for a fresh checkpoint, which recounts the live tree exactly (replaced and removed nodes no longer count): only a
+   // live tree that itself reaches the cap ends up as an opaque placeholder plus a gap (walk's last-slot rule).
+   const state = newWalkState(this.ids, this.allocate, this.observeShadow, Math.max(1, MAX_NODES - this.counter)), events: ReplayEvent[] = [], at = this.now().mono_ns;
    for (const [id, node] of dirty) {
     let covered = false;
     for (let up = dom.parentNode(node), hops = 0; up !== null && hops < MAX_DEPTH * 4; up = dom.parentNode(up), hops++) { const upId = this.ids.get(up); if (upId !== undefined && dirty.has(upId)) { covered = true; break; } }
@@ -171,9 +177,9 @@ class Recorder implements ReplayRecorder {
     events.push({at_ns: at, kind: "mutation", node: String(id), x: 0, y: 0});
     walk(dom, node, parentId === undefined ? "0" : String(parentId), state, 0, id);
    }
-   if (state.overflow) { this.loss++; events.push({at_ns: at, kind: "gap", node: "0", x: 0, y: 0}); }
+   if (state.overflow) { this.flushEvents(); this.checkpoint(); return; }
    this.flushEvents();
-   this.write(state.nodes, events, false, state.overflow);
+   this.write(state.nodes, events, false, false);
   });
  }
 

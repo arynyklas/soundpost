@@ -118,3 +118,27 @@ test("consent revocation: disconnects at once, destroys pending replay state, no
  expect(resumed.checkpoint_sequence).toBe(resumed.sequence);
  expect((await chunksOf(page)).join("\n")).not.toMatch(/canary/i);
 });
+
+test("closed shadow roots attached while capture is active are opaque (roots attached before capture starts are a documented limitation)", async ({page}) => {
+ await open(page);
+ await page.evaluate(() => Reflect.get(window, "__replay").setConsent(true));
+ await page.evaluate(() => {
+  const host = document.createElement("div"); host.id = "late-closed-host";
+  host.attachShadow({mode: "closed"}).innerHTML = "<p>CANARY_LATE_CLOSED_SHADOW_TEXT</p>";
+  const light = document.createElement("p"); light.textContent = "CANARY_LATE_CLOSED_LIGHT_CHILD"; host.appendChild(light);
+  const open = document.createElement("div"); open.attachShadow({mode: "open"}).innerHTML = "<span>CANARY_LATE_OPEN_SHADOW_TEXT</span>";
+  document.getElementById("burst")!.append(host, open);
+ });
+ await page.waitForTimeout(1500);
+ const queue = await chunksOf(page);
+ for (const pattern of secrets) expect(queue.join("\n")).not.toMatch(pattern);
+ const delta = queue.map(line => JSON.parse(line)).filter(chunk => chunk.sequence !== chunk.checkpoint_sequence && chunk.nodes.length > 0);
+ expect(delta.length).toBeGreaterThan(0);
+ const nodes = delta.flatMap(chunk => chunk.nodes) as Array<Node & {id: string; parent: string}>;
+ // The batch holds the new closed host (opaque: tag and class masked) and then the open host. No node hangs below the closed host.
+ const opaque = nodes.filter(node => node.tag === "masked" && node.class === "masked");
+ expect(opaque.length).toBeGreaterThan(0);
+ for (const node of opaque) expect(nodes.some(other => other.parent === node.id)).toBe(false);
+ // The open host's shadow content IS walked (masked text) under it, so the opaque node above is the closed host, not the open one.
+ expect(nodes.filter(node => node.tag === "span" || node.tag === "p").length).toBeGreaterThan(0);
+});

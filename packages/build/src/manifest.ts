@@ -9,7 +9,7 @@ export const LIMITS = Object.freeze({maxBytes:32*1024*1024,maxFiles:1024,maxDept
 export type ArtifactErrorCode=
  |"options_invalid"|"manifest_invalid"|"path_invalid"|"credential_invalid"|"endpoint_invalid"|"endpoint_insecure"
  |"too_many_files"|"bundle_too_large"|"generated_missing"|"generated_hash_mismatch"|"map_missing"|"map_hash_mismatch"
- |"map_invalid"|"map_indexed"|"map_too_large"|"map_too_deep"|"map_path_unsafe"
+ |"map_invalid"|"map_too_large"|"map_too_deep"|"map_path_unsafe"
  |"source_content_missing"|"source_content_unexpected"|"sourcemap_inline_unsupported"|"debug_id_conflict"
  |"upload_failed"|"upload_rejected"|"receipt_invalid";
 
@@ -83,7 +83,36 @@ const SCHEME=/^[A-Za-z][A-Za-z0-9+.-]*:/;
 function safeSourcePath(source:string):boolean {
  return source.length>0&&source.length<=LIMITS.maxPath&&!UNSAFE_TEXT.test(source)&&!source.includes("\\")&&!source.startsWith("/")&&!SCHEME.test(source)&&!source.split("/").includes("..");
 }
-export interface SourceMapView {readonly version:3;readonly sources:string[];readonly mappings:string;readonly sourcesContent?:(string|null)[];readonly [key:string]:unknown}
+export interface SourceMapView {readonly version:3;readonly sources?:string[];readonly mappings?:string;readonly sections?:unknown[];readonly sourcesContent?:(string|null)[];readonly [key:string]:unknown}
+
+/**
+ * Indexed maps follow the backend policy (internal/artifacts/policy.go): inline sections only, each section map a complete
+ * v3 map or itself indexed, recursion bounded by the shared JSON depth limit, at most LIMITS.maxFiles sections per map. A map
+ * is either regular (sources+mappings) or indexed (sections), never both. Visits every regular (leaf) map exactly once.
+ */
+function forEachLeafMap(map:Record<string,unknown>,visit:(leaf:Record<string,unknown>)=>void):void {
+ if(!Object.hasOwn(map,"sections")){visit(map);return;}
+ if(map.version!==3||Object.hasOwn(map,"sources")||Object.hasOwn(map,"mappings")||!Array.isArray(map.sections))throw new ArtifactError("map_invalid");
+ if(map.sections.length>LIMITS.maxFiles)throw new ArtifactError("too_many_files");
+ for(const section of map.sections as unknown[]){
+  if(section===null||typeof section!=="object"||Array.isArray(section))throw new ArtifactError("map_invalid");
+  const {offset,map:child}=section as {offset?:unknown;map?:unknown};
+  if(offset===null||typeof offset!=="object"||Array.isArray(offset)||child===null||typeof child!=="object"||Array.isArray(child))throw new ArtifactError("map_invalid");
+  forEachLeafMap(child as Record<string,unknown>,visit);
+ }
+}
+function checkLeaf(map:Record<string,unknown>,sourceContent:boolean):number {
+ if(map.version!==3||!Array.isArray(map.sources)||typeof map.mappings!=="string"||(map.names!==undefined&&!Array.isArray(map.names)))throw new ArtifactError("map_invalid");
+ if(map.sources.length>LIMITS.maxFiles)throw new ArtifactError("too_many_files");
+ if(map.sources.some(source=>typeof source!=="string"))throw new ArtifactError("map_invalid");
+ const sources=map.sources as string[];
+ if(sources.some(source=>!safeSourcePath(source))||(map.sourceRoot!==undefined&&(typeof map.sourceRoot!=="string"||(map.sourceRoot!==""&&!safeSourcePath(map.sourceRoot)))))throw new ArtifactError("map_path_unsafe");
+ const content=map.sourcesContent;
+ if(sourceContent){
+  if(!Array.isArray(content)||content.length!==sources.length||content.some(entry=>typeof entry!=="string"))throw new ArtifactError("source_content_missing");
+ }else if(content!==undefined&&(!Array.isArray(content)||content.some(entry=>entry!==null)))throw new ArtifactError("source_content_unexpected");
+ return sources.length;
+}
 
 /** Parse and bound a map. Pure: checks size, depth, indexed/section forms, path safety and the source-content grant. */
 export function inspectSourceMap(bytes:Uint8Array,sourceContent:boolean):SourceMapView {
@@ -95,16 +124,8 @@ export function inspectSourceMap(bytes:Uint8Array,sourceContent:boolean):SourceM
  try{parsed=JSON.parse(text);}catch{throw new ArtifactError("map_invalid");}
  if(parsed===null||typeof parsed!=="object"||Array.isArray(parsed))throw new ArtifactError("map_invalid");
  const map=parsed as Record<string,unknown>;
- if(Object.hasOwn(map,"sections"))throw new ArtifactError("map_indexed");
- if(map.version!==3||!Array.isArray(map.sources)||typeof map.mappings!=="string"||(map.names!==undefined&&!Array.isArray(map.names)))throw new ArtifactError("map_invalid");
- if(map.sources.length>LIMITS.maxFiles)throw new ArtifactError("too_many_files");
- if(map.sources.some(source=>typeof source!=="string"))throw new ArtifactError("map_invalid");
- const sources=map.sources as string[];
- if(sources.some(source=>!safeSourcePath(source))||(map.sourceRoot!==undefined&&(typeof map.sourceRoot!=="string"||(map.sourceRoot!==""&&!safeSourcePath(map.sourceRoot)))))throw new ArtifactError("map_path_unsafe");
- const content=map.sourcesContent;
- if(sourceContent){
-  if(!Array.isArray(content)||content.length!==sources.length||content.some(entry=>typeof entry!=="string"))throw new ArtifactError("source_content_missing");
- }else if(content!==undefined&&(!Array.isArray(content)||content.some(entry=>entry!==null)))throw new ArtifactError("source_content_unexpected");
+ let total=0;
+ forEachLeafMap(map,leaf=>{total+=checkLeaf(leaf,sourceContent);if(total>LIMITS.maxFiles)throw new ArtifactError("too_many_files");});
  return map as unknown as SourceMapView;
 }
 
@@ -144,9 +165,7 @@ export function prepareArtifact(input:PrepareInput):PreparedArtifact {
   map=JSON.parse(text) as Record<string,unknown>;
  }catch(error){throw error instanceof ArtifactError?error:new ArtifactError("map_invalid");}
  if(map===null||typeof map!=="object"||Array.isArray(map))throw new ArtifactError("map_invalid");
- if(Object.hasOwn(map,"sections"))throw new ArtifactError("map_indexed");
- normalizeSources(map,input.mapDir,input.root);
- if(!input.sourceContent)delete map.sourcesContent;
+ forEachLeafMap(map,leaf=>{normalizeSources(leaf,input.mapDir,input.root);if(!input.sourceContent)delete leaf.sourcesContent;});
  const text=new TextDecoder("utf-8",{fatal:false}).decode(input.generated),base=text.replace(MAP_COMMENT,"").replace(DEBUG_COMMENT,"").replace(MAP_COMMENT,"");
  const debug=sha256Hex(base).slice(0,32);
  if(typeof map.debugId==="string"&&map.debugId!==debug&&map.debugId!=="")throw new ArtifactError("debug_id_conflict");

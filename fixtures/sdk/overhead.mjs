@@ -126,12 +126,19 @@ function runChild(execPath,argv,{stdinKeep=false}={}){
  const done=new Promise((res,rej)=>{child.on("exit",code=>code===0||stdinKeep?res({code,out,err}):rej(new Error(`child exit ${code}: ${err.slice(0,300)}`)));child.on("error",rej);});
  return {child,done,get out(){return out;},get err(){return err;}};
 }
+// --cpu-prof-dir DIR: every non-baseline server child writes a V8 CPU profile (100 us sampling) there when it ends; profiling
+// perturbs the run, so a profiled run is for attributing cost, never for the budget rows.
+const cpuProfDir=option("--cpu-prof-dir","");
 async function serverScenario(bundle,mode,rps,seconds,hashes){
- const server=runChild(process.execPath,[here,"--role","server","--mode",mode,"--bundle",bundle,"--hashes",String(hashes)],{stdinKeep:true});
+ const profiled=cpuProfDir!==""&&mode!=="baseline";
+ const server=runChild(process.execPath,[...(profiled?["--cpu-prof","--cpu-prof-dir="+cpuProfDir,"--cpu-prof-interval=100","--cpu-prof-name=server-"+mode+"-"+hashes+"-"+Date.now()+".cpuprofile"]:[]),here,"--role","server","--mode",mode,"--bundle",bundle,"--hashes",String(hashes)],{stdinKeep:true});
  const port=await new Promise((res,rej)=>{const t=setTimeout(()=>rej(new Error("server did not start")),20000);const poll=setInterval(()=>{const m=/LISTENING (\d+)/.exec(server.out);if(m){clearInterval(poll);clearTimeout(t);res(Number(m[1]));}},20);});
  const load=runChild(process.execPath,[here,"--role","load","--port",String(port),"--rps",String(rps),"--seconds",String(seconds)]);
  const done=await load.done;
- server.child.stdin.end();server.child.kill();await server.done.catch(()=>{});
+ server.child.stdin.end();
+ // A profiled child must exit by itself (process.exit(0) on stdin end) so the profile is written.
+ if(profiled)await Promise.race([server.done,sleep(10000)]);
+ server.child.kill();await server.done.catch(()=>{});
  return JSON.parse(done.out.trim().split("\n").at(-1));
 }
 function latencyStats(latencies){const s=[...latencies].sort((a,b)=>a-b);return {count:s.length,p50_ms:quantile(s,0.5),p95_ms:quantile(s,0.95),p99_ms:quantile(s,0.99),max_ms:s.at(-1)};}

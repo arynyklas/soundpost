@@ -7,7 +7,7 @@
 // The fixture POSTs {org_id, project_id, batch_ids, minimum_receipts, trace_ids, start_ns, end_ns} with an
 // independent reader credential. The verifier never touches the SDK, the ingest path or private storage: it
 // replays the caller's own bearer credential against the product's existing authenticated read route
-// (POST /api/v1/exports: create, status, download) for the span, error and loss signals and returns what the
+// (POST /api/v1/exports: create, status, download) for the span, error, loss and job_attempt signals and returns what the
 // product serves, as {partial, records:[{id,kind,payload}]}.
 //
 // Honest limit: no product read route exposes ingest batch ids or receipt cursors, so records are matched by the
@@ -85,7 +85,7 @@ func handle(est *estate.Estate, w http.ResponseWriter, r *http.Request) {
 		signals = nil
 		for _, s := range body.Signals {
 			switch model.Kind(s) {
-			case model.SpanKind, model.ErrorKind, model.Loss:
+			case model.SpanKind, model.ErrorKind, model.Loss, model.JobAttempt:
 				signals = append(signals, model.Kind(s))
 			default:
 				http.Error(w, "unsupported signal", http.StatusBadRequest)

@@ -175,9 +175,19 @@ test("missing or mismatched maps and generated files produce visible reasons and
  expect(await reason(GOOD_MAP,{},(_generated,map)=>[{path:"assets/app.js.map",role:"map",bytes:map}])).toBe("generated_missing");
 });
 
-test("indexed, recursive, traversal, oversize and over-deep maps are rejected before any upload",async()=>{
- expect(await reason({version:3,sections:[{offset:{line:0,column:0},map:GOOD_MAP}]})).toBe("map_indexed");
- expect(await reason({version:3,sections:[{offset:{line:0,column:0},map:{version:3,sections:[{offset:{line:0,column:0},map:GOOD_MAP}]}}]})).toBe("map_indexed");
+test("indexed maps follow the backend policy: inline sections accepted, malformed or hostile sections rejected before any upload",async()=>{
+ const section=(map:unknown)=>({offset:{line:0,column:0},map});
+ const indexed={version:3,sections:[section(GOOD_MAP)]};
+ const ok=await attempt(indexed);expect(ok.uploads).toBe(1);
+ const nested=await attempt({version:3,sections:[section(indexed)]});expect(nested.uploads).toBe(1);
+ expect(await reason({...GOOD_MAP,sections:[section(GOOD_MAP)]})).toBe("map_invalid");
+ expect(await reason({version:3,sections:[{offset:{line:0,column:0}}]})).toBe("map_invalid");
+ expect(await reason({version:3,sections:"x"})).toBe("map_invalid");
+ expect(await reason({version:3,sections:[section({...GOOD_MAP,sources:["../../etc/passwd"]})]})).toBe("map_path_unsafe");
+ expect(await reason({version:3,sections:[section({...GOOD_MAP,sourcesContent:["secret"]})]})).toBe("source_content_unexpected");
+ expect(await reason({version:3,sections:Array.from({length:1025},()=>section(GOOD_MAP))})).toBe("too_many_files");
+ let deepIndexed:unknown=GOOD_MAP;for(let i=0;i<3;i++)deepIndexed={version:3,sections:[section(deepIndexed)]};
+ expect(await reason(deepIndexed)).toBe("map_too_deep");
  expect(await reason({...GOOD_MAP,sources:["../../etc/passwd"]})).toBe("map_path_unsafe");
  expect(await reason({...GOOD_MAP,sources:["/abs/app.ts"]})).toBe("map_path_unsafe");
  expect(await reason({...GOOD_MAP,sources:["src\\app.ts"]})).toBe("map_path_unsafe");

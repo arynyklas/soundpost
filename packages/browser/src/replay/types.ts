@@ -49,7 +49,10 @@ export interface DomAccessors {
  localName(element: object): string;
  /** Open shadow root or null. Closed roots are invisible to page script and become opaque only when closedShadow reports them. */
  openShadowRoot(element: object): object | null;
+ /** True for a host whose closed shadow root was observed being attached while capture was active. */
  closedShadow?(element: object): boolean;
+ /** Undoes every platform hook the accessors installed; called when capture stops. */
+ release?(): void;
  editable(element: object): boolean;
  mutationTarget(record: object): object | null;
  eventTarget(event: object): object | null;

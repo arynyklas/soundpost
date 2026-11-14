@@ -2,7 +2,7 @@
 
 Copyright 2026 Aryn Yklas. SPDX-License-Identifier: Apache-2.0.
 
-This package implements policy-first safe capture, explicit Python spans/protocol adapters, explicit manual job-attempt observations (`client.job_attempt`) and bounded native HTTPS delivery. Replay recording and a Celery (or any other job-framework) adapter are not implemented; profiling exists only as the optional internal `soundpost.profile` adapter described below. No record is acknowledged merely by entering the queue. `buffered_records()` returns immutable serialized safe snapshots, never raw exceptions. `flush(timeout=2.0)` releases only matching durable receipts; `close()` flushes, releases owned hooks/transport/spool leases, and counts nondisk pending destruction as loss without claiming an ACK.
+This package implements policy-first safe capture, explicit Python spans/protocol adapters, explicit manual job-attempt observations (`client.job_attempt`) and bounded native HTTPS delivery. Replay recording is not implemented, and Celery 5 is the only job-framework adapter (`soundpost.celery.instrument`, below); profiling exists only as the optional internal `soundpost.profile` adapter described below. No record is acknowledged merely by entering the queue. `buffered_records()` returns immutable serialized safe snapshots, never raw exceptions. `flush(timeout=2.0)` releases only matching durable receipts; `close()` flushes, releases owned hooks/transport/spool leases, and counts nondisk pending destruction as loss without claiming an ACK.
 
 ## Installation trust and policy protocol
 
@@ -111,6 +111,15 @@ Queue `record_signal_loss(signal, reason, count:int, at_ns:str) -> bool` reports
 `Config.job_registry=(("approved.alias", "<canonical-nonzero-JobID32>"), ...)` registers at most1024 unique safe aliases using `[A-Za-z0-9_.-]{1,128}`. `client.job_attempt(job, run_id, ordinal)` accepts a registered alias, canonical nonzero32hex run ID and positive exact integer ordinal through uint64 maximum. Use either `with` or `async with`; the scope emits started then succeeded/failed/cancelled observations through the existing policy-first durable queue. Failed body exceptions are sanitized independently of trace sampling, and the original application outcome propagates.
 
 These are explicitly unscheduled observations with schedule occurrence `manual.<runID>`, not cron evaluation, current job health, successful delivery or availability evidence. Optional causal links do not grant authorization. Effective capture requires the actual signed jobs bit and deployment conjunction; initialized configuration alone cannot grant it. Runtime matrix qualification remains separate and unclaimed. Job implementation/report ownership is03.05; see `.superpowers/sdd/approved-product/03.05-jobs-report.md` for authored tests and parent verification prerequisites.
+
+## Celery 5 job attempts: `soundpost.celery.instrument`
+
+`from soundpost.celery import instrument`; `instrument(app, client, *, origin=None)` attaches job-attempt capture to one Celery app and returns an `Instrumentation` whose `close()` disconnects every handler (idempotent; an attempt whose worker never reached `task_postrun` is not invented as success or failure). `celery` is NOT a dependency of this package: import `soundpost.celery` only where Celery 5 is installed (development/qualification pin: `requirements-integrations.lock`).
+
+- One attempt per task execution. The Celery task name must be a `Config.job_registry` alias; an unregistered task or a task id that is not a UUID is never instrumented and never changes execution (`job_run_id_invalid` loss for the latter). The run ID is the task id's 32-hex form and the ordinal is `request.retries + 1`, so retries are attempts of one run.
+- Outcomes come from Celery's signals: `task_retry`/`task_failure` give the failed attempt (the sanitized exception becomes the error record and the attempt's `cause_error`), `task_revoked`/`Terminated` give cancelled, `task_postrun` finishes the attempt.
+- `origin` names an allow-listed destination alias. Only then does `before_task_publish` add a W3C `traceparent` header; the worker records that trace as the attempt's `cause_trace` link and never makes it the active parent, so no child span is created from the publisher. Without `origin` nothing is published.
+- Observed (not a claim for other brokers): a real Celery 5.7.0 worker process (`--pool=solo`) on a kombu filesystem broker against a real product (`fixtures/sdk/jobs/python_attempts.py`, driven by `critical --mode jobs`). Redis/RabbitMQ, prefork/gevent pools and current job health are not qualified; the backend reducer, not the SDK, computes run and schedule health.
 
 ## Error code authorization
 

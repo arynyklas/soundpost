@@ -4,9 +4,20 @@
   "scope": "Declared licenses and license texts of the pinned packages in sdk/python/requirements-*.lock; regenerate with `go run ./build inventory --python`",
   "locks_sha256": {
     "requirements-dev.lock": "c5e70bd33e8356dd523c004d83c3dca234136ec5fce593d483a77b7bda953951",
-    "requirements-integrations.lock": "41738916b526ac3a65d00cc9a6b77b715ca282d614c75e676f6c5e9d4811bd3c"
+    "requirements-integrations.lock": "d09bc345db02630a8fb9ccdf5b11f8ad5ad5769eb01f3581e419261a0280b765"
   },
   "packages": [
+    {
+      "name": "amqp",
+      "version": "5.4.2",
+      "license_declared": "BSD",
+      "license_source": "PyPI JSON info.license",
+      "metadata_url": "https://pypi.org/pypi/amqp/5.4.2/json",
+      "artifact": "amqp-5.4.2-py3-none-any.whl",
+      "artifact_sha256": "e6e756b15c89c86818b48a4947a424706238afbf67d457428d3269bc4590db9e",
+      "license_text_sha256": "f5ef5f1282eae1931c74645f8719b6c69b3d6a2cf277bfda249a8270cd473af3",
+      "notice_audit": "license_text_collected"
+    },
     {
       "name": "annotated-doc",
       "version": "0.0.5",
@@ -41,6 +52,17 @@
       "notice_audit": "license_text_collected"
     },
     {
+      "name": "billiard",
+      "version": "4.3.2",
+      "license_declared": "BSD",
+      "license_source": "PyPI JSON info.license",
+      "metadata_url": "https://pypi.org/pypi/billiard/4.3.2/json",
+      "artifact": "billiard-4.3.2-py3-none-any.whl",
+      "artifact_sha256": "37735a7b4117aafa73532b3b493db4c02fb85c0e69d5f3447f113fd30ff27872",
+      "license_text_sha256": "27883e12193b9e4fec0bea2ec0295d535c87a243fae163a9f988af10aeabe8fe",
+      "notice_audit": "license_text_collected"
+    },
+    {
       "name": "blinker",
       "version": "1.9.0",
       "license_declared": "MIT",
@@ -49,6 +71,17 @@
       "artifact": "blinker-1.9.0-py3-none-any.whl",
       "artifact_sha256": "ba0efaa9080b619ff2f3459d1d500c57bddea4a6b424b60a91141db6fd2f08bc",
       "license_text_sha256": "9eb73a1f38597a4aa17025d2ae1be3839624c795e985d4f0e9769ce29faca467",
+      "notice_audit": "license_text_collected"
+    },
+    {
+      "name": "celery",
+      "version": "5.7.0",
+      "license_declared": "BSD-3-Clause",
+      "license_source": "PyPI JSON info.license",
+      "metadata_url": "https://pypi.org/pypi/celery/5.7.0/json",
+      "artifact": "celery-5.7.0-py3-none-any.whl",
+      "artifact_sha256": "18310a9c919f9029e4735367484d93e6a25cdfd30afdc474622cc263d9b35f6e",
+      "license_text_sha256": "c358cdf77f28bbab50d4a754e123118339c15230349e82bf66489cece3ac093a",
       "notice_audit": "license_text_collected"
     },
     {
@@ -82,6 +115,40 @@
       "artifact": "charset_normalizer-3.5.2-py3-none-any.whl",
       "artifact_sha256": "b6b751274acb69d77b3323d6b7dbaa3c7fdfc1eb829b7eb61d262f32e1af9685",
       "license_text_sha256": "6d0d41bfe170ac6c7dc248c9a63e254d0fb45a60d50a8257d0af92c6e249b887",
+      "notice_audit": "license_text_collected"
+    },
+    {
+      "name": "click-didyoumean",
+      "version": "0.3.1",
+      "license_declared": "MIT",
+      "license_source": "PyPI JSON info.license",
+      "metadata_url": "https://pypi.org/pypi/click-didyoumean/0.3.1/json",
+      "artifact": "click_didyoumean-0.3.1-py3-none-any.whl",
+      "artifact_sha256": "5c4bb6007cfea5f2fd6583a2fb6701a22a41eb98957e63d0fac41c10e7c3117c",
+      "license_text_sha256": "efc74f255dd6fd4289363b1bfe71cd0ed70b2926c8258d6152204e6a89041c0a",
+      "notice_audit": "license_text_collected"
+    },
+    {
+      "name": "click-plugins",
+      "version": "1.1.1.2",
+      "license_declared": "NOASSERTION",
+      "license_reason": "PyPI metadata carries no SPDX license expression (info.license_expression empty; info.license is free text or empty; classifiers ambiguous)",
+      "license_source": "PyPI JSON",
+      "metadata_url": "https://pypi.org/pypi/click-plugins/1.1.1.2/json",
+      "artifact": "click_plugins-1.1.1.2-py2.py3-none-any.whl",
+      "artifact_sha256": "008d65743833ffc1f5417bf0e78e8d2c23aab04d9745ba817bd3e71b0feb6aa6",
+      "license_text_sha256": "56c057dfbde1b2df7b394c48271a3fbd2b276082e3394004dc621cdb58c1fd53",
+      "notice_audit": "license_text_collected"
+    },
+    {
+      "name": "click-repl",
+      "version": "0.4.1",
+      "license_declared": "MIT",
+      "license_source": "PyPI JSON info.license",
+      "metadata_url": "https://pypi.org/pypi/click-repl/0.4.1/json",
+      "artifact": "click_repl-0.4.1-py3-none-any.whl",
+      "artifact_sha256": "5cb10881d4c5ebaa8695eceb69911af3062ee78342812b713564b17aad333eb5",
+      "license_text_sha256": "c39a97224173e617907a62d7568484bd83e05a5a655ea942407dc35a321eb431",
       "notice_audit": "license_text_collected"
     },
     {
@@ -217,6 +284,17 @@
       "notice_audit": "license_text_collected"
     },
     {
+      "name": "kombu",
+      "version": "5.7.0",
+      "license_declared": "BSD-3-Clause",
+      "license_source": "PyPI JSON info.license",
+      "metadata_url": "https://pypi.org/pypi/kombu/5.7.0/json",
+      "artifact": "kombu-5.7.0-py3-none-any.whl",
+      "artifact_sha256": "dede73bff4c89175be382c4203d2f167cf7017c384396ec75c36a1b5678f1587",
+      "license_text_sha256": "72216de09e6340d2c1aa67f833c3b6aeeee2e6922721366699811b632640fd3b",
+      "notice_audit": "license_text_collected"
+    },
+    {
       "name": "markupsafe",
       "version": "3.0.4",
       "license_declared": "BSD-3-Clause",
@@ -247,6 +325,18 @@
       "artifact": "pluggy-1.7.0-py3-none-any.whl",
       "artifact_sha256": "7dd7b0d8832ba3cb632c306926ded123429211b83641b35dc5c41ad2d34f9bec",
       "license_text_sha256": "d6b65e6c213a5d0b577911d34d6e5949b9f59d76c238c5071a2f3fc16cfb2606",
+      "notice_audit": "license_text_collected"
+    },
+    {
+      "name": "prompt-toolkit",
+      "version": "3.0.53",
+      "license_declared": "NOASSERTION",
+      "license_reason": "PyPI metadata carries no SPDX license expression (info.license_expression empty; info.license is free text or empty; classifiers ambiguous)",
+      "license_source": "PyPI JSON",
+      "metadata_url": "https://pypi.org/pypi/prompt-toolkit/3.0.53/json",
+      "artifact": "prompt_toolkit-3.0.53-py3-none-any.whl",
+      "artifact_sha256": "01c0891d7f9237d5e339f7d3e42cdae80b7534abb1c7c0e3352efba6231492f2",
+      "license_text_sha256": "303574d9bdd85c757d6025017942bf17baeedf2778f62bd7f425d07d880f4c4a",
       "notice_audit": "license_text_collected"
     },
     {
@@ -327,6 +417,17 @@
       "notice_audit": "license_text_collected"
     },
     {
+      "name": "python-dateutil",
+      "version": "2.9.0.post0",
+      "license_declared": "Apache-2.0",
+      "license_source": "PyPI JSON info.classifiers (Development Status :: 5 - Production/Stable...)",
+      "metadata_url": "https://pypi.org/pypi/python-dateutil/2.9.0.post0/json",
+      "artifact": "python_dateutil-2.9.0.post0-py2.py3-none-any.whl",
+      "artifact_sha256": "a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427",
+      "license_text_sha256": "9313256b27c4a1b7666c433acbf70a447383df0ea8c4b59bee0b6e412a281f92",
+      "notice_audit": "license_text_collected"
+    },
+    {
       "name": "requests",
       "version": "2.33.0",
       "license_declared": "Apache-2.0",
@@ -335,6 +436,17 @@
       "artifact": "requests-2.33.0-py3-none-any.whl",
       "artifact_sha256": "3324635456fa185245e24865e810cecec7b4caf933d7eb133dcde67d48cee69b",
       "license_text_sha256": "8374cc2b3a9ad92db8a7c10c0e0888b73fa3d1d36571e7a1bbc033d08c48fa55",
+      "notice_audit": "license_text_collected"
+    },
+    {
+      "name": "six",
+      "version": "1.17.0",
+      "license_declared": "MIT",
+      "license_source": "PyPI JSON info.license",
+      "metadata_url": "https://pypi.org/pypi/six/1.17.0/json",
+      "artifact": "six-1.17.0-py2.py3-none-any.whl",
+      "artifact_sha256": "4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274",
+      "license_text_sha256": "4375ba20e2b9c6c4e7cad2940a628fd90e95cc3d50ee92aae755715d8ba1fbd0",
       "notice_audit": "license_text_collected"
     },
     {
@@ -382,6 +494,17 @@
       "notice_audit": "license_text_collected"
     },
     {
+      "name": "tzlocal",
+      "version": "5.4.5",
+      "license_declared": "MIT",
+      "license_source": "PyPI JSON info.license_expression",
+      "metadata_url": "https://pypi.org/pypi/tzlocal/5.4.5/json",
+      "artifact": "tzlocal-5.4.5-py3-none-any.whl",
+      "artifact_sha256": "ecab534f6d65d9deb4c4ea52c121ab6dd5958e9b878e71dcb102578269752454",
+      "license_text_sha256": "d99ab209aeb16aad2c25c90ffd83c1a981e290ffff76a420a2ab03e03f041b8c",
+      "notice_audit": "license_text_collected"
+    },
+    {
       "name": "urllib3",
       "version": "2.8.0",
       "license_declared": "MIT",
@@ -401,6 +524,28 @@
       "artifact": "uvicorn-0.54.0-py3-none-any.whl",
       "artifact_sha256": "505bdb0f318731d45f1f712071fc781a8981f6847a31c902c9f5e652d4f67faf",
       "license_text_sha256": "efe1acf3e62fb99c288b0ec73e5a773b7268ef4320fe757ea994214e4b63c371",
+      "notice_audit": "license_text_collected"
+    },
+    {
+      "name": "vine",
+      "version": "5.1.0",
+      "license_declared": "BSD",
+      "license_source": "PyPI JSON info.license",
+      "metadata_url": "https://pypi.org/pypi/vine/5.1.0/json",
+      "artifact": "vine-5.1.0-py3-none-any.whl",
+      "artifact_sha256": "40fdf3c48b2cfe1c38a49e9ae2da6fda88e4794c810050a728bd7413811fb1dc",
+      "license_text_sha256": "177f62f5352b9321f802cead0c2247663d37895304f9c434698446be90c5aaf8",
+      "notice_audit": "license_text_collected"
+    },
+    {
+      "name": "wcwidth",
+      "version": "0.9.4",
+      "license_declared": "MIT",
+      "license_source": "PyPI JSON info.classifiers (Development Status :: 5 - Production/Stable...)",
+      "metadata_url": "https://pypi.org/pypi/wcwidth/0.9.4/json",
+      "artifact": "wcwidth-0.9.4-py3-none-any.whl",
+      "artifact_sha256": "901eace6d2dd25ebb917d0ce5db18e5c537e1504c905cf32f0d006c12098b05d",
+      "license_text_sha256": "70b98a95a2144eb70af8017fa8c6d95ce247e40867436e8bc649e137fe13d21a",
       "notice_audit": "license_text_collected"
     },
     {

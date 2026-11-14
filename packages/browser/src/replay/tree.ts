@@ -17,6 +17,38 @@ function required(proto: object | undefined, name: string): Read {
  if (read === undefined) throw Error("replay_dom_accessor_missing");
  return read;
 }
+/**
+ * Closed shadow roots are invisible to page script (`shadowRoot` is null), so they can only be recognised when they are
+ * created: while a recorder is active, `Element.prototype.attachShadow` is wrapped so a call that returned a root for a host
+ * whose own platform `shadowRoot` getter answers null marks that host closed. The init dictionary is never read (the platform reads
+ * it once itself; a second read could run page getters or Proxy traps). The wrapper forwards the receiver, arguments, result and any
+ * exception unchanged. A closed root created BEFORE the wrapper was installed (page script that ran before replay started) cannot be
+ * detected: its host is walked as an ordinary element (see packages/browser/README.md).
+ */
+function watchClosedShadows(elementProto: object, shadow: Read): {readonly closedShadow: (element: object) => boolean; readonly release: () => void} {
+ const closed = new WeakSet<object>();
+ const none = {closedShadow: () => false, release: () => {}};
+ const descriptor = Object.getOwnPropertyDescriptor(elementProto, "attachShadow");
+ const original = descriptor?.value;
+ if (descriptor === undefined || typeof original !== "function" || descriptor.writable !== true) return none;
+ let live = true;
+ const wrapper = function attachShadow(this: unknown, ...args: unknown[]): unknown {
+  const root = Reflect.apply(original, this, args);
+  if (live && typeof this === "object" && this !== null && typeof root === "object" && root !== null) {
+   try { if (shadow(this) === null) closed.add(this); } catch { /* host is not a platform element: nothing to record */ }
+  }
+  return root;
+ };
+ Object.defineProperty(elementProto, "attachShadow", {...descriptor, value: wrapper});
+ return {
+  closedShadow: element => closed.has(element),
+  release: () => {
+   live = false;
+   // Restore only when nobody wrapped the wrapper; otherwise it stays installed but inert.
+   if (Object.getOwnPropertyDescriptor(elementProto, "attachShadow")?.value === wrapper) Object.defineProperty(elementProto, "attachShadow", descriptor);
+  },
+ };
+}
 const asObject = (value: unknown): object | null => (typeof value === "object" && value !== null ? value : null);
 const asNumber = (value: unknown): number => (typeof value === "number" ? value : 0);
 
@@ -28,6 +60,7 @@ export function captureDomAccessors(g: DomGlobals): DomAccessors {
  const nodeP = g.Node.prototype, elementP = g.Element.prototype, htmlP = g.HTMLElement?.prototype ?? elementP;
  const nodeType = required(nodeP, "nodeType"), first = required(nodeP, "firstChild"), next = required(nodeP, "nextSibling"), parent = required(nodeP, "parentNode");
  const localName = required(elementP, "localName"), shadow = required(elementP, "shadowRoot"), editable = getter(htmlP, "isContentEditable");
+ const closedShadows = watchClosedShadows(elementP, shadow);
  const target = required(g.MutationRecord?.prototype, "target"), eventTarget = required(g.Event?.prototype, "target");
  const clientX = required(g.MouseEvent?.prototype, "clientX"), clientY = required(g.MouseEvent?.prototype, "clientY");
  return {
@@ -37,6 +70,8 @@ export function captureDomAccessors(g: DomGlobals): DomAccessors {
   parentNode: node => asObject(parent(node)),
   localName: element => { const name = localName(element); return typeof name === "string" ? name.toLowerCase() : ""; },
   openShadowRoot: element => asObject(shadow(element)),
+  closedShadow: element => closedShadows.closedShadow(element),
+  release: closedShadows.release,
   // The HTMLElement getter throws "Illegal invocation" on SVG/MathML elements, which cannot be contenteditable.
   editable: element => { try { return editable?.(element) === true; } catch { return false; } },
   mutationTarget: record => asObject(target(record)),
@@ -52,12 +87,14 @@ export interface WalkState {
  readonly allocate: () => number;
  readonly onOpenShadow?: (root: object) => void;
  overflow: boolean;
+ /** Most nodes this walk may emit: MAX_NODES minus the nodes already allocated since the last checkpoint (the running total of the live tree). */
+ readonly limit: number;
  /** Number of siblings skipped because of the node cap or depth limit. */
  truncated: number;
  steps: number;
 }
-export function newWalkState(ids: WeakMap<object, number>, allocate: () => number, onOpenShadow?: (root: object) => void): WalkState {
- return {nodes: [], ids, allocate, ...(onOpenShadow === undefined ? {} : {onOpenShadow}), overflow: false, truncated: 0, steps: 0};
+export function newWalkState(ids: WeakMap<object, number>, allocate: () => number, onOpenShadow?: (root: object) => void, limit: number = MAX_NODES): WalkState {
+ return {nodes: [], ids, allocate, ...(onOpenShadow === undefined ? {} : {onOpenShadow}), overflow: false, limit, truncated: 0, steps: 0};
 }
 
 function emit(state: WalkState, source: object, node: Omit<ReplayNode, "id">, id: number | undefined): void {
@@ -75,7 +112,7 @@ export function walk(dom: DomAccessors, source: object, parentId: string, state:
  const type = dom.nodeType(source);
  if (type === 9 || type === 11) { walkChildren(dom, source, parentId, state, depth); return; }
  if (type !== 1 && type !== 3) return;
- if (state.nodes.length >= MAX_NODES - 1) {
+ if (state.nodes.length >= state.limit - 1) {
   // Last slot: one opaque placeholder stands for everything not retained; nothing further is walked.
   state.overflow = true;
   emit(state, source, {parent: parentId, tag: "masked", class: "masked", text: ""}, forcedId);

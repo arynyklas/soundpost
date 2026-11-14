@@ -30,12 +30,15 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/arynyklas/soundpost/fixtures/sdk/estate"
 	"github.com/arynyklas/soundpost/fixtures/sdk/verifier"
+	"github.com/arynyklas/soundpost/internal/httpapi"
+	"github.com/arynyklas/soundpost/internal/jobs"
 	"github.com/arynyklas/soundpost/internal/model"
 )
 
@@ -45,7 +48,7 @@ type env struct {
 
 func main() {
 	var e env
-	mode := flag.String("mode", "", "python | gateway")
+	mode := flag.String("mode", "", "python | gateway | browser | release | jobs | reducer")
 	pythons := flag.String("python", "", "label=venv,label=venv")
 	node := flag.String("node", "", "Linux Node 22 (browser mode backend and Playwright)")
 	winNode := flag.String("win-node", "", "Windows node.exe (release mode: owns the installed Vite)")
@@ -74,8 +77,12 @@ func main() {
 		}
 	case "gateway":
 		rows = append(rows, e.gateway())
+	case "reducer":
+		rows = append(rows, e.reducer())
+	case "jobs":
+		rows = append(rows, e.jobs(*pythons)...)
 	case "release":
-		rows = append(rows, e.release(*winNode))
+		rows = append(rows, e.release(*winNode, *node))
 	case "browser":
 		for _, b := range strings.Split(*browsers, ",") {
 			target, exe, ok := strings.Cut(b, "=")
@@ -85,7 +92,7 @@ func main() {
 			rows = append(rows, e.browser(target, exe, *node))
 		}
 	default:
-		estate.Fail("--mode python|gateway|browser|release")
+		estate.Fail("--mode python|gateway|browser|release|jobs|reducer")
 	}
 	raw, _ := json.MarshalIndent(map[string]any{"rows": rows}, "", "  ")
 	fmt.Println(string(raw))
@@ -399,9 +406,21 @@ func wslWindows(path string) string {
 
 // release is 03.06-W1: fixtures/sdk/releases/build-and-verify.mjs (real Vite build, real private artifact upload, independent
 // authenticated read-back, negatives, release rename) against a real product, then again after a server restart.
-func (e *env) release(winNode string) map[string]any {
-	if winNode == "" {
-		estate.Fail("--win-node is required in release mode")
+// With --win-node the fixture runs under the Windows node.exe that owns the installed Vite (WSL host); with --node it runs
+// natively under Linux Node (the release host, linux/amd64 per D10), which needs the workspace installed on that host.
+func (e *env) release(winNode, linuxNode string) map[string]any {
+	if (winNode == "") == (linuxNode == "") {
+		estate.Fail("release mode needs exactly one of --win-node and --node")
+	}
+	hostPath := func(path string) string {
+		if winNode != "" {
+			return wslWindows(path)
+		}
+		return path
+	}
+	nodeBin := winNode
+	if nodeBin == "" {
+		nodeBin = linuxNode
 	}
 	est := estate.New(estate.Options{Binary: e.binary, Work: filepath.Join(e.work, "release"), Kinds: []model.Kind{model.SpanKind}, Builds: []string{"main", "renamed"}, Name: "release"})
 	defer est.Close()
@@ -409,12 +428,12 @@ func (e *env) release(winNode string) map[string]any {
 	est.Provision()
 	receiptFile := filepath.Join(e.work, "release-receipt.json")
 	names := []string{"SOUNDPOST_FIXTURE_API", "SOUNDPOST_FIXTURE_ORG", "SOUNDPOST_FIXTURE_PROJECT", "SOUNDPOST_FIXTURE_SOURCE", "SOUNDPOST_FIXTURE_BUILD", "SOUNDPOST_FIXTURE_BUILD_RENAMED",
-		"SOUNDPOST_FIXTURE_ARTIFACT_WRITE_CREDENTIAL", "SOUNDPOST_FIXTURE_ARTIFACT_READ_CREDENTIAL", "NODE_EXTRA_CA_CERTS"}
+		"SOUNDPOST_FIXTURE_ARTIFACT_WRITE_CREDENTIAL", "SOUNDPOST_FIXTURE_ARTIFACT_READ_CREDENTIAL", "SOUNDPOST_FIXTURE_SOURCE_GRANT", "NODE_EXTRA_CA_CERTS"}
 	run := func(extra ...string) (string, string) {
-		cmd := exec.Command(winNode, append([]string{wslWindows(filepath.Join(e.root, "fixtures/sdk/releases/build-and-verify.mjs")), "--endpoint-env", "SOUNDPOST_FIXTURE_API"}, extra...)...)
+		cmd := exec.Command(nodeBin, append([]string{hostPath(filepath.Join(e.root, "fixtures/sdk/releases/build-and-verify.mjs")), "--endpoint-env", "SOUNDPOST_FIXTURE_API"}, extra...)...)
 		cmd.Env = append(os.Environ(), "SOUNDPOST_FIXTURE_API=https://"+est.Addr, "SOUNDPOST_FIXTURE_ORG="+est.Org.String(), "SOUNDPOST_FIXTURE_PROJECT="+est.Project.String(), "SOUNDPOST_FIXTURE_SOURCE="+est.Source.String(),
 			"SOUNDPOST_FIXTURE_BUILD="+est.Builds["main"].String(), "SOUNDPOST_FIXTURE_BUILD_RENAMED="+est.Builds["renamed"].String(), "SOUNDPOST_FIXTURE_ARTIFACT_WRITE_CREDENTIAL="+est.WriteToken,
-			"SOUNDPOST_FIXTURE_ARTIFACT_READ_CREDENTIAL="+est.ArtifactRead, "NODE_EXTRA_CA_CERTS="+wslWindows(est.CA), "WSLENV="+strings.Join(names, ":"))
+			"SOUNDPOST_FIXTURE_ARTIFACT_READ_CREDENTIAL="+est.ArtifactRead, "SOUNDPOST_FIXTURE_SOURCE_GRANT=denied", "NODE_EXTRA_CA_CERTS="+hostPath(est.CA), "WSLENV="+strings.Join(names, ":"))
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout, cmd.Stderr = &stdout, &stderr
 		if err := cmd.Run(); err != nil {
@@ -422,9 +441,209 @@ func (e *env) release(winNode string) map[string]any {
 		}
 		return strings.TrimSpace(stdout.String()), strings.TrimSpace(stderr.String())
 	}
-	built, _ := run("--receipt-out", wslWindows(receiptFile))
+	built, _ := run("--receipt-out", hostPath(receiptFile))
 	est.Stop()
 	est.Start()
-	restarted, _ := run("--verify-receipt", wslWindows(receiptFile))
+	restarted, _ := run("--verify-receipt", hostPath(receiptFile))
 	return map[string]any{"fixture": "fixtures/sdk/releases/build-and-verify.mjs", "build_upload_read": json.RawMessage(built), "after_restart": json.RawMessage(restarted), "route": "/api/v1/artifacts"}
+}
+
+// jobs is 03.06-W4: fixtures/sdk/jobs/python_attempts.py (explicit attempts plus a real Celery worker process on a kombu
+// filesystem broker, one venv per --python label=venv) and fixtures/sdk/jobs/bun-attempts.ts against a real product whose source
+// is signed for job_attempt, verified through the D8 verifier (the caller's own reader bearer on the product's export route).
+func (e *env) jobs(pythons string) []map[string]any {
+	var rows []map[string]any
+	run := func(name string, build func(est *estate.Estate, cfgPath, verifyURL, jobID string) *exec.Cmd) map[string]any {
+		est := estate.New(estate.Options{Binary: e.binary, Work: filepath.Join(e.work, "jobs-"+name), Kinds: []model.Kind{model.SpanKind, model.ErrorKind, model.Loss, model.JobAttempt}, Name: "jobs-" + name})
+		defer est.Close()
+		est.Start()
+		est.Provision()
+		verifyURL, stop := verifier.Serve(est)
+		defer stop()
+		cfg := est.SDKConfig(est.Builds["main"], "fixture-1")
+		cfg["ca_file"] = est.CA
+		cfgPath := filepath.Join(e.work, "jobs-"+name+".json")
+		estate.WriteJSON(cfgPath, cfg)
+		jobID := est.ID("job/fixture").String()
+		cmd := build(est, cfgPath, verifyURL, jobID)
+		cmd.Dir = e.root
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &stdout, &stderr
+		rc := 0
+		if err := cmd.Run(); err != nil {
+			rc = 1
+			if ee, ok := err.(*exec.ExitError); ok {
+				rc = ee.ExitCode()
+			}
+		}
+		row := map[string]any{"fixture": name, "exit_code": rc, "stdout": strings.TrimSpace(stdout.String()), "stderr": estate.Tail(stderr.String()), "verifier_route": "/api/v1/exports"}
+		if rc != 0 {
+			raw, _ := json.Marshal(row)
+			fmt.Println(string(raw))
+			estate.Fail("%s failed", name)
+		}
+		return row
+	}
+	baseEnv := func(est *estate.Estate, cfgPath, verifyURL, jobID string) []string {
+		return []string{"PATH=" + os.Getenv("PATH"), "SOUNDPOST_FIXTURE_CONFIG=" + cfgPath, "SOUNDPOST_FIXTURE_INGEST=https://" + est.Addr + "/ingest/v1/batches", "SOUNDPOST_FIXTURE_VERIFY=" + verifyURL,
+			"SOUNDPOST_FIXTURE_READ_CREDENTIAL=" + est.Reader, "SOUNDPOST_FIXTURE_JOB_ID=" + jobID, "SOUNDPOST_FIXTURE_CA_FILE=" + est.CA, "NODE_EXTRA_CA_CERTS=" + est.CA, "SSL_CERT_FILE=" + est.CA, "PYTHONDONTWRITEBYTECODE=1"}
+	}
+	if e.bun != "" {
+		rows = append(rows, run("fixtures/sdk/jobs/bun-attempts.ts", func(est *estate.Estate, cfgPath, verifyURL, jobID string) *exec.Cmd {
+			cmd := exec.Command(e.bun, filepath.Join(e.root, "fixtures/sdk/jobs/bun-attempts.ts"))
+			cmd.Env = baseEnv(est, cfgPath, verifyURL, jobID)
+			return cmd
+		}))
+	}
+	for _, p := range strings.Split(pythons, ",") {
+		if p == "" {
+			continue
+		}
+		label, venv, ok := strings.Cut(p, "=")
+		if !ok {
+			estate.Fail("--python wants label=venv")
+		}
+		row := run("fixtures/sdk/jobs/python_attempts.py", func(est *estate.Estate, cfgPath, verifyURL, jobID string) *exec.Cmd {
+			cmd := exec.Command(filepath.Join(venv, "bin", "python"), filepath.Join(e.root, "fixtures/sdk/jobs/python_attempts.py"))
+			cmd.Env = append(baseEnv(est, cfgPath, verifyURL, jobID), "PYTHONPATH="+filepath.Join(e.root, "sdk/python/src")+":"+filepath.Join(e.root, "fixtures/sdk/python"))
+			return cmd
+		})
+		row["python_label"] = label
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+// reducer is 03.06-W7: real SDK attempts through the real job reducer. Three Bun SDK clients (controlled clocks) deliver, in
+// this order, a NEWER run (succeeded), a late OLDER run (failed) and a retried run (attempt 1 failed, attempt 2 succeeded, newest)
+// to a real product; after each delivery the product's own job view (POST /api/v1/jobs/view, the reader's bearer) is polled until
+// the committed job books reflect it. The SDK wire events are then replayed through internal/jobs directly: every event applied
+// twice must be a Duplicate leaving the state identical, and the reverse delivery order must give the same current health.
+func (e *env) reducer() map[string]any {
+	if e.bun == "" {
+		estate.Fail("--bun is required in reducer mode")
+	}
+	est := estate.New(estate.Options{Binary: e.binary, Work: filepath.Join(e.work, "reducer"), Kinds: []model.Kind{model.SpanKind, model.ErrorKind, model.Loss, model.JobAttempt}, Name: "reducer"})
+	defer est.Close()
+	est.Start()
+	est.Provision()
+	cfg := est.SDKConfig(est.Builds["main"], "fixture-1")
+	cfgPath := filepath.Join(e.work, "reducer.json")
+	estate.WriteJSON(cfgPath, cfg)
+	job := est.ID("job/fixture")
+	type step struct {
+		RunID  string            `json:"run_id"`
+		Events []json.RawMessage `json:"events"`
+	}
+	emit := func(name string, at time.Time) step {
+		cmd := exec.Command(e.bun, filepath.Join(e.root, "fixtures/sdk/jobs/reducer.ts"))
+		cmd.Dir = e.root
+		cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "SOUNDPOST_FIXTURE_CONFIG=" + cfgPath, "SOUNDPOST_FIXTURE_INGEST=https://" + est.Addr + "/ingest/v1/batches", "SOUNDPOST_FIXTURE_JOB_ID=" + job.String(),
+			"SOUNDPOST_FIXTURE_REDUCER_STEP=" + name, fmt.Sprintf("SOUNDPOST_FIXTURE_REDUCER_AT_NS=%d", at.UnixNano()), "NODE_EXTRA_CA_CERTS=" + est.CA}
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &stdout, &stderr
+		if err := cmd.Run(); err != nil {
+			estate.Fail("reducer step %s: %v: %s", name, err, estate.Tail(stderr.String()))
+		}
+		var out step
+		estate.Must(json.Unmarshal(stdout.Bytes(), &out), "step output")
+		return out
+	}
+	view := func(want func(httpapi.JobView) bool, what string) httpapi.JobView {
+		// The product's job producer applies fresh journal rows at once but re-sweeps rows older than its tail only every
+		// defaultJobSweepRest (5 minutes, internal/appcore/producers_jobs.go), so a late older run becomes visible within ~5 minutes.
+		deadline := time.Now().Add(9 * time.Minute)
+		var last httpapi.JobView
+		for {
+			status, raw := est.Post("/api/v1/jobs/view", map[string]any{"org": est.Org, "project": est.Project, "job": job}, est.Reader)
+			if status == 200 {
+				last = httpapi.JobView{}
+				estate.Must(json.Unmarshal(raw, &last), "job view")
+				if last.State == httpapi.StateReady && want(last) {
+					return last
+				}
+			}
+			if time.Now().After(deadline) {
+				estate.Fail("job view never showed %s (last status %d state %q reason %q runs %d)", what, status, last.State, last.Reason, last.TotalRuns)
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+	}
+	basis := func(v httpapi.JobView, run string) *httpapi.RunView {
+		for i := range v.Runs {
+			if v.Runs[i].ID.String() == run {
+				return &v.Runs[i]
+			}
+		}
+		return nil
+	}
+	now := time.Now()
+	newer := emit("newer", now.Add(-time.Minute))
+	v1 := view(func(v httpapi.JobView) bool { return v.TotalRuns == 1 && v.Health != nil }, "the newer run")
+	if v1.Health.Status != jobs.StatusSucceeded || v1.Health.Evidence.Run == nil || v1.Health.Evidence.Run.String() != newer.RunID {
+		estate.Fail("after the newer run health is %q run %v, want succeeded on %s", v1.Health.Status, v1.Health.Evidence.Run, newer.RunID)
+	}
+	older := emit("older", now.Add(-30*time.Minute))
+	v2 := view(func(v httpapi.JobView) bool { return v.TotalRuns == 2 && v.Health != nil }, "the late older run")
+	if v2.Health.Status != jobs.StatusSucceeded || v2.Health.Evidence.Run == nil || v2.Health.Evidence.Run.String() != newer.RunID {
+		estate.Fail("a late older failed run overwrote the newer health: %q run %v", v2.Health.Status, v2.Health.Evidence.Run)
+	}
+	if r := basis(v2, older.RunID); r == nil || r.Status != jobs.RunFailed || r.BasisOfHealth {
+		estate.Fail("older run view wrong: %+v", r)
+	}
+	if r := basis(v2, newer.RunID); r == nil || !r.BasisOfHealth {
+		estate.Fail("newer run is not the basis of health: %+v", r)
+	}
+	retry := emit("retry", now)
+	v3 := view(func(v httpapi.JobView) bool { return v.TotalRuns == 3 && v.TotalAttempts == 4 && v.Health != nil }, "the retried run")
+	if v3.Health.Status != jobs.StatusSucceeded || v3.Health.Evidence.Run == nil || v3.Health.Evidence.Run.String() != retry.RunID {
+		estate.Fail("retried run is not the basis of health: %q run %v", v3.Health.Status, v3.Health.Evidence.Run)
+	}
+	if r := basis(v3, retry.RunID); r == nil || !r.Recovered || r.AttemptCount != 2 || r.FailedAttempts != 1 || !r.BasisOfHealth {
+		estate.Fail("retried run view wrong: %+v", r)
+	}
+	// Replay the SDK's own wire events through the real reducer.
+	decode := func(s step) []model.JobAttemptEvent {
+		var out []model.JobAttemptEvent
+		for _, raw := range s.Events {
+			var ev model.JobAttemptEvent
+			estate.Must(model.StrictJSON(raw, &ev), "decode sdk job event")
+			out = append(out, ev)
+		}
+		return out
+	}
+	apply := func(st jobs.JobState, evs []model.JobAttemptEvent, runs ...step) jobs.JobState {
+		for _, s := range runs {
+			for _, ev := range decode(s) {
+				next, outcome, err := jobs.ReduceEvent(st, ev)
+				estate.Must(err, "reduce sdk event")
+				if outcome != jobs.Applied {
+					estate.Fail("first delivery of an SDK event was %q, want applied", outcome)
+				}
+				st = next
+			}
+		}
+		return st
+	}
+	forward := apply(jobs.JobState{}, nil, newer, older, retry)
+	for _, s := range []step{newer, older, retry} {
+		for _, ev := range decode(s) {
+			again, outcome, err := jobs.ReduceEvent(forward, ev)
+			estate.Must(err, "duplicate delivery")
+			if outcome != jobs.Duplicate || !reflect.DeepEqual(again, forward) {
+				estate.Fail("duplicate delivery of attempt %s sequence %d was %q or changed the state", ev.Attempt, ev.Sequence, outcome)
+			}
+		}
+	}
+	reverse := apply(jobs.JobState{}, nil, retry, older, newer)
+	hf, hr := jobs.Evaluate(forward, v3.EvaluatedAt), jobs.Evaluate(reverse, v3.EvaluatedAt)
+	if hf.Status != hr.Status || hf.Evidence.Run == nil || hr.Evidence.Run == nil || *hf.Evidence.Run != *hr.Evidence.Run || hf.Evidence.Run.String() != retry.RunID {
+		estate.Fail("delivery order changed current health: forward %q %v reverse %q %v", hf.Status, hf.Evidence.Run, hr.Status, hr.Evidence.Run)
+	}
+	if hf.Status != v3.Health.Status || *hf.Evidence.Run != *v3.Health.Evidence.Run {
+		estate.Fail("the product's committed health differs from the pure reducer's")
+	}
+	return map[string]any{"fixture": "fixtures/sdk/jobs/reducer.ts", "bun": func() string { v, _ := estate.RunOut(e.bun, "--version"); return v }(), "route": "/api/v1/jobs/view",
+		"late_older_run_overwrote_newer_health": false, "retry_run_recovered": true, "duplicate_events_checked": len(decode(newer)) + len(decode(older)) + len(decode(retry)), "delivery_order_invariant": true,
+		"runs": v3.TotalRuns, "attempts": v3.TotalAttempts, "health": v3.Health.Status}
 }

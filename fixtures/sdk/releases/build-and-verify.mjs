@@ -112,7 +112,11 @@ try{
    mark("negative","write_credential_read_allowed");assert.equal((await readMap(endpoint,write,ids,receipt.id)).status,404);
    mark("negative","cross_project_read_not_denied");assert.equal((await readMap(endpoint,read,{...ids,project:"f".repeat(32)},receipt.id)).status,404);
    mark("negative","absent_artifact_not_404");assert.equal((await readMap(endpoint,read,ids,"e".repeat(32))).status,404);
-   mark("negative","unauthenticated_read_allowed");assert.equal((await post(endpoint,undefined,{headers:{"content-type":"application/json"},body:JSON.stringify({operation:"read",org:ids.org,project:ids.project,id:receipt.id})})).status,401);
+   mark("negative","unauthenticated_read_allowed");// No Authorization header falls through to the browser-session path, which refuses a non-same-origin request (403) before any
+   // credential is looked at; a presented-but-wrong bearer is 401. Either is a denial, nothing may be served.
+   const anonymous=await post(endpoint,undefined,{headers:{"content-type":"application/json"},body:JSON.stringify({operation:"read",org:ids.org,project:ids.project,id:receipt.id})});
+   assert.ok(anonymous.status===401||anonymous.status===403);assert.ok(!(await anonymous.text()).includes("\"mappings\""));
+   mark("negative","wrong_bearer_read_allowed");assert.equal((await readMap(endpoint,"0".repeat(43),ids,receipt.id)).status,401);
    const mapBytes=new TextEncoder().encode(JSON.stringify({version:3,sources:["src/x.ts"],names:[],mappings:"AAAA"}));
    const manifest={version:1,...ids,build:buildId,debug_id:"negative-probe",generated_sha256:sha("g"),map_sha256:sha(mapBytes),path:"assets/x.js",source_content:false,size:String(mapBytes.length),retain_until_ns:String((BigInt(Date.now())+86400000n)*1000000n)};
    for(const [label,changes] of [["traversal_path",{path:"../escape.js"}],["hash_mismatch",{map_sha256:sha("other")}],["oversize_declared",{size:String(32*1024*1024+1)}]]){
@@ -126,7 +130,8 @@ try{
    if(process.env.SOUNDPOST_FIXTURE_SOURCE_GRANT==="denied"){
     const withContent=new TextEncoder().encode(JSON.stringify({version:3,sources:["src/x.ts"],names:[],mappings:"AAAA",sourcesContent:["PRIVATE_SOURCE_CANARY"]}));
     mark("negative","source_content_grant_not_denied");
-    const response=await post(endpoint,write,{body:multipart({...manifest,source_content:true,map_sha256:sha(withContent),size:String(withContent.length)},withContent)});assert.notEqual(response.status,200);
+    const response=await post(endpoint,write,{body:multipart({...manifest,source_content:true,map_sha256:sha(withContent),size:String(withContent.length)},withContent)});// Source content needs raw.read plus a named source-reader grant; without them the product answers NotFound (404), never 200.
+    assert.equal(response.status,404);
    }
    const renamed=process.env.SOUNDPOST_FIXTURE_BUILD_RENAMED;let renameEvidence=false;
    if(renamed){

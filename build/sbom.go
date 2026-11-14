@@ -512,7 +512,7 @@ func collectInventory(root string) (Inventory, error) {
 			License string `json:"license"`
 		}
 		if json.Unmarshal(raw, &p) == nil && spdxLead(p.License) != "" {
-			stdlib.License, stdlib.LicenseSource, stdlib.NoticeText = spdxLead(p.License), "third_party/format/go124/provenance.json (Go distribution license; Go version pinned by build/toolchains.json)", true
+			stdlib.License, stdlib.LicenseSource, stdlib.NoticeText = spdxLead(p.License), "third_party/format/go124/provenance.json (Go distribution LICENSE text, carried as third_party/format/go124/LICENSE; byte-identical, sha256 911f8f57…, to the LICENSE of the Go toolchain pinned by build/toolchains.json; the older third_party/regex/go12x LICENSE copies are a different file, sha256 2d36597f…)", true
 		}
 	}
 	if stdlib.License == "" {
@@ -710,6 +710,7 @@ func renderNotices(root string, inv Inventory) ([]byte, error) {
 	b.WriteString("\"text\" says whether the full license/notice text is carried in this file (npm and Python texts come from\n")
 	b.WriteString("build/dependencies/license-texts, collected from each package's own distributed files) or in third_party/. npm and\n")
 	b.WriteString("Python dependencies are development/test lock inputs and are NOT bundled in the Go release archives.\n")
+	b.WriteString("The go-standard-library row carries the Go distribution LICENSE (third_party/format/go124/LICENSE), not a per-minor-version copy.\n")
 	for _, eco := range []struct{ id, title string }{{"golang", "Go modules and runtime"}, {"generic", "Vendored data and primitives (third_party)"}, {"npm", "npm packages (pnpm-lock.yaml)"}, {"pypi", "Python packages (sdk/python/requirements-*.lock)"}} {
 		fmt.Fprintf(&b, "\n== %s ==\n", eco.title)
 		for _, c := range inv.Components {

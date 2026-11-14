@@ -123,12 +123,12 @@ def verify_records(records, expected_ids, trace_ids, dsn, expected_source):
     raw=json.dumps(records)
     if any(value in raw for value in ('PRIVATE_',dsn,'SELECT','division by zero')): raise AssertionError('privacy_canary_exported')
 
-def verify_http(config, report, expected, start, end):
+def verify_http(config, report, expected, start, end, signals=None):
     endpoint=os.environ['SOUNDPOST_FIXTURE_VERIFY']
     reader=os.environ['SOUNDPOST_FIXTURE_READ_CREDENTIAL']
     parsed=urlsplit(endpoint)
     if parsed.scheme!='https' or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment: raise ValueError('invalid_verifier_endpoint')
-    body={'org_id':config.org,'project_id':config.project,'batch_ids':list(report.acknowledged_batch_ids),'minimum_receipts':[{'batch_id':receipt['batch_id'],'cursor':receipt['cursor']} for receipt in report.receipts],'signals':['span','error','loss'],'trace_ids':sorted({record['payload']['trace_id'] for record in expected if record['kind']=='span'}),'start_ns':str(start),'end_ns':str(end)}
+    body={'org_id':config.org,'project_id':config.project,'batch_ids':list(report.acknowledged_batch_ids),'minimum_receipts':[{'batch_id':receipt['batch_id'],'cursor':receipt['cursor']} for receipt in report.receipts],'signals':list(signals) if signals is not None else ['span','error','loss'],'trace_ids':sorted({record['payload']['trace_id'] for record in expected if record['kind']=='span'}),'start_ns':str(start),'end_ns':str(end)}
     connection=http.client.HTTPSConnection(parsed.hostname,parsed.port or 443,timeout=10,context=ssl.create_default_context(cafile=config.ca_file))
     try:
         connection.request('POST',parsed.path or '/',body=json.dumps(body).encode(),headers={'Authorization':'Bearer '+reader,'Content-Type':'application/json'})

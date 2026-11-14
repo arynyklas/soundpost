@@ -65,7 +65,8 @@ def main():
         if 'CANARY_' in json.dumps(expected): raise AssertionError('prequeue_privacy_failure')
         report = client.flush(10)
         if report.pending or report.lost or not report.receipts: raise AssertionError('durable_delivery_incomplete')
-        admitted, _ = verify_http(config, report, expected, start, end)
+        # The export route allows only a few live exports per principal: ask for exactly the signals this journey stored.
+        admitted, _ = verify_http(config, report, expected, start, end, sorted({record['kind'] for record in expected}))
         actual = {record['id']: record for record in admitted}
         for record in expected:
             observed = actual.get(record['id'])

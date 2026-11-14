@@ -4,6 +4,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -132,5 +134,27 @@ func TestRealTreeLicensesAlwaysCarryASource(t *testing.T) {
 	}
 	if _, err := os.Stat("../THIRD_PARTY_NOTICES"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// The go-standard-library notices row states which LICENSE file backs it; the statement must match the shipped bytes.
+func TestStdlibLicenseSourceNamesTheShippedLicenseDigest(t *testing.T) {
+	inv, err := collectInventory("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var source string
+	for _, c := range inv.Components {
+		if c.Name == "go-standard-library" {
+			source = c.LicenseSource
+		}
+	}
+	raw, err := os.ReadFile("../third_party/format/go124/LICENSE")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(raw)
+	if !strings.Contains(source, "sha256 "+hex.EncodeToString(sum[:4])+"…") {
+		t.Fatalf("stdlib license source %q does not name the digest prefix %x of third_party/format/go124/LICENSE", source, sum[:4])
 	}
 }

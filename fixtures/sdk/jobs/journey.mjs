@@ -16,21 +16,23 @@ const diagnosticStages=Object.freeze({
  capture_window:"capture",boundary_stamp:"verification",boundary_exclusion:"verification",boundary_inclusion:"verification",
  client_close:"shutdown",
 });
-async function readJobReceipts(config,report,start,end,mark){
+async function readJobReceipts(config,report,start,end,mark,expected){
  mark("receipt_pending");assert.equal(report.pending,0);mark("receipt_lost");assert.equal(report.lost,0);mark("receipt_present");assert.ok(report.receipts.length>0);
  mark("verifier_config");const reader=process.env.SOUNDPOST_FIXTURE_READ_CREDENTIAL,endpoint=process.env.SOUNDPOST_FIXTURE_VERIFY;
  if(!reader||!endpoint||reader===config.credential)throw Error("independent_scoped_verifier_required");
  const url=new URL(endpoint);if(url.protocol!=="https:"||url.username||url.password||url.search||url.hash)throw Error("invalid_verifier_endpoint");
- const body=JSON.stringify({org_id:config.org,project_id:config.project,batch_ids:report.acknowledgedBatchIds,minimum_receipts:report.receipts.map(receipt=>({batch_id:receipt.batch_id,cursor:receipt.cursor})),trace_ids:[],start_ns:start,end_ns:end});
+ const body=JSON.stringify({org_id:config.org,project_id:config.project,batch_ids:report.acknowledgedBatchIds,minimum_receipts:report.receipts.map(receipt=>({batch_id:receipt.batch_id,cursor:receipt.cursor})),signals:[...new Set(expected.map(record=>record.kind))].sort(),trace_ids:[],start_ns:start,end_ns:end});
  mark("verifier_request");const response=await new Promise((resolve,reject)=>{
   const req=request(url,{method:"POST",headers:{authorization:"Bearer "+reader,"content-type":"application/json"},...(process.env.SOUNDPOST_FIXTURE_CA_FILE?{ca:readFileSync(process.env.SOUNDPOST_FIXTURE_CA_FILE)}:{})},res=>{const chunks=[];let bytes=0;res.on("data",chunk=>{bytes+=chunk.length;if(bytes>4194304){res.destroy();reject(Error("verifier_result_too_large"));}else chunks.push(chunk);});res.once("error",reject);res.once("end",()=>{try{if(res.statusCode!==200)throw Error("verifier_read_failed");resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")));}catch(error){reject(error);}});});req.once("error",reject);req.end(body);
  });
  mark("verifier_response");assert.equal(response.partial,false);
- mark("verifier_receipt_fence");for(const receipt of report.receipts){const watermark=response.watermarks.find(value=>value.group===receipt.cursor.group);assert.ok(watermark&&BigInt(watermark.index)>=BigInt(receipt.cursor.index));}
+ // Decision D8: the independent verifier reads the product's own read route, which exposes no ingest cursor or batch id, so
+ // visibility is matched by record id (verifyJobReceipts checks every expected id) and the method is asserted.
+ mark("verifier_receipt_fence");assert.equal(response.batch_matching,"record_id");
  return response;
 }
 export async function verifyJobReceipts(config,report,expected,start,end,mark){
- const response=await readJobReceipts(config,report,start,end,mark);
+ const response=await readJobReceipts(config,report,start,end,mark,expected);
  for(const record of expected){
   mark("verifier_record_present");const actual=response.records.find(value=>value.id===record.id);
   if(actual===undefined){
@@ -100,7 +102,7 @@ export async function runJobBoundary(init,runtime){
    mark("boundary_stamp");assert.equal(expected.length,3);assert.ok(expected.every(record=>record.observed_at_ns===at));
    mark("capture_window");const plusOne=exclusiveCaptureEnd(at,expected);assert.equal(BigInt(plusOne),BigInt(at)+1n);
    mark("flush");const report=await client.flush(10000);
-   const equalEnd=await readJobReceipts(config,report,start,at,mark);
+   const equalEnd=await readJobReceipts(config,report,start,at,mark,expected);
    mark("boundary_exclusion");assert.equal(equalEnd.records.filter(record=>expected.some(value=>value.id===record.id)).length,0);
    mark("boundary_inclusion");const verified=await verifyJobReceipts(config,report,expected,start,plusOne,mark);
    console.log(JSON.stringify({fixture:"job_attempt_boundary",runtime,actual:process.versions,platform:process.platform,excluded_at_equal_end:true,included_at_plus_one_ns:true,known_observed_equals_end:true,manual_unscheduled:true,current_health_claimed:false,...verified}));complete=true;
