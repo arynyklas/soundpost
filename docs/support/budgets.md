@@ -5,10 +5,10 @@ Limits are pinned in `qualification/workloads.yaml` from design section 13 and a
 
 | Budget | Limit | Status (qualification run, shared WSL2/Windows host) |
 |---|---|---|
-| Server SDK p95 latency, core capture | <=5% | **FAILED**: after 11.17 on the Linux 6.1 2 vCPU VM, Node 22 +26% (3-hash) / +299% (100-hash), Node 24 +10% / +298%; the 100-hash p95 is GC-dominated (SDK load grows V8's young generation), see `.superpowers/sdd/approved-product/11.17-report.md`. Earlier: Node 22 Linux +69% / +79%; Windows +182%/+101% |
-| Server SDK CPU per request | <=5% | **FAILED**: after 11.17 on the same VM (queue saturated, fixture never flushes), Node 22 +26% (3-hash) / +15% (100-hash), Node 24 +27% / +12% (before: +253% / +127% and +268% / +137%). Earlier: Node 22 Linux +219%/+129%; Windows +384%/+126% |
+| Server SDK p95 latency, core capture | <=5% | **FAILED**. Judged on delivered mode (flush() every 100 ms through an in-process ACKing receipt transport, 0 queue_full drops), Linux 6.1 2 vCPU KVM VM, 5 alternating runs: Node 22 +351% (3-hash) / +283% (100-hash), Node 24 +44% / +231%. Saturated mode (never flushed, spans dropped once the queue fills; not judged): Node 22 +103% / +243%, Node 24 +8% / +384%. The 100-hash p95 is GC-dominated (SDK load grows V8's young generation); see `.superpowers/sdd/approved-product/11.17-report.md` |
+| Server SDK CPU per request | <=5% | **FAILED**. Delivered mode, same run: Node 22 +101% (3-hash, 204 -> 410 us) / +39% (100-hash), Node 24 +94% (153 -> 298 us) / +30%. Saturated mode (not judged): Node 22 +28% / +14%, Node 24 +30% / +18%. Before 11.17 (saturated): +253% / +127% and +268% / +137% |
 | SDK queue | <=2 MiB | met (881,686 B acking and stalled) |
-| Browser core gzip | <=40 KiB | **FAILED**: 46,570 B (index re-exports replay; no core-only entry) |
+| Browser core gzip | <=40 KiB | met after 11.13: 36,411 B for the `@soundpost/browser` core entry (replay and profile are separate entries) |
 | Browser replay gzip | <=60 KiB | met (5,882 B) |
 | Recorder p95 per mutation batch | <=5 ms | not exercised (no harness) |
 | Native CPU overhead per target | <=3% | met on the full run, WSL2 functional row, cpu fixture only (`overhead --hz 99 --seconds 120 --repeats 5`, `fixtures/nativeperf/qualification.json` `overhead_full_run`): workload CPU overhead -0.34% (stderr 0.57%), throughput change 0.37%; the collector itself used 4.57% of one core. The earlier reduced 20 s x 3 run (about 0.2%) is superseded |

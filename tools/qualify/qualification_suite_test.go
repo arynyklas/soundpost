@@ -426,9 +426,10 @@ func httpRow(hashes int, p95Base, p95Cap, cpuBase, cpuCap []float64) sdkHTTPRow 
 		ELU: modePair{statBlock{[]float64{70}}, statBlock{[]float64{90}}}, Achieved: modePair{statBlock{[]float64{995}}, statBlock{[]float64{996}}}, Errors: json.RawMessage("0")}
 }
 
+// sdkRun returns a harness result whose delivered-mode rows are rows (the budget is judged on delivered mode).
 func sdkRun(rows ...sdkHTTPRow) *sdkOverheadRun {
 	res := &sdkOverhead{}
-	res.Rows.HTTP = rows
+	res.Rows.Delivered = rows
 	return &sdkOverheadRun{Result: res, Raw: []byte(`{}`), Command: "node overhead.mjs"}
 }
 
@@ -483,6 +484,26 @@ func TestQualificationOverheadMissedBudgetIsAMeasuredFailure(t *testing.T) {
 	}
 	if row := runServerRow(t, &sdkOverheadRun{Failure: "harness exited 1", Command: "node overhead.mjs", Exit: 1}, "3"); row.Outcome != OutcomeFailed || row.State != StateExercised {
 		t.Errorf("a failed harness is a failed row: %+v", row)
+	}
+}
+
+// The budget is judged on delivered mode. A result with only the saturated row (the server never flushed, spans dropped
+// once the queue filled) is not evidence that capture meets the budget, however cheap it looks; a delivered run that
+// kept up by dropping spans as queue_full is a failure too.
+func TestQualificationOverheadIsJudgedOnDeliveredMode(t *testing.T) {
+	cheap := httpRow(3, []float64{1.0}, []float64{1.01}, []float64{100}, []float64{101})
+	saturatedOnly := &sdkOverhead{}
+	saturatedOnly.Rows.HTTP = []sdkHTTPRow{cheap}
+	if row := runServerRow(t, &sdkOverheadRun{Result: saturatedOnly, Raw: []byte(`{}`), Command: "node overhead.mjs"}, "3"); row.Outcome != OutcomeFailed {
+		t.Errorf("a saturated-only result passed the budget: %+v", row)
+	}
+	dropping := cheap
+	dropping.QueueFull = []float64{0, 12}
+	if row := runServerRow(t, sdkRun(dropping), "3"); row.Outcome != OutcomeFailed || !strings.Contains(strings.Join(row.Failures, " "), "queue_full") {
+		t.Errorf("a delivered run that dropped spans passed: %+v", row)
+	}
+	if row := runServerRow(t, sdkRun(cheap), "3"); row.Outcome != OutcomePassed {
+		t.Errorf("a delivered run within budget without drops must pass: %+v", row)
 	}
 }
 

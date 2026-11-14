@@ -135,6 +135,7 @@ type sdkHTTPRow struct {
 	Achieved      modePair        `json:"achieved_rps"`
 	Errors        json.RawMessage `json:"errors"`
 	RPS           float64         `json:"requests_per_second_requested"`
+	QueueFull     []float64       `json:"queue_full_drops"`
 }
 
 type modePair struct {
@@ -166,10 +167,13 @@ type sdkOverhead struct {
 		Node string `json:"node"`
 	} `json:"machine_class"`
 	Rows struct {
-		HTTP    []sdkHTTPRow `json:"node_http_server_core_capture"`
-		Acking  sdkQueueRow  `json:"node_queue_acking_transport"`
-		Stalled sdkQueueRow  `json:"node_queue_cap_stalled_transport"`
-		Bundles struct {
+		// HTTP is the saturated mode (the server never flushes; spans are dropped once the queue is full). It is kept as
+		// evidence only: the budget is judged on Delivered, the state a real application is in.
+		HTTP      []sdkHTTPRow `json:"node_http_server_core_capture"`
+		Delivered []sdkHTTPRow `json:"node_http_server_delivered_capture"`
+		Acking    sdkQueueRow  `json:"node_queue_acking_transport"`
+		Stalled   sdkQueueRow  `json:"node_queue_cap_stalled_transport"`
+		Bundles   struct {
 			Index   sdkBundle `json:"browser_index"`
 			Replay  sdkBundle `json:"replay_only"`
 			Profile sdkBundle `json:"profile_module"`
@@ -251,14 +255,19 @@ func runOverheadSDKServer(rc *runCtx, spec RowSpec) Row {
 		return row
 	}
 	want, _ := strconv.Atoi(spec.Params["handler_hashes"])
-	var hr *sdkHTTPRow
+	var hr, saturated *sdkHTTPRow
+	for i := range run.Result.Rows.Delivered {
+		if run.Result.Rows.Delivered[i].HandlerHashes == want {
+			hr = &run.Result.Rows.Delivered[i]
+		}
+	}
 	for i := range run.Result.Rows.HTTP {
 		if run.Result.Rows.HTTP[i].HandlerHashes == want {
-			hr = &run.Result.Rows.HTTP[i]
+			saturated = &run.Result.Rows.HTTP[i]
 		}
 	}
 	if hr == nil {
-		row.Outcome, row.Failures = OutcomeFailed, []string{fmt.Sprintf("the harness result has no handler_hashes=%d row", want)}
+		row.Outcome, row.Failures = OutcomeFailed, []string{fmt.Sprintf("the harness result has no delivered-mode handler_hashes=%d row", want)}
 		return row
 	}
 	row.Series = []Series{
@@ -297,7 +306,20 @@ func runOverheadSDKServer(rc *runCtx, spec RowSpec) Row {
 			row.Outcome = OutcomeFailed
 		}
 	}
-	row.Loss = fmt.Sprintf("load error counters (harness-reported): %s; capture used an in-process ACKing fake receipt transport, so nothing was lost in transit by construction", string(hr.Errors))
+	dropped := 0.0
+	for _, n := range hr.QueueFull {
+		dropped += n
+	}
+	if dropped > 0 {
+		// A capture that keeps up only by dropping spans has not delivered its workload; its cost is not the claim.
+		row.Outcome = OutcomeFailed
+		row.Failures = append(row.Failures, fmt.Sprintf("delivered mode dropped %.0f records as queue_full: the exporter did not keep up", dropped))
+	}
+	row.Loss = fmt.Sprintf("load error counters (harness-reported): %s; delivered mode: flush() every 100 ms through an in-process ACKing receipt transport, queue_full drops per run %v", string(hr.Errors), hr.QueueFull)
+	if saturated != nil {
+		row.Evidence = append(row.Evidence, fmt.Sprintf("saturated mode (never flushed, spans dropped as queue_full once the queue fills), not judged: p95 %+.1f %%, process CPU %+.1f %%",
+			percentIncrease(mean(saturated.P95.Baseline.Values), mean(saturated.P95.Capture.Values)), percentIncrease(mean(saturated.CPU.Baseline.Values), mean(saturated.CPU.Capture.Values))))
+	}
 	row.Limits = []string{
 		fmt.Sprintf("handler = %d x sha256 over 1 KiB + 16-field JSON; loopback HTTP; no TLS or network export cost measured", want),
 		fmt.Sprintf("host %s %s, %.0f logical CPUs, fixed-work noise CV %.0f %% on a shared workstation (other jobs ran concurrently); %s",

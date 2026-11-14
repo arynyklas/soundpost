@@ -41,6 +41,8 @@ async function roleServer(){
   const wrap=sdk.installHttp(client,{operation:"request"}),inner=listener;
   listener=wrap.listener((req,res)=>{if(count%100===99)client.captureException(new Error("fixture handled error"));inner(req,res);});
   if(mode==="capture-stalled"||mode==="capture-sampled"){sampler=setInterval(()=>{maxQueueBytes=Math.max(maxQueueBytes,queueBytes());},50);sampler.unref();}
+  // Delivered mode: export on a timer like a real application, so batching, receipts and acknowledgement are in the measured cost.
+  if(mode==="capture-delivered"){const flusher=setInterval(()=>{void client.flush(1000).catch(()=>{});},100);flusher.unref();}
  }
  const server=http.createServer((req,res)=>{
   if(req.url==="/__cpu"){const c=process.cpuUsage(),elu=performance.eventLoopUtilization();res.end(JSON.stringify({user_us:c.user,system_us:c.system,elu_active_ms:elu.active,requests:count,queue_bytes:queueBytes(),max_queue_bytes:Math.max(maxQueueBytes,queueBytes()),diagnostics:client?client.diagnostics():{}}));return;}
@@ -176,7 +178,7 @@ export {installHttp};
     const metric=(pick)=>({baseline:summary(series("baseline",pick)),capture:summary(series("capture",pick)),...compare(series("baseline",pick),series("capture",pick))});
     const p95=metric(r=>r.stats.p95_ms),cpu=metric(r=>r.cpu_us_per_request),loop=metric(r=>r.loop_active_us_per_request);
     result.rows.node_http_server_core_capture.push({
-     workload:`node:http loopback server, deterministic handler (${hashes}x sha256 over 1 KiB + JSON of 16 fields), open-loop load at ${rps} req/s from a separate process, ${seconds} s measured after 1 s warm-up, ${runs} alternating runs per mode; capture = Node SDK installHttp listener (root span per request, one handled error per 100 requests) with an in-process ACKing fake receipt transport (no TLS/network export cost measured)`,
+     workload:`node:http loopback server, deterministic handler (${hashes}x sha256 over 1 KiB + JSON of 16 fields), open-loop load at ${rps} req/s from a separate process, ${seconds} s measured after 1 s warm-up, ${runs} alternating runs per mode; capture = Node SDK installHttp listener (root span per request, one handled error per 100 requests); the server never calls flush(), so once the 1024-record queue fills, spans are dropped as queue_full (saturated mode; delivery cost is in node_http_server_delivered_capture)`,
      handler_hashes:hashes,requests_per_second_requested:rps,
      p95_latency_ms:p95,p99_latency_ms:metric(r=>r.stats.p99_ms),p50_latency_ms:metric(r=>r.stats.p50_ms),
      process_cpu_us_per_request:{note:"process.cpuUsage; on Windows its resolution is the ~15.6 ms scheduler tick, so short windows can read 0 (see the raw values); treat as coarse",...cpu},
@@ -185,6 +187,34 @@ export {installHttp};
      errors:{baseline:series("baseline",r=>r.errors),capture:series("capture",r=>r.errors)},
      budget:{p95_percent:BUDGET.server_p95_latency_percent,cpu_percent:BUDGET.server_cpu_percent},
      verdict:{p95:p95.delta_percent<=BUDGET.server_p95_latency_percent?"within_budget_point_estimate":"exceeds_budget",loop_active_cpu_proxy:loop.delta_percent<=BUDGET.server_cpu_percent?"within_budget_point_estimate":"exceeds_budget",process_cpu:cpu.delta_percent<=BUDGET.server_cpu_percent?"within_budget_point_estimate":"exceeds_budget",p95_difference_distinguishable_from_run_noise:p95.delta_exceeds_two_standard_errors,loop_difference_distinguishable_from_run_noise:loop.delta_exceeds_two_standard_errors,process_cpu_difference_distinguishable_from_run_noise:cpu.delta_exceeds_two_standard_errors},
+    });
+   }
+   // Delivered mode: the same capture plus flush() every 100 ms through the in-process ACKing receipt transport (batching,
+   // hashing, receipts and acknowledgement measured; no TLS or network). Same budget; recorded separately, never merged
+   // into the saturated row.
+   result.rows.node_http_server_delivered_capture=[];
+   for(const hashes of weights){
+    const collected={baseline:[],"capture-delivered":[]};
+    for(let run=0;run<runs;run++){
+     for(const mode of run%2===0?["baseline","capture-delivered"]:["capture-delivered","baseline"]){
+      const r=await serverScenario(sdk,mode,rps,seconds,hashes);
+      collected[mode].push({stats:latencyStats(r.latencies_ms),cpu_us_per_request:r.server.cpu_us/Math.max(1,r.server.requests),loop_active_us_per_request:r.server.elu_active_us/Math.max(1,r.server.requests),achieved_rps:r.sent/r.wall_s,errors:r.errors,server:r.server});
+     }
+    }
+    const series=(mode,pick)=>collected[mode].map(pick);
+    const metric=(pick)=>({baseline:summary(series("baseline",pick)),capture:summary(series("capture-delivered",pick)),...compare(series("baseline",pick),series("capture-delivered",pick))});
+    const p95=metric(r=>r.stats.p95_ms),cpu=metric(r=>r.cpu_us_per_request),loop=metric(r=>r.loop_active_us_per_request);
+    const lost=series("capture-delivered",r=>(r.server.diagnostics.queue_full??0));
+    result.rows.node_http_server_delivered_capture.push({
+     workload:`same server and load (${hashes} hashes), capture plus flush() every 100 ms through the ACKing receipt transport`,
+     handler_hashes:hashes,requests_per_second_requested:rps,
+     p95_latency_ms:p95,p99_latency_ms:metric(r=>r.stats.p99_ms),p50_latency_ms:metric(r=>r.stats.p50_ms),
+     process_cpu_us_per_request:cpu,event_loop_active_us_per_request:loop,
+     achieved_rps:{baseline:summary(series("baseline",r=>r.achieved_rps)),capture:summary(series("capture-delivered",r=>r.achieved_rps))},
+     queue_full_drops:lost,
+     errors:{baseline:series("baseline",r=>r.errors),capture:series("capture-delivered",r=>r.errors)},
+     budget:{p95_percent:BUDGET.server_p95_latency_percent,cpu_percent:BUDGET.server_cpu_percent},
+     verdict:{p95:p95.delta_percent<=BUDGET.server_p95_latency_percent?"within_budget_point_estimate":"exceeds_budget",process_cpu:cpu.delta_percent<=BUDGET.server_cpu_percent?"within_budget_point_estimate":"exceeds_budget",delivered_without_queue_full:lost.every(n=>n===0)},
     });
    }
    const sampled=await serverScenario(sdk,"capture-sampled",rps,seconds,weights[0]),stalled=await serverScenario(sdk,"capture-stalled",rps,seconds,weights[0]);
