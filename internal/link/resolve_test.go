@@ -22,6 +22,7 @@ import (
 type scriptedRecords struct {
 	known map[model.ID]bool
 	scans []model.ID
+	reqs  []storage.ScanRequest
 	// failure modes of an otherwise-present target
 	scanErr, nextErr, closeErr bool
 }
@@ -38,6 +39,7 @@ func (s *scriptedRecords) Scan(_ context.Context, _ auth.Scope, req storage.Scan
 		return nil, err
 	}
 	s.scans = append(s.scans, id)
+	s.reqs = append(s.reqs, req)
 	if s.scanErr {
 		return nil, errors.New("index unavailable")
 	}
@@ -148,6 +150,13 @@ func TestResolveAuthorizesBeforeAnyLookupAndHidesDifference(t *testing.T) {
 	// Only in-scope, well-formed record references reached an index.
 	if len(records.scans) != 3 {
 		t.Fatalf("index lookups %d, want 3 (present, absent, present again)", len(records.scans))
+	}
+	// An existence probe reads one projected page: no payload, resource or observed-time column
+	// is decoded for a target that is only being looked up.
+	for i, req := range records.reqs {
+		if len(req.Projection) != 1 || req.Projection[0] != storage.FieldID {
+			t.Fatalf("probe %d projects %v, want only the ID field", i, req.Projection)
+		}
 	}
 	if _, err = resolver.Resolve(ctx, scope, make([]link.Reference, 129)); err == nil {
 		t.Fatal("oversized reference batch accepted")

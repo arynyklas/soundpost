@@ -119,7 +119,7 @@ func (r *Resolver) exists(ctx context.Context, scope auth.Scope, ref Reference) 
 	if !ok {
 		return false
 	}
-	rows, err := r.records.Scan(ctx, scope, storage.ScanRequest{Projects: []model.ID{ref.Project}, Signal: target.kind, Start: math.MinInt64, End: math.MaxInt64, Selectors: []storage.Matcher{{Target: storage.MatchField, Name: target.field, Op: storage.MatchEqual, Literal: storage.Literal{Kind: storage.LiteralString, String: ref.ID.String()}}}})
+	rows, err := r.records.Scan(ctx, scope, storage.ScanRequest{Projects: []model.ID{ref.Project}, Signal: target.kind, Start: math.MinInt64, End: math.MaxInt64, Projection: []storage.Field{storage.FieldID}, Selectors: []storage.Matcher{{Target: storage.MatchField, Name: target.field, Op: storage.MatchEqual, Literal: storage.Literal{Kind: storage.LiteralString, String: ref.ID.String()}}}})
 	if err != nil {
 		return false
 	}

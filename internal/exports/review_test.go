@@ -112,8 +112,13 @@ func TestExportLimitsArePerPrincipalPerOrgAndGlobal(t *testing.T) {
 			t.Fatalf("a1 export %d: %v", i, err)
 		}
 	}
-	if err := create(a1, orgX, projectX); faultCode(err) != model.Quota {
+	err := create(a1, orgX, projectX)
+	if faultCode(err) != model.Quota {
 		t.Fatalf("a1 exceeded its per-principal budget: %v", err)
+	}
+	// The cap frees when an export ends or expires, so the refusal is retryable (served as 429).
+	if fault := new(*model.Fault); !errors.As(err, fault) || !(*fault).Retryable {
+		t.Fatalf("export cap refusal is not marked retryable: %v", err)
 	}
 	if err := create(a2, orgX, projectX); err != nil {
 		t.Fatalf("a1 saturating its own budget blocked a2: %v", err)
@@ -296,5 +301,35 @@ func TestScanStopsAtTheNextPageAfterRevocation(t *testing.T) {
 	}
 	if got := s.nexts.Load(); got != 2 {
 		t.Fatalf("scan kept reading after revocation: %d page requests, want 2", got)
+	}
+}
+
+// Operation.Generation is the delete generation the export was bound to (C11
+// LifecycleOperation), the same number from creation to completion, not a phase counter.
+func TestOperationGenerationIsTheBoundDeleteGeneration(t *testing.T) {
+	f := newFx(t)
+	org, project := f.newOrg("generation")
+	c, _ := f.reader(org, project, "generation-reader@example.test", auth.Read)
+	deletes := &bump{base: f.svc.SourceLifecycleGenerations()}
+	deletes.n.Store(7)
+	cache, err := auth.NewCache(f.svc, deletes, 64, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exp, err := NewWithLimits(f.svc, cache, deletes, &script{pages: 1}, testLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(exp.Close)
+	scope := f.scope(c, org, project)
+	grant, err := exp.Create(f.ctx, scope, metricRequest(project))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if grant.Operation.Generation != 7 {
+		t.Fatalf("created operation generation %d, want the bound delete generation 7", grant.Operation.Generation)
+	}
+	if op := exp.settle(t, exp.entryFor(t, grant.Operation.ID)); op.Phase != "complete" || op.Generation != 7 {
+		t.Fatalf("completed operation %q generation %d, want complete 7", op.Phase, op.Generation)
 	}
 }

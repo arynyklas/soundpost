@@ -229,7 +229,7 @@ func (s *Service) Create(ctx context.Context, scope auth.Scope, r Request) (Gran
 	if end := scope.ExpiresAt(); !end.IsZero() && end.Before(expires) {
 		expires = end
 	}
-	e := &entry{op: Operation{ID: id, Kind: "export", Phase: "running", Generation: 1}, project: r.Project, org: scope.OrgID(), principal: scope.PrincipalID(), epoch: scope.PolicyEpoch(), deletion: gen, expires: expires}
+	e := &entry{op: Operation{ID: id, Kind: "export", Phase: "running", Generation: model.Uint64(gen)}, project: r.Project, org: scope.OrgID(), principal: scope.PrincipalID(), epoch: scope.PolicyEpoch(), deletion: gen, expires: expires}
 	s.mu.Lock()
 	dead := s.sweepLocked()
 	var byPrincipal, byOrg int
@@ -244,7 +244,9 @@ func (s *Service) Create(ctx context.Context, scope auth.Scope, r Request) (Gran
 	if byPrincipal >= s.limits.PerPrincipal || byOrg >= s.limits.PerOrg || len(s.entries) >= s.limits.Global {
 		s.mu.Unlock()
 		drop(dead)
-		return Grant{}, model.Fail(model.Quota)
+		fault := model.Fail(model.Quota)
+		fault.Retryable = true
+		return Grant{}, fault
 	}
 	s.entries[s.key(scope, id)] = e
 	s.wg.Add(1)
@@ -265,7 +267,7 @@ func (e *entry) snapshot() Operation {
 func (e *entry) finish(phase, reason string, chunks [][]byte) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.op.Phase, e.op.SafeReason, e.op.Generation = phase, reason, 2
+	e.op.Phase, e.op.SafeReason = phase, reason
 	if phase == "complete" && len(chunks) == 0 {
 		chunks = [][]byte{{}}
 	}
@@ -415,7 +417,12 @@ func (s *Service) Status(ctx context.Context, scope auth.Scope, id model.ID) (Op
 
 // Chunk releases one chunk. The ticket, the scope, the epoch and the delete
 // generation are all revalidated for this chunk; for an elevated scope the
-// read audit commits before any bytes are returned.
+// read audit commits before any bytes are returned. For an ordinary scope a
+// revocation that commits between that last check and the response write
+// cannot be observed, so a revoked reader may still receive that one chunk
+// (at most 64 KiB) and no later one: the next call fails the ticket binding.
+// Elevated releases have no such window because the audit commit re-runs
+// ValidateControlState inside its own transaction.
 func (s *Service) Chunk(ctx context.Context, scope auth.Scope, ticket string, id model.ID, index uint64) (Chunk, error) {
 	subject, _, err := s.cache.OpenTicket(ctx, scope, ticketKind, ticket)
 	if err != nil {

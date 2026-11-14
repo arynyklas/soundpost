@@ -10,6 +10,7 @@ import (
 	"io"
 	"reflect"
 	"sort"
+	"unsafe"
 )
 
 // The v1 schema is the ordered C04 Go field layout, not Go's gob format or JSON.
@@ -231,7 +232,10 @@ func (r *columnDecoder) value(v reflect.Value) error {
 		}
 	case reflect.Array:
 		if v.Type().Elem().Kind() == reflect.Uint8 {
-			if _, err := io.ReadFull(r, v.Slice(0, v.Len()).Bytes()); err != nil {
+			// IDs, cursors and hashes are byte arrays reached through addressable slice
+			// elements; reading straight into the array keeps a page of them at a fixed
+			// number of allocations (v.Slice(...).Bytes() allocated once per element).
+			if _, err := io.ReadFull(r.Reader, unsafe.Slice((*byte)(v.Addr().UnsafePointer()), v.Len())); err != nil {
 				return model.Fail(model.Corrupt)
 			}
 			return nil

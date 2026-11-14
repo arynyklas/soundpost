@@ -65,6 +65,13 @@ func reply(w http.ResponseWriter, v any, e error) {
 			status = 409
 		case model.Unavailable, model.Corrupt:
 			status = 503
+		case model.Quota:
+			// A capacity that frees up (the concurrent-export cap) is retryable, like the
+			// ingest quota; a permanent quota stays a plain 400.
+			if f.Retryable {
+				status = http.StatusTooManyRequests
+				w.Header().Set("Retry-After", "1")
+			}
 		}
 		w.WriteHeader(status)
 		_ = json.NewEncoder(w).Encode(f)

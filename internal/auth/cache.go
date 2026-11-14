@@ -35,18 +35,23 @@ type sourceLifecycle struct{ service *Service }
 
 func (g sourceLifecycle) DeleteGeneration(ctx context.Context, org model.ID, projects []model.ID) (uint64, error) {
 	var out uint64
-	err := g.service.store.View(ctx, func(st model.ControlState) error {
-		if _, ok := st.Orgs[org.String()]; !ok {
-			return model.Fail(model.NotFound)
-		}
-		for _, src := range st.Sources {
-			if src.Org == org && (src.Revoked || src.Retired) {
-				out++
-			}
-		}
-		return nil
+	err := g.service.store.View(ctx, func(st model.ControlState) (err error) {
+		out, err = g.DeleteGenerationFromState(st, org, projects)
+		return err
 	})
 	return out, err
+}
+func (g sourceLifecycle) DeleteGenerationFromState(st model.ControlState, org model.ID, _ []model.ID) (uint64, error) {
+	if _, ok := st.Orgs[org.String()]; !ok {
+		return 0, model.Fail(model.NotFound)
+	}
+	var out uint64
+	for _, src := range st.Sources {
+		if src.Org == org && (src.Revoked || src.Retired) {
+			out++
+		}
+	}
+	return out, nil
 }
 
 const (
@@ -70,9 +75,12 @@ type Cache struct {
 	// order holds exactly the entries in map, oldest first. It is the single
 	// source of truth for eviction: every removal path deletes from both.
 	order *list.List
+	// counts is how many entries each owning visibility fingerprint holds.
+	counts map[string]int
 }
 type cacheEntry struct {
 	key      [32]byte
+	owner    string // visibility fingerprint that stored it, for fair eviction
 	value    []byte
 	negative bool
 	expires  time.Time
@@ -97,7 +105,7 @@ func NewCache(service *Service, deletes DeleteGenerations, limit int, ttl time.D
 	if service == nil || deletes == nil || limit < 1 || limit > 1<<16 || ttl <= 0 || ttl > 5*time.Minute {
 		return nil, model.Fail(model.Invalid)
 	}
-	c := &Cache{service: service, deletes: deletes, limit: limit, ttl: ttl, entries: map[[32]byte]*list.Element{}, order: list.New()}
+	c := &Cache{service: service, deletes: deletes, limit: limit, ttl: ttl, entries: map[[32]byte]*list.Element{}, order: list.New(), counts: map[string]int{}}
 	if _, err := rand.Read(c.secret[:]); err != nil {
 		return nil, model.Fail(model.Unavailable)
 	}
@@ -200,21 +208,45 @@ func (c *Cache) Store(ctx context.Context, scope Scope, fill CacheFill, value []
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	entry := &cacheEntry{key: fill.key, value: append([]byte(nil), value...), negative: negative, expires: c.lifetimeEnd(scope, c.ttl)}
+	entry := &cacheEntry{key: fill.key, owner: fill.fingerprint, value: append([]byte(nil), value...), negative: negative, expires: c.lifetimeEnd(scope, c.ttl)}
 	if el, exists := c.entries[fill.key]; exists {
+		c.counts[el.Value.(*cacheEntry).owner]--
 		el.Value = entry
 		c.order.MoveToBack(el)
 	} else {
 		c.entries[fill.key] = c.order.PushBack(entry)
 	}
+	c.counts[entry.owner]++
 	for c.order.Len() > c.limit {
-		c.removeLocked(c.order.Front())
+		c.removeLocked(c.evictionVictimLocked())
 	}
 	return nil
 }
 
+// evictionVictimLocked is the oldest entry of the principal holding the most entries, so a
+// tenant cycling many keys evicts its own warm entries first and never a quiet neighbour's.
+// Ties go to the owner of the oldest entry.
+func (c *Cache) evictionVictimLocked() *list.Element {
+	heaviest, most := "", -1
+	for owner, n := range c.counts {
+		if n > most {
+			heaviest, most = owner, n
+		}
+	}
+	for el := c.order.Front(); el != nil; el = el.Next() {
+		if el.Value.(*cacheEntry).owner == heaviest {
+			return el
+		}
+	}
+	return c.order.Front()
+}
+
 func (c *Cache) removeLocked(el *list.Element) {
-	delete(c.entries, el.Value.(*cacheEntry).key)
+	entry := el.Value.(*cacheEntry)
+	delete(c.entries, entry.key)
+	if c.counts[entry.owner]--; c.counts[entry.owner] <= 0 {
+		delete(c.counts, entry.owner)
+	}
 	c.order.Remove(el)
 }
 
@@ -333,11 +365,41 @@ type VisibleSource struct {
 	Kinds          []model.Kind   `json:"kinds"`
 	Replay         bool           `json:"replay"`
 	PolicyRevision model.Revision `json:"policy_revision"`
+	State          string         `json:"state"`
 }
 
-// VisibleSources lists only the active sources the scope may actually read:
-// structured sources of its projects for telemetry.read, and restricted-raw
-// sources only for a raw.read scope whose principal is a named reader.
+// Source lifecycle states a VisibleSource reports. Only ingest ends with them (decision D11):
+// stored records stay readable under the unchanged scope and privacy rules.
+const (
+	SourceActive   = "active"
+	SourceClosing  = "closing"
+	SourceDisabled = "disabled"
+	SourceExpired  = "expired"
+	SourceRevoked  = "revoked"
+	SourceRetired  = "retired"
+)
+
+// sourceState names why a source no longer ingests, or SourceActive when it still does.
+func sourceState(src model.SourceAuthority, now time.Time) string {
+	switch {
+	case src.Retired:
+		return SourceRetired
+	case src.Revoked:
+		return SourceRevoked
+	case src.Closing:
+		return SourceClosing
+	case !src.Policy.Enabled:
+		return SourceDisabled
+	case int64(src.Expires) <= now.UnixNano() || src.Policy.Expires != 0 && int64(src.Policy.Expires) <= now.UnixNano():
+		return SourceExpired
+	}
+	return SourceActive
+}
+
+// VisibleSources lists the sources the scope may actually read, whatever their lifecycle state:
+// structured sources of its projects for telemetry.read, and restricted-raw sources only for a
+// raw.read scope whose principal is a named reader. A restricted-raw source whose clock window
+// has closed is the one exception (decision D6: raw eligibility ends by clock).
 func (s *Service) VisibleSources(ctx context.Context, scope Scope) ([]VisibleSource, error) {
 	if scope.service != s || scope.sourceCredential != nil || scope.action != Read && scope.action != RawRead {
 		return nil, model.Fail(model.NotFound)
@@ -352,10 +414,7 @@ func (s *Service) VisibleSources(ctx context.Context, scope Scope) ([]VisibleSou
 		}
 		o := st.Orgs[scope.org.String()]
 		for _, src := range st.Sources {
-			if src.Org != scope.org || !scope.AllowsProject(src.Project) || src.Revoked || src.Retired || src.Closing || !src.Policy.Enabled {
-				continue
-			}
-			if src.Policy.Expires != 0 && int64(src.Policy.Expires) <= s.now().UnixNano() {
+			if src.Org != scope.org || !scope.AllowsProject(src.Project) {
 				continue
 			}
 			if src.Policy.Class == "restricted_raw" {
@@ -376,7 +435,7 @@ func (s *Service) VisibleSources(ctx context.Context, scope Scope) ([]VisibleSou
 					continue
 				}
 			}
-			out = append(out, VisibleSource{ID: src.ID, Project: src.Project, Class: src.Policy.Class, Kinds: append([]model.Kind(nil), src.Policy.Kinds...), Replay: src.Policy.Replay, PolicyRevision: src.Policy.Revision})
+			out = append(out, VisibleSource{ID: src.ID, Project: src.Project, Class: src.Policy.Class, Kinds: append([]model.Kind(nil), src.Policy.Kinds...), Replay: src.Policy.Replay, PolicyRevision: src.Policy.Revision, State: sourceState(src, s.now())})
 		}
 		return nil
 	})

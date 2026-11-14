@@ -910,24 +910,34 @@ func verifyReplayAgainstSnapshotsFor(bundle BackupBundle, snapshot replica.Snaps
 	return nil
 }
 
+// writeHold stamps the restore-quota marker with temp + fsync + rename, so a crash leaves the
+// previous marker or the new one and never a short file.
 func (e *Engine) writeHold(digest model.Hash) error {
 	path := filepath.Join(e.dir, restorePendingFile)
-	if err := os.WriteFile(path, []byte(digest.String()), 0600); err != nil {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(digest.String()), 0600); err != nil {
 		return err
 	}
-	if err := durablefs.SyncFileAndDir(path); err != nil {
+	if err := durablefs.SyncFileAndDir(tmp); err != nil {
+		return err
+	}
+	if err := durablefs.Rename(tmp, path); err != nil {
 		return err
 	}
 	e.snap.hold.Store(true)
 	return nil
 }
 
-// loadRestoreHold re-arms the intake gate after a restart of a restored engine.
+// loadRestoreHold re-arms the intake gate after a restart of a restored engine. A marker
+// temporary left by a crash inside writeHold arms it too: the stamp never completed, so
+// reconciliation has not, and intake must stay closed until the restore stamps it again.
 func (e *Engine) loadRestoreHold() error {
-	if _, err := os.Stat(filepath.Join(e.dir, restorePendingFile)); err == nil {
-		e.snap.hold.Store(true)
-	} else if !os.IsNotExist(err) {
-		return err
+	for _, name := range []string{restorePendingFile, restorePendingFile + ".tmp"} {
+		if _, err := os.Stat(filepath.Join(e.dir, name)); err == nil {
+			e.snap.hold.Store(true)
+		} else if !os.IsNotExist(err) {
+			return err
+		}
 	}
 	return e.loadDeletionGate()
 }

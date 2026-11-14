@@ -359,7 +359,14 @@ func (e *Engine) publishManifestLocalLocked(ctx context.Context, groupID model.I
 		e.failLocked()
 		return 0, err
 	}
+	retired := e.catalog.File
 	e.catalog = state
+	// The retired manifest is unreachable once the pointer is durable (a snapshot cut that
+	// pinned it keeps it until release); failing to remove it only leaves an orphan, never a
+	// wrong catalog.
+	if retired != "" && retired != name && filepath.Base(retired) == retired {
+		_ = e.retireFileLocked(filepath.Join(e.dir, retired))
+	}
 	return replacement.Revision, nil
 }
 func storageIndexes() []IndexReference {

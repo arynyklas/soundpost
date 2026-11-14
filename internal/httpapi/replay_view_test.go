@@ -506,13 +506,18 @@ func (r *chainRecorder) next(t *testing.T, checkpoint bool) model.ReplayChunk {
 }
 
 func realReplayEnv(t *testing.T) (*rpEnv, model.ID, model.ID, person, *chainRecorder) {
+	return realReplayEnvWith(t, func(r httpapi.ReplayReader) httpapi.ReplayReader { return r })
+}
+
+// realReplayEnvWith is realReplayEnv with the real replay reader wrapped by wrap.
+func realReplayEnvWith(t *testing.T, wrap func(httpapi.ReplayReader) httpapi.ReplayReader) (*rpEnv, model.ID, model.ID, person, *chainRecorder) {
 	t.Helper()
 	e := &rpEnv{isoEnv: newIsoEnv(t)}
 	svc, err := replays.New(e.app.Storage, e.app.Auth, e.app.Control)
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := httpapi.NewReplays(svc)
+	h := httpapi.NewReplays(wrap(svc))
 	e.srv = httptest.NewTLSServer(httpapi.NewServer("", e.app.Auth, nil, func(mux *http.ServeMux) { httpapi.RegisterReplayRoutes(mux, e.app.Auth, h) }).Handler)
 	t.Cleanup(e.srv.Close)
 	p := model.NewID()
@@ -556,50 +561,6 @@ func TestReplayStreamRealServicePausesAtGapAndResumesAtCheckpoint(t *testing.T) 
 			t.Fatalf("policy revision lost: %+v", l)
 		}
 	}
-}
-
-func TestReplayStreamRealServiceRevokeEndsDeliveryAndReopenIsNotFound(t *testing.T) {
-	e, org, p, reader, r := realReplayEnv(t)
-	resp := e.open(reader, replayBody(org, p, r.replay), nil)
-	lines := newLines(t, resp)
-	for range 3 { // open + two chunks
-		if _, _, ok := lines.next(); !ok {
-			t.Fatal("stream ended early")
-		}
-	}
-	e.grant(org, reader, p, false, auth.Read)
-	var rest []httpapi.ReplayLine
-	for {
-		l, _, ok := lines.next()
-		if !ok {
-			break
-		}
-		rest = append(rest, l)
-	}
-	// The real service prefetches up to a batch, but never releases a body after the fence fails:
-	// the first line after the revocation is the typed revoke and nothing follows it.
-	for i, l := range rest {
-		if l.Type == "revoke" {
-			if i != len(rest)-1 {
-				t.Fatalf("lines after the revoke: %s", types(rest))
-			}
-			if l.Reason != replays.ReasonAuthorityRevoked {
-				t.Fatalf("reason = %q", l.Reason)
-			}
-			again := e.open(reader, replayBody(org, p, r.replay), nil)
-			raw, _ := io.ReadAll(again.Body)
-			if again.StatusCode != 404 {
-				t.Fatalf("reopen after revocation: %d %s", again.StatusCode, raw)
-			}
-			return
-		}
-		if l.Type == "checkpoint" || l.Type == "delta" {
-			if l.Sequence != nil && *l.Sequence > 3 {
-				t.Fatalf("chunk %d delivered after the revocation committed: %s", *l.Sequence, types(rest))
-			}
-		}
-	}
-	t.Fatalf("no revoke line: %s", types(rest))
 }
 
 func itoa(v uint64) string { return strconv.FormatUint(v, 10) }
@@ -697,5 +658,88 @@ func TestReplayStreamProbeRevalidatesWithoutReleasingAnyChunk(t *testing.T) {
 	e.grant(org, reader, p, false, auth.Read, httpapi.ReplayRead)
 	if resp := e.open(reader, body, nil); resp.StatusCode != 404 {
 		t.Fatalf("probe after revocation: %d", resp.StatusCode)
+	}
+}
+
+// gatedReader lets a real replay stream deliver `allow` events and then parks the next read
+// until the test releases it, so a revocation can be committed at exactly that point.
+type gatedReader struct {
+	inner   httpapi.ReplayReader
+	allow   int
+	parked  chan struct{}
+	release chan struct{}
+}
+
+type gatedStream struct {
+	replays.ReplayStream
+	g *gatedReader
+	n int
+}
+
+func (g *gatedReader) Read(ctx context.Context, s auth.Scope, replay model.ID, w replays.ReplayWindow) (replays.ReplayStream, error) {
+	st, err := g.inner.Read(ctx, s, replay, w)
+	if err != nil {
+		return nil, err
+	}
+	return &gatedStream{ReplayStream: st, g: g}, nil
+}
+
+func (s *gatedStream) Next(ctx context.Context) (replays.Event, error) {
+	if s.n == s.g.allow {
+		close(s.g.parked)
+		select {
+		case <-s.g.release:
+		case <-ctx.Done():
+			return replays.Event{}, ctx.Err()
+		}
+	}
+	s.n++
+	return s.ReplayStream.Next(ctx)
+}
+
+// A revocation committed after a chunk was read and before the next one is released stops the
+// stream at that chunk: the next line after the revocation is the typed revoke and no content
+// line is ever released after it. The wire buffering of lines already written before the
+// revocation cannot be told apart from a late release by a client, so the interleaving is
+// forced on the server side instead of being raced from the client.
+func TestReplayStreamNeverReleasesAChunkAfterTheRevocationCommitted(t *testing.T) {
+	gate := &gatedReader{allow: 3, parked: make(chan struct{}), release: make(chan struct{})}
+	e, org, p, reader, r := realReplayEnvWith(t, func(in httpapi.ReplayReader) httpapi.ReplayReader { gate.inner = in; return gate })
+	lines := newLines(t, e.open(reader, replayBody(org, p, r.replay), nil))
+	for i := range 4 { // open, C1, D2, D3
+		if _, _, ok := lines.next(); !ok {
+			t.Fatalf("stream ended early at line %d", i)
+		}
+	}
+	select {
+	case <-gate.parked:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the stream never reached the gate")
+	}
+	e.grant(org, reader, p, false, auth.Read) // committed before the parked read returns
+	close(gate.release)
+	var rest []httpapi.ReplayLine
+	for {
+		l, _, ok := lines.next()
+		if !ok {
+			break
+		}
+		rest = append(rest, l)
+	}
+	if len(rest) == 0 || rest[len(rest)-1].Type != "revoke" {
+		t.Fatalf("stream after the revocation: %s", types(rest))
+	}
+	for _, l := range rest {
+		if l.Type == "checkpoint" || l.Type == "delta" {
+			t.Fatalf("content released after the revocation committed: %s", types(rest))
+		}
+	}
+	if got := rest[len(rest)-1].Reason; got != replays.ReasonAuthorityRevoked {
+		t.Fatalf("reason = %q", got)
+	}
+	again := e.open(reader, replayBody(org, p, r.replay), nil)
+	raw, _ := io.ReadAll(again.Body)
+	if again.StatusCode != 404 {
+		t.Fatalf("reopen after revocation: %d %s", again.StatusCode, raw)
 	}
 }
