@@ -133,8 +133,16 @@ func (g *Group) cadenceLoop() {
 // cutAndCompact cuts a snapshot at the applied index, drops the superseded ones and compacts the
 // journal onto the cut.
 func (g *Group) cutAndCompact() error {
+	// The cut ends when the group stops, so Close (which waits for this loop) never waits out the minute.
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
+	go func() {
+		select {
+		case <-g.stop:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
 	g.mu.Lock()
 	commands, size := g.sinceCommands, g.sinceBytes
 	cursor := model.Cursor{Group: g.group, Index: model.Uint64(g.application)}

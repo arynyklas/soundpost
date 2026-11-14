@@ -255,6 +255,7 @@ type Group struct {
 	gateCtx     context.Context
 	gateCancel  context.CancelFunc
 	gateWG      sync.WaitGroup
+	cadenceWG   sync.WaitGroup // the cadence loop; Close waits so no cut writes after the group closed
 	retryWindow time.Duration
 	retryMax    int
 	retryOrder  []model.ID
@@ -385,7 +386,11 @@ func Open(c Config) (*Group, error) {
 		go g.run(c.TickInterval)
 	}
 	if g.cadence.Enabled() {
-		go g.cadenceLoop()
+		g.cadenceWG.Add(1)
+		go func() {
+			defer g.cadenceWG.Done()
+			g.cadenceLoop()
+		}()
 	}
 	return g, nil
 }
@@ -406,6 +411,9 @@ func (g *Group) Close() error {
 	if g.gateCancel != nil {
 		g.gateCancel()
 	}
+	// A cut in progress writes snapshot files and compacts the journal; it must finish (or fail against
+	// the stopped group) before the disk closes, or it writes after Close returned.
+	g.cadenceWG.Wait()
 	err := g.closeLocked()
 	g.gateWG.Wait() // the senders report through g.mu, which closeLocked has released
 	return err

@@ -4,7 +4,10 @@ package replica
 
 import (
 	"errors"
+	"fmt"
+	"io/fs"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -153,4 +156,56 @@ func TestNoCadenceNeverCompacts(t *testing.T) {
 	if now, _ := g.JournalRange(); now != first {
 		t.Fatalf("a group without a cadence compacted: head %d -> %d", first, now)
 	}
+}
+
+// Close stops the cadence loop and waits for a cut in progress: nothing under the group's directory may change after Close
+// returned (a cut still writing snapshot files raced the caller's cleanup: `directory not empty` on CI).
+func TestCloseWaitsForACadenceCut(t *testing.T) {
+	for round := range 20 {
+		dir := filepath.Join(t.TempDir(), "raft")
+		id := model.NewID()
+		machine := newWholeMachine(id)
+		transport := NewLoopback()
+		g, err := Open(Config{ID: 1, Group: id, Directory: dir, Transport: transport, Members: soloMembers(), Machine: digestMachine{machine}, Cadence: Cadence{Commands: 1}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = transport.Register(g); err == nil {
+			err = g.Campaign()
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i := range 3 {
+			putWhole(t, g, machine, i)
+		}
+		_ = g.Close()
+		transport.Close()
+		before := treeState(t, dir)
+		time.Sleep(200 * time.Millisecond)
+		if after := treeState(t, dir); after != before {
+			t.Fatalf("round %d: the group directory changed after Close returned:\nbefore %s\nafter  %s", round, before, after)
+		}
+	}
+}
+
+// treeState lists every path under dir with its size.
+func treeState(t *testing.T, dir string) string {
+	t.Helper()
+	var b strings.Builder
+	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(&b, "%s:%d;", p, info.Size())
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b.String()
 }
