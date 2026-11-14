@@ -254,6 +254,10 @@ func suiteRow(r Row) releaseevidence.Row {
 	case StateNotExercised, StateUnsupported, StateDenied:
 		out.Status = string(r.State)
 		out.Detail = releaseevidence.Detail(r.Reason)
+	case StateOutOfReleaseScope:
+		out.Status = releaseevidence.StatusOutOfReleaseScope
+		out.Platform = r.Subject.OS + "/" + r.Subject.Arch
+		out.Detail = releaseevidence.Detail(r.Reason)
 	default:
 		out.Status = releaseevidence.StatusFailed
 		out.Detail = fmt.Sprintf("unknown state %q", r.State)

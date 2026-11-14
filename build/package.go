@@ -250,11 +250,16 @@ func checkEvidenceOf(kind string, r Reports, commit string) Check {
 		c.Blocking = append(c.Blocking, kind+" evidence declares no expected rows")
 	}
 	status := map[string]string{}
+	outOfScope := 0
 	for _, row := range e.Rows {
 		if _, dup := status[row.ID]; dup {
 			c.Blocking = append(c.Blocking, fmt.Sprintf("%s evidence has duplicate row %s", kind, row.ID))
 		}
 		status[row.ID] = row.Status
+		if releaseevidence.ScopeAccepts(row, releaseevidence.ReleasePlatforms) {
+			outOfScope++
+			continue
+		}
 		if row.Status != "passed" {
 			c.Blocking = append(c.Blocking, fmt.Sprintf("%s row %s is %s %s", kind, row.ID, row.Status, row.Detail))
 		}
@@ -265,6 +270,9 @@ func checkEvidenceOf(kind string, r Reports, commit string) Check {
 		}
 	}
 	c.Detail = fmt.Sprintf("%d rows, %d expected", len(e.Rows), len(e.Expected))
+	if outOfScope > 0 {
+		c.Detail += fmt.Sprintf(", %d out of release scope (%s, not passed)", outOfScope, releaseevidence.ScopeDecision)
+	}
 	return c
 }
 

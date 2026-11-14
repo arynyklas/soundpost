@@ -47,7 +47,35 @@ const StatusPassed = "passed"
 const (
 	StatusFailed = "failed"
 	StatusNotRun = "not_run"
+	// StatusOutOfReleaseScope marks a row whose platform the release does not contain (decision D10).
+	// It is never a pass: the gate accepts it only under the conditions of ScopeAccepts.
+	StatusOutOfReleaseScope = "out_of_release_scope"
 )
+
+// ScopeDecision is the owner decision that limits the release platforms.
+const ScopeDecision = "D10"
+
+// ReleasePlatforms is the one list of platforms (GOOS/GOARCH) the release contains. build/release.go
+// builds exactly these and the gate accepts an out_of_release_scope row only for a platform not listed.
+// A later release that adds a platform adds it here and in qualification/matrix.yaml release_platforms.
+var ReleasePlatforms = []string{"linux/amd64"}
+
+// InReleasePlatforms reports whether platform is one of platforms.
+func InReleasePlatforms(platforms []string, platform string) bool {
+	for _, p := range platforms {
+		if p == platform {
+			return true
+		}
+	}
+	return false
+}
+
+// ScopeAccepts reports whether an out_of_release_scope row may stand in for a required row: its
+// detail must cite the decision and its platform must be known and not part of the release.
+func ScopeAccepts(row Row, platforms []string) bool {
+	return row.Status == StatusOutOfReleaseScope && strings.Contains(row.Detail, ScopeDecision) &&
+		row.Platform != "" && !InReleasePlatforms(platforms, row.Platform)
+}
 
 // Report is the envelope. Its JSON form is read by the gate with unknown fields rejected.
 type Report struct {
@@ -63,6 +91,8 @@ type Row struct {
 	ID     string `json:"id"`
 	Status string `json:"status"`
 	Detail string `json:"detail,omitempty"`
+	// Platform is GOOS/GOARCH of an out_of_release_scope row; empty for every other row.
+	Platform string `json:"platform,omitempty"`
 }
 
 var commitPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)

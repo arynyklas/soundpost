@@ -18,6 +18,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/arynyklas/soundpost/internal/releaseevidence"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -40,6 +42,9 @@ const (
 	StateNotExercised State = "not_exercised"
 	StateUnsupported  State = "unsupported"
 	StateDenied       State = "denied"
+	// StateOutOfReleaseScope marks a row whose platform the release does not contain (D10). It never
+	// ran, is never exercised or passed, and does not take part in the verdict.
+	StateOutOfReleaseScope State = "out_of_release_scope"
 )
 
 // Outcome is the verdict of an exercised row.
@@ -213,6 +218,18 @@ func ValidateRow(r Row) error {
 				return bad("not_exercised carries an available reading %s", rd.Name)
 			}
 		}
+	case StateOutOfReleaseScope:
+		if !strings.Contains(r.Reason, releaseevidence.ScopeDecision) {
+			return bad("out_of_release_scope must cite %s in its reason", releaseevidence.ScopeDecision)
+		}
+		if r.Build != nil || r.Command != nil || len(r.Series) > 0 || len(r.Budgets) > 0 || r.Interval != nil || r.Outcome != "" || len(r.Failures) > 0 || len(r.Evidence) > 0 {
+			return bad("out_of_release_scope carries measurement data")
+		}
+		for _, rd := range r.Readings {
+			if rd.Availability == AvailAvailable {
+				return bad("out_of_release_scope carries an available reading %s", rd.Name)
+			}
+		}
 	case StateUnsupported, StateDenied:
 		if r.Reason == "" {
 			return bad("%s without a reason", r.State)
@@ -286,6 +303,7 @@ type SuiteReport struct {
 	Host        HostInfo `json:"host"`
 	Rows        []Row    `json:"rows"`
 	Unqualified []string `json:"unqualified_required_rows"`
+	OutOfScope  []string `json:"out_of_release_scope_rows"`
 	Failed      []string `json:"measured_failures"`
 	ExitCode    int      `json:"exit_code"`
 }
@@ -336,9 +354,13 @@ const (
 // the claim, every exercised row that missed a check or budget blocks it, and a
 // matrix without any required row cannot pass vacuously.
 func (r *SuiteReport) Verdict() {
-	r.Unqualified, r.Failed = nil, nil
+	r.Unqualified, r.Failed, r.OutOfScope = nil, nil, nil
 	required := 0
 	for _, row := range r.Rows {
+		if row.State == StateOutOfReleaseScope {
+			r.OutOfScope = append(r.OutOfScope, fmt.Sprintf("%s: %s", row.ID, row.Reason))
+			continue
+		}
 		if row.Required {
 			required++
 			if row.State != StateExercised {
@@ -376,13 +398,16 @@ func (r SuiteReport) Summary() string {
 	for _, row := range r.Rows {
 		counts[row.State]++
 	}
-	fmt.Fprintf(&b, "suite %s: %d rows (exercised %d, not_exercised %d, unsupported %d, denied %d), exit %d\n", r.Suite, len(r.Rows),
-		counts[StateExercised], counts[StateNotExercised], counts[StateUnsupported], counts[StateDenied], r.ExitCode)
+	fmt.Fprintf(&b, "suite %s: %d rows (exercised %d, not_exercised %d, unsupported %d, denied %d, out_of_release_scope %d), exit %d\n", r.Suite, len(r.Rows),
+		counts[StateExercised], counts[StateNotExercised], counts[StateUnsupported], counts[StateDenied], counts[StateOutOfReleaseScope], r.ExitCode)
 	for _, line := range r.Failed {
 		fmt.Fprintf(&b, "MEASURED FAILURE %s\n", line)
 	}
 	for _, line := range r.Unqualified {
 		fmt.Fprintf(&b, "UNQUALIFIED %s\n", line)
+	}
+	for _, line := range r.OutOfScope {
+		fmt.Fprintf(&b, "OUT OF RELEASE SCOPE %s\n", line)
 	}
 	return b.String()
 }
@@ -424,12 +449,16 @@ type NativeSpec struct {
 
 // Matrix is the decoded matrix.yaml.
 type Matrix struct {
-	Schema    string               `yaml:"schema"`
-	Root      string               `yaml:"root"`
-	Workloads string               `yaml:"workloads"`
-	Builds    map[string]BuildSpec `yaml:"builds"`
-	Rows      []RowSpec            `yaml:"rows"`
-	Native    []NativeSpec         `yaml:"native"`
+	Schema    string `yaml:"schema"`
+	Root      string `yaml:"root"`
+	Workloads string `yaml:"workloads"`
+	// ReleasePlatforms (GOOS/GOARCH) are the platforms the release contains; a row whose build or subject
+	// is on another platform is out_of_release_scope. Empty means no scoping.
+	ReleasePlatforms     []string             `yaml:"release_platforms"`
+	ReleaseScopeDecision string               `yaml:"release_scope_decision"`
+	Builds               map[string]BuildSpec `yaml:"builds"`
+	Rows                 []RowSpec            `yaml:"rows"`
+	Native               []NativeSpec         `yaml:"native"`
 }
 
 // MatrixSchema is the schema identifier of matrix.yaml.
@@ -449,6 +478,9 @@ func LoadMatrix(path string) (Matrix, error) {
 	}
 	if m.Schema != MatrixSchema {
 		return Matrix{}, fmt.Errorf("matrix %s: schema %q, want %q", path, m.Schema, MatrixSchema)
+	}
+	if len(m.ReleasePlatforms) > 0 && m.ReleaseScopeDecision == "" {
+		return Matrix{}, fmt.Errorf("matrix %s: release_platforms needs a release_scope_decision", path)
 	}
 	for _, n := range m.Native {
 		for _, k := range n.Kernels {
@@ -493,6 +525,15 @@ func LoadMatrix(path string) (Matrix, error) {
 		}
 	}
 	return m, nil
+}
+
+// outOfReleaseScope reports whether a subject's platform is outside the release. A subject with os or
+// arch "any" has no platform and stays in scope.
+func (m Matrix) outOfReleaseScope(s Subject) bool {
+	if len(m.ReleasePlatforms) == 0 || s.OS == "any" || s.Arch == "any" {
+		return false
+	}
+	return !releaseevidence.InReleasePlatforms(m.ReleasePlatforms, s.OS+"/"+s.Arch)
 }
 
 func hostInfo() HostInfo {
@@ -566,7 +607,12 @@ func RunSuite(ctx context.Context, suite Suite, matrixPath, reportDir string) (S
 		if !ok {
 			return rep, fmt.Errorf("row %s: unknown runner %q", spec.ID, spec.Runner)
 		}
-		row := run(rc, spec)
+		var row Row
+		if subj := rc.subject(spec); m.outOfReleaseScope(subj) {
+			row = Row{State: StateOutOfReleaseScope, Reason: fmt.Sprintf("%s: platform %s/%s is not in the release platforms %s; the row was not run", m.ReleaseScopeDecision, subj.OS, subj.Arch, strings.Join(m.ReleasePlatforms, ", "))}
+		} else {
+			row = run(rc, spec)
+		}
 		row.ID, row.Suite, row.Required = spec.ID, spec.Suite, spec.Required
 		row.Subject = rc.subject(spec)
 		if err := ValidateRow(row); err != nil {

@@ -682,3 +682,36 @@ func TestCheckedInPromisedSurfacesAndNotices(t *testing.T) {
 		t.Fatal("THIRD_PARTY_NOTICES is not a fresh `go run ./build notices` generation")
 	}
 }
+
+func TestGateAcceptsOutOfReleaseScopeOnlyForPlatformsOutsideTheRelease(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		row     EvidenceRow
+		blocked string
+	}{
+		{"arm64 cites D10", EvidenceRow{ID: "row-1", Status: "out_of_release_scope", Platform: "linux/arm64", Detail: "D10: platform linux/arm64 is not in the release"}, ""},
+		{"platform in release", EvidenceRow{ID: "row-1", Status: "out_of_release_scope", Platform: "linux/amd64", Detail: "D10: wrongly scoped out"}, "runtime row row-1 is out_of_release_scope"},
+		{"no D10 reason", EvidenceRow{ID: "row-1", Status: "out_of_release_scope", Platform: "linux/arm64", Detail: "skipped for time"}, "runtime row row-1 is out_of_release_scope"},
+		{"no platform", EvidenceRow{ID: "row-1", Status: "out_of_release_scope", Detail: "D10"}, "runtime row row-1 is out_of_release_scope"},
+		{"not exercised arm64 still blocks", EvidenceRow{ID: "row-1", Status: "not_exercised", Platform: "linux/arm64", Detail: "D10"}, "runtime row row-1 is not_exercised"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t).signed()
+			raw, _ := json.Marshal(EvidenceReport{Schema: evidenceSchema, Kind: "runtime", Commit: testCommit, Expected: []string{"row-1"}, Rows: []EvidenceRow{tc.row}})
+			write(t, f.evidence["runtime"], string(raw))
+			r := f.reports()
+			r.ApprovalPath = f.approve(testCommit)
+			m, _ := Release(context.Background(), testCommit, r)
+			blocking := strings.Join(m.Blocking, "\n")
+			if tc.blocked == "" {
+				if strings.Contains(blocking, "evidence_runtime") {
+					t.Fatalf("out of scope row for a platform outside the release must not block: %v", m.Blocking)
+				}
+				return
+			}
+			if !strings.Contains(blocking, tc.blocked) {
+				t.Fatalf("want %q in %v", tc.blocked, m.Blocking)
+			}
+		})
+	}
+}

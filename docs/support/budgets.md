@@ -18,3 +18,5 @@ Limits are pinned in `qualification/workloads.yaml` from design section 13 and a
 | Single-host, distributed, queries | section 13 table | not exercised (no fixture hosts/1 h runs) |
 
 Server numbers use a synthetic loopback handler, 5 alternating runs of 3 s at 1000 req/s; raw series and requested/observed intervals are in the report JSON. Other jobs ran on the host. Linux arm64, Node 24 and Python rows are not exercised.
+
+Release platform scope (owner decision D10, 2026-11-15): the release contains only linux/amd64. Budget rows for linux/arm64, Windows and macOS hosts and platform-specific browsers are reported as `out_of_release_scope` with D10 as the reason, not as met, failed or not exercised; they are listed separately from the rows above and never count as passed. Browser SDK rows run on Linux browsers. A later release that adds a platform re-enables its rows unchanged.

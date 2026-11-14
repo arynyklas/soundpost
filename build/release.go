@@ -42,6 +42,8 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+
+	"github.com/arynyklas/soundpost/internal/releaseevidence"
 )
 
 func main() {
@@ -570,7 +572,7 @@ func runRelease(args []string, out io.Writer) error {
 	outDir := f.String("out", "", "output directory (created)")
 	version := f.String("version", "", "release version")
 	commit := f.String("commit", "unknown", "source commit recorded in the binaries")
-	arches := f.String("arch", "amd64,arm64", "comma-separated linux architectures")
+	arches := f.String("arch", releaseArches(), "comma-separated linux architectures (default: the release platforms, decision D10)")
 	webDist := f.String("web-dist", "", "built UI bundle (default web/dist)")
 	archive := f.String("archive", "", "pinned Go archive")
 	reproduce := f.Bool("reproduce", false, "build twice with empty caches and compare sha256")
@@ -678,4 +680,15 @@ func runRelease(args []string, out io.Writer) error {
 		return errors.New("the two builds are not byte-identical: " + manifest.Reproducibility.Detail)
 	}
 	return nil
+}
+
+// releaseArches lists the linux architectures of releaseevidence.ReleasePlatforms, comma separated.
+func releaseArches() string {
+	var arches []string
+	for _, p := range releaseevidence.ReleasePlatforms {
+		if arch, ok := strings.CutPrefix(p, "linux/"); ok {
+			arches = append(arches, arch)
+		}
+	}
+	return strings.Join(arches, ",")
 }
