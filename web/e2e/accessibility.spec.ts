@@ -3,15 +3,15 @@
 import {test,expect,request as pwRequest,type Browser,type BrowserContext,type Page} from '@playwright/test';
 import {mkdirSync} from 'node:fs';
 import {join} from 'node:path';
-import {login,owner} from './support/real';
+import {adminCommand,createOrg,createProject,field,id,ingestError,login,onboardErrorSource,owner,postJson} from './support/real';
 import {auditDom,focusIndicated,tabStops,type Violation} from './support/audit';
 import {deepLink,seedJourney,type JourneySeed} from './support/journey';
 
 // Real server, real Chrome, real data (see support/journey.ts). The first-party DOM audits in support/audit.ts SUPPLEMENT the real
 // keyboard checks below (real Tab and Enter presses, the focus the browser really reports, the computed focus ring the browser
 // really draws); they do not replace them. No third-party audit library is used.
+// The conflict dialog of the incident action form is covered by the last test, on a real incident the runner opens from an ingested error.
 // NOT covered here, on purpose and stated (see docs/user/investigation-acceptance.md):
-//  - the conflict dialog of the incident action form: incidents have no committed create route, so no real incident exists to conflict on;
 //  - stale: no committed route returns a stale investigation view; the component is covered by the bun test src/app/accessibility.test.tsx;
 //  - error and rate_limited are produced by a transport-level fault (the browser is answered 500 / 429 for one request), not by the server.
 // Firefox and WebKit are configured in playwright.config.ts and are NOT installed on this host: they are not run.
@@ -247,6 +247,61 @@ test('the audits have teeth: each defect injected into the real rendered page is
  }
 });
 
-test('conflict dialog: NOT run, no real incident can exist to conflict on (no committed incident create route); recorded in the acceptance document',async()=>{
- test.skip(true,'incidents have no committed create route, so the 05.03 conflict surface cannot be reached on a real server; incident-actions.spec.ts needs uncommitted seed routes');
+// A REAL conflict on a REAL incident (the one the runner opens from an ingested error, found through POST /api/v1/queue; two org-admin people
+// on two browsers, as in incident-actions.spec.ts): the person who lost the race is told in an alert that takes focus, the audited DOM has no
+// violation, and the keyboard alone reaches the one control inside it (with a visible focus ring) and reloads.
+test('conflict dialog: a real conflict is an alert that takes focus, passes the DOM audit, and its Reload control is reachable and operable by keyboard',async()=>{
+ test.setTimeout(240_000);
+ const org=await createOrg(owners,'a11y conflict org'),project=await createProject(owners,org,'a11y conflict project');
+ const people:{id:string;email:string;password:string}[]=[];
+ for(const name of ['alpha','bravo']){
+  const p={id:id(),email:`${name}-${id().slice(0,8)}@example.test`,password:`a11y ${name} password 2026`};
+  await adminCommand(owners,org,'create_user',{id:p.id,email:p.email,password:p.password});
+  await adminCommand(owners,org,'membership',{user_id:p.id,enabled:true});
+  await adminCommand(owners,org,'org_admin',{user_id:p.id,enabled:true});
+  people.push(p);
+ }
+ const [alpha,bravo]=people as [typeof people[0],typeof people[0]];
+ const api=await pwRequest.newContext();
+ const source=await onboardErrorSource(owners,org,project);
+ await ingestError(api,source,{at:String(BigInt(Date.now())*1_000_000n),class:'A11yConflictFailure',fatal:false,handled:false});
+ await api.dispose();
+ let incident='';
+ await expect.poll(async()=>{
+  const r=await postJson(owners,'/api/v1/queue',{org,projects:[project],limit:50});
+  const entries=field(r.json,'entries');
+  const first=Array.isArray(entries)?field(entries[0],'incident_id'):undefined;
+  incident=typeof first==='string'?first:'';
+  return incident;
+ },{message:'the runner opens an incident for the ingested error',timeout:90_000,intervals:[250,500,1000]}).not.toBe('');
+ const ns=(ms:number):string=>String(BigInt(ms)*1_000_000n);
+ const url=`/#${new URLSearchParams({org,projects:project,start:ns(Date.now()-3*3600_000),end:ns(Date.now()+3*3600_000),tz:'UTC',view:'incidents',incident:`${project}:${incident}`})}`;
+ const open=async(who:{email:string;password:string}):Promise<Page> =>{
+  const context=await br.newContext();
+  const page=await context.newPage();
+  await login(page,who.email,who.password);
+  await page.goto(url);
+  await expect(page.getByTestId('revision')).toContainText('Revision 1');
+  return page;
+ };
+ const pageA=await open(alpha),pageB=await open(bravo);
+ await pageA.getByRole('radio',{name:'Assign owner',exact:true}).check();
+ await pageA.getByRole('button',{name:'Use my user ID',exact:true}).click();
+ await pageA.getByRole('button',{name:'Submit: Assign owner',exact:true}).click();
+ await expect(pageA.locator('[data-outcome="committed"]')).toContainText('revision 2');
+ // B still holds revision 1 and loses.
+ await pageB.getByRole('radio',{name:'Acknowledge',exact:true}).check();
+ await pageB.getByRole('button',{name:'Submit: Acknowledge',exact:true}).click();
+ const conflict=pageB.locator('[data-outcome="conflict"]');
+ await expect(conflict).toBeFocused();
+ await expect(conflict.getByRole('alert')).toContainText('Conflict: not applied');
+ const found:Violation[]=await auditDom(pageB);
+ expect(found,JSON.stringify(found,null,1)).toEqual([]);
+ const [reload]=await tabStops(pageB,1);
+ expect(reload?.name).toBe('Reload the current incident');
+ expect(reload&&focusIndicated(reload)).toBe(true);
+ expect(reload?.inView).toBe(true);
+ await pageB.keyboard.press('Enter');
+ await expect(pageB.locator('[data-conflict="reloaded"]')).toContainText('was not applied');
+ await expect(pageB.getByTestId('revision')).toContainText('Revision 2');
 });

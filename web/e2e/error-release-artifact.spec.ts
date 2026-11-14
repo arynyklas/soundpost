@@ -4,9 +4,10 @@ import {id,login,origin,owner,postJson,csrf} from './support/real';
 import {CANARY_FN,CANARY_LABEL,MAP_SECRET,revoke,seedEvidence,type EvidenceSeed,type Member} from './support/evidence';
 
 // Real server, real Chrome. The organization, users, grants, source policy and source go through the real admin and
-// onboarding routes; the source map is admitted through the real multipart POST /api/v1/artifacts upload; every read
-// below is the real /api/v1/evidence/* route (plus the committed /api/v1/artifacts and /api/v1/actions routes) as a real
-// logged-in person. Release registration and one grouping issue are seeded by the temporary harness routes (see the report).
+// onboarding routes; the source map is admitted through the real multipart POST /api/v1/artifacts upload; releases are
+// registered through the real POST /api/v1/releases/register and the one grouping issue is made by the runner's issue
+// producer from two real ingested error occurrences; every read below is the real /api/v1/evidence/* route (plus the
+// committed /api/v1/artifacts and /api/v1/actions routes) as a real logged-in person. No seed route exists.
 // The symbolication sandbox MUST be ready (native mode, `symbolicator: ready (sandbox probes passed)`). The admitted map has the single mapping `AAAA`
 // (generated 1:0), so a frame at another position is answered `unmapped` by the real worker and an unknown artifact `artifact_unavailable`.
 test.describe.configure({mode:'serial'});
@@ -93,26 +94,24 @@ test('release page: a project reader is told it needs an organization administra
  expect(new Set(texts).size).toBe(1);
 });
 
-test('issue page: grouping version and hash, occurrences, late history apart, unknown ancestry, no regression claimed, actions truthfully not available',async()=>{
+test('issue page: grouping version and hash, occurrences, unknown ancestry, no regression claimed, actions truthfully not available',async()=>{
  const page=await as(seed.admin,hash(seed.org,'issues',{project:seed.project,id:seed.issue.id}));
  await expect(page.getByRole('heading',{name:/^Issue /})).toBeVisible();
- await expect(page.getByTestId('grouping-version')).toHaveText('3');
+ await expect(page.getByTestId('grouping-version')).toHaveText('1');
  await expect(page.getByTestId('grouping-hash')).toContainText(seed.issue.fingerprint);
- await expect(page.getByTestId('workflow')).toContainText('resolved');
+ await expect(page.getByTestId('workflow')).toContainText('open');
  const rows=page.locator('[data-section="occurrences"] tr[data-occurrence]');
- await expect(rows).toHaveCount(3);
+ await expect(rows).toHaveCount(2);
  await expect(page.locator(`tr[data-occurrence="${seed.issue.knownOccurrence}"]`)).toHaveAttribute('data-ancestry','known');
  await expect(page.locator(`tr[data-occurrence="${seed.issue.unknownOccurrence}"]`)).toHaveAttribute('data-ancestry','unknown');
  await expect(page.locator(`tr[data-occurrence="${seed.issue.unknownOccurrence}"]`)).toContainText('no regression is claimed');
- const late=page.locator(`tr[data-occurrence="${seed.issue.lateOccurrence}"]`);
- await expect(late).toHaveAttribute('data-late','yes');
- await expect(late).toContainText('version 2');
- await expect(page.locator('table:has(caption:text-is("Stored occurrences")) tr[data-late="yes"]')).toHaveCount(0);
+ // The producer groups both occurrences into the current grouping version: nothing is stored apart as late history.
+ await expect(page.locator('tr[data-late="yes"]')).toHaveCount(0);
  await expect(page.getByTestId('regression-note')).toContainText('No regression is claimed');
  await expect(page.locator('[data-section="occurrence_detail"]')).toContainText('Not available');
  await expect(page.locator('[data-section="regression"]')).toContainText('Not available');
  // Actions go through the existing action dispatch, which answers a typed not_available for an issue; nothing is changed or shown as changed.
- await expect(page.getByTestId('issue-expected-version')).toHaveText('4');
+ await expect(page.getByTestId('issue-expected-version')).toHaveText(/^\d+$/);
  for(const label of ['Resolve','Ignore','Stop ignoring','Reopen'])await expect(page.getByRole('radio',{name:label})).toBeVisible();
  await page.getByRole('radio',{name:'Ignore'}).check();
  await page.getByRole('button',{name:'Submit: Ignore'}).click();
@@ -120,7 +119,7 @@ test('issue page: grouping version and hash, occurrences, late history apart, un
  await expect(note).toBeVisible();
  await expect(note).toContainText('Not available. Nothing was changed.');
  await expect(note).toContainText('has no control handler');
- await expect(page.getByTestId('workflow')).toContainText('resolved');
+ await expect(page.getByTestId('workflow')).toContainText('open');
  // An issue that does not exist and one in another scope are the same Not found.
  const unknown=await as(seed.admin,hash(seed.org,'issues',{project:seed.project,id:id()}));
  await expect(unknown.locator('.status').first()).toContainText('Not found');

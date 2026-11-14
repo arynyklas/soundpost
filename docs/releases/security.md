@@ -45,6 +45,19 @@ Each producer keeps writing its own result files; a thin exporter converts them 
 | `node_loss` | 07.07 `drills --scenario all` (per-scenario JSON in the report directory) | `drills evidence --scenarios drills/scenarios.yaml --reports D --commit C --out F` | the scenarios `drills/scenarios.yaml` tags `evidence: node_loss` (the three-member cluster group: node kill, minority and majority pause, partition, power loss, fsync failure, disk disappearance) | `passed`, `failed`, `not_run` as the drill reported them; a `passed` report with a failed check is exported as `failed`; a drill that lists not-run parts stays `passed` with the parts named in the detail |
 | `browser` | `playwright test --project=chromium --reporter=json` in real Chrome, `tools/smoke journeys` (`observed.json`) and `tools/smoke evidence` (`evidence-summary.json`) | `go run ./tools/browserevidence/cmd/browser-evidence --commit C --out F --playwright-list L --playwright-results R --journeys observed.json --evidence evidence-summary.json` | every test of `playwright test --list --reporter=json` for the project, the Playwright run row, the 14 journey rows and the 15 evidence-smoke rows (lists pinned to the smokes' source by `tools/smoke/browser_evidence_rows_test.go`) | tests: `passed` only when expected to pass, ended as expected and the last result passed (`failed`, `skipped`, `flaky`, `expected_failure`, `not_run` otherwise); smoke rows: required rows, `passed` iff `satisfied`. A result file that does not exist leaves its rows without a result |
 
+### Browser e2e: provisioning and run
+
+The Playwright suite in `web/e2e` reads accounts and an OIDC provider that a fresh server does not have. `web/e2e-provision/provision.spec.ts` (run through `web/playwright.provision.config.ts`, deliberately outside the suite's `testDir`) creates them through the real admin commands and writes them as `export NAME='value'` lines (mode 0600) to `PROVISION_OUT`. Per fresh server: start `soundpost serve` over trusted HTTPS with the symbolicate sandbox ready and the OIDC fixture (`web/fixtures/oidc`) trusted, bootstrap the instance owner, then
+
+```
+SOUNDPOST_TEST_ORIGIN=https://localhost:PORT SOUNDPOST_OIDC_ISSUER=https://localhost:OIDCPORT \
+SOUNDPOST_SCOPE_EMAIL=<owner> SOUNDPOST_SCOPE_PASSWORD=<password> PROVISION_OUT=F \
+  playwright test -c playwright.provision.config.ts --project=chromium
+. F && playwright test --project=chromium --reporter=json   # the producer of the `browser` evidence rows
+```
+
+`playwright test --list` also needs those variables (the auth and elevation specs throw at load without them), so list after provisioning. The suite registers its own releases through `POST /api/v1/releases/register`, uploads a real source map through `POST /api/v1/artifacts` and ingests real error occurrences; it uses no seed route.
+
 ## Known limits
 
 Public handle availability is only a point-in-time registry observation; it does not establish trademark clearance. The Go module path is `github.com/arynyklas/soundpost`; the handle check derives the Go handle from the `module` line of `go.mod` and asks the module proxy whether it is claimed.

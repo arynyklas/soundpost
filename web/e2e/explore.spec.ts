@@ -19,9 +19,11 @@ async function open(projects:string[]=[seed.p1,seed.p2],org=seed.org):Promise<Pa
 }
 const results=(page:Page):Locator=>page.getByTestId('results');
 const panel=(page:Page,project:string):Locator=>results(page).locator(`[data-project="${project}"]`);
+// A real query reads stored shards through the real engine: on a loaded shared host a range query measured 13.6 s and 15.7 s (2 s typical)
+// against Playwright's 5 s default, so the wait for "no panel is still loading" is bounded by 60 s. The assertion itself is unchanged.
 async function settled(page:Page):Promise<void>{
  await expect(page.getByTestId('evaluated-with')).toBeVisible();
- await expect(results(page).locator('[data-state="loading"]')).toHaveCount(0);
+ await expect(results(page).locator('[data-state="loading"]')).toHaveCount(0,{timeout:60_000});
 }
 async function run(page:Page,expression:string):Promise<void>{
  await page.getByLabel('Query expression').fill(expression);

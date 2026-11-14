@@ -72,8 +72,8 @@ page the app renders, and real keyboard checks. No third-party audit library was
   produced by any committed route; it is covered only by the server-rendered unit test `web/src/app/accessibility.test.ts`.
 - Reduced motion: under `prefers-reduced-motion: reduce` no animation, transition or smooth scroll runs, even against an author rule
   that tries to animate (control: the same rule animates when motion is allowed). The rule itself already existed in `style.css`.
-- **Conflict dialog: NOT verified in a browser.** The conflict surface of the incident action form needs a real incident, which no
-  committed route can create. The test is reported as skipped with that reason, not as passed.
+- Conflict dialog: verified in Chrome on a real incident (opened by the runner from an ingested error, found through `POST /api/v1/queue`):
+  the losing person's alert takes focus, the DOM audit is clean, and the keyboard reaches and operates "Reload the current incident".
 
 ## What was looked at
 

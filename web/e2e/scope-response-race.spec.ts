@@ -9,13 +9,19 @@ const password=process.env.SOUNDPOST_SCOPE_PASSWORD;
 if(!email||!password)throw new Error('A real provisioned MFA-free instance-admin account (SOUNDPOST_SCOPE_EMAIL, SOUNDPOST_SCOPE_PASSWORD) is required');
 const id=():string=>randomBytes(16).toString('hex');
 const origin=new URL(process.env.SOUNDPOST_TEST_ORIGIN??'').origin;
+// The control revision also advances under the runner's own commits (producers), so a command read at revision N can land
+// at N+1: that 409 is retried with a fresh revision, exactly as support/real.ts adminCommand does; any other status fails.
 async function command(page:Page,org:string,kind:string,payload:Record<string,unknown>):Promise<void>{
- const session=await (await page.request.get('/api/v1/session')).json() as {csrf:string};
- const read=await page.request.post('/api/v1/admin/read',{headers:{'X-CSRF-Token':session.csrf,Origin:origin},data:{kind:'organizations'}});
- expect(read.ok()).toBe(true);
- const {revision}=await read.json() as {revision:string};
- const response=await page.request.post('/api/v1/admin/commands',{headers:{'X-CSRF-Token':session.csrf,Origin:origin},data:{command_id:id(),expected_revision:revision,org_id:org,kind,payload:{...payload,reason:'Generic scope race acceptance'}}});
- expect(response.status(),`${kind}`).toBeLessThan(300);
+ for(let attempt=0;;attempt++){
+  const session=await (await page.request.get('/api/v1/session')).json() as {csrf:string};
+  const read=await page.request.post('/api/v1/admin/read',{headers:{'X-CSRF-Token':session.csrf,Origin:origin},data:{kind:'organizations'}});
+  expect(read.ok()).toBe(true);
+  const {revision}=await read.json() as {revision:string};
+  const response=await page.request.post('/api/v1/admin/commands',{headers:{'X-CSRF-Token':session.csrf,Origin:origin},data:{command_id:id(),expected_revision:revision,org_id:org,kind,payload:{...payload,reason:'Generic scope race acceptance'}}});
+  if(response.status()===409&&attempt<4)continue;
+  expect(response.status(),`${kind}`).toBeLessThan(300);
+  return;
+ }
 }
 const hashFor=(org:string,project:string,service:string):string=>`#${new URLSearchParams({org,projects:project,start:'1700000000000000000',end:'1700003600000000000',tz:'UTC',view:'services',service})}`;
 test('a stale response for the previous scope never paints after navigation',async({page})=>{

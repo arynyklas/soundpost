@@ -67,6 +67,30 @@ type ReleaseReader interface {
 	Graph(ctx context.Context, scope auth.Scope, project model.ID) (releases.Graph, error)
 }
 
+// ReleaseRegistrar is the write side of the release registry; *releases.Service
+// implements it and needs an organization-admin scope. expected is the control
+// revision the caller read, exactly as for an administration command.
+type ReleaseRegistrar interface {
+	Register(ctx context.Context, scope auth.Scope, release model.Release, expected model.Revision, commandID model.ID) (model.Release, error)
+}
+
+// RegisterReleaseBody is the POST /api/v1/releases/register body. A new release
+// has entity revision 0; renaming its display label supplies the current entity
+// revision in Release.Revision and the current control revision in ExpectedRevision.
+type RegisterReleaseBody struct {
+	Org              model.ID      `json:"org"`
+	Project          model.ID      `json:"project"`
+	CommandID        model.ID      `json:"command_id"`
+	ExpectedRevision model.Uint64  `json:"expected_revision"`
+	Release          model.Release `json:"release"`
+}
+
+// RegisterReleaseView names the committed release and its entity revision.
+type RegisterReleaseView struct {
+	ID       model.ID       `json:"id"`
+	Revision model.Revision `json:"revision"`
+}
+
 // IssueEvidenceReader reads one persisted issue with its grouping version,
 // fingerprint and evidence; *releases.Service implements it (an org-admin
 // read of the committed grouping issues). A nil reader is an explicit
@@ -519,6 +543,7 @@ func (e *Evidence) Issue(ctx context.Context, scope auth.Scope, body IssueBody) 
 //	POST /api/v1/evidence/frames   FramesBody  -> FramesView
 //	POST /api/v1/evidence/release  ReleaseBody -> ReleaseView
 //	POST /api/v1/evidence/issue    IssueBody   -> IssueView
+//	POST /api/v1/releases/register RegisterReleaseBody -> RegisterReleaseView (only when the release registry is a ReleaseRegistrar)
 func RegisterEvidenceRoutes(mux *http.ServeMux, authority *auth.Service, evidence *Evidence) {
 	mux.HandleFunc("POST /api/v1/evidence/frames", func(w http.ResponseWriter, r *http.Request) {
 		credential, err := artifactCredential(authority, w, r)
@@ -581,4 +606,32 @@ func RegisterEvidenceRoutes(mux *http.ServeMux, authority *auth.Service, evidenc
 		}
 		queryReply(w, view, err)
 	})
+	if registry, ok := evidence.releases.(ReleaseRegistrar); ok {
+		mux.HandleFunc("POST /api/v1/releases/register", func(w http.ResponseWriter, r *http.Request) {
+			credential, err := artifactCredential(authority, w, r)
+			if err != nil {
+				queryReply(w, nil, err)
+				return
+			}
+			var body RegisterReleaseBody
+			if err = decode(w, r, &body); err != nil {
+				queryReply(w, nil, err)
+				return
+			}
+			if body.Org == (model.ID{}) || body.Project == (model.ID{}) || body.CommandID == (model.ID{}) || body.Release.Org != body.Org || body.Release.Project != body.Project {
+				queryReply(w, nil, invalid("release_ids_required"))
+				return
+			}
+			scope, err := authority.Authorize(r.Context(), credential, body.Org, []model.ID{body.Project}, auth.OrgAdmin)
+			if err != nil {
+				queryReply(w, nil, err)
+				return
+			}
+			registered, err := registry.Register(r.Context(), scope, body.Release, model.Revision(body.ExpectedRevision), body.CommandID)
+			if err == nil {
+				err = authority.Revalidate(r.Context(), scope)
+			}
+			queryReply(w, RegisterReleaseView{ID: registered.ID, Revision: registered.Revision}, err)
+		})
+	}
 }
