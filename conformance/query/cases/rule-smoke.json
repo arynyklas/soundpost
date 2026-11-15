@@ -108,7 +108,7 @@
         "for_ns": "0",
         "recovery_hold_ns": "0",
         "missing_data": "unknown",
-        "severity": "page",
+        "severity": "warning",
         "version": "1"
       },
       {

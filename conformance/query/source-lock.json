@@ -282,7 +282,7 @@
     "cases/input-normalization.json": "46fee92f622a54e91d600cf0b5d8bf0ce5e24fba42165f5d1181709d7b020701",
     "cases/owned-query-smoke.json": "4f64b5532becc8d67a9ce3ceb4734e93125f0630da6d18d31068d6da688b57a5",
     "cases/live-smoke.json": "a49f648dbf04836ca2802c53c13990182f0172cbe373415e499735ed675a3f30",
-    "cases/rule-smoke.json": "6a5752b49831df6ab6584287a577c9eb25c2002068342bfdfa44944bdd70ad2b",
+    "cases/rule-smoke.json": "dbebe2251592cce6e7ba82d7905c3e528ed134d5a3b139aa40e7b308844637f9",
     "generation.json": "24271c2557490ba659282bebf94325a357be1284be3a861eb8859fc66189bef7",
     "release-policy.json": "0125ad8206c9370f08415028fa557fc5c63c84adcbf0ec2a5ae01ec82d4fabd3",
     "regressions/index.json": "f4e101bc07a065e60b9d5a5fac076060897f2e846596bac2ef2bc04d2234080c",

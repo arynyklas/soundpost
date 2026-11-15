@@ -24,3 +24,7 @@
 ./internal/query/logql TestReleaseLogQLPrimitiveTemplateVersion
 ./internal/query/logql TestReleaseLogQLPrimitiveTimeSemantics
 ./internal/query/logql TestReleaseLogQLPrimitiveUnicodeEdition
+./internal/query/logql TestReleaseLogQLShardAggregationSwitchSemantics
+./internal/query/logql TestReleaseLogQLShardAggregationSwitchSelectsRegisteredFeatureSets
+./internal/query/logql TestReleaseLogQLShardAggregationSwitchDrivesApproxTopK
+./internal/query/logql TestReleaseLogQLMergeLogsNeverCollapsesReplicasAcrossInputs

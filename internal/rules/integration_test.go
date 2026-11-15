@@ -307,7 +307,7 @@ func (o *crashingOutbox) Settle(ctx context.Context, scope auth.Scope, lease rep
 func (n *node) rule(kind rules.Kind, expression string) rules.Rule {
 	r := rules.Rule{ID: model.NewID(), Project: n.project, Version: 1, Kind: kind, Profile: "promql-prometheus-3.13.5", FeatureSet: n.features["promql-prometheus-3.13.5"], Expression: expression, Interval: time.Minute}
 	if kind == rules.KindAlert {
-		r.Severity = "page"
+		r.Severity = "warning"
 	} else {
 		r.RecordName, r.Labels = "job:queue_depth:sum", lbl("env", "prod")
 	}

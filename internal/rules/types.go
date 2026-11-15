@@ -81,14 +81,14 @@ type Rule struct {
 	For          time.Duration `json:"for"`
 	RecoveryHold time.Duration `json:"recovery_hold"`
 	MissingData  MissingData   `json:"missing_data"`
-	// Severity is the literal severity carried on condition events (alert rules).
-	//
-	// It is free text here (safeText): the conditions package, which consumes the
-	// committed intents, accepts any safe text, so a closed set enforced at Check
-	// would reject rules that package takes. Likewise the status words of the
-	// events a rule emits are the C07 lifecycle (pending, firing, recovering,
-	// resolved), not the C04 record vocabulary (firing, recovered, unknown): the
-	// mapping (resolved is its recovered) belongs to the conditions package.
+	// Severity is the severity carried on condition events (alert rules). It is
+	// the closed set the conditions package admits (info, warning, error,
+	// critical, exact case): Validate refuses anything else with
+	// ReasonUnknownSeverity, so a rule can never author a severity whose every
+	// output would be dropped downstream. The status words of the events a rule
+	// emits are the C07 lifecycle (pending, firing, recovering, resolved), not
+	// the C04 record vocabulary (firing, recovered, unknown): the mapping
+	// (resolved is its recovered) belongs to the conditions package.
 	Severity string `json:"severity,omitempty"`
 	// RecordName and Labels configure recording rules: the resulting metric name,
 	// and labels set on (overriding) every resulting series.
@@ -138,6 +138,20 @@ func (r Rule) signal() model.Kind {
 	return model.Metric
 }
 
+// ReasonUnknownSeverity is the SafeDetail of the Invalid fault Validate returns
+// for an alert rule whose severity is not in the closed set.
+const ReasonUnknownSeverity = "unknown_severity"
+
+// validSeverity mirrors conditions.ValidSeverity (that package's tests import
+// this one, so it cannot be imported here); a test pins the two together.
+func validSeverity(s string) bool {
+	switch s {
+	case "info", "warning", "error", "critical":
+		return true
+	}
+	return false
+}
+
 func safeText(v string, max int) bool {
 	if v == "" || len(v) > max || !utf8.ValidString(v) {
 		return false
@@ -169,7 +183,10 @@ func (r Rule) Validate() error {
 	}
 	switch r.Kind {
 	case KindAlert:
-		if !safeText(r.Severity, 64) || r.RecordName != "" || len(r.Labels) != 0 {
+		if !validSeverity(r.Severity) {
+			return &model.Fault{Code: model.Invalid, SafeDetail: ReasonUnknownSeverity, RequestID: model.NewID()}
+		}
+		if r.RecordName != "" || len(r.Labels) != 0 {
 			return invalid()
 		}
 	case KindRecording:

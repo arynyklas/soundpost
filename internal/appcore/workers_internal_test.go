@@ -48,7 +48,7 @@ func TestWorkerErrorCodesAreClosed(t *testing.T) {
 }
 
 func TestConditionSeverityNeverEscalatesUnknownText(t *testing.T) {
-	for text, want := range map[string]notify.Severity{"critical": notify.SeverityCritical, "CRITICAL": notify.SeverityCritical, "major": notify.SeverityMajor, "minor": notify.SeverityMinor, "page-now": notify.SeverityMinor, "": notify.SeverityMinor} {
+	for text, want := range map[string]notify.Severity{"critical": notify.SeverityCritical, "CRITICAL": notify.SeverityCritical, "major": notify.SeverityMinor, "error": notify.SeverityMinor, "minor": notify.SeverityMinor, "page-now": notify.SeverityMinor, "": notify.SeverityMinor} {
 		if got := conditionSeverity(text); got != want {
 			t.Fatalf("conditionSeverity(%q) = %v, want %v", text, got, want)
 		}
@@ -57,7 +57,7 @@ func TestConditionSeverityNeverEscalatesUnknownText(t *testing.T) {
 
 func TestConditionEvidenceSaysNothingBeforeADefiniteEpisode(t *testing.T) {
 	episode := model.ID{0xe1}
-	base := conditions.State{Version: 7, Notify: true, Episode: &episode, Freshness: conditions.FreshnessFresh, Severity: "major"}
+	base := conditions.State{Version: 7, Notify: true, Episode: &episode, Freshness: conditions.FreshnessFresh, Severity: "critical"}
 	cases := map[string]struct {
 		phase conditions.Phase
 		drop  bool
@@ -84,7 +84,7 @@ func TestConditionEvidenceSaysNothingBeforeADefiniteEpisode(t *testing.T) {
 		if ok != c.ok {
 			t.Fatalf("%s: ok = %v", name, ok)
 		}
-		if ok && (ev.State != c.state || ev.Seq != 7 || ev.Episode != episode || ev.Severity != notify.SeverityMajor || ev.Freshness != notify.FreshnessFresh) {
+		if ok && (ev.State != c.state || ev.Seq != 7 || ev.Episode != episode || ev.Severity != notify.SeverityCritical || ev.Freshness != notify.FreshnessFresh) {
 			t.Fatalf("%s: %+v", name, ev)
 		}
 	}

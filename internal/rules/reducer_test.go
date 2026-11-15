@@ -21,7 +21,7 @@ func labels(pairs ...string) model.Labels {
 }
 
 func alertRule(forD, hold time.Duration) Rule {
-	return Rule{ID: model.ID{1}, Project: model.ID{2}, Version: 1, Kind: KindAlert, Profile: "promql-prometheus-3.13.5", FeatureSet: "fs", Expression: "up", Interval: 60 * time.Second, For: forD, RecoveryHold: hold, Severity: "page"}
+	return Rule{ID: model.ID{1}, Project: model.ID{2}, Version: 1, Kind: KindAlert, Profile: "promql-prometheus-3.13.5", FeatureSet: "fs", Expression: "up", Interval: 60 * time.Second, For: forD, RecoveryHold: hold, Severity: "warning"}
 }
 
 // step is one evaluation fed to the pure reducer.

@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/arynyklas/soundpost/internal/auth"
 	"github.com/arynyklas/soundpost/internal/conditions"
@@ -420,6 +421,16 @@ func TestConditionSeverityIsAClosedSet(t *testing.T) {
 		e.Condition, e.Severity = model.NewID(), bad
 		if _, err := f.apply(e); code(err) != model.Invalid || detail(err) != conditions.DetailInvalidEvent {
 			t.Fatalf("severity %q: %v", bad, err)
+		}
+	}
+}
+
+// A rule can author exactly the severities a condition event admits.
+func TestRuleSeverityAuthoringMatchesTheConditionSet(t *testing.T) {
+	for _, s := range []string{"info", "warning", "error", "critical", "major", "minor", "page", "Critical", "", " info"} {
+		r := rules.Rule{ID: model.ID{1}, Project: model.ID{2}, Version: 1, Kind: rules.KindAlert, Profile: "promql-prometheus-3.13.5", FeatureSet: "fs", Expression: "up", Interval: time.Minute, Severity: s}
+		if (r.Validate() == nil) != conditions.ValidSeverity(s) {
+			t.Fatalf("severity %q: rule accepts=%v, conditions accepts=%v", s, r.Validate() == nil, conditions.ValidSeverity(s))
 		}
 	}
 }
