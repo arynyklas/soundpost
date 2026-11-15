@@ -88,3 +88,41 @@ func TestEncodeFragmentJSONLeavesOtherEntriesToTheGenericPath(t *testing.T) {
 		}
 	}
 }
+
+// The fast path names the walEntry members it requires to be absent. A member added to walEntry later
+// would pass that list unseen and be dropped from the journal; every member other than Type and
+// Artifact, set on an otherwise plain fragment entry, must send it to the generic path.
+func TestEveryOtherWalEntryMemberDisablesTheFragmentFastPath(t *testing.T) {
+	typ := reflect.TypeOf(walEntry{})
+	for i := range typ.NumField() {
+		f := typ.Field(i)
+		if f.Name == "Type" || f.Name == "Artifact" {
+			continue
+		}
+		e := fragmentWAL('a', 64)
+		v := reflect.ValueOf(&e).Elem().Field(i)
+		switch v.Kind() {
+		case reflect.Pointer:
+			v.Set(reflect.New(v.Type().Elem()))
+		case reflect.Slice:
+			v.Set(reflect.MakeSlice(v.Type(), 1, 1))
+		case reflect.Map:
+			v.Set(reflect.MakeMap(v.Type()))
+		case reflect.String:
+			v.SetString("x")
+		case reflect.Bool:
+			v.SetBool(true)
+		case reflect.Int, reflect.Int64, reflect.Int32, reflect.Uint, reflect.Uint64, reflect.Uint32:
+			if v.CanInt() {
+				v.SetInt(1)
+			} else {
+				v.SetUint(1)
+			}
+		default:
+			t.Fatalf("walEntry.%s has kind %s: teach this test how to set it", f.Name, v.Kind())
+		}
+		if _, ok, err := encodeFragmentJSON(e); ok || err != nil {
+			t.Fatalf("walEntry.%s set on a fragment entry still takes the fragment fast path (ok %v, %v): it would be dropped from the journal", f.Name, ok, err)
+		}
+	}
+}
