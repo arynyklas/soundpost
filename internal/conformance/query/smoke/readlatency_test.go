@@ -25,7 +25,12 @@ import (
 const (
 	readBackBatches = 300
 	readBackBound   = 5 * time.Second
-	readBackMetric  = "drill_writes"
+	// raceSlowdown scales the bound for a race-detector binary. The bound is a
+	// regression ceiling of this harness, not a product guarantee: the sequential
+	// per-page fences it guards against took 17-24 s per query without the race
+	// detector, far above 4 x 5 s once the detector's slowdown is added.
+	raceSlowdown   = 4
+	readBackMetric = "drill_writes"
 )
 
 // readBackRig is a three-voter installation holding readBackBatches
@@ -101,6 +106,10 @@ func TestDistributedReadBackOfManyBatchesIsFast(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer rig.env.Close()
+	bound := readBackBound
+	if raceEnabled {
+		bound *= raceSlowdown
+	}
 	for round := range 2 { // the second round is the warm one
 		for _, node := range []uint64{1, 2, 3} {
 			last, count, ls, cs, err := rig.readBack(node)
@@ -111,8 +120,8 @@ func TestDistributedReadBackOfManyBatchesIsFast(t *testing.T) {
 			if ls != readBackBatches || cs != readBackBatches {
 				t.Errorf("node %d read back %d / %d series, want %d", node, ls, cs, readBackBatches)
 			}
-			if last > readBackBound || count > readBackBound {
-				t.Errorf("node %d: reading %d batches took %v / %v, bound %v", node, readBackBatches, last, count, readBackBound)
+			if last > bound || count > bound {
+				t.Errorf("node %d: reading %d batches took %v / %v, bound %v", node, readBackBatches, last, count, bound)
 			}
 		}
 	}

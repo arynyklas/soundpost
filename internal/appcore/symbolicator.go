@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -184,10 +185,30 @@ func loadSymbolicatorConfig(name string) (symbolicate.Config, string) {
 	if _, err = dec.Token(); !errors.Is(err, io.EOF) {
 		return symbolicate.Config{}, "config_invalid"
 	}
-	if c.Mode != "native" && c.Mode != "oci" {
+	if !operatorConfigComplete(c) {
 		return symbolicate.Config{}, "config_invalid"
 	}
 	return c, ""
+}
+
+// operatorConfigComplete is true when the config names exactly the keys of its
+// mode: a missing or malformed one is the operator's typo, reported as such
+// rather than as a sandbox the host cannot provide, and a key of the other mode
+// is a stale edit, never silently ignored.
+func operatorConfigComplete(c symbolicate.Config) bool {
+	if c.WorkerSHA256 == (model.Hash{}) || c.CacheBytes < 0 || c.CacheBytes > 64<<20 {
+		return false
+	}
+	switch c.Mode {
+	case "native":
+		return filepath.IsAbs(c.WorkerPath) && filepath.IsAbs(c.CgroupRoot) && c.OCIRuntime == "" && c.OCIImage == "" && !c.WarmSpare
+	case "oci":
+		image, ok := strings.CutPrefix(c.OCIImage, "sha256:")
+		raw, err := hex.DecodeString(image)
+		return ok && err == nil && len(raw) == 32 && image == strings.ToLower(image) &&
+			filepath.IsAbs(c.OCIRuntime) && c.WorkerPath == "" && c.CgroupRoot == ""
+	}
+	return false
 }
 
 func fileSHA256(name string) (model.Hash, error) {

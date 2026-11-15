@@ -6,7 +6,9 @@ package symbolicate
 
 import (
 	"context"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -72,11 +74,11 @@ func TestWarmSpareServesExactlyOneRequestAndIsRemovedOnce(t *testing.T) {
 
 	answered(t, s) // cold: starts its own worker, then queues a spare
 	s.spares.started.Wait()
-	if got := len(d.runNames()); got != 2 {
-		t.Fatalf("after the first request %d containers were started, want 2 (its own and the spare): %q", got, d.runNames())
+	if got := len(d.runNames()); got != 3 {
+		t.Fatalf("after the first request %d containers were started, want 3 (its own and one spare per request slot): %q", got, d.runNames())
 	}
-	if live := d.live(); len(live) != 1 || live[0] != d.runNames()[1] {
-		t.Fatalf("live containers %v, want only the spare %s", live, d.runNames()[1])
+	if live := d.live(); len(live) != 2 || slices.Contains(live, d.runNames()[0]) {
+		t.Fatalf("live containers %v, want only the two spares %v", live, d.runNames()[1:])
 	}
 
 	before := len(d.runNames())
@@ -98,8 +100,8 @@ func TestWarmSpareServesExactlyOneRequestAndIsRemovedOnce(t *testing.T) {
 			t.Errorf("container %s was never removed: %v", n, counts)
 		}
 	}
-	if len(names) != 3 {
-		t.Fatalf("%d containers for 2 requests and 1 expired spare: %q", len(names), names)
+	if len(names) != 4 {
+		t.Fatalf("%d containers for 2 requests (3 starts at first, 1 refill) and 3 spares: %q", len(names), names)
 	}
 }
 
@@ -117,8 +119,9 @@ func TestWarmSpareThatExpiredIsNotServed(t *testing.T) {
 	}
 	before := len(d.runNames())
 	answered(t, s)
-	if got := len(d.runNames()) - before; got != 1 {
-		t.Fatalf("a request after the spare expired started %d workers itself, want 1", got)
+	s.spares.started.Wait()
+	if got := len(d.runNames()) - before; got != 3 {
+		t.Fatalf("a request after the spares expired started %d containers, want its own plus a spare per slot (3)", got)
 	}
 	s.spares.started.Wait()
 	time.Sleep(spareMaxAge + 400*time.Millisecond)
@@ -149,5 +152,44 @@ func TestWarmSpareIsRefusedOutsideOCIMode(t *testing.T) {
 	c.Mode, c.WarmSpare = "native", true
 	if _, err := New(&unusedReader{}, unusedGenerations{}, c); err == nil {
 		t.Fatal("warm_spare was accepted for a native service")
+	}
+}
+
+// A burst as wide as the request slots finds a warm worker for every request:
+// neither request starts a container on its own path, and each worker serves
+// exactly one request.
+func TestWarmSparesServeAConcurrentBurstOneEach(t *testing.T) {
+	fastRetries(t)
+	fastSpare(t)
+	d := newFakeDocker(t, "ok")
+	s := d.warm(t)
+	answered(t, s)
+	s.spares.started.Wait()
+	spares := d.live()
+	if len(spares) != 2 {
+		t.Fatalf("%d spares waiting, want 2: %v", len(spares), spares)
+	}
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Add(1)
+		go func() { defer wg.Done(); answered(t, s) }()
+	}
+	wg.Wait()
+	s.spares.started.Wait()
+	names := d.runNames()
+	// 1 cold + 2 spares, then 2 refills; the burst itself started nothing.
+	if len(names) != 5 {
+		t.Fatalf("%d containers, want 5 (cold, two spares, two refills): %q", len(names), names)
+	}
+	counts := d.removeCounts()
+	for _, n := range spares {
+		if counts[n] < 1 {
+			t.Errorf("spare %s served a request and was not removed: %v", n, counts)
+		}
+	}
+	time.Sleep(spareMaxAge + 400*time.Millisecond)
+	removeRetries.Wait()
+	if live := d.live(); len(live) != 0 {
+		t.Fatalf("containers left: %v", live)
 	}
 }

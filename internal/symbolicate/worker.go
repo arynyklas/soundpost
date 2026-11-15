@@ -215,10 +215,20 @@ func WorkerMain() int {
 	if _, e = os.Stdout.Write(append([]byte{'R'}, digest[:]...)); e != nil {
 		return 70
 	}
-	frameTimer := time.AfterFunc(FrameTimeout, func() { os.Exit(124) })
-	defer frameTimer.Stop()
+	// The 100 ms processing watchdog covers the request: it starts when the first
+	// byte of the request arrives, not when the worker became ready. A pre-started
+	// (warm spare) worker waits for its request for up to the spare's age bound;
+	// until then only the five-second process timer above runs.
+	var frameTimer *time.Timer
+	defer func() {
+		if frameTimer != nil {
+			frameTimer.Stop()
+		}
+	}()
 	var in workerInput
-	if e = decodeClosed(os.Stdin, &in, MaxInputBytes); e != nil {
+	if e = decodeClosed(&armOnFirstByte{r: os.Stdin, arm: func() {
+		frameTimer = time.AfterFunc(FrameTimeout, func() { os.Exit(124) })
+	}}, &in, MaxInputBytes); e != nil {
 		return 72
 	}
 	out := resolveBatch(in)
@@ -227,6 +237,23 @@ func WorkerMain() int {
 	}
 	return 0
 }
+
+// armOnFirstByte calls arm once, when the first byte has been read.
+type armOnFirstByte struct {
+	r    io.Reader
+	arm  func()
+	done bool
+}
+
+func (a *armOnFirstByte) Read(p []byte) (int, error) {
+	n, e := a.r.Read(p)
+	if n > 0 && !a.done {
+		a.done = true
+		a.arm()
+	}
+	return n, e
+}
+
 func executableHash() (model.Hash, error) {
 	var h model.Hash
 	name, e := os.Executable()

@@ -32,6 +32,10 @@ func TestPersistedPathAnswersAreIdenticalAtEveryStage(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, s := range res.Steps {
+		if lapsedUnderRace(s) {
+			t.Logf("NOT OBSERVED %s %s", s.Name, s.Detail)
+			continue
+		}
 		if !s.Passed {
 			t.Errorf("FAIL %s %s", s.Name, s.Detail)
 		}
@@ -43,6 +47,14 @@ func TestPersistedPathAnswersAreIdenticalAtEveryStage(t *testing.T) {
 	}
 	requirePersistedFamilies(t, res)
 	t.Logf("%d steps, %d scenarios, %d normalization checks", len(res.Steps), len(res.Persistence), len(res.Normalization))
+}
+
+// lapsedUnderRace reports the one row a slow run may legitimately not observe:
+// the previous stage's cache entry, once the stages are further apart than the
+// product's one-minute cache lifetime. Only a race-detector binary tolerates it;
+// a plain run that cannot observe the entry fails.
+func lapsedUnderRace(s StepResult) bool {
+	return raceEnabled && s.NotRun && strings.HasSuffix(s.Name, "/cache/previous-stage-entry")
 }
 
 // crossSteps is the number of steps of profile-cross-products.json: four

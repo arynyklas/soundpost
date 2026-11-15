@@ -221,6 +221,10 @@ type Env struct {
 	Limits      query.Limits
 	tick        int64
 	ownerMember bool
+	// ownerLogin is when the owner last presented its password. Administrative
+	// commands need a credential authenticated within the last five minutes (a
+	// product guarantee), and a long run spends longer than that between stages.
+	ownerLogin time.Time
 }
 
 func (e *Env) App() *appcore.App { return e.app }
@@ -304,6 +308,7 @@ func (e *Env) bootstrap() error {
 		return err
 	}
 	e.owner = Person{ID: session.User, Session: session, Cred: cred}
+	e.ownerLogin = time.Now()
 	e.org = model.NewID()
 	return e.command(e.org, "create_org", auth.AdminPayload{Name: "smoke"})
 }
@@ -381,6 +386,9 @@ func (e *Env) reauthenticate() error {
 	if err != nil {
 		return fmt.Errorf("owner session did not survive the restart: %w", err)
 	}
+	// ownerLogin is left alone on purpose: authenticating a stored token does not
+	// refresh the credential's freshness, so ownerCredential still logs in again
+	// when the last password check is old.
 	e.owner.Cred = cred
 	for _, p := range e.People {
 		if p.Cred, err = e.app.Auth.Authenticate(e.ctx, p.Session.Token); err != nil {
@@ -419,14 +427,40 @@ func (e *Env) Close() {
 	}
 }
 
+// ownerCredential returns the owner's credential, logging the owner in again
+// (as an administrator's client does) once the last password check is older
+// than freshOwnerAfter, so a slow stage never makes the harness itself the
+// stale admin the product rightly refuses.
+func (e *Env) ownerCredential() (auth.Credential, error) {
+	if time.Since(e.ownerLogin) > freshOwnerAfter {
+		session, err := e.app.Auth.Login(e.ctx, "smoke-owner@example.test", "soundpost smoke owner password 2026", "")
+		if err != nil {
+			return auth.Credential{}, fmt.Errorf("owner login: %w", err)
+		}
+		cred, err := e.app.Auth.Authenticate(e.ctx, session.Token)
+		if err != nil {
+			return auth.Credential{}, err
+		}
+		e.owner.Session, e.owner.Cred, e.ownerLogin = session, cred, time.Now()
+	}
+	return e.owner.Cred, nil
+}
+
+// freshOwnerAfter is well inside the five-minute administrative freshness window.
+const freshOwnerAfter = 2 * time.Minute
+
 func (e *Env) command(org model.ID, kind string, p auth.AdminPayload) error {
+	cred, err := e.ownerCredential()
+	if err != nil {
+		return err
+	}
 	var revision model.Revision
 	if err := e.app.Control.View(e.ctx, func(st model.ControlState) error { revision = st.Revision; return nil }); err != nil {
 		return err
 	}
 	p.Reason = "query smoke"
 	raw, _ := json.Marshal(p)
-	_, err := e.app.Auth.AdminCommand(e.ctx, e.owner.Cred, auth.AdminCommandRequest{CommandID: model.NewID(), ExpectedRevision: revision, OrgID: org, Kind: kind, Payload: raw})
+	_, err = e.app.Auth.AdminCommand(e.ctx, cred, auth.AdminCommandRequest{CommandID: model.NewID(), ExpectedRevision: revision, OrgID: org, Kind: kind, Payload: raw})
 	if err != nil {
 		return fmt.Errorf("%s: %w", kind, err)
 	}
@@ -509,7 +543,9 @@ func (e *Env) AddSource(spec SourceSpec) *Source {
 	}
 	cfg, _ := json.Marshal(auth.SourcePolicyConfig{ProjectID: project, Enabled: true})
 	check(e.command(e.org, "source_policy", auth.AdminPayload{ID: id, Config: cfg}))
-	issued, err := e.app.Auth.OnboardSource(e.ctx, e.owner.Cred, auth.SourceOnboarding{CommandID: model.NewID(), Org: e.org, Project: project, Source: id, Expires: model.UnixNano(time.Now().Add(time.Hour).UnixNano()), Policy: policy, Reason: "query smoke"})
+	ownerCred, err := e.ownerCredential()
+	check(err)
+	issued, err := e.app.Auth.OnboardSource(e.ctx, ownerCred, auth.SourceOnboarding{CommandID: model.NewID(), Org: e.org, Project: project, Source: id, Expires: model.UnixNano(time.Now().Add(time.Hour).UnixNano()), Policy: policy, Reason: "query smoke"})
 	check(err)
 	cred, err := e.app.Auth.AuthenticateSource(e.ctx, issued.Credential, "", false)
 	check(err)

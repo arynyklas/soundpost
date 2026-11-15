@@ -266,7 +266,9 @@ func RunPersisted(ctx context.Context, layout Layout, dir, path string) (res Per
 			failed := false
 			for _, st := range h.check(stage) {
 				res.Steps = append(res.Steps, st)
-				if !st.Passed {
+				// A row the harness could not observe is reported (NotRun) and gated
+				// by the callers; it is not a failed check.
+				if !st.Passed && !st.NotRun {
 					failed = true
 					failures++
 				}
@@ -335,7 +337,7 @@ func RunPersisted(ctx context.Context, layout Layout, dir, path string) (res Per
 		}
 		for _, st := range h.final() {
 			res.Steps = append(res.Steps, st)
-			if !st.Passed {
+			if !st.Passed && !st.NotRun {
 				hookFailed[h.name] = true
 			}
 		}

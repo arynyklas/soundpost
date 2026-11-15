@@ -262,6 +262,39 @@ func TestOperatorConfigIsPrivateStrictAndExplicit(t *testing.T) {
 		"other_mode":    {write([]byte(`{"mode":"auto"}`), 0o600), "config_invalid"},
 		"trailing":      {write([]byte(`{"mode":"native"} {}`), 0o600), "config_invalid"},
 	}
+	// Every key of the chosen mode is required and checked here, so a typo is
+	// reported as the operator's config and not as an unsupported host.
+	sha := model.HashCanonical([]byte("w"))
+	native := symbolicate.Config{Mode: "native", WorkerPath: "/opt/soundpost/soundpost", WorkerSHA256: sha, CgroupRoot: "/sys/fs/cgroup/system.slice/soundpost.service"}
+	for name, c := range map[string]func(*symbolicate.Config){
+		"native_no_worker":     func(c *symbolicate.Config) { c.WorkerPath = "" },
+		"native_relative":      func(c *symbolicate.Config) { c.WorkerPath = "soundpost" },
+		"native_no_hash":       func(c *symbolicate.Config) { c.WorkerSHA256 = model.Hash{} },
+		"native_no_cgroup":     func(c *symbolicate.Config) { c.CgroupRoot = "" },
+		"native_oci_key":       func(c *symbolicate.Config) { c.OCIRuntime = "/usr/bin/docker" },
+		"native_warm_spare":    func(c *symbolicate.Config) { c.WarmSpare = true },
+		"native_cache_too_big": func(c *symbolicate.Config) { c.CacheBytes = 65 << 20 },
+		"oci_no_runtime":       func(c *symbolicate.Config) { *c = good; c.OCIRuntime = "" },
+		"oci_relative_runtime": func(c *symbolicate.Config) { *c = good; c.OCIRuntime = "docker" },
+		"oci_tag_not_digest":   func(c *symbolicate.Config) { *c = good; c.OCIImage = "soundpost-symbolicate:latest" },
+		"oci_upper_digest":     func(c *symbolicate.Config) { *c = good; c.OCIImage = "sha256:" + strings.Repeat("A", 64) },
+		"oci_short_digest":     func(c *symbolicate.Config) { *c = good; c.OCIImage = "sha256:abc" },
+		"oci_native_key":       func(c *symbolicate.Config) { *c = good; c.WorkerPath = "/opt/soundpost/soundpost" },
+		"oci_cgroup_key":       func(c *symbolicate.Config) { *c = good; c.CgroupRoot = "/sys/fs/cgroup/x" },
+	} {
+		bad := native
+		c(&bad)
+		b, _ := json.Marshal(bad)
+		cases[name] = struct {
+			path   string
+			reason string
+		}{write(b, 0o600), "config_invalid"}
+	}
+	if b, _ := json.Marshal(native); true {
+		if c, reason := resolveSymbolicatorConfig(SymbolicatorSettings{ConfigPath: write(b, 0o600)}); reason != "" || c.Mode != "native" {
+			t.Fatalf("valid native config: %+v %q", c, reason)
+		}
+	}
 	if os.PathSeparator == '/' {
 		cases["world_writable"] = struct {
 			path   string

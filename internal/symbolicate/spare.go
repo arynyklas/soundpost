@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"slices"
 	"sync"
 	"time"
 
@@ -18,7 +19,8 @@ import (
 var spareMaxAge = 2 * time.Second
 
 // spareState is the opt-in warm pool of an OCI service (Config.WarmSpare): at
-// most one worker that already passed the full launch handshake (image
+// most one worker per request slot (the service runs at most cap(slots)
+// requests at once, so a burst of that size finds a warm worker each) that already passed the full launch handshake (image
 // provenance, container start, sandbox installed, executable identity checked)
 // and waits for its one request. It is never reused: the request that takes it
 // is the only one it ever serves, and the worker is then removed like any
@@ -26,8 +28,8 @@ var spareMaxAge = 2 * time.Second
 // A replacement is started in the background after each request.
 type spareState struct {
 	mu      sync.Mutex
-	spare   *spareWorker
-	pending bool
+	spares  []*spareWorker
+	pending int
 	// started lets tests wait for background starts.
 	started sync.WaitGroup
 }
@@ -95,58 +97,67 @@ func (s *Service) takeSpare() *workerProcess {
 	}
 	s.spares.mu.Lock()
 	defer s.spares.mu.Unlock()
-	w := s.spares.spare
-	if w == nil || !w.timer.Stop() {
-		return nil
+	for i, w := range s.spares.spares {
+		// A spare whose timer already fired stays listed: expireSpare discards it.
+		if w.timer.Stop() {
+			s.spares.spares = slices.Delete(s.spares.spares, i, i+1)
+			return w.p
+		}
 	}
-	s.spares.spare = nil
-	return w.p
+	return nil
 }
 
-// refillSpare starts the replacement spare in the background, off the
-// request's slot and clock. Nothing but a worker that completed its handshake is
-// ever kept.
+// refillSpare tops the pool up to one worker per request slot in the
+// background, off the request's slot and clock. Nothing but a worker that
+// completed its handshake is ever kept.
 func (s *Service) refillSpare() {
 	if !s.config.WarmSpare {
 		return
 	}
 	st := &s.spares
 	st.mu.Lock()
-	if st.spare != nil || st.pending {
+	missing := cap(s.slots) - len(st.spares) - st.pending
+	if missing <= 0 {
 		st.mu.Unlock()
 		return
 	}
-	st.pending = true
+	st.pending += missing
+	st.started.Add(missing)
 	st.mu.Unlock()
-	st.started.Add(1)
-	go func() {
-		defer st.started.Done()
-		ctx, cancel := context.WithTimeout(context.Background(), ProcessTimeout)
-		p, reason := s.startWorker(ctx)
-		st.mu.Lock()
-		st.pending = false
-		if reason != "" {
-			st.mu.Unlock()
-			cancel()
-			return
-		}
-		inner := p.cleanup
-		p.cleanup = func() { inner(); cancel() }
-		w := &spareWorker{p: p}
-		w.timer = time.AfterFunc(spareMaxAge, func() { s.expireSpare(w) })
-		st.spare = w
+	for range missing {
+		go s.startSpare()
+	}
+}
+
+func (s *Service) startSpare() {
+	st := &s.spares
+	defer st.started.Done()
+	ctx, cancel := context.WithTimeout(context.Background(), ProcessTimeout)
+	p, reason := s.startWorker(ctx)
+	st.mu.Lock()
+	st.pending--
+	if reason != "" {
 		st.mu.Unlock()
-	}()
+		cancel()
+		return
+	}
+	inner := p.cleanup
+	p.cleanup = func() { inner(); cancel() }
+	w := &spareWorker{p: p}
+	w.timer = time.AfterFunc(spareMaxAge, func() { s.expireSpare(w) })
+	st.spares = append(st.spares, w)
+	st.mu.Unlock()
 }
 
 // expireSpare discards a spare nobody took in time.
 func (s *Service) expireSpare(w *spareWorker) {
 	s.spares.mu.Lock()
-	if s.spares.spare != w {
+	i := slices.Index(s.spares.spares, w)
+	if i < 0 {
 		s.spares.mu.Unlock()
 		return
 	}
-	s.spares.spare = nil
+	s.spares.spares = slices.Delete(s.spares.spares, i, i+1)
 	s.spares.mu.Unlock()
 	w.p.cmd.Process.Kill()
 	w.p.cleanup()

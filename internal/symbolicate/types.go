@@ -63,8 +63,9 @@ type Config struct {
 	OCIRuntime   string     `json:"oci_runtime,omitempty"`
 	OCIImage     string     `json:"oci_image,omitempty"`
 	CacheBytes   int        `json:"cache_bytes,omitempty"`
-	// WarmSpare (OCI only) keeps one pre-started, single-use worker waiting so a
-	// request does not pay the container start. Off by default: it costs one extra
-	// container start per request when requests are rarer than the spare's lifetime.
+	// WarmSpare (OCI only) keeps up to one pre-started, single-use worker per
+	// request slot waiting so a request does not pay the container start. Off by
+	// default: it costs extra container starts (one per request, two for the first)
+	// when requests are rarer than the spare's lifetime.
 	WarmSpare bool `json:"warm_spare,omitempty"`
 }

@@ -170,6 +170,11 @@ func stepOf(name string, fn func() string) StepResult {
 func cacheHook(env *Env, c cacheSection) persistedHook {
 	stage := 0
 	prev := 0
+	// computed is when the entry of each stage's query was last computed. The
+	// authorized result cache keeps an entry for one minute (a product bound), so
+	// an entry older than cacheEntryHorizon may have lapsed by its own lifetime,
+	// whatever a flush or compaction did to it.
+	computed := map[int]time.Time{}
 	return persistedHook{
 		name: "cache-and-faults",
 		check: func(name string) []StepResult {
@@ -185,6 +190,7 @@ func cacheHook(env *Env, c cacheSection) persistedHook {
 				if cached, _ := a.cachedFlags(); cached != 0 {
 					return fmt.Sprintf("a never-asked query was served from the cache for %d projects", cached)
 				}
+				computed[k] = time.Now()
 				return ""
 			}))
 			steps = append(steps, stepOf(prefix+"warm", func() string {
@@ -197,8 +203,19 @@ func cacheHook(env *Env, c cacheSection) persistedHook {
 				}
 				return ""
 			}))
-			if prev != 0 {
-				restarted := strings.HasPrefix(name, "restart")
+			restarted := strings.HasPrefix(name, "restart")
+			born, filled := computed[prev]
+			if age := time.Since(born); prev != 0 && !restarted && (!filled || age > cacheEntryHorizon) {
+				// The entry may have lapsed by its own lifetime between the two
+				// stages (minutes apart under -race), so the step cannot show what a
+				// flush or compaction did to it. Report that, never a pass. (After a
+				// restart the expectation, no cached answer, holds whatever the age.)
+				detail := "the previous stage's query was never computed"
+				if filled {
+					detail = fmt.Sprintf("the previous stage's entry is %v old, past %v of its one-minute cache lifetime; retention across the flush or compaction cannot be observed", age.Round(time.Second), cacheEntryHorizon)
+				}
+				steps = append(steps, StepResult{Name: prefix + "previous-stage-entry", NotRun: true, Detail: detail})
+			} else if prev != 0 {
 				steps = append(steps, stepOf(prefix+"previous-stage-entry", func() string {
 					a := env.askCache(c, prev, false)
 					if d := env.answers(a, c.Expect); d != "" {
@@ -220,6 +237,11 @@ func cacheHook(env *Env, c cacheSection) persistedHook {
 		final: func() []StepResult { return faultRows(env, c) },
 	}
 }
+
+// cacheEntryHorizon is inside the product's one-minute authorized-cache entry
+// lifetime (appcore.Open: auth.NewCache(..., time.Minute)); the margin is the time a
+// request itself takes. A lapse is never read as a pass: the row is NotRun.
+const cacheEntryHorizon = 55 * time.Second
 
 // faultRows are the rows that run once the persisted stages are done.
 func faultRows(env *Env, c cacheSection) []StepResult {
