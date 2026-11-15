@@ -5,13 +5,16 @@ package appcore
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"math"
+	"sort"
 	"sync"
 	"time"
 
 	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/control"
 	"github.com/arynyklas/soundpost/internal/jobs"
 	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/replica"
@@ -46,8 +49,13 @@ import (
 // (invalid, contradicting committed evidence, over a quota) is skipped; any other
 // failure ends the call with the row not covered.
 //
-// The position is kept in memory: a restart reads from the start of the journal
-// through duplicates and never skips a row.
+// The position is durable: when an epoch moves through it is committed to control state
+// (control.JobKindAdvance, runner scope, forward only) and a producer that starts loads it
+// (control.Store.JobPosition), so a restart reads only what arrived after the last
+// committed position. A failed commit is retried by the next pass; a lost position only
+// costs a re-read through duplicates, never a skipped row. A restart does not have the
+// per-source event times of the rows it does not re-read: jobs observed before any new row
+// of their source arrives are attested through nothing, which is conservative.
 //
 // The producer is also the observer of the jobs an administrator defined in the job
 // schedule-definition catalogue (jobs.Catalogue, POST /api/v1/jobs/definitions): after the
@@ -120,6 +128,8 @@ type jobPositions struct {
 	sources  map[model.ID]map[model.ID]struct{}
 	observed map[model.ID]model.UnixNano
 	synced   bool
+	loaded   bool
+	saved    map[model.ID]model.Uint64
 }
 
 // jobEpoch is one read of the rows above through: marks are the watermarks it
@@ -173,7 +183,21 @@ func (p *jobProducer) Produce(ctx context.Context, scopes ProducerScopes, lease 
 		p.pos[key] = pos
 	}
 	run := jobRun{p: p, group: group, lease: lease, read: read, write: write, project: scopes.Project(), budget: p.bound, newest: map[model.ID]model.UnixNano{}, sources: map[model.ID]map[model.ID]struct{}{}}
+	if !pos.loaded {
+		stored, err := p.app.Control.JobPosition(ctx, read, scopes.Project())
+		if err != nil {
+			return 0, err
+		}
+		pos.saved = map[model.ID]model.Uint64{}
+		for _, e := range stored {
+			pos.through[e.Group], pos.saved[e.Group] = e.Index, e.Index
+		}
+		pos.loaded = true
+	}
 	if err = run.epoch(ctx, pos); err != nil {
+		return run.committed, err
+	}
+	if err = p.save(ctx, write, scopes, pos); err != nil {
 		return run.committed, err
 	}
 	pos.synced = pos.synced || pos.epoch == nil
@@ -182,6 +206,31 @@ func (p *jobProducer) Produce(ctx context.Context, scopes ProducerScopes, lease 
 	}
 	n, err := p.observe(ctx, scopes, read, write, pos)
 	return run.committed + n, err
+}
+
+// save commits the part of through that moved since the last commit.
+func (p *jobProducer) save(ctx context.Context, write auth.Scope, scopes ProducerScopes, pos *jobPositions) error {
+	var moved []model.Cursor
+	for g, i := range pos.through {
+		if i > pos.saved[g] {
+			moved = append(moved, model.Cursor{Group: g, Index: i})
+		}
+	}
+	if len(moved) == 0 {
+		return nil
+	}
+	sort.Slice(moved, func(i, j int) bool { return moved[i].Group.String() < moved[j].Group.String() })
+	raw, err := json.Marshal(control.JobUpdateCommand{Project: scopes.Project(), Job: scopes.Project(), Kind: control.JobKindAdvance, Position: &control.JobPositionApply{Project: scopes.Project(), Through: moved, At: scopes.Now()}})
+	if err != nil {
+		return model.Fail(model.Invalid)
+	}
+	if _, err = p.app.Control.TransactJobs(ctx, write, control.Command{CommandID: model.NewID(), Kind: string(control.KindUpdateJob), Payload: raw}); err != nil {
+		return err
+	}
+	for _, e := range moved {
+		pos.saved[e.Group] = e.Index
+	}
+	return nil
 }
 
 // observe feeds the schedule observations of the catalogue's active jobs (see the file comment).

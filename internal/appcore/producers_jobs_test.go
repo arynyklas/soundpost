@@ -812,3 +812,27 @@ func TestJobProducerAttestsEachJobOnlyThroughItsOwnSource(t *testing.T) {
 		}
 	}
 }
+
+// The position is durable: a producer that starts after another one covered the journal (a restart) loads the committed
+// position and reads nothing it covered, and a row that arrived while it was down is still applied.
+func TestJobProducerResumesFromTheCommittedPositionAfterARestart(t *testing.T) {
+	r := newJobRig(t)
+	s := r.ingestScenario()
+	first := r.workers(appcore.NewJobProducerForTest(r.app, 256))
+	if rep := r.tick(first); rep.Produced != scenarioApplied {
+		t.Fatalf("the first producer applied %d, want %d", rep.Produced, scenarioApplied)
+	}
+	restarted := r.workers(appcore.NewJobProducerForTest(r.app, 256))
+	before := r.app.Storage.Stats().PagesRead
+	if rep := r.tick(restarted); rep.Produced != 0 {
+		t.Fatalf("the restarted producer applied %d rows", rep.Produced)
+	}
+	if got := r.app.Storage.Stats().PagesRead - before; got != 0 {
+		t.Fatalf("the restarted producer re-read %d pages of the covered journal", got)
+	}
+	r.ingest(r.event(s.job, s.run2, model.NewID(), "job-run-2", 2, 1, "started", 20*time.Second, 0))
+	again := r.workers(appcore.NewJobProducerForTest(r.app, 256))
+	if rep := r.tick(again); rep.Produced != 1 {
+		t.Fatalf("a row that arrived while the producer was down produced %d, want 1", rep.Produced)
+	}
+}

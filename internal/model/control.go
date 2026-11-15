@@ -182,6 +182,12 @@ type ControlState struct {
 	// retirement of the owning project drops them
 	// (internal/control/job_definitions.go). Authoring never changes authority.
 	JobDefinitions map[string]json.RawMessage `json:",omitempty"`
+	// Job producer resume position (plan 11.01-W4). "org:project" holds the control
+	// package's closed JobPositionRecord DTO: per data group, the origin index of the
+	// job_attempt journal through which the producer has applied every row. Only the
+	// runner advances it and it only moves forward; a retirement of the owning
+	// project drops it (internal/control/job_position.go).
+	JobPositions map[string]json.RawMessage `json:",omitempty"`
 }
 type ControlCommand struct {
 	CommandID        ID

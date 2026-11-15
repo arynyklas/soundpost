@@ -114,6 +114,8 @@ type JobUpdateCommand struct {
 	// Definition is the arm of the catalogue kinds (JobKindDefine, JobKindRetire),
 	// which carry no State and no versions.
 	Definition *JobDefinitionApply `json:"definition,omitempty"`
+	// Position is the arm of JobKindAdvance, which carries no State and no versions.
+	Position *JobPositionApply `json:"position,omitempty"`
 }
 
 // JobCommandEntry remembers one applied command of a job.
@@ -329,7 +331,10 @@ func applyJobUpdate(scope auth.Scope, st *State, cmd Command) (model.ID, model.R
 	if c.Kind == JobKindDefine || c.Kind == JobKindRetire {
 		return applyJobDefinition(scope, st, cmd, c)
 	}
-	if cmd.CommandID == (model.ID{}) || c.Job == (model.ID{}) || c.InputDigest == (model.Hash{}) || c.NewVersion != c.ExpectedVersion+1 || c.NewVersion == 0 || c.Definition != nil {
+	if c.Kind == JobKindAdvance {
+		return applyJobPosition(scope, st, c)
+	}
+	if cmd.CommandID == (model.ID{}) || c.Job == (model.ID{}) || c.InputDigest == (model.Hash{}) || c.NewVersion != c.ExpectedVersion+1 || c.NewVersion == 0 || c.Definition != nil || c.Position != nil {
 		return model.ID{}, 0, "", model.Fail(model.Invalid)
 	}
 	switch c.Kind {
