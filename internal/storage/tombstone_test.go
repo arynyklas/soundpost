@@ -966,3 +966,39 @@ func TestDeleteEntityBarrierRejectsOnlyNamedChunksAndHidesStoredOnes(t *testing.
 		t.Fatalf("local entity tombstone: %d replay rows readable", got)
 	}
 }
+
+// CheckpointErasure re-commits an already fenced barrier as a no-op entry in every slot. The
+// ledger generation (read by backup and restore verification as tombstone evidence) counts
+// deletion operations, so a checkpoint tick must not raise it (N6).
+func TestCheckpointTickDoesNotRaiseLedgerGeneration(t *testing.T) {
+	store, a, _, d := fixture(t)
+	engine := openDeleteEngine(t, t.TempDir(), a, store)
+	machine := &slotMachine{engine: engine, slot: 9}
+	p := rangeDelete(d, []model.Kind{model.Metric}, 5, 10)
+	barrierAll(t, engine, p)
+	fenced, err := machine.DeletionLedger()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = engine.CheckpointErasure(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+	if err = engine.CheckpointErasure(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+	ticked, err := machine.DeletionLedger()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ticked.Generation != fenced.Generation {
+		t.Fatalf("two checkpoint ticks moved the ledger generation %d -> %d", fenced.Generation, ticked.Generation)
+	}
+	if len(ticked.Entries) != len(fenced.Entries)+2 {
+		t.Fatalf("the ticks are log entries and stay in the ledger: %d -> %d entries", len(fenced.Entries), len(ticked.Entries))
+	}
+	second := rangeDelete(d, []model.Kind{model.Metric}, 11, 12)
+	barrierAll(t, engine, second)
+	if after, err := machine.DeletionLedger(); err != nil || after.Generation != fenced.Generation+1 {
+		t.Fatalf("a second deletion must raise the generation by one: %d -> %v (%v)", fenced.Generation, after.Generation, err)
+	}
+}

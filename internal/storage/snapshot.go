@@ -42,9 +42,17 @@ const (
 // DeletionLedger lists every retained tombstone-class command of the slot: source
 // fences, cancellation fences and artifact deletions, each with the digest of its
 // committed bytes. The generation is the storage manifest's tombstone generation, plus
-// one per delete barrier in the history. Each sealed window carries its own share of the
+// one per deletion operation fenced in this slot (the tombstone rows), not one per delete_barrier
+// command: CheckpointErasure re-commits an already fenced barrier as a no-op entry, and counting
+// those would raise a number that backup and restore verification read as tombstone evidence
+// without a deletion having happened. Each sealed window carries its own share of the
 // ledger in its record, so the ledger is assembled from the window records and the open
 // window instead of reading the whole history.
+//
+// Two numbers carry the word generation: this one (per slot, read by the snapshot ledger and by
+// ApplyDeletionLedger) and meta/deletion_generation (installation-wide, fed by BuildLedger from
+// control's deletion ledger, tombstone.go). They are independent; consumers must read the one
+// their own layer owns.
 func (m *slotMachine) DeletionLedger() (replica.Ledger, error) {
 	e := m.engine
 	e.mu.Lock()
@@ -58,9 +66,17 @@ func (m *slotMachine) DeletionLedger() (replica.Ledger, error) {
 		return replica.Ledger{}, err
 	}
 	for _, rec := range table {
-		ledger.Generation += rec.Barriers
 		ledger.Entries = append(ledger.Entries, rec.Ledger...)
 	}
+	var fenced int
+	if err = e.db.View(func(tx *bolt.Tx) error {
+		rows, err := tombstonesWithPrefix(tx, slotKey(m.slot))
+		fenced = len(rows)
+		return err
+	}); err != nil {
+		return replica.Ledger{}, err
+	}
+	ledger.Generation += uint64(fenced)
 	return ledger, nil
 }
 

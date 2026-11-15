@@ -9,8 +9,10 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/arynyklas/soundpost/internal/control"
 	"github.com/arynyklas/soundpost/internal/issues"
 	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replica"
 )
 
 // Occurrence-ledger compaction (06.02-W3): a hot fingerprint keeps committing
@@ -59,6 +61,14 @@ func (f *fx) withLedger(w issues.LedgerWindow) {
 // control store: nothing is refused, the checkpoint advances with every batch,
 // the summary is exact, and the stored issue stays small (F).
 func TestHotFingerprintKeepsCommittingAcrossCompaction(t *testing.T) {
+	// The control journal is cut by its own cadence (decision D4: 4096 commands or 64 MiB). Each of this
+	// test's folding commits carries the whole issue, so the default cadence leaves tens of MiB of journal
+	// that the restart below replays inside appcore's fixed 20 s startup budget; under -race that replay
+	// alone takes about 23 s and Open fails with replica.ErrStale. A tighter byte cadence, the same
+	// mechanism, makes the restart load a snapshot plus a short tail, which is what a long-lived node does.
+	prev := control.DefaultJournalCadence
+	control.DefaultJournalCadence = replica.Cadence{Commands: prev.Commands, Bytes: 4 << 20}
+	t.Cleanup(func() { control.DefaultJournalCadence = prev })
 	f := newRealFx(t)
 	const total = 5000
 	all := f.hot(1, f.A, total)

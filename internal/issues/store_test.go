@@ -6,11 +6,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/arynyklas/soundpost/internal/appcore"
 	"github.com/arynyklas/soundpost/internal/auth"
@@ -53,7 +56,11 @@ func (r *realFx) restart() {
 	if e := r.app.Close(); e != nil {
 		r.t.Fatal(e)
 	}
+	start := time.Now()
 	app, e := appcore.Open(r.dir)
+	if wal, statErr := os.Stat(filepath.Join(r.dir, "raft", "control", "ready.wal")); statErr == nil {
+		r.t.Logf("restart: control journal %d bytes, reopened in %v", wal.Size(), time.Since(start))
+	}
 	if e != nil {
 		r.t.Fatal(e)
 	}

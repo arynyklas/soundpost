@@ -3,6 +3,7 @@
 package replica
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/binary"
@@ -440,20 +441,54 @@ func (g *Group) redactPinsLocked(targets map[model.ID]*redactTarget) (int, error
 	return total, nil
 }
 
-func redactPinArchive(path string, targets map[model.ID]*redactTarget) (int, error) {
-	raw, err := os.ReadFile(path)
+// redactPinArchive streams the archive record by record into a temp file, so memory is one record,
+// not the archive twice. An archive that holds nothing to redact has its temp file removed and
+// stays untouched; otherwise the temp file is fsynced and renamed over it.
+func redactPinArchive(path string, targets map[model.ID]*redactTarget) (rewritten int, err error) {
+	src, err := os.Open(path)
 	if err != nil {
 		return 0, err
 	}
-	var out bytes.Buffer
-	rewritten := 0
-	for len(raw) >= 8 {
-		n := binary.BigEndian.Uint32(raw[:4])
-		if uint64(n) > uint64(len(raw)-8) || crc32.Checksum(raw[8:8+n], readyCRC) != binary.BigEndian.Uint32(raw[4:8]) {
+	defer src.Close()
+	info, err := src.Stat()
+	if err != nil {
+		return 0, err
+	}
+	temp := path + ".tmp"
+	dst, err := os.OpenFile(temp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
+	if err != nil {
+		return 0, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			dst.Close()
+			os.Remove(temp)
+		}
+	}()
+	in, out := bufio.NewReaderSize(src, 1<<20), bufio.NewWriterSize(dst, 1<<20)
+	remaining := uint64(info.Size())
+	var h [8]byte
+	var buf []byte
+	for remaining >= 8 {
+		if _, err = io.ReadFull(in, h[:]); err != nil {
+			return 0, err
+		}
+		n := binary.BigEndian.Uint32(h[:4])
+		if uint64(n) > remaining-8 {
 			break // torn tail of an interrupted append: the journal still holds those entries
 		}
-		record := raw[8 : 8+n]
-		raw = raw[8+n:]
+		if cap(buf) < int(n) {
+			buf = make([]byte, n)
+		}
+		record := buf[:n]
+		if _, err = io.ReadFull(in, record); err != nil {
+			return 0, err
+		}
+		remaining -= 8 + uint64(n)
+		if crc32.Checksum(record, readyCRC) != binary.BigEndian.Uint32(h[4:]) {
+			break // torn tail of an interrupted append: the journal still holds those entries
+		}
 		var r pinRecord
 		if model.StrictJSON(record, &r) != nil {
 			return 0, ErrCorrupt
@@ -477,31 +512,31 @@ func redactPinArchive(path string, targets map[model.ID]*redactTarget) (int, err
 				rewritten++
 			}
 		}
-		var h [8]byte
 		binary.BigEndian.PutUint32(h[:4], uint32(len(record)))
 		binary.BigEndian.PutUint32(h[4:], crc32.Checksum(record, readyCRC))
-		out.Write(h[:])
-		out.Write(record)
+		if _, err = out.Write(h[:]); err != nil {
+			return 0, err
+		}
+		if _, err = out.Write(record); err != nil {
+			return 0, err
+		}
 	}
 	if rewritten == 0 {
 		return 0, nil
 	}
-	temp := path + ".tmp"
-	f, err := os.OpenFile(temp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
-	if err != nil {
-		return 0, err
-	}
-	_, err = f.Write(out.Bytes())
+	err = out.Flush()
 	if err == nil {
-		err = f.Sync()
+		err = dst.Sync()
 	}
-	if ce := f.Close(); err == nil {
+	if ce := dst.Close(); err == nil {
 		err = ce
 	}
 	if err != nil {
 		return 0, err
 	}
+	committed = true
 	if err = durablefs.Rename(temp, path); err != nil {
+		os.Remove(temp)
 		return 0, err
 	}
 	return rewritten, durablefs.SyncDir(filepath.Dir(path))

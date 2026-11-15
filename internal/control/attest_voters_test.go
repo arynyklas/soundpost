@@ -41,7 +41,16 @@ func (v *controlVoters) erasedWithVoter3Idle(canary string) {
 	// host (a 2-vCPU CI runner) a delayed heartbeat can move the lead between phases, and a write sent to a voter
 	// that stopped leading answers unavailable. The assertions are unchanged; only the fixture's precondition is
 	// re-established.
-	for round := range 40 { // the replaced state spans freed pages that later writes do not all reuse
+	// Each round is a replicated commit of the whole control state, which grows with every round, so the
+	// fixture costs the square of the round count (measured under -race on 8 vCPU: 40 rounds took 76 s
+	// before the saga even started and the whole three-voter package ran for hours, with the leader moving
+	// off voter 1 mid-fixture: "stale"). The race build keeps the same sequence of events (writes, saga,
+	// passes, scrub) with fewer rounds; the "fixture invalid" checks below still prove voter 3 holds a copy.
+	rounds := 40
+	if raceEnabled {
+		rounds = 10
+	}
+	for round := range rounds { // the replaced state spans freed pages that later writes do not all reuse
 		if round%10 == 0 {
 			v.leaderIs(1)
 		}
