@@ -164,6 +164,7 @@ var (
 	recipient = model.ID{0xd1, 0x01}
 	delivery1 = model.ID{0xde, 0xad, 0x01}
 	entity    = notify.Entity{Kind: notify.EntityIncident, ID: model.ID{0x53}}
+	project1  = model.ID{0xb7, 0x02}
 )
 
 func mkDelivery(o model.ID, attempt uint32) notify.Delivery {
@@ -174,13 +175,18 @@ func mkDelivery(o model.ID, attempt uint32) notify.Delivery {
 		Route:   notify.RouteImmediate,
 		Attempt: attempt,
 		Template: notify.Template{
-			Entity: entity, Tier: notify.Tier("urgent"), Severity: 2, Source: notify.SourceState("firing"), Freshness: notify.Freshness("fresh"), Human: notify.HumanStatus("open"),
+			Project: project1, Entity: entity, Tier: notify.Tier("urgent"), Severity: 2, Source: notify.SourceState("firing"), Freshness: notify.Freshness("fresh"), Human: notify.HumanStatus("open"),
 			Explanation: notify.Explanation{Failures: 7, Operations: 100, Rate: notify.RateKnown, RateBasisPoints: 700},
 		},
 	}
 }
 
 const origin = "https://soundpost.example.test"
+
+// wantLink is the console hash link of the test incident for organization o.
+func wantLink(o model.ID) string {
+	return origin + "/#view=incidents&org=" + o.String() + "&projects=" + project1.String() + "&incident=" + project1.String() + ":" + entity.ID.String()
+}
 
 func testCommon(reg *registry) Common {
 	dests, err := notify.NewDestinations(reg, reg)
@@ -318,7 +324,7 @@ func TestProvidersWireAndUncertainty(t *testing.T) {
 		if body["version"] != float64(1) || body["delivery_id"] != delivery1.String() || body["event_kind"] != "open" || body["impact_revision"] != float64(3) {
 			t.Fatalf("body: %s", a.body)
 		}
-		if body["link"] != origin+"/incidents/"+entity.ID.String() {
+		if body["link"] != wantLink(o.id) {
 			t.Fatalf("link %v", body["link"])
 		}
 		if strings.Contains(string(a.body), canarySecret) {
@@ -448,6 +454,7 @@ func TestProvidersWireAndUncertainty(t *testing.T) {
 	})
 
 	t.Run("telegram", func(t *testing.T) {
+		var runOrg model.ID
 		run := func(t *testing.T, status int, body string, hdr map[string]string) (notify.Outcome, capturedReq, string) {
 			var cap captured
 			h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -459,6 +466,7 @@ func TestProvidersWireAndUncertainty(t *testing.T) {
 				_, _ = w.Write([]byte(body))
 			})
 			o := newOrg(t)
+			runOrg = o.id
 			srv := newTLSServer(t, h)
 			reg := newRegistry()
 			reg.put(o.id, recipient, notify.DestinationRecord{Type: "telegram", Address: "-1001234567890", Enabled: true}, canaryToken)
@@ -486,7 +494,7 @@ func TestProvidersWireAndUncertainty(t *testing.T) {
 		var sent map[string]any
 		_ = json.Unmarshal(req.body, &sent)
 		text, _ := sent["text"].(string)
-		if sent["chat_id"] != "-1001234567890" || !strings.Contains(text, origin+"/incidents/"+entity.ID.String()) || !strings.Contains(text, delivery1.String()) || !strings.Contains(text, "Failures: 7") || !strings.Contains(text, "7.00%") {
+		if sent["chat_id"] != "-1001234567890" || !strings.Contains(text, wantLink(runOrg)) || !strings.Contains(text, delivery1.String()) || !strings.Contains(text, "Failures: 7") || !strings.Contains(text, "7.00%") {
 			t.Fatalf("message: %v", sent)
 		}
 		if _, hasMode := sent["parse_mode"]; hasMode {
@@ -722,7 +730,7 @@ func TestProvidersSMTPWire(t *testing.T) {
 			if !strings.Contains(joined, "MAIL FROM:<soundpost@example.test>") || !strings.Contains(joined, "RCPT TO:<oncall@example.test>") {
 				t.Fatalf("envelope: %s", joined)
 			}
-			for _, want := range []string{"To: oncall@example.test", "Subject: [Soundpost] incident opened (severity 2)", "Message-ID: <" + delivery1.String() + "@soundpost.invalid>", "Link: " + origin + "/incidents/" + entity.ID.String(), "Failures: 7", "Delivery: " + delivery1.String()} {
+			for _, want := range []string{"To: oncall@example.test", "Subject: [Soundpost] incident opened (severity 2)", "Message-ID: <" + delivery1.String() + "@soundpost.invalid>", "Link: " + wantLink(o.id), "Failures: 7", "Delivery: " + delivery1.String()} {
 				if !strings.Contains(s.data, want) {
 					t.Fatalf("message lacks %q:\n%s", want, s.data)
 				}

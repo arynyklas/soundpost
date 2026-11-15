@@ -8,8 +8,8 @@ its leader-only background runner (see [background workers](background-workers.m
 it acts as the in-process `system:runner` principal, owner decision D1) routes the
 conditions and incidents of every project to every enabled destination of the
 project's organization and sends through these providers. The destinations are
-organization configuration written by the `destination` admin command; the node's own
-environment is the `--public-origin`, `--notify-*` and `--worker-interval` serve
+organization configuration written by the `destination` admin command (or the
+`/api/v1/destinations` route below); the node's own environment is the `--public-origin`, `--notify-*` and `--worker-interval` serve
 flags. The code is `internal/notify/providers/{provider,smtp,telegram,webhook}.go`,
 the destination registry `internal/notify/destinations.go` and the composition
 `internal/appcore/notification_wiring.go` (destination source and sealed-secret
@@ -43,9 +43,15 @@ package; the composition binds them.
   and logs only a redacted view: id, channel, host or domain, "has secret") or a
   rendered notification.
 * Rendered notifications are the approved template only: typed enums, counts, the
-  delivery ID and a link built from the configured public https origin
-  (`<origin>/<incidents|issues|conditions>/<id>`). No log, error message, source,
-  replay or profile text exists in a delivery, so none can be pasted outward.
+  delivery ID and a link built from the configured public https origin. The link
+  is the console's hash form, `<origin>/#view=<incidents|issues|queue>&org=<org>&projects=<project>&incident=<project>:<id>`
+  (issues use `target=` instead of `incident=`; a condition opens the queue). It
+  carries IDs only: the console opens on the last 24 hours in UTC and the viewer's
+  own session decides what is readable. The server serves one shell at `/` and
+  answers path-shaped addresses such as `/incidents/<id>` with 404, so the links
+  never use that form. A delivery stored before the template carried its project
+  links to `<origin>/`. No log, error message, source, replay or profile text
+  exists in a delivery, so none can be pasted outward.
 
 ## Egress
 
@@ -144,19 +150,33 @@ service, reminder/queue numbers) and `link` (configured public origin).
   signature is acknowledged with 2xx and not acted on again. Signing secrets are at
   least 16 bytes.
 
+## Managing destinations
+
+`POST /api/v1/destinations` (`list` | `save`) manages them over HTTPS. Saving needs
+the `policy.write` scope of the named project and an organization administrator
+(a destination routes every project of the organization, so a pure `policy.write`
+holder is refused). A save carries a command ID, the expected destination version
+(0 = must not exist; a stale version is a conflict), a reason and a write-only
+secret, and commits as the audited `destination` admin command. The answer is a
+redacted view: host or domain, whether a secret exists, enabled, version; never
+the endpoint path, token or secret. The web console has no destination settings
+page yet.
+
 ## What is verified, and what is not
 
 `internal/notify/providers/providers_test.go` runs a real SMTP protocol server
 (implicit TLS and STARTTLS, AUTH PLAIN, DATA, queue IDs, 4xx/5xx, silence and
 connection drop after the data) and real HTTPS servers (webhook and Telegram Bot
 API shapes) on loopback with a private test CA, and verifies the egress cases
-above. `internal/notify/destinations_test.go` covers the registry. No real
-Telegram account, public SMTP relay or third-party receiver has been called. No
-real-provider acceptance test exists in the tree (an earlier plan named
-`TestProvidersRealAcceptance`; it was never written), and no delivery from a served
-node has been exercised.
+above. `internal/notify/destinations_test.go` covers the registry.
 
-Not built here: HTTP routes for destination administration, the application
-wiring (a `DestinationSource` over control state, a `SecretReader` over the control
-store's `OpenSecret`, and an `AttemptStamper` persisting attempt timestamps), and
-the public web routes the links point at.
+`TestProvidersRealAcceptance` (`providers_acceptance_test.go`) adds: a signed
+receiver using `providers.Receiver` where the connection dies after the receiver
+acted and a new sender instance retries with the same delivery ID (one action,
+duplicate recognised); the same for SMTP (same Message-ID on the retry); and one
+real Bot API message when `SOUNDPOST_TEST_TELEGRAM_TOKEN` and
+`SOUNDPOST_TEST_TELEGRAM_CHAT` are set. Without them that case is reported as
+skipped with the missing names; with `SOUNDPOST_REQUIRE_REAL_TELEGRAM=1` it fails
+loudly. No real Telegram account, public SMTP relay or third-party receiver has
+been called by the committed test runs, and no delivery from a served node to an
+external provider has been exercised.

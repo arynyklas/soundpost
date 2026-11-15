@@ -74,12 +74,19 @@ export function encodeHash(c: ViewContext, section: SectionId, service = '', inc
 /** One incident inside the selected projects: the project is part of its identity. */
 export interface IncidentRef { project: Id; id: Id }
 export interface Navigation { context: ViewContext | null; section: SectionId; service: Id | ''; incident: IncidentRef | null; /** The issue or release of the issues and releases sections. */ target: IncidentRef | null }
-export function decodeHash(hash: string, generation: number): Navigation {
+/** DEFAULT_LINK_MINUTES is the window a notification deep link opens with: the link names an organization, projects and one entity (IDs only), never a time, so the view opens on the last day ending now, in UTC. */
+export const DEFAULT_LINK_MINUTES = 24 * 60;
+export function decodeHash(hash: string, generation: number, nowMs: number = Date.now()): Navigation {
  const params = new URLSearchParams(hash.startsWith('#') ? hash.slice(1) : hash);
  const section = SECTIONS.find((s) => s.id === params.get('view'))?.id ?? 'queue';
  const service = params.get('service') ?? '';
  const none: Navigation = { context: null, section, service: '', incident: null, target: null };
- const org = params.get('org') ?? '', start = params.get('start') ?? '', end = params.get('end') ?? '', tz = params.get('tz') ?? '';
+ const org = params.get('org') ?? '';
+ let start = params.get('start') ?? '', end = params.get('end') ?? '', tz = params.get('tz') ?? '';
+ if (!params.has('start') && !params.has('end') && !params.has('tz')) {
+  ({ start, end } = windowEndingAt(nowMs, DEFAULT_LINK_MINUTES));
+  tz = 'UTC';
+ }
  const projects = (params.get('projects') ?? '').split(',').filter((p) => p !== '');
  if (!isId(org) || projects.length === 0 || projects.length > MAX_PROJECTS || !projects.every(isId) || new Set(projects).size !== projects.length) return none;
  const environment = params.get('env') ?? '';

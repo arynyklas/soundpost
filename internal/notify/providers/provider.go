@@ -522,8 +522,27 @@ func safe(s string) string {
 	return b.String()
 }
 
-func link(origin string, e notify.Entity) string {
-	return origin + "/" + safe(string(e.Kind)) + "s/" + e.ID.String()
+// link is the web view of the entity, in the console's hash form (the server
+// serves one shell at "/" and 404s path-shaped deep links). It carries only IDs;
+// the console supplies the time window and zone. A delivery without a project
+// (stored before the field existed) links to the console root.
+func link(origin string, org model.ID, t notify.Template) string {
+	if t.Project == (model.ID{}) {
+		return origin + "/"
+	}
+	view, param := "queue", ""
+	switch t.Entity.Kind {
+	case notify.EntityIncident:
+		view, param = "incidents", "incident"
+	case notify.EntityIssue:
+		view, param = "issues", "target"
+	}
+	ref := t.Project.String() + ":" + t.Entity.ID.String()
+	s := origin + "/#view=" + view + "&org=" + org.String() + "&projects=" + t.Project.String()
+	if param != "" {
+		s += "&" + param + "=" + ref
+	}
+	return s
 }
 
 // render is the approved template: typed fields only. No telemetry, log, error
@@ -558,6 +577,6 @@ func render(d notify.Delivery, origin string) (subject, text string) {
 		rate = fmt.Sprintf("%d.%02d%%", ex.RateBasisPoints/100, ex.RateBasisPoints%100)
 	}
 	fmt.Fprintf(&b, "Failures: %d%s  Rate: %s\n", ex.Failures, sat, rate)
-	fmt.Fprintf(&b, "Link: %s\nDelivery: %s\n", link(origin, t.Entity), d.ID.String())
+	fmt.Fprintf(&b, "Link: %s\nDelivery: %s\n", link(origin, d.Key.Org, t), d.ID.String())
 	return subject, b.String()
 }

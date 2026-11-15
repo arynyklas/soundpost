@@ -1183,7 +1183,7 @@ func (r *run) flush() error {
 func (r *run) template() Template {
 	s := &r.s
 	t := Template{
-		Entity: s.Owner, Tier: s.Tier, Severity: s.Severity, Source: s.Source, Freshness: s.SourceFresh,
+		Project: s.Project, Entity: s.Owner, Tier: s.Tier, Severity: s.Severity, Source: s.Source, Freshness: s.SourceFresh,
 		Human: s.Human, Acknowledged: s.acked(), Explanation: s.Explanation, Queue: s.QueueRevision,
 	}
 	if g := s.Explanation.Regression; g != nil {

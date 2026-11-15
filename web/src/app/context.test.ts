@@ -30,6 +30,17 @@ describe('navigation state in the URL', () => {
   ]) expect(decodeHash(hash, 0).context).toBeNull();
  });
  test('the URL carries no query text, credential or telemetry', () => { expect(encodeHash(ctx, 'queue')).toMatch(/^#org=[0-9a-f]{32}&projects=[0-9a-f%C]+&start=\d+&end=\d+&tz=UTC&view=queue$/i); });
+ test('a notification deep link carries IDs only and opens on the last day in UTC', () => {
+  const I = '3'.repeat(32), now = 1_700_000_000_000;
+  const nav = decodeHash(`#view=incidents&org=${A}&projects=${P}&incident=${P}:${I}`, 2, now);
+  expect(nav.section).toBe('incidents');
+  expect(nav.incident).toEqual({ project: P, id: I });
+  expect(nav.context).toEqual({ org: A, projects: [P], environment: '', timezone: 'UTC', generation: 2, ...windowEndingAt(now, 24 * 60) });
+  const issue = decodeHash(`#view=issues&org=${A}&projects=${P}&target=${P}:${I}`, 0, now);
+  expect([issue.section, issue.target]).toEqual(['issues', { project: P, id: I }]);
+  expect(decodeHash(`#view=incidents&org=${A}&incident=${P}:${I}`, 0, now).context).toBeNull();
+  expect(decodeHash(`#view=incidents&org=${A}&projects=${P}&start=1`, 0, now).context).toBeNull();
+ });
  test('window validation', () => { expect(validWindow('0', '1')).toBe(true); expect(validWindow('1', '1')).toBe(false); expect(validWindow('01', '2')).toBe(false); });
  test('window ends at now with a whole-nanosecond start', () => { expect(windowEndingAt(120_000, 1)).toEqual({ start: '60000000000', end: '120000000000' }); expect(windowEndingAt(1_000, 1)).toEqual({ start: '0', end: '1000000000' }); });
  test('scope key ignores presentation but not data scope', () => {

@@ -687,6 +687,7 @@ type IntentKey struct {
 // the wording from Kind; no telemetry, message, source or human text is here.
 type Template struct {
 	Entity       Entity      `json:"entity"`
+	Project      model.ID    `json:"project_id,omitempty"` // owning project, for the notification link; zero on deliveries stored before it existed
 	Tier         Tier        `json:"tier"`
 	Severity     Severity    `json:"severity"`
 	Source       SourceState `json:"source"`

@@ -102,7 +102,7 @@ func webhookBodyBytes(d notify.Delivery, origin string) ([]byte, error) {
 	return json.Marshal(webhookBody{
 		Version: WebhookVersion, DeliveryID: d.ID.String(), EventKind: d.Key.Kind, Org: d.Key.Org,
 		Entity: d.Template.Entity, ImpactRevision: d.Key.ImpactRevision, Ordinal: d.Key.Ordinal,
-		Impact: d.Template, Link: link(origin, d.Template.Entity),
+		Impact: d.Template, Link: link(origin, d.Key.Org, d.Template),
 	})
 }
 
