@@ -94,6 +94,7 @@ func releaseFixture(t testing.TB) ReleaseConfig {
 	cfg.Isolation = []ScenarioOutcome{{Name: "foreign-project", Passed: true}}
 	cfg.Provenance = []ProvenanceDecision{{File: "provenance.json", Accepted: true}}
 	cfg.Interaction = InteractionCoverage{Required: 4, Covered: 4}
+	cfg.Generated = []GeneratedRun{fixtureGeneratedRun(cfg, 20261110, 3)}
 	return cfg
 }
 

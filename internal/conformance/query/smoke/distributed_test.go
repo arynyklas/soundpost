@@ -86,6 +86,7 @@ func TestDistributedPersistedPathAnswersAreIdenticalAtEveryStage(t *testing.T) {
 	if len(res.Normalization) == 0 {
 		t.Fatal("no normalization checks")
 	}
+	requirePersistedFamilies(t, res)
 }
 
 func TestDistributedRuleSmokeRunsOnThreeVotersWithReplicatedControl(t *testing.T) {
@@ -131,8 +132,8 @@ func TestDistributedProfileCrossProductsKeepEachProfilesExpectation(t *testing.T
 			t.Errorf("FAIL %s %s", s.Name, s.Detail)
 		}
 	}
-	if len(steps) != 32 {
-		t.Fatalf("%d steps, want 4 stages x 4 queries x 2 profiles", len(steps))
+	if len(steps) != crossSteps {
+		t.Fatalf("%d steps, want %d", len(steps), crossSteps)
 	}
 }
 

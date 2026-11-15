@@ -52,7 +52,7 @@ func LoadReleaseCaseManifest(path string) (ReleaseCaseManifest, error) {
 	}
 	for _, f := range m.Files {
 		switch {
-		case f.Language == "promql" && (f.Phase == "syntax" || f.Phase == "evaluation"):
+		case f.Language == "promql" && (f.Phase == "syntax" || f.Phase == "evaluation" || f.Phase == "configuration"):
 		case f.Language == "logql" && (f.Phase == "syntax" || f.Phase == "pipeline" || f.Phase == "syntax,pipeline" || f.Phase == "logql-template" || f.Phase == "logql-metric"):
 		default:
 			return m, fmt.Errorf("release case file %s: unsupported language/phase %s/%s", f.Path, f.Language, f.Phase)
@@ -76,6 +76,16 @@ func ReleaseCasesFromManifest(lock SourceLock, queryDir string, m ReleaseCaseMan
 		switch {
 		case f.Language == "promql" && f.Phase == "syntax":
 			cases, err := readLockedSyntaxCases(lock, path)
+			if err != nil {
+				return nil, err
+			}
+			for _, c := range cases {
+				for _, p := range c.Profiles {
+					ids = append(ids, phaseRow{p, c.ID})
+				}
+			}
+		case f.Language == "promql" && f.Phase == "configuration":
+			cases, err := readConfigurationCases(lock, []string{path})
 			if err != nil {
 				return nil, err
 			}
@@ -141,6 +151,14 @@ func RunReleasePhases(ctx context.Context, lock SourceLock, queryDir, profilesDi
 			if err != nil && len(rep.Cases) == 0 {
 				failures = append(failures, fmt.Sprintf("%s: %v", f.Path, err))
 			}
+		case f.Language == "promql" && f.Phase == "configuration":
+			rep, err := RunConfigurationPhase(ctx, lock, []string{path}, runtime)
+			for _, c := range rep.Cases {
+				results[PhaseKey(c.Profile, c.ID)] = PhaseOutcome{Phase: tag, Identity: c.Oracle, Problems: c.Mismatches}
+			}
+			if err != nil && len(rep.Cases) == 0 {
+				failures = append(failures, fmt.Sprintf("%s: %v", f.Path, err))
+			}
 		case f.Language == "promql":
 			rep, err := RunEvaluationPhase(ctx, lock, []string{path}, profilesDir, runtime)
 			for _, c := range rep.Cases {
@@ -179,7 +197,7 @@ func (r PhaseResults) PhaseOracle() OracleFunc {
 	return func(_ context.Context, p SourceProfile, c ReleaseCase) (SemanticResult, error) {
 		o, ok := r[PhaseKey(p.ID, c.ID)]
 		if !ok || o.Identity == nil {
-			return SemanticResult{}, fmt.Errorf("the pinned oracle did not observe %s", c.ID)
+			return SemanticResult{}, fmt.Errorf("the pinned oracle did not observe %s: %w", c.ID, ErrNotObserved)
 		}
 		id := *o.Identity
 		return SemanticResult{Kind: "phase-case", Type: o.Phase, Oracle: &id}, nil
@@ -192,7 +210,7 @@ func (r PhaseResults) PhaseOwn() OwnFunc {
 	return func(_ context.Context, c ReleaseCase) (SemanticResult, error) {
 		o, ok := r[PhaseKey(c.Profile, c.ID)]
 		if !ok {
-			return SemanticResult{}, fmt.Errorf("the owned engine was not run for %s", c.ID)
+			return SemanticResult{}, fmt.Errorf("the owned engine was not run for %s: %w", c.ID, ErrNotObserved)
 		}
 		if len(o.Problems) > 0 {
 			return SemanticResult{}, fmt.Errorf("%s", strings.Join(o.Problems, "; "))

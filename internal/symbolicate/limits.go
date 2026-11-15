@@ -10,9 +10,11 @@ import (
 )
 
 const (
-	MaxMapBytes    = 32 << 20
-	MaxInputBytes  = (MaxMapBytes * 4 / 3) + (64 << 10)
-	MaxOutputBytes = 64 << 10
+	MaxMapBytes   = 32 << 20
+	MaxInputBytes = (MaxMapBytes * 4 / 3) + (64 << 10)
+	// MaxOutputBytes bounds one worker reply: one answer per position, each
+	// with a <=4096-byte source, <=256-byte function and <=4096-byte context.
+	MaxOutputBytes = (16 << 10) * 64
 	MaxFrames      = 1024
 	// MaxResolvedFrames bounds distinct (artifact, line, column) lookups per Resolve call.
 	MaxResolvedFrames = 64

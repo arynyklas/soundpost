@@ -31,6 +31,14 @@ type Quota interface {
 	ReserveAdmission(context.Context, auth.Scope, model.NormalizedBatch) (model.AdmissionReservation, error)
 	FinalizeAdmission(context.Context, auth.Scope, model.FinalizeAdmission) error
 }
+
+// Preflighter is optionally implemented by an Appender: the refusals Append would
+// make before it stores anything, run without storing or charging anything. Admit
+// calls it before ReserveAdmission. Append keeps its own check, because the state
+// it reads can change between the two.
+type Preflighter interface {
+	Preflight(context.Context, auth.Scope, model.NormalizedBatch) error
+}
 type Service struct {
 	auth     *auth.Service
 	policy   *policy.Service
@@ -136,6 +144,14 @@ func (s *Service) Admit(ctx context.Context, g SourceGrant, b Batch) (Receipt, e
 	scope, e := g.Scope()
 	if e != nil {
 		return Receipt{}, e
+	}
+	// An appender that can refuse a batch before storing it (the replay index
+	// and stored-chunk checks) does so before the reservation, so a refused
+	// forged batch never leaves a charged reservation behind.
+	if p, ok := s.appender.(Preflighter); ok {
+		if e = p.Preflight(ctx, scope, n); e != nil {
+			return Receipt{}, e
+		}
 	}
 	reservation, e := s.quota.ReserveAdmission(ctx, scope, n)
 	if e != nil {

@@ -367,6 +367,49 @@ func TestServedProcessMapsARealFrame(t *testing.T) {
 	}
 }
 
+// nativeSandbox is the operator's native qualification config
+// (SOUNDPOST_SYMBOLICATE_TEST_CONFIG, the one the symbolicate package tests use):
+// the worker binary, its hash and an already delegated cgroup subtree.
+func nativeSandbox(t *testing.T) symbolicate.Config {
+	t.Helper()
+	name := os.Getenv("SOUNDPOST_SYMBOLICATE_TEST_CONFIG")
+	if name == "" {
+		t.Skip("native sandbox not exercised: SOUNDPOST_SYMBOLICATE_TEST_CONFIG unset")
+	}
+	raw, err := os.ReadFile(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var c symbolicate.Config
+	if json.Unmarshal(raw, &c) != nil || c.Mode != "native" {
+		t.Skip("native sandbox not exercised: SOUNDPOST_SYMBOLICATE_TEST_CONFIG is not a native config")
+	}
+	return c
+}
+
+// The mapped-frame proof for the native backend: a real uploaded map, a real
+// startup probe, a real sandboxed worker, answered through the served route. It
+// is red when ConfigureSymbolicator does not install the resolver (the frame then
+// answers sandbox_unavailable).
+func TestServedProcessMapsARealFrameNative(t *testing.T) {
+	r := newSymRig(t)
+	st := r.configure(SymbolicatorSettings{ConfigPath: writeConfig(t, nativeSandbox(t))})
+	if st.State != SymbolicatorReady {
+		t.Fatalf("native sandbox did not pass its startup probes: %+v", st)
+	}
+	artifact := r.mustUpload(r.a, []byte(symMapDoc), "dist/out.js", "debug-native", false)
+	frame := symFrame(artifact.ID.String(), 1, 0)
+	resp, v, attempts := r.mapped(r.a, false, frame)
+	t.Logf("attempts inside the sandbox deadline: %d", attempts)
+	f := v.Frames[0]
+	if resp.status != 200 || f.Reason != string(symbolicate.Resolved) || f.Resolved == nil || f.Resolved.Source != "src/app.ts" || f.Resolved.Line != 7 || f.Resolved.Function != "boom" {
+		t.Fatalf("frame was not mapped by the served process: %d %s", resp.status, resp.body)
+	}
+	if !reflect.DeepEqual(f.Original, frame) || v.State != httpapi.StateReady {
+		t.Fatalf("original altered or state %q: %s", v.State, resp.body)
+	}
+}
+
 // Same-organization only: another organization (where the signed-in user holds
 // artifacts.read) naming this artifact gets exactly the answer of an artifact that
 // does not exist.

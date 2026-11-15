@@ -10,6 +10,7 @@ import (
 	"github.com/arynyklas/soundpost/internal/model"
 	"io"
 	"slices"
+	"sync"
 )
 
 type Service struct {
@@ -18,8 +19,13 @@ type Service struct {
 	config  Config
 	cache   *boundedCache
 	slots   chan struct{}
-	// runner launches one worker for one frame; tests replace it with a fake.
-	runner func(context.Context, workerInput) workerOutput
+	// runner launches one worker for one batch of positions; tests replace it with a fake.
+	runner func(context.Context, workerInput) []workerOutput
+	// verified is the identity of the native worker file whose hash last matched
+	// the configured provenance (see verifyWorker).
+	verifyMu    sync.Mutex
+	verified    fileIdentity
+	verifiedSet bool
 }
 
 // New binds the protected artifact reader and the delete-generation authority
@@ -58,6 +64,8 @@ func (s *Service) ResolveWithOptions(ctx context.Context, scope auth.Scope, buil
 	out := make([]SymbolicatedFrame, len(frames))
 	projects := scope.ProjectIDs()
 	seen := map[frameKey]int{}
+	plan := batchPlan(frames, len(projects) == 1)
+	results := map[batchKey]workerOutput{}
 	for i, f := range frames {
 		out[i] = SymbolicatedFrame{Original: f, Build: build, Reason: Unavailable}
 		if f.Column != nil {
@@ -146,20 +154,38 @@ func (s *Service) ResolveWithOptions(ctx context.Context, scope auth.Scope, buil
 			}
 			s.cache.put(key, raw)
 		}
-		in := workerInput{Version: 1, Map: raw, MapHash: ref.Map.Manifest.Hash, Line: f.Line, Column: *f.Column, IncludeSources: options.IncludeSources}
+		var sourcesHash model.Hash
 		if options.IncludeSources {
 			if ref.Sources == nil {
 				out[i].Reason = SourceDenied
 				continue
 			}
-			in.Sources, e = s.read(ctx, read, ref, true)
-			if e != nil {
-				out[i].Reason = SourceDenied
-				continue
-			}
-			in.SourcesHash = ref.Sources.Manifest.Hash
+			sourcesHash = ref.Sources.Manifest.Hash
 		}
-		result := s.runner(ctx, in)
+		// One worker run answers every distinct position of this request that
+		// resolves against the same map, so a deep stack in one bundle costs one
+		// sandbox launch (not one per frame, which under load ate the 5 s wall).
+		bk := batchKey{frameKey{id, f.Line, *f.Column}, ref.Map.Manifest.Hash, sourcesHash}
+		result, ran := results[bk]
+		if !ran {
+			in := workerInput{Version: 1, Map: raw, MapHash: ref.Map.Manifest.Hash, Positions: positionsFor(plan[id], f.Line, *f.Column), IncludeSources: options.IncludeSources}
+			if options.IncludeSources {
+				in.Sources, e = s.read(ctx, read, ref, true)
+				if e != nil {
+					out[i].Reason = SourceDenied
+					continue
+				}
+				in.SourcesHash = sourcesHash
+			}
+			answers := s.runner(ctx, in)
+			if len(answers) != len(in.Positions) {
+				answers = uniform(len(in.Positions), WorkerFailure)
+			}
+			for j, p := range in.Positions {
+				results[batchKey{frameKey{id, p.Line, p.Column}, in.MapHash, sourcesHash}] = answers[j]
+			}
+			result = results[bk]
+		}
 		if ctx.Err() != nil {
 			out[i].Reason = Deadline
 			continue
@@ -193,6 +219,46 @@ func isNotFound(err error) bool {
 type frameKey struct {
 	artifact     model.ID
 	line, column uint32
+}
+
+// batchKey identifies one position's answer for one retained map (and, when
+// private sources are granted, one retained source document).
+type batchKey struct {
+	frame       frameKey
+	mapHash     model.Hash
+	sourcesHash model.Hash
+}
+
+// batchPlan lists, per artifact, the distinct positions ResolveWithOptions will
+// admit (the same filter and MaxResolvedFrames cap as its main loop), in order.
+func batchPlan(frames []model.Frame, oneProject bool) map[model.ID][]workerPosition {
+	plan := map[model.ID][]workerPosition{}
+	if !oneProject {
+		return plan
+	}
+	seen := map[frameKey]bool{}
+	for _, f := range frames {
+		id, e := model.ParseID(f.Artifact)
+		if e != nil || f.Line == 0 || f.Column == nil {
+			continue
+		}
+		k := frameKey{id, f.Line, *f.Column}
+		if seen[k] || len(seen) >= MaxResolvedFrames {
+			continue
+		}
+		seen[k] = true
+		plan[id] = append(plan[id], workerPosition{Line: f.Line, Column: *f.Column})
+	}
+	return plan
+}
+
+// positionsFor returns planned, guaranteeing it contains (line, column).
+func positionsFor(planned []workerPosition, line, column uint32) []workerPosition {
+	want := workerPosition{Line: line, Column: column}
+	if slices.Contains(planned, want) {
+		return planned
+	}
+	return append([]workerPosition{want}, planned...)
 }
 
 func matches(id model.ID, build BuildID, r artifacts.Artifact) bool {

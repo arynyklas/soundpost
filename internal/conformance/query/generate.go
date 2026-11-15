@@ -228,9 +228,9 @@ func promInput(c map[string]string) []InputRecord {
 			return &Histogram{Kind: "integer", Schema: 0, ResetHint: "unknown", Count: count, ZeroCount: zero, ZeroThresholdBits: floatBits(0.001), SumBits: sum, PositiveSpans: []HistogramSpan{{Offset: 0, Length: uint32(len(d))}}, NegativeSpans: []HistogramSpan{}, PositiveDeltas: d}
 		}
 		in = []InputRecord{
-			{Kind: "histogram", Timestamp: "10000000000", Name: "h", Labels: l, Histogram: h("9", "1", floatBits(12), []string{"3", "1", "-1"})},
+			{Kind: "histogram", Timestamp: "10000000000", Name: "h", Labels: l, Histogram: h("11", "1", floatBits(12), []string{"3", "1", "-1"})},
 			// A counter reset: the second observation has a lower count.
-			{Kind: "histogram", Timestamp: "20000000000", Name: "h", Labels: l, Histogram: h("4", "0", floatBits(5), []string{"2", "0", "0"})},
+			{Kind: "histogram", Timestamp: "20000000000", Name: "h", Labels: l, Histogram: h("6", "0", floatBits(5), []string{"2", "0", "0"})},
 		}
 	case "stale":
 		in = []InputRecord{sample(10, floatBits(1), l), sample(20, StaleBits, l), sample(30, floatBits(3), l)}

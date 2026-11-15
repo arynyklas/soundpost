@@ -58,7 +58,7 @@ func TestSandboxUnavailableFailsClosed(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if got := s.run(context.Background(), workerInput{Version: 1, Line: 1}); got.Reason != SandboxUnavailable || got.Position != nil {
+	if got := s.runOne(context.Background(), workerInput{Version: 1, Positions: []workerPosition{{Line: 1}}}); got.Reason != SandboxUnavailable || got.Position != nil {
 		t.Fatal("unsupported sandbox executed decoder", got)
 	}
 }

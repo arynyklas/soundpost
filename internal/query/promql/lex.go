@@ -85,7 +85,13 @@ func (l *lexer) quoted(i int) (int, *syntax.LanguageError) {
 			i++
 		}
 		if i < len(s) {
-			i++
+			// The pinned lexer reads runes and refuses U+FFFD, whether it is the
+			// decoder's answer for malformed bytes or a well-formed U+FFFD.
+			r, w := utf8.DecodeRuneInString(s[i:])
+			if r == utf8.RuneError {
+				return 0, l.bad(start, len(s), "invalid UTF-8 rune")
+			}
+			i += w
 		}
 	}
 	if !closed {

@@ -77,7 +77,11 @@ networkPolicy:
 
 resources:
   requests: {cpu: 500m, memory: 1Gi}
-  limits: {memory: 4Gi}
+  limits: {memory: 2Gi}
+  # Soft limit of the Go heap in every member (GOMEMLIMIT), below limits.memory so the collector
+  # works harder before the kernel kills the pod. Derivation: docs/artifacts/source-maps.md,
+  # "Sizing the memory limit". Raise limits.memory and this together.
+  goMemLimit: 1500MiB
 
 # OPTIONAL native acquisition helper (plan 04). Off. The server pods never hold PERFMON, a
 # seccomp relaxation, privileged mode or host PID. The helper is a separate DaemonSet that

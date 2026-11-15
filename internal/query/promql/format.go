@@ -23,7 +23,13 @@ func label(s string) string {
 	if identifier(s) && !strings.Contains(s, ":") {
 		return s
 	}
-	return strconv.Quote(s)
+	return quote(s)
+}
+
+// quote is strconv.Quote except that U+FFFD stays an escape: the lexer refuses
+// the character itself inside a string, so the raw form would not reparse.
+func quote(s string) string {
+	return strings.ReplaceAll(strconv.Quote(s), "\uFFFD", `\ufffd`)
 }
 func labels(xs []string) string {
 	out := make([]string, len(xs))
@@ -53,16 +59,16 @@ func Format(e Expr) string {
 			s = n.RangeText
 		}
 	case "string":
-		s = strconv.Quote(n.Text)
+		s = quote(n.Text)
 	case "selector":
 		s = n.Text
 		var ms []string
 		if !identifier(n.Text) && n.Text != "" {
 			s = ""
-			ms = append(ms, strconv.Quote(n.Text))
+			ms = append(ms, quote(n.Text))
 		}
 		for _, m := range n.Matchers {
-			ms = append(ms, label(m.Name)+m.Op+strconv.Quote(m.Value))
+			ms = append(ms, label(m.Name)+m.Op+quote(m.Value))
 		}
 		if len(ms) > 0 || s == "" {
 			s += "{" + strings.Join(ms, ", ") + "}"

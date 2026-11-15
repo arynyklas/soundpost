@@ -82,6 +82,13 @@ SystemCallFilter=seccomp
 SystemCallErrorNumber=EPERM
 LimitNOFILE=65536
 TasksMax=4096
+# Memory ceiling (derivation and measurements: docs/artifacts/source-maps.md, "Sizing the memory
+# limit"). GOMEMLIMIT is the Go heap's soft limit: the collector works harder instead of growing
+# past it. MemoryMax is the kernel's hard limit on the whole unit cgroup (server, its
+# symbolication children and page cache charged to them), set above GOMEMLIMIT so the heap limit
+# bites first. Raise both together on a host with more RAM and larger uploads in flight.
+Environment=GOMEMLIMIT=1500MiB
+MemoryMax=2G
 
 [Install]
 WantedBy=multi-user.target

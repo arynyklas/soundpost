@@ -16,8 +16,11 @@ const DefaultNaNBits uint64 = 0xfff8000000000000
 // not depend on the architecture:
 //
 //   - neither operand is NaN: the NaN is new, from an invalid operation, and carries DefaultNaNBits;
-//   - both operands are NaN: the second operand's NaN is returned (hardware picks the first or the
-//     second one depending on the instruction and the operand order the compiler chose);
+//   - both operands are NaN: the first operand's NaN is returned. x86 SSE returns its first source
+//     operand when both are NaN, and the pinned references (Prometheus 3.1.0 and 3.13.5 on amd64)
+//     compile every a+b, a-b, a/b, and on 3.13.5 a*b, with the source-order first operand there
+//     (observed by the wave-6 differential rows: sum(), avg(), stddev(), stdvar(), the *_over_time
+//     functions and binary operators over distinct NaN payloads);
 //   - exactly one operand is NaN: hardware already returns that operand's payload quieted, on every
 //     architecture, so r is returned unchanged.
 //
@@ -28,15 +31,28 @@ func arithNaN(r, a, b float64) float64 {
 		return r
 	}
 	if a != a {
-		if b != b {
-			return b
-		}
-		return r
+		return quiet(a)
 	}
 	if b != b {
 		return r
 	}
 	return math.Float64frombits(DefaultNaNBits)
+}
+
+// quiet is the NaN with its quiet bit set: hardware quiets a signalling NaN operand (such as the
+// 0x7ff0000000000001 payload) when it propagates it, and so does the reference.
+func quiet(x float64) float64 { return math.Float64frombits(math.Float64bits(x) | 0x0008000000000000) }
+
+// arithNaNSecond is arithNaN for a reference operation whose compiled code returns the second
+// operand's payload when both operands are NaN (Prometheus 3.1.0's binary `*`).
+func arithNaNSecond(r, a, b float64) float64 {
+	if r == r {
+		return r
+	}
+	if a != a && b != b {
+		return quiet(b)
+	}
+	return arithNaN(r, a, b)
 }
 
 // Add is a+b with architecture-independent NaN bits (see arithNaN).
@@ -45,9 +61,16 @@ func Add(a, b float64) float64 { return arithNaN(a+b, a, b) }
 // Sub is a-b with architecture-independent NaN bits (see arithNaN).
 func Sub(a, b float64) float64 { return arithNaN(a-b, a, b) }
 
+// AddSecond is Add with the second operand's NaN winning when both are NaN, for the reference
+// sites whose compiled `x += term` returns the added term's payload (see arithNaNSecond).
+func AddSecond(a, b float64) float64 { return arithNaNSecond(a+b, a, b) }
+
 // Mul is a*b rounded once, with architecture-independent NaN bits (see arithNaN). The explicit
 // conversion keeps compilers from fusing the product into a following addition.
 func Mul(a, b float64) float64 { return arithNaN(float64(a*b), a, b) }
+
+// MulSecond is Mul with the second operand's NaN winning when both are NaN (see arithNaNSecond).
+func MulSecond(a, b float64) float64 { return arithNaNSecond(float64(a*b), a, b) }
 
 // Div is a/b with architecture-independent NaN bits (see arithNaN).
 func Div(a, b float64) float64 { return arithNaN(a/b, a, b) }

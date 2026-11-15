@@ -4,7 +4,10 @@ package storage
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -136,5 +139,55 @@ func TestSlotMachineDecodeReusesOnlyIdenticalPayload(t *testing.T) {
 	}
 	if again, err := m.decode(payload); err != nil || again.Artifact != e.Artifact {
 		t.Fatalf("the slot did not survive a refusal: %v", err)
+	}
+}
+
+// The journal entries below were written by the binary of commit e805349 (json.Marshal over
+// walEntry, in commitReplicated), by a generator test run in a clean `git archive e805349` tree.
+// testdata/e805349/wal_sha256.json records the SHA-256 the generator observed for each file. The
+// current codec must read them, and write exactly the same bytes back.
+func TestGoldenWALEntriesOfE805349ReadBack(t *testing.T) {
+	var sums map[string]string
+	raw, err := os.ReadFile("testdata/e805349/wal_sha256.json")
+	if err != nil || json.Unmarshal(raw, &sums) != nil || len(sums) != 3 {
+		t.Fatalf("golden checksums: %v %v", sums, err)
+	}
+	read := func(name string) (walEntry, []byte) {
+		t.Helper()
+		raw, err := os.ReadFile("testdata/e805349/wal_" + name + ".json")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if sum := sha256.Sum256(raw); hex.EncodeToString(sum[:]) != sums[name] {
+			t.Fatalf("%s is not the bytes e805349 wrote", name)
+		}
+		got, err := decodeWAL(raw)
+		if err != nil {
+			t.Fatalf("%s: the current decoder refuses what e805349 wrote: %v", name, err)
+		}
+		var ref walEntry
+		if err = json.Unmarshal(raw, &ref); err != nil || !reflect.DeepEqual(ref, got) {
+			t.Fatalf("%s: decodeWAL differs from json.Unmarshal (%v)", name, err)
+		}
+		again, err := encodeWAL(got)
+		if err != nil || !bytes.Equal(again, raw) {
+			t.Fatalf("%s: the current encoder does not reproduce the bytes e805349 wrote (len %d vs %d, %v)", name, len(again), len(raw), err)
+		}
+		return got, raw
+	}
+	batch, _ := read("batch")
+	if batch.Type != "batch" || batch.Batch == nil || len(batch.Batch.Records) != 1 {
+		t.Fatalf("batch entry: %+v", batch)
+	}
+	if c := batch.Batch.Records[0].Payload.Replay; c == nil || c.Sequence != 2 || c.CheckpointSequence != 1 || len(c.Nodes) != 1 || c.Nodes[0].Text != "[masked]" || batch.Batch.PolicyEpoch != 3 {
+		t.Fatalf("the replay chunk of the old batch entry read back wrong: %+v", batch.Batch.Records[0].Payload.Replay)
+	}
+	fragment, _ := read("fragment")
+	if fragment.Type != "artifact_fragment" || fragment.Artifact == nil || fragment.Artifact.Ordinal != 3 || len(fragment.Artifact.Bytes) != 300+len("<&>\u2028\n\"\\é") || fragment.Artifact.Hash != model.HashCanonical(fragment.Artifact.Bytes) {
+		t.Fatalf("fragment entry: %+v", fragment.Artifact)
+	}
+	rejected, _ := read("rejected")
+	if rejected.Type != "rejected" || rejected.Rejection == nil || *rejected.Rejection != (model.ID{0xa0, 15: 0xee}) {
+		t.Fatalf("rejected entry: %+v", rejected)
 	}
 }

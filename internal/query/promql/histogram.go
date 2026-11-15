@@ -354,7 +354,7 @@ func functionHistogram(ctx context.Context, call CallPlan, args []value.Result, 
 		}
 		for i, quantile := range args[2:] {
 			if q := functionFloat(quantile.Scalar); math.IsNaN(q) || q < 0 || q > 1 {
-				d = append(d, functionDiagnosticArg(call.Expr, "InvalidQuantileWarning", 2+i))
+				d = append(d, keyed(functionDiagnosticArg(call.Expr, "InvalidQuantileWarning", 2+i), annotationFloat(q)))
 			}
 			single := CallPlan{Name: "histogram_quantile", Expr: call.Expr}
 			r, ds, e := functionHistogramOne(ctx, single, []value.Result{quantile, args[0]}, f, false)
@@ -420,7 +420,7 @@ func functionHistogramOne(ctx context.Context, call CallPlan, args []value.Resul
 	}
 	q := functionFloat(args[0].Scalar)
 	if reportInvalid && quantile && (math.IsNaN(q) || q < 0 || q > 1) {
-		d = append(d, functionDiagnostic(call.Expr, "InvalidQuantileWarning"))
+		d = append(d, keyed(functionDiagnostic(call.Expr, "InvalidQuantileWarning"), annotationFloat(q)))
 	}
 	type group struct {
 		series  value.Series
@@ -449,7 +449,7 @@ func functionHistogramOne(ctx context.Context, call CallPlan, args []value.Resul
 		if point.Histogram == nil {
 			upper, err := strconv.ParseFloat(value.Label(series.Labels, "le"), 64)
 			if err != nil {
-				d = append(d, functionDiagnostic(call.Expr, "BadBucketLabelWarning"))
+				d = append(d, keyed(functionDiagnostic(call.Expr, "BadBucketLabelWarning"), value.Label(series.Labels, "le"), histogramInputName(f.Profile, seriesMetricName(series))))
 				continue
 			}
 			if entry == nil {
@@ -477,7 +477,7 @@ func functionHistogramOne(ctx context.Context, call CallPlan, args []value.Resul
 	for _, key := range order {
 		entry := groups[key]
 		if entry.native != nil && len(entry.classic) > 0 {
-			d = append(d, functionDiagnostic(call.Expr, "MixedClassicNativeHistogramsWarning"))
+			d = append(d, keyed(functionDiagnostic(call.Expr, "MixedClassicNativeHistogramsWarning"), histogramInputName(f.Profile, seriesMetricName(entry.series))))
 			delete(groups, key)
 		}
 	}
@@ -509,7 +509,7 @@ func functionHistogramOne(ctx context.Context, call CallPlan, args []value.Resul
 				continue
 			}
 			if reason != "" && (f.Profile.ID == "promql-prometheus-3.13.5" || reason == "HistogramQuantileForcedMonotonicityInfo") {
-				d = append(d, functionDiagnostic(call.Expr, reason))
+				d = append(d, histogramQuantileReasonKey(f.Profile, functionDiagnostic(call.Expr, reason), seriesMetricName(entry.series)))
 			}
 			out.Vector = append(out.Vector, functionSeries(entry.series, functionSample(result, f.Time), true))
 		}
@@ -521,7 +521,7 @@ func histogramBinary(op string, a, b value.Sample) (value.Sample, bool, []syntax
 }
 func histogramBinaryProfile(op string, a, b value.Sample, p profile.Profile) (value.Sample, bool, []syntax.Diagnostic, error) {
 	incompatible := func() (value.Sample, bool, []syntax.Diagnostic, error) {
-		return value.Sample{}, false, []syntax.Diagnostic{functionDiagnostic(TypedExpr{}, "IncompatibleTypesInBinOpInfo")}, nil
+		return value.Sample{}, false, []syntax.Diagnostic{keyed(functionDiagnostic(TypedExpr{}, "IncompatibleTypesInBinOpInfo"), op, binaryOperandType(a), binaryOperandType(b))}, nil
 	}
 	if a.Histogram != nil && b.Histogram != nil {
 		switch op {
@@ -539,10 +539,10 @@ func histogramBinaryProfile(op string, a, b value.Sample, p profile.Profile) (va
 					reason = "IncompatibleBucketLayoutInBinOpWarning"
 				}
 				if p.ID == "promql-prometheus-3.1.0" && reason == "MismatchedCustomBucketsHistogramsInfo" {
-					return value.Sample{}, false, []syntax.Diagnostic{functionDiagnostic(TypedExpr{}, "MixedExponentialCustomHistogramsWarning")}, nil
+					return value.Sample{}, false, []syntax.Diagnostic{histogramReasonKey(functionDiagnostic(TypedExpr{}, "MixedExponentialCustomHistogramsWarning"), "", binaryHistogramOperation(op))}, nil
 				}
 				if p.ID == "promql-prometheus-3.13.5" || reason != "HistogramCounterResetCollisionWarning" {
-					d = append(d, functionDiagnostic(TypedExpr{}, reason))
+					d = append(d, binaryReasonKey(p, functionDiagnostic(TypedExpr{}, reason), op))
 				}
 			}
 			// A 3.13.5 explicit-reset plus explicit-not-reset pair cannot be

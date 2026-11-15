@@ -50,7 +50,15 @@ func run() error {
 	restart := flag.Bool("restart-worker", false, "resolve again through a fresh worker")
 	timeout := flag.Bool("inject-timeout", false, "kill an actual bounded busy worker before the second resolution")
 	probes := flag.Bool("sandbox-probes", false, "exercise real file/network/exec denial and memory kill")
+	provisionDir := flag.String("provision-dir", "", "write fresh private fixture state, manifest, token and fixture.json here (needs --artifact-dir and --sandbox-config), then exit")
+	sandboxConfig := flag.String("sandbox-config", "", "with --provision-dir: private operator sandbox JSON (symbolicate.Config) to embed")
 	flag.Parse()
+	if *provisionDir != "" {
+		if *artifactDir == "" || *sandboxConfig == "" {
+			return errors.New("--provision-dir needs --artifact-dir and --sandbox-config")
+		}
+		return provision(*provisionDir, *artifactDir, *sandboxConfig)
+	}
 	if *configFile == "" || *artifactDir == "" || *endpointEnv == "" || os.Getenv(*endpointEnv) != "" {
 		return errors.New("private config, actual fixture directory and unused local endpoint variable required")
 	}

@@ -857,19 +857,24 @@ func TestWiredLifecycleOldSnapshotCannotReviveARetiredRoot(t *testing.T) {
 	if status := r.routeRead(a.ID); status == 200 {
 		t.Fatal("a root restored from an old snapshot was readable")
 	}
-	if err := r.app.Control.ValidateArtifactReferences(r.ctx); wlCode(err) != model.Corrupt {
-		t.Fatalf("startup validation accepted a published intent over erased bytes: %v", err)
-	}
 	if got, err := life.LatestReference(r.ctx, r.candidate(a)); err != nil || got != 0 {
 		t.Fatalf("the ledger is retired, so nothing retains the root: %d %v", got, err)
 	}
-	if _, err := life.GC(r.ctx, r.scope(auth.ArtifactWrite), a.ID); err != nil { // heals the intent
-		t.Fatal(err)
+	// 10.09-W5: the verified fence in the ledger is the durable record that the root is gone,
+	// so startup validation moves the restored intent back to retired instead of refusing to
+	// start over bytes nothing may read (before the heal this was Corrupt; the unfenced
+	// published-intent-over-missing-bytes case still fails, see
+	// TestWiredLifecyclePublishedIntentWithoutBlobStillFailsOpen).
+	if err := r.app.Control.ValidateArtifactReferences(r.ctx); err != nil {
+		t.Fatalf("startup validation refused a published intent under a verified GC fence: %v", err)
 	}
 	if r.intentState(a) != "retired" {
-		t.Fatal("the fence did not retire the restored intent again")
+		t.Fatal("validation did not retire the restored intent")
 	}
-	if err := r.app.Control.ValidateArtifactReferences(r.ctx); err != nil {
+	if _, err := life.GC(r.ctx, r.scope(auth.ArtifactWrite), a.ID); err != nil { // idempotent
 		t.Fatal(err)
+	}
+	if status := r.routeRead(a.ID); status == 200 {
+		t.Fatal("a healed root was readable")
 	}
 }

@@ -18,56 +18,99 @@ import (
 	"unicode/utf8"
 )
 
-type workerInput struct {
-	Version        uint16     `json:"version"`
-	Map            []byte     `json:"map"`
-	MapHash        model.Hash `json:"map_hash"`
-	Line           uint32     `json:"line"`
-	Column         uint32     `json:"column"`
-	IncludeSources bool       `json:"include_sources"`
-	Sources        []byte     `json:"sources,omitempty"`
-	SourcesHash    model.Hash `json:"sources_hash"`
+// workerPosition is one generated-code position inside a batch.
+type workerPosition struct {
+	Line   uint32 `json:"line"`
+	Column uint32 `json:"column"`
 }
+
+// workerInput is one map plus every distinct position of one request that
+// resolves against it. The map is hashed, decoded and (when granted) its
+// sources parsed once per worker run, so a deep stack of frames in one bundle
+// costs one sandbox launch instead of one per frame.
+type workerInput struct {
+	Version        uint16           `json:"version"`
+	Map            []byte           `json:"map"`
+	MapHash        model.Hash       `json:"map_hash"`
+	Positions      []workerPosition `json:"positions"`
+	IncludeSources bool             `json:"include_sources"`
+	Sources        []byte           `json:"sources,omitempty"`
+	SourcesHash    model.Hash       `json:"sources_hash"`
+}
+
+// workerOutput is the answer for one position; the worker prints one per
+// input position, in order.
 type workerOutput struct {
 	Reason        Reason        `json:"reason"`
 	Position      *CodeIdentity `json:"position,omitempty"`
 	SourceContext *string       `json:"source_context,omitempty"`
 }
 
-func resolveInput(in workerInput) workerOutput {
-	if in.Version != 1 || in.Line == 0 {
-		return workerOutput{Reason: InvalidMap}
+func uniform(n int, r Reason) []workerOutput {
+	out := make([]workerOutput, n)
+	for i := range out {
+		out[i].Reason = r
+	}
+	return out
+}
+
+// resolveBatch answers every position of in. A map-level failure answers every
+// position alike; a position-level failure (line 0) only its own.
+func resolveBatch(in workerInput) []workerOutput {
+	n := len(in.Positions)
+	if n == 0 || n > MaxResolvedFrames {
+		return uniform(1, InvalidMap)
+	}
+	if in.Version != 1 {
+		return uniform(n, InvalidMap)
 	}
 	if len(in.Map) == 0 || len(in.Map)+len(in.Sources) > MaxMapBytes {
-		return workerOutput{Reason: ResourceLimit}
+		return uniform(n, ResourceLimit)
 	}
 	if model.HashCanonical(in.Map) != in.MapHash || len(in.Sources) > 0 && model.HashCanonical(in.Sources) != in.SourcesHash {
-		return workerOutput{Reason: CorruptArtifact}
+		return uniform(n, CorruptArtifact)
 	}
 	decoded, e := sourcemap.Decode(bytes.NewReader(in.Map), sourcemap.Limits{MaxBytes: MaxMapBytes, MaxFiles: 1024, MaxDepth: 8})
 	if e != nil {
 		if errors.Is(e, sourcemap.ErrLimit) {
-			return workerOutput{Reason: ResourceLimit}
+			return uniform(n, ResourceLimit)
 		}
-		return workerOutput{Reason: InvalidMap}
+		return uniform(n, InvalidMap)
 	}
-	p, ok, e := decoded.Lookup(in.Line, in.Column)
-	if e != nil {
-		return workerOutput{Reason: InvalidMap}
-	}
-	if !ok {
-		return workerOutput{Reason: Unmapped}
-	}
-	out := workerOutput{Reason: Resolved, Position: &CodeIdentity{Source: p.SourceID, Function: p.Name, Line: p.Line, Column: p.Column}}
-	if in.IncludeSources {
-		if len(in.Sources) == 0 {
-			return workerOutput{Reason: SourceDenied}
+	var doc sourceDocument
+	var docErr error
+	docParsed := false
+	out := make([]workerOutput, n)
+	for i, pos := range in.Positions {
+		if pos.Line == 0 {
+			out[i].Reason = InvalidMap
+			continue
 		}
-		var doc sourceDocument
-		if json.Unmarshal(in.Sources, &doc) != nil {
-			return workerOutput{Reason: CorruptArtifact}
+		p, ok, e := decoded.Lookup(pos.Line, pos.Column)
+		if e != nil {
+			out[i].Reason = InvalidMap
+			continue
 		}
-		out.SourceContext = doc.context(in.Line-1, in.Column, p.SourceID, p.Line, 1)
+		if !ok {
+			out[i].Reason = Unmapped
+			continue
+		}
+		out[i] = workerOutput{Reason: Resolved, Position: &CodeIdentity{Source: p.SourceID, Function: p.Name, Line: p.Line, Column: p.Column}}
+		if in.IncludeSources {
+			if len(in.Sources) == 0 {
+				out[i] = workerOutput{Reason: SourceDenied}
+				continue
+			}
+			if !docParsed {
+				docErr = json.Unmarshal(in.Sources, &doc)
+				docParsed = true
+			}
+			if docErr != nil {
+				out[i] = workerOutput{Reason: CorruptArtifact}
+				continue
+			}
+			out[i].SourceContext = doc.context(pos.Line-1, pos.Column, p.SourceID, p.Line, 1)
+		}
 	}
 	return out
 }
@@ -178,7 +221,7 @@ func WorkerMain() int {
 	if e = decodeClosed(os.Stdin, &in, MaxInputBytes); e != nil {
 		return 72
 	}
-	out := resolveInput(in)
+	out := resolveBatch(in)
 	if e = json.NewEncoder(os.Stdout).Encode(out); e != nil {
 		return 70
 	}

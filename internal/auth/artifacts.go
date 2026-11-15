@@ -5,14 +5,37 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"github.com/arynyklas/soundpost/internal/artifacts/refledger"
 	"github.com/arynyklas/soundpost/internal/model"
 )
 
 const ArtifactWrite Permission = "artifacts.write"
 const ArtifactRead Permission = "artifacts.read"
 
+// ArtifactRetentionElapsed is the SafeDetail of the NotFound a read of an artifact is refused
+// with once its effective retention has elapsed (D-new C07 below). It is only ever answered to a
+// caller whose scope already covers the artifact, so it tells a reader nothing about other
+// tenants' artifacts; to everyone else the artifact is simply absent.
+const ArtifactRetentionElapsed = "retention_elapsed"
+
 // ValidateArtifactState is called inside the same control transaction as a
 // reservation/reference write. Source credentials are never artifact authority.
+//
+// D-new C07 (owner decision, 10.09-W2, 2026-11-15): the read gate uses the artifact's EFFECTIVE
+// retention, not the retention stored in its manifest. A map is readable until the later of the
+// upload's own deadline and the deadline of every unreleased reference to it (a retained error
+// occurrence, profile or build record, or an open issue that groups occurrences naming it), so a
+// map that retention keeps for a referencing record is also readable and symbolicatable for
+// exactly as long. It is the value Lifecycle.EffectiveRetention reports: both are computed by
+// refledger.EffectiveRetention over the same verified reference ledger, here inside the state
+// the read is decided on, so no read path (route, symbolication, export, native profiles) can
+// pass a map the lifecycle considers gone, and none can skip the check by not owning a
+// Lifecycle. A read of an elapsed map is refused as NotFound with ArtifactRetentionElapsed; a
+// GC-fenced map is NotFound; a ledger that does not verify (edited, removed with its index entry,
+// rolled back) refuses every read of the project's maps as Corrupt rather than guessing. Writes
+// (reservation, publication, cleanup) are not read-gated and ignore the ledger. Per-organization
+// and per-project retention overrides enter where a reference's deadline is chosen
+// (LifecycleConfig.DefaultRetention), so they are part of the effective retention.
 func (scope Scope) ValidateArtifactState(st model.ControlState, m model.BlobManifest, write bool) error {
 	if scope.service == nil || scope.sourceCredential != nil || scope.org != m.Org || !scope.AllowsProject(m.Project) {
 		return model.Fail(model.NotFound)
@@ -26,9 +49,6 @@ func (scope Scope) ValidateArtifactState(st model.ControlState, m model.BlobMani
 	}
 	if write && scope.elevation != (model.ID{}) {
 		return model.Fail(model.Forbidden)
-	}
-	if !write && m.RetainUntil != 0 && int64(m.RetainUntil) <= scope.service.now().UnixNano() {
-		return model.Fail(model.NotFound)
 	}
 	if err := scope.ValidateControlState(st); err != nil {
 		return err
@@ -48,6 +68,20 @@ func (scope Scope) ValidateArtifactState(st model.ControlState, m model.BlobMani
 			return model.Fail(model.Conflict)
 		}
 		return model.Fail(model.NotFound)
+	}
+	if !write {
+		until, retired, err := refledger.EffectiveRetention(st, m)
+		if err != nil {
+			return err
+		}
+		if retired {
+			return model.Fail(model.NotFound)
+		}
+		if until != 0 && int64(until) <= scope.service.now().UnixNano() {
+			elapsed := model.Fail(model.NotFound)
+			elapsed.SafeDetail = ArtifactRetentionElapsed
+			return elapsed
+		}
 	}
 	src, ok := st.Sources[m.Source.String()]
 	if !ok || src.Org != m.Org || src.Project != m.Project || src.Retired || src.Revoked || src.Closing || !src.Policy.Enabled || src.Browser {

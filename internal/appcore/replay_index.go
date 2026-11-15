@@ -9,6 +9,7 @@ import (
 	"github.com/arynyklas/soundpost/internal/ingest"
 	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/replays"
+	"slices"
 	"time"
 )
 
@@ -53,27 +54,74 @@ func NewReplayIndexingAppender(inner ingest.Appender, index ReplayIndex) (ingest
 	return &replayIndexingAppender{inner: inner, index: index, now: time.Now}, nil
 }
 
-func (a *replayIndexingAppender) Append(ctx context.Context, scope auth.Scope, b model.NormalizedBatch) (model.Receipt, error) {
+// StoredChecker is optionally implemented by the index (*replays.Service): the
+// check of a batch's chunks against the chunks already stored for the same
+// replays. An index without it is checked against the checkpoint index only.
+type StoredChecker interface {
+	CheckStored(ctx context.Context, scope auth.Scope, project model.ID, chunks []model.ReplayChunk) error
+}
+
+// replayChunks is the replay chunks of a batch; nil when it carries none.
+func replayChunks(b model.NormalizedBatch) ([]*model.ReplayChunk, error) {
 	var chunks []*model.ReplayChunk
 	for i := range b.Records {
 		if r := &b.Records[i]; r.Kind == model.Replay {
 			if r.Payload.Replay == nil {
-				return model.Receipt{}, model.Fail(model.Invalid)
+				return nil, model.Fail(model.Invalid)
 			}
 			chunks = append(chunks, r.Payload.Replay)
 		}
 	}
-	if len(chunks) == 0 {
-		return a.inner.Append(ctx, scope, b)
-	}
+	return chunks, nil
+}
+
+// check refuses, as a typed fault and without writing anything, a batch whose
+// replay chunks conflict with the checkpoint index or with the chunks already
+// stored. It returns the chunks the index step must record.
+func (a *replayIndexingAppender) check(ctx context.Context, scope auth.Scope, b model.NormalizedBatch, chunks []*model.ReplayChunk) ([]*model.ReplayChunk, error) {
 	indexed, err := indexedChunks(chunks)
 	if err != nil {
-		return model.Receipt{}, err
+		return nil, err
 	}
 	for _, c := range indexed {
 		if err = a.index.CheckIndex(ctx, scope, b.Project, *c); err != nil {
-			return model.Receipt{}, indexFault(err)
+			return nil, indexFault(err)
 		}
+	}
+	if stored, ok := a.index.(StoredChecker); ok {
+		values := make([]model.ReplayChunk, len(chunks))
+		for i, c := range chunks {
+			values[i] = *c
+		}
+		if err = stored.CheckStored(ctx, scope, b.Project, values); err != nil {
+			return nil, indexFault(err)
+		}
+	}
+	return indexed, nil
+}
+
+// Preflight is ingest.Preflighter: the pre-store refusals of Append, run before
+// the quota reservation, so a refused forged batch leaves no charged reservation.
+func (a *replayIndexingAppender) Preflight(ctx context.Context, scope auth.Scope, b model.NormalizedBatch) error {
+	chunks, err := replayChunks(b)
+	if err != nil || len(chunks) == 0 {
+		return err
+	}
+	_, err = a.check(ctx, scope, b, chunks)
+	return err
+}
+
+func (a *replayIndexingAppender) Append(ctx context.Context, scope auth.Scope, b model.NormalizedBatch) (model.Receipt, error) {
+	chunks, err := replayChunks(b)
+	if err != nil {
+		return model.Receipt{}, err
+	}
+	if len(chunks) == 0 {
+		return a.inner.Append(ctx, scope, b)
+	}
+	indexed, err := a.check(ctx, scope, b, chunks)
+	if err != nil {
+		return model.Receipt{}, err
 	}
 	receipt, err := a.inner.Append(ctx, scope, b)
 	if err != nil {
@@ -177,12 +225,15 @@ type checkpointKey struct {
 // stored together. The first chunk of each replay fixes the batch's root session
 // and every checkpoint is a pinned hash; a later delta of the same replay adds
 // nothing the index can answer differently (every chunk of a batch shares one
-// deadline). A batch that contradicts itself (two sessions for one replay, two
-// different chunks at one checkpoint sequence) is a Conflict before any chunk
-// of it is stored.
+// deadline). A delta that is first in the batch is dropped again when a
+// checkpoint of the same replay follows it, because a replay is rooted by its
+// checkpoint, never by a delta. A batch that contradicts itself (two sessions
+// for one replay, two different chunks at one checkpoint sequence) is a Conflict
+// before any chunk of it is stored.
 func indexedChunks(chunks []*model.ReplayChunk) ([]*model.ReplayChunk, error) {
 	sessions := make(map[model.ID]model.ID, len(chunks))
 	checkpoints := map[checkpointKey]*model.ReplayChunk{}
+	rootDelta := map[model.ID]*model.ReplayChunk{}
 	out := make([]*model.ReplayChunk, 0, len(chunks))
 	for _, c := range chunks {
 		session, known := sessions[c.Replay]
@@ -205,8 +256,15 @@ func indexedChunks(chunks []*model.ReplayChunk) ([]*model.ReplayChunk, error) {
 				continue
 			}
 			checkpoints[key] = c
+			if d := rootDelta[c.Replay]; d != nil {
+				out = slices.DeleteFunc(out, func(x *model.ReplayChunk) bool { return x == d })
+				delete(rootDelta, c.Replay)
+			}
 		}
 		if !known || isCheckpoint {
+			if !isCheckpoint {
+				rootDelta[c.Replay] = c
+			}
 			out = append(out, c)
 		}
 	}

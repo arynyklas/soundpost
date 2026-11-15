@@ -5,6 +5,7 @@ package artifacts
 import (
 	"context"
 	"encoding/json"
+	"github.com/arynyklas/soundpost/internal/artifacts/refledger"
 	"github.com/arynyklas/soundpost/internal/auth"
 	"github.com/arynyklas/soundpost/internal/model"
 	"slices"
@@ -12,14 +13,19 @@ import (
 )
 
 // ReferenceKind names the retained usage that keeps a map: an error occurrence,
-// a profile, or a build record. The set is closed: a reference never carries a
-// URL or any other user-supplied string.
+// a profile, a build record, or (written only by HoldMaps) an open issue. The
+// set is closed: a reference never carries a URL or any other user-supplied
+// string.
 type ReferenceKind string
 
 const (
-	ReferenceError   ReferenceKind = "error"
-	ReferenceProfile ReferenceKind = "profile"
-	ReferenceBuild   ReferenceKind = "build"
+	ReferenceError   ReferenceKind = refledger.KindError
+	ReferenceProfile ReferenceKind = refledger.KindProfile
+	ReferenceBuild   ReferenceKind = refledger.KindBuild
+	// ReferenceIssue is the hold of an open issue that groups occurrences naming the map
+	// (holds.go). It is identified by the issue alone, is dropped when the issue stops being
+	// open and may be taken again when it reopens; Reference and Unreference refuse it.
+	ReferenceIssue ReferenceKind = refledger.KindIssue
 )
 
 // The artifact intent's state. "retired" is written in the same control transition
@@ -32,14 +38,11 @@ const (
 
 const (
 	// DefaultMapRetention is how long a reference with no explicit deadline
-	// retains its map.
+	// retains its map when the lifecycle has no retention policy to ask
+	// (LifecycleConfig.DefaultRetention).
 	DefaultMapRetention = 90 * 24 * time.Hour
 	// MaxReferenceRetention bounds how far one reference can pin a map.
 	MaxReferenceRetention = 10 * 365 * 24 * time.Hour
-	maxLedgerEntries      = 1024
-	ledgerVersion         = 1
-	ledgerPrefix          = model.ArtifactLedgerKeyPrefix
-	indexPrefix           = model.ArtifactLedgerIndexKeyPrefix
 )
 
 // OriginCursor is the durable position of the retained record that uses the map
@@ -51,12 +54,7 @@ type OriginCursor struct {
 }
 
 func (o OriginCursor) valid() bool {
-	switch o.Kind {
-	case ReferenceError, ReferenceProfile, ReferenceBuild:
-	default:
-		return false
-	}
-	return o.Cursor.Group != (model.ID{}) && o.Cursor.Index != 0
+	return o.Kind != ReferenceIssue && refledger.ValidOrigin(string(o.Kind), o.Cursor)
 }
 
 // StateStore is the replicated control state the reference ledgers live in
@@ -95,11 +93,24 @@ type LifecycleConfig struct {
 	Origins    OriginVerifier // optional
 	Now        func() time.Time
 	CacheBytes int // visibility-bound fragment cache budget; 0 disables
+	// DefaultRetention is how long a Reference with no explicit deadline retains the
+	// map in one project at an instant: the audited organization and project retention
+	// for source maps (retention.Resolve ArtifactDays), so an override is honoured. Nil
+	// means DefaultMapRetention.
+	DefaultRetention func(ctx context.Context, org, project model.ID, at model.UnixNano) (time.Duration, error)
 }
 
 // Lifecycle owns artifact references, retention decisions and the read fences.
 // It installs the read gate on the Service it is built over, so the common Get
 // path, ReadAuthorized and ReadSourcesAuthorized all apply the same fences.
+//
+// The retention decision of a read is D-new C07 (owner decision, backlog item
+// 10.09-W2): a map is readable until its EFFECTIVE retention, the later of the
+// upload's own deadline and every unreleased reference (EffectiveRetention), and
+// not until the upload's stored deadline alone. The check itself runs where every
+// reader meets it, auth.Scope.ValidateArtifactState, over the same verified ledger
+// (internal/artifacts/refledger); Lifecycle adds the organization delete
+// generation and the visibility-bound cache on top.
 type Lifecycle struct {
 	service *Service
 	cfg     LifecycleConfig
@@ -114,124 +125,14 @@ func NewLifecycle(s *Service, cfg LifecycleConfig) (*Lifecycle, error) {
 		cfg.Now = time.Now
 	}
 	l := &Lifecycle{service: s, cfg: cfg}
-	l.gate = &readGate{deletes: cfg.Deletes, state: cfg.State, cache: newFragmentCache(cfg.CacheBytes)}
+	l.gate = &readGate{deletes: cfg.Deletes, cache: newFragmentCache(cfg.CacheBytes)}
 	s.gate.Store(l.gate)
 	return l, nil
 }
 
-type refEntry struct {
-	Kind        ReferenceKind  `json:"kind"`
-	Cursor      model.Cursor   `json:"cursor"`
-	RetainUntil model.UnixNano `json:"retain_until_ns"`
-	Released    bool           `json:"released,omitempty"`
-}
-
-// refLedger is the complete reference state of one artifact root. Head is a
-// digest over everything else, and the project index pins (Seq, Head), so an
-// edited, removed or rolled-back ledger is detected on load.
-type refLedger struct {
-	Version int            `json:"Version"`
-	Project model.ID       `json:"Project"`
-	Root    model.ID       `json:"Root"`
-	Seq     uint64         `json:"Seq"`
-	Retired bool           `json:"Retired"`
-	Floor   model.UnixNano `json:"Floor"` // latest deadline of entries compacted away
-	Entries []refEntry     `json:"Entries"`
-	Head    model.Hash     `json:"Head"`
-}
-type refIndexEntry struct {
-	Seq  uint64     `json:"Seq"`
-	Head model.Hash `json:"Head"`
-}
-
-func (l refLedger) digest() model.Hash {
-	l.Head = model.Hash{}
-	raw, err := model.CanonicalJSON(l)
-	if err != nil {
-		return model.Hash{}
-	}
-	return model.HashCanonical(raw)
-}
-
-// latest is the latest deadline any unreleased reference still holds.
-func (l *refLedger) latest() model.UnixNano {
-	if l == nil {
-		return 0
-	}
-	out := l.Floor
-	for _, e := range l.Entries {
-		if !e.Released && e.RetainUntil > out {
-			out = e.RetainUntil
-		}
-	}
-	return out
-}
-
-func ledgerKey(project, root model.ID) string {
-	return ledgerPrefix + project.String() + ":" + root.String()
-}
-func indexKey(project model.ID) string { return indexPrefix + project.String() }
-
-func readIndex(settings map[string]json.RawMessage, project model.ID) (map[string]refIndexEntry, error) {
-	raw, ok := settings[indexKey(project)]
-	if !ok {
-		return map[string]refIndexEntry{}, nil
-	}
-	var idx map[string]refIndexEntry
-	if model.StrictJSON(raw, &idx) != nil || idx == nil {
-		return nil, model.Fail(model.Corrupt)
-	}
-	return idx, nil
-}
-
-// loadLedger returns the verified ledger, nil when the artifact has none, and
-// Corrupt for any disagreement between the ledger and the index.
-func loadLedger(settings map[string]json.RawMessage, project, root model.ID) (*refLedger, error) {
-	idx, err := readIndex(settings, project)
-	if err != nil {
-		return nil, err
-	}
-	ie, indexed := idx[root.String()]
-	raw, stored := settings[ledgerKey(project, root)]
-	if !stored && !indexed {
-		return nil, nil
-	}
-	if stored != indexed {
-		return nil, model.Fail(model.Corrupt)
-	}
-	var l refLedger
-	if model.StrictJSON(raw, &l) != nil || l.Version != ledgerVersion || l.Project != project || l.Root != root || len(l.Entries) > maxLedgerEntries || l.Head != l.digest() || l.Seq != ie.Seq || l.Head != ie.Head {
-		return nil, model.Fail(model.Corrupt)
-	}
-	for _, e := range l.Entries {
-		if !(OriginCursor{Kind: e.Kind, Cursor: e.Cursor}).valid() {
-			return nil, model.Fail(model.Corrupt)
-		}
-	}
-	return &l, nil
-}
-
-// storeLedger seals and writes the ledger and its index entry together.
-func storeLedger(o *model.ControlOrg, l *refLedger) error {
-	l.Version = ledgerVersion
-	l.Head = l.digest()
-	raw, err := json.Marshal(l)
-	if err != nil {
-		return model.Fail(model.Corrupt)
-	}
-	idx, err := readIndex(o.Settings, l.Project)
-	if err != nil {
-		return err
-	}
-	idx[l.Root.String()] = refIndexEntry{Seq: l.Seq, Head: l.Head}
-	rawIdx, err := json.Marshal(idx)
-	if err != nil {
-		return model.Fail(model.Corrupt)
-	}
-	o.Settings[ledgerKey(l.Project, l.Root)] = raw
-	o.Settings[indexKey(l.Project)] = rawIdx
-	return nil
-}
+// Now is the lifecycle's clock: the instant every deadline it records, extends or
+// expires is measured on.
+func (l *Lifecycle) Now() time.Time { return l.cfg.Now() }
 
 func deletionCovers(st model.ControlState, m model.BlobManifest) bool {
 	for _, op := range st.Deletions {
@@ -242,81 +143,138 @@ func deletionCovers(st model.ControlState, m model.BlobManifest) bool {
 	return false
 }
 
-// mutation is run inside one replicated control transaction, over the verified
-// ledger. It returns whether the ledger changed.
-type mutation func(m model.ArtifactManifest, l *refLedger, now model.UnixNano) (bool, error)
+// plan is what one ledger operation changes, computed read-only over a control state.
+type plan struct {
+	project    model.ID
+	ledgers    []*refledger.Ledger           // sealed on write; Seq already advanced
+	putHolders map[model.ID]refledger.Holder // issue -> holder to store
+	delHolders []model.ID                    // issues whose holder is removed
+	retire     []string                      // artifact intent keys flipped to retired
+}
 
-// apply runs fn over the verified ledger of one published artifact inside a
-// single control transaction: authorize (when non-nil) sees the intent, a
-// deleted artifact is NotFound, a corrupt ledger fails the transaction, and a
-// changed ledger is sealed together with its index entry (and, when bump is set,
-// the org delete generation advances: readable bytes are about to go).
-func (l *Lifecycle) apply(ctx context.Context, org, project model.ID, id ArtifactID, bump bool, authorize func(model.ControlState, model.ArtifactReferenceIntent) error, fn mutation) error {
+func (p plan) empty() bool {
+	return len(p.ledgers) == 0 && len(p.putHolders) == 0 && len(p.delHolders) == 0 && len(p.retire) == 0
+}
+
+// write applies the plan to the state a control transaction is changing. When bump is set the
+// org delete generation advances if a ledger changed: readable bytes are about to go.
+func (p plan) write(st *model.ControlState, org model.ID, bump bool) error {
+	o, ok := st.Orgs[org.String()]
+	if !ok {
+		return model.Fail(model.NotFound)
+	}
+	if err := refledger.Store(&o, p.project, p.ledgers...); err != nil {
+		return err
+	}
+	for issue, h := range p.putHolders {
+		if err := refledger.PutHolder(&o, p.project, issue, h); err != nil {
+			return err
+		}
+	}
+	for _, issue := range p.delHolders {
+		refledger.DeleteHolder(&o, p.project, issue)
+	}
+	st.Orgs[org.String()] = o
+	if bump && len(p.ledgers) > 0 {
+		if st.DeleteGenerations == nil {
+			st.DeleteGenerations = map[string]uint64{}
+		}
+		st.DeleteGenerations[org.String()]++
+	}
+	for _, key := range p.retire {
+		intent := st.ArtifactIntents[key]
+		intent.State = intentRetired
+		st.ArtifactIntents[key] = intent
+	}
+	return nil
+}
+
+// run evaluates an operation over the committed state first and commits only when it has
+// something to change: a call that changes nothing (a repeated Reference, a release of
+// nothing) is a read, not a replicated control transaction. The evaluation is repeated
+// inside the transaction, over the state it really changes. The instant is fixed per call,
+// so both evaluations decide on the same time.
+func (l *Lifecycle) run(ctx context.Context, org model.ID, bump bool, evaluate func(model.ControlState, model.UnixNano) (plan, error)) error {
+	now := model.UnixNano(l.cfg.Now().UnixNano())
+	pending := false
+	if err := l.cfg.State.View(ctx, func(st model.ControlState) error {
+		p, err := evaluate(st, now)
+		pending = !p.empty()
+		return err
+	}); err != nil || !pending {
+		return err
+	}
 	update := l.cfg.State.Update
 	if u, ok := l.cfg.State.(ledgerUpdater); ok && !bump {
-		update = u.UpdateArtifactReferences // Reference / Unreference: ledger bookkeeping, not authority
+		update = u.UpdateArtifactReferences // Reference / Unreference / holds: ledger bookkeeping, not authority
 	}
 	return update(ctx, func(st *model.ControlState) error {
+		p, err := evaluate(*st, now)
+		if err != nil || p.empty() {
+			return err
+		}
+		return p.write(st, org, bump)
+	})
+}
+
+// mutation is run over the verified ledger of one published artifact. It returns whether the
+// ledger changed.
+type mutation func(m model.ArtifactManifest, l *refledger.Ledger, now model.UnixNano) (bool, error)
+
+// one evaluates fn over the verified ledger of one artifact: authorize (when non-nil) sees the
+// intent, a deleted artifact is NotFound, a corrupt ledger fails the evaluation, and a changed
+// ledger is part of the plan. The GC fence and the intent move together, in one control
+// transition: control (which cannot read the ledger) sees "retired" and no longer requires the
+// root's bytes, and the fence is durable before retention erases them. A crash after the fence
+// leaves a retired intent over present bytes (an orphan the next pass erases), never a
+// published intent over missing bytes. A ledger fenced by an earlier build over a
+// still-published intent is healed here too.
+func one(org, project model.ID, id ArtifactID, authorize func(model.ControlState, model.ArtifactReferenceIntent) error, fn mutation) func(model.ControlState, model.UnixNano) (plan, error) {
+	return func(st model.ControlState, now model.UnixNano) (plan, error) {
 		key := org.String() + ":" + project.String() + ":" + id.String()
 		intent, ok := st.ArtifactIntents[key]
 		if !ok || intent.State != intentPublished && intent.State != intentRetired {
-			return model.Fail(model.NotFound)
+			return plan{}, model.Fail(model.NotFound)
 		}
 		if authorize != nil {
-			if err := authorize(*st, intent); err != nil {
-				return err
+			if err := authorize(st, intent); err != nil {
+				return plan{}, err
 			}
 		}
-		if deletionCovers(*st, intent.Map.Manifest) {
-			return model.Fail(model.NotFound)
+		if deletionCovers(st, intent.Map.Manifest) {
+			return plan{}, model.Fail(model.NotFound)
 		}
 		o, ok := st.Orgs[org.String()]
 		if !ok {
-			return model.Fail(model.NotFound)
+			return plan{}, model.Fail(model.NotFound)
 		}
-		if o.Settings == nil {
-			o.Settings = map[string]json.RawMessage{}
-		}
-		ledger, err := loadLedger(o.Settings, project, id)
+		ledger, err := refledger.Load(o.Settings, project, id)
 		if err != nil {
-			return err
+			return plan{}, err
 		}
 		if ledger == nil {
-			ledger = &refLedger{Project: project, Root: id}
+			ledger = &refledger.Ledger{Project: project, Root: id}
 		}
-		changed, err := fn(intent.Manifest, ledger, model.UnixNano(l.cfg.Now().UnixNano()))
+		if intent.State == intentRetired && !ledger.Retired {
+			// The fence writes the ledger and the intent in one transition: a retired intent
+			// over a ledger that is missing or not fenced means the ledger was removed or
+			// rolled back (not detectable by the digest and the index alone).
+			return plan{}, model.Fail(model.Corrupt)
+		}
+		changed, err := fn(intent.Manifest, ledger, now)
 		if err != nil {
-			return err
+			return plan{}, err
 		}
-		// The GC fence and the intent move together, in this one control transition: control
-		// (which cannot read the ledger) sees "retired" and no longer requires the root's
-		// bytes, and the fence is durable before retention erases them. A crash after the fence
-		// leaves a retired intent over present bytes (an orphan the next pass erases), never a
-		// published intent over missing bytes. A ledger fenced by an earlier build over a
-		// still-published intent is healed here too.
-		retire := ledger.Retired && intent.State == intentPublished
-		if !changed && !retire {
-			return nil
-		}
+		p := plan{project: project}
 		if changed {
 			ledger.Seq++
-			if err = storeLedger(&o, ledger); err != nil {
-				return err
-			}
-			if bump {
-				if st.DeleteGenerations == nil {
-					st.DeleteGenerations = map[string]uint64{}
-				}
-				st.DeleteGenerations[org.String()]++
-			}
-			st.Orgs[org.String()] = o
+			p.ledgers = []*refledger.Ledger{ledger}
 		}
-		if retire {
-			intent.State = intentRetired
-			st.ArtifactIntents[key] = intent
+		if ledger.Retired && intent.State == intentPublished {
+			p.retire = []string{key}
 		}
-		return nil
-	})
+		return p, nil
+	}
 }
 
 // mutate authorizes artifacts.write over the artifact's exact org/project (the
@@ -326,22 +284,46 @@ func (l *Lifecycle) mutate(ctx context.Context, scope auth.Scope, id ArtifactID,
 	if scope.Permission() != auth.ArtifactWrite || len(scope.ProjectIDs()) != 1 {
 		return model.Fail(model.NotFound)
 	}
-	return l.apply(ctx, scope.OrgID(), scope.ProjectIDs()[0], id, false, func(st model.ControlState, in model.ArtifactReferenceIntent) error {
+	org, project := scope.OrgID(), scope.ProjectIDs()[0]
+	return l.run(ctx, org, false, one(org, project, id, func(st model.ControlState, in model.ArtifactReferenceIntent) error {
 		return scope.ValidateArtifactCleanup(st, in.Map.Manifest)
-	}, fn)
+	}, fn))
+}
+
+// defaultRetention is how long a Reference without a deadline retains the map of one project.
+func (l *Lifecycle) defaultRetention(ctx context.Context, scope auth.Scope, now time.Time) (time.Duration, error) {
+	if l.cfg.DefaultRetention == nil {
+		return DefaultMapRetention, nil
+	}
+	if scope.Permission() != auth.ArtifactWrite || len(scope.ProjectIDs()) != 1 {
+		return 0, model.Fail(model.NotFound)
+	}
+	d, err := l.cfg.DefaultRetention(ctx, scope.OrgID(), scope.ProjectIDs()[0], model.UnixNano(now.UnixNano()))
+	if err != nil {
+		return 0, err
+	}
+	return d, nil
 }
 
 // Reference records that a retained error/profile/build usage needs the map
-// until retainUntil (zero: DefaultMapRetention from now). The origin is a typed
-// cursor, never a user string. Idempotent: a repeat never shortens, the same
-// origin may extend, a released origin or a GC-fenced map is a Conflict.
+// until retainUntil (zero: the audited source-map retention of the project from
+// now, DefaultMapRetention without a policy). The origin is a typed cursor, never
+// a user string. Idempotent: a repeat never shortens, the same origin may extend,
+// a released origin or a GC-fenced map is a Conflict, and so is a map whose
+// retention (its own deadline and every other reference) has already elapsed: an
+// expired map is gone for its readers (C07) and a late reference cannot revive it,
+// whether or not retention has fenced it yet.
 func (l *Lifecycle) Reference(ctx context.Context, scope auth.Scope, id ArtifactID, origin OriginCursor, retainUntil model.UnixNano) error {
 	if !origin.valid() {
 		return model.Fail(model.Invalid)
 	}
 	now := l.cfg.Now()
 	if retainUntil == 0 {
-		retainUntil = model.UnixNano(now.Add(DefaultMapRetention).UnixNano())
+		d, err := l.defaultRetention(ctx, scope, now)
+		if err != nil {
+			return err
+		}
+		retainUntil = model.UnixNano(now.Add(d).UnixNano())
 	}
 	if int64(retainUntil) <= now.UnixNano() || int64(retainUntil) > now.Add(MaxReferenceRetention).UnixNano() {
 		return model.Fail(model.Invalid)
@@ -359,11 +341,14 @@ func (l *Lifecycle) Reference(ctx context.Context, scope auth.Scope, id Artifact
 			return model.Fail(model.Invalid)
 		}
 	}
-	return l.mutate(ctx, scope, id, func(_ model.ArtifactManifest, led *refLedger, _ model.UnixNano) (bool, error) {
+	return l.mutate(ctx, scope, id, func(m model.ArtifactManifest, led *refledger.Ledger, at model.UnixNano) (bool, error) {
 		if led.Retired {
 			return false, model.Fail(model.Conflict) // the GC fence was taken first
 		}
-		i := slices.IndexFunc(led.Entries, func(e refEntry) bool { return e.Kind == origin.Kind && e.Cursor == origin.Cursor })
+		if max(m.RetainUntil, led.Latest()) <= at {
+			return false, model.Fail(model.Conflict) // retention elapsed: expired, not yet fenced, and not revivable
+		}
+		i := slices.IndexFunc(led.Entries, func(e refledger.Entry) bool { return e.Kind == string(origin.Kind) && e.Cursor == origin.Cursor })
 		if i >= 0 {
 			e := &led.Entries[i]
 			if e.Released {
@@ -375,29 +360,15 @@ func (l *Lifecycle) Reference(ctx context.Context, scope auth.Scope, id Artifact
 			e.RetainUntil = retainUntil
 			return true, nil
 		}
-		if len(led.Entries) >= maxLedgerEntries {
-			led.compact(model.UnixNano(now.UnixNano()))
-			if len(led.Entries) >= maxLedgerEntries {
+		if len(led.Entries) >= refledger.MaxEntries {
+			led.Compact(at)
+			if len(led.Entries) >= refledger.MaxEntries {
 				return false, model.Fail(model.TooLarge)
 			}
 		}
-		led.Entries = append(led.Entries, refEntry{Kind: origin.Kind, Cursor: origin.Cursor, RetainUntil: retainUntil})
+		led.Entries = append(led.Entries, refledger.Entry{Kind: string(origin.Kind), Cursor: origin.Cursor, RetainUntil: retainUntil})
 		return true, nil
 	})
-}
-
-// compact folds expired entries into Floor. Released tombstones stay: they are
-// what keeps a released occurrence from being revived.
-func (l *refLedger) compact(now model.UnixNano) {
-	kept := l.Entries[:0]
-	for _, e := range l.Entries {
-		if !e.Released && e.RetainUntil <= now {
-			l.Floor = max(l.Floor, e.RetainUntil)
-			continue
-		}
-		kept = append(kept, e)
-	}
-	l.Entries = kept
 }
 
 // Unreference releases one origin (its record expired or was deleted). Fenced by
@@ -408,24 +379,24 @@ func (l *Lifecycle) Unreference(ctx context.Context, scope auth.Scope, id Artifa
 	if !origin.valid() {
 		return model.Fail(model.Invalid)
 	}
-	return l.mutate(ctx, scope, id, func(_ model.ArtifactManifest, led *refLedger, _ model.UnixNano) (bool, error) {
+	return l.mutate(ctx, scope, id, func(_ model.ArtifactManifest, led *refledger.Ledger, _ model.UnixNano) (bool, error) {
 		if expectedSeq != 0 && led.Seq != expectedSeq {
 			return false, model.Fail(model.Conflict)
 		}
 		if led.Retired {
 			return false, nil
 		}
-		i := slices.IndexFunc(led.Entries, func(e refEntry) bool { return e.Kind == origin.Kind && e.Cursor == origin.Cursor })
+		i := slices.IndexFunc(led.Entries, func(e refledger.Entry) bool { return e.Kind == string(origin.Kind) && e.Cursor == origin.Cursor })
 		switch {
 		case i >= 0 && led.Entries[i].Released:
 			return false, nil
 		case i >= 0:
 			led.Entries[i].Released = true
 		default:
-			if len(led.Entries) >= maxLedgerEntries {
+			if len(led.Entries) >= refledger.MaxEntries {
 				return false, model.Fail(model.TooLarge)
 			}
-			led.Entries = append(led.Entries, refEntry{Kind: origin.Kind, Cursor: origin.Cursor, Released: true})
+			led.Entries = append(led.Entries, refledger.Entry{Kind: string(origin.Kind), Cursor: origin.Cursor, Released: true})
 		}
 		return true, nil
 	})

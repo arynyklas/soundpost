@@ -302,8 +302,11 @@ func TestReplayIndexIsNotReadForBatchesWithoutReplayRecordsAndNotWrittenForRefus
 	if _, err := rig.admit(rig.replayBatch(good)); err != nil {
 		t.Fatal(err)
 	}
-	if index.checks.Load() != 1 || index.records.Load() != 1 {
-		t.Fatalf("an admitted checkpoint: %d index reads and %d writes, want one each", index.checks.Load(), index.records.Load())
+	// The index is read twice per checkpoint: by the preflight before the quota
+	// reservation (ingest.Preflighter) and again by Append, which cannot rely on
+	// state that may have moved in between. It is written once.
+	if index.checks.Load() != 2 || index.records.Load() != 1 {
+		t.Fatalf("an admitted checkpoint: %d index reads and %d writes, want two reads and one write", index.checks.Load(), index.records.Load())
 	}
 }
 

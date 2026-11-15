@@ -61,14 +61,14 @@ func TestWorkerLimitsPreserveOriginalFrames(t *testing.T) {
 		t.Fatalf("original lost: %#v %v", got, e)
 	}
 	for _, raw := range []string{`{"version":3,"sources":["../private"],"names":[],"mappings":"AAAA"}`, `{"version":3,"sources":["a.ts"],"names":[],"mappings":"!"}`} {
-		in := workerInput{Version: 1, Map: []byte(raw), MapHash: model.HashCanonical([]byte(raw)), Line: 1}
-		result := resolveInput(in)
+		in := workerInput{Version: 1, Map: []byte(raw), MapHash: model.HashCanonical([]byte(raw)), Positions: []workerPosition{{Line: 1}}}
+		result := resolveOne(in)
 		if result.Reason != InvalidMap || result.Position != nil {
 			t.Fatal("invalid map resolved", result)
 		}
 	}
-	oversized := workerInput{Version: 1, Map: make([]byte, MaxMapBytes+1), Line: 1}
-	if resolveInput(oversized).Reason != ResourceLimit {
+	oversized := workerInput{Version: 1, Map: make([]byte, MaxMapBytes+1), Positions: []workerPosition{{Line: 1}}}
+	if resolveOne(oversized).Reason != ResourceLimit {
 		t.Fatal("map byte limit bypass")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -80,8 +80,8 @@ func TestWorkerLimitsPreserveOriginalFrames(t *testing.T) {
 }
 func TestSourceContextGrantSeparate(t *testing.T) {
 	public := []byte(`{"version":3,"sources":["src/app.ts"],"names":[],"mappings":"AAAA","sourcesContent":["SOURCE CANARY"]}`)
-	in := workerInput{Version: 1, Map: public, MapHash: model.HashCanonical(public), Line: 1}
-	got := resolveInput(in)
+	in := workerInput{Version: 1, Map: public, MapHash: model.HashCanonical(public), Positions: []workerPosition{{Line: 1}}}
+	got := resolveOne(in)
 	encoded, _ := json.Marshal(got)
 	if got.Reason != Resolved || bytes.Contains(encoded, []byte("CANARY")) || got.SourceContext != nil {
 		t.Fatalf("default source leaked: %s", encoded)
@@ -90,12 +90,12 @@ func TestSourceContextGrantSeparate(t *testing.T) {
 	in.Sources = private
 	in.SourcesHash = model.HashCanonical(private)
 	in.IncludeSources = true
-	got = resolveInput(in)
+	got = resolveOne(in)
 	if got.SourceContext == nil || *got.SourceContext != "first" {
 		t.Fatal("separately supplied granted context missing", got)
 	}
 	in.IncludeSources = false
-	got = resolveInput(in)
+	got = resolveOne(in)
 	if got.SourceContext != nil {
 		t.Fatal("implicit private source release")
 	}
@@ -109,7 +109,7 @@ func TestWorkerClosedDTOAndHash(t *testing.T) {
 		t.Fatal("trailing DTO")
 	}
 	raw := []byte(`{"version":3,"sources":["a.ts"],"names":[],"mappings":"AAAA"}`)
-	if resolveInput(workerInput{Version: 1, Map: raw, MapHash: model.HashCanonical([]byte("other")), Line: 1}).Reason != CorruptArtifact {
+	if resolveOne(workerInput{Version: 1, Map: raw, MapHash: model.HashCanonical([]byte("other")), Positions: []workerPosition{{Line: 1}}}).Reason != CorruptArtifact {
 		t.Fatal("unverified worker map")
 	}
 }

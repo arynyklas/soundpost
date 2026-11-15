@@ -6,11 +6,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"github.com/arynyklas/soundpost/internal/appcore"
 	"github.com/arynyklas/soundpost/internal/artifacts"
 	"github.com/arynyklas/soundpost/internal/auth"
 	"github.com/arynyklas/soundpost/internal/model"
 	"io"
+	"strings"
 	"testing"
 	"time"
 )
@@ -418,5 +420,73 @@ func TestArtifactBlobManifestHashKeepsPrimitiveNumericBinding(t *testing.T) {
 	legacy := []byte(`{"Build":"11111111111111111111111111111111","DebugID":"debug","GeneratedSHA256":"0000000000000000000000000000000000000000000000000000000000000000","Hash":"0000000000000000000000000000000000000000000000000000000000000000","MapSHA256":"0000000000000000000000000000000000000000000000000000000000000000","Org":"11111111111111111111111111111111","Path":"dist/app.js","PolicyEpoch":7,"PolicyRevision":"1","PrivateSources":false,"Project":"11111111111111111111111111111111","RetainUntil":"9","Root":"11111111111111111111111111111111","Size":17,"Source":"11111111111111111111111111111111"}`)
 	if model.BlobManifestHash(m) != model.HashCanonical(legacy) {
 		t.Fatal("wire scalar cutover changed the durable manifest binding bytes")
+	}
+}
+
+// A genuine retained map larger than two fragments: the size comes from real
+// mapping segments, not sourcesContent (which the transformer strips), so the
+// retained bytes span several 256 KiB fragments and every one must be returned.
+func TestArtifactMultiFragmentRetainedMapAndSourceContentRead(t *testing.T) {
+	f := newArtifactFixture(t)
+	ctx := context.Background()
+	const lines = 30_000
+	var generated, mappings strings.Builder
+	for i := 0; i < lines; i++ {
+		fmt.Fprintf(&generated, "export const value%d = %d;\n", i, i)
+		if i > 0 {
+			mappings.WriteByte(';')
+			mappings.WriteString("AACT")
+		} else {
+			mappings.WriteString("AAAA")
+		}
+		mappings.WriteString(",IAAI,KAAK,MAAM,OAAO")
+	}
+	doc := map[string]any{"version": 3, "sources": []string{"src/big.ts"}, "names": []string{}, "mappings": mappings.String(), "sourcesContent": []string{generated.String()}}
+	raw, e := json.Marshal(doc)
+	if e != nil {
+		t.Fatal(e)
+	}
+	delete(doc, "sourcesContent")
+	retained, _ := json.Marshal(doc)
+	if len(retained) <= 2*model.ArtifactFragmentLimit {
+		t.Fatalf("fixture retained %d bytes: not larger than 512 KiB without sourcesContent", len(retained))
+	}
+	m := f.manifest(raw)
+	m.SourceContent = true
+	got, e := f.app.Artifacts.Put(ctx, f.scope(t, auth.Permission("artifacts.write")), m, bytes.NewReader(raw))
+	if e != nil {
+		t.Fatal(e)
+	}
+	var total uint64
+	for _, fr := range got.Map.Fragments {
+		if fr.Size == 0 || fr.Size > model.ArtifactFragmentLimit {
+			t.Fatalf("fragment %d size %d", fr.Ordinal, fr.Size)
+		}
+		total += uint64(fr.Size)
+	}
+	if len(got.Map.Fragments) < 3 || total != uint64(len(retained)) {
+		t.Fatalf("%d fragments, %d bytes; want >=3 fragments totalling %d", len(got.Map.Fragments), total, len(retained))
+	}
+	read := f.scope(t, auth.Permission("artifacts.read"))
+	r, e := f.app.Artifacts.Get(ctx, read, got.ID)
+	if e != nil {
+		t.Fatal(e)
+	}
+	body, e := io.ReadAll(r)
+	r.Close()
+	if e != nil || !bytes.Equal(body, retained) {
+		t.Fatalf("retained read %d bytes, want %d: %v", len(body), len(retained), e)
+	}
+	sr, e := f.app.Artifacts.GetSources(ctx, read, got.ID)
+	if e != nil {
+		t.Fatal(e)
+	}
+	sb, e := io.ReadAll(sr)
+	sr.Close()
+	var back struct {
+		SourcesContent []string `json:"sourcesContent"`
+	}
+	if e != nil || got.Sources == nil || json.Unmarshal(sb, &back) != nil || len(back.SourcesContent) != 1 || back.SourcesContent[0] != generated.String() {
+		t.Fatalf("source_content read lost or altered content (%d bytes): %v", len(sb), e)
 	}
 }

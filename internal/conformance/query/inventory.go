@@ -66,6 +66,9 @@ type SourceProfile struct {
 	License           string    `json:"license"`
 	ConfigurationPath string    `json:"configuration_path"`
 	Artifact          *Artifact `json:"artifact"`
+	// ConfigurationOracle is the configuration-phase variant of the oracle image
+	// (Prometheus profiles only; decision D29).
+	ConfigurationOracle *ConfigurationOracle `json:"configuration_oracle,omitempty"`
 }
 type SourceLock struct {
 	ManifestVersion int               `json:"manifest_version"`

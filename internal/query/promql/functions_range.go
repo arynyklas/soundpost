@@ -23,7 +23,7 @@ func functionQuantile(q float64, xs []float64) float64 {
 	if q > 1 {
 		return math.Inf(1)
 	}
-	sort.Float64s(xs)
+	sort.Sort(quantileHeap(xs))
 	rank := float64(q * float64(len(xs)-1))
 	lo := int(math.Floor(rank))
 	hi := lo + 1
@@ -31,7 +31,22 @@ func functionQuantile(q float64, xs []float64) float64 {
 		hi = lo
 	}
 	weight := rank - float64(lo)
-	return value.Add(value.Mul(xs[lo], 1-weight), value.Mul(xs[hi], weight))
+	// The reference's interpolation returns the upper term's NaN payload when both terms are NaN.
+	return value.AddSecond(value.Mul(xs[lo], 1-weight), value.Mul(xs[hi], weight))
+}
+
+// quantileHeap orders values the way the pinned engines' vectorByValueHeap does:
+// a NaN is less than everything, including another NaN, so which NaN payload ends
+// up at the interpolation ranks is decided by the same comparison sequence.
+type quantileHeap []float64
+
+func (s quantileHeap) Len() int      { return len(s) }
+func (s quantileHeap) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
+func (s quantileHeap) Less(i, j int) bool {
+	if math.IsNaN(s[i]) {
+		return true
+	}
+	return s[i] < s[j]
 }
 func functionKahan(xs []float64) (float64, float64) {
 	sum, comp := 0.0, 0.0
@@ -52,6 +67,21 @@ func functionKahanAdd(sum, comp, x float64) (float64, float64) {
 	return next, value.Add(comp, value.Add(value.Sub(x, next), sum))
 }
 
+// functionKahanAddOverTime310 is functionKahanAdd as Prometheus 3.1.0 compiled it into
+// avg_over_time: when both the compensation and the correction term are NaN the
+// correction (the second operand of the `+=`) wins. Only the else branch can meet NaNs
+// (a NaN operand fails the magnitude comparison), so it alone carries the rule.
+func functionKahanAddOverTime310(sum, comp, x float64) (float64, float64) {
+	next := value.Add(sum, x)
+	if math.IsInf(next, 0) {
+		return next, 0
+	}
+	if math.Abs(sum) >= math.Abs(x) {
+		return next, value.AddSecond(comp, value.Add(value.Sub(sum, next), x))
+	}
+	return next, value.AddSecond(comp, value.Add(value.Sub(x, next), sum))
+}
+
 func functionSum(xs []float64) float64 {
 	sum, comp := functionKahan(xs)
 	return value.Add(sum, comp)
@@ -69,23 +99,28 @@ func functionSum(xs []float64) float64 {
 //	        with an Inf-mean guard.
 //	3.13.5: sum/n + c/n; incremental step scales mean and c by (n-1)/n and
 //	        folds f/n.
-func functionMean(xs []float64, profileID string) float64 {
+func functionMean(xs []float64, profileID string, overTime bool) float64 {
 	if len(xs) == 0 {
 		return math.NaN()
 	}
 	if profileID == "promql-prometheus-3.13.5" {
 		return functionMean3135(xs)
 	}
-	return functionMean310(xs)
+	return functionMean310(xs, overTime)
 }
 
-func functionMean310(xs []float64) float64 {
+func functionMean310(xs []float64, overTime bool) float64 {
+	kahanAdd, finalAdd := functionKahanAdd, value.Add
+	if overTime {
+		// avg_over_time on 3.1.0 adds the compensation second: see functionKahanAddOverTime310.
+		kahanAdd, finalAdd = functionKahanAddOverTime310, value.AddSecond
+	}
 	var sum, mean, count, comp float64
 	incremental := false
 	for _, x := range xs {
 		count++
 		if !incremental {
-			next, nextComp := functionKahanAdd(sum, comp, x)
+			next, nextComp := kahanAdd(sum, comp, x)
 			// The first value is always accepted, even if infinite, so the
 			// switch never divides by a zero count.
 			if count == 1 || !math.IsInf(next, 0) {
@@ -106,13 +141,13 @@ func functionMean310(xs []float64) float64 {
 				continue
 			}
 		}
-		corrected := mean + comp
-		mean, comp = functionKahanAdd(mean, comp, x/count-corrected/count)
+		corrected := value.Add(mean, comp)
+		mean, comp = kahanAdd(mean, comp, value.Sub(x/count, corrected/count))
 	}
 	if incremental {
-		return mean + comp
+		return finalAdd(mean, comp)
 	}
-	return (sum + comp) / count
+	return value.Div(finalAdd(sum, comp), count)
 }
 
 func functionMean3135(xs []float64) float64 {
@@ -138,9 +173,9 @@ func functionMean3135(xs []float64) float64 {
 		mean, comp = functionKahanAdd(scaledMean, scaledComp, x/count)
 	}
 	if incremental {
-		return mean + comp
+		return value.Add(mean, comp)
 	}
-	return sum/count + comp/count
+	return value.Add(sum/count, comp/count)
 }
 
 // functionRangeVariance is the window (`*_over_time`) population variance: a
@@ -157,14 +192,25 @@ func functionRangeVariance(xs []float64) float64 {
 	}
 	return value.Div(value.Add(m2, m2Comp), count)
 }
+
+// functionVariance is the aggregation (stdvar/stddev) variance: the reference's
+// Welford update seeded with the first value (mean = first, sum of squares 0, or
+// the canonical NaN when the first value is NaN or infinite), so that NaN payloads
+// meet in the reference's operand order.
 func functionVariance(xs []float64) float64 {
-	mean, m2 := 0.0, 0.0
-	for i, x := range xs {
-		d := value.Sub(x, mean)
-		mean = value.Add(mean, value.Div(d, float64(i+1)))
-		m2 = value.Add(m2, value.Mul(d, value.Sub(x, mean)))
+	mean, m2, count := xs[0], 0.0, 1.0
+	if math.IsNaN(xs[0]) || math.IsInf(xs[0], 0) {
+		m2 = math.NaN()
 	}
-	return value.Div(m2, float64(len(xs)))
+	for _, x := range xs[1:] {
+		count++
+		delta := value.Sub(x, mean)
+		// `mean += delta/count` and `m2 += delta*(x-mean)` keep the added term's NaN payload
+		// (the second operand) when both sides are NaN, on 3.1.0 and 3.13.5 alike.
+		mean = value.AddSecond(mean, value.Div(delta, count))
+		m2 = value.AddSecond(m2, value.Mul(delta, value.Sub(x, mean)))
+	}
+	return value.Div(m2, count)
 }
 func functionRegression(xs []value.Sample, reference model.UnixNano) (float64, float64) {
 	if len(xs) < 2 {
@@ -174,16 +220,7 @@ func functionRegression(xs []value.Sample, reference model.UnixNano) (float64, f
 	constant := true
 	var sums, compensation [4]float64
 	add := func(index int, v float64) {
-		sum := sums[index]
-		next := sum + v
-		if math.IsInf(next, 0) {
-			compensation[index] = 0
-		} else if math.Abs(sum) >= math.Abs(v) {
-			compensation[index] += (sum - next) + v
-		} else {
-			compensation[index] += (v - next) + sum
-		}
-		sums[index] = next
+		sums[index], compensation[index] = functionKahanAdd(sums[index], compensation[index], v)
 	}
 	for _, point := range xs {
 		x := float64(point.Time-reference) / 1e9
@@ -193,8 +230,8 @@ func functionRegression(xs []value.Sample, reference model.UnixNano) (float64, f
 		}
 		add(0, x)
 		add(1, y)
-		add(2, float64(x*y))
-		add(3, float64(x*x))
+		add(2, value.Mul(x, y))
+		add(3, value.Mul(x, x))
 	}
 	if constant {
 		if math.IsInf(first, 0) {
@@ -203,11 +240,13 @@ func functionRegression(xs []value.Sample, reference model.UnixNano) (float64, f
 		return 0, first
 	}
 	for i := range sums {
-		sums[i] += compensation[i]
+		sums[i] = value.Add(sums[i], compensation[i])
 	}
 	n := float64(len(xs))
-	slope := (sums[2] - sums[0]*sums[1]/n) / (sums[3] - sums[0]*sums[0]/n)
-	return slope, sums[1]/n - slope*sums[0]/n
+	covXY := value.Sub(sums[2], value.Div(value.Mul(sums[0], sums[1]), n))
+	varX := value.Sub(sums[3], value.Div(value.Mul(sums[0], sums[0]), n))
+	slope := value.Div(covXY, varX)
+	return slope, value.Sub(value.Div(sums[1], n), value.Div(value.Mul(slope, sums[0]), n))
 }
 func functionRangeBounds(call CallPlan, f Frame) (model.UnixNano, model.UnixNano, string) {
 	if f.HasWindow {
@@ -268,7 +307,7 @@ func functionRange(ctx context.Context, call CallPlan, args []value.Result, inde
 	if name == "quantile_over_time" {
 		q := functionFloat(args[0].Scalar)
 		if math.IsNaN(q) || q < 0 || q > 1 {
-			diagnostics = append(diagnostics, functionDiagnostic(call.Expr, "InvalidQuantileWarning"))
+			diagnostics = append(diagnostics, keyed(functionDiagnostic(call.Expr, "InvalidQuantileWarning"), annotationFloat(q)))
 		}
 	}
 	for _, series := range args[index].Matrix {
@@ -335,14 +374,14 @@ func functionRange(ctx context.Context, call CallPlan, args []value.Result, inde
 		case "sum_over_time", "avg_over_time":
 			if mixed {
 				emit = false
-				ds = append(ds, functionDiagnostic(call.Expr, "MixedFloatsHistogramsWarning"))
+				ds = append(ds, keyed(functionDiagnostic(call.Expr, "MixedFloatsHistogramsWarning"), seriesMetricName(series)))
 			} else if histCount > 0 {
 				h := value.CloneHistogram(*samples[0].Histogram)
 				for _, p := range samples[1:] {
 					var reason string
 					h, reason = histogramCombineForProfile(h, *p.Histogram, false, f.Profile.ID)
 					if reason != "" {
-						ds = append(ds, functionDiagnostic(call.Expr, reason))
+						ds = append(ds, histogramReasonKey(functionDiagnostic(call.Expr, reason), seriesMetricName(series), "aggregation"))
 						if h.Float == nil || reason == "MismatchedCustomBucketsHistogramsInfo" && f.Profile.ID == "promql-prometheus-3.1.0" {
 							emit = false
 							break
@@ -358,7 +397,7 @@ func functionRange(ctx context.Context, call CallPlan, args []value.Result, inde
 			} else {
 				x := functionSum(xs)
 				if name == "avg_over_time" {
-					x = functionMean(xs, f.Profile.ID)
+					x = functionMean(xs, f.Profile.ID, true)
 				}
 				sample = functionSample(x, f.Time)
 			}
@@ -374,7 +413,7 @@ func functionRange(ctx context.Context, call CallPlan, args []value.Result, inde
 				break
 			}
 			if mixed && f.Profile.ID == "promql-prometheus-3.13.5" {
-				ds = append(ds, functionDiagnostic(call.Expr, "HistogramIgnoredInMixedRangeInfo"))
+				ds = append(ds, keyed(functionDiagnostic(call.Expr, "HistogramIgnoredInMixedRangeInfo"), seriesMetricName(series)))
 			}
 			x := math.NaN()
 			switch name {
@@ -400,7 +439,7 @@ func functionRange(ctx context.Context, call CallPlan, args []value.Result, inde
 			case "mad_over_time":
 				median := functionQuantile(.5, append([]float64(nil), xs...))
 				for i, v := range xs {
-					xs[i] = math.Abs(v - median)
+					xs[i] = math.Abs(value.Sub(v, median))
 				}
 				x = functionQuantile(.5, xs)
 			case "stdvar_over_time", "stddev_over_time":
@@ -420,7 +459,7 @@ func functionRange(ctx context.Context, call CallPlan, args []value.Result, inde
 				slope, intercept := functionRegression(floats, reference)
 				x = slope
 				if name == "predict_linear" {
-					x = intercept + float64(slope*functionFloat(args[1].Scalar))
+					x = value.Add(value.Mul(slope, functionFloat(args[1].Scalar)), intercept)
 				}
 			case "double_exponential_smoothing":
 				if len(xs) < 2 {
@@ -471,7 +510,7 @@ func functionRate(call CallPlan, s value.Series, start, end model.UnixNano, f Fr
 	hist := first.Histogram != nil
 	for _, p := range points {
 		if (p.Histogram != nil) != hist {
-			return value.Sample{}, false, []syntax.Diagnostic{functionDiagnostic(call.Expr, "MixedFloatsHistogramsWarning")}, nil
+			return value.Sample{}, false, []syntax.Diagnostic{keyed(functionDiagnostic(call.Expr, "MixedFloatsHistogramsWarning"), seriesMetricName(s))}, nil
 		}
 	}
 	span := float64(last.Time-first.Time) / 1e9
@@ -491,7 +530,7 @@ func functionRate(call CallPlan, s value.Series, start, end model.UnixNano, f Fr
 				id = "NativeHistogramNotGaugeWarning"
 			}
 			if id != "" {
-				d = append(d, functionDiagnostic(call.Expr, id))
+				d = append(d, keyed(functionDiagnostic(call.Expr, id), seriesMetricName(s)))
 				break
 			}
 		}
@@ -506,7 +545,7 @@ func functionRate(call CallPlan, s value.Series, start, end model.UnixNano, f Fr
 		counterInitial = math.Float64frombits(uint64(histogramView(*first.Histogram).Count))
 		histogram, reason := histogramCombineForProfile(*last.Histogram, baseline, true, f.Profile.ID)
 		if reason != "" {
-			d = append(d, functionDiagnostic(call.Expr, reason))
+			d = append(d, histogramReasonKey(functionDiagnostic(call.Expr, reason), seriesMetricName(s), "subtraction"))
 		}
 		if histogram.Float == nil {
 			return value.Sample{}, false, d, nil
@@ -519,7 +558,7 @@ func functionRate(call CallPlan, s value.Series, start, end model.UnixNano, f Fr
 					}
 					histogram, reason = histogramCombineForProfile(histogram, *points[i-1].Histogram, false, f.Profile.ID)
 					if reason != "" {
-						d = append(d, functionDiagnostic(call.Expr, reason))
+						d = append(d, histogramReasonKey(functionDiagnostic(call.Expr, reason), seriesMetricName(s), "addition"))
 					}
 					if histogram.Float == nil {
 						return value.Sample{}, false, d, nil
@@ -536,7 +575,7 @@ func functionRate(call CallPlan, s value.Series, start, end model.UnixNano, f Fr
 		for _, point := range points[begin:] {
 			histogram, reason = histogramCombineForProfile(histogram, histogramEmptyShape(*point.Histogram), false, f.Profile.ID)
 			if reason != "" {
-				d = append(d, functionDiagnostic(call.Expr, reason))
+				d = append(d, histogramReasonKey(functionDiagnostic(call.Expr, reason), seriesMetricName(s), "addition"))
 			}
 			if histogram.Float == nil {
 				return value.Sample{}, false, d, nil
@@ -653,10 +692,10 @@ func possibleNonCounterNotes(call CallPlan, labels model.Labels, f Frame) []synt
 	if f.Profile.ID == "promql-prometheus-3.13.5" && enabled(f.Profile, "type-and-unit-labels") {
 		metricType := value.Label(labels, "__type__")
 		if metricType != "counter" && metricType != "histogram" {
-			return []syntax.Diagnostic{functionDiagnostic(call.Expr, "PossibleNonCounterLabelInfo")}
+			return []syntax.Diagnostic{keyed(functionDiagnostic(call.Expr, "PossibleNonCounterLabelInfo"), metricType, metricName)}
 		}
 	} else if !strings.HasSuffix(metricName, "_total") && !strings.HasSuffix(metricName, "_sum") && !strings.HasSuffix(metricName, "_count") && !strings.HasSuffix(metricName, "_bucket") {
-		return []syntax.Diagnostic{functionDiagnostic(call.Expr, "PossibleNonCounterInfo")}
+		return []syntax.Diagnostic{keyed(functionDiagnostic(call.Expr, "PossibleNonCounterInfo"), metricName)}
 	}
 	return nil
 }

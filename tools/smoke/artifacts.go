@@ -142,6 +142,8 @@ func runArtifactUpload(args []string) error {
 	flags.SetOutput(io.Discard)
 	configPath := flags.String("fixture-config", "", "private fixture configuration")
 	artifactDir := flags.String("artifact-dir", "", "sanitized output directory")
+	minRetained := flags.Uint64("min-retained-bytes", 2*model.ArtifactFragmentLimit+1, "minimum retained (sourcesContent-stripped) map size in bytes")
+	requireSources := flags.Bool("require-source-content", false, "require a source_content manifest and the explicit sources read")
 	if e := flags.Parse(args); e != nil {
 		return e
 	}
@@ -151,6 +153,9 @@ func runArtifactUpload(args []string) error {
 	c, m, e := readArtifactSmokeConfig(*configPath)
 	if e != nil {
 		return e
+	}
+	if *requireSources && !m.SourceContent {
+		return fmt.Errorf("manifest must declare source_content for the explicit sources read")
 	}
 	private, e := os.MkdirTemp("", "soundpost-artifact-smoke-")
 	if e != nil {
@@ -221,6 +226,11 @@ waiting:
 		if e = app.Storage.VerifyBlob(context.Background(), *staged.Sources); e != nil {
 			return e
 		}
+	}
+	// A genuine multi-fragment fixture: the killed child already made at least
+	// three retained fragments durable and none exceeds the fragment limit.
+	if e = requireMultiFragment(staged.Map, *minRetained); e != nil {
+		return e
 	}
 	// Every byte receipt of the killed child verified durable before publication.
 	killedAfterBytes := true
@@ -293,6 +303,9 @@ waiting:
 	}
 	a, _ := model.CanonicalJSON(staged.Map)
 	b, _ := model.CanonicalJSON(published.Map)
+	if e = requireMultiFragment(published.Map, *minRetained); e != nil {
+		return e
+	}
 	sameCursors := bytes.Equal(a, b) && published.ID == staged.ID && published.CommandID == staged.ID && published.ControlRevision != 0
 	if sources := staged.Sources; sources != nil {
 		sc, _ := model.CanonicalJSON(*sources)
@@ -322,6 +335,10 @@ waiting:
 	if e != nil || status != http.StatusOK || model.HashCanonical(download) != published.Map.Hash || bytes.Contains(download, []byte("sourcesContent")) {
 		return fmt.Errorf("artifact protected map read/hash mismatch")
 	}
+	// Every fragment is returned: the read is exactly the retained byte count.
+	if uint64(len(download)) != retainedBytes(published.Map) {
+		return fmt.Errorf("artifact read returned %d bytes, receipts record %d", len(download), retainedBytes(published.Map))
+	}
 	denied, e := artifactSmokeToken(c.DeniedTokenFile)
 	if e != nil {
 		return e
@@ -330,11 +347,27 @@ waiting:
 	if e != nil || deniedStatus != 401 && deniedStatus != 403 && deniedStatus != 404 {
 		return fmt.Errorf("artifact denied credential released a read")
 	}
+	sourcesRead := false
 	if m.SourceContent {
 		status, sourceBytes, err := readHTTP(reader, "sources")
 		if err != nil || status != 200 || published.Sources == nil || model.HashCanonical(sourceBytes) != published.Sources.Hash {
 			return fmt.Errorf("artifact explicit source read/hash mismatch")
 		}
+		var want, got struct {
+			SourcesContent []*string `json:"sourcesContent"`
+		}
+		if json.Unmarshal(input, &want) != nil || json.Unmarshal(sourceBytes, &got) != nil || len(want.SourcesContent) == 0 || len(got.SourcesContent) != len(want.SourcesContent) {
+			return fmt.Errorf("artifact explicit source read lost sourcesContent")
+		}
+		for i := range want.SourcesContent {
+			if want.SourcesContent[i] == nil || got.SourcesContent[i] == nil || *want.SourcesContent[i] != *got.SourcesContent[i] {
+				return fmt.Errorf("artifact explicit source read differs from uploaded sourcesContent")
+			}
+		}
+		sourcesRead = true
+	}
+	if *requireSources && !sourcesRead {
+		return fmt.Errorf("explicit source read was required but not performed")
 	}
 	if e = os.MkdirAll(*artifactDir, 0700); e != nil {
 		return e
@@ -350,10 +383,37 @@ waiting:
 		CommandID        model.ID                    `json:"command_id"`
 		DeniedStatus     int                         `json:"denied_status"`
 		Replication      string                      `json:"replication"`
-	}{1, killedAfterBytes, orphanDenied, sameCursors, published.Map.Hash, published.Map.Fragments, published.ControlRevision, published.CommandID, deniedStatus, "single_voter_only"}
+		RetainedBytes    uint64                      `json:"retained_bytes"`
+		SourcesRead      bool                        `json:"sources_read"`
+	}{1, killedAfterBytes, orphanDenied, sameCursors, published.Map.Hash, published.Map.Fragments, published.ControlRevision, published.CommandID, deniedStatus, "single_voter_only", retainedBytes(published.Map), sourcesRead}
 	raw, e = json.MarshalIndent(report, "", "  ")
 	if e != nil {
 		return e
 	}
 	return os.WriteFile(filepath.Join(*artifactDir, "artifact-upload.json"), raw, 0600)
+}
+
+func retainedBytes(r model.BlobReceipt) uint64 {
+	var n uint64
+	for _, f := range r.Fragments {
+		n += uint64(f.Size)
+	}
+	return n
+}
+
+// requireMultiFragment rejects a fixture whose retained map is small or fits in
+// fewer than three fragments: the kill/resume must span several durable fragments.
+func requireMultiFragment(r model.BlobReceipt, minBytes uint64) error {
+	if len(r.Fragments) < 3 {
+		return fmt.Errorf("retained map has %d fragments; need at least 3", len(r.Fragments))
+	}
+	for _, f := range r.Fragments {
+		if f.Size == 0 || f.Size > model.ArtifactFragmentLimit {
+			return fmt.Errorf("retained fragment %d has invalid size %d", f.Ordinal, f.Size)
+		}
+	}
+	if n := retainedBytes(r); n < minBytes {
+		return fmt.Errorf("retained map is %d bytes; need at least %d", n, minBytes)
+	}
+	return nil
 }

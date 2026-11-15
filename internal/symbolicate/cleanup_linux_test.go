@@ -62,7 +62,14 @@ run)
     dd bs=1 count=1 of=/dev/null 2>/dev/null
     cat "$D/hello"
     cat >/dev/null
-    echo '{"reason":"unmapped"}'
+    echo '[{"reason":"unmapped"}]'
+    exit 0;;
+  okbatch)
+    touch "$D/containers/$n"
+    dd bs=1 count=1 of=/dev/null 2>/dev/null
+    cat "$D/hello"
+    cat >"$D/stdin.json"
+    echo '[{"reason":"unmapped"},{"reason":"unmapped"},{"reason":"unmapped"}]'
     exit 0;;
   esac;;
 esac
@@ -141,17 +148,17 @@ func (d *fakeDocker) assertRemoved(t *testing.T) {
 
 func TestOCIContainerIsRemovedOnEveryExit(t *testing.T) {
 	fastRetries(t)
-	in := workerInput{Version: 1, Line: 1, Column: 0, Map: []byte("{}"), MapHash: model.HashCanonical([]byte("{}"))}
+	in := workerInput{Version: 1, Positions: []workerPosition{{Line: 1}}, Map: []byte("{}"), MapHash: model.HashCanonical([]byte("{}"))}
 	t.Run("normal success", func(t *testing.T) {
 		d := newFakeDocker(t, "ok")
-		if got := d.service(t).run(context.Background(), in); got.Reason != Unmapped {
+		if got := d.service(t).runOne(context.Background(), in); got.Reason != Unmapped {
 			t.Fatalf("fake worker answer: %+v", got)
 		}
 		d.assertRemoved(t)
 	})
 	t.Run("start-time failure of the run command", func(t *testing.T) {
 		d := newFakeDocker(t, "fail")
-		if got := d.service(t).run(context.Background(), in); got.Reason == Resolved {
+		if got := d.service(t).runOne(context.Background(), in); got.Reason == Resolved {
 			t.Fatalf("answer %+v", got)
 		}
 		removeRetries.Wait()
@@ -169,7 +176,7 @@ func TestOCIContainerIsRemovedOnEveryExit(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
 		defer cancel()
 		start := time.Now()
-		if got := d.service(t).run(ctx, in); got.Reason != Deadline && got.Reason != SandboxUnavailable {
+		if got := d.service(t).runOne(ctx, in); got.Reason != Deadline && got.Reason != SandboxUnavailable {
 			t.Fatalf("answer %+v", got)
 		}
 		if took := time.Since(start); took > 4*time.Second {
@@ -186,7 +193,7 @@ func TestOCIContainerIsRemovedOnEveryExit(t *testing.T) {
 		d := newFakeDocker(t, "late")
 		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 		defer cancel()
-		d.service(t).run(ctx, in)
+		d.service(t).runOne(ctx, in)
 		// The first remove finds nothing; the container appears 0.6 s after the
 		// client died. It must still end up removed.
 		time.Sleep(900 * time.Millisecond)

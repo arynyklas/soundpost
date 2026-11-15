@@ -350,6 +350,15 @@ func issueID(org, project model.ID, version uint16, fingerprint model.Hash) mode
 	copy(id[:], h.Sum(nil))
 	return id
 }
+
+// IssueID is the identity issueID gives the issue that groups evidence of this grouping version
+// and fingerprint in one project. A producer that must name the issue before the lifecycle
+// commits the evidence (the artifact holds of an occurrence are taken first) derives it here;
+// an issue that was re-pointed by a grouping migration keeps its own ID, so such a caller must
+// treat an ID the book does not know as unknown, never as absent.
+func IssueID(org, project model.ID, version uint16, fingerprint model.Hash) model.ID {
+	return issueID(org, project, version, fingerprint)
+}
 func effectID(kind string, occurrence model.ID) model.ID {
 	h := sha256.New()
 	h.Write([]byte("soundpost.issue.effect.v1"))

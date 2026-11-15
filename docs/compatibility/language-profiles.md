@@ -68,6 +68,46 @@ acknowledges nothing and fails reads closed, and restarted voters converge on id
 original receipt unchanged. The voters share one host and one process, so this is a software
 failure-domain check, not the three-independent-hardware qualification (`docs/operations/distributed.md`).
 
+## Numeric determinism and platforms (10.33)
+
+The release platform is linux/amd64 only (decision D10); arm64, Windows and macOS rows are reported as
+`out_of_release_scope`, never as passed. Within that scope the engines are bit-compared with the pinned
+references, with two declared limits:
+
+- `^` (power with a non-integer exponent) and `exp()` use the platform `math.Pow`/`math.Exp`, as the pinned
+  references do. On amd64 `math.Exp` is assembly that uses fused multiply-add when the CPU has it, so the last
+  bits of such results differ between a CPU with and without FMA (measured with `GODEBUG=cpu.fma=off`: 17,904
+  of 900,676 `Pow` and 49,598 `Exp` probe results change) and between architectures. There is no deterministic
+  amd64 reference to port, and a pure-Go port would move the owned results away from the references on the
+  release platform. They are therefore declared non-portable: conformance holds on hosts with the CPU features
+  of the oracle host (FMA), and on no other platform. `Pow` with an integer exponent is identical everywhere.
+  `Log`, `Log2`, `Log10` and `Exp2` are portable pure-Go ports (`third_party/portablemath`).
+- Invalid-operation NaN payloads are canonicalised at the arithmetic sites listed in
+  `internal/query/value` (`Add`/`Sub`/`Mul`/`Div`, quantile, Kahan sum, variance, histogram average and
+  quantile interpolation). Other NaN-creating arithmetic (the remaining aggregations, `rate`/`deriv`,
+  `holt_winters`, LogQL metric math, histogram bucket math) is not wrapped: its NaN payload bits are only
+  guaranteed on linux/amd64. Wrapping them and running the suites under qemu arm64 (10.33-W2) is an arm64
+  item and so out of the release scope.
+
+## PromQL selector regexes that are not UTF-8 (02.12-W3)
+
+Observed against both pinned references (`conformance/query/cases/promql-wave6-regex-utf8*.json`, same
+behaviour on 3.1.0 and 3.13.5):
+
+- A label-matcher regex (`=~`, `!~`, including `__name__`) whose `|`-separated alternatives contain no
+  regexp metacharacter (`\ . + * ? ( ) | [ ] { } ^ $`) is matched by byte equality against the
+  alternatives and is never compiled, so it is accepted even when it is not valid UTF-8 (the PromQL
+  string escape `\xff` yields one such byte). The owned engine does the same for both PromQL profiles.
+- Any metacharacter in any alternative sends the pattern through the compiler, which rejects the
+  invalid UTF-8 (`m{v=~"\xff.*"}`, `(\xff)`, `[\xff]`, `(?i)\xff`, `\xff|a.*`).
+- `label_replace` always compiles its regex, so `label_replace(m,"d","x","v","\xff")` is an evaluation
+  error on both references and on the owned engine (the comparator cannot compare that error text, so it
+  is covered by the syntax rows only as an accepted query).
+- A quoted or raw string holding the character U+FFFD itself is a lexical error on both references
+  (`m{v="<U+FFFD>"}`); the escape `"\ufffd"` is accepted. The owned lexer and formatter follow this.
+- Not probed: label values that are invalid UTF-8 (the case format carries JSON strings only), and Loki
+  stream-selector regexes.
+
 ## What it proves, and what it does not
 
 It proves that the locked release gate and smoke runner were executed for all three pinned

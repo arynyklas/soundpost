@@ -234,6 +234,11 @@ func applyIndex(st *model.ControlState, org, project model.ID, chunk model.Repla
 	}
 	changed := false
 	if g == nil {
+		// A replay is rooted by a checkpoint: a delta (which carries no root of its
+		// own) must not be the chunk that creates the group and fixes its session.
+		if chunk.CheckpointSequence != chunk.Sequence {
+			return false, model.Fail(model.Conflict)
+		}
 		g = &group{Version: groupVersion, Project: project, Replay: chunk.Replay, Session: chunk.Session}
 		changed = true
 	}

@@ -21,7 +21,7 @@ func TestReleaseBindingsResolveToLockedCaseRows(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chdir(here) })
-	cfg, err := LoadReleaseConfig("conformance/query", "conformance/query/release-policy.json", nil, 20261110)
+	cfg, err := LoadReleaseConfig("conformance/query", "conformance/query/release-policy.json", nil, []uint64{20261110})
 	if err != nil {
 		t.Fatal(err)
 	}

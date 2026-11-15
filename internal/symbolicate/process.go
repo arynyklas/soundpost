@@ -4,13 +4,11 @@ package symbolicate
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"github.com/arynyklas/soundpost/internal/model"
 	"io"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -38,16 +36,26 @@ type workerProcess struct {
 	attach  func() error
 }
 
-func (s *Service) run(ctx context.Context, in workerInput) workerOutput {
+// run answers every position of in with one sandboxed worker launch. A failure
+// of the launch or the worker answers every position with that reason.
+func (s *Service) run(ctx context.Context, in workerInput) []workerOutput {
+	out, reason := s.exec(ctx, in)
+	if reason != "" {
+		return uniform(len(in.Positions), reason)
+	}
+	return out
+}
+
+func (s *Service) exec(ctx context.Context, in workerInput) ([]workerOutput, Reason) {
 	ctx, cancel := context.WithTimeout(ctx, ProcessTimeout)
 	defer cancel()
 	p, e := s.launch(ctx, false)
 	if e != nil {
-		return workerOutput{Reason: SandboxUnavailable}
+		return nil, SandboxUnavailable
 	}
 	defer p.cleanup()
 	if e = p.cmd.Start(); e != nil {
-		return workerOutput{Reason: SandboxUnavailable}
+		return nil, SandboxUnavailable
 	}
 	waited := false
 	defer func() {
@@ -57,10 +65,10 @@ func (s *Service) run(ctx context.Context, in workerInput) workerOutput {
 		}
 	}()
 	if e = p.attach(); e != nil {
-		return workerOutput{Reason: SandboxUnavailable}
+		return nil, SandboxUnavailable
 	}
 	if _, e = p.input.Write([]byte{'A'}); e != nil {
-		return workerOutput{Reason: SandboxUnavailable}
+		return nil, SandboxUnavailable
 	}
 	ready := make(chan error, 1)
 	go func() {
@@ -80,13 +88,14 @@ func (s *Service) run(ctx context.Context, in workerInput) workerOutput {
 	select {
 	case e = <-ready:
 		if e != nil {
-			return workerOutput{Reason: SandboxUnavailable}
+			return nil, SandboxUnavailable
 		}
 	case <-ctx.Done():
-		return workerOutput{Reason: Deadline}
+		return nil, Deadline
 	}
 	// The worker enforces its own authoritative 100 ms processing watchdog (exit 124,
-	// typed `deadline`). This parent bound is the independent wall backstop and it
+	// typed `deadline`), covering the decode and every position of the batch. This
+	// parent bound is the independent wall backstop and it
 	// also spans the request/reply transport: through an OCI runtime that is the
 	// client -> daemon -> shim -> container stdio chain, measured at 96-162 ms
 	// round trip on an idle host, so a bare 100 ms made most OCI frames answer
@@ -98,14 +107,14 @@ func (s *Service) run(ctx context.Context, in workerInput) workerOutput {
 	frameCtx, frameCancel := context.WithTimeout(ctx, frameBudget)
 	defer frameCancel()
 	type answer struct {
-		out workerOutput
+		out []workerOutput
 		err error
 	}
 	done := make(chan answer, 1)
 	go func() {
 		writeDone := make(chan error, 1)
 		go func() { e := json.NewEncoder(p.input).Encode(in); p.input.Close(); writeDone <- e }()
-		var out workerOutput
+		var out []workerOutput
 		e := decodeClosed(p.output, &out, MaxOutputBytes)
 		if we := <-writeDone; e == nil {
 			e = we
@@ -118,20 +127,25 @@ func (s *Service) run(ctx context.Context, in workerInput) workerOutput {
 		waited = true
 		if e != nil || a.err != nil {
 			if p.oom() {
-				return workerOutput{Reason: ResourceLimit}
+				return nil, ResourceLimit
 			}
 			if p.cmd.ProcessState.ExitCode() == 124 {
-				return workerOutput{Reason: Deadline}
+				return nil, Deadline
 			}
-			return workerOutput{Reason: WorkerFailure}
+			return nil, WorkerFailure
 		}
-		if !validOutput(a.out, in.IncludeSources) {
-			return workerOutput{Reason: WorkerFailure}
+		if len(a.out) != len(in.Positions) {
+			return nil, WorkerFailure
 		}
-		return a.out
+		for _, o := range a.out {
+			if !validOutput(o, in.IncludeSources) {
+				return nil, WorkerFailure
+			}
+		}
+		return a.out, ""
 	case <-frameCtx.Done():
 		p.cmd.Process.Kill()
-		return workerOutput{Reason: Deadline}
+		return nil, Deadline
 	}
 }
 func validOutput(o workerOutput, private bool) bool {
@@ -161,15 +175,8 @@ func (s *Service) launch(ctx context.Context, probe bool) (*workerProcess, error
 		if !filepath.IsAbs(s.config.WorkerPath) {
 			return nil, errors.New("absolute worker required")
 		}
-		f, e := os.Open(s.config.WorkerPath)
-		if e != nil {
+		if e := s.verifyWorker(); e != nil {
 			return nil, e
-		}
-		h := sha256.New()
-		_, e = io.Copy(h, f)
-		f.Close()
-		if e != nil || hex.EncodeToString(h.Sum(nil)) != hex.EncodeToString(s.config.WorkerSHA256[:]) {
-			return nil, errors.New("worker provenance mismatch")
 		}
 		cmd = exec.CommandContext(ctx, s.config.WorkerPath, mode)
 		cmd.Env = []string{"GOMAXPROCS=1", "GOMEMLIMIT=192MiB", "GOGC=50"}

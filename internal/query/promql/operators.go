@@ -107,7 +107,13 @@ func (s *evaluationState) sampleBinary(n *Node, a, b value.Sample, at model.Unix
 		p.Time = at
 		return p, keep, ds, e
 	}
-	v, keep, valid := floatOperator(n.Text, math.Float64frombits(uint64(a.Float)), math.Float64frombits(uint64(b.Float)))
+	x, y := math.Float64frombits(uint64(a.Float)), math.Float64frombits(uint64(b.Float))
+	v, keep, valid := floatOperator(n.Text, x, y)
+	if valid && n.Text == "*" && s.plan.Profile.ID == "promql-prometheus-3.1.0" {
+		// Prometheus 3.1.0's compiled `*` keeps the second operand's NaN payload (every
+		// other arithmetic operator, and 3.13.5's `*`, keep the first).
+		v = value.MulSecond(x, y)
+	}
 	if !valid {
 		return value.Sample{}, false, nil, operatorError(n, "binary.operator-invalid", "invalid binary operator")
 	}
@@ -127,6 +133,11 @@ func (s *evaluationState) binary(n *Node, a, b value.Result, at model.UnixNano) 
 			return value.Result{}, nil, operatorError(n, "binary.operand-type", "histogram trimming is not allowed for scalar operations")
 		}
 		p, _, ds, e := s.sampleBinary(n, a.Scalar, b.Scalar, at)
+		if e == nil && n.Text == "*" && s.plan.Profile.ID == "promql-prometheus-3.1.0" {
+			// 3.1.0 compiles scalar*scalar (scalarBinop) to the first operand's NaN payload,
+			// unlike its vector `*` (see sampleBinary).
+			p.Float = model.FloatBits(math.Float64bits(value.Mul(math.Float64frombits(uint64(a.Scalar.Float)), math.Float64frombits(uint64(b.Scalar.Float)))))
+		}
 		return value.Result{Type: "scalar", Scalar: p}, ds, e
 	}
 	if n.Text == "and" || n.Text == "or" || n.Text == "unless" {

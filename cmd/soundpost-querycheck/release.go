@@ -30,6 +30,7 @@ func runRelease(args []string) error {
 	unbound := f.Bool("require-zero-unbound", false, "require zero unbound obligations")
 	skips := f.Bool("require-zero-skips", false, "require zero skips")
 	mismatches := f.Bool("require-zero-mismatches", false, "require zero mismatches")
+	partial := f.String("partial-generated-phase", "", "diagnostic only: run just the generated rows of this phase tag (e.g. promql:evaluation) and skip the authored phases; the command still exits non-zero")
 	if err := f.Parse(args); err != nil {
 		return err
 	}
@@ -43,7 +44,7 @@ func runRelease(args []string) error {
 			return err
 		}
 	}
-	cfg, err := q.LoadReleaseConfig(filepath.Dir(*policyPath), *policyPath, smoke, *seed)
+	cfg, err := q.LoadReleaseConfig(filepath.Dir(*policyPath), *policyPath, smoke, []uint64{*seed})
 	if err != nil {
 		return err
 	}
@@ -53,9 +54,17 @@ func runRelease(args []string) error {
 		if err != nil {
 			return err
 		}
-		results, runErr := q.RunReleasePhases(context.Background(), cfg.Lock, queryDir, *profileDir, *runtime, manifest)
-		if runErr != nil {
-			fmt.Fprintln(os.Stderr, "release phases:", runErr)
+		var results q.PhaseResults
+		if *partial == "" {
+			var runErr error
+			results, runErr = q.RunReleasePhases(context.Background(), cfg.Lock, queryDir, *profileDir, *runtime, manifest)
+			if runErr != nil {
+				fmt.Fprintln(os.Stderr, "release phases:", runErr)
+			}
+		} else {
+			for i, run := range cfg.Generated {
+				cfg.Generated[i].Rows = q.RowsOfPhase(run.Rows, *partial)
+			}
 		}
 		cfg.Oracle, cfg.Own = results.PhaseOracle(), results.PhaseOwn()
 		if *detailPath != "" {
@@ -67,6 +76,17 @@ func runRelease(args []string) error {
 				return err
 			}
 		}
+		// The generated concrete-input cases of this seed run through the same
+		// differential phase runners against the same pinned oracles.
+		env := q.GeneratedEnv{Lock: cfg.Lock, QueryDir: queryDir, ProfilesDir: *profileDir, Runtime: *runtime}
+		for i, run := range cfg.Generated {
+			executed, genErr := env.Execute(context.Background(), run.Seed, run.Rows)
+			if genErr != nil {
+				fmt.Fprintln(os.Stderr, "generated phases (seed", run.Seed, "):", genErr)
+			}
+			cfg.Generated[i] = executed
+		}
+		cfg.Minimize = env.Minimizer(cfg.GateDomains).Minimize
 	}
 	report, gateErr := q.ReleaseGate(context.Background(), cfg)
 	raw, err := q.MarshalReport(report)
@@ -80,6 +100,19 @@ func runRelease(args []string) error {
 	}
 	if _, err = os.Stdout.Write(raw); err != nil {
 		return err
+	}
+	var regressions []q.Regression
+	for _, g := range report.Generated {
+		regressions = append(regressions, g.Regressions...)
+	}
+	// The regression index is a content-locked inventory file: it is written
+	// only after the gate (nothing re-reads the lock afterwards) and must be
+	// relocked and reviewed before the next run.
+	if err = q.WriteRegressions(filepath.Join(filepath.Dir(*policyPath), "regressions"), regressions); err != nil {
+		return err
+	}
+	if *partial != "" {
+		return fmt.Errorf("partial diagnostic run of generated phase %s: not a release gate result (gate: %v)", *partial, gateErr)
 	}
 	if gateErr != nil {
 		return gateErr

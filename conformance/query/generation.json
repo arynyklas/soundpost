@@ -47,7 +47,8 @@
     {"profile": "promql-prometheus-3.13.5", "gate": "promql-binop-fill-modifiers", "expression": "m + fill(0) m", "category": "syntax"}
   ],
   "special_arguments": {
-    "info": ["m", "{job=\"api\"}"]
+    "info": ["m", "{job=\"api\"}"],
+    "double_exponential_smoothing": ["m[5m]", "0.5", "0.5"]
   },
   "semantic_only_gates": {
     "promql-delayed-name-removal": "changes name-drop timing, not syntax: no parser-visible rejection",

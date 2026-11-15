@@ -16,6 +16,7 @@ import (
 	"github.com/arynyklas/soundpost/internal/appcore"
 	"github.com/arynyklas/soundpost/internal/auth"
 	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/incidents"
 	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/notify"
 	"github.com/arynyklas/soundpost/internal/replica"
@@ -792,5 +793,162 @@ func TestWorkersReportAnUnprovableLeaseAndDoNothing(t *testing.T) {
 	}
 	if _, found := n.book(rule); found {
 		t.Fatal("a pass that could not prove its lease committed")
+	}
+}
+
+// openIncident opens one incident as the runner's own principal.
+func (n *workerNode) openIncident() (model.ID, incidents.Impact, incidents.State) {
+	n.t.Helper()
+	admin, err := n.app.Auth.AuthorizeSystem(n.ctx, n.org, []model.ID{n.project}, auth.OrgAdmin)
+	if err != nil {
+		n.t.Fatal(err)
+	}
+	id := model.NewID()
+	impact := incidents.Impact{Condition: model.NewID(), Episode: model.NewID(), Severity: incidents.SeverityMajor, State: incidents.ConditionFiring, Freshness: incidents.FreshnessFresh}
+	opened, err := n.app.Incidents.Act(n.ctx, admin, incidents.Action{CommandID: model.NewID(), Type: incidents.TypeOpen, Origin: incidents.OriginSystem, Target: incidents.Target{Project: n.project, Incident: id}, Impact: &impact}, workerNow)
+	if err != nil || opened.Status != incidents.StatusOpen {
+		n.t.Fatalf("open incident: %+v %v", opened, err)
+	}
+	return id, impact, opened
+}
+
+func (n *workerNode) incidentConfig(sender notify.Sender, limit int) appcore.WorkerConfig {
+	return n.config(func(c *appcore.WorkerConfig) {
+		c.Sender = sender
+		c.NotifyLimit = limit
+		c.Routing = hookRouting{binding: appcore.NotificationBinding{Policy: model.ID{0xf2}, Revision: 1, Config: notify.DefaultConfig(), Recipients: []model.ID{n.dest}}}
+	})
+}
+
+// The notification budget bounds INCIDENT decisions per pass as it bounds condition
+// decisions, and an incident already decided (same version) costs no budget, so the
+// next incident is reached on the next pass instead of being starved behind it.
+func TestWorkersBoundIncidentDecisionsPerPass(t *testing.T) {
+	n := newWorkerNode(t)
+	n.openIncident()
+	n.openIncident()
+	sender := &countingSender{}
+	w, err := n.app.NewWorkers(n.incidentConfig(sender, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := n.tick(w)
+	if first.Submitted != 2 || sender.count() != 1 {
+		t.Fatalf("first tick (two incidents, notify limit 1): %+v, sends %d", first, sender.count())
+	}
+	second := n.tick(w)
+	if second.Submitted != 2 || sender.count() != 2 {
+		t.Fatalf("second tick (the already decided incident must not consume the budget): %+v, sends %d", second, sender.count())
+	}
+	if third := n.tick(w); third.Submitted != 0 || sender.count() != 2 {
+		t.Fatalf("third tick did more work: %+v, sends %d", third, sender.count())
+	}
+}
+
+// ctxRules records the deadline of the context each pass hands to its stages.
+type ctxRules struct {
+	deadline atomic.Pointer[time.Time]
+	seen     chan struct{}
+	once     sync.Once
+}
+
+func (c *ctxRules) Rules(ctx context.Context, _ auth.Scope, _ model.ID) ([]rules.Rule, error) {
+	if d, ok := ctx.Deadline(); ok {
+		c.deadline.Store(&d)
+	}
+	c.once.Do(func() { close(c.seen) })
+	return nil, nil
+}
+
+// Run bounds every pass by PassTimeout: a stage that hangs cannot hold the leader
+// forever. The pass context handed to a stage carries a deadline of about PassTimeout.
+func TestWorkersRunBoundsEachPassByThePassTimeout(t *testing.T) {
+	n := newWorkerNode(t)
+	probe := &ctxRules{seen: make(chan struct{})}
+	const timeout = 40 * time.Second
+	w, err := n.app.NewWorkers(n.config(func(c *appcore.WorkerConfig) { c.Rules = probe; c.PassTimeout = timeout }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(n.ctx)
+	done := make(chan struct{})
+	started := time.Now()
+	go func() { w.Run(ctx); close(done) }()
+	select {
+	case <-probe.seen:
+	case <-time.After(30 * time.Second):
+		t.Fatal("the worker never ran a pass")
+	}
+	cancel()
+	<-done
+	d := probe.deadline.Load()
+	if d == nil {
+		t.Fatal("the pass context carries no deadline: PassTimeout is not applied")
+	}
+	if until := d.Sub(started); until <= 0 || until > timeout+5*time.Second || until < timeout-5*time.Second {
+		t.Fatalf("pass deadline %v from the start of Run, want about %v", until, timeout)
+	}
+}
+
+// A different consume limit moves what one pass may consume, and the
+// default (256) is a bound, not "everything": it is applied as configured.
+func TestWorkersConsumeAtMostTheConfiguredLimitEvenWhenManyAreDue(t *testing.T) {
+	n := newWorkerNode(t)
+	set := staticRules{n.alertRule(), n.alertRule(), n.alertRule()}
+	sender := &countingSender{}
+	cfg := n.conditionConfig(set[0], sender, nil, nil)
+	cfg.Rules = set
+	cfg.ConsumeLimit = 2
+	w, err := n.app.NewWorkers(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first := n.tick(w); first.Evaluated != 3 || first.Consumed != 2 {
+		t.Fatalf("first tick (three conditions, consume limit 2): %+v", first)
+	}
+	if second := n.tick(w); second.Consumed != 1 {
+		t.Fatalf("second tick: %+v", second)
+	}
+}
+
+// swapRouting lets a test change the binding between passes.
+type swapRouting struct {
+	binding atomic.Pointer[appcore.NotificationBinding]
+}
+
+func (r *swapRouting) Routing(context.Context, auth.Scope, model.ID) (appcore.NotificationBinding, bool, error) {
+	return *r.binding.Load(), true, nil
+}
+
+// A recipient the policy state already enables is not submitted again when a later
+// incident version is decided, even under a newer policy revision: only the new
+// evidence is a decision (Submitted counts new commits, not retries).
+func TestWorkersDoNotResubmitAnEnabledRecipientForLaterEvidence(t *testing.T) {
+	n := newWorkerNode(t)
+	id, impact, opened := n.openIncident()
+	sender := &countingSender{}
+	routing := &swapRouting{}
+	binding := appcore.NotificationBinding{Policy: model.ID{0xf3}, Revision: 1, Config: notify.DefaultConfig(), Recipients: []model.ID{n.dest}}
+	routing.binding.Store(&binding)
+	w, err := n.app.NewWorkers(n.config(func(c *appcore.WorkerConfig) { c.Sender = sender; c.Routing = routing }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first := n.tick(w); first.Submitted != 2 {
+		t.Fatalf("first tick (destination + incident evidence): %+v", first)
+	}
+	admin, err := n.app.Auth.AuthorizeSystem(n.ctx, n.org, []model.ID{n.project}, auth.OrgAdmin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	impact.State = incidents.ConditionRecovered
+	if _, err = n.app.Incidents.Act(n.ctx, admin, incidents.Action{CommandID: model.NewID(), ExpectedVersion: opened.Version, Type: incidents.TypeImpact, Origin: incidents.OriginSystem, Target: incidents.Target{Project: n.project, Incident: id}, Impact: &impact}, workerNow); err != nil {
+		t.Fatal(err)
+	}
+	next := binding
+	next.Revision = 2
+	routing.binding.Store(&next)
+	if second := n.tick(w); second.Submitted != 1 {
+		t.Fatalf("second tick (newer incident version, enabled recipient): %+v", second)
 	}
 }

@@ -162,6 +162,11 @@ type ReleaseConfig struct {
 	Isolation   []ScenarioOutcome
 	Provenance  []ProvenanceDecision
 	Interaction InteractionCoverage
+	// Generated are the concrete-input cases of each generator seed, run through
+	// the differential phase runners. Minimize, when set, shrinks every
+	// mismatching generated case into a Regression.
+	Generated []GeneratedRun
+	Minimize  func(ctx context.Context, m GeneratedMismatch) (Regression, error)
 }
 
 type MismatchRecord struct {
@@ -179,34 +184,35 @@ type ResourceStats struct {
 }
 
 type Report struct {
-	Profiles             map[string]string    `json:"profiles"` // id -> commit
-	Configs              map[string]string    `json:"configs"`  // id -> oracle configuration digest
-	FeatureSets          map[string]int       `json:"feature_sets"`
-	Build                BuildIdentity        `json:"build"`
-	InputNormalizationID string               `json:"input_normalization_identity"`
-	ObligationCount      int                  `json:"obligation_count"`
-	BoundCount           int                  `json:"bound_count"`
-	UnboundCount         int                  `json:"unbound_count"`
-	InteractionRequired  int                  `json:"interactions_required"`
-	InteractionCovered   int                  `json:"interactions_covered"`
-	RequiredCaseCount    int                  `json:"required_case_count"`
-	MatchedCaseCount     int                  `json:"matched_case_count"`
-	OracleRuns           int                  `json:"oracle_runs"`
-	OracleUnavailable    int                  `json:"oracle_unavailable"`
-	OracleUnverified     int                  `json:"oracle_unverified"`
-	Mismatches           []MismatchRecord     `json:"mismatches"`
-	UnrunCases           []string             `json:"unrun_cases"`
-	SkippedCount         int                  `json:"skipped_count"`
-	NormalizationLoss    int                  `json:"normalization_loss"`
-	UnobservedTests      int                  `json:"unobserved_tests"`
-	Provenance           []ProvenanceDecision `json:"provenance"`
-	ProvenanceRejected   int                  `json:"provenance_rejected"`
-	Persistence          []ScenarioOutcome    `json:"persistence"`
-	Isolation            []ScenarioOutcome    `json:"isolation"`
-	ScenarioFailures     int                  `json:"scenario_failures"`
-	Resources            ResourceStats        `json:"resources"`
-	UnresolvedCount      int                  `json:"unresolved_count"`
-	Failures             []string             `json:"failures"`
+	Profiles             map[string]string     `json:"profiles"` // id -> commit
+	Configs              map[string]string     `json:"configs"`  // id -> oracle configuration digest
+	FeatureSets          map[string]int        `json:"feature_sets"`
+	Build                BuildIdentity         `json:"build"`
+	InputNormalizationID string                `json:"input_normalization_identity"`
+	ObligationCount      int                   `json:"obligation_count"`
+	BoundCount           int                   `json:"bound_count"`
+	UnboundCount         int                   `json:"unbound_count"`
+	InteractionRequired  int                   `json:"interactions_required"`
+	InteractionCovered   int                   `json:"interactions_covered"`
+	RequiredCaseCount    int                   `json:"required_case_count"`
+	MatchedCaseCount     int                   `json:"matched_case_count"`
+	Generated            []GeneratedSeedReport `json:"generated_cases"`
+	OracleRuns           int                   `json:"oracle_runs"`
+	OracleUnavailable    int                   `json:"oracle_unavailable"`
+	OracleUnverified     int                   `json:"oracle_unverified"`
+	Mismatches           []MismatchRecord      `json:"mismatches"`
+	UnrunCases           []string              `json:"unrun_cases"`
+	SkippedCount         int                   `json:"skipped_count"`
+	NormalizationLoss    int                   `json:"normalization_loss"`
+	UnobservedTests      int                   `json:"unobserved_tests"`
+	Provenance           []ProvenanceDecision  `json:"provenance"`
+	ProvenanceRejected   int                   `json:"provenance_rejected"`
+	Persistence          []ScenarioOutcome     `json:"persistence"`
+	Isolation            []ScenarioOutcome     `json:"isolation"`
+	ScenarioFailures     int                   `json:"scenario_failures"`
+	Resources            ResourceStats         `json:"resources"`
+	UnresolvedCount      int                   `json:"unresolved_count"`
+	Failures             []string              `json:"failures"`
 }
 
 // ErrReleaseRejected is returned (wrapped) whenever any count is nonzero.
@@ -273,7 +279,20 @@ func bindingFault(o Obligation, b Binding, ok bool, passed map[string]bool) (unb
 
 func oracleIdentityOK(p SourceProfile, r SemanticResult) bool {
 	id := r.Oracle
-	if p.Artifact == nil || id == nil || id.Profile != p.ID || id.ImageSHA256 != p.Artifact.SHA256 || id.ConfigurationSHA256 != p.Artifact.ConfigurationSHA256 {
+	if p.Artifact == nil || id == nil || id.Profile != p.ID {
+		return false
+	}
+	wantImage, wantConfiguration := p.Artifact.SHA256, p.Artifact.ConfigurationSHA256
+	if r.Type == ConfigurationPhaseType {
+		// A configuration-phase observation comes from the locked variant of the
+		// evaluation oracle, which must itself be built from that oracle.
+		co := p.ConfigurationOracle
+		if co == nil || co.BaseImageID != p.Artifact.Path {
+			return false
+		}
+		wantImage, wantConfiguration = strings.TrimPrefix(co.ImageID, "sha256:"), co.ConfigurationFileSHA256
+	}
+	if id.ImageSHA256 != wantImage || id.ConfigurationSHA256 != wantConfiguration {
 		return false
 	}
 	version := strings.TrimPrefix(strings.TrimPrefix(p.ID, "promql-prometheus-"), "logql-loki-")
@@ -452,6 +471,9 @@ func ReleaseGate(ctx context.Context, cfg ReleaseConfig) (Report, error) {
 		rep.MatchedCaseCount++
 	}
 	sort.Strings(rep.UnrunCases)
+	if err := gateGenerated(ctx, cfg, sources, &rep, fail); err != nil {
+		return rep, err
+	}
 	// Input normalization.
 	rep.InputNormalizationID = sha256Hex(canonical(cfg.Inputs))
 	if len(cfg.Inputs) == 0 {
@@ -484,9 +506,16 @@ func ReleaseGate(ctx context.Context, cfg ReleaseConfig) (Report, error) {
 	var mem runtime.MemStats
 	runtime.ReadMemStats(&mem)
 	rep.Resources = ResourceStats{DurationNS: time.Since(started).Nanoseconds(), PeakHeapBytes: mem.HeapSys, TotalAllocated: mem.TotalAlloc, Goroutines: runtime.NumGoroutine()}
-	rep.UnresolvedCount = rep.UnboundCount + len(rep.UnrunCases) + rep.SkippedCount + len(rep.Mismatches) + rep.UnobservedTests + rep.OracleUnverified + len(rep.Failures)
+	for _, g := range rep.Generated {
+		rep.UnresolvedCount += g.Mismatched + g.Unrun
+	}
+	rep.UnresolvedCount += rep.UnboundCount + len(rep.UnrunCases) + rep.SkippedCount + len(rep.Mismatches) + rep.UnobservedTests + rep.OracleUnverified + len(rep.Failures)
 	if rep.UnresolvedCount != 0 {
-		return rep, fmt.Errorf("%w: %d unresolved (unbound %d, unrun %d, skipped %d, mismatches %d, normalization loss %d)", ErrReleaseRejected, rep.UnresolvedCount, rep.UnboundCount, len(rep.UnrunCases), rep.SkippedCount, len(rep.Mismatches), rep.NormalizationLoss)
+		generated := ""
+		for _, g := range rep.Generated {
+			generated += fmt.Sprintf("; seed %d generated %d executed %d matched %d mismatched %d unrun %d", g.Seed, g.Generated, g.Executed, g.Matched, g.Mismatched, g.Unrun)
+		}
+		return rep, fmt.Errorf("%w: %d unresolved (unbound %d, unrun %d, skipped %d, mismatches %d, normalization loss %d%s)", ErrReleaseRejected, rep.UnresolvedCount, rep.UnboundCount, len(rep.UnrunCases), rep.SkippedCount, len(rep.Mismatches), rep.NormalizationLoss, generated)
 	}
 	return rep, nil
 }

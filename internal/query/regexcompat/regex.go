@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/arynyklas/soundpost/internal/query/profile"
 	syn123 "github.com/arynyklas/soundpost/third_party/regex/go123/forksyntax"
@@ -88,6 +89,16 @@ func compile(p profile.Profile, pattern string, mode Mode) (*Regexp, error) {
 		return nil, err
 	}
 	original := pattern
+	if mode == Label && (e == 1 || e == 3) && !utf8.ValidString(pattern) {
+		// The PromQL reference never compiles a label-matcher pattern whose
+		// |-separated alternatives are all metacharacter-free: it matches by
+		// byte equality, so invalid UTF-8 is accepted there and rejected by the
+		// compiler everywhere else.
+		if set, ok := literalAlternatives(pattern); ok {
+			eng := literalEngine{set: set}
+			return &Regexp{engine: eng, pattern: original, units: eng.ProgramSize()}, nil
+		}
+	}
 	if mode != Search && mode != Label {
 		return nil, errors.New("invalid regex matching mode")
 	}

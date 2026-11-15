@@ -312,6 +312,9 @@ if "cases/release-logql-metric.json" in files:
 for name, spec in sorted(ext_files.items()):
     manifest["files"].append({"path": name, "language": spec["language"], "phase": spec["phase"]})
 manifest["files"].append({"path": "cases/logql-templates.json", "language": "logql", "phase": "logql-template"})
+# 02.12-W3: the locked divergence rows of the invalid-UTF-8 selector regex work run in every gate (not bound to a ledger obligation)
+for _name, _phase in (("cases/promql-wave6-regex-utf8.json", "evaluation"), ("cases/promql-wave6-regex-utf8-syntax.json", "syntax")):
+    manifest["files"].append({"path": _name, "language": "promql", "phase": _phase})
 dump(f"{Q}/release-cases.json", manifest)
 
 # the committed template rows already carry ledger IDs and are in the manifest

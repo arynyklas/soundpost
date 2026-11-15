@@ -71,7 +71,10 @@ func sumHex(b []byte) string {
 // artifacts. Evidence that does not exist (production bindings, authored case
 // runs, Go test observations, smoke results) is left empty so the gate counts
 // it as unresolved rather than inventing it.
-func LoadReleaseConfig(queryDir, policyPath string, smoke *SmokeReport, seed uint64) (ReleaseConfig, error) {
+func LoadReleaseConfig(queryDir, policyPath string, smoke *SmokeReport, seeds []uint64) (ReleaseConfig, error) {
+	if len(seeds) == 0 {
+		return ReleaseConfig{}, fmt.Errorf("at least one generator seed is required")
+	}
 	var cfg ReleaseConfig
 	if err := ReadJSON(policyPath, &cfg.Policy); err != nil {
 		return cfg, err
@@ -122,11 +125,20 @@ func LoadReleaseConfig(queryDir, policyPath string, smoke *SmokeReport, seed uin
 	if err != nil {
 		return cfg, err
 	}
-	cases, err := generateForRelease(spec, ledger, cfg.GateDomains, seed)
-	if err != nil {
-		return cfg, err
+	for i, seed := range seeds {
+		cases, err := generateForRelease(spec, ledger, cfg.GateDomains, seed)
+		if err != nil {
+			return cfg, err
+		}
+		if i == 0 {
+			cfg.Interaction = Coverage(spec, cases)
+		}
+		rows, err := PlanGenerated(spec, ledger, cfg.GateDomains, seed)
+		if err != nil {
+			return cfg, fmt.Errorf("seed %d: %w", seed, err)
+		}
+		cfg.Generated = append(cfg.Generated, GeneratedRun{Seed: seed, Rows: rows})
 	}
-	cfg.Interaction = Coverage(spec, cases)
 	if smoke != nil {
 		cfg.Persistence, cfg.Isolation, cfg.Inputs = smoke.Persistence, smoke.Isolation, smoke.Normalization
 	}

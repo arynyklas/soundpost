@@ -18,9 +18,9 @@ func TestProfileGatesShareOneDirectionForUnregisteredProfiles(t *testing.T) {
 	const unknown = "promql-prometheus-9.9.9"
 	// Recorded in release data: these inputs separate the 3.1.0 and 3.13.5 mean rules.
 	xs := []float64{math.MaxFloat64, math.MaxFloat64, -math.MaxFloat64, 1, 2, 3}
-	old, current := functionMean(xs, "promql-prometheus-3.1.0"), functionMean(xs, "promql-prometheus-3.13.5")
-	if math.Float64bits(functionMean(xs, unknown)) != math.Float64bits(old) {
-		t.Fatalf("mean for an unregistered profile must follow 3.1.0: %v vs %v (3.13.5 %v)", functionMean(xs, unknown), old, current)
+	old, current := functionMean(xs, "promql-prometheus-3.1.0", false), functionMean(xs, "promql-prometheus-3.13.5", false)
+	if math.Float64bits(functionMean(xs, unknown, false)) != math.Float64bits(old) {
+		t.Fatalf("mean for an unregistered profile must follow 3.1.0: %v vs %v (3.13.5 %v)", functionMean(xs, unknown, false), old, current)
 	}
 	// A histogram whose NaN sum means 1 observation is in no bucket: the 3.13.5
 	// ceiling is the bucket population, the 3.1.0 ceiling the observation count.

@@ -5,6 +5,7 @@ package artifacts
 import (
 	"context"
 	"errors"
+	"github.com/arynyklas/soundpost/internal/artifacts/refledger"
 	"github.com/arynyklas/soundpost/internal/auth"
 	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/storage"
@@ -32,14 +33,15 @@ func (l *Lifecycle) GC(ctx context.Context, scope auth.Scope, id ArtifactID) (GC
 		return GCDecision{}, model.Fail(model.NotFound)
 	}
 	var out GCDecision
-	err := l.apply(ctx, scope.OrgID(), scope.ProjectIDs()[0], id, true, func(st model.ControlState, in model.ArtifactReferenceIntent) error {
+	org, project := scope.OrgID(), scope.ProjectIDs()[0]
+	err := l.run(ctx, org, true, one(org, project, id, func(st model.ControlState, in model.ArtifactReferenceIntent) error {
 		return scope.ValidateArtifactCleanup(st, in.Map.Manifest)
-	}, func(m model.ArtifactManifest, led *refLedger, now model.UnixNano) (bool, error) {
+	}, func(m model.ArtifactManifest, led *refledger.Ledger, now model.UnixNano) (bool, error) {
 		if led.Retired {
 			out = GCDecision{Seq: led.Seq}
 			return false, nil
 		}
-		if max(m.RetainUntil, led.latest()) > now {
+		if max(m.RetainUntil, led.Latest()) > now {
 			return false, model.Fail(model.Conflict)
 		}
 		pinned, err := l.cfg.Pins.Pinned(ctx, m.Org, m.Project, id)
@@ -52,7 +54,7 @@ func (l *Lifecycle) GC(ctx context.Context, scope auth.Scope, id ArtifactID) (GC
 		led.Retired = true
 		out = GCDecision{Seq: led.Seq + 1}
 		return true, nil
-	})
+	}))
 	return out, err
 }
 
@@ -75,13 +77,17 @@ func (l *Lifecycle) LatestReference(ctx context.Context, c storage.EraseCandidat
 		if covered = deletionCovers(st, m); covered {
 			return nil
 		}
-		_, present = st.ArtifactIntents[m.Org.String()+":"+m.Project.String()+":"+m.Root.String()]
-		led, err := loadLedger(settingsOf(st, m.Org), m.Project, m.Root)
+		intent, ok := st.ArtifactIntents[m.Org.String()+":"+m.Project.String()+":"+m.Root.String()]
+		present = ok
+		led, err := refledger.Load(settingsOf(st, m.Org), m.Project, m.Root)
 		if err != nil {
 			return err
 		}
 		retired = led != nil && led.Retired
-		latest = max(m.RetainUntil, led.latest())
+		if ok && intent.State == intentRetired && !retired {
+			return model.Fail(model.Corrupt) // the fence wrote both: the ledger was removed or rolled back
+		}
+		latest = max(m.RetainUntil, led.Latest())
 		return nil
 	})
 	switch {
@@ -97,12 +103,12 @@ func (l *Lifecycle) LatestReference(ctx context.Context, c storage.EraseCandidat
 		return 0, nil // no published reference exists to fence
 	}
 	out := retainedForever
-	err = l.apply(ctx, m.Org, m.Project, m.Root, true, nil, func(mf model.ArtifactManifest, led *refLedger, at model.UnixNano) (bool, error) {
+	err = l.run(ctx, m.Org, true, one(m.Org, m.Project, m.Root, nil, func(mf model.ArtifactManifest, led *refledger.Ledger, at model.UnixNano) (bool, error) {
 		if led.Retired {
 			out = 0
 			return false, nil
 		}
-		if v := max(mf.RetainUntil, led.latest()); v > at {
+		if v := max(mf.RetainUntil, led.Latest()); v > at {
 			out = v
 			return false, nil
 		}
@@ -117,7 +123,7 @@ func (l *Lifecycle) LatestReference(ctx context.Context, c storage.EraseCandidat
 		led.Retired = true
 		out = 0
 		return true, nil
-	})
+	}))
 	if isNotFound(err) { // deleted between the check and the fence
 		return 0, nil
 	}
@@ -125,24 +131,27 @@ func (l *Lifecycle) LatestReference(ctx context.Context, c storage.EraseCandidat
 }
 
 // EffectiveRetention is when the map stops being retained: the later of the
-// upload's own deadline and every unreleased reference. NotFound for a GC-fenced
-// or deleted artifact and for any artifact outside the caller's scope.
+// upload's own deadline and every unreleased reference. It is the deadline the
+// read gate enforces (D-new C07, see Lifecycle): auth.Scope.ValidateArtifactState
+// computes it with the same code over the same verified ledger
+// (refledger.EffectiveRetention), so a read is refused exactly when this has elapsed.
+// NotFound for a GC-fenced, deleted or already elapsed artifact (its readers are
+// refused alike) and for any artifact outside the caller's scope.
 func (l *Lifecycle) EffectiveRetention(ctx context.Context, scope auth.Scope, id ArtifactID) (model.UnixNano, error) {
 	artifact, err := l.service.Lookup(ctx, scope, id)
 	if err != nil {
 		return 0, err
 	}
-	m := artifact.Manifest
 	var out model.UnixNano
 	err = l.cfg.State.View(ctx, func(st model.ControlState) error {
-		led, lerr := loadLedger(settingsOf(st, m.Org), m.Project, id)
-		if lerr != nil {
-			return lerr
+		until, retired, e := refledger.EffectiveRetention(st, artifact.Map.Manifest)
+		if e != nil {
+			return e
 		}
-		if led != nil && led.Retired {
+		if retired {
 			return model.Fail(model.NotFound)
 		}
-		out = max(m.RetainUntil, led.latest())
+		out = until
 		return nil
 	})
 	return out, err

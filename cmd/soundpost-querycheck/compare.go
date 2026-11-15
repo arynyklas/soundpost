@@ -39,8 +39,8 @@ func runCompare(args []string) error {
 		if *phase != "syntax" && *phase != "pipeline" && *phase != "syntax,pipeline" && *phase != "pipeline,syntax" && *phase != "logql-template" && *phase != "logql-metric" {
 			return fmt.Errorf("Loki comparison requires --phase syntax,pipeline|logql-template|logql-metric")
 		}
-	} else if *phase != "syntax" && *phase != "evaluation" {
-		return fmt.Errorf("PromQL comparison requires --phase syntax|evaluation")
+	} else if *phase != "syntax" && *phase != "evaluation" && *phase != "configuration" {
+		return fmt.Errorf("PromQL comparison requires --phase syntax|evaluation|configuration")
 	}
 	var lock q.SourceLock
 	if err := q.ReadJSON(*lockPath, &lock); err != nil {
@@ -49,6 +49,13 @@ func runCompare(args []string) error {
 	lock.LedgerPath = filepath.Join(filepath.Dir(*lockPath), "obligations.json")
 	if isLogQL {
 		report, err := q.RunLogQLPhase(context.Background(), lock, *cases, *directory, *runtime, *phase)
+		if encodeErr := json.NewEncoder(os.Stdout).Encode(report); encodeErr != nil {
+			return encodeErr
+		}
+		return err
+	}
+	if *phase == "configuration" {
+		report, err := q.RunConfigurationPhase(context.Background(), lock, strings.Split(*cases, ","), *runtime)
 		if encodeErr := json.NewEncoder(os.Stdout).Encode(report); encodeErr != nil {
 			return encodeErr
 		}

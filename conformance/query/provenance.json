@@ -1027,5 +1027,41 @@
       "license_path": "COPYING", "license_sha256": "55172044f7e241207117448a4d9d6ba1d0925c8ad66b5d4c08c70adfa9cc3de6",
       "used_for": "Snappy block format (varint length, literal/copy tags) read to write the product's own first-party bounded decoder in internal/adapters/queryinput/remote_write.go; google/snappy code is neither linked nor copied."
     }
-  ]
+  ],
+  "configuration_oracles": {
+    "decision": "D29 (2026-11-15): the configuration obligations stay in the language ledger and are observed with a separately pinned configuration-phase oracle variant built from the same pinned upstream release; black box, no source copying.",
+    "method": "docker build --pull=false --provenance=false --sbom=false of the recorded Dockerfile: FROM the locked evaluation-oracle image id (local store, no registry pull) and one COPY of the recorded configuration file; no RUN, no entrypoint change. The harness starts the unmodified upstream /bin/prometheus of that image through `--entrypoint /bin/sh <observation script>` in the same isolation as the evaluation oracle (no network, read-only root, uid 65534, no capabilities) and reads only its exit/log and /api/v1/status/config.",
+    "profiles": {
+      "promql-prometheus-3.1.0": {
+        "image": "soundpost-oracle-promql-prometheus-3.1.0-configuration:current",
+        "image_id": "sha256:9ca7edd54e6ff511a09b1ae02c16675e0d44d673a84e4f81971b5ae742429334",
+        "base_image_id": "sha256:6f238ce554111c3d86b2df22c3bb74e8f293bd0eb194aa38aab0a300ee6e0b79",
+        "architecture": "linux/amd64",
+        "base_layers": 14,
+        "added_layer_diff_id": "sha256:4214866f4ba9bc2513ba792521d9589cdb979fa8caac06df0c617ae4c1f688a5",
+        "dockerfile": "oracles/promql-prometheus-3.1.0-configuration.Dockerfile",
+        "dockerfile_sha256": "be79fc5a24e730097cb3cf9e9de80d84e0e0932d09b5548a4b9b523c6f88d8d7",
+        "configuration_file": "oracles/promql-prometheus-3.1.0-configuration.yaml",
+        "configuration_file_sha256": "506f0ed3aacca3e70650b0c0250dfa3c01ab140af848d8da1bb95611ccd85df3",
+        "installed_at": "/etc/prometheus/soundpost-configuration-phase.yaml",
+        "observer_script": "internal/conformance/query/configuration_observe.sh",
+        "observer_script_sha256": "98cfefd30a75095846db9179f6c0c62e3be9454de8e6f94af372e0109c1a5438"
+      },
+      "promql-prometheus-3.13.5": {
+        "image": "soundpost-oracle-promql-prometheus-3.13.5-configuration:current",
+        "image_id": "sha256:e419a763d1fc906030d752626ae9029849381410dec90ff6b02045bf0ac74ea4",
+        "base_image_id": "sha256:2251b83038a6c0c61c21ed8721cb94a699ceb3bee38c1f115b4efae338fbe453",
+        "architecture": "linux/amd64",
+        "base_layers": 13,
+        "added_layer_diff_id": "sha256:c49a27e3097e4d2489c0c1262dea8400523cfab912cf33107da0d4e9da3d2e7f",
+        "dockerfile": "oracles/promql-prometheus-3.13.5-configuration.Dockerfile",
+        "dockerfile_sha256": "ae767d98ba32d525d6b3119a7c9768a70605b921075ff5fdef8b2d2edd01c754",
+        "configuration_file": "oracles/promql-prometheus-3.13.5-configuration.yaml",
+        "configuration_file_sha256": "94c7ab81af0f2b3f7736715dfd654805c98fb4af3d5d2c707a09b93cfb23b431",
+        "installed_at": "/etc/prometheus/soundpost-configuration-phase.yaml",
+        "observer_script": "internal/conformance/query/configuration_observe.sh",
+        "observer_script_sha256": "98cfefd30a75095846db9179f6c0c62e3be9454de8e6f94af372e0109c1a5438"
+      }
+    }
+  }
 }

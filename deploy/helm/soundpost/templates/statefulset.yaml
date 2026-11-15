@@ -119,6 +119,10 @@ spec:
             failureThreshold: 3
           # No liveness probe on quorum: a member that lost quorum must stay up to rejoin;
           # restarting every member because the others are down only deepens an outage.
+          # GOMEMLIMIT is the Go heap's soft limit (about 75% of the container limit by default,
+          # see resources.goMemLimit in values.yaml); the container limit is the kernel's hard one.
+          env:
+            - {name: GOMEMLIMIT, value: {{ $root.Values.resources.goMemLimit | quote }}}
           resources:
             requests: {cpu: {{ $root.Values.resources.requests.cpu | quote }}, memory: {{ $root.Values.resources.requests.memory | quote }}}
             limits: {memory: {{ $root.Values.resources.limits.memory | quote }}}

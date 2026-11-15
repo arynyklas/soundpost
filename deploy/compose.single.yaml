@@ -19,6 +19,12 @@ services:
     security_opt:
       - no-new-privileges:true
     pids_limit: 512
+    # Memory ceiling (derivation and measurements: docs/artifacts/source-maps.md, "Sizing the
+    # memory limit"): the Go heap's soft limit sits below the container's hard limit so the
+    # collector works harder before the kernel kills the container. Override both together.
+    mem_limit: ${SOUNDPOST_MEMORY_LIMIT:-2g}
+    environment:
+      GOMEMLIMIT: ${SOUNDPOST_GOMEMLIMIT:-1500MiB}
     restart: unless-stopped
     stop_grace_period: 30s
     ports:

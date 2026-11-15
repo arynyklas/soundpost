@@ -30,30 +30,17 @@ type ArtifactReader interface {
 type CacheStats struct{ Hits, Misses, Entries, Bytes uint64 }
 
 // readGate is what a Lifecycle installs on its Service so that every read path
-// applies the same current generation and reference-state fences.
+// applies the same current delete-generation fence and uses the visibility-bound cache. The
+// retention and reference-state fences (the effective retention of C07, the GC fence, a
+// ledger that does not verify) are not here: they are part of the scope check every read
+// already runs (auth.Scope.RevalidateArtifact), so no read path can skip them.
 type readGate struct {
 	deletes auth.DeleteGenerations
-	state   StateStore
 	cache   *fragmentCache
 }
 
 func (g *readGate) generation(ctx context.Context, scope auth.Scope) (uint64, error) {
 	return g.deletes.DeleteGeneration(ctx, scope.OrgID(), scope.ProjectIDs())
-}
-
-// referenceState refuses a GC-fenced artifact (indistinguishable from absent) and
-// fails closed on a reference ledger that does not verify.
-func (g *readGate) referenceState(ctx context.Context, org, project, root model.ID) error {
-	return g.state.View(ctx, func(st model.ControlState) error {
-		led, err := loadLedger(settingsOf(st, org), project, root)
-		if err != nil {
-			return err
-		}
-		if led != nil && led.Retired {
-			return model.Fail(model.NotFound)
-		}
-		return nil
-	})
 }
 
 // ReadAuthorized opens the retained map for a window of its bytes.
@@ -95,9 +82,6 @@ func (s *Service) openWindow(ctx context.Context, scope auth.Scope, id ArtifactI
 	r := &windowReader{service: s, gate: s.gate.Load(), ctx: ctx, scope: scope, id: id, private: private, receipt: receipt, ordinal: -1}
 	if r.gate != nil {
 		if r.generation, err = r.gate.generation(ctx, scope); err != nil {
-			return nil, err
-		}
-		if err = r.gate.referenceState(ctx, receipt.Manifest.Org, receipt.Manifest.Project, receipt.Manifest.Root); err != nil {
 			return nil, err
 		}
 	}
@@ -176,8 +160,7 @@ func (r *windowReader) revalidate() error {
 	if gen != r.generation {
 		return model.Fail(model.NotFound)
 	}
-	m := r.receipt.Manifest
-	return r.gate.referenceState(r.ctx, m.Org, m.Project, m.Root)
+	return nil
 }
 
 func (r *windowReader) key(ordinal int) (cacheKey, bool) {

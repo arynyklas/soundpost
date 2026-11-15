@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/profiles"
 )
 
@@ -19,13 +20,43 @@ type crossFile struct {
 	Runner  struct {
 		Stages []string `json:"stages"`
 	} `json:"runner"`
-	Cross []struct {
+	// NativePoints are native histograms ingested after the fixture's floats.
+	NativePoints []nativePoint `json:"native_points"`
+	Cross        []struct {
 		ID         string                     `json:"id"`
+		Language   string                     `json:"language"`
 		Expression string                     `json:"expression"`
 		TimeNS     string                     `json:"time_ns"`
 		Enabled    []string                   `json:"enabled"`
 		Expect     map[string]json.RawMessage `json:"expect"`
 	} `json:"cross_products"`
+}
+
+type nativePoint struct {
+	Source    string                 `json:"source"`
+	Name      string                 `json:"name"`
+	Labels    map[string]string      `json:"labels"`
+	TimeNS    string                 `json:"time_ns"`
+	Histogram *model.NativeHistogram `json:"histogram"`
+}
+
+// ingestNative admits each native histogram point through the ingest route.
+func (e *Env) ingestNative(points []nativePoint) {
+	for _, p := range points {
+		s := e.Sources[p.Source]
+		checkf(s != nil, "unknown source %s", p.Source)
+		ls := model.Labels{}
+		for _, k := range sortedLabelNames(p.Labels) {
+			ls = append(ls, model.Label{Name: k, Value: p.Labels[k]})
+		}
+		kind := "float_histogram"
+		if p.Histogram.Integer != nil {
+			kind = "integer_histogram"
+		}
+		rec := model.Record{ID: model.NewID(), Kind: model.Metric, ObservedAt: model.UnixNano(mustInt(p.TimeNS)), Resource: s.Resource,
+			Payload: model.Payload{Metric: &model.MetricPoint{Name: p.Name, Labels: ls, SampleKind: kind, Histogram: p.Histogram, Unit: "1", Type: "histogram"}}}
+		e.Ingest(s, rec)
+	}
 }
 
 // featureSetFor resolves a registered feature set whose enabled gates are
@@ -71,6 +102,7 @@ func RunCross(ctx context.Context, layout Layout, dir, path string) (steps []Ste
 	check(err)
 	defer env.Close()
 	file.Fixture.Load(env)
+	env.ingestNative(file.NativePoints)
 	stage := func(name string) {
 		for _, c := range file.Cross {
 			for profileID, raw := range c.Expect {
@@ -87,7 +119,11 @@ func RunCross(ctx context.Context, layout Layout, dir, path string) (steps []Ste
 					}()
 					set, err := featureSetFor(profileID, c.Enabled)
 					check(err)
-					body := env.QueryBody("promql", profileID, c.Expression, mustInt(c.TimeNS), file.Fixture.Projects...)
+					language := c.Language
+					if language == "" {
+						language = "promql"
+					}
+					body := env.QueryBody(language, profileID, c.Expression, mustInt(c.TimeNS), file.Fixture.Projects...)
 					body["feature_set"] = set
 					code, out := env.Post(env.People["reader"], "/api/v1/query", body)
 					var want struct {

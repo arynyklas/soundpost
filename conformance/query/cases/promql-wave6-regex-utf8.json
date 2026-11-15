@@ -1,0 +1,1994 @@
+{
+ "phase": "evaluation",
+ "cases": [
+  {
+   "id": "wave6-regex-utf8/literal",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "query": "m{v=~\"\\xff\"}",
+   "kind": "instant",
+   "time": "20000000000",
+   "series": [
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "a"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "x"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "é"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "�"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "wave6-regex-utf8/literal-neg",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "query": "m{v!~\"\\xff\"}",
+   "kind": "instant",
+   "time": "20000000000",
+   "series": [
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "a"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "x"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "é"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "�"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "wave6-regex-utf8/literal-prefix",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "query": "m{v=~\"a\\xff\"}",
+   "kind": "instant",
+   "time": "20000000000",
+   "series": [
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "a"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "x"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "é"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "�"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "wave6-regex-utf8/literal-trunc",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "query": "m{v=~\"\\xc3\"}",
+   "kind": "instant",
+   "time": "20000000000",
+   "series": [
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "a"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "x"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "é"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "�"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "wave6-regex-utf8/literal-surrogate",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "query": "m{v=~\"\\xed\\xa0\\x80\"}",
+   "kind": "instant",
+   "time": "20000000000",
+   "series": [
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "a"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "x"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "é"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "�"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "wave6-regex-utf8/literal-with-valid",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "query": "m{v=~\"\\xffa\"}",
+   "kind": "instant",
+   "time": "20000000000",
+   "series": [
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "a"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "x"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "é"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "�"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "wave6-regex-utf8/alt-literals",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "query": "m{v=~\"\\xff|a\"}",
+   "kind": "instant",
+   "time": "20000000000",
+   "series": [
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "a"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "x"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "é"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "�"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "wave6-regex-utf8/alt-literals-three",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "query": "m{v=~\"a|\\xff|x\"}",
+   "kind": "instant",
+   "time": "20000000000",
+   "series": [
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "a"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "x"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "é"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "�"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "wave6-regex-utf8/alt-literals-neg",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "query": "m{v!~\"a|\\xff\"}",
+   "kind": "instant",
+   "time": "20000000000",
+   "series": [
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "a"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "x"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "é"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "�"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "wave6-regex-utf8/alt-empty-member",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "query": "m{v=~\"\\xff|\"}",
+   "kind": "instant",
+   "time": "20000000000",
+   "series": [
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "a"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "x"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "é"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "�"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "wave6-regex-utf8/with-eq",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "query": "m{v=~\"\\xff\",w=\"x\"}",
+   "kind": "instant",
+   "time": "20000000000",
+   "series": [
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "a"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "x"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "é"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "�"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "wave6-regex-utf8/name-matcher",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "query": "{__name__=~\"\\xff\"}",
+   "kind": "instant",
+   "time": "20000000000",
+   "series": [
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "a"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "x"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "é"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "�"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "wave6-regex-utf8/count-literal",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "query": "count(m{v=~\"\\xff\"})",
+   "kind": "instant",
+   "time": "20000000000",
+   "series": [
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "a"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "x"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "é"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "�"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "wave6-regex-utf8/range-selector",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "query": "count_over_time(m{v=~\"\\xff\"}[1m])",
+   "kind": "instant",
+   "time": "20000000000",
+   "series": [
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "a"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "x"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "é"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "�"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "wave6-regex-utf8/valid-multibyte",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "query": "m{v=~\"é\"}",
+   "kind": "instant",
+   "time": "20000000000",
+   "series": [
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "a"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "x"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "é"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "�"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "wave6-regex-utf8/valid-negated-class",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "query": "m{v=~\"[^a]\"}",
+   "kind": "instant",
+   "time": "20000000000",
+   "series": [
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "a"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "x"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "é"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "�"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "wave6-regex-utf8/label-replace-valid",
+   "profiles": [
+    "promql-prometheus-3.1.0",
+    "promql-prometheus-3.13.5"
+   ],
+   "enabled_features": [],
+   "query": "label_replace(m,\"d\",\"$1\",\"v\",\"(.*)\")",
+   "kind": "instant",
+   "time": "20000000000",
+   "series": [
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "a"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "x"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "é"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    },
+    {
+     "labels": [
+      {
+       "name": "__name__",
+       "value": "m"
+      },
+      {
+       "name": "v",
+       "value": "�"
+      },
+      {
+       "name": "w",
+       "value": "x"
+      }
+     ],
+     "samples": [
+      {
+       "time": "5000000000",
+       "float_bits": "3ff0000000000000"
+      },
+      {
+       "time": "15000000000",
+       "float_bits": "4008000000000000"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

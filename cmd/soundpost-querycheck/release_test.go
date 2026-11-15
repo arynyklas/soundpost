@@ -34,11 +34,12 @@ func TestReleaseRefusesAWeakerGateThanThePolicy(t *testing.T) {
 	}
 }
 
-// The real ledger is not fully bound and no oracle runtime is given: the gate
-// must say so with counts and a nonzero outcome, never pass.
-func TestReleaseFailsOnTheRealPartlyBoundLedger(t *testing.T) {
+// The real ledger is fully bound (02.12-W1 closed the configuration obligations)
+// but no oracle runtime is given: the gate must still reject, with every
+// required case unrun and no generated case executed, never pass.
+func TestReleaseFailsWithoutAnOracleRuntime(t *testing.T) {
 	err := runRelease([]string{"--policy", queryDir("release-policy.json"), "--all-profiles", "--all-feature-sets", "--require-locked", "--require-zero-unbound", "--require-zero-skips", "--require-zero-mismatches"})
-	if err == nil || !strings.Contains(err.Error(), "release gate rejected") || !strings.Contains(err.Error(), "unbound ") || strings.Contains(err.Error(), "unbound 0,") {
-		t.Fatalf("the partly bound ledger passed or the count is wrong: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "release gate rejected") || !strings.Contains(err.Error(), "unbound 0,") || !strings.Contains(err.Error(), "unrun 2355") || !strings.Contains(err.Error(), "executed 0") {
+		t.Fatalf("the gate passed without an oracle or the counts are wrong: %v", err)
 	}
 }

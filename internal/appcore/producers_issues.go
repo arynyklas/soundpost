@@ -183,6 +183,11 @@ type issueRow struct {
 	index model.Uint64
 	skip  bool
 	ev    issues.Evidence
+	// issue is the issue the occurrence groups into and roots the source maps its frames
+	// name (producers_issue_maps.go): the maps are held for the issue before the occurrence
+	// is applied to the book.
+	issue model.ID
+	roots []model.ID
 }
 
 type issueBacklog struct {
@@ -266,6 +271,7 @@ func (p *issueProducer) Produce(ctx context.Context, scopes ProducerScopes, leas
 	}
 	sort.Slice(groups, func(i, j int) bool { return bytes.Compare(groups[i][:], groups[j][:]) < 0 })
 	committed := 0
+	maps := p.newMapHolds(ctx, scopes, lease)
 	for _, group := range groups {
 		rows := backlog[group].take()
 		if len(rows) == 0 {
@@ -273,6 +279,7 @@ func (p *issueProducer) Produce(ctx context.Context, scopes ProducerScopes, leas
 		}
 		seen := map[model.ID]bool{}
 		var evidence []issues.Evidence
+		holds := mapHolds{}
 		for _, r := range rows {
 			if r.skip || seen[r.ev.OccurrenceID] {
 				continue
@@ -282,12 +289,26 @@ func (p *issueProducer) Produce(ctx context.Context, scopes ProducerScopes, leas
 			}
 			seen[r.ev.OccurrenceID] = true
 			evidence = append(evidence, r.ev)
+			holds.add(r.issue, r.roots)
+		}
+		// The maps the occurrences name are held for their issues before the occurrences
+		// are applied: a crash between the two leaves holds nobody uses yet (they lapse),
+		// never an applied occurrence whose map is unheld. A hold that cannot be taken stops
+		// the pass; the checkpoint has not moved, so the next pass takes it again.
+		if err := maps.hold(ctx, write, holds); err != nil {
+			return committed, err
 		}
 		cursor := model.Cursor{Group: group, Index: rows[len(rows)-1].index}
 		if err := svc.ApplyThrough(ctx, write, cursor, evidence); err != nil {
 			return committed, err
 		}
 		committed += len(evidence)
+	}
+	// An issue that was resolved or ignored releases its maps, and one that reopened takes
+	// them again: reconciled against the committed book, every pass, also when nothing new
+	// arrived.
+	if err := maps.settle(ctx, write); err != nil {
+		return committed, err
 	}
 	return committed, nil
 }
@@ -356,6 +377,7 @@ func (p *issueProducer) row(org, project model.ID, page storage.Page, i int) iss
 	if arrival <= 0 {
 		arrival = page.Times[i]
 	}
+	r.issue, r.roots = issues.IssueID(org, project, issueGroupingVersion, model.Hash(fingerprint)), occurrenceMaps(*occ)
 	e := issues.Evidence{OccurrenceID: occ.Occurrence, RecordID: page.IDs[i], Origin: page.Origins[i], GroupingVersion: issueGroupingVersion,
 		Fingerprint: model.Hash(fingerprint), EventTime: page.Times[i], ArrivalTime: arrival, Ancestry: "unknown", Ordinal: page.Origins[i].Index, Freshness: "fresh"}
 	if occ.Build != (model.ID{}) {

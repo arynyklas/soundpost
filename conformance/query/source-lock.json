@@ -75,6 +75,21 @@
         "evidence": ".superpowers/sdd/approved-product/02.01-loki-stage-trace.txt",
         "evidence_sha256": "0fe2b2913ce32c3f5bfedd734d25ad16276ce787d398b8642df815790776f32f",
         "compatibility_with_own_compiler": "not assumed; versioned primitive obligations remain release-blocking"
+      },
+      "configuration_oracle": {
+        "image": "soundpost-oracle-promql-prometheus-3.1.0-configuration:current",
+        "image_id": "sha256:9ca7edd54e6ff511a09b1ae02c16675e0d44d673a84e4f81971b5ae742429334",
+        "base_image_id": "sha256:6f238ce554111c3d86b2df22c3bb74e8f293bd0eb194aa38aab0a300ee6e0b79",
+        "architecture": "linux/amd64",
+        "base_layers": 14,
+        "added_layer_diff_id": "sha256:4214866f4ba9bc2513ba792521d9589cdb979fa8caac06df0c617ae4c1f688a5",
+        "dockerfile": "oracles/promql-prometheus-3.1.0-configuration.Dockerfile",
+        "dockerfile_sha256": "be79fc5a24e730097cb3cf9e9de80d84e0e0932d09b5548a4b9b523c6f88d8d7",
+        "configuration_file": "oracles/promql-prometheus-3.1.0-configuration.yaml",
+        "configuration_file_sha256": "506f0ed3aacca3e70650b0c0250dfa3c01ab140af848d8da1bb95611ccd85df3",
+        "installed_at": "/etc/prometheus/soundpost-configuration-phase.yaml",
+        "observer_script": "internal/conformance/query/configuration_observe.sh",
+        "observer_script_sha256": "98cfefd30a75095846db9179f6c0c62e3be9454de8e6f94af372e0109c1a5438"
       }
     },
     {
@@ -151,6 +166,21 @@
         "evidence": ".superpowers/sdd/approved-product/02.01-loki-stage-trace.txt",
         "evidence_sha256": "0fe2b2913ce32c3f5bfedd734d25ad16276ce787d398b8642df815790776f32f",
         "compatibility_with_own_compiler": "not assumed; versioned primitive obligations remain release-blocking"
+      },
+      "configuration_oracle": {
+        "image": "soundpost-oracle-promql-prometheus-3.13.5-configuration:current",
+        "image_id": "sha256:e419a763d1fc906030d752626ae9029849381410dec90ff6b02045bf0ac74ea4",
+        "base_image_id": "sha256:2251b83038a6c0c61c21ed8721cb94a699ceb3bee38c1f115b4efae338fbe453",
+        "architecture": "linux/amd64",
+        "base_layers": 13,
+        "added_layer_diff_id": "sha256:c49a27e3097e4d2489c0c1262dea8400523cfab912cf33107da0d4e9da3d2e7f",
+        "dockerfile": "oracles/promql-prometheus-3.13.5-configuration.Dockerfile",
+        "dockerfile_sha256": "ae767d98ba32d525d6b3119a7c9768a70605b921075ff5fdef8b2d2edd01c754",
+        "configuration_file": "oracles/promql-prometheus-3.13.5-configuration.yaml",
+        "configuration_file_sha256": "94c7ab81af0f2b3f7736715dfd654805c98fb4af3d5d2c707a09b93cfb23b431",
+        "installed_at": "/etc/prometheus/soundpost-configuration-phase.yaml",
+        "observer_script": "internal/conformance/query/configuration_observe.sh",
+        "observer_script_sha256": "98cfefd30a75095846db9179f6c0c62e3be9454de8e6f94af372e0109c1a5438"
       }
     },
     {
@@ -237,7 +267,7 @@
   "ledger_sha256": "1f7c2799fda0cf489a8ce990d6c8c6b8961dd79c1e46f01696461d3a29ae0dc9",
   "inventory_files": {
     "flags.json": "d47316a20492ba5fa1fffa0d59575aa228e4f6220e88ce7a5ca016d981ba7953",
-    "provenance.json": "a21d225c5927a6a4bcf166bc42868b2a3225aa63f41552e4f4448acd623c7180",
+    "provenance.json": "bcb2fa33f0f2e9d42bd47ba1cc55a6615451c614d41786161e8871272b2f5632",
     "semantic-scope.json": "e6d72eee373eb64eb557e21a4840896acde71752d5548451b32ac4c3a98db148",
     "version-diff.json": "681e3d11c84a26b663454eaa2d07eee3d590f98a5dc468cc2367195d8038f2ad",
     "gate-domains.json": "d88c0fcc3f192f489d5ddf60872a6a0d4485ef992b65c9e6d53a5d32bbaffe67",
@@ -262,6 +292,10 @@
     "cases/logql-syntax-pipeline.json": "88a74606c34f8a8260c09f3fbb246e083224de63be0f6c15da675a0902aadc28",
     "cases/logql-templates.json": "762bfe4da659abec401a45beb09287766891e5bd787916962efe672cf27ba8c6",
     "cases/logql-metrics-order.json": "7c9d0b3bcc9dc40e6c847834a45b6b30cda5b8a1d686fedeb85d07ca650dd0d9",
+    "cases/promql-wave6-regex-utf8-syntax.json": "e7f5724caf2a0940c6b62002f894a6874201227bbca011947a5f3a830fbc6087",
+    "cases/promql-wave6-annotations-nan.json": "d75ae99d3056cd14fbe8090b43ed41569e67b0817e4b7ea5a8598cf583d8387a",
+    "cases/promql-wave6-regex-utf8.json": "eb7cbac94e716888368f9ddc333fffb24863b2f6d810a1a0fc5c444a11b0ee67",
+    "cases/release-configuration.json": "39997c81a11a7e9ba506e316a0a2194bdf3192a57596e12449b7d7a4ba5e1148",
     "cases/logql-wave2-divergences.json": "67d7115c64d9cffbcb29193c285ea68ae9b0910fd25149ca7c41064274ad6283",
     "cases/release-numeric-facts.json": "1370982e0f979a9401e923939ed5b23f25c2a9dd7d5b2259384346a323f1e430",
     "cases/release-logql-tpl.json": "1b83f3857f567e88192d9b67cbc768f826073daf7ef9a51a983c76ba9a4736d8",
@@ -283,11 +317,11 @@
     "cases/owned-query-smoke.json": "4f64b5532becc8d67a9ce3ceb4734e93125f0630da6d18d31068d6da688b57a5",
     "cases/live-smoke.json": "a49f648dbf04836ca2802c53c13990182f0172cbe373415e499735ed675a3f30",
     "cases/rule-smoke.json": "dbebe2251592cce6e7ba82d7905c3e528ed134d5a3b139aa40e7b308844637f9",
-    "generation.json": "24271c2557490ba659282bebf94325a357be1284be3a861eb8859fc66189bef7",
+    "generation.json": "4ce2380d94b4b28bf5c658dfed9b361a1c5f92749edd689bfd8f4b5dc9eaf955",
     "release-policy.json": "0125ad8206c9370f08415028fa557fc5c63c84adcbf0ec2a5ae01ec82d4fabd3",
     "regressions/index.json": "f4e101bc07a065e60b9d5a5fac076060897f2e846596bac2ef2bc04d2234080c",
-    "cases/persisted-path.json": "5f4e328433a187c7e94b2c6f00848c6fb63643e816d6dd25cffd9839e8d3d0e3",
-    "cases/profile-cross-products.json": "21d54d107fbe4a3ca532c9d515472482d368d07f9632fdf4362696337546db22"
+    "cases/persisted-path.json": "80e7876b6a0828078fb138f5421454a0ab131c497cdd23bd007eb791a2baa684",
+    "cases/profile-cross-products.json": "558c7d17a73b90b99f93a62eb1ff4873dc85eec727f0cf1f6e1a16c16d24cd37"
   },
   "profile_files": {
     "profiles/query/logql-loki-3.5.2.json": "cc57e2e121eee6db798ff192a35f44216ffa241b0130a816a672e004f934e48c",

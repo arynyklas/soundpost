@@ -1,0 +1,9 @@
+# annotations partition (02.12-W3 part B): annotation merge by rendered text and NaN payload order
+./internal/query/promql TestAnnotationsWithTheSameRenderedTextMerge
+./internal/query/promql TestAnnotationRenderedFactsFollowThePinnedRelease
+./internal/query/promql TestSumKeepsTheFirstNaNPayloadLikeTheReference
+./internal/query/promql TestMeanNaNPayloadFollowsEachRelease
+./internal/query/promql TestAggregationVarianceKeepsTheAddedTermNaNPayload
+./internal/query/promql TestQuantileSortsNaNFirstAndKeepsTheUpperTermPayload
+./internal/query/promql TestRegressionNaNPayloadFollowsTheReferenceOperandOrder
+./internal/conformance/query TestOwnedMatchesRecordedNativeAnnotationAndNaNObservations

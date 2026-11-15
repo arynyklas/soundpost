@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/arynyklas/soundpost/internal/adapters/queryinput"
 	"github.com/arynyklas/soundpost/internal/appcore"
 	"github.com/arynyklas/soundpost/internal/auth"
 	"github.com/arynyklas/soundpost/internal/httpapi"
@@ -89,6 +90,8 @@ type gate struct {
 	held  int
 	// inflight counts scans executing inside the inner scanner.
 	inflight int
+	// fault makes every returned iterator fail (see faultyRows); zero is off.
+	fault faultMode
 }
 
 func (g *gate) arm() chan struct{} {
@@ -103,6 +106,11 @@ func (g *gate) disarm() {
 	g.hold = nil
 }
 func (g *gate) setDown(v bool) { g.mu.Lock(); g.down = v; g.mu.Unlock() }
+func (g *gate) setFault(m faultMode) {
+	g.mu.Lock()
+	g.fault = m
+	g.mu.Unlock()
+}
 func (g *gate) openCount() int { g.mu.Lock(); defer g.mu.Unlock(); return g.open }
 func (g *gate) heldCount() int { g.mu.Lock(); defer g.mu.Unlock(); return g.held }
 
@@ -118,7 +126,7 @@ func (g *gate) outstandingRPC() int {
 
 func (g *gate) Scan(ctx context.Context, scope auth.Scope, req storage.ScanRequest) (storage.RowIterator, error) {
 	g.mu.Lock()
-	hold, down := g.hold, g.down
+	hold, down, fault := g.hold, g.down, g.fault
 	g.mu.Unlock()
 	if down {
 		return nil, model.Fail(model.Unavailable)
@@ -152,7 +160,11 @@ func (g *gate) Scan(ctx context.Context, scope auth.Scope, req storage.ScanReque
 	g.mu.Lock()
 	g.open++
 	g.mu.Unlock()
-	return &countedRows{RowIterator: it, g: g}, nil
+	var rows storage.RowIterator = &countedRows{RowIterator: it, g: g}
+	if fault != faultNone {
+		rows = &faultyRows{RowIterator: rows, mode: fault}
+	}
+	return rows, nil
 }
 
 type countedRows struct {
@@ -333,6 +345,7 @@ func (e *Env) attach(app *appcore.App) error {
 func serveOwned(app *appcore.App, engine *query.Engine) *httptest.Server {
 	return httptest.NewTLSServer(httpapi.NewServer("", app.Auth, nil, func(mux *http.ServeMux) {
 		httpapi.RegisterIngestRoutes(mux, app.Auth, app.Ingest)
+		httpapi.RegisterInputAdapterRoutes(mux, app.Auth, app.Ingest, httpapi.InputAdapterConfig{Help: queryinput.HelpDiscard})
 		httpapi.RegisterQueryRoutes(mux, app.Auth, engine)
 		httpapi.RegisterLiveRoutes(mux, app.Auth, app.Live)
 	}).Handler)

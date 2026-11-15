@@ -34,6 +34,10 @@ type persistedFile struct {
 		TimeNS     string              `json:"time_ns"`
 		Expect     map[string][]string `json:"expect"`
 	} `json:"queries"`
+	Adapters adaptersSection `json:"adapters"`
+	Native   adaptersSection `json:"native_histograms"`
+	Logs     logsSection     `json:"logs"`
+	Cache    cacheSection    `json:"cache"`
 }
 
 type point struct {
@@ -201,12 +205,31 @@ func RunPersisted(ctx context.Context, layout Layout, dir, path string) (res Per
 		remember(p)
 		authored = append(authored, inputOf(env, p))
 	}
+	hooks := adapterHooks(env, &file.Adapters, file.Runner.Profiles, "adapter")
+	hooks = append(hooks, adapterHooks(env, &file.Native, file.Runner.Profiles, "native")...)
+	hooks = append(hooks, logsHooks(env, &file.Logs, file.Runner.Profiles)...)
+	if file.Cache.Expression != "" {
+		hooks = append(hooks, cacheHook(env, file.Cache))
+	}
+	hookFailed := map[string]bool{}
+	defer func() {
+		for _, h := range hooks {
+			if h.close != nil {
+				h.close()
+			}
+		}
+	}()
 	// Exact duplicates re-sent as later batches: they must collapse, never double.
 	resend := func() {
 		for _, p := range file.Resends {
 			send(p)
 			sent++
 			remember(p)
+		}
+		for _, h := range hooks {
+			if h.resend != nil {
+				h.resend()
+			}
 		}
 	}
 	record := func(name string, passed bool, detail string) {
@@ -238,6 +261,17 @@ func RunPersisted(ctx context.Context, layout Layout, dir, path string) (res Per
 					failures++
 				}
 			}
+		}
+		for _, h := range hooks {
+			failed := false
+			for _, st := range h.check(stage) {
+				res.Steps = append(res.Steps, st)
+				if !st.Passed {
+					failed = true
+					failures++
+				}
+			}
+			hookFailed[h.name] = hookFailed[h.name] || failed
 		}
 		// Manifest: receipts sent == batches admitted; stored distinct samples == sent distinct samples.
 		var rows []storedRow
@@ -295,6 +329,17 @@ func RunPersisted(ctx context.Context, layout Layout, dir, path string) (res Per
 		env.Ingest(s, env.MetricRecord(s, conflict.Name, conflict.Labels, mustInt(conflict.TimeNS), mustHex(conflict.ValueBits), nil))
 	}()
 	stageCheck("after-conflict")
+	for _, h := range hooks {
+		if h.final == nil {
+			continue
+		}
+		for _, st := range h.final() {
+			res.Steps = append(res.Steps, st)
+			if !st.Passed {
+				hookFailed[h.name] = true
+			}
+		}
+	}
 	// Collate the named persistence scenarios from the stage outcomes.
 	pass := func(names ...string) bool {
 		for _, n := range names {
@@ -317,6 +362,9 @@ func RunPersisted(ctx context.Context, layout Layout, dir, path string) (res Per
 		q.ScenarioOutcome{Name: "restart", Passed: pass("restart-queries", "restart-after-compaction-queries")},
 		q.ScenarioOutcome{Name: "receipt-manifest-reconciles", Passed: pass("hot-manifest", "flush-manifest", "multi-segment-manifest", "compaction-manifest", "restart-manifest", "restart-after-compaction-manifest", "after-conflict-manifest")},
 	)
+	for _, h := range hooks {
+		res.Persistence = append(res.Persistence, q.ScenarioOutcome{Name: h.name, Passed: !hookFailed[h.name]})
+	}
 	return res, nil
 }
 

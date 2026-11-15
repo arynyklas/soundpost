@@ -1,0 +1,1666 @@
+{
+  "copyright": "Copyright 2026 Aryn Yklas",
+  "license": "Apache-2.0",
+  "schema": "soundpost-authored-prometheus-configuration-cases-v1",
+  "phase": "configuration",
+  "cases": [
+    {
+      "id": "promql-prometheus-3.1.0/configuration/protocols/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "obligation": "promql-prometheus-3.1.0/configuration/protocols",
+      "scenarios": [
+        {
+          "name": "native-histograms-feature-prefers-proto",
+          "config": "scrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "features": [
+            "native-histograms"
+          ],
+          "expect": {
+            "global.scrape_protocols": "PrometheusProto,OpenMetricsText1.0.0,OpenMetricsText0.0.1,PrometheusText1.0.0,PrometheusText0.0.4",
+            "job:a.scrape_protocols": "PrometheusProto,OpenMetricsText1.0.0,OpenMetricsText0.0.1,PrometheusText1.0.0,PrometheusText0.0.4"
+          }
+        },
+        {
+          "name": "created-timestamp-feature-prefers-proto",
+          "config": "scrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "features": [
+            "created-timestamp-zero-ingestion"
+          ],
+          "expect": {
+            "global.scrape_protocols": "PrometheusProto,OpenMetricsText1.0.0,OpenMetricsText0.0.1,PrometheusText1.0.0,PrometheusText0.0.4",
+            "job:a.scrape_protocols": "PrometheusProto,OpenMetricsText1.0.0,OpenMetricsText0.0.1,PrometheusText1.0.0,PrometheusText0.0.4"
+          }
+        },
+        {
+          "name": "both-features",
+          "config": "scrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "features": [
+            "native-histograms",
+            "created-timestamp-zero-ingestion"
+          ],
+          "expect": {
+            "job:a.scrape_protocols": "PrometheusProto,OpenMetricsText1.0.0,OpenMetricsText0.0.1,PrometheusText1.0.0,PrometheusText0.0.4"
+          }
+        },
+        {
+          "name": "feature-keeps-explicit-global",
+          "config": "global:\n  scrape_protocols: [PrometheusText0.0.4]\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "features": [
+            "native-histograms"
+          ],
+          "expect": {
+            "global.scrape_protocols": "PrometheusText0.0.4",
+            "job:a.scrape_protocols": "PrometheusText0.0.4"
+          }
+        },
+        {
+          "name": "feature-keeps-explicit-job",
+          "config": "scrape_configs:\n  - job_name: a\n    scrape_protocols: [PrometheusText1.0.0]\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "features": [
+            "native-histograms"
+          ],
+          "expect": {
+            "global.scrape_protocols": "PrometheusProto,OpenMetricsText1.0.0,OpenMetricsText0.0.1,PrometheusText1.0.0,PrometheusText0.0.4",
+            "job:a.scrape_protocols": "PrometheusText1.0.0"
+          }
+        },
+        {
+          "name": "feature-null-global-list-takes-feature-default",
+          "config": "global:\n  scrape_protocols: null\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "features": [
+            "native-histograms"
+          ],
+          "expect": {
+            "global.scrape_protocols": "PrometheusProto,OpenMetricsText1.0.0,OpenMetricsText0.0.1,PrometheusText1.0.0,PrometheusText0.0.4"
+          }
+        },
+        {
+          "name": "feature-does-not-excuse-empty-list",
+          "config": "global:\n  scrape_protocols: []\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "features": [
+            "native-histograms"
+          ],
+          "reason": "protocols_empty@global"
+        },
+        {
+          "name": "unrelated-feature-keeps-default",
+          "config": "scrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "features": [
+            "ooo-native-histograms"
+          ],
+          "expect": {
+            "job:a.scrape_protocols": "OpenMetricsText1.0.0,OpenMetricsText0.0.1,PrometheusText1.0.0,PrometheusText0.0.4"
+          }
+        },
+        {
+          "name": "native-histogram-key-is-unknown-in-310",
+          "config": "global:\n  scrape_native_histograms: true\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "unknown_field@document"
+        },
+        {
+          "name": "job-native-histogram-key-is-unknown-in-310",
+          "config": "scrape_configs:\n  - job_name: a\n    scrape_native_histograms: true\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "unknown_field@document"
+        }
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.1.0/configuration/protocols/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "obligation": "promql-prometheus-3.1.0/configuration/protocols",
+      "scenarios": [
+        {
+          "name": "empty-global-list",
+          "config": "global:\n  scrape_protocols: []\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "protocols_empty@global"
+        },
+        {
+          "name": "empty-job-list",
+          "config": "scrape_configs:\n  - job_name: a\n    scrape_protocols: []\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "protocols_empty@job:a"
+        },
+        {
+          "name": "duplicate-casefold-in-job",
+          "config": "scrape_configs:\n  - job_name: a\n    scrape_protocols: [PrometheusProto, prometheusproto]\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "protocols_duplicate@job:a"
+        },
+        {
+          "name": "duplicate-exact-in-global",
+          "config": "global:\n  scrape_protocols: [PrometheusText0.0.4, PrometheusText0.0.4]\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "protocols_duplicate@global"
+        },
+        {
+          "name": "unknown-protocol-in-job",
+          "config": "scrape_configs:\n  - job_name: a\n    scrape_protocols: [Foo]\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "protocols_unknown@job:a"
+        },
+        {
+          "name": "unknown-protocol-in-global",
+          "config": "global:\n  scrape_protocols: [X]\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "protocols_unknown@global"
+        },
+        {
+          "name": "known-name-wrong-case",
+          "config": "scrape_configs:\n  - job_name: a\n    scrape_protocols: [prometheusproto]\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "protocols_unknown@job:a"
+        },
+        {
+          "name": "unknown-before-casefold-duplicate",
+          "config": "scrape_configs:\n  - job_name: a\n    scrape_protocols: [Foo, foo]\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "protocols_unknown@job:a"
+        },
+        {
+          "name": "unknown-fallback-protocol",
+          "config": "scrape_configs:\n  - job_name: a\n    fallback_scrape_protocol: Nope\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "fallback_protocol_unknown@job:a"
+        },
+        {
+          "name": "empty-list-before-unknown-fallback",
+          "config": "scrape_configs:\n  - job_name: a\n    scrape_protocols: []\n    fallback_scrape_protocol: Nope\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "protocols_empty@job:a"
+        },
+        {
+          "name": "list-is-not-a-sequence",
+          "config": "scrape_configs:\n  - job_name: a\n    scrape_protocols: PrometheusProto\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "invalid_value@document"
+        }
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.1.0/configuration/protocols/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "obligation": "promql-prometheus-3.1.0/configuration/protocols",
+      "scenarios": [
+        {
+          "name": "default-list",
+          "config": "scrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "global.scrape_protocols": "OpenMetricsText1.0.0,OpenMetricsText0.0.1,PrometheusText1.0.0,PrometheusText0.0.4",
+            "job:a.scrape_protocols": "OpenMetricsText1.0.0,OpenMetricsText0.0.1,PrometheusText1.0.0,PrometheusText0.0.4"
+          }
+        },
+        {
+          "name": "global-override-and-explicit-job",
+          "config": "global:\n  scrape_protocols: [PrometheusText0.0.4]\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n  - job_name: b\n    scrape_protocols: [OpenMetricsText1.0.0, PrometheusProto]\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "global.scrape_protocols": "PrometheusText0.0.4",
+            "job:a.scrape_protocols": "PrometheusText0.0.4",
+            "job:b.scrape_protocols": "OpenMetricsText1.0.0,PrometheusProto"
+          }
+        },
+        {
+          "name": "null-lists-inherit",
+          "config": "global:\n  scrape_protocols: null\nscrape_configs:\n  - job_name: a\n    scrape_protocols: null\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "job:a.scrape_protocols": "OpenMetricsText1.0.0,OpenMetricsText0.0.1,PrometheusText1.0.0,PrometheusText0.0.4"
+          }
+        },
+        {
+          "name": "all-five-known-names",
+          "config": "scrape_configs:\n  - job_name: a\n    scrape_protocols: [PrometheusText1.0.0, OpenMetricsText0.0.1, PrometheusProto, PrometheusText0.0.4, OpenMetricsText1.0.0]\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "job:a.scrape_protocols": "PrometheusText1.0.0,OpenMetricsText0.0.1,PrometheusProto,PrometheusText0.0.4,OpenMetricsText1.0.0"
+          }
+        },
+        {
+          "name": "fallback-protocol-known",
+          "config": "scrape_configs:\n  - job_name: a\n    fallback_scrape_protocol: PrometheusText0.0.4\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "job:a.fallback_scrape_protocol": "PrometheusText0.0.4"
+          }
+        },
+        {
+          "name": "single-protocol-global",
+          "config": "global:\n  scrape_protocols: [OpenMetricsText1.0.0]\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "job:a.scrape_protocols": "OpenMetricsText1.0.0"
+          }
+        }
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.1.0/configuration/scrape-inheritance/interaction",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "obligation": "promql-prometheus-3.1.0/configuration/scrape-inheritance",
+      "scenarios": [
+        {
+          "name": "limits-inherit-override-and-zero",
+          "config": "global:\n  sample_limit: 100\n  target_limit: 100\n  label_limit: 100\n  label_name_length_limit: 100\n  label_value_length_limit: 100\n  keep_dropped_targets: 100\n  body_size_limit: 2MB\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n  - job_name: b\n    sample_limit: 1\n    target_limit: 1\n    label_limit: 1\n    label_name_length_limit: 1\n    label_value_length_limit: 1\n    keep_dropped_targets: 1\n    body_size_limit: 3KB\n    static_configs:\n      - targets: ['127.0.0.1:9']\n  - job_name: c\n    sample_limit: 0\n    target_limit: 0\n    label_limit: 0\n    label_name_length_limit: 0\n    label_value_length_limit: 0\n    keep_dropped_targets: 0\n    body_size_limit: 0\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "global.sample_limit": "100",
+            "global.target_limit": "100",
+            "global.label_limit": "100",
+            "global.label_name_length_limit": "100",
+            "global.label_value_length_limit": "100",
+            "global.keep_dropped_targets": "100",
+            "global.body_size_limit": "2097152",
+            "job:a.sample_limit": "100",
+            "job:a.target_limit": "100",
+            "job:a.label_limit": "100",
+            "job:a.label_name_length_limit": "100",
+            "job:a.label_value_length_limit": "100",
+            "job:a.keep_dropped_targets": "100",
+            "job:a.body_size_limit": "2097152",
+            "job:b.sample_limit": "1",
+            "job:b.target_limit": "1",
+            "job:b.label_limit": "1",
+            "job:b.label_name_length_limit": "1",
+            "job:b.label_value_length_limit": "1",
+            "job:b.keep_dropped_targets": "1",
+            "job:b.body_size_limit": "3072",
+            "job:c.sample_limit": "100",
+            "job:c.target_limit": "100",
+            "job:c.label_limit": "100",
+            "job:c.label_name_length_limit": "100",
+            "job:c.label_value_length_limit": "100",
+            "job:c.keep_dropped_targets": "100",
+            "job:c.body_size_limit": "2097152"
+          }
+        },
+        {
+          "name": "global-limits-zero-mean-no-cap",
+          "config": "global:\n  sample_limit: 0\n  target_limit: 0\n  label_limit: 0\n  label_name_length_limit: 0\n  label_value_length_limit: 0\n  keep_dropped_targets: 0\n  body_size_limit: 0\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n  - job_name: b\n    sample_limit: 1\n    target_limit: 1\n    label_limit: 1\n    label_name_length_limit: 1\n    label_value_length_limit: 1\n    keep_dropped_targets: 1\n    body_size_limit: 1B\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "global.sample_limit": "0",
+            "global.target_limit": "0",
+            "global.label_limit": "0",
+            "global.label_name_length_limit": "0",
+            "global.label_value_length_limit": "0",
+            "global.keep_dropped_targets": "0",
+            "global.body_size_limit": "0",
+            "job:a.sample_limit": "0",
+            "job:a.target_limit": "0",
+            "job:a.label_limit": "0",
+            "job:a.label_name_length_limit": "0",
+            "job:a.label_value_length_limit": "0",
+            "job:a.keep_dropped_targets": "0",
+            "job:a.body_size_limit": "0",
+            "job:b.sample_limit": "1",
+            "job:b.target_limit": "1",
+            "job:b.label_limit": "1",
+            "job:b.label_name_length_limit": "1",
+            "job:b.label_value_length_limit": "1",
+            "job:b.keep_dropped_targets": "1",
+            "job:b.body_size_limit": "1"
+          }
+        },
+        {
+          "name": "job-limit-one-below-global",
+          "config": "global:\n  sample_limit: 100\nscrape_configs:\n  - job_name: a\n    sample_limit: 99\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "global.sample_limit": "100",
+            "job:a.sample_limit": "99"
+          }
+        },
+        {
+          "name": "job-limit-equals-global",
+          "config": "global:\n  sample_limit: 100\nscrape_configs:\n  - job_name: a\n    sample_limit: 100\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "job:a.sample_limit": "100"
+          }
+        },
+        {
+          "name": "job-limit-one-above-global",
+          "config": "global:\n  sample_limit: 100\nscrape_configs:\n  - job_name: a\n    sample_limit: 101\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "job:a.sample_limit": "101"
+          }
+        },
+        {
+          "name": "job-limit-one-over-zero-global",
+          "config": "global:\n  sample_limit: 0\nscrape_configs:\n  - job_name: a\n    sample_limit: 1\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "global.sample_limit": "0",
+            "job:a.sample_limit": "1"
+          }
+        },
+        {
+          "name": "each-limit-inherits-on-its-own",
+          "config": "global:\n  sample_limit: 7\n  target_limit: 7\n  label_limit: 7\n  label_name_length_limit: 7\n  label_value_length_limit: 7\n  keep_dropped_targets: 7\n  body_size_limit: 1KB\nscrape_configs:\n  - job_name: a\n    sample_limit: 0\n    target_limit: 2\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "job:a.sample_limit": "7",
+            "job:a.target_limit": "2",
+            "job:a.label_limit": "7",
+            "job:a.body_size_limit": "1024"
+          }
+        },
+        {
+          "name": "body-size-units",
+          "config": "scrape_configs:\n  - job_name: a\n    body_size_limit: 1KB\n    static_configs:\n      - targets: ['127.0.0.1:9']\n  - job_name: b\n    body_size_limit: 1KiB\n    static_configs:\n      - targets: ['127.0.0.1:9']\n  - job_name: c\n    body_size_limit: 1MB512KB\n    static_configs:\n      - targets: ['127.0.0.1:9']\n  - job_name: d\n    body_size_limit: 10GB\n    static_configs:\n      - targets: ['127.0.0.1:9']\n  - job_name: e\n    body_size_limit: 1B\n    static_configs:\n      - targets: ['127.0.0.1:9']\n  - job_name: f\n    body_size_limit: 0B\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "job:a.body_size_limit": "1024",
+            "job:b.body_size_limit": "1024",
+            "job:c.body_size_limit": "1572864",
+            "job:d.body_size_limit": "10737418240",
+            "job:e.body_size_limit": "1",
+            "job:f.body_size_limit": "0"
+          }
+        },
+        {
+          "name": "millisecond-and-compound-durations",
+          "config": "global:\n  scrape_interval: 1500ms\n  scrape_timeout: 500ms\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n  - job_name: b\n    scrape_interval: 1h30m\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "global.scrape_interval": "1.5s",
+            "global.scrape_timeout": "500ms",
+            "job:a.scrape_interval": "1.5s",
+            "job:b.scrape_interval": "1h30m",
+            "job:b.scrape_timeout": "500ms"
+          }
+        },
+        {
+          "name": "calendar-unit-durations",
+          "config": "global:\n  scrape_interval: 1d\nscrape_configs:\n  - job_name: a\n    scrape_interval: 1w\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "global.scrape_interval": "24h",
+            "job:a.scrape_interval": "168h"
+          }
+        },
+        {
+          "name": "bare-zero-duration-is-zero",
+          "config": "global:\n  scrape_interval: 0\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "global.scrape_interval": "1m"
+          }
+        },
+        {
+          "name": "evaluation-interval-is-independent",
+          "config": "global:\n  scrape_interval: 7s\n  evaluation_interval: 45s\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "global.evaluation_interval": "45s",
+            "job:a.scrape_interval": "7s",
+            "job:a.scrape_timeout": "7s"
+          }
+        },
+        {
+          "name": "global-error-wins-over-job-error",
+          "config": "global:\n  scrape_interval: 5s\n  scrape_timeout: 9s\nscrape_configs:\n  - job_name: a\n    scrape_interval: 5s\n    scrape_timeout: 9s\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "timeout_exceeds_interval@global"
+        },
+        {
+          "name": "global-error-wins-over-job-type-error",
+          "config": "global:\n  scrape_interval: 5s\n  scrape_timeout: 9s\nscrape_configs:\n  - job_name: a\n    sample_limit: -1\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "timeout_exceeds_interval@global"
+        },
+        {
+          "name": "global-error-wins-when-it-comes-last",
+          "config": "scrape_configs:\n  - job_name: a\n    sample_limit: -1\n    static_configs:\n      - targets: ['127.0.0.1:9']\nglobal:\n  scrape_interval: 5s\n  scrape_timeout: 9s\n",
+          "accepted": false,
+          "reason": "timeout_exceeds_interval@global"
+        },
+        {
+          "name": "type-error-wins-over-job-timeout",
+          "config": "scrape_configs:\n  - job_name: a\n    sample_limit: -1\n    static_configs:\n      - targets: ['127.0.0.1:9']\n  - job_name: b\n    scrape_interval: 5s\n    scrape_timeout: 9s\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "invalid_value@document"
+        },
+        {
+          "name": "global-type-error-skips-global-validation",
+          "config": "global:\n  sample_limit: -1\n  scrape_interval: 5s\n  scrape_timeout: 9s\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "invalid_value@document"
+        },
+        {
+          "name": "first-failing-job-is-reported",
+          "config": "scrape_configs:\n  - job_name: a\n    scrape_protocols: []\n    static_configs:\n      - targets: ['127.0.0.1:9']\n  - job_name: b\n    scrape_interval: 5s\n    scrape_timeout: 9s\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "protocols_empty@job:a"
+        },
+        {
+          "name": "timeout-checked-before-protocols",
+          "config": "scrape_configs:\n  - job_name: a\n    scrape_interval: 5s\n    scrape_timeout: 9s\n    scrape_protocols: []\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "timeout_exceeds_interval@job:a"
+        }
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.1.0/configuration/scrape-inheritance/negative",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "obligation": "promql-prometheus-3.1.0/configuration/scrape-inheritance",
+      "scenarios": [
+        {
+          "name": "global-timeout-above-interval",
+          "config": "global:\n  scrape_interval: 10s\n  scrape_timeout: 11s\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "timeout_exceeds_interval@global"
+        },
+        {
+          "name": "global-timeout-above-default-interval",
+          "config": "global:\n  scrape_timeout: 2m\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "timeout_exceeds_interval@global"
+        },
+        {
+          "name": "job-timeout-above-interval",
+          "config": "scrape_configs:\n  - job_name: a\n    scrape_interval: 15s\n    scrape_timeout: 16s\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "timeout_exceeds_interval@job:a"
+        },
+        {
+          "name": "job-timeout-above-global-interval",
+          "config": "global:\n  scrape_interval: 15s\nscrape_configs:\n  - job_name: a\n    scrape_timeout: 16s\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "timeout_exceeds_interval@job:a"
+        },
+        {
+          "name": "job-timeout-above-default-interval",
+          "config": "scrape_configs:\n  - job_name: a\n    scrape_timeout: 2m\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "timeout_exceeds_interval@job:a"
+        },
+        {
+          "name": "invalid-duration-word",
+          "config": "global:\n  scrape_interval: abc\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "invalid_duration@document"
+        },
+        {
+          "name": "negative-duration",
+          "config": "global:\n  scrape_interval: -5s\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "invalid_duration@document"
+        },
+        {
+          "name": "bare-nonzero-number-duration",
+          "config": "global:\n  scrape_interval: 5\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "invalid_duration@document"
+        },
+        {
+          "name": "fractional-duration",
+          "config": "global:\n  scrape_interval: 1.5s\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "invalid_duration@document"
+        },
+        {
+          "name": "duration-units-out-of-order",
+          "config": "global:\n  scrape_interval: 30s1m\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "invalid_duration@document"
+        },
+        {
+          "name": "negative-limit",
+          "config": "scrape_configs:\n  - job_name: a\n    sample_limit: -1\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "invalid_value@document"
+        },
+        {
+          "name": "negative-global-limit",
+          "config": "global:\n  sample_limit: -1\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "invalid_value@document"
+        },
+        {
+          "name": "non-numeric-limit",
+          "config": "scrape_configs:\n  - job_name: a\n    sample_limit: abc\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "invalid_value@document"
+        },
+        {
+          "name": "bare-number-body-size",
+          "config": "scrape_configs:\n  - job_name: a\n    body_size_limit: 1000\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "invalid_size@document"
+        },
+        {
+          "name": "non-numeric-body-size",
+          "config": "scrape_configs:\n  - job_name: a\n    body_size_limit: abc\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "invalid_size@document"
+        },
+        {
+          "name": "lowercase-body-size-unit",
+          "config": "scrape_configs:\n  - job_name: a\n    body_size_limit: 1kb\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "invalid_size@document"
+        },
+        {
+          "name": "non-boolean-honor-labels",
+          "config": "scrape_configs:\n  - job_name: a\n    honor_labels: perhaps\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "invalid_value@document"
+        },
+        {
+          "name": "global-honor-labels-is-not-a-global-key",
+          "config": "global:\n  honor_labels: true\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "unknown_field@document"
+        },
+        {
+          "name": "document-is-a-list",
+          "config": "- a\n",
+          "accepted": false,
+          "reason": "invalid_value@document"
+        },
+        {
+          "name": "scrape-configs-is-a-mapping",
+          "config": "scrape_configs: {}\n",
+          "accepted": false,
+          "reason": "invalid_value@document"
+        },
+        {
+          "name": "global-is-a-scalar",
+          "config": "global: 5\n",
+          "accepted": false,
+          "reason": "invalid_value@document"
+        }
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.1.0/configuration/scrape-inheritance/positive",
+      "profiles": [
+        "promql-prometheus-3.1.0"
+      ],
+      "obligation": "promql-prometheus-3.1.0/configuration/scrape-inheritance",
+      "scenarios": [
+        {
+          "name": "global-zero-values-take-defaults",
+          "config": "global:\n  scrape_interval: 0s\n  scrape_timeout: 0s\n  evaluation_interval: 0s\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "global.scrape_interval": "1m",
+            "global.scrape_timeout": "10s",
+            "global.evaluation_interval": "1m",
+            "job:a.scrape_interval": "1m",
+            "job:a.scrape_timeout": "10s"
+          }
+        },
+        {
+          "name": "absent-global-takes-defaults",
+          "config": "scrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "global.scrape_interval": "1m",
+            "global.scrape_timeout": "10s",
+            "global.evaluation_interval": "1m",
+            "job:a.scrape_interval": "1m",
+            "job:a.scrape_timeout": "10s"
+          }
+        },
+        {
+          "name": "short-global-interval-caps-default-timeout",
+          "config": "global:\n  scrape_interval: 5s\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "global.scrape_interval": "5s",
+            "global.scrape_timeout": "5s",
+            "job:a.scrape_timeout": "5s"
+          }
+        },
+        {
+          "name": "global-timeout-zero-with-long-interval",
+          "config": "global:\n  scrape_interval: 30s\n  scrape_timeout: 0\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "global.scrape_timeout": "10s",
+            "job:a.scrape_timeout": "10s"
+          }
+        },
+        {
+          "name": "global-timeout-equals-interval",
+          "config": "global:\n  scrape_interval: 10s\n  scrape_timeout: 10s\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "global.scrape_timeout": "10s",
+            "job:a.scrape_interval": "10s"
+          }
+        },
+        {
+          "name": "global-timeout-with-default-interval",
+          "config": "global:\n  scrape_timeout: 5s\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "global.scrape_interval": "1m",
+            "global.scrape_timeout": "5s"
+          }
+        },
+        {
+          "name": "job-zero-values-inherit-global",
+          "config": "global:\n  scrape_interval: 20s\n  scrape_timeout: 8s\nscrape_configs:\n  - job_name: a\n    scrape_interval: 0s\n    scrape_timeout: 0s\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "job:a.scrape_interval": "20s",
+            "job:a.scrape_timeout": "8s"
+          }
+        },
+        {
+          "name": "job-interval-below-global-timeout-caps-timeout",
+          "config": "global:\n  scrape_interval: 20s\n  scrape_timeout: 8s\nscrape_configs:\n  - job_name: a\n    scrape_interval: 4s\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "job:a.scrape_interval": "4s",
+            "job:a.scrape_timeout": "4s"
+          }
+        },
+        {
+          "name": "job-interval-above-global-timeout-keeps-timeout",
+          "config": "global:\n  scrape_interval: 20s\n  scrape_timeout: 8s\nscrape_configs:\n  - job_name: a\n    scrape_interval: 9s\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "job:a.scrape_interval": "9s",
+            "job:a.scrape_timeout": "8s"
+          }
+        },
+        {
+          "name": "job-timeout-equals-interval",
+          "config": "scrape_configs:\n  - job_name: a\n    scrape_interval: 15s\n    scrape_timeout: 15s\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "job:a.scrape_interval": "15s",
+            "job:a.scrape_timeout": "15s"
+          }
+        },
+        {
+          "name": "job-timeout-below-inherited-interval",
+          "config": "global:\n  scrape_interval: 1h\nscrape_configs:\n  - job_name: a\n    scrape_timeout: 59m\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "job:a.scrape_interval": "1h0m0s",
+            "job:a.scrape_timeout": "59m"
+          }
+        },
+        {
+          "name": "jobs-inherit-independently",
+          "config": "global:\n  scrape_interval: 1m\nscrape_configs:\n  - job_name: a\n    scrape_interval: 5s\n    static_configs:\n      - targets: ['127.0.0.1:9']\n  - job_name: b\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "job:a.scrape_interval": "5s",
+            "job:a.scrape_timeout": "5s",
+            "job:b.scrape_interval": "1m",
+            "job:b.scrape_timeout": "10s",
+            "jobs": "a,b"
+          }
+        },
+        {
+          "name": "acquisition-defaults",
+          "config": "scrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "job:a.honor_labels": "false",
+            "job:a.honor_timestamps": "true",
+            "job:a.track_timestamps_staleness": "false"
+          }
+        },
+        {
+          "name": "acquisition-explicit",
+          "config": "scrape_configs:\n  - job_name: a\n    honor_labels: true\n    honor_timestamps: false\n    track_timestamps_staleness: true\n    static_configs:\n      - targets: ['127.0.0.1:9']\n  - job_name: b\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "job:a.honor_labels": "true",
+            "job:a.honor_timestamps": "false",
+            "job:a.track_timestamps_staleness": "true",
+            "job:b.honor_labels": "false",
+            "job:b.honor_timestamps": "true"
+          }
+        },
+        {
+          "name": "null-values-are-zero",
+          "config": "global:\n  scrape_interval:\n  scrape_timeout: ~\nscrape_configs:\n  - job_name: a\n    scrape_interval:\n    sample_limit:\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "job:a.scrape_interval": "1m",
+            "job:a.scrape_timeout": "10s",
+            "job:a.sample_limit": "0"
+          }
+        },
+        {
+          "name": "document-without-jobs",
+          "config": "global:\n  scrape_interval: 2m\n",
+          "accepted": true,
+          "expect": {
+            "global.scrape_interval": "2m",
+            "global.scrape_timeout": "10s",
+            "jobs": ""
+          }
+        },
+        {
+          "name": "empty-document",
+          "config": "",
+          "accepted": true,
+          "expect": {
+            "global.scrape_interval": "1m",
+            "global.scrape_timeout": "10s",
+            "global.evaluation_interval": "1m",
+            "jobs": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/configuration/protocols/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "obligation": "promql-prometheus-3.13.5/configuration/protocols",
+      "scenarios": [
+        {
+          "name": "global-native-true-prefers-proto",
+          "config": "global:\n  scrape_native_histograms: true\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n  - job_name: b\n    scrape_native_histograms: false\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "global.scrape_protocols": "<unset>",
+            "global.scrape_native_histograms": "true",
+            "job:a.scrape_protocols": "PrometheusProto,OpenMetricsText1.0.0,OpenMetricsText0.0.1,PrometheusText1.0.0,PrometheusText0.0.4",
+            "job:a.scrape_native_histograms": "true",
+            "job:b.scrape_protocols": "OpenMetricsText1.0.0,OpenMetricsText0.0.1,PrometheusText1.0.0,PrometheusText0.0.4",
+            "job:b.scrape_native_histograms": "false"
+          }
+        },
+        {
+          "name": "job-native-true-prefers-proto",
+          "config": "scrape_configs:\n  - job_name: a\n    scrape_native_histograms: true\n    static_configs:\n      - targets: ['127.0.0.1:9']\n  - job_name: b\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "job:a.scrape_protocols": "PrometheusProto,OpenMetricsText1.0.0,OpenMetricsText0.0.1,PrometheusText1.0.0,PrometheusText0.0.4",
+            "job:b.scrape_protocols": "OpenMetricsText1.0.0,OpenMetricsText0.0.1,PrometheusText1.0.0,PrometheusText0.0.4"
+          }
+        },
+        {
+          "name": "native-true-keeps-explicit-job-list",
+          "config": "global:\n  scrape_native_histograms: true\nscrape_configs:\n  - job_name: a\n    scrape_protocols: [PrometheusText0.0.4]\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "job:a.scrape_protocols": "PrometheusText0.0.4"
+          }
+        },
+        {
+          "name": "native-true-keeps-explicit-global-list",
+          "config": "global:\n  scrape_native_histograms: true\n  scrape_protocols: [PrometheusText0.0.4]\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "global.scrape_protocols": "PrometheusText0.0.4",
+            "job:a.scrape_protocols": "PrometheusText0.0.4"
+          }
+        },
+        {
+          "name": "job-native-false-overrides-global-true",
+          "config": "global:\n  scrape_native_histograms: true\nscrape_configs:\n  - job_name: a\n    scrape_native_histograms: false\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "job:a.scrape_protocols": "OpenMetricsText1.0.0,OpenMetricsText0.0.1,PrometheusText1.0.0,PrometheusText0.0.4",
+            "job:a.scrape_native_histograms": "false"
+          }
+        },
+        {
+          "name": "native-histograms-feature-is-a-noop",
+          "config": "scrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "features": [
+            "native-histograms"
+          ],
+          "expect": {
+            "global.scrape_protocols": "<unset>",
+            "job:a.scrape_protocols": "OpenMetricsText1.0.0,OpenMetricsText0.0.1,PrometheusText1.0.0,PrometheusText0.0.4"
+          }
+        },
+        {
+          "name": "created-timestamp-feature-sets-global-proto-first",
+          "config": "scrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "features": [
+            "created-timestamp-zero-ingestion"
+          ],
+          "expect": {
+            "global.scrape_protocols": "PrometheusProto,OpenMetricsText1.0.0,OpenMetricsText0.0.1,PrometheusText1.0.0,PrometheusText0.0.4",
+            "job:a.scrape_protocols": "PrometheusProto,OpenMetricsText1.0.0,OpenMetricsText0.0.1,PrometheusText1.0.0,PrometheusText0.0.4"
+          }
+        },
+        {
+          "name": "start-timestamp-storage-feature-sets-global-proto-first",
+          "config": "scrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "features": [
+            "st-storage",
+            "xor2-encoding"
+          ],
+          "expect": {
+            "global.scrape_protocols": "PrometheusProto,OpenMetricsText1.0.0,OpenMetricsText0.0.1,PrometheusText1.0.0,PrometheusText0.0.4",
+            "job:a.scrape_protocols": "PrometheusProto,OpenMetricsText1.0.0,OpenMetricsText0.0.1,PrometheusText1.0.0,PrometheusText0.0.4"
+          }
+        },
+        {
+          "name": "feature-global-list-does-not-reach-native-false-job",
+          "config": "global:\n  scrape_native_histograms: false\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "features": [
+            "created-timestamp-zero-ingestion"
+          ],
+          "expect": {
+            "job:a.scrape_protocols": "PrometheusProto,OpenMetricsText1.0.0,OpenMetricsText0.0.1,PrometheusText1.0.0,PrometheusText0.0.4"
+          }
+        },
+        {
+          "name": "feature-keeps-explicit-global",
+          "config": "global:\n  scrape_protocols: [PrometheusText0.0.4]\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "features": [
+            "created-timestamp-zero-ingestion"
+          ],
+          "expect": {
+            "global.scrape_protocols": "PrometheusText0.0.4",
+            "job:a.scrape_protocols": "PrometheusText0.0.4"
+          }
+        },
+        {
+          "name": "feature-does-not-excuse-empty-list",
+          "config": "global:\n  scrape_protocols: []\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "features": [
+            "created-timestamp-zero-ingestion"
+          ],
+          "reason": "protocols_empty@global"
+        },
+        {
+          "name": "native-flag-must-be-boolean",
+          "config": "global:\n  scrape_native_histograms: maybe\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "invalid_value@document"
+        },
+        {
+          "name": "utf8-validation-with-allow-utf8-escaping-default",
+          "config": "scrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "global.metric_name_validation_scheme": "utf8",
+            "job:a.metric_name_validation_scheme": "utf8",
+            "job:a.metric_name_escaping_scheme": "allow-utf-8"
+          }
+        },
+        {
+          "name": "global-legacy-validation-escapes-with-underscores",
+          "config": "global:\n  metric_name_validation_scheme: legacy\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "global.metric_name_validation_scheme": "legacy",
+            "job:a.metric_name_validation_scheme": "legacy",
+            "job:a.metric_name_escaping_scheme": "underscores"
+          }
+        },
+        {
+          "name": "job-legacy-does-not-inherit-utf8-escaping",
+          "config": "scrape_configs:\n  - job_name: a\n    metric_name_validation_scheme: legacy\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "job:a.metric_name_validation_scheme": "legacy",
+            "job:a.metric_name_escaping_scheme": "underscores"
+          }
+        },
+        {
+          "name": "job-utf8-over-global-legacy",
+          "config": "global:\n  metric_name_validation_scheme: legacy\nscrape_configs:\n  - job_name: a\n    metric_name_validation_scheme: utf8\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "job:a.metric_name_validation_scheme": "utf8",
+            "job:a.metric_name_escaping_scheme": "allow-utf-8"
+          }
+        },
+        {
+          "name": "global-escaping-reaches-unset-job",
+          "config": "global:\n  metric_name_escaping_scheme: dots\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n  - job_name: b\n    metric_name_escaping_scheme: values\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "job:a.metric_name_escaping_scheme": "dots",
+            "job:b.metric_name_escaping_scheme": "values"
+          }
+        },
+        {
+          "name": "underscore-escaping-under-utf8-validation",
+          "config": "scrape_configs:\n  - job_name: a\n    metric_name_escaping_scheme: underscores\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "job:a.metric_name_validation_scheme": "utf8",
+            "job:a.metric_name_escaping_scheme": "underscores"
+          }
+        },
+        {
+          "name": "allow-utf8-escaping-requires-utf8-validation",
+          "config": "global:\n  metric_name_validation_scheme: legacy\n  metric_name_escaping_scheme: allow-utf-8\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "escaping_requires_utf8@scrape"
+        },
+        {
+          "name": "unknown-job-escaping",
+          "config": "scrape_configs:\n  - job_name: a\n    metric_name_escaping_scheme: nope\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "escaping_scheme_unknown@scrape"
+        },
+        {
+          "name": "unknown-global-escaping",
+          "config": "global:\n  metric_name_escaping_scheme: nope\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "escaping_scheme_unknown@global"
+        },
+        {
+          "name": "unknown-validation-scheme",
+          "config": "scrape_configs:\n  - job_name: a\n    metric_name_validation_scheme: nope\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "validation_scheme_unknown@document"
+        }
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/configuration/protocols/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "obligation": "promql-prometheus-3.13.5/configuration/protocols",
+      "scenarios": [
+        {
+          "name": "empty-global-list",
+          "config": "global:\n  scrape_protocols: []\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "protocols_empty@global"
+        },
+        {
+          "name": "empty-job-list",
+          "config": "scrape_configs:\n  - job_name: a\n    scrape_protocols: []\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "protocols_empty@job:a"
+        },
+        {
+          "name": "duplicate-casefold-in-job",
+          "config": "scrape_configs:\n  - job_name: a\n    scrape_protocols: [PrometheusProto, prometheusproto]\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "protocols_duplicate@job:a"
+        },
+        {
+          "name": "duplicate-exact-in-global",
+          "config": "global:\n  scrape_protocols: [PrometheusText0.0.4, PrometheusText0.0.4]\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "protocols_duplicate@global"
+        },
+        {
+          "name": "unknown-protocol-in-job",
+          "config": "scrape_configs:\n  - job_name: a\n    scrape_protocols: [Foo]\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "protocols_unknown@job:a"
+        },
+        {
+          "name": "unknown-protocol-in-global",
+          "config": "global:\n  scrape_protocols: [X]\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "protocols_unknown@global"
+        },
+        {
+          "name": "known-name-wrong-case",
+          "config": "scrape_configs:\n  - job_name: a\n    scrape_protocols: [prometheusproto]\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "protocols_unknown@job:a"
+        },
+        {
+          "name": "unknown-before-casefold-duplicate",
+          "config": "scrape_configs:\n  - job_name: a\n    scrape_protocols: [Foo, foo]\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "protocols_unknown@job:a"
+        },
+        {
+          "name": "unknown-fallback-protocol",
+          "config": "scrape_configs:\n  - job_name: a\n    fallback_scrape_protocol: Nope\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "fallback_protocol_unknown@job:a"
+        },
+        {
+          "name": "empty-list-before-unknown-fallback",
+          "config": "scrape_configs:\n  - job_name: a\n    scrape_protocols: []\n    fallback_scrape_protocol: Nope\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "protocols_empty@job:a"
+        },
+        {
+          "name": "list-is-not-a-sequence",
+          "config": "scrape_configs:\n  - job_name: a\n    scrape_protocols: PrometheusProto\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "invalid_value@document"
+        }
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/configuration/protocols/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "obligation": "promql-prometheus-3.13.5/configuration/protocols",
+      "scenarios": [
+        {
+          "name": "default-list",
+          "config": "scrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "global.scrape_protocols": "<unset>",
+            "job:a.scrape_protocols": "OpenMetricsText1.0.0,OpenMetricsText0.0.1,PrometheusText1.0.0,PrometheusText0.0.4"
+          }
+        },
+        {
+          "name": "global-override-and-explicit-job",
+          "config": "global:\n  scrape_protocols: [PrometheusText0.0.4]\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n  - job_name: b\n    scrape_protocols: [OpenMetricsText1.0.0, PrometheusProto]\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "global.scrape_protocols": "PrometheusText0.0.4",
+            "job:a.scrape_protocols": "PrometheusText0.0.4",
+            "job:b.scrape_protocols": "OpenMetricsText1.0.0,PrometheusProto"
+          }
+        },
+        {
+          "name": "null-lists-inherit",
+          "config": "global:\n  scrape_protocols: null\nscrape_configs:\n  - job_name: a\n    scrape_protocols: null\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "job:a.scrape_protocols": "OpenMetricsText1.0.0,OpenMetricsText0.0.1,PrometheusText1.0.0,PrometheusText0.0.4"
+          }
+        },
+        {
+          "name": "all-five-known-names",
+          "config": "scrape_configs:\n  - job_name: a\n    scrape_protocols: [PrometheusText1.0.0, OpenMetricsText0.0.1, PrometheusProto, PrometheusText0.0.4, OpenMetricsText1.0.0]\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "job:a.scrape_protocols": "PrometheusText1.0.0,OpenMetricsText0.0.1,PrometheusProto,PrometheusText0.0.4,OpenMetricsText1.0.0"
+          }
+        },
+        {
+          "name": "fallback-protocol-known",
+          "config": "scrape_configs:\n  - job_name: a\n    fallback_scrape_protocol: PrometheusText0.0.4\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "job:a.fallback_scrape_protocol": "PrometheusText0.0.4"
+          }
+        },
+        {
+          "name": "single-protocol-global",
+          "config": "global:\n  scrape_protocols: [OpenMetricsText1.0.0]\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "job:a.scrape_protocols": "OpenMetricsText1.0.0"
+          }
+        }
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/configuration/scrape-inheritance/interaction",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "obligation": "promql-prometheus-3.13.5/configuration/scrape-inheritance",
+      "scenarios": [
+        {
+          "name": "limits-inherit-override-and-zero",
+          "config": "global:\n  sample_limit: 100\n  target_limit: 100\n  label_limit: 100\n  label_name_length_limit: 100\n  label_value_length_limit: 100\n  keep_dropped_targets: 100\n  body_size_limit: 2MB\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n  - job_name: b\n    sample_limit: 1\n    target_limit: 1\n    label_limit: 1\n    label_name_length_limit: 1\n    label_value_length_limit: 1\n    keep_dropped_targets: 1\n    body_size_limit: 3KB\n    static_configs:\n      - targets: ['127.0.0.1:9']\n  - job_name: c\n    sample_limit: 0\n    target_limit: 0\n    label_limit: 0\n    label_name_length_limit: 0\n    label_value_length_limit: 0\n    keep_dropped_targets: 0\n    body_size_limit: 0\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "global.sample_limit": "100",
+            "global.target_limit": "100",
+            "global.label_limit": "100",
+            "global.label_name_length_limit": "100",
+            "global.label_value_length_limit": "100",
+            "global.keep_dropped_targets": "100",
+            "global.body_size_limit": "2097152",
+            "job:a.sample_limit": "100",
+            "job:a.target_limit": "100",
+            "job:a.label_limit": "100",
+            "job:a.label_name_length_limit": "100",
+            "job:a.label_value_length_limit": "100",
+            "job:a.keep_dropped_targets": "100",
+            "job:a.body_size_limit": "2097152",
+            "job:b.sample_limit": "1",
+            "job:b.target_limit": "1",
+            "job:b.label_limit": "1",
+            "job:b.label_name_length_limit": "1",
+            "job:b.label_value_length_limit": "1",
+            "job:b.keep_dropped_targets": "1",
+            "job:b.body_size_limit": "3072",
+            "job:c.sample_limit": "100",
+            "job:c.target_limit": "100",
+            "job:c.label_limit": "100",
+            "job:c.label_name_length_limit": "100",
+            "job:c.label_value_length_limit": "100",
+            "job:c.keep_dropped_targets": "100",
+            "job:c.body_size_limit": "2097152"
+          }
+        },
+        {
+          "name": "global-limits-zero-mean-no-cap",
+          "config": "global:\n  sample_limit: 0\n  target_limit: 0\n  label_limit: 0\n  label_name_length_limit: 0\n  label_value_length_limit: 0\n  keep_dropped_targets: 0\n  body_size_limit: 0\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n  - job_name: b\n    sample_limit: 1\n    target_limit: 1\n    label_limit: 1\n    label_name_length_limit: 1\n    label_value_length_limit: 1\n    keep_dropped_targets: 1\n    body_size_limit: 1B\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "global.sample_limit": "0",
+            "global.target_limit": "0",
+            "global.label_limit": "0",
+            "global.label_name_length_limit": "0",
+            "global.label_value_length_limit": "0",
+            "global.keep_dropped_targets": "0",
+            "global.body_size_limit": "0",
+            "job:a.sample_limit": "0",
+            "job:a.target_limit": "0",
+            "job:a.label_limit": "0",
+            "job:a.label_name_length_limit": "0",
+            "job:a.label_value_length_limit": "0",
+            "job:a.keep_dropped_targets": "0",
+            "job:a.body_size_limit": "0",
+            "job:b.sample_limit": "1",
+            "job:b.target_limit": "1",
+            "job:b.label_limit": "1",
+            "job:b.label_name_length_limit": "1",
+            "job:b.label_value_length_limit": "1",
+            "job:b.keep_dropped_targets": "1",
+            "job:b.body_size_limit": "1"
+          }
+        },
+        {
+          "name": "job-limit-one-below-global",
+          "config": "global:\n  sample_limit: 100\nscrape_configs:\n  - job_name: a\n    sample_limit: 99\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "global.sample_limit": "100",
+            "job:a.sample_limit": "99"
+          }
+        },
+        {
+          "name": "job-limit-equals-global",
+          "config": "global:\n  sample_limit: 100\nscrape_configs:\n  - job_name: a\n    sample_limit: 100\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "job:a.sample_limit": "100"
+          }
+        },
+        {
+          "name": "job-limit-one-above-global",
+          "config": "global:\n  sample_limit: 100\nscrape_configs:\n  - job_name: a\n    sample_limit: 101\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "job:a.sample_limit": "101"
+          }
+        },
+        {
+          "name": "job-limit-one-over-zero-global",
+          "config": "global:\n  sample_limit: 0\nscrape_configs:\n  - job_name: a\n    sample_limit: 1\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "global.sample_limit": "0",
+            "job:a.sample_limit": "1"
+          }
+        },
+        {
+          "name": "each-limit-inherits-on-its-own",
+          "config": "global:\n  sample_limit: 7\n  target_limit: 7\n  label_limit: 7\n  label_name_length_limit: 7\n  label_value_length_limit: 7\n  keep_dropped_targets: 7\n  body_size_limit: 1KB\nscrape_configs:\n  - job_name: a\n    sample_limit: 0\n    target_limit: 2\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "job:a.sample_limit": "7",
+            "job:a.target_limit": "2",
+            "job:a.label_limit": "7",
+            "job:a.body_size_limit": "1024"
+          }
+        },
+        {
+          "name": "body-size-units",
+          "config": "scrape_configs:\n  - job_name: a\n    body_size_limit: 1KB\n    static_configs:\n      - targets: ['127.0.0.1:9']\n  - job_name: b\n    body_size_limit: 1KiB\n    static_configs:\n      - targets: ['127.0.0.1:9']\n  - job_name: c\n    body_size_limit: 1MB512KB\n    static_configs:\n      - targets: ['127.0.0.1:9']\n  - job_name: d\n    body_size_limit: 10GB\n    static_configs:\n      - targets: ['127.0.0.1:9']\n  - job_name: e\n    body_size_limit: 1B\n    static_configs:\n      - targets: ['127.0.0.1:9']\n  - job_name: f\n    body_size_limit: 0B\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "job:a.body_size_limit": "1024",
+            "job:b.body_size_limit": "1024",
+            "job:c.body_size_limit": "1572864",
+            "job:d.body_size_limit": "10737418240",
+            "job:e.body_size_limit": "1",
+            "job:f.body_size_limit": "0"
+          }
+        },
+        {
+          "name": "millisecond-and-compound-durations",
+          "config": "global:\n  scrape_interval: 1500ms\n  scrape_timeout: 500ms\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n  - job_name: b\n    scrape_interval: 1h30m\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "global.scrape_interval": "1.5s",
+            "global.scrape_timeout": "500ms",
+            "job:a.scrape_interval": "1.5s",
+            "job:b.scrape_interval": "1h30m",
+            "job:b.scrape_timeout": "500ms"
+          }
+        },
+        {
+          "name": "calendar-unit-durations",
+          "config": "global:\n  scrape_interval: 1d\nscrape_configs:\n  - job_name: a\n    scrape_interval: 1w\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "global.scrape_interval": "24h",
+            "job:a.scrape_interval": "168h"
+          }
+        },
+        {
+          "name": "bare-zero-duration-is-zero",
+          "config": "global:\n  scrape_interval: 0\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "global.scrape_interval": "1m"
+          }
+        },
+        {
+          "name": "evaluation-interval-is-independent",
+          "config": "global:\n  scrape_interval: 7s\n  evaluation_interval: 45s\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "global.evaluation_interval": "45s",
+            "job:a.scrape_interval": "7s",
+            "job:a.scrape_timeout": "7s"
+          }
+        },
+        {
+          "name": "global-error-wins-over-job-error",
+          "config": "global:\n  scrape_interval: 5s\n  scrape_timeout: 9s\nscrape_configs:\n  - job_name: a\n    scrape_interval: 5s\n    scrape_timeout: 9s\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "timeout_exceeds_interval@global"
+        },
+        {
+          "name": "global-error-wins-over-job-type-error",
+          "config": "global:\n  scrape_interval: 5s\n  scrape_timeout: 9s\nscrape_configs:\n  - job_name: a\n    sample_limit: -1\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "timeout_exceeds_interval@global"
+        },
+        {
+          "name": "global-error-wins-when-it-comes-last",
+          "config": "scrape_configs:\n  - job_name: a\n    sample_limit: -1\n    static_configs:\n      - targets: ['127.0.0.1:9']\nglobal:\n  scrape_interval: 5s\n  scrape_timeout: 9s\n",
+          "accepted": false,
+          "reason": "timeout_exceeds_interval@global"
+        },
+        {
+          "name": "type-error-wins-over-job-timeout",
+          "config": "scrape_configs:\n  - job_name: a\n    sample_limit: -1\n    static_configs:\n      - targets: ['127.0.0.1:9']\n  - job_name: b\n    scrape_interval: 5s\n    scrape_timeout: 9s\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "invalid_value@document"
+        },
+        {
+          "name": "global-type-error-skips-global-validation",
+          "config": "global:\n  sample_limit: -1\n  scrape_interval: 5s\n  scrape_timeout: 9s\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "invalid_value@document"
+        },
+        {
+          "name": "first-failing-job-is-reported",
+          "config": "scrape_configs:\n  - job_name: a\n    scrape_protocols: []\n    static_configs:\n      - targets: ['127.0.0.1:9']\n  - job_name: b\n    scrape_interval: 5s\n    scrape_timeout: 9s\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "protocols_empty@job:a"
+        },
+        {
+          "name": "timeout-checked-before-protocols",
+          "config": "scrape_configs:\n  - job_name: a\n    scrape_interval: 5s\n    scrape_timeout: 9s\n    scrape_protocols: []\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "timeout_exceeds_interval@job:a"
+        },
+        {
+          "name": "native-feature-does-not-change-intervals",
+          "config": "global:\n  scrape_interval: 20s\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "features": [
+            "native-histograms"
+          ],
+          "expect": {
+            "job:a.scrape_interval": "20s",
+            "job:a.scrape_timeout": "10s"
+          }
+        }
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/configuration/scrape-inheritance/negative",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "obligation": "promql-prometheus-3.13.5/configuration/scrape-inheritance",
+      "scenarios": [
+        {
+          "name": "global-timeout-above-interval",
+          "config": "global:\n  scrape_interval: 10s\n  scrape_timeout: 11s\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "timeout_exceeds_interval@global"
+        },
+        {
+          "name": "global-timeout-above-default-interval",
+          "config": "global:\n  scrape_timeout: 2m\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "timeout_exceeds_interval@global"
+        },
+        {
+          "name": "job-timeout-above-interval",
+          "config": "scrape_configs:\n  - job_name: a\n    scrape_interval: 15s\n    scrape_timeout: 16s\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "timeout_exceeds_interval@job:a"
+        },
+        {
+          "name": "job-timeout-above-global-interval",
+          "config": "global:\n  scrape_interval: 15s\nscrape_configs:\n  - job_name: a\n    scrape_timeout: 16s\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "timeout_exceeds_interval@job:a"
+        },
+        {
+          "name": "job-timeout-above-default-interval",
+          "config": "scrape_configs:\n  - job_name: a\n    scrape_timeout: 2m\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "timeout_exceeds_interval@job:a"
+        },
+        {
+          "name": "invalid-duration-word",
+          "config": "global:\n  scrape_interval: abc\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "invalid_duration@document"
+        },
+        {
+          "name": "negative-duration",
+          "config": "global:\n  scrape_interval: -5s\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "invalid_duration@document"
+        },
+        {
+          "name": "bare-nonzero-number-duration",
+          "config": "global:\n  scrape_interval: 5\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "invalid_duration@document"
+        },
+        {
+          "name": "fractional-duration",
+          "config": "global:\n  scrape_interval: 1.5s\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "invalid_duration@document"
+        },
+        {
+          "name": "duration-units-out-of-order",
+          "config": "global:\n  scrape_interval: 30s1m\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "invalid_duration@document"
+        },
+        {
+          "name": "negative-limit",
+          "config": "scrape_configs:\n  - job_name: a\n    sample_limit: -1\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "invalid_value@document"
+        },
+        {
+          "name": "negative-global-limit",
+          "config": "global:\n  sample_limit: -1\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "invalid_value@document"
+        },
+        {
+          "name": "non-numeric-limit",
+          "config": "scrape_configs:\n  - job_name: a\n    sample_limit: abc\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "invalid_value@document"
+        },
+        {
+          "name": "bare-number-body-size",
+          "config": "scrape_configs:\n  - job_name: a\n    body_size_limit: 1000\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "invalid_size@document"
+        },
+        {
+          "name": "non-numeric-body-size",
+          "config": "scrape_configs:\n  - job_name: a\n    body_size_limit: abc\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "invalid_size@document"
+        },
+        {
+          "name": "lowercase-body-size-unit",
+          "config": "scrape_configs:\n  - job_name: a\n    body_size_limit: 1kb\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "invalid_size@document"
+        },
+        {
+          "name": "non-boolean-honor-labels",
+          "config": "scrape_configs:\n  - job_name: a\n    honor_labels: perhaps\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "invalid_value@document"
+        },
+        {
+          "name": "global-honor-labels-is-not-a-global-key",
+          "config": "global:\n  honor_labels: true\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": false,
+          "reason": "unknown_field@document"
+        },
+        {
+          "name": "document-is-a-list",
+          "config": "- a\n",
+          "accepted": false,
+          "reason": "invalid_value@document"
+        },
+        {
+          "name": "scrape-configs-is-a-mapping",
+          "config": "scrape_configs: {}\n",
+          "accepted": false,
+          "reason": "invalid_value@document"
+        },
+        {
+          "name": "global-is-a-scalar",
+          "config": "global: 5\n",
+          "accepted": false,
+          "reason": "invalid_value@document"
+        }
+      ]
+    },
+    {
+      "id": "promql-prometheus-3.13.5/configuration/scrape-inheritance/positive",
+      "profiles": [
+        "promql-prometheus-3.13.5"
+      ],
+      "obligation": "promql-prometheus-3.13.5/configuration/scrape-inheritance",
+      "scenarios": [
+        {
+          "name": "global-zero-values-take-defaults",
+          "config": "global:\n  scrape_interval: 0s\n  scrape_timeout: 0s\n  evaluation_interval: 0s\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "global.scrape_interval": "1m",
+            "global.scrape_timeout": "10s",
+            "global.evaluation_interval": "1m",
+            "job:a.scrape_interval": "1m",
+            "job:a.scrape_timeout": "10s"
+          }
+        },
+        {
+          "name": "absent-global-takes-defaults",
+          "config": "scrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "global.scrape_interval": "1m",
+            "global.scrape_timeout": "10s",
+            "global.evaluation_interval": "1m",
+            "job:a.scrape_interval": "1m",
+            "job:a.scrape_timeout": "10s"
+          }
+        },
+        {
+          "name": "short-global-interval-caps-default-timeout",
+          "config": "global:\n  scrape_interval: 5s\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "global.scrape_interval": "5s",
+            "global.scrape_timeout": "5s",
+            "job:a.scrape_timeout": "5s"
+          }
+        },
+        {
+          "name": "global-timeout-zero-with-long-interval",
+          "config": "global:\n  scrape_interval: 30s\n  scrape_timeout: 0\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "global.scrape_timeout": "10s",
+            "job:a.scrape_timeout": "10s"
+          }
+        },
+        {
+          "name": "global-timeout-equals-interval",
+          "config": "global:\n  scrape_interval: 10s\n  scrape_timeout: 10s\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "global.scrape_timeout": "10s",
+            "job:a.scrape_interval": "10s"
+          }
+        },
+        {
+          "name": "global-timeout-with-default-interval",
+          "config": "global:\n  scrape_timeout: 5s\nscrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "global.scrape_interval": "1m",
+            "global.scrape_timeout": "5s"
+          }
+        },
+        {
+          "name": "job-zero-values-inherit-global",
+          "config": "global:\n  scrape_interval: 20s\n  scrape_timeout: 8s\nscrape_configs:\n  - job_name: a\n    scrape_interval: 0s\n    scrape_timeout: 0s\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "job:a.scrape_interval": "20s",
+            "job:a.scrape_timeout": "8s"
+          }
+        },
+        {
+          "name": "job-interval-below-global-timeout-caps-timeout",
+          "config": "global:\n  scrape_interval: 20s\n  scrape_timeout: 8s\nscrape_configs:\n  - job_name: a\n    scrape_interval: 4s\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "job:a.scrape_interval": "4s",
+            "job:a.scrape_timeout": "4s"
+          }
+        },
+        {
+          "name": "job-interval-above-global-timeout-keeps-timeout",
+          "config": "global:\n  scrape_interval: 20s\n  scrape_timeout: 8s\nscrape_configs:\n  - job_name: a\n    scrape_interval: 9s\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "job:a.scrape_interval": "9s",
+            "job:a.scrape_timeout": "8s"
+          }
+        },
+        {
+          "name": "job-timeout-equals-interval",
+          "config": "scrape_configs:\n  - job_name: a\n    scrape_interval: 15s\n    scrape_timeout: 15s\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "job:a.scrape_interval": "15s",
+            "job:a.scrape_timeout": "15s"
+          }
+        },
+        {
+          "name": "job-timeout-below-inherited-interval",
+          "config": "global:\n  scrape_interval: 1h\nscrape_configs:\n  - job_name: a\n    scrape_timeout: 59m\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "job:a.scrape_interval": "1h0m0s",
+            "job:a.scrape_timeout": "59m"
+          }
+        },
+        {
+          "name": "jobs-inherit-independently",
+          "config": "global:\n  scrape_interval: 1m\nscrape_configs:\n  - job_name: a\n    scrape_interval: 5s\n    static_configs:\n      - targets: ['127.0.0.1:9']\n  - job_name: b\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "job:a.scrape_interval": "5s",
+            "job:a.scrape_timeout": "5s",
+            "job:b.scrape_interval": "1m",
+            "job:b.scrape_timeout": "10s",
+            "jobs": "a,b"
+          }
+        },
+        {
+          "name": "acquisition-defaults",
+          "config": "scrape_configs:\n  - job_name: a\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "job:a.honor_labels": "false",
+            "job:a.honor_timestamps": "true",
+            "job:a.track_timestamps_staleness": "false"
+          }
+        },
+        {
+          "name": "acquisition-explicit",
+          "config": "scrape_configs:\n  - job_name: a\n    honor_labels: true\n    honor_timestamps: false\n    track_timestamps_staleness: true\n    static_configs:\n      - targets: ['127.0.0.1:9']\n  - job_name: b\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "job:a.honor_labels": "true",
+            "job:a.honor_timestamps": "false",
+            "job:a.track_timestamps_staleness": "true",
+            "job:b.honor_labels": "false",
+            "job:b.honor_timestamps": "true"
+          }
+        },
+        {
+          "name": "null-values-are-zero",
+          "config": "global:\n  scrape_interval:\n  scrape_timeout: ~\nscrape_configs:\n  - job_name: a\n    scrape_interval:\n    sample_limit:\n    static_configs:\n      - targets: ['127.0.0.1:9']\n",
+          "accepted": true,
+          "expect": {
+            "job:a.scrape_interval": "1m",
+            "job:a.scrape_timeout": "10s",
+            "job:a.sample_limit": "0"
+          }
+        },
+        {
+          "name": "document-without-jobs",
+          "config": "global:\n  scrape_interval: 2m\n",
+          "accepted": true,
+          "expect": {
+            "global.scrape_interval": "2m",
+            "global.scrape_timeout": "10s",
+            "jobs": ""
+          }
+        },
+        {
+          "name": "empty-document",
+          "config": "",
+          "accepted": true,
+          "expect": {
+            "global.scrape_interval": "1m",
+            "global.scrape_timeout": "10s",
+            "global.evaluation_interval": "1m",
+            "jobs": ""
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -83,12 +83,13 @@ func EvalAggregation(ctx context.Context, agg AggregationPlan, input value.Resul
 			return out, d, functionError(agg.Expr, "aggregation.parameter-nan", "limit ratio cannot be NaN")
 		}
 		if parameter < -1 || parameter > 1 {
-			d = append(d, functionDiagnostic(agg.Expr, "InvalidRatioWarning"))
-			parameter = math.Max(-1, math.Min(1, parameter))
+			capped := math.Max(-1, math.Min(1, parameter))
+			d = append(d, keyed(functionDiagnostic(agg.Expr, "InvalidRatioWarning"), annotationFloat(parameter), annotationFloat(capped)))
+			parameter = capped
 		}
 	}
 	if agg.Name == "quantile" && (math.IsNaN(parameter) || parameter < 0 || parameter > 1) {
-		d = append(d, functionDiagnostic(agg.Expr, "InvalidQuantileWarning"))
+		d = append(d, keyed(functionDiagnostic(agg.Expr, "InvalidQuantileWarning"), annotationFloat(parameter)))
 	}
 	if len(input.Vector) == 0 {
 		return out, d, nil
@@ -101,6 +102,7 @@ func EvalAggregation(ctx context.Context, agg AggregationPlan, input value.Resul
 	series := make([]value.Series, 0, len(input.Vector))
 	floats := make([]float64, 0, len(input.Vector))
 	histograms := make([]*model.NativeHistogram, 0, len(input.Vector))
+	histogramNames := make([]string, 0, len(input.Vector))
 	for _, s := range input.Vector {
 		if err := functionCheck(ctx, f); err != nil {
 			return out, d, err
@@ -116,6 +118,7 @@ func EvalAggregation(ctx context.Context, agg AggregationPlan, input value.Resul
 			floats = append(floats, functionFloat(s.Samples[0]))
 		} else {
 			histograms = append(histograms, s.Samples[0].Histogram)
+			histogramNames = append(histogramNames, seriesMetricName(s))
 		}
 	}
 	if len(series) == 0 {
@@ -136,7 +139,7 @@ func EvalAggregation(ctx context.Context, agg AggregationPlan, input value.Resul
 			}
 		}
 		if len(histograms) > 0 {
-			d = append(d, functionDiagnostic(agg.Expr, "HistogramIgnoredInAggregationInfo"))
+			d = append(d, keyed(functionDiagnostic(agg.Expr, "HistogramIgnoredInAggregationInfo"), agg.Name))
 		}
 		sort.SliceStable(candidates, func(i, j int) bool {
 			x, y := functionFloat(candidates[i].Samples[0]), functionFloat(candidates[j].Samples[0])
@@ -205,21 +208,21 @@ func EvalAggregation(ctx context.Context, agg AggregationPlan, input value.Resul
 		x = float64(len(series))
 	case "sum", "avg":
 		if len(floats) > 0 && len(histograms) > 0 {
-			d = append(d, functionDiagnostic(agg.Expr, "MixedFloatsHistogramsWarning"))
+			d = append(d, keyed(functionDiagnostic(agg.Expr, "MixedFloatsHistogramsWarning"), "aggregation"))
 			return out, d, nil
 		}
 		if len(histograms) > 0 {
 			h := value.CloneHistogram(*histograms[0])
-			for _, next := range histograms[1:] {
+			for i, next := range histograms[1:] {
 				var reason string
 				h, reason = histogramCombineForProfile(h, *next, false, f.Profile.ID)
 				if reason != "" {
 					if reason == "MismatchedCustomBucketsHistogramsInfo" && f.Profile.ID == "promql-prometheus-3.1.0" {
-						d = append(d, functionDiagnostic(agg.Expr, "MixedExponentialCustomHistogramsWarning"))
+						d = append(d, histogramReasonKey(functionDiagnostic(agg.Expr, "MixedExponentialCustomHistogramsWarning"), histogramNames[i+1], "aggregation"))
 						return out, d, nil
 					}
 					if f.Profile.ID == "promql-prometheus-3.13.5" || reason != "HistogramCounterResetCollisionWarning" {
-						d = append(d, functionDiagnostic(agg.Expr, reason))
+						d = append(d, histogramReasonKey(functionDiagnostic(agg.Expr, reason), histogramNames[i+1], "aggregation"))
 					}
 					if h.Float == nil {
 						return out, d, nil
@@ -233,12 +236,12 @@ func EvalAggregation(ctx context.Context, agg AggregationPlan, input value.Resul
 		} else {
 			x = functionSum(floats)
 			if agg.Name == "avg" {
-				x = functionMean(floats, f.Profile.ID)
+				x = functionMean(floats, f.Profile.ID, false)
 			}
 		}
 	case "min", "max":
 		if len(floats) == 0 {
-			return out, append(d, functionDiagnostic(agg.Expr, "HistogramIgnoredInAggregationInfo")), nil
+			return out, append(d, keyed(functionDiagnostic(agg.Expr, "HistogramIgnoredInAggregationInfo"), agg.Name)), nil
 		}
 		x = floats[0]
 		for _, y := range floats[1:] {
@@ -248,7 +251,7 @@ func EvalAggregation(ctx context.Context, agg AggregationPlan, input value.Resul
 		}
 	case "stdvar", "stddev":
 		if len(floats) == 0 {
-			return out, append(d, functionDiagnostic(agg.Expr, "HistogramIgnoredInAggregationInfo")), nil
+			return out, append(d, keyed(functionDiagnostic(agg.Expr, "HistogramIgnoredInAggregationInfo"), agg.Name)), nil
 		}
 		x = functionVariance(floats)
 		if agg.Name == "stddev" {
@@ -256,12 +259,15 @@ func EvalAggregation(ctx context.Context, agg AggregationPlan, input value.Resul
 		}
 	case "quantile":
 		if len(floats) == 0 {
+			if len(histograms) > 0 {
+				d = append(d, keyed(functionDiagnostic(agg.Expr, "HistogramIgnoredInAggregationInfo"), agg.Name))
+			}
 			return out, d, nil
 		}
 		x = functionQuantile(parameter, floats)
 	}
 	if len(histograms) > 0 && (agg.Name == "min" || agg.Name == "max" || agg.Name == "stddev" || agg.Name == "stdvar" || agg.Name == "quantile") {
-		d = append(d, functionDiagnostic(agg.Expr, "HistogramIgnoredInAggregationInfo"))
+		d = append(d, keyed(functionDiagnostic(agg.Expr, "HistogramIgnoredInAggregationInfo"), agg.Name))
 	}
 	sample := functionSample(x, f.Time)
 	sample.Histogram = histogram

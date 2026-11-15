@@ -9,6 +9,7 @@ import (
 	"github.com/arynyklas/soundpost/internal/symbolicate"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func budgetFixture(t *testing.T) (*scopedFixture, *symbolicate.Service, *int, model.Frame) {
@@ -67,6 +68,43 @@ func TestFrameCapYieldsFrameLimitForOverflow(t *testing.T) {
 		}
 		if g.Reason != want || !reflect.DeepEqual(g.Original, frames[i]) || (want != symbolicate.Resolved && g.Resolved != nil) {
 			t.Fatalf("frame %d: %+v want %s", i, g, want)
+		}
+	}
+}
+
+// A deep stack in one bundle must cost one worker launch, not one per frame:
+// each launch here takes 80 ms (a loaded host), so 64 launches would burn the
+// 5 s wall and degrade frames to `deadline`.
+func TestDeepStackIsOneWorkerLaunchPerArtifact(t *testing.T) {
+	f, s, _, frame := budgetFixture(t)
+	var launches, positions int
+	s.SetFakeBatchWorker(func(_ context.Context, _ []byte, ps [][2]uint32) []symbolicate.Reason {
+		launches++
+		positions += len(ps)
+		time.Sleep(80 * time.Millisecond)
+		out := make([]symbolicate.Reason, len(ps))
+		for i := range out {
+			out[i] = symbolicate.Resolved
+		}
+		return out
+	})
+	n := symbolicate.MaxResolvedFrames
+	frames := make([]model.Frame, n)
+	for i := range frames {
+		frames[i] = at(frame, "f", uint32(i))
+	}
+	start := time.Now()
+	got, e := s.Resolve(context.Background(), f.scope(t, auth.ArtifactRead), f.build, frames)
+	elapsed := time.Since(start)
+	if e != nil || launches != 1 || positions != n {
+		t.Fatalf("launches=%d positions=%d want 1/%d err=%v", launches, positions, n, e)
+	}
+	if elapsed > symbolicate.ProcessTimeout/2 {
+		t.Fatalf("deep stack took %s", elapsed)
+	}
+	for i, g := range got {
+		if g.Reason != symbolicate.Resolved || g.Resolved == nil || g.Resolved.Column != uint32(i) || !reflect.DeepEqual(g.Original, frames[i]) {
+			t.Fatalf("frame %d under load: %+v", i, g)
 		}
 	}
 }

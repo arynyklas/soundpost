@@ -47,5 +47,224 @@
     {"id": "sum-never-crosses-projects", "expression": "sum(m)", "time_ns": "45000000000", "expect": {"project-a": ["4010000000000000"], "project-b": ["4059000000000000"]}},
     {"id": "positive-infinity", "expression": "inf_m", "time_ns": "15000000000", "expect": {"project-a": ["7ff0000000000000"], "project-b": []}},
     {"id": "signed-zero", "expression": "negzero", "time_ns": "15000000000", "expect": {"project-a": ["8000000000000000"], "project-b": []}}
-  ]
+  ],
+  "adapters": {
+    "description": "Every input adapter of internal/adapters/queryinput admits one authored request through the real bridge route (or, for the OpenMetrics scrape, through the production decoder and C03 admission) into project-adapters. Timestamps are offsets from a run anchor 20 minutes in the past because the bridge admits only recent data. Each feed carries its manifest (records, input kinds, one receipt per child batch) and the answers authored from its records. At every stage the stored rows of the feed's source must equal the authored records exactly (no loss, no duplicate), and an identical retry after the flush must reuse the child identities and receipts and add nothing. In the distributed layout the feeds are admitted through different voters and read on the primary under the acknowledged receipt cursors.",
+    "fixture": {
+      "projects": ["project-adapters"],
+      "sources": [
+        {"id": "adapter-rw1", "project": "project-adapters", "kinds": ["metric"], "labels": {"job": ["api"]}},
+        {"id": "adapter-rw2", "project": "project-adapters", "kinds": ["metric"], "labels": {"job": ["api"]}},
+        {"id": "adapter-om", "project": "project-adapters", "kinds": ["metric"], "labels": {"job": ["api"]}},
+        {"id": "adapter-loki", "project": "project-adapters", "kinds": ["log"], "labels": {"shard": ["s0", "s1"]},
+         "log_template": {"id": "migrated.line", "revision": 1, "line": "{line}", "field": "line", "values": ["alpha", "beta", "gamma"]}},
+        {"id": "adapter-cond", "project": "project-adapters", "kinds": ["condition"], "labels": {"job": ["api"]}}
+      ]
+    },
+    "grants": {"reader": ["telemetry.read"]},
+    "feeds": [
+      {
+        "id": "remote-write-v1", "adapter": "prometheus_write", "wire": "remote_write_v1", "source": "adapter-rw1",
+        "series": [
+          {"name": "rw1_m", "labels": {"job": "api"}, "samples": [
+            {"t_ms": 0, "bits": "3ff8000000000000"}, {"t_ms": 10000, "bits": "4004000000000000"},
+            {"t_ms": 20000, "bits": "7ff0000000000002"}, {"t_ms": 30000, "bits": "4340000000000001"}]},
+          {"name": "rw1_n", "labels": {"job": "api"}, "samples": [
+            {"t_ms": 0, "bits": "8000000000000000"}, {"t_ms": 10000, "bits": "7ff0000000000000"}, {"t_ms": 20000, "bits": "3fb999999999999a"}]}
+        ],
+        "manifest": {"records": 7, "input_kinds": {"float": 6, "stale": 1}, "receipts": "one per child batch"},
+        "queries": [
+          {"id": "first-sample", "language": "promql", "expression": "rw1_m", "at_ms": 5000, "expect_bits": ["3ff8000000000000"]},
+          {"id": "second-sample", "language": "promql", "expression": "rw1_m", "at_ms": 15000, "expect_bits": ["4004000000000000"]},
+          {"id": "stale-marker-is-absence", "language": "promql", "expression": "rw1_m", "at_ms": 25000, "expect_bits": []},
+          {"id": "value-above-2-pow-53-keeps-its-bits", "language": "promql", "expression": "rw1_m", "at_ms": 35000, "expect_bits": ["4340000000000001"]},
+          {"id": "negative-zero", "language": "promql", "expression": "rw1_n", "at_ms": 5000, "expect_bits": ["8000000000000000"]},
+          {"id": "positive-infinity", "language": "promql", "expression": "rw1_n", "at_ms": 15000, "expect_bits": ["7ff0000000000000"]},
+          {"id": "count-drops-the-stale-marker", "language": "promql", "expression": "count_over_time(rw1_m[1m])", "at_ms": 35000, "expect_bits": ["4008000000000000"]}
+        ]
+      },
+      {
+        "id": "remote-write-v2", "adapter": "prometheus_write", "wire": "remote_write_v2", "source": "adapter-rw2",
+        "series": [
+          {"name": "rw2_m", "labels": {"job": "api"}, "samples": [
+            {"t_ms": 0, "bits": "3ff0000000000000"}, {"t_ms": 10000, "bits": "4000000000000000"}, {"t_ms": 20000, "bits": "4008000000000000"}]},
+          {"name": "rw2_c", "labels": {"job": "api"}, "samples": [
+            {"t_ms": 0, "bits": "4059000000000000"}, {"t_ms": 10000, "bits": "4045000000000000"}]}
+        ],
+        "manifest": {"records": 5, "input_kinds": {"float": 5}, "receipts": "one per child batch"},
+        "queries": [
+          {"id": "second-sample", "language": "promql", "expression": "rw2_m", "at_ms": 15000, "expect_bits": ["4000000000000000"]},
+          {"id": "max-over-the-window", "language": "promql", "expression": "max_over_time(rw2_m[1m])", "at_ms": 25000, "expect_bits": ["4008000000000000"]},
+          {"id": "other-series", "language": "promql", "expression": "rw2_c", "at_ms": 5000, "expect_bits": ["4059000000000000"]}
+        ]
+      },
+      {
+        "id": "openmetrics-scrape", "adapter": "openmetrics_scrape", "wire": "openmetrics_text", "source": "adapter-om",
+        "series": [
+          {"name": "om_g", "labels": {"job": "api"}, "samples": [
+            {"t_ms": 0, "bits": "3fb999999999999a"}, {"t_ms": 10000, "bits": "401c000000000000"}]},
+          {"name": "om_events_total", "labels": {"job": "api"}, "samples": [
+            {"t_ms": 0, "bits": "4024000000000000"}, {"t_ms": 10000, "bits": "4045000000000000"}]}
+        ],
+        "manifest": {"records": 4, "input_kinds": {"float": 4}, "receipts": "one per child batch"},
+        "queries": [
+          {"id": "gauge-keeps-the-decimal-bits", "language": "promql", "expression": "om_g", "at_ms": 5000, "expect_bits": ["3fb999999999999a"]},
+          {"id": "counter-latest", "language": "promql", "expression": "om_events_total", "at_ms": 15000, "expect_bits": ["4045000000000000"]}
+        ]
+      },
+      {
+        "id": "loki-push", "adapter": "loki_push", "wire": "loki_json", "source": "adapter-loki",
+        "streams": [
+          {"labels": {"shard": "s0"}, "lines": [{"t_ns": 0, "line": "alpha"}, {"t_ns": 1000000000, "line": "beta"}, {"t_ns": 1000000000, "line": "gamma"}]},
+          {"labels": {"shard": "s1"}, "lines": [{"t_ns": 0, "line": "alpha"}, {"t_ns": 2000000000, "line": "alpha"}]}
+        ],
+        "manifest": {"records": 5, "input_kinds": {"log": 5}, "receipts": "one per child batch"},
+        "queries": [
+          {"id": "stream-s0-in-order", "language": "logql", "expression": "{shard=\"s0\"}", "streams": true, "at_ms": 0,
+           "expect_lines": [{"t_ns": 0, "line": "alpha"}, {"t_ns": 1000000000, "line": "beta"}, {"t_ns": 1000000000, "line": "gamma"}]},
+          {"id": "line-filter", "language": "logql", "expression": "{shard=\"s1\"} |= \"alpha\"", "streams": true, "at_ms": 0,
+           "expect_lines": [{"t_ns": 0, "line": "alpha"}, {"t_ns": 2000000000, "line": "alpha"}]},
+          {"id": "count-every-line", "language": "logql", "expression": "sum(count_over_time({shard=~\"s0|s1\"}[1h]))", "at_ms": 10000, "expect_bits": ["4014000000000000"]},
+          {"id": "count-per-stream", "language": "logql", "expression": "sum by (shard) (count_over_time({shard=~\"s0|s1\"}[1h]))", "at_ms": 10000, "expect_bits": ["4000000000000000", "4008000000000000"]}
+        ]
+      },
+      {
+        "id": "conditions-webhook", "adapter": "conditions", "wire": "conditions_json", "source": "adapter-cond",
+        "events": [
+          {"condition": "checkout-latency", "epoch": "boot-1", "sequence": 1, "t_ms": 0, "status": "firing", "severity": "critical", "labels": {"job": "api"}},
+          {"condition": "checkout-latency", "epoch": "boot-1", "sequence": 2, "t_ms": 10000, "status": "recovered", "severity": "critical", "labels": {"job": "api"}},
+          {"condition": "disk-full", "epoch": "boot-1", "sequence": 1, "t_ms": 0, "status": "unknown", "severity": "warning", "labels": {}}
+        ],
+        "manifest": {"records": 3, "input_kinds": {"condition": 3}, "receipts": "one per child batch"},
+        "queries": []
+      }
+    ]
+  },
+  "native_histograms": {
+    "description": "Native integer and float histograms through the same persisted stages: sent directly through the ingest route and through the Prometheus remote-write bridge (v1 and v2). The library covers a counter reset (the count falls and the hint says reset), values above 2^53 (an integer histogram whose count and buckets are 2^54+1 and 2^53+1, which a float64 cannot hold), a float histogram with counts of 2^60, fractional buckets and a negative first span offset, and custom buckets (schema -53, remote-write v2 and direct only). The stored histogram must equal the authored one canonically at every stage; the queries are authored from the arithmetic (float64 conversion of the exact integers is round-to-nearest-even).",
+    "fixture": {
+      "projects": ["project-native"],
+      "sources": [
+        {"id": "native-direct", "project": "project-native", "kinds": ["metric"], "labels": {"job": ["api"]}},
+        {"id": "native-rw1", "project": "project-native", "kinds": ["metric"], "labels": {"job": ["api"]}},
+        {"id": "native-rw2", "project": "project-native", "kinds": ["metric"], "labels": {"job": ["api"]}}
+      ]
+    },
+    "grants": {"reader": ["telemetry.read"]},
+    "library": [
+      {
+        "name": "int", "labels": {"job": "api"},
+        "samples": [
+          {"t_ms": 0, "histogram": {"integer": {"flavor": "counter", "schema": 0, "zero_threshold": "0000000000000000", "sum": "4059000000000000", "count": "18014398509481985", "zero_count": "0", "positive_spans": [{"offset": 0, "length": 2}], "negative_spans": [], "positive_buckets": ["9007199254740993", "-1"], "negative_buckets": [], "reset_hint": "unknown"}}},
+          {"t_ms": 10000, "histogram": {"integer": {"flavor": "counter", "schema": 0, "zero_threshold": "0000000000000000", "sum": "4062c00000000000", "count": "18014398509481987", "zero_count": "0", "positive_spans": [{"offset": 0, "length": 2}], "negative_spans": [], "positive_buckets": ["9007199254740994", "-1"], "negative_buckets": [], "reset_hint": "unknown"}}},
+          {"t_ms": 20000, "histogram": {"integer": {"flavor": "counter", "schema": 0, "zero_threshold": "0000000000000000", "sum": "401c000000000000", "count": "5", "zero_count": "0", "positive_spans": [{"offset": 0, "length": 2}], "negative_spans": [], "positive_buckets": ["3", "-1"], "negative_buckets": [], "reset_hint": "reset"}}},
+          {"t_ms": 30000, "histogram": {"integer": {"flavor": "counter", "schema": 0, "zero_threshold": "0000000000000000", "sum": "4034000000000000", "count": "9", "zero_count": "0", "positive_spans": [{"offset": 0, "length": 2}], "negative_spans": [], "positive_buckets": ["4", "1"], "negative_buckets": [], "reset_hint": "not_reset"}}}
+        ],
+        "queries": [
+          {"id": "count-above-2-pow-53-rounds-to-nearest-even", "language": "promql", "expression": "histogram_count({p}int)", "at_ms": 5000, "expect_bits": ["4350000000000000"]},
+          {"id": "count-2-pow-54-plus-3-rounds-up", "language": "promql", "expression": "histogram_count({p}int)", "at_ms": 15000, "expect_bits": ["4350000000000001"]},
+          {"id": "count-after-the-reset", "language": "promql", "expression": "histogram_count({p}int)", "at_ms": 25000, "expect_bits": ["4014000000000000"]},
+          {"id": "count-after-the-reset-recovers", "language": "promql", "expression": "histogram_count({p}int)", "at_ms": 35000, "expect_bits": ["4022000000000000"]},
+          {"id": "sum-before-the-reset", "language": "promql", "expression": "histogram_sum({p}int)", "at_ms": 15000, "expect_bits": ["4062c00000000000"]},
+          {"id": "average-after-the-reset", "language": "promql", "expression": "histogram_avg({p}int)", "at_ms": 25000, "expect_bits": ["3ff6666666666666"]},
+          {"id": "all-four-samples-are-counted", "language": "promql", "expression": "count_over_time({p}int[1m])", "at_ms": 35000, "expect_bits": ["4010000000000000"]},
+          {"id": "one-counter-reset-is-detected", "language": "promql", "expression": "resets({p}int[1m])", "at_ms": 35000, "expect_bits": ["3ff0000000000000"]}
+        ]
+      },
+      {
+        "name": "float", "labels": {"job": "api"},
+        "samples": [
+          {"t_ms": 0, "histogram": {"float": {"flavor": "counter", "schema": 0, "zero_threshold": "0000000000000000", "sum": "4059000000000000", "count": "43b0000000000000", "zero_count": "0000000000000000", "positive_spans": [{"offset": 0, "length": 2}], "negative_spans": [], "positive_buckets": ["43a0000000000000", "43a0000000000000"], "negative_buckets": [], "reset_hint": "unknown"}}},
+          {"t_ms": 10000, "histogram": {"float": {"flavor": "counter", "schema": 0, "zero_threshold": "0000000000000000", "sum": "4045000000000000", "count": "400c000000000000", "zero_count": "3fd0000000000000", "positive_spans": [{"offset": -1, "length": 1}, {"offset": 1, "length": 1}], "negative_spans": [], "positive_buckets": ["3ff4000000000000", "4000000000000000"], "negative_buckets": [], "reset_hint": "reset"}}}
+        ],
+        "queries": [
+          {"id": "count-2-pow-60", "language": "promql", "expression": "histogram_count({p}float)", "at_ms": 5000, "expect_bits": ["43b0000000000000"]},
+          {"id": "count-after-the-reset", "language": "promql", "expression": "histogram_count({p}float)", "at_ms": 15000, "expect_bits": ["400c000000000000"]},
+          {"id": "sum-after-the-reset", "language": "promql", "expression": "histogram_sum({p}float)", "at_ms": 15000, "expect_bits": ["4045000000000000"]},
+          {"id": "one-counter-reset-is-detected", "language": "promql", "expression": "resets({p}float[1m])", "at_ms": 15000, "expect_bits": ["3ff0000000000000"]}
+        ]
+      },
+      {
+        "name": "custom", "labels": {"job": "api"},
+        "samples": [
+          {"t_ms": 0, "histogram": {"integer": {"flavor": "counter", "schema": -53, "zero_threshold": "0000000000000000", "sum": "403e000000000000", "count": "7", "zero_count": "0", "positive_spans": [{"offset": 0, "length": 3}], "negative_spans": [], "positive_buckets": ["2", "1", "-1"], "negative_buckets": [], "reset_hint": "unknown", "custom_bounds": ["3ff0000000000000", "4024000000000000"]}}},
+          {"t_ms": 10000, "histogram": {"integer": {"flavor": "counter", "schema": -53, "zero_threshold": "0000000000000000", "sum": "4044000000000000", "count": "10", "zero_count": "0", "positive_spans": [{"offset": 0, "length": 3}], "negative_spans": [], "positive_buckets": ["3", "1", "-1"], "negative_buckets": [], "reset_hint": "unknown", "custom_bounds": ["3ff0000000000000", "4024000000000000"]}}}
+        ],
+        "queries": [
+          {"id": "custom-bucket-count", "language": "promql", "profiles": ["promql-prometheus-3.13.5"], "expression": "histogram_count({p}custom)", "at_ms": 5000, "expect_bits": ["401c000000000000"]},
+          {"id": "custom-bucket-sum", "language": "promql", "profiles": ["promql-prometheus-3.13.5"], "expression": "histogram_sum({p}custom)", "at_ms": 15000, "expect_bits": ["4044000000000000"]}
+        ]
+      }
+    ],
+    "feeds": [
+      {"id": "direct-ingest", "adapter": "ingest", "wire": "direct_json", "source": "native-direct", "prefix": "nd_", "library": ["int", "float", "custom"],
+       "manifest": {"records": 8, "input_kinds": {"integer_histogram": 6, "float_histogram": 2}, "receipts": "one per record"}},
+      {"id": "remote-write-v1", "adapter": "prometheus_write", "wire": "remote_write_v1", "source": "native-rw1", "prefix": "n1_", "library": ["int", "float"],
+       "manifest": {"records": 6, "input_kinds": {"integer_histogram": 4, "float_histogram": 2}, "receipts": "one per child batch"}},
+      {"id": "remote-write-v2", "adapter": "prometheus_write", "wire": "remote_write_v2", "source": "native-rw2", "prefix": "n2_", "library": ["int", "float", "custom"],
+       "manifest": {"records": 8, "input_kinds": {"integer_histogram": 6, "float_histogram": 2}, "receipts": "one per child batch"}}
+    ]
+  },
+  "logs": {
+    "description": "LogQL logs and the pinned Loki profile on the persisted layouts. Lines are sent through the Loki push bridge and directly through ingest (several equal-time lines are distinct records), then read through the owned envelopes at every stage: stream queries in both orders and with a limit, metric queries over the stored lines, discovery of label values paged with a cursor that is taken at one stage and resumed at the next (it continues exactly after a flush or compaction; after a restart it either continues exactly or is refused with a typed error, never answered with other items), an alert rule over the logs whose firing series must equal the authored ones, and a live stream that must deliver the line appended at each stage exactly once. The stored lines of every feed must equal the authored ones at every stage.",
+    "fixture": {
+      "projects": ["project-logs"],
+      "sources": [
+        {"id": "logs-loki", "project": "project-logs", "kinds": ["log"], "labels": {"shard": ["s0", "s1"]},
+         "log_template": {"id": "migrated.line", "revision": 1, "line": "{line}", "field": "line", "values": ["alpha", "beta", "gamma"]}},
+        {"id": "logs-direct", "project": "project-logs", "kinds": ["log"], "labels": {"shard": ["d0"]},
+         "log_template": {"id": "direct.line", "revision": 1, "line": "{line}", "field": "line", "values": ["alpha", "beta"]}},
+        {"id": "logs-live", "project": "project-logs", "kinds": ["log"], "labels": {"app": ["web"]},
+         "log_template": {"id": "live.line", "revision": 1, "line": "{line}", "field": "line", "values": ["l1", "l2", "l3", "l4", "l5", "l6", "l7", "l8", "l9", "l10", "l11", "l12"]}}
+      ]
+    },
+    "grants": {"reader": ["telemetry.read"]},
+    "feeds": [
+      {
+        "id": "loki-push", "adapter": "loki_push", "wire": "loki_json", "source": "logs-loki",
+        "streams": [
+          {"labels": {"shard": "s0"}, "lines": [{"t_ns": 0, "line": "alpha"}, {"t_ns": 1000000000, "line": "beta"}, {"t_ns": 1000000000, "line": "gamma"}]},
+          {"labels": {"shard": "s1"}, "lines": [{"t_ns": 0, "line": "alpha"}, {"t_ns": 2000000000, "line": "alpha"}]}
+        ],
+        "manifest": {"records": 5, "input_kinds": {"log": 5}, "receipts": "one per child batch"},
+        "queries": [
+          {"id": "stream-s0", "language": "logql", "expression": "{shard=\"s0\"}", "streams": true, "at_ms": 0,
+           "expect_lines": [{"t_ns": 0, "line": "alpha"}, {"t_ns": 1000000000, "line": "beta"}, {"t_ns": 1000000000, "line": "gamma"}]},
+          {"id": "forward-limit-one", "language": "logql", "expression": "{shard=\"s1\"}", "streams": true, "order": "forward", "limit": 1, "at_ms": 0,
+           "expect_lines": [{"t_ns": 0, "line": "alpha"}]},
+          {"id": "backward-limit-one", "language": "logql", "expression": "{shard=\"s1\"}", "streams": true, "order": "backward", "limit": 1, "at_ms": 0,
+           "expect_lines": [{"t_ns": 2000000000, "line": "alpha"}]},
+          {"id": "line-filter", "language": "logql", "expression": "{shard=\"s1\"} |= \"alpha\"", "streams": true, "at_ms": 0,
+           "expect_lines": [{"t_ns": 0, "line": "alpha"}, {"t_ns": 2000000000, "line": "alpha"}]},
+          {"id": "count-over-the-hour", "language": "logql", "expression": "sum(count_over_time({shard=~\"s0|s1\"}[1h]))", "at_ms": 10000, "expect_bits": ["4014000000000000"]},
+          {"id": "count-per-stream", "language": "logql", "expression": "sum by (shard) (count_over_time({shard=~\"s0|s1\"}[1h]))", "at_ms": 10000, "expect_bits": ["4000000000000000", "4008000000000000"]}
+        ]
+      },
+      {
+        "id": "direct-ingest", "adapter": "ingest", "wire": "direct_json", "source": "logs-direct",
+        "streams": [
+          {"labels": {"shard": "d0"}, "lines": [{"t_ns": 0, "line": "alpha"}, {"t_ns": 500000000, "line": "beta"}]}
+        ],
+        "manifest": {"records": 2, "input_kinds": {"log": 2}, "receipts": "one per record"},
+        "queries": [
+          {"id": "stream-d0", "language": "logql", "expression": "{shard=\"d0\"}", "streams": true, "order": "forward", "at_ms": 0,
+           "expect_lines": [{"t_ns": 0, "line": "alpha"}, {"t_ns": 500000000, "line": "beta"}]},
+          {"id": "count-d0", "language": "logql", "expression": "count_over_time({shard=\"d0\"}[1h])", "at_ms": 10000, "expect_bits": ["4000000000000000"]}
+        ]
+      }
+    ],
+    "discovery": [
+      {"id": "shard-values", "kind": "label_values", "field": "shard", "limit": 1, "pages": [["d0"], ["s0"], ["s1"]]}
+    ],
+    "rule": {"expression": "count_over_time({shard=\"s0\"}[5m]) > 2", "at_ms": 120000, "firing": [{"shard": "s0"}]},
+    "live": {"source": "logs-live", "app": "web", "template": "live.line"}
+  },
+  "cache": {
+    "description": "The authorized-cache stages and the injected faults. The expression adds and subtracts the number k again, so each k is a different cache key whose authored answer is the sum of the fixture's samples of each project (the persisted queries above). Each stage asks a never-asked key (cold: computed), asks it again (warm: served from the cache), and re-asks the previous stage's key (still warm after a flush or compaction, cold after a restart). After the last stage: a delete generation advance kills a warm entry, a revoked reader is refused (never served a warm entry), a missing shard, a corrupt first page and a scan cut short by corruption are typed failures (strict) and partial results that carry only the typed failure (allow_partial) and never an empty success nor a cached failure, and a deletion committed while the scan is held fails the request as stale whether or not partial results are allowed.",
+    "expression": "sum(m) + {k} - {k}",
+    "time_ns": "45000000000",
+    "profile": "promql-prometheus-3.13.5",
+    "projects": ["project-a", "project-b"],
+    "expect": {"project-a": ["4010000000000000"], "project-b": ["4059000000000000"]}
+  }
 }

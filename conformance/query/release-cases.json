@@ -17,6 +17,16 @@
       "phase": "logql-metric"
     },
     {
+      "path": "cases/promql-wave6-annotations-nan.json",
+      "language": "promql",
+      "phase": "evaluation"
+    },
+    {
+      "path": "cases/release-configuration.json",
+      "language": "promql",
+      "phase": "configuration"
+    },
+    {
       "path": "cases/release-grammar-evaluation.json",
       "language": "promql",
       "phase": "evaluation"
@@ -75,6 +85,16 @@
       "path": "cases/logql-templates.json",
       "language": "logql",
       "phase": "logql-template"
+    },
+    {
+      "path": "cases/promql-wave6-regex-utf8.json",
+      "language": "promql",
+      "phase": "evaluation"
+    },
+    {
+      "path": "cases/promql-wave6-regex-utf8-syntax.json",
+      "language": "promql",
+      "phase": "syntax"
     }
   ]
 }

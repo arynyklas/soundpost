@@ -398,13 +398,19 @@ func TestReplayConcurrentChunkArrivalConvergesToTheSameChain(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		all = append(all, r.chain(9)...) // 3 checkpoints, 27 deltas
 	}
+	// A replay is rooted by a checkpoint, never by a delta (a delta that would create the
+	// index is refused: replay-v1.md "Admission order"), so the first checkpoint is admitted
+	// first; every other chunk then arrives concurrently, newest first.
+	if err := f.admit(f.main, all[0]); err != nil {
+		t.Fatal(err)
+	}
 	var wg sync.WaitGroup
 	var failures atomic.Int64
 	for w := 0; w < 6; w++ {
 		wg.Add(1)
 		go func(w int) {
 			defer wg.Done()
-			for i := len(all) - 1 - w; i >= 0; i -= 6 { // newest first: maximal disorder
+			for i := len(all) - 1 - w; i >= 1; i -= 6 { // newest first: maximal disorder
 				if err := f.admit(f.main, all[i]); err != nil {
 					failures.Add(1)
 				}

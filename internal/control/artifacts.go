@@ -5,6 +5,7 @@ package control
 import (
 	"bytes"
 	"context"
+	"github.com/arynyklas/soundpost/internal/artifacts/refledger"
 	"github.com/arynyklas/soundpost/internal/auth"
 	"github.com/arynyklas/soundpost/internal/model"
 )
@@ -190,11 +191,22 @@ func (s *Store) LookupArtifact(ctx context.Context, scope auth.Scope, id model.I
 // root that retention erased (or is about to erase after a crash between fence and
 // erase) does not stop the process. A "published" intent whose blob is missing or
 // corrupt stays Corrupt.
+//
+// Heal (10.09-W5): a "published" intent whose reference ledger verifies and carries the GC fence
+// (Retired) is first moved to "retired". The lifecycle writes the fence and the intent state in
+// one transition, so a published intent under a verified fence is the state an earlier build left
+// when it erased the bytes of a fenced root, or a control snapshot older than the fence; the
+// ledger is the durable record that nothing may read or reference the root any more, so its bytes
+// are not required and the process may start. A ledger that does not verify heals nothing (the
+// blob check below decides, as before), and so does a published intent under an unfenced ledger.
+// The heal is best effort: on a node that cannot commit control state (a follower that has not
+// caught up) it is skipped and the validation below answers as it always did.
 func (s *Store) ValidateArtifactReferences(ctx context.Context) error {
 	owner, err := s.artifactOwner()
 	if err != nil {
 		return err
 	}
+	_ = s.healFencedArtifactIntents(ctx)
 	var refs []model.BlobReceipt
 	if err = model.RetryWhileStale(ctx, func() error {
 		return s.View(ctx, func(st State) error {
@@ -221,6 +233,44 @@ func (s *Store) ValidateArtifactReferences(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// fencedIntent reports whether the intent is published under a verified reference ledger that
+// carries the GC fence.
+func fencedIntent(st State, r model.ArtifactReferenceIntent) bool {
+	if r.State != artifactPublished {
+		return false
+	}
+	led, err := refledger.Load(st.Orgs[r.Manifest.Org.String()].Settings, r.Manifest.Project, r.ID)
+	return err == nil && led != nil && led.Retired
+}
+
+// healFencedArtifactIntents moves every published intent under a verified GC fence to retired, in
+// one control transition that re-checks each of them against the state it changes.
+func (s *Store) healFencedArtifactIntents(ctx context.Context) error {
+	var keys []string
+	if err := model.RetryWhileStale(ctx, func() error {
+		keys = keys[:0]
+		return s.View(ctx, func(st State) error {
+			for key, r := range st.ArtifactIntents {
+				if fencedIntent(st, r) {
+					keys = append(keys, key)
+				}
+			}
+			return nil
+		})
+	}); err != nil || len(keys) == 0 {
+		return err
+	}
+	return s.Update(ctx, func(st *State) error {
+		for _, key := range keys {
+			if r, ok := st.ArtifactIntents[key]; ok && fencedIntent(*st, r) {
+				r.State = artifactRetired
+				st.ArtifactIntents[key] = r
+			}
+		}
+		return nil
+	})
 }
 
 // CancelArtifact is a terminal, serialized no-reference intent. Charges remain

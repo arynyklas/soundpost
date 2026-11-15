@@ -83,6 +83,39 @@ go run ./cmd/soundpost-querycheck compare --phase pipeline --profiles logql-loki
 
 The other phases are `evaluation` (PromQL), `logql-template` and `logql-metric`.
 
+### The configuration phase (Prometheus configuration obligations)
+
+`--phase configuration` (PromQL profiles only) observes the
+`configuration/protocols` and `configuration/scrape-inheritance` obligations of both
+Prometheus pins. Those obligations describe how the unmodified Prometheus release
+loads a scrape configuration, which the evaluation oracle's `/adapter` cannot
+express, so each pin has a separately pinned configuration-phase oracle image
+(decision D29): `soundpost-oracle-promql-prometheus-<v>-configuration:current`,
+built `FROM` the locked evaluation-oracle image id plus one added file
+(`oracles/promql-prometheus-<v>-configuration.Dockerfile`, `.yaml`); no source
+is copied and no layer below it changes. The harness starts the upstream
+`/bin/prometheus` through `--entrypoint /bin/sh` with the observation script
+`internal/conformance/query/configuration_observe.sh` and reads only whether it
+became ready, the error it logged, and `/api/v1/status/config`.
+
+```sh
+docker build --pull=false --provenance=false --sbom=false \
+  -f conformance/query/oracles/promql-prometheus-3.1.0-configuration.Dockerfile \
+  -t soundpost-oracle-promql-prometheus-3.1.0-configuration:current conformance/query/oracles
+python3 conformance/query/author/lock-configuration-oracle.py   # records ids and hashes
+python3 conformance/query/author/release-author.py --only configuration
+go run ./cmd/soundpost-querycheck compare --phase configuration \
+  --cases conformance/query/cases/release-configuration.json --require-locked --runtime docker
+python3 conformance/query/author/record-configuration-observations.py report.json
+```
+
+The owned side is `internal/sources/prometheus_config.go`; its scope (the modelled
+keys and text forms) is stated in that file. `ConfigurationScenario` rows carry the
+authored acceptance, refusal family and the effective values the rule text fixes;
+the recorded reference observations are replayed Docker-free by
+`TestReleaseConfiguration*`, and `author/configuration-mutants.py` (throwaway
+copies only) shows twelve deliberate resolver defects are caught.
+
 ## Sample timestamps in comparison rows must be whole milliseconds
 
 The pinned Prometheus oracle stores and returns milliseconds, while Soundpost keeps

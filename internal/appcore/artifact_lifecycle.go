@@ -50,13 +50,37 @@ func bindArtifactLifecycle(store artifacts.StateStore, service *artifacts.Servic
 	if service == nil || ret == nil {
 		return nil, model.Fail(model.Invalid)
 	}
-	life, err := artifacts.NewLifecycle(service, artifacts.LifecycleConfig{State: store, Deletes: ret, Pins: pins, CacheBytes: artifactReadCacheBytes, Now: now})
+	life, err := artifacts.NewLifecycle(service, artifacts.LifecycleConfig{State: store, Deletes: ret, Pins: pins, CacheBytes: artifactReadCacheBytes, Now: now,
+		DefaultRetention: artifactRetention(store)})
 	if err != nil {
 		return nil, err
 	}
 	// The References binding is not made here: retention accepts exactly one source,
 	// and the artifact lifecycle is one of several (see BindRetentionReferences).
 	return life, nil
+}
+
+// artifactRetention is the lifecycle's default retention of a reference with no explicit
+// deadline: the source-map period of the audited retention policy in force for the project at
+// the instant, the defaults layered with the organization's and then the project's versions
+// (retention.Resolve, ArtifactDays). A per-organization or per-project override therefore
+// changes how long a reference keeps a map, and with it the map's effective retention (D-new
+// C07, auth.Scope.ValidateArtifactState).
+func artifactRetention(store artifacts.StateStore) func(context.Context, model.ID, model.ID, model.UnixNano) (time.Duration, error) {
+	return func(ctx context.Context, org, project model.ID, at model.UnixNano) (time.Duration, error) {
+		var days uint32
+		err := store.View(ctx, func(st model.ControlState) error {
+			days = retention.Resolve(st, org, &project, at).ArtifactDays
+			return nil
+		})
+		if err != nil {
+			return 0, err
+		}
+		if days == 0 {
+			return 0, model.Fail(model.Invalid)
+		}
+		return time.Duration(days) * 24 * time.Hour, nil
+	}
 }
 
 // journalPins is artifacts.SnapshotPins over the durable journal pins a backup (or

@@ -10,8 +10,8 @@ import (
 	"github.com/arynyklas/soundpost/internal/model"
 	"io"
 	"mime"
+	"mime/multipart"
 	"net/http"
-	"os"
 	"strconv"
 )
 
@@ -159,35 +159,9 @@ func RegisterArtifactRoutes(mux *http.ServeMux, authorizer *auth.Service, servic
 				artifactReply(w, nil, model.Fail(model.Invalid))
 				return
 			}
-			temp, err := os.CreateTemp("", "soundpost-upload-")
-			if err != nil {
-				artifactReply(w, nil, model.Fail(model.Unavailable))
-				return
-			}
-			defer os.Remove(temp.Name())
-			defer temp.Close()
-			n, err := io.Copy(temp, io.LimitReader(part, int64(manifest.Size)+1))
-			part.Close()
-			if err != nil || n < int64(manifest.Size) {
-				artifactReply(w, nil, model.Fail(model.Invalid))
-				return
-			}
-			if n > int64(manifest.Size) {
-				artifactReply(w, nil, model.Fail(model.TooLarge))
-				return
-			}
-			if next, err := parts.NextPart(); err != io.EOF {
-				if next != nil {
-					next.Close()
-				}
-				artifactReply(w, nil, model.Fail(model.Invalid))
-				return
-			}
-			if _, err = temp.Seek(0, 0); err != nil {
-				artifactReply(w, nil, model.Fail(model.Unavailable))
-				return
-			}
-			artifact, err := service.Put(r.Context(), scope, manifest, temp)
+			// The file part streams straight into Put: nothing is spooled to disk, and
+			// Put admits (size ceiling, in-flight memory budget) before it reads a byte.
+			artifact, err := service.Put(r.Context(), scope, manifest, &filePart{part: part, parts: parts})
 			artifactReply(w, artifact, err)
 		default:
 			artifactReply(w, nil, model.Fail(model.Invalid))
@@ -219,4 +193,31 @@ func artifactReply(w http.ResponseWriter, v any, e error) {
 		return
 	}
 	reply(w, v, e)
+}
+
+// filePart is the file part of an upload. At its end it requires that no other
+// part follows, so a body with trailing parts fails inside Put's read, before
+// anything is stored (Put maps a read error to Invalid).
+type filePart struct {
+	part  io.Reader
+	parts *multipart.Reader
+	err   error
+}
+
+func (f *filePart) Read(p []byte) (int, error) {
+	if f.err != nil {
+		return 0, f.err
+	}
+	n, err := f.part.Read(p)
+	if err == io.EOF {
+		next, nextErr := f.parts.NextPart()
+		if nextErr != io.EOF {
+			if next != nil {
+				next.Close()
+			}
+			f.err = model.Fail(model.Invalid)
+			return n, f.err
+		}
+	}
+	return n, err
 }
