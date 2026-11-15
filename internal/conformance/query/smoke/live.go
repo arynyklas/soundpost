@@ -80,7 +80,8 @@ type liveData struct {
 	Project  string `json:"project"`
 	Reason   string `json:"reason"`
 	Entry    *struct {
-		Line string `json:"line"`
+		Line         string       `json:"line"`
+		Multiplicity model.Uint64 `json:"multiplicity"`
 	} `json:"entry"`
 	Gap *struct {
 		Reason string `json:"reason"`

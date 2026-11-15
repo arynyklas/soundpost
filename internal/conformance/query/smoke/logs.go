@@ -127,6 +127,37 @@ func (h *logsEnvelope) check(stage string) []StepResult {
 			}
 			return "paging did not terminate"
 		})
+		// The same items paged at twice the limit: the cursor of a page must name
+		// the LAST item of that page (a one-item page cannot tell it from the first).
+		add("discovery/"+spec.ID+"/pages-at-double-limit", func() string {
+			var flat []string
+			for _, p := range spec.Pages {
+				flat = append(flat, p...)
+			}
+			wide := spec
+			wide.Limit = spec.Limit * 2
+			var want [][]string
+			for i := 0; i < len(flat); i += int(wide.Limit) {
+				want = append(want, flat[i:min(i+int(wide.Limit), len(flat))])
+			}
+			var pages [][]string
+			cursor := ""
+			for range 20 {
+				d, code, out := h.discover(wide, cursor)
+				if code != 200 {
+					return fmt.Sprintf("status %d %s", code, trim(out))
+				}
+				pages = append(pages, d.Items)
+				if !d.More {
+					if fmt.Sprint(pages) != fmt.Sprint(want) {
+						return fmt.Sprintf("pages at limit %d: %v, want %v", wide.Limit, pages, want)
+					}
+					return ""
+				}
+				cursor = d.NextCursor
+			}
+			return "paging did not terminate"
+		})
 	}
 	// A cursor taken at the previous stage continues exactly where it stopped
 	// after a flush or a compaction (they move bytes, not data); after a restart
@@ -292,6 +323,9 @@ func (h *logsEnvelope) liveStage(stage string) string {
 		case "record":
 			if ev.Data.Entry == nil || ev.Data.Entry.Line != rendered {
 				return fmt.Sprintf("record %+v, want line %q", ev.Data.Entry, rendered)
+			}
+			if ev.Data.Entry.Multiplicity != 1 {
+				return fmt.Sprintf("the appended record carries multiplicity %d, want 1", ev.Data.Entry.Multiplicity)
 			}
 			if _, again := stream.silent(300 * time.Millisecond); again {
 				return "the appended record was delivered more than once"

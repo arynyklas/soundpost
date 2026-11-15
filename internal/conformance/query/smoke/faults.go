@@ -273,8 +273,13 @@ func faultRows(env *Env, c cacheSection) []StepResult {
 	})
 	add("missing-shard-leaves-no-cached-failure", func() string {
 		k := key()
+		mark := env.stores.mark()
 		env.gate.setDown(true)
 		env.askCache(c, k, true)
+		if d := env.stores.failedSince(mark); d != "" {
+			env.gate.setDown(false)
+			return d
+		}
 		env.gate.setDown(false)
 		a := env.askCache(c, k, false)
 		if d := env.answers(a, c.Expect); d != "" {
@@ -304,8 +309,13 @@ func faultRows(env *Env, c cacheSection) []StepResult {
 		})
 		add(tc.name+"-leaves-no-cached-failure", func() string {
 			k := key()
+			mark := env.stores.mark()
 			env.gate.setFault(tc.mode)
 			env.askCache(c, k, true)
+			if d := env.stores.failedSince(mark); d != "" {
+				env.gate.setFault(faultNone)
+				return d
+			}
 			env.gate.setFault(faultNone)
 			a := env.askCache(c, k, false)
 			if d := env.answers(a, c.Expect); d != "" {

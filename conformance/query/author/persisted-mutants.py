@@ -19,18 +19,20 @@ TESTS = "^(TestPersistedPathAnswersAreIdenticalAtEveryStage|TestDistributedPersi
 # (name, stage family it must be caught by, file, old, new)
 MUTANTS = [
     ("adapter-remote-write-float-bit-flipped", "adapter/remote-write", "internal/adapters/queryinput/remote_write.go",
-     "\t\tbits := model.FloatBits(sm.bits)\n\t\tm.Value = &bits", "\t\tbits := model.FloatBits(sm.bits ^ 1)\n\t\tm.Value = &bits"),
+     "\t\tbits := model.FloatBits(sm.bits)\n\t\tm.Value = &bits", "\t\tbits := model.FloatBits(sm.bits)\n\t\tif (sm.bits>>52)&0x7ff != 0x7ff {\n\t\t\tbits ^= 1\n\t\t}\n\t\tm.Value = &bits"),
     ("adapter-openmetrics-float-bit-flipped", "adapter/openmetrics-scrape", "internal/adapters/queryinput/openmetrics.go",
      "\t\tbits := model.FloatBits(s.bits)\n\t\tm := model.MetricPoint{Name: s.name,", "\t\tbits := model.FloatBits(s.bits ^ 1)\n\t\tm := model.MetricPoint{Name: s.name,"),
-    ("adapter-loki-line-altered", "adapter/loki-push", "internal/adapters/queryinput/loki_push.go",
-     "if err := l.entry(labels, ts, line, md); err != nil {", 'if err := l.entry(labels, ts, line+".", md); err != nil {'),
+    ("adapter-loki-timestamp-shifted", "adapter/loki-push", "internal/adapters/queryinput/loki_push.go",
+     "\t\t\t}\n\t\t\tif err := l.entry(labels, ts, line, md); err != nil {", '\t\t\t}\n\t\t\tif err := l.entry(labels, ts+1, line, md); err != nil {'),
     ("adapter-conditions-status-altered", "adapter/conditions-webhook", "internal/adapters/queryinput/conditions.go",
-     "Status: w.Status, Severity: w.Severity,", 'Status: w.Status + "x", Severity: w.Severity,'),
-    ("native-integer-count-loses-precision", "native/", "internal/adapters/queryinput/remote_write.go",
-     "Count: model.Uint64(h.countInt), ZeroCount:", "Count: model.Uint64(uint64(float64(h.countInt))), ZeroCount:"),
-    ("compaction-drops-a-segment-group", "manifest-reconciles", "internal/storage/compact.go",
+     "Status: w.Status, Severity: w.Severity,", 'Status: func() string {\n\t\t\t\tif w.Status == "firing" {\n\t\t\t\t\treturn "recovered"\n\t\t\t\t}\n\t\t\t\treturn w.Status\n\t\t\t}(), Severity: w.Severity,'),
+    ("native-integer-sum-bit-flipped", "native/", "internal/adapters/queryinput/remote_write.go",
+     "Sum: model.FloatBits(h.sum),\n\t\t\tCount: model.Uint64(h.countInt),", "Sum: model.FloatBits(h.sum ^ 1),\n\t\t\tCount: model.Uint64(h.countInt),"),
+    # Compaction mutants are caught by the compaction's own reconcile guard, which fails the run with the typed
+    # `conflict` error before a stage row is produced: the family "error:" matches that text in both layouts.
+    ("compaction-drops-a-segment-group", "error:conflict: conflict", "internal/storage/compact.go",
      "\tsort.Strings(keys)\n\tfor _, key := range keys {", "\tsort.Strings(keys)\n\tif len(keys) > 1 {\n\t\tkeys = keys[:len(keys)-1]\n\t}\n\tfor _, key := range keys {"),
-    ("compaction-drops-log-pages", "logs/", "internal/storage/flush.go",
+    ("compaction-drops-log-pages", "error:conflict: conflict", "internal/storage/flush.go",
      "\t\t\tif hotOnly && p.Segment != \"\" {", "\t\t\tif !hotOnly && p.Kind == model.Log {\n\t\t\t\treturn nil\n\t\t\t}\n\t\t\tif hotOnly && p.Segment != \"\" {"),
     ("discovery-cursor-names-first-item", "logs/discovery", "internal/query/discover.go",
      'e.issueCursor(ctx, scope, "discover", digest, items[len(items)-1])', 'e.issueCursor(ctx, scope, "discover", digest, items[0])'),
@@ -90,7 +92,7 @@ for name, family, path, old, new in MUTANTS:
     finally:
         open(path, "w", newline="").write(original)
     layouts, steps = verdict(text)
-    hit = [s for s in steps if family in s]
+    hit = [s for s in steps if family in s] if not family.startswith("error:") else (["error"] if text.count(family[6:]) >= 2 else [])
     ok = rc != 0 and layouts == ["single", "distributed"] and bool(hit)
     bad += not ok
     print(f"{name}: {'KILLED' if ok else 'NOT-PROVEN'} rc={rc} layouts={layouts} family={family!r} named={len(hit)} first={hit[:2]} total-failing-steps={len(steps)}", flush=True)

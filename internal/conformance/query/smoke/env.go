@@ -212,6 +212,7 @@ type Env struct {
 	Sources     map[string]*Source
 	Names       map[string]model.ID // symbolic IDs in case files ("trace-a")
 	gate        *gate
+	stores      *storeLog
 	engine      *query.Engine
 	server      *httptest.Server
 	client      *http.Client
@@ -333,7 +334,8 @@ func (e *Env) attach(app *appcore.App) error {
 	}
 	e.gate = &gate{inner: app.Storage}
 	var err error
-	if e.engine, err = query.New(e.gate, app.Auth, e.registry, e.Limits, query.WithDeleteGenerations(app.Retention), query.WithTickets(app.Cache), query.WithResultCache(app.Cache)); err != nil {
+	e.stores = &storeLog{inner: app.Cache}
+	if e.engine, err = query.New(e.gate, app.Auth, e.registry, e.Limits, query.WithDeleteGenerations(app.Retention), query.WithTickets(app.Cache), query.WithResultCache(e.stores)); err != nil {
 		return err
 	}
 	e.server = serveOwned(app, e.engine)
