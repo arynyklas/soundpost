@@ -864,3 +864,38 @@ func TestIssueDurableEvidenceReplay(t *testing.T) {
 		t.Fatalf("regression explanation missing: %+v", explained)
 	}
 }
+
+// An organization administrator acts on an issue as a person (decision D20: the
+// administrator keeps every right), the lifecycle reads for them too, and the
+// in-process runner's own org.admin scope is no actor of human actions.
+func TestIssueActionAdmitsAdministratorsButNotTheRunner(t *testing.T) {
+	f := newFx(t)
+	f.apply(f.ev(1, f.A, 50))
+	current := f.issueFor(1)
+	f.clock.at = 100
+	ctx := context.Background()
+
+	admin := f.scopeFor("issues@example.test", "issues fixture password 2026", f.org, []model.ID{f.project}, auth.OrgAdmin)
+	got, e := f.svc.Act(ctx, admin, issues.IssueAction{CommandID: model.NewID(), ExpectedVersion: current.Revision, IssueID: current.ID, Kind: "resolve", Reason: "administrator resolves"})
+	if e != nil || got.Workflow != "resolved" {
+		t.Fatalf("an organization administrator must act as a person: %v %+v", e, got)
+	}
+	if read, e := f.svc.Get(ctx, admin, f.project, current.ID); e != nil || read.Workflow != "resolved" {
+		t.Fatalf("an organization administrator must read the issue they act on: %v %+v", e, read)
+	}
+
+	runner, e := f.app.Auth.AuthorizeSystem(ctx, f.org, []model.ID{f.project}, auth.OrgAdmin)
+	if e != nil {
+		t.Fatal(e)
+	}
+	commits := len(f.store.commits)
+	if _, e = f.svc.Act(ctx, runner, issues.IssueAction{CommandID: model.NewID(), ExpectedVersion: got.Revision, IssueID: current.ID, Kind: "reopen", Reason: "runner reopens"}); code(e) != model.Forbidden {
+		t.Fatalf("the runner's org.admin scope must not act: %v", e)
+	}
+	if _, e = f.svc.Get(ctx, runner, f.project, current.ID); code(e) != model.Forbidden {
+		t.Fatalf("the runner's org.admin scope must not read through the lifecycle: %v", e)
+	}
+	if len(f.store.commits) != commits {
+		t.Fatal("a refused action committed")
+	}
+}

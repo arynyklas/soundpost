@@ -51,6 +51,7 @@ type Engine struct {
 	storageStats StorageStats
 	snap         snapshotState
 	pressure     pressureState
+	journal      journalHolds // held lifecycle evidence journals (journal_hold.go)
 	tomb         tombstoneState
 	scrub        scrubConfig
 	redact       redactState
@@ -313,6 +314,9 @@ func (e *Engine) Append(ctx context.Context, scope auth.Scope, b model.Normalize
 		return old, nil
 	}
 	if err = e.admitPressure(batchClass(b.Records), uint64(len(b.Canonical))); err != nil {
+		return model.Receipt{}, err
+	}
+	if err = e.admitJournal(b.Org, b.Project, b.Records, uint64(len(b.Canonical))); err != nil {
 		return model.Receipt{}, err
 	}
 	canonical, err := model.CanonicalJSON(b.Batch)

@@ -96,3 +96,16 @@ func TestOpenWiresTheInputAdapterRoutes(t *testing.T) {
 		}
 	}
 }
+
+// The default Open binds the human issue lifecycle; without it every issue
+// action answers not_available on a served node.
+func TestOpenBindsTheIssueActions(t *testing.T) {
+	app, err := appcore.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.Close()
+	if !app.Actions.IssuesBound() {
+		t.Fatal("Open left the issue lifecycle unbound: every issue action answers not_available")
+	}
+}

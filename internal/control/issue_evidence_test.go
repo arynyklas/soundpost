@@ -275,12 +275,15 @@ func TestIssueScopeBeforeLookup(t *testing.T) {
 	if _, err = f.store.TransactIssues(f.ctx, read, c); code(err) != model.Forbidden {
 		t.Fatalf("read scope committed: %v", err)
 	}
-	if _, err = f.store.TransactIssues(f.ctx, f.adminScope(), c); code(err) != model.Forbidden {
-		t.Fatalf("admin scope committed through the issue path: %v", err)
+	// An organization administrator is admitted to the issue path as a person
+	// (decision D20): a stale book revision is the conflict, never forbidden.
+	stale := f.commitCmd(control.IssueCommand{ExpectedRevision: 999, Records: []control.IssueRecordChange{f.record(f.issue(2, 1, f.evidence(2, 2)))}})
+	if _, err = f.store.TransactIssues(f.ctx, f.adminScope(), stale); code(err) != model.Conflict {
+		t.Fatalf("admin scope through the issue path: %v", err)
 	}
 	c.ExpectedRevision = f.revision()
-	if _, err = f.store.Transact(f.ctx, f.adminScope(), c); code(err) != model.Forbidden {
-		t.Fatalf("admin scope committed through the generic path: %v", err)
+	if _, err = f.store.Transact(f.ctx, read, c); code(err) != model.Forbidden {
+		t.Fatalf("read scope committed through the generic path: %v", err)
 	}
 	// Reads: read scope may read, the zero scope may not.
 	if _, err = f.store.IssueBook(f.ctx, read, f.project); err != nil {

@@ -159,6 +159,35 @@ func issueDenominatorTainted(p model.DeletePredicate, d *model.GroupingDenominat
 	return d != nil && p.Mode == model.DeleteHistoricalRange && kindCovered(p.Signals, model.ErrorKind) && d.Start < p.End && d.End >= p.Start
 }
 
+// issueCompactionCovered says whether a predicate cannot be shown NOT to reach
+// evidence folded into an aggregate (never called for a retirement). The
+// aggregate keeps no per-evidence record, build or producer-epoch IDs, so what it
+// can be tested by is its event-time bounds (a range overlapping
+// [FirstEvent,LastEvent]), the occurrence IDs of its dedup tail and the releases
+// it names. Covered or not provably clear, the aggregate is dropped whole: the
+// counts then shrink, which is the safe direction for a deletion.
+func issueCompactionCovered(p model.DeletePredicate, c *model.GroupingCompaction) bool {
+	if c == nil {
+		return false
+	}
+	switch p.Mode {
+	case model.DeleteHistoricalRange:
+		return kindCovered(p.Signals, model.ErrorKind) && c.FirstEvent < p.End && c.LastEvent >= p.Start
+	case model.DeleteEntity:
+		for _, entity := range p.Entities {
+			if issueHasID(c.Recent, entity) {
+				return true
+			}
+			for _, r := range c.Releases {
+				if r.Release == entity {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 func eraseIssueEvidence(st *State, p model.DeletePredicate, org, projectID model.ID) (int, error) {
 	issues := projectIssues(st, org, projectID)
 	keys := make([]string, 0, len(issues))
@@ -192,8 +221,19 @@ func eraseIssueEvidence(st *State, p model.DeletePredicate, org, projectID model
 			return out
 		}
 		next.Occurrences, next.LateHistory = keep(gi.Occurrences), keep(gi.LateHistory)
+		fold := func(c *model.GroupingCompaction) *model.GroupingCompaction {
+			if !issueCompactionCovered(p, c) {
+				return c
+			}
+			for _, id := range c.Recent {
+				droppedOccurrences[id] = true
+			}
+			lost += int(c.Count)
+			return nil
+		}
+		next.Compacted, next.LateCompacted = fold(gi.Compacted), fold(gi.LateCompacted)
 		switch {
-		case lost > 0 && len(next.Occurrences)+len(next.LateHistory) == 0:
+		case lost > 0 && len(next.Occurrences)+len(next.LateHistory) == 0 && next.Compacted == nil && next.LateCompacted == nil:
 			delete(st.GroupingIssues, key)
 			removed[gi.ID] = true
 			dropped += lost + 1
@@ -279,6 +319,15 @@ func eraseIssueEvidence(st *State, p model.DeletePredicate, org, projectID model
 }
 
 func issueSurvivorNames(gi model.GroupingIssue, release model.ID) bool {
+	for _, folded := range []*model.GroupingCompaction{gi.Compacted, gi.LateCompacted} {
+		if folded != nil {
+			for _, r := range folded.Releases {
+				if r.Release == release {
+					return true
+				}
+			}
+		}
+	}
 	for _, list := range [][]model.GroupingEvidence{gi.Occurrences, gi.LateHistory} {
 		for _, e := range list {
 			if issueIDIs(e.ReleaseID, release) {

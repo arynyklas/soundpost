@@ -38,6 +38,7 @@ const (
 	ReasonIssueNeedsAdmin      = "issue_evidence_needs_org_admin"
 	ReasonOccurrenceDetail     = "occurrence_payload_view_not_built"
 	ReasonRegressionDetail     = "regression_explanation_view_not_built"
+	ReasonEvidenceCompacted    = "evidence_window_compacted"
 	ReasonSourcesNotRequested  = "sources_not_requested"
 	ReasonSourcesGrantRequired = "source_grant_required"
 	ReasonNoSourceContent      = "no_source_content"
@@ -458,17 +459,23 @@ type OccurrenceEvidenceView struct {
 	Late            bool        `json:"late"`
 }
 
-// GroupingView is the issue's grouping identity and resolution facts.
+// GroupingView is the issue's grouping identity and resolution facts. The
+// occurrence and late-history lists are the newest evidence window; the oldest
+// evidence of a hot issue is folded into counts, so Compacted* say how many
+// occurrences (and late-history items) the lists no longer carry. The full
+// count is len(list) + Compacted*.
 type GroupingView struct {
-	Version            uint16       `json:"grouping_version"`
-	Fingerprint        model.Hash   `json:"fingerprint"`
-	Workflow           string       `json:"workflow"`
-	Revision           model.Uint64 `json:"revision"`
-	ResolutionTime     *model.Int64 `json:"resolution_time_ns,omitempty"`
-	ResolutionFrontier []model.ID   `json:"resolution_frontier"`
-	ObservedReleases   []model.ID   `json:"observed_releases"`
-	FixedDescendants   []model.ID   `json:"fixed_descendants"`
-	MigrationLinks     []model.ID   `json:"migration_links"`
+	Version              uint16       `json:"grouping_version"`
+	Fingerprint          model.Hash   `json:"fingerprint"`
+	Workflow             string       `json:"workflow"`
+	Revision             model.Uint64 `json:"revision"`
+	ResolutionTime       *model.Int64 `json:"resolution_time_ns,omitempty"`
+	ResolutionFrontier   []model.ID   `json:"resolution_frontier"`
+	ObservedReleases     []model.ID   `json:"observed_releases"`
+	FixedDescendants     []model.ID   `json:"fixed_descendants"`
+	MigrationLinks       []model.ID   `json:"migration_links"`
+	CompactedOccurrences model.Uint64 `json:"compacted_occurrences"`
+	CompactedLate        model.Uint64 `json:"compacted_late_history"`
 }
 
 // IssueView answers an issue evidence request.
@@ -532,6 +539,12 @@ func (e *Evidence) Issue(ctx context.Context, scope auth.Scope, body IssueBody) 
 		t := model.Int64(*issue.ResolutionTime)
 		grouping.ResolutionTime = &t
 	}
+	if c := issue.Compacted; c != nil {
+		grouping.CompactedOccurrences = c.Count
+	}
+	if c := issue.LateCompacted; c != nil {
+		grouping.CompactedLate = c.Count
+	}
 	view.Grouping = &grouping
 	for _, o := range issue.Occurrences {
 		view.Occurrences = append(view.Occurrences, evidenceView(o, false))
@@ -539,7 +552,11 @@ func (e *Evidence) Issue(ctx context.Context, scope auth.Scope, body IssueBody) 
 	for _, o := range issue.LateHistory {
 		view.LateHistory = append(view.LateHistory, evidenceView(o, true))
 	}
-	view.Sections = []ViewSection{{Name: "grouping", State: StateReady}, {Name: "evidence", State: StateReady},
+	evidence := ViewSection{Name: "evidence", State: StateReady}
+	if grouping.CompactedOccurrences+grouping.CompactedLate > 0 {
+		evidence = ViewSection{Name: "evidence", State: StateIncomplete, Reason: ReasonEvidenceCompacted}
+	}
+	view.Sections = []ViewSection{{Name: "grouping", State: StateReady}, evidence,
 		{Name: "occurrence_detail", State: StateNotAvailable, Reason: ReasonOccurrenceDetail},
 		{Name: "regression", State: StateNotAvailable, Reason: ReasonRegressionDetail}}
 	return view, nil

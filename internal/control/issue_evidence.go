@@ -33,10 +33,12 @@ import (
 //     N cannot both commit; the loser is a typed conflict that carries the
 //     current revision, never merged;
 //   - per-issue revisions (an issue changes only from the revision the commit
-//     saw, so a concurrent grouping migration cannot be overwritten), an
-//     append-only occurrence ledger, a project-wide occurrence index (one
-//     occurrence, one issue) and a monotonic per-group checkpoint, all written
-//     together with the evidence they cover;
+//     saw, so a concurrent grouping migration cannot be overwritten), a
+//     compacting occurrence ledger (evidence only ever leaves a ledger by being
+//     folded into an exact aggregate that control recomputes and verifies, see
+//     issueLedgerPrefix), a project-wide occurrence index (one occurrence, one
+//     issue; an aggregate's dedup tail IDs count) and a monotonic per-group
+//     checkpoint, all written together with the evidence they cover;
 //   - exactly-once commands: a retried command returns its first result and a
 //     reused command ID with other content is a conflict;
 //   - bounded state: every count and byte size below, refused as quota, never
@@ -131,6 +133,10 @@ type IssueSnapshot struct {
 const (
 	issueOpCommit  = "commit"
 	issueOpCollect = "collect_retired"
+	// issueOpMigrate is the grouping migration (the model.ReleaseCommand
+	// operation of the same name). It is not an issue-book arm: its payload keeps
+	// the release command shape and applyIssueOperation dispatches it.
+	issueOpMigrate = "grouping_migration"
 )
 
 // IssueRevisionConflict is the SafeDetail prefix of a lost project revision
@@ -144,7 +150,7 @@ const (
 	maxIssuePayload        = 4 << 20
 	maxIssueRecords        = 64
 	maxIssuesPerProject    = 256
-	maxIssueLedger         = 1024
+	maxIssueLedger         = model.GroupingWindowMax
 	maxIssueIDList         = 1024
 	maxIssueLinks          = 64
 	maxIssueExplanations   = 256 << 10
@@ -207,7 +213,7 @@ func isIssueBookOperation(raw json.RawMessage) bool {
 	if json.Unmarshal(raw, &head) != nil {
 		return false
 	}
-	return head.Operation == issueOpCommit || head.Operation == issueOpCollect
+	return head.Operation == issueOpCommit || head.Operation == issueOpCollect || head.Operation == IssueOpAck
 }
 
 func issueToken(s string, max int) bool {
@@ -306,11 +312,70 @@ func issueProjectScope(scope auth.Scope, st *State, project model.ID) error {
 	return nil
 }
 
+// issueWriter reports whether a scope may write the issue lifecycle at all: the
+// issues.write scope (a granted person, or the runner's own scope) and, as a
+// person, an organization administrator (decision D20: administrators keep every
+// right). The runner's org.admin scope is not a writer of this book.
+func issueWriter(scope auth.Scope) bool {
+	switch scope.Permission() {
+	case issuesWritePermission:
+		return true
+	case auth.OrgAdmin:
+		return !scope.IsSystem()
+	}
+	return false
+}
+
 func issueWriteScope(scope auth.Scope, st *State, project model.ID) error {
-	if scope.Permission() != issuesWritePermission {
+	if !issueWriter(scope) {
 		return model.Fail(model.Forbidden)
 	}
 	return issueProjectScope(scope, st, project)
+}
+
+// migrationScope admits the scope to the grouping migration of a project: an
+// organization administrator as before (releaseScope), or a member who holds BOTH
+// issues.write and policy.write on the project (decision D20; the migration
+// rewrites a project policy). The runner holds neither and is refused.
+func migrationScope(scope auth.Scope, st *State, org, project model.ID) error {
+	if err := scope.ValidateControlState(*st); err != nil {
+		return err
+	}
+	if scope.Permission() != issuesWritePermission || scope.IsSystem() {
+		return releaseScope(scope, st, org, project)
+	}
+	authority, ok := st.Orgs[org.String()]
+	principal := scope.PrincipalID()
+	if !ok || org == (model.ID{}) || project == (model.ID{}) || scope.OrgID() != org || len(scope.ProjectIDs()) != 1 || !scope.AllowsProject(project) || !authority.Members[principal.String()] ||
+		!issueGrantHeld(authority, principal, project, issuesWritePermission) || !issueGrantHeld(authority, principal, project, auth.PolicyWrite) {
+		return model.Fail(model.NotFound)
+	}
+	if _, ok := authority.Projects[project.String()]; !ok {
+		return model.Fail(model.NotFound)
+	}
+	if _, retired := st.RetiredProjects[org.String()+":"+project.String()]; retired {
+		return model.Fail(model.NotFound)
+	}
+	return nil
+}
+
+// AuthorizePolicyWrite answers, against the committed state, whether the scope's
+// principal may also write the project's policy, which the grouping migration
+// needs on top of issues.write (issues.PolicyAuthorizer). The scope itself is
+// validated against the same state.
+func (s *Store) AuthorizePolicyWrite(ctx context.Context, scope auth.Scope, project model.ID) error {
+	return s.View(ctx, func(st State) error {
+		if !issueWriter(scope) || scope.IsSystem() {
+			return model.Fail(model.Forbidden)
+		}
+		return migrationScope(scope, &st, scope.OrgID(), project)
+	})
+}
+
+// AuthorizeIssueWrite validates, against the committed state, that the scope may
+// write the issue lifecycle of the project (issueWriteScope).
+func (s *Store) AuthorizeIssueWrite(ctx context.Context, scope auth.Scope, project model.ID) error {
+	return s.View(ctx, func(st State) error { return issueWriteScope(scope, &st, project) })
 }
 
 func issueReadScope(scope auth.Scope, st State, project model.ID) error {
@@ -372,16 +437,126 @@ func normalizeIssue(gi model.GroupingIssue) model.GroupingIssue {
 		return list
 	}
 	gi.Occurrences, gi.LateHistory = norm(gi.Occurrences), norm(gi.LateHistory)
+	gi.Compacted, gi.LateCompacted = gi.Compacted.Clone(), gi.LateCompacted.Clone()
 	gi.ResolutionFrontier, gi.ObservedReleases = ids(gi.ResolutionFrontier), ids(gi.ObservedReleases)
 	gi.FixedDescendants, gi.MigrationLinks = ids(gi.FixedDescendants), ids(gi.MigrationLinks)
 	return gi
 }
 
-func evidencePrefix(prior, next []model.GroupingEvidence) bool {
-	if len(prior) == 0 {
-		return true
+// issueLedgerPrefix is the verified fold rule for one ledger of an existing
+// issue (06.02-W3). The next ledger must be the prior ledger without its first k
+// entries (k >= 0), followed by whatever was appended. k is not trusted: it is the
+// growth of the issue's aggregate Count, and the next aggregate must equal the
+// prior aggregate with exactly prior[:k] folded in (recomputed here), so no
+// evidence can leave a ledger except into an aggregate that accounts for it, and
+// no aggregate can change any other way. A resolved issue's evidence after the
+// committed resolution boundary is never folded. It returns k.
+func issueLedgerPrefix(prior, next []model.GroupingEvidence, priorFolded, nextFolded *model.GroupingCompaction, bound *model.UnixNano) (int, error) {
+	var had, now uint64
+	if priorFolded != nil {
+		had = uint64(priorFolded.Count)
 	}
-	return len(next) >= len(prior) && reflect.DeepEqual(prior, next[:len(prior)])
+	if nextFolded != nil {
+		now = uint64(nextFolded.Count)
+	}
+	if now < had || now-had > uint64(len(prior)) {
+		return 0, model.Fail(model.Invalid)
+	}
+	k := int(now - had)
+	kept := prior[k:]
+	if len(next) < len(kept) || len(kept) > 0 && !reflect.DeepEqual(kept, next[:len(kept)]) {
+		return 0, model.Fail(model.Invalid)
+	}
+	if bound != nil {
+		for _, e := range prior[:k] {
+			if e.EventTime > *bound {
+				return 0, model.Fail(model.Invalid)
+			}
+		}
+	}
+	if !reflect.DeepEqual(priorFolded.Fold(prior[:k]), nextFolded.Clone()) {
+		return 0, model.Fail(model.Invalid)
+	}
+	return k, nil
+}
+
+// verifyIssueCompaction applies issueLedgerPrefix to both ledgers of a changed
+// issue. Folding is only a way to make room, so it never takes the window below
+// the window the writers keep (model.GroupingWindowKeep): a writer cannot
+// discard an issue's recent evidence by folding it.
+func verifyIssueCompaction(prior, next model.GroupingIssue) error {
+	var bound *model.UnixNano
+	if prior.Workflow == "resolved" {
+		bound = prior.ResolutionTime
+	}
+	kOccurrences, err := issueLedgerPrefix(prior.Occurrences, next.Occurrences, prior.Compacted, next.Compacted, bound)
+	if err != nil {
+		return err
+	}
+	kLate, err := issueLedgerPrefix(prior.LateHistory, next.LateHistory, prior.LateCompacted, next.LateCompacted, bound)
+	if err != nil {
+		return err
+	}
+	if kOccurrences+kLate > 0 && len(next.Occurrences)+len(next.LateHistory) < model.GroupingWindowKeep {
+		return model.Fail(model.Invalid)
+	}
+	return nil
+}
+
+// issueHeldIDs visits every occurrence ID an issue accounts for: its window and
+// the dedup tails of its folded evidence.
+func issueHeldIDs(gi model.GroupingIssue, visit func(model.ID) bool) bool {
+	for _, list := range [][]model.GroupingEvidence{gi.Occurrences, gi.LateHistory} {
+		for _, e := range list {
+			if !visit(e.OccurrenceID) {
+				return false
+			}
+		}
+	}
+	for _, folded := range []*model.GroupingCompaction{gi.Compacted, gi.LateCompacted} {
+		if folded == nil {
+			continue
+		}
+		for _, id := range folded.Recent {
+			if !visit(id) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// validIssueCompaction checks the shape of one aggregate (no state): a count, ordered
+// bounds, a first event per release inside those bounds, a bounded unique dedup
+// tail that is no longer than the count.
+func validIssueCompaction(c *model.GroupingCompaction) error {
+	if c == nil {
+		return nil
+	}
+	if c.Count == 0 || c.FirstEvent <= 0 || c.LastEvent < c.FirstEvent || c.FirstArrival <= 0 || c.LastArrival < c.FirstArrival {
+		return model.Fail(model.Invalid)
+	}
+	if len(c.Releases) > maxIssueIDList || len(c.Recent) > model.GroupingDedupTail {
+		return model.Fail(model.Quota)
+	}
+	if uint64(len(c.Recent)) > uint64(c.Count) {
+		return model.Fail(model.Invalid)
+	}
+	releases := make(map[model.ID]bool, len(c.Releases))
+	for _, r := range c.Releases {
+		if r.Release == (model.ID{}) || releases[r.Release] || r.FirstEvent < c.FirstEvent || r.FirstEvent > c.LastEvent {
+			return model.Fail(model.Invalid)
+		}
+		releases[r.Release] = true
+	}
+	tail := make(map[model.ID]bool, len(c.Recent))
+	for _, id := range c.Recent {
+		if id == (model.ID{}) || tail[id] {
+			return model.Fail(model.Invalid)
+		}
+		tail[id] = true
+	}
+	return nil
 }
 
 func idPrefix(prior, next []model.ID) bool {
@@ -434,13 +609,26 @@ func validIssue(org, project model.ID, gi model.GroupingIssue) error {
 	if len(gi.ResolutionFrontier) > maxIssueIDList || len(gi.ObservedReleases) > maxIssueIDList || len(gi.FixedDescendants) > maxIssueLinks || len(gi.MigrationLinks) > maxIssueLinks {
 		return model.Fail(model.Quota)
 	}
+	if err := validIssueCompaction(gi.Compacted); err != nil {
+		return err
+	}
+	if err := validIssueCompaction(gi.LateCompacted); err != nil {
+		return err
+	}
+	// An occurrence ID is held once by an issue, whether in its window or in a
+	// dedup tail.
 	seen := make(map[model.ID]bool, len(gi.Occurrences)+len(gi.LateHistory))
+	if !issueHeldIDs(gi, func(id model.ID) bool {
+		if seen[id] {
+			return false
+		}
+		seen[id] = true
+		return true
+	}) {
+		return model.Fail(model.Invalid)
+	}
 	for _, list := range [][]model.GroupingEvidence{gi.Occurrences, gi.LateHistory} {
 		for _, e := range list {
-			if seen[e.OccurrenceID] {
-				return model.Fail(model.Invalid)
-			}
-			seen[e.OccurrenceID] = true
 			if err := validIssueEvidence(e, gi); err != nil {
 				return err
 			}
@@ -551,6 +739,9 @@ func applyIssueBook(scope auth.Scope, st *State, cmd Command) (Effect, error) {
 	if len(cmd.Payload) > maxIssuePayload {
 		return Effect{}, model.Fail(model.TooLarge)
 	}
+	if issueOperationOf(cmd.Payload) == IssueOpAck {
+		return applyIssueAck(scope, st, cmd)
+	}
 	var c IssueCommand
 	if err := strictPayload(cmd.Payload, &c); err != nil {
 		return Effect{}, err
@@ -592,11 +783,10 @@ func applyIssueBook(scope auth.Scope, st *State, cmd Command) (Effect, error) {
 		if changed[gi.ID] {
 			continue
 		}
-		for _, list := range [][]model.GroupingEvidence{gi.Occurrences, gi.LateHistory} {
-			for _, e := range list {
-				held[e.OccurrenceID] = gi.ID
-			}
-		}
+		issueHeldIDs(gi, func(id model.ID) bool {
+			held[id] = gi.ID
+			return true
+		})
 	}
 	affected := make([]model.ID, 0, len(c.Records))
 	for _, r := range c.Records {
@@ -608,25 +798,34 @@ func applyIssueBook(scope auth.Scope, st *State, cmd Command) (Effect, error) {
 			if next.Revision != prior.Revision+1 {
 				return Effect{}, ruleFault(model.Conflict, issueRecordConflict)
 			}
-			if next.ID != prior.ID || next.GroupingVersion != prior.GroupingVersion || next.Fingerprint != prior.Fingerprint ||
-				!evidencePrefix(prior.Occurrences, next.Occurrences) || !evidencePrefix(prior.LateHistory, next.LateHistory) || !idPrefix(prior.MigrationLinks, next.MigrationLinks) {
+			if next.ID != prior.ID || next.GroupingVersion != prior.GroupingVersion || next.Fingerprint != prior.Fingerprint || !idPrefix(prior.MigrationLinks, next.MigrationLinks) {
 				return Effect{}, model.Fail(model.Invalid)
+			}
+			if err := verifyIssueCompaction(prior, next); err != nil {
+				return Effect{}, err
 			}
 		} else {
 			if next.Revision != 1 {
 				return Effect{}, ruleFault(model.Conflict, issueRecordConflict)
 			}
+			// A new issue has folded nothing: an aggregate with no prior to fold from
+			// cannot be accounted for.
+			if next.Compacted != nil || next.LateCompacted != nil {
+				return Effect{}, model.Fail(model.Invalid)
+			}
 			if len(issues) >= maxIssuesPerProject {
 				return Effect{}, model.Fail(model.Quota)
 			}
 		}
-		for _, list := range [][]model.GroupingEvidence{next.Occurrences, next.LateHistory} {
-			for _, e := range list {
-				if holder, taken := held[e.OccurrenceID]; taken && holder != next.ID {
-					return Effect{}, ruleFault(model.Conflict, issueRecordConflict)
-				}
-				held[e.OccurrenceID] = next.ID
+		conflict := !issueHeldIDs(next, func(id model.ID) bool {
+			if holder, taken := held[id]; taken && holder != next.ID {
+				return false
 			}
+			held[id] = next.ID
+			return true
+		})
+		if conflict {
+			return Effect{}, ruleFault(model.Conflict, issueRecordConflict)
 		}
 		issues[key] = next
 		expl, err := issueExplanations(r.Explanations)
@@ -810,26 +1009,29 @@ func (s *Store) CollectRetiredIssues(ctx context.Context, scope auth.Scope, proj
 	return nil, model.Fail(model.Conflict)
 }
 
-// TransactIssues commits one lifecycle command (operation "commit") for a scope
-// that holds issues.write on the project. The generic Transact admits only
-// organization administrators; the issue lifecycle is written by workers and
-// reviewers that hold the narrower permission, so this entry point validates the
-// scope against the very state the command applies to (session, token, epoch,
-// membership and the issues.write grant) and then dispatches through the
-// registered KindApplyIssueEvidence handler like Transact does. There is no
-// control-wide revision to race on: the project revision is the compare-and-set
-// token, so concurrent committers never fail on unrelated control changes.
+// TransactIssues commits one lifecycle command (operation "commit", or the
+// grouping migration) for a scope that holds issues.write on the project, or for
+// an organization administrator acting as a person (decision D20). The generic
+// Transact admits only organization administrators; the issue lifecycle is
+// written by workers and people that hold the narrower permission, so this entry
+// point validates the scope against the very state the command applies to
+// (session, token, epoch, membership and the issues.write grant, and for the
+// migration also policy.write) and then dispatches through the registered
+// KindApplyIssueEvidence handler like Transact does. There is no control-wide
+// revision to race on: the project revision is the compare-and-set token, so
+// concurrent committers never fail on unrelated control changes.
 //
 // A command ID commits at most once; a retry returns the first result and a
 // reused ID with other content is a conflict.
 func (s *Store) TransactIssues(ctx context.Context, scope auth.Scope, cmd Command) (Result, error) {
-	if cmd.Kind != string(KindApplyIssueEvidence) || cmd.CommandID == (model.ID{}) || !isIssueCommit(cmd.Payload) {
+	operation := issueOperationOf(cmd.Payload)
+	if cmd.Kind != string(KindApplyIssueEvidence) || cmd.CommandID == (model.ID{}) || operation != issueOpCommit && operation != issueOpMigrate && operation != IssueOpAck {
 		return Result{}, model.Fail(model.Invalid)
 	}
 	if len(cmd.Payload) > maxIssuePayload {
 		return Result{}, model.Fail(model.TooLarge)
 	}
-	if scope.Permission() != issuesWritePermission {
+	if !issueWriter(scope) {
 		return Result{}, model.Fail(model.Forbidden)
 	}
 	handler := s.handler(KindApplyIssueEvidence)
@@ -840,7 +1042,11 @@ func (s *Store) TransactIssues(ctx context.Context, scope auth.Scope, cmd Comman
 	err := s.updateAs(ctx, writerTransactIssues, func(st *State) error {
 		binding := scope.PrincipalID().String() + ":" + scope.OrgID().String() + ":" + cmd.Kind
 		if v, ok := st.Commands[cmd.CommandID.String()]; ok {
-			if err := issueReplayable(scope, st, cmd, binding); err != nil {
+			replay := issueReplayable
+			if operation == issueOpMigrate {
+				replay = migrationReplayable
+			}
+			if err := replay(scope, st, cmd, binding); err != nil {
 				return err
 			}
 			out = v
@@ -861,11 +1067,32 @@ func (s *Store) TransactIssues(ctx context.Context, scope auth.Scope, cmd Comman
 	return out, err
 }
 
-func isIssueCommit(raw json.RawMessage) bool {
+// issueOperationOf is the operation named by a KindApplyIssueEvidence payload.
+func issueOperationOf(raw json.RawMessage) string {
 	var head struct {
 		Operation string `json:"operation"`
 	}
-	return json.Unmarshal(raw, &head) == nil && head.Operation == issueOpCommit
+	if json.Unmarshal(raw, &head) != nil {
+		return ""
+	}
+	return head.Operation
+}
+
+// migrationReplayable is issueReplayable for the grouping migration: the scope
+// must still be admitted to the migrated project and the command must be this
+// principal's. The migration payload names its project inside the migration.
+func migrationReplayable(scope auth.Scope, st *State, cmd Command, binding string) error {
+	var c model.ReleaseCommand
+	if json.Unmarshal(cmd.Payload, &c) != nil || c.Migration == nil {
+		return model.Fail(model.Invalid)
+	}
+	if err := migrationScope(scope, st, c.Migration.Org, c.Migration.Project); err != nil {
+		return err
+	}
+	if st.CommandOwners[cmd.CommandID.String()] != binding {
+		return model.Fail(model.NotFound)
+	}
+	return nil
 }
 
 // issueReplayable admits a retry of an already committed command: the scope must

@@ -64,7 +64,9 @@ type Clock interface{ Now() model.UnixNano }
 type State struct {
 	Revision model.Revision
 	Issues   map[model.ID]Record
-	// Occurrences maps every deduplicated occurrence ID to the issue holding it.
+	// Occurrences maps every deduplicated occurrence ID to the issue holding it:
+	// the evidence in an issue's window and the occurrence IDs of its folded
+	// evidence that are still in a dedup tail.
 	Occurrences map[model.ID]model.ID
 	// Checkpoints is the per data group processed cursor.
 	Checkpoints map[model.ID]model.Uint64
@@ -164,7 +166,17 @@ type Deps struct {
 	Migrator   Migrator
 	Clock      Clock
 	Regression RegressionPolicy
+	// Ledger tunes when the evidence ledger of one issue is compacted. The zero
+	// value is the production window shared with control (model.GroupingWindowMax
+	// and model.GroupingWindowKeep); a smaller one only compacts sooner and
+	// exists for tests of stores that do not verify compaction.
+	Ledger LedgerWindow
 }
+
+// LedgerWindow is the compaction trigger of one issue's evidence ledgers: when
+// the two ledgers hold Trigger evidence together and one more is to be added,
+// the oldest foldable evidence is folded into the aggregate until Keep remain.
+type LedgerWindow struct{ Trigger, Keep int }
 
 type Service struct{ d Deps }
 
@@ -181,6 +193,12 @@ func New(d Deps) (*Service, error) {
 		d.Regression.MinOccurrences = 1
 	}
 	if d.Regression.Window < 0 {
+		return nil, model.Fail(model.Invalid)
+	}
+	if d.Ledger == (LedgerWindow{}) {
+		d.Ledger = LedgerWindow{Trigger: model.GroupingWindowMax, Keep: model.GroupingWindowKeep}
+	}
+	if d.Ledger.Keep < 1 || d.Ledger.Trigger <= d.Ledger.Keep || d.Ledger.Trigger > model.GroupingWindowMax {
 		return nil, model.Fail(model.Invalid)
 	}
 	return &Service{d: d}, nil
@@ -208,7 +226,7 @@ func (s *Service) read(ctx context.Context, scope auth.Scope, project model.ID) 
 	if e := s.d.Authorizer.Revalidate(ctx, scope); e != nil {
 		return State{}, e
 	}
-	if p := scope.Permission(); p != auth.Read && p != issuesWrite {
+	if p := scope.Permission(); p != auth.Read && p != issuesWrite && !(p == auth.OrgAdmin && !scope.IsSystem()) {
 		return State{}, model.Fail(model.Forbidden)
 	}
 	if !allowsProject(scope, project) {
@@ -296,6 +314,7 @@ func cloneEvidences(in []Evidence) []Evidence {
 func cloneIssue(i Issue) Issue {
 	i.Occurrences = cloneEvidences(i.Occurrences)
 	i.LateHistory = cloneEvidences(i.LateHistory)
+	i.Compacted, i.LateCompacted = i.Compacted.Clone(), i.LateCompacted.Clone()
 	i.ResolutionFrontier = append([]model.ID(nil), i.ResolutionFrontier...)
 	i.ObservedReleases = append([]model.ID(nil), i.ObservedReleases...)
 	i.FixedDescendants = append([]model.ID(nil), i.FixedDescendants...)
@@ -358,9 +377,10 @@ func routes(state State) map[route]model.ID {
 }
 func lessID(a, b model.ID) bool { return string(a[:]) < string(b[:]) }
 
-// Summary is recomputed from the immutable ledger, never stored: counts and
-// first/last seen follow event time, and receipt (arrival) times are reported
-// as recorded.
+// Summary is recomputed from the ledgers, never stored: counts and first/last
+// seen follow event time, and receipt (arrival) times are reported as recorded.
+// It is exact across compaction: the folded evidence contributes its aggregate
+// (count and bounds), so a count is never lower for having been compacted.
 type Summary struct {
 	Count, Late               int
 	FirstSeen, LastSeen       model.UnixNano
@@ -370,26 +390,69 @@ type Summary struct {
 func Summarize(i Issue) Summary {
 	s := Summary{Count: len(i.Occurrences) + len(i.LateHistory), Late: len(i.LateHistory)}
 	first := true
-	visit := func(list []Evidence) {
+	bound := func(event, arrival model.UnixNano) {
+		if first || event < s.FirstSeen {
+			s.FirstSeen = event
+		}
+		if first || event > s.LastSeen {
+			s.LastSeen = event
+		}
+		if first || arrival < s.FirstArrival {
+			s.FirstArrival = arrival
+		}
+		if first || arrival > s.LastArrival {
+			s.LastArrival = arrival
+		}
+		first = false
+	}
+	folded := func(c *model.GroupingCompaction, late bool) {
+		if c == nil || c.Count == 0 {
+			return
+		}
+		s.Count += int(c.Count)
+		if late {
+			s.Late += int(c.Count)
+		}
+		bound(c.FirstEvent, c.FirstArrival)
+		bound(c.LastEvent, c.LastArrival)
+	}
+	folded(i.Compacted, false)
+	folded(i.LateCompacted, true)
+	for _, list := range [][]Evidence{i.Occurrences, i.LateHistory} {
 		for _, e := range list {
-			if first || e.EventTime < s.FirstSeen {
-				s.FirstSeen = e.EventTime
-			}
-			if first || e.EventTime > s.LastSeen {
-				s.LastSeen = e.EventTime
-			}
-			if first || e.ArrivalTime < s.FirstArrival {
-				s.FirstArrival = e.ArrivalTime
-			}
-			if first || e.ArrivalTime > s.LastArrival {
-				s.LastArrival = e.ArrivalTime
-			}
-			first = false
+			bound(e.EventTime, e.ArrivalTime)
 		}
 	}
-	visit(i.Occurrences)
-	visit(i.LateHistory)
 	return s
+}
+
+// observedAtOrBefore is the set of releases named by evidence (folded or not)
+// whose event time is at or before the boundary, in first-seen ledger order.
+func observedAtOrBefore(i Issue, boundary model.UnixNano) []model.ID {
+	var observed []model.ID
+	add := func(id model.ID) {
+		if !containsID(observed, id) {
+			observed = append(observed, id)
+		}
+	}
+	for _, part := range []struct {
+		folded *model.GroupingCompaction
+		window []Evidence
+	}{{i.Compacted, i.Occurrences}, {i.LateCompacted, i.LateHistory}} {
+		if part.folded != nil {
+			for _, r := range part.folded.Releases {
+				if r.FirstEvent <= boundary {
+					add(r.Release)
+				}
+			}
+		}
+		for _, e := range part.window {
+			if e.EventTime <= boundary && e.ReleaseID != nil {
+				add(*e.ReleaseID)
+			}
+		}
+	}
+	return observed
 }
 
 // ApplyEvidence applies one occurrence at its own durable cursor and returns
@@ -420,6 +483,14 @@ func (s *Service) ApplyEvidence(ctx context.Context, scope auth.Scope, e Evidenc
 // skipped; evidence above it is deduplicated by occurrence ID, so neither a
 // worker restart nor a lost acknowledgement can double count, regress or
 // notify. On a concurrent commit it rereads and reduces again.
+//
+// A hot fingerprint never stalls the checkpoint on the per-issue ledger window:
+// the oldest evidence of a full window is compacted into the issue's exact
+// aggregate (see reduce). A batch that needs more room for one issue than a
+// single commit can free is applied in several commits; each moves the
+// checkpoint to just below the first evidence it did not apply, and the last one
+// to the batch cursor, so a crash between them resumes there instead of
+// replaying evidence that has left the dedup horizon.
 func (s *Service) ApplyThrough(ctx context.Context, scope auth.Scope, cursor model.Cursor, evidence []Evidence) error {
 	if len(scope.ProjectIDs()) != 1 {
 		return model.Fail(model.Invalid)
@@ -431,12 +502,13 @@ func (s *Service) ApplyThrough(ctx context.Context, scope auth.Scope, cursor mod
 	if e := validateBatch(cursor, evidence); e != nil {
 		return e
 	}
-	for range maxAttempts {
+	conflicts := 0
+	for {
 		state, e := s.d.Store.Load(ctx, scope, project)
 		if e != nil {
 			return e
 		}
-		commit, e := s.reduce(ctx, scope, project, state, cursor, evidence)
+		commit, done, e := s.reduce(ctx, scope, project, state, cursor, evidence)
 		if e != nil {
 			return e
 		}
@@ -445,19 +517,83 @@ func (s *Service) ApplyThrough(ctx context.Context, scope auth.Scope, cursor mod
 		}
 		e = s.d.Store.Commit(ctx, scope, project, *commit)
 		if code(e) == model.Conflict {
+			if conflicts++; conflicts >= maxAttempts {
+				return model.Fail(model.Conflict)
+			}
 			continue
 		}
-		return e
+		if e != nil || done {
+			return e
+		}
 	}
-	return model.Fail(model.Conflict)
 }
 
-// reduce is the deterministic lifecycle reducer for one batch. It returns nil
-// when the batch changes nothing and the checkpoint is already there.
-func (s *Service) reduce(ctx context.Context, scope auth.Scope, project model.ID, state State, cursor model.Cursor, evidence []Evidence) (*Commit, error) {
+// origin is what a working issue held when this batch loaded it: how many
+// leading entries of each ledger came from the committed record (only those can
+// be folded, because control verifies a fold against the committed record) and
+// the committed resolution boundary, after which evidence of a resolved issue is
+// never folded.
+type origin struct {
+	occurrences, late int
+	bound             *model.UnixNano
+}
+
+// foldable counts the leading entries of a ledger that may be folded: at most
+// limit of them, none after the boundary.
+func foldable(list []Evidence, limit int, bound *model.UnixNano) int {
+	n := 0
+	for n < limit && n < len(list) && (bound == nil || list[n].EventTime <= *bound) {
+		n++
+	}
+	return n
+}
+
+// room makes space for one more evidence in the issue's window. A window below
+// the trigger has room. A full one folds the oldest foldable evidence of the two
+// ledgers (the longer ledger first) into their aggregates until the window is
+// down to Keep, and has room unless nothing was foldable (every evidence is
+// from this very commit or lies after the resolution boundary): then the batch
+// stops here and the caller commits what it has.
+func (s *Service) room(i *Issue, o *origin) bool {
+	total := len(i.Occurrences) + len(i.LateHistory)
+	if total < s.d.Ledger.Trigger {
+		return true
+	}
+	needed := total - s.d.Ledger.Keep
+	availOccurrences, availLate := foldable(i.Occurrences, o.occurrences, o.bound), foldable(i.LateHistory, o.late, o.bound)
+	takeOccurrences, takeLate := 0, 0
+	for needed > 0 && (availOccurrences > takeOccurrences || availLate > takeLate) {
+		if availOccurrences > takeOccurrences && (availLate <= takeLate || len(i.Occurrences)-takeOccurrences >= len(i.LateHistory)-takeLate) {
+			takeOccurrences++
+		} else {
+			takeLate++
+		}
+		needed--
+	}
+	if takeOccurrences+takeLate == 0 {
+		return false
+	}
+	i.Compacted = i.Compacted.Fold(i.Occurrences[:takeOccurrences])
+	i.Occurrences = append([]Evidence(nil), i.Occurrences[takeOccurrences:]...)
+	i.LateCompacted = i.LateCompacted.Fold(i.LateHistory[:takeLate])
+	i.LateHistory = append([]Evidence(nil), i.LateHistory[takeLate:]...)
+	o.occurrences -= takeOccurrences
+	o.late -= takeLate
+	return true
+}
+
+// reduce is the deterministic lifecycle reducer for one batch. It returns a nil
+// commit when the batch changes nothing and the checkpoint is already there.
+// done is false when the commit applies only a prefix of the batch (an issue
+// window that could not free more room in this commit): the commit then carries
+// a checkpoint just below the first evidence not applied (or none) and the caller
+// reduces again on the committed state. A batch that cannot apply even one
+// evidence is the honest last resort, Quota.
+func (s *Service) reduce(ctx context.Context, scope auth.Scope, project model.ID, state State, cursor model.Cursor, evidence []Evidence) (*Commit, bool, error) {
 	checkpoint := state.Checkpoints[cursor.Group]
 	index := routes(state)
 	working := map[model.ID]*Record{}
+	origins := map[model.ID]*origin{}
 	occurrences := map[model.ID]model.ID{}
 	known := func(occ model.ID) (model.ID, bool) {
 		if id, ok := occurrences[occ]; ok {
@@ -473,6 +609,12 @@ func (s *Service) reduce(ctx context.Context, scope auth.Scope, project model.ID
 		if r, ok := state.Issues[id]; ok {
 			c := cloneRecord(r)
 			working[id] = &c
+			o := &origin{occurrences: len(c.Issue.Occurrences), late: len(c.Issue.LateHistory)}
+			if c.Issue.Workflow == "resolved" && c.Issue.ResolutionTime != nil {
+				b := *c.Issue.ResolutionTime
+				o.bound = &b
+			}
+			origins[id] = o
 			return &c
 		}
 		return nil
@@ -480,7 +622,9 @@ func (s *Service) reduce(ctx context.Context, scope auth.Scope, project model.ID
 	var graph releases.Graph
 	graphLoaded := false
 	var effects []Effect
-	for _, raw := range evidence {
+	applied, stopped := 0, -1
+	touched := map[model.ID]bool{}
+	for pos, raw := range evidence {
 		if raw.Origin.Index <= checkpoint {
 			continue
 		}
@@ -492,10 +636,10 @@ func (s *Service) reduce(ctx context.Context, scope auth.Scope, project model.ID
 			} else if r, ok := state.Issues[holder]; ok {
 				held = r.Issue
 			} else {
-				return nil, model.Fail(model.Corrupt)
+				return nil, false, model.Fail(model.Corrupt)
 			}
 			if !holds(held, e) {
-				return nil, model.Fail(model.Conflict)
+				return nil, false, model.Fail(model.Conflict)
 			}
 			continue
 		}
@@ -504,13 +648,23 @@ func (s *Service) reduce(ctx context.Context, scope auth.Scope, project model.ID
 		if !ok {
 			id = issueID(scope.OrgID(), project, e.GroupingVersion, e.Fingerprint)
 			if _, exists := state.Issues[id]; exists {
-				return nil, model.Fail(model.Corrupt)
+				return nil, false, model.Fail(model.Corrupt)
 			}
 			working[id] = &Record{Issue: Issue{ID: id, Org: scope.OrgID(), Project: project, GroupingVersion: e.GroupingVersion, Fingerprint: e.Fingerprint, Workflow: "open", Revision: 0}}
+			origins[id] = &origin{}
 			index[k] = id
 		}
 		rec := record(id)
 		i := &rec.Issue
+		if !s.room(i, origins[id]) {
+			if !touched[id] {
+				delete(working, id)
+				delete(origins, id)
+			}
+			stopped = pos
+			break
+		}
+		touched[id] = true
 		switch {
 		case i.Workflow == "resolved" && i.ResolutionTime != nil && e.EventTime <= *i.ResolutionTime:
 			i.LateHistory = append(i.LateHistory, e)
@@ -518,7 +672,7 @@ func (s *Service) reduce(ctx context.Context, scope auth.Scope, project model.ID
 			if !graphLoaded {
 				g, err := s.d.Graphs.Graph(ctx, scope, project)
 				if err != nil {
-					return nil, err
+					return nil, false, err
 				}
 				graph, graphLoaded = g, true
 			}
@@ -531,10 +685,26 @@ func (s *Service) reduce(ctx context.Context, scope auth.Scope, project model.ID
 			i.ObservedReleases = append(i.ObservedReleases, *e.ReleaseID)
 		}
 		occurrences[e.OccurrenceID] = id
+		applied++
 	}
-	advance := cursor.Index > checkpoint
+	done := stopped < 0
+	if !done && applied == 0 {
+		return nil, false, model.Fail(model.Quota)
+	}
+	// The checkpoint a commit carries: the batch cursor when the whole batch is
+	// applied, otherwise the position just below the first evidence not applied
+	// yet (every unapplied evidence lies above it, so a replay resumes there).
+	through := cursor.Index
+	if !done {
+		for _, e := range evidence[stopped:] {
+			if e.Origin.Index > checkpoint && e.Origin.Index-1 < through {
+				through = e.Origin.Index - 1
+			}
+		}
+	}
+	advance := through > checkpoint
 	if len(working) == 0 && !advance {
-		return nil, nil
+		return nil, true, nil
 	}
 	ids := make([]model.ID, 0, len(working))
 	for id := range working {
@@ -548,11 +718,17 @@ func (s *Service) reduce(ctx context.Context, scope auth.Scope, project model.ID
 		commit.Records = append(commit.Records, *r)
 	}
 	if advance {
-		commit.Checkpoint = &Checkpoint{Group: cursor.Group, Index: cursor.Index}
+		commit.Checkpoint = &Checkpoint{Group: cursor.Group, Index: through}
 	}
-	return commit, nil
+	return commit, done, nil
 }
 
+// holds reports whether the issue already counts the evidence. An occurrence in
+// a ledger must be the same durable occurrence (sameOccurrence), else the
+// caller reports a Conflict. An occurrence that was folded out of the window but
+// is still in a dedup tail has no identity left to compare: a tail hit is a
+// duplicate, so an identity conflict on a folded ID goes undetected (the
+// documented residual of compaction).
 func holds(i Issue, e Evidence) bool {
 	for _, list := range [][]Evidence{i.Occurrences, i.LateHistory} {
 		for _, held := range list {
@@ -561,8 +737,15 @@ func holds(i Issue, e Evidence) bool {
 			}
 		}
 	}
-	return false
+	return containsID(tailOf(i.Compacted), e.OccurrenceID) || containsID(tailOf(i.LateCompacted), e.OccurrenceID)
 }
+func tailOf(c *model.GroupingCompaction) []model.ID {
+	if c == nil {
+		return nil
+	}
+	return c.Recent
+}
+
 func containsID(list []model.ID, id model.ID) bool {
 	for _, v := range list {
 		if v == id {
@@ -634,7 +817,9 @@ func (s *Service) Act(ctx context.Context, scope auth.Scope, a IssueAction) (Iss
 	if e := s.d.Authorizer.Revalidate(ctx, scope); e != nil {
 		return Issue{}, e
 	}
-	if scope.Permission() != issuesWrite || len(scope.ProjectIDs()) == 0 {
+	// issues.write (a granted person) or an organization administrator acting as a
+	// person (decision D20). The runner's own org.admin scope is no actor.
+	if p := scope.Permission(); p != issuesWrite && !(p == auth.OrgAdmin && !scope.IsSystem()) || len(scope.ProjectIDs()) == 0 {
 		return Issue{}, model.Fail(model.Forbidden)
 	}
 	if a.CommandID == (model.ID{}) || a.IssueID == (model.ID{}) || !actionKinds[a.Kind] || !safeText(a.Reason) {
@@ -671,6 +856,11 @@ func (s *Service) Act(ctx context.Context, scope auth.Scope, a IssueAction) (Iss
 				}
 				return cloneIssue(prior.Issue), nil
 			}
+			if to, moved := state.Issues[migrationTarget(a)]; a.Kind == "grouping_migration" && a.Migration != nil && moved && containsID(to.Issue.MigrationLinks, a.Migration.ID) && containsID(prior.Issue.MigrationLinks, a.Migration.ID) {
+				// The migration is already committed: a retry of it (the issue moved to
+				// the revision the migration produced) returns the issue as it is.
+				return cloneIssue(prior.Issue), nil
+			}
 			if prior.Issue.Revision != a.ExpectedVersion {
 				return Issue{}, model.Fail(model.Conflict)
 			}
@@ -695,6 +885,15 @@ func (s *Service) Act(ctx context.Context, scope auth.Scope, a IssueAction) (Iss
 		// Not in this project (or the commit kept losing races): try the next.
 	}
 	return Issue{}, model.Fail(model.NotFound)
+}
+
+// migrationTarget is the issue a migration action moves to (the zero ID for any
+// other action).
+func migrationTarget(a IssueAction) model.ID {
+	if a.Migration == nil {
+		return model.ID{}
+	}
+	return a.Migration.To
 }
 
 func fingerprintOf(a IssueAction) ([32]byte, error) {
@@ -743,14 +942,7 @@ func (s *Service) transition(ctx context.Context, scope auth.Scope, project mode
 				seen[f] = true
 			}
 		}
-		var observed []model.ID
-		for _, list := range [][]Evidence{i.Occurrences, i.LateHistory} {
-			for _, e := range list {
-				if e.EventTime <= boundary && e.ReleaseID != nil && !containsID(observed, *e.ReleaseID) {
-					observed = append(observed, *e.ReleaseID)
-				}
-			}
-		}
+		observed := observedAtOrBefore(*i, boundary)
 		i.Workflow = "resolved"
 		i.ResolutionTime = &boundary
 		i.ResolutionFrontier = observed

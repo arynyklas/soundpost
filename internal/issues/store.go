@@ -136,6 +136,16 @@ func (s *ControlStore) Load(ctx context.Context, scope auth.Scope, project model
 				out.Occurrences[e.OccurrenceID] = gi.ID
 			}
 		}
+		// The dedup tails of the folded evidence stay in the index: a redelivered
+		// occurrence there is a duplicate, never a second count.
+		for _, tail := range [][]model.ID{tailOf(gi.Compacted), tailOf(gi.LateCompacted)} {
+			for _, id := range tail {
+				if _, dup := out.Occurrences[id]; dup {
+					return State{}, model.Fail(model.Corrupt)
+				}
+				out.Occurrences[id] = gi.ID
+			}
+		}
 	}
 	for id, entry := range snap.Commands {
 		if entry.Action != nil {

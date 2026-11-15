@@ -167,7 +167,7 @@ func applyIssueOperation(scope auth.Scope, st *State, cmd Command) (Effect, erro
 		return Effect{}, model.Fail(model.Invalid)
 	}
 	migration := *payload.Migration
-	if e = releaseScope(scope, st, migration.Org, migration.Project); e != nil {
+	if e = migrationScope(scope, st, migration.Org, migration.Project); e != nil {
 		return Effect{}, e
 	}
 	if migration.ID == (model.ID{}) || migration.From == (model.ID{}) || migration.To == (model.ID{}) || migration.From == migration.To || migration.GroupingVersion == 0 || migration.Fingerprint == (model.Hash{}) || migration.At <= 0 || !safeReleaseText(migration.Reason, 1024, false) || strings.TrimSpace(migration.Reason) == "" {

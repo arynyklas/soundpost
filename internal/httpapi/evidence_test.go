@@ -662,6 +662,56 @@ func TestEvidenceIssueShowsGroupingLateHistoryAndUnknownAncestry(t *testing.T) {
 	}
 }
 
+// The issue view lists the newest evidence window. The oldest evidence of a hot
+// issue is folded into counts: the view must say how many items the lists no
+// longer carry, and mark the evidence section incomplete, never show a silently
+// lower count.
+func TestEvidenceIssueLabelsCompactedEvidence(t *testing.T) {
+	issues := &fakeIssues{}
+	e := newEvEnv(t, nil, issues, true)
+	p := model.NewID()
+	org := e.org("evidence compacted", p)
+	admin := e.user(org, "compacted-admin@example.test")
+	e.cmd(org, "org_admin", auth.AdminPayload{UserID: admin.ID, Enabled: true})
+	fp := model.HashCanonical([]byte("compacted fingerprint"))
+	issues.issue = model.GroupingIssue{ID: model.NewID(), Org: org, Project: p, GroupingVersion: 1, Fingerprint: fp, Workflow: "open", Revision: 9,
+		Occurrences:   []model.GroupingEvidence{{OccurrenceID: model.NewID(), RecordID: model.NewID(), GroupingVersion: 1, Fingerprint: fp, EventTime: 90, ArrivalTime: 200, Ancestry: "unknown", Freshness: "fresh"}},
+		Compacted:     &model.GroupingCompaction{Count: 700, FirstEvent: 1, LastEvent: 80, FirstArrival: 2, LastArrival: 90},
+		LateCompacted: &model.GroupingCompaction{Count: 5, FirstEvent: 1, LastEvent: 8, FirstArrival: 2, LastArrival: 9}}
+	body := map[string]any{"org": org.String(), "project": p.String(), "issue": issues.issue.ID.String()}
+	status, raw := e.post(admin, "/api/v1/evidence/issue", body, nil)
+	if status != 200 {
+		t.Fatalf("issue: %d %s", status, raw)
+	}
+	var v httpapi.IssueView
+	if err := json.Unmarshal(raw, &v); err != nil {
+		t.Fatal(err)
+	}
+	if v.Grouping == nil || v.Grouping.CompactedOccurrences != 700 || v.Grouping.CompactedLate != 5 || len(v.Occurrences) != 1 {
+		t.Fatalf("compacted counts missing from the view: %s", raw)
+	}
+	section := map[string]httpapi.ViewSection{}
+	for _, s := range v.Sections {
+		section[s.Name] = s
+	}
+	if got := section["evidence"]; got.State != httpapi.StateIncomplete || got.Reason != httpapi.ReasonEvidenceCompacted {
+		t.Fatalf("evidence section %+v", got)
+	}
+	// An issue that folded nothing keeps the ready section and zero counts.
+	issues.issue.Compacted, issues.issue.LateCompacted = nil, nil
+	_, raw = e.post(admin, "/api/v1/evidence/issue", body, nil)
+	if err := json.Unmarshal(raw, &v); err != nil {
+		t.Fatal(err)
+	}
+	section = map[string]httpapi.ViewSection{}
+	for _, s := range v.Sections {
+		section[s.Name] = s
+	}
+	if v.Grouping.CompactedOccurrences != 0 || v.Grouping.CompactedLate != 0 || section["evidence"].State != httpapi.StateReady {
+		t.Fatalf("uncompacted issue: %s", raw)
+	}
+}
+
 // TestArtifactReadGrants exercises the committed protected artifact route with
 // the REAL artifact service: the map is readable with artifacts.read, private
 // source bytes only through the separate sources operation for a named source

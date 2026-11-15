@@ -261,6 +261,9 @@ func openWith(dir string, options *replicationOptions, meter storage.DiskMeter, 
 	evidence := httpapi.NewEvidence(sandboxUnavailable{}, r, r)
 	traces := httpapi.NewTraces(httpapi.NewStorageSpanSource(engine))
 	out := &App{Control: c, Auth: a, Storage: engine, Ingest: i, Releases: r, Artifacts: artifactService, ArtifactLifecycle: artifactLifecycle, Cache: cache, Exports: exportService, Retention: ret, Query: queryEngine, Live: liveService, Investigator: investigator, Incidents: incidentService, Jobs: jobService, Actions: actions, Policies: policies, Evidence: evidence, Traces: traces, Replays: httpapi.NewReplays(replayService)}
+	if e = out.BindIssueActions(); e != nil {
+		return fail(e)
+	}
 	// Built once: the profile service keys its cursors per instance.
 	out.Profiles = httpapi.NewProfiles(out.NewNativeProfiles())
 	startupTimeout := 20 * time.Second

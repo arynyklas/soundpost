@@ -14,6 +14,7 @@ import (
 	"github.com/arynyklas/soundpost/internal/auth"
 	"github.com/arynyklas/soundpost/internal/control"
 	"github.com/arynyklas/soundpost/internal/incidents"
+	"github.com/arynyklas/soundpost/internal/issues"
 	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/notify"
 	"github.com/arynyklas/soundpost/internal/retention"
@@ -22,9 +23,10 @@ import (
 // This file is the C11 human-action surface of the investigation UI. It is a
 // thin, scope-first handler over owned services: it dispatches by closed entity
 // kind and implements no reducer of its own. Incident actions go to the C08
-// incidents.Service (which owns validation, the version compare-and-set, the
-// actor and the audit); issue actions with no owner yet are an explicit
-// not_available answer, never an empty success and never invented data.
+// incidents.Service and issue actions to the C07 issues.Service (which own
+// validation, the version compare-and-set, the actor and the audit); an issue
+// action with no lifecycle bound is an explicit not_available answer, never an
+// empty success and never invented data.
 
 // ActionEntity is the closed set of entities a human action may target.
 type ActionEntity string
@@ -84,6 +86,24 @@ type ActionPayload struct {
 	Until  *model.Int64    `json:"until,omitempty"`
 	Impact *ImpactPayload  `json:"impact,omitempty"`
 	Link   *incidents.Link `json:"link,omitempty"`
+	// ResolutionBoundary and FixedFrontier belong to the issue resolve action: the
+	// explicit event-time boundary (default: the server's admission time) and the
+	// releases that contain the fix.
+	ResolutionBoundary *model.Int64 `json:"resolution_boundary,omitempty"`
+	FixedFrontier      []model.ID   `json:"fixed_frontier,omitempty"`
+	// Migration belongs to the issue grouping_migration action only.
+	Migration *MigrationPayload `json:"migration,omitempty"`
+}
+
+// MigrationPayload names the issue the migration moves to and the grouping
+// version and fingerprint it is under. The organization, project, source issue,
+// source revision, reason and time are the request's own (scope, target,
+// expected version, payload reason and the server clock): never claims here.
+type MigrationPayload struct {
+	ID              model.ID   `json:"id"`
+	To              model.ID   `json:"to"`
+	GroupingVersion uint16     `json:"grouping_version"`
+	Fingerprint     model.Hash `json:"fingerprint"`
 }
 
 // ActionRequest is one human action. ProjectID and TargetID are selectors that
@@ -115,16 +135,48 @@ const (
 )
 
 // ActionResponse is what an action answers. A committed incident action carries
-// the incident exactly as the control group committed it; the browser shows
-// nothing as committed before this arrives.
+// the incident exactly as the control group committed it, a committed issue
+// action the issue; the browser shows nothing as committed before this arrives.
 type ActionResponse struct {
-	State      ActionState   `json:"state"`
-	Reason     string        `json:"reason,omitempty"`
-	EntityKind ActionEntity  `json:"entity_kind"`
-	Kind       ActionKind    `json:"kind"`
-	TargetID   model.ID      `json:"target_id"`
-	Revision   *model.Uint64 `json:"revision,omitempty"`
-	Incident   *IncidentView `json:"incident,omitempty"`
+	State      ActionState      `json:"state"`
+	Reason     string           `json:"reason,omitempty"`
+	EntityKind ActionEntity     `json:"entity_kind"`
+	Kind       ActionKind       `json:"kind"`
+	TargetID   model.ID         `json:"target_id"`
+	Revision   *model.Uint64    `json:"revision,omitempty"`
+	Incident   *IncidentView    `json:"incident,omitempty"`
+	Issue      *IssueActionView `json:"issue,omitempty"`
+}
+
+// IssueActionView is the safe projection of a committed issue: identity, workflow, the
+// revision the next action must expect, the resolution boundary and the links a
+// grouping migration made. It carries no occurrence evidence and no telemetry.
+// Versions and times are decimal strings, never JavaScript numbers.
+type IssueActionView struct {
+	ID               model.ID     `json:"id"`
+	Workflow         string       `json:"workflow"`
+	Revision         model.Uint64 `json:"revision"`
+	GroupingVersion  uint16       `json:"grouping_version"`
+	ResolutionTime   *model.Int64 `json:"resolution_time_ns,omitempty"`
+	FixedDescendants []model.ID   `json:"fixed_descendants,omitempty"`
+	MigrationLinks   []model.ID   `json:"migration_links,omitempty"`
+}
+
+// IssueConflict is a lost issue revision race (or a transition the issue's
+// workflow does not allow): the issue is at Current, the action expected
+// Expected. Nothing was applied and the handler never retries it.
+type IssueConflict struct{ Current, Expected model.Revision }
+
+func (c *IssueConflict) Error() string { return c.Detail() }
+
+// Detail is the stable 409 detail: a moved revision is issue_version_conflict; an
+// action the workflow state forbids at the revision the caller saw is
+// issue_state_conflict.
+func (c *IssueConflict) Detail() string {
+	if c.Current != c.Expected {
+		return "issue_version_conflict"
+	}
+	return "issue_state_conflict"
 }
 
 // ActionConflict is the HTTP 409 body of a lost optimistic-concurrency race: the
@@ -278,9 +330,19 @@ type DeletionPoller interface {
 // ActionClock supplies the time active windows are judged at.
 type ActionClock interface{ Now() model.UnixNano }
 
+// IssueService is the committed C07 issue lifecycle as the handler consumes it;
+// *issues.Service implements it. It owns the scope check, the revision compare
+// and set, the command-ID retry and the audit; the handler maps the closed
+// payload and implements no transition itself.
+type IssueService interface {
+	Act(ctx context.Context, scope auth.Scope, action issues.IssueAction) (issues.Issue, error)
+	Get(ctx context.Context, scope auth.Scope, project, id model.ID) (issues.Issue, error)
+}
+
 // Actions is the human-action service behind POST /api/v1/actions.
 type Actions struct {
 	incidents IncidentService
+	issues    IssueService
 	lister    IncidentLister
 	directory Directory
 	deletions DeletionPoller
@@ -301,6 +363,15 @@ func NewActions(svc IncidentService, lister IncidentLister, directory Directory,
 	a.notices, _ = lister.(NotificationReader)
 	return a, nil
 }
+
+// BindIssues installs the issue lifecycle service that issue actions dispatch to.
+// Until it is bound every issue action is an explicit not_available answer
+// (ReasonIssueActionsNotBuilt); nothing changes and nothing is invented. A nil
+// service unbinds it.
+func (a *Actions) BindIssues(svc IssueService) { a.issues = svc }
+
+// IssuesBound reports whether the issue lifecycle is installed (the application binds it at Open).
+func (a *Actions) IssuesBound() bool { return a.issues != nil }
 
 func invalid(detail string) error {
 	f := model.Fail(model.Invalid)
@@ -355,9 +426,7 @@ func (a *Actions) Act(ctx context.Context, scope auth.Scope, req ActionRequest) 
 	}
 	switch req.EntityKind {
 	case EntityIssue:
-		// internal/issues has no control handler yet: an issue action has no owner
-		// that can commit it, so it is not_available, never a fake success.
-		return ActionResponse{State: ActionNotAvailable, Reason: ReasonIssueActionsNotBuilt, EntityKind: req.EntityKind, Kind: req.Kind, TargetID: req.TargetID}, nil
+		return a.issueAct(ctx, scope, req)
 	}
 	action, err := a.incidentAction(ctx, scope, req)
 	if err != nil {
@@ -373,6 +442,62 @@ func (a *Actions) Act(ctx context.Context, scope auth.Scope, req ActionRequest) 
 	}
 	view := a.view(state, true, facts)
 	return ActionResponse{State: ActionCommitted, EntityKind: req.EntityKind, Kind: req.Kind, TargetID: req.TargetID, Revision: &view.Version, Incident: &view}, nil
+}
+
+// issueAct dispatches one issue action to the C07 lifecycle service. The scope is
+// the caller's own (issues.write held on the project, or the organization
+// administrator's): the handler mints nothing and never widens it. With no
+// service bound the answer is the explicit not_available; with one, the committed
+// issue is answered exactly as the lifecycle committed it, and a lost revision
+// race is an IssueConflict (HTTP 409), never retried here.
+func (a *Actions) issueAct(ctx context.Context, scope auth.Scope, req ActionRequest) (ActionResponse, error) {
+	if a.issues == nil {
+		return ActionResponse{State: ActionNotAvailable, Reason: ReasonIssueActionsNotBuilt, EntityKind: req.EntityKind, Kind: req.Kind, TargetID: req.TargetID}, nil
+	}
+	action, err := a.issueAction(scope, req)
+	if err != nil {
+		return ActionResponse{}, err
+	}
+	issue, err := a.issues.Act(ctx, scope, action)
+	if err != nil {
+		var f *model.Fault
+		if errors.As(err, &f) && f.Code == model.Conflict {
+			// Say which revision the issue is at, so the caller can reread. A read that
+			// fails leaves the plain conflict.
+			if current, e := a.issues.Get(ctx, scope, req.ProjectID, req.TargetID); e == nil {
+				return ActionResponse{}, &IssueConflict{Current: current.Revision, Expected: model.Revision(req.ExpectedVersion)}
+			}
+		}
+		return ActionResponse{}, err
+	}
+	revision := model.Uint64(issue.Revision)
+	view := IssueActionView{ID: issue.ID, Workflow: issue.Workflow, Revision: revision, GroupingVersion: issue.GroupingVersion, FixedDescendants: issue.FixedDescendants, MigrationLinks: issue.MigrationLinks}
+	if issue.ResolutionTime != nil {
+		t := model.Int64(*issue.ResolutionTime)
+		view.ResolutionTime = &t
+	}
+	return ActionResponse{State: ActionCommitted, EntityKind: req.EntityKind, Kind: req.Kind, TargetID: req.TargetID, Revision: &revision, Issue: &view}, nil
+}
+
+// issueAction maps the closed payload to the C07 action. Fields a kind does not
+// take are refused; the actor and organization are the scope's, the migration's
+// source and revision are the request's and its time is the server's.
+func (a *Actions) issueAction(scope auth.Scope, req ActionRequest) (issues.IssueAction, error) {
+	p := req.Payload
+	kind := req.Kind
+	if p.Owner != nil || p.Until != nil || p.Impact != nil || p.Link != nil ||
+		(p.ResolutionBoundary != nil || len(p.FixedFrontier) != 0) && kind != ActionResolve || p.Migration != nil != (kind == ActionGroupMigration) {
+		return issues.IssueAction{}, invalid("action_payload_invalid")
+	}
+	out := issues.IssueAction{CommandID: req.CommandID, ExpectedVersion: model.Revision(req.ExpectedVersion), IssueID: req.TargetID, Kind: string(kind), Reason: p.Reason, FixedDescendantFrontier: slices.Clone(p.FixedFrontier)}
+	if p.ResolutionBoundary != nil {
+		out.ResolutionBoundary = model.UnixNano(*p.ResolutionBoundary)
+	}
+	if m := p.Migration; m != nil {
+		out.Migration = &model.GroupingMigration{ID: m.ID, Org: scope.OrgID(), Project: req.ProjectID, From: req.TargetID, To: m.To, FromRevision: model.Revision(req.ExpectedVersion),
+			GroupingVersion: m.GroupingVersion, Fingerprint: m.Fingerprint, Reason: p.Reason, At: a.clock.Now()}
+	}
+	return out, nil
 }
 
 func severityOf(name string) (incidents.Severity, bool) {
@@ -406,7 +531,8 @@ func (a *Actions) incidentAction(ctx context.Context, scope auth.Scope, req Acti
 	p := req.Payload
 	kind := req.Kind
 	if p.Owner != nil && kind != ActionAssign || p.Until != nil != (kind == ActionSnooze || kind == ActionMaintenance) ||
-		p.Impact != nil != (kind == ActionImpact) || p.Link != nil != (kind == ActionLink) {
+		p.Impact != nil != (kind == ActionImpact) || p.Link != nil != (kind == ActionLink) ||
+		p.ResolutionBoundary != nil || len(p.FixedFrontier) != 0 || p.Migration != nil {
 		return incidents.Action{}, invalid("action_payload_invalid")
 	}
 	out := incidents.Action{CommandID: req.CommandID, ExpectedVersion: model.Revision(req.ExpectedVersion), Type: incidentKinds[kind], Reason: p.Reason, Target: incidents.Target{Project: req.ProjectID, Incident: req.TargetID}}
@@ -768,6 +894,14 @@ func actionReply(w http.ResponseWriter, v any, err error) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusConflict)
 		_ = json.NewEncoder(w).Encode(ActionConflict{Code: string(model.Conflict), Detail: control.IncidentVersionConflict, CurrentVersion: model.Uint64(conflict.Current), RequestID: w.Header().Get("X-Request-ID")})
+		return
+	}
+	var issueConflict *IssueConflict
+	if errors.As(err, &issueConflict) {
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(ActionConflict{Code: string(model.Conflict), Detail: issueConflict.Detail(), CurrentVersion: model.Uint64(issueConflict.Current), RequestID: w.Header().Get("X-Request-ID")})
 		return
 	}
 	switch r := v.(type) {
