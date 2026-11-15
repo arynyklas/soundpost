@@ -409,6 +409,7 @@ func (req PolicyRequest) command() (auth.AdminCommandRequest, error) {
 // CSRF binding. A write commits through auth.Service.PolicyCommand under that
 // scope.
 func RegisterPolicyRoutes(mux *http.ServeMux, authority *auth.Service, policies *Policies) {
+	registerDestinationRoutes(mux, authority, policies)
 	mux.HandleFunc("POST /api/v1/policies", func(w http.ResponseWriter, r *http.Request) {
 		credential, err := artifactCredential(authority, w, r)
 		if err != nil {

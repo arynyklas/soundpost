@@ -33,6 +33,10 @@ type AdminPayload struct {
 	Secret      string          `json:"secret"`
 	Reason      string          `json:"reason"`
 	Config      json.RawMessage `json:"config"`
+	// ExpectedVersion, when set, is the destination version (DestinationConfig.Revision;
+	// 0 = it must not exist) a "destination" command is based on; a different stored
+	// version is a conflict. Unset keeps the organization-level precondition only.
+	ExpectedVersion *model.Uint64 `json:"expected_version,omitempty"`
 }
 type AdminReadRequest struct {
 	OrgID model.ID `json:"org_id"`
@@ -223,6 +227,13 @@ func (s *Service) adminCommand(ctx context.Context, c Credential, r AdminCommand
 			}
 			if err := validateAdminConfig(r.Kind, p, &o); err != nil {
 				return err
+			}
+			if r.Kind == "destination" {
+				cfg, err := versionDestination(o, p)
+				if err != nil {
+					return err
+				}
+				p.Config = cfg
 			}
 			o.Settings[r.Kind+":"+p.ID.String()] = append(json.RawMessage(nil), p.Config...)
 			if r.Kind == "retention" {

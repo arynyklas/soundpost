@@ -129,7 +129,7 @@ func validState(s *PolicyState) error {
 		s.Mode != ModeActive && s.Mode != ModeShadow,
 		!slices.Contains(s.Linked, s.Owner), len(s.Linked) > MaxLinked,
 		len(s.Windows) > MaxWindows, len(s.Recipients) > MaxRecipients,
-		len(s.Sent) > MaxSentMarks, len(s.Cursors) > MaxCursors:
+		len(s.Sent) > MaxSentMarks, len(s.Cursors) > MaxCursors, len(s.LateSeen) > MaxLateMarks:
 		return refuse(model.Invalid, ReasonInvalidState)
 	}
 	for _, w := range s.Windows {
@@ -355,6 +355,14 @@ func mulNano(a, k model.UnixNano) (model.UnixNano, bool) {
 
 func (r *run) late(mode Mode) {
 	s := &r.s
+	// A replay of an event already counted (same command) is not new history.
+	if slices.Contains(s.LateSeen, r.ev.Command) {
+		return
+	}
+	s.LateSeen = append(s.LateSeen, r.ev.Command)
+	if len(s.LateSeen) > MaxLateMarks {
+		s.LateSeen = s.LateSeen[len(s.LateSeen)-MaxLateMarks:]
+	}
 	if mode == ModeBackfill {
 		s.Backfilled = satAdd(s.Backfilled)
 		return
@@ -1351,6 +1359,7 @@ func (s PolicyState) clone() PolicyState {
 	s.Cursors = slices.Clone(s.Cursors)
 	s.CriticalServices = slices.Clone(s.CriticalServices)
 	s.Sent = slices.Clone(s.Sent)
+	s.LateSeen = slices.Clone(s.LateSeen)
 	s.Config = s.Config.clone()
 	s.LastCutover = cloneID(s.LastCutover)
 	s.EpisodeRef = cloneID(s.EpisodeRef)

@@ -11,11 +11,16 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
 
 	"github.com/arynyklas/soundpost/internal/model"
+	// The zone database is the pinned one notification digests use, so DST folds
+	// and gaps resolve identically on every node, on hosts without an installed
+	// tz database, and for jobs and notifications alike.
+	timezone "github.com/arynyklas/soundpost/third_party/timezone/go124"
 )
 
 // Every function in this file is pure and deterministic: no wall clock, no
@@ -902,11 +907,27 @@ type compiled struct {
 	domStar, dowStar         bool
 }
 
+// zoneCache holds immutable public zone data parsed from the pinned dataset,
+// keyed by a validated name; the pinned loader parses the zone on every call.
+var zoneCache sync.Map
+
+func location(name string) (*time.Location, error) {
+	if v, ok := zoneCache.Load(name); ok {
+		return v.(*time.Location), nil
+	}
+	loc, err := timezone.LoadLocation(name)
+	if err != nil {
+		return nil, err
+	}
+	zoneCache.Store(name, loc)
+	return loc, nil
+}
+
 func compileSchedule(s Schedule) (*compiled, error) {
 	if !safeZone(s.Timezone) {
 		return nil, model.Fail(model.Invalid)
 	}
-	loc, err := time.LoadLocation(s.Timezone)
+	loc, err := location(s.Timezone)
 	if err != nil {
 		return nil, model.Fail(model.Invalid)
 	}

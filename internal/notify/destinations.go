@@ -63,6 +63,8 @@ type DestinationRecord struct {
 	Address   string
 	Enabled   bool
 	HasSecret bool
+	// Version is the destination's own committed version (0: none yet).
+	Version model.Revision
 }
 
 // DestinationSource reads the configured destinations of one organization. A
@@ -91,6 +93,10 @@ type DestinationView struct {
 	Channel   Channel  `json:"channel"`
 	Display   string   `json:"display"`
 	HasSecret bool     `json:"has_secret"`
+	// Enabled and Version are set by the destination admin routes (the view of
+	// a saved destination); a resolved Destination leaves them zero.
+	Enabled *bool          `json:"enabled,omitempty"`
+	Version model.Revision `json:"version,omitempty"`
 }
 
 // View is the redacted DTO. A webhook shows its host only, an e-mail its
@@ -171,31 +177,40 @@ func (r *Destinations) Resolve(ctx context.Context, scope auth.Scope, d Delivery
 		return Destination{}, ErrDestinationDisabled
 	}
 	dest := Destination{ID: id, Org: org, Channel: ch}
-	switch ch {
-	case ChannelWebhook:
-		u, e := url.Parse(rec.Endpoint)
-		if e != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-			return Destination{}, ErrDestinationInvalid
-		}
-		dest.Target = rec.Endpoint
-	case ChannelTelegram:
-		if !chatPattern.MatchString(rec.Address) {
-			return Destination{}, ErrDestinationInvalid
-		}
-		dest.Target = rec.Address
-	case ChannelSMTP:
-		a, e := mail.ParseAddress(rec.Address)
-		if e != nil || a.Address != rec.Address || a.Name != "" || !emailPattern.MatchString(rec.Address) {
-			return Destination{}, ErrDestinationInvalid
-		}
-		dest.Target = rec.Address
-	default:
-		return Destination{}, ErrNoDestination
+	if dest.Target, err = destinationTarget(ch, rec.Endpoint, rec.Address); err != nil {
+		return Destination{}, err
 	}
 	if rec.HasSecret {
 		dest.Secret = &SecretRef{Org: org, ID: id}
 	}
 	return dest, nil
+}
+
+// destinationTarget validates the target a channel sends to (the webhook URL,
+// the Telegram chat or the e-mail recipient) and returns it. Resolve applies it
+// to every attempt and SaveDestination to every write, so what can be saved is
+// exactly what can be delivered to.
+func destinationTarget(ch Channel, endpoint, address string) (string, error) {
+	switch ch {
+	case ChannelWebhook:
+		u, e := url.Parse(endpoint)
+		if e != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+			return "", ErrDestinationInvalid
+		}
+		return endpoint, nil
+	case ChannelTelegram:
+		if !chatPattern.MatchString(address) {
+			return "", ErrDestinationInvalid
+		}
+		return address, nil
+	case ChannelSMTP:
+		a, e := mail.ParseAddress(address)
+		if e != nil || a.Address != address || a.Name != "" || !emailPattern.MatchString(address) {
+			return "", ErrDestinationInvalid
+		}
+		return address, nil
+	}
+	return "", ErrNoDestination
 }
 
 // Read implements SecretReader with the allow-list: only the secret of a

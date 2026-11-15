@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/issues"
 	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/replica"
 	"github.com/arynyklas/soundpost/internal/storage"
@@ -137,6 +138,76 @@ func gapID(org, project, group model.ID, after, through model.Uint64) model.ID {
 	return id
 }
 
+type journalEntry struct{ at model.UnixNano }
+
+// unprocessed is the part of the project's expiring plan that no checkpoint or
+// gap covers yet, per data group, and whether any of it expires inside the Lead
+// (the trigger). It is a pure function of the plan and the issue book, so a
+// node that just became leader derives the same answer as the one it replaced.
+func (p *journalExpiryProducer) unprocessed(mine []storage.ExpiringEntry, state issues.State, now model.UnixNano) (map[model.ID]map[model.Uint64]journalEntry, bool) {
+	expiring := map[model.ID]map[model.Uint64]journalEntry{}
+	trigger := false
+	for _, e := range mine {
+		if e.Cursor.Index <= state.Checkpoints[e.Cursor.Group] {
+			continue // processed (or already covered by a gap)
+		}
+		if expiring[e.Cursor.Group] == nil {
+			expiring[e.Cursor.Group] = map[model.Uint64]journalEntry{}
+		}
+		if prior, ok := expiring[e.Cursor.Group][e.Cursor.Index]; !ok || e.At < prior.at {
+			expiring[e.Cursor.Group][e.Cursor.Index] = journalEntry{at: e.At}
+		}
+		if e.Deadline <= now+model.UnixNano(p.cfg.Lead) {
+			trigger = true
+		}
+	}
+	return expiring, trigger
+}
+
+// Acquired re-derives the journal holds when this node becomes the leader (or
+// the process restarts). The hold is in-memory state of the node's storage
+// engine, so a new leader starts without it; the hold is nevertheless a pure
+// function of replicated state, namely error evidence expiring inside the Lead
+// that no gap or checkpoint covers. Holding it here closes the window until the
+// project's first Produce pass (which releases the hold again once its gap
+// commits, or finds nothing left to protect).
+func (p *journalExpiryProducer) Acquired(ctx context.Context, lease replica.FenceToken) error {
+	if err := p.app.leaseGate(ctx, lease); err != nil {
+		return err
+	}
+	p.mu.Lock()
+	p.plan = nil // a fresh plan: the cache of the previous leadership is not evidence
+	p.mu.Unlock()
+	now := p.cfg.Clock.Now()
+	plan, err := p.expiring(ctx, now)
+	if err != nil {
+		return err
+	}
+	var failures []error
+	for key, mine := range plan {
+		scopes := ProducerScopes{authority: p.app.Auth, org: key.org, project: key.project}
+		write, err := scopes.Scope(ctx, auth.IssuesWrite)
+		if err == nil {
+			var store *issues.ControlStore
+			var state issues.State
+			if _, store, err = (&issueProducer{app: p.app, clock: p.cfg.Clock}).service(lease); err == nil {
+				state, err = store.Load(ctx, write, key.project)
+			}
+			if err == nil {
+				if _, trigger := p.unprocessed(mine, state, now); trigger {
+					p.app.Storage.HoldJournal(key.org, key.project, p.cfg.ReserveBytes)
+				}
+				continue
+			}
+		}
+		if code(err) == string(model.NotFound) || code(err) == string(model.Forbidden) {
+			continue // the organization or project ended; nothing to protect
+		}
+		failures = append(failures, err)
+	}
+	return errors.Join(failures...)
+}
+
 func (p *journalExpiryProducer) Produce(ctx context.Context, scopes ProducerScopes, lease replica.FenceToken) (int, error) {
 	if err := p.app.leaseGate(ctx, lease); err != nil {
 		return 0, err
@@ -165,25 +236,7 @@ func (p *journalExpiryProducer) Produce(ctx context.Context, scopes ProducerScop
 	if err != nil {
 		return 0, err
 	}
-	// The unprocessed entries that expire inside the reach, per data group, and
-	// whether any of them expires inside the Lead (the trigger).
-	type entry struct{ at model.UnixNano }
-	expiring := map[model.ID]map[model.Uint64]entry{}
-	trigger := false
-	for _, e := range mine {
-		if e.Cursor.Index <= state.Checkpoints[e.Cursor.Group] {
-			continue // processed (or already covered by a gap)
-		}
-		if expiring[e.Cursor.Group] == nil {
-			expiring[e.Cursor.Group] = map[model.Uint64]entry{}
-		}
-		if prior, ok := expiring[e.Cursor.Group][e.Cursor.Index]; !ok || e.At < prior.at {
-			expiring[e.Cursor.Group][e.Cursor.Index] = entry{at: e.At}
-		}
-		if e.Deadline <= now+model.UnixNano(p.cfg.Lead) {
-			trigger = true
-		}
-	}
+	expiring, trigger := p.unprocessed(mine, state, now)
 	if len(expiring) == 0 {
 		p.app.Storage.ReleaseJournal(org, project)
 		return 0, nil

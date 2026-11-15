@@ -23,6 +23,9 @@ func (p AdminPayload) MarshalJSON() ([]byte, error) {
 	if len(p.Config) > 0 {
 		v["config"] = p.Config
 	}
+	if p.ExpectedVersion != nil {
+		v["expected_version"] = p.ExpectedVersion
+	}
 	return json.Marshal(v)
 }
 func (p *AdminPayload) UnmarshalJSON(b []byte) error {

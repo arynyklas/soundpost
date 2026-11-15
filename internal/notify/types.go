@@ -259,8 +259,11 @@ const (
 	MaxCriticalCodes     = 32
 	MaxCriticalServices  = 8
 	MaxSentMarks         = 64
-	MaxReasonBytes       = 512
-	MaxName              = 64
+	// MaxLateMarks bounds the commands remembered so a replayed late or
+	// backfill event is counted once (older replays count again).
+	MaxLateMarks   = 64
+	MaxReasonBytes = 512
+	MaxName        = 64
 	// MaxSuppressionHard bounds the configurable snooze/maintenance maximum.
 	MaxSuppressionHard = model.UnixNano(90 * 24 * time.Hour)
 )
@@ -604,6 +607,9 @@ type PolicyState struct {
 	// backfill evidence. Neither ever interrupts anyone.
 	Late       uint32 `json:"late,omitempty"`
 	Backfilled uint32 `json:"backfilled,omitempty"`
+	// LateSeen is the most recent commands counted in Late or Backfilled, so a
+	// replay of one of them does not count twice.
+	LateSeen []model.ID `json:"late_seen,omitempty"`
 
 	Windows         []WindowState  `json:"windows,omitempty"`
 	ConditionSeq    uint64         `json:"condition_seq,omitempty"`

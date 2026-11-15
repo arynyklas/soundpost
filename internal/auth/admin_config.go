@@ -21,6 +21,10 @@ type DestinationConfig struct {
 	Endpoint string `json:"endpoint"`
 	Address  string `json:"address"`
 	Enabled  bool   `json:"enabled"`
+	// Revision is the destination's own version: 0 before it exists, then one more
+	// with every committed write. The transition sets it; a client-sent value is
+	// overwritten.
+	Revision model.Revision `json:"revision,omitempty"`
 }
 type RetentionConfig struct {
 	ProjectID model.ID `json:"project_id"`
@@ -178,4 +182,40 @@ func appendRetentionVersion(st *model.ControlState, org, actor model.ID, p Admin
 	project := cfg.ProjectID
 	st.RetentionPolicies[key] = append(st.RetentionPolicies[key], model.RetentionPolicyVersion{Org: org, Project: &project, Version: model.Uint64(len(st.RetentionPolicies[key]) + 1), Days: days, Effective: model.UnixNano(at), Actor: actor, Reason: p.Reason, At: model.UnixNano(at)})
 	return nil
+}
+
+// DestinationVersion is the committed version of destination id in o: 0 when it
+// does not exist (or predates versions).
+func DestinationVersion(o model.ControlOrg, id model.ID) (model.Revision, error) {
+	raw, ok := o.Settings["destination:"+id.String()]
+	if !ok {
+		return 0, nil
+	}
+	var cfg DestinationConfig
+	if json.Unmarshal(raw, &cfg) != nil {
+		return 0, model.Fail(model.Corrupt)
+	}
+	return cfg.Revision, nil
+}
+
+// versionDestination checks the payload's expected version against the stored
+// one and returns the config to store, stamped with the next version.
+func versionDestination(o model.ControlOrg, p AdminPayload) (json.RawMessage, error) {
+	stored, err := DestinationVersion(o, p.ID)
+	if err != nil {
+		return nil, err
+	}
+	if p.ExpectedVersion != nil && model.Uint64(stored) != *p.ExpectedVersion {
+		return nil, model.Fail(model.Conflict)
+	}
+	var cfg DestinationConfig
+	if err = strictConfig(p.Config, &cfg); err != nil {
+		return nil, err
+	}
+	cfg.Revision = stored + 1
+	raw, err := json.Marshal(cfg)
+	if err != nil {
+		return nil, model.Fail(model.Invalid)
+	}
+	return raw, nil
 }

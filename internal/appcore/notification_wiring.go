@@ -85,7 +85,7 @@ func (c controlDestinations) Destination(ctx context.Context, scope auth.Scope, 
 		if json.Unmarshal(raw, &cfg) != nil {
 			return model.Fail(model.Corrupt)
 		}
-		rec = notify.DestinationRecord{Type: cfg.Type, Endpoint: cfg.Endpoint, Address: cfg.Address, Enabled: cfg.Enabled, HasSecret: o.Secrets["destination:"+id.String()] != ""}
+		rec = notify.DestinationRecord{Type: cfg.Type, Endpoint: cfg.Endpoint, Address: cfg.Address, Enabled: cfg.Enabled, HasSecret: o.Secrets["destination:"+id.String()] != "", Version: cfg.Revision}
 		found = true
 		return nil
 	})

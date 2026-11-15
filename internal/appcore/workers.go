@@ -192,6 +192,7 @@ type Workers struct {
 
 	mu          sync.Mutex
 	projectNext int
+	acquired    replica.FenceToken // the leadership Acquirers have run for
 	ruleNext    map[model.ID]int
 }
 
@@ -376,9 +377,11 @@ func (w *Workers) Tick(ctx context.Context) PassReport {
 	var report PassReport
 	lease, err := w.cfg.Fence.Fence(ctx)
 	if err != nil {
+		w.acquired = replica.FenceToken{} // the next leadership is a new acquisition
 		return report
 	}
 	report.Leader = true
+	w.acquire(ctx, lease, &report)
 	orgs, err := w.orgs(ctx)
 	if err != nil {
 		report.Errors = append(report.Errors, StageError{Stage: StageAuth, Code: code(err)})
@@ -391,6 +394,38 @@ func (w *Workers) Tick(ctx context.Context) PassReport {
 		w.serveOrg(ctx, org, lease, &report)
 	}
 	return report
+}
+
+// Acquirer is a Producer that keeps state in this node's memory which is a
+// function of replicated state. Acquired runs once per leadership (a new term,
+// or a restarted process) before the first pass serves any project, and again
+// while it fails.
+type Acquirer interface {
+	Acquired(ctx context.Context, lease replica.FenceToken) error
+}
+
+func (w *Workers) acquire(ctx context.Context, lease replica.FenceToken, report *PassReport) {
+	if w.acquired.Group == lease.Group && w.acquired.Term == lease.Term && lease.Term != 0 {
+		return
+	}
+	done := true
+	for _, producer := range w.cfg.Producers {
+		a, ok := producer.(Acquirer)
+		if !ok {
+			continue
+		}
+		if err := a.Acquired(ctx, lease); err != nil {
+			done = false
+			if deposed(err) {
+				report.Deposed = true
+				return
+			}
+			report.Errors = append(report.Errors, StageError{Stage: StageProduce, Code: code(err)})
+		}
+	}
+	if done {
+		w.acquired = lease
+	}
 }
 
 // orgs is the organizations this pass serves: the configured ones, or every

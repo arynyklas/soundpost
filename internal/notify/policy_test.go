@@ -2101,3 +2101,49 @@ func TestPolicyRepeatedExpiriesEachGetTheirOwnUpdate(t *testing.T) {
 		t.Fatalf("second expiry must produce its own update: %+v", second)
 	}
 }
+
+// Provenance counters are replay-safe: re-applying a late or backfill event the
+// state already counted (the same command) does not count it again, and a new
+// command still does. Distinct commands beyond the bounded memory count again.
+func TestPolicyLateAndBackfillCountersAreReplaySafe(t *testing.T) {
+	h := newHarness(t, issueE)
+	h.dest(rcptA, "", t0)
+	backfill := h.ev(notify.EventIssue)
+	backfill.Entity = &issueE
+	backfill.Mode = notify.ModeBackfill
+	backfill.Issue = &notify.IssueEvidence{WindowStart: t0, Occurrences: occ(3, 1), Freshness: notify.FreshnessFresh}
+	for range 3 {
+		h.do(backfill, t0+min1)
+	}
+	if h.s.Backfilled != 1 || h.s.Late != 0 {
+		t.Fatalf("a replayed backfill event counted %d times (late %d)", h.s.Backfilled, h.s.Late)
+	}
+	old := t0 - 2*hour
+	late := h.ev(notify.EventIssue)
+	late.Entity = &issueE
+	late.Issue = &notify.IssueEvidence{WindowStart: old - old%notify.ErrorWindow, Occurrences: occ(3, 2), Freshness: notify.FreshnessFresh}
+	for range 3 {
+		h.do(late, t0+min1)
+	}
+	if h.s.Late != 1 || h.s.Backfilled != 1 {
+		t.Fatalf("a replayed late event counted %d times (backfilled %d)", h.s.Late, h.s.Backfilled)
+	}
+	again := late
+	again.Command = model.ID{0xc9, 1}
+	h.do(again, t0+2*min1)
+	if h.s.Late != 2 {
+		t.Fatalf("a new late event must count: %d", h.s.Late)
+	}
+	// The memory is bounded: after MaxLateMarks newer commands the oldest is forgotten.
+	for i := range notify.MaxLateMarks {
+		next := late
+		next.Command = model.ID{0xc8, byte(i >> 8), byte(i)}
+		h.do(next, t0+3*min1)
+	}
+	if len(h.s.LateSeen) != notify.MaxLateMarks {
+		t.Fatalf("late memory holds %d commands, bound %d", len(h.s.LateSeen), notify.MaxLateMarks)
+	}
+	if h.s.Late != uint32(2+notify.MaxLateMarks) {
+		t.Fatalf("late = %d", h.s.Late)
+	}
+}
