@@ -17,18 +17,28 @@ import { JobsPage } from '../jobs/JobsPage';
 import { MAX_PROJECTS, SECTIONS, decodeHash, encodeHash, formatNs, isId, scopeKey, useInvestigation, validTimezone, windowEndingAt, type IncidentRef, type SectionId, type ViewContext } from './context';
 import { SectionList, StatusPanel } from './StatusPanel';
 
+/** Focus is free to move to a heading while it is on the page itself or, when `origin` is given, still on that control and the control is part of the
+ * investigation (about to be replaced by what the user asked for). A control outside it (the skip link, which survives the session boundary re-mounting the
+ * console) is the user's choice and is never taken. */
+const focusIsFree = (origin: Element | null): boolean => {
+ const a = document.activeElement;
+ if (a === null || a === document.body) return true;
+ if (origin !== null && a !== origin) return false;
+ return document.querySelector('.investigation')?.contains(a) === true;
+};
+
 /** After an entity (incident, trace, replay, ...) is opened, focus moves to the entity's own heading as soon as it exists, so
  * keyboard and screen-reader users land on the result instead of staying on the submit button. (The session boundary remounts
  * the investigation on every address change, so this also runs when the page is opened from a deep link.) The heading can appear
  * seconds after the effect starts; if the user has meanwhile moved focus to some control (the skip link, a form field), that choice
- * wins and focus is not taken: it moves only while focus is still where it was (or on the page itself). */
+ * wins and focus is not taken: it moves only while focus is still on the control that was focused when the effect started and
+ * that control belongs to the investigation, or on the page itself. */
 function useFocusEntityHeading(entity: string): void {
  React.useEffect(() => {
   if (entity === '') return;
   const origin = document.activeElement;
-  const unmoved = (): boolean => { const a = document.activeElement; return a === null || a === document.body || a === origin; };
   const find = (): HTMLElement | null => document.querySelector<HTMLElement>('[data-entity] h2');
-  const land = (h: HTMLElement): void => { if (!unmoved()) return; h.setAttribute('tabindex', '-1'); h.focus(); };
+  const land = (h: HTMLElement): void => { if (!focusIsFree(origin)) return; h.setAttribute('tabindex', '-1'); h.focus(); };
   const now = find();
   if (now) { land(now); return; }
   const observer = new MutationObserver(() => { const h = find(); if (h) { observer.disconnect(); land(h); } });
@@ -178,7 +188,10 @@ export function App(): React.JSX.Element {
  React.useEffect(() => {
   const was = previous.current;
   previous.current = { section: nav.section, scope, entity };
-  if (was.section !== nav.section || was.scope !== scope || (entity === '' && was.entity !== '')) heading.current?.focus();
+  const changed = was.section !== nav.section || was.scope !== scope || (entity === '' && was.entity !== '');
+  // The first run of a mount is a deep link or the session boundary re-mounting the console after it revalidated access (it does so every time the window
+  // regains focus). A control the user holds outside the console (the skip link) is not taken from them then.
+  if (changed && !(was.section === '' && !focusIsFree(null))) heading.current?.focus();
  }, [nav.section, scope, entity]);
  React.useEffect(() => { document.title = `${section.label} — Soundpost`; }, [section.label]);
  useFocusEntityHeading(entity);

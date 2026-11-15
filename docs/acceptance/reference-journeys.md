@@ -22,11 +22,13 @@ Compose is used only for the two backing services (`examples/reference/compose.y
 apps are host processes because they use the committed SDK source trees. Compose was validated with
 `docker compose config` only, it was not started by the smoke.
 
-Platform notes recorded by the run: the host is Windows with WSL2 (kernel in the artifact). Vite's native
-binaries exist only for win32 in the pinned `node_modules`, so the web build runs with the Windows Node 22.23.4
-from WSL (it reaches the WSL loopback node); everything else is Linux. Python is the system 3.12.3 with
-cryptography 41.0.7 (the SDK pins 50.0.0) and the pure-Python psycopg 3.2.10/httpx 0.28.1 copied by
-`examples/reference/pysite.sh`; this is a version mismatch, not a qualification of the pinned set.
+Platform notes: everything runs on Linux, including the web build (Linux Node 22 with the Vite from the pnpm workspace:
+`examples/reference/web` is a workspace member, so `pnpm install --frozen-lockfile` installs its pinned dependencies).
+Python is the system 3.12 with the hash-locked packages of `examples/reference/requirements.lock` (the pins of
+`sdk/python/requirements-*.lock`, including cryptography 50.0.0) installed by `examples/reference/pysite.sh` with
+`pip --require-hashes`; `tools/smoke` `TestReferenceLockMatchesSDKLocks` keeps that file equal to the SDK locks. The
+recorded run under `tools/smoke/testdata/journeys` predates this change (Windows Node for Vite, copied pure-Python
+packages) and is kept as the recorded observation it is.
 
 ## Rows
 

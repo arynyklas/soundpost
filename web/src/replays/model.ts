@@ -162,3 +162,9 @@ export function lossText(s: ReplaySummary): string {
  if (!s.lossReported) return 'unknown (no chunk has been delivered yet)';
  return s.loss === 0n ? 'none reported by the recorder (a report of none is not proof that nothing was dropped)' : `${s.loss} events were dropped by the recorder before upload and are not in this replay`;
 }
+
+/** What the host knows about its viewer frame: it is ready once the frame has reported a status, however late the first one arrived; the
+ * start timeout only decides the "did not start" wording while no status has arrived. */
+export function viewerReadiness(started: boolean, startTimedOut: boolean): { ready: boolean; failedToStart: boolean } {
+ return { ready: started, failedToStart: startTimedOut && !started };
+}

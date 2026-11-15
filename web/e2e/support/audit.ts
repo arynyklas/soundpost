@@ -73,7 +73,10 @@ export async function auditDom(page:Page):Promise<Violation[]>{
   let previous=0;
   const level=(h:Element):number=>h.hasAttribute('aria-level')?Number(h.getAttribute('aria-level')):h.tagName.length===2&&h.tagName[0]==='H'?Number(h.tagName[1]):2;
   const h1s=headings.filter((h)=>level(h)===1);
-  if(headings.length>0&&h1s.length!==1)out.push({rule:'heading-order',node:'document',detail:`${h1s.length} level-1 headings, want exactly 1`});
+  if(h1s.length!==1)out.push({rule:'heading-order',node:'document',detail:`${h1s.length} level-1 headings, want exactly 1`});
+  // 3b. coverage: an audit that inspected nothing proves nothing (content only inside a frame, a blank render, a broken visibility walk).
+  const shown=Array.from(document.querySelectorAll('main *')).filter((e)=>visible(e)&&(e.textContent??'').trim()!=='');
+  if(shown.length===0)out.push({rule:'coverage',node:'document',detail:'no visible text in main: nothing was audited'});
   for(const h of headings){
    const l=level(h);
    if(text(h)==='')add('heading-order',h,'empty heading');

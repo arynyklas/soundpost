@@ -79,6 +79,13 @@ the process log and (in-process) every file of the live and restored data roots.
 
 `tools/browserevidence` exports three named rows beside the per-test `playwright/...` rows, each derived from real Playwright tests that run against a served instance: `browser/mapped_frame` (trace to the issue's frames mapped by the real source map), `browser/masked_replay_viewer` (the masked replay in the sandboxed viewer, including the one recorded by the real browser SDK recorder) and `browser/profile_view` (the native profile and the SDK-produced profile). A row passes only when every test it names (`BrowserViews` in `tools/browserevidence/browserevidence.go`, by spec file and title prefix) is in the Playwright list AND passed in the run; a renamed or dropped test fails its row, and without results the row stays missing. `TestBrowserViewsNameRealSpecTests` pins the names to `web/e2e`.
 
+## Browser matrix and certificate trust (10.19-W3)
+
+The committed `web/playwright.config.ts` never sets `ignoreHTTPSErrors`: pointed at a server whose certificate the browser trusts it runs strict. The Linux worker's acceptance runs (`web/e2e-harness/h.sh`) serve a short-lived private CA and leaf on loopback, so:
+
+- Chromium is launched with `--ignore-certificate-errors-spki-list=<the run's leaf key pin>` (a pin of one key, not a blanket ignore).
+- Firefox and WebKit have no such switch, and trusting the private CA in them would need a system or NSS certificate-store change (root on the host, or a pre-seeded Firefox profile): observed on the Linux worker (run l3w14-tls1, specs unchanged, `ignoreHTTPSErrors` removed, `SSL_CERT_FILE` pointing at the run's CA, Firefox `security.enterprise_roots.enabled`): WebKit `page.goto: Unacceptable TLS certificate`, Firefox `SEC_ERROR_UNKNOWN_ISSUER`, first test failed, rest not run. The harness therefore sets `ignoreHTTPSErrors: true` for those two projects only, for the loopback origin `127.0.0.1` and the CA that run itself generated and discards. This is an accepted, documented limitation of the headless Linux harness: those two runs prove the application, not certificate validation, which Chromium (pinned) and the Go and Node clients (they trust the CA through `SSL_CERT_FILE` / `NODE_EXTRA_CA_CERTS`) exercise.
+
 ## Wiring status
 
 `soundpost serve` applies the symbolication configuration itself: after `appcore.Open` it

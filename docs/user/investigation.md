@@ -52,3 +52,9 @@ Assign, acknowledge, resolve, link evidence, report impact, snooze, end a snooze
 - Resolving while the source is firing needs a reason and leaves a persistent banner: the incident was resolved by a person, the source was not recovered.
 - Snooze and maintenance are separate, expiring, reasoned windows. Neither hides the source, the timeline or ingestion problems.
 - Operation progress: **fencing** is pending (reads are denied but the fence is not complete) and is never success; **held** and **failed** are not success; a logically complete deletion is not physical erasure, and the physical and backup deadlines are the real ones the server holds.
+
+## Live tail and request logs (SO-04)
+
+- A live stream is opened in two steps: `POST /api/v1/live-tickets` carries the selector, projects and expression in its body and answers a single-use ticket; `GET /api/v1/live?ticket=<id>` carries only that ticket. Nothing but the ticket is ever in the URL; any other query parameter is refused.
+- The server writes no per-request access log (no handler logs `RequestURI`, the URL or its query), so no query string, the ticket included, reaches a Soundpost log. Each response carries an `X-Request-ID` header that identifies the request without the URL.
+- A reverse proxy or load balancer in front of the server is outside that guarantee. Configure it to strip or not log the query string of `/api/v1/live`. A logged ticket is already spent after its stream opened, or expires unused, and it opens nothing without the caller's own session cookie, CSRF header and `Origin`.

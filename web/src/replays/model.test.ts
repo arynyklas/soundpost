@@ -1,7 +1,7 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
 import { describe, expect, test } from 'bun:test';
 import { ApiFault } from '../api/types';
-import { emptySummary, gapReason, gapSentence, lineSplitter, lossText, parseReplayLine, summarize, toItem, type ReplayLine } from './model';
+import { emptySummary, gapReason, gapSentence, lineSplitter, lossText, parseReplayLine, summarize, toItem, viewerReadiness, type ReplayLine } from './model';
 import { ItemQueue } from './queue';
 
 const want = { org: 'a'.repeat(32), project: 'b'.repeat(32), replay: 'c'.repeat(32) };
@@ -113,5 +113,15 @@ describe('item queue', () => {
   const w2 = q2[Symbol.asyncIterator]().next();
   q2.close();
   expect((await w2).done).toBe(true);
+ });
+});
+
+describe('viewer readiness', () => {
+ test('a first status that arrives after the start timeout still makes the viewer ready', () => {
+  expect(viewerReadiness(true, true)).toEqual({ ready: true, failedToStart: false });
+ });
+ test('no status after the timeout is a failed start, and before the timeout it is only starting', () => {
+  expect(viewerReadiness(false, true)).toEqual({ ready: false, failedToStart: true });
+  expect(viewerReadiness(false, false)).toEqual({ ready: false, failedToStart: false });
  });
 });

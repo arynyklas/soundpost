@@ -1,6 +1,6 @@
 // Copyright 2026 Aryn Yklas
 // SPDX-License-Identifier: Apache-2.0
-// Real Vite build + real private source-map upload. Run with Windows Node from the repository root:
+// Real Vite build + real private source-map upload. Run with Linux Node from the repository root (after `pnpm install --frozen-lockfile`):
 //   node examples/reference/web/build.mjs
 // Environment: REFERENCE_ORG, REFERENCE_PROJECT, REFERENCE_SOURCE, REFERENCE_BUILD_ID (32 hex), REFERENCE_ENDPOINT
 // (node origin), REFERENCE_ARTIFACT_TOKEN (private artifact-write credential; held in a closure, never printed) and

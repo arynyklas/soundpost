@@ -35,6 +35,9 @@ type artifactSmokeConfig struct {
 	UploaderTokenFile string `json:"uploader_token_file"`
 	ReaderTokenFile   string `json:"reader_token_file"`
 	DeniedTokenFile   string `json:"denied_token_file"`
+	// DeniedOrg and DeniedProject name the other organization in which the denied credential is live.
+	DeniedOrg     model.ID `json:"denied_org"`
+	DeniedProject model.ID `json:"denied_project"`
 }
 
 func readArtifactSmokeConfig(path string) (artifactSmokeConfig, artifacts.Manifest, error) {
@@ -44,7 +47,7 @@ func readArtifactSmokeConfig(path string) (artifactSmokeConfig, artifacts.Manife
 	if e != nil || model.StrictJSON(raw, &c) != nil {
 		return c, m, fmt.Errorf("private artifact fixture configuration required")
 	}
-	if c.StateDir == "" || c.ManifestFile == "" || c.MapFile == "" || c.UploaderTokenFile == "" || c.ReaderTokenFile == "" || c.DeniedTokenFile == "" {
+	if c.StateDir == "" || c.ManifestFile == "" || c.MapFile == "" || c.UploaderTokenFile == "" || c.ReaderTokenFile == "" || c.DeniedTokenFile == "" || c.DeniedOrg == (model.ID{}) || c.DeniedProject == (model.ID{}) {
 		return c, m, fmt.Errorf("incomplete private artifact fixture configuration")
 	}
 	raw, e = os.ReadFile(c.ManifestFile)
@@ -347,6 +350,26 @@ waiting:
 	if e != nil || deniedStatus != 401 && deniedStatus != 403 && deniedStatus != 404 {
 		return fmt.Errorf("artifact denied credential released a read")
 	}
+	// The denied credential is a live artifact-read credential of ANOTHER organization: it must be
+	// refused for this one, and must still be accepted for its own, so the refusal is isolation and
+	// not a dead token.
+	deniedActor, e := app.Auth.Authenticate(context.Background(), denied)
+	if e != nil {
+		return fmt.Errorf("other-org credential did not authenticate: %w", e)
+	}
+	_, crossErr := app.Auth.Authorize(context.Background(), deniedActor, m.Org, []model.ID{m.Project}, auth.ArtifactRead)
+	otherOrgDenied := crossErr != nil
+	if !otherOrgDenied {
+		return fmt.Errorf("other-org credential was authorized for the artifact's organization")
+	}
+	if _, e = app.Auth.Authorize(context.Background(), deniedActor, c.DeniedOrg, []model.ID{c.DeniedProject}, auth.ArtifactRead); e != nil {
+		return fmt.Errorf("other-org credential is not live in its own organization: %w", e)
+	}
+	otherOrgLive := true
+	deniedSources, _, e := readHTTP(denied, "sources")
+	if e != nil || deniedSources != 401 && deniedSources != 403 && deniedSources != 404 {
+		return fmt.Errorf("other-org credential released a sources read (status %d)", deniedSources)
+	}
 	sourcesRead := false
 	if m.SourceContent {
 		status, sourceBytes, err := readHTTP(reader, "sources")
@@ -385,7 +408,10 @@ waiting:
 		Replication      string                      `json:"replication"`
 		RetainedBytes    uint64                      `json:"retained_bytes"`
 		SourcesRead      bool                        `json:"sources_read"`
-	}{1, killedAfterBytes, orphanDenied, sameCursors, published.Map.Hash, published.Map.Fragments, published.ControlRevision, published.CommandID, deniedStatus, "single_voter_only", retainedBytes(published.Map), sourcesRead}
+		OtherOrgDenied   bool                        `json:"other_org_denied"`
+		OtherOrgLive     bool                        `json:"other_org_credential_live"`
+		SourcesDenied    int                         `json:"other_org_sources_status"`
+	}{1, killedAfterBytes, orphanDenied, sameCursors, published.Map.Hash, published.Map.Fragments, published.ControlRevision, published.CommandID, deniedStatus, "single_voter_only", retainedBytes(published.Map), sourcesRead, otherOrgDenied, otherOrgLive, deniedSources}
 	raw, e = json.MarshalIndent(report, "", "  ")
 	if e != nil {
 		return e

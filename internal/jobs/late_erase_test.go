@@ -108,4 +108,9 @@ func TestJobWithEvidenceInsideACompletedRangeIsErasedAsItCommits(t *testing.T) {
 	if snap, found, err := o.app.Control.JobBook(context.Background(), w, p, jobID); err != nil || !found || !snap.Erased || snap.Version != 1 {
 		t.Fatalf("a job with evidence inside the range must read as erased at its version: %+v found=%v err=%v", snap, found, err)
 	}
+	// The listing carries the flag too: the console's only "History erased" wording rests on it.
+	page, err := h.svc.List(context.Background(), h.reader(t), p, model.ID{}, 10)
+	if err != nil || len(page.Jobs) != 1 || page.Jobs[0].Job != jobID || !page.Jobs[0].Erased {
+		t.Fatalf("the listing must report the erased job as erased: %+v err=%v", page, err)
+	}
 }

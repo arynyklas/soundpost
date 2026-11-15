@@ -108,7 +108,9 @@ test('keyboard: the first Tab stop is the skip link, every stop shows a focus ri
   await focusLinkByKeyboard(page,skip);
   await expect(skip).toBeFocused();
   const ring=await skip.evaluate((e)=>{const s=getComputedStyle(e);return {outline:`${s.outlineStyle} ${s.outlineWidth}`,shadow:s.boxShadow};});
-  // The page must not take focus away from a link the user just reached (a late-arriving entity heading used to: seen on WebKit and Chromium).
+  // The page must not take focus away from a link the user just reached. Tabbing out of the page and back fires the window's focus event, the session boundary
+  // then revalidates access and re-mounts the console, and the re-mounted console used to focus its heading at once, stealing the skip link's focus (seen on WebKit and Chromium).
+  await page.evaluate(()=>window.dispatchEvent(new Event('focus'))); // the revalidation is what used to steal focus: fire it deterministically, as revocation-detail.spec.ts does
   await page.waitForTimeout(500);
   await expect(skip).toBeFocused();
   stops.push({tag:'a',name:'Skip to content',outline:ring.outline,shadow:ring.shadow,inView:true,path:'a.skip-link'});
@@ -246,6 +248,7 @@ test('the audits have teeth: each defect injected into the real rendered page is
   ['interactive-name',`document.querySelector('nav a').textContent=''`],
   ['form-label',`Array.from(document.querySelectorAll('form[aria-label="Open a trace"] label')).find((l)=>l.textContent.startsWith('Trace')).childNodes.forEach((n)=>{if(n.nodeType===3)n.textContent=''})`],
   ['heading-order',`document.querySelector('main').insertAdjacentHTML('beforeend','<h2>Section</h2><h6>Skipped levels</h6>')`],
+  ['coverage',`document.querySelector('main').replaceChildren()`],
   ['landmarks',`document.body.insertAdjacentHTML('beforeend','<main>second</main>')`],
   ['status-text',`document.querySelector('main').insertAdjacentHTML('beforeend','<span class="badge" data-state="failed">●</span>')`],
   ['aria-references',`document.querySelector('main').insertAdjacentHTML('beforeend','<p aria-labelledby="no-such-id">x</p>')`],

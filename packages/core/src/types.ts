@@ -49,4 +49,4 @@ export type CaptureInput=ErrorInput|LogInput|SpanInput|JobInput|ProfileInput|Cap
 export interface SafeRecord {readonly kind:"error"|"log"|"span"|"job_attempt"|"replay_chunk"|"profile_chunk"|"capability";readonly id:string;readonly observed_at_ns:string;readonly policy_revision:string;readonly payload:Readonly<Record<string,unknown>>}
 export type HookMechanism="uncaught_exception"|"unhandled_rejection"|"thread_exception"|"asyncio_exception";
 export type ExceptionEdgeKind="cause"|"context"|"group";
-export interface OwnedHookLease {close():void}
+export interface OwnedHookLease {close():void|Promise<void>}

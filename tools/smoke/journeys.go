@@ -48,7 +48,6 @@ func RunJourneys(args []string) (result error) {
 	fs.StringVar(&j.release, "release", "/tmp/n0704-dist", "directory of `go run ./build release` output")
 	fs.StringVar(&j.bun, "bun", "/opt/bun/bin/bun", "Linux Bun")
 	fs.StringVar(&j.nodeLinux, "node-linux", "", "Linux Node 22 (default: extracted from /tmp/node22.tar.xz after its sha256 check)")
-	fs.StringVar(&j.nodeWin, "node-windows", "", "Windows Node 22 for Vite (default: <root>/.tools/node-v22.23.4-win-x64/node.exe)")
 	fs.StringVar(&j.python, "python", "python3", "Python 3")
 	fs.StringVar(&j.chrome, "chrome", "", "Linux Chrome (default: <root>/.tools/chrome-linux156/chrome-linux64/chrome)")
 	fs.StringVar(&j.pgImage, "pg-image", "92620daddcd9", "LOCAL PostgreSQL 16 image (never pulled)")
@@ -73,8 +72,8 @@ func RunJourneys(args []string) (result error) {
 }
 
 type journeyRun struct {
-	artDir, root, binary, release, bun, nodeLinux, nodeWin, python, chrome, pgImage, symImage string
-	hold                                                                                      bool
+	artDir, root, binary, release, bun, nodeLinux, python, chrome, pgImage, symImage string
+	hold                                                                             bool
 
 	work     string
 	pki      *journeyPKI
@@ -154,9 +153,6 @@ func (j *journeyRun) run() error {
 	if j.work, err = os.MkdirTemp("", "journeys-"); err != nil {
 		return err
 	}
-	if j.nodeWin == "" {
-		j.nodeWin = filepath.Join(j.root, ".tools", "node-v22.23.4-win-x64", "node.exe")
-	}
 	if j.chrome == "" {
 		j.chrome = filepath.Join(j.root, ".tools", "chrome-linux156", "chrome-linux64", "chrome")
 	}
@@ -218,9 +214,6 @@ func (j *journeyRun) toolchain() error {
 	if v["node_linux"], err = runOut(j.root, nil, j.nodeLinux, "--version"); err != nil {
 		return err
 	}
-	if v["node_windows_vite"], err = runOut(j.root, nil, j.nodeWin, "--version"); err != nil {
-		return err
-	}
 	if v["python"], err = runOut(j.root, nil, j.python, "--version"); err != nil {
 		return err
 	}
@@ -255,7 +248,7 @@ func (j *journeyRun) toolchain() error {
 		return &smokeFailure{Stage: "binary_static", Code: "not_static_elf"}
 	}
 	pysite := filepath.Join(j.root, "examples/reference/pysite.sh")
-	if out, err = runOut(j.root, nil, "sh", pysite, filepath.Join(j.work, "pysite")); err != nil {
+	if out, err = runOut(j.root, []string{"REFERENCE_PYTHON=" + j.python}, "sh", pysite, filepath.Join(j.work, "pysite")); err != nil {
 		return err
 	}
 	j.pyPath = lastLine(out)
@@ -435,7 +428,7 @@ func (j *journeyRun) provision() error {
 	e.WebBuild = journeyID("build/web")
 	e.UnpricedItem = "sku-404"
 	e.Canaries = []string{"CANARY_BODY_7f3a", "CANARY_PROMPT_9b2f", "CANARY_SQL_LITERAL_5d1e"}
-	e.RequiredVersionIDs = []string{"go", "bun", "node_linux", "node_windows_vite", "python", "chrome", "postgres", "docker_server", "soundpost"}
+	e.RequiredVersionIDs = []string{"go", "bun", "node_linux", "python", "chrome", "postgres", "docker_server", "soundpost"}
 	// Where the unpriced order's failure is thrown (src/receipt.ts); set by the web app, see README.
 	e.ThrowSource, e.ThrowLine, e.ThrowColumn = journeyThrowSource, journeyThrowLine, journeyThrowColumn
 	readerA, readerB, builder := journeyID("user/reader-a"), journeyID("user/reader-b"), journeyID("user/builder")
@@ -577,9 +570,8 @@ func (j *journeyRun) buildWeb() error {
 	web := j.apps["web"]
 	env := []string{"REFERENCE_ORG=" + j.exp.Org.String(), "REFERENCE_PROJECT=" + j.exp.Project.String(), "REFERENCE_SOURCE=" + j.apps["webbuild"].Source.String(),
 		"REFERENCE_BUILD_ID=" + web.Build.String(), "REFERENCE_ENDPOINT=https://" + j.nodeAddr, "REFERENCE_ARTIFACT_TOKEN=" + j.token,
-		"REFERENCE_OUT_DIR=" + out, "NODE_EXTRA_CA_CERTS=" + j.pki.CA,
-		"WSLENV=REFERENCE_ORG:REFERENCE_PROJECT:REFERENCE_SOURCE:REFERENCE_BUILD_ID:REFERENCE_ENDPOINT:REFERENCE_ARTIFACT_TOKEN:REFERENCE_OUT_DIR/p:NODE_EXTRA_CA_CERTS/p"}
-	stdout, err := runOut(j.root, env, j.nodeWin, "examples/reference/web/build.mjs")
+		"REFERENCE_OUT_DIR=" + out, "NODE_EXTRA_CA_CERTS=" + j.pki.CA}
+	stdout, err := runOut(j.root, env, j.nodeLinux, "examples/reference/web/build.mjs")
 	if err != nil {
 		return fmt.Errorf("vite build: %w", err)
 	}

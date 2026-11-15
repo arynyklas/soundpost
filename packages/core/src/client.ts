@@ -155,7 +155,16 @@ export class Client {
  bufferedRecords():readonly string[]{return this.delivery.records();}
  diagnostics():Readonly<Record<string,number>>{const counts={...this.counts};for(const [key,value] of Object.entries(this.delivery.diagnostics()))counts[key]=(counts[key]??0)+value;return Object.freeze(counts);}
  flush(timeoutMs=2000):Promise<FlushReport>{return this.delivery.flush(timeoutMs);}
- async close():Promise<void>{if(this.closed)return;for(const lease of [...this.hookLeases])lease.close();this.spans.close();this.closed=true;await this.delivery.close();}
+ private closing:Promise<void>|undefined;
+ /** Concurrent and repeated calls share one shutdown: a second caller resolves only when the first has drained the queue. A lease whose close() returns a promise
+  * (a browser profile run delivering its finished report) is awaited, bounded by the lease itself, before the client shuts its queue; every other lease closes synchronously as before. */
+ close():Promise<void>{return this.closing??=this.shutdown();}
+ private async shutdown():Promise<void>{
+  const waits:Promise<void>[]=[];
+  for(const lease of [...this.hookLeases]){const result=lease.close();if(result instanceof Promise)waits.push(result.then(()=>undefined,()=>undefined));}
+  if(waits.length>0)await Promise.all(waits);
+  this.spans.close();this.closed=true;await this.delivery.close();
+ }
 }
 export function init(config:Config):Client{return new Client(config);}
 /** One token means exactly one logical occurrence, not an implicit identity cache.

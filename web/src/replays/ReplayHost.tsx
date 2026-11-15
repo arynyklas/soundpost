@@ -1,6 +1,6 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
 import * as React from 'react';
-import type { ReplayItem, ReplayStream } from './model';
+import { viewerReadiness, type ReplayItem, type ReplayStream } from './model';
 
 /** Same-origin static document built from packages/replay-viewer by web/vite.config.ts and served under its own hash-only, no-network policy. */
 export const REPLAY_FRAME_SRC = '/assets/replay-frame.html';
@@ -87,7 +87,7 @@ export function ReplayHost(props: { stream: ReplayStream }): React.JSX.Element {
   setMode((m) => (m === 'finished' ? m : 'paused'));
  };
  const pause = (): void => { playing.current = false; setMode((m) => (m === 'finished' ? m : 'paused')); };
- const ready = started && !startFailed;
+ const { ready, failedToStart } = viewerReadiness(started, startFailed);
  return (
   <div className="replay-host" data-testid="replay-host" data-mode={mode}>
    <div role="group" aria-label="Playback controls" className="replay-controls">
@@ -97,7 +97,7 @@ export function ReplayHost(props: { stream: ReplayStream }): React.JSX.Element {
      : <button type="button" className="primary" disabled={!ready || mode === 'finished'} onClick={() => { void play(); }}>Play</button>}
    </div>
    <p role="status" data-testid="viewer-status" data-status={status ?? 'none'}>
-    Viewer: {startFailed && !started ? 'the replay viewer did not start; no replay content can be shown' : status === null ? 'starting' : STATUS_TEXT[status]}.
+    Viewer: {failedToStart ? 'the replay viewer did not start; no replay content can be shown' : status === null ? 'starting' : STATUS_TEXT[status]}.
     {' '}Events delivered to the viewer: {delivered}.{mode === 'finished' ? ' All received events were delivered.' : ''}
    </p>
    <ol className="viewer-status-log" data-testid="viewer-status-log" aria-label="Viewer status in order">

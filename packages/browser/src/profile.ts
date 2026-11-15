@@ -11,6 +11,7 @@
 // name, or the `external` placeholder. No arguments, locals, source text, thread names or error values exist in the trace to begin with.
 
 import type {Client} from "./index.ts";
+import type {OwnedHookLease} from "@soundpost/core/types";
 import {profileWire} from "./profile_wire.ts";
 
 export const profileReasons = [
@@ -56,12 +57,20 @@ export interface ProfileReport {
  readonly stack_order: "leaf_first";
  readonly frames: readonly ProfileFrame[]; readonly stacks: readonly {readonly frames: readonly number[]}[]; readonly samples: readonly ProfileSample[];
  readonly sample_count: number; readonly truncated: boolean; readonly losses: readonly ProfileLoss[]; readonly non_profile: readonly ProfileLongTask[];
- readonly ack: {readonly status: "not_available" | "obtained" | "failed"; readonly reason?: string; readonly cursors?: readonly string[]};
+ readonly ack: ProfileAck;
  readonly stopped_by: "caller" | "duration" | "client_close" | "timeout_cleanup" | "not_started";
 }
+/** What delivery through a client's queue did with this report (the same vocabulary as the Node and Bun profilers). `not_available`: nothing was delivered (a bare
+ * profiler, or the records were not admitted); `obtained`: the bounded flush that carried the records returned acknowledged cursors; `failed`: it did not. */
+export type ProfileAck =
+ | {readonly status: "not_available"; readonly reason?: "no_profile_admission_path" | "profile_not_admitted"}
+ | {readonly status: "obtained"; readonly cursors: readonly string[]}
+ | {readonly status: "failed"; readonly reason: "flush_deadline_exceeded" | "no_acknowledged_cursor" | "flush_error"};
 export interface ProfileHandle {
  /** Idempotent and bounded. Resolves (never rejects) with the finished report; the profile lease is always released. */
  stop(): Promise<ProfileReport>;
+ /** For the owner that is shutting down (the client being closed): the same finish as `stop()`, recorded as `client_close`. The first finish wins. */
+ close(): Promise<ProfileReport>;
 }
 export interface ProfilerApi {startProfile(options: ProfileOptions): Promise<ProfileHandle>}
 /** Everything the profiler touches. The real browser values come from globalEnv(); tests inject fakes (bun has no DOM). */
@@ -280,10 +289,14 @@ function mapTrace(trace: unknown, origin: string | undefined, limit: number, thr
 }
 
 /** `deliver`, when given, receives every finished report exactly once (a refusal at start, or the single finish of a run: caller stop, duration
- * timer or stop timeout). It runs after the profile lease is released, and an exception from it never reaches the application. */
-export function createProfiler(env: ProfilerEnv, deliver?: (report: ProfileReport) => void): ProfilerApi {
+ * timer, stop timeout or client close). It runs after the profile lease is released, and an exception from it never reaches the application. When it
+ * returns (or resolves to) a `ProfileAck`, the report `stop()` resolves with carries it in `ack`. */
+export function createProfiler(env: ProfilerEnv, deliver?: (report: ProfileReport) => void | ProfileAck | Promise<ProfileAck | void>): ProfilerApi {
  const stopTimeoutMs = env.stopTimeoutMs ?? STOP_TIMEOUT_MS;
- const hand = (report: ProfileReport): void => { if (deliver === undefined) return; try { deliver(report); } catch { /* delivery failures are the delivery layer's to count; the application never sees them */ } };
+ const hand = async (report: ProfileReport): Promise<ProfileReport> => {
+  if (deliver === undefined) return report;
+  try { const ack = await deliver(report); return ack === undefined ? report : {...report, ack}; } catch { return report; /* delivery failures are the delivery layer's to count; the application never sees them */ }
+ };
  interface Frame {
   status: ProfileStatus; reason: ProfileReason; wallStart: string; wallEnd: string; identity: Identity; requestedUs: number; requested: Record<string, unknown>; scope: Record<string, unknown>;
   stoppedBy: ProfileReport["stopped_by"]; mapped?: Mapped; truncated?: boolean; losses?: ProfileLoss[]; nonProfile?: ProfileLongTask[];
@@ -307,8 +320,8 @@ export function createProfiler(env: ProfilerEnv, deliver?: (report: ProfileRepor
  const refusal = async (status: ProfileStatus, reason: ProfileReason, identity: Promise<Identity>, requestedUs: number, requested: Record<string, unknown>): Promise<ProfileHandle> => {
   const wall = env.wallNs(), who = await identity;
   const report = assemble({status, reason, wallStart: wall, wallEnd: wall, identity: who, requestedUs, requested, scope: {isolate: env.scope, runtime: {name: who.name, version: who.version}}, stoppedBy: "not_started"});
-  hand(report);
-  return {stop: () => Promise.resolve(report)};
+  const delivered = hand(report);
+  return {stop: () => delivered, close: () => delivered};
  };
 
  return {async startProfile(raw: ProfileOptions): Promise<ProfileHandle> {
@@ -384,7 +397,7 @@ export function createProfiler(env: ProfilerEnv, deliver?: (report: ProfileRepor
    safeCall(() => unsubscribeVisibility?.());
    release();
   };
-  const finish = (stoppedBy: "caller" | "duration"): Promise<ProfileReport> => finished ??= (async (): Promise<ProfileReport> => {
+  const finish = (stoppedBy: "caller" | "duration" | "client_close"): Promise<ProfileReport> => finished ??= (async (): Promise<ProfileReport> => {
    env.clearTimeout(durationTimer);
    let outcome: {kind: "trace"; trace: unknown} | {kind: "timeout"} | {kind: "failed"};
    let stopTimer: unknown;
@@ -411,9 +424,9 @@ export function createProfiler(env: ProfilerEnv, deliver?: (report: ProfileRepor
    if (truncatedCount > 0) losses.push({reason: "truncated", count: String(truncatedCount)});
    if (mapped.missingSamples > 0 || visibility.changed || visibility.start === "hidden" || visibilityEnd === "hidden") losses.push({reason: "sample_gap", count: String(mapped.missingSamples)});
    return assemble({...base, status: "supported", reason: "ok", mapped, truncated: truncatedCount > 0 || mapped.deepSamples > 0, losses});
-  })().then(report => { hand(report); return report; });
+  })().then(report => hand(report));
   const durationTimer = env.setTimeout(() => { void finish("duration"); }, options.durationMs);
-  return {stop: () => finish("caller")};
+  return {stop: () => finish("caller"), close: () => finish("client_close")};
  }};
 }
 
@@ -462,7 +475,33 @@ export function submitProfile(client: Client, report: ProfileReport): boolean {
  return queued;
 }
 
+/** Bound on the flush that acknowledges one finished profile run. */
+const ACK_FLUSH_TIMEOUT_MS = 2000;
+
+/** Queues the finished report on `client` and records in `ack` what became of it: not admitted, or admitted and then acknowledged (cursors) or not (bounded flush).
+ * The cursors are those the flush returned: the acknowledgements of the batch(es) that carried these records, with whatever else was queued beside them. Never rejects. */
+async function acknowledge(client: Client, report: ProfileReport): Promise<ProfileAck> {
+ if (!submitProfile(client, report)) return {status: "not_available", reason: "profile_not_admitted"};
+ try {
+  const flushed = await client.flush(ACK_FLUSH_TIMEOUT_MS);
+  const cursors = flushed.acknowledgedCursors.filter(cursor => typeof cursor === "string");
+  return cursors.length > 0 ? {status: "obtained", cursors} : {status: "failed", reason: flushed.deadlineExceeded ? "flush_deadline_exceeded" : "no_acknowledged_cursor"};
+ } catch { return {status: "failed", reason: "flush_error"}; }
+}
+
 /** Starts one bounded JS Self-Profiling run whose finished report (including a refusal) is delivered through `client`'s queue:
  * the capability truth record always, the profile chunk(s) only when the sampler genuinely ran. Requires `deploymentProfiles: true`
- * and a source policy that lists profile_chunk and capability; otherwise nothing is enqueued and the drop is counted in diagnostics(). */
-export function startClientProfile(client: Client, options: ProfileOptions): Promise<ProfileHandle> { return createProfiler(globalProfilerEnv(), report => { submitProfile(client, report); }).startProfile(options); }
+ * and a source policy that lists profile_chunk and capability; otherwise nothing is enqueued and the drop is counted in diagnostics().
+ * The report `stop()` resolves with carries the delivery outcome in `ack`. The run holds a lease on `client`: closing the client stops the run (`stopped_by: "client_close"`)
+ * and waits until the finished report was queued and acknowledged, before the client shuts its queue. (A client that cannot take another lease still runs the profile,
+ * which then is not stopped by the client's close.) `env` is the real browser globals unless a test injects fakes. */
+export function startClientProfile(client: Client, options: ProfileOptions, env: ProfilerEnv = globalProfilerEnv()): Promise<ProfileHandle> {
+ let lease: OwnedHookLease | undefined;
+ let started: Promise<ProfileHandle> | undefined;
+ const release = (): void => { if (lease !== undefined) { try { client.releaseHookLease(lease); } catch { /* closed client */ } lease = undefined; } };
+ const profiler = createProfiler(env, report => { release(); return acknowledge(client, report); });
+ const own: OwnedHookLease = {close: () => (started ?? Promise.reject(new Error("not started"))).then(handle => handle.close()).then(() => undefined, () => undefined)};
+ try { client.ownHookLease(own); lease = own; } catch { lease = undefined; }
+ started = profiler.startProfile(options).catch((error: unknown) => { release(); throw error; });
+ return started;
+}

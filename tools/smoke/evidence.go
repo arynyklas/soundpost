@@ -823,6 +823,10 @@ func (s *evidenceServer) journey(fx *evidenceFixture) *evidenceRows {
 		a, b := p.real, p.control
 		sa, ra := a()
 		sb, rb := b()
+		if sa == 0 || sb == 0 {
+			isolated, why = false, p.name+" (no HTTP answer: transport failure is not isolation)"
+			break
+		}
 		if sa != sb || evidenceNorm(ra, p.a...) != evidenceNorm(rb, p.c...) || bytes.Contains(ra, []byte("simple.ts")) {
 			isolated, why = false, p.name
 			break
@@ -864,7 +868,7 @@ func (s *evidenceServer) journey(fx *evidenceFixture) *evidenceRows {
 		sa, _ := s.post(revoked, "/api/v1/artifacts", httpapi.ArtifactReadRequest{Operation: "read", Org: orgA, Project: projA, ID: artifact.ID})
 		sb, _ := s.post(revoked, "/api/v1/evidence/frames", httpapi.FramesBody{Org: orgA, Project: projA, Build: res.Build, Frames: []model.Frame{frame}})
 		sc, _, _ := s.stream(revoked, orgA, projA, replayID)
-		if sa == 200 || sb == 200 || sc == 200 {
+		if !typedDenial(sa) || !typedDenial(sb) || !typedDenial(sc) {
 			rows.add("lifecycle_grant_revoke_denies_reads", true, false, fmt.Sprintf("after the grant was revoked: artifact %d frames %d replay %d", sa, sb, sc))
 		} else {
 			rows.add("lifecycle_grant_revoke_denies_reads", true, true, fmt.Sprintf("after revocation artifact/frames/replay answered %d/%d/%d", sa, sb, sc))

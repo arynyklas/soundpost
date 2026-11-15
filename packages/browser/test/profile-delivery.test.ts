@@ -6,7 +6,7 @@
 // What the real server stores for these records is observed by the journeys smoke on Linux Chrome, not here.
 import {test, expect} from "bun:test";
 import {init, type Client, type Config} from "../src/index.ts";
-import {createProfiler, submitProfile, type ProfileOptions, type ProfileReport, type ProfilerEnv} from "../src/profile.ts";
+import {createProfiler, startClientProfile, submitProfile, type ProfileOptions, type ProfileReport, type ProfilerEnv} from "../src/profile.ts";
 import {config as coreConfig, signed, ORG, PROJECT, SOURCE} from "../../core/test/fixture.ts";
 import {parseSafeRecord} from "../../core/src/wire.ts";
 import type {FrozenBatch, Outcome, ReceiptTransport} from "../../core/src/transport.ts";
@@ -302,4 +302,107 @@ test("when the policy does not allow loss records the truncation is counted in d
  expect(sent(ledger).filter(record => record.kind === "loss")).toEqual([]);
  expect(client.diagnostics().profile_samples_truncated).toBe(3);
  await client.close();
+});
+
+// ---- 10.17-W4: the acknowledgement cursor and the client's close ----------------------------------------------------------------
+test("startClientProfile: the finished report carries the cursors the server acknowledged for its records", async () => {
+ const {ledger, client} = delivering();
+ const rg = rig();
+ const handle = await startClientProfile(client, OPTIONS, rg.env);
+ rg.trace = simpleTrace();
+ const report = await handle.stop();
+ expect(report.stopped_by).toBe("caller");
+ expect(report.ack.status).toBe("obtained");
+ const cursors = report.ack.status === "obtained" ? report.ack.cursors : [];
+ expect(cursors.length).toBeGreaterThan(0);
+ expect(cursors.every(cursor => typeof cursor === "string" && cursor.includes(":"))).toBe(true);
+ expect(sent(ledger).map(record => record.kind).sort()).toEqual(["capability", "profile_chunk"]);
+ expect((await handle.stop()).ack).toEqual(report.ack); // the same finished report, not a second delivery
+ expect(sent(ledger).length).toBe(2);
+ await client.close();
+});
+
+test("startClientProfile: a refusal at start is acknowledged as capability truth and the report says so", async () => {
+ const {ledger, client} = delivering();
+ const handle = await startClientProfile(client, OPTIONS, rig({ctorError: new DOMError("NotAllowedError")}).env);
+ const report = await handle.stop();
+ expect(report.stopped_by).toBe("not_started"); expect(report.capability.reason).toBe("document_policy_missing");
+ expect(report.ack.status).toBe("obtained");
+ expect(sent(ledger).map(record => record.kind)).toEqual(["capability"]);
+ await client.close();
+});
+
+test("startClientProfile: records the policy refused are not_available, never a fabricated acknowledgement", async () => {
+ const {ledger, client} = delivering(false);
+ const handle = await startClientProfile(client, OPTIONS, rig().env);
+ const report = await handle.stop();
+ expect(report.ack).toEqual({status: "not_available", reason: "profile_not_admitted"});
+ expect(sent(ledger)).toEqual([]);
+ await client.close();
+});
+
+test("startClientProfile: a transport that never acknowledges is a failed ack, not an obtained one", async () => {
+ const deaf = new (class extends Ledger { override async send(batch: FrozenBatch): Promise<Outcome> { this.bodies.push(batch.body); return {kind: "retry", delayMs: 1} as unknown as Outcome; } })();
+ const client = init({...coreConfig(), transport: deaf, deploymentProfiles: true});
+ const rg = rig();
+ const handle = await startClientProfile(client, OPTIONS, rg.env);
+ rg.trace = simpleTrace();
+ const report = await handle.stop();
+ expect(report.ack.status).toBe("failed");
+ expect(report.ack.status === "failed" ? ["flush_deadline_exceeded", "no_acknowledged_cursor"].includes(report.ack.reason) : false).toBe(true);
+ void client.close().catch(() => {});
+});
+
+test("startClientProfile: closing the client stops a running profile, delivers its report and only then shuts the queue", async () => {
+ const {ledger, client} = delivering();
+ const rg = rig();
+ const handle = await startClientProfile(client, OPTIONS, rg.env);
+ rg.trace = simpleTrace();
+ await client.close();
+ expect(sent(ledger).map(record => record.kind).sort()).toEqual(["capability", "profile_chunk"]); // delivered before the queue closed, not lost to it
+ expect(client.diagnostics().closed).toBeUndefined();
+ const report = await handle.stop();
+ expect(report.stopped_by).toBe("client_close");
+ expect(report.capability.status).toBe("supported"); expect(report.sample_count).toBe(3);
+ expect(report.ack.status).toBe("obtained");
+ expect(rg.timers.queue.size).toBe(0); // the duration timer is gone
+});
+
+test("startClientProfile: a run that already finished leaves no lease, so a later close does not touch it", async () => {
+ const {ledger, client} = delivering();
+ const rg = rig();
+ const handle = await startClientProfile(client, {durationMs: 500, intervalUs: 10_000, scope: "main"}, rg.env);
+ rg.trace = simpleTrace();
+ await rg.timers.advance(500); await settle();
+ await client.close();
+ const report = await handle.stop();
+ expect(report.stopped_by).toBe("duration");
+ expect(sent(ledger).length).toBe(2);
+});
+
+test("startClientProfile: finished runs release their lease (the client holds at most 8), so a later run is still stopped by close", async () => {
+ const {client} = delivering();
+ for (let i = 0; i < 10; i++) {
+  const rg = rig();
+  const handle = await startClientProfile(client, {durationMs: 500, intervalUs: 10_000, scope: "main"}, rg.env);
+  rg.trace = simpleTrace();
+  await rg.timers.advance(500); await settle();
+  expect((await handle.stop()).stopped_by).toBe("duration");
+ }
+ const rg = rig();
+ const handle = await startClientProfile(client, OPTIONS, rg.env);
+ rg.trace = simpleTrace();
+ await client.close();
+ expect((await handle.stop()).stopped_by).toBe("client_close"); // a leaked lease would have exhausted the cap and left this run unowned
+});
+
+test("Client.close: concurrent calls share one shutdown and the second resolves only after the profile was delivered", async () => {
+ const {ledger, client} = delivering();
+ const rg = rig();
+ await startClientProfile(client, OPTIONS, rg.env);
+ rg.trace = simpleTrace();
+ const first = client.close(), second = client.close();
+ expect(second).toBe(first);
+ await second;
+ expect(sent(ledger).map(record => record.kind).sort()).toEqual(["capability", "profile_chunk"]);
 });
