@@ -36,14 +36,16 @@ type NotificationRouting interface {
 	Routing(ctx context.Context, scope auth.Scope, project model.ID) (binding NotificationBinding, found bool, err error)
 }
 
-// conditionSeverity maps the severity of a rule to the closed policy severity:
-// "critical" keeps its rank, every other text (including none) is minor, so
-// unknown text can never page as critical. Rule authoring admits only the four
-// condition severities, so there is no "major" rule severity.
+// conditionSeverity maps the closed condition severity (info, warning, error,
+// critical) to the policy severity: critical stays critical, error is major,
+// everything else (warning, info, and any text that is not one of the four)
+// is minor, so unknown text can never page as critical or major (D27).
 func conditionSeverity(text string) notify.Severity {
 	switch strings.ToLower(text) {
 	case "critical":
 		return notify.SeverityCritical
+	case "error":
+		return notify.SeverityMajor
 	}
 	return notify.SeverityMinor
 }

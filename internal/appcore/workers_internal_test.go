@@ -48,7 +48,7 @@ func TestWorkerErrorCodesAreClosed(t *testing.T) {
 }
 
 func TestConditionSeverityNeverEscalatesUnknownText(t *testing.T) {
-	for text, want := range map[string]notify.Severity{"critical": notify.SeverityCritical, "CRITICAL": notify.SeverityCritical, "major": notify.SeverityMinor, "error": notify.SeverityMinor, "minor": notify.SeverityMinor, "page-now": notify.SeverityMinor, "": notify.SeverityMinor} {
+	for text, want := range map[string]notify.Severity{"critical": notify.SeverityCritical, "CRITICAL": notify.SeverityCritical, "error": notify.SeverityMajor, "ERROR": notify.SeverityMajor, "major": notify.SeverityMinor, "warning": notify.SeverityMinor, "info": notify.SeverityMinor, "minor": notify.SeverityMinor, "page-now": notify.SeverityMinor, "": notify.SeverityMinor} {
 		if got := conditionSeverity(text); got != want {
 			t.Fatalf("conditionSeverity(%q) = %v, want %v", text, got, want)
 		}
