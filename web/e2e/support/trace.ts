@@ -17,7 +17,7 @@ export interface Domain{host:string;boot:string;runtime:string;base:bigint}
 let domains=0;
 /** A clock domain; its monotonic readings start at a base unrelated to every other domain's. */
 export const domain=():Domain=>({host:id(),boot:id(),runtime:id(),base:1_000_000_000_000n+BigInt(++domains)*7_919_000_000_000n});
-export interface SpanSpec{span:string;parent?:string;kind?:'internal'|'server'|'client'|'producer'|'consumer';operation:string;dependency?:string;startMs:number;endMs?:number;domain:Domain;skewMs?:number;uncertaintyMs?:number;status?:'ok'|'error'|'cancelled'|'incomplete';links?:{trace:string;span:string}[];probability?:number;decision?:'keep'|'drop'}
+export interface SpanSpec{span:string;parent?:string;kind?:'internal'|'server'|'client'|'producer'|'consumer';operation:string;dependency?:string;startMs:number;endMs?:number;domain:Domain;skewMs?:number;uncertaintyMs?:number;status?:'ok'|'error'|'cancelled'|'incomplete';/** when the producer reported the span, in ms from ANCHOR (default: its start) */observedMs?:number;links?:{trace:string;span:string}[];probability?:number;decision?:'keep'|'drop'}
 
 /** The anchor every fixture offset is measured from: at(10) of the shared test epoch, inside the window the spec opens. */
 export const ANCHOR=at(10);
@@ -29,15 +29,21 @@ export async function ingestTrace(request:APIRequestContext,s:Source,trace:strin
   const stamp=(ms:number)=>({wall_ns:(ANCHOR+BigInt(ms)*MS+BigInt(Math.round((sp.skewMs??0)*1e6))).toString(),mono_ns:(sp.domain.base+BigInt(ms)*MS).toString(),domain:{host:sp.domain.host,boot:sp.domain.boot,runtime:sp.domain.runtime},uncertainty_ns:(BigInt(sp.uncertaintyMs??0)*MS).toString()});
   const end=sp.endMs===undefined?null:stamp(sp.endMs);
   const payload={trace_id:trace,span_id:sp.span,parent_id:sp.parent??null,span_kind:sp.kind??'internal',operation:sp.operation,start:stamp(sp.startMs),end,status:sp.status??'ok',dependency_alias:sp.dependency??'',links:(sp.links??[]).map((l)=>({trace_id:l.trace,span_id:l.span})),sample_probability:bitsOf(sp.probability??1),sample_decision:sp.decision??'keep'};
-  return {id:id(),kind:'span' as const,observed_at_ns:(ANCHOR+BigInt(sp.startMs)*MS).toString(),resource:resource(s),payload};
+  return {id:id(),kind:'span' as const,observed_at_ns:(ANCHOR+BigInt(sp.observedMs??sp.startMs)*MS).toString(),resource:resource(s),payload};
  });
  await ingestBatch(request,s,records);
 }
 
+/** One real loss record: this producer dropped `count` spans between startMs and endMs (from ANCHOR) for `reason`. */
+export async function ingestSpanLoss(request:APIRequestContext,s:Source,l:{startMs:number;endMs:number;reason:string;count:number}):Promise<void>{
+ const payload={source:s.id,producer:s.producer,producer_epoch:id(),start_ns:(ANCHOR+BigInt(l.startMs)*MS).toString(),end_ns:(ANCHOR+BigInt(l.endMs)*MS).toString(),signal:'span',reason:l.reason,count:String(l.count),last_ack:null,queue_bytes:'0',queue_records:'0'};
+ await ingestBatch(request,s,[{id:id(),kind:'loss' as const,observed_at_ns:(ANCHOR+BigInt(l.endMs)*MS).toString(),resource:resource(s),payload}]);
+}
+
 /** A structured span source whose policy lists the operations and dependency aliases of this fixture. */
-export async function onboardSpanSource(page:Page,org:string,project:string):Promise<Source>{
+export async function onboardSpanSource(page:Page,org:string,project:string,withLoss=false):Promise<Source>{
  const source=id(),service=id(),environment=id(),build=id(),instance='opaque-instance';
- const policy={revision:'1',enabled:true,class:'structured',kinds:['span'],templates:[],resources:{service_id:[service],environment_id:[environment],build_id:[build],instance_pseudonym:[instance]},labels:{},operations:OPS,dependencies:DEPS,codes:[],retention_days:{span:7},max_bytes:'1048576',max_series:'1000',replay:false,expires_ns:'0'};
+ const policy={revision:'1',enabled:true,class:'structured',kinds:withLoss?['span','loss']:['span'],templates:[],resources:{service_id:[service],environment_id:[environment],build_id:[build],instance_pseudonym:[instance]},labels:{},operations:OPS,dependencies:DEPS,codes:[],retention_days:withLoss?{span:7,loss:7}:{span:7},max_bytes:'1048576',max_series:'1000',replay:false,expires_ns:'0'};
  const r=await postJson(page,'/api/v1/sources',{command_id:id(),org,project,source,browser:false,origins:[],expires_ns:(BigInt(Date.now())*MS+24n*3600n*SECOND).toString(),policy,reason:'Critical path e2e fixture'});
  const credential=field(r.json,'credential'),revision=field(field(r.json,'descriptor'),'policy_revision');
  if(r.status!==200||typeof credential!=='string')throw Error(`span source onboarding: HTTP ${r.status} ${r.text}`);

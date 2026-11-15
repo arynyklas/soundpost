@@ -24,7 +24,7 @@ export function cleanPath(over: Partial<PathResult> = {}): PathResult {
   trace_id: TRACE, span_count: 3, spans: [span(1, null, 0, 100), span(2, 1, 0, 70), span(3, 1, 0, 40)],
   trees: [tree(1, bounds(100n * MS), [segment(1, 0, 30, { parallel_siblings_off_path: 1 }), segment(2, 1, 70)])],
   observed: bounds(100n * MS), edges: [], clock_issues: [], unlike_clock_domains: false, max_uncertainty_ns: '0',
-  sampling: { kept: 3, dropped: 0, min_probability: 1, sampled: false, invalid_probability: 0 }, complete: true, reasons: [], ...over,
+  sampling: { kept: 3, dropped: 0, min_probability: 1, sampled: false, invalid_probability: 0 }, late_spans: [], producer_gaps: [], complete: true, reasons: [], ...over,
  };
 }
 export function viewOf(path: PathResult | undefined, over: Partial<TraceView> = {}): TraceView {

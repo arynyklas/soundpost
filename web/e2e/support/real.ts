@@ -6,11 +6,11 @@
 // Nanosecond values are decimal strings or bigint, never number; floats travel as the 16-hex-digit IEEE-754 bits.
 import {request as playwrightRequest,type APIRequestContext,type Page} from '@playwright/test';
 import {createHash,randomBytes} from 'node:crypto';
-import {readFileSync} from 'node:fs';
+import {readFileSync,renameSync,unlinkSync,writeFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 
 export type Ns=bigint|string;
-export type Kind='metric'|'log'|'span'|'job_attempt'|'error';
+export type Kind='metric'|'log'|'span'|'job_attempt'|'error'|'loss';
 export interface Reply{status:number;text:string;json:unknown}
 export interface Source{id:string;credential:string;producer:string;org:string;project:string;service:string;environment:string;build:string;instance:string;policyRevision:string;kinds:readonly Kind[];template?:LogTemplateWire}
 export interface Reader{id:string;email:string;password:string}
@@ -139,6 +139,7 @@ function ownerKey(r:RecordWire):string{
  case 'span':return String(r.payload.trace_id);
  case 'job_attempt':return String(r.payload.run_id);
  case 'error':return String(r.payload.occurrence_id);
+ case 'loss':return String(r.payload.source)+String(r.payload.producer)+'loss';
  }
 }
 function routeSlot(org:string,project:string,r:RecordWire):number{
@@ -380,4 +381,83 @@ export async function verifyExplore(seed:ExploreSeed):Promise<void>{
   await expect('explore_shared in two projects',{org:seed.org,projects:[seed.p1,seed.p2],expression:'explore_shared',instant:at(60)},2);
   await expect('log lines',{org:seed.org,projects:[seed.p1],language:'logql',expression:'{app="web"}',start:T0,end:T0+SECOND,step:SECOND,logOrder:'forward'},seed.logs.lines.length);
  }finally{await api.dispose();}
+}
+
+// ---- shard loss (server built with -tags soundpost_faults; harness: E2E_FAULTS=1) --------------------------------
+/** True when the harness built the server with the fault-control seam (`E2E_FAULTS=1 h.sh prep`). */
+export const faultControl=():boolean=>(process.env.E2E_FAULT_DIR??'')!=='';
+/**
+ * Removes (closes) the replica groups of these data slots (0-63) under the RUNNING server, as a lost shard looks to a reader:
+ * the server consumes `close-groups` in E2E_FAULT_DIR and answers `close-groups.result`. Irreversible for that server, so only
+ * a spec that owns its server (shard-loss.spec.ts) may call it.
+ */
+export async function removeShards(slots:readonly number[]):Promise<number>{
+ const dir=process.env.E2E_FAULT_DIR??'';
+ if(dir==='')throw Error('E2E_FAULT_DIR is not set: the server was not built with the fault-control seam');
+ const result=resolve(dir,'close-groups.result');
+ try{unlinkSync(result);}catch{/* none yet */}
+ writeFileSync(resolve(dir,'close-groups.tmp'),slots.join(','));
+ renameSync(resolve(dir,'close-groups.tmp'),resolve(dir,'close-groups'));
+ for(let i=0;i<100;i++){
+  await sleep(100);
+  let text='';
+  try{text=readFileSync(result,'utf8');}catch{continue;}
+  const m=/^ok (\d+)$/.exec(text);
+  if(m)return Number(m[1]);
+  throw Error(`removing shards failed: ${text}`);
+ }
+ throw Error('the server did not answer the shard-removal request');
+}
+
+// ---- a real TCP path between the browser and the server --------------------------------------------------------
+export interface TcpPath{origin:string;/** drops every open connection at once, with no HTTP or SSE goodbye */cut():void;/** stops reading what the server sends (its writes back up) or resumes */stall(on:boolean):void;close():Promise<void>}
+/**
+ * A byte-for-byte TCP relay (TLS passes through untouched, so the server sees the browser's own handshake and Host) listening on
+ * another local port. The session cookie is not scoped to a port, so a page that logged in on the server origin is logged in here.
+ * It is how a spec makes a real transport loss or a real slow consumer: no server answer is faked.
+ */
+export async function tcpPath():Promise<TcpPath>{
+ const {createServer,connect}=await import('node:net');
+ const target=Number(new URL(origin()).port);
+ const pairs=new Set<{client:import('node:net').Socket;upstream:import('node:net').Socket}>();
+ const server=createServer((client)=>{
+  const upstream=connect(target,'127.0.0.1');
+  const pair={client,upstream};pairs.add(pair);
+  client.pipe(upstream);upstream.pipe(client);
+  const done=()=>{pairs.delete(pair);client.destroy();upstream.destroy();};
+  client.on('error',done);upstream.on('error',done);client.on('close',done);upstream.on('close',done);
+ });
+ await new Promise<void>((ok)=>server.listen(0,'127.0.0.1',ok));
+ const port=(server.address() as {port:number}).port;
+ return {origin:`https://127.0.0.1:${port}`,
+  cut(){for(const p of [...pairs]){p.client.destroy();p.upstream.destroy();}},
+  stall(on){for(const p of pairs){if(on)p.upstream.pause();else p.upstream.resume();}},
+  close(){for(const p of [...pairs]){p.client.destroy();p.upstream.destroy();}return new Promise<void>((ok)=>server.close(()=>ok()));}};
+}
+
+// ---- restricted raw source ---------------------------------------------------------------------------------------
+/** A real member with telemetry.read AND raw.read on one project: the only kind of account that may read a restricted raw source. */
+export async function createRawReader(page:Page,org:string,project:string):Promise<Reader>{
+ const who:Reader={id:id(),email:`raw-${id().slice(0,8)}@example.test`,password:`explore raw password ${id().slice(0,8)}`};
+ await adminCommand(page,org,'create_user',{id:who.id,email:who.email,password:who.password});
+ await adminCommand(page,org,'membership',{user_id:who.id,enabled:true});
+ await adminCommand(page,org,'grant',{user_id:who.id,project_id:project,enabled:true,permissions:['telemetry.read','raw.read']});
+ return who;
+}
+/** A restricted_raw log source (template `raw`, one restricted field `msg`) owned by `rawOwner`, who is also its only named reader. */
+export async function onboardRawLogSource(page:Page,org:string,project:string,rawOwner:Reader):Promise<Source>{
+ await fresh(page);
+ const source=id(),service=id(),environment=id(),build=id();
+ await adminCommand(page,org,'source_policy',{id:source,config:{project_id:project,origins:[],restricted:true,readers:[rawOwner.id],enabled:true}});
+ const template:LogTemplateWire={id:'raw',revision:'1',line:'{msg}',severity:'error',fields:[{name:'msg',type:'string',max_bytes:64,sensitivity:'restricted_raw',values:[]}]};
+ const policy={revision:'1',enabled:true,class:'restricted_raw',kinds:['log'],templates:[template],resources:{service_id:[service],environment_id:[environment],build_id:[build],instance_pseudonym:[INSTANCE]},labels:{app:['web']},operations:[],dependencies:[],codes:[],retention_days:{log:7},max_bytes:'1048576',max_series:'100',replay:false,expires_ns:ns(BigInt(Date.now())*1_000_000n+2n*3600n*SECOND),raw_owner:rawOwner.id,raw_rationale:'e2e restricted raw fixture',raw_max_bytes:128};
+ const r=await postJson(page,'/api/v1/sources',{command_id:id(),org,project,source,browser:false,origins:[],expires_ns:ns(BigInt(Date.now())*1_000_000n+24n*3600n*SECOND),policy,reason:'Explore e2e restricted raw fixture'});
+ const credential=field(r.json,'credential'),policyRevision=field(field(r.json,'descriptor'),'policy_revision');
+ if(r.status!==200||typeof credential!=='string')throw Error(`raw source onboarding: HTTP ${r.status} ${r.text}`);
+ return {id:source,credential,producer:id(),org,project,service,environment,build,instance:INSTANCE,policyRevision:typeof policyRevision==='string'?policyRevision:'1',kinds:['log'],template};
+}
+/** One raw log line as its own real batch. */
+export async function ingestRawLog(request:APIRequestContext,s:Source,l:{at:Ns;text:string}):Promise<void>{
+ const payload={timestamp_ns:ns(l.at),severity:'error',template_id:'raw',template_revision:'1',fields:{msg:l.text},line:l.text,stream_labels:labelsWire({app:'web'}),structured_metadata:{},source_class:'restricted_raw'};
+ await ingestBatch(request,s,[{id:id(),kind:'log',observed_at_ns:ns(l.at),resource:resourceWire(s),payload}]);
 }

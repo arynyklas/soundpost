@@ -26,6 +26,8 @@ var (
 	ErrTooDeep      = errors.New("traces: trace too deep")
 	ErrMixedTraces  = errors.New("traces: spans belong to more than one trace")
 	ErrInvalidSpan  = errors.New("traces: span without trace or span identity")
+	// ErrInvalidEvidence: the reported times do not line up one to one with the spans.
+	ErrInvalidEvidence = errors.New("traces: reported times do not match the spans")
 )
 
 // Bounds is an observed duration interval in nanoseconds. It is evidence, not a
@@ -54,7 +56,7 @@ type SpanReport struct {
 	Duration   Bounds        `json:"duration"`
 	// Flags is a sorted closed vocabulary: open, end_before_start,
 	// cross_domain_duration, dependency_boundary, cancelled, incomplete, async,
-	// duplicate_id, in_cycle, orphan.
+	// duplicate_id, in_cycle, orphan, late.
 	Flags             []string     `json:"flags"`
 	SampleProbability float64      `json:"sample_probability"`
 	SampleDecision    string       `json:"sample_decision"`
@@ -62,6 +64,9 @@ type SpanReport struct {
 	Replay            *model.ID    `json:"replay_id,omitempty"`
 	Profile           *model.ID    `json:"profile_id,omitempty"`
 	Links             []LinkReport `json:"links"`
+	// ReportedWall is when the producer reported the span (the record's observation time), absent
+	// when the read could not say. It is the nearest thing to an arrival time the stored record holds.
+	ReportedWall *model.Int64 `json:"reported_wall_ns,omitempty"`
 }
 
 // LinkReport is an explicit span link. A link is an asynchronous causal
@@ -141,8 +146,13 @@ type PathResult struct {
 	UnlikeDomain bool         `json:"unlike_clock_domains"`
 	MaxUncertain model.Int64  `json:"max_uncertainty_ns"`
 	Sampling     Sampling     `json:"sampling"`
-	Complete     bool         `json:"complete"`
-	Reasons      []string     `json:"reasons"`
+	// Late lists the spans reported more than LateAfterNS after they ended; Gaps lists the loss the
+	// spans' own producers reported over the time this trace covers. Both are evidence, not repairs:
+	// a late span stays in the analysis and a gap adds no invented span.
+	Late     []LateSpan     `json:"late_spans"`
+	Gaps     []ProducerLoss `json:"producer_gaps"`
+	Complete bool           `json:"complete"`
+	Reasons  []string       `json:"reasons"`
 }
 
 // iv is a closed interval of nanosecond offsets.
@@ -288,12 +298,20 @@ const groupScanLimit = 1024
 // parent edge decides who is whose child; times only bound durations and report
 // disagreement. Spans whose parent is absent, ambiguous or corrupt form their
 // own orphan trees; they never lengthen a real root.
-func CriticalPath(spans []model.Span) (PathResult, error) {
+func CriticalPath(spans []model.Span) (PathResult, error) { return Analyze(spans, Evidence{}) }
+
+// Analyze is CriticalPath with the evidence that does not live in the spans themselves: when each
+// span was reported (late spans) and what the producers said they lost (gaps). Evidence the caller
+// does not have is left empty and is never replaced by a guess.
+func Analyze(spans []model.Span, ev Evidence) (PathResult, error) {
 	if len(spans) == 0 {
 		return PathResult{}, ErrNoSpans
 	}
 	if len(spans) > MaxSpans {
 		return PathResult{}, ErrTooManySpans
+	}
+	if len(ev.Reported) != 0 && len(ev.Reported) != len(spans) {
+		return PathResult{}, ErrInvalidEvidence
 	}
 	trace := spans[0].Trace
 	for i := range spans {
@@ -309,12 +327,16 @@ func CriticalPath(spans []model.Span) (PathResult, error) {
 		sorted[i] = &spans[i]
 	}
 	slices.SortFunc(sorted, spanLess)
+	position := make(map[*model.Span]int, len(spans))
+	for i := range spans {
+		position[&spans[i]] = i
+	}
 
 	counts := make(map[model.SpanID]int, len(sorted))
 	for _, s := range sorted {
 		counts[s.ID]++
 	}
-	res := PathResult{Trace: trace, SpanCount: len(sorted), Spans: make([]SpanReport, 0, len(sorted)), Trees: []TreePath{}, Edges: []EdgeIssue{}, Clock: []ClockIssue{}, Reasons: []string{}}
+	res := PathResult{Trace: trace, SpanCount: len(sorted), Spans: make([]SpanReport, 0, len(sorted)), Trees: []TreePath{}, Edges: []EdgeIssue{}, Clock: []ClockIssue{}, Late: []LateSpan{}, Gaps: []ProducerLoss{}, Reasons: []string{}}
 	reasons := map[string]bool{}
 	nodeOf := make(map[model.SpanID]int, len(sorted))
 	var nodes []node
@@ -408,6 +430,17 @@ func CriticalPath(spans []model.Span) (PathResult, error) {
 			reasons["end_before_start"] = true
 		case d.cross:
 			r.Flags = append(r.Flags, "cross_domain_duration")
+		}
+		if len(ev.Reported) != 0 {
+			if at := ev.Reported[position[s]]; at > 0 {
+				w := model.Int64(at)
+				r.ReportedWall = &w
+				if s.End != nil && !d.reversed && at > satAdd(int64(s.End.Wall), LateAfterNS) {
+					r.Flags = append(r.Flags, "late")
+					res.Late = append(res.Late, LateSpan{Span: s.ID, EndedWall: model.Int64(s.End.Wall), ReportedWall: w, LateBy: model.Int64(at - int64(s.End.Wall))})
+					reasons["late_spans"] = true
+				}
+			}
 		}
 		reports = append(reports, r)
 		if counts[s.ID] > 1 {
@@ -602,6 +635,14 @@ func CriticalPath(spans []model.Span) (PathResult, error) {
 		slices.Sort(reports[i].Flags)
 	}
 	res.Spans = reports
+	var gapsCut bool
+	res.Gaps, gapsCut = relevantGaps(ev.Losses, sorted)
+	if len(res.Gaps) > 0 {
+		reasons["producer_loss"] = true
+	}
+	if gapsCut {
+		reasons["producer_loss_truncated"] = true
+	}
 	for r := range reasons {
 		res.Reasons = append(res.Reasons, r)
 	}

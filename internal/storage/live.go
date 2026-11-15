@@ -11,6 +11,7 @@ import (
 	bolt "go.etcd.io/bbolt"
 	"io"
 	"strconv"
+	"time"
 )
 
 type committedPage struct {
@@ -385,8 +386,25 @@ func (it *changeIterator) Next(ctx context.Context) (ChangePage, error) {
 		it.offset = 0
 		events := it.events
 		e.mu.Unlock()
+		fence := time.NewTimer(liveFenceEvery)
 		select {
+		case <-fence.C:
+			// Nothing was committed for a while: a shard that went away in the meantime would
+			// otherwise leave this stream looking healthy until its next commit. A group that
+			// no longer answers ends the stream with its error, like a commit that cannot be certified.
+			if _, _, err := e.replicaReadFence(ctx, nil, false); err != nil {
+				e.mu.Lock()
+				if it.closed {
+					terminal := it.terminal
+					e.mu.Unlock()
+					return ChangePage{}, terminal
+				}
+				page, failure := it.failLocked(err)
+				e.mu.Unlock()
+				return page, failure
+			}
 		case event, ok := <-events:
+			fence.Stop()
 			e.mu.Lock()
 			if !ok {
 				err := it.terminal
@@ -398,14 +416,21 @@ func (it *changeIterator) Next(ctx context.Context) (ChangePage, error) {
 			}
 			e.mu.Unlock()
 		case <-ctx.Done():
+			fence.Stop()
 			_ = it.Close()
 			return ChangePage{}, model.Fail(model.Cancelled)
 		case <-it.ctx.Done():
+			fence.Stop()
 			_ = it.Close()
 			return ChangePage{}, model.Fail(model.Cancelled)
 		}
 	}
 }
+
+// liveFenceEvery is how long a live subscription waits for a commit before it asks every replica
+// group whether it still answers. A variable only so a test can shorten it.
+var liveFenceEvery = 10 * time.Second
+
 func (it *changeIterator) allowsRoute(route committedPage) bool {
 	return route.Kind == it.req.Signal && route.Restricted == (it.scope.Permission() == auth.RawRead) && (!route.Restricted || it.scope.AllowsSource(route.Source)) && allowsSubject(it.scope, route.Kind, route.Subject)
 }

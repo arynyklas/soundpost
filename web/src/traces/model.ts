@@ -1,7 +1,7 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
 // Pure view mapping for the trace page. Every limit of the analysis is turned into a sentence here, so no state of a trace
 // is carried by colour or position alone. Nanoseconds are decimal strings on the wire and BigInt here, never `number`.
-import { ApiFault, type DurationBounds, type Id, type PathResult, type PathSegment, type SpanId, type SpanReport, type TraceView, type ViewState } from '../api/types';
+import { ApiFault, type DurationBounds, type Id, type PathResult, type ProducerGap, type PathSegment, type SpanId, type SpanReport, type TraceView, type ViewState } from '../api/types';
 
 const ID32 = /^[0-9a-f]{32}$/;
 const ID16 = /^[0-9a-f]{16}$/;
@@ -9,7 +9,7 @@ const NS = /^-?(0|[1-9][0-9]{0,18})$/;
 const CODE = /^[a-z_]{1,48}$/;
 const STATES: readonly ViewState[] = ['ready', 'empty', 'incomplete', 'stale', 'not_available'];
 const BASES = ['same_domain_monotonic', 'wall_clock_with_uncertainty'];
-const FLAGS = ['open', 'end_before_start', 'cross_domain_duration', 'dependency_boundary', 'cancelled', 'incomplete', 'async', 'duplicate_id', 'in_cycle', 'orphan'];
+const FLAGS = ['open', 'end_before_start', 'cross_domain_duration', 'dependency_boundary', 'cancelled', 'incomplete', 'async', 'duplicate_id', 'in_cycle', 'orphan', 'late'];
 const EDGE_KINDS = ['missing_parent', 'parent_ambiguous', 'parent_in_cycle', 'cycle', 'duplicate_span_id', 'multiple_roots', 'no_root', 'sequential_order_uncertain', 'critical_branch_ambiguous', 'link_unresolved', 'link_foreign_trace'];
 /** Bounds on what a page renders; the server caps the trace at the same order of magnitude. */
 export const MAX_RENDER_SPANS = 100_000;
@@ -42,11 +42,12 @@ export function parseTraceView(raw: unknown, want: { org: Id; project: Id; trace
 
 function parsePath(raw: unknown, trace: Id): void {
  if (!isRec(raw) || raw.trace_id !== trace || !ID32.test(trace) || !list(raw.spans) || raw.span_count !== (raw.spans as unknown[]).length) return bad();
- if (!list(raw.trees) || !list(raw.edges) || !list(raw.clock_issues) || !list(raw.reasons, 64) || !boundsOk(raw.observed) || typeof raw.complete !== 'boolean' || typeof raw.unlike_clock_domains !== 'boolean' || !dec(raw.max_uncertainty_ns)) return bad();
+ if (!list(raw.trees) || !list(raw.edges) || !list(raw.clock_issues) || !list(raw.late_spans) || !list(raw.producer_gaps, 100) || !list(raw.reasons, 64) || !boundsOk(raw.observed) || typeof raw.complete !== 'boolean' || typeof raw.unlike_clock_domains !== 'boolean' || !dec(raw.max_uncertainty_ns)) return bad();
  const ids = new Set<string>();
  for (const s of raw.spans as unknown[]) {
   if (!isRec(s) || !spanId(s.span_id) || (s.parent_id !== null && !spanId(s.parent_id)) || !text(s.span_kind) || !text(s.operation) || !text(s.status) || (s.dependency_alias !== undefined && !text(s.dependency_alias))) return bad();
   if (!dec(s.start_wall_ns) || (s.end_wall_ns !== null && !dec(s.end_wall_ns)) || !boundsOk(s.duration) || !list(s.flags, 16) || !(s.flags as unknown[]).every((f) => FLAGS.includes(f as string)) || typeof s.sample_probability !== 'number' || !text(s.sample_decision) || !list(s.links, 256)) return bad();
+  if (s.reported_wall_ns !== undefined && !dec(s.reported_wall_ns)) return bad();
   for (const k of ['job_id', 'replay_id', 'profile_id']) if (s[k] !== undefined && (typeof s[k] !== 'string' || !ID32.test(s[k] as string))) return bad();
   for (const l of s.links as unknown[]) if (!isRec(l) || typeof l.trace_id !== 'string' || !ID32.test(l.trace_id) || !spanId(l.span_id) || typeof l.same_trace !== 'boolean' || typeof l.resolved !== 'boolean') return bad();
   ids.add(s.span_id);
@@ -58,6 +59,8 @@ function parsePath(raw: unknown, trace: Id): void {
  }
  for (const e of raw.edges as unknown[]) if (!isRec(e) || !EDGE_KINDS.includes(e.kind as string) || (e.span_id !== undefined && !ids.has(e.span_id as string)) || (e.other_span_ids !== undefined && (!list(e.other_span_ids, 64) || !(e.other_span_ids as unknown[]).every(spanId))) || (e.count !== undefined && typeof e.count !== 'number')) return bad();
  for (const c of raw.clock_issues as unknown[]) if (!isRec(c) || !ids.has(c.span_id as string) || !ids.has(c.parent_id as string) || (c.kind !== 'starts_before_parent' && c.kind !== 'ends_after_parent') || typeof c.certain !== 'boolean' || typeof c.cross_domain !== 'boolean' || !dec(c.uncertainty_ns)) return bad();
+ for (const l of raw.late_spans as unknown[]) if (!isRec(l) || !ids.has(l.span_id as string) || !dec(l.ended_wall_ns) || !dec(l.reported_wall_ns) || !dec(l.late_by_ns)) return bad();
+ for (const g of raw.producer_gaps as unknown[]) if (!isRec(g) || typeof g.source !== 'string' || !ID32.test(g.source) || typeof g.producer !== 'string' || !ID32.test(g.producer) || !dec(g.start_ns) || !dec(g.end_ns) || typeof g.reason !== 'string' || !CODE.test(g.reason) || !/^(0|[1-9][0-9]{0,19})$/.test(g.count as string)) return bad();
  if (!(raw.reasons as unknown[]).every((r) => typeof r === 'string' && CODE.test(r))) return bad();
  const s = raw.sampling;
  if (!isRec(s) || typeof s.kept !== 'number' || typeof s.dropped !== 'number' || typeof s.min_probability !== 'number' || typeof s.sampled !== 'boolean' || typeof s.invalid_probability !== 'number') return bad();
@@ -104,6 +107,12 @@ export interface Limit { code: string; text: string }
 const edgeCount = (path: PathResult, kind: string): number => path.edges.filter((e) => e.kind === kind).reduce((n, e) => n + (e.count ?? 1), 0);
 const flagCount = (path: PathResult, flag: string): number => path.spans.filter((s) => s.flags.includes(flag)).length;
 const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
+const gapTotal = (path: PathResult): bigint => path.producer_gaps.reduce((n, g) => n + BigInt(g.count), 0n);
+
+/** One producer loss record as a sentence (every value is text; the reason is the producer's own closed code). */
+export function gapWords(g: ProducerGap): string {
+ return `${g.count} ${g.count === '1' ? 'span' : 'spans'} lost by producer ${g.producer} of source ${g.source} between ${g.start_ns} and ${g.end_ns} (wall ns), reason ${g.reason}.`;
+}
 
 /** Every limit of the analysis as a sentence: what is missing, what is ambiguous, what the clocks cannot say and what sampling hides. */
 export function limits(path: PathResult, partial: boolean): Limit[] {
@@ -128,6 +137,9 @@ export function limits(path: PathResult, partial: boolean): Limit[] {
    case 'link_foreign_trace': add(reason, `${plural(edgeCount(path, 'link_foreign_trace'), 'link points', 'links point')} at a span of another trace. It is shown as a reference only; nothing from that trace is read or counted here.`); break;
    case 'head_sampled': add(reason, `Head sampling applies (lowest probability ${path.sampling.min_probability}; ${plural(path.sampling.dropped, 'span has', 'spans have')} a drop decision). Spans that were not sampled are absent, so this trace may be only part of the work.`); break;
    case 'sample_probability_invalid': add(reason, `${plural(path.sampling.invalid_probability, 'span carries', 'spans carry')} a sampling probability that is not a valid probability, so what fraction of work was sampled is unknown.`); break;
+   case 'late_spans': add(reason, `${plural(path.late_spans.length, 'span was', 'spans were')} reported more than five seconds after ${path.late_spans.length === 1 ? 'it' : 'they'} ended (the latest by ${durationText(path.late_spans.reduce((m, l) => (BigInt(l.late_by_ns) > m ? BigInt(l.late_by_ns) : m), 0n))}). A view of this trace taken earlier would not have shown ${path.late_spans.length === 1 ? 'it' : 'them'}; ${path.late_spans.length === 1 ? 'it is' : 'they are'} part of this analysis exactly as recorded.`); break;
+   case 'producer_loss': add(reason, `${plural(path.producer_gaps.length, 'loss record', 'loss records')} from the producers of this trace cover the time it spans: ${gapTotal(path)} ${gapTotal(path) === 1n ? 'span' : 'spans'} never reached storage. Which trace they belonged to cannot be known, so spans may be missing from this trace. Each gap is listed below with its producer and reason.`); break;
+   case 'producer_loss_truncated': add(reason, 'More producer loss records cover this trace than are listed; only the earliest are shown.'); break;
    case 'span_incomplete': add(reason, `${plural(flagCount(path, 'incomplete'), 'span is', 'spans are')} marked incomplete by its producer.`); break;
    default: add(reason, `The analysis reported a limit this page does not recognise (${reason}); treat the trace as incomplete.`);
   }
@@ -144,7 +156,7 @@ export function limits(path: PathResult, partial: boolean): Limit[] {
 // ---- rows ---------------------------------------------------------------------------------------------------------
 const FLAG_WORDS: Record<string, string> = {
  open: 'no recorded end', end_before_start: 'end recorded before start', cross_domain_duration: 'start and end on unlike clock domains', dependency_boundary: 'dependency boundary: internals not captured',
- cancelled: 'cancelled', incomplete: 'marked incomplete', async: 'asynchronous child: not part of the synchronous path', duplicate_id: 'span ID recorded more than once', in_cycle: 'in a parent cycle', orphan: 'parent missing or ambiguous',
+ cancelled: 'cancelled', incomplete: 'marked incomplete', async: 'asynchronous child: not part of the synchronous path', duplicate_id: 'span ID recorded more than once', in_cycle: 'in a parent cycle', orphan: 'parent missing or ambiguous', late: 'reported more than five seconds after it ended',
 };
 export function flagWords(flag: string): string { return FLAG_WORDS[flag] ?? flag; }
 
@@ -187,6 +199,7 @@ export function detailsOf(path: PathResult, id: SpanId | null): Detail[] | null 
   { label: 'Sampling', value: `decision ${s.sample_decision}, probability ${s.sample_probability}` },
  ];
  if (s.dependency_alias) d.push({ label: 'Dependency', value: s.dependency_alias });
+ if (s.reported_wall_ns !== undefined) d.push({ label: 'Reported by its producer', value: `at wall time ${s.reported_wall_ns} ns${s.flags.includes('late') ? ' (late)' : ''}` });
  if (s.flags.length) d.push({ label: 'Limits of this span', value: s.flags.map(flagWords).join('; ') });
  for (const l of s.links) d.push({ label: 'Link', value: `${l.span_id} in ${l.same_trace ? 'this trace' : `trace ${l.trace_id}`}: ${l.resolved ? 'target span is in this trace' : 'target not readable here'} (asynchronous reference, not part of the duration)` });
  const clock = path.clock_issues.filter((c) => c.span_id === s.span_id);

@@ -39,7 +39,8 @@ prep() {
 		sed -i 's|^\tincidentService, e := incidents.New(c, releaseActionClock{})|\tinvestigator.WithHealth(c)\n&|' "$ROOT/internal/appcore/app.go"
 		grep -q 'investigator.WithHealth(c)' "$ROOT/internal/appcore/app.go" || { echo "health wiring did not apply" >&2; exit 1; }
 	fi
-	( cd "$ROOT" && go build -o "$BIN" ./cmd/soundpost )
+	# E2E_FAULTS=1 builds the server with the soundpost_faults tag: it then reads shard-removal requests from $T/fault (cmd/soundpost/faultcontrol.go).
+	( cd "$ROOT" && go build ${E2E_FAULTS:+-tags soundpost_faults} -o "$BIN" ./cmd/soundpost )
 	( cd "$ROOT/web" && node node_modules/typescript/bin/tsc -p tsconfig.json && node node_modules/vite/bin/vite.js build 2>&1 | tail -2 )
 	echo prep-ok
 }
@@ -69,7 +70,7 @@ up() {
 		setsid nohup "$T/oidc" --listen 127.0.0.1:$OPORT --issuer "$issuer" --callback "$ORIGIN/api/v1/oidc/callback" --tls-cert "$PKI/leaf.pem" --tls-key "$PKI/leaf.key" >"$T/oidc.log" 2>&1 </dev/null &
 		echo $! >"$T/oidc.pid"; sleep 2
 	fi
-	rm -rf "$DATA"; mkdir -p "$DATA"
+	rm -rf "$DATA" "$T/fault"; mkdir -p "$DATA" "$T/fault"
 	notify_args=""
 	# E2E_NOTIFY_IP (a private address of this host): the notification worker may reach exactly that address, trusts the private CA
 	# and gives up on a send after 3s, so a receiver that never answers yields a real uncertain delivery.
@@ -81,11 +82,11 @@ up() {
 		UNIT=$P-$PORT
 		: >"$T/server.log"
 		CGROOT=/sys/fs/cgroup/user.slice/user-$(id -u).slice/user@$(id -u).service/app.slice/$UNIT.service
-		systemd-run --user --collect --quiet --unit="$UNIT" -p "Delegate=memory pids" -p DelegateSubgroup=main -p "StandardOutput=append:$T/server.log" -p "StandardError=append:$T/server.log" -E "SSL_CERT_FILE=$PKI/ca.pem" "$BIN" serve --mode single --data-dir "$DATA" --listen 127.0.0.1:$PORT --tls-cert "$PKI/leaf.pem" --tls-key "$PKI/leaf.key" --web-dir "$ROOT/web/dist" --symbolicate-cgroup-root "$CGROOT" $notify_args ${SERVE_ARGS:-}
+		systemd-run --user --collect --quiet --unit="$UNIT" -p "Delegate=memory pids" -p DelegateSubgroup=main -p "StandardOutput=append:$T/server.log" -p "StandardError=append:$T/server.log" -E "SSL_CERT_FILE=$PKI/ca.pem" -E "SOUNDPOST_FAULT_DIR=$T/fault" "$BIN" serve --mode single --data-dir "$DATA" --listen 127.0.0.1:$PORT --tls-cert "$PKI/leaf.pem" --tls-key "$PKI/leaf.key" --web-dir "$ROOT/web/dist" --symbolicate-cgroup-root "$CGROOT" $notify_args ${SERVE_ARGS:-}
 		echo "$UNIT" >"$T/server.unit"
 		systemctl --user show -p MainPID --value "$UNIT" >"$T/server.pid"
 	else
-		SSL_CERT_FILE=$PKI/ca.pem setsid nohup "$BIN" serve --mode single --data-dir "$DATA" --listen 127.0.0.1:$PORT --tls-cert "$PKI/leaf.pem" --tls-key "$PKI/leaf.key" --web-dir "$ROOT/web/dist" $notify_args ${SERVE_ARGS:-} >"$T/server.log" 2>&1 </dev/null &
+		SOUNDPOST_FAULT_DIR=$T/fault SSL_CERT_FILE=$PKI/ca.pem setsid nohup "$BIN" serve --mode single --data-dir "$DATA" --listen 127.0.0.1:$PORT --tls-cert "$PKI/leaf.pem" --tls-key "$PKI/leaf.key" --web-dir "$ROOT/web/dist" $notify_args ${SERVE_ARGS:-} >"$T/server.log" 2>&1 </dev/null &
 		echo $! >"$T/server.pid"
 	fi
 	i=0
@@ -122,7 +123,7 @@ XX
 
 pw_env() {
 	export NODE_EXTRA_CA_CERTS=$PKI/ca.pem SOUNDPOST_TEST_ORIGIN=$ORIGIN SOUNDPOST_SCOPE_EMAIL=e2e-owner@example.test SOUNDPOST_SCOPE_PASSWORD='e2e instance owner password 2026'
-	export E2E_SPKI=$(cat "$PKI/spki.txt") CHROME E2E_SERVER_LOG=$T/server.log E2E_DATA_DIR=$DATA E2E_BIN=$BIN E2E_ORIGIN_PORT=$PORT E2E_PKI=$PKI E2E_OUT_DIR=${E2E_OUT_DIR:-$OUT/test-results} E2E_EVIDENCE_DIR=${E2E_EVIDENCE_DIR:-$OUT/evidence}
+	export E2E_FAULT_DIR=$T/fault E2E_SPKI=$(cat "$PKI/spki.txt") CHROME E2E_SERVER_LOG=$T/server.log E2E_DATA_DIR=$DATA E2E_BIN=$BIN E2E_ORIGIN_PORT=$PORT E2E_PKI=$PKI E2E_OUT_DIR=${E2E_OUT_DIR:-$OUT/test-results} E2E_EVIDENCE_DIR=${E2E_EVIDENCE_DIR:-$OUT/evidence}
 	[ -f "$T/provision.env" ] && . "$T/provision.env"
 	"$@"
 }

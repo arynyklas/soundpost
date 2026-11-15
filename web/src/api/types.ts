@@ -421,7 +421,13 @@ export interface SpanReport {
  span_id: SpanId; parent_id: SpanId | null; span_kind: string; operation: string; status: string; dependency_alias?: string;
  start_wall_ns: string; end_wall_ns: string | null; duration: DurationBounds; flags: string[];
  sample_probability: number; sample_decision: string; job_id?: Id; replay_id?: Id; profile_id?: Id; links: SpanLinkReport[];
+ /** When the producer reported the span (the record's observation time); absent when the read could not say. */
+ reported_wall_ns?: string;
 }
+/** A span reported more than five seconds after it ended. */
+export interface LateSpan { span_id: SpanId; ended_wall_ns: string; reported_wall_ns: string; late_by_ns: string }
+/** A loss record of one of the trace's own producers over the time the trace covers: spans that never reached storage. */
+export interface ProducerGap { source: Id; producer: Id; start_ns: string; end_ns: string; reason: string; count: string }
 export interface PathSegment { span_id: SpanId; depth: number; self: DurationBounds; ambiguous: boolean; parallel_siblings_off_path: number; async_children_off_path: number }
 export interface TreePath { root_span_id: SpanId; orphan: boolean; duration: DurationBounds; segments: PathSegment[] }
 export interface EdgeIssue { kind: string; span_id?: SpanId; other_span_ids?: SpanId[]; count?: number }
@@ -429,7 +435,7 @@ export interface ClockIssue { span_id: SpanId; parent_id: SpanId; kind: 'starts_
 export interface SamplingReport { kept: number; dropped: number; min_probability: number; sampled: boolean; invalid_probability: number }
 export interface PathResult {
  trace_id: Id; span_count: number; spans: SpanReport[]; trees: TreePath[]; observed: DurationBounds; edges: EdgeIssue[]; clock_issues: ClockIssue[];
- unlike_clock_domains: boolean; max_uncertainty_ns: string; sampling: SamplingReport; complete: boolean; reasons: string[];
+ unlike_clock_domains: boolean; max_uncertainty_ns: string; sampling: SamplingReport; late_spans: LateSpan[]; producer_gaps: ProducerGap[]; complete: boolean; reasons: string[];
 }
 export interface TraceView { org: Id; project: Id; trace: Id; state: ViewState; reason?: string; partial: boolean; path?: PathResult; sections: ViewSection[] }
 

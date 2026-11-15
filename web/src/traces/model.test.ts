@@ -2,7 +2,7 @@
 import { describe, expect, test } from 'bun:test';
 import { ApiFault, type PathResult, type TraceView } from '../api/types';
 import { MS, ORG, PROJECT, TRACE, bounds, cleanPath, segment, sid, span, tree, unknownBounds, viewOf } from './fixture';
-import { basisWords, boundsText, detailsOf, durationText, exploreWindow, flagWords, limits, observedWords, offPath, parseTraceView, rows } from './model';
+import { basisWords, boundsText, detailsOf, durationText, exploreWindow, flagWords, gapWords, limits, observedWords, offPath, parseTraceView, rows } from './model';
 
 const want = { org: ORG, project: PROJECT, trace: TRACE };
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
@@ -183,5 +183,54 @@ describe('rows and details', () => {
   expect(exploreWindow({ ...s, start_wall_ns: '5', end_wall_ns: '9' }).start).toBe('0');
   const open = exploreWindow(span(1, null, 0, null));
   expect(BigInt(open.end) - BigInt(s.start_wall_ns)).toBe(1_000_000_001n);
+ });
+});
+
+describe('late spans and producer gaps are parsed strictly and said in words', () => {
+ const lateAt = (id: number): PathResult['late_spans'][number] => ({ span_id: sid(id), ended_wall_ns: '1700000000060000000', reported_wall_ns: '1700000020060000000', late_by_ns: '20000000000' });
+ const gap = (count: string, reason = 'transport'): PathResult['producer_gaps'][number] => ({ source: 'a'.repeat(32), producer: 'b'.repeat(32), start_ns: '1700000000020000000', end_ns: '1700000000030000000', reason, count });
+ test('a view with a late span and a gap round-trips', () => {
+  const p = cleanPath({ late_spans: [lateAt(2)], producer_gaps: [gap('3')], reasons: ['late_spans', 'producer_loss'], complete: false });
+  p.spans[1]!.flags = ['late'];
+  p.spans[1]!.reported_wall_ns = '1700000020060000000';
+  const got = parseTraceView(clone(viewOf(p)), want).path!;
+  expect(got.late_spans).toHaveLength(1);
+  expect(got.producer_gaps).toHaveLength(1);
+  expect(got.spans[1]!.reported_wall_ns).toBe('1700000020060000000');
+ });
+ test('malformed late spans, gaps and report times are faults', () => {
+  const bad = (mutate: (p: PathResult) => void): void => { const v = clone(viewOf(cleanPath({ late_spans: [lateAt(2)], producer_gaps: [gap('3')] }))); mutate(v.path!); refuses(v); };
+  bad((p) => { p.late_spans[0]!.span_id = sid(77); });
+  bad((p) => { p.late_spans[0]!.late_by_ns = '1.5'; });
+  bad((p) => { (p as unknown as Record<string, unknown>).late_spans = null; });
+  bad((p) => { (p as unknown as Record<string, unknown>).producer_gaps = undefined; });
+  bad((p) => { p.producer_gaps[0]!.source = 'nope'; });
+  bad((p) => { p.producer_gaps[0]!.reason = 'Not A Code!'; });
+  bad((p) => { p.producer_gaps[0]!.count = '-1'; });
+  bad((p) => { p.producer_gaps[0]!.start_ns = 1700000000020000000 as unknown as string; });
+  bad((p) => { p.spans[0]!.reported_wall_ns = 17 as unknown as string; });
+  bad((p) => { p.producer_gaps = Array.from({ length: 101 }, () => gap('1')); });
+ });
+ test('limits say what was late and what was lost, with exact counts', () => {
+  const p = cleanPath({ late_spans: [lateAt(2), lateAt(3)], producer_gaps: [gap('3'), gap('4', 'queue_full')], reasons: ['late_spans', 'producer_loss', 'producer_loss_truncated'], complete: false });
+  const sentence = (code: string): string => limits(p, false).find((l) => l.code === code)!.text;
+  expect(sentence('late_spans')).toContain('2 spans were reported more than five seconds after they ended');
+  expect(sentence('late_spans')).toContain('20 s');
+  expect(sentence('producer_loss')).toContain('2 loss records');
+  expect(sentence('producer_loss')).toContain('7 spans never reached storage');
+  expect(sentence('producer_loss')).toContain('spans may be missing');
+  expect(sentence('producer_loss_truncated')).toContain('only the earliest are shown');
+  expect(limits(cleanPath(), false).map((l) => l.code)).toEqual(['none_reported']);
+ });
+ test('a gap is one sentence naming the count, producer, source, interval and reason; a late span says so in its details', () => {
+  expect(gapWords(gap('1'))).toBe(`1 span lost by producer ${'b'.repeat(32)} of source ${'a'.repeat(32)} between 1700000000020000000 and 1700000000030000000 (wall ns), reason transport.`);
+  expect(gapWords(gap('12', 'queue_full'))).toContain('12 spans lost');
+  expect(flagWords('late')).toBe('reported more than five seconds after it ended');
+  const p = cleanPath();
+  p.spans[1]!.flags = ['late'];
+  p.spans[1]!.reported_wall_ns = '1700000020060000000';
+  const d = detailsOf(p, p.spans[1]!.span_id)!;
+  expect(d.find((x) => x.label === 'Reported by its producer')!.value).toBe('at wall time 1700000020060000000 ns (late)');
+  expect(d.find((x) => x.label === 'Limits of this span')!.value).toContain('reported more than five seconds');
  });
 });

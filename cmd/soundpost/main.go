@@ -171,6 +171,7 @@ func run() error {
 		return e
 	}
 	defer core.Close()
+	startFaultControl(ctx, core)
 	// A storage failure fails every replication group closed; this process then exits non-zero so
 	// its supervisor restarts it and the restart re-verifies the journal.
 	storageFailed := watchStorage(ctx, core, stop)

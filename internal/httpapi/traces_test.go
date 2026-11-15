@@ -10,6 +10,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -236,10 +237,12 @@ func deepChain(trace model.ID, n int) []model.Span {
 // request and serves one borrowed page it scribbles over afterwards, the way the
 // real iterator reuses its buffers.
 type fakeScanner struct {
-	req   storage.ScanRequest
-	pages []storage.Page
-	err   error
-	scope auth.Scope
+	req       storage.ScanRequest  // the span scan
+	loss      *storage.ScanRequest // the loss scan, when one was made
+	pages     []storage.Page       // served for the span scan
+	lossPages []storage.Page       // served for the loss scan
+	err       error
+	scope     auth.Scope
 }
 
 type fakeRows struct {
@@ -258,7 +261,12 @@ func (r *fakeRows) Watermarks() []model.Cursor { return nil }
 func (r *fakeRows) Close() error               { return nil }
 
 func (f *fakeScanner) Scan(_ context.Context, scope auth.Scope, req storage.ScanRequest) (storage.RowIterator, error) {
-	f.req, f.scope = req, scope
+	f.scope = scope
+	if req.Signal == model.Loss {
+		f.loss = &req
+		return &fakeRows{pages: f.lossPages}, nil
+	}
+	f.req = req
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -342,5 +350,113 @@ func TestStorageSpanSourceBoundsMemory(t *testing.T) {
 	}
 	if _, err = traces.CriticalPath(set.Spans); err == nil {
 		t.Fatal("oversized trace analyzed")
+	}
+}
+
+func lossPage(partial bool, losses ...model.LossReport) storage.Page {
+	p := storage.Page{Partial: partial}
+	for i := range losses {
+		p.IDs = append(p.IDs, model.NewID())
+		p.Values = append(p.Values, model.Payload{Loss: &losses[i]})
+	}
+	return p
+}
+
+// The storage source reports when each span was reported and the span loss of the producers that
+// contributed to the trace, and nothing of other producers, other signals or other traces' sources.
+func TestStorageSpanSourceReportsArrivalAndProducerLoss(t *testing.T) {
+	trace, project := model.NewID(), model.NewID()
+	srcA, srcB, srcOther := model.NewID(), model.NewID(), model.NewID()
+	a, b := tSpan(trace, 1, 0, 0, 10), tSpan(trace, 2, 1, 0, 5)
+	page := pageOf(false, &a, &b)
+	page.Sources = []model.ID{srcA, srcB}
+	page.ObservedTimes = []model.UnixNano{111, 222}
+	producer := model.NewID()
+	mine := model.LossReport{Source: srcA, Producer: producer, Start: 5, End: 9, Signal: model.SpanKind, Reason: "transport", Count: 4}
+	sc := &fakeScanner{pages: []storage.Page{page}, lossPages: []storage.Page{lossPage(false,
+		mine,
+		model.LossReport{Source: srcA, Producer: producer, Start: 5, End: 9, Signal: model.Metric, Reason: "transport", Count: 9},       // another signal
+		model.LossReport{Source: srcOther, Producer: producer, Start: 5, End: 9, Signal: model.SpanKind, Reason: "transport", Count: 9}, // a source that sent no span of this trace
+	)}}
+	set, err := httpapi.NewStorageSpanSource(sc).TraceSpans(context.Background(), auth.Scope{}, project, trace, query.TimeRange{Start: 10, End: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(set.Reported) != 2 || set.Reported[0] != 111 || set.Reported[1] != 222 {
+		t.Fatalf("reported = %v, want the record observation times in span order", set.Reported)
+	}
+	if len(set.Losses) != 1 || set.Losses[0].Source != srcA || set.Losses[0].Count != 4 || set.Losses[0].Reason != "transport" {
+		t.Fatalf("losses = %+v, want only the span loss of a contributing source", set.Losses)
+	}
+	if sc.loss == nil || sc.loss.Signal != model.Loss || sc.loss.Projects[0] != project || sc.loss.Start != 10 || sc.loss.End != 20 || !sc.loss.Fence.AllowPartial {
+		t.Fatalf("loss scan = %+v", sc.loss)
+	}
+	if !slicesHasField(sc.req.Projection, storage.FieldObservedTime) {
+		t.Fatalf("the span scan does not ask for the observation time: %v", sc.req.Projection)
+	}
+	// A partial loss read makes the whole trace read partial.
+	sc.lossPages = []storage.Page{lossPage(true)}
+	set, err = httpapi.NewStorageSpanSource(sc).TraceSpans(context.Background(), auth.Scope{}, project, trace, query.TimeRange{Start: 10, End: 20})
+	if err != nil || !set.Partial {
+		t.Fatalf("partial loss read: partial %v err %v", set.Partial, err)
+	}
+	// No span, no loss read: nothing to attach a gap to.
+	sc.pages, sc.loss = nil, nil
+	if _, err = httpapi.NewStorageSpanSource(sc).TraceSpans(context.Background(), auth.Scope{}, project, trace, query.TimeRange{Start: 10, End: 20}); err != nil || sc.loss != nil {
+		t.Fatalf("a trace with no span read the loss records: %v %+v", err, sc.loss)
+	}
+}
+
+func slicesHasField(fs []storage.Field, f storage.Field) bool {
+	for _, x := range fs {
+		if x == f {
+			return true
+		}
+	}
+	return false
+}
+
+// The view carries the late spans and gaps the source found, and the trace is no longer complete.
+func TestTraceViewCarriesLateSpansAndProducerGaps(t *testing.T) {
+	trace := model.NewID()
+	root, child := tSpan(trace, 1, 0, 0, 100), tSpan(trace, 2, 1, 10, 60)
+	wall := func(ms int64) int64 { return 1_700_000_000_000_000_000 + ms*1_000_000 }
+	src := &fakeSpans{}
+	e := newTrEnv(t, src)
+	project := model.NewID()
+	org := e.org("trace late", project)
+	reader := e.user(org, "trace-late-reader@example.test")
+	e.grant(org, reader, project, true, auth.Read)
+	src.answer = func() (httpapi.SpanSet, error) {
+		return httpapi.SpanSet{
+			Spans:    []model.Span{root, child},
+			Reported: []int64{wall(100), wall(60) + 20_000*1_000_000},
+			Losses:   []traces.ProducerLoss{{Source: model.ID{1}, Producer: model.ID{2}, Start: model.Int64(wall(20)), End: model.Int64(wall(30)), Reason: "queue_full", Count: 3}},
+		}, nil
+	}
+	status, raw := e.view(reader, traceBody(org, project, trace))
+	if status != 200 {
+		t.Fatalf("status %d %s", status, raw)
+	}
+	v := decodeTrace(t, raw)
+	if v.Path == nil || len(v.Path.Late) != 1 || len(v.Path.Gaps) != 1 || v.Path.Complete {
+		t.Fatalf("view path = %+v", v.Path)
+	}
+	var wire struct {
+		Path struct {
+			Late []map[string]any `json:"late_spans"`
+			Gaps []map[string]any `json:"producer_gaps"`
+		} `json:"path"`
+	}
+	if err := json.Unmarshal(raw, &wire); err != nil || len(wire.Path.Late) != 1 || wire.Path.Late[0]["late_by_ns"] == nil || len(wire.Path.Gaps) != 1 || wire.Path.Gaps[0]["reason"] != "queue_full" {
+		t.Fatalf("wire shape: %v %s", err, raw)
+	}
+	// Reported times that do not line up with the spans are corrupt data, never a guess.
+	src.answer = func() (httpapi.SpanSet, error) {
+		return httpapi.SpanSet{Spans: []model.Span{root, child}, Reported: []int64{1}}, nil
+	}
+	status, raw = e.view(reader, traceBody(org, project, trace))
+	if status == 200 || !strings.Contains(string(raw), `"code":"corrupt"`) {
+		t.Fatalf("misaligned reported times were analyzed or mislabelled: %d %s", status, raw)
 	}
 }

@@ -2,7 +2,7 @@
 import {test,expect,request as pwRequest,type APIRequestContext,type BrowserContext,type Locator,type Page,type Request} from '@playwright/test';
 import {readFileSync,readdirSync} from 'node:fs';
 import {resolve} from 'node:path';
-import {at,createReader,featureSet,id,login,owner,postJson,seedExplore,setGrant,type ExploreSeed} from './support/real';
+import {at,createProject,createRawReader,createReader,featureSet,id,ingestLog,ingestRawLog,login,onboardLogSource,onboardRawLogSource,owner,postJson,seedExplore,setGrant,type ExploreSeed} from './support/real';
 // Real server, real Chrome. Every number, nanosecond and label below was admitted through the real ingest route and is
 // read back through the real C06 query, discovery, exemplar, format, investigate and export routes by a real reader who
 // holds telemetry.read on two projects. Nothing in this file fakes a server answer.
@@ -575,5 +575,54 @@ test('an export completes, downloads the exact records, and an export revoked be
  await page.getByLabel('Query expression').fill('explore_gauge');
  await page.getByRole('button',{name:'Run query',exact:true}).click();
  await expect(page.locator('[data-testid="results"] [data-state="unauthorized"]')).toContainText('Not found');
+ await rctx.close();
+});
+
+test('a restricted raw source is invisible to a telemetry-only reader: no rows, no text, no counts; its raw reader sees exactly its lines',async({browser})=>{
+ test.setTimeout(240_000);
+ const RAW=['RAWCANARY-alpha-7f3a91','RAWCANARY-beta-7f3a91','RAWCANARY-gamma-7f3a91'];
+ const project=await createProject(owners,seed.org,'explore restricted raw');
+ await setGrant(owners,seed.org,seed.reader.id,project,true);
+ const rawReader=await createRawReader(owners,seed.org,project);
+ const raw=await onboardRawLogSource(owners,seed.org,project,rawReader);
+ const plain=await onboardLogSource(owners,seed.org,project,{names:['alice']});
+ await ingestLog(api,plain,{at:at(1),name:'alice'});
+ for(let i=0;i<RAW.length;i++)await ingestRawLog(api,raw,{at:at(2+i),text:RAW[i]!});
+ const hash=`#${new URLSearchParams({org:seed.org,projects:project,start:String(at(0)),end:String(at(70)),tz:'UTC',view:'explore'})}`;
+ const query='{app="web"}';
+ const logs=async(page:Page,source?:string):Promise<void>=>{
+  await page.goto(`/${hash}`);
+  await expect(page.getByRole('heading',{name:'Explore',exact:true})).toBeVisible();
+  await page.getByRole('radio',{name:'LogQL',exact:true}).check();
+  await page.getByLabel('Log order').selectOption('forward');
+  if(source!==undefined)await page.getByLabel(/Restricted source ID/).fill(source);
+  await run(page,query);
+ };
+ // The telemetry-only reader (the same account the rest of this spec uses) gets the structured line and nothing else.
+ const telemetry=await ctx.newPage();
+ await logs(telemetry);
+ const entries=panel(telemetry,project).locator('tr[data-entry]');
+ await expect(entries).toHaveCount(1);
+ await expect(entries.first().locator('[data-line]')).toContainText('alice');
+ const stats=panel(telemetry,project).getByText(/rows read in/);
+ await expect(stats).toContainText('1 logs returned');
+ const text=await telemetry.locator('body').innerText();
+ for(const canary of RAW)expect(text).not.toContain(canary);
+ // The same reader naming the restricted source gets Not found: no row, no count, no line.
+ const named=await ctx.newPage();
+ await logs(named,raw.id);
+ await expect(named.locator('[data-testid="results"] [data-state="unauthorized"],[data-testid="results"] [data-state="error"]').first()).toBeVisible();
+ await expect(named.locator('tr[data-entry]')).toHaveCount(0);
+ const namedText=await named.locator('body').innerText();
+ for(const canary of RAW)expect(namedText).not.toContain(canary);
+ expect(namedText).not.toMatch(/\d+ rows read in/);
+ // The raw reader, naming the source, reads exactly the three raw lines and none of the structured one.
+ const rctx=await browser.newContext();
+ const rawPage=await rctx.newPage();
+ await login(rawPage,rawReader.email,rawReader.password);
+ await logs(rawPage,raw.id);
+ const rawEntries=panel(rawPage,project).locator('tr[data-entry]');
+ await expect(rawEntries).toHaveCount(3);
+ expect(await rawEntries.locator('[data-line]').allInnerTexts()).toEqual(RAW);
  await rctx.close();
 });

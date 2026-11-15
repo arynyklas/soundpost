@@ -77,4 +77,24 @@ describe('CriticalPath markup', () => {
   for (const c of ['1', '2', '3']) expect(html).toContain(c.repeat(32));
   expect(html).toContain('its access is checked there, not here');
  });
+ test('producer gaps and late spans are sections of text, and a hostile reason or operation stays escaped', () => {
+  const p = cleanPath({
+   late_spans: [{ span_id: sid(2), ended_wall_ns: '10', reported_wall_ns: '30000000010', late_by_ns: '30000000000' }],
+   producer_gaps: [{ source: 'a'.repeat(32), producer: 'b'.repeat(32), start_ns: '5', end_ns: '9', reason: 'transport', count: '4' }],
+   reasons: ['late_spans', 'producer_loss'], complete: false,
+   spans: [span(1, null, 0, 100), span(2, 1, 0, 70, { operation: CANARY, flags: ['late'], reported_wall_ns: '30000000010' }), span(3, 1, 0, 40)],
+  });
+  const html = render(React.createElement(CriticalPath, { path: p, selectedSpan: null }));
+  expect(html).toContain('data-testid="producer-gaps"');
+  expect(html).toContain('4 spans lost by producer');
+  expect(html).toContain('reason transport.');
+  expect(html).toContain('data-testid="late-spans"');
+  expect(html).toContain('30000000000 ns later.');
+  expect(html).toContain('data-limit="late_spans"');
+  expect(html).toContain('data-limit="producer_loss"');
+  noElementsFromText(html);
+  const clean = render(React.createElement(CriticalPath, { path: cleanPath(), selectedSpan: null }));
+  expect(clean).not.toContain('producer-gaps');
+  expect(clean).not.toContain('late-spans');
+ });
 });

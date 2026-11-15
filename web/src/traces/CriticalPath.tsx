@@ -1,7 +1,7 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
 import * as React from 'react';
 import type { PathResult, SpanId, SpanReport } from '../api/types';
-import { basisWords, boundsText, detailsOf, flagWords, limits, observedWords, offPath, rows } from './model';
+import { basisWords, boundsText, detailsOf, flagWords, gapWords, limits, observedWords, offPath, rows } from './model';
 
 const MAX_ROWS = 1000;
 const MAX_OFF_PATH = 200;
@@ -26,6 +26,18 @@ export function CriticalPath(props: { path: PathResult; selectedSpan: SpanId | n
     <h4 id="cp-limits-heading">Limits of this analysis</h4>
     <ul>{lim.map((l) => <li key={l.code} data-limit={l.code}>{l.text}</li>)}</ul>
    </section>
+   {path.producer_gaps.length > 0 && (
+    <section aria-labelledby="cp-gaps-heading" data-testid="producer-gaps">
+     <h4 id="cp-gaps-heading">Gaps reported by the producers of this trace</h4>
+     <ul>{path.producer_gaps.map((g, i) => <li key={`${i}:${g.source}:${g.start_ns}`} data-gap-reason={g.reason}>{gapWords(g)}</li>)}</ul>
+    </section>
+   )}
+   {path.late_spans.length > 0 && (
+    <section aria-labelledby="cp-late-heading" data-testid="late-spans">
+     <h4 id="cp-late-heading">Spans reported late</h4>
+     <ul>{path.late_spans.map((l) => <li key={l.span_id} data-span={l.span_id}>{path.spans.find((s) => s.span_id === l.span_id)?.operation ?? l.span_id} ended at {l.ended_wall_ns} and was reported at {l.reported_wall_ns} (wall ns), {l.late_by_ns} ns later.</li>)}</ul>
+    </section>
+   )}
    {path.trees.map((t, treeIndex) => {
     const treeRows = shown.filter((r) => r.tree === treeIndex);
     return (

@@ -37,6 +37,9 @@ type rowIterator struct {
 	ctx       context.Context
 	posting   string
 	partial   bool
+	// partialShown is set once a page carrying Partial was returned, so the flag of a read whose
+	// answering shards held no matching row is still delivered, once, at the end.
+	partialShown bool
 }
 
 func compileMatchers(ms []Matcher) ([]compiledMatcher, error) {
@@ -427,6 +430,7 @@ func (it *rowIterator) Next(ctx context.Context) (Page, error) {
 			}
 			projectPage(&selected, it.req.Projection, it.req.Signal)
 			selected.Partial = it.partial
+			it.partialShown = it.partial
 			selected.Bytes = chunkBytes
 			it.page = selected
 			e.storageStats.BorrowedPages++
@@ -437,6 +441,12 @@ func (it *rowIterator) Next(ctx context.Context) (Page, error) {
 		it.terminal = err
 		it.closeLocked()
 		return Page{}, err
+	}
+	if it.partial && !it.partialShown {
+		// Some shards did not answer and the ones that did hold no matching row: without this page
+		// the reader would see a complete, empty answer, which is a zero graph for missing data.
+		it.partialShown = true
+		return Page{Partial: true}, nil
 	}
 	it.terminal = io.EOF
 	it.closeLocked()

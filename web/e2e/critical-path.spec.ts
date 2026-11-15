@@ -1,7 +1,7 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
 import {test,expect,request as pwRequest,type APIRequestContext,type BrowserContext,type Locator,type Page} from '@playwright/test';
-import {at,createOrg,createProject,createReader,login,owner,type Reader} from './support/real';
-import {ANCHOR,onboardSpanSource,seedTraces,type TraceSeed} from './support/trace';
+import {at,createOrg,createProject,createReader,id,login,owner,spanId,type Reader} from './support/real';
+import {ANCHOR,domain,ingestSpanLoss,ingestTrace,onboardSpanSource,seedTraces,type TraceSeed} from './support/trace';
 // Real server, real Chrome. Every span below was admitted through the real ingest route with a real source credential and is
 // read back through the real POST /api/v1/traces/view route (the real storage scan) by a real reader holding telemetry.read
 // on one project. Nothing here fakes a server answer. The committed ingest refuses an end in another clock domain, an end
@@ -158,4 +158,42 @@ test('outside the scope or the window: a project the reader does not hold is the
  await expect(late.getByText('not proof that the trace does not exist')).toBeVisible();
  const unknown=await open(seed.absent);
  await expect(unknown.locator('.status')).toHaveAttribute('data-state','empty');
+});
+
+test('a span reported long after it ended and a loss its producer reported are limits of the trace, in words, never repairs',async()=>{
+ test.setTimeout(120_000);
+ // A second source of its own: a loss record is attributed to the producers that sent a span of the trace, so the other traces stay untouched.
+ const source=await onboardSpanSource(owners,org,p1,true);
+ const d=domain();
+ const late={trace:id(),root:spanId(),child:spanId()};
+ await ingestTrace(api,source,late.trace,[
+  {span:late.root,kind:'server',operation:'op.frontend',startMs:0,endMs:100,domain:d},
+  {span:late.child,parent:late.root,kind:'internal',operation:'op.api',startMs:10,endMs:60,observedMs:30_060,domain:d},
+ ]);
+ const lossy={trace:id(),root:spanId()};
+ await ingestTrace(api,source,lossy.trace,[{span:lossy.root,kind:'server',operation:'op.frontend',startMs:0,endMs:100,domain:d}]);
+ await ingestSpanLoss(api,source,{startMs:20,endMs:30,reason:'transport',count:5});
+
+ const page=await open(late.trace);
+ await expect(limits(page).locator('[data-limit="late_spans"]')).toContainText('1 span was reported more than five seconds after it ended (the latest by 30 s)');
+ await expect(page.getByTestId('late-spans')).toContainText('30000000000 ns later.');
+ expect(await rowIds(page)).toEqual([late.root,late.child]); // the late span stays on the path exactly as recorded
+ await expect(path(page).locator(`tr[data-span="${late.child}"]`)).toContainText('exactly 50 ms');
+ await expect(path(page).locator(`tr[data-span="${late.child}"]`)).toContainText('reported more than five seconds after it ended');
+ await path(page).getByRole('button',{name:'Show details of span op.api, internal, level 2'}).click();
+ await expect(page.getByTestId('span-details')).toContainText('Reported by its producer');
+ await expect(page.getByTestId('span-details')).toContainText('(late)');
+ // The producer's own loss record covers this trace's time (and only for the producers that sent it a span).
+ const lost=await open(lossy.trace);
+ await expect(lost.getByTestId('producer-gaps')).toContainText(`5 spans lost by producer ${source.producer} of source ${source.id}`);
+ await expect(lost.getByTestId('producer-gaps')).toContainText('reason transport.');
+ await expect(limits(lost).locator('[data-limit="producer_loss"]')).toContainText('5 spans never reached storage');
+ await expect(limits(lost).locator('[data-limit="producer_loss"]')).toContainText('spans may be missing from this trace');
+ await expect(limits(lost).locator('[data-limit="none_reported"]')).toHaveCount(0);
+ await expect(lost.getByTestId('late-spans')).toHaveCount(0);
+ // The same producer's loss is a gap on its late trace too (its time overlaps), but a trace of the first source shows none.
+ await expect(page.getByTestId('producer-gaps')).toContainText('5 spans lost');
+ const clean=await open(seed.clean.trace);
+ await expect(clean.getByTestId('producer-gaps')).toHaveCount(0);
+ await expect(clean.getByTestId('late-spans')).toHaveCount(0);
 });

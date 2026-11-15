@@ -36,8 +36,13 @@ const (
 // SpanSet is what a SpanSource returns for one trace: its spans visible to the
 // scope inside the window, and whether the read was partial (missing shards).
 type SpanSet struct {
-	Spans   []model.Span
-	Partial bool
+	Spans []model.Span
+	// Reported is, per span in order, when its producer reported it (the record's observation time);
+	// empty when the source cannot say. Losses are the loss records of the producers that contributed
+	// a span to this trace, for the signal span, over the read window.
+	Reported []int64
+	Losses   []traces.ProducerLoss
+	Partial  bool
 }
 
 // SpanSource reads the spans of exactly one trace under a scope. Implementations
@@ -86,7 +91,7 @@ func (s storageSpans) TraceSpans(ctx context.Context, scope auth.Scope, project,
 	rows, err := s.scanner.Scan(ctx, scope, storage.ScanRequest{
 		Projects: []model.ID{project}, Signal: model.SpanKind, Start: window.Start, End: window.End,
 		Selectors:  []storage.Matcher{{Target: storage.MatchField, Name: "trace_id", Op: storage.MatchEqual, Literal: storage.Literal{Kind: storage.LiteralString, String: trace.String()}}},
-		Projection: []storage.Field{storage.FieldID, storage.FieldTime, storage.FieldSpan},
+		Projection: []storage.Field{storage.FieldID, storage.FieldTime, storage.FieldSpan, storage.FieldObservedTime},
 		Fence:      storage.ReadFence{AllowPartial: true},
 	})
 	if err != nil {
@@ -97,9 +102,15 @@ func (s storageSpans) TraceSpans(ctx context.Context, scope auth.Scope, project,
 	}
 	defer rows.Close()
 	var out SpanSet
+	sources := map[model.ID]bool{}
 	for {
 		page, err := rows.Next(ctx)
 		if errors.Is(err, io.EOF) {
+			if len(out.Spans) > 0 {
+				if out.Losses, err = s.losses(ctx, scope, project, sources, window, &out.Partial); err != nil {
+					return SpanSet{}, err
+				}
+			}
 			return out, nil
 		}
 		if err != nil {
@@ -109,7 +120,7 @@ func (s storageSpans) TraceSpans(ctx context.Context, scope auth.Scope, project,
 		if len(page.Values) != page.Len() {
 			return SpanSet{}, model.Fail(model.Corrupt)
 		}
-		for _, v := range page.Values {
+		for i, v := range page.Values {
 			if v.Span == nil || v.Span.Trace != trace {
 				continue
 			}
@@ -117,6 +128,55 @@ func (s storageSpans) TraceSpans(ctx context.Context, scope auth.Scope, project,
 				return out, nil
 			}
 			out.Spans = append(out.Spans, copySpan(*v.Span))
+			reported := int64(0)
+			if len(page.ObservedTimes) == page.Len() {
+				reported = int64(page.ObservedTimes[i])
+			}
+			out.Reported = append(out.Reported, reported)
+			if len(page.Sources) == page.Len() {
+				sources[page.Sources[i]] = true
+			}
+		}
+	}
+}
+
+// losses reads the loss records of the signal span over the window and keeps those of a producer
+// that contributed a span to this trace. A loss read that is itself partial marks the whole read so.
+func (s storageSpans) losses(ctx context.Context, scope auth.Scope, project model.ID, sources map[model.ID]bool, window query.TimeRange, partial *bool) ([]traces.ProducerLoss, error) {
+	rows, err := s.scanner.Scan(ctx, scope, storage.ScanRequest{
+		Projects: []model.ID{project}, Signal: model.Loss, Start: window.Start, End: window.End,
+		Projection: []storage.Field{storage.FieldID, storage.FieldTime, storage.FieldLoss},
+		Fence:      storage.ReadFence{AllowPartial: true},
+	})
+	if err != nil {
+		return nil, err
+	}
+	if rows == nil {
+		return nil, model.Fail(model.Corrupt)
+	}
+	defer rows.Close()
+	var out []traces.ProducerLoss
+	for {
+		page, err := rows.Next(ctx)
+		if errors.Is(err, io.EOF) {
+			return out, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		*partial = *partial || page.Partial
+		if len(page.Values) != page.Len() {
+			return nil, model.Fail(model.Corrupt)
+		}
+		for _, v := range page.Values {
+			l := v.Loss
+			if l == nil || l.Signal != model.SpanKind || !sources[l.Source] {
+				continue
+			}
+			out = append(out, traces.ProducerLoss{Source: l.Source, Producer: l.Producer, Start: model.Int64(l.Start), End: model.Int64(l.End), Reason: l.Reason, Count: l.Count})
+			if len(out) > traces.MaxGaps*4 {
+				return out, nil
+			}
 		}
 	}
 }
@@ -195,8 +255,10 @@ func (t *Traces) View(ctx context.Context, authority *auth.Service, credential a
 		}
 		return traceViewOf(body, StateEmpty, ReasonNoSpansInWindow), scope, nil
 	}
-	path, err := traces.CriticalPath(set.Spans)
+	path, err := traces.Analyze(set.Spans, traces.Evidence{Reported: set.Reported, Losses: set.Losses})
 	switch {
+	case errors.Is(err, traces.ErrInvalidEvidence):
+		return TraceView{}, auth.Scope{}, model.Fail(model.Corrupt)
 	case errors.Is(err, traces.ErrTooManySpans), errors.Is(err, traces.ErrTooDeep):
 		return TraceView{}, auth.Scope{}, model.Fail(model.TooLarge)
 	case err != nil:

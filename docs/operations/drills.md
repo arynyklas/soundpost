@@ -13,6 +13,8 @@ simulated as passed.
 go run -tags soundpost_faults ./tools/drills --scenario NAME|all --target isolated --report DIR [--binary PATH] [--root .]
 ```
 
+The same tag also builds the `soundpost serve` shard-removal seam used by the browser end-to-end suite (`cmd/soundpost/faultcontrol.go`): with `SOUNDPOST_FAULT_DIR` set, a `close-groups` file there (comma-separated data slots 0-63) closes those replica groups of the running server, so readers find shards unanswering. It is never compiled into the released binary (`faultcontrol_off.go` is a no-op); `web/e2e-harness/h.sh` builds it with `E2E_FAULTS=1` for `web/e2e/shard-loss.spec.ts`, which needs a server of its own because the removal is permanent.
+
 The `soundpost_faults` tag compiles the storage engine's fault seam (`storage.Engine.SetFaultHook`) into the
 drills binary only; the released `soundpost` binary is built without it, so no consumer can install a fault
 hook. Without the tag every scenario still runs except the engine part of `capacity-faults`, which then fails
