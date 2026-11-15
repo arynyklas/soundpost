@@ -1,7 +1,8 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
 import {test,expect,type Browser,type BrowserContext,type Page,type Request} from '@playwright/test';
-import {id,login,origin,owner,postJson,csrf} from './support/real';
-import {CANARY_FN,CANARY_LABEL,MAP_SECRET,revoke,seedEvidence,type EvidenceSeed,type Member} from './support/evidence';
+import {createHash} from 'node:crypto';
+import {adminCommand,id,login,origin,owner,postJson,csrf} from './support/real';
+import {CANARY_FN,CANARY_LABEL,MAP_SECRET,REAL_CLASS,REAL_CODE,groupingFingerprint,issueId,member,revoke,seedEvidence,type EvidenceSeed,type Member} from './support/evidence';
 
 // Real server, real Chrome. The organization, users, grants, source policy and source go through the real admin and
 // onboarding routes; the source map is admitted through the real multipart POST /api/v1/artifacts upload; releases are
@@ -63,7 +64,7 @@ test('release page: identity, label as a separate revision, ancestry from parent
  await expect(cmp.filter({hasText:seed.releases.child})).toHaveAttribute('data-order','same');
  await expect(cmp.filter({hasText:seed.releases.unregistered})).toHaveAttribute('data-order','unknown');
  await expect(cmp.filter({hasText:seed.releases.unregistered})).toContainText('no order is claimed');
- await expect(page.locator('[data-section="regression"]')).toContainText('Not available');
+ await expect(page.locator('li[data-section="regression"]')).toHaveAttribute('data-state','empty');
  // A release whose parent was never registered is incomplete, with the unknown parent called out; no regression is claimed.
  await page.goto(`/${hash(seed.org,'releases',{project:seed.project,id:seed.releases.orphan})}`);
  await expect(page.getByTestId('release-parents').locator('li')).toHaveAttribute('data-known','no');
@@ -94,7 +95,7 @@ test('release page: a project reader is told it needs an organization administra
  expect(new Set(texts).size).toBe(1);
 });
 
-test('issue page: grouping version and hash, occurrences, unknown ancestry, no regression claimed, actions truthfully not available',async()=>{
+test('issue page: grouping version and hash, occurrences, unknown ancestry, no regression claimed; the stored detail needs telemetry.read; strangers and project readers',async()=>{
  const page=await as(seed.admin,hash(seed.org,'issues',{project:seed.project,id:seed.issue.id}));
  await expect(page.getByRole('heading',{name:/^Issue /})).toBeVisible();
  await expect(page.getByTestId('grouping-version')).toHaveText('1');
@@ -107,19 +108,18 @@ test('issue page: grouping version and hash, occurrences, unknown ancestry, no r
  await expect(page.locator(`tr[data-occurrence="${seed.issue.unknownOccurrence}"]`)).toContainText('no regression is claimed');
  // The producer groups both occurrences into the current grouping version: nothing is stored apart as late history.
  await expect(page.locator('tr[data-late="yes"]')).toHaveCount(0);
- await expect(page.getByTestId('regression-note')).toContainText('No regression is claimed');
- await expect(page.locator('[data-section="occurrence_detail"]')).toContainText('Not available');
- await expect(page.locator('[data-section="regression"]')).toContainText('Not available');
- // Actions go through the existing action dispatch, which answers a typed not_available for an issue; nothing is changed or shown as changed.
+ await expect(page.getByTestId('regression-note')).toContainText('never inferred from timestamps or release labels');
+ await expect(page.getByTestId('regression-none')).toBeVisible();
+ // An administrator holds the issue evidence but not the telemetry: the stored record behind an occurrence is withheld, with the reason in words, and nothing of it is shown.
+ const detail=page.locator('li[data-section="occurrence_detail"]');
+ await expect(detail).toHaveAttribute('data-state','not_available');
+ await expect(detail).toContainText('telemetry.read');
+ await page.getByRole('button',{name:`Show stored detail of occurrence ${seed.issue.knownOccurrence}`}).click();
+ const stored=page.locator('[data-section="occurrence-detail"]');
+ await expect(stored.locator('.status')).toContainText('telemetry.read');
+ await expect(stored.getByTestId('occ-class')).toHaveCount(0);
  await expect(page.getByTestId('issue-expected-version')).toHaveText(/^\d+$/);
  for(const label of ['Resolve','Ignore','Stop ignoring','Reopen'])await expect(page.getByRole('radio',{name:label})).toBeVisible();
- await page.getByRole('radio',{name:'Ignore'}).check();
- await page.getByRole('button',{name:'Submit: Ignore'}).click();
- const note=page.getByTestId('issue-action-not-available');
- await expect(note).toBeVisible();
- await expect(note).toContainText('Not available. Nothing was changed.');
- await expect(note).toContainText('has no control handler');
- await expect(page.getByTestId('workflow')).toContainText('open');
  // An issue that does not exist and one in another scope are the same Not found.
  const unknown=await as(seed.admin,hash(seed.org,'issues',{project:seed.project,id:id()}));
  await expect(unknown.locator('.status').first()).toContainText('Not found');
@@ -129,6 +129,196 @@ test('issue page: grouping version and hash, occurrences, unknown ancestry, no r
  const reader=await as(seed.telemetry,hash(seed.org,'issues',{project:seed.project,id:seed.issue.id}));
  await expect(reader.locator('.status').getByText('Persisted issue evidence can only be read by an organization administrator')).toBeVisible();
  await expect(reader.getByTestId('grouping-hash')).toHaveCount(0);
+ // An administrator who also holds telemetry.read stays the administrator: the evidence and the stored detail are both readable.
+ const analyst=await as(seed.analyst,hash(seed.org,'issues',{project:seed.project,id:seed.issue.id}));
+ await expect(analyst.getByTestId('grouping-hash')).toContainText(seed.issue.fingerprint);
+ await expect(analyst.locator('li[data-section="occurrence_detail"]')).toHaveAttribute('data-state','ready');
+});
+
+const reasonField=(page:Page)=>page.getByLabel(/^Reason/);
+async function submitIssueAction(page:Page,label:string,reason:string,fixedIn?:string):Promise<void>{
+ await page.getByRole('radio',{name:label}).check();
+ await reasonField(page).fill(reason);
+ if(fixedIn!==undefined)await page.getByLabel(/^Fixed in releases/).fill(fixedIn);
+ await page.getByRole('button',{name:`Submit: ${label}`}).click();
+}
+const revisionOf=async(page:Page):Promise<number>=>Number((await page.getByTestId('issue-expected-version').innerText()).trim());
+
+test('issue actions: ignore, stop ignoring, resolve and reopen are committed by the server and shown from the stored issue; a moved revision, a forbidden transition and a refusal are told apart',async()=>{
+ const target={project:seed.project,id:seed.actions.issue};
+ const page=await as(seed.admin,hash(seed.org,'issues',target));
+ await expect(page.getByTestId('workflow')).toContainText('open');
+ const r0=await revisionOf(page);
+ const posts:string[]=[];
+ page.on('request',(r)=>{if(r.method()==='POST'&&new URL(r.url()).pathname==='/api/v1/actions')posts.push(r.postData()??'');});
+ // No reason: the browser refuses to send, and a blank reason is refused before anything is sent.
+ await page.getByRole('radio',{name:'Ignore'}).check();
+ await page.getByRole('button',{name:'Submit: Ignore'}).click();
+ expect(await reasonField(page).evaluate((el:HTMLTextAreaElement)=>el.validity.valueMissing)).toBe(true);
+ await reasonField(page).fill('   ');
+ await page.getByRole('button',{name:'Submit: Ignore'}).click();
+ await expect(page.getByRole('alert').filter({hasText:'Give a reason'})).toBeVisible();
+ expect(posts).toHaveLength(0);
+ await expect(page.getByTestId('workflow')).toContainText(`open (revision ${r0})`);
+
+ // Ignore: pending first, then committed with the revision the server names, and the page re-reads the stored issue.
+ await submitIssueAction(page,'Ignore','noise from a retry loop');
+ const committed=page.getByTestId('issue-action-committed');
+ await expect(committed).toContainText('Ignore committed');
+ await expect(committed).toContainText(`revision ${r0+1}`);
+ await expect(page.getByTestId('workflow')).toContainText(`ignored (revision ${r0+1})`);
+ await expect(page.getByTestId('issue-expected-version')).toHaveText(String(r0+1));
+ expect(posts).toHaveLength(1);
+ const sent=JSON.parse(posts[0]??'{}') as Record<string,unknown>;
+ expect(sent).toMatchObject({entity_kind:'issue',kind:'ignore',target_id:seed.actions.issue,expected_version:String(r0),payload:{reason:'noise from a retry loop'}});
+ for(const forbidden of ['actor','origin','principal','timestamp','at'])expect(Object.keys(sent)).not.toContain(forbidden);
+
+ // A transition the workflow forbids at the revision on screen: a conflict that says so, nothing changed, the revision is the same.
+ await submitIssueAction(page,'Reopen','trying to reopen an ignored issue');
+ const forbidden=page.getByTestId('issue-action-conflict');
+ await expect(forbidden).toHaveAttribute('data-conflict','issue_state_conflict');
+ await expect(forbidden).toContainText('does not allow this action');
+ await expect(page.getByTestId('workflow')).toContainText(`ignored (revision ${r0+1})`);
+
+ // Stop ignoring, then resolve naming the release that contains the fix.
+ await submitIssueAction(page,'Stop ignoring','the noise is fixed upstream');
+ await expect(page.getByTestId('issue-action-committed')).toContainText('Stop ignoring committed');
+ await expect(page.getByTestId('workflow')).toContainText(`open (revision ${r0+2})`);
+ await submitIssueAction(page,'Resolve','fixed in the child release',seed.releases.child);
+ await expect(page.getByTestId('issue-action-committed')).toContainText('Resolve committed');
+ await expect(page.getByTestId('workflow')).toContainText(`resolved (revision ${r0+3})`);
+ await expect(page.locator('section[data-section="grouping"]')).toContainText('Resolved at');
+
+ // A second browser opens the resolved issue; the first reopens it; the second is now acting on a revision that moved.
+ const second=await as(seed.admin,hash(seed.org,'issues',target));
+ await expect(second.getByTestId('workflow')).toContainText(`resolved (revision ${r0+3})`);
+ await submitIssueAction(page,'Reopen','a customer reported it again');
+ await expect(page.getByTestId('workflow')).toContainText(`open (revision ${r0+4})`);
+ await submitIssueAction(second,'Reopen','reopen from the stale page');
+ const stale=second.getByTestId('issue-action-conflict');
+ await expect(stale).toHaveAttribute('data-conflict','issue_version_conflict');
+ await expect(stale).toContainText(`revision ${r0+4}`);
+ await expect(stale).toContainText(`revision ${r0+3}`);
+ // The page re-read the issue after the conflict: it shows what is stored now and the revision the next action will expect.
+ await expect(second.getByTestId('workflow')).toContainText(`open (revision ${r0+4})`);
+ await expect(second.getByTestId('issue-expected-version')).toHaveText(String(r0+4));
+
+ // A refusal is not a conflict: an administrator whose rights end while the page is open is told the action was not applied, and nothing changed.
+ const demoted=await member(ownerPage,seed.org,seed.project,'demoted',['artifacts.read'],true);
+ const gone=await as(demoted,hash(seed.org,'issues',target));
+ await expect(gone.getByTestId('workflow')).toContainText(`open (revision ${r0+4})`);
+ await adminCommand(ownerPage,seed.org,'org_admin',{user_id:demoted.id,enabled:false});
+ await submitIssueAction(gone,'Ignore','after my rights ended');
+ const refused=gone.getByTestId('issue-action-refused');
+ await expect(refused).toContainText('Not applied');
+ await expect(refused).toContainText('not_found');
+ await expect(gone.getByTestId('issue-action-committed')).toHaveCount(0);
+ await second.getByRole('button',{name:'Reload issue'}).click();
+ await expect(second.getByTestId('workflow')).toContainText(`open (revision ${r0+4})`);
+ // The same actions without the grant or from another organization are the same not-found at the route, with nothing changed.
+ for(const who of [seed.telemetry,seed.outsider]){
+  const p=await as(who,hash(seed.org,'queue'));
+  const r=await postJson(p,'/api/v1/actions',{org:seed.org,command_id:id(),expected_version:String(r0+4),project_id:seed.project,target_id:seed.actions.issue,entity_kind:'issue',kind:'ignore',payload:{reason:'no grant'}});
+  expect(r.status).toBe(404);
+ }
+});
+
+test('real bundle: the frames of the real failure are mapped by the real source map to the source function and line; a label rename cannot change the map; a corrupt map is refused',async()=>{
+ const {bundle}=seed.real;
+ const open=async():Promise<Page>=>{
+  const page=await as(seed.analyst,hash(seed.org,'issues',{project:seed.project,id:seed.real.issue}));
+  await page.getByRole('button',{name:`Show stored detail of occurrence ${seed.real.occurrence}`}).click();
+  await expect(page.getByTestId('stored-frames').getByRole('article')).toHaveCount(2);
+  return page;
+ };
+ const page=await open();
+ const frames=page.getByTestId('stored-frames').getByRole('article');
+ // The frames are the stored ones of the real stack, not typed: original generated position and function first.
+ for(const [i,f] of bundle.frames.entries()){
+  await expect(frames.nth(i)).toHaveAttribute('data-reason','resolved');
+  await expect(frames.nth(i).getByTestId('frame-state')).toHaveText('Mapped');
+  await expect(frames.nth(i).getByTestId('frame-original')).toContainText(`${seed.artifact}:${f.line}:${f.column} in ${f.function}`);
+ }
+ // The throw site maps to the line of `throw new Error` in the source; the call site to the line of the call, where the real map names the function.
+ await expect(frames.nth(0).getByTestId('frame-mapped')).toContainText(`${bundle.sourceFile}:${bundle.throwLine}:`);
+ await expect(frames.nth(1).getByTestId('frame-mapped')).toContainText(`${bundle.sourceFile}:${bundle.callLine}:`);
+ await expect(frames.nth(1).getByTestId('frame-mapped')).toContainText('in riskyCheckout');
+ for(const i of [0,1]){
+  await expect(frames.nth(i).getByTestId('frame-mapped')).toContainText(seed.build);
+  await expect(frames.nth(i).getByTestId('frame-mapped')).toContainText(seed.mapHash);
+ }
+ // No private source text is released to a caller without the sources grant, and nothing was requested.
+ await expect(page.locator('body')).not.toContainText(MAP_SECRET);
+ await expect(frames.nth(0).getByTestId('frame-source-state')).toHaveAttribute('data-source','withheld');
+ const mapped=await frames.getByTestId('frame-mapped').allInnerTexts();
+
+ // The display label of the release is a separate, revisioned value: renaming it changes the release page and nothing about the mapping.
+ await seed.renameChild('v1.1-label-renamed-again','2');
+ const release=await as(seed.analyst,hash(seed.org,'releases',{project:seed.project,id:seed.releases.child}));
+ await expect(release.getByTestId('release-label')).toContainText('v1.1-label-renamed-again');
+ await expect(release.getByRole('list',{name:'Label history'}).getByRole('listitem')).toHaveCount(3);
+ await expect(release.getByTestId('release-artifacts')).toContainText(seed.artifact);
+ await expect(release.getByTestId('release-artifacts')).toContainText(seed.debugId);
+ const again=await open();
+ expect(await again.getByTestId('stored-frames').getByTestId('frame-mapped').allInnerTexts()).toEqual(mapped);
+ // A label is never an identity: it is refused as a frame's artifact before anything is sent.
+ await again.getByLabel('Build ID').fill(seed.build);
+ await again.getByLabel(/^Frames \(/).fill(`v1.1-label-renamed-again ${bundle.frames[0]?.line} 7 boom`);
+ await again.getByRole('button',{name:'Resolve frames'}).click();
+ await expect(again.getByRole('alert').filter({hasText:'not a path, URL or label'})).toBeVisible();
+
+ // A corrupt map never becomes an artifact: admission refuses it, and the real map keeps mapping the same frames.
+ const writer=await browserRef.newContext({baseURL:origin()});
+ contexts.push(writer);
+ const w=await writer.newPage();
+ await login(w,seed.srcOwner.email,seed.srcOwner.password);
+ const corrupt=Buffer.from('{"version":3,"sources":["a.ts"],"names":[],"mappings":"!!!!"}');
+ const sha=(b:Buffer):string=>createHash('sha256').update(b).digest('hex');
+ const manifest=`{"version":1,"org":"${seed.org}","project":"${seed.project}","source":"${seed.source}","build":"${seed.build}","debug_id":"debug-corrupt","generated_sha256":"${sha(Buffer.from('x'))}","map_sha256":"${sha(corrupt)}","path":"dist/corrupt.js","source_content":false,"size":"${corrupt.length}","retain_until_ns":"4102444800000000000"}`;
+ const upload=await w.request.post(`${origin()}/api/v1/artifacts`,{headers:{'X-CSRF-Token':await csrf(w),Origin:origin()},multipart:{manifest:{name:'manifest',mimeType:'application/json',buffer:Buffer.from(manifest)},file:{name:'corrupt.js.map',mimeType:'application/json',buffer:corrupt}}});
+ expect(upload.status()).toBeGreaterThanOrEqual(400);
+ expect(upload.status()).toBeLessThan(500);
+ expect(await upload.text()).not.toMatch(/"id":"[0-9a-f]{32}"/);
+ const last=await open();
+ expect(await last.getByTestId('stored-frames').getByTestId('frame-mapped').allInnerTexts()).toEqual(mapped);
+});
+
+test('stored occurrence: class, mechanism, handled and fatal, code, chain and frames come from the real stored record; the links go to the release and the real trace',async()=>{
+ const page=await as(seed.analyst,hash(seed.org,'issues',{project:seed.project,id:seed.real.issue}));
+ await expect(page.getByTestId('grouping-hash')).toContainText(seed.real.fingerprint);
+ await expect(page.locator('li[data-section="occurrence_detail"]')).toHaveAttribute('data-state','ready');
+ await page.getByRole('button',{name:`Show stored detail of occurrence ${seed.real.occurrence}`}).click();
+ const d=page.locator('[data-section="occurrence-detail"]');
+ await expect(d.getByTestId('occ-class')).toHaveText(REAL_CLASS);
+ await expect(d.getByTestId('occ-mechanism')).toContainText('uncaught_exception');
+ await expect(d.getByTestId('occ-mechanism')).toContainText('reached the top of the program');
+ await expect(d.getByTestId('occ-handled-fatal')).toHaveText('Not handled, fatal.');
+ await expect(d.getByTestId('occ-handled-fatal')).toHaveAttribute('data-handled','no');
+ await expect(d.getByTestId('occ-handled-fatal')).toHaveAttribute('data-fatal','yes');
+ await expect(d.getByTestId('occ-code')).toHaveText(REAL_CODE);
+ await expect(d.getByTestId('occ-build')).toContainText(seed.build);
+ // The exception chain as stored: two errors, the suppressed context said so, the edge and the reason the chain may be incomplete.
+ const chain=d.getByTestId('occ-chain');
+ await expect(chain.getByRole('list',{name:'Errors in the chain',exact:true}).getByRole('listitem')).toHaveCount(2);
+ await expect(chain.locator('li[data-node="1"]')).toContainText('CheckoutCause');
+ await expect(chain.locator('li[data-node="1"]')).toContainText('suppressed the context');
+ await expect(chain.locator('li[data-edge-kind="cause"]')).toHaveText(`${REAL_CLASS} (node 0) to CheckoutCause (node 1): cause`);
+ await expect(d.getByTestId('occ-chain-reasons').locator('li[data-reason="cause_accessor"]')).toContainText('accessor');
+ // The issue's second tab: an occurrence of another issue is not reachable through this one (the route answers one not-found).
+ const crossed=await postJson(page,'/api/v1/evidence/occurrence',{org:seed.org,project:seed.project,issue:seed.real.issue,occurrence:seed.issue.knownOccurrence});
+ expect(crossed.status).toBe(404);
+ // Links: the release the record names and the trace and span it happened under.
+ await expect(d.getByTestId('occ-release-link')).toContainText(seed.real.release);
+ await expect(d.getByTestId('occ-trace')).toContainText(seed.real.span);
+ await d.getByTestId('occ-release-link').click();
+ await expect(page.getByRole('heading',{name:/^Release /})).toContainText(seed.real.release);
+ await expect(page.getByTestId('release-artifacts')).toContainText(seed.artifact);
+ await page.goBack();
+ await expect(page.getByRole('heading',{name:/^Issue /})).toBeVisible();
+ await page.getByRole('button',{name:`Show stored detail of occurrence ${seed.real.occurrence}`}).click();
+ await page.locator('[data-section="occurrence-detail"]').getByTestId('occ-trace-link').click();
+ await expect(page.getByRole('heading',{name:/^Trace /})).toContainText(seed.real.trace);
+ await expect(page.getByTestId('critical-path')).toContainText('op.request');
 });
 
 async function resolve(page:Page,build:string,lines:string[],sources:boolean):Promise<void>{
@@ -140,6 +330,89 @@ async function resolve(page:Page,build:string,lines:string[],sources:boolean):Pr
 }
 const frameLine=(artifact:string,line:number,fn:string):string=>`${artifact} ${line} 7 ${fn}`;
 
+test('regression: the stored explanation of each occurrence after a resolution is shown on the issue and on the release; unknown ancestry is decided by the boundary and says so; nothing is inferred from timestamps',async()=>{
+ const klass='E2eRegressionTarget';
+ await seed.occurrenceOf(klass,seed.releases.root);
+ const identity=issueId(seed.org,seed.project,groupingFingerprint(seed.org,seed.project,klass,'manual'));
+ const target={project:seed.project,id:identity};
+ const page=await as(seed.admin,hash(seed.org,'issues',target));
+ // Never resolved, so never evaluated: the empty list has its own words, and a recent occurrence on a release names no regression.
+ await expect(page.getByTestId('regression-none')).toBeVisible();
+ await expect(page.locator('li[data-section="regression"]')).toHaveAttribute('data-state','empty');
+ await expect(page.getByTestId('regression-note')).toContainText('never inferred from timestamps or release labels');
+ // Resolve naming the child release as the fix.
+ await submitIssueAction(page,'Resolve','fixed in the child release',seed.releases.child);
+ await expect(page.getByTestId('workflow')).toContainText('resolved');
+ const rows=page.getByTestId('regression-list').locator('tbody tr');
+ const reload=async():Promise<void>=>{await page.getByRole('button',{name:'Reload issue'}).click();await expect(page.getByRole('button',{name:'Reload issue'})).toBeEnabled();};
+
+ // 1. An occurrence in the root release, an ancestor of the fix: evaluated, not eligible, nothing reopened, the issue stays resolved.
+ const onRoot=await seed.occurrenceOf(klass,seed.releases.root);
+ await reload();
+ await expect(rows).toHaveCount(1);
+ await expect(rows.nth(0)).toHaveAttribute('data-occurrence',onRoot);
+ await expect(rows.nth(0)).toHaveAttribute('data-eligible','no');
+ await expect(rows.nth(0)).toHaveAttribute('data-reopened','no');
+ await expect(rows.nth(0)).toHaveAttribute('data-ancestry','known');
+ await expect(rows.nth(0).getByTestId('regression-reason')).toHaveText('release is not the fix frontier or a descendant of it');
+ await expect(rows.nth(0).getByTestId('regression-outcome')).toHaveText('Did not reopen the issue.');
+ await expect(rows.nth(0)).toContainText(seed.releases.child);
+ await expect(rows.nth(0)).toContainText('qualifying of 1 needed');
+ await expect(page.getByTestId('workflow')).toContainText('resolved');
+
+ // 2. An occurrence in the child release, the fix itself: eligible by release ancestry, and the stored evaluation reopened the issue.
+ const onChild=await seed.occurrenceOf(klass,seed.releases.child);
+ await reload();
+ await expect(rows).toHaveCount(2);
+ await expect(rows.nth(1)).toHaveAttribute('data-occurrence',onChild);
+ await expect(rows.nth(1)).toHaveAttribute('data-eligible','yes');
+ await expect(rows.nth(1)).toHaveAttribute('data-reopened','yes');
+ await expect(rows.nth(1).getByTestId('regression-reason')).toHaveText('release is the fix frontier or a descendant of it');
+ await expect(rows.nth(1).getByTestId('regression-outcome')).toHaveText('Reopened the issue.');
+ await expect(page.getByTestId('workflow')).toContainText('open');
+
+ // 3. Resolved again with no named fix, an occurrence that names no release: its ancestry is unknown, so only the explicit resolution time boundary decides, and the page says exactly that.
+ await submitIssueAction(page,'Resolve','accepted for now');
+ await expect(page.getByTestId('workflow')).toContainText('resolved');
+ const noRelease=await seed.occurrenceOf(klass);
+ await reload();
+ await expect(rows).toHaveCount(3);
+ const last=rows.last();
+ await expect(last).toHaveAttribute('data-occurrence',noRelease);
+ await expect(last).toHaveAttribute('data-ancestry','unknown');
+ await expect(last).toHaveAttribute('data-eligible','yes');
+ await expect(last.getByTestId('regression-reason')).toHaveText('ancestry unknown: event after the explicit resolution boundary');
+ await expect(last.getByTestId('regression-verdict')).toContainText('Ancestry unknown: decided by the explicit resolution time boundary, not by release ancestry.');
+ await expect(last).toContainText('The occurrence names no release.');
+ await expect(page.getByTestId('workflow')).toContainText('open');
+
+ // The release page lists the stored evaluations whose occurrence ran in it, each with its issue; a release none ran in says so and claims nothing.
+ const root=await as(seed.admin,hash(seed.org,'releases',{project:seed.project,id:seed.releases.root}));
+ const rootRows=root.getByTestId('regression-list').locator('tbody tr');
+ await expect(rootRows).toHaveCount(1);
+ await expect(rootRows.nth(0)).toHaveAttribute('data-occurrence',onRoot);
+ await expect(rootRows.nth(0)).toHaveAttribute('data-eligible','no');
+ await expect(rootRows.nth(0).getByRole('link').first()).toHaveAttribute('href',new RegExp(`view=issues&target=${seed.project}%3A${identity}$`));
+ await expect(root.locator('li[data-section="regression"]')).toHaveAttribute('data-state','ready');
+ const child=await as(seed.admin,hash(seed.org,'releases',{project:seed.project,id:seed.releases.child}));
+ const childRows=child.getByTestId('regression-list').locator('tbody tr');
+ await expect(childRows).toHaveCount(1);
+ await expect(childRows.nth(0)).toHaveAttribute('data-occurrence',onChild);
+ await expect(childRows.nth(0)).toHaveAttribute('data-reopened','yes');
+ const sibling=await as(seed.admin,hash(seed.org,'releases',{project:seed.project,id:seed.releases.sibling}));
+ await expect(sibling.getByTestId('release-regressions-none')).toBeVisible();
+ await expect(sibling.locator('li[data-section="regression"]')).toHaveAttribute('data-state','empty');
+ // The issue link on the release page opens the issue with the same evaluations.
+ await rootRows.nth(0).getByRole('link').first().click();
+ await expect(root.getByRole('heading',{name:/^Issue /})).toContainText(identity);
+ await expect(root.getByTestId('regression-list').locator('tbody tr')).toHaveCount(3);
+ // A project reader is told the evidence needs an administrator and sees no evaluation; a stranger sees the one not-found.
+ const reader=await as(seed.telemetry,hash(seed.org,'issues',target));
+ await expect(reader.getByTestId('regression-list')).toHaveCount(0);
+ const stranger=await as(seed.outsider,hash(seed.org,'issues',target));
+ await expect(stranger.locator('.status').first()).toContainText('Not found');
+ await expect(stranger.getByTestId('regression-list')).toHaveCount(0);
+});
 test('frames: the real map is found for its build, an unmapped position is said so, original frames and reasons are shown, no URL is ever fetched, markup is text',async()=>{
  const page=await as(seed.srcOwner,hash(seed.org,'issues',{project:seed.project,id:seed.issue.id}));
  await expect(page.getByRole('form',{name:'Resolve frames'})).toBeVisible();

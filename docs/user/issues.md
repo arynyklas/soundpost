@@ -23,6 +23,22 @@ Issue actions need `issues.write` on the project; the grouping migration needs `
 
 The action answer is the issue as the lifecycle committed it (`issue`: id, workflow, revision, resolution time, fixed descendants, migration links). A stale expected revision is HTTP 409 with detail `issue_version_conflict` and the current version; a transition the workflow forbids at the revision the caller saw is 409 `issue_state_conflict`. While a deletion saga covering the project is fencing, issue actions are refused (retryable 503, detail `deletion_fencing`).
 
+### What the console sends and shows
+
+Every issue action carries a non-empty `reason` (it is the audit record's reason; an empty one is HTTP 400). Only `resolve` may carry `fixed_frontier` (registered release IDs that contain the fix) and `resolution_boundary`. The console sends the revision on screen as `expected_version`, shows nothing as changed until the server answers `state: committed`, then re-reads the stored issue; both 409 details are shown as different facts (a moved revision, or a transition the workflow does not allow).
+
+## Reading an issue: `/api/v1/evidence/*`
+
+All three reads are `POST`, scope-first (a wrong organization, a project the caller does not hold and a missing target are one indistinguishable 404) and need the session's CSRF binding.
+
+| Route | Answer |
+| --- | --- |
+| `/api/v1/evidence/issue` | Grouping version and hash, workflow and revision, the newest evidence window with counts folded out (`compacted_*`), late history listed apart, and `regression`: the stored regression evaluations of the issue, oldest first. Needs an organization administrator; a project reader is told so (`issue_evidence_needs_org_admin`) and nothing is read. |
+| `/api/v1/evidence/occurrence` | Body `{org, project, issue, occurrence}`. The stored error record behind one occurrence the issue lists: `exception_class`, `mechanism`, `handled`, `fatal`, `code`, `template_id`, `build_id`, `release_id`, `trace_id`, `span_id`, `frames` and the exception chain (`exception_graph`: nodes, edges `cause`/`context`/`group`, and the `reasons` a part was not captured). It holds no message text. Reading it needs an organization administrator **and** `telemetry.read` on the project: administration alone never reads telemetry (`occurrence_needs_telemetry_read`). An occurrence the issue does not list is a 404; a record that expired or was erased is `occurrence_not_stored`; a partial storage read is `incomplete` (`occurrence_read_partial`), never proof of absence. |
+| `/api/v1/evidence/release` | Release identity, label history, parents and partial-order comparisons, and `regressions`: the stored evaluations whose occurrence ran in this release, each with its issue. |
+
+Regression evaluations are exactly what the lifecycle stored when an occurrence arrived after a resolution (decision, the evaluator's reason, the fix frontier compared with, threshold/window/qualifying, whether it reopened the issue). The `regression` section is `not_available` when no reader is wired, `empty` (`no_regression_evaluated`) when nothing was evaluated, and never a verdict inferred from timestamps or release labels. The frames of a stored occurrence are mapped through the exact source map of the record's own build (`/api/v1/evidence/frames`), which needs the sandbox to be ready (`docs/operations/symbolication.md`).
+
 ## Deduplicated evidence
 
 Evidence is keyed by its occurrence ID, which originates at a durable data cursor (group, index), never at a delivery attempt. `ApplyThrough(ctx, scope, cursor, evidence)` applies a batch and advances that data group's checkpoint in **one** store commit together with the issue changes, the occurrence index, effects and audits.

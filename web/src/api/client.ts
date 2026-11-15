@@ -1,7 +1,7 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
 import { ANCESTRY_ORDERS, ApiFault, COMPLETENESS, EXPORT_PHASES, INVESTIGATION_KINDS, LIVE_EVENT_TYPES, OutcomeUnknown, QueryFault, VersionConflict, type ActionRequest, type ActionResponse, type AncestryOrder, type Completeness, type DiscoveryRequest, type DiscoveryResult, type ExemplarRequest, type ExemplarResult, type ExportGrant, type ExportOperation, type ExportPhase, type ExportSignal, type FormatRequest, type FormatResult, type FramesRequest, type FramesView, type Id, type IncidentView, type InvestigationKind, type InvestigationRequest, type InvestigationView, type IssueEvidenceView, type LifecycleOperation, type LiveEvent, type LiveEventType, type LiveTicket, type LiveTicketRequest, type LoadState, type QueryRequest, type QueryResult, type QueueView, type ReleaseView, type SafeFrame, type ViewState, type VisibleSource } from './types';
 import { SseProtocolError, readSse, type SseFrame } from './sse';
-import type { DestinationView, PolicyView, PolicyWriteAnswer, PolicyWriteRequest, RetentionView, TraceView } from './types';
+import type { DestinationView, ErrorOccurrenceView, ExceptionChain, IssueActionView, PolicyView, PolicyWriteAnswer, PolicyWriteRequest, RetentionView, TraceView } from './types';
 import { parseTraceView } from '../traces/model';
 import { lineSplitter, parseReplayLine, type ReplayLine } from '../replays/model';
 import { parseProfileResponse } from '../profiles/model';
@@ -163,17 +163,34 @@ export function parseIncident(raw: unknown, want: { org: Id; project: Id; id: Id
  return raw as unknown as IncidentView;
 }
 
-/** Accepts a response only for the action that was sent. A committed answer must carry the committed incident at the committed revision. */
+const ISSUE_WORKFLOWS = ['open', 'resolved', 'ignored'];
+
+/** Accepts the committed issue only for exactly the issue that was acted on, at a revision the server named twice (answer and issue) and in a workflow state the lifecycle has. */
+export function parseIssueAnswer(raw: unknown, want: { id: Id }): IssueActionView {
+ if (!isRecord(raw) || raw.id !== want.id || typeof raw.workflow !== 'string' || !ISSUE_WORKFLOWS.includes(raw.workflow) || !decLike(raw.revision) || typeof raw.grouping_version !== 'number') return badResponse();
+ if (raw.resolution_time_ns !== undefined && !decLike(raw.resolution_time_ns)) return badResponse();
+ if ((raw.fixed_descendants !== undefined && !idList(raw.fixed_descendants)) || (raw.migration_links !== undefined && !idList(raw.migration_links))) return badResponse();
+ return raw as unknown as IssueActionView;
+}
+
+/** Accepts a response only for the action that was sent. A committed incident answer must carry the committed incident at the committed revision; a committed issue answer the committed issue at the committed revision, and never an incident. */
 export function parseAction(raw: unknown, req: ActionRequest): ActionResponse {
  if (!isRecord(raw) || raw.entity_kind !== req.entity_kind || raw.kind !== req.kind || raw.target_id !== req.target_id) return badResponse();
- if (raw.state === 'not_available') return typeof raw.reason === 'string' && raw.incident === undefined && raw.revision === undefined ? raw as unknown as ActionResponse : badResponse();
+ if (raw.state === 'not_available') return typeof raw.reason === 'string' && raw.incident === undefined && raw.issue === undefined && raw.revision === undefined ? raw as unknown as ActionResponse : badResponse();
  if (raw.state !== 'committed' || !decLike(raw.revision)) return badResponse();
+ if (req.entity_kind === 'issue') {
+  if (raw.incident !== undefined) return badResponse();
+  const issue = parseIssueAnswer(raw.issue, { id: req.target_id });
+  if (issue.revision !== raw.revision) return badResponse();
+  return { ...(raw as unknown as ActionResponse), issue };
+ }
+ if (raw.issue !== undefined) return badResponse();
  const incident = parseIncident(raw.incident, { org: req.org, project: req.project_id, id: req.target_id });
  if (incident.version !== raw.revision || incident.timeline === undefined) return badResponse();
  return { ...(raw as unknown as ActionResponse), incident };
 }
 
-/** POST /api/v1/actions. A 409 with the incident-version detail is a VersionConflict carrying the current revision; a 501 is the explicit not_available answer; a transport failure is OutcomeUnknown (the same command ID may be resent: the server returns the original result). */
+/** POST /api/v1/actions. A 409 with a version or state conflict detail is a VersionConflict carrying the current revision; a 501 is the explicit not_available answer; a transport failure is OutcomeUnknown (the same command ID may be resent: the server returns the original result). */
 export async function act(req: ActionRequest, signal: AbortSignal): Promise<ActionResponse> {
  let response: Response;
  try {
@@ -189,8 +206,9 @@ export async function act(req: ActionRequest, signal: AbortSignal): Promise<Acti
  if (response.status === 409) {
   const copy = response.clone();
   const body: unknown = await copy.json().catch(() => null);
-  if (isRecord(body) && body.code === 'conflict' && body.detail === 'incident_version_conflict' && decLike(body.current_version)) {
-   throw new VersionConflict(body.current_version, /^[0-9a-f]{32}$/.test(String(body.request_id ?? '')) ? String(body.request_id) : '');
+  const detail = req.entity_kind === 'issue' ? ['issue_version_conflict', 'issue_state_conflict'] : ['incident_version_conflict'];
+  if (isRecord(body) && body.code === 'conflict' && typeof body.detail === 'string' && detail.includes(body.detail) && decLike(body.current_version)) {
+   throw new VersionConflict(body.current_version, /^[0-9a-f]{32}$/.test(String(body.request_id ?? '')) ? String(body.request_id) : '', body.detail);
   }
  }
  if (!response.ok && response.status !== 501) throw await apiFault(response);
@@ -638,6 +656,14 @@ export async function getFrames(req: FramesRequest, signal: AbortSignal): Promis
  return parseFrames(await response.json() as unknown, req);
 }
 
+/** One stored regression evaluation: bounded text, decimal times, booleans and counters. A release's list also names the issue each belongs to. */
+function explanationLike(x: unknown, withIssue: boolean): boolean {
+ return isRecord(x) && idLike(x.occurrence) && (x.evidence_release === undefined || idLike(x.evidence_release)) && decLike(x.event_time_ns) && decLike(x.resolution_time_ns) && decLike(x.window_ns)
+  && typeof x.eligible === 'boolean' && typeof x.ancestry_known === 'boolean' && typeof x.reopened === 'boolean' && textLike(x.reason, 512) && idList(x.frontier)
+  && typeof x.threshold === 'number' && Number.isInteger(x.threshold) && x.threshold >= 0 && typeof x.qualifying === 'number' && Number.isInteger(x.qualifying) && x.qualifying >= 0
+  && (withIssue ? idLike(x.issue) : x.issue === undefined);
+}
+
 export function parseReleaseEvidence(raw: unknown, want: { org: Id; project: Id; release: Id; compare: Id[] }): ReleaseView {
  if (!isRecord(raw) || raw.org !== want.org || raw.project !== want.project || !stateLike(raw.state) || !Array.isArray(raw.parents) || !idList(raw.children) || !Array.isArray(raw.comparisons) || !sectionsLike(raw.sections)) return badResponse();
  if (!raw.parents.every((p: unknown) => isRecord(p) && idLike(p.id) && typeof p.known === 'boolean')) return badResponse();
@@ -649,6 +675,7 @@ export function parseReleaseEvidence(raw: unknown, want: { org: Id; project: Id;
   if (r.id !== want.release || !idLike(r.build_id) || !textLike(r.label, 256) || !decLike(r.revision) || !decLike(r.build_time_ns) || !Array.isArray(r.debug_artifacts) || !Array.isArray(r.label_history)) return badResponse();
   if (!r.debug_artifacts.every((d: unknown) => isRecord(d) && idLike(d.artifact_id) && textLike(d.debug_id, 256) && hashLike(d.sha256)) || !r.label_history.every((h: unknown) => isRecord(h) && decLike(h.revision) && textLike(h.label, 256))) return badResponse();
  }
+ if (!Array.isArray(raw.regressions) || raw.regressions.length > 4096 || !raw.regressions.every((x: unknown) => explanationLike(x, true)) || (raw.state === 'not_available' && raw.regressions.length > 0)) return badResponse();
  return raw as unknown as ReleaseView;
 }
 
@@ -669,6 +696,7 @@ export function parseIssueEvidence(raw: unknown, want: { org: Id; project: Id; i
  const g = raw.grouping;
  if (raw.state === 'not_available' ? g !== undefined : !isRecord(g)) return badResponse();
  if (isRecord(g) && (typeof g.grouping_version !== 'number' || !hashLike(g.fingerprint) || typeof g.workflow !== 'string' || !decLike(g.revision) || !idList(g.resolution_frontier) || !idList(g.observed_releases) || !idList(g.fixed_descendants) || !idList(g.migration_links))) return badResponse();
+ if (raw.regression !== undefined && (raw.state === 'not_available' || !isRecord(raw.regression) || !Array.isArray(raw.regression.explanations) || raw.regression.explanations.length > 4096 || !raw.regression.explanations.every((x: unknown) => explanationLike(x, false)))) return badResponse();
  return raw as unknown as IssueEvidenceView;
 }
 
@@ -677,6 +705,39 @@ export async function getIssueEvidence(org: Id, project: Id, issue: Id, signal: 
  const response = await jsonPost('/api/v1/evidence/issue', { org, project, issue }, signal);
  if (!response.ok) throw await apiFault(response);
  return parseIssueEvidence(await response.json() as unknown, { org, project, issue });
+}
+
+const MECHANISMS = ['manual', 'uncaught_exception', 'unhandled_rejection', 'thread_exception', 'asyncio_exception'];
+const EDGE_KINDS = ['cause', 'context', 'group'];
+function chainLike(c: unknown): c is ExceptionChain {
+ if (!isRecord(c) || !Array.isArray(c.nodes) || !Array.isArray(c.edges) || !Array.isArray(c.reasons)) return false;
+ if (c.nodes.length === 0 || c.nodes.length > 16 || c.edges.length > 272 || c.reasons.length > 16 || !c.reasons.every((r: unknown) => textLike(r, 64))) return false;
+ const count = c.nodes.length;
+ return c.nodes.every((n: unknown, i: number) => isRecord(n) && n.id === i && textLike(n.exception_class, 256) && Array.isArray(n.frames) && n.frames.length <= 128 && n.frames.every(isSafeFrame) && typeof n.context_suppressed === 'boolean')
+  && c.edges.every((e: unknown) => isRecord(e) && Number.isInteger(e.from) && Number.isInteger(e.to) && (e.from as number) >= 0 && (e.from as number) < count && (e.to as number) >= 0 && (e.to as number) < count && EDGE_KINDS.includes(e.kind as string)
+   && ((e.kind === 'group') === (e.ordinal !== undefined)) && (e.ordinal === undefined || (Number.isInteger(e.ordinal) && (e.ordinal as number) >= 0 && (e.ordinal as number) < 16)));
+}
+
+/** Accepts a stored occurrence only for exactly the requested organization, project, issue and occurrence. A detail exists exactly when the view is ready; every part of it is bounded text or a number, and a chain that points at a node it does not have is a fault and never rendered. */
+export function parseErrorOccurrence(raw: unknown, want: { org: Id; project: Id; issue: Id; occurrence: Id }): ErrorOccurrenceView {
+ if (!isRecord(raw) || raw.org !== want.org || raw.project !== want.project || raw.issue !== want.issue || raw.occurrence !== want.occurrence || !stateLike(raw.state) || !sectionsLike(raw.sections)) return badResponse();
+ const d = raw.detail;
+ if ((raw.state === 'ready') !== (d !== undefined)) return badResponse();
+ if (d !== undefined) {
+  if (!isRecord(d) || !textLike(d.exception_class, 256) || !MECHANISMS.includes(d.mechanism as string) || typeof d.handled !== 'boolean' || typeof d.fatal !== 'boolean' || !(d.code === null || textLike(d.code, 256))
+   || !idLike(d.build_id) || !Array.isArray(d.frames) || d.frames.length > 128 || !d.frames.every(isSafeFrame) || (d.template_id !== undefined && !textLike(d.template_id, 256))) return badResponse();
+  for (const key of ['release_id', 'trace_id', 'replay_id', 'profile_id', 'run_id']) if (d[key] !== undefined && !idLike(d[key])) return badResponse();
+  if (d.span_id !== undefined && !(typeof d.span_id === 'string' && /^[0-9a-f]{16}$/.test(d.span_id))) return badResponse();
+  if (d.exception_graph !== undefined && !chainLike(d.exception_graph)) return badResponse();
+ }
+ return raw as unknown as ErrorOccurrenceView;
+}
+
+/** The stored error record behind one occurrence of an issue: class, mechanism, handled, fatal, code, frames and exception chain, read under the caller's own telemetry scope. */
+export async function getErrorOccurrence(org: Id, project: Id, issue: Id, occurrence: Id, signal: AbortSignal): Promise<ErrorOccurrenceView> {
+ const response = await jsonPost('/api/v1/evidence/occurrence', { org, project, issue, occurrence }, signal);
+ if (!response.ok) throw await apiFault(response);
+ return parseErrorOccurrence(await response.json() as unknown, { org, project, issue, occurrence });
 }
 
 /** The spans of one trace in the window, analyzed by the server into a critical path with duration bounds and limits. The scope is the caller's own; the body names only the organization, project, trace and window. */

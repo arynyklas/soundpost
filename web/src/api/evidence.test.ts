@@ -1,7 +1,7 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
 import { describe, expect, test } from 'bun:test';
 import { ApiFault, type FramesRequest, type ViewState } from './types';
-import { parseFrames, parseIssueEvidence, parseReleaseEvidence } from './client';
+import { parseErrorOccurrence, parseFrames, parseIssueEvidence, parseReleaseEvidence } from './client';
 
 const A = 'a'.repeat(32), P = '1'.repeat(32), B = 'b'.repeat(32), R = '4'.repeat(32), R2 = '5'.repeat(32), H = 'd'.repeat(64);
 const sent = { module_id: '', function: 'boom', artifact_id: A, line: 10, column: 7, in_app: true, async: false };
@@ -48,7 +48,7 @@ describe('frames response is accepted only for the request that was sent', () =>
 });
 
 const release = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
- org: A, project: P, state: 'ready', parents: [{ id: R2, known: true }], children: [], comparisons: [{ release: R2, order: 'descendant' }], sections: [{ name: 'ancestry', state: 'ready' }],
+ org: A, project: P, state: 'ready', parents: [{ id: R2, known: true }], children: [], comparisons: [{ release: R2, order: 'descendant' }], regressions: [], sections: [{ name: 'ancestry', state: 'ready' }],
  release: { id: R, build_id: B, label: 'v2', revision: '1', build_time_ns: '5', debug_artifacts: [{ artifact_id: A, debug_id: 'd', sha256: H }], label_history: [{ revision: '1', label: 'v2' }] }, ...over,
 });
 describe('release evidence', () => {
@@ -98,5 +98,81 @@ describe('issue evidence', () => {
  test('hash and version are typed', () => {
   refused(() => parseIssueEvidence(issueView({ grouping: { ...(issueView().grouping as object), fingerprint: 'abc' } }), want));
   refused(() => parseIssueEvidence(issueView({ occurrences: [occ({ fingerprint: 'zz' })] }), want));
+ });
+});
+
+const frame = (over: Record<string, unknown> = {}): Record<string, unknown> => ({ module_id: 'app', function: 'boom', artifact_id: A, line: 3, column: 4, in_app: true, async: false, ...over });
+const detail = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+ exception_class: 'StoredFailure', mechanism: 'unhandled_rejection', handled: false, fatal: true, code: 'E_STORED', build_id: B, release_id: R2, trace_id: R, span_id: '0102030405060708', frames: [frame()],
+ exception_graph: { nodes: [{ id: 0, exception_class: 'StoredFailure', frames: [frame()], context_suppressed: false }, { id: 1, exception_class: 'Root', frames: [], context_suppressed: true }], edges: [{ from: 0, to: 1, kind: 'cause' }, { from: 0, to: 1, kind: 'group', ordinal: 1 }], reasons: ['node_limit'] }, ...over,
+});
+const occurrenceView = (over: Record<string, unknown> = {}): Record<string, unknown> => ({ org: A, project: P, issue: R, occurrence: B, state: 'ready', sections: [{ name: 'occurrence_detail', state: 'ready' }], detail: detail(), ...over });
+describe('stored occurrence', () => {
+ const want = { org: A, project: P, issue: R, occurrence: B };
+ test('accepted for the requested occurrence of the requested issue only', () => {
+  expect(parseErrorOccurrence(occurrenceView(), want).detail?.exception_class).toBe('StoredFailure');
+  for (const other of [{ org: B }, { project: B }, { issue: A }, { occurrence: A }]) refused(() => parseErrorOccurrence(occurrenceView(other), want));
+ });
+ test('a detail exists exactly when the view is ready', () => {
+  refused(() => parseErrorOccurrence(occurrenceView({ detail: undefined }), want));
+  refused(() => parseErrorOccurrence(occurrenceView({ state: 'not_available', reason: 'occurrence_not_stored' }), want));
+  expect(parseErrorOccurrence(occurrenceView({ state: 'not_available', reason: 'occurrence_not_stored', detail: undefined, sections: [{ name: 'occurrence_detail', state: 'not_available', reason: 'occurrence_not_stored' }] }), want).state).toBe('not_available' as ViewState);
+ });
+ test('mechanism is the closed vocabulary; handled, fatal and code are typed; a code may be null', () => {
+  refused(() => parseErrorOccurrence(occurrenceView({ detail: detail({ mechanism: 'telepathy' }) }), want));
+  refused(() => parseErrorOccurrence(occurrenceView({ detail: detail({ handled: 'no' }) }), want));
+  refused(() => parseErrorOccurrence(occurrenceView({ detail: detail({ fatal: 1 }) }), want));
+  refused(() => parseErrorOccurrence(occurrenceView({ detail: detail({ code: 7 }) }), want));
+  expect(parseErrorOccurrence(occurrenceView({ detail: detail({ code: null }) }), want).detail?.code).toBeNull();
+ });
+ test('identities are typed: a build, release, trace and span of the wrong shape are faults', () => {
+  for (const bad of [{ build_id: 'x' }, { release_id: 'x' }, { trace_id: 'abc' }, { span_id: 'zz' }, { span_id: '0102' }]) refused(() => parseErrorOccurrence(occurrenceView({ detail: detail(bad) }), want));
+ });
+ test('frames are bounded and typed', () => {
+  refused(() => parseErrorOccurrence(occurrenceView({ detail: detail({ frames: [frame({ line: -1 })] }) }), want));
+  refused(() => parseErrorOccurrence(occurrenceView({ detail: detail({ frames: Array.from({ length: 129 }, () => frame()) }) }), want));
+  refused(() => parseErrorOccurrence(occurrenceView({ detail: detail({ frames: [frame({ column: 'x' })] }) }), want));
+  expect(parseErrorOccurrence(occurrenceView({ detail: detail({ frames: [frame({ column: null })] }) }), want).detail?.frames).toHaveLength(1);
+ });
+ test('a chain must point only at nodes it has, with node IDs in order, a known kind and an ordinal exactly on a group edge', () => {
+  const chain = (g: Record<string, unknown>): Record<string, unknown> => ({ ...(detail().exception_graph as object), ...g });
+  refused(() => parseErrorOccurrence(occurrenceView({ detail: detail({ exception_graph: chain({ edges: [{ from: 0, to: 2, kind: 'cause' }] }) }) }), want));
+  refused(() => parseErrorOccurrence(occurrenceView({ detail: detail({ exception_graph: chain({ edges: [{ from: 0, to: 1, kind: 'because' }] }) }) }), want));
+  refused(() => parseErrorOccurrence(occurrenceView({ detail: detail({ exception_graph: chain({ edges: [{ from: 0, to: 1, kind: 'group' }] }) }) }), want));
+  refused(() => parseErrorOccurrence(occurrenceView({ detail: detail({ exception_graph: chain({ edges: [{ from: 0, to: 1, kind: 'cause', ordinal: 0 }] }) }) }), want));
+  refused(() => parseErrorOccurrence(occurrenceView({ detail: detail({ exception_graph: chain({ nodes: [{ id: 1, exception_class: 'X', frames: [], context_suppressed: false }] }) }) }), want));
+  refused(() => parseErrorOccurrence(occurrenceView({ detail: detail({ exception_graph: chain({ nodes: [] }) }) }), want));
+  refused(() => parseErrorOccurrence(occurrenceView({ detail: detail({ exception_graph: chain({ nodes: Array.from({ length: 17 }, (_, i) => ({ id: i, exception_class: 'X', frames: [], context_suppressed: false })), edges: [] }) }) }), want));
+  expect(parseErrorOccurrence(occurrenceView({ detail: detail({ exception_graph: undefined }) }), want).detail?.exception_graph).toBeUndefined();
+ });
+});
+
+const explanation = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+ occurrence: B, evidence_release: R2, event_time_ns: '900', resolution_time_ns: '100', eligible: true, ancestry_known: true, reason: 'release is the fix frontier or a descendant of it', frontier: [R], threshold: 1, window_ns: '0', qualifying: 1, reopened: true, ...over,
+});
+describe('regression explanations', () => {
+ const want = { org: A, project: P, issue: R };
+ const wantRelease = { org: A, project: P, release: R, compare: [R2] };
+ test('an issue view carries the stored list as it is, and may carry none', () => {
+  expect(parseIssueEvidence(issueView({ regression: { explanations: [explanation()] } }), want).regression?.explanations[0]?.reopened).toBe(true);
+  expect(parseIssueEvidence(issueView(), want).regression).toBeUndefined();
+  expect(parseIssueEvidence(issueView({ regression: { explanations: [] } }), want).regression?.explanations).toEqual([]);
+ });
+ test('an evaluation is typed: times and the window are decimal strings, flags are booleans, the reason is bounded text', () => {
+  for (const bad of [{ event_time_ns: 900 }, { resolution_time_ns: 'soon' }, { window_ns: -1 }, { eligible: 'yes' }, { ancestry_known: 1 }, { reopened: null }, { reason: 'x'.repeat(513) }, { reason: 7 }, { occurrence: 'x' }, { evidence_release: 'x' }, { frontier: ['x'] }, { threshold: 1.5 }, { qualifying: -1 }]) {
+   refused(() => parseIssueEvidence(issueView({ regression: { explanations: [explanation(bad)] } }), want));
+  }
+  expect(parseIssueEvidence(issueView({ regression: { explanations: [explanation({ evidence_release: undefined, ancestry_known: false })] } }), want).regression?.explanations).toHaveLength(1);
+ });
+ test('an issue evaluation carries no issue field of its own and a not_available view carries no list', () => {
+  refused(() => parseIssueEvidence(issueView({ regression: { explanations: [explanation({ issue: A })] } }), want));
+  refused(() => parseIssueEvidence(issueView({ state: 'not_available', reason: 'issue_evidence_needs_org_admin', grouping: undefined, occurrences: [], late_history: [], regression: { explanations: [] } }), want));
+ });
+ test('a release view lists evaluations that each name their issue; a not_available view lists none', () => {
+  expect(parseReleaseEvidence(release({ regressions: [explanation({ issue: A })] }), wantRelease).regressions[0]?.issue).toBe(A);
+  refused(() => parseReleaseEvidence(release({ regressions: [explanation()] }), wantRelease));
+  refused(() => parseReleaseEvidence(release({ regressions: [explanation({ issue: 'x' })] }), wantRelease));
+  refused(() => parseReleaseEvidence(release({ regressions: undefined }), wantRelease));
+  refused(() => parseReleaseEvidence(release({ state: 'not_available', reason: 'release_records_need_org_admin', release: undefined, comparisons: [], regressions: [explanation({ issue: A })] }), wantRelease));
  });
 });

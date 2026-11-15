@@ -8,6 +8,7 @@ import (
 
 	"github.com/arynyklas/soundpost/internal/auth"
 	"github.com/arynyklas/soundpost/internal/control"
+	"github.com/arynyklas/soundpost/internal/httpapi"
 	"github.com/arynyklas/soundpost/internal/issues"
 	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/releases"
@@ -27,13 +28,19 @@ import (
 //	  -> issueMigrator             the grouping migration, through the same door
 
 // BindIssueActions installs the issue lifecycle on the C11 action surface. Until
-// it runs every issue action answers not_available (nothing changed).
+// it runs every issue action answers not_available (nothing changed). It also
+// binds the stored-error reader of the issue evidence view: the issue evidence
+// lists occurrences by record, and the record behind one is read through the
+// storage scan under the caller's own telemetry scope.
 func (a *App) BindIssueActions() error {
 	svc, err := a.NewIssueActions(releaseActionClock{})
 	if err != nil {
 		return err
 	}
 	a.Actions.BindIssues(svc)
+	if a.Evidence != nil {
+		a.Evidence = a.Evidence.With(httpapi.WithErrorOccurrences(httpapi.NewStorageErrorSource(a.Storage)), httpapi.WithRegressionExplanations(svc))
+	}
 	return nil
 }
 

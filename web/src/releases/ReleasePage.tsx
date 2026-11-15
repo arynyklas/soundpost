@@ -7,8 +7,9 @@ import { StatusPanel } from '../app/StatusPanel';
 import { EvidenceSections } from '../evidence/Sections';
 import { orderWords, parseCompareIds } from '../evidence/model';
 import { dataOf, useEvidence } from '../evidence/useEvidence';
+import { RegressionTable } from '../issues/RegressionTable';
 
-/** One release: its immutable identity (build and debug artifacts), its label as a separate revisioned display value, its declared parents and the partial-order relation to the releases you name. Ancestry comes only from immutable parent edges: an unregistered parent or release is shown as unknown, never ordered by name, version string or time, and no regression is claimed here. */
+/** One release: its immutable identity (build and debug artifacts), its label as a separate revisioned display value, its declared parents and the partial-order relation to the releases you name. Ancestry comes only from immutable parent edges: an unregistered parent or release is shown as unknown, never ordered by name, version string or time. A regression appears only as the stored evaluation of an occurrence that ran in this release; none is inferred. */
 export function ReleasePage(props: { id: Id; project: Id; context: ViewContext }): React.JSX.Element {
  const { context, project, id } = props;
  const [text, setText] = React.useState('');
@@ -65,6 +66,17 @@ export function ReleasePage(props: { id: Id; project: Id; context: ViewContext }
        <h4>Comparisons</h4>
        {view.comparisons.length === 0 ? <p>No release was chosen to compare with.</p>
         : <ul data-testid="release-comparisons">{view.comparisons.map((c) => <li key={c.release} data-order={c.order}>Compared with <code>{c.release}</code>: {orderWords(c.order)}</li>)}</ul>}
+      </section>
+     )}
+     {record && (
+      <section className="panel" aria-labelledby="rel-regression-heading" data-section="release-regressions">
+       <h3 id="rel-regression-heading">Regression evaluations that ran in this release</h3>
+       <p>These are the evaluations the issue lifecycle stored for occurrences that ran in this release, with the issue each belongs to. A regression is never inferred here from the release's label, order or time, and a release with no stored evaluation is not thereby shown to be free of regressions.</p>
+       {view.sections.find((s) => s.name === 'regression')?.state === 'not_available'
+        ? <p data-testid="release-regressions-unavailable">The stored explanations are not available here, so no regression is claimed for this release.</p>
+        : view.regressions.length === 0
+         ? <p data-testid="release-regressions-none">No stored regression evaluation names an occurrence that ran in this release.</p>
+         : <RegressionTable context={context} project={project} rows={view.regressions} caption="Stored regression evaluations of occurrences that ran in this release" byRelease />}
       </section>
      )}
     </>

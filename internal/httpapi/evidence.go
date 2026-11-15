@@ -5,14 +5,18 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"io"
+	"math"
 	"net/http"
 	"slices"
 	"unicode"
 	"unicode/utf8"
 
 	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/issues"
 	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/releases"
+	"github.com/arynyklas/soundpost/internal/storage"
 	"github.com/arynyklas/soundpost/internal/symbolicate"
 )
 
@@ -30,19 +34,23 @@ import (
 
 // Reason codes of the evidence surface (closed vocabulary of static strings).
 const (
-	ReasonSymbolicatorNotBuilt = "symbolicator_not_wired"
-	ReasonArtifactGrantAbsent  = "artifact_read_not_granted"
-	ReasonReleasesNotBuilt     = "release_reader_not_wired"
-	ReasonReleaseNeedsAdmin    = "release_records_need_org_admin"
-	ReasonIssueEvidenceAbsent  = "issue_evidence_view_not_built"
-	ReasonIssueNeedsAdmin      = "issue_evidence_needs_org_admin"
-	ReasonOccurrenceDetail     = "occurrence_payload_view_not_built"
-	ReasonRegressionDetail     = "regression_explanation_view_not_built"
-	ReasonEvidenceCompacted    = "evidence_window_compacted"
-	ReasonSourcesNotRequested  = "sources_not_requested"
-	ReasonSourcesGrantRequired = "source_grant_required"
-	ReasonNoSourceContent      = "no_source_content"
-	ReasonFrameNotMapped       = "frame_not_mapped"
+	ReasonSymbolicatorNotBuilt     = "symbolicator_not_wired"
+	ReasonArtifactGrantAbsent      = "artifact_read_not_granted"
+	ReasonReleasesNotBuilt         = "release_reader_not_wired"
+	ReasonReleaseNeedsAdmin        = "release_records_need_org_admin"
+	ReasonIssueEvidenceAbsent      = "issue_evidence_view_not_built"
+	ReasonIssueNeedsAdmin          = "issue_evidence_needs_org_admin"
+	ReasonOccurrenceDetail         = "occurrence_payload_view_not_built"
+	ReasonRegressionDetail         = "regression_explanation_view_not_built"
+	ReasonEvidenceCompacted        = "evidence_window_compacted"
+	ReasonSourcesNotRequested      = "sources_not_requested"
+	ReasonSourcesGrantRequired     = "source_grant_required"
+	ReasonNoSourceContent          = "no_source_content"
+	ReasonFrameNotMapped           = "frame_not_mapped"
+	ReasonOccurrenceNeedsTelemetry = "occurrence_needs_telemetry_read"
+	ReasonOccurrenceNotStored      = "occurrence_not_stored"
+	ReasonOccurrenceReadPartial    = "occurrence_read_partial"
+	ReasonNoRegression             = "no_regression_evaluated"
 )
 
 // Evidence bounds. A request never names more than MaxEvidenceFrames frames or
@@ -100,16 +108,81 @@ type IssueEvidenceReader interface {
 	GroupingIssue(ctx context.Context, scope auth.Scope, project, id model.ID) (model.GroupingIssue, error)
 }
 
-// Evidence is the handler set behind /api/v1/evidence/*. Any seam may be nil.
-type Evidence struct {
-	frames   FrameResolver
-	releases ReleaseReader
-	issues   IssueEvidenceReader
+// ErrorOccurrenceReader reads the stored error record behind one piece of issue
+// evidence. The scope is a telemetry-read scope for exactly one project (the
+// evidence itself is an organization-admin read; the telemetry is not part of
+// it). found is false when no record with that occurrence ID is stored any more
+// (expired or erased); partial says some shard did not answer, so a missing
+// record is not proof of absence. NewStorageErrorSource is the committed
+// implementation. A nil reader is an explicit not_available state.
+type ErrorOccurrenceReader interface {
+	ErrorOccurrence(ctx context.Context, scope auth.Scope, project, record, occurrence model.ID, at model.UnixNano) (occ model.ErrorOccurrence, found, partial bool, err error)
 }
 
-// NewEvidence binds the three optional seams.
-func NewEvidence(frames FrameResolver, releases ReleaseReader, issues IssueEvidenceReader) *Evidence {
-	return &Evidence{frames: frames, releases: releases, issues: issues}
+// Evidence is the handler set behind /api/v1/evidence/*. Any seam may be nil.
+type Evidence struct {
+	frames      FrameResolver
+	releases    ReleaseReader
+	issues      IssueEvidenceReader
+	occurrences ErrorOccurrenceReader
+	regressions RegressionReader
+}
+
+// EvidenceOption binds one optional seam of NewEvidence.
+type EvidenceOption func(*Evidence)
+
+// WithErrorOccurrences binds the stored error reader behind /api/v1/evidence/occurrence.
+func WithErrorOccurrences(r ErrorOccurrenceReader) EvidenceOption {
+	return func(e *Evidence) { e.occurrences = r }
+}
+
+// RegressionReader reads the regression evaluations the issue lifecycle stored;
+// *issues.Service implements it under the caller's own scope. ExplainAll answers
+// every issue of one project (the release view lists the evaluations whose
+// occurrence ran in it). A nil reader is an explicit not_available section.
+type RegressionReader interface {
+	Explain(ctx context.Context, scope auth.Scope, project, issue model.ID) ([]issues.Explanation, error)
+	ExplainAll(ctx context.Context, scope auth.Scope, project model.ID) (map[model.ID][]issues.Explanation, error)
+}
+
+// WithRegressionExplanations binds the stored regression reader of the issue and release views.
+func WithRegressionExplanations(r RegressionReader) EvidenceOption {
+	return func(e *Evidence) { e.regressions = r }
+}
+
+func sortedIssueIDs(all map[model.ID][]issues.Explanation) []model.ID {
+	ids := make([]model.ID, 0, len(all))
+	for id := range all {
+		ids = append(ids, id)
+	}
+	slices.SortFunc(ids, func(a, b model.ID) int { return slices.Compare(a[:], b[:]) })
+	return ids
+}
+
+// NewEvidence binds the three required-or-nil seams and any options.
+func NewEvidence(frames FrameResolver, releases ReleaseReader, issues IssueEvidenceReader, options ...EvidenceOption) *Evidence {
+	e := &Evidence{frames: frames, releases: releases, issues: issues}
+	for _, o := range options {
+		o(e)
+	}
+	return e
+}
+
+// With returns a copy of the handler set with options applied; the receiver is unchanged.
+func (e *Evidence) With(options ...EvidenceOption) *Evidence {
+	c := *e
+	for _, o := range options {
+		o(&c)
+	}
+	return &c
+}
+
+// WithFrames returns a copy with another frame resolver: the symbolicator is
+// configured after the node is open and everything else the node bound stays.
+func (e *Evidence) WithFrames(frames FrameResolver) *Evidence {
+	c := *e
+	c.frames = frames
+	return &c
 }
 
 // FramesBody is the POST /api/v1/evidence/frames body. Org and Project are
@@ -343,15 +416,16 @@ type ReleaseComparison struct {
 
 // ReleaseView answers a release request.
 type ReleaseView struct {
-	Org         model.ID            `json:"org"`
-	Project     model.ID            `json:"project"`
-	State       ViewState           `json:"state"`
-	Reason      string              `json:"reason,omitempty"`
-	Release     *ReleaseRecordView  `json:"release,omitempty"`
-	Parents     []ParentView        `json:"parents"`
-	Children    []model.ID          `json:"children"`
-	Comparisons []ReleaseComparison `json:"comparisons"`
-	Sections    []ViewSection       `json:"sections"`
+	Org         model.ID                `json:"org"`
+	Project     model.ID                `json:"project"`
+	State       ViewState               `json:"state"`
+	Reason      string                  `json:"reason,omitempty"`
+	Release     *ReleaseRecordView      `json:"release,omitempty"`
+	Parents     []ParentView            `json:"parents"`
+	Children    []model.ID              `json:"children"`
+	Comparisons []ReleaseComparison     `json:"comparisons"`
+	Regressions []ReleaseRegressionView `json:"regressions"`
+	Sections    []ViewSection           `json:"sections"`
 }
 
 func validRelease(body ReleaseBody) error {
@@ -367,7 +441,7 @@ func validRelease(body ReleaseBody) error {
 }
 
 func unavailableReleaseView(body ReleaseBody, reason string) ReleaseView {
-	return ReleaseView{Org: body.Org, Project: body.Project, State: StateNotAvailable, Reason: reason, Parents: []ParentView{}, Children: []model.ID{}, Comparisons: []ReleaseComparison{},
+	return ReleaseView{Org: body.Org, Project: body.Project, State: StateNotAvailable, Reason: reason, Parents: []ParentView{}, Children: []model.ID{}, Comparisons: []ReleaseComparison{}, Regressions: []ReleaseRegressionView{},
 		Sections: []ViewSection{{Name: "release", State: StateNotAvailable, Reason: reason}}}
 }
 
@@ -398,7 +472,7 @@ func (e *Evidence) Release(ctx context.Context, scope auth.Scope, body ReleaseBo
 	if err != nil {
 		return ReleaseView{}, err
 	}
-	view := ReleaseView{Org: body.Org, Project: body.Project, State: StateReady, Parents: []ParentView{}, Children: []model.ID{}, Comparisons: []ReleaseComparison{}}
+	view := ReleaseView{Org: body.Org, Project: body.Project, State: StateReady, Parents: []ParentView{}, Children: []model.ID{}, Comparisons: []ReleaseComparison{}, Regressions: []ReleaseRegressionView{}}
 	record := ReleaseRecordView{ID: rel.ID, BuildID: rel.BuildID, Label: rel.DisplayLabel, Revision: model.Uint64(rel.Revision), BuildTime: model.Int64(rel.BuildTime), DebugArtifacts: []DebugArtifactView{}, LabelHistory: []LabelRevisionView{}}
 	for _, d := range rel.DebugArtifacts {
 		record.DebugArtifacts = append(record.DebugArtifacts, DebugArtifactView{ArtifactID: d.ArtifactID, DebugID: d.DebugID, SHA256: d.SHA256})
@@ -430,8 +504,25 @@ func (e *Evidence) Release(ctx context.Context, scope auth.Scope, body ReleaseBo
 		ancestry = ViewSection{Name: "ancestry", State: StateIncomplete, Reason: "ancestry_unknown"}
 		view.State, view.Reason = StateIncomplete, "ancestry_unknown"
 	}
-	view.Sections = []ViewSection{{Name: "release", State: StateReady}, ancestry,
-		{Name: "regression", State: StateNotAvailable, Reason: ReasonRegressionDetail}}
+	regression := ViewSection{Name: "regression", State: StateNotAvailable, Reason: ReasonRegressionDetail}
+	if e.regressions != nil {
+		all, err := e.regressions.ExplainAll(ctx, scope, body.Project)
+		if err != nil {
+			return ReleaseView{}, err
+		}
+		for _, issue := range sortedIssueIDs(all) {
+			for _, x := range all[issue] {
+				if x.EvidenceRelease == rel.ID {
+					view.Regressions = append(view.Regressions, ReleaseRegressionView{Issue: issue, RegressionExplanationView: explanationView(x)})
+				}
+			}
+		}
+		regression = ViewSection{Name: "regression", State: StateReady}
+		if len(view.Regressions) == 0 {
+			regression = ViewSection{Name: "regression", State: StateEmpty, Reason: ReasonNoRegression}
+		}
+	}
+	view.Sections = []ViewSection{{Name: "release", State: StateReady}, ancestry, regression}
 	return view, nil
 }
 
@@ -488,6 +579,7 @@ type IssueView struct {
 	Grouping    *GroupingView            `json:"grouping,omitempty"`
 	Occurrences []OccurrenceEvidenceView `json:"occurrences"`
 	LateHistory []OccurrenceEvidenceView `json:"late_history"`
+	Regression  *RegressionView          `json:"regression,omitempty"`
 	Sections    []ViewSection            `json:"sections"`
 }
 
@@ -509,10 +601,19 @@ func evidenceView(e model.GroupingEvidence, late bool) OccurrenceEvidenceView {
 		BuildID: e.BuildID, ReleaseID: e.ReleaseID, Ancestry: ancestry, Freshness: e.Freshness, Late: late}
 }
 
-// Issue reads one persisted issue's evidence under scope. It never computes a
-// regression: the stored ancestry and the grouping version/hash are shown as
-// they are, and an issue the reader cannot see is the one not-found.
+// Issue reads one persisted issue's evidence under scope with no telemetry read
+// (the stored occurrence detail is then reported as needing that grant).
 func (e *Evidence) Issue(ctx context.Context, scope auth.Scope, body IssueBody) (IssueView, error) {
+	return e.IssueWithDetail(ctx, scope, nil, body)
+}
+
+// IssueWithDetail reads one persisted issue's evidence under the
+// organization-admin scope. read, when not nil, is the same caller's
+// telemetry-read scope for the project: only then is the stored occurrence
+// detail section ready. It never computes a regression: the stored ancestry
+// and the grouping version/hash are shown as they are, and an issue the reader
+// cannot see is the one not-found.
+func (e *Evidence) IssueWithDetail(ctx context.Context, scope auth.Scope, read *auth.Scope, body IssueBody) (IssueView, error) {
 	if body.Org == (model.ID{}) || body.Project == (model.ID{}) || body.Issue == (model.ID{}) {
 		return IssueView{}, invalid("evidence_request_invalid")
 	}
@@ -532,7 +633,7 @@ func (e *Evidence) Issue(ctx context.Context, scope auth.Scope, body IssueBody) 
 	if issue.ID != body.Issue || issue.Org != scope.OrgID() || issue.Project != body.Project {
 		return IssueView{}, model.Fail(model.NotFound)
 	}
-	view := IssueView{Org: body.Org, Project: body.Project, Issue: issue.ID, State: StateIncomplete, Reason: ReasonOccurrenceDetail, Occurrences: []OccurrenceEvidenceView{}, LateHistory: []OccurrenceEvidenceView{}}
+	view := IssueView{Org: body.Org, Project: body.Project, Issue: issue.ID, Occurrences: []OccurrenceEvidenceView{}, LateHistory: []OccurrenceEvidenceView{}}
 	grouping := GroupingView{Version: issue.GroupingVersion, Fingerprint: issue.Fingerprint, Workflow: issue.Workflow, Revision: model.Uint64(issue.Revision), ResolutionFrontier: idsOrEmpty(issue.ResolutionFrontier),
 		ObservedReleases: idsOrEmpty(issue.ObservedReleases), FixedDescendants: idsOrEmpty(issue.FixedDescendants), MigrationLinks: idsOrEmpty(issue.MigrationLinks)}
 	if issue.ResolutionTime != nil {
@@ -556,10 +657,380 @@ func (e *Evidence) Issue(ctx context.Context, scope auth.Scope, body IssueBody) 
 	if grouping.CompactedOccurrences+grouping.CompactedLate > 0 {
 		evidence = ViewSection{Name: "evidence", State: StateIncomplete, Reason: ReasonEvidenceCompacted}
 	}
-	view.Sections = []ViewSection{{Name: "grouping", State: StateReady}, evidence,
-		{Name: "occurrence_detail", State: StateNotAvailable, Reason: ReasonOccurrenceDetail},
-		{Name: "regression", State: StateNotAvailable, Reason: ReasonRegressionDetail}}
+	detail := ViewSection{Name: "occurrence_detail", State: StateNotAvailable, Reason: ReasonOccurrenceDetail}
+	switch {
+	case e.occurrences == nil:
+	case read == nil:
+		detail.Reason = ReasonOccurrenceNeedsTelemetry
+	default:
+		detail = ViewSection{Name: "occurrence_detail", State: StateReady}
+	}
+	regression, err := e.regressionSection(ctx, scope, body.Project, body.Issue, &view)
+	if err != nil {
+		return IssueView{}, err
+	}
+	view.Sections = []ViewSection{{Name: "grouping", State: StateReady}, evidence, detail, regression}
+	view.State = StateReady
+	for _, s := range view.Sections {
+		if s.State != StateReady && s.State != StateEmpty {
+			view.State, view.Reason = StateIncomplete, s.Reason
+			break
+		}
+	}
 	return view, nil
+}
+
+// RegressionExplanationView is one stored regression evaluation of an issue: the
+// occurrence evaluated, the release it ran in, the decision with the reason the
+// evaluator stored, the fix frontier it was compared with, the recorded policy
+// (Threshold qualifying occurrences within Window nanoseconds, 0 = unbounded) and
+// whether the evaluation reopened the issue. It is exactly what the lifecycle
+// recorded when the evidence arrived: nothing here is computed from timestamps or
+// release labels, and an occurrence whose ancestry is unknown says so.
+type RegressionExplanationView struct {
+	Occurrence      model.ID    `json:"occurrence"`
+	EvidenceRelease *model.ID   `json:"evidence_release,omitempty"`
+	EventTime       model.Int64 `json:"event_time_ns"`
+	ResolutionTime  model.Int64 `json:"resolution_time_ns"`
+	Eligible        bool        `json:"eligible"`
+	AncestryKnown   bool        `json:"ancestry_known"`
+	Reason          string      `json:"reason"`
+	Frontier        []model.ID  `json:"frontier"`
+	Threshold       uint32      `json:"threshold"`
+	Window          model.Int64 `json:"window_ns"`
+	Qualifying      uint32      `json:"qualifying"`
+	Reopened        bool        `json:"reopened"`
+}
+
+// RegressionView lists an issue's stored regression evaluations, oldest first.
+type RegressionView struct {
+	Explanations []RegressionExplanationView `json:"explanations"`
+}
+
+// ReleaseRegressionView is one stored regression evaluation whose occurrence ran
+// in the viewed release, with the issue it belongs to.
+type ReleaseRegressionView struct {
+	Issue model.ID `json:"issue"`
+	RegressionExplanationView
+}
+
+func explanationView(x issues.Explanation) RegressionExplanationView {
+	v := RegressionExplanationView{Occurrence: x.OccurrenceID, EventTime: model.Int64(x.EventTime), ResolutionTime: model.Int64(x.ResolutionTime), Eligible: x.Decision.Eligible, AncestryKnown: x.Decision.AncestryKnown,
+		Reason: x.Decision.Reason, Frontier: idsOrEmpty(x.Decision.Frontier), Threshold: x.Threshold, Window: model.Int64(x.Window), Reopened: x.Reopened}
+	if x.Qualifying > 0 {
+		v.Qualifying = uint32(x.Qualifying)
+	}
+	if x.EvidenceRelease != (model.ID{}) {
+		r := x.EvidenceRelease
+		v.EvidenceRelease = &r
+	}
+	return v
+}
+
+// regressionSection reads the issue's stored explanations and sets view.Regression.
+// An unwired reader is an explicit not_available section; an issue with no stored
+// evaluation is an empty one, never a claim that a regression did or did not happen.
+func (e *Evidence) regressionSection(ctx context.Context, scope auth.Scope, project, issue model.ID, view *IssueView) (ViewSection, error) {
+	if e.regressions == nil {
+		return ViewSection{Name: "regression", State: StateNotAvailable, Reason: ReasonRegressionDetail}, nil
+	}
+	explained, err := e.regressions.Explain(ctx, scope, project, issue)
+	if err != nil && !faultIs(err, model.NotFound) {
+		return ViewSection{}, err
+	}
+	view.Regression = &RegressionView{Explanations: make([]RegressionExplanationView, 0, len(explained))}
+	for _, x := range explained {
+		view.Regression.Explanations = append(view.Regression.Explanations, explanationView(x))
+	}
+	if len(explained) == 0 {
+		return ViewSection{Name: "regression", State: StateEmpty, Reason: ReasonNoRegression}, nil
+	}
+	return ViewSection{Name: "regression", State: StateReady}, nil
+}
+
+// ErrorOccurrenceBody is the POST /api/v1/evidence/occurrence body. The occurrence
+// must be one the named issue's evidence lists.
+type ErrorOccurrenceBody struct {
+	Org        model.ID `json:"org"`
+	Project    model.ID `json:"project"`
+	Issue      model.ID `json:"issue"`
+	Occurrence model.ID `json:"occurrence"`
+}
+
+// ErrorOccurrenceDetail is what the stored error record says about one occurrence:
+// the exception class, the mechanism, whether it was handled and whether it was
+// fatal, the code, the sanitized frames and the exception chain (cause, context
+// and group edges, with the reasons a part of the chain was not captured). It
+// holds no message text or values: the record carries none. The links name
+// the build, the release, the trace and the span, the replay and the profile
+// the record itself carries; none is inferred.
+type ErrorOccurrenceDetail struct {
+	Class     string                `json:"exception_class"`
+	Mechanism string                `json:"mechanism"`
+	Handled   bool                  `json:"handled"`
+	Fatal     bool                  `json:"fatal"`
+	Code      *string               `json:"code"`
+	Template  *string               `json:"template_id,omitempty"`
+	Build     model.ID              `json:"build_id"`
+	Release   *model.ID             `json:"release_id,omitempty"`
+	Trace     *model.ID             `json:"trace_id,omitempty"`
+	Span      *model.SpanID         `json:"span_id,omitempty"`
+	Replay    *model.ID             `json:"replay_id,omitempty"`
+	Profile   *model.ID             `json:"profile_id,omitempty"`
+	Run       *model.ID             `json:"run_id,omitempty"`
+	Frames    []model.Frame         `json:"frames"`
+	Chain     *model.ExceptionGraph `json:"exception_graph,omitempty"`
+}
+
+// ErrorOccurrenceView answers an occurrence request. Detail is present only when
+// State is ready.
+type ErrorOccurrenceView struct {
+	Org        model.ID               `json:"org"`
+	Project    model.ID               `json:"project"`
+	Issue      model.ID               `json:"issue"`
+	Occurrence model.ID               `json:"occurrence"`
+	State      ViewState              `json:"state"`
+	Reason     string                 `json:"reason,omitempty"`
+	Detail     *ErrorOccurrenceDetail `json:"detail,omitempty"`
+	Sections   []ViewSection          `json:"sections"`
+}
+
+func unavailableOccurrenceView(body ErrorOccurrenceBody, state ViewState, reason string) ErrorOccurrenceView {
+	return ErrorOccurrenceView{Org: body.Org, Project: body.Project, Issue: body.Issue, Occurrence: body.Occurrence, State: state, Reason: reason,
+		Sections: []ViewSection{{Name: "occurrence_detail", State: state, Reason: reason}}}
+}
+
+func copyFrames(in []model.Frame) []model.Frame {
+	out := make([]model.Frame, len(in))
+	for i, f := range in {
+		out[i] = copyFrame(f)
+	}
+	return out
+}
+
+func copyChain(g *model.ExceptionGraph) *model.ExceptionGraph {
+	if g == nil {
+		return nil
+	}
+	out := &model.ExceptionGraph{Nodes: make([]model.ExceptionNode, len(g.Nodes)), Edges: make([]model.ExceptionEdge, len(g.Edges)), Reasons: append([]string{}, g.Reasons...)}
+	for i, n := range g.Nodes {
+		n.Frames = copyFrames(n.Frames)
+		out.Nodes[i] = n
+	}
+	for i, edge := range g.Edges {
+		if edge.Ordinal != nil {
+			o := *edge.Ordinal
+			edge.Ordinal = &o
+		}
+		out.Edges[i] = edge
+	}
+	return out
+}
+
+func copyID(p *model.ID) *model.ID {
+	if p == nil {
+		return nil
+	}
+	v := *p
+	return &v
+}
+
+func copyText(p *string) *string {
+	if p == nil {
+		return nil
+	}
+	v := *p
+	return &v
+}
+
+// cloneError copies a stored error record out of a borrowed storage page.
+func cloneError(o model.ErrorOccurrence) model.ErrorOccurrence {
+	o.Frames = copyFrames(o.Frames)
+	o.Graph = copyChain(o.Graph)
+	o.Template, o.Code = copyText(o.Template), copyText(o.Code)
+	o.Release, o.Trace, o.Replay, o.Profile, o.Run = copyID(o.Release), copyID(o.Trace), copyID(o.Replay), copyID(o.Profile), copyID(o.Run)
+	if o.Span != nil {
+		s := *o.Span
+		o.Span = &s
+	}
+	return o
+}
+
+// Occurrence reads the stored error record behind one occurrence of an issue.
+// admin is the caller's organization-admin scope (the issue evidence is an
+// admin read); read is the same caller's telemetry-read scope, or nil when she
+// holds none, and the record is read under it alone. The occurrence must be
+// listed by the issue's own evidence: another record is never reachable through
+// this route by guessing an ID.
+func (e *Evidence) Occurrence(ctx context.Context, admin auth.Scope, read *auth.Scope, body ErrorOccurrenceBody) (ErrorOccurrenceView, error) {
+	if body.Org == (model.ID{}) || body.Project == (model.ID{}) || body.Issue == (model.ID{}) || body.Occurrence == (model.ID{}) {
+		return ErrorOccurrenceView{}, invalid("evidence_request_invalid")
+	}
+	if !admin.AllowsProject(body.Project) {
+		return ErrorOccurrenceView{}, model.Fail(model.NotFound)
+	}
+	if e.issues == nil {
+		return unavailableOccurrenceView(body, StateNotAvailable, ReasonIssueEvidenceAbsent), nil
+	}
+	if admin.Permission() != auth.OrgAdmin {
+		return unavailableOccurrenceView(body, StateNotAvailable, ReasonIssueNeedsAdmin), nil
+	}
+	issue, err := e.issues.GroupingIssue(ctx, admin, body.Project, body.Issue)
+	if err != nil {
+		return ErrorOccurrenceView{}, err
+	}
+	if issue.ID != body.Issue || issue.Org != admin.OrgID() || issue.Project != body.Project {
+		return ErrorOccurrenceView{}, model.Fail(model.NotFound)
+	}
+	var evidence *model.GroupingEvidence
+	for _, list := range [][]model.GroupingEvidence{issue.Occurrences, issue.LateHistory} {
+		for i := range list {
+			if list[i].OccurrenceID == body.Occurrence {
+				evidence = &list[i]
+			}
+		}
+	}
+	if evidence == nil {
+		return ErrorOccurrenceView{}, model.Fail(model.NotFound)
+	}
+	if e.occurrences == nil {
+		return unavailableOccurrenceView(body, StateNotAvailable, ReasonOccurrenceDetail), nil
+	}
+	if read == nil {
+		return unavailableOccurrenceView(body, StateNotAvailable, ReasonOccurrenceNeedsTelemetry), nil
+	}
+	occ, found, partial, err := e.occurrences.ErrorOccurrence(ctx, *read, body.Project, evidence.RecordID, evidence.OccurrenceID, evidence.EventTime)
+	if err != nil {
+		return ErrorOccurrenceView{}, err
+	}
+	if !found {
+		if partial {
+			return unavailableOccurrenceView(body, StateIncomplete, ReasonOccurrenceReadPartial), nil
+		}
+		return unavailableOccurrenceView(body, StateNotAvailable, ReasonOccurrenceNotStored), nil
+	}
+	if occ.Occurrence != evidence.OccurrenceID {
+		return ErrorOccurrenceView{}, model.Fail(model.Corrupt)
+	}
+	detail := ErrorOccurrenceDetail{Class: occ.Class, Mechanism: occ.Mechanism, Handled: occ.Handled, Fatal: occ.Fatal, Code: occ.Code, Template: occ.Template, Build: occ.Build, Release: occ.Release, Trace: occ.Trace, Span: occ.Span,
+		Replay: occ.Replay, Profile: occ.Profile, Run: occ.Run, Frames: occ.Frames, Chain: occ.Graph}
+	if detail.Frames == nil {
+		detail.Frames = []model.Frame{}
+	}
+	if g := detail.Chain; g != nil {
+		// The wire form has no nulls: an absent list is an empty one.
+		if g.Nodes == nil {
+			g.Nodes = []model.ExceptionNode{}
+		}
+		for i := range g.Nodes {
+			if g.Nodes[i].Frames == nil {
+				g.Nodes[i].Frames = []model.Frame{}
+			}
+		}
+		if g.Edges == nil {
+			g.Edges = []model.ExceptionEdge{}
+		}
+		if g.Reasons == nil {
+			g.Reasons = []string{}
+		}
+	}
+	return ErrorOccurrenceView{Org: body.Org, Project: body.Project, Issue: body.Issue, Occurrence: body.Occurrence, State: StateReady, Detail: &detail,
+		Sections: []ViewSection{{Name: "occurrence_detail", State: StateReady}}}, nil
+}
+
+// ErrorScanner is the committed storage read seam (*storage.Engine implements it).
+type ErrorScanner interface {
+	Scan(ctx context.Context, scope auth.Scope, req storage.ScanRequest) (storage.RowIterator, error)
+}
+
+type storageErrors struct{ scanner ErrorScanner }
+
+// NewStorageErrorSource reads one stored error record through the committed
+// storage scan: signal error, one project, an occurrence_id equality selector
+// and the one-nanosecond window of the evidence's own event time.
+func NewStorageErrorSource(scanner ErrorScanner) ErrorOccurrenceReader { return storageErrors{scanner} }
+
+func (s storageErrors) ErrorOccurrence(ctx context.Context, scope auth.Scope, project, record, occurrence model.ID, at model.UnixNano) (model.ErrorOccurrence, bool, bool, error) {
+	if s.scanner == nil || at < 0 || at == math.MaxInt64 {
+		return model.ErrorOccurrence{}, false, false, model.Fail(model.Unavailable)
+	}
+	rows, err := s.scanner.Scan(ctx, scope, storage.ScanRequest{
+		Projects: []model.ID{project}, Signal: model.ErrorKind, Start: at, End: at + 1,
+		Selectors:  []storage.Matcher{{Target: storage.MatchField, Name: "occurrence_id", Op: storage.MatchEqual, Literal: storage.Literal{Kind: storage.LiteralString, String: occurrence.String()}}},
+		Projection: []storage.Field{storage.FieldID, storage.FieldTime, storage.FieldError},
+		Fence:      storage.ReadFence{AllowPartial: true},
+	})
+	if err != nil {
+		return model.ErrorOccurrence{}, false, false, err
+	}
+	if rows == nil {
+		return model.ErrorOccurrence{}, false, false, model.Fail(model.Corrupt)
+	}
+	defer rows.Close()
+	partial := false
+	for {
+		page, err := rows.Next(ctx)
+		if errors.Is(err, io.EOF) {
+			return model.ErrorOccurrence{}, false, partial, nil
+		}
+		if err != nil {
+			return model.ErrorOccurrence{}, false, false, err
+		}
+		partial = partial || page.Partial
+		if len(page.Values) != page.Len() || len(page.IDs) != page.Len() {
+			return model.ErrorOccurrence{}, false, false, model.Fail(model.Corrupt)
+		}
+		for i, v := range page.Values {
+			if v.Error == nil || v.Error.Occurrence != occurrence || page.IDs[i] != record {
+				continue
+			}
+			return cloneError(*v.Error), true, partial, nil
+		}
+	}
+}
+
+// evidenceScope is the caller's scope for the organization-admin evidence reads:
+// the administrator's own scope when she is one, and otherwise exactly what the
+// other reads would give her (a project reader or an incident writer), so that
+// she is told the evidence needs an administrator instead of being refused. An
+// administrator who also holds telemetry.read is therefore still the
+// administrator here.
+func evidenceScope(ctx context.Context, authority *auth.Service, credential auth.Credential, org model.ID, projects []model.ID) (auth.Scope, error) {
+	if org == (model.ID{}) || len(projects) == 0 {
+		return auth.Scope{}, model.Fail(model.Invalid)
+	}
+	scope, err := authority.Authorize(ctx, credential, org, projects, auth.OrgAdmin)
+	if err == nil || !faultIs(err, model.NotFound) {
+		return scope, err
+	}
+	return readScope(ctx, authority, credential, org, projects)
+}
+
+// detailScope is the same caller's telemetry-read scope for the project, or nil
+// when she is not an administrator or holds no telemetry.read grant there. The
+// stored error records are telemetry: administration alone never reads them.
+func detailScope(ctx context.Context, authority *auth.Service, credential auth.Credential, admin auth.Scope, org, project model.ID) (*auth.Scope, error) {
+	if admin.Permission() != auth.OrgAdmin {
+		return nil, nil
+	}
+	read, err := authority.Authorize(ctx, credential, org, []model.ID{project}, auth.Read)
+	if err != nil {
+		if faultIs(err, model.NotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &read, nil
+}
+
+func revalidateAll(ctx context.Context, authority *auth.Service, scope auth.Scope, read *auth.Scope) error {
+	if err := authority.Revalidate(ctx, scope); err != nil {
+		return err
+	}
+	if read != nil {
+		return authority.Revalidate(ctx, *read)
+	}
+	return nil
 }
 
 // RegisterEvidenceRoutes mounts the error-investigation reads. Each route needs
@@ -569,6 +1040,7 @@ func (e *Evidence) Issue(ctx context.Context, scope auth.Scope, body IssueBody) 
 //	POST /api/v1/evidence/frames   FramesBody  -> FramesView
 //	POST /api/v1/evidence/release  ReleaseBody -> ReleaseView
 //	POST /api/v1/evidence/issue    IssueBody   -> IssueView
+//	POST /api/v1/evidence/occurrence ErrorOccurrenceBody -> ErrorOccurrenceView
 //	POST /api/v1/releases/register RegisterReleaseBody -> RegisterReleaseView (only when the release registry is a ReleaseRegistrar)
 func RegisterEvidenceRoutes(mux *http.ServeMux, authority *auth.Service, evidence *Evidence) {
 	mux.HandleFunc("POST /api/v1/evidence/frames", func(w http.ResponseWriter, r *http.Request) {
@@ -599,7 +1071,7 @@ func RegisterEvidenceRoutes(mux *http.ServeMux, authority *auth.Service, evidenc
 			queryReply(w, nil, err)
 			return
 		}
-		scope, err := readScope(r.Context(), authority, credential, body.Org, []model.ID{body.Project})
+		scope, err := evidenceScope(r.Context(), authority, credential, body.Org, []model.ID{body.Project})
 		if err != nil {
 			queryReply(w, nil, err)
 			return
@@ -621,14 +1093,46 @@ func RegisterEvidenceRoutes(mux *http.ServeMux, authority *auth.Service, evidenc
 			queryReply(w, nil, err)
 			return
 		}
-		scope, err := readScope(r.Context(), authority, credential, body.Org, []model.ID{body.Project})
+		scope, err := evidenceScope(r.Context(), authority, credential, body.Org, []model.ID{body.Project})
 		if err != nil {
 			queryReply(w, nil, err)
 			return
 		}
-		view, err := evidence.Issue(r.Context(), scope, body)
+		read, err := detailScope(r.Context(), authority, credential, scope, body.Org, body.Project)
+		if err != nil {
+			queryReply(w, nil, err)
+			return
+		}
+		view, err := evidence.IssueWithDetail(r.Context(), scope, read, body)
 		if err == nil {
-			err = authority.Revalidate(r.Context(), scope)
+			err = revalidateAll(r.Context(), authority, scope, read)
+		}
+		queryReply(w, view, err)
+	})
+	mux.HandleFunc("POST /api/v1/evidence/occurrence", func(w http.ResponseWriter, r *http.Request) {
+		credential, err := artifactCredential(authority, w, r)
+		if err != nil {
+			queryReply(w, nil, err)
+			return
+		}
+		var body ErrorOccurrenceBody
+		if err = decode(w, r, &body); err != nil {
+			queryReply(w, nil, err)
+			return
+		}
+		scope, err := evidenceScope(r.Context(), authority, credential, body.Org, []model.ID{body.Project})
+		if err != nil {
+			queryReply(w, nil, err)
+			return
+		}
+		read, err := detailScope(r.Context(), authority, credential, scope, body.Org, body.Project)
+		if err != nil {
+			queryReply(w, nil, err)
+			return
+		}
+		view, err := evidence.Occurrence(r.Context(), scope, read, body)
+		if err == nil {
+			err = revalidateAll(r.Context(), authority, scope, read)
 		}
 		queryReply(w, view, err)
 	})

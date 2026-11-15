@@ -106,7 +106,7 @@ func (a *App) ConfigureSymbolicator(ctx context.Context, settings SymbolicatorSe
 		return SymbolicatorStatus{State: SymbolicatorUnavailable, Reason: "app_incomplete"}
 	}
 	resolver, status := buildFrameResolver(ctx, a.Artifacts, a.Retention, settings)
-	a.Evidence = httpapi.NewEvidence(resolver, a.Releases, a.Releases)
+	a.Evidence = a.Evidence.WithFrames(resolver)
 	return status
 }
 

@@ -101,6 +101,48 @@ describe('act() maps the server answer without hiding or inventing a result', ()
  });
 });
 
+describe('a committed issue answer is accepted only for the issue that was acted on', () => {
+ const issueReq = (over: Partial<ActionRequest> = {}): ActionRequest => ({ org: A, command_id: 'c'.repeat(32), expected_version: '3', project_id: P, target_id: I, entity_kind: 'issue', kind: 'ignore', payload: { reason: 'noise' }, ...over });
+ const issue = (over: Record<string, unknown> = {}): Record<string, unknown> => ({ id: I, workflow: 'ignored', revision: '4', grouping_version: 1, ...over });
+ const answer = (over: Record<string, unknown> = {}): Record<string, unknown> => ({ state: 'committed', entity_kind: 'issue', kind: 'ignore', target_id: I, revision: '4', issue: issue(), ...over });
+ test('the committed issue at the committed revision', () => {
+  const parsed = parseAction(answer(), issueReq());
+  expect([parsed.issue?.workflow, parsed.issue?.revision, parsed.incident]).toEqual(['ignored', '4', undefined]);
+  expect(parseAction(answer({ issue: issue({ workflow: 'resolved', resolution_time_ns: '9', fixed_descendants: [C] }) }), issueReq({ kind: 'ignore' })).issue?.resolution_time_ns).toBe('9');
+ });
+ test('another issue, a different revision, an unknown workflow or a bad time is refused', () => {
+  for (const raw of [answer({ issue: issue({ id: C }) }), answer({ revision: '5' }), answer({ issue: issue({ workflow: 'archived' }) }), answer({ issue: issue({ resolution_time_ns: 'soon' }) }), answer({ issue: issue({ revision: 4 }) }), answer({ issue: undefined })]) expect(() => parseAction(raw, issueReq())).toThrow(ApiFault);
+ });
+ test('an issue answer never carries an incident, and an incident answer never carries an issue', () => {
+  expect(() => parseAction(answer({ incident: incident() }), issueReq())).toThrow(ApiFault);
+  expect(() => parseAction(committed({ issue: issue() }), req())).toThrow(ApiFault);
+ });
+ test('not_available for an issue carries no issue', () => {
+  expect(parseAction({ state: 'not_available', reason: 'issue_control_handler_not_built', entity_kind: 'issue', kind: 'ignore', target_id: I }, issueReq()).state).toBe('not_available');
+  expect(() => parseAction({ state: 'not_available', reason: 'x', entity_kind: 'issue', kind: 'ignore', target_id: I, issue: issue() }, issueReq())).toThrow(ApiFault);
+ });
+ test('a moved revision and a transition the workflow forbids are two conflicts with the current revision; an incident detail is not an issue conflict', async () => {
+  respond(409, { code: 'conflict', detail: 'issue_version_conflict', current_version: '9', request_id: 'e'.repeat(32) });
+  let error = await act(issueReq(), signal).catch((e: unknown) => e);
+  expect([error instanceof VersionConflict, (error as VersionConflict).detail, (error as VersionConflict).currentVersion]).toEqual([true, 'issue_version_conflict', '9']);
+  respond(409, { code: 'conflict', detail: 'issue_state_conflict', current_version: '3' });
+  error = await act(issueReq(), signal).catch((e: unknown) => e);
+  expect([error instanceof VersionConflict, (error as VersionConflict).detail]).toEqual([true, 'issue_state_conflict']);
+  respond(409, { code: 'conflict', detail: 'incident_version_conflict', current_version: '9' });
+  expect(await act(issueReq(), signal).catch((e: unknown) => e)).toBeInstanceOf(ApiFault);
+  respond(409, { code: 'conflict', detail: 'issue_version_conflict', current_version: '9' });
+  expect(await act(req(), signal).catch((e: unknown) => e)).toBeInstanceOf(ApiFault);
+ });
+ test('a committed issue answer is returned only after it is validated; a permission refusal keeps one status shape', async () => {
+  respond(200, answer());
+  expect((await act(issueReq(), signal)).issue?.revision).toBe('4');
+  respond(200, answer({ issue: issue({ id: C }) }));
+  expect(await act(issueReq(), signal).catch((e: unknown) => e)).toBeInstanceOf(ApiFault);
+  respond(404, { code: 'not_found', detail: 'not_found' });
+  expect(((await act(issueReq(), signal).catch((e: unknown) => e)) as ApiFault).status).toBe(404);
+ });
+});
+
 describe('notification state is accepted only in a shape the product can show', () => {
  const ready = (entries: unknown[], attention = 'failed'): Record<string, unknown> => incident({ notification: { ...(incident().notification as object), delivery: { state: 'ready', attention, counts: { failed: 1 }, entries } } });
  const entry = { id: C, kind: 'open', route: 'immediate', phase: 'failed', status: 'failed', attempts: 1, eligible_at: '5' };

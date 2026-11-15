@@ -82,7 +82,7 @@ export type LinkKind = 'condition' | 'issue' | 'release' | 'service' | 'incident
 export interface ImpactPayload { condition: Id; episode: Id; severity: Severity; state: ConditionState; freshness: ConditionFreshness }
 export interface IncidentLink { kind: LinkKind; id: Id }
 /** Closed payload: there is no actor, origin, organization or timestamp field; the server takes the actor from the session. */
-export interface ActionPayload { reason?: string; owner?: Id; until?: string; impact?: ImpactPayload; link?: IncidentLink }
+export interface ActionPayload { reason?: string; owner?: Id; until?: string; impact?: ImpactPayload; link?: IncidentLink; fixed_frontier?: Id[]; resolution_boundary?: string }
 export interface ActionRequest {
  org: Id;
  command_id: Id;
@@ -136,6 +136,8 @@ export interface IncidentView {
  last_activity: string;
  timeline?: TimelineEntry[];
 }
+/** The committed issue exactly as the lifecycle committed it: identity, workflow, the revision the next action must expect, the resolution boundary and any grouping-migration links. It carries no occurrence evidence. */
+export interface IssueActionView { id: Id; workflow: string; revision: string; grouping_version: number; resolution_time_ns?: string; fixed_descendants?: Id[]; migration_links?: Id[] }
 export interface ActionResponse {
  state: 'committed' | 'not_available';
  reason?: string;
@@ -144,10 +146,11 @@ export interface ActionResponse {
  target_id: Id;
  revision?: string;
  incident?: IncidentView;
+ issue?: IssueActionView;
 }
-/** A lost optimistic-concurrency race (HTTP 409): nothing was applied, and the incident is at `currentVersion`. */
+/** A lost optimistic-concurrency race (HTTP 409): nothing was applied, and the target is at `currentVersion`. For an issue `detail` says whether its revision moved (`issue_version_conflict`) or the action is one its workflow state does not allow at the revision the caller saw (`issue_state_conflict`). */
 export class VersionConflict extends Error {
- constructor(readonly currentVersion: string, readonly requestId: string) { super('incident_version_conflict'); }
+ constructor(readonly currentVersion: string, readonly requestId: string, readonly detail: string = 'incident_version_conflict') { super(detail); }
 }
 /** The request left the browser but its outcome is unknown (transport failure). The same command ID may be resent safely. */
 export class OutcomeUnknown extends Error {
@@ -369,10 +372,25 @@ export interface ReleaseRecord { id: Id; build_id: Id; label: string; revision: 
 export type AncestryOrder = 'same' | 'ancestor' | 'descendant' | 'concurrent' | 'unknown';
 export const ANCESTRY_ORDERS: readonly AncestryOrder[] = ['same', 'ancestor', 'descendant', 'concurrent', 'unknown'];
 export interface ReleaseComparison { release: Id; order: AncestryOrder }
-export interface ReleaseView { org: Id; project: Id; state: ViewState; reason?: string; release?: ReleaseRecord; parents: { id: Id; known: boolean }[]; children: Id[]; comparisons: ReleaseComparison[]; sections: ViewSection[] }
+/** One stored regression evaluation: exactly what the lifecycle recorded when an occurrence arrived after a resolution. Times and the window are decimal nanosecond strings; `window_ns` 0 means unbounded. */
+export interface RegressionExplanation { occurrence: Id; evidence_release?: Id; event_time_ns: string; resolution_time_ns: string; eligible: boolean; ancestry_known: boolean; reason: string; frontier: Id[]; threshold: number; window_ns: string; qualifying: number; reopened: boolean }
+export interface ReleaseRegression extends RegressionExplanation { issue: Id }
+export interface ReleaseView { org: Id; project: Id; state: ViewState; reason?: string; release?: ReleaseRecord; parents: { id: Id; known: boolean }[]; children: Id[]; comparisons: ReleaseComparison[]; regressions: ReleaseRegression[]; sections: ViewSection[] }
 export interface OccurrenceEvidence { occurrence_id: Id; record_id: Id; grouping_version: number; fingerprint: string; event_time_ns: string; arrival_time_ns: string; build_id?: Id; release_id?: Id; ancestry: 'known' | 'unknown'; freshness: string; late: boolean }
 export interface GroupingIdentity { grouping_version: number; fingerprint: string; workflow: string; revision: string; resolution_time_ns?: string; resolution_frontier: Id[]; observed_releases: Id[]; fixed_descendants: Id[]; migration_links: Id[] }
-export interface IssueEvidenceView { org: Id; project: Id; issue: Id; state: ViewState; reason?: string; grouping?: GroupingIdentity; occurrences: OccurrenceEvidence[]; late_history: OccurrenceEvidence[]; sections: ViewSection[] }
+export interface IssueEvidenceView { org: Id; project: Id; issue: Id; state: ViewState; reason?: string; grouping?: GroupingIdentity; occurrences: OccurrenceEvidence[]; late_history: OccurrenceEvidence[]; regression?: { explanations: RegressionExplanation[] }; sections: ViewSection[] }
+/** One stored node of the exception chain. `context_suppressed` says the runtime withheld the context of this error; the chain is then incomplete there, not empty. */
+export interface ExceptionNode { id: number; exception_class: string; frames: SafeFrame[]; context_suppressed: boolean }
+export type ExceptionEdgeKind = 'cause' | 'context' | 'group';
+export interface ExceptionEdge { from: number; to: number; kind: ExceptionEdgeKind; ordinal?: number }
+export interface ExceptionChain { nodes: ExceptionNode[]; edges: ExceptionEdge[]; reasons: string[] }
+/** What the stored error record says about one occurrence. Class, mechanism, handled, fatal and code are exactly as stored; the record carries no message text. */
+export interface ErrorOccurrenceDetail {
+ exception_class: string; mechanism: string; handled: boolean; fatal: boolean; code: string | null; template_id?: string;
+ build_id: Id; release_id?: Id; trace_id?: Id; span_id?: string; replay_id?: Id; profile_id?: Id; run_id?: Id;
+ frames: SafeFrame[]; exception_graph?: ExceptionChain;
+}
+export interface ErrorOccurrenceView { org: Id; project: Id; issue: Id; occurrence: Id; state: ViewState; reason?: string; detail?: ErrorOccurrenceDetail; sections: ViewSection[] }
 
 // ---- Trace view and critical path (POST /api/v1/traces/view; internal/httpapi/traces.go, internal/traces/critical_path.go) ----
 // Nanosecond values are decimal strings. A duration is an interval, never a single authoritative total.

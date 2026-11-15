@@ -55,7 +55,10 @@ stop_pid() {
 	fi
 	rm -f "$f"
 }
-down() { stop_pid "$T/server.pid"; stop_pid "$T/oidc.pid"; echo down; }
+down() {
+	if [ -f "$T/server.unit" ]; then systemctl --user stop "$(cat "$T/server.unit")" 2>/dev/null || true; rm -f "$T/server.unit" "$T/server.pid"; fi
+	stop_pid "$T/server.pid"; stop_pid "$T/oidc.pid"; echo down
+}
 
 up() {
 	down >/dev/null
@@ -71,13 +74,26 @@ up() {
 	# E2E_NOTIFY_IP (a private address of this host): the notification worker may reach exactly that address, trusts the private CA
 	# and gives up on a send after 3s, so a receiver that never answers yields a real uncertain delivery.
 	[ -n "${E2E_NOTIFY_IP:-}" ] && notify_args="--notify-egress-allow $E2E_NOTIFY_IP/32 --notify-ca-file $PKI/ca.pem --notify-send-timeout 3s"
-	SSL_CERT_FILE=$PKI/ca.pem setsid nohup "$BIN" serve --mode single --data-dir "$DATA" --listen 127.0.0.1:$PORT --tls-cert "$PKI/leaf.pem" --tls-key "$PKI/leaf.key" --web-dir "$ROOT/web/dist" $notify_args ${SERVE_ARGS:-} >"$T/server.log" 2>&1 </dev/null &
-	echo $! >"$T/server.pid"
+	if [ "${E2E_SANDBOX:-}" = 1 ]; then
+		# The native symbolication sandbox needs an empty delegated cgroup v2 subtree (docs/operations/symbolication.md): run the server as a
+		# transient user unit with Delegate=memory pids and DelegateSubgroup=main, exactly as the shipped unit does. Without it every frame
+		# answers sandbox_unavailable and no frame can be mapped.
+		UNIT=$P-$PORT
+		: >"$T/server.log"
+		CGROOT=/sys/fs/cgroup/user.slice/user-$(id -u).slice/user@$(id -u).service/app.slice/$UNIT.service
+		systemd-run --user --collect --quiet --unit="$UNIT" -p "Delegate=memory pids" -p DelegateSubgroup=main -p "StandardOutput=append:$T/server.log" -p "StandardError=append:$T/server.log" -E "SSL_CERT_FILE=$PKI/ca.pem" "$BIN" serve --mode single --data-dir "$DATA" --listen 127.0.0.1:$PORT --tls-cert "$PKI/leaf.pem" --tls-key "$PKI/leaf.key" --web-dir "$ROOT/web/dist" --symbolicate-cgroup-root "$CGROOT" $notify_args ${SERVE_ARGS:-}
+		echo "$UNIT" >"$T/server.unit"
+		systemctl --user show -p MainPID --value "$UNIT" >"$T/server.pid"
+	else
+		SSL_CERT_FILE=$PKI/ca.pem setsid nohup "$BIN" serve --mode single --data-dir "$DATA" --listen 127.0.0.1:$PORT --tls-cert "$PKI/leaf.pem" --tls-key "$PKI/leaf.key" --web-dir "$ROOT/web/dist" $notify_args ${SERVE_ARGS:-} >"$T/server.log" 2>&1 </dev/null &
+		echo $! >"$T/server.pid"
+	fi
 	i=0
 	until [ "$(curl -s --cacert "$PKI/ca.pem" -o /dev/null -w '%{http_code}' "$ORIGIN/readyz")" = 200 ]; do
 		i=$((i + 1)); [ $i -gt 60 ] && { echo "not ready" >&2; cat "$T/server.log" >&2; exit 1; }; sleep 1
 	done
 	i=0
+	if [ "${E2E_SANDBOX:-}" = 1 ] && ! grep -q 'symbolicator: ready' "$T/server.log"; then echo "the symbolication sandbox is not ready" >&2; grep symbolicator "$T/server.log" >&2; exit 1; fi
 	until [ -s "$DATA/bootstrap.token" ]; do i=$((i + 1)); [ $i -gt 30 ] && { echo "no bootstrap token" >&2; exit 1; }; sleep 1; done
 	TOKEN=$(cat "$DATA/bootstrap.token")
 	code=$(curl -s --cacert "$PKI/ca.pem" -o "$T/bootstrap.json" -w '%{http_code}' -H "Origin: $ORIGIN" -H "Content-Type: application/json" -X POST "$ORIGIN/api/v1/bootstrap" -d "{\"Token\":\"$TOKEN\",\"Email\":\"e2e-owner@example.test\",\"Password\":\"e2e instance owner password 2026\"}")
