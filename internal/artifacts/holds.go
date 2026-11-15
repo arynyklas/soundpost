@@ -104,6 +104,12 @@ func issueOrigin(issue model.ID) model.Cursor { return model.Cursor{Group: issue
 // take adds or extends the issue's hold on one map. It reports false when the map cannot be
 // held; an error is only a ledger that does not verify.
 func (h *holdSet) take(issue, root model.ID, until model.UnixNano) (bool, error) {
+	return h.hold(refledger.KindIssue, issueOrigin(issue), root, until)
+}
+
+// hold adds or extends the entry (kind, cursor) on one map: the shared core of an issue's hold
+// and a profile's.
+func (h *holdSet) hold(kind string, cursor model.Cursor, root model.ID, until model.UnixNano) (bool, error) {
 	intent, ok := h.st.ArtifactIntents[h.key(root)]
 	if !ok || intent.State != intentPublished || deletionCovers(h.st, intent.Map.Manifest) {
 		return false, nil
@@ -120,7 +126,7 @@ func (h *holdSet) take(issue, root model.ID, until model.UnixNano) (bool, error)
 		return false, nil // fenced, or retention already elapsed: a late hold cannot revive it
 	}
 	i := slices.IndexFunc(led.Entries, func(e refledger.Entry) bool {
-		return e.Kind == refledger.KindIssue && e.Cursor == issueOrigin(issue)
+		return e.Kind == kind && e.Cursor == cursor
 	})
 	if i >= 0 {
 		if until > led.Entries[i].RetainUntil {
@@ -132,7 +138,7 @@ func (h *holdSet) take(issue, root model.ID, until model.UnixNano) (bool, error)
 	if !led.MakeRoom(h.now) {
 		return false, nil
 	}
-	led.Entries = append(led.Entries, refledger.Entry{Kind: refledger.KindIssue, Cursor: issueOrigin(issue), RetainUntil: until})
+	led.Entries = append(led.Entries, refledger.Entry{Kind: kind, Cursor: cursor, RetainUntil: until})
 	h.changed[root] = true
 	return true, nil
 }
@@ -361,6 +367,82 @@ func (l *Lifecycle) SettleIssues(ctx context.Context, scope auth.Scope) (HoldRes
 			}
 		}
 		return h.plan(put, del), nil
+	})
+	return out, err
+}
+
+// MaxHoldProfiles bounds the profiles of one HoldProfiles call (one control transaction).
+const MaxHoldProfiles = 256
+
+// ProfileHold names the maps the retained chunks of one profile use. A profile is one root of
+// the profile signal (ProfileChunk.Profile): all its chunks share one entry per map, so a
+// profile of many chunks costs one ledger entry per map, not one per chunk.
+type ProfileHold struct {
+	Profile model.ID
+	Roots   []ArtifactID
+	// Until is the latest deadline of the retained chunks that use the maps (clamped to
+	// MaxReferenceRetention).
+	Until model.UnixNano
+}
+
+// profileOrigin is the canonical ledger cursor of a profile's hold: the profile root, index 1
+// (profile entries must carry a non-zero index, refledger.ValidOrigin).
+func profileOrigin(profile model.ID) model.Cursor { return model.Cursor{Group: profile, Index: 1} }
+
+// HoldProfiles is the profile side of HoldIssues: it keeps the maps the frames of retained
+// profile chunks name until the profile's retention deadline, under the system principal's
+// issues.write scope (the runner's closed role set has no artifacts.write, D1), so a profile
+// that names a map keeps it readable for symbolication as long as the profile itself is
+// retained. A profile is not an issue: nothing releases the hold early; it is a ledger entry
+// of kind profile that lapses by its own deadline. Idempotent: a repeat, or a replay after a
+// crash, extends nothing that is already held and writes nothing.
+//
+// A map that cannot be held (not a published map of the project, retired, deleted, already
+// past its retention, or a ledger with no room left) is counted in Skipped, never an error.
+func (l *Lifecycle) HoldProfiles(ctx context.Context, scope auth.Scope, holds []ProfileHold) (HoldResult, error) {
+	distinct := map[model.ID]bool{}
+	for _, h := range holds {
+		if h.Profile == (model.ID{}) || len(h.Roots) == 0 || len(h.Roots) > refledger.MaxHolderRoots || h.Until <= 0 {
+			return HoldResult{}, model.Fail(model.Invalid)
+		}
+		for _, r := range h.Roots {
+			if r == (model.ID{}) {
+				return HoldResult{}, model.Fail(model.Invalid)
+			}
+			distinct[r] = true
+		}
+	}
+	if len(holds) == 0 || len(holds) > MaxHoldProfiles || len(distinct) > MaxHoldRoots {
+		return HoldResult{}, model.Fail(model.Invalid)
+	}
+	var out HoldResult
+	err := l.run(ctx, scope.OrgID(), false, func(st model.ControlState, now model.UnixNano) (plan, error) {
+		out = HoldResult{}
+		org, project, err := holdScope(scope, st)
+		if err != nil {
+			return plan{}, err
+		}
+		h := &holdSet{st: st, org: org, project: project, now: now, ledgers: map[model.ID]*refledger.Ledger{}, changed: map[model.ID]bool{}}
+		for _, hold := range holds {
+			until := min(hold.Until, now+model.UnixNano(MaxReferenceRetention))
+			seen := map[model.ID]bool{}
+			for _, root := range hold.Roots {
+				if seen[root] {
+					continue
+				}
+				seen[root] = true
+				ok, err := h.hold(refledger.KindProfile, profileOrigin(hold.Profile), root, until)
+				if err != nil {
+					return plan{}, err
+				}
+				if ok {
+					out.Held++
+				} else {
+					out.Skipped++
+				}
+			}
+		}
+		return h.plan(nil, nil), nil
 	})
 	return out, err
 }
