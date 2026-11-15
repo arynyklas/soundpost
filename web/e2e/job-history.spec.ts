@@ -8,7 +8,7 @@ import {join,resolve} from 'node:path';
 import {promisify} from 'node:util';
 import {test,expect,type APIRequestContext,type Browser,type BrowserContext,type Page} from '@playwright/test';
 import {setPermissions} from './support/replay';
-import {createOrg,createProject,createReader,field,id,ingestJobAttempt,login,onboardJobSource,onboardSdkJobSource,owner,postJson,sdkConfig,setGrant,type JobAttemptInput,type Reader,type Source} from './support/real';
+import {createOrg,createProject,createReader,field,id,ingestJobAttempt,login,onboardJobSource,onboardSdkJobSource,owner,postJson,sdkConfig,setGrant,tcpPath,type JobAttemptInput,type Reader,type Source} from './support/real';
 
 // Real server, real Chrome, real HTTPS, real sessions, real routes only. The job data is produced the product's own way:
 //   source credential -> POST /ingest/v1/batches (kind job_attempt) -> the leader-only background runner (`soundpost serve`, its job
@@ -343,6 +343,64 @@ test('a run produced by the real Python SDK job API (first attempt raises, the r
  await expect(page.getByTestId('run-dedup')).toContainText('2 distinct attempts counted');
  await expect(page.getByTestId('run-dedup')).toContainText('4 events accepted');
  await expect(page.getByTestId('cause-links')).toContainText(sdk.error);
+});
+
+test('an exporter interrupted mid-run (the first attempt fails and the process dies with nothing delivered) leaves no trace, then the retry process recovers the spool and the run reads as recovered with no attempt left started',async()=>{
+ // The real Python SDK in two processes sharing one encrypted spool. The path to the product is a real TCP relay that refuses every connection while the
+ // exporter is interrupted: the SDK's HTTPS transport really fails, the first process is killed (os._exit) with the failed attempt's events undelivered,
+ // and the product knows nothing. The retry process finds the retained events in the spool, delivers them with the new attempt's and the product's
+ // runner produces the run. Nothing is ingested by the test.
+ const sdkSource=await onboardSdkJobSource(owners,org,p1);
+ const job=id();
+ const dir=mkdtempSync(join(tmpdir(),'sp-sdk-job-'));
+ const config=join(dir,'sdk.json');
+ const through=await tcpPath();
+ try{
+  through.refuse(true);
+  writeFileSync(config,JSON.stringify(sdkConfig(sdkSource,through.origin)),{mode:0o600});
+  const env={...process.env,PYTHONPATH:resolve(process.cwd(),'../sdk/python/src'),SOUNDPOST_SDK_CONFIG:config,SOUNDPOST_SDK_JOB:job,SOUNDPOST_SDK_SPOOL:join(dir,'spool.bin')};
+  const python=process.env.E2E_PYTHON??'python3',script=resolve(process.cwd(),'e2e/support/sdk_job_interrupted.py');
+  const crashed=await promisify(execFile)(python,[script,'crash'],{env,timeout:60_000}).then(()=>null,(e:{code?:number;stdout?:string;stderr?:string})=>e);
+  expect(crashed?.code,`the first process must die abruptly: ${crashed?.stderr}`).toBe(137);
+  const first=JSON.parse((crashed?.stdout??'').trim().split('\n').pop()??'{}') as {run:string;failed_attempt:string;error:string;pending:number};
+  expect(first.pending).toBeGreaterThan(0);
+
+  // While the exporter is interrupted the product has nothing: no job, never a success and never a started attempt.
+  const page=await rctx.newPage();
+  await open(page);
+  await expect(row(page,job)).toHaveCount(0);
+  const none=await postJson(api,'/api/v1/jobs/view',{org,project:p1,job,run:first.run});
+  expect(none.status,none.text).not.toBe(200);
+
+  through.refuse(false);
+  const {stdout}=await promisify(execFile)(python,[script,'resume'],{env:{...env,SOUNDPOST_SDK_RUN:first.run},timeout:90_000});
+  const sdk=JSON.parse(stdout.trim().split('\n').pop()??'{}') as {run:string;failed_attempt:string;retry_attempt:string;error:string;events:number;recovered:number};
+  expect(sdk.run).toBe(first.run);
+  expect(sdk.recovered).toBe(2);
+  expect(sdk.failed_attempt).toBe(first.failed_attempt);
+  expect(sdk.error).toBe(first.error);
+  await applied(job,{[first.run]:4});
+
+  await open(page);
+  await expect(row(page,job)).toContainText('Succeeded');
+  await openJob(page,job);
+  await expect(page.getByTestId('job-health')).toContainText('Current job health: Succeeded');
+  await expect(run(page,first.run)).toContainText('Run recovery: Recovered after retry');
+  await expect(run(page,first.run)).toContainText('1 failed of 2 attempts');
+  await run(page,first.run).getByRole('button',{name:`Open run ${first.run}`}).click();
+  const attempts=page.locator('[data-testid=attempt-row]');
+  await expect(attempts).toHaveCount(2);
+  await expect(attempts.nth(0)).toHaveAttribute('data-attempt',first.failed_attempt);
+  await expect(attempts.nth(0)).toHaveAttribute('data-state','failed');
+  await expect(attempts.nth(1)).toHaveAttribute('data-attempt',sdk.retry_attempt);
+  await expect(attempts.nth(1)).toHaveAttribute('data-state','succeeded');
+  await expect(page.locator('[data-testid=attempt-row][data-state=started]')).toHaveCount(0);
+  await expect(page.getByTestId('run-dedup')).toContainText('2 distinct attempts counted');
+  await expect(page.getByTestId('run-dedup')).toContainText('4 events accepted');
+  await expect(page.getByTestId('cause-links')).toContainText(first.error);
+ }finally{
+  await through.close();
+ }
 });
 
 test('a reader without access, or in another organization, sees Not found; revoking the grant clears the page on refresh',async()=>{

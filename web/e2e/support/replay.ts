@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Real-server fixture of the replay and profile e2e. Organizations, projects, users and grants go through the real admin routes,
 // the source through the real POST /api/v1/sources, and every chunk through the real POST /ingest/v1/batches with that source's
-// credential. Replay chunks are built through the CLOSED format the Go validator accepts (the committed browser recorder emits
-// node fields rect/pres and a wider tag enum that Go and packages/core/src/wire.ts refuse, so REAL recorder chunks cannot be
-// admitted today; this fixture does not claim otherwise). Profile chunks are produced by the real nativeperf assembler over
-// sanitized SYNTHETIC kernel events (no perf privileges exist on the test host); see profile-fixture.json.
+// credential. These replay chunks are built through the closed format the Go validator accepts, so a test can make gaps on purpose; chunks of the REAL
+// browser SDK recorder (which now emits that same closed schema, decision D2) are produced by support/recorder.ts instead. The native profile chunk is
+// produced by the real nativeperf assembler over sanitized SYNTHETIC kernel events (no perf privileges exist on the test host); see profile-fixture.json.
+// Profiles of the real SDKs are produced by support/sdk_profile.py.
 import {createHash,randomBytes} from 'node:crypto';
 import {readFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
@@ -145,4 +145,34 @@ export async function seedProfiles(request:APIRequestContext,s:Source):Promise<v
  const chunk={profile_id:BROWSER_PROFILE,process_id:BROWSER_PROCESS,capability_id:BROWSER_CAP,method:'runtime_cpu',units:'samples',start_ns:observed,end_ns:(T0_NS+SECOND).toString(),clock,frames:[],stacks:[],samples:[],intervals:[],loss:'0',truncated:false};
  st=await ingestBatchRaw(request,s,[{id:id(),kind:'profile_chunk',observed_at_ns:observed,resource:resource(s),payload:chunk}]);
  if(st!==200)throw Error(`browser profile chunk refused: HTTP ${st}`);
+}
+
+/** A replay of its own (a checkpoint then `chunks-1` deltas, every chunk delivered), so a test may delete it without touching the shared seeds. */
+export async function seedOwnReplay(request:APIRequestContext,s:Source,chunks=8):Promise<string>{
+ const recorder=new Recorder();
+ for(let n=1;n<=chunks;n++){
+  const status=await ingestChunk(request,s,recorder.next(n===1?{checkpoint:true}:{}));
+  if(status!==200)throw Error(`replay chunk refused: HTTP ${status}`);
+ }
+ return recorder.replay;
+}
+
+/** The native fixture profile again under a fresh profile ID (the capability records seedProfiles admitted are shared), for a test that deletes it. */
+export async function seedOwnProfile(request:APIRequestContext,s:Source):Promise<string>{
+ const profile=id();
+ const st=await ingestBatchRaw(request,s,[{id:id(),kind:'profile_chunk',observed_at_ns:T0_NS.toString(),resource:resource(s),payload:{...fixture.chunk,profile_id:profile}}]);
+ if(st!==200)throw Error(`native profile chunk refused: HTTP ${st}`);
+ return profile;
+}
+
+/** Begin a real entity deletion (POST /api/v1/admin/deletions, mode entity) of one replay or profile; returns once the server answers that it is fencing, which already denies every read. */
+export async function deleteEntity(page:Page,org:string,project:string,entity:string,kind:'replay_chunk'|'profile_chunk'):Promise<string>{
+ const read=await postJson(page,'/api/v1/admin/read',{kind:'organizations'});
+ const revision=field(read.json,'revision');
+ if(typeof revision!=='string')throw Error(`admin read: ${read.text}`);
+ const r=await postJson(page,'/api/v1/admin/deletions',{command_id:id(),expected_revision:revision,mode:'entity',org_id:org,project_ids:[project],signals:[kind],entity_ids:[entity],reason:'replay-profile e2e deletion while open'});
+ if(r.status!==202)throw Error(`entity deletion: HTTP ${r.status} ${r.text}`);
+ const phase=field(r.json,'phase');
+ if(phase!=='fencing'&&phase!=='complete')throw Error(`entity deletion phase ${String(phase)}`);
+ return String(field(r.json,'operation_id'));
 }

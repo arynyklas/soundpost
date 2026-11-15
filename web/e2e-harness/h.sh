@@ -32,7 +32,7 @@ pki() {
 }
 
 prep() {
-	( cd "$ROOT" && pnpm install --frozen-lockfile --filter @soundpost/web... 2>&1 | tail -3 )
+	( cd "$ROOT" && pnpm install --frozen-lockfile --filter @soundpost/web... --filter @soundpost/browser... 2>&1 | tail -3 )
 	# E2E_WIRE_HEALTH=1 applies, to this run's VM copy only, the one-line wiring the parent applies to internal/appcore/app.go:
 	# investigator.WithHealth(c) right after the investigator is built.
 	if [ "${E2E_WIRE_HEALTH:-}" = 1 ] && ! grep -q 'investigator.WithHealth(c)' "$ROOT/internal/appcore/app.go"; then

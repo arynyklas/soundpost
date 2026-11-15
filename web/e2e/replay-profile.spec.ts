@@ -1,19 +1,25 @@
 // Copyright 2026 Aryn Yklas
 // SPDX-License-Identifier: Apache-2.0
+import {execFile} from 'node:child_process';
 import {createHash} from 'node:crypto';
+import {mkdtempSync,readdirSync,readFileSync,writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join,resolve} from 'node:path';
+import {promisify} from 'node:util';
 import {test,expect,request as pwRequest,type APIRequestContext,type Response,type Browser,type BrowserContext,type FrameLocator,type Page} from '@playwright/test';
-import {at,createOrg,createProject,createReader,login,owner,id,type Reader} from './support/real';
-import {NATIVE_PROFILE,PROFILE_WINDOW,UNSUPPORTED_PROFILE,onboardReplaySource,seedProfiles,seedReplays,setPermissions,type ReplaySeed} from './support/replay';
+import {at,createOrg,createProject,createReader,login,onboardSdkProfileSource,origin,owner,id,sdkConfig,type Reader,type Source} from './support/real';
+import {NATIVE_PROFILE,PROFILE_WINDOW,UNSUPPORTED_PROFILE,deleteEntity,onboardReplaySource,seedOwnProfile,seedOwnReplay,seedProfiles,seedReplays,setPermissions,type ReplaySeed} from './support/replay';
+import {PAGE_CANARIES,onboardBrowserReplaySource,record,recorderApp} from './support/recorder';
 
 // Real server, real Chrome. Every replay chunk and profile record below was admitted through the real ingest route with a real
 // source credential, stored by the real storage engine and read back through the real POST /api/v1/replays/stream and
-// POST /api/v1/profiles/view routes by real readers. Nothing here fakes a server answer. NOT covered, on purpose and stated:
-//  - REAL recorder chunks (packages/browser/src/replay): the recorder emits node fields rect/pres and a wider tag enum that the
-//    Go validator and packages/core/src/wire.ts refuse, so they cannot be admitted. The chunks here use the closed format.
+// POST /api/v1/profiles/view routes by real readers. Nothing here fakes a server answer. The seeded replays use the closed chunk format
+// built by support/replay.ts (so gaps can be made on purpose); two tests at the end instead run the REAL browser SDK recorder
+// (packages/browser, support/recorder.ts) in the real Chrome over a page of canary text, delivered by the SDK's own transport. NOT covered, on purpose and stated:
 //  - live perf: the native profile is the real nativeperf assembler over sanitized synthetic events (no perf privileges here).
 test.describe.configure({mode:'serial'});
 const ALL=['telemetry.read','replay.read','profiles.read'];
-let br:Browser,ctx:BrowserContext,owners:Page,api:APIRequestContext,org:string,p1:string,reader:Reader,telemetryOnly:Reader,seed:ReplaySeed;
+let br:Browser,ctx:BrowserContext,owners:Page,api:APIRequestContext,org:string,p1:string,reader:Reader,telemetryOnly:Reader,seed:ReplaySeed,replaySource:Source;
 
 const hash=(view:string,target:string,start=at(0),end=at(70)):string=>`#${new URLSearchParams({org,projects:p1,start:String(start),end:String(end),tz:'UTC',view,target:`${p1}:${target}`})}`;
 const frameOf=(page:Page):FrameLocator=>page.frameLocator('[data-testid=replay-frame]');
@@ -49,9 +55,9 @@ test.beforeAll(async({browser})=>{
  reader=await createReader(owners,org,[p1]);
  await setPermissions(owners,org,reader.id,p1,true,ALL);
  telemetryOnly=await createReader(owners,org,[p1]); // telemetry.read only: no replay.read, no profiles.read
- const source=await onboardReplaySource(owners,org,p1);
- seed=await seedReplays(api,source);
- await seedProfiles(api,source);
+ replaySource=await onboardReplaySource(owners,org,p1);
+ seed=await seedReplays(api,replaySource);
+ await seedProfiles(api,replaySource);
  ctx=await browser.newContext();
  const page=await ctx.newPage();
  await login(page,reader.email,reader.password);
@@ -255,4 +261,181 @@ test('profiles need their own grant, an unknown profile is the same not-found, a
  await expect(page.getByTestId('profile-method')).toHaveCount(0);
  await expect(page.getByTestId('frame-list')).toHaveCount(0);
  await denied.context().close();await page.context().close();
+});
+
+/** The paths under `dir` (the real server's data directory) whose bytes contain any of `needles`. */
+function filesContaining(dir:string,needles:readonly string[]):string[]{
+ const hits:string[]=[];
+ const walk=(d:string):void=>{
+  for(const entry of readdirSync(d,{withFileTypes:true})){
+   const path=join(d,entry.name);
+   if(entry.isDirectory()){walk(path);continue;}
+   if(!entry.isFile())continue;
+   const bytes=readFileSync(path);
+   if(needles.some((n)=>bytes.includes(n)))hits.push(path);
+  }
+ };
+ walk(dir);
+ return hits;
+}
+
+test('a replay recorded by the real browser SDK recorder in a real page is delivered by the SDK itself, stored masked and plays in the sandboxed viewer; no page text exists anywhere',async()=>{
+ test.setTimeout(240_000);
+ const app=await recorderApp();
+ const rctx=await br.newContext();
+ try{
+  const config=await onboardBrowserReplaySource(owners,org,p1,app.origin);
+  const page=await rctx.newPage();
+  const recorded=await record(page,app,config,async(p)=>{
+   // Real input through the real browser: typing into a password field and a textarea, a click, pointer movement, and a DOM mutation.
+   await p.fill('#name',PAGE_CANARIES.typed);
+   await p.fill('#note',PAGE_CANARIES.area);
+   await p.mouse.move(40,60);await p.mouse.move(120,140);
+   await p.click('#go');
+   await p.evaluate((text)=>{const n=document.createElement('p');n.textContent=text;document.getElementById('result')?.append(n);},PAGE_CANARIES.paragraph+'-late');
+  });
+  expect(recorded.outcome.replayPolicyAllowed).toBe(true);
+  expect(recorded.outcome.chunksEmitted).toBeGreaterThan(1);
+  expect(recorded.outcome.flush).toEqual({pending:0,lost:0,receipts:expect.any(Number)});
+  expect(recorded.outcome.flush.receipts).toBeGreaterThan(0);
+  // The SDK delivered by itself: the page's only traffic beyond its own two files is the real server's ingest route.
+  const foreign=recorded.requests.filter((u)=>!u.startsWith(app.origin+'/'));
+  expect(foreign.length).toBeGreaterThan(0);
+  expect(foreign.every((u)=>u.startsWith(origin()+'/ingest/v1/batches'))).toBe(true);
+  await page.close();
+
+  const viewer=await ctx.newPage();
+  const texts:string[]=[];
+  viewer.on('response',(r)=>{if(r.url().endsWith('/api/v1/replays/stream'))void r.text().then((t)=>texts.push(t),()=>undefined);});
+  await openReplay(viewer,recorded.replay);
+  await waitStarted(viewer);
+  await viewer.getByRole('button',{name:'Play',exact:true}).click();
+  await expect(hostStatus(viewer)).toContainText('All received events were delivered.');
+  const labels=viewer.getByTestId('replay-labels');
+  await expect(labels.getByTestId('label-loss')).toContainText('none reported by the recorder');
+  await expect(labels.getByTestId('label-policy')).toHaveText('1');
+  const chunks=Number(/^(\d+) /.exec(await labels.getByTestId('label-chunks').innerText())?.[1]);
+  expect(chunks).toBe(recorded.outcome.chunksEmitted);
+  const items=await timeline(viewer).allTextContents();
+  expect(items[0]).toBe('checkpoint 1');
+  expect(items.length).toBeGreaterThan(1);
+  await expect(viewer.getByTestId('replay-gaps')).not.toContainText('missing');
+  await expect(frameOf(viewer).locator('[data-masked]').first()).toBeVisible();
+  // The page's own text, in every form it was typed or written, exists nowhere the viewer or the server can reach: not in what the viewer received,
+  // not in the viewer's page or frame, and not in a byte of the server's data directory or log.
+  const canaries=Object.values(PAGE_CANARIES);
+  const seen=[await viewer.content(),await frameOf(viewer).locator('body').innerHTML(),...texts];
+  for(const c of canaries)expect(seen.join('\n'),c).not.toContain(c);
+  const dataDir=process.env.E2E_DATA_DIR;
+  expect(dataDir,'the harness exports E2E_DATA_DIR').toBeDefined();
+  expect(filesContaining(dataDir as string,canaries)).toEqual([]);
+  const log=process.env.E2E_SERVER_LOG;
+  if(log!==undefined)for(const c of canaries)expect(readFileSync(log,'utf8')).not.toContain(c);
+  await viewer.close();
+ }finally{
+  await rctx.close();
+  await app.close();
+ }
+});
+
+test('a replay of the real recorder is gone for a reader who lacks replay.read, exactly like any other replay',async()=>{
+ const app=await recorderApp();
+ const rctx=await br.newContext();
+ try{
+  const config=await onboardBrowserReplaySource(owners,org,p1,app.origin);
+  const page=await rctx.newPage();
+  const recorded=await record(page,app,config,async(p)=>{await p.click('#go');});
+  expect(recorded.outcome.flush.pending).toBe(0);
+  await page.close();
+  const denied=await loggedIn(telemetryOnly);
+  await openReplay(denied,recorded.replay);
+  await expect(denied.getByText('This selection was not found or is not available to this account.')).toBeVisible();
+  await expect(denied.getByTestId('replay-frame')).toHaveCount(0);
+  await denied.context().close();
+ }finally{
+  await rctx.close();
+  await app.close();
+ }
+});
+
+test('a profile produced by the real Python SDK (a bounded wall-sampling run of a named hot loop) is delivered by the SDK and reads as engine-reported samples, never as OS CPU time',async()=>{
+ test.setTimeout(240_000);
+ // The SDK reads its own clocks, samples its own threads, composes the capability and chunk records and delivers them over its own HTTPS transport
+ // (the driver exits non-zero without durable receipts). Nothing is built by the test.
+ const source=await onboardSdkProfileSource(owners,org,p1);
+ const dir=mkdtempSync(join(tmpdir(),'sp-sdk-profile-'));
+ const config=join(dir,'sdk.json');
+ writeFileSync(config,JSON.stringify(sdkConfig(source)),{mode:0o600});
+ const {stdout}=await promisify(execFile)(process.env.E2E_PYTHON??'python3',[resolve(process.cwd(),'e2e/support/sdk_profile.py')],{env:{...process.env,PYTHONPATH:resolve(process.cwd(),'../sdk/python/src'),SOUNDPOST_SDK_CONFIG:config},timeout:120_000});
+ const sdk=JSON.parse(stdout.trim().split('\n').pop()??'{}') as {profile:string;samples:number;chunks:number;method:string;units:string};
+ expect(sdk.method).toBe('python_wall_samples');
+ expect(sdk.units).toBe('samples');
+ const now=BigInt(Date.now())*1_000_000n;
+ const page=await ctx.newPage();
+ await page.goto(`/${hash('profiles',sdk.profile,now-3_600n*1_000_000_000n,now+3_600n*1_000_000_000n)}`);
+ await expect(page.getByRole('heading',{name:/^Profile /})).toBeVisible();
+ await expect(page.getByTestId('profile-method')).toContainText('runtime_cpu');
+ const caps=page.getByTestId('capability-row');
+ await expect(caps).toHaveCount(1);
+ await expect(caps).toHaveAttribute('data-method','python_wall_samples');
+ await expect(caps).toHaveAttribute('data-status','supported');
+ const engine=await page.getByTestId('unit-engine').innerText();
+ expect(Number(/([\d,. \u202f\u00a0]+) samples, engine-reported/.exec(engine)?.[1]?.replace(/\D/g,'')),engine).toBe(sdk.samples);
+ await expect(page.getByTestId('frame-list')).toContainText('e2e_hot_loop');
+ await expect(page.getByTestId('frame-list')).toContainText('e2e_sleeper');
+ // Engine samples are not OS CPU: no OS on-CPU, blocked or runnable-delay figure is claimed for them.
+ await expect(page.getByTestId('unit-oscpu')).not.toContainText(/\d/);
+ await expect(page.getByTestId('unit-blocked')).not.toContainText(/\d+ ns/);
+ await page.close();
+});
+
+test('deleting a replay while it is open ends the view, clears the page and releases no further chunk',async()=>{
+ test.setTimeout(120_000);
+ const own=await seedOwnReplay(api,replaySource,8);
+ const victim=await createReader(owners,org,[p1]);
+ await setPermissions(owners,org,victim.id,p1,true,ALL);
+ const page=await loggedIn(victim);
+ const requests:string[]=[];
+ page.on('request',(r)=>requests.push(r.url()));
+ await openReplay(page,own);
+ await waitStarted(page);
+ await step(page);await expect(hostStatus(page)).toContainText('Events delivered to the viewer: 1');
+ await step(page);await expect(hostStatus(page)).toContainText('Events delivered to the viewer: 2');
+ await expect(timeline(page)).toHaveText(['checkpoint 1','delta 2']);
+ await deleteEntity(owners,org,p1,own,'replay_chunk');
+ await expect(page.getByTestId('replay-ended')).toBeVisible({timeout:20_000});
+ await expect(page.getByTestId('replay-frame')).toHaveCount(0);
+ await expect(page.getByTestId('replay-host')).toHaveCount(0);
+ await expect(page.getByTestId('replay-labels')).toHaveCount(0);
+ await expect(page.locator('body')).not.toContainText('checkpoint 1');
+ const seen=requests.length;
+ await page.waitForTimeout(4500);
+ expect(requests.slice(seen).filter((u)=>!u.endsWith('/api/v1/session'))).toEqual([]);
+ const reopened=await page.request.post('/api/v1/replays/stream',{headers:{'X-CSRF-Token':(await (await page.request.get('/api/v1/session')).json() as {csrf:string}).csrf,Origin:new URL(page.url()).origin},data:{org,project:p1,replay:own}});
+ expect(reopened.status()).toBe(404);
+ // Deleting one replay leaves the others: the shared seed is still there for the same reader.
+ await openReplay(page,seed.clean.replay);
+ await waitStarted(page);
+ await page.context().close();
+});
+
+test('deleting a profile while it is open clears it on the next read and the same profile is then Not found',async()=>{
+ test.setTimeout(120_000);
+ const own=await seedOwnProfile(api,replaySource);
+ const victim=await createReader(owners,org,[p1]);
+ await setPermissions(owners,org,victim.id,p1,true,ALL);
+ const page=await loggedIn(victim);
+ await openProfile(page,own);
+ await expect(page.getByTestId('profile-method')).toContainText('native_cpu');
+ await expect(page.getByTestId('frame-list')).toBeVisible();
+ await deleteEntity(owners,org,p1,own,'profile_chunk');
+ await page.getByRole('button',{name:'Refresh'}).click();
+ await expect(page.getByText('This selection was not found or is not available to this account.')).toBeVisible();
+ await expect(page.getByTestId('profile-method')).toHaveCount(0);
+ await expect(page.getByTestId('frame-list')).toHaveCount(0);
+ await expect(page.locator('body')).not.toContainText('native_cpu');
+ // The shared native profile is untouched.
+ await openProfile(page,NATIVE_PROFILE);
+ await expect(page.getByTestId('profile-method')).toContainText('native_cpu');
+ await page.context().close();
 });

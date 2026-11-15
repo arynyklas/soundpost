@@ -229,13 +229,18 @@ export function onboardJobSource(page:Page,org:string,project:string):Promise<So
 export function onboardSdkJobSource(page:Page,org:string,project:string):Promise<Source>{
  return onboard(page,org,project,{kinds:['job_attempt','error','loss'],templates:[],labels:{},operations:[]});
 }
+/** A structured source for a real SDK's runtime profiles: the profile chunks, the capability record of the method that produced them and the SDK's own loss counters. */
+export function onboardSdkProfileSource(page:Page,org:string,project:string):Promise<Source>{
+ return onboard(page,org,project,{kinds:['profile_chunk','capability','loss'],templates:[],labels:{},operations:[]});
+}
 /**
  * The private configuration file the real SDK fixtures load (the shape of fixtures/sdk/estate SDKConfigFor): the onboarded source, its signed policy
  * and trusted keys, the routing descriptor, and the CA the SDK's HTTPS transport trusts (the harness exports it as NODE_EXTRA_CA_CERTS).
+ * `through` is the origin the SDK delivers to when it is not the server itself (a tcpPath relay).
  */
-export function sdkConfig(s:Source):Record<string,unknown>{
+export function sdkConfig(s:Source,through:string=origin()):Record<string,unknown>{
  if(s.sdk===undefined)throw Error('source was not onboarded with SDK configuration');
- return {org:s.org,project:s.project,source:s.id,credential:s.credential,build:s.build,endpoint:`${origin()}/ingest/v1/batches`,policy:s.sdk.policy,trusted_keys:s.sdk.trusted_keys,descriptor:s.sdk.descriptor,
+ return {org:s.org,project:s.project,source:s.id,credential:s.credential,build:s.build,endpoint:`${through}/ingest/v1/batches`,policy:s.sdk.policy,trusted_keys:s.sdk.trusted_keys,descriptor:s.sdk.descriptor,
   resource:{service_id:s.service,environment_id:s.environment,build_id:s.build,instance_pseudonym:s.instance,labels:[]},ca_file:process.env.NODE_EXTRA_CA_CERTS};
 }
 export type JobAttemptState='started'|'succeeded'|'failed'|'cancelled';
@@ -423,7 +428,7 @@ export async function removeShards(slots:readonly number[]):Promise<number>{
 }
 
 // ---- a real TCP path between the browser and the server --------------------------------------------------------
-export interface TcpPath{origin:string;/** drops every open connection at once, with no HTTP or SSE goodbye */cut():void;/** stops reading what the server sends (its writes back up) or resumes */stall(on:boolean):void;close():Promise<void>}
+export interface TcpPath{origin:string;/** drops every open connection at once, with no HTTP or SSE goodbye */cut():void;/** stops reading what the server sends (its writes back up) or resumes */stall(on:boolean):void;/** while on, every new connection is dropped on accept (the server is unreachable through this path) */refuse(on:boolean):void;close():Promise<void>}
 /**
  * A byte-for-byte TCP relay (TLS passes through untouched, so the server sees the browser's own handshake and Host) listening on
  * another local port. The session cookie is not scoped to a port, so a page that logged in on the server origin is logged in here.
@@ -433,7 +438,9 @@ export async function tcpPath():Promise<TcpPath>{
  const {createServer,connect}=await import('node:net');
  const target=Number(new URL(origin()).port);
  const pairs=new Set<{client:import('node:net').Socket;upstream:import('node:net').Socket}>();
+ let refusing=false;
  const server=createServer((client)=>{
+  if(refusing){client.destroy();return;}
   const upstream=connect(target,'127.0.0.1');
   const pair={client,upstream};pairs.add(pair);
   client.pipe(upstream);upstream.pipe(client);
@@ -445,6 +452,7 @@ export async function tcpPath():Promise<TcpPath>{
  return {origin:`https://127.0.0.1:${port}`,
   cut(){for(const p of [...pairs]){p.client.destroy();p.upstream.destroy();}},
   stall(on){for(const p of pairs){if(on)p.upstream.pause();else p.upstream.resume();}},
+  refuse(on){refusing=on;if(on)for(const p of [...pairs]){p.client.destroy();p.upstream.destroy();}},
   close(){for(const p of [...pairs]){p.client.destroy();p.upstream.destroy();}return new Promise<void>((ok)=>server.close(()=>ok()));}};
 }
 

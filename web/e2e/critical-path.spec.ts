@@ -1,6 +1,6 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
 import {test,expect,request as pwRequest,type APIRequestContext,type BrowserContext,type Locator,type Page} from '@playwright/test';
-import {at,createOrg,createProject,createReader,id,ingestError,ingestJobAttempt,login,onboardErrorSource,onboardJobSource,owner,spanId,type Reader} from './support/real';
+import {adminCommand,at,createOrg,createProject,createReader,id,ingestError,ingestJobAttempt,login,onboardErrorSource,onboardJobSource,owner,spanId,type Reader} from './support/real';
 import {NATIVE_PROFILE,onboardReplaySource,seedProfiles,seedReplays,setPermissions} from './support/replay';
 import {ANCHOR,domain,ingestSpanLoss,ingestTrace,onboardSpanSource,seedTraces,type TraceSeed} from './support/trace';
 // Real server, real Chrome. Every span below was admitted through the real ingest route with a real source credential and is
@@ -239,6 +239,9 @@ test('a selected span links to its job, replay, profile and error through the se
  await openIssue.click();
  await expect(page).toHaveURL(new RegExp(`view=issues&target=${p1}%3A[0-9a-f]{32}`));
  await expect(page.getByRole('heading',{name:/^Issue [0-9a-f]{32}$/})).toBeVisible();
+ // Persisted issue evidence is an organization-administrator read (the issue view takes no time window: it lists every stored occurrence): a reader holding telemetry.read only lands on the issue and is told so, and sees no occurrence.
+ await expect(page.locator('.status')).toContainText('organization administrator');
+ await expect(page.locator('tr[data-occurrence]')).toHaveCount(0);
  await page.goBack();
  details=await selectSpan(page,'Show details of span op.api, internal, level 2');
  await expect(target(details,'replay','no')).toContainText('not available to this account.');
@@ -275,5 +278,14 @@ test('a selected span links to its job, replay, profile and error through the se
  details=await selectSpan(rp,'Show details of span op.api, internal, level 2');
  await details.getByRole('link',{name:'Open this profile'}).click();
  await expect(rp).toHaveURL(new RegExp(`view=profiles&target=${p1}%3A${NATIVE_PROFILE}`));
+ // The same link, followed by an organization administrator who also holds telemetry.read, lists the very occurrence the span names.
+ await adminCommand(owners,org,'org_admin',{user_id:rich.id,enabled:true});
+ await rp.goto(`/${hashFor(t.trace)}`);
+ await expect(rp.getByRole('heading',{name:/^Trace /})).toBeVisible();
+ details=await selectSpan(rp,'Show details of span op.api, internal, level 2');
+ await details.getByRole('link',{name:'Open the issue holding this occurrence'}).click();
+ await expect(rp).toHaveURL(new RegExp(`view=issues&target=${p1}%3A[0-9a-f]{32}`));
+ await expect(rp.locator(`[data-section="occurrences"] tr[data-occurrence="${occurrence}"]`)).toBeVisible();
+ await expect(rp.locator('[data-section="occurrences"] tr[data-occurrence]')).toHaveCount(1);
  await rctx.close();
 });
