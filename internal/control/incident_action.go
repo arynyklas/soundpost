@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"sort"
+	"time"
 
 	"github.com/arynyklas/soundpost/internal/auth"
 	"github.com/arynyklas/soundpost/internal/model"
@@ -16,7 +17,8 @@ import (
 // dispatcher. Like rule evaluation it stores only leaf DTOs. The incident state
 // is opaque JSON that the incidents package computes with its pure reducer;
 // control never imports that package and never interprets a state beyond the
-// closed header (incident_id, org_id, project_id, version). What control owns,
+// closed header (incident_id, org_id, project_id, version) and, only to bound
+// growth, the resolution (status, resolved_at). What control owns,
 // atomically in one command:
 //
 //   - scope: an organization administrator of exactly this organization and
@@ -79,6 +81,14 @@ const (
 	maxIncidentIntents        = 1024
 	maxIncidentCommandIntents = 8
 	maxIncidentToken          = 32
+
+	// IncidentResolvedRetention is how long a resolved incident is kept before it
+	// may be pruned to make room for a new one (the lifecycle retention of the
+	// evidence it summarises, 90 days). Pruning happens only at the per-project
+	// cap, oldest resolution first, and never touches an open incident or a
+	// resolved one inside the window: a project full of recent incidents is
+	// refused (Quota), not silently trimmed.
+	IncidentResolvedRetention = model.UnixNano(90 * 24 * time.Hour)
 )
 
 // IncidentVersionConflict is the SafeDetail of a lost incident version race.
@@ -192,7 +202,10 @@ func applyIncidentAction(scope auth.Scope, st *State, cmd Command) (Effect, erro
 			}
 		}
 		if n >= maxIncidentsPerProject {
-			return Effect{}, model.Fail(model.Quota)
+			n -= pruneResolvedIncidents(st, prefix, c.At, n-maxIncidentsPerProject+1)
+			if n >= maxIncidentsPerProject {
+				return Effect{}, model.Fail(model.Quota)
+			}
 		}
 		rec = IncidentRecord{Org: org, Project: c.Project, ID: c.Incident}
 	}
@@ -225,6 +238,50 @@ func applyIncidentAction(scope auth.Scope, st *State, cmd Command) (Effect, erro
 		return Effect{}, err
 	}
 	return Effect{AffectedIDs: []model.ID{c.Incident}, Phase: "applied"}, nil
+}
+
+// pruneResolvedIncidents drops up to need resolved incidents of one project
+// whose resolution is at least IncidentResolvedRetention before at, oldest
+// resolution first (key order breaks ties), and returns how many it dropped. It
+// is a pure function of the state and the command's own time, so every replica
+// prunes the same records. A record whose state is a tombstone or does not parse
+// as resolved is never pruned.
+func pruneResolvedIncidents(st *State, prefix string, at model.UnixNano, need int) int {
+	type candidate struct {
+		key  string
+		when model.UnixNano
+	}
+	var out []candidate
+	for k, raw := range st.IncidentBooks {
+		if len(k) <= len(prefix) || k[:len(prefix)] != prefix {
+			continue
+		}
+		var rec IncidentRecord
+		if json.Unmarshal(raw, &rec) != nil || rec.Erased() {
+			continue
+		}
+		var head struct {
+			Status     string         `json:"status"`
+			ResolvedAt model.UnixNano `json:"resolved_at"`
+		}
+		if json.Unmarshal(rec.State, &head) != nil || head.Status != "resolved" || head.ResolvedAt <= 0 || at-head.ResolvedAt < IncidentResolvedRetention {
+			continue
+		}
+		out = append(out, candidate{k, head.ResolvedAt})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].when != out[j].when {
+			return out[i].when < out[j].when
+		}
+		return out[i].key < out[j].key
+	})
+	if len(out) > need {
+		out = out[:need]
+	}
+	for _, c := range out {
+		delete(st.IncidentBooks, c.key)
+	}
+	return len(out)
 }
 
 // Incident reads one incident's committed record through a linearizable control

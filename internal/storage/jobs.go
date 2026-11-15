@@ -33,14 +33,25 @@ func validateJobs(tx *bolt.Tx, b model.NormalizedBatch) error {
 		if exists {
 			old, _ := model.CanonicalJSON(previous)
 			value, _ := model.CanonicalJSON(next)
-			if previous.State != "started" && !bytes.Equal(old, value) {
+			if previous.Job != next.Job || previous.Run != next.Run || previous.Ordinal != next.Ordinal || previous.Epoch != next.Epoch {
 				return model.Fail(model.Conflict)
 			}
-			if previous.Job != next.Job || previous.Run != next.Run || previous.Ordinal != next.Ordinal || previous.Epoch != next.Epoch || next.Sequence < previous.Sequence {
-				return model.Fail(model.Conflict)
+			// A re-sent older "started" of an attempt that has moved on (even to a
+			// terminal event) is a late duplicate, not a conflict: the sender never
+			// saw the ack. The reducer is the authority on duplicate/ordering and
+			// the stored marker keeps the newest event (see putJob). An older
+			// terminal event, or any different event at the same sequence, is.
+			late := next.Sequence < previous.Sequence && next.State == "started"
+			if !late {
+				if previous.State != "started" && !bytes.Equal(old, value) {
+					return model.Fail(model.Conflict)
+				}
+				if next.Sequence < previous.Sequence || next.Sequence == previous.Sequence && !bytes.Equal(old, value) {
+					return model.Fail(model.Conflict)
+				}
 			}
-			if next.Sequence == previous.Sequence && !bytes.Equal(old, value) {
-				return model.Fail(model.Conflict)
+			if late {
+				continue
 			}
 		}
 		seen[string(key)] = *next
@@ -72,4 +83,22 @@ func validateOrdered(tx *bolt.Tx, b model.NormalizedBatch) error {
 		return e
 	}
 	return validateJobs(tx, b)
+}
+
+// putJob stores the newest event of an attempt: a late older event (accepted as a
+// duplicate by validateJobs) never regresses the marker.
+func putJob(tx *bolt.Tx, b model.NormalizedBatch, j *model.JobAttemptEvent) error {
+	bucket := tx.Bucket([]byte("jobs"))
+	key := jobKey(b, j)
+	if raw := bucket.Get(key); raw != nil {
+		var previous model.JobAttemptEvent
+		if json.Unmarshal(raw, &previous) == nil && previous.Epoch == j.Epoch && j.Sequence < previous.Sequence {
+			return nil
+		}
+	}
+	raw, err := json.Marshal(j)
+	if err != nil {
+		return err
+	}
+	return bucket.Put(key, raw)
 }

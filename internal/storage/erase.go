@@ -802,11 +802,7 @@ func (e *Engine) applyBatchRedactedTx(tx *bolt.Tx, slot uint16, index uint64, en
 			}
 		}
 		if record.Kind == model.JobAttempt {
-			raw, err := json.Marshal(record.Payload.Job)
-			if err != nil {
-				return err
-			}
-			if err = tx.Bucket([]byte("jobs")).Put(jobKey(b, record.Payload.Job), raw); err != nil {
+			if err := putJob(tx, b, record.Payload.Job); err != nil {
 				return err
 			}
 		}

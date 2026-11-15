@@ -339,3 +339,49 @@ func TestWorkersDeliverAnIncidentOpenedBySystemRunner(t *testing.T) {
 		t.Fatalf("second pass: %+v, %d posts", rep, len(recv.received()))
 	}
 }
+
+// The served worker pass fires the policy's own timers: with no new evidence, only
+// the clock advancing, the next pass decides and delivers the 15-minute reminder
+// once (the same Timer decision that carries snooze expiry and the daily digest).
+func TestWorkersFireADueReminderTimerOnce(t *testing.T) {
+	n := newWorkerNode(t)
+	recv := newReceiver(t)
+	n.setDestinationEnabled(n.dest, false)
+	n.webhookDestination(recv.url, "destination signing secret 0123456789", true)
+	sender, err := n.app.NotificationSender(n.notificationSender(recv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin, err := n.app.Auth.AuthorizeSystem(n.ctx, n.org, []model.ID{n.project}, auth.OrgAdmin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = n.app.Incidents.Act(n.ctx, admin, incidents.Action{CommandID: model.NewID(), Type: incidents.TypeOpen, Origin: incidents.OriginSystem, Target: incidents.Target{Project: n.project, Incident: model.NewID()},
+		Impact: &incidents.Impact{Condition: model.NewID(), Episode: model.NewID(), Severity: incidents.SeverityMajor, State: incidents.ConditionFiring, Freshness: incidents.FreshnessFresh}}, model.UnixNano(workerNow)); err != nil {
+		t.Fatal(err)
+	}
+	w, err := n.app.NewWorkers(n.config(func(c *appcore.WorkerConfig) { c.Routing, c.Sender = n.app.OrgRouting(), sender }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep := n.tick(w); rep.Attempted != 1 || len(recv.received()) != 1 {
+		t.Fatalf("opening pass: %+v, %d posts", rep, len(recv.received()))
+	}
+	n.clock.v.Store(int64(workerNow) + int64(10*time.Minute))
+	if rep := n.tick(w); rep.Attempted != 0 || len(recv.received()) != 1 {
+		t.Fatalf("a timer fired early: %+v, %d posts", rep, len(recv.received()))
+	}
+	n.clock.v.Store(int64(workerNow) + int64(16*time.Minute))
+	if rep := n.tick(w); rep.Attempted != 1 || len(recv.received()) != 2 {
+		t.Fatalf("the due reminder was not delivered by the served pass: %+v, %d posts", rep, len(recv.received()))
+	}
+	var body struct {
+		EventKind string `json:"event_kind"`
+	}
+	if err = json.Unmarshal(recv.received()[1].body, &body); err != nil || body.EventKind != "reminder" {
+		t.Fatalf("second post: %s (%v)", recv.received()[1].body, err)
+	}
+	if rep := n.tick(w); rep.Attempted != 0 || len(recv.received()) != 2 {
+		t.Fatalf("the reminder was decided twice: %+v, %d posts", rep, len(recv.received()))
+	}
+}

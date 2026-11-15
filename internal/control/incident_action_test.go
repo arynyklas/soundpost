@@ -399,3 +399,60 @@ func TestIncidentActionSurvivesRestartAndSnapshotImport(t *testing.T) {
 		t.Fatalf("a stale expected version committed after restart: %v", err)
 	}
 }
+
+// Resolved incidents are pruned, within bounds, only to make room at the
+// per-project cap: an old resolved one goes (oldest first), a recently resolved
+// or open one never does, and a project full of those is refused.
+func TestIncidentActionPrunesOldResolvedIncidentsOnlyAtTheCap(t *testing.T) {
+	f := newIncFx(t)
+	const day = model.UnixNano(24 * time.Hour)
+	now := model.UnixNano(1_700_000_000_000_000_000)
+	id := func(n int) model.ID { return model.ID{0xb0, byte(n >> 8), byte(n)} }
+	state := func(n int, status string, resolvedAt model.UnixNano) json.RawMessage {
+		resolved, _ := json.Marshal(resolvedAt)
+		return json.RawMessage(fmt.Sprintf(`{"incident_id":%q,"org_id":%q,"project_id":%q,"version":"1","status":%q,"resolved_at":%s}`, id(n).String(), f.org.String(), f.project.String(), status, resolved))
+	}
+	open := func(n int, st json.RawMessage) error {
+		_, err := f.send(model.NewID(), control.IncidentCommand{Project: f.project, Incident: id(n), Action: "open", Origin: "human", Actor: f.user, At: now, ExpectedVersion: 0, NewVersion: 1, State: st, Digest: digest(st)})
+		return err
+	}
+	const cap = 1024
+	for n := 0; n < cap; n++ {
+		st := state(n, "open", 0)
+		switch n {
+		case 0:
+			st = state(n, "resolved", now-120*day) // oldest, past retention
+		case 1:
+			st = state(n, "resolved", now-100*day) // past retention
+		case 2:
+			st = state(n, "resolved", now-10*day) // inside retention
+		case 3:
+			st = state(n, "open", now-200*day) // never pruned: not resolved, whatever else the state says
+		}
+		if err := open(n, st); err != nil {
+			t.Fatalf("incident %d: %v", n, err)
+		}
+	}
+	exists := func(n int) bool {
+		_, ok, err := f.store.Incident(f.ctx, f.adminScope(), f.project, id(n))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ok
+	}
+	if err := open(cap, state(cap, "open", 0)); err != nil {
+		t.Fatalf("a new incident at the cap must prune the oldest expired resolved one: %v", err)
+	}
+	if exists(0) || !exists(1) || !exists(2) || !exists(3) || !exists(cap) {
+		t.Fatalf("pruned oldest-first and only one: 0=%v 1=%v 2=%v new=%v", exists(0), exists(1), exists(2), exists(cap))
+	}
+	if err := open(cap+1, state(cap+1, "open", 0)); err != nil || exists(1) || !exists(2) {
+		t.Fatalf("the second expired resolved incident goes next: err=%v 1=%v 2=%v", err, exists(1), exists(2))
+	}
+	if err := open(cap+2, state(cap+2, "open", 0)); code(err) != model.Quota {
+		t.Fatalf("only open and recently resolved incidents remain, so a new one must be refused: %v", err)
+	}
+	if !exists(2) || !exists(3) || exists(cap+2) {
+		t.Fatal("a refused open pruned or stored something")
+	}
+}

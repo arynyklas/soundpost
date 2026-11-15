@@ -78,6 +78,14 @@ func (r *jobRig) event(job, run, attempt model.ID, occurrence string, ordinal, s
 // retry that re-sends an event it never saw acknowledged.
 func (r *jobRig) ingest(e model.JobAttemptEvent) {
 	r.t.Helper()
+	if status, body := r.send(e); status != 200 {
+		r.t.Fatalf("ingest answered %d: %s", status, body)
+	}
+}
+
+// send is ingest without the success requirement: it returns the HTTP status.
+func (r *jobRig) send(e model.JobAttemptEvent) (int, []byte) {
+	r.t.Helper()
 	record := model.Record{ID: model.NewID(), Kind: model.JobAttempt, ObservedAt: e.Observed, Resource: r.resource, Payload: model.Payload{Job: &e}}
 	batch := model.Batch{Version: 1, Project: r.project, Source: model.ID{}, Producer: r.producer, ID: model.NewID(), PolicyRevision: 1, Records: []model.Record{record}}
 	var err error
@@ -94,10 +102,8 @@ func (r *jobRig) ingest(e model.JobAttemptEvent) {
 		r.t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		body, _ := io.ReadAll(resp.Body)
-		r.t.Fatalf("ingest answered %d: %s", resp.StatusCode, body)
-	}
+	body, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, body
 }
 
 func (r *jobRig) post(path string, body any) (int, []byte) {
@@ -578,5 +584,40 @@ func TestJobEvidenceFromAClockSkewedHostIsRejectedAndDoesNotWedgeTheJournal(t *t
 	}
 	if rep := r.tick(w); rep.Produced != 0 {
 		t.Fatalf("the rejected row was retried: %+v", rep)
+	}
+}
+
+// Decision (06.03 ingest finding): a re-sent OLDER "started" event of an attempt
+// that already has a terminal event is an idempotent duplicate (200), because the
+// SDK that never saw the ack must be able to drain its queue (design: "duplicate
+// retry is identical", "idempotent retries do not count twice"). A different
+// terminal for the attempt stays a 409 conflict, and the late duplicate never
+// regresses the stored marker that the conflict check compares against.
+func TestJobIngestAcceptsALateResendOfAnOlderEventOfASettledAttempt(t *testing.T) {
+	r := newJobRig(t)
+	job, run, attempt := model.NewID(), model.NewID(), model.NewID()
+	started := r.event(job, run, attempt, "job-run-late", 1, 1, "started", 10*time.Second, 0)
+	failed := r.event(job, run, attempt, "job-run-late", 1, 2, "failed", 10*time.Second, 20*time.Second)
+	r.ingest(started)
+	r.ingest(failed)
+	if status, body := r.send(started); status != 200 {
+		t.Fatalf("a re-sent older started event of a failed attempt answered %d: %s", status, body)
+	}
+	other := r.event(job, run, attempt, "job-run-late", 1, 2, "failed", 10*time.Second, 25*time.Second)
+	if status, _ := r.send(other); status != 409 {
+		t.Fatalf("a different terminal at the same sequence answered %d, want 409 (the late duplicate must not have regressed the marker)", status)
+	}
+	if status, body := r.send(failed); status != 200 {
+		t.Fatalf("the identical terminal re-sent answered %d: %s", status, body)
+	}
+	older := r.event(job, run, attempt, "job-run-late", 1, 1, "failed", 10*time.Second, 20*time.Second)
+	if status, _ := r.send(older); status != 409 {
+		t.Fatalf("an older terminal event answered %d, want 409", status)
+	}
+	w := r.workers(r.app.JobProducer())
+	r.tick(w)
+	report, err := r.app.Jobs.Health(r.ctx, r.humanRead(), r.project, job)
+	if err != nil || len(report.State.Attempts) != 1 || report.State.Attempts[attempt].Terminal == nil || len(report.State.Attempts[attempt].Events) != 2 {
+		t.Fatalf("the attempt must hold its two distinct events once: %v %+v", err, report.State.Attempts)
 	}
 }

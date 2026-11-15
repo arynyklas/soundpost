@@ -583,3 +583,37 @@ func TestAckDoesNotStopIssueOccurrenceAccumulation(t *testing.T) {
 		t.Fatalf("more occurrences of the same impact must neither undo the ACK nor open another incident: %v %+v", err, state)
 	}
 }
+
+// The other half of "an ACK is not undone": a later impact observation of the
+// same episode at the same severity (what a source re-reports while the error
+// keeps happening) leaves the ACK current and the version alone, and only a
+// new episode makes the ACK stale (reminders pause, worse impact notifies).
+func TestAckSurvivesAnEqualImpactObservationButNotAWorseOne(t *testing.T) {
+	r := newIssueRig(t)
+	r.ingest("TypeError", 5, false, true)
+	w := r.workers()
+	if rep := r.tick(w); rep.Produced != 2 {
+		t.Fatalf("first tick: %+v", rep)
+	}
+	records := r.incidentRecords()
+	if len(records) != 1 {
+		t.Fatalf("incidents = %d", len(records))
+	}
+	target := incidents.Target{Project: r.project, Incident: records[0].ID}
+	acked, err := r.app.Incidents.Act(r.ctx, r.admin(), incidents.Action{CommandID: model.NewID(), ExpectedVersion: 1, Type: incidents.TypeAck, Target: target, Reason: "looking"}, 0)
+	if err != nil || !acked.AckCurrent() {
+		t.Fatalf("ack: %v %+v", err, acked)
+	}
+	impact := func(episode model.ID) incidents.Action {
+		return incidents.Action{CommandID: model.NewID(), ExpectedVersion: acked.Version, Type: incidents.TypeImpact, Origin: incidents.OriginSystem, Target: target,
+			Impact: &incidents.Impact{Condition: acked.Condition.ID, Episode: episode, Severity: acked.Severity, State: incidents.ConditionFiring, Freshness: incidents.FreshnessFresh}}
+	}
+	same, err := r.app.Incidents.Act(r.ctx, r.admin(), impact(acked.Episode), 0)
+	if err != nil || !same.AckCurrent() || same.ImpactRevision != acked.ImpactRevision || same.Version != acked.Version {
+		t.Fatalf("an equal-impact observation undid the ACK or changed the incident: %v %+v", err, same)
+	}
+	worse, err := r.app.Incidents.Act(r.ctx, r.admin(), impact(model.NewID()), 0)
+	if err != nil || worse.AckCurrent() || worse.ImpactRevision != acked.ImpactRevision+1 {
+		t.Fatalf("a new episode must make the ACK stale: %v %+v", err, worse)
+	}
+}

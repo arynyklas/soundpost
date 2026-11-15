@@ -29,6 +29,12 @@ person decided never hides what the source is doing, and the other way round.
   new episode or a worse impact proposes a new incident linked to the resolved
   one. A resolved timeline is never reopened or rewritten.
 - System condition events can never assign an owner, acknowledge or resolve.
+- A project keeps at most 1024 incidents. Only when a new incident would exceed
+  that, resolved incidents whose resolution is at least 90 days old are removed,
+  oldest first, to make room. Open incidents and recently resolved ones are never
+  removed; if nothing is old enough the new incident is refused (`quota`) rather
+  than anything being trimmed silently. If the source is still firing for an
+  episode whose resolved incident was removed, the system opens a new one.
 
 ## Snooze and maintenance
 
