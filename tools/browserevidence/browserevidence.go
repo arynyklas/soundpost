@@ -61,6 +61,28 @@ var EvidenceRowIDs = []string{
 	"canary_responses_logs",
 }
 
+// BrowserViews are the console views whose real-browser acceptance is a named release row of its own: a row passes only
+// when every Playwright test it names is in the list AND passed in the run (a renamed or dropped test fails the row,
+// it cannot silently leave the view unverified). Each test is `<spec file> > <title prefix>`.
+var BrowserViews = []struct {
+	ID    string
+	Tests []string
+}{
+	{"browser/mapped_frame", []string{
+		"investigation-journeys.spec.ts > trace to source: frontend, API and database in one trace",
+	}},
+	{"browser/masked_replay_viewer", []string{
+		"investigation-journeys.spec.ts > replay: the keyboard opens the masked replay",
+		"replay-profile.spec.ts > masked text, opaque regions, policy revision and recording loss are labelled in words",
+		"replay-profile.spec.ts > a replay recorded by the real browser SDK recorder in a real page",
+	}},
+	{"browser/profile_view", []string{
+		"investigation-journeys.spec.ts > profile: the keyboard opens the native profile",
+		"replay-profile.spec.ts > a native CPU profile keeps OS on-CPU samples",
+		"replay-profile.spec.ts > a profile produced by the real Python SDK",
+	}},
+}
+
 // Row id prefixes of the three producers.
 const (
 	PlaywrightPrefix = "playwright/"
@@ -106,6 +128,9 @@ func Export(in Inputs, commit string) (releaseevidence.Report, error) {
 	for _, t := range listed {
 		expected = append(expected, PlaywrightPrefix+t.id)
 	}
+	for _, v := range BrowserViews {
+		expected = append(expected, v.ID)
+	}
 	for _, id := range JourneyRowIDs {
 		expected = append(expected, JourneysPrefix+id)
 	}
@@ -134,7 +159,55 @@ func Export(in Inputs, commit string) (releaseevidence.Report, error) {
 		}
 		rows = append(rows, r...)
 	}
-	return releaseevidence.New(releaseevidence.KindBrowser, commit, expected, mergeDuplicates(rows))
+	rows = mergeDuplicates(rows)
+	rows = append(rows, viewRows(listed, rows)...)
+	return releaseevidence.New(releaseevidence.KindBrowser, commit, expected, rows)
+}
+
+// viewRows derives the BrowserViews rows from the Playwright rows. Without any Playwright result the view rows stay
+// missing; with results, a named test that is not in the list or has no passed row fails its view.
+func viewRows(listed []pwEntry, rows []releaseevidence.Row) []releaseevidence.Row {
+	status := map[string]string{}
+	have := false
+	for _, r := range rows {
+		if strings.HasPrefix(r.ID, PlaywrightPrefix) {
+			status[strings.TrimPrefix(r.ID, PlaywrightPrefix)] = r.Status
+			have = true
+		}
+	}
+	if !have {
+		return nil
+	}
+	var out []releaseevidence.Row
+	for _, v := range BrowserViews {
+		row := releaseevidence.Row{ID: v.ID, Status: releaseevidence.StatusPassed}
+		var bad []string
+		n := 0
+		for _, want := range v.Tests {
+			found := false
+			for _, e := range listed {
+				if !strings.HasPrefix(e.id, want) {
+					continue
+				}
+				found = true
+				n++
+				if st := status[e.id]; st != releaseevidence.StatusPassed {
+					bad = append(bad, fmt.Sprintf("%s: %q", e.id, st))
+				}
+			}
+			if !found {
+				bad = append(bad, "not in the Playwright list: "+want)
+			}
+		}
+		if len(bad) > 0 {
+			row.Status = releaseevidence.StatusFailed
+			row.Detail = releaseevidence.Detail(bad...)
+		} else {
+			row.Detail = fmt.Sprintf("%d named test(s) passed", n)
+		}
+		out = append(out, row)
+	}
+	return out
 }
 
 // mergeDuplicates keeps one row per id. A producer that reported one id twice with different

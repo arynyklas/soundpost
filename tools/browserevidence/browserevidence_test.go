@@ -6,6 +6,8 @@ package browserevidence
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -118,7 +120,7 @@ func TestExportKeepsEveryBrowserRowVerdict(t *testing.T) {
 			t.Errorf("a row of another project leaked in: %s", id)
 		}
 	}
-	if want := 1 + 2 + len(JourneyRowIDs) + len(EvidenceRowIDs); len(rep.Expected) != want {
+	if want := 1 + 2 + len(BrowserViews) + len(JourneyRowIDs) + len(EvidenceRowIDs); len(rep.Expected) != want {
 		t.Errorf("expected rows %d, want %d", len(rep.Expected), want)
 	}
 }
@@ -248,5 +250,84 @@ func TestEnvelopeIsWhatTheGateDecodes(t *testing.T) {
 	}
 	if _, err := Export(Inputs{PlaywrightList: []byte(listJSON())}, "main"); err == nil {
 		t.Error("a symbolic commit was accepted")
+	}
+}
+
+// viewReport builds a one-project Playwright report holding exactly the tests the BrowserViews name (plus the given extras),
+// each with status; drop removes the first named test of the list.
+func viewReport(status string, drop string) string {
+	var specs []string
+	for _, v := range BrowserViews {
+		for _, want := range v.Tests {
+			if want == drop {
+				continue
+			}
+			i := strings.Index(want, " > ")
+			res := `[{"status":"passed"}]`
+			st, exp := "expected", "passed"
+			if status == "failed" {
+				res, st = `[{"status":"failed","error":{"message":"boom"}}]`, "unexpected"
+			}
+			if status == "list" {
+				res = `[]`
+			}
+			specs = append(specs, fmt.Sprintf(`{"title":%q,"file":%q,"tests":[{"projectName":"chromium","expectedStatus":%q,"status":%q,"results":%s}]}`, want[i+3:]+" and more", want[:i], exp, st, res))
+		}
+	}
+	return `{"suites":[{"title":"x","file":"x","specs":[` + strings.Join(specs, ",") + `]}],"errors":[]}`
+}
+
+func TestBrowserViewRowsNeedEveryNamedTest(t *testing.T) {
+	run := func(list, results string) map[string]releaseevidence.Row {
+		rep, err := Export(Inputs{PlaywrightList: []byte(list), PlaywrightResults: []byte(results)}, commit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return rowMap(rep)
+	}
+	rows := run(viewReport("list", ""), viewReport("passed", ""))
+	for _, v := range BrowserViews {
+		if r := rows[v.ID]; r.Status != releaseevidence.StatusPassed {
+			t.Errorf("%s with every named test passed: %+v", v.ID, r)
+		}
+	}
+	rows = run(viewReport("list", ""), viewReport("failed", ""))
+	for _, v := range BrowserViews {
+		if r := rows[v.ID]; r.Status != releaseevidence.StatusFailed || !strings.Contains(r.Detail, "failed") {
+			t.Errorf("%s with failing tests: %+v", v.ID, r)
+		}
+	}
+	gone := BrowserViews[1].Tests[1]
+	rows = run(viewReport("list", gone), viewReport("passed", gone))
+	if r := rows[BrowserViews[1].ID]; r.Status != releaseevidence.StatusFailed || !strings.Contains(r.Detail, "not in the Playwright list") {
+		t.Errorf("a renamed or dropped named test must fail its view: %+v", r)
+	}
+	if r := rows[BrowserViews[0].ID]; r.Status != releaseevidence.StatusPassed {
+		t.Errorf("an unrelated view must not be affected: %+v", r)
+	}
+	// No run results: the view rows stay missing.
+	rep, err := Export(Inputs{PlaywrightList: []byte(viewReport("list", ""))}, commit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(rep.Missing(), " "), "browser/mapped_frame") {
+		t.Errorf("missing %v", rep.Missing())
+	}
+}
+
+// Every test a BrowserViews row names exists, by title prefix, in the spec file it names: a rename in web/e2e fails here,
+// not only at release time.
+func TestBrowserViewsNameRealSpecTests(t *testing.T) {
+	for _, v := range BrowserViews {
+		for _, want := range v.Tests {
+			i := strings.Index(want, " > ")
+			raw, err := os.ReadFile(filepath.Join("..", "..", "web", "e2e", want[:i]))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(raw), "test('"+want[i+3:]) {
+				t.Errorf("%s: no test starting %q in %s", v.ID, want[i+3:], want[:i])
+			}
+		}
 	}
 }

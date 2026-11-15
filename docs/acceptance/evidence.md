@@ -75,6 +75,10 @@ Canaries: a distinct sentinel in the source map `sourcesContent`, in replay node
 text and in an error `message` field is asserted absent from every HTTP response,
 the process log and (in-process) every file of the live and restored data roots.
 
+## Browser rows (09.06-W4)
+
+`tools/browserevidence` exports three named rows beside the per-test `playwright/...` rows, each derived from real Playwright tests that run against a served instance: `browser/mapped_frame` (trace to the issue's frames mapped by the real source map), `browser/masked_replay_viewer` (the masked replay in the sandboxed viewer, including the one recorded by the real browser SDK recorder) and `browser/profile_view` (the native profile and the SDK-produced profile). A row passes only when every test it names (`BrowserViews` in `tools/browserevidence/browserevidence.go`, by spec file and title prefix) is in the Playwright list AND passed in the run; a renamed or dropped test fails its row, and without results the row stays missing. `TestBrowserViewsNameRealSpecTests` pins the names to `web/e2e`.
+
 ## Wiring status
 
 `soundpost serve` applies the symbolication configuration itself: after `appcore.Open` it

@@ -108,6 +108,9 @@ test('keyboard: the first Tab stop is the skip link, every stop shows a focus ri
   await focusLinkByKeyboard(page,skip);
   await expect(skip).toBeFocused();
   const ring=await skip.evaluate((e)=>{const s=getComputedStyle(e);return {outline:`${s.outlineStyle} ${s.outlineWidth}`,shadow:s.boxShadow};});
+  // The page must not take focus away from a link the user just reached (a late-arriving entity heading used to: seen on WebKit and Chromium).
+  await page.waitForTimeout(500);
+  await expect(skip).toBeFocused();
   stops.push({tag:'a',name:'Skip to content',outline:ring.outline,shadow:ring.shadow,inView:true,path:'a.skip-link'});
  }
  const unseen=stops.filter((s)=>!focusIndicated(s)).map((s)=>`${s.path} "${s.name}" outline=${s.outline} shadow=${s.shadow}`);
