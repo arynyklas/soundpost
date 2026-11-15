@@ -12,6 +12,7 @@ import importlib.util
 import json
 import platform
 import re
+import secrets
 import socket
 import sys
 import sysconfig
@@ -877,7 +878,8 @@ def test_ack_is_not_available_without_loss_permission_or_without_reportable_loss
         spin(work.app, 0.05)
         report = clean.stop()
         assert [loss["reason"] for loss in report["losses"] if loss["reason"] == "truncated"] == []
-        assert report["ack"] == {"status": "not_available", "reason": "no_loss_recorded"}
+        # The clean run's profile was refused (deployment_profiles is off on this client) and nothing else was recorded.
+        assert report["ack"] == {"status": "not_available", "reason": "profile_not_admitted"}
         assert not ledger.sends
     finally:
         denied.close(); allowed.close()
@@ -893,3 +895,91 @@ def test_ack_fails_honestly_when_the_backend_returns_no_cursor(work):
         assert len(ledger.sends) >= 1
     finally:
         client.close()
+
+# ---------------------------------------------------------------- 03.09-W4: profile + capability records through the real queue
+
+def profiles_client(transport, **policy):
+    original = config()
+    payload = json.loads(base64.urlsafe_b64decode(original.policy.payload + "=" * (-len(original.policy.payload) % 4)))
+    payload.update(policy)
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    return init(replace(original, transport=transport, deployment_profiles=True, policy=SignedPolicy(1, "Ed25519", "test", b64(raw), b64(KEY.sign(raw)))))
+
+def records_sent(ledger, kind):
+    return [record for body in ledger.sends for record in json.loads(body)["records"] if record["kind"] == kind]
+
+def assert_closed_wire(record):
+    assert parse_safe_record(json.dumps({"id": record["id"], "kind": record["kind"], "observed_at_ns": record["observed_at_ns"], "payload": record["payload"], "policy_revision": "1"}))
+
+@pytest.mark.parametrize("method,units", [(WALL, "samples"), (MONITORING, "events")])
+def test_a_supported_run_reaches_the_queue_as_a_capability_and_linked_runtime_cpu_chunks(work, method, units):
+    if method == MONITORING and (MON is None or sysconfig.get_config_var("Py_GIL_DISABLED")):
+        pytest.skip("sys.monitoring/GIL build required")
+    ledger = Ledger(); ledger.lost = False
+    client = profiles_client(ledger)
+    try:
+        lease = start_profile(options(work, method=method), client)
+        spin(work.app, 0.15)
+        report = lease.stop()
+        assert report["capability"]["status"] == "supported" and report["ack"]["status"] == "obtained" and report["ack"]["cursors"]
+        capabilities, chunks = records_sent(ledger, "capability"), records_sent(ledger, "profile_chunk")
+        assert len(capabilities) == 1 and chunks
+        capability = capabilities[0]
+        assert capability["payload"]["method"] == method and capability["payload"]["signal"] == "profile_chunk" and capability["payload"]["status"] == "supported"
+        for chunk in chunks:
+            payload = chunk["payload"]
+            assert payload["method"] == "runtime_cpu" and payload["units"] == units and payload["capability_id"] == capability["id"]
+            assert payload["clock"]["domain"] == capability["payload"]["clock_domain"] and payload["profile_id"] != payload["process_id"]
+            assert all(set(frame) == {"module_id", "function", "artifact_id", "offset", "reason"} for frame in payload["frames"])
+            assert_closed_wire(chunk)
+        assert_closed_wire(capability)
+        if method == WALL:
+            assert sum(int(s["count"]) for c in chunks for s in c["payload"]["samples"]) == report["sample_count"]
+        else:
+            # events are summed per code object across PY_START/PY_RESUME/PY_RETURN/PY_UNWIND
+            assert sum(int(s["count"]) for c in chunks for s in c["payload"]["samples"]) == sum(int(row["count"]) for row in report["events"])
+    finally:
+        client.close()
+
+def test_a_refused_run_is_the_capability_record_alone(work, monkeypatch):
+    ledger = Ledger(); ledger.lost = False
+    client = profiles_client(ledger, loss=True)
+    real = sysconfig.get_config_var
+    monkeypatch.setattr(sysconfig, "get_config_var", lambda name: 1 if name == "Py_GIL_DISABLED" else real(name))
+    try:
+        report = start_profile(options(work), client).stop()
+        assert report["capability"]["status"] == "unsupported" and report["ack"]["status"] == "obtained"
+        assert records_sent(ledger, "profile_chunk") == []
+        capabilities = records_sent(ledger, "capability")
+        assert [(c["payload"]["status"], c["payload"]["reason"], c["payload"]["method"]) for c in capabilities] == [("unsupported", "free_threaded_unqualified", WALL)]
+    finally:
+        client.close()
+
+def test_a_client_without_profile_permission_queues_nothing_and_says_so(work):
+    ledger = Ledger(); ledger.lost = False
+    client = signed_client(ledger)
+    try:
+        lease = start_profile(options(work), client)
+        spin(work.app, 0.05)
+        report = lease.stop()
+        assert report["ack"] == {"status": "not_available", "reason": "profile_not_admitted"}
+        assert not ledger.sends and client.diagnostics().get("policy_disabled", 0) >= 1
+    finally:
+        client.close()
+
+def test_a_large_wall_profile_is_split_with_one_profile_id_and_loss_on_the_first_chunk_only():
+    domain = {key: secrets.token_hex(16) for key in ("host", "boot", "runtime")}
+    capability = {"id": "d" * 32, "runtime": "cpython", "version": "3.13.5", "build": "b", "os": "linux", "arch": "x64", "signal": "profile_chunk", "method": WALL, "status": "supported", "reason": "ok",
+                  "coverage": {"frames": "partial", "threads": "partial", "workers": "none", "tasks": "none"}, "clock_domain": domain, "expires_ns": "1700003600000000000"}
+    frames = [{"module_id": "src/a.py", "function": "f", "artifact_id": "src/a.py", "line": 3, "column": None, "offset": "0", "reason": ""}, dict(PLACEHOLDER)]
+    report = {"method": WALL, "units": "samples", "capability": capability, "frames": frames, "stacks": [{"frames": [0, 1]}, {"frames": [1]}], "events": [], "truncated": True, "losses": [{"reason": "truncated", "count": "7"}],
+              "clock": {"domain": domain, "uncertainty_ns": "18446744073709551615", "wall_start_ns": "1700000000000000000", "wall_end_ns": "1700000005000000000"},
+              "samples": [{"at_us": str(i * 10), "stack": i % 2, "count": "1", "thread": "1"} for i in range(9000)]}
+    ids = iter(f"{n:032x}" for n in range(1, 100))
+    cap, chunks = P.profile_wire(report, "e" * 32, lambda: next(ids))
+    counts = [len(c["payload"]["samples"]) for c in chunks]
+    assert len(chunks) > 1 and sum(counts) == 9000 and max(counts) <= 8192
+    assert len({c["payload"]["profile_id"] for c in chunks}) == 1 and [c["payload"]["loss"] for c in chunks] == ["7"] + ["0"] * (len(chunks) - 1) and [c["payload"]["truncated"] for c in chunks] == [True] + [False] * (len(chunks) - 1)
+    assert all(len(json.dumps(c)) < 262_144 and c["payload"]["capability_id"] == cap["id"] for c in chunks)
+    assert all("line" not in frame and "column" not in frame for c in chunks for frame in c["payload"]["frames"])
+    assert P.profile_wire({**report, "capability": {**capability, "status": "error", "reason": "sampler_failed"}}, "e" * 32)[1] == []

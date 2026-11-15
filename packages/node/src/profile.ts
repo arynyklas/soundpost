@@ -11,7 +11,8 @@ export type ProfileStatus="supported"|"denied"|"unsupported"|"error";
 export type ProfileReason="ok"|"profiler_owned"|"isolate_scope_mismatch"|"invalid_options"|"client_unavailable"|"inspector_unavailable"|"inspector_timeout"|"inspector_error"|"profiler_state_lost";
 export type CoverageValue="complete"|"partial"|"none"|"unknown";
 export type StoppedBy="caller"|"duration"|"client_close"|"timeout_cleanup"|"not_started";
-export interface LeaseOwner {ownHookLease(lease:{close():void}):void;releaseHookLease(lease:{close():void}):void}
+/** `captureRuntimeProfile` and `flush` are optional: the real Soundpost `Client` has both, and with them a finished report is delivered through the client's ordinary queue (capability record, plus chunks only when the sampler genuinely ran) and acknowledged by a bounded flush. */
+export interface LeaseOwner {ownHookLease(lease:{close():void}):void;releaseHookLease(lease:{close():void}):void;captureRuntimeProfile?(report:ProfileReport):boolean;flush?(timeoutMs:number):Promise<{readonly acknowledgedCursors:readonly string[];readonly deadlineExceeded:boolean}>}
 export interface ProfileOptions {
  /** Required wall-clock bound, 1..60000 ms. The profile always stops by itself at this bound. */
  readonly durationMs:number;
@@ -42,7 +43,10 @@ export interface NonProfileMeasurement {
  readonly method:"event_loop_delay";readonly profile:false;readonly signal:"metric";readonly unit:"nanoseconds";readonly resolution_ms:number;
  readonly count:number;readonly min:number|null;readonly max:number|null;readonly mean:number|null;readonly p50:number|null;readonly p99:number|null;readonly exceeds:number;
 }
-export interface ProfileAck {readonly status:"not_available";readonly reason:"no_profile_admission_path"}
+export type ProfileAck=
+ |{readonly status:"not_available";readonly reason:"no_profile_admission_path"|"profile_not_admitted"}
+ |{readonly status:"obtained";readonly cursors:readonly string[]}
+ |{readonly status:"failed";readonly reason:"flush_deadline_exceeded"|"no_acknowledged_cursor"|"flush_error"};
 export interface ProfileReport {
  readonly version:1;readonly method:"runtime_engine_samples";readonly profile:true;readonly units:"samples";readonly time_delta_unit:"engine_microseconds";
  readonly capability:ProfileCapability;
@@ -179,13 +183,25 @@ export function createProfiler(deps:ProfilerDeps):{startProfile(options:ProfileO
  });
  const freshDomain=():ClockDomain=>({host:randomHex(16),boot:randomHex(16),runtime:randomHex(16)});
  const scopeOf=(debuggerListener:boolean)=>({isolate:(deps.isMainThread?"main":"worker") as "main"|"worker",thread_id:deps.threadId,runtime:{name:safeToken(deps.runtime,128),version:safeToken(deps.version,128)},debugger_listener_present:debuggerListener});
+ /** Hands a finished report to a client that can admit profiles and records what happened in `ack`: not admitted, or admitted and then acknowledged (cursors) or not (bounded flush). Any other client leaves the report as built. Never rejects. */
+ const deliver=async(report:ProfileReport,client:LeaseOwner|undefined):Promise<ProfileReport>=>{
+  if(client===undefined||typeof client.captureRuntimeProfile!=="function")return report;
+  let admitted=false;try{admitted=client.captureRuntimeProfile(report)===true;}catch{admitted=false;}
+  if(!admitted)return {...report,ack:{status:"not_available",reason:"profile_not_admitted"}};
+  try{
+   if(typeof client.flush!=="function")throw new Error("no flush");
+   const flushed=await client.flush(DEFAULT_COMMAND_TIMEOUT_MS),cursors=flushed.acknowledgedCursors.filter(cursor=>typeof cursor==="string");
+   return {...report,ack:cursors.length>0?{status:"obtained",cursors}:{status:"failed",reason:flushed.deadlineExceeded?"flush_deadline_exceeded":"no_acknowledged_cursor"}};
+  }catch{return {...report,ack:{status:"failed",reason:"flush_error"}};}
+ };
  const refusal=(status:ProfileStatus,reason:ProfileReason,requested:Resolved|undefined):ProfileHandle=>{
   const wall=deps.wallNs(),domain=freshDomain(),capability=capabilityOf(status,reason,NO_COVERAGE,domain,wall),stamp=wall.toString();
   const report:ProfileReport={version:1,method:"runtime_engine_samples",profile:true,units:"samples",time_delta_unit:"engine_microseconds",capability,
    interval:{requested_us:requested?.intervalUs??DEFAULT_INTERVAL_US,achieved_us:null},clock:{domain,uncertainty_ns:MAX_UNCERTAINTY,source:"v8_profiler_engine_clock",wall_start_ns:stamp,wall_end_ns:stamp},
    scope:scopeOf(false),coverage:NO_COVERAGE,requested:{duration_ms:requested?.durationMs??0,interval_us:requested?.intervalUs??DEFAULT_INTERVAL_US,max_samples:requested?.maxSamples??MAX_SAMPLES},
    stack_order:"leaf_first",frames:[],stacks:[],samples:[],sample_count:0,truncated:false,losses:[],non_profile:[],ack:{status:"not_available",reason:"no_profile_admission_path"},stopped_by:"not_started"};
-  return {active:false,capability,stop:()=>Promise.resolve(report)};
+  const delivered=deliver(report,requested?.client);
+  return {active:false,capability,stop:()=>delivered};
  };
  /** One bounded inspector command. Settles exactly once; a callback arriving after the bound is ignored. */
  const command=(session:InspectorSession,method:string,params:object|undefined,during:"start"|"stop"):Promise<unknown>=>{
@@ -264,9 +280,9 @@ export function createProfiler(deps:ProfilerDeps):{startProfile(options:ProfileO
     if(fault||!mapped){
      const failure=fault??new Fault("inspector_error","error"),final=capabilityOf(failure.status,failure.reason,NO_COVERAGE,domain,wallStart);
      const losses:ProfileLoss[]=failure.reason==="profiler_state_lost"?[{reason:"foreign_state",count:"1"}]:failure.reason==="inspector_timeout"?[{reason:"timeout_cleanup",count:"1"}]:[];
-     return build(final,{frames:[],stacks:[],samples:[],sampleCount:0,truncated:false,losses,achievedUs:null},wallEnd,failure.reason==="inspector_timeout"?"timeout_cleanup":by,delay);
+     return deliver(build(final,{frames:[],stacks:[],samples:[],sampleCount:0,truncated:false,losses,achievedUs:null},wallEnd,failure.reason==="inspector_timeout"?"timeout_cleanup":by,delay),resolved.client);
     }
-    return build(capability,mapped,wallEnd,by,delay);
+    return deliver(build(capability,mapped,wallEnd,by,delay),resolved.client);
    })();
    return stopping;
   };

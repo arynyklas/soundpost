@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased — 03.09 runtime profile delivery
+
+- Runtime profiles reach the backend: `Config(deployment_profiles=True)` plus a source policy that lists `profile_chunk` and `capability` admits the internal `start_profile` report as a `capability` record (method `python_monitoring` / `python_wall_samples`) and, for a supported run, linked `runtime_cpu` chunks (units `samples`, or `events` for `python_monitoring`; one single-frame stack per code object with its summed event count). `report["ack"]` is `not_available/profile_not_admitted` when the records were refused.
+
 ## Unreleased — 03.06 Celery documentation
 
 - Document `soundpost.celery.instrument` (README "Celery 5 job attempts"); the README no longer says a Celery adapter is not implemented.

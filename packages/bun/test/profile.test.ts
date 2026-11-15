@@ -283,3 +283,37 @@ test("achieved interval excludes the first sample's lead-in delta and fractional
  const rounded=await (await createProfiler(deps(fake({profile:fractional}))).startProfile(options)).stop();
  expect(rounded.samples.slice(0,4).map((s:{at_us:string})=>s.at_us)).toEqual(["236","1176","2030","2912"]);
 });
+
+// 03.09-W4: delivery through the REAL core client (queue, closed wire validation, receipts); the inspector stays a fake, the transport a recording ledger.
+function deliveringClient(profiles:boolean){
+ const bodies:string[]=[];
+ const transport={async send(batch:{id:string;hash:string;body:string;kinds:string[]}){bodies.push(batch.body);return {kind:"receipt",receipt:{version:1,batch_id:batch.id,hash:batch.hash,cursor:{group:"9".repeat(32),index:String(bodies.length)},retain_until_ns:"9007199254740994",dedup_until_ns:"9007199254740995",signal_deadlines:batch.kinds.map(kind=>({kind,retain_until_ns:"9007199254740994"}))}};},async lookup(){return {kind:"not_found"};},close(){}};
+ const client=init({...config(),transport:transport as never,...(profiles?{deploymentProfiles:true}:{})});
+ return {client,records:()=>bodies.flatMap(body=>(JSON.parse(body) as {records:{id:string;kind:string;payload:Record<string,unknown>}[]}).records)};
+}
+test("a client that admits profiles receives the capability and a linked runtime_cpu chunk, and the report carries the flush acknowledgement",async()=>{
+ const {client,records}=deliveringClient(true),report=await (await createProfiler(deps(fake())).startProfile({...options,client})).stop();
+ expect(report.ack.status).toBe("obtained");
+ const all=records(),capability=all.find(r=>r.kind==="capability")!,chunk=all.find(r=>r.kind==="profile_chunk")!;
+ expect(all.map(r=>r.kind).sort()).toEqual(["capability","profile_chunk"]);
+ expect(capability.payload.method).toBe("runtime_engine_samples");expect(chunk.payload.method).toBe("runtime_cpu");expect(chunk.payload.units).toBe("samples");
+ expect(chunk.payload.capability_id).toBe(report.capability.id);expect((chunk.payload.samples as unknown[]).length).toBe(report.sample_count);
+ await client.close();
+});
+test("a refusal is delivered as the capability record alone; a client without profile admission leaves the documented not-admitted ack",async()=>{
+ const {client,records}=deliveringClient(true),refused=await (await createProfiler(deps(fake())).startProfile({...options,isolate:"worker",client})).stop();
+ expect(refused.capability.status).toBe("denied");expect(refused.ack.status).toBe("obtained");expect(records().map(r=>r.kind)).toEqual(["capability"]);await client.close();
+ const off=deliveringClient(false),report=await (await createProfiler(deps(fake())).startProfile({...options,client:off.client})).stop();
+ expect(report.ack).toEqual({status:"not_available",reason:"profile_not_admitted"});expect(off.records()).toEqual([]);await off.client.close();
+ // A lease owner that cannot admit profiles keeps the original "no admission path" ack untouched.
+ const owner={ownHookLease(){},releaseHookLease(){}},plain=await (await createProfiler(deps(fake())).startProfile({...options,client:owner})).stop();
+ expect(plain.ack).toEqual({status:"not_available",reason:"no_profile_admission_path"});
+});
+test("the acknowledgement is failed, never obtained, without a cursor: deadline, no cursor and a throwing flush are each stated",async()=>{
+ const owner=(flush:()=>Promise<{acknowledgedCursors:string[];deadlineExceeded:boolean}>)=>({ownHookLease(){},releaseHookLease(){},captureRuntimeProfile:()=>true,flush});
+ const run=async(client:ReturnType<typeof owner>)=>(await (await createProfiler(deps(fake())).startProfile({...options,client})).stop()).ack;
+ expect(await run(owner(async()=>({acknowledgedCursors:[],deadlineExceeded:true})))).toEqual({status:"failed",reason:"flush_deadline_exceeded"});
+ expect(await run(owner(async()=>({acknowledgedCursors:[],deadlineExceeded:false})))).toEqual({status:"failed",reason:"no_acknowledged_cursor"});
+ expect(await run(owner(async()=>{throw Error("transport down");}))).toEqual({status:"failed",reason:"flush_error"});
+ expect(await run(owner(async()=>({acknowledgedCursors:["g:1"],deadlineExceeded:false})))).toEqual({status:"obtained",cursors:["g:1"]});
+});

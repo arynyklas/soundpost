@@ -8,6 +8,7 @@ import type {FrameNaming} from "./frames.ts";
 export type {ErrorBoundary} from "./errors.ts";
 import {DeliveryQueue} from "./queue.ts";
 import {HttpsReceiptTransport} from "./transport.ts";
+import {runtimeProfileWire,type RuntimeProfileReport} from "./profile_wire.ts";
 import type {FlushReport} from "./types.ts";
 import {SpanRecorder,createSynchronousMetadataContext,signalAborted,randomHex} from "./tracing.ts";
 import type {MetadataContext,TraceContext,SpanOptions,ActiveSpan,LiveSpan} from "./tracing.ts";
@@ -34,6 +35,7 @@ type RuntimeErrorBoundary=ErrorBoundary&{readonly timerCancellation?:(error:unkn
 export class Client {
  private readonly delivery:DeliveryQueue;
  private readonly counts:Record<string,number>=Object.create(null) as Record<string,number>;
+ private profileProcess:string|undefined;
  private readonly policy:SourcePolicy;
  private readonly templates=new Map<string,Template>();
  private readonly clock:()=>string;
@@ -109,6 +111,18 @@ export class Client {
  private admitProfile(input:CapabilityInput|ProfileInput):boolean{try{return this.admit(input);}catch{this.loss("invalid_profile_record");return false;}}
  /** For adapters whose own profile-to-wire mapping failed before anything reached the queue. */
  profileFailed():void{this.loss("profile_wire_failed");}
+ /** Maps a finished Node/Bun `runtime_engine_samples` report to its capability (+ profile chunk) records and enqueues them (see profile_wire.ts for the vocabulary mapping). True only when everything was queued; a mapping failure is counted
+  * as profile_wire_failed. Samples the profiler dropped from the run are a recorded truncated loss whether or not the retained part was queued. Never throws. */
+ captureRuntimeProfile(report:RuntimeProfileReport):boolean{
+  let queued:boolean;
+  try{const wire=runtimeProfileWire(report,{process:this.profileProcess??=randomHex(16),id:()=>randomHex(16)});queued=this.captureProfile(wire.capability,wire.chunks);}
+  catch{this.profileFailed();queued=false;}
+  try{
+   let truncated=0n;for(const loss of report.losses)if(loss.reason==="truncated")truncated+=BigInt(loss.count);
+   if(truncated>0n){const start=report.clock.wall_start_ns,end=report.clock.wall_end_ns;this.captureProfileLoss(truncated,BigInt(end)>=BigInt(start)?end:start);}
+  }catch{this.profileFailed();}
+  return queued;
+ }
  /** Records `count` profile samples the adapter dropped from one run (past its sample/frame/stack bounds or the browser's buffer) as a native loss of the
   * profile_chunk signal with reason "truncated", the way every other signal loss is recorded (durable `loss` record plus the queue's per-signal counters).
   * The diagnostics counter `profile_samples_truncated` always moves; the durable record only when the signed policy allows loss and the client is open.

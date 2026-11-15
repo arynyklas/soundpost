@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `Client.captureRuntimeProfile(report)` admits a Node/Bun `runtime_engine_samples` report as a capability record plus linked, size-split `runtime_cpu` chunks (`runtimeProfileWire` in `profile_wire.ts`), with truncated samples recorded as a loss.
+
 - Original JS exception frames (D7): descriptor-only, formatter-safe stack read with a bounded V8/JavaScriptCore/SpiderMonkey parser, `Config.artifactRoot`/`Config.artifactIds`, and the graph reasons `stack_formatter_hooked`, `stack_not_plain`, `stack_unparsed`.
 
 ## 0.1.0 — 2026-11-03

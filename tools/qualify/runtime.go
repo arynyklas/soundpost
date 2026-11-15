@@ -61,6 +61,8 @@ var runners = map[string]runner{
 	"overhead_sdk_runtime_server": runOverheadRuntimeServer,
 	"overhead_sdk_queue":          runOverheadSDKQueue,
 	"overhead_bundle":             runOverheadBundle,
+	"overhead_recorder_batch":     runOverheadRecorderBatch,
+	"sdk_critical_path":           runSDKCriticalPath,
 	"overhead_native":             runOverheadNative,
 }
 

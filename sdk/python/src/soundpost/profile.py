@@ -15,6 +15,7 @@ report with a refusal capability instead of raising. One lease may own the profi
 stored under a well-known key on ``sys`` so duplicate module copies still conflict.
 """
 import copy
+import json
 import math
 import os
 import platform
@@ -24,6 +25,7 @@ import sys
 import sysconfig
 import threading
 import time
+import weakref
 import types
 from dataclasses import dataclass
 from .frames import normalize_root
@@ -449,6 +451,82 @@ def _empty_result(requested_us=None):
     return {"health": None, "frames": [], "stacks": [], "samples": [], "events": [], "losses": [], "truncated": False,
             "interval": {"requested_us": requested_us, "achieved_us": None}, "scope": {}}
 
+_PROCESS_IDS = weakref.WeakKeyDictionary()
+_CHUNK_BYTES = 180_000
+_MAX_UINT64 = 18446744073709551615
+
+def profile_wire(report, process_id, new_id=lambda: secrets.token_hex(16)):
+    """Maps a finished report to wire records: ``(capability_input, [profile_chunk_input, ...])``.
+
+    One ``capability`` record keeps the SDK's own method (``python_monitoring`` / ``python_wall_samples``); only a supported run adds ``profile_chunk`` records, which
+    name that capability and carry its clock domain. The chunk method is the server's closed ``runtime_cpu`` vocabulary (documented mapping, see
+    internal/model telemetry validation): ``python_wall_samples`` is units ``samples``; ``python_monitoring`` is units ``events`` and is sent as one single-frame
+    stack per code object whose sample ``count`` is that code object's total PY_START/PY_RESUME/PY_RETURN/PY_UNWIND events (the per-kind split stays in the local
+    report). Line and column are not sent (the closed server frame has no such field); sample offsets are relative to the first sample (the report's unbounded clock
+    uncertainty states that no wall alignment is claimed). A refused or failed run is the capability record alone."""
+    cap = report["capability"]
+    wall_start = report["clock"]["wall_start_ns"]
+    wall_end = report["clock"]["wall_end_ns"] if int(report["clock"]["wall_end_ns"]) >= int(wall_start) else wall_start
+    capability = {"kind": "capability", "id": cap["id"], "observed_at_ns": wall_end, "payload": {
+        "runtime": cap["runtime"], "version": cap["version"], "build": cap["build"], "os": cap["os"], "arch": cap["arch"], "signal": cap["signal"], "method": cap["method"],
+        "status": cap["status"], "reason": cap["reason"], "coverage": {key: cap["coverage"][key] for key in ("frames", "threads", "workers", "tasks")},
+        "clock_domain": {key: cap["clock_domain"][key] for key in ("host", "boot", "runtime")}, "expires_ns": cap["expires_ns"]}}
+    if cap["status"] != "supported":
+        return capability, []
+    frames, stacks, samples = report["frames"], report["stacks"], report["samples"]
+    if report["method"] == "python_monitoring":
+        totals = {}
+        for row in report["events"]:
+            totals[row["frame"]] = totals.get(row["frame"], 0) + int(row["count"])
+        order = sorted(totals)
+        stacks = [{"frames": [frame]} for frame in order]
+        samples = [{"at_us": "0", "stack": index, "count": str(totals[frame]), "thread": "0"} for index, frame in enumerate(order)]
+    lost = min(sum(int(loss["count"]) for loss in report["losses"]), _MAX_UINT64)
+    wire_frame = lambda index: {key: frames[index].get(key, "" if key != "offset" else "0") for key in ("module_id", "function", "artifact_id", "offset", "reason")}
+    chunks, current = [], None
+    for sample in samples:
+        stack = stacks[sample["stack"]]["frames"]
+        wire_sample = lambda local: {"at_ns": str(int(sample["at_us"]) * 1000), "stack": local, "count": str(sample["count"]), "thread": sample["thread"] if str(sample["thread"]).isdigit() else "0"}
+        while True:
+            if current is None:
+                current = {"frames": [], "stacks": [], "samples": [], "frame_index": {}, "stack_index": {}, "bytes": 0}
+            new = [index for index in dict.fromkeys(stack) if index not in current["frame_index"]]
+            known = sample["stack"] in current["stack_index"]
+            cost = sum(len(json.dumps(wire_frame(index))) + 1 for index in new) + (0 if known else len(json.dumps({"frames": stack})) + 9) + len(json.dumps(wire_sample(0))) + 1
+            if current["samples"] and (current["bytes"] + cost > _CHUNK_BYTES or len(current["samples"]) >= MAX_SAMPLES):
+                chunks.append(current)
+                current = None
+                continue
+            local = current["stack_index"].get(sample["stack"])
+            if local is None:
+                for index in new:
+                    current["frame_index"][index] = len(current["frames"])
+                    current["frames"].append(wire_frame(index))
+                local = len(current["stacks"])
+                current["stacks"].append({"frames": [current["frame_index"][index] for index in stack]})
+                current["stack_index"][sample["stack"]] = local
+            current["samples"].append(wire_sample(local))
+            current["bytes"] += cost
+            break
+    chunks.append(current if current is not None else {"frames": [], "stacks": [], "samples": []})
+    profile = new_id()
+    domain = {key: report["clock"]["domain"][key] for key in ("host", "boot", "runtime")}
+    out = [{"kind": "profile_chunk", "id": new_id(), "observed_at_ns": wall_end, "payload": {
+        "profile_id": profile, "process_id": process_id, "capability_id": cap["id"], "method": "runtime_cpu", "units": report["units"], "start_ns": wall_start, "end_ns": wall_end,
+        "clock": {"wall_ns": wall_start, "mono_ns": "0", "domain": domain, "uncertainty_ns": report["clock"]["uncertainty_ns"]},
+        "frames": chunk["frames"], "stacks": chunk["stacks"], "samples": chunk["samples"], "intervals": [], "loss": str(lost if position == 0 else 0), "truncated": position == 0 and bool(report["truncated"])}}
+           for position, chunk in enumerate(chunks)]
+    return capability, out
+
+def _process_id(client):
+    try:
+        known = _PROCESS_IDS.get(client)
+        if known is None:
+            known = _PROCESS_IDS[client] = secrets.token_hex(16)
+        return known
+    except TypeError:
+        return secrets.token_hex(16)
+
 class ProfileLease:
     """One bounded profile run. ``stop``/``close`` are idempotent and always release every runtime facility."""
     def __init__(self, client, method, requested, units, time_delta_unit):
@@ -471,6 +549,8 @@ class ProfileLease:
         self._domain = {key: secrets.token_hex(16) for key in ("host", "boot", "runtime")}
         self._wall_start = time.time_ns()
         self._client_done = False
+        self._profile_attempted = False
+        self._profile_admitted = False
         self._loss_attempted = False
         self._loss_admitted = False
         self._ack_done = False
@@ -564,6 +644,14 @@ class ProfileLease:
             release = getattr(self._client, "_release_hook_lease", None)
             if release is not None:
                 release(self)
+            capture = getattr(self._client, "_capture_profile", None)
+            if capture is not None:
+                self._profile_attempted = True
+                try:
+                    capability, chunks = profile_wire(self._report, _process_id(self._client))
+                    self._profile_admitted = bool(capture(capability, chunks))
+                except Exception:
+                    self._profile_admitted = False
             losses = self._reportable_losses()
             if losses:
                 self._loss_attempted = True
@@ -589,9 +677,9 @@ class ProfileLease:
             if self._ack_done or not self._client_finished.is_set():
                 return
             self._ack_done = True
-        if not self._loss_attempted:
-            ack = {"status": "not_available", "reason": "no_loss_recorded"}
-        elif not self._loss_admitted:
+        if not self._loss_attempted and not self._profile_admitted:
+            ack = {"status": "not_available", "reason": "profile_not_admitted" if self._profile_attempted else "no_loss_recorded"}
+        elif self._loss_attempted and not self._loss_admitted and not self._profile_admitted:
             ack = {"status": "not_available", "reason": "loss_not_admitted"}
         else:
             try:

@@ -21,7 +21,7 @@ class Client:
         if type(config.max_records) is not int or not 1<=config.max_records<=1024 or type(config.max_bytes) is not int or not 1<=config.max_bytes<=2097152: raise ValueError("invalid queue limits")
         for identity in (config.org,config.project,config.source,config.build):
             canonical_id(identity)
-        if any(type(flag) is not bool for flag in (config.deployment_errors,config.deployment_logs,config.deployment_replay,config.deployment_bodies,config.deployment_traces,config.deployment_jobs,config.deployment_loss)):
+        if any(type(flag) is not bool for flag in (config.deployment_errors,config.deployment_logs,config.deployment_replay,config.deployment_bodies,config.deployment_traces,config.deployment_jobs,config.deployment_loss,config.deployment_profiles)):
             raise ValueError("deployment permissions must be boolean")
         if config.integrations:raise ValueError("integrations not available")
         import re
@@ -103,6 +103,28 @@ class Client:
             return False
         observed=self._read_clock()
         return observed is not None and self._admit({"kind":"span","id":secrets.token_hex(16),"observed_at_ns":observed,"payload":payload})
+    def _capture_profile(self,capability:dict,chunks:list)->bool:
+        """Enqueues a finished runtime profile on the ordinary delivery path (same queue, closed wire validation, batching, receipts and loss counters): the capability
+        record first and alone as the complete answer for a refusal, then the chunks in order, stopping at the first refusal so a profile never has a hole. Needs
+        deployment_profiles=True and a signed policy; otherwise nothing is enqueued and the refusal is counted in diagnostics(). Never raises."""
+        try:ok=self._admit(capability)
+        except Exception:
+            with self._lock:self._loss("invalid_profile_record")
+            ok=False
+        if not ok:
+            with self._lock:
+                for _chunk in chunks:self._loss("profile_chunk_dropped")
+            return False
+        for index,chunk in enumerate(chunks):
+            try:ok=self._admit(chunk)
+            except Exception:
+                with self._lock:self._loss("invalid_profile_record")
+                ok=False
+            if not ok:
+                with self._lock:
+                    for _rest in chunks[index+1:]:self._loss("profile_chunk_dropped")
+                return False
+        return True
     def _record_signal_loss(self,signal:str,reason:str,count:int)->bool:
         with self._lock:
             if self._closed or EXPORTING.get() or self._trace_context.is_exporting() or not self._policy.decision.loss:return False

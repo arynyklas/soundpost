@@ -351,7 +351,7 @@ export function unitRows(v: ProfileView): UnitRow[] {
   const base = { id: 'engine', label: 'Engine-reported samples', meaning: 'Samples or deltas reported by the language engine, in the unit the engine reports. Not OS CPU time and not comparable to the OS sample count.' } as const;
   if (v.method === 'runtime_cpu' && v.samples.length > 0) {
    const sum = sumCounts(v.samples);
-   rows.push({ ...base, state: 'measured', text: v.units === 'nanoseconds' ? `${groupDigits(sum)} ns, engine-reported deltas` : `${groupDigits(sum)} samples, engine-reported` });
+  rows.push({ ...base, state: 'measured', text: v.units === 'nanoseconds' ? `${groupDigits(sum)} ns, engine-reported deltas` : v.units === 'events' ? `${groupDigits(sum)} events, runtime-reported` : `${groupDigits(sum)} samples, engine-reported` });
   } else if (engineCap !== undefined && engineCap.status !== 'supported') rows.push({ ...base, ...unavailable(engineCap, 'runtime_cpu') });
   else rows.push({ ...base, state: v.method === 'runtime_cpu' ? 'no_observations' : 'not_measured', text: v.method === 'runtime_cpu' ? 'no observations' : 'not measured' });
  }
@@ -386,7 +386,7 @@ export function headerFacts(v: ProfileView): Fact[] {
  const or = (s: string | undefined): string => (s === undefined || s === '' ? 'not reported' : s);
  const facts: Fact[] = [
   { label: 'Method', value: methodWords(v.method), testId: 'profile-method' },
-  { label: 'Units', value: v.units === 'samples' ? 'samples (a count of observations)' : 'nanoseconds' },
+  { label: 'Units', value: v.units === 'samples' ? 'samples (a count of observations)' : v.units === 'events' ? 'events (a count of runtime monitoring events)' : 'nanoseconds' },
   { label: 'Engine or runtime', value: c === undefined ? 'not reported' : `${or(c.runtime)} ${or(c.version)}` },
   { label: 'Build', value: or(c?.build) },
   { label: 'Operating system and architecture', value: c === undefined ? 'not reported' : `${or(c.os)} / ${or(c.arch)}` },
@@ -618,7 +618,7 @@ function stackText(v: ProfileView, index: number): string {
 function sampleQuantity(v: ProfileView, s: ProfileSample): string {
  const n = big(s.count);
  if (s.native !== undefined || v.method === 'native_cpu') return `${groupDigits(n)} OS on-CPU ${n === 1n ? 'sample' : 'samples'}`;
- return v.units === 'nanoseconds' ? `${groupDigits(n)} ns, engine-reported` : `${groupDigits(n)} ${n === 1n ? 'sample' : 'samples'}, engine-reported`;
+ return v.units === 'nanoseconds' ? `${groupDigits(n)} ns, engine-reported` : v.units === 'events' ? `${groupDigits(n)} ${n === 1n ? 'event' : 'events'}, runtime-reported` : `${groupDigits(n)} ${n === 1n ? 'sample' : 'samples'}, engine-reported`;
 }
 function sampleNotes(s: ProfileSample): string[] {
  const n = s.native;

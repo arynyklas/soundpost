@@ -5,8 +5,8 @@ import type { Id, ViewSection, ViewState } from '../api/types';
 
 export type ProfileMethod = 'runtime_cpu' | 'native_cpu' | 'native_offcpu';
 export const PROFILE_METHODS: readonly ProfileMethod[] = ['runtime_cpu', 'native_cpu', 'native_offcpu'];
-export type ProfileUnits = 'samples' | 'nanoseconds';
-export const PROFILE_UNITS: readonly ProfileUnits[] = ['samples', 'nanoseconds'];
+export type ProfileUnits = 'samples' | 'nanoseconds' | 'events';
+export const PROFILE_UNITS: readonly ProfileUnits[] = ['samples', 'nanoseconds', 'events'];
 export type IntervalKind = 'blocked' | 'runnable' | 'unknown_offcpu';
 export const INTERVAL_KINDS: readonly IntervalKind[] = ['blocked', 'runnable', 'unknown_offcpu'];
 export type CapabilityStatus = 'supported' | 'denied' | 'unsupported' | 'error';

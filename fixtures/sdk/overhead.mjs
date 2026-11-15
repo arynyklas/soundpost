@@ -17,7 +17,7 @@ import crypto from "node:crypto";
 const here=fileURLToPath(import.meta.url),root=resolve(dirname(here),"../..");
 const args=process.argv.slice(2);
 const option=(name,fallback)=>{const i=args.indexOf(name);return i>=0&&i+1<args.length?args[i+1]:fallback;};
-const BUDGET={server_p95_latency_percent:5,server_cpu_percent:5,queue_bytes:2*1024*1024,browser_core_gzip_bytes:40*1024,browser_replay_gzip_bytes:60*1024};
+const BUDGET={server_p95_latency_percent:5,server_cpu_percent:5,queue_bytes:2*1024*1024,browser_core_gzip_bytes:40*1024,browser_replay_gzip_bytes:60*1024,recorder_batch_p95_ms:5};
 
 // ---------------------------------------------------------------- shared deterministic request work (identical in every mode)
 const payload=Buffer.alloc(1024,7);
@@ -303,8 +303,32 @@ function buildBundle(bun,entrySource,dir,name,target="node",extra=[]){
 }
 const fwd=p=>JSON.stringify(p.replaceAll("\\","/"));
 
+/** Runs fixtures/sdk/replay/mutation-batch.spec.ts (real Chrome through Playwright) and returns the harness row: the spec's own MUTATION_BATCH_P95 report judged against the 5 ms p95 budget, or a not_measured statement of why the browser run produced no report. SOUNDPOST_CHROME names the browser (default Playwright's Chromium); SOUNDPOST_CHROME_ARGS passes launch flags. */
+function recorderBatchRow(bunPathValue){
+ const cli=join(root,"web/node_modules/@playwright/test/cli.js");
+ if(!existsSync(cli))return {not_measured:"Playwright (web/node_modules/@playwright/test) is not installed in this checkout"};
+ const r=spawnSync(process.execPath,[cli,"test","-c",join(root,"fixtures/sdk/replay/budget.config.ts"),"--reporter=json","mutation-batch.spec.ts"],{cwd:join(root,"web"),encoding:"utf8",timeout:600000,maxBuffer:64*1024*1024,env:{...process.env,SOUNDPOST_BUN:bunPathValue,NODE_PATH:join(root,"web/node_modules")}});
+ return recorderBatchFromReport(r.stdout||"",r.status,(r.stderr||"").slice(-300));
+}
+/** Pure part of recorderBatchRow: report JSON text from `playwright test --reporter=json` -> the overhead row. The budget is compared here, never edited. */
+function recorderBatchFromReport(stdout,exitCode,stderrTail=""){
+ let report;try{report=JSON.parse(stdout);}catch{return {not_measured:"Playwright printed no parseable report (exit "+exitCode+"): "+stderrTail};}
+ let text="";const walk=suite=>{for(const spec of suite.specs??[])for(const t of spec.tests??[])for(const res of t.results??[])for(const o of res.stdout??[])text+=o.text??"";for(const s of suite.suites??[])walk(s);};
+ for(const s of report.suites??[])walk(s);
+ const line=text.split("\n").find(l=>l.includes("MUTATION_BATCH_P95 {"));
+ if(!line)return {not_measured:"the spec produced no MUTATION_BATCH_P95 report (exit "+exitCode+"): "+((report.errors??[]).map(e=>e.message).join("; ")||stderrTail).slice(0,300)};
+ let data;try{data=JSON.parse(line.slice(line.indexOf("MUTATION_BATCH_P95 ")+"MUTATION_BATCH_P95 ".length));}catch{return {not_measured:"the MUTATION_BATCH_P95 line is not JSON"};}
+ const rows=Array.isArray(data.rows)?data.rows:[];
+ if(rows.length===0)return {not_measured:"the MUTATION_BATCH_P95 report has no burst rows"};
+ const worst=Math.max(...rows.map(x=>x.p95_ms));
+ return {workload:"real Chrome, canary page with replay consent: 60 bursts per size (10, 100, 400 nodes) of insert/rewrite/attribute/remove; the page's MutationObserver is wrapped so the recorder's own handler is timed with performance.now() per batch",
+  browser:data.browser??null,playwright_exit_code:exitCode,budget_p95_ms:BUDGET.recorder_batch_p95_ms,rows,worst_p95_ms:worst,
+  verdict:{p95:worst<=BUDGET.recorder_batch_p95_ms?"within_budget":"exceeds_budget"},
+  note:"the 2 MiB recorder queue bound is not measured by this spec"};
+}
+
 async function parentMain(){
- const rps=Number(option("--requests-per-second","1000")),seconds=Number(option("--duration-s","3")),runs=Number(option("--runs","5")),profileRuns=Number(option("--profile-runs","7")),outPath=option("--out",""),only=option("--only","server,bun,python,profile,bundle").split(",");
+ const rps=Number(option("--requests-per-second","1000")),seconds=Number(option("--duration-s","3")),runs=Number(option("--runs","5")),profileRuns=Number(option("--profile-runs","7")),outPath=option("--out",""),only=option("--only","server,bun,python,profile,bundle,recorder").split(",");
  const bun=bunPath();if(!bun)throw new Error("overhead measurement requires SOUNDPOST_BUN or the pinned Bun 1.3.14 to bundle the SDK");
  const dir=mkdtempSync(join(os.tmpdir(),"soundpost-overhead-"));
  const result={fixture:"overhead",schema:1,recorded_at:new Date().toISOString(),command:"node fixtures/sdk/overhead.mjs "+args.join(" "),budgets_from_design_section_13:BUDGET,machine_class:machineClass(),runtimes:{node:process.version,bun:spawnSync(bun,["--version"],{encoding:"utf8"}).stdout.trim()},rows:{}};
@@ -444,8 +468,10 @@ print(json.dumps({"runtime_version": sys.version.split()[0], "rows": rows}))
     browser_index:{raw_bytes:raw(core),gzip_bytes:gz(core),budget_gzip_bytes:BUDGET.browser_core_gzip_bytes,within_budget:gz(core)<=BUDGET.browser_core_gzip_bytes},
     replay_only:{raw_bytes:raw(replay),gzip_bytes:gz(replay),budget_gzip_bytes:BUDGET.browser_replay_gzip_bytes,within_budget:gz(replay)<=BUDGET.browser_replay_gzip_bytes},
     profile_module:profile?{raw_bytes:raw(profile),gzip_bytes:gz(profile)}:{not_measured:"packages/browser/src/profile.ts absent"}};
-   result.rows.browser_recorder_mutation_batch_p95={not_measured:"requires a real browser mutation-storm run; fixtures/sdk/replay/recorder.spec.ts asserts behavior, not this timing budget. Budget 5 ms p95 per batch is NOT claimed."};
   }
+  // Recorder cost per MutationObserver batch (03.09-W3): the committed real-browser spec fixtures/sdk/replay/mutation-batch.spec.ts run through Playwright; its MUTATION_BATCH_P95 line is the measurement, judged against the 5 ms p95 budget here. A failing budget is a measurement, so the spec's own exit code is recorded, not required to be 0.
+  if(only.includes("recorder"))result.rows.browser_recorder_mutation_batch_p95=recorderBatchRow(bun);
+  else result.rows.browser_recorder_mutation_batch_p95={not_measured:"--only did not include recorder"};
   // Bun core server capture: the same deterministic handler and open-loop load against Bun.serve, with and without the Bun SDK's serve integration (installServe), flush() every 100 ms through the in-process ACKing transport.
   if(only.includes("bun")){
    const bunSdk=buildBundle(bun,sdkEntry(join(root,"packages/bun/src/index.ts"),"installServe"),dir,"bunsdk","bun");

@@ -176,7 +176,9 @@ type sdkOverhead struct {
 		// BunHTTP and PythonHTTP are the other runtimes' delivered-mode rows (03.09): a list of rows, or an object that says why the runtime was not measured.
 		BunHTTP    json.RawMessage `json:"bun_http_server_delivered_capture"`
 		PythonHTTP json.RawMessage `json:"python_http_server_delivered_capture"`
-		Bundles    struct {
+		// Recorder is the recorder p95-per-mutation-batch row (03.09-W3): measured bursts, or a not_measured statement.
+		Recorder json.RawMessage `json:"browser_recorder_mutation_batch_p95"`
+		Bundles  struct {
 			Index   sdkBundle `json:"browser_index"`
 			Replay  sdkBundle `json:"replay_only"`
 			Profile sdkBundle `json:"profile_module"`
@@ -507,6 +509,113 @@ func runOverheadBundle(rc *runCtx, spec RowSpec) Row {
 		}
 	}
 	row.Limits = []string{"each budget is measured on its own published entry bundled alone; an application that imports several entries ships their sum"}
+	return row
+}
+
+// recorderBatch is the harness's browser_recorder_mutation_batch_p95 row: the recorder's measured cost per MutationObserver batch, or the harness's own statement that it could not measure.
+type recorderBatch struct {
+	NotMeasured    string  `json:"not_measured"`
+	Browser        string  `json:"browser"`
+	PlaywrightExit int     `json:"playwright_exit_code"`
+	WorstP95       float64 `json:"worst_p95_ms"`
+	Rows           []struct {
+		BurstNodes float64 `json:"burst_nodes"`
+		Batches    float64 `json:"batches"`
+		P50        float64 `json:"p50_ms"`
+		P95        float64 `json:"p95_ms"`
+		P99        float64 `json:"p99_ms"`
+		Max        float64 `json:"max_ms"`
+	} `json:"rows"`
+}
+
+// recorderOverhead runs the committed overhead harness for the recorder (--only recorder) with the row's browser: a Node build from the
+// row's needs runs the harness, which drives the real browser through Playwright and bundles the SDK with Bun.
+func (rc *runCtx) recorderOverhead(spec RowSpec) (*sdkOverheadRun, *probeResult, string) {
+	p := rc.probe(spec.Build)
+	if !p.Found {
+		return nil, p, p.Reason
+	}
+	if why := rc.needsMissing(spec); why != "" {
+		return nil, p, why
+	}
+	key := "sdk-overhead-recorder:" + spec.Build
+	if v, ok := rc.cache[key]; ok {
+		return v.(*sdkOverheadRun), p, ""
+	}
+	nodePath := ""
+	for _, need := range spec.Needs {
+		if nb := rc.probe(need); nb.Build.Family == "node" {
+			nodePath = nb.Path
+		}
+	}
+	if nodePath == "" {
+		return nil, p, "the recorder overhead row needs a Node build to run the harness, and none is listed in its needs"
+	}
+	bun, why := rc.bunForBundling()
+	if why != "" {
+		return nil, p, why
+	}
+	env := []string{"SOUNDPOST_BUN=" + bun, "SOUNDPOST_CHROME=" + p.Path}
+	args := []string{"fixtures/sdk/overhead.mjs", "--only", "recorder"}
+	res := rc.exec(20*time.Minute, rc.root, env, nodePath, args...)
+	run := &sdkOverheadRun{Exit: res.Exit, Command: "node " + strings.Join(args, " "), Elapsed: res.Duration}
+	var out sdkOverhead
+	if err := json.NewDecoder(strings.NewReader(res.Stdout)).Decode(&out); err != nil || res.Exit != 0 {
+		run.Failure = fmt.Sprintf("overhead harness exited %d without a usable result: %s", res.Exit, tail(rc.rel(res.Stderr), 240))
+	} else {
+		run.Result, run.Raw = &out, []byte(res.Stdout)
+	}
+	rc.cache[key] = run
+	return run, p, ""
+}
+
+// runOverheadRecorderBatch judges the recorder's p95 cost per mutation batch, per burst size and as the worst of them, against the
+// design 13 budget (<=5 ms). The verdict is derived here from the raw per-burst p95 values; the harness's own verdict and worst
+// figure are never trusted.
+func runOverheadRecorderBatch(rc *runCtx, spec RowSpec) Row {
+	run, p, why := rc.recorderOverhead(spec)
+	if why != "" {
+		return notExercised(why)
+	}
+	row := Row{State: StateExercised, Build: &p.Build, Command: &CommandRun{Command: run.Command, ExitCode: run.Exit, DurationMS: run.Elapsed.Milliseconds()}}
+	if len(run.Raw) > 0 {
+		row.Evidence = append(row.Evidence, rc.writeEvidence("recorder-batch-"+spec.Build+".json", run.Raw))
+	}
+	row.Evidence = append(row.Evidence, "overhead harness fixtures/sdk/overhead.mjs --only recorder: the committed real-browser spec mutation-batch.spec.ts through Playwright")
+	if run.Result == nil {
+		row.Outcome, row.Failures = OutcomeFailed, []string{run.Failure}
+		return row
+	}
+	var rb recorderBatch
+	if len(run.Result.Rows.Recorder) == 0 {
+		return notExercised("the harness result has no browser_recorder_mutation_batch_p95 row")
+	}
+	if err := json.Unmarshal(run.Result.Rows.Recorder, &rb); err != nil {
+		row.Outcome, row.Failures = OutcomeFailed, []string{"the harness recorder row is not decodable: " + err.Error()}
+		return row
+	}
+	if rb.NotMeasured != "" {
+		return notExercised(rb.NotMeasured)
+	}
+	if len(rb.Rows) == 0 {
+		row.Outcome, row.Failures = OutcomeFailed, []string{"the harness recorder row carries no burst rows"}
+		return row
+	}
+	worst := math.Inf(-1)
+	for _, b := range rb.Rows {
+		row.Series = append(row.Series, Series{Name: "recorder_batch_p95", Unit: "ms", Mode: fmt.Sprintf("burst_%.0f_nodes", b.BurstNodes), Values: []float64{b.P95}})
+		worst = math.Max(worst, b.P95)
+	}
+	row.Budgets = []BudgetResult{rc.budget("browser_recorder_batch_p95_ms", worst, "worst p95 over the burst sizes of the recorder's own MutationObserver handler time per batch (performance.now around the handler)")}
+	row.Outcome = OutcomePassed
+	if !row.Budgets[0].Within {
+		row.Outcome = OutcomeFailed
+	}
+	row.Evidence = append(row.Evidence, fmt.Sprintf("fixtures/sdk/replay/mutation-batch.spec.ts in real %s %s (%s)", p.Build.Family, p.Build.Version, rb.Browser))
+	row.Limits = []string{
+		fmt.Sprintf("this row is the %s %s build only, headless Linux; per-batch time is the recorder handler's own time, not paint or layout", p.Build.Family, p.Build.Version),
+		"the bounded 2 MiB recorder queue (browser_recorder_queue_bytes) is not measured by this harness",
+	}
 	return row
 }
 

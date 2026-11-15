@@ -10,10 +10,10 @@ Limits are pinned in `qualification/workloads.yaml` from design section 13 and a
 | SDK queue | <=2 MiB | met (881,686 B acking and stalled) |
 | Browser core gzip | <=40 KiB | met after 11.13: 36,411 B for the `@soundpost/browser` core entry (replay and profile are separate entries) |
 | Browser replay gzip | <=60 KiB | met (5,882 B) |
-| Recorder p95 per mutation batch | <=5 ms | not exercised (no harness) |
+| Recorder p95 per mutation batch | <=5 ms | FAILED (measured): real Chrome 142.0.7444.59 on a Linux VM, `fixtures/sdk/replay/mutation-batch.spec.ts` through `node fixtures/sdk/overhead.mjs --only recorder` / `tools/qualify --suite overhead` (row `overhead.browser.recorder_mutation_batch_p95`): p95 per batch 3.2 ms (10-node bursts), 7.4 ms (100), 6.0 ms (400); the worst burst decides. The 2 MiB recorder queue bound is not measured by this harness |
 | Native CPU overhead per target | <=3% | met on the full run, WSL2 functional row, cpu fixture only (`overhead --hz 99 --seconds 120 --repeats 5`, `fixtures/nativeperf/qualification.json` `overhead_full_run`): workload CPU overhead -0.34% (stderr 0.57%), throughput change 0.37%; the collector itself used 4.57% of one core. The earlier reduced 20 s x 3 run (about 0.2%) is superseded |
 | Native memory | <=64 MiB | met, 38,182,912 B (about 36 MiB) combined maximum in the same full run |
-| Python / Bun core capture | <=5% | not exercised (no workload) |
+| Python / Bun core capture | <=5% | FAILED (measured, `tools/qualify --suite overhead` on a Linux VM, delivered mode): CPython 3.13 p95 +20.2% / +22.4% and process CPU +179% / +155% (3 / 100 hashes); Bun 1.3.14 p95 +138% / +121%, CPU +166% / +101% |
 | Native blocked/runqueue workload | <=3% | not exercised (scheduler, no harness) |
 | Single-host, distributed, queries | section 13 table | not exercised (no fixture hosts/1 h runs) |
 

@@ -175,7 +175,10 @@ describe('five readings that are never added together', () => {
   const ns = unitRows(runtimeCpuView({ units: 'nanoseconds' }));
   expect(row(ns, 'engine').text).toBe('10 ns, engine-reported deltas');
   expect(row(ns, 'oscpu').text).toBe('not measured');
- });
+  const ev = unitRows(runtimeCpuView({ units: 'events' }));
+  expect(row(ev, 'engine').text).toBe('10 events, runtime-reported');
+  expect(row(ev, 'oscpu').text).toBe('not measured');
+});
  test('blocked time and runnable delay are separate readings and are not summed or relabelled as CPU', () => {
   const rows = unitRows(offCpuView());
   expect(row(rows, 'blocked').text).toContain('80 ms');

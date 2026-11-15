@@ -62,6 +62,7 @@ class Config:
     deployment_traces: bool = True
     deployment_jobs: bool = True
     deployment_loss: bool = True
+    deployment_profiles: bool = False
     max_records: int = 1024
     max_bytes: int = 2097152
     clock_ns: Callable[[], str] = lambda: str(time.time_ns())
@@ -85,6 +86,7 @@ class PolicyDecision:
     traces: bool = False
     jobs: bool = False
     loss: bool = False
+    profiles: bool = False
 @dataclass(frozen=True)
 class FlushReport:
     acknowledged_batch_ids: tuple[str, ...]

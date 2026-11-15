@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- `startProfile({client})` now delivers the finished report through the client's queue (`captureRuntimeProfile`): a `capability` record (method `runtime_engine_samples`) and, only for a supported run, linked `profile_chunk` records (chunk method `runtime_cpu`, units `samples`; line/column are not sent). `report.ack` is `obtained` (flush cursors), `failed` or `not_available` (`profile_not_admitted` / `no_profile_admission_path`). Needs `deploymentProfiles: true` and a source policy that lists `profile_chunk` and `capability`.
+
 ## 0.1.0 — 2026-11-03
 
 - Expose policy-first native error graph capture and explicit bounded leases.

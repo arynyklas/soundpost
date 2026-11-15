@@ -73,7 +73,7 @@ def resolve(config: Config) -> SourcePolicy:
         for name in ("traces","jobs","loss"):
             if name in data and type(data[name]) is not bool: raise ValueError()
         revision=decimal(data["revision"]);expiry=unix_nano(data["expires_ns"])
-        decision=PolicyDecision(True,"approved",revision,data["errors"] and config.deployment_errors,data["logs"] and config.deployment_logs,data["replay"] and config.deployment_replay,data["bodies"] and config.deployment_bodies,data.get("traces",False) and config.deployment_traces,data.get("jobs",False) and config.deployment_jobs,data.get("loss",False) and config.deployment_loss)
+        decision=PolicyDecision(True,"approved",revision,data["errors"] and config.deployment_errors,data["logs"] and config.deployment_logs,data["replay"] and config.deployment_replay,data["bodies"] and config.deployment_bodies,data.get("traces",False) and config.deployment_traces,data.get("jobs",False) and config.deployment_jobs,data.get("loss",False) and config.deployment_loss,config.deployment_profiles is True)
         return SourcePolicy(decision,expiry)
     except Exception:
         raise ValueError("invalid signed policy") from None
@@ -103,7 +103,7 @@ def normalize_record(policy: SourcePolicy, capture: CaptureInput, templates: dic
     try:unix_nano(capture["observed_at_ns"])
     except ValueError:return None,"invalid_clock"
     if int(capture["observed_at_ns"])>=int(policy.expires_ns): return None,"policy_expired"
-    permission={"error":"errors","log":"logs","span":"traces","job_attempt":"jobs"}.get(kind)
+    permission={"error":"errors","log":"logs","span":"traces","job_attempt":"jobs","profile_chunk":"profiles","capability":"profiles"}.get(kind)
     if permission is None: return None,"invalid_kind"
     if not getattr(policy.decision,permission): return None,"policy_disabled"
     if kind=="error":
@@ -120,6 +120,10 @@ def normalize_record(policy: SourcePolicy, capture: CaptureInput, templates: dic
         from .jobs import normalize_attempt
         try: payload=normalize_attempt(capture["payload"])
         except (ValueError,TypeError,KeyError,OverflowError): return None,"invalid_job_attempt"
+    elif kind in ("profile_chunk","capability"):
+        # Closed native shape: parse_safe_record (wire.py) is the validator the queue applies to the serialized record; only a dict payload is copied here.
+        if type(capture["payload"]) is not dict: return None,"invalid_profile"
+        payload=dict(capture["payload"])
     else:
         template=templates.get(capture["template_id"])
         if template is None:return None,"unknown_template"

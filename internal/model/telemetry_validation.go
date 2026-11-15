@@ -355,7 +355,10 @@ func ValidateRecord(r *Record, p SourcePolicy) error {
 		}
 	case Profile:
 		c := r.Payload.Profile
-		if c.Profile == (ID{}) || c.Process == (ID{}) || c.Capability == (ID{}) || c.End < c.Start || !oneOf(c.Method, "runtime_cpu", "native_cpu", "native_offcpu") || !oneOf(c.Units, "samples", "nanoseconds") || len(c.Frames) > 4096 || len(c.Stacks) > 4096 || len(c.Samples) > 8192 || len(c.Intervals) > 8192 {
+		// Vocabulary mapping for runtime SDK profiles (03.09-W4): the chunk method stays the closed runtime_cpu; the SDK's own method
+		// (runtime_engine_samples, python_monitoring, python_wall_samples) lives on the capability record, whose method is free. `events`
+		// counts deterministic sys.monitoring events (python_monitoring) and is valid only for a runtime_cpu chunk; native chunks keep samples/nanoseconds.
+		if c.Profile == (ID{}) || c.Process == (ID{}) || c.Capability == (ID{}) || c.End < c.Start || !oneOf(c.Method, "runtime_cpu", "native_cpu", "native_offcpu") || !oneOf(c.Units, "samples", "nanoseconds", "events") || c.Units == "events" && c.Method != "runtime_cpu" || len(c.Frames) > 4096 || len(c.Stacks) > 4096 || len(c.Samples) > 8192 || len(c.Intervals) > 8192 {
 			return Fail(Invalid)
 		}
 		if validateNativeProfile(c) != nil || c.NativeDomain != nil && c.PolicyRevision != p.Revision {
