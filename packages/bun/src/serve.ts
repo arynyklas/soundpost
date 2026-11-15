@@ -11,7 +11,7 @@ export class ServeLease {
  handler(handler:ServeHandler):ServeHandler {
   return (request,server)=>{
    if(this.closed)return handler(request,server);
-   const parent=parsePropagation(request.headers.get("traceparent"),request.headers.get("x-soundpost-context")),span=this.client.startSpan(this.operation,{kind:"server",parent:parent??null});let ended=false;
+   const parent=parsePropagation(request.headers.get("traceparent"),request.headers.get("x-soundpost-context")),span=this.client.startAdapterSpan(this.operation,"server",undefined,parent??null);let ended=false;
    const end=(status:"ok"|"error"|"cancelled"|"incomplete"):void=>{if(ended)return;ended=true;request.signal.removeEventListener("abort",cancel);this.pending.delete(incomplete);span.end(status);},cancel=():void=>end("cancelled"),incomplete=():void=>end("incomplete");
    if(this.pending.size>=1024){span.end("incomplete");return handler(request,server);}
    this.pending.add(incomplete);request.signal.addEventListener("abort",cancel,{once:true});if(request.signal.aborted)cancel();

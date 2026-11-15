@@ -13,18 +13,24 @@ def utf8_size(value: str) -> int:
     except UnicodeEncodeError:
         raise ValueError("invalid Unicode text") from None
 
+_OPAQUE_ID=re.compile(r"[0-9a-f]{32}").fullmatch
+_DECIMAL=re.compile(r"0|[1-9][0-9]{0,19}").fullmatch
+_UNIX_NANO=re.compile(r"0|-?[1-9][0-9]{0,18}").fullmatch
+_ALIAS=re.compile(r"[A-Za-z0-9_.-]{1,128}").fullmatch
+_HEX16=re.compile(r"[0-9a-f]{16}").fullmatch
+
 def canonical_id(value: object) -> str:
-    if type(value) is not str or re.fullmatch(r"[0-9a-f]{32}",value) is None or value=="0"*32:
+    if type(value) is not str or _OPAQUE_ID(value) is None or value=="0"*32:
         raise ValueError("invalid opaque ID")
     return value
 
 def decimal(value: object) -> str:
-    if type(value) is not str or re.fullmatch(r"0|[1-9][0-9]{0,19}", value) is None or int(value)>18446744073709551615:
+    if type(value) is not str or _DECIMAL(value) is None or int(value)>18446744073709551615:
         raise ValueError("invalid uint64")
     return value
 
 def unix_nano(value: object) -> str:
-    if type(value) is not str or re.fullmatch(r"0|-?[1-9][0-9]{0,18}",value) is None:
+    if type(value) is not str or _UNIX_NANO(value) is None:
         raise ValueError("invalid UnixNano")
     if not -9223372036854775808<=int(value)<=9223372036854775807:
         raise ValueError("invalid UnixNano")
@@ -161,9 +167,9 @@ def normalize_span(raw: dict) -> dict:
     if any(type(raw[name]) is not str for name in ("span_kind","status","sample_decision")): raise ValueError("invalid span state")
     if raw["span_kind"] not in SPAN_KINDS or raw["status"] not in ("ok","error","cancelled","incomplete") or raw["sample_decision"] not in ("keep","drop"): raise ValueError("invalid span state")
     for name in ("operation","dependency_alias"):
-        if type(raw[name]) is not str or (name=="operation" or raw[name]) and re.fullmatch(r"[A-Za-z0-9_.-]{1,128}",raw[name]) is None: raise ValueError("invalid span alias")
+        if type(raw[name]) is not str or (name=="operation" or raw[name]) and _ALIAS(raw[name]) is None: raise ValueError("invalid span alias")
     bits=raw["sample_probability"]
-    if type(bits) is not str or re.fullmatch(r"[0-9a-f]{16}",bits) is None: raise ValueError("invalid probability")
+    if type(bits) is not str or _HEX16(bits) is None: raise ValueError("invalid probability")
     probability=struct.unpack(">d",bytes.fromhex(bits))[0]
     if not math.isfinite(probability) or not 0<=probability<=1: raise ValueError("invalid probability")
     def stamp(value):

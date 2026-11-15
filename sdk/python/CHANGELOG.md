@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased — 03.09 server capture cost (no wire or API change)
+
+- Span capture is composed directly in canonical form (`Client._record_span`, `DeliveryQueue.enqueue_span`) instead of being re-validated by `normalize_span`/`parse_safe_record` and canonicalized twice; the output is byte-identical to the validated path (pinned by `tests/test_span_fast_path.py`, including every refusal and loss reason). `Client._capture_span` is removed (it had no caller left).
+- Batches are built from the stored record text (policy revision swapped for the resource) and a text header instead of re-parsing every record at freeze; entries expire through a conservative next-expiry bound instead of an O(n) scan per enqueue; hot validation regexes are precompiled; `TraceContext.trusted`, class-based context bindings, no context rebinding while iterating a list/tuple WSGI body, default `Config.clock_ns` is the named `types.wall_clock_ns` (read without re-validation).
+- Measured with `fixtures/sdk/overhead.mjs --only python` (CPython 3.13.5, 3 runs each): process CPU per request +182% -> +38..45% (3 hashes) and +165% -> +31..35% (100 hashes), p95 +22% -> +0.2%. The 5% budget is still not met.
+
 ## Unreleased — 03.09 runtime profile delivery
 
 - Runtime profiles reach the backend: `Config(deployment_profiles=True)` plus a source policy that lists `profile_chunk` and `capability` admits the internal `start_profile` report as a `capability` record (method `python_monitoring` / `python_wall_samples`) and, for a supported run, linked `runtime_cpu` chunks (units `samples`, or `events` for `python_monitoring`; one single-frame stack per code object with its summed event count). `report["ack"]` is `not_available/profile_not_admitted` when the records were refused.

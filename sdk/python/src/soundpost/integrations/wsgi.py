@@ -1,9 +1,11 @@
 # Copyright 2026 Aryn Yklas
 # SPDX-License-Identifier: Apache-2.0
 import sys
+from contextlib import nullcontext
 from ..propagation import extract
 from ..tracing import SpanContextManager
 
+_NO_CONTEXT = nullcontext()
 def _capture_boundary(client, operation, error):
     if isinstance(error, Exception):
         episode = client.begin_handling_episode()
@@ -19,7 +21,8 @@ class WSGIMiddleware:
 
     def __call__(self, environ, start_response):
         if not self.enabled: return self.app(environ, start_response)
-        parent = extract({'traceparent': environ.get('HTTP_TRACEPARENT')})
+        header = environ.get('HTTP_TRACEPARENT')
+        parent = extract({'traceparent': header}) if header is not None else None
         binding = self.client._trace_context.bind(parent)
         with binding:
             span = SpanContextManager(self.client, self.operation, kind='server')
@@ -41,6 +44,8 @@ class WSGIMiddleware:
 class _Response:
     def __init__(self, body, span):
         self.body, self.span = body, span
+        # Iterating a list or tuple runs no application code, so there is no request context to restore around it.
+        self.plain = type(body) in (list, tuple)
         self.iterator = None
         self.closed = False
         self.exhausted = False
@@ -50,7 +55,7 @@ class _Response:
 
     def __next__(self):
         if self.closed: raise StopIteration
-        with self.span.client._trace_context.bind(self.span.context):
+        with (_NO_CONTEXT if self.plain else self.span.client._trace_context.bind(self.span.context)):
             try:
                 if self.iterator is None: self.iterator = iter(self.body)
                 return next(self.iterator)

@@ -1,10 +1,12 @@
 # Copyright 2026 Aryn Yklas
 # SPDX-License-Identifier: Apache-2.0
+import os
 import secrets
+import struct
 import threading
 import time
 import warnings
-from .types import Config, Template, PolicyDecision, CaptureInput, ErrorMechanism, FlushReport
+from .types import Config, Template, PolicyDecision, CaptureInput, ErrorMechanism, FlushReport, SPAN_KINDS, wall_clock_ns
 from .policy import resolve, approve_template, normalize_record, canonical_id, unix_nano, decimal
 from .errors import extract_exception, HandlingEpisode
 from .frames import normalize_root
@@ -14,6 +16,7 @@ from .context import ContextState
 from .tracing import SpanContextManager
 from .jobs import JobProducer, AttemptContextManager
 
+_SPAN_STATUSES=frozenset(("ok","error","cancelled","incomplete"))
 class Client:
     """Policy-first capture with immutable, durable-receipt-aware delivery."""
     def __init__(self, config: Config):
@@ -33,9 +36,10 @@ class Client:
         self._trace_dependencies=frozenset(config.dependencies)
         self._trace_origins=frozenset(config.origins)
         self._trace_domain={key:secrets.token_hex(16) for key in ("host","boot","runtime")}
+        self._span_domain='{"boot":"%s","host":"%s","runtime":"%s"}'%(self._trace_domain["boot"],self._trace_domain["host"],self._trace_domain["runtime"])
         self._trace_uncertainty=decimal(config.clock_uncertainty_ns)
-        self._policy=resolve(config)
-        self._clock=config.clock_ns
+        self._policy=resolve(config);self._expires=int(self._policy.expires_ns)
+        self._clock=config.clock_ns;self._default_clock=config.clock_ns is wall_clock_ns
         self._max_records=config.max_records;self._max_bytes=config.max_bytes
         self._build=config.build;self._codes=frozenset(config.operations)
         self._templates={}
@@ -48,6 +52,7 @@ class Client:
     def policy_decision(self) -> PolicyDecision:return self._policy.decision
     def _loss(self,reason):self._counts[reason]=self._counts.get(reason,0)+1
     def _read_clock(self)->str|None:
+        if self._default_clock:return str(time.time_ns())
         try:return unix_nano(self._clock())
         except Exception:
             with self._lock:self._loss("invalid_clock")
@@ -66,6 +71,16 @@ class Client:
             record,reason=normalize_record(self._policy,capture,self._templates)
             if record is None:self._loss(reason);return False
             return self._delivery.enqueue(record)
+    def _admit_span(self,event,observed,payload,trace_id):
+        """`_admit` for a span record composed by `_record_span` in canonical form: the same gates in the same order (closed, exporter recursion, expiry, permission) as
+        `_admit` + `normalize_record`, then the queue's trusted entry point; nothing here parses or re-validates the text."""
+        with self._lock:
+            if self._closed:self._loss("closed");return False
+            if EXPORTING.get() or self._trace_context.is_exporting():self._loss("exporter_recursion");return False
+            policy=self._policy
+            if int(observed)>=self._expires:self._loss("policy_expired");return False
+            if not policy.decision.traces:self._loss("policy_disabled");return False
+            return self._delivery.enqueue_span(f'{{"id":"{event}","kind":"span","observed_at_ns":"{observed}","payload":{payload},"policy_revision":"{policy.decision.revision}"}}',trace_id)
     def capture_exception(self,error:BaseException,*,code:str|None=None)->str:
         return self._capture_exception(error,code,"manual",False)
     def _capture_exception(self,error,code,mechanism:ErrorMechanism,fatal:bool):
@@ -93,16 +108,33 @@ class Client:
         return SpanContextManager(self,operation,dependency=dependency,kind=kind)
     def job_attempt(self,job:str,run_id:str,ordinal:int,scheduled:tuple|None=None)->AttemptContextManager:
         return self._jobs.attempt(job,run_id,ordinal,scheduled)
-    def _capture_span(self,payload:dict)->bool:
-        if payload["operation"] not in self._trace_operations or payload["dependency_alias"] and payload["dependency_alias"] not in self._trace_dependencies:
+    def _record_span(self,span,end)->bool:
+        """Capture of a finished SpanContextManager scope: registered aliases, sampling, clock and policy admission as for every record, but the C04 span DTO is composed
+        straight into canonical text: every field is an identifier the SDK generated, a validated clock value, a registered alias or a fixed vocabulary word, so the
+        closed-shape validation of `normalize_span`/`parse_safe_record` would only re-check the SDK's own output. A field outside that vocabulary (a caller poking
+        `status` or `kind`) is refused as `invalid_span` exactly like the validated path. Output equality with the validated path (`_admit` of the same span through
+        `normalize_record`) is pinned by tests/test_span_fast_path.py."""
+        operation,dependency,context=span.operation,span.dependency,span.context
+        if operation not in self._trace_operations or dependency and dependency not in self._trace_dependencies:
             with self._lock:self._loss("unregistered_span")
             return False
-        if payload["sample_decision"]=="drop":
+        if not context.sampled:
             with self._lock:self._loss("trace_sampled_out")
             self._record_signal_loss("span","policy",1)
             return False
         observed=self._read_clock()
-        return observed is not None and self._admit({"kind":"span","id":secrets.token_hex(16),"observed_at_ns":observed,"payload":payload})
+        if observed is None:return False
+        status,kind,start=span.status,span.kind,span.start
+        if type(status) is not str or status not in _SPAN_STATUSES or type(kind) is not str or kind not in SPAN_KINDS or end[1]<start[1]:
+            with self._lock:self._loss("invalid_span")
+            return False
+        parent=span.parent_id
+        probability='3ff0000000000000' if context.sample_probability==1 else struct.pack('>d',context.sample_probability).hex()
+        domain,uncertainty=self._span_domain,self._trace_uncertainty
+        payload=(f'{{"dependency_alias":"{dependency}","end":{{"domain":{domain},"mono_ns":"{end[1]}","uncertainty_ns":"{uncertainty}","wall_ns":"{end[0]}"}},"links":[],"operation":"{operation}",'
+                 f'"parent_id":{"null" if parent is None else chr(34)+parent+chr(34)},"sample_decision":"keep","sample_probability":"{probability}","span_id":"{context.span_id}","span_kind":"{kind}",'
+                 f'"start":{{"domain":{domain},"mono_ns":"{start[1]}","uncertainty_ns":"{uncertainty}","wall_ns":"{start[0]}"}},"status":"{status}","trace_id":"{context.trace_id}"}}')
+        return self._admit_span(os.urandom(16).hex(),observed,payload,context.trace_id)
     def _capture_profile(self,capability:dict,chunks:list)->bool:
         """Enqueues a finished runtime profile on the ordinary delivery path (same queue, closed wire validation, batching, receipts and loss counters): the capability
         record first and alone as the complete answer for a refusal, then the chunks in order, stopping at the first refusal so a profile never has a hole. Needs

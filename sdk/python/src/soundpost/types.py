@@ -8,6 +8,9 @@ Primitive: TypeAlias = str | int | bool | None
 ErrorMechanism: TypeAlias = Literal["manual","uncaught_exception","unhandled_rejection","thread_exception","asyncio_exception"]
 ExceptionEdgeKind: TypeAlias = Literal["cause","context","group"]
 SPAN_KINDS: tuple[str,...] = ("internal","server","client","producer","consumer")
+def wall_clock_ns() -> str:
+    """The default Config.clock_ns: the system clock in Unix nanoseconds as canonical decimal text (always a valid UnixNano until the year 2262)."""
+    return str(time.time_ns())
 @dataclass(frozen=True)
 class SignedPolicy:
     version: int
@@ -65,7 +68,7 @@ class Config:
     deployment_profiles: bool = False
     max_records: int = 1024
     max_bytes: int = 2097152
-    clock_ns: Callable[[], str] = lambda: str(time.time_ns())
+    clock_ns: Callable[[], str] = wall_clock_ns
     clock_uncertainty_ns: str = "18446744073709551615"
     project_root: str | None = None
     descriptor: RoutingDescriptor | None = None

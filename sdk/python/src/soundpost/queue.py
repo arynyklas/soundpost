@@ -3,17 +3,20 @@
 import base64
 import hashlib
 import json
+import os
 from dataclasses import replace
 import random
+from operator import itemgetter
 import secrets
 import threading
 import time
 from .types import RoutingDescriptor,FlushReport
 from .policy import decimal,canonical_id,unix_nano
-from .routing import native_canonical,route_record,resource_wire,validate_descriptor
+from .routing import native_canonical,route_record,route_prefix,route_owner,resource_wire,validate_descriptor
 from .transport import FrozenBatch,Outcome,verify_receipt,EXPORTING
 from .wire import parse_safe_record
 
+_SIZE=itemgetter('size')
 def retry_delay(attempt,random_value=random.random):
     cap=min(30,.25*2**min(attempt,7))
     return max(.25,min(30,cap*(.5+.5*max(0,min(1,random_value())))))
@@ -25,6 +28,9 @@ class DeliveryQueue:
         self.descriptor=validate_descriptor(config.descriptor or RoutingDescriptor(1,config.org,config.project,config.source,1,64,decimal(self.policy['revision'])))
         if (self.descriptor.org,self.descriptor.project,self.descriptor.source,self.descriptor.policy_revision)!=(config.org,config.project,config.source,self.policy['revision']):raise ValueError('routing identity mismatch')
         self.resource=resource_wire(config.resource,config.build);self.producer=canonical_id(config.producer or secrets.token_hex(16))
+        self._resource_tail=',"resource":'+native_canonical(self.resource).decode()+'}';self._span_route=route_prefix(self.descriptor,'span');self._next_expiry=float('inf')
+        try:self._expires=int(unix_nano(self.policy['expires_ns']))
+        except Exception:self._expires=float('-inf')  # an unusable expiry reads as expired, as the per-call conversion it replaces did
         self.spool=spool or config.spool;self._entries=[];self._batches=[];self._bytes=0;self._lost=0;self._counts={};self._denied=False;self._closed=False;self._closing=False
         self._loss_epoch=canonical_id(secrets.token_hex(16));self._loss_buckets={};self._last_ack=None;self._materializing_loss=False;self._allow_loss=self.policy.get('loss') is True and getattr(config,'deployment_loss',True) is True
         if self.spool:self.spool.assert_binding(self.descriptor,self.descriptor.policy_revision)
@@ -35,6 +41,9 @@ class DeliveryQueue:
         except Exception:
             self.release();raise ValueError('invalid encrypted spool state') from None
         finally:self._recovering=False
+    def _policy_expired(self):
+        try:return int(unix_nano(self.config.clock_ns()))>=self._expires
+        except Exception:return True
     def _valid_signal_loss(self,signal,reason):
         return type(signal) is str and signal in ('metric','log','span','error','job_attempt','replay_chunk','profile_chunk','capability','condition') and type(reason) is str and reason in ('queue_full','expired','policy','unsupported','ring_overflow','reorder_gap','transport','shutdown','truncated')
     def record_signal_loss(self,signal,reason,count,at_ns):
@@ -42,7 +51,7 @@ class DeliveryQueue:
             if self._closed or self._closing or self._denied or not self._allow_loss or EXPORTING.get():self._counts['native_loss_unavailable']=self._counts.get('native_loss_unavailable',0)+1;return False
             try:
                 unix_nano(at_ns)
-                if not self._valid_signal_loss(signal,reason) or type(count) is not int or not 0<count<=18446744073709551615 or int(at_ns)>=int(self.policy['expires_ns']):raise ValueError()
+                if not self._valid_signal_loss(signal,reason) or type(count) is not int or not 0<count<=18446744073709551615 or int(at_ns)>=self._expires:raise ValueError()
             except (ValueError,TypeError):self._counts['invalid_signal_loss']=self._counts.get('invalid_signal_loss',0)+1;return False
             self._expire();self._expire_signal_losses();key=(self._loss_epoch,signal,reason);bucket=self._loss_buckets.get(key)
             if bucket is None:
@@ -70,8 +79,7 @@ class DeliveryQueue:
             for key,bucket in self._loss_buckets.items():
                 if not bucket['unbatched']:continue
                 if not self._allow_loss or bucket['revision']!=self.descriptor.policy_revision:bucket['unbatched']=0;bucket['start']=None;bucket['end']=None;self._loss('native_loss_policy');continue
-                try:expired=int(unix_nano(self.config.clock_ns()))>=int(self.policy['expires_ns'])
-                except Exception:expired=True
+                expired=self._policy_expired()
                 if expired:continue
                 old=next((e for e in self._entries if e.get('loss_key')==key and not e['batch']),None);total=bucket['unbatched']
                 if old:
@@ -85,7 +93,7 @@ class DeliveryQueue:
                     old['text']=encoded;old['loss_count']=total
                 else:
                     if not self.enqueue(encoded):continue
-                    entry=self._entries[-1];entry['loss_key']=key;entry['loss_count']=total;entry['at']=bucket['at'];entry['wall']=bucket['wall']
+                    entry=self._entries[-1];entry['loss_key']=key;entry['loss_count']=total;entry['at']=bucket['at'];entry['wall']=bucket['wall'];self._next_expiry=min(self._next_expiry,entry['at']+300)
                 bucket['unbatched']=0;bucket['start']=None;bucket['end']=None
         finally:self._materializing_loss=False
     def signal_loss_counters(self):
@@ -97,6 +105,7 @@ class DeliveryQueue:
             return tuple(result)
     def _acknowledge_signal_losses(self,batch,receipt):
         cursor=receipt['cursor'];self._last_ack=dict(group=canonical_id(cursor['group']),index=decimal(cursor['index']))
+        if 'loss' not in batch.kinds:return
         for entry in self._entries:
             if entry['batch']==batch.id and entry.get('loss_key') is not None:
                 bucket=self._loss_buckets.get(entry['loss_key']);count=entry['loss_count']
@@ -121,18 +130,22 @@ class DeliveryQueue:
         if key in self._loss_buckets:entry['loss_key']=key;entry['loss_count']=int(decimal(p['count']))
     def _loss(self,reason,count=1):self._lost+=count;self._counts[reason]=self._counts.get(reason,0)+count
     def _remove(self,batch,reason=None):
-        self._entries=[entry for entry in self._entries if entry['batch']!=batch.id];self._bytes=sum(e['size'] for e in self._entries)+512*len(self._loss_buckets)
-        self._batches=[state for state in self._batches if state['batch'].id!=batch.id]
+        identity=batch.id
+        self._entries=[entry for entry in self._entries if entry['batch']!=identity];self._bytes=sum(map(_SIZE,self._entries))+512*len(self._loss_buckets)
+        self._batches=[state for state in self._batches if state['batch'].id!=identity]
         if reason:self._loss(reason,batch.count)
     def _expire(self):
-        now=self.now();expired={e['batch'] for e in self._entries if now-e['at']>=300 and e['batch']}
+        now=self.now()
+        # `_next_expiry` never exceeds the earliest entry's age limit, so while it is in the future nothing can have expired and the scan is skipped.
+        if now<self._next_expiry:return
+        expired={e['batch'] for e in self._entries if now-e['at']>=300 and e['batch']}
         for state in tuple(self._batches):
             if state['batch'].id in expired:self._remove(state['batch'],'queue_expired')
         retained=[]
         for entry in self._entries:
             if now-entry['at']>=300:self._bytes-=entry['size'];self._loss('queue_expired')
             else:retained.append(entry)
-        self._entries=retained
+        self._entries=retained;self._next_expiry=min((e['at'] for e in retained),default=float('inf'))+300
     @property
     def pending(self):
         with self._lock:self._expire();self._expire_signal_losses();return len(self._entries) or int(any(b['unbatched'] for b in self._loss_buckets.values()))
@@ -155,45 +168,63 @@ class DeliveryQueue:
             if type(text) is not str:raise ValueError('serialized safe record required')
             record=parse_safe_record(text)
             if not self._recovering and decimal(record['policy_revision'])!=self.descriptor.policy_revision:raise ValueError('policy revision mismatch')
-            safe=native_canonical(record).decode();slot=route_record(record,self.descriptor,self.producer);native={key:record[key] for key in ('id','kind','observed_at_ns','payload')};native['resource']=self.resource;record_bytes=len(native_canonical(native));size=record_bytes+(1024 if record['kind']=='loss' else 512)
-            if record_bytes>(131072 if record['kind']=='replay_chunk' else 262144):
-                if not self._materializing_loss:self._loss('record_too_large')
+            return self._append(native_canonical(record).decode(),record['kind'],route_record(record,self.descriptor,self.producer))
+    def enqueue_span(self,text,trace_id):
+        """Enqueues a span record the SDK composed itself in canonical form from identifiers and clock values it generated or validated (tracing.py, Client._admit_span).
+        Skips the parse and re-validation of `enqueue`; every other step (closed, expiry, size, priority eviction, spool) is the shared `_append`. Equality with the
+        validated path is pinned by tests/test_span_fast_path.py."""
+        with self._lock:
+            if self._closed or self._closing and not self._materializing_loss:self._loss('closed');return False
+            self._expire()
+            return self._append(text,'span',route_owner(self._span_route,trace_id.encode()))
+    def _wire(self,text):
+        """The native wire form of a stored record: the canonical text without its policy_revision (always the last key) and with the resource, as bytes."""
+        return (text[:text.rindex(',"policy_revision":')]+self._resource_tail).encode()
+    def _append(self,safe,kind,slot):
+        record_bytes=len(self._wire(safe));size=record_bytes+(1024 if kind=='loss' else 512)
+        if record_bytes>(131072 if kind=='replay_chunk' else 262144):
+            if not self._materializing_loss:self._loss('record_too_large')
+            return False
+        while len(self._entries)>=self.config.max_records or self._bytes+size>self.config.max_bytes:
+            index=next((i for i,e in enumerate(self._entries) if not e['batch'] and _priority(e['kind'])<_priority(kind)),None)
+            if index is None:
+                if not self._materializing_loss:self._loss('queue_full')
                 return False
-            while len(self._entries)>=self.config.max_records or self._bytes+size>self.config.max_bytes:
-                index=next((i for i,e in enumerate(self._entries) if not e['batch'] and _priority(e['kind'])<_priority(record['kind'])),None)
-                if index is None:
-                    if not self._materializing_loss:self._loss('queue_full')
-                    return False
-                old=self._entries.pop(index);self._bytes-=old['size'];self._loss('queue_pressure')
-            self._entries.append(dict(text=safe,size=size,at=self.now(),wall=time.time(),kind=record['kind'],slot=slot,batch=None,position=None));self._bytes+=size
-            if self.spool and not self._recovering and not self._materializing_loss:
-                try:self.persist()
-                except (OSError,ValueError):self._counts['spool_failed']=self._counts.get('spool_failed',0)+1
-            return True
+            old=self._entries.pop(index);self._bytes-=old['size'];self._loss('queue_pressure')
+        at=self.now();self._next_expiry=min(self._next_expiry,at+300)
+        self._entries.append(dict(text=safe,size=size,at=at,wall=time.time(),kind=kind,slot=slot,batch=None,position=None));self._bytes+=size
+        if self.spool and not self._recovering and not self._materializing_loss:
+            try:self.persist()
+            except (OSError,ValueError):self._counts['spool_failed']=self._counts.get('spool_failed',0)+1
+        return True
     def freeze(self):
         with self._lock:
             self._expire()
             self._expire_signal_losses();self._materialize_signal_losses()
-            for slot in range(64):
-                pending=[e for e in self._entries if e['slot']==slot and not e['batch']]
-                if not pending:continue
-                selected=[];wire=[];record_bytes=0;batch_id=secrets.token_hex(16)
-                def header():
-                    return native_canonical(dict(version=1,project=self.descriptor.project,source=self.descriptor.source,producer=self.producer,id=batch_id,policy_revision=self.descriptor.policy_revision,route_slot=slot,records=[]))
-                header_bytes=len(header())
-                def finish():
-                    nonlocal selected,wire,record_bytes,batch_id
-                    if not selected:return
-                    raw=header().replace(b'\"records\":[]',b'\"records\":['+b','.join(wire)+b']',1)
-                    batch=FrozenBatch(batch_id,self.descriptor.source,self.producer,slot,hashlib.sha256(raw).hexdigest(),raw,len(selected),tuple(sorted({e['kind'] for e in selected})),min(e['wall'] for e in selected),self.descriptor.policy_revision)
-                    for position,entry in enumerate(selected):entry['batch']=batch_id;entry['position']=position;entry['text']=None
-                    self._batches.append(dict(batch=batch,ambiguous=False,attempt=0,next=0));selected=[];wire=[];record_bytes=0;batch_id=secrets.token_hex(16)
-                for entry in pending:
-                    record=parse_safe_record(entry['text']);record.pop('policy_revision');record['resource']=self.resource;encoded=native_canonical(record)
-                    if len(selected)==512 or header_bytes+record_bytes+len(encoded)+len(selected)>1048576:finish()
-                    selected.append(entry);wire.append(encoded);record_bytes+=len(encoded)
-                finish()
+            by_slot={}
+            for entry in self._entries:
+                if not entry['batch']:by_slot.setdefault(entry['slot'],[]).append(entry)
+            if by_slot:
+                # The canonical batch header (keys sorted, so `records` sits between `project` and `route_slot`) as text around the batch id and the record array.
+                middle='","policy_revision":"'+self.descriptor.policy_revision+'","producer":"'+self.producer+'","project":"'+self.descriptor.project+'","records":['
+                for slot in sorted(by_slot):
+                    tail=('],"route_slot":'+str(slot)+',"source":"'+self.descriptor.source+'","version":1}').encode()
+                    header_bytes=len(('{"id":"'+'0'*32+middle).encode())+len(tail)
+                    selected=[];wire=[];record_bytes=0
+                    for entry in by_slot[slot]:
+                        encoded=self._wire(entry['text'])
+                        if len(selected)==512 or header_bytes+record_bytes+len(encoded)+len(selected)>1048576:
+                            self._seal(slot,selected,wire,middle,tail);selected=[];wire=[];record_bytes=0
+                        selected.append(entry);wire.append(encoded);record_bytes+=len(encoded)
+                    self._seal(slot,selected,wire,middle,tail)
             return tuple(s['batch'] for s in self._batches)
+    def _seal(self,slot,selected,wire,middle,tail):
+        """Turns the selected entries of one route slot into a frozen batch (a fresh random id, the hash of its exact bytes) and marks them as batched."""
+        if not selected:return
+        batch_id=os.urandom(16).hex();raw=('{"id":"'+batch_id+middle).encode()+b','.join(wire)+tail
+        batch=FrozenBatch(batch_id,self.descriptor.source,self.producer,slot,hashlib.sha256(raw).hexdigest(),raw,len(selected),tuple(sorted({e['kind'] for e in selected})),min(e['wall'] for e in selected),self.descriptor.policy_revision)
+        for position,entry in enumerate(selected):entry['batch']=batch_id;entry['position']=position;entry['text']=None
+        self._batches.append(dict(batch=batch,ambiguous=False,attempt=0,next=0))
     def persist(self):
         if not self.spool:return
         with self._lock:
@@ -222,7 +253,7 @@ class DeliveryQueue:
                 r=records[position];original=native_canonical(dict(id=r['id'],kind=r['kind'],observed_at_ns=r['observed_at_ns'],payload=r['payload'],policy_revision=revision)).decode();native_size=len(native_canonical(r))+(1024 if r['kind']=='loss' else 512)
             if stored['batch'] is None and parse_safe_record(original)['policy_revision']!=self.descriptor.policy_revision:self._loss('policy_changed');continue
             if not self.enqueue(original):raise ValueError('spool capacity exceeded')
-            entry=self._entries[-1];entry['wall']=stored['wall'];entry['at']=self.now()-age;entry['batch']=stored['batch'];entry['position']=stored['position']
+            entry=self._entries[-1];entry['wall']=stored['wall'];entry['at']=self.now()-age;entry['batch']=stored['batch'];entry['position']=stored['position'];self._next_expiry=min(self._next_expiry,entry['at']+300)
             self._mark_loss_entry(entry,json.loads(original))
             if stored['batch'] is not None:
                 self._bytes+=native_size-entry['size'];entry['size']=native_size;entry['text']=None
@@ -257,9 +288,7 @@ class DeliveryQueue:
                     if self.now()>=deadline or time.monotonic()>=wire_deadline:break
                     if state['next']>self.now():wait=min(wait,state['next']-self.now());continue
                     if not state['ambiguous']:
-                        try:expired=int(unix_nano(self.config.clock_ns()))>=int(self.policy['expires_ns'])
-                        except Exception:expired=True
-                        if expired:
+                        if self._policy_expired():
                             with self._lock:self._remove(state['batch'],'policy_expired');self.persist()
                             attempted=True;continue
                     attempted=True;lookup=state['ambiguous'];state['ambiguous']=True
@@ -276,9 +305,7 @@ class DeliveryQueue:
                         if out.kind=='terminal' and not lookup:self._remove(state['batch'],'terminal_rejected');self.persist();continue
                         if out.kind=='not_found' and lookup:
                             if state['batch'].policy_revision!=self.descriptor.policy_revision:self._remove(state['batch'],'policy_changed');self.persist();continue
-                            try:expired=int(unix_nano(self.config.clock_ns()))>=int(self.policy['expires_ns'])
-                            except Exception:expired=True
-                            if expired:self._remove(state['batch'],'policy_expired');self.persist();continue
+                            if self._policy_expired():self._remove(state['batch'],'policy_expired');self.persist();continue
                             state['ambiguous']=False
                         elif out.kind=='retryable' and not lookup:state['ambiguous']=False
                         state['next']=self.now()+max(retry_delay(state['attempt'],self.random),out.retry_after or 0);state['attempt']+=1;self.persist()

@@ -1,7 +1,7 @@
 # Copyright 2026 Aryn Yklas
 # SPDX-License-Identifier: Apache-2.0
 import asyncio
-import secrets
+from os import urandom as _urandom
 import time
 from .context import TraceContext
 from .types import SPAN_KINDS
@@ -37,18 +37,20 @@ class SpanContextManager:
         """Mark this span failed without raising, e.g. a nonzero exit code or an HTTP 5xx handled by the caller."""
         self.set_status('error')
 
-    def _clock(self):
+    def _stamp(self):
+        """(wall_ns text validated by the client's clock reader, monotonic_ns int), or None when the client clock is unusable."""
         wall=self.client._read_clock()
         if wall is None:return None
-        return {'wall_ns': wall, 'mono_ns': str(time.monotonic_ns()), 'domain': dict(self.client._trace_domain), 'uncertainty_ns': self.client._trace_uncertainty}
+        return (wall, time.monotonic_ns())
 
     def __enter__(self):
         if self._entered: raise RuntimeError('span scope already entered')
         self._entered = True
         parent = self.client._trace_context.current()
         self.parent_id = parent.span_id if parent else None
-        self.context = TraceContext(parent.trace_id if parent else secrets.token_hex(16), secrets.token_hex(8), parent.sampled if parent else True, parent.sample_probability if parent else 1.0)
-        self.start = self._clock()
+        # Fresh random identifiers and a validated parent's own fields: nothing for TraceContext's constructor checks to find.
+        self.context = TraceContext.trusted(parent.trace_id if parent else _urandom(16).hex(), _urandom(8).hex(), parent.sampled if parent else True, parent.sample_probability if parent else 1.0)
+        self.start = self._stamp()
         self._binding = self.client._trace_context.bind(self.context)
         self._binding.__enter__()
         return self
@@ -58,12 +60,11 @@ class SpanContextManager:
         try:
             if exception_type is not None:
                 self.status = 'cancelled' if issubclass(exception_type, asyncio.CancelledError) else 'error'
-            end = self._clock()
+            end = self._stamp()
             if self.start is None or end is None:
                 with self.client._lock:self.client._loss("span_clock_unavailable")
                 return False
-            import struct
-            self.client._capture_span({'trace_id': self.context.trace_id, 'span_id': self.context.span_id, 'parent_id': self.parent_id, 'span_kind': self.kind, 'operation': self.operation, 'start': self.start, 'end': end, 'status': self.status, 'dependency_alias': self.dependency, 'links': [], 'sample_probability': struct.pack('>d', self.context.sample_probability).hex(), 'sample_decision': 'keep' if self.context.sampled else 'drop'})
+            self.client._record_span(self, end)
         finally:
             self._binding.__exit__(exception_type, exception, traceback)
         return False

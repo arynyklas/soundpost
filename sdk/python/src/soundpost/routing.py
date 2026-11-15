@@ -48,3 +48,12 @@ def route_record(record,descriptor,producer):
     parts=[descriptor.org.encode(),descriptor.project.encode(),record['kind'].encode(),owner_key(record,descriptor,producer)]
     digest=hashlib.sha256(b''.join(struct.pack('>I',len(p))+p for p in parts)).digest()
     return int.from_bytes(digest[:8],'big')%64
+
+def route_prefix(descriptor,kind):
+    """The length-framed (org, project, kind) prefix of the route hash input; `route_owner` appends the framed owner key. Together they equal `route_record` for a record of that kind."""
+    validate_descriptor(descriptor)
+    return b''.join(struct.pack('>I',len(p))+p for p in (descriptor.org.encode(),descriptor.project.encode(),kind.encode()))
+
+def route_owner(prefix,owner):
+    digest=hashlib.sha256(prefix+struct.pack('>I',len(owner))+owner).digest()
+    return int.from_bytes(digest[:8],'big')%64
