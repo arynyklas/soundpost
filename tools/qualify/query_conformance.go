@@ -527,6 +527,13 @@ func verifyRelease(res *RowResult, raw []byte, pin MatrixProfile, m QueryMatrix,
 	if commit != pin.Commit {
 		fail("profile %s commit: matrix %s, report %s", p, pin.Commit, commit)
 	}
+	var seeds []uint64
+	for _, g := range r.Generated {
+		seeds = append(seeds, g.Seed)
+	}
+	if len(seeds) != 1 || seeds[0] != res.Seed {
+		fail("report seed: the report records seeds %v, the row is bound to seed %d", seeds, res.Seed)
+	}
 	if r.Configs[p] != pin.ConfigSHA256 {
 		fail("profile %s oracle configuration digest mismatch: matrix %s, report %s", p, pin.ConfigSHA256, r.Configs[p])
 	}

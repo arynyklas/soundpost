@@ -42,8 +42,9 @@ import (
 //     restore that brings back control state without the tombstone cannot revive it
 //     once the deletion ledger is re-applied.
 //
-// NOT exercised, and not claimed: profile references (no profile record links to
-// artifacts in this build, so no profile reference is created); a real snapshot
+// NOT exercised, and not claimed: a profile-record to artifact reference producer
+// (no profile record links to artifacts in this build; the profile reference kind
+// is exercised through the lifecycle API, see policy_profile_reference); a real snapshot
 // pin source (none exists: pins are an explicit "no pin" implementation and the
 // manifest says so); the 01.09 backup restore authority (the restore is a control
 // rollback followed by ImportDeletions of the deletion's own predicates); and
@@ -474,6 +475,45 @@ func (p *policySmoke) run() error {
 	}
 	p.offset.Store(0)
 
+	// ---- profile reference: the third reference kind -------------------------
+	p.stage = "policy_profile_reference"
+	prof, err := p.put("policy-profile", false)
+	if err != nil {
+		return err
+	}
+	profileDeadline := model.UnixNano(time.Now().Add(72 * time.Hour).UnixNano())
+	profileRef := artifacts.OriginCursor{Kind: artifacts.ReferenceProfile, Cursor: model.Cursor{Group: model.NewID(), Index: 11}}
+	if err = p.life.Reference(ctx, write, prof.ID, profileRef, profileDeadline); err != nil {
+		return err
+	}
+	profEffective, err := p.life.EffectiveRetention(ctx, read(), prof.ID)
+	if err != nil {
+		return err
+	}
+	if err = p.check("profile_reference_retains_map_past_upload_deadline", profEffective >= profileDeadline && profEffective > prof.Manifest.RetainUntil); err != nil {
+		return err
+	}
+	p.offset.Store(int64(2 * time.Hour)) // the upload's own hour is over
+	profHeld, err := p.life.LatestReference(ctx, candidate(prof))
+	if err != nil {
+		return err
+	}
+	if err = p.check("profile_referenced_map_pinned_after_upload_deadline", int64(profHeld) > p.now().UnixNano()); err != nil {
+		return err
+	}
+	if err = p.life.Unreference(ctx, write, prof.ID, profileRef, 0); err != nil {
+		return err
+	}
+	profLast, err := p.life.LatestReference(ctx, candidate(prof))
+	if err != nil {
+		return err
+	}
+	_, readProf := p.app.Artifacts.Get(ctx, read(), prof.ID)
+	if err = p.check("profile_last_reference_released_map_is_fenced_for_erasure", profLast == 0 && faultOf(readProf) == model.NotFound); err != nil {
+		return err
+	}
+	p.offset.Store(0)
+
 	// ---- restart and tampering ----------------------------------------------
 	p.stage = "policy_restart"
 	c, err := p.put("policy-c", false)
@@ -616,8 +656,8 @@ func (p *policySmoke) run() error {
 	if err = p.check("restore_with_deletion_ledger_cannot_revive_artifact", len(tombstones) == 1 && gone()); err != nil {
 		return err
 	}
-	p.evidence["reference_kinds_exercised"] = []string{"error", "build"}
-	p.evidence["reference_kinds_not_exercised"] = []string{"profile"}
+	p.evidence["reference_kinds_exercised"] = []string{"error", "build", "profile"}
+	p.evidence["profile_reference_producer"] = "none in this build: no profile record links to an artifact, so the profile reference is created directly through the lifecycle API (the kind, its retention and its release are exercised, not a producer)"
 	p.evidence["snapshot_pins"] = "explicit no-pin implementation (no snapshot pin source exists)"
 	p.evidence["restore"] = "control rollback of the tombstone plus ImportDeletions of the deletion's predicates (backup authority not driven)"
 	return nil

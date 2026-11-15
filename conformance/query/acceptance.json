@@ -11203,154 +11203,1144 @@
   },
   "test_observations": [
     {
+      "name": "TestAggregationSemantics",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestAggregationVarianceKeepsTheAddedTermNaNPayload",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestAnnotationRenderedFactsFollowThePinnedRelease",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestAnnotationsWithTheSameRenderedTextMerge",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestAuthoredSignatureArityTypeAndGateCases",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestCaptureReplacementAndEmptyProgression",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
       "name": "TestClassifyReferenceConfigurationError",
       "passed": true,
       "command": "conformance/query/author/observe-go-tests.sh",
-      "evidence_sha256": "9f3d275c76089c1738a471bc4e61fa687b83642806ba0c79922850fd81397f79"
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
     },
     {
       "name": "TestConfigurationDockerfileMayOnlyAddTheConfigurationFile",
       "passed": true,
       "command": "conformance/query/author/observe-go-tests.sh",
-      "evidence_sha256": "9f3d275c76089c1738a471bc4e61fa687b83642806ba0c79922850fd81397f79"
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
     },
     {
       "name": "TestConfigurationOracleLockIsVerifiable",
       "passed": true,
       "command": "conformance/query/author/observe-go-tests.sh",
-      "evidence_sha256": "9f3d275c76089c1738a471bc4e61fa687b83642806ba0c79922850fd81397f79"
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestDistributedPersistedPathAnswersAreIdenticalAtEveryStage",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
     },
     {
       "name": "TestDistributedProfileCrossProductsKeepEachProfilesExpectation",
       "passed": true,
       "command": "conformance/query/author/observe-go-tests.sh",
-      "evidence_sha256": "9f3d275c76089c1738a471bc4e61fa687b83642806ba0c79922850fd81397f79"
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestEvaluateReturnsTypedFaultsForCancellationAndRegexBudget",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestEveryFunctionOverload",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestEveryLogQLMetricInventoryBinding",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestEveryLogQLMetricObligation",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestEveryPromQLOperator",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestExactGridOffsetSubquery",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
     },
     {
       "name": "TestGeneratedFilesAreContentLockedForTheRunners",
       "passed": true,
       "command": "conformance/query/author/observe-go-tests.sh",
-      "evidence_sha256": "9f3d275c76089c1738a471bc4e61fa687b83642806ba0c79922850fd81397f79"
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
     },
     {
       "name": "TestGeneratedMinimizerShrinksThroughThePhaseRunners",
       "passed": true,
       "command": "conformance/query/author/observe-go-tests.sh",
-      "evidence_sha256": "9f3d275c76089c1738a471bc4e61fa687b83642806ba0c79922850fd81397f79"
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestGroupingInfrastructure",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestInvalidUTF8PatternWithMetacharacterOrOutsideLabelModeStillFails",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestLabelPatternOfLiteralAlternativesMayBeInvalidUTF8",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestLanguageFailuresRetainSemanticOrigins",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestLiteralLabelPatternThroughQueryScope",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestMeanNaNPayloadFollowsEachRelease",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestNativeExtendedMatrixSelectorBoundaries",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestNativeExtendedRateFamilyValues",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestNativeExtendedRejectedFunctionsFailDuringExecution",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestNativeExtensionOnSubqueryIsAParseError",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestNativeMillisecondDomainRangeGrid",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestNativeSmoothedInstantSelector",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestNativeTopkParameterRange",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestNestedSubqueryResolution",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestNoUnknownOrMismatchedProfileFallback",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
     },
     {
       "name": "TestOracleIdentityFollowsThePhaseOfTheRow",
       "passed": true,
       "command": "conformance/query/author/observe-go-tests.sh",
-      "evidence_sha256": "9f3d275c76089c1738a471bc4e61fa687b83642806ba0c79922850fd81397f79"
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
     },
     {
       "name": "TestOwnedMatchesRecordedNativeAnnotationAndNaNObservations",
       "passed": true,
       "command": "conformance/query/author/observe-go-tests.sh",
-      "evidence_sha256": "9f3d275c76089c1738a471bc4e61fa687b83642806ba0c79922850fd81397f79"
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
     },
     {
       "name": "TestOwnedMatchesRecordedNativeRegexUTF8Observations",
       "passed": true,
       "command": "conformance/query/author/observe-go-tests.sh",
-      "evidence_sha256": "9f3d275c76089c1738a471bc4e61fa687b83642806ba0c79922850fd81397f79"
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
     },
     {
       "name": "TestParseConfigurationObservationsNeverReportsAnEmptySuccess",
       "passed": true,
       "command": "conformance/query/author/observe-go-tests.sh",
-      "evidence_sha256": "9f3d275c76089c1738a471bc4e61fa687b83642806ba0c79922850fd81397f79"
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestPersistedPathAnswersAreIdenticalAtEveryStage",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestPinnedCaseHelpersAndErrorClassification",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestPinnedGatedSyntax",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestPinnedTimestampAndDurationQuantization",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestPinnedUnicodeAndSyntax",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
     },
     {
       "name": "TestPlannedGeneratedRowsAreDeterministicAndCoverEveryPhaseAndFeatureSet",
       "passed": true,
       "command": "conformance/query/author/observe-go-tests.sh",
-      "evidence_sha256": "9f3d275c76089c1738a471bc4e61fa687b83642806ba0c79922850fd81397f79"
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
     },
     {
       "name": "TestPlannedGeneratedRowsCarryTheConcreteInputKinds",
       "passed": true,
       "command": "conformance/query/author/observe-go-tests.sh",
-      "evidence_sha256": "9f3d275c76089c1738a471bc4e61fa687b83642806ba0c79922850fd81397f79"
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
     },
     {
       "name": "TestProfileCrossProductsEachProfileKeepsItsOwnExpectation",
       "passed": true,
       "command": "conformance/query/author/observe-go-tests.sh",
-      "evidence_sha256": "9f3d275c76089c1738a471bc4e61fa687b83642806ba0c79922850fd81397f79"
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestProfileMetadataSchemaRemovalAndDelayedCleanup",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestPromConfigDurationAndSizeGrammar",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestPromConfigIgnoresUnmodelledKeys",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestPromConfigRefusalCarriesFamilyAndScope",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestPropertyNamesRetainCallerParserDistinction",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestQuantileSortsNaNFirstAndKeepsTheUpperTermPayload",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestQuotedStringRefusesRawReplacementCharacter",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestRegressionNaNPayloadFollowsTheReferenceOperandOrder",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
     },
     {
       "name": "TestReleaseBindingsResolveToLockedCaseRows",
       "passed": true,
       "command": "conformance/query/author/observe-go-tests.sh",
-      "evidence_sha256": "9f3d275c76089c1738a471bc4e61fa687b83642806ba0c79922850fd81397f79"
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
     },
     {
       "name": "TestReleaseConfigurationProtocolsRefusesWhatThePinnedReleaseRefuses",
       "passed": true,
       "command": "conformance/query/author/observe-go-tests.sh",
-      "evidence_sha256": "9f3d275c76089c1738a471bc4e61fa687b83642806ba0c79922850fd81397f79"
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
     },
     {
       "name": "TestReleaseConfigurationProtocolsResolution",
       "passed": true,
       "command": "conformance/query/author/observe-go-tests.sh",
-      "evidence_sha256": "9f3d275c76089c1738a471bc4e61fa687b83642806ba0c79922850fd81397f79"
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
     },
     {
       "name": "TestReleaseConfigurationRecordedObservationsAreBoundToTheirInputs",
       "passed": true,
       "command": "conformance/query/author/observe-go-tests.sh",
-      "evidence_sha256": "9f3d275c76089c1738a471bc4e61fa687b83642806ba0c79922850fd81397f79"
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
     },
     {
       "name": "TestReleaseConfigurationScrapeInheritanceRefusesWhatThePinnedReleaseRefuses",
       "passed": true,
       "command": "conformance/query/author/observe-go-tests.sh",
-      "evidence_sha256": "9f3d275c76089c1738a471bc4e61fa687b83642806ba0c79922850fd81397f79"
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
     },
     {
       "name": "TestReleaseConfigurationScrapeInheritanceResolution",
       "passed": true,
       "command": "conformance/query/author/observe-go-tests.sh",
-      "evidence_sha256": "9f3d275c76089c1738a471bc4e61fa687b83642806ba0c79922850fd81397f79"
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
     },
     {
       "name": "TestReleaseCountsAnUnobservedGeneratedCaseAsUnrun",
       "passed": true,
       "command": "conformance/query/author/observe-go-tests.sh",
-      "evidence_sha256": "9f3d275c76089c1738a471bc4e61fa687b83642806ba0c79922850fd81397f79"
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
     },
     {
       "name": "TestReleaseCountsGeneratedCasesPerSeed",
       "passed": true,
       "command": "conformance/query/author/observe-go-tests.sh",
-      "evidence_sha256": "9f3d275c76089c1738a471bc4e61fa687b83642806ba0c79922850fd81397f79"
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseGrammarAtModifierForms",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseGrammarCommentsAndNestedSigns",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseGrammarDiagnosticStarts",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseGrammarDurationExpressionFormat",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseGrammarDurationLiteralsKeepTheirSpelling",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseGrammarDurationRuntime",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseGrammarKeywordsAndMetricNames",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseGrammarNumberLiterals",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseGrammarPrecedenceAndSignedValues",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseGrammarRegexAndLabelErrors",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseGrammarRuleTable",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseGrammarStringEscapes",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseGrammarUnknownFunctionKeepsTypeCategory",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseGrammarZeroNumericRange",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseHistogramAggregationAnnotationAnchorsAtArgument",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseHistogramAnnotationRules",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseHistogramAnnotationsDeduplicate",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseHistogramBinaryAnnotationsSpanWholeExpression",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseHistogramDelayedNameRangeMerge",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseHistogramFractionCustomBucketSpanningZero",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseHistogramInfoJoinFacts",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseHistogramInfoNewerOriginalTimestampWins",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseHistogramLayoutReconciliation",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseHistogramMixedRangeAnnotations",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseHistogramQuantileAndFractionFacts",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseHistogramRateResetKeepsFirstSampleCountForZeroCap",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseHistogramRateZeroCap",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseHistogramReservedNameRemoval",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseHistogramResetDetectionClauses",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseHistogramScaleFacts",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseHistogramStartTimestampResetPredicate",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseHistogramSubqueryClearsExplicitResetHints",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseHistogramTrimFacts",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseHistogramTrimSumIsDeterministic",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseHistogramTypeUnitFeatureSwitchesCounterHeuristic",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseHistogramVarianceFacts",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseHistogramVarianceZeroCrossingCustomBucketIsZero",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseLogQLApproxTopkParameterIsFunctionArguments",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseLogQLBinaryMatchingAndSetOperators",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseLogQLDropErrorLabelClearsDetails",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseLogQLEntryMergeInEnginePathOrdersTiesByLabels",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseLogQLEntryMergeKeepsEncounterOrderOfTies",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseLogQLEntryMergeTieBreaksByStreamHash",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseLogQLFilterStages",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseLogQLFirstLastAndSampleIdentity",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseLogQLLabelFormatSnapshotIsTakenAtFirstTemplate",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseLogQLLexicalAndUnwrapStages",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseLogQLLineFilterHoistsOverDecolorize",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseLogQLLogOrderLimitAndInterval",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseLogQLMergeLogsNeverCollapsesReplicasAcrossInputs",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseLogQLMutationStages",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseLogQLParserStages",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseLogQLPrimitiveNumericAndStringSemantics",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseLogQLPrimitiveRegexpEngineIdentity",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseLogQLPrimitiveTemplateVersion",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseLogQLPrimitiveTimeSemantics",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseLogQLPrimitiveUnicodeEdition",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseLogQLRangeWindowsAndTimeGrid",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseLogQLSelectorsAndStructuredMetadata",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseLogQLShardAggregationSwitchDrivesApproxTopK",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseLogQLShardAggregationSwitchSelectsRegisteredFeatureSets",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseLogQLShardAggregationSwitchSemantics",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseLogQLTemplateCapabilities",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseLogQLVariantsAndShardCapabilityDomain",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseLogQLVariantsDisabledIsFeatureCategory",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseLogQLVectorAndLabelReplace",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
     },
     {
       "name": "TestReleaseManifestCarriesTheConfigurationRows",
       "passed": true,
       "command": "conformance/query/author/observe-go-tests.sh",
-      "evidence_sha256": "9f3d275c76089c1738a471bc4e61fa687b83642806ba0c79922850fd81397f79"
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseNumericAbsentDerivedLabels",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseNumericAggregationParameterEvaluationPerProfile",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseNumericAggregationParameters",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseNumericArithmeticSemantics",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseNumericClassicQuantile",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseNumericComparisonSemantics",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseNumericFiniteResultsAreGoMath",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseNumericFloatSumMean",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseNumericFunctionDomains",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseNumericHistogramScalarOperationsDropEmptyBuckets",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseNumericIEEESemantics",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseNumericInstantLatestTwo",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseNumericLogSubnormalFollowsPinnedAmd64Math",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseNumericLookbackBoundary",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseNumericMatchingLabels",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseNumericMaxMinOverTimeSignedZeroKeepsFirst",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseNumericOrderingSemantics",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseNumericQuantileTolerance",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseNumericQuantileValues",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseNumericRangeResultSeriesSortedByLabels",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseNumericRangeWindowSemantics",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseNumericRateExtrapolation",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseNumericRegression",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseNumericRoundClamp",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseNumericScalarSampleKind",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseNumericSmoothing",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseNumericUTCCalendar",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
     },
     {
       "name": "TestReleaseRejectsAMismatchingGeneratedCaseAndMinimizesIt",
       "passed": true,
       "command": "conformance/query/author/observe-go-tests.sh",
-      "evidence_sha256": "9f3d275c76089c1738a471bc4e61fa687b83642806ba0c79922850fd81397f79"
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
     },
     {
       "name": "TestReleaseRejectsZeroExecutedGeneratedCases",
       "passed": true,
       "command": "conformance/query/author/observe-go-tests.sh",
-      "evidence_sha256": "9f3d275c76089c1738a471bc4e61fa687b83642806ba0c79922850fd81397f79"
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseSemanticsASCIIClassesFoldWithoutUnicodeDigits",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseSemanticsCancelIsNeverEmptySuccess",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseSemanticsCopiedGroupingLabelCollisionIsMultipleMatch",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseSemanticsDuplicateLabelsetErrorsAtTheSameStep",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseSemanticsEngineLookbackZeroDefaultsToFiveMinutes",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseSemanticsEngineOptionsRejectAtAndNegativeOffset",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseSemanticsExtendedRootRejectsHistogramMatrices",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseSemanticsFillSubstitutesOnlyAbsentSides",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseSemanticsFilteredComparisonIsNotARepeatedMatch",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseSemanticsFoldPrefixSuffixByteLength",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseSemanticsHistogramPointCostsSizeUnits",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseSemanticsInvalidParameterErrorsButQuantileWarns",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseSemanticsLegacyDelayedRangeCollisionAcrossSteps",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseSemanticsManyToManyNeedsUniqueOneSide",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseSemanticsMatchingDoesNotNormalizeLabelIdentity",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseSemanticsPerQueryLookbackOption",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseSemanticsPerStepStatisticsNeedEngineAndQueryOptIn",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseSemanticsRangeQueryNameCollisionIsDuplicateLabelset",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseSemanticsSampleBudgetNeverTruncates",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseSemanticsSampleUnitPeaksAndLimit",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseSemanticsSimpleFoldOrbitsExcludeUnicode17Pairs",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseSemanticsStorageFailureIsNeverEmptyData",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseSemanticsSubqueryGridIsGloballyAligned",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestReleaseSemanticsTimeoutIsNeverEmptySuccess",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestSearchLabelAnchoringAndNewlines",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestSelectorRegexOfLiteralInvalidUTF8",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestSelectorRegexUsesPinnedPrimitive",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestSumKeepsTheFirstNaNPayloadLikeTheReference",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestTemplateEveryHelper",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestVectorMissingEmptyLabelsAndGroupingUniqueness",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
+    },
+    {
+      "name": "TestVectorOperatorValuesAndNameRules",
+      "passed": true,
+      "command": "conformance/query/author/observe-go-tests.sh",
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
     },
     {
       "name": "TestWriteRegressionsCreatesCaseFilesAndMergesTheIndex",
       "passed": true,
       "command": "conformance/query/author/observe-go-tests.sh",
-      "evidence_sha256": "9f3d275c76089c1738a471bc4e61fa687b83642806ba0c79922850fd81397f79"
+      "evidence_sha256": "338130cf9c61a997b6e55110460b26b8019b3e2220a63240c437ed803ba41700"
     }
   ],
   "configuration_phase": {

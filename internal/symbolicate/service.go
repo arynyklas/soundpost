@@ -26,6 +26,8 @@ type Service struct {
 	verifyMu    sync.Mutex
 	verified    fileIdentity
 	verifiedSet bool
+	// spares is the opt-in pre-started single-use worker (Config.WarmSpare).
+	spares spareState
 }
 
 // New binds the protected artifact reader and the delete-generation authority
@@ -34,7 +36,7 @@ type Service struct {
 // advances it makes them unreachable; the deletion predicates themselves are
 // re-checked on every request through the reader's revalidation fence.
 func New(reader ArtifactReader, deletes auth.DeleteGenerations, config Config) (*Service, error) {
-	if reader == nil || deletes == nil || config.CacheBytes < 0 || config.CacheBytes > 64<<20 {
+	if reader == nil || deletes == nil || config.CacheBytes < 0 || config.CacheBytes > 64<<20 || config.WarmSpare && config.Mode != "oci" {
 		return nil, model.Fail(model.Invalid)
 	}
 	n := config.CacheBytes

@@ -158,3 +158,48 @@ exit 2
 		}
 	})
 }
+
+// workerContainers lists the names of every worker container (any state) of the
+// runtime.
+func workerContainers(t *testing.T, c Config) map[string]bool {
+	t.Helper()
+	out, e := exec.Command(c.OCIRuntime, "ps", "-a", "--no-trunc", "--filter", "name=soundpost-symbolicate-", "--format", "{{.Names}}").Output()
+	if e != nil {
+		t.Fatalf("ps: %v", e)
+	}
+	names := map[string]bool{}
+	for _, l := range strings.Fields(string(out)) {
+		names[l] = true
+	}
+	return names
+}
+
+// OCI symbolication through the real runtime and the pinned image (the launcher
+// is the current one, not a stand-in): every position of the batch resolves to
+// its own line, within the parent's wall bound, and the run leaves no container.
+func TestActualOCISymbolicationResolvesABatchAndLeavesNoContainer(t *testing.T) {
+	c := realOCIConfig(t)
+	before := workerContainers(t, c)
+	s, err := New(&unusedReader{}, unusedGenerations{}, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := []uint32{1, 5, 7, 12}
+	start := time.Now()
+	got := s.run(context.Background(), batchInput(lineMap(20), lines...))
+	t.Logf("real OCI batch of %d positions answered in %s", len(lines), time.Since(start))
+	if len(got) != len(lines) {
+		t.Fatalf("%d answers for %d positions: %+v", len(got), len(lines), got)
+	}
+	for i, l := range lines {
+		if got[i].Reason != Resolved || got[i].Position == nil || got[i].Position.Line != l || got[i].Position.Source != "a.ts" {
+			t.Fatalf("position %d (line %d): %+v", i, l, got[i])
+		}
+	}
+	removeRetries.Wait()
+	for name := range workerContainers(t, c) {
+		if !before[name] {
+			t.Errorf("worker container %s left behind", name)
+		}
+	}
+}

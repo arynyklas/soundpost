@@ -49,14 +49,18 @@ func (s *Service) run(ctx context.Context, in workerInput) []workerOutput {
 func (s *Service) exec(ctx context.Context, in workerInput) ([]workerOutput, Reason) {
 	ctx, cancel := context.WithTimeout(ctx, ProcessTimeout)
 	defer cancel()
-	p, e := s.launch(ctx, false)
-	if e != nil {
-		return nil, SandboxUnavailable
+	// A pre-started, single-use worker (opt-in, OCI only) takes the container
+	// start off the request path; otherwise the worker starts here. Either way
+	// this request is the only one the worker ever serves.
+	p := s.takeSpare()
+	if p == nil {
+		var reason Reason
+		if p, reason = s.startWorker(ctx); reason != "" {
+			return nil, reason
+		}
 	}
+	defer s.refillSpare()
 	defer p.cleanup()
-	if e = p.cmd.Start(); e != nil {
-		return nil, SandboxUnavailable
-	}
 	waited := false
 	defer func() {
 		if !waited {
@@ -64,35 +68,7 @@ func (s *Service) exec(ctx context.Context, in workerInput) ([]workerOutput, Rea
 			p.cmd.Wait()
 		}
 	}()
-	if e = p.attach(); e != nil {
-		return nil, SandboxUnavailable
-	}
-	if _, e = p.input.Write([]byte{'A'}); e != nil {
-		return nil, SandboxUnavailable
-	}
-	ready := make(chan error, 1)
-	go func() {
-		var b [33]byte
-		_, e := io.ReadFull(p.output, b[:1])
-		if e == nil && b[0] != 'R' {
-			e = errors.New("sandbox unavailable")
-		}
-		if e == nil {
-			_, e = io.ReadFull(p.output, b[1:])
-			if e == nil && model.Hash(b[1:]) != s.config.WorkerSHA256 {
-				e = errors.New("worker identity")
-			}
-		}
-		ready <- e
-	}()
-	select {
-	case e = <-ready:
-		if e != nil {
-			return nil, SandboxUnavailable
-		}
-	case <-ctx.Done():
-		return nil, Deadline
-	}
+	var e error
 	// The worker enforces its own authoritative 100 ms processing watchdog (exit 124,
 	// typed `deadline`), covering the decode and every position of the batch. This
 	// parent bound is the independent wall backstop and it
