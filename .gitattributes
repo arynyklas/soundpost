@@ -1,6 +1,9 @@
+# Text is LF in the repository and in every working tree: hashes and locks (conformance/query/source-lock.json,
+# provenance) are computed over working-tree bytes, so a CRLF working copy would lock bytes git never stores.
+* text=auto eol=lf
 # Third-party license and notice texts are kept byte for byte as published upstream;
 # their trailing whitespace is part of the text, not a style error.
 /THIRD_PARTY_NOTICES -whitespace
 /build/dependencies/license-texts/** -whitespace
 # Real upstream wire captures are kept byte for byte (e.g. Loki emits "# HELP name " with empty text).
-/conformance/query/fixtures/adapters/real/** -whitespace
+/conformance/query/fixtures/adapters/real/** -text -whitespace
