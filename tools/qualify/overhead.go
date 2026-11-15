@@ -178,7 +178,9 @@ type sdkOverhead struct {
 		PythonHTTP json.RawMessage `json:"python_http_server_delivered_capture"`
 		// Recorder is the recorder p95-per-mutation-batch row (03.09-W3): measured bursts, or a not_measured statement.
 		Recorder json.RawMessage `json:"browser_recorder_mutation_batch_p95"`
-		Bundles  struct {
+		// RecorderQueue is the recorder queue-bound row (07.06-W4): the observed maxima of the client's delivery queue under a recorder flood, or a not_measured statement.
+		RecorderQueue json.RawMessage `json:"browser_recorder_queue_bound"`
+		Bundles       struct {
 			Index   sdkBundle `json:"browser_index"`
 			Replay  sdkBundle `json:"replay_only"`
 			Profile sdkBundle `json:"profile_module"`
@@ -614,7 +616,76 @@ func runOverheadRecorderBatch(rc *runCtx, spec RowSpec) Row {
 	row.Evidence = append(row.Evidence, fmt.Sprintf("fixtures/sdk/replay/mutation-batch.spec.ts in real %s %s (%s)", p.Build.Family, p.Build.Version, rb.Browser))
 	row.Limits = []string{
 		fmt.Sprintf("this row is the %s %s build only, headless Linux; per-batch time is the recorder handler's own time, not paint or layout", p.Build.Family, p.Build.Version),
-		"the bounded 2 MiB recorder queue (browser_recorder_queue_bytes) is not measured by this harness",
+		"the recorder's 2 MiB queue bound is judged by the separate row overhead.browser.recorder_queue_bound",
+	}
+	return row
+}
+
+// recorderQueue is the harness's browser_recorder_queue_bound row: the observed maxima of the Client's delivery queue while the recorder
+// floods it behind a transport that never completes, or the harness's statement that it could not measure.
+type recorderQueue struct {
+	NotMeasured  string  `json:"not_measured"`
+	Steps        float64 `json:"steps"`
+	MaxBytes     float64 `json:"max_queue_bytes"`
+	MaxRecords   float64 `json:"max_queue_records"`
+	EndBytes     float64 `json:"end_queue_bytes"`
+	Refusals     float64 `json:"queue_full_refusals"`
+	FirstRefusal float64 `json:"first_refusal_step"`
+	BunExitCode  int     `json:"bun_exit_code"`
+}
+
+// runOverheadRecorderQueue judges the recorder's queue bound: the largest serialized byte count the queue held at any sample must be
+// within browser_recorder_queue_bytes (2 MiB). The verdict is derived here from the raw maximum; the harness's own verdict is never
+// trusted. A flood that never reached the bound (no refusal counted) is recorded as a limit: the bound is then observed, not exercised.
+func runOverheadRecorderQueue(rc *runCtx, spec RowSpec) Row {
+	run, p, why := rc.recorderOverhead(spec)
+	if why != "" {
+		return notExercised(why)
+	}
+	row := Row{State: StateExercised, Build: &p.Build, Command: &CommandRun{Command: run.Command, ExitCode: run.Exit, DurationMS: run.Elapsed.Milliseconds()}}
+	if len(run.Raw) > 0 {
+		row.Evidence = append(row.Evidence, rc.writeEvidence("recorder-queue-"+spec.Build+".json", run.Raw))
+	}
+	row.Evidence = append(row.Evidence, "overhead harness fixtures/sdk/overhead.mjs --only recorder: fixtures/sdk/replay/queue-bound.ts run by Bun")
+	if run.Result == nil {
+		row.Outcome, row.Failures = OutcomeFailed, []string{run.Failure}
+		return row
+	}
+	if len(run.Result.Rows.RecorderQueue) == 0 {
+		return notExercised("the harness result has no browser_recorder_queue_bound row")
+	}
+	var q recorderQueue
+	if err := json.Unmarshal(run.Result.Rows.RecorderQueue, &q); err != nil {
+		row.Outcome, row.Failures = OutcomeFailed, []string{"the harness recorder queue row is not decodable: " + err.Error()}
+		return row
+	}
+	if q.NotMeasured != "" {
+		return notExercised(q.NotMeasured)
+	}
+	if q.BunExitCode != 0 {
+		row.Outcome, row.Failures = OutcomeFailed, []string{fmt.Sprintf("the queue-bound runner exited %d after printing its report; the report is not trusted", q.BunExitCode)}
+		return row
+	}
+	if q.Steps <= 0 || q.MaxBytes <= 0 {
+		row.Outcome, row.Failures = OutcomeFailed, []string{"the harness recorder queue row holds no flood steps or no queued bytes; nothing was measured"}
+		return row
+	}
+	row.Series = []Series{
+		{Name: "recorder_queue_max_bytes", Unit: "bytes", Values: []float64{q.MaxBytes}},
+		{Name: "recorder_queue_max_records", Unit: "records", Values: []float64{q.MaxRecords}},
+		{Name: "recorder_queue_refusals", Unit: "count", Values: []float64{q.Refusals}},
+	}
+	row.Budgets = []BudgetResult{rc.budget("browser_recorder_queue_bytes", q.MaxBytes, "largest serialized size of client.bufferedRecords() sampled every 8 steps of a flood that outpaces an undelivering transport")}
+	row.Outcome = OutcomePassed
+	if !row.Budgets[0].Within {
+		row.Outcome = OutcomeFailed
+	}
+	row.Limits = []string{
+		"the queue is the Client's own JavaScript delivery queue driven by a scripted page and the real recorder; it is not run inside a browser, which adds nothing to its byte accounting",
+		fmt.Sprintf("the flood held at most %.0f records (the Client also bounds the queue to 1024 records); chunks of other sizes were not measured", q.MaxRecords),
+	}
+	if q.Refusals == 0 {
+		row.Limits = append(row.Limits, "the flood never made the queue refuse a chunk, so the bound was observed but not exercised")
 	}
 	return row
 }

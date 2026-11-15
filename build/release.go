@@ -57,7 +57,7 @@ func main() {
 
 func run(args []string, out io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: release verify|release [flags]")
+		return errors.New("usage: release verify|release|artifacts|image-context|inventory|sbom|notices|gate|verify-signature|handles [flags]")
 	}
 	switch args[0] {
 	case "verify":
@@ -74,6 +74,8 @@ func run(args []string, out io.Writer) error {
 		return json.NewEncoder(out).Encode(inputs)
 	case "release":
 		return runRelease(args[1:], out)
+	case "artifacts":
+		return runArtifacts(args[1:], out)
 	case "image-context":
 		return runImageContext(args[1:])
 	case "inventory":

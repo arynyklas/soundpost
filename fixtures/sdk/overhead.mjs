@@ -324,7 +324,20 @@ function recorderBatchFromReport(stdout,exitCode,stderrTail=""){
  return {workload:"real Chrome, canary page with replay consent: 60 bursts per size (10, 100, 400 nodes) of insert/rewrite/attribute/remove; the page's MutationObserver is wrapped so the recorder's own handler is timed with performance.now() per batch",
   browser:data.browser??null,playwright_exit_code:exitCode,budget_p95_ms:BUDGET.recorder_batch_p95_ms,rows,worst_p95_ms:worst,
   verdict:{p95:worst<=BUDGET.recorder_batch_p95_ms?"within_budget":"exceeds_budget"},
-  note:"the 2 MiB recorder queue bound is not measured by this spec"};
+  note:"the recorder's 2 MiB queue bound is measured separately (browser_recorder_queue_bound)"};
+}
+/** Runs fixtures/sdk/replay/queue-bound.ts under Bun (the recorder filling the browser Client's real delivery queue behind a transport that never completes) and returns the row: the observed maxima judged against the 2 MiB bound, or a not_measured statement. */
+function recorderQueueRow(bunPathValue){
+ const r=spawnSync(bunPathValue,["run",join(root,"fixtures/sdk/replay/queue-bound.ts")],{cwd:root,encoding:"utf8",timeout:300000,maxBuffer:16*1024*1024});
+ return recorderQueueFromOutput(r.stdout||"",r.status,(r.stderr||"").slice(-300));
+}
+/** Pure part of recorderQueueRow: the runner's stdout -> the overhead row. The budget is compared here, never edited. */
+function recorderQueueFromOutput(stdout,exitCode,stderrTail=""){
+ const line=stdout.split("\n").find(l=>l.startsWith("RECORDER_QUEUE_BOUND {"));
+ if(!line)return {not_measured:"the queue-bound runner printed no RECORDER_QUEUE_BOUND report (exit "+exitCode+"): "+stderrTail};
+ let data;try{data=JSON.parse(line.slice("RECORDER_QUEUE_BOUND ".length));}catch{return {not_measured:"the RECORDER_QUEUE_BOUND line is not JSON"};}
+ if(typeof data.max_queue_bytes!=="number")return {not_measured:"the RECORDER_QUEUE_BOUND report has no max_queue_bytes"};
+ return {...data,bun_exit_code:exitCode,budget_bytes:BUDGET.queue_bytes,verdict:{queue_bytes:data.max_queue_bytes<=BUDGET.queue_bytes?"within_budget":"exceeds_budget"}};
 }
 
 async function parentMain(){
@@ -470,8 +483,8 @@ print(json.dumps({"runtime_version": sys.version.split()[0], "rows": rows}))
     profile_module:profile?{raw_bytes:raw(profile),gzip_bytes:gz(profile)}:{not_measured:"packages/browser/src/profile.ts absent"}};
   }
   // Recorder cost per MutationObserver batch (03.09-W3): the committed real-browser spec fixtures/sdk/replay/mutation-batch.spec.ts run through Playwright; its MUTATION_BATCH_P95 line is the measurement, judged against the 5 ms p95 budget here. A failing budget is a measurement, so the spec's own exit code is recorded, not required to be 0.
-  if(only.includes("recorder"))result.rows.browser_recorder_mutation_batch_p95=recorderBatchRow(bun);
-  else result.rows.browser_recorder_mutation_batch_p95={not_measured:"--only did not include recorder"};
+  if(only.includes("recorder")){result.rows.browser_recorder_mutation_batch_p95=recorderBatchRow(bun);result.rows.browser_recorder_queue_bound=recorderQueueRow(bun);}
+  else{result.rows.browser_recorder_mutation_batch_p95={not_measured:"--only did not include recorder"};result.rows.browser_recorder_queue_bound={not_measured:"--only did not include recorder"};}
   // Bun core server capture: the same deterministic handler and open-loop load against Bun.serve, with and without the Bun SDK's serve integration (installServe), flush() every 100 ms through the in-process ACKing transport.
   if(only.includes("bun")){
    const bunSdk=buildBundle(bun,sdkEntry(join(root,"packages/bun/src/index.ts"),"installServe"),dir,"bunsdk","bun");

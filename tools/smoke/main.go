@@ -78,6 +78,12 @@ func run() (err error) {
 		case "install-single":
 			smoke, stage = "install_single", "install_dispatch"
 			return RunInstallSingle(os.Args[2:])
+		case "upgrade-rollback":
+			smoke, stage = "upgrade_rollback", "upgrade_dispatch"
+			return RunUpgradeRollback(os.Args[2:])
+		case "fresh-install-matrix":
+			smoke, stage = "fresh_install_matrix", "matrix_dispatch"
+			return RunFreshInstallMatrix(os.Args[2:])
 		case "install-distributed":
 			smoke, stage = "install_distributed", "install_dispatch"
 			return RunInstallDistributed(os.Args[2:])

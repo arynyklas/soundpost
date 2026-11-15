@@ -83,6 +83,15 @@ jobs:
           cmp dist/sbom/soundpost.spdx.json dist/sbom-again/soundpost.spdx.json
           go run ./build notices --check
 
+      - name: Deterministic wheel, npm packages and container image
+        run: |
+          set -eu
+          go run ./build artifacts --release dist/release --out dist/artifacts --sbom dist/sbom --commit "$COMMIT" --reproduce > /dev/null
+          go run ./build artifacts --release dist/release --out dist/artifacts-again --sbom dist/sbom --commit "$COMMIT" --reproduce > /dev/null
+          cmp dist/artifacts/SHA256SUMS.artifacts dist/artifacts-again/SHA256SUMS.artifacts
+          cmp dist/artifacts/artifacts.json dist/artifacts-again/artifacts.json
+          cat dist/artifacts/SHA256SUMS.artifacts
+
       - name: Whole-product gate (dry run; expected to block until the owner inputs exist)
         run: |
           set -u
@@ -105,3 +114,5 @@ jobs:
             dist/sbom
             dist/release/SHA256SUMS
             dist/release/release.json
+            dist/artifacts/artifacts.json
+            dist/artifacts/SHA256SUMS.artifacts

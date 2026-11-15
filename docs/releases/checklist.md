@@ -45,6 +45,7 @@ the real release key and the approval decision are owner actions (Aryn Yklas).
 - [ ] `notices`: `THIRD_PARTY_NOTICES` equals `go run ./build notices` output and every in-scope component carries license/notice text.
 - [ ] `sbom`: CycloneDX 1.5 and SPDX 2.3 generated twice with identical sha256.
 - [ ] `checksums`: `SHA256SUMS` matches every artifact and `release.json` (reproducible, `--reproduce`).
+- [ ] `artifacts` (CI step `Deterministic wheel, npm packages and container image` in release.yml; not a `build gate` check): wheel, npm tarballs and image from `go run ./build artifacts --reproduce` are byte-identical across two builds (`SHA256SUMS.artifacts` and `artifacts.json` compare equal); `artifacts.json` records the `release.json` and SBOM digests it was built next to.
 - [ ] `signature`: detached Ed25519 signature over the `release.json` digest verifies against the published public key (`not_signed` blocks).
 - [ ] `handle_check`: npm/PyPI/Go handles checked unclaimed (`not_run` blocks). A handle this project has already published is listed in `build/owned-handles.json` with its evidence and may exist; any other existing handle blocks.
 - [ ] `owner_approval`: signed owner approval for this exact version, commit and manifest digest.
