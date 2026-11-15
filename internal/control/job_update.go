@@ -81,6 +81,13 @@ const (
 	maxJobAuditReason  = 512
 )
 
+// JobStateBounds are the per-state caps of one durable job state. internal/jobs
+// keeps its reducer limits (MaxRetainedRuns, MaxRetainedAttempts, definition
+// history, intervals) at or below these, so a reducer-produced state is never
+// refused as Quota for its shape; control cannot import jobs, so appcore pins the
+// relation in a test.
+var JobStateBounds = struct{ Runs, Attempts, Occurrences, History, Intervals int }{maxJobRuns, maxJobAttempts, maxJobOccurrences, maxJobHistory, maxJobIntervals}
+
 // JobAudit is the audit a correction commits with its state. The principal must
 // be the scope's own.
 type JobAudit struct {

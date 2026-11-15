@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -385,5 +387,196 @@ func TestJobProducerIsLeaderOnly(t *testing.T) {
 	}
 	if len(r.commands()) != 0 {
 		t.Fatal("a producer committed under a lease that proves nothing")
+	}
+}
+
+type wallClock struct{}
+
+func (wallClock) Now() model.UnixNano { return model.UnixNano(time.Now().UnixNano()) }
+
+// sdkJourney loads the Python SDK's actual output for a scheduled run whose first
+// attempt fails and whose retry succeeds (sdk/python/tests/test_job_schedule.py
+// regenerates and compares it), moved onto the hour before now so the real
+// service clock evaluates it. The scheduled key is rebuilt with the server's own
+// jobs.OccurrenceKey after proving the SDK's key was exactly that function's.
+func sdkJourney(t *testing.T) (events []model.JobAttemptEvent, scheduled model.UnixNano, key string) {
+	t.Helper()
+	raw, err := os.ReadFile("testdata/sdk-scheduled-retry-journey.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &events); err != nil || len(events) != 4 {
+		t.Fatalf("fixture: %v (%d events)", err, len(events))
+	}
+	original, _, _, ok := jobs.ParseOccurrenceKey(events[0].Schedule)
+	if !ok || events[0].Schedule != jobs.OccurrenceKey("UTC", original, 0) {
+		t.Fatalf("the SDK's schedule_occurrence %q is not jobs.OccurrenceKey", events[0].Schedule)
+	}
+	scheduled = model.UnixNano(time.Now().Add(-3 * time.Minute).Truncate(time.Hour).UnixNano())
+	key = jobs.OccurrenceKey("UTC", scheduled, 0)
+	shift := scheduled - original
+	for i := range events {
+		events[i].Schedule = key
+		events[i].Observed += shift
+		if events[i].Terminal != nil {
+			terminal := *events[i].Terminal + shift
+			events[i].Terminal = &terminal
+		}
+	}
+	return events, scheduled, key
+}
+
+// TestJobDurableRetryJourney is the 06.03 smoke: the SDK's real scheduled retry
+// journey enters through the real ingest route, the journal producer commits it
+// to the real control state, the exporter drops and recovers (the observer
+// attests the incomplete stretch, the SDK redelivers everything), and the
+// verdicts come from the committed state, also through a service that shares no
+// memory with the one that wrote it.
+func TestJobDurableRetryJourney(t *testing.T) {
+	r := newJobRig(t)
+	events, scheduled, key := sdkJourney(t)
+	jobID := events[0].Job
+	w := r.workers(r.app.JobProducer())
+	r.command("grant", auth.AdminPayload{UserID: r.user, ProjectID: r.project, Permissions: []string{string(auth.Read), string(auth.PolicyWrite)}, Enabled: true})
+	policyWrite := func() auth.Scope {
+		cred, err := r.app.Auth.Authenticate(r.ctx, r.token)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scope, err := r.app.Auth.Authorize(r.ctx, cred, r.org, []model.ID{r.project}, auth.PolicyWrite)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return scope
+	}()
+	def := jobs.Definition{Revision: 1, EffectiveFrom: scheduled - model.UnixNano(30*time.Minute), Schedule: &jobs.Schedule{Cron: "0 * * * *", Timezone: "UTC"}}
+	observe := func(through model.UnixNano, incomplete ...jobs.Interval) {
+		t.Helper()
+		_, err := r.app.Jobs.ObserveSchedule(r.ctx, policyWrite, jobs.ScheduleEvidence{CommandID: model.NewID(), Project: r.project, Job: jobID, Observer: model.ID{7}, ObservedAt: model.UnixNano(time.Now().UnixNano()), CompleteThrough: through, Healthy: true, Definition: &def, Incomplete: incomplete})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	health := func(svc *jobs.Service) jobs.Report {
+		t.Helper()
+		report, err := svc.Health(r.ctx, r.humanRead(), r.project, jobID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return report
+	}
+	now := func() model.UnixNano { return model.UnixNano(time.Now().UnixNano()) }
+
+	// The first attempt fails; the exporter delivered both of its events.
+	r.ingest(events[0])
+	r.ingest(events[1])
+	observe(now())
+	if rep := r.tick(w); rep.Produced != 2 {
+		t.Fatalf("first pass: %+v", rep)
+	}
+	if got := health(r.app.Jobs); got.Health.Status != jobs.StatusFailed || got.Health.Evidence.Occurrence != key {
+		t.Fatalf("a failed scheduled attempt: %+v", got.Health)
+	}
+
+	// The exporter's connectivity drops while the retry runs: the observer attests that
+	// the data path is complete only through the failure and names the stretch it cannot vouch for.
+	lost := jobs.Interval{ID: model.NewID(), Start: *events[1].Terminal, End: *events[3].Terminal, Reason: "exporter_connectivity"}
+	observe(*events[1].Terminal, lost)
+	got := health(r.app.Jobs)
+	if got.Health.Status != jobs.StatusFailed || got.Health.Complete || !slices.Contains(got.Health.Reasons, jobs.ReasonEvidenceGap) || len(got.Intervals) != 1 || got.Intervals[0].ID != lost.ID {
+		t.Fatalf("during the outage the known failure stands but is marked incomplete by the gap: %+v %+v", got.Health, got.Intervals)
+	}
+
+	// Connectivity returns: the SDK flushes the retry and re-sends the first attempt's
+	// terminal event it never saw acknowledged (a new batch, a new record id; ingest
+	// refuses an older sequence of a settled attempt, so the start is not re-sent).
+	// The observer attests the path complete again.
+	r.ingest(events[1])
+	r.ingest(events[2])
+	r.ingest(events[3])
+	observe(now())
+	if rep := r.tick(w); rep.Produced != 2 {
+		t.Fatalf("the redelivered terminal event must not commit again, only the retry: %+v", rep)
+	}
+	got = health(r.app.Jobs)
+	st := got.State
+	if got.Health.Status != jobs.StatusSucceeded || !got.Health.Complete || !slices.Contains(got.Health.Reasons, jobs.ReasonRunRecovered) {
+		t.Fatalf("the retry must recover the scheduled run: %+v", got.Health)
+	}
+	if len(st.Attempts) != 2 || st.Attempts[events[0].Attempt].Effective() != jobs.AttemptFailed || st.Attempts[events[2].Attempt].Effective() != jobs.AttemptSucceeded || len(st.Runs) != 1 || len(st.Occurrences[key].Runs) != 1 || !st.Occurrences[key].Scheduled || st.Occurrences[key].At != scheduled {
+		t.Fatalf("the history must keep attempt 1 failed under one scheduled occurrence: %+v", st)
+	}
+
+	// Persistence: a service sharing no memory with the writer reads the same verdict from control,
+	// and every attempt command is the system principal's with its origin cursor.
+	store, err := jobs.NewControlStore(r.app.Control)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := jobs.New(store, r.app.Auth, wallClock{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again := health(fresh); again.Health.Status != got.Health.Status || again.State.Version != got.State.Version || len(again.State.Attempts) != 2 {
+		t.Fatalf("a fresh service over control disagrees: %+v vs %+v", again.Health, got.Health)
+	}
+	attempts := 0
+	for _, c := range r.commands() {
+		if c.Kind == "attempt" {
+			attempts++
+			if c.Principal != auth.SystemPrincipal(r.org) || c.Origin == nil {
+				t.Fatalf("attempt command not the runner's: %+v", c)
+			}
+		}
+	}
+	if attempts != 4 {
+		t.Fatalf("committed %d attempt commands, want 4 (the redelivery must not double count)", attempts)
+	}
+	if rep := r.tick(w); rep.Produced != 0 {
+		t.Fatalf("a further pass produced %d", rep.Produced)
+	}
+}
+
+// The reducer's limits stay at or below the durable store's caps: a state the
+// reducer produces must never be refused for its shape, or the job stalls.
+func TestJobReducerBoundsFitTheDurableStore(t *testing.T) {
+	b := control.JobStateBounds
+	for _, c := range []struct {
+		name         string
+		reducer, cap int
+	}{
+		{"runs", jobs.MaxRetainedRuns, b.Runs},
+		{"attempts", jobs.MaxRetainedAttempts, b.Attempts},
+		{"occurrences (one per retained run)", jobs.MaxRetainedRuns, b.Occurrences},
+		{"definition history", jobs.MaxDefinitions, b.History},
+		{"intervals", jobs.MaxIntervals, b.Intervals},
+	} {
+		if c.reducer > c.cap {
+			t.Errorf("reducer %s limit %d exceeds the control cap %d: a busy job would stall in Quota", c.name, c.reducer, c.cap)
+		}
+	}
+}
+
+// Decision (06.03-W4): evidence stamped more than jobs.MaxFutureSkew ahead of the
+// service clock is rejected (Invalid), not stored and flagged. The journal worker
+// then moves past it for good, so one skewed host never wedges the others.
+func TestJobEvidenceFromAClockSkewedHostIsRejectedAndDoesNotWedgeTheJournal(t *testing.T) {
+	r := newJobRig(t)
+	job, run, skewed, good := model.NewID(), model.NewID(), model.NewID(), model.NewID()
+	r.ingest(r.event(job, run, skewed, "job-run-skew", 1, 1, "started", time.Hour+10*time.Minute, 0))
+	r.ingest(r.event(job, model.NewID(), good, "job-run-good", 1, 1, "started", 10*time.Second, 0))
+	w := r.workers(r.app.JobProducer())
+	if rep := r.tick(w); rep.Produced != 1 {
+		t.Fatalf("only the sane host's evidence may commit: %+v", rep)
+	}
+	report, err := r.app.Jobs.Health(r.ctx, r.humanRead(), r.project, job)
+	if err != nil || len(report.State.Attempts) != 1 || report.State.Attempts[good].Effective() == "" {
+		t.Fatalf("the skewed attempt must not be in the state: %v %+v", err, report.State.Attempts)
+	}
+	if _, ok := report.State.Attempts[skewed]; ok {
+		t.Fatal("a future-stamped attempt was stored")
+	}
+	if rep := r.tick(w); rep.Produced != 0 {
+		t.Fatalf("the rejected row was retried: %+v", rep)
 	}
 }

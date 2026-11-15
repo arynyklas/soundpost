@@ -243,7 +243,7 @@ func (n *node) lease() replica.FenceToken {
 
 func (n *node) rule(expression string) rules.Rule {
 	return rules.Rule{ID: model.NewID(), Project: n.project, Version: 1, Kind: rules.KindAlert, Profile: "promql-prometheus-3.13.5", FeatureSet: n.features["promql-prometheus-3.13.5"],
-		Expression: expression, Interval: time.Minute, Severity: "page"}
+		Expression: expression, Interval: time.Minute, Severity: "critical"}
 }
 
 func (n *node) wiring(clock rules.Clock) (*rules.Evaluator, *rules.Committer, rules.RuleStateReader) {

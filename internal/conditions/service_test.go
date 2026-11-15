@@ -336,3 +336,90 @@ func TestConditionServiceListsInIDOrder(t *testing.T) {
 		t.Fatalf("list: %+v %v", got, err)
 	}
 }
+
+// The condition quota is control's: a project at MaxConditionsPerProject refuses a
+// new condition as Quota, and the consumer reports that output as Retried and leaves
+// it pending, never suppressed or dropped. Capacity returning (a record leaving the
+// project) lets the very next consume apply the same output.
+func TestConsumeReportsQuotaRefusalAsRetriedAndAppliesItOnceThereIsRoom(t *testing.T) {
+	f := newRuleFx(t)
+	seed := func(n int) {
+		t.Helper()
+		if err := f.app.Control.Update(f.ctx, func(st *control.State) error {
+			if st.ConditionBooks == nil {
+				st.ConditionBooks = map[string]json.RawMessage{}
+			}
+			for i := range n {
+				var id model.ID
+				id[0], id[1], id[2] = 0xd0, byte(i>>8), byte(i)
+				state, err := json.Marshal(struct {
+					conditions.State
+					Org     model.ID `json:"org_id"`
+					Project model.ID `json:"project_id"`
+				}{conditions.State{Condition: id, Epoch: model.ID{0xd1}, Version: 1, Phase: conditions.PhaseRecovered, Freshness: conditions.FreshnessFresh, Labels: model.Labels{}, Links: []model.ID{}, Recent: []conditions.EventRef{{Epoch: model.ID{0xd1}, Sequence: 1, At: 1, Status: "recovered"}}}, f.org, f.project})
+				if err != nil {
+					return err
+				}
+				raw, err := json.Marshal(control.ConditionRecord{Org: f.org, Project: f.project, ID: id, Version: 1, State: state})
+				if err != nil {
+					return err
+				}
+				st.ConditionBooks[f.org.String()+":"+f.project.String()+":"+id.String()] = raw
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seed(control.MaxConditionsPerProject)
+	f.evaluate(65, f.lease)
+	pending := f.outputs(control.RulePhasePending)
+	if len(pending) != 1 {
+		t.Fatalf("the firing evaluation's output: %+v", pending)
+	}
+	rep := f.consume(f.lease)
+	if len(rep.Retried) != 1 || rep.Retried[0] != pending[0].ID || len(rep.Applied)+len(rep.NoEffect)+len(rep.Suppressed) != 0 {
+		t.Fatalf("a quota refusal must be Retried and nothing else: %+v", rep)
+	}
+	if got := f.outputs(control.RulePhasePending); len(got) != 1 || got[0].ID != pending[0].ID || len(f.outputs(control.RulePhaseFinalized))+len(f.outputs(control.RulePhaseSuppress)) != 0 {
+		t.Fatalf("the refused output must stay pending: pending %d", len(got))
+	}
+	// Retrying while still full is the same refusal, not a different outcome.
+	if again := f.consume(f.lease); len(again.Retried) != 1 || len(again.Applied) != 0 {
+		t.Fatalf("second refusal: %+v", again)
+	}
+	if err := f.app.Control.Update(f.ctx, func(st *control.State) error {
+		var id model.ID
+		id[0] = 0xd0
+		delete(st.ConditionBooks, f.org.String()+":"+f.project.String()+":"+id.String())
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if rep = f.consume(f.lease); len(rep.Applied) != 1 || len(rep.Retried) != 0 {
+		t.Fatalf("once there is room the same output applies: %+v", rep)
+	}
+	if got := f.outputs(control.RulePhasePending); len(got) != 0 {
+		t.Fatalf("applied output still pending: %+v", got)
+	}
+}
+
+// Severity is a closed set: a free-text severity is an invalid event (Apply
+// refuses it, a consumed output carrying one is suppressed, never applied).
+func TestConditionSeverityIsAClosedSet(t *testing.T) {
+	f := newSfx(t)
+	for _, ok := range []string{"info", "warning", "error", "critical"} {
+		e := event(model.NewID(), 1, 100, "firing")
+		e.Condition, e.Severity = model.NewID(), ok
+		if _, err := f.apply(e); err != nil {
+			t.Fatalf("%s refused: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"page", "major", "Critical", "CRITICAL", "", " critical", "critical\n", "warn"} {
+		e := event(model.NewID(), 1, 100, "firing")
+		e.Condition, e.Severity = model.NewID(), bad
+		if _, err := f.apply(e); code(err) != model.Invalid || detail(err) != conditions.DetailInvalidEvent {
+			t.Fatalf("severity %q: %v", bad, err)
+		}
+	}
+}

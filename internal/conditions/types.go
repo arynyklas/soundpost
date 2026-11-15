@@ -96,6 +96,16 @@ var reasons = map[string]Freshness{
 	ReasonUnspecified:     FreshnessUnknown,
 }
 
+// severities is the closed set a condition carries: the same four values the
+// ConditionEvent wire contract admits (internal/model), in increasing order.
+// Anything else (free text, another casing, empty) is an invalid event, so a
+// rule cannot invent a severity that a later policy would have to guess.
+var severities = map[string]bool{"info": true, "warning": true, "error": true, "critical": true}
+
+// ValidSeverity reports whether s is one of the closed condition severities:
+// "info", "warning", "error" or "critical".
+func ValidSeverity(s string) bool { return severities[s] }
+
 // Limits.
 const (
 	// MaxRecent bounds the accepted-event refs kept to recognise duplicates and
@@ -105,7 +115,6 @@ const (
 	maxLabelName = 256
 	maxLabelVal  = 1024
 	maxLinks     = 64
-	maxSeverity  = 64
 )
 
 // EventRef identifies one accepted event: enough to recognise a duplicate and to

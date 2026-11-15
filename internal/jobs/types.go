@@ -36,7 +36,13 @@ const (
 	// MaxRetainedRuns bounds one job state. The data-group journal remains the
 	// complete history; the state is the current-health projection. Older runs
 	// fall out of the state with an explicit Compaction record, never silently.
-	MaxRetainedRuns          = 512
+	MaxRetainedRuns = 512
+	// MaxRetainedAttempts bounds the attempts of one state across all its runs. It
+	// equals internal/control's job-state attempt cap (control.JobStateBounds), so a
+	// state the reducer produces always fits the durable store: when the attempts
+	// exceed it the oldest runs leave through the same Compaction record as for
+	// MaxRetainedRuns (a test in appcore pins the equality).
+	MaxRetainedAttempts      = 2048
 	MaxAttemptsPerRun        = 256
 	MaxEventsPerAttempt      = 16
 	MaxCorrectionsPerAttempt = 16

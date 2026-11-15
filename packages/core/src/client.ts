@@ -13,6 +13,8 @@ import type {FlushReport} from "./types.ts";
 import {SpanRecorder,createSynchronousMetadataContext,signalAborted,randomHex} from "./tracing.ts";
 import type {MetadataContext,TraceContext,SpanOptions,ActiveSpan,LiveSpan} from "./tracing.ts";
 import {JobRecorder} from "./jobs.ts";
+import type {ScheduledOccurrence} from "./jobs.ts";
+export type {ScheduledOccurrence} from "./jobs.ts";
 export {checkedTraceContext,createTraceClock} from "./tracing.ts";
 export {createTimerCancellationBoundary} from "./jobs.ts";
 function frameNaming(config:Config):FrameNaming{
@@ -159,8 +161,8 @@ export class Client {
   const span=this.startSpan(operation,options),signal=options?Object.getOwnPropertyDescriptor(options,"signal")?.value:undefined;
   try{const value=await span.run(callback);span.end(signalAborted(signal)?"cancelled":"ok");return value;}catch(error){span.run(()=>this.captureException(error));span.end(signalAborted(signal)?"cancelled":"error");throw error;}
  }
- async withJobAttempt<T>(job:string,runId:string,ordinal:number,callback:()=>Promise<T>):Promise<T>{
-  if(this.closed)throw Error("client closed");return this.jobs.run(job,runId,ordinal,callback);
+ async withJobAttempt<T>(job:string,runId:string,ordinal:number,callback:()=>Promise<T>,scheduled?:ScheduledOccurrence):Promise<T>{
+  if(this.closed)throw Error("client closed");return this.jobs.run(job,runId,ordinal,callback,scheduled);
  }
  bufferedRecords():readonly string[]{return this.delivery.records();}
  diagnostics():Readonly<Record<string,number>>{const counts={...this.counts};for(const [key,value] of Object.entries(this.delivery.diagnostics()))counts[key]=(counts[key]??0)+value;return Object.freeze(counts);}

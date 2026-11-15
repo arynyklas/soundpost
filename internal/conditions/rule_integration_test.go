@@ -3,8 +3,13 @@
 package conditions_test
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,6 +19,7 @@ import (
 	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/replica"
 	"github.com/arynyklas/soundpost/internal/rules"
+	pb "go.etcd.io/raft/v3/raftpb"
 )
 
 // ruleFx is a real alert rule over actually admitted metrics: the committed C07
@@ -132,7 +138,7 @@ func TestRuleConditionIntegration(t *testing.T) {
 	}
 	s := f.only()
 	if s.Phase != conditions.PhaseFiring || s.Freshness != conditions.FreshnessFresh || !s.Notify || s.Rule == nil || *s.Rule != f.alert.ID || s.RuleVersion != 1 ||
-		s.Severity != "page" || s.Arrived != 65*sec || s.EventAt != 60*sec || s.Version != 1 || len(s.Labels) != 2 || s.Labels[0].Name != "__name__" || s.Labels[1].Name != "job" || s.Labels[1].Value != "api" {
+		s.Severity != "critical" || s.Arrived != 65*sec || s.EventAt != 60*sec || s.Version != 1 || len(s.Labels) != 2 || s.Labels[0].Name != "__name__" || s.Labels[1].Name != "job" || s.Labels[1].Value != "api" {
 		t.Fatalf("condition after the first evaluation: %+v", s)
 	}
 	if got := f.outputs(control.RulePhasePending); len(got) != 0 {
@@ -416,5 +422,419 @@ func TestRuleConditionIntegrationSuppressesOutputsItCannotApply(t *testing.T) {
 	s := f.only()
 	if !s.Recovered() || s.Sequence != 2 || s.EventAt != 300*sec || s.Version != 2 || f.audits("conditions.recovered") != 1 {
 		t.Fatalf("condition: %+v", s)
+	}
+}
+
+// ---- three voters ----------------------------------------------------------
+//
+// voters is a real three-voter control group in one process (the shape of
+// internal/notify's TestOutboxThreeNode* fixture, which lives in another test
+// package and cannot be imported): three control stores in private directories,
+// each with its own Raft group over an in-process transport delivering through
+// Group.Step/ReportDelivery, opened from the genesis node's replication seed
+// exactly as a distributed appcore node is. The metric data and the C06 engine
+// are the genesis node's (the data groups are not part of this fixture); the
+// rule scheduler, committer, outbox and condition service of every voter run over
+// that voter's own control store. There are no separate processes and no mTLS: a
+// "process death" closes one voter's store and group and cuts it from the mesh.
+
+type meshMsg struct {
+	from uint64
+	m    *pb.Message
+}
+
+type mesh struct {
+	mu      sync.Mutex
+	groups  map[uint64]*replica.Group
+	queues  map[uint64]chan meshMsg
+	blocked map[uint64]bool
+	stop    chan struct{}
+	wg      sync.WaitGroup
+	once    sync.Once
+}
+
+func newMesh() *mesh {
+	return &mesh{groups: map[uint64]*replica.Group{}, queues: map[uint64]chan meshMsg{}, blocked: map[uint64]bool{}, stop: make(chan struct{})}
+}
+
+func (m *mesh) set(id uint64, g *replica.Group) { m.mu.Lock(); m.groups[id] = g; m.mu.Unlock() }
+func (m *mesh) partition(id uint64, down bool)  { m.mu.Lock(); m.blocked[id] = down; m.mu.Unlock() }
+func (m *mesh) down(id uint64) bool             { m.mu.Lock(); defer m.mu.Unlock(); return m.blocked[id] }
+func (m *mesh) close()                          { m.once.Do(func() { close(m.stop) }); m.wg.Wait() }
+
+type meshTransport struct {
+	mesh *mesh
+	node uint64
+}
+
+func (t meshTransport) Send(_ model.ID, message *pb.Message) error {
+	if message == nil || message.GetFrom() != t.node {
+		return replica.ErrInvalid
+	}
+	to := message.GetTo()
+	t.mesh.mu.Lock()
+	q := t.mesh.queues[to]
+	if q == nil {
+		q = make(chan meshMsg, 512)
+		t.mesh.queues[to] = q
+		t.mesh.wg.Add(1)
+		go t.mesh.deliver(to, q)
+	}
+	t.mesh.mu.Unlock()
+	select {
+	case <-t.mesh.stop:
+		return replica.ErrUnavailable
+	case q <- meshMsg{from: t.node, m: message}:
+		return nil
+	default:
+		return replica.ErrUnavailable
+	}
+}
+
+func (m *mesh) deliver(to uint64, q <-chan meshMsg) {
+	defer m.wg.Done()
+	for {
+		select {
+		case <-m.stop:
+			return
+		case in := <-q:
+			m.mu.Lock()
+			dst, src := m.groups[to], m.groups[in.from]
+			down := m.blocked[in.from] || m.blocked[to]
+			m.mu.Unlock()
+			var err error
+			switch {
+			case dst == nil || down:
+				err = replica.ErrUnavailable
+			default:
+				if stepped := dst.Step(context.Background(), in.m); errors.Is(stepped, replica.ErrUnavailable) {
+					err = stepped
+				}
+			}
+			if src != nil {
+				src.ReportDelivery(to, in.m.GetType() == pb.MsgSnap, err)
+			}
+		}
+	}
+}
+
+type voters struct {
+	t      *testing.T
+	g      *node
+	clock  *fixedClock
+	mesh   *mesh
+	stores map[uint64]*control.Store
+	svcs   map[uint64]*auth.Service
+	creds  map[uint64]auth.Credential
+	alive  map[uint64]bool
+}
+
+func newVoters(t *testing.T, g *node, clock *fixedClock) *voters {
+	t.Helper()
+	seed, application, err := g.app.Control.ReplicationSeed()
+	if err != nil {
+		t.Fatal(err)
+	}
+	position := g.app.Control.ReplicaGroup().Status()
+	dirs := map[uint64]string{1: t.TempDir(), 2: t.TempDir(), 3: t.TempDir()}
+	v := &voters{t: t, g: g, clock: clock, mesh: newMesh(), stores: map[uint64]*control.Store{}, svcs: map[uint64]*auth.Service{}, creds: map[uint64]auth.Credential{}, alive: map[uint64]bool{}}
+	t.Cleanup(func() {
+		for id, s := range v.stores {
+			if v.alive[id] {
+				s.Close()
+			}
+		}
+		v.mesh.close()
+	})
+	members := replica.Members{Revision: 1}
+	for id := uint64(1); id <= 3; id++ {
+		members.Nodes = append(members.Nodes, replica.Member{ID: id, Address: fmt.Sprintf("https://voter%d.invalid", id), NodeIdentity: fmt.Sprintf("voter-%d", id), FailureDomain: fmt.Sprintf("disk-%d", id)})
+	}
+	for id := uint64(1); id <= 3; id++ {
+		store, err := control.OpenSeed(dirs[id], seed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		v.stores[id], v.alive[id] = store, true
+		svc, err := auth.NewService(auth.AuthDependencies{Control: store, Now: time.Now})
+		if err != nil {
+			t.Fatal(err)
+		}
+		v.svcs[id] = svc
+		for _, bind := range []func() error{store.BindRuleEvaluation, store.BindConditionApply} {
+			if err = bind(); err != nil {
+				t.Fatal(err)
+			}
+		}
+		var installation model.ID
+		if err = store.View(g.ctx, func(st control.State) error { installation = st.Installation; return nil }); err != nil {
+			t.Fatal(err)
+		}
+		group, err := store.EnableReplication(replica.Config{ID: id, Group: installation, Directory: filepath.Join(dirs[id], "raft", "control"), TickInterval: 20 * time.Millisecond, Members: members,
+			Transport: meshTransport{mesh: v.mesh, node: id}, Seed: seed, Application: application, SeedIndex: position.Applied + 1, SeedTerm: position.Term + 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		v.mesh.set(id, group)
+	}
+	v.leaderOf(1)
+	for id := uint64(1); id <= 3; id++ {
+		cred, err := v.svcs[id].Authenticate(g.ctx, g.token)
+		if err != nil {
+			t.Fatalf("voter %d does not know the genesis session: %v", id, err)
+		}
+		v.creds[id] = cred
+	}
+	return v
+}
+
+// leaderOf waits until voter id is the control leader and a quorum round
+// succeeds on it, campaigning from it as needed (first election only).
+func (v *voters) leaderOf(id uint64) {
+	v.t.Helper()
+	if err := v.stores[id].ReplicaGroup().Campaign(); err != nil {
+		v.t.Fatal(err)
+	}
+	deadline := time.Now().Add(60 * time.Second)
+	for round := 0; time.Now().Before(deadline); round++ {
+		g := v.stores[id].ReplicaGroup()
+		if g.Status().Leader == id {
+			ctx, cancel := context.WithTimeout(v.g.ctx, 3*time.Second)
+			_, err := g.Fence(ctx)
+			cancel()
+			if err == nil {
+				return
+			}
+		} else if round%10 == 0 {
+			_ = g.Campaign()
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	v.t.Fatalf("voter %d never became the control leader", id)
+}
+
+// surviving waits for a leader among the running, connected voters and returns it
+// once a quorum round succeeds on it.
+func (v *voters) surviving() uint64 {
+	v.t.Helper()
+	deadline := time.Now().Add(60 * time.Second)
+	for round := 0; time.Now().Before(deadline); round++ {
+		var candidates []uint64
+		for id := uint64(1); id <= 3; id++ {
+			if v.alive[id] && !v.mesh.down(id) {
+				candidates = append(candidates, id)
+			}
+		}
+		for _, id := range candidates {
+			g := v.stores[id].ReplicaGroup()
+			if g.Status().Leader != id {
+				continue
+			}
+			ctx, cancel := context.WithTimeout(v.g.ctx, 3*time.Second)
+			_, err := g.Fence(ctx)
+			cancel()
+			if err == nil {
+				return id
+			}
+		}
+		if round%10 == 0 && len(candidates) > 0 {
+			_ = v.stores[candidates[0]].ReplicaGroup().Campaign()
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	v.t.Fatal("the surviving voters never elected a leader")
+	return 0
+}
+
+// kill is a process death of one voter.
+func (v *voters) kill(id uint64) {
+	v.t.Helper()
+	v.mesh.partition(id, true)
+	if err := v.stores[id].Close(); err != nil {
+		v.t.Fatal(err)
+	}
+	v.mesh.set(id, nil)
+	v.alive[id] = false
+}
+
+func (v *voters) lease(id uint64) replica.FenceToken {
+	v.t.Helper()
+	l, err := v.stores[id].ReplicaGroup().Fence(v.g.ctx)
+	if err != nil {
+		v.t.Fatalf("voter %d lease: %v", id, err)
+	}
+	return l
+}
+
+func (v *voters) admin(id uint64) auth.Scope {
+	v.t.Helper()
+	s, err := v.svcs[id].Authorize(v.g.ctx, v.creds[id], v.g.org, []model.ID{v.g.project}, auth.OrgAdmin)
+	if err != nil {
+		v.t.Fatalf("voter %d admin scope: %v", id, err)
+	}
+	return s
+}
+
+// scheduler is the rule scheduler of one voter: the shared C06 engine over the
+// genesis node's data, with the voter's own control store, state, group and committer.
+func (v *voters) scheduler(id uint64) *rules.Scheduler {
+	store := rules.NewStateStore(v.stores[id])
+	group := v.stores[id].ReplicaGroup()
+	evaluator := rules.NewEvaluator(v.g.engine, store, rules.WithClock(v.clock), rules.WithFencer(group), rules.WithEvidence(rules.GapEvidence{Gaps: v.stores[id]}))
+	return rules.NewScheduler(evaluator, rules.NewCommitter(v.stores[id], group), store, rules.WithSchedulerClock(v.clock))
+}
+
+func (v *voters) service(id uint64, outbox conditions.Outbox) *conditions.Service {
+	v.t.Helper()
+	if outbox == nil {
+		outbox = rules.NewOutboxStore(v.stores[id])
+	}
+	svc, err := conditions.New(v.stores[id], v.stores[id].ReplicaGroup(), outbox, v.clock)
+	if err != nil {
+		v.t.Fatal(err)
+	}
+	return svc
+}
+
+func (v *voters) records(id uint64) []control.ConditionRecord {
+	v.t.Helper()
+	recs, err := v.stores[id].Conditions(v.g.ctx, v.admin(id), v.g.project)
+	if err != nil {
+		v.t.Fatal(err)
+	}
+	return recs
+}
+
+func (v *voters) outputs(id uint64, rule model.ID, phase string) []control.RuleOutput {
+	v.t.Helper()
+	out, err := v.stores[id].RuleOutputs(v.g.ctx, v.admin(id), v.g.project, rule, phase, 0)
+	if err != nil {
+		v.t.Fatal(err)
+	}
+	return out
+}
+
+// Leadership of the control group is transferred while a rule fires, loses its
+// data, and recovers (06.04 criterion 11). One evaluation is one output and one
+// transition no matter which leader decides it: a leader that died between the
+// condition commit and the output finalize leaves exactly one effect for the
+// successor to finish, the deposed term's lease can neither evaluate nor
+// consume, a shard outage on the new leader is unknown history without a
+// recovery, and every surviving voter converges on the same record.
+func TestRuleConditionThreeVoterLeadershipTransfer(t *testing.T) {
+	g := newNode(t)
+	for _, s := range []struct {
+		at int64
+		v  float64
+	}{{30, 10}, {90, 10}, {150, 10}, {210, 10}, {270, 1}, {330, 1}} {
+		g.put("queue_depth", labels("job", "api"), model.UnixNano(s.at)*sec, s.v)
+	}
+	alert := g.rule(`queue_depth > 5`)
+	if err := alert.Check(g.registry); err != nil {
+		t.Fatal(err)
+	}
+	clock := &fixedClock{}
+	clock.set(65)
+	v := newVoters(t, g, clock)
+	read := g.scope(auth.Read)
+
+	// Voter 1 leads: the alert fires and the process dies after the condition state is
+	// durable but before the output is finalized.
+	lease1 := v.lease(1)
+	if _, err := v.scheduler(1).RunOnce(g.ctx, read, v.admin(1), alert, lease1); err != nil {
+		t.Fatalf("evaluation on the first leader: %v", err)
+	}
+	crash := &crashingOutbox{Outbox: rules.NewOutboxStore(v.stores[1])}
+	crash.armed.Store(true)
+	if _, err := v.service(1, crash).Consume(g.ctx, v.admin(1), lease1, 50); err == nil || !crash.crashed.Load() {
+		t.Fatalf("the first leader's crash between state commit and finalize was not observed: %v", err)
+	}
+	if recs := v.records(1); len(recs) != 1 || stateOf(t, recs[0]).Phase != conditions.PhaseFiring || len(v.outputs(1, alert.ID, control.RulePhasePending)) != 1 {
+		t.Fatalf("after the crash: %d records, %d pending outputs", len(v.records(1)), len(v.outputs(1, alert.ID, control.RulePhasePending)))
+	}
+	cid := stateOf(t, v.records(1)[0]).Condition
+	pendingBefore := v.outputs(1, alert.ID, control.RulePhasePending)[0].ID
+
+	// Leadership transfers: voter 1 dies, a survivor wins a later term.
+	v.kill(1)
+	next := v.surviving()
+	if next == 1 {
+		t.Fatal("the dead voter leads")
+	}
+	lease2 := v.lease(next)
+	if lease2.Term <= lease1.Term {
+		t.Fatalf("no new leadership term: %d -> %d", lease1.Term, lease2.Term)
+	}
+	// The deposed term's lease evaluates nothing and consumes nothing on the new leader.
+	clock.set(125)
+	if _, err := v.scheduler(next).RunOnce(g.ctx, read, v.admin(next), alert, lease1); err == nil {
+		t.Fatal("the deposed term's lease evaluated a rule")
+	}
+	if _, err := v.service(next, nil).Consume(g.ctx, v.admin(next), lease1, 10); code(err) != model.Stale {
+		t.Fatalf("the deposed term's lease consumed outputs: %v", err)
+	}
+	// The successor finishes the dead leader's work: the transition is already durable, so it
+	// is a no-op and only the finalize remains. Same output identity, same single record.
+	rep, err := v.service(next, nil).Consume(g.ctx, v.admin(next), lease2, 50)
+	if err != nil || len(rep.NoEffect) != 1 || len(rep.Applied) != 0 || rep.NoEffect[0] != pendingBefore {
+		t.Fatalf("the successor's consume: %v %+v (want the one pending output %s as a no-effect)", err, rep, pendingBefore)
+	}
+	if recs := v.records(next); len(recs) != 1 || stateOf(t, recs[0]).Version != 1 || len(v.outputs(next, alert.ID, control.RulePhasePending)) != 0 {
+		t.Fatalf("after the successor's consume: %d records", len(v.records(next)))
+	}
+
+	// The new leader keeps evaluating. Healthy firing evaluations change nothing; a missing
+	// shard is unknown history without a recovery; the recovery comes once and only after the data returns.
+	sched := v.scheduler(next)
+	for _, at := range []int64{125, 185} {
+		clock.set(at)
+		if _, err := sched.RunOnce(g.ctx, read, v.admin(next), alert, lease2); err != nil {
+			t.Fatalf("evaluate at %ds: %v", at, err)
+		}
+	}
+	g.scanner.down.Store(true)
+	clock.set(245)
+	if _, err := sched.RunOnce(g.ctx, read, v.admin(next), alert, lease2); err != nil {
+		t.Fatalf("evaluate while the shard is missing: %v", err)
+	}
+	if got := v.outputs(next, alert.ID, control.RulePhasePending); len(got) != 0 {
+		t.Fatalf("an unknown evaluation emitted an output: %+v", got)
+	}
+	clock.set(250)
+	if _, err := v.service(next, nil).Consume(g.ctx, v.admin(next), lease2, 50); err != nil {
+		t.Fatal(err)
+	}
+	if s := stateOf(t, v.records(next)[0]); s.Phase != conditions.PhaseFiring || s.Freshness != conditions.FreshnessUnknown || s.Recovered() {
+		t.Fatalf("while the shard is missing: %+v", s)
+	}
+	g.scanner.down.Store(false)
+	clock.set(305)
+	if _, err := sched.RunOnce(g.ctx, read, v.admin(next), alert, lease2); err != nil {
+		t.Fatal(err)
+	}
+	if rep, err := v.service(next, nil).Consume(g.ctx, v.admin(next), lease2, 50); err != nil || len(rep.Applied) != 1 {
+		t.Fatalf("recovery consume: %v %+v", err, rep)
+	}
+
+	// One condition, one firing and one recovery, one finalized output per transition, and the
+	// other surviving voter holds the same replicated state.
+	for id := uint64(1); id <= 3; id++ {
+		if !v.alive[id] {
+			continue
+		}
+		recs := v.records(id)
+		if len(recs) != 1 || recs[0].ID != cid {
+			t.Fatalf("voter %d: %d condition records", id, len(recs))
+		}
+		s := stateOf(t, recs[0])
+		if !s.Recovered() || len(s.Recent) != 2 || s.Recent[0].Status != "firing" || s.Recent[1].Status != "recovered" {
+			t.Fatalf("voter %d condition: %+v", id, s)
+		}
+		if got := statuses(t, v.outputs(id, alert.ID, control.RulePhaseFinalized)); len(got) != 2 || got[0] != "firing" || got[1] != "resolved" {
+			t.Fatalf("voter %d finalized outputs: %v", id, got)
+		}
+		if len(v.outputs(id, alert.ID, control.RulePhasePending)) != 0 {
+			t.Fatalf("voter %d has pending outputs", id)
+		}
 	}
 }

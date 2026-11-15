@@ -806,13 +806,12 @@ func TestScheduleObserverAndCurrentHealthReads(t *testing.T) {
 
 // --------------------------------------------------------- journey
 
-// TestJobDurableRetryJourney replays the 06.03 retry journey through the real
-// scope authority and a persisting fake store: a failed attempt, a retry that
-// succeeds, a dropped exporter connection recorded as an evidence gap, a
-// service restart that redelivers the whole journal, and reconciliation. It is
-// not the SDK/scheduler/control-persistence smoke (no such production binding
-// exists yet); see docs/user/jobs.md.
-func TestJobDurableRetryJourney(t *testing.T) {
+// TestJobRetryJourneyOverPersistingFake replays the retry journey at service level
+// through the real scope authority and a persisting fake store: a failed attempt,
+// a retry that succeeds, an exporter drop recorded as a modelled evidence gap, a
+// service restart that redelivers the whole journal, and reconciliation. The real
+// SDK/scheduler/control smoke is appcore.TestJobDurableRetryJourney.
+func TestJobRetryJourneyOverPersistingFake(t *testing.T) {
 	ctx := context.Background()
 	h := newHarness(t, hm(11, 10, 0))
 	w, r := h.writer(t), h.reader(t)
@@ -896,4 +895,66 @@ func TestJobDurableRetryJourney(t *testing.T) {
 		t.Fatal("history changed")
 	}
 
+}
+
+// The SDKs (sdk/python/src/soundpost/jobs.py, packages/core/src/jobs.ts) rebuild
+// this key byte for byte; their tests pin the same vectors.
+func TestOccurrenceKeyVectors(t *testing.T) {
+	const at = model.UnixNano(1699999200000000000)
+	for _, c := range []struct {
+		zone string
+		fold uint8
+		want string
+	}{
+		{"UTC", 0, "s.1699999200000000000.f0.4bda1821"},
+		{"UTC", 1, "s.1699999200000000000.f1.4bda1821"},
+	} {
+		if got := jobs.OccurrenceKey(c.zone, at, c.fold); got != c.want {
+			t.Fatalf("OccurrenceKey(%s,%d) = %s, want %s", c.zone, c.fold, got, c.want)
+		}
+		if gotAt, fold, _, ok := jobs.ParseOccurrenceKey(c.want); !ok || gotAt != at || fold != c.fold {
+			t.Fatalf("key %s does not parse back: %v %v %v", c.want, gotAt, fold, ok)
+		}
+	}
+	if jobs.OccurrenceKey("Europe/London", at, 0) == jobs.OccurrenceKey("UTC", at, 0) {
+		t.Fatal("the zone tag must separate zones")
+	}
+}
+
+// The durable store (internal/control) refuses a state above its attempt cap as
+// Quota, so a job that outgrows it would stall. The reducer therefore keeps the
+// attempts of one state at MaxRetainedAttempts and compacts whole old runs, with
+// the Compaction record, instead of letting a few busy runs overflow it.
+func TestJobStateKeepsAttemptsWithinTheDurableCap(t *testing.T) {
+	var st jobs.JobState
+	perRun := jobs.MaxAttemptsPerRun
+	runs := jobs.MaxRetainedAttempts/perRun + 4
+	if runs > jobs.MaxRetainedRuns {
+		t.Fatal("the scenario must reach the attempt cap before the run cap")
+	}
+	for r := 0; r < runs; r++ {
+		run := model.ID{0xE0, byte(r)}
+		key := jobsKey(hm(r, 0, 0))
+		for a := 0; a < perRun; a++ {
+			at := hm(r, 0, 0) + model.UnixNano(a+1)*1e6
+			st = mustReduce(t, st, ev(run, model.ID{0xE1, byte(r), byte(a)}, key, uint64(a+1), 1, "started", at, nil))
+		}
+		if len(st.Attempts) > jobs.MaxRetainedAttempts {
+			t.Fatalf("after run %d the state holds %d attempts, over %d", r, len(st.Attempts), jobs.MaxRetainedAttempts)
+		}
+	}
+	if len(st.Attempts) != jobs.MaxRetainedAttempts || len(st.Runs) != jobs.MaxRetainedAttempts/perRun || st.Compaction.Runs != 4 {
+		t.Fatalf("attempts %d runs %d compacted %d", len(st.Attempts), len(st.Runs), st.Compaction.Runs)
+	}
+	// Only the oldest runs left; the newest run is whole, and evidence older than the compaction stays out.
+	if _, ok := st.Runs[model.ID{0xE0, byte(runs - 1)}]; !ok {
+		t.Fatal("the newest run was evicted")
+	}
+	if _, ok := st.Runs[model.ID{0xE0, 0}]; ok {
+		t.Fatal("the oldest run was kept")
+	}
+	_, outcome, err := jobs.ReduceEvent(st, ev(model.ID{0xE0, 0}, model.ID{0xE2}, jobsKey(hm(0, 0, 0)), 1, 1, "started", hm(0, 0, 0)+1, nil))
+	if err != nil || outcome != jobs.Ignored {
+		t.Fatalf("evidence older than the compaction: %v %v", outcome, err)
+	}
 }

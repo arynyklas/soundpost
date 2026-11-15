@@ -1,10 +1,11 @@
 # Copyright 2026 Aryn Yklas
 # SPDX-License-Identifier: Apache-2.0
-"""Manual attempt observations, not a scheduler or a source of current health."""
+"""Attempt observations (manual, or keyed to the scheduler's occurrence); not a scheduler or a source of current health."""
 import asyncio
 from concurrent.futures import CancelledError as FutureCancelledError
 from contextvars import ContextVar
 from dataclasses import dataclass
+import hashlib
 import os
 import re
 import secrets
@@ -38,6 +39,19 @@ def normalize_attempt(raw: dict) -> dict:
     return dict(raw)
 
 
+def occurrence_key(timezone, at_ns, fold=0) -> str:
+    """Byte-for-byte the key internal/jobs.OccurrenceKey produces for a scheduled occurrence:
+    s.<scheduled unix ns>.f<fold>.<first 4 bytes of SHA-256(b"soundpost.jobs.zone\\0" + zone) in hex>."""
+    if type(timezone) is not str or not 1 <= len(timezone.encode()) <= 256:
+        raise ValueError('invalid job schedule')
+    if type(at_ns) is not int or isinstance(at_ns, bool) or not 1 <= at_ns <= 9223372036854775807:
+        raise ValueError('invalid job schedule')
+    if type(fold) is not int or isinstance(fold, bool) or fold not in (0, 1):
+        raise ValueError('invalid job schedule')
+    tag = hashlib.sha256(b'soundpost.jobs.zone\x00' + timezone.encode()).hexdigest()[:8]
+    return 's.%d.f%d.%s' % (at_ns, fold, tag)
+
+
 @dataclass(frozen=True, slots=True)
 class AttemptContext:
     job_id: str
@@ -66,13 +80,20 @@ class JobProducer:
     def current(self) -> AttemptContext | None:
         return self._context.get() if os.getpid() == self._pid else None
 
-    def attempt(self, job, run_id, ordinal):
+    def attempt(self, job, run_id, ordinal, scheduled=None):
         if type(job) is not str or job not in self._registry:
             raise ValueError('job must be registered')
         canonical_id(run_id)
         if type(ordinal) is not int or not 1 <= ordinal <= 18446744073709551615:
             raise ValueError('ordinal must be a positive uint64')
-        return AttemptContextManager(self, self._registry[job], run_id, str(ordinal))
+        # scheduled is (timezone, scheduled_at_ns, fold) from the scheduler; absent means a manual run.
+        if scheduled is None:
+            schedule = 'manual.' + run_id
+        else:
+            if type(scheduled) is not tuple or len(scheduled) not in (2, 3):
+                raise ValueError('invalid job schedule')
+            schedule = occurrence_key(*scheduled)
+        return AttemptContextManager(self, self._registry[job], run_id, str(ordinal), schedule)
 
     def emit(self, attempt, state, terminal=None, cause_error=None):
         if attempt.observed_ns is None: return
@@ -91,7 +112,7 @@ class JobProducer:
                     return
                 self._sequence += 1
                 payload = {'job_id': attempt.context.job_id, 'run_id': attempt.run_id, 'attempt_id': attempt.context.attempt_id,
-                           'schedule_occurrence': 'manual.' + attempt.run_id, 'ordinal': attempt.ordinal,
+                           'schedule_occurrence': attempt.schedule, 'ordinal': attempt.ordinal,
                            'producer_epoch': self._epoch, 'sequence': str(self._sequence), 'state': state,
                            'observed_ns': attempt.observed_ns, 'terminal_ns': terminal}
                 if attempt.trace_id is not None: payload['cause_trace'] = attempt.trace_id
@@ -106,10 +127,11 @@ class JobProducer:
 
 class AttemptContextManager:
     """One-use sync/async scope; no arguments, task values or raw errors retained."""
-    def __init__(self, producer, job_id, run_id, ordinal):
+    def __init__(self, producer, job_id, run_id, ordinal, schedule):
         self._producer = producer
         self.context = AttemptContext(job_id, run_id, secrets.token_hex(16))
         self.run_id = run_id
+        self.schedule = schedule
         self.ordinal = ordinal
         self.observed_ns = None
         self.trace_id = None

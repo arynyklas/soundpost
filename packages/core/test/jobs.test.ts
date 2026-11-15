@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import {test,expect} from "bun:test";
 import {Client} from "../src/client.ts";
-import {normalizeAttempt,createTimerCancellationBoundary} from "../src/jobs.ts";
+import {normalizeAttempt,createTimerCancellationBoundary,occurrenceKey} from "../src/jobs.ts";
 import {JOB,RUN,jobSettings} from "./jobs-fixture.ts";
 import {config} from "./fixture.ts";
 import {types} from "node:util";
@@ -92,5 +92,20 @@ test("an attempt inside an active span records the trace as a link and never cre
   expect(spans).toHaveLength(1);expect(spans[0].payload.parent_span_id??null).toBeNull();
   expect(attempts.every(value=>value.cause_trace===spans[0].payload.trace_id)).toBe(true);
   expect(records(client,"span").some(value=>value.payload.operation==="fixture.task")).toBe(false);void seen;
+ }finally{await client.close();}
+});
+test("a scheduled attempt carries the server's occurrence key and an unscheduled one stays manual",async()=>{
+ const client=new Client(jobSettings());
+ try{
+  const at="1699999200000000000";
+  await client.withJobAttempt("fixture.task",RUN,1,async()=>{},{timezone:"UTC",atNs:at,fold:0});
+  await client.withJobAttempt("fixture.task",RUN,2,async()=>{});
+  const keys=records(client).map(value=>value.payload.schedule_occurrence);
+  // Go: jobs.OccurrenceKey("UTC", 1699999200000000000, 0) (internal/jobs TestOccurrenceKeyVectors).
+  expect(keys).toEqual(["s."+at+".f0.4bda1821","s."+at+".f0.4bda1821","manual."+RUN,"manual."+RUN]);
+  expect(occurrenceKey({timezone:"UTC",atNs:at,fold:1})).toBe("s."+at+".f1.4bda1821");
+  expect(occurrenceKey({timezone:"Europe/London",atNs:at})).not.toBe(occurrenceKey({timezone:"UTC",atNs:at}));
+  for(const bad of [{timezone:"UTC",atNs:"0"},{timezone:"UTC",atNs:"-1"},{timezone:"",atNs:at},{timezone:"UTC",atNs:at,fold:2 as 0},{timezone:"UTC",atNs:"1.5"},{timezone:5 as unknown as string,atNs:at}])expect(()=>occurrenceKey(bad)).toThrow();
+  let calls=0;await expect(client.withJobAttempt("fixture.task",RUN,3,async()=>{calls++;},{timezone:"UTC",atNs:"0"})).rejects.toThrow();expect(calls).toBe(0);
  }finally{await client.close();}
 });

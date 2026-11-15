@@ -285,6 +285,8 @@ func TestConditionSourceOrdering(t *testing.T) {
 			"status":         func(e *model.ConditionEvent) { e.Status = "paging" },
 			"severity text":  func(e *model.ConditionEvent) { e.Severity = "line\nbreak" },
 			"no severity":    func(e *model.ConditionEvent) { e.Severity = "" },
+			"severity page":  func(e *model.ConditionEvent) { e.Severity = "page" },
+			"severity case":  func(e *model.ConditionEvent) { e.Severity = "Critical" },
 			"long severity":  func(e *model.ConditionEvent) { e.Severity = strings.Repeat("s", 65) },
 			"negative time":  func(e *model.ConditionEvent) { e.At = -1 },
 			"unsorted labels": func(e *model.ConditionEvent) {
@@ -364,7 +366,7 @@ type ruleHarness struct {
 }
 
 func newRuleHarness(t *testing.T, forDur, hold time.Duration) *ruleHarness {
-	r := rules.Rule{ID: model.ID{0xa1}, Project: model.ID{0xb1}, Version: 1, Kind: rules.KindAlert, Interval: time.Minute, For: forDur, RecoveryHold: hold, Severity: "page"}
+	r := rules.Rule{ID: model.ID{0xa1}, Project: model.ID{0xb1}, Version: 1, Kind: rules.KindAlert, Interval: time.Minute, For: forDur, RecoveryHold: hold, Severity: "critical"}
 	return &ruleHarness{t: t, rule: r, cstates: map[model.ID]conditions.State{}, org: model.ID{0xd1}}
 }
 

@@ -282,9 +282,11 @@ func (s *JobState) attemptLess(a, b model.ID) bool {
 }
 
 // evict bounds the state. Only the oldest runs by occurrence order leave, and
-// the departure is recorded in Compaction.
+// the departure is recorded in Compaction. Runs leave while there are too many of
+// them or while their attempts together exceed MaxRetainedAttempts (a single run
+// holds at most MaxAttemptsPerRun, so the bound is always reachable).
 func (s *JobState) evict() {
-	for len(s.Runs) > MaxRetainedRuns {
+	for len(s.Runs) > MaxRetainedRuns || len(s.Attempts) > MaxRetainedAttempts && len(s.Runs) > 1 {
 		var oldest model.ID
 		first := true
 		for id, run := range s.Runs {

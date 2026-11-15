@@ -59,7 +59,7 @@ func normalize(e model.ConditionEvent) (model.ConditionEvent, string, error) {
 		return model.ConditionEvent{}, "", fault(model.Invalid, DetailInvalidEvent)
 	}
 	status, ok := canonicalStatus(e.Status)
-	if !ok || e.Condition == (model.ID{}) || e.Epoch == (model.ID{}) || e.At < 0 || !safeText(e.Severity, maxSeverity) {
+	if !ok || e.Condition == (model.ID{}) || e.Epoch == (model.ID{}) || e.At < 0 || !ValidSeverity(e.Severity) {
 		return invalid()
 	}
 	if len(e.Labels) > maxLabels || e.Labels.Validate() != nil || len(e.Links) > maxLinks {

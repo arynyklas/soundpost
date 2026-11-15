@@ -1,9 +1,20 @@
 // Copyright 2026 Aryn Yklas
 // SPDX-License-Identifier: Apache-2.0
 import {canonicalId,decimal,unixNano} from "./policy.ts";
+import {sha256} from "@noble/hashes/sha256";
 import {randomHex} from "./tracing.ts";
 import type {MetadataContext} from "./tracing.ts";
 export interface JobContext {readonly jobId:string;readonly runId:string;readonly attemptId:string}
+/** A scheduled occurrence: the scheduler's IANA zone, the scheduled UTC instant (unix nanoseconds, decimal) and the fold (1 for the second instance of a repeated local time). */
+export interface ScheduledOccurrence {readonly timezone:string;readonly atNs:string;readonly fold?:0|1}
+/** Byte-for-byte the key internal/jobs.OccurrenceKey produces: "s.<at>.f<fold>.<first 4 bytes of SHA-256("soundpost.jobs.zone\0"+zone) in hex>". */
+export function occurrenceKey(scheduled:ScheduledOccurrence):string {
+ if(!scheduled||typeof scheduled!=="object"||typeof scheduled.timezone!=="string"||scheduled.timezone.length<1||scheduled.timezone.length>256)throw Error("invalid_job_schedule");
+ const at=unixNano(scheduled.atNs),fold=scheduled.fold??0;
+ if(BigInt(at)<=0n||(fold!==0&&fold!==1))throw Error("invalid_job_schedule");
+ const tag=Array.from(sha256(new TextEncoder().encode("soundpost.jobs.zone\u0000"+scheduled.timezone)).subarray(0,4),b=>b.toString(16).padStart(2,"0")).join("");
+ return "s."+at+".f"+fold+"."+tag;
+}
 export type AttemptState="started"|"succeeded"|"failed"|"cancelled";
 export interface NativeJobAttempt {
  readonly job_id:string;readonly run_id:string;readonly attempt_id:string;readonly schedule_occurrence:string;
@@ -72,20 +83,21 @@ export class JobRecorder {
    for(const key of keys){if(typeof key!=="string"||key.length<1||key.length>128||/[^A-Za-z0-9_.-]/.test(key)||!("value" in entries[key]!))throw Error("invalid_job_registry");this.registry.set(key,canonicalId(entries[key]!.value));}
   }
  }
- private emit(context:JobContext,ordinal:string,observed:string|undefined,state:AttemptState,terminal:string|null,trace:string|undefined,error?:string):void {
+ private emit(context:JobContext,schedule:string,ordinal:string,observed:string|undefined,state:AttemptState,terminal:string|null,trace:string|undefined,error?:string):void {
   if(observed===undefined)return;
   try{
    if(this.sequence===18446744073709551615n){this.hooks.loss("job_sequence_exhausted");return;}
    this.sequence++;
-   this.hooks.emit({job_id:context.jobId,run_id:context.runId,attempt_id:context.attemptId,schedule_occurrence:"manual."+context.runId,ordinal,producer_epoch:this.epoch,sequence:String(this.sequence),state,observed_ns:observed,terminal_ns:terminal,...(trace!==undefined?{cause_trace:trace}:{}),...(error!==undefined?{cause_error:error}:{})},terminal??observed);
+   this.hooks.emit({job_id:context.jobId,run_id:context.runId,attempt_id:context.attemptId,schedule_occurrence:schedule,ordinal,producer_epoch:this.epoch,sequence:String(this.sequence),state,observed_ns:observed,terminal_ns:terminal,...(trace!==undefined?{cause_trace:trace}:{}),...(error!==undefined?{cause_error:error}:{})},terminal??observed);
   }catch{this.hooks.loss("job_capture_failed");}
  }
- async run<T>(job:string,runId:string,ordinal:number,callback:()=>Promise<T>):Promise<T>{
+ async run<T>(job:string,runId:string,ordinal:number,callback:()=>Promise<T>,scheduled?:ScheduledOccurrence):Promise<T>{
   if(typeof job!=="string"||!this.registry.has(job))throw Error("unregistered_job");canonicalId(runId);
   if(!Number.isSafeInteger(ordinal)||ordinal<1)throw Error("invalid_job_ordinal");if(typeof callback!=="function")throw Error("invalid_job_callback");
+  const schedule=scheduled===undefined?"manual."+runId:occurrenceKey(scheduled);
   const context=Object.freeze({jobId:this.registry.get(job)!,runId,attemptId:randomHex(16)}),trace=this.context.current()?.traceId;
   let observed:string|undefined;try{observed=this.hooks.clock();}catch{this.hooks.loss("job_clock_unavailable");}
-  this.emit(context,String(ordinal),observed,"started",null,trace);
+  this.emit(context,schedule,String(ordinal),observed,"started",null,trace);
   let state:AttemptState="succeeded",cause:string|undefined,completedAt:string|undefined,failed=false;
   try{return await this.context.runJob(context,callback);}
   catch(error){
@@ -96,7 +108,7 @@ export class JobRecorder {
   }finally{
    try{
     const terminal=failed?completedAt:this.hooks.clock();
-    if(terminal!==undefined&&observed!==undefined&&BigInt(terminal)>=BigInt(observed))this.emit(context,String(ordinal),observed,state,terminal,trace,cause);
+    if(terminal!==undefined&&observed!==undefined&&BigInt(terminal)>=BigInt(observed))this.emit(context,schedule,String(ordinal),observed,state,terminal,trace,cause);
     else this.hooks.loss("job_clock_unavailable");
    }catch{this.hooks.loss("job_capture_failed");}
   }

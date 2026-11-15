@@ -31,7 +31,7 @@ A scheduled run reports `schedule_occurrence` as the key made by `jobs.Occurrenc
 s.<scheduled UTC instant, decimal nanoseconds>.f<0|1>.<8 hex digits of the configured zone>
 ```
 
-The key stays within the SDK alphabet (`[A-Za-z0-9_.-]`, at most 256 bytes). Any other string (for example `manual.<run id>`, which today's Python SDK sends) identifies a manual or unscheduled execution. Such runs are ordered by their earliest attempt start. **Until an SDK or scheduler adapter supplies the scheduled instant in this form, runs are attributed to a schedule window by start time only**: a run that starts at or after an expected instant covers that occurrence (and, if it is the newest run, every earlier one).
+The key stays within the SDK alphabet (`[A-Za-z0-9_.-]`, at most 256 bytes). Any other string (for example `manual.<run id>`, which the SDKs send when no scheduler instant is given) identifies a manual or unscheduled execution. A scheduler adapter passes its zone and scheduled instant to the SDK (`client.job_attempt(job, run_id, ordinal, (timezone, scheduled_at_ns, fold))` in Python, `client.withJobAttempt(job, runId, ordinal, callback, {timezone, atNs, fold})` in TypeScript) and the SDK reports exactly this key; `occurrence_key` / `occurrenceKey` expose the same function. Such runs are ordered by their earliest attempt start. **Until a scheduler adapter supplies the scheduled instant in this form, runs are attributed to a schedule window by start time only**: a run that starts at or after an expected instant covers that occurrence (and, if it is the newest run, every earlier one).
 
 Which run is "newer" is decided by the occurrence's scheduled instant (or, for manual runs, start time), never by arrival order. A late failure from an old schedule cannot overwrite the health of a newer successful occurrence; it is appended to history and shown as the older run.
 
@@ -107,4 +107,4 @@ Read side: `POST /api/v1/jobs/list` and `POST /api/v1/jobs/view` (`internal/http
 Still not wired:
 
 - The served node's background runner (`App.JobProducer`, `internal/appcore/producers_jobs.go`) reads the data-group job-attempt journal and calls `ApplyAttempt` under the in-process `system:runner` principal (see `docs/operations/background-workers.md`). No scheduler observer exists to call `ObserveSchedule`: there is no committed source of schedule definitions, so scheduled jobs read `unknown / no_schedule_observer`.
-- No HTTP route exposes `Correct`; the SDK sends `manual.<run id>` schedule occurrences.
+- No HTTP route exposes `Correct`; the SDKs send `manual.<run id>` unless the caller supplies the scheduled instant.

@@ -91,8 +91,8 @@ class Client:
         finally:episode.close()
     def span(self,operation:str,*,dependency:str|None=None,kind:str='internal')->SpanContextManager:
         return SpanContextManager(self,operation,dependency=dependency,kind=kind)
-    def job_attempt(self,job:str,run_id:str,ordinal:int)->AttemptContextManager:
-        return self._jobs.attempt(job,run_id,ordinal)
+    def job_attempt(self,job:str,run_id:str,ordinal:int,scheduled:tuple|None=None)->AttemptContextManager:
+        return self._jobs.attempt(job,run_id,ordinal,scheduled)
     def _capture_span(self,payload:dict)->bool:
         if payload["operation"] not in self._trace_operations or payload["dependency_alias"] and payload["dependency_alias"] not in self._trace_dependencies:
             with self._lock:self._loss("unregistered_span")

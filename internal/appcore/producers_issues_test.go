@@ -541,3 +541,45 @@ func (r *issueRig) currentRevision() model.Revision {
 	}
 	return revision
 }
+
+// An ACK is a statement about the incident's reminders, never about the evidence:
+// occurrences of the acknowledged incident's issue keep accumulating on the issue,
+// the issue stays open, and the ACK stays current while the impact does not grow
+// (06.05 criterion 10, across the issues and incidents packages).
+func TestAckDoesNotStopIssueOccurrenceAccumulation(t *testing.T) {
+	r := newIssueRig(t)
+	first := r.ingest("TypeError", 5, false, true)
+	w := r.workers()
+	if rep := r.tick(w); rep.Produced != 2 {
+		t.Fatalf("first tick: %+v", rep)
+	}
+	records := r.incidentRecords()
+	if len(records) != 1 {
+		t.Fatalf("incidents = %d", len(records))
+	}
+	acked, err := r.app.Incidents.Act(r.ctx, r.admin(), incidents.Action{CommandID: model.NewID(), ExpectedVersion: 1, Type: incidents.TypeAck, Target: incidents.Target{Project: r.project, Incident: records[0].ID}, Reason: "looking"}, 0)
+	if err != nil || acked.Ack == nil || !acked.AckCurrent() || acked.Status != incidents.StatusOpen {
+		t.Fatalf("ack: %v %+v", err, acked)
+	}
+
+	// The same error keeps happening after the ACK.
+	second, third := r.ingest("TypeError", 6, false, true), r.ingest("TypeError", 7, false, true)
+	if rep := r.tick(w); rep.Produced != 2 {
+		t.Fatalf("a pass after the ACK produced %d, want the 2 new occurrences: %+v", rep.Produced, rep)
+	}
+	snap := r.snapshot()
+	if len(snap.Issues) != 1 || snap.Issues[0].Workflow != "open" {
+		t.Fatalf("issue after the ACK: %+v", snap.Issues)
+	}
+	seen := map[model.ID]bool{}
+	for _, o := range snap.Issues[0].Occurrences {
+		seen[o.OccurrenceID] = true
+	}
+	if len(seen) != 3 || !seen[first] || !seen[second] || !seen[third] {
+		t.Fatalf("the occurrences after the ACK did not accumulate on the issue: %+v", snap.Issues[0].Occurrences)
+	}
+	state, err := r.app.Incidents.Get(r.ctx, r.admin(), r.project, records[0].ID)
+	if err != nil || state.Version != acked.Version || !state.AckCurrent() || state.Status != incidents.StatusOpen || len(r.incidentRecords()) != 1 {
+		t.Fatalf("more occurrences of the same impact must neither undo the ACK nor open another incident: %v %+v", err, state)
+	}
+}
