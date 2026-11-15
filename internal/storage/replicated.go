@@ -101,6 +101,24 @@ func storageReplicaFault(err error) error {
 	return model.Fail(model.Unavailable)
 }
 
+// replicaFaultUnder is storageReplicaFault for the error of a call made under ctx. Group.ReadIndex
+// answers replica.ErrStale when ctx ends before its freshness fence is reached: that is the caller
+// giving up, not evidence that the data moved, and it reads as the caller's cancellation or deadline.
+// A query that has failed one project cancels the others, and a typed Stale from one of them is fatal
+// for the whole request and, when that project sorts first, would replace the failure that caused the
+// cancellation (a corrupt page answered as stale).
+func replicaFaultUnder(ctx context.Context, err error) error {
+	if errors.Is(err, replica.ErrStale) {
+		switch cerr := ctx.Err(); {
+		case errors.Is(cerr, context.DeadlineExceeded):
+			return model.Fail(model.Timeout)
+		case cerr != nil:
+			return model.Fail(model.Cancelled)
+		}
+	}
+	return storageReplicaFault(err)
+}
+
 // failLocked marks the engine failed; e.mu is held. One engine backs all 64 data groups of the
 // node, so a failed engine can apply nothing for any of them: the node's replica groups are
 // failed closed with it (replica.FailDomain), from another goroutine because the caller holds
@@ -1048,7 +1066,7 @@ func (e *Engine) replicaReadFence(ctx context.Context, minimum []model.Cursor, a
 	for i, mark := range cuts {
 		if errs[i] != nil {
 			if !allowPartial {
-				return nil, false, storageReplicaFault(errs[i])
+				return nil, false, replicaFaultUnder(ctx, errs[i])
 			}
 			partial = true
 			continue
@@ -1098,7 +1116,7 @@ func (e *Engine) replicaReleaseFenceLocked(ctx context.Context, marks []model.Cu
 	cuts, errs := readIndexEach(ctx, owners)
 	for i, mark := range marks {
 		if errs[i] != nil {
-			return storageReplicaFault(errs[i])
+			return replicaFaultUnder(ctx, errs[i])
 		}
 		if cuts[i].Index < mark.Index {
 			return model.Fail(model.Stale)
@@ -1114,7 +1132,7 @@ func (e *Engine) replicaBeforeCursor(ctx context.Context, cursor model.Cursor) e
 		if e.group(uint16(slot)) == cursor.Group {
 			cut, err := group.ReadIndex(ctx)
 			if err != nil {
-				return storageReplicaFault(err)
+				return replicaFaultUnder(ctx, err)
 			}
 			if cut.Index < cursor.Index {
 				return model.Fail(model.Stale)

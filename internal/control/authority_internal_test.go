@@ -132,6 +132,7 @@ func TestEveryControlWriterIsClassified(t *testing.T) {
 		"InitializeBearerHashKey":       "bump",
 		"RedactRetainedControlCommands": "writerRedactNoop",
 		"CancelArtifact":                "bump",
+		"healFencedArtifactIntents":     "bump", // retires a published intent under a verified GC fence: artifact readability changes
 		"healLegacyAuthority":           "bump",
 		"Update":                        "bump",
 		// Dispatch by Command kind (nonAuthorityKinds).

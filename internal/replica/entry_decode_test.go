@@ -4,12 +4,17 @@ package replica
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/arynyklas/soundpost/internal/model"
+	pb "go.etcd.io/raft/v3/raftpb"
 )
 
 func entryDecodeCorpus(t *testing.T) map[string][]byte {
@@ -120,5 +125,139 @@ func TestGroupDecodeEntryReuseIsByIdentityOnly(t *testing.T) {
 	got, err := g.decodeEntry(other)
 	if err != nil || got.ApplicationIndex != 8 {
 		t.Fatalf("same-length different entry: index %d err %v", got.ApplicationIndex, err)
+	}
+}
+
+// goldenDir is a control group's raft directory written by the binary of commit e805349 (the
+// writer that kept the retry table by digest), not by this tree: ready.wal, one sealed snapshot
+// (CURRENT, MANIFEST, envelope, ledger, raft.conf) and one journal-pin archive. It was produced by
+// a generator test run in a clean `git archive e805349` tree, which committed three whole-state
+// control commands, pinned the journal, committed three more, cut and compacted, committed two
+// more and closed. expected.json records what that run observed (the commands, the receipts it
+// acknowledged them with, the final state and the SHA-256 of every file).
+const goldenDir = "testdata/e805349"
+
+type goldenRow struct {
+	Entry json.RawMessage `json:"entry"`
+	Acked CommittedEntry  `json:"acked"`
+}
+
+type goldenExpected struct {
+	Group      model.ID          `json:"group"`
+	Pin        model.ID          `json:"pin"`
+	Rows       []goldenRow       `json:"rows"`
+	FinalRev   uint64            `json:"final_rev"`
+	FinalState wholeState        `json:"final_state"`
+	Files      map[string]string `json:"file_sha256"`
+}
+
+// copyGolden copies the golden raft directory into dir/raft after proving its bytes are the ones
+// the old writer produced (the recorded SHA-256 of every file).
+func copyGolden(t *testing.T, dir string) goldenExpected {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(goldenDir, "expected.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ex goldenExpected
+	if err = json.Unmarshal(raw, &ex); err != nil {
+		t.Fatal(err)
+	}
+	if len(ex.Files) < 7 || len(ex.Rows) != 8 {
+		t.Fatalf("golden metadata is incomplete: %d files, %d rows", len(ex.Files), len(ex.Rows))
+	}
+	for rel, want := range ex.Files {
+		data, err := os.ReadFile(filepath.Join(goldenDir, "raft", filepath.FromSlash(rel)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if sum := sha256.Sum256(data); hex.EncodeToString(sum[:]) != want {
+			t.Fatalf("%s no longer has the bytes e805349 wrote", rel)
+		}
+		dst := filepath.Join(dir, "raft", filepath.FromSlash(rel))
+		if err = os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err = os.WriteFile(dst, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return ex
+}
+
+func (ex goldenExpected) wholeRows(t *testing.T) []wholeRow {
+	t.Helper()
+	rows := make([]wholeRow, len(ex.Rows))
+	for i, r := range ex.Rows {
+		var e Entry
+		if err := json.Unmarshal(r.Entry, &e); err != nil {
+			t.Fatal(err)
+		}
+		rows[i] = wholeRow{entry: e, acked: r.Acked}
+	}
+	return rows
+}
+
+// The current code opens the directory the old binary left: the sealed snapshot is restored, the
+// ready.wal suffix is replayed to the same final state, every command the old binary
+// acknowledged is still answered with its original receipt (the digest-kept retry table of the
+// snapshot and the journal's own entries), and the pin's archive is read back.
+func TestGoldenRaftDirectoryOfE805349ReadsBack(t *testing.T) {
+	dir := t.TempDir()
+	ex := copyGolden(t, dir)
+	s := openDigest(t, dir, ex.Group)
+	if _, err := s.group.ReadIndex(s.ctx()); err != nil {
+		t.Fatal(err)
+	}
+	state := s.machine.current()
+	if state.Rev != ex.FinalRev || !reflect.DeepEqual(state, ex.FinalState) {
+		t.Fatalf("state after replaying the old directory: rev %d %v, want rev %d %v", state.Rev, state.Books, ex.FinalRev, ex.FinalState.Books)
+	}
+	rows := ex.wholeRows(t)
+	requireOriginalReceipts(t, s, "golden e805349", rows)
+
+	pins, err := s.group.Pins()
+	if err != nil || len(pins) != 1 || pins[0].ID != ex.Pin || !pins[0].Orphaned {
+		t.Fatalf("the old pin was not reloaded as an orphan: %+v %v", pins, err)
+	}
+	archive, err := readPinArchive(filepath.Join(dir, "raft", "pins", ex.Pin.String()+".pin"))
+	if err != nil || archive.header.ID != ex.Pin || archive.header.After == 0 {
+		t.Fatalf("pin archive header: %+v %v", archive.header, err)
+	}
+	archived := map[model.ID]bool{}
+	for _, ent := range archive.entries {
+		if len(ent.GetData()) == 0 {
+			continue
+		}
+		e, err := decodeEntry(ent.GetData())
+		if err != nil {
+			t.Fatalf("an archived entry the old binary wrote no longer decodes: %v", err)
+		}
+		archived[e.ID] = true
+	}
+	for i := 3; i < 6; i++ {
+		if !archived[rows[i].entry.ID] {
+			t.Fatalf("command %d, committed after the pin and before the compaction, is not in the archive", i+1)
+		}
+	}
+
+	var scanned int
+	wal, err := os.Open(filepath.Join(dir, "raft", "ready.wal"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer wal.Close()
+	err = scanJournalEntries(wal, func(ent *pb.Entry) error {
+		if len(ent.GetData()) == 0 {
+			return nil
+		}
+		if _, err := decodeEntry(ent.GetData()); err != nil {
+			return err
+		}
+		scanned++
+		return nil
+	})
+	if err != nil || scanned == 0 {
+		t.Fatalf("the old ready.wal does not scan: %d entries, %v", scanned, err)
 	}
 }
