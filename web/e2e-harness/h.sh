@@ -45,6 +45,12 @@ prep() {
 		sed -i 's|^\ttraces := httpapi.NewTraces(httpapi.NewStorageSpanSource(engine))$|\ttraces := httpapi.NewTraces(httpapi.NewStorageSpanSource(engine)).WithLinks(resolver)|' "$ROOT/internal/appcore/app.go"
 		grep -q 'NewStorageSpanSource(engine)).WithLinks(resolver)' "$ROOT/internal/appcore/app.go" || { echo "trace link wiring did not apply" >&2; exit 1; }
 	fi
+	# E2E_WIRE_TRACE_ISSUES=1 applies, to this run's VM copy only, the wiring the parent applies to internal/appcore/app.go:
+	# bindIssueLinks(c, resolver) (internal/appcore/link_issues.go) right after the resolver is built, so a trace error occurrence links to its issue.
+	if [ "${E2E_WIRE_TRACE_ISSUES:-}" = 1 ] && ! grep -q 'bindIssueLinks(c, resolver)' "$ROOT/internal/appcore/app.go"; then
+		sed -i 's|^\tinvestigator, e := httpapi.NewInvestigator(a, queryEngine, resolver)$|\tif e = bindIssueLinks(c, resolver); e != nil {\n\t\treturn fail(e)\n\t}\n&|' "$ROOT/internal/appcore/app.go"
+		grep -q 'bindIssueLinks(c, resolver)' "$ROOT/internal/appcore/app.go" || { echo "issue link wiring did not apply" >&2; exit 1; }
+	fi
 	# E2E_FAULTS=1 builds the server with the soundpost_faults tag: it then reads shard-removal requests from $T/fault (cmd/soundpost/faultcontrol.go).
 	( cd "$ROOT" && go build ${E2E_FAULTS:+-tags soundpost_faults} -o "$BIN" ./cmd/soundpost )
 	( cd "$ROOT/web" && node node_modules/typescript/bin/tsc -p tsconfig.json && node node_modules/vite/bin/vite.js build 2>&1 | tail -2 )

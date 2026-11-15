@@ -104,7 +104,14 @@ Implemented and tested: the pure reducer (`Reduce`, `ReduceEvent`, `Observe`, `A
 
 Read side: `POST /api/v1/jobs/list` and `POST /api/v1/jobs/view` (`internal/httpapi/jobs_view.go`) return job state with `jobs.Health`.
 
+Write side (`internal/httpapi/jobs_write.go`), each needing `policy.write` on the project (a session with its CSRF binding, or a bearer token of the observer's service principal); the body names the organization and project as selectors, the acting principal is always the caller's own, and any unknown body field is refused:
+
+- `POST /api/v1/jobs/schedule-evidence` is the external schedule observer's feed (`ObserveSchedule`): `org`, `project`, `job`, `command_id` (a retry of the same command is idempotent), `observer`, `observed_ns`, `complete_through_ns`, `healthy`, an optional `definition` (revision, `effective_from_ns`, `schedule {cron, timezone}`, `grace_ns`, `max_runtime_ns`, `observer_stale_after_ns`, `overlap`) and optional `incomplete` intervals. An observation whose clock is ahead of the server by more than the allowed skew is refused.
+- `POST /api/v1/jobs/correct` is the audited correction (`Correct`): `org`, `project`, `job`, `command_id`, `expected_version` (the view's `source.version`), `attempt`, `version`, `state`, `reason`. The original result stays; the correction appears beside it with the actor, time and reason.
+
+Both answer `{state: "committed", job, version}`.
+
 Still not wired:
 
-- The served node's background runner (`App.JobProducer`, `internal/appcore/producers_jobs.go`) reads the data-group job-attempt journal and calls `ApplyAttempt` under the in-process `system:runner` principal (see `docs/operations/background-workers.md`). No scheduler observer exists to call `ObserveSchedule`: there is no committed source of schedule definitions, so scheduled jobs read `unknown / no_schedule_observer`.
-- No HTTP route exposes `Correct`; the SDKs send `manual.<run id>` unless the caller supplies the scheduled instant.
+- The served node's background runner (`App.JobProducer`, `internal/appcore/producers_jobs.go`) reads the data-group job-attempt journal and calls `ApplyAttempt` under the in-process `system:runner` principal (see `docs/operations/background-workers.md`). The runner itself observes no schedule: a scheduled job reads `unknown / no_schedule_observer` until an external observer feeds `schedule-evidence`. Besides the tail and the periodic sweep it re-reads the last 15 minutes of event time behind the tail on every pass (rows already covered are skipped), so an event that arrives slightly out of order is applied on the next pass instead of waiting for the sweep.
+- The SDKs send `manual.<run id>` unless the caller supplies the scheduled instant.

@@ -230,6 +230,9 @@ func openWith(dir string, options *replicationOptions, meter storage.DiskMeter, 
 	if e != nil {
 		return fail(e)
 	}
+	if e = bindIssueLinks(c, resolver); e != nil {
+		return fail(e)
+	}
 	investigator, e := httpapi.NewInvestigator(a, queryEngine, resolver)
 	if e != nil {
 		return fail(e)

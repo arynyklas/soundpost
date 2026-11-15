@@ -438,7 +438,7 @@ export interface PathResult {
  unlike_clock_domains: boolean; max_uncertainty_ns: string; sampling: SamplingReport; late_spans: LateSpan[]; producer_gaps: ProducerGap[]; complete: boolean; reasons: string[];
 }
 /** One reference a span carries (its job, replay or profile, or an error occurrence recorded inside it) and whether the server's C04 resolution could reach it under this account's scope. An unavailable target is one value: missing, in another project and not readable cannot be told apart. */
-export interface SpanTarget { span_id: SpanId; kind: 'job' | 'replay' | 'profile' | 'error'; id: Id; relation: 'explicit' | 'time_overlap_inference'; available: boolean }
+export interface SpanTarget { span_id: SpanId; kind: 'job' | 'replay' | 'profile' | 'error'; id: Id; relation: 'explicit' | 'time_overlap_inference'; available: boolean; /** Only on an available error occurrence that an issue holds: the issue that opens it. */ issue_id?: Id }
 export interface TraceView { org: Id; project: Id; trace: Id; state: ViewState; reason?: string; partial: boolean; path?: PathResult; /** Present only when the server resolved the references through C04. */ targets?: SpanTarget[]; sections: ViewSection[] }
 
 // ---- Job run and attempt investigation (POST /api/v1/jobs/list, /api/v1/jobs/view; internal/httpapi/jobs_view.go, internal/jobs/types.go) ----

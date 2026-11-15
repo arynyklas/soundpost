@@ -17,7 +17,7 @@ function TargetItem(props: { target: SpanTarget; href: string | null }): React.J
  if (!target.available) return <li data-target-kind={target.kind} data-target-available="no">{word} <code>{target.id}</code>: not available to this account.</li>;
  return (
   <li data-target-kind={target.kind} data-target-available="yes">
-   {word} <code>{target.id}</code>: {href !== null ? <a href={href}>Open this {word.toLowerCase()}</a> : 'readable by this account; its stored detail is opened from its issue.'} Access is checked again when it opens.
+   {word} <code>{target.id}</code>: {href !== null ? <a href={href}>{target.kind === 'error' ? 'Open the issue holding this occurrence' : `Open this ${word.toLowerCase()}`}</a> : 'readable by this account; no issue holds it yet, so it has no view of its own.'} Access is checked again when it opens.
   </li>
  );
 }

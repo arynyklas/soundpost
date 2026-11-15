@@ -69,14 +69,22 @@ type JobReader interface {
 
 // Jobs is the handler behind POST /api/v1/jobs/list and /api/v1/jobs/view. The
 // reader may be nil.
-type Jobs struct{ reader JobReader }
+type Jobs struct {
+	reader JobReader
+	writer JobWriter
+}
 
 // NewJobs binds the optional job reader. A nil *jobs.Service is not a reader.
 func NewJobs(reader JobReader) *Jobs {
 	if s, ok := reader.(*jobs.Service); ok && s == nil {
 		reader = nil
 	}
-	return &Jobs{reader: reader}
+	j := &Jobs{reader: reader}
+	// The write routes are live only when the same service also writes.
+	if w, ok := reader.(JobWriter); ok {
+		j.writer = w
+	}
+	return j
 }
 
 // JobsListBody is the POST /api/v1/jobs/list body. Org and Project are
@@ -520,7 +528,10 @@ func (j *Jobs) View(ctx context.Context, authority *auth.Service, credential aut
 //
 //	POST /api/v1/jobs/list  JobsListBody -> JobsListView
 //	POST /api/v1/jobs/view  JobViewBody  -> JobView
+//
+// and the write routes of jobs_write.go.
 func RegisterJobRoutes(mux *http.ServeMux, authority *auth.Service, j *Jobs) {
+	registerJobWriteRoutes(mux, authority, j)
 	mux.HandleFunc("POST /api/v1/jobs/list", func(w http.ResponseWriter, r *http.Request) {
 		credential, err := artifactCredential(authority, w, r)
 		if err != nil {

@@ -261,6 +261,12 @@ func (t *Traces) WithLinks(r TargetResolver) *Traces {
 // LinksWired reports whether a link resolver is bound (the application binds one at Open).
 func (t *Traces) LinksWired() bool { return t.links != nil }
 
+// IssueLinksWired reports whether the bound resolver can map an error occurrence to its issue.
+func (t *Traces) IssueLinksWired() bool {
+	b, ok := t.links.(interface{ IssuesBound() bool })
+	return ok && b.IssuesBound()
+}
+
 // ErrorRef is one error occurrence recorded inside a span.
 type ErrorRef struct {
 	Span       model.SpanID
@@ -277,6 +283,8 @@ type SpanTarget struct {
 	ID        model.ID     `json:"id"`
 	Relation  string       `json:"relation"`
 	Available bool         `json:"available"`
+	// Issue is the issue holding an error occurrence, present only when it is available and an issue holds it.
+	Issue *model.ID `json:"issue_id,omitempty"`
 }
 
 // TraceBody is the POST /api/v1/traces/view body. Org and Project are selectors
@@ -448,6 +456,25 @@ func (t *Traces) resolveTargets(ctx context.Context, scope auth.Scope, project m
 			targets[i].Available = resolved[j].Available
 		}
 	}
+	// An available error occurrence also names the issue that holds it, when the resolver can say (the link is
+	// scope-checked there; an occurrence no issue holds, or one it cannot map, carries none).
+	if ix, ok := t.links.(IssueResolver); ok {
+		var occurrences []model.ID
+		for _, tg := range targets {
+			if tg.Kind == "error" && tg.Available {
+				occurrences = append(occurrences, tg.ID)
+			}
+		}
+		if len(occurrences) > 0 {
+			held := ix.IssuesOf(ctx, scope, project, occurrences)
+			for i := range targets {
+				if issue, found := held[targets[i].ID]; found && targets[i].Kind == "error" && targets[i].Available {
+					owned := issue
+					targets[i].Issue = &owned
+				}
+			}
+		}
+	}
 	view.Sections = append(view.Sections, section)
 	return targets, nil
 }
@@ -492,4 +519,10 @@ func RegisterTraceRoutes(mux *http.ServeMux, authority *auth.Service, t *Traces)
 		}
 		queryReply(w, view, err)
 	})
+}
+
+// IssueResolver is the optional second capability of the trace link resolver (*link.Resolver has it): the issue
+// holding each readable error occurrence, resolved under the caller's scope.
+type IssueResolver interface {
+	IssuesOf(ctx context.Context, scope auth.Scope, project model.ID, occurrences []model.ID) map[model.ID]model.ID
 }

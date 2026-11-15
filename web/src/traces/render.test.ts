@@ -94,11 +94,18 @@ describe('CriticalPath markup', () => {
   expect(html).toContain('data-target-kind="replay" data-target-available="no"');
   expect(html).toContain('not available to this account.');
   expect(html).not.toContain('open-replay');
-  expect(html).toContain('Error occurrence <code>' + '4'.repeat(32) + '</code>: readable by this account');
+  expect(html).toContain('Error occurrence <code>' + '4'.repeat(32) + '</code>: readable by this account; no issue holds it yet');
   expect((html.match(/Access is checked again when it opens/g) ?? []).length).toBe(3);
   // Another span's reference is not listed on this one, and the old "checked there, not here" statement is only for an unresolved view.
   expect(html).not.toContain('5'.repeat(32));
   expect(html).not.toContain('its access is checked there, not here');
+ });
+ test('an error occurrence with an issue is an anchor to that issue', () => {
+  const p = cleanPath({ spans: [span(1, null, 0, 100), span(2, 1, 0, 70), span(3, 1, 0, 40)] });
+  const targets: SpanTarget[] = [{ span_id: sid(1), kind: 'error', id: '4'.repeat(32), relation: 'explicit', available: true, issue_id: '6'.repeat(32) }];
+  const html = render(React.createElement(CriticalPath, { path: p, selectedSpan: sid(1), targets, targetHref: () => '#issue-x' }));
+  expect(html).toContain('<a href="#issue-x">Open the issue holding this occurrence</a>');
+  expect(html).not.toContain('no issue holds it yet');
  });
  test('an empty list of resolved targets shows none, and a view the server did not resolve keeps the plain statement', () => {
   const p = cleanPath({ spans: [span(1, null, 0, 100, { job_id: '1'.repeat(32) }), span(2, 1, 0, 70), span(3, 1, 0, 40)] });

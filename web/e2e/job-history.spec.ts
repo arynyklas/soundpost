@@ -1,22 +1,25 @@
 // Copyright 2026 Aryn Yklas
 // SPDX-License-Identifier: Apache-2.0
+import {execFile} from 'node:child_process';
 import {createHash} from 'node:crypto';
+import {mkdtempSync,writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join,resolve} from 'node:path';
+import {promisify} from 'node:util';
 import {test,expect,type APIRequestContext,type Browser,type BrowserContext,type Page} from '@playwright/test';
-import {createOrg,createProject,createReader,field,id,ingestJobAttempt,login,onboardJobSource,owner,postJson,setGrant,type JobAttemptInput,type Reader,type Source} from './support/real';
+import {setPermissions} from './support/replay';
+import {createOrg,createProject,createReader,field,id,ingestJobAttempt,login,onboardJobSource,onboardSdkJobSource,owner,postJson,sdkConfig,setGrant,type JobAttemptInput,type Reader,type Source} from './support/real';
 
 // Real server, real Chrome, real HTTPS, real sessions, real routes only. The job data is produced the product's own way:
 //   source credential -> POST /ingest/v1/batches (kind job_attempt) -> the leader-only background runner (`soundpost serve`, its job
 //   producer, acting as the in-process system principal) -> durable job books -> POST /api/v1/jobs/list and /api/v1/jobs/view -> the UI.
 // The test waits (polls the real /api/v1/jobs/view) until the runner has applied every ingested event; nothing writes a job book but the runner.
 //
-// Assertions REMOVED because the real path cannot reproduce them (no committed source of job/schedule definitions exists, so the runner
-// never calls ObserveSchedule or Correct; a scheduled job reads `unknown / no_schedule_observer`, a job with only attempt evidence reads
-// "No job definition has been reported"):
-//  - a schedule definition's grace, time zone and cron text, and "Schedule observer: fresh";
-//  - missed WITH external observer evidence, and an observer outage / incomplete data path reading Unknown, never missed;
+// The external schedule observer speaks through its own route (POST /api/v1/jobs/schedule-evidence) and corrections through
+// POST /api/v1/jobs/correct; one test drives both. One test drives the job API of the real Python SDK (web/e2e/support/sdk_job_retry.py).
+// Still not covered here because the real path cannot reproduce it:
 //  - a local time that does not exist (skipped by DST) reported as skipped, and the schedule-derived expected occurrences;
-//  - overlap policy and the overlap text derived from a definition ("allow: ..."): the per-run overlap sentence from attempt times IS kept;
-//  - a correction (Correct) keeping the original failed result with its audit and the inert reason text.
+//  - the per-occurrence overlap policy text derived from a definition ("allow: ..."): the per-run overlap sentence from attempt times IS kept.
 // KEPT (all through ingest): start -> failure -> retry -> success, the next occurrence, redelivery counted nowhere, a late old completion
 // that never overwrites current health, cancellation never success, ID-only cause links, Refresh keeping the selection, the repeated local
 // time (fold 1) carried by the occurrence key itself, overlap sentences, scope and revocation.
@@ -248,6 +251,98 @@ test('overlapping runs are recorded, never dropped or merged, and say so',async(
  await expect(page.locator('[data-testid=run-row]')).toHaveCount(2);
  await expect(run(page,G.x)).toContainText('Overlaps with 1 other run');
  await expect(run(page,G.y)).toContainText('Overlaps with 1 other run');
+});
+
+test('the external schedule observer feed: missed with its evidence, an outage of the data path reads Unknown, a silent observer reads stale; a correction is audited beside the original failure',async()=>{
+ // The observer is its own account holding policy.write only (it reads nothing); it speaks through the product's real feed route.
+ const observer=await createReader(owners,org,[p1]);
+ await setPermissions(owners,org,observer.id,p1,true,['policy.write']);
+ const op=await loggedIn(observer);
+ const hourAgo=Date.now()-3600_000;
+ const definition={revision:'1',effective_from_ns:ns(Date.now()-24*3600_000),schedule:{cron:'* * * * *',timezone:'UTC'},grace_ns:'60000000000',max_runtime_ns:'0',observer_stale_after_ns:'600000000000',overlap:'allow'};
+ const observerId=id();
+ const observe=async(job:string,observed:number,completeThrough:number,healthy=true)=>{
+  const r=await postJson(op,'/api/v1/jobs/schedule-evidence',{org,project:p1,job,command_id:id(),observer:observerId,observed_ns:ns(observed),complete_through_ns:ns(completeThrough),healthy,definition});
+  expect(r.status,r.text).toBe(200);
+ };
+ const jobMissed=id(),jobOutage=id(),jobStale=id();
+ await observe(jobMissed,Date.now()-1000,Date.now()-1000);
+ await observe(jobOutage,Date.now()-1000,Date.now()-3*3600_000);
+ await observe(jobStale,hourAgo,hourAgo);
+ // The feed is a write: the telemetry-only reader may not use it.
+ const denied=await postJson(api,'/api/v1/jobs/schedule-evidence',{org,project:p1,job:jobMissed,command_id:id(),observer:observerId,observed_ns:ns(Date.now()),complete_through_ns:ns(Date.now()),healthy:true});
+ expect(denied.status).not.toBe(200);
+
+ const page=await rctx.newPage();
+ await open(page);
+ await expect(row(page,jobMissed)).toContainText('Missed');
+ await expect(row(page,jobOutage)).toContainText('Unknown');
+ await openJob(page,jobMissed);
+ await expect(page.getByTestId('job-health')).toContainText('Missed (external schedule observer evidence)');
+ await expect(page.getByTestId('job-observer')).toContainText('Schedule observer: fresh');
+ await expect(page.getByTestId('job-observer')).toContainText('Observer reports itself healthy');
+ await open(page);
+ await openJob(page,jobOutage);
+ await expect(page.getByTestId('job-health')).toContainText('Unknown');
+ await expect(page.getByTestId('job-health')).not.toContainText('Missed');
+ await expect(page.getByTestId('job-observer')).toContainText('Schedule observer: fresh');
+ await open(page);
+ await openJob(page,jobStale);
+ await expect(page.getByTestId('job-observer')).toContainText('Schedule observer: stale');
+ // The silent observer's last word is passed through but labelled: incomplete evidence, and the stale-observer sentence.
+ await expect(page.getByTestId('job-health')).toContainText('Incomplete evidence');
+ await expect(page.getByTestId('job-health')).toContainText('has not reported recently enough');
+
+ // A correction: the failed attempt (ingested the product's way) is corrected through the audited route; the original failure stays.
+ const C={job:id(),run:id(),att:id()};
+ await send({job:C.job,run:C.run,attempt:C.att,occurrence:'manual.corrected',ordinal:1,sequence:1,state:'started',observed:at(300)});
+ await send({job:C.job,run:C.run,attempt:C.att,occurrence:'manual.corrected',ordinal:1,sequence:2,state:'failed',observed:at(300),terminal:at(300,20)});
+ await applied(C.job,{[C.run]:2});
+ const v=await postJson(api,'/api/v1/jobs/view',{org,project:p1,job:C.job,run:C.run});
+ const version=field(field(v.json,'source'),'version');
+ const reason='the task finished; the exit code was misreported';
+ const fix=await postJson(op,'/api/v1/jobs/correct',{org,project:p1,job:C.job,command_id:id(),expected_version:version,attempt:C.att,version:'1',state:'succeeded',reason});
+ expect(fix.status,fix.text).toBe(200);
+ await open(page);
+ await openJob(page,C.job);
+ await run(page,C.run).getByRole('button',{name:`Open run ${C.run}`}).click();
+ const attempt=page.locator(`[data-testid=attempt-row][data-attempt="${C.att}"]`);
+ await expect(attempt).toContainText('Attempt 1: Succeeded');
+ await expect(attempt).toContainText('Original result: Failed');
+ await expect(attempt.getByTestId('correction')).toContainText(`Corrected to Succeeded (correction version 1 by ${observer.id}`);
+ await expect(attempt.getByTestId('correction')).toContainText(reason);
+});
+
+test('a run produced by the real Python SDK job API (first attempt raises, the retry succeeds) reads as recovered with its captured error as the cause',async()=>{
+ // No raw ingest helper: the SDK reads its own clock, allocates its own IDs, epoch and sequence, captures the failure and delivers over its own
+ // HTTPS transport; the test only waits for durable receipts (the driver exits non-zero without them) and then reads the product's own views.
+ const sdkSource=await onboardSdkJobSource(owners,org,p1);
+ const job=id();
+ const dir=mkdtempSync(join(tmpdir(),'sp-sdk-job-'));
+ const config=join(dir,'sdk.json');
+ writeFileSync(config,JSON.stringify(sdkConfig(sdkSource)),{mode:0o600});
+ const {stdout}=await promisify(execFile)(process.env.E2E_PYTHON??'python3',[resolve(process.cwd(),'e2e/support/sdk_job_retry.py')],{env:{...process.env,PYTHONPATH:resolve(process.cwd(),'../sdk/python/src'),SOUNDPOST_SDK_CONFIG:config,SOUNDPOST_SDK_JOB:job},timeout:60_000});
+ const sdk=JSON.parse(stdout.trim().split('\n').pop()??'{}') as {run:string;failed_attempt:string;retry_attempt:string;error:string;events:number};
+ expect(sdk.events).toBe(4);
+ await applied(job,{[sdk.run]:4});
+
+ const page=await rctx.newPage();
+ await open(page);
+ await expect(row(page,job)).toContainText('Succeeded');
+ await openJob(page,job);
+ await expect(page.getByTestId('job-health')).toContainText('Current job health: Succeeded');
+ await expect(run(page,sdk.run)).toContainText('Run recovery: Recovered after retry');
+ await expect(run(page,sdk.run)).toContainText('1 failed of 2 attempts');
+ await run(page,sdk.run).getByRole('button',{name:`Open run ${sdk.run}`}).click();
+ const attempts=page.locator('[data-testid=attempt-row]');
+ await expect(attempts).toHaveCount(2);
+ await expect(attempts.nth(0)).toHaveAttribute('data-attempt',sdk.failed_attempt);
+ await expect(attempts.nth(0)).toHaveAttribute('data-state','failed');
+ await expect(attempts.nth(1)).toHaveAttribute('data-attempt',sdk.retry_attempt);
+ await expect(attempts.nth(1)).toHaveAttribute('data-state','succeeded');
+ await expect(page.getByTestId('run-dedup')).toContainText('2 distinct attempts counted');
+ await expect(page.getByTestId('run-dedup')).toContainText('4 events accepted');
+ await expect(page.getByTestId('cause-links')).toContainText(sdk.error);
 });
 
 test('a reader without access, or in another organization, sees Not found; revoking the grant clears the page on refresh',async()=>{

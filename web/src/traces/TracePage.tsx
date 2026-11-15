@@ -7,6 +7,7 @@ import { StatusPanel } from '../app/StatusPanel';
 import { EvidenceSections } from '../evidence/Sections';
 import { dataOf, useEvidence } from '../evidence/useEvidence';
 import { CriticalPath } from './CriticalPath';
+import { targetLocation } from './links';
 import { exploreWindow } from './model';
 
 /** One trace under the caller's own scope: its spans, causal critical path, duration bounds and every limit of the analysis. The server reads only spans this account may read, inside the selected window; nothing outside that window or scope is inferred. The observed duration is a bound, never an authoritative total. */
@@ -20,16 +21,8 @@ export function TracePage(props: { id: Id; project: Id; context: ViewContext }):
   const w = exploreWindow(span);
   return encodeHash({ ...context, start: w.start, end: w.end }, 'explore');
  };
- // Jobs, replays and profiles open in their own view, which checks the scope again; an error occurrence is opened from its issue.
- const targetHref = (target: SpanTarget): string | null => {
-  const ref = { project, id: target.id };
-  switch (target.kind) {
-   case 'job': return encodeHash(context, 'jobs', '', null, ref);
-   case 'replay': return encodeHash(context, 'replays', '', null, ref);
-   case 'profile': return encodeHash(context, 'profiles', '', null, ref);
-   case 'error': return null;
-  }
- };
+ // Jobs, replays and profiles open in their own view and an error occurrence in its issue; each checks the scope again.
+ const targetHref = (target: SpanTarget): string | null => targetLocation(context, project, target);
  return (
   <section className="panel" aria-labelledby="trace-heading">
    <h2 id="trace-heading">Trace <code>{id}</code></h2>

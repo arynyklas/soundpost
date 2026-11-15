@@ -12,7 +12,7 @@ import {resolve} from 'node:path';
 export type Ns=bigint|string;
 export type Kind='metric'|'log'|'span'|'job_attempt'|'error'|'loss';
 export interface Reply{status:number;text:string;json:unknown}
-export interface Source{id:string;credential:string;producer:string;org:string;project:string;service:string;environment:string;build:string;instance:string;policyRevision:string;kinds:readonly Kind[];template?:LogTemplateWire}
+export interface Source{id:string;credential:string;producer:string;org:string;project:string;service:string;environment:string;build:string;instance:string;policyRevision:string;kinds:readonly Kind[];template?:LogTemplateWire;/** the signed policy, trusted keys and routing descriptor the source onboarding returned: what an SDK is configured from */sdk?:{policy:unknown;trusted_keys:unknown;descriptor:unknown}}
 export interface Reader{id:string;email:string;password:string}
 export interface Owner{email:string;password:string}
 export interface LogTemplateWire{id:string;revision:string;line:string;severity:string;fields:{name:string;type:string;max_bytes:number;sensitivity:string;values:unknown[]}[]}
@@ -160,7 +160,7 @@ async function onboard(page:Page,org:string,project:string,p:SourcePolicyInput):
  const r=await postJson(page,'/api/v1/sources',{command_id:id(),org,project,source,browser:false,origins:[],expires_ns:ns(BigInt(Date.now())*1_000_000n+24n*3600n*SECOND),policy,reason:'Explore e2e fixture'});
  const credential=field(r.json,'credential'),policyRevision=field(field(r.json,'descriptor'),'policy_revision');
  if(r.status!==200||typeof credential!=='string')throw Error(`source onboarding: HTTP ${r.status} ${r.text}`);
- return {id:source,credential,producer:id(),org,project,service,environment,build,instance:INSTANCE,policyRevision:typeof policyRevision==='string'?policyRevision:'1',kinds:p.kinds,...(p.templates[0]?{template:p.templates[0]}:{})};
+ return {id:source,credential,producer:id(),org,project,service,environment,build,instance:INSTANCE,policyRevision:typeof policyRevision==='string'?policyRevision:'1',kinds:p.kinds,...(p.templates[0]?{template:p.templates[0]}:{}),sdk:{policy:field(r.json,'policy'),trusted_keys:field(r.json,'trusted_keys'),descriptor:field(r.json,'descriptor')}};
 }
 export interface MetricSourceOptions{labels?:Record<string,string[]>;operations?:string[]}
 /** A structured source for metrics and spans; `labels` is the allow-list name -> permitted values. */
@@ -224,6 +224,19 @@ export async function ingestSpan(request:APIRequestContext,s:Source,sp:SpanInput
 /** A structured source admitting only job_attempt records (internal/model/telemetry.go JobAttemptEvent). */
 export function onboardJobSource(page:Page,org:string,project:string):Promise<Source>{
  return onboard(page,org,project,{kinds:['job_attempt'],templates:[],labels:{},operations:[]});
+}
+/** A structured source for a real SDK's jobs, the errors a failed attempt captures and the SDK's own loss counters. */
+export function onboardSdkJobSource(page:Page,org:string,project:string):Promise<Source>{
+ return onboard(page,org,project,{kinds:['job_attempt','error','loss'],templates:[],labels:{},operations:[]});
+}
+/**
+ * The private configuration file the real SDK fixtures load (the shape of fixtures/sdk/estate SDKConfigFor): the onboarded source, its signed policy
+ * and trusted keys, the routing descriptor, and the CA the SDK's HTTPS transport trusts (the harness exports it as NODE_EXTRA_CA_CERTS).
+ */
+export function sdkConfig(s:Source):Record<string,unknown>{
+ if(s.sdk===undefined)throw Error('source was not onboarded with SDK configuration');
+ return {org:s.org,project:s.project,source:s.id,credential:s.credential,build:s.build,endpoint:`${origin()}/ingest/v1/batches`,policy:s.sdk.policy,trusted_keys:s.sdk.trusted_keys,descriptor:s.sdk.descriptor,
+  resource:{service_id:s.service,environment_id:s.environment,build_id:s.build,instance_pseudonym:s.instance,labels:[]},ca_file:process.env.NODE_EXTRA_CA_CERTS};
 }
 export type JobAttemptState='started'|'succeeded'|'failed'|'cancelled';
 export interface JobAttemptInput{job:string;run:string;attempt:string;/** the schedule_occurrence identity; a manual execution uses any [A-Za-z0-9_.-] string */occurrence:string;ordinal:number;epoch:string;sequence:number;state:JobAttemptState;observed:Ns;terminal?:Ns;causeTrace?:string;causeError?:string}

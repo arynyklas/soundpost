@@ -36,6 +36,11 @@ import (
 //
 //   - the tail, the last row covered in scan order, is where every pass starts
 //     reading, so fresh evidence is applied promptly;
+//   - the lookback re-reads the rows in the last jobLookback of event time before the
+//     tail on every pass and applies those it has not covered, so an event that reached
+//     the journal slightly out of order (a finished attempt delivered after later-stamped
+//     rows of other attempts) is applied on the next pass instead of waiting for the
+//     sweep: a finished attempt does not read "started" for the sweep's rest;
 //   - the sweep walks the journal from its start up to the tail, a bounded chunk
 //     per pass, so a row that reached the journal behind the tail (a retried old
 //     event, a producer with a slow clock) is still found. When it reaches the
@@ -48,6 +53,10 @@ import (
 const (
 	defaultJobProducerBound = 256
 	defaultJobSweepRest     = 5 * time.Minute
+	// jobLookback is how far (event time) behind the tail a pass looks for rows that arrived out of order, and
+	// maxCoveredRows bounds the rows remembered for it; past the bound a pass skips the lookback (the sweep still finds the row).
+	jobLookback    = 15 * time.Minute
+	maxCoveredRows = 8192
 )
 
 // rowKey is the scan order of a journal row: observed time, record ID, origin.
@@ -86,6 +95,8 @@ func (k rowKey) start() model.UnixNano {
 type jobPositions struct {
 	tail, sweep rowKey
 	restUntil   time.Time
+	// covered holds the rows covered within the lookback window: the lookback applies only rows not in it.
+	covered map[rowKey]struct{}
 }
 
 type jobProducer struct {
@@ -130,16 +141,21 @@ func (p *jobProducer) Produce(ctx context.Context, scopes ProducerScopes, lease 
 	key := [2]model.ID{scopes.Org(), scopes.Project()}
 	pos := p.pos[key]
 	if pos == nil {
-		pos = &jobPositions{}
+		pos = &jobPositions{covered: map[rowKey]struct{}{}}
 		p.pos[key] = pos
 	}
-	run := jobRun{p: p, group: group, lease: lease, read: read, write: write, project: scopes.Project(), budget: p.bound}
-	end, err := run.drain(ctx, &pos.tail, rowKey{}, false)
+	run := jobRun{p: p, group: group, lease: lease, read: read, write: write, project: scopes.Project(), budget: p.bound, covered: pos.covered}
+	end, err := run.drain(ctx, &pos.tail, rowKey{}, false, false)
 	if err != nil {
 		return run.committed, err
 	}
+	if end && pos.tail.set {
+		if err = run.lookback(ctx, pos); err != nil {
+			return run.committed, err
+		}
+	}
 	if end && run.budget > 0 && pos.tail.set && !p.now().Before(pos.restUntil) {
-		swept, err := run.drain(ctx, &pos.sweep, pos.tail, true)
+		swept, err := run.drain(ctx, &pos.sweep, pos.tail, true, false)
 		if err != nil {
 			return run.committed, err
 		}
@@ -160,12 +176,34 @@ type jobRun struct {
 	project   model.ID
 	budget    int
 	committed int
+	covered   map[rowKey]struct{}
+}
+
+// lookback applies the rows within jobLookback behind the tail that no pass has covered yet, and forgets the covered
+// rows older than that window. It never spends budget on a row it already covered.
+func (r *jobRun) lookback(ctx context.Context, pos *jobPositions) error {
+	floor := pos.tail.at - model.UnixNano(jobLookback)
+	for k := range r.covered {
+		if k.at < floor {
+			delete(r.covered, k)
+		}
+	}
+	if len(r.covered) > maxCoveredRows {
+		clear(r.covered)
+		return nil
+	}
+	if r.budget == 0 {
+		return nil
+	}
+	from := rowKey{set: true, at: floor}
+	_, err := r.drain(ctx, &from, pos.tail, true, true)
+	return err
 }
 
 // drain covers rows after *from in scan order, advancing *from past each row it
 // covers, until the journal (or, when bounded, the row `until`) ends or the
 // call's budget is spent. It reports whether it reached that end.
-func (r *jobRun) drain(ctx context.Context, from *rowKey, until rowKey, bounded bool) (bool, error) {
+func (r *jobRun) drain(ctx context.Context, from *rowKey, until rowKey, bounded, skipCovered bool) (bool, error) {
 	it, err := r.p.app.Storage.Scan(ctx, r.read, storage.ScanRequest{Projects: []model.ID{r.project}, Signal: model.JobAttempt, Start: from.start(), End: math.MaxInt64})
 	if err != nil {
 		return false, err
@@ -190,6 +228,11 @@ func (r *jobRun) drain(ctx context.Context, from *rowKey, until rowKey, bounded 
 			if bounded && row.after(until) {
 				return true, nil
 			}
+			if skipCovered {
+				if _, done := r.covered[row]; done {
+					continue
+				}
+			}
 			if r.budget == 0 {
 				return false, nil
 			}
@@ -205,6 +248,7 @@ func (r *jobRun) drain(ctx context.Context, from *rowKey, until rowKey, bounded 
 				r.committed++
 			}
 			*from = row
+			r.covered[row] = struct{}{}
 			r.budget--
 		}
 	}

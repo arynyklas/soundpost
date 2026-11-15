@@ -46,6 +46,7 @@ type Resolver struct {
 	scope     Revalidator
 	records   Records
 	artifacts Artifacts
+	issues    IssueIndex
 }
 
 // New requires the revalidator and the record reader. artifacts may be nil, in
@@ -128,4 +129,49 @@ func (r *Resolver) exists(ctx context.Context, scope auth.Scope, ref Reference) 
 	page, err := rows.Next(ctx)
 	found := err == nil && page.Len() > 0
 	return rows.Close() == nil && found
+}
+
+// IssueIndex answers which issue holds each of a project's error occurrences. The read is made under the
+// caller's own scope, so an index that cannot authorize it answers an error and nothing resolves.
+type IssueIndex interface {
+	IssuesOf(ctx context.Context, scope auth.Scope, project model.ID, occurrences []model.ID) (map[model.ID]model.ID, error)
+}
+
+// WithIssues binds the occurrence-to-issue index. Without one no occurrence resolves to an issue.
+func (r *Resolver) WithIssues(index IssueIndex) *Resolver {
+	r.issues = index
+	return r
+}
+
+// IssuesBound reports whether an occurrence-to-issue index is bound.
+func (r *Resolver) IssuesBound() bool { return r.issues != nil }
+
+// IssuesOf maps error occurrences to the issue holding each. Scope comes first: a project outside the scope or a
+// stale scope yields nothing before any index is read, and an occurrence is mapped only if the error record itself
+// is readable under the scope, so an occurrence that is missing, foreign or unreadable is simply absent from the
+// answer, never distinguishable. The answer holds only occurrences that resolved.
+func (r *Resolver) IssuesOf(ctx context.Context, scope auth.Scope, project model.ID, occurrences []model.ID) map[model.ID]model.ID {
+	out := map[model.ID]model.ID{}
+	if r.issues == nil || len(occurrences) == 0 || len(occurrences) > maxReferences*2 || !scope.AllowsProject(project) || r.scope.Revalidate(ctx, scope) != nil {
+		return out
+	}
+	var readable []model.ID
+	for _, id := range occurrences {
+		if id != (model.ID{}) && r.exists(ctx, scope, Reference{Project: project, Kind: "error", ID: id, Relation: RelationExplicit}) {
+			readable = append(readable, id)
+		}
+	}
+	if len(readable) == 0 {
+		return out
+	}
+	held, err := r.issues.IssuesOf(ctx, scope, project, readable)
+	if err != nil || r.scope.Revalidate(ctx, scope) != nil {
+		return out
+	}
+	for _, id := range readable {
+		if issue, ok := held[id]; ok && issue != (model.ID{}) {
+			out[id] = issue
+		}
+	}
+	return out
 }

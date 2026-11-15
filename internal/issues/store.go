@@ -223,3 +223,19 @@ func (s *ControlStore) Commit(ctx context.Context, scope auth.Scope, project mod
 // lost a revision race, so a caller can tell a stale revision from another
 // conflict (a reused command ID, a regressing checkpoint).
 func ConflictRevision(err error) (model.Revision, bool) { return control.IssueConflictRevision(err) }
+
+// IssuesOf answers, under the caller's scope, which issue holds each given occurrence (an occurrence no issue
+// holds is absent). It is the occurrence-to-issue lookup behind deep links from an error occurrence.
+func (s *ControlStore) IssuesOf(ctx context.Context, scope auth.Scope, project model.ID, occurrences []model.ID) (map[model.ID]model.ID, error) {
+	st, err := s.Load(ctx, scope, project)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[model.ID]model.ID, len(occurrences))
+	for _, o := range occurrences {
+		if issue, ok := st.Occurrences[o]; ok {
+			out[o] = issue
+		}
+	}
+	return out, nil
+}

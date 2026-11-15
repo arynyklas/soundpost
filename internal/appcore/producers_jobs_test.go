@@ -327,6 +327,36 @@ func TestJobProducerSweepFindsEvidenceBehindTheFrontier(t *testing.T) {
 	}
 }
 
+// An attempt that finished is never left reading "started" for the sweep's rest: its terminal event is stamped with the
+// attempt's start and reaches the journal after rows of later-started attempts were already covered. The rest between sweeps
+// is an hour here; only the lookback behind the tail can apply it on the next pass.
+func TestJobProducerAppliesAFinishedAttemptThatArrivedBehindTheFrontierWithoutWaitingForTheSweep(t *testing.T) {
+	r := newJobRig(t)
+	w := r.workers(appcore.NewJobProducerForTest(r.app, 256, time.Hour))
+	slow, other := model.ID{0x71, 1}, model.ID{0x71, 2}
+	runSlow, runOther, attSlow, attOther := model.NewID(), model.NewID(), model.NewID(), model.NewID()
+	r.ingest(r.event(slow, runSlow, attSlow, "manual.slow", 1, 1, "started", 20*time.Second, 0))
+	r.ingest(r.event(other, runOther, attOther, "manual.other", 1, 1, "started", time.Minute, 0))
+	if rep := r.tick(w); rep.Produced != 2 {
+		t.Fatalf("first pass: %+v", rep)
+	}
+	if got := r.view(slow, runSlow).Run.Attempts[0].Effective; got != jobs.AttemptStarted {
+		t.Fatalf("before its result arrives the attempt is %v", got)
+	}
+	// The result of the slow attempt is delivered now, out of order: stamped 20 s, behind the covered row at 60 s.
+	r.ingest(r.event(slow, runSlow, attSlow, "manual.slow", 1, 2, "failed", 20*time.Second, 30*time.Second))
+	if rep := r.tick(w); rep.Produced != 1 {
+		t.Fatalf("the finished attempt that arrived behind the frontier was not applied on the next pass: %+v", rep)
+	}
+	if got := r.view(slow, runSlow).Run.Attempts[0].Effective; got != jobs.AttemptFailed {
+		t.Fatalf("a finished attempt still reads %v", got)
+	}
+	// Covered rows are not re-applied or re-counted by later passes.
+	if rep := r.tick(w); rep.Produced != 0 {
+		t.Fatalf("a pass over covered rows produced %d", rep.Produced)
+	}
+}
+
 func TestJobProducerProducesNothingForARetiredProject(t *testing.T) {
 	r := newJobRig(t)
 	s := r.ingestScenario()

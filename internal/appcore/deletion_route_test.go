@@ -121,4 +121,7 @@ func TestOpenWiresTheTraceLinks(t *testing.T) {
 	if !app.Traces.LinksWired() {
 		t.Fatal("Open left the trace view without a link resolver: every trace answers links not_available")
 	}
+	if !app.Traces.IssueLinksWired() {
+		t.Fatal("Open left the trace resolver without the occurrence-to-issue index: an error occurrence never links to its issue")
+	}
 }

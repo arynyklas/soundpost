@@ -261,3 +261,62 @@ func TestStorageSpanSourceReadsTheErrorsRecordedInTheTrace(t *testing.T) {
 		t.Fatalf("a trace with no span read the error records: %v", err)
 	}
 }
+
+// fakeIssueTargets adds the occurrence->issue capability to the labelled C04 double.
+type fakeIssueTargets struct {
+	*fakeTargets
+	issues map[model.ID]model.ID
+	asked  [][]model.ID
+}
+
+func (f *fakeIssueTargets) IssuesOf(_ context.Context, _ auth.Scope, _ model.ID, occ []model.ID) map[model.ID]model.ID {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.asked = append(f.asked, append([]model.ID(nil), occ...))
+	out := map[model.ID]model.ID{}
+	for _, o := range occ {
+		if i, ok := f.issues[o]; ok {
+			out[o] = i
+		}
+	}
+	return out
+}
+
+// An error occurrence carries the issue holding it only when it is available to the caller and an issue holds
+// it; an unavailable occurrence is never asked about, so its issue cannot be learned from the trace view.
+func TestTraceViewLinksAvailableErrorOccurrencesToTheirIssue(t *testing.T) {
+	trace := model.NewID()
+	held, unheld, hidden, issue, leaked := model.NewID(), model.NewID(), model.NewID(), model.NewID(), model.NewID()
+	s1 := tSpan(trace, 1, 0, 0, 100)
+	src := &fakeSpans{answer: func() (httpapi.SpanSet, error) {
+		return httpapi.SpanSet{Spans: []model.Span{s1}, Errors: []httpapi.ErrorRef{{Span: spanID(1), Occurrence: held}, {Span: spanID(1), Occurrence: unheld}, {Span: spanID(1), Occurrence: hidden}}}, nil
+	}}
+	links := &fakeIssueTargets{fakeTargets: &fakeTargets{available: map[model.ID]bool{held: true, unheld: true}}, issues: map[model.ID]model.ID{held: issue, hidden: leaked}}
+	e := newTrLinksEnv(t, src, links)
+	p := model.NewID()
+	org := e.org("trace issue links", p)
+	reader := e.user(org, "trace-issue-reader@example.test")
+	e.grant(org, reader, p, true, auth.Read)
+	status, raw := e.view(reader, traceBody(org, p, trace))
+	if status != 200 {
+		t.Fatalf("view: %d %s", status, raw)
+	}
+	v := decodeTrace(t, raw)
+	for _, w := range []struct {
+		id   model.ID
+		want *model.ID
+	}{{held, &issue}, {unheld, nil}, {hidden, nil}} {
+		var got *httpapi.SpanTarget
+		for i := range v.Targets {
+			if v.Targets[i].Kind == "error" && v.Targets[i].ID == w.id {
+				got = &v.Targets[i]
+			}
+		}
+		if got == nil || (got.Issue == nil) != (w.want == nil) || (w.want != nil && *got.Issue != *w.want) {
+			t.Errorf("occurrence %v: %+v, want issue %v", w.id, got, w.want)
+		}
+	}
+	if len(links.asked) != 1 || len(links.asked[0]) != 2 {
+		t.Fatalf("issue lookup asked %v, want one call about the two available occurrences", links.asked)
+	}
+}

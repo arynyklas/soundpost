@@ -229,7 +229,18 @@ test('a selected span links to its job, replay, profile and error through the se
  const page=await open(t.trace);
  let details=await selectSpan(page,'Show details of span op.api, internal, level 2');
  await expect(target(details,'error','yes')).toContainText(occurrence);
- await expect(target(details,'error','yes')).toContainText('readable by this account');
+ // The occurrence is grouped into an issue by the background producer: once it is, the occurrence is an anchor to that issue, which checks the scope again.
+ const openIssue=details.getByRole('link',{name:'Open the issue holding this occurrence'});
+ await expect(async()=>{
+  await page.reload();
+  details=await selectSpan(page,'Show details of span op.api, internal, level 2');
+  await expect(openIssue).toBeVisible({timeout:2_000});
+ }).toPass({timeout:90_000});
+ await openIssue.click();
+ await expect(page).toHaveURL(new RegExp(`view=issues&target=${p1}%3A[0-9a-f]{32}`));
+ await expect(page.getByRole('heading',{name:/^Issue [0-9a-f]{32}$/})).toBeVisible();
+ await page.goBack();
+ details=await selectSpan(page,'Show details of span op.api, internal, level 2');
  await expect(target(details,'replay','no')).toContainText('not available to this account.');
  await expect(target(details,'profile','no')).toContainText('not available to this account.');
  await expect(details.getByRole('link',{name:/^Open this (replay|profile)$/})).toHaveCount(0);
