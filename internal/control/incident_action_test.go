@@ -433,12 +433,14 @@ func TestIncidentActionPrunesOldResolvedIncidentsOnlyAtTheCap(t *testing.T) {
 			t.Fatalf("incident %d: %v", n, err)
 		}
 	}
+	// exists is whether the incident still holds its state: a pruned one stays as a stub (R01-4,
+	// TestIncidentPruningLeavesTheProducersKeyStanding) that reads as erased.
 	exists := func(n int) bool {
-		_, ok, err := f.store.Incident(f.ctx, f.adminScope(), f.project, id(n))
+		rec, ok, err := f.store.Incident(f.ctx, f.adminScope(), f.project, id(n))
 		if err != nil {
 			t.Fatal(err)
 		}
-		return ok
+		return ok && !rec.Erased()
 	}
 	if err := open(cap, state(cap, "open", 0)); err != nil {
 		t.Fatalf("a new incident at the cap must prune the oldest expired resolved one: %v", err)
@@ -454,5 +456,48 @@ func TestIncidentActionPrunesOldResolvedIncidentsOnlyAtTheCap(t *testing.T) {
 	}
 	if !exists(2) || !exists(3) || exists(cap+2) {
 		t.Fatal("a refused open pruned or stored something")
+	}
+}
+
+// R01-4: the incident ID is the producer's idempotence key (it derives one from an
+// issue episode and opens the incident when none exists), so pruning a resolved
+// incident must leave the key standing: the record stays as a stub that holds its
+// identity and version and none of its state, and opening the same incident again
+// is the version conflict it always was, not a fresh incident that would notify twice.
+func TestIncidentPruningLeavesTheProducersKeyStanding(t *testing.T) {
+	f := newIncFx(t)
+	const day = model.UnixNano(24 * time.Hour)
+	now := model.UnixNano(1_700_000_000_000_000_000)
+	id := func(n int) model.ID { return model.ID{0xb0, byte(n >> 8), byte(n)} }
+	state := func(n int, status string, resolvedAt model.UnixNano) json.RawMessage {
+		resolved, _ := json.Marshal(resolvedAt)
+		return json.RawMessage(fmt.Sprintf(`{"incident_id":%q,"org_id":%q,"project_id":%q,"version":"1","status":%q,"resolved_at":%s}`, id(n).String(), f.org.String(), f.project.String(), status, resolved))
+	}
+	open := func(n int, st json.RawMessage) error {
+		_, err := f.send(model.NewID(), control.IncidentCommand{Project: f.project, Incident: id(n), Action: "open", Origin: "human", Actor: f.user, At: now, ExpectedVersion: 0, NewVersion: 1, State: st, Digest: digest(st)})
+		return err
+	}
+	const cap = 1024
+	for n := range cap {
+		if err := open(n, state(n, "resolved", now-120*day)); err != nil {
+			t.Fatalf("incident %d: %v", n, err)
+		}
+	}
+	if err := open(cap, state(cap, "open", 0)); err != nil {
+		t.Fatalf("a new incident at the cap must prune an expired resolved one: %v", err)
+	}
+	rec, ok, err := f.store.Incident(f.ctx, f.adminScope(), f.project, id(0))
+	if err != nil || !ok || !rec.Erased() || rec.Version != 1 || rec.ID != id(0) {
+		t.Fatalf("the pruned incident left no key behind: found=%v erased=%v version=%d err=%v", ok, rec.Erased(), rec.Version, err)
+	}
+	if strings.Contains(string(rec.State), "resolved_at") {
+		t.Fatalf("the pruned incident kept its state: %s", rec.State)
+	}
+	if err := open(0, state(0, "open", 0)); code(err) != model.Conflict {
+		t.Fatalf("opening a pruned incident again must conflict, got %v", err)
+	}
+	// The stub does not take room from live incidents: pruning one more makes room for one more.
+	if err := open(cap+1, state(cap+1, "open", 0)); err != nil {
+		t.Fatalf("a stub counted against the live cap: %v", err)
 	}
 }

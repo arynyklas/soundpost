@@ -408,6 +408,12 @@ func (h LegalHold) CoversBlob(m BlobManifest) bool {
 // because nothing enumerates the entries it names. Actor is the declaring
 // principal (the installation for the worker). Both are set by control, never
 // taken from a request.
+//
+// Merged is set only by the issue book when it is full of gaps: it is how many
+// other declared gaps of the same data group this one absorbed. Such a gap states
+// (After, Through] as the span of everything it absorbed (evidence processed
+// between two of them is inside the span) and Count as the exact number of
+// evidence lost, so a loss is never understated; the span may overstate where.
 type EvidenceGap struct {
 	ID         ID       `json:"id"`
 	Org        ID       `json:"org"`
@@ -423,6 +429,7 @@ type EvidenceGap struct {
 	RecordedAt UnixNano `json:"recorded_at_ns"`
 	DeclaredBy string   `json:"declared_by,omitempty"`
 	Actor      *ID      `json:"actor,omitempty"`
+	Merged     uint32   `json:"merged,omitempty"`
 }
 
 // RetentionPolicyVersion is one audited revision of a project's (or, with a

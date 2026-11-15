@@ -571,3 +571,86 @@ func TestConditionApplySurvivesRestartAndSnapshotImport(t *testing.T) {
 		t.Fatalf("a stale expected version committed after restart: %v", err)
 	}
 }
+
+// R01-5: the condition books of a project are bounded in bytes, not only in count
+// (4096 records of up to 32 KiB were ~128 MiB, never collected). A new condition
+// that would take the project past MaxConditionProjectBytes first collects the
+// conditions that settled long ago (recovered, untouched for the retention): each
+// keeps its identity, version and fence and loses its state, so a later event
+// starts it anew on a version that only moves forward (the notification policy
+// orders by that version). When nothing is collectable the creation is refused.
+func TestConditionApplyCollectsSettledConditionsUnderTheByteBudget(t *testing.T) {
+	f := newCondFx(t)
+	const day = model.UnixNano(24 * time.Hour)
+	now := model.UnixNano(1_700_000_000_000_000_000)
+	pad := strings.Repeat("x", 30<<10)
+	idOf := func(i int) model.ID { return model.ID{0xd0, byte(i >> 8), byte(i)} }
+	seed := func(n int, phase string, touched model.UnixNano) {
+		if err := f.store.Update(f.ctx, func(st *control.State) error {
+			st.ConditionBooks = map[string]json.RawMessage{}
+			for i := range n {
+				id := idOf(i)
+				state := json.RawMessage(fmt.Sprintf(`{"condition_id":%q,"org_id":%q,"project_id":%q,"version":"1","phase":%q,"event_ns":"%d","arrived_ns":"%d","fresh_ns":"%d","pad":%q}`,
+					id.String(), f.org.String(), f.project.String(), phase, int64(touched)+int64(i), int64(touched)+int64(i), int64(touched)+int64(i), pad))
+				raw, err := json.Marshal(control.ConditionRecord{Org: f.org, Project: f.project, ID: id, Version: 1, State: state})
+				if err != nil {
+					return err
+				}
+				st.ConditionBooks[f.org.String()+":"+f.project.String()+":"+id.String()] = raw
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	held := func() (total int, erased int) {
+		recs, err := f.store.Conditions(f.ctx, f.adminScope(), f.project)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range recs {
+			raw, _ := json.Marshal(r)
+			total += len(raw)
+			if r.Erased() {
+				erased++
+			}
+		}
+		return total, erased
+	}
+	lease := f.lease()
+	create := func(id model.ID) error {
+		state := condState(f.org, f.project, id, 1, "new")
+		c := control.ConditionCommand{Project: f.project, Condition: id, Lease: &lease, ExpectedVersion: 0, NewVersion: 1, At: now, State: state, Digest: digest(state)}
+		_, err := f.send(model.NewID(), c)
+		return err
+	}
+	const seeded = 320 // 320 x 30 KiB is about 9.6 MB, past the 8 MiB budget (and inside one control entry, 16 MiB)
+	seed(seeded, "recovered", now-200*day)
+	if err := create(model.ID{0xe1}); err != nil {
+		t.Fatalf("a new condition over the byte budget must collect settled ones: %v", err)
+	}
+	total, erased := held()
+	if total > control.MaxConditionProjectBytes || erased == 0 {
+		t.Fatalf("%d bytes held (budget %d), %d collected", total, control.MaxConditionProjectBytes, erased)
+	}
+	first, ok, err := f.store.Condition(f.ctx, f.adminScope(), f.project, idOf(0))
+	if err != nil || !ok || !first.Erased() || first.Version != 1 || first.ID != idOf(0) {
+		t.Fatalf("the oldest settled condition kept no identity: found=%v erased=%v version=%d err=%v", ok, first.Erased(), first.Version, err)
+	}
+	last, _, _ := f.store.Condition(f.ctx, f.adminScope(), f.project, idOf(seeded-1))
+	if last.Erased() {
+		t.Fatal("collection took the newest condition before the oldest ones were enough")
+	}
+	// Nothing settled is nothing to collect: firing and recently recovered conditions stay, the creation is refused.
+	seed(seeded, "firing", now-200*day)
+	if err := create(model.ID{0xe2}); code(err) != model.Quota {
+		t.Fatalf("firing conditions are never collected: %v", err)
+	}
+	seed(seeded, "recovered", now-10*day)
+	if err := create(model.ID{0xe3}); code(err) != model.Quota {
+		t.Fatalf("conditions recovered inside the retention are never collected: %v", err)
+	}
+	if _, erased = held(); erased != 0 {
+		t.Fatalf("a refused creation collected %d conditions", erased)
+	}
+}

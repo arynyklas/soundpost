@@ -29,12 +29,16 @@ person decided never hides what the source is doing, and the other way round.
   new episode or a worse impact proposes a new incident linked to the resolved
   one. A resolved timeline is never reopened or rewritten.
 - System condition events can never assign an owner, acknowledge or resolve.
-- A project keeps at most 1024 incidents. Only when a new incident would exceed
-  that, resolved incidents whose resolution is at least 90 days old are removed,
-  oldest first, to make room. Open incidents and recently resolved ones are never
-  removed; if nothing is old enough the new incident is refused (`quota`) rather
-  than anything being trimmed silently. If the source is still firing for an
-  episode whose resolved incident was removed, the system opens a new one.
+- A project keeps at most 1024 incidents with their state. Only when a new
+  incident would exceed that, resolved incidents whose resolution is at least 90
+  days old are pruned, oldest first, to make room. Open incidents and recently
+  resolved ones are never pruned; if nothing is old enough the new incident is
+  refused (`quota`) rather than anything being trimmed silently. A pruned
+  incident keeps its identity and version as a stub that holds none of its state
+  and reads as erased: the identity is what stops a still-firing episode from
+  opening, and notifying for, a second incident. The project keeps the newest
+  4096 stubs; a stub older than those is dropped, and only an episode that is
+  still current after that many further prunings would open a new incident.
 
 ## Snooze and maintenance
 

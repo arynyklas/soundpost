@@ -538,38 +538,34 @@ func (s *Service) ApplyThrough(ctx context.Context, scope auth.Scope, cursor mod
 }
 
 // origin is what a working issue held when this batch loaded it: how many
-// leading entries of each ledger came from the committed record (only those can
-// be folded, because control verifies a fold against the committed record) and
-// the committed resolution boundary, after which evidence of a resolved issue is
-// never folded.
+// leading entries of each ledger came from the committed record. Only those can
+// be folded, because control verifies a fold against the committed record.
 type origin struct {
 	occurrences, late int
-	bound             *model.UnixNano
 }
 
 // foldable counts the leading entries of a ledger that may be folded: at most
-// limit of them, none after the boundary.
-func foldable(list []Evidence, limit int, bound *model.UnixNano) int {
-	n := 0
-	for n < limit && n < len(list) && (bound == nil || list[n].EventTime <= *bound) {
-		n++
-	}
-	return n
+// limit of them. Evidence on either side of a resolution boundary folds alike (a
+// fold is exact: counts, bounds and the first event per release, so what a later
+// resolution observes does not change); a window that never folded post-boundary
+// evidence would wedge a hot resolved fingerprint on Quota (06.02-W3, R01-3).
+func foldable(list []Evidence, limit int) int {
+	return min(limit, len(list))
 }
 
 // room makes space for one more evidence in the issue's window. A window below
 // the trigger has room. A full one folds the oldest foldable evidence of the two
 // ledgers (the longer ledger first) into their aggregates until the window is
 // down to Keep, and has room unless nothing was foldable (every evidence is
-// from this very commit or lies after the resolution boundary): then the batch
-// stops here and the caller commits what it has.
+// from this very commit): then the batch stops here and the caller commits what
+// it has.
 func (s *Service) room(i *Issue, o *origin) bool {
 	total := len(i.Occurrences) + len(i.LateHistory)
 	if total < s.d.Ledger.Trigger {
 		return true
 	}
 	needed := total - s.d.Ledger.Keep
-	availOccurrences, availLate := foldable(i.Occurrences, o.occurrences, o.bound), foldable(i.LateHistory, o.late, o.bound)
+	availOccurrences, availLate := foldable(i.Occurrences, o.occurrences), foldable(i.LateHistory, o.late)
 	takeOccurrences, takeLate := 0, 0
 	for needed > 0 && (availOccurrences > takeOccurrences || availLate > takeLate) {
 		if availOccurrences > takeOccurrences && (availLate <= takeLate || len(i.Occurrences)-takeOccurrences >= len(i.LateHistory)-takeLate) {
@@ -618,12 +614,7 @@ func (s *Service) reduce(ctx context.Context, scope auth.Scope, project model.ID
 		if r, ok := state.Issues[id]; ok {
 			c := cloneRecord(r)
 			working[id] = &c
-			o := &origin{occurrences: len(c.Issue.Occurrences), late: len(c.Issue.LateHistory)}
-			if c.Issue.Workflow == "resolved" && c.Issue.ResolutionTime != nil {
-				b := *c.Issue.ResolutionTime
-				o.bound = &b
-			}
-			origins[id] = o
+			origins[id] = &origin{occurrences: len(c.Issue.Occurrences), late: len(c.Issue.LateHistory)}
 			return &c
 		}
 		return nil
@@ -698,6 +689,9 @@ func (s *Service) reduce(ctx context.Context, scope auth.Scope, project model.ID
 	}
 	done := stopped < 0
 	if !done && applied == 0 {
+		// Cannot happen while Keep is below Trigger (the first evidence of an issue can
+		// always fold what an earlier commit stored); kept so that a window change can
+		// never drop a whole batch silently.
 		return nil, false, model.Fail(model.Quota)
 	}
 	// The checkpoint a commit carries: the batch cursor when the whole batch is
@@ -724,6 +718,7 @@ func (s *Service) reduce(ctx context.Context, scope auth.Scope, project model.ID
 	for _, id := range ids {
 		r := working[id]
 		r.Issue.Revision++
+		r.Explanations = pruneExplanations(r.Explanations, r.Issue)
 		commit.Records = append(commit.Records, *r)
 	}
 	if advance {

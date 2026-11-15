@@ -136,6 +136,13 @@ They are not notifications and are not delivered anywhere.
 ## Limits
 
 - At most 4096 conditions per project. Past that, new conditions are refused
-  with a quota error rather than evicting the history of settled ones.
+  with a quota error: a condition's identity and version are never evicted (the
+  notification policy orders a condition by its version).
+- At most 8 MiB of condition state per project. A new condition that would pass
+  it first collects settled conditions: a condition that recovered and was
+  untouched for 90 days keeps its identity and version, loses its state and reads
+  as erased, and starts anew on the next event, oldest first. With nothing
+  settled to collect, the new condition is refused with a quota error. Updates of
+  an existing condition are never refused by the byte bound.
 - The most recent 16 accepted events per condition are kept for duplicate and
   conflict detection. A replay of an older sequence is treated as old.

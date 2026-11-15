@@ -104,6 +104,9 @@ type IssueActionRecord struct {
 type IssueCommandEntry struct {
 	Digest model.Hash         `json:"digest"`
 	Action *IssueActionRecord `json:"action,omitempty"`
+	// Rev is the book revision that committed the command: the order the book
+	// evicts by when it holds maxIssueCommands records.
+	Rev model.Revision `json:"rev,omitempty"`
 }
 
 // IssueBook is everything control holds for one project besides the issues.
@@ -449,9 +452,11 @@ func normalizeIssue(gi model.GroupingIssue) model.GroupingIssue {
 // growth of the issue's aggregate Count, and the next aggregate must equal the
 // prior aggregate with exactly prior[:k] folded in (recomputed here), so no
 // evidence can leave a ledger except into an aggregate that accounts for it, and
-// no aggregate can change any other way. A resolved issue's evidence after the
-// committed resolution boundary is never folded. It returns k.
-func issueLedgerPrefix(prior, next []model.GroupingEvidence, priorFolded, nextFolded *model.GroupingCompaction, bound *model.UnixNano) (int, error) {
+// no aggregate can change any other way. Evidence folds the same on either side
+// of a resolved issue's boundary: the aggregate keeps the first event per release,
+// so what a later resolution observed at or before a boundary stays exact, and a
+// hot resolved fingerprint can always make room (R01-3). It returns k.
+func issueLedgerPrefix(prior, next []model.GroupingEvidence, priorFolded, nextFolded *model.GroupingCompaction) (int, error) {
 	var had, now uint64
 	if priorFolded != nil {
 		had = uint64(priorFolded.Count)
@@ -467,13 +472,6 @@ func issueLedgerPrefix(prior, next []model.GroupingEvidence, priorFolded, nextFo
 	if len(next) < len(kept) || len(kept) > 0 && !reflect.DeepEqual(kept, next[:len(kept)]) {
 		return 0, model.Fail(model.Invalid)
 	}
-	if bound != nil {
-		for _, e := range prior[:k] {
-			if e.EventTime > *bound {
-				return 0, model.Fail(model.Invalid)
-			}
-		}
-	}
 	if !reflect.DeepEqual(priorFolded.Fold(prior[:k]), nextFolded.Clone()) {
 		return 0, model.Fail(model.Invalid)
 	}
@@ -485,15 +483,11 @@ func issueLedgerPrefix(prior, next []model.GroupingEvidence, priorFolded, nextFo
 // the window the writers keep (model.GroupingWindowKeep): a writer cannot
 // discard an issue's recent evidence by folding it.
 func verifyIssueCompaction(prior, next model.GroupingIssue) error {
-	var bound *model.UnixNano
-	if prior.Workflow == "resolved" {
-		bound = prior.ResolutionTime
-	}
-	kOccurrences, err := issueLedgerPrefix(prior.Occurrences, next.Occurrences, prior.Compacted, next.Compacted, bound)
+	kOccurrences, err := issueLedgerPrefix(prior.Occurrences, next.Occurrences, prior.Compacted, next.Compacted)
 	if err != nil {
 		return err
 	}
-	kLate, err := issueLedgerPrefix(prior.LateHistory, next.LateHistory, prior.LateCompacted, next.LateCompacted, bound)
+	kLate, err := issueLedgerPrefix(prior.LateHistory, next.LateHistory, prior.LateCompacted, next.LateCompacted)
 	if err != nil {
 		return err
 	}
@@ -675,7 +669,7 @@ func validIssueAudit(scope auth.Scope, a model.ControlAudit) error {
 func validIssueGap(org, project model.ID, c IssueCommand) error {
 	g := c.Gap
 	if g.ID == (model.ID{}) || g.Org != org || g.Project != project || g.Group == (model.ID{}) || g.Through <= g.After || g.Count == 0 || g.End < g.Start ||
-		!issueText(g.Reason, maxIssueReason, true) || len(g.Signals) > maxIssueSignals || g.DeclaredBy != "" || g.Actor != nil {
+		!issueText(g.Reason, maxIssueReason, true) || len(g.Signals) > maxIssueSignals || g.DeclaredBy != "" || g.Actor != nil || g.Merged != 0 {
 		return model.Fail(model.Invalid)
 	}
 	// The gap commits together with the checkpoint advance over it, under the
@@ -878,12 +872,13 @@ func applyIssueBook(scope auth.Scope, st *State, cmd Command) (Effect, error) {
 				return Effect{}, ruleFault(model.Conflict, "issue_gap_exists")
 			}
 		}
-		if len(book.Gaps) >= maxIssueGaps {
-			return Effect{}, model.Fail(model.Quota)
-		}
 		g := *c.Gap
 		g.Signals = append([]model.Kind(nil), c.Gap.Signals...)
-		book.Gaps = append(book.Gaps, g)
+		gaps, err := appendIssueGap(book.Gaps, g)
+		if err != nil {
+			return Effect{}, err
+		}
+		book.Gaps = gaps
 	}
 	if c.Command != nil {
 		key := c.Command.String()
@@ -891,12 +886,12 @@ func applyIssueBook(scope auth.Scope, st *State, cmd Command) (Effect, error) {
 			return Effect{}, ruleFault(model.Conflict, "issue_command_exists")
 		}
 		if len(book.Commands) >= maxIssueCommands {
-			return Effect{}, model.Fail(model.Quota)
+			evictOldestIssueCommand(book.Commands)
 		}
 		if book.Commands == nil {
 			book.Commands = map[string]IssueCommandEntry{}
 		}
-		entry := IssueCommandEntry{Digest: model.Hash(sha256.Sum256(cmd.Payload))}
+		entry := IssueCommandEntry{Digest: model.Hash(sha256.Sum256(cmd.Payload)), Rev: book.Revision + 1}
 		if c.Action != nil {
 			a := *c.Action
 			entry.Action = &a

@@ -3,9 +3,11 @@
 package control
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"sort"
 	"time"
 
@@ -81,13 +83,17 @@ const (
 	maxIncidentIntents        = 1024
 	maxIncidentCommandIntents = 8
 	maxIncidentToken          = 32
+	// maxIncidentStubs bounds the pruned-incident stubs one project keeps (R01-4):
+	// four times the live cap, a few hundred bytes each.
+	maxIncidentStubs = 4096
 
-	// IncidentResolvedRetention is how long a resolved incident is kept before it
-	// may be pruned to make room for a new one (the lifecycle retention of the
-	// evidence it summarises, 90 days). Pruning happens only at the per-project
-	// cap, oldest resolution first, and never touches an open incident or a
-	// resolved one inside the window: a project full of recent incidents is
-	// refused (Quota), not silently trimmed.
+	// IncidentResolvedRetention is how long a resolved incident keeps its state
+	// before it may be pruned to make room for a new one (the lifecycle retention
+	// of the evidence it summarises, 90 days). Pruning happens only at the
+	// per-project cap, oldest resolution first, and never touches an open incident
+	// or a resolved one inside the window: a project full of recent incidents is
+	// refused (Quota), not silently trimmed. A pruned incident stays as a stub (see
+	// pruneResolvedIncidents).
 	IncidentResolvedRetention = model.UnixNano(90 * 24 * time.Hour)
 )
 
@@ -195,17 +201,20 @@ func applyIncidentAction(scope auth.Scope, st *State, cmd Command) (Effect, erro
 		return Effect{}, ruleFault(model.Conflict, IncidentVersionConflict)
 	case !exists:
 		prefix := org.String() + ":" + c.Project.String() + ":"
-		n := 0
-		for k := range st.IncidentBooks {
+		live := 0
+		for k, raw := range st.IncidentBooks {
 			if len(k) > len(prefix) && k[:len(prefix)] == prefix {
-				n++
+				if _, stub := prunedIncidentAt(raw); !stub {
+					live++
+				}
 			}
 		}
-		if n >= maxIncidentsPerProject {
-			n -= pruneResolvedIncidents(st, prefix, c.At, n-maxIncidentsPerProject+1)
-			if n >= maxIncidentsPerProject {
+		if live >= maxIncidentsPerProject {
+			live -= pruneResolvedIncidents(st, prefix, c.At, live-maxIncidentsPerProject+1)
+			if live >= maxIncidentsPerProject {
 				return Effect{}, model.Fail(model.Quota)
 			}
+			boundIncidentStubs(st, prefix, maxIncidentStubs)
 		}
 		rec = IncidentRecord{Org: org, Project: c.Project, ID: c.Incident}
 	}
@@ -240,16 +249,25 @@ func applyIncidentAction(scope auth.Scope, st *State, cmd Command) (Effect, erro
 	return Effect{AffectedIDs: []model.ID{c.Incident}, Phase: "applied"}, nil
 }
 
-// pruneResolvedIncidents drops up to need resolved incidents of one project
-// whose resolution is at least IncidentResolvedRetention before at, oldest
-// resolution first (key order breaks ties), and returns how many it dropped. It
+// pruneResolvedIncidents turns up to need resolved incidents of one project whose
+// resolution is at least IncidentResolvedRetention before at into stubs, oldest
+// resolution first (key order breaks ties), and returns how many it pruned. It
 // is a pure function of the state and the command's own time, so every replica
 // prunes the same records. A record whose state is a tombstone or does not parse
 // as resolved is never pruned.
+//
+// A pruned incident is not removed: the incident ID is the idempotence key of the
+// producers that open incidents (they derive it from the episode and open one when
+// none exists), so a missing record would let the same episode open a second
+// incident and notify twice (R01-4). The record keeps its identity, version and
+// digest, loses its state and its intents (it reads as erased, see
+// prunedIncidentState) and does not count against maxIncidentsPerProject; the
+// stubs themselves are bounded by boundIncidentStubs.
 func pruneResolvedIncidents(st *State, prefix string, at model.UnixNano, need int) int {
 	type candidate struct {
 		key  string
 		when model.UnixNano
+		rec  IncidentRecord
 	}
 	var out []candidate
 	for k, raw := range st.IncidentBooks {
@@ -267,7 +285,7 @@ func pruneResolvedIncidents(st *State, prefix string, at model.UnixNano, need in
 		if json.Unmarshal(rec.State, &head) != nil || head.Status != "resolved" || head.ResolvedAt <= 0 || at-head.ResolvedAt < IncidentResolvedRetention {
 			continue
 		}
-		out = append(out, candidate{k, head.ResolvedAt})
+		out = append(out, candidate{k, head.ResolvedAt, rec})
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].when != out[j].when {
@@ -278,10 +296,85 @@ func pruneResolvedIncidents(st *State, prefix string, at model.UnixNano, need in
 	if len(out) > need {
 		out = out[:need]
 	}
+	pruned := 0
 	for _, c := range out {
-		delete(st.IncidentBooks, c.key)
+		stub := IncidentRecord{Org: c.rec.Org, Project: c.rec.Project, ID: c.rec.ID, Version: c.rec.Version, Digest: c.rec.Digest, State: prunedIncidentState(c.rec, at)}
+		raw, err := json.Marshal(stub)
+		if err != nil {
+			continue // cannot happen for these fields; the record is then kept whole
+		}
+		st.IncidentBooks[c.key] = raw
+		pruned++
 	}
-	return len(out)
+	return pruned
+}
+
+// incidentPrunedMark is the value of the "erased" member of a pruned incident's
+// state: the record is a tombstone (IncidentRecord.Erased) that no deletion
+// produced.
+const incidentPrunedMark = "pruned"
+
+// prunedIncidentState is the state a pruned incident keeps in place of its own: the
+// closed header, the pruning time and the tombstone mark.
+func prunedIncidentState(rec IncidentRecord, at model.UnixNano) json.RawMessage {
+	v, _ := json.Marshal(rec.Version)
+	return json.RawMessage(fmt.Sprintf(`{"incident_id":%q,"org_id":%q,"project_id":%q,"version":%s,"erased":%q,"pruned_ns":%d}`, rec.ID.String(), rec.Org.String(), rec.Project.String(), v, incidentPrunedMark, int64(at)))
+}
+
+// prunedIncidentAt reports whether the record is a pruned stub and when it was
+// pruned. The cheap byte test comes first; the parse decides.
+func prunedIncidentAt(raw json.RawMessage) (model.UnixNano, bool) {
+	if !bytes.Contains(raw, []byte(`"erased":"`+incidentPrunedMark+`"`)) {
+		return 0, false
+	}
+	var rec IncidentRecord
+	if json.Unmarshal(raw, &rec) != nil {
+		return 0, false
+	}
+	var head struct {
+		Erased   string `json:"erased"`
+		PrunedAt int64  `json:"pruned_ns"`
+	}
+	if json.Unmarshal(rec.State, &head) != nil || head.Erased != incidentPrunedMark {
+		return 0, false
+	}
+	return model.UnixNano(head.PrunedAt), true
+}
+
+// boundIncidentStubs drops the oldest pruned stubs of one project (by pruning
+// time, then key) beyond limit and returns how many it dropped. A producer can
+// only look for the incident of an episode that is still current, one per issue
+// (at most 256 issues a project holds), so a stub older than the newest limit
+// of them can only be for an episode long over: this bound costs a repeated
+// incident only for an issue still open after limit further prunings.
+func boundIncidentStubs(st *State, prefix string, limit int) int {
+	type stub struct {
+		key  string
+		when model.UnixNano
+	}
+	var all []stub
+	for k, raw := range st.IncidentBooks {
+		if len(k) <= len(prefix) || k[:len(prefix)] != prefix {
+			continue
+		}
+		if at, ok := prunedIncidentAt(raw); ok {
+			all = append(all, stub{k, at})
+		}
+	}
+	if len(all) <= limit {
+		return 0
+	}
+	sort.Slice(all, func(i, j int) bool {
+		if all[i].when != all[j].when {
+			return all[i].when < all[j].when
+		}
+		return all[i].key < all[j].key
+	})
+	drop := all[:len(all)-limit]
+	for _, s := range drop {
+		delete(st.IncidentBooks, s.key)
+	}
+	return len(drop)
 }
 
 // Incident reads one incident's committed record through a linearizable control

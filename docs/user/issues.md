@@ -54,6 +54,12 @@ Evidence is routed to the issue with the same grouping version and fingerprint, 
 
 While an issue is resolved, evidence whose event time is at or before the resolution boundary goes to the issue's late history. Counts, first seen and last seen are recomputed from the ledger (`Summarize`) by event time; arrival times are reported as recorded.
 
+## Evidence window
+
+An issue's two ledgers hold at most 1024 evidence records together. When one more would not fit, the oldest records fold into an exact aggregate (count, event and arrival bounds, first event per release, the last 512 occurrence IDs for duplicate recognition) down to 512, and control verifies every fold. The fold does not depend on which side of a resolution boundary the evidence lies: a resolved issue whose post-boundary evidence keeps arriving (a hot fingerprint in a release without the fix) folds it like any other, so it never stalls the data group's checkpoint. The aggregate keeps the first event per release, so the releases observed at or before a later resolution boundary stay exact. A folded occurrence reads as `incomplete` (`evidence_window_compacted`) on the evidence route.
+
+The stored regression evaluations of one issue are bounded by size (192 KiB, pruned down to 128 KiB, against control's 256 KiB): the oldest evaluations that nothing decides by are dropped first. An evaluation that reopened the issue is never dropped (the episode number of its incident counts them), and neither is, while the issue is resolved, an eligible evaluation of the current resolution (it counts toward the reopen threshold).
+
 ## Regression
 
 `Regresses(issue, evidence, graph)` is a pure function of the stored resolution facts, the evidence and the release graph (a partial order from 06.01, never version text or time): only a **resolved** issue regresses; evidence at or before the resolution boundary is late history; with a recorded fixed-descendant frontier evidence qualifies only in a frontier release or a descendant; unknown ancestry is reported as `ancestry unknown`, not guessed.
@@ -70,7 +76,7 @@ The error evidence journal is retained for its declared period. Before unprocess
 
 1. the journal-expiry producer lists the error occurrences expiring within twice the lead (default lead 24 hours; the listing is cached for 15 minutes);
 2. when an unprocessed occurrence expires within the lead, `RecordGap` commits one gap over the contiguous unprocessed run that is expiring, starting exactly at the group's checkpoint, and advances the checkpoint over it in the same transaction; `Health` then reports the project incomplete, never zero or recovered;
-3. if the gap cannot commit (control unavailable, the book's gap capacity of 128 reached), the journal is **held** (`storage.HoldJournal`): the retention worker keeps what no gap covers, and admissions of error evidence for that project are accepted only while a reserve of 64 MiB lasts, then rejected with a retryable `journal_reserve` fault instead of discarding anything. A committed gap releases the hold. The hold is in memory on the leader and is set again on the next pass.
+3. if the gap cannot commit (control unavailable; a full book of 128 gaps is not a reason, it coalesces, see Bounds), the journal is **held** (`storage.HoldJournal`): the retention worker keeps what no gap covers, and admissions of error evidence for that project are accepted only while a reserve of 64 MiB lasts, then rejected with a retryable `journal_reserve` fault instead of discarding anything. A committed gap releases the hold. The hold is in memory on the leader and is set again on the next pass.
 
 ## Deletion and scope fences
 
@@ -78,4 +84,10 @@ Every operation revalidates the scope, checks permission and project, and consul
 
 ## Bounds
 
-Per project: 256 issues, 4 MiB of issue JSON, 256 effect intents, 128 gaps, 128 data-group checkpoints, 1024 command records. Per issue: a bounded evidence ledger and 256 KiB of explanations.
+Per project: 256 issues, 4 MiB of issue JSON, 256 effect intents, 128 gaps, 128 data-group checkpoints, 1024 command records. Per issue: an evidence window of at most 1024 records and 256 KiB of explanations.
+
+None of the lists below refuses the project for the rest of its life:
+
+- **Gaps.** The 129th declared gap of a data group is coalesced with the oldest gap of that group (`merged` counts the declarations a gap absorbed): the lost count is the exact sum, the cursor span covers both (evidence processed between them lies inside the span, so a span may overstate where evidence was lost, never how much), and the newest declaration stays as it was. Only a book whose 128 gaps are all of different groups would refuse, and the group bound makes that unreachable.
+- **Command records.** The 1025th explicit command (a human action or a gap) evicts the oldest record, by the book revision that committed it. A command ID re-sent after a thousand newer ones is no longer recognized as a retry; the issue's own revision check then refuses a stale action.
+- **Explanations.** See "Evidence window" above.

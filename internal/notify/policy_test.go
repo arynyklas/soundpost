@@ -2134,7 +2134,8 @@ func TestPolicyLateAndBackfillCountersAreReplaySafe(t *testing.T) {
 	if h.s.Late != 2 {
 		t.Fatalf("a new late event must count: %d", h.s.Late)
 	}
-	// The memory is bounded: after MaxLateMarks newer commands the oldest is forgotten.
+	// The memory is bounded and does not roll: it holds three commands now (the backfill, the late
+	// event and `again`), MaxLateMarks-3 more fill it, and the rest are not counted (a lower bound).
 	for i := range notify.MaxLateMarks {
 		next := late
 		next.Command = model.ID{0xc8, byte(i >> 8), byte(i)}
@@ -2143,7 +2144,56 @@ func TestPolicyLateAndBackfillCountersAreReplaySafe(t *testing.T) {
 	if len(h.s.LateSeen) != notify.MaxLateMarks {
 		t.Fatalf("late memory holds %d commands, bound %d", len(h.s.LateSeen), notify.MaxLateMarks)
 	}
-	if h.s.Late != uint32(2+notify.MaxLateMarks) {
-		t.Fatalf("late = %d", h.s.Late)
+	if h.s.Late != uint32(notify.MaxLateMarks-1) || !h.s.LateSaturated {
+		t.Fatalf("late = %d saturated=%v", h.s.Late, h.s.LateSaturated)
+	}
+}
+
+// R01-7 (06.06-W2): the provenance counters never count a replay, however many
+// other commands came between. The memory of counted commands does not roll: the
+// first MaxLateMarks distinct commands are remembered for good, and a later
+// distinct one is not counted but flags the counters as a lower bound
+// (LateSaturated), exactly as a saturated evidence window does.
+func TestPolicyLateCountersNeverCountAReplayAfterTheMemoryFills(t *testing.T) {
+	h := newHarness(t, issueE)
+	h.dest(rcptA, "", t0)
+	old := t0 - 2*hour
+	late := h.ev(notify.EventIssue)
+	late.Entity = &issueE
+	late.Issue = &notify.IssueEvidence{WindowStart: old - old%notify.ErrorWindow, Occurrences: occ(3, 2), Freshness: notify.FreshnessFresh}
+	h.do(late, t0+min1)
+	if h.s.Late != 1 || h.s.LateSaturated {
+		t.Fatalf("first late event: late=%d saturated=%v", h.s.Late, h.s.LateSaturated)
+	}
+	for i := 1; i < notify.MaxLateMarks; i++ {
+		next := late
+		next.Command = model.ID{0xc8, byte(i >> 8), byte(i)}
+		h.do(next, t0+min1)
+	}
+	if h.s.Late != notify.MaxLateMarks || h.s.LateSaturated {
+		t.Fatalf("memory full: late=%d saturated=%v", h.s.Late, h.s.LateSaturated)
+	}
+	// Distinct commands beyond the memory are not counted, and say so.
+	for i := range 10 {
+		extra := late
+		extra.Command = model.ID{0xc9, byte(i)}
+		h.do(extra, t0+2*min1)
+	}
+	if h.s.Late != notify.MaxLateMarks || !h.s.LateSaturated {
+		t.Fatalf("beyond the memory: late=%d saturated=%v (a lower bound, flagged)", h.s.Late, h.s.LateSaturated)
+	}
+	// A replay of the first command, long after the others, is still a replay.
+	before := h.s
+	h.do(late, t0+3*min1)
+	if h.s.Late != before.Late || h.s.Backfilled != before.Backfilled {
+		t.Fatalf("a replay after the memory turned over counted again: late %d -> %d", before.Late, h.s.Late)
+	}
+	backfill := h.ev(notify.EventIssue)
+	backfill.Entity = &issueE
+	backfill.Mode = notify.ModeBackfill
+	backfill.Issue = &notify.IssueEvidence{WindowStart: t0, Occurrences: occ(3, 1), Freshness: notify.FreshnessFresh}
+	h.do(backfill, t0+4*min1)
+	if h.s.Backfilled != 0 || !h.s.LateSaturated {
+		t.Fatalf("a backfill past the memory is not counted: %d", h.s.Backfilled)
 	}
 }

@@ -167,5 +167,8 @@ State per problem is bounded: 3 windows of at most 1024 occurrence IDs, 32
 recipients, 8 linked entities, 8 critical services, 16 source cursors and a
 ledger of the last 64 decisions. Going beyond a bound is a typed refusal.
 
-The `Late` and `Backfilled` counters are best-effort provenance: a replayed late
-event counts again.
+The `Late` and `Backfilled` counters are provenance and count each late or
+backfill command once: a replay of a counted command never counts again, however
+much later it arrives. The state remembers the first 64 distinct such commands;
+a further distinct one is not counted and sets `late_saturated`, which makes
+both counters lower bounds (never above the truth).

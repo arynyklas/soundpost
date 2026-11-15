@@ -264,3 +264,60 @@ func TestRealHostMemoryLoadAndPrivacy(t *testing.T) {
 		}
 	}
 }
+
+// TestRealHostProcessCountOnAHidepidMount runs the collector against a REAL /proc
+// mount, not a fixture (07.03-W4). The mount is made by the caller, who sets
+// SOUNDPOST_REAL_HIDEPID to what it set up (internal/host/hidepid_real.sh is the
+// recipe: a user and pid namespace with /proc remounted hidepid=2, run as a
+// non-root and as the namespace's root):
+//
+//	restricted: hidepid mount, euid != 0: the group is unknown/process_visibility_restricted and no sample is emitted
+//	exempt:     hidepid mount, euid 0: the agent is assumed to see every process, so it counts
+//	plain:      an ordinary /proc: it counts
+//
+// Without the variable the test is skipped: the host it runs on decides the mount.
+func TestRealHostProcessCountOnAHidepidMount(t *testing.T) {
+	mode := os.Getenv("SOUNDPOST_REAL_HIDEPID")
+	if mode == "" {
+		t.Skip("SOUNDPOST_REAL_HIDEPID is not set: this test needs a /proc mount made for it (internal/host/hidepid_real.sh)")
+	}
+	mountinfo, err := os.ReadFile("/proc/self/mountinfo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hidepid := false
+	for _, line := range strings.Split(string(mountinfo), "\n") {
+		if f := strings.Fields(line); len(f) > 4 && f[4] == "/proc" && strings.Contains(line, "hidepid=") {
+			hidepid = true
+		}
+	}
+	b, caps := realCollect(t, HostPolicy{Allow: []Group{GroupProcessCount}})
+	switch mode {
+	case "restricted":
+		if !hidepid || os.Geteuid() == 0 {
+			t.Fatalf("not the restricted setup: hidepid mount %v, euid %d", hidepid, os.Geteuid())
+		}
+		mustCap(t, caps, GroupProcessCount, "", StatusUnknown, ReasonProcessVisibility)
+		if len(b.Samples) != 0 {
+			t.Fatalf("a restricted process view emitted samples: %+v", b.Samples)
+		}
+	case "exempt":
+		if !hidepid || os.Geteuid() != 0 {
+			t.Fatalf("not the exempt setup: hidepid mount %v, euid %d", hidepid, os.Geteuid())
+		}
+		mustCap(t, caps, GroupProcessCount, "", StatusSupported, ReasonNone)
+		if values(b)["host_processes_total{}"] < 1 {
+			t.Fatalf("no process counted: %+v", b.Samples)
+		}
+	case "plain":
+		if hidepid {
+			t.Fatal("the plain setup has a hidepid mount")
+		}
+		mustCap(t, caps, GroupProcessCount, "", StatusSupported, ReasonNone)
+		if values(b)["host_processes_total{}"] < 1 {
+			t.Fatalf("no process counted: %+v", b.Samples)
+		}
+	default:
+		t.Fatalf("unknown SOUNDPOST_REAL_HIDEPID %q", mode)
+	}
+}

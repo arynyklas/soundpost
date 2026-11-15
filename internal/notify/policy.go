@@ -353,16 +353,22 @@ func mulNano(a, k model.UnixNano) (model.UnixNano, bool) {
 
 // ---- evidence ----
 
+// late counts one late or backfill event, once per command. The memory of counted
+// commands does not roll (a rolling one forgets the oldest, and a replay of a
+// forgotten command would count again, 06.06-W2): once it holds MaxLateMarks
+// commands a further distinct command is not counted and LateSaturated says the
+// counters are lower bounds from here on. A replay is therefore never counted
+// twice, at any distance, and a counter is never above the truth.
 func (r *run) late(mode Mode) {
 	s := &r.s
-	// A replay of an event already counted (same command) is not new history.
 	if slices.Contains(s.LateSeen, r.ev.Command) {
 		return
 	}
-	s.LateSeen = append(s.LateSeen, r.ev.Command)
-	if len(s.LateSeen) > MaxLateMarks {
-		s.LateSeen = s.LateSeen[len(s.LateSeen)-MaxLateMarks:]
+	if len(s.LateSeen) >= MaxLateMarks {
+		s.LateSaturated = true
+		return
 	}
+	s.LateSeen = append(s.LateSeen, r.ev.Command)
 	if mode == ModeBackfill {
 		s.Backfilled = satAdd(s.Backfilled)
 		return

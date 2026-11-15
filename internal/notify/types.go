@@ -260,7 +260,9 @@ const (
 	MaxCriticalServices  = 8
 	MaxSentMarks         = 64
 	// MaxLateMarks bounds the commands remembered so a replayed late or
-	// backfill event is counted once (older replays count again).
+	// backfill event is counted once. The memory does not roll: the first
+	// MaxLateMarks distinct commands are kept for good and later distinct ones are
+	// not counted (PolicyState.LateSaturated), so no replay is ever counted twice.
 	MaxLateMarks   = 64
 	MaxReasonBytes = 512
 	MaxName        = 64
@@ -607,9 +609,12 @@ type PolicyState struct {
 	// backfill evidence. Neither ever interrupts anyone.
 	Late       uint32 `json:"late,omitempty"`
 	Backfilled uint32 `json:"backfilled,omitempty"`
-	// LateSeen is the most recent commands counted in Late or Backfilled, so a
-	// replay of one of them does not count twice.
-	LateSeen []model.ID `json:"late_seen,omitempty"`
+	// LateSeen is the first MaxLateMarks distinct commands counted in Late or
+	// Backfilled, so a replay of one of them, at any later time, does not count
+	// twice. LateSaturated is set when a further distinct command arrived with the
+	// memory full: it was not counted, so Late and Backfilled are then lower bounds.
+	LateSeen      []model.ID `json:"late_seen,omitempty"`
+	LateSaturated bool       `json:"late_saturated,omitempty"`
 
 	Windows         []WindowState  `json:"windows,omitempty"`
 	ConditionSeq    uint64         `json:"condition_seq,omitempty"`

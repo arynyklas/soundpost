@@ -330,10 +330,11 @@ func TestCompactionDoesNotChangeResolutionOrRegression(t *testing.T) {
 	}
 }
 
-// Post-boundary evidence of a resolved issue is never folded away, only the
-// evidence at or before the boundary is; with nothing foldable the old Quota is
-// the honest last resort.
-func TestResolvedIssueNeverFoldsPostBoundaryEvidence(t *testing.T) {
+// Post-boundary evidence of a resolved issue folds like any other when the window
+// is full, oldest first (the pre-boundary evidence first, because it is the oldest);
+// the summary and the releases observed at or before the boundary stay exact, and
+// the hot issue keeps committing (R01-3).
+func TestResolvedIssueFoldsPostBoundaryEvidenceToMakeRoom(t *testing.T) {
 	f := newFx(t)
 	f.withLedger(issues.LedgerWindow{Trigger: 8, Keep: 4})
 	f.apply(f.ev(1, f.A, 10), f.ev(1, f.A, 11), f.ev(1, f.A, 12))
@@ -344,29 +345,26 @@ func TestResolvedIssueNeverFoldsPostBoundaryEvidence(t *testing.T) {
 	if got := f.issueFor(1); len(got.Occurrences) != 8 || got.Compacted != nil || got.Workflow != "resolved" {
 		t.Fatalf("fixture: %+v", got)
 	}
-	// Room is made by folding the three pre-boundary evidence, never the others.
+	// Room is made by folding the four oldest: the three pre-boundary evidence and the first after it.
 	f.apply(f.ev(1, f.A, 205))
 	got := f.issueFor(1)
-	if got.Compacted == nil || got.Compacted.Count != 3 || got.Compacted.LastEvent != 12 || len(got.Occurrences) != 6 {
-		t.Fatalf("pre-boundary evidence was not the part folded: %+v", got)
+	if got.Compacted == nil || got.Compacted.Count != 4 || got.Compacted.LastEvent != 200 || len(got.Occurrences) != 5 {
+		t.Fatalf("the oldest four were not the part folded: %+v", got)
 	}
-	f.apply(f.ev(1, f.A, 206), f.ev(1, f.A, 207))
+	for i := 206; i < 240; i++ {
+		f.apply(f.ev(1, f.A, model.UnixNano(i)))
+	}
 	cp := f.projectState().Checkpoints[f.group]
-	last := f.ev(1, f.A, 208)
-	if e := f.svc.ApplyThrough(context.Background(), f.writer, last.Origin, []issues.Evidence{last}); code(e) != model.Quota {
-		t.Fatalf("nothing foldable must stay the honest Quota, got %v", e)
-	}
 	after := f.issueFor(1)
-	if len(after.Occurrences) != 8 || after.Compacted.Count != 3 || f.projectState().Checkpoints[f.group] != cp {
-		t.Fatalf("a refused batch changed state: %d in window, aggregate %+v", len(after.Occurrences), after.Compacted)
+	if cp != model.Uint64(f.next) || len(after.Occurrences) > 8 || after.Workflow != "resolved" {
+		t.Fatalf("checkpoint %d (want %d), %d in the window, workflow %s", cp, f.next, len(after.Occurrences), after.Workflow)
 	}
-	for i, e := range after.Occurrences {
-		if want := model.UnixNano(200 + i); e.EventTime != want {
-			t.Fatalf("post-boundary evidence %d is %d, want %d", i, e.EventTime, want)
-		}
-	}
-	if s := issues.Summarize(after); s.Count != 11 || s.FirstSeen != 10 || s.LastSeen != 207 {
+	if s := issues.Summarize(after); s.Count != 43 || s.FirstSeen != 10 || s.LastSeen != 239 {
 		t.Fatalf("summary %+v", s)
+	}
+	// A resolution after a later reopen still sees the release the folded evidence named.
+	if observed := after.ObservedReleases; len(observed) != 1 || observed[0] != f.A {
+		t.Fatalf("observed releases %v", observed)
 	}
 }
 
@@ -414,37 +412,34 @@ func TestResolutionAndRegressionAfterRealCompaction(t *testing.T) {
 	}
 }
 
-// A batch stops at the first evidence whose issue cannot free room, having applied
-// what came before: the checkpoint rests just below that evidence (it is never
-// skipped), the stalled issue is left exactly as it was, and with nothing at all
-// applicable the answer is the honest Quota.
-func TestAStalledIssueHoldsTheCheckpointJustBelowItsEvidence(t *testing.T) {
+// A resolved issue whose window is full of post-boundary evidence does not stall
+// its batch: the oldest evidence folds, the whole batch commits and the checkpoint
+// reaches its end (R01-3; it used to rest just below the stalled evidence, and with
+// nothing applicable the answer was Quota, wedging the data group).
+func TestAResolvedIssueFullOfPostBoundaryEvidenceDoesNotStallItsBatch(t *testing.T) {
 	f := newFx(t)
 	f.withLedger(issues.LedgerWindow{Trigger: 8, Keep: 4})
 	f.apply(f.ev(1, f.A, 10))
 	f.resolve(1, f.B) // boundary 100: later evidence in A does not contain the fix
-	for i := range 8 {
+	for i := range 11 {
 		f.apply(f.ev(1, f.A, model.UnixNano(200+i)))
 	}
-	stalled := f.issueFor(1)
-	if len(stalled.Occurrences) != 8 || stalled.Compacted == nil || stalled.Compacted.Count != 1 {
-		t.Fatalf("fixture: %d in the window, aggregate %+v", len(stalled.Occurrences), stalled.Compacted)
+	if got := f.issueFor(1); len(got.Occurrences) != 8 || got.Compacted == nil || got.Compacted.Count != 4 || got.Workflow != "resolved" {
+		t.Fatalf("fixture: %d in the window, aggregate %+v", len(got.Occurrences), got.Compacted)
 	}
-	before := f.projectState().Checkpoints[f.group]
-	other, overflow, after := f.ev(2, f.A, 300), f.ev(1, f.A, 208), f.ev(2, f.A, 301)
-	e := f.svc.ApplyThrough(context.Background(), f.writer, after.Origin, []issues.Evidence{other, overflow, after})
-	if code(e) != model.Quota {
-		t.Fatalf("the stalled evidence must end the batch with Quota, got %v", e)
+	other, overflow, after := f.ev(2, f.A, 300), f.ev(1, f.A, 211), f.ev(2, f.A, 301)
+	if e := f.svc.ApplyThrough(context.Background(), f.writer, after.Origin, []issues.Evidence{other, overflow, after}); e != nil {
+		t.Fatalf("a resolved issue with a full post-boundary window stalled its batch: %v", e)
 	}
-	st := f.projectState()
-	if got := issues.Summarize(f.issueFor(2)); got.Count != 1 || got.LastSeen != 300 {
-		t.Fatalf("the evidence before the stall was not applied: %+v", got)
+	if cp := f.projectState().Checkpoints[f.group]; cp != after.Origin.Index {
+		t.Fatalf("checkpoint %d, want the end of the batch %d", cp, after.Origin.Index)
 	}
-	if st.Checkpoints[f.group] != other.Origin.Index || other.Origin.Index <= before {
-		t.Fatalf("checkpoint %d, want %d (just below the stalled evidence at %d)", st.Checkpoints[f.group], other.Origin.Index, overflow.Origin.Index)
+	got := f.issueFor(1)
+	if s := issues.Summarize(got); s.Count != 13 || s.FirstSeen != 10 || s.LastSeen != 211 || got.Workflow != "resolved" {
+		t.Fatalf("summary %+v workflow %s", s, got.Workflow)
 	}
-	if again := f.issueFor(1); !reflect.DeepEqual(again, stalled) {
-		t.Fatalf("the stalled issue changed: revision %d -> %d", stalled.Revision, again.Revision)
+	if s := issues.Summarize(f.issueFor(2)); s.Count != 2 || s.LastSeen != 301 {
+		t.Fatalf("the other issue: %+v", s)
 	}
 }
 
@@ -461,4 +456,87 @@ func TestLedgerWindowIsValidated(t *testing.T) {
 		}
 	}
 	f.withLedger(issues.LedgerWindow{Trigger: model.GroupingWindowMax, Keep: 1})
+}
+
+// R01-3: a resolved issue whose post-boundary evidence keeps arriving (a hot
+// fingerprint in a release that does not contain the fix) must not wedge the data
+// group's checkpoint. Over the real control store, 3000 such occurrences commit,
+// the count stays exact, the issue stays resolved and its stored explanations stay
+// inside control's size bound.
+func TestHotResolvedFingerprintDoesNotWedgeTheCheckpoint(t *testing.T) {
+	f := newRealFx(t)
+	f.clock.at = 100_000
+	first := f.ev(1, f.A, 10)
+	f.apply(first)
+	issue := f.issueByFp(1)
+	if _, e := f.svc.Act(context.Background(), f.writer, issues.IssueAction{CommandID: model.NewID(), ExpectedVersion: issue.Revision, IssueID: issue.ID, Kind: "resolve", Reason: "fixed in B", FixedDescendantFrontier: []model.ID{f.B}}); e != nil {
+		t.Fatal(e)
+	}
+	const total = 3000
+	all := []issues.Evidence{first}
+	for i := 0; i < total; i += 100 {
+		batch := make([]issues.Evidence, 0, 100)
+		for j := range 100 {
+			batch = append(batch, f.ev(1, f.A, model.UnixNano(200_000+i+j))) // after the boundary, without the fix
+		}
+		all = append(all, batch...)
+		last := batch[len(batch)-1].Origin
+		if e := f.svc.ApplyThrough(context.Background(), f.writer, last, batch); e != nil {
+			t.Fatalf("batch at %d: %v (a hot resolved fingerprint wedged the checkpoint)", i, e)
+		}
+	}
+	st := f.load()
+	if st.Checkpoints[f.group] != model.Uint64(f.next) {
+		t.Fatalf("checkpoint %d, want %d", st.Checkpoints[f.group], f.next)
+	}
+	got := f.issueByFp(1)
+	if got.Workflow != "resolved" || issues.Summarize(got).Count != total+1 {
+		t.Fatalf("workflow %s, count %d", got.Workflow, issues.Summarize(got).Count)
+	}
+	if window := len(got.Occurrences) + len(got.LateHistory); window > model.GroupingWindowMax || got.Compacted == nil {
+		t.Fatalf("window %d, aggregate %+v", window, got.Compacted)
+	}
+	if want := exact(all); issues.Summarize(got) != want {
+		t.Fatalf("summary\n got %+v\nwant %+v", issues.Summarize(got), want)
+	}
+	explained := f.explain(got)
+	if len(explained) == 0 || len(explained) >= total {
+		t.Fatalf("%d explanations kept of %d evaluated", len(explained), total)
+	}
+	if newest := all[len(all)-1]; explained[len(explained)-1].OccurrenceID != newest.OccurrenceID {
+		t.Fatalf("the newest evaluation was not kept")
+	}
+}
+
+// Pruning explanations never loses one the lifecycle still needs: an eligible
+// evaluation of the current resolution counts toward the reopen threshold however
+// many ineligible ones came after it.
+func TestExplanationPruningKeepsWhatTheThresholdCounts(t *testing.T) {
+	f := newFx(t)
+	f.svc = f.service(issues.RegressionPolicy{MinOccurrences: 3})
+	f.apply(f.ev(1, f.A, 10))
+	f.resolve(1, f.B)
+	f.apply(f.ev(1, f.C, 200), f.ev(1, f.C, 201)) // descendants of the fix: eligible, below the threshold
+	var noise []issues.Evidence
+	for i := range 2500 {
+		noise = append(noise, f.ev(1, f.A, model.UnixNano(300+i))) // a release without the fix: never eligible
+	}
+	f.applyBatches(noise, 100)
+	explained := f.explain(f.issueFor(1))
+	if len(explained) >= 2502 {
+		t.Fatalf("%d explanations are all kept", len(explained))
+	}
+	eligible := 0
+	for _, x := range explained {
+		if x.Decision.Eligible {
+			eligible++
+		}
+	}
+	if eligible != 2 {
+		t.Fatalf("%d eligible evaluations kept, want the 2 the threshold counts", eligible)
+	}
+	f.apply(f.ev(1, f.C, 9000))
+	if got := f.issueFor(1); got.Workflow != "open" {
+		t.Fatalf("the third eligible occurrence must reopen: %s", got.Workflow)
+	}
 }

@@ -149,41 +149,6 @@ func TestControlVerifiesEveryCompaction(t *testing.T) {
 	}
 }
 
-// Evidence after a resolved issue's committed boundary is never folded, and the
-// committed boundary governs even when the same commit reopens the issue.
-func TestControlRefusesToFoldPostBoundaryEvidence(t *testing.T) {
-	f := newIssFx(t)
-	boundary := model.UnixNano(1000 + 500) // events are 1000+index: indices 1..500 are at or before it
-	prior := f.ledger(1, 1, model.GroupingWindowMax)
-	resolved := f.issue(1, 1, prior...)
-	resolved.Workflow, resolved.ResolutionTime = "resolved", &boundary
-	f.must(control.IssueCommand{Records: []control.IssueRecordChange{f.record(resolved)}})
-	try := func(next model.GroupingIssue) error {
-		_, err := f.commit(control.IssueCommand{ExpectedRevision: 1, Records: []control.IssueRecordChange{f.record(next)}})
-		return err
-	}
-	fold := func(k int, reopen bool) model.GroupingIssue {
-		next := f.issue(1, 2, append(append([]model.GroupingEvidence(nil), prior[k:]...), f.evidence(1, 2000))...)
-		next.Compacted = (*model.GroupingCompaction)(nil).Fold(prior[:k])
-		if !reopen {
-			next.Workflow, next.ResolutionTime = "resolved", &boundary
-		}
-		return next
-	}
-	if err := try(fold(model.GroupingWindowKeep, false)); code(err) != model.Invalid {
-		t.Fatalf("folding evidence after the boundary: %v", err)
-	}
-	if err := try(fold(model.GroupingWindowKeep, true)); code(err) != model.Invalid {
-		t.Fatalf("folding after the boundary while reopening in the same commit: %v", err)
-	}
-	if err := try(fold(500, false)); err != nil {
-		t.Fatalf("folding exactly the evidence at or before the boundary: %v", err)
-	}
-	if got := f.snap().Issues[0].Compacted; got.Count != 500 || got.LastEvent != boundary {
-		t.Fatalf("aggregate %+v", got)
-	}
-}
-
 // The late-history ledger folds by the same rule with its own aggregate.
 func TestControlVerifiesLateHistoryCompaction(t *testing.T) {
 	f := newIssFx(t)
@@ -206,5 +171,31 @@ func TestControlVerifiesLateHistoryCompaction(t *testing.T) {
 	}
 	if got := f.snap().Issues[0]; got.Compacted != nil || got.LateCompacted == nil || got.LateCompacted.Count != model.GroupingWindowKeep {
 		t.Fatalf("stored %+v", got)
+	}
+}
+
+// R01-3: a fold is exact whatever side of the resolution boundary the folded
+// evidence lies on, so a hot resolved issue can make room; a forged aggregate is
+// still refused.
+func TestControlFoldsPostBoundaryEvidenceExactly(t *testing.T) {
+	f := newIssFx(t)
+	boundary := model.UnixNano(1000 + 500)
+	prior := f.ledger(1, 1, model.GroupingWindowMax)
+	resolved := f.issue(1, 1, prior...)
+	resolved.Workflow, resolved.ResolutionTime = "resolved", &boundary
+	f.must(control.IssueCommand{Records: []control.IssueRecordChange{f.record(resolved)}})
+	next := f.issue(1, 2, append(append([]model.GroupingEvidence(nil), prior[model.GroupingWindowKeep:]...), f.evidence(1, 2000))...)
+	next.Compacted = (*model.GroupingCompaction)(nil).Fold(prior[:model.GroupingWindowKeep])
+	next.Workflow, next.ResolutionTime = "resolved", &boundary
+	forged := clone(t, next)
+	forged.Compacted.LastEvent++
+	if _, err := f.commit(control.IssueCommand{ExpectedRevision: 1, Records: []control.IssueRecordChange{f.record(forged)}}); code(err) != model.Invalid {
+		t.Fatalf("a forged aggregate: %v", err)
+	}
+	if _, err := f.commit(control.IssueCommand{ExpectedRevision: 1, Records: []control.IssueRecordChange{f.record(next)}}); err != nil {
+		t.Fatalf("folding evidence after the boundary of a resolved issue: %v", err)
+	}
+	if got := f.snap().Issues[0].Compacted; got.Count != model.GroupingWindowKeep || got.LastEvent <= boundary {
+		t.Fatalf("aggregate %+v", got)
 	}
 }

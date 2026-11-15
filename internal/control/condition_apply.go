@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"sort"
 	"strings"
 
@@ -74,9 +75,20 @@ const (
 	maxConditionStateBytes = 32 << 10
 	maxConditionToken      = 32
 	// MaxConditionsPerProject bounds the condition records of one project. The
-	// bound is a visible quota error; settled conditions are never evicted,
-	// because a late event for an evicted condition would read as a new one.
+	// bound is a visible quota error: a condition's identity and version are never
+	// evicted, because a late event for an evicted condition would read as a new one
+	// and the notification policy orders a condition by its version.
 	MaxConditionsPerProject = 4096
+	// MaxConditionProjectBytes bounds the condition records of one project in bytes
+	// (records may hold up to maxConditionStateBytes each, which alone is 128 MiB at
+	// MaxConditionsPerProject). A creation that would pass it first collects settled
+	// conditions (collectSettledConditions) and is refused as a quota when that is
+	// not enough. Updates of an existing condition are not refused by it.
+	MaxConditionProjectBytes = 8 << 20
+	// ConditionSettledRetention is how long a recovered condition must have been
+	// untouched before its state may be collected: the lifecycle retention of the
+	// evidence it summarises, 90 days, as for incidents.
+	ConditionSettledRetention = IncidentResolvedRetention
 )
 
 // ConditionVersionConflict is the SafeDetail of a lost condition version race.
@@ -148,13 +160,17 @@ func applyCondition(scope auth.Scope, st *State, cmd Command) (Effect, error) {
 		return Effect{}, ruleFault(model.Conflict, ConditionVersionConflict)
 	case !exists:
 		prefix := org.String() + ":" + c.Project.String() + ":"
-		n := 0
-		for k := range st.ConditionBooks {
+		n, held := 0, 0
+		for k, raw := range st.ConditionBooks {
 			if strings.HasPrefix(k, prefix) {
 				n++
+				held += len(raw)
 			}
 		}
 		if n >= MaxConditionsPerProject {
+			return Effect{}, model.Fail(model.Quota)
+		}
+		if over := held + len(c.State) + conditionRecordOverhead - MaxConditionProjectBytes; over > 0 && !collectSettledConditions(st, prefix, c.At, over) {
 			return Effect{}, model.Fail(model.Quota)
 		}
 		rec = ConditionRecord{Org: org, Project: c.Project, ID: c.Condition}
@@ -255,4 +271,87 @@ func eraseConditionsBy(st *State, p model.DeletePredicate, rule stateRule) (drop
 		dropped++
 	}
 	return dropped, over, nil
+}
+
+// conditionRecordOverhead is what a condition record adds around its state in the
+// committed book (header, digest, fence), for the byte budget.
+const conditionRecordOverhead = 512
+
+// collectSettledConditions frees at least need bytes of one project's condition
+// books by replacing the state of settled conditions with a tombstone, oldest
+// first (last activity, then key), and reports whether it freed enough; when it
+// cannot it changes nothing. A condition is settled when its state parses as
+// recovered and nothing touched it (an event, an arrival, a freshness
+// observation) for ConditionSettledRetention before at. It is a pure function of
+// the state and the command's own time, so every replica collects the same records.
+//
+// The record is not removed: its identity, version, digest and fence stay, so the
+// next event for the condition starts it anew on the preserved version, exactly as
+// after an erasure, and the notification policy, which orders a condition by its
+// version, never sees it go backwards. Only the state goes (it reads as erased).
+func collectSettledConditions(st *State, prefix string, at model.UnixNano, need int) bool {
+	type candidate struct {
+		key   string
+		when  model.UnixNano
+		stub  []byte
+		freed int
+	}
+	var out []candidate
+	potential := 0
+	for k, raw := range st.ConditionBooks {
+		if !strings.HasPrefix(k, prefix) {
+			continue
+		}
+		var rec ConditionRecord
+		if json.Unmarshal(raw, &rec) != nil || rec.Erased() {
+			continue
+		}
+		var head struct {
+			Phase   string         `json:"phase"`
+			EventAt model.UnixNano `json:"event_ns"`
+			Arrived model.UnixNano `json:"arrived_ns"`
+			FreshAt model.UnixNano `json:"fresh_ns"`
+		}
+		if json.Unmarshal(rec.State, &head) != nil || head.Phase != "recovered" {
+			continue
+		}
+		touched := max(head.EventAt, head.Arrived, head.FreshAt)
+		if touched <= 0 || at-touched < ConditionSettledRetention {
+			continue
+		}
+		rec.State = collectedConditionState(rec)
+		small, err := json.Marshal(rec)
+		if err != nil || len(small) >= len(raw) {
+			continue
+		}
+		out = append(out, candidate{k, touched, small, len(raw) - len(small)})
+		potential += len(raw) - len(small)
+	}
+	if potential < need {
+		return false
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].when != out[j].when {
+			return out[i].when < out[j].when
+		}
+		return out[i].key < out[j].key
+	})
+	freed := 0
+	for _, c := range out {
+		if freed >= need {
+			break
+		}
+		st.ConditionBooks[c.key] = c.stub
+		freed += c.freed
+	}
+	return true
+}
+
+// collectedConditionState is the state a collected condition keeps: the closed
+// header and the tombstone mark ("erased"), nothing derived from telemetry. The
+// mark is a tombstone to every reader (ConditionRecord.Erased), though no deletion
+// produced it.
+func collectedConditionState(rec ConditionRecord) json.RawMessage {
+	v, _ := json.Marshal(rec.Version)
+	return json.RawMessage(fmt.Sprintf(`{"condition_id":%q,"org_id":%q,"project_id":%q,"version":%s,"erased":"collected"}`, rec.ID.String(), rec.Org.String(), rec.Project.String(), v))
 }

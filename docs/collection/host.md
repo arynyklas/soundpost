@@ -57,10 +57,17 @@ the Windows `process_count` cell above is implemented, not smoke-verified;
 was available, and the CPU group is not implemented there); other OSes are
 only compile-checked (`GOOS=freebsd`).
 
+**Run on a real `/proc` mount with `hidepid`** (07.03-W4, `internal/host/hidepid_real.sh`,
+`TestRealHostProcessCountOnAHidepidMount`): the mount is made without root in a user
+and pid namespace and remounted `hidepid=2`; a non-root agent (nested user namespace)
+gets `unknown / process_visibility_restricted` and no sample, the namespace's root
+counts (exempt), and a plain `/proc` counts. Only one uid exists in such a namespace, so
+no foreign process was actually hidden: the mount-option branch is real, the hiding is not.
+
 **Not run:** the system-level unit as installed (`User=soundpost-agent`,
 `/usr/local/bin`, `/etc/soundpost`, `ProtectHome=yes` unchanged) because that
 needs root and the VM allows none (`sudo` asks for a password); a root agent
-(and so the `CAP_SYS_PTRACE` question); `hidepid` hosts; cgroup v1 or hybrid
+with real `CAP_SYS_PTRACE`; `hidepid` hosts with several users; cgroup v1 or hybrid
 hosts (the VM is pure cgroup v2); other kernels, bare metal and containers.
 
 ## Metric catalogue

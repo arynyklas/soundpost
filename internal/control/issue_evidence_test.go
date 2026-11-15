@@ -1347,3 +1347,67 @@ func TestIssueGapIDIsRecordedOnce(t *testing.T) {
 		t.Fatalf("a gap ID recorded twice: %v", err)
 	}
 }
+
+// R01-2: the issue book's gap list and command records are bounded without
+// refusing the project forever. A 129th declared gap in one group is coalesced
+// with the oldest gap of that group (the lost count stays exact, the span covers
+// both), so the data group's journal-expiry producer never loses its way to record
+// a loss.
+func TestIssueGapListCoalescesAtItsBoundInsteadOfRefusing(t *testing.T) {
+	f := newIssFx(t)
+	f.must(f.first()) // revision 1, checkpoint 1
+	const declared = 130
+	for i := range declared {
+		after := uint64(1 + i)
+		id := model.ID{0xa7, 1, byte(i)}
+		g := model.EvidenceGap{ID: id, Org: f.org, Project: f.project, Group: f.group, After: model.Uint64(after), Through: model.Uint64(after + 1), Count: 1,
+			Start: model.UnixNano(100 + i), End: model.UnixNano(100 + i), Signals: []model.Kind{model.Log}, Reason: "expired before processing", RecordedAt: model.UnixNano(1000 + i)}
+		if _, err := f.commit(control.IssueCommand{Command: &id, ExpectedRevision: model.Revision(1 + i), Checkpoint: &control.IssueCheckpoint{Group: f.group, Index: model.Uint64(after + 1)}, Gap: &g}); err != nil {
+			t.Fatalf("gap %d of %d: %v", i+1, declared, err)
+		}
+	}
+	s := f.snap()
+	if len(s.Gaps) > 128 {
+		t.Fatalf("%d gaps held, bound 128", len(s.Gaps))
+	}
+	var lost model.Uint64
+	lowest, highest := s.Gaps[0].After, s.Gaps[0].Through
+	for _, g := range s.Gaps {
+		lost += g.Count
+		lowest, highest = min(lowest, g.After), max(highest, g.Through)
+	}
+	if lost != declared || lowest != 1 || highest != declared+1 || s.Checkpoints[f.group] != declared+1 {
+		t.Fatalf("lost %d (want %d), span (%d,%d], checkpoint %d", lost, declared, lowest, highest, s.Checkpoints[f.group])
+	}
+	if last := s.Gaps[len(s.Gaps)-1]; last.ID != (model.ID{0xa7, 1, byte(declared - 1)}) || last.Count != 1 {
+		t.Fatalf("the newest gap was not kept as declared: %+v", last)
+	}
+}
+
+// R01-2: explicit command records are bounded by eviction of the oldest (by the
+// book revision that committed them): a project's human actions keep working past
+// the 1024th command, and the newest commands are still recognized.
+func TestIssueCommandRecordsAreBoundedByEvictingTheOldest(t *testing.T) {
+	f := newIssFx(t)
+	f.must(f.first()) // revision 1
+	const total = 1030
+	cmd := func(i int) model.ID { return model.ID{0xc7, byte(i >> 8), byte(i)} }
+	for i := range total {
+		id := cmd(i)
+		c := control.IssueCommand{Command: &id, ExpectedRevision: model.Revision(1 + i), Records: []control.IssueRecordChange{f.record(f.issue(1, uint64(2+i), f.evidence(1, 1)))},
+			Action: &control.IssueActionRecord{Fingerprint: model.Hash{byte(i)}, Issue: f.issueID(1)}}
+		if _, err := f.commit(c); err != nil {
+			t.Fatalf("command %d of %d: %v", i+1, total, err)
+		}
+	}
+	s := f.snap()
+	if len(s.Commands) > 1024 {
+		t.Fatalf("%d command records held, bound 1024", len(s.Commands))
+	}
+	if _, ok := s.Commands[cmd(0)]; ok {
+		t.Fatal("the oldest command record was kept while newer ones were refused")
+	}
+	if _, ok := s.Commands[cmd(total-1)]; !ok || len(s.Commands) != 1024 {
+		t.Fatalf("the newest command record is missing or the book is not full (%d)", len(s.Commands))
+	}
+}
