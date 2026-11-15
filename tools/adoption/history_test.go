@@ -564,6 +564,10 @@ func TestClosureClockAndCallValidation(t *testing.T) {
 		"age bound over 30 days": func(l *ClosureLedger) { l.MaxEvidenceAgeSecs = 30*24*3600 + 1 },
 		"history clock differs":  func(l *ClosureLedger) { l.History.Now = closureNow.Add(time.Second) },
 		"history age bound bad":  func(l *ClosureLedger) { l.History.MaxEvidenceAgeSecs = 30*24*3600 + 1 },
+		"history age bound looser than the closure's": func(l *ClosureLedger) {
+			l.MaxEvidenceAgeSecs, l.History.MaxEvidenceAgeSecs = 3600, 7200
+		},
+		"history snapshot of another scope": func(l *ClosureLedger) { l.History.Scope = "some/other-scope" },
 	}
 	for name, edit := range bad {
 		t.Run(name, func(t *testing.T) {
@@ -574,6 +578,14 @@ func TestClosureClockAndCallValidation(t *testing.T) {
 			}
 		})
 	}
+	t.Run("history snapshot of the same scope and an equal or tighter age bound closes", func(t *testing.T) {
+		c := closureLedgerFixture(t)
+		c.History.Scope, c.History.MaxEvidenceAgeSecs = c.Scope, c.MaxEvidenceAgeSecs
+		r := closureClose(t, c)
+		if !r.Closed || r.History.Scope != c.Scope {
+			t.Fatalf("closed=%v scope=%q blockers=%v", r.Closed, r.History.Scope, r.Blockers)
+		}
+	})
 	t.Run("history inherits clock and age bound", func(t *testing.T) {
 		c := closureLedgerFixture(t)
 		c.History.Now, c.History.MaxEvidenceAgeSecs = time.Time{}, 0
@@ -1061,6 +1073,10 @@ func TestHistoryStatusObligations(t *testing.T) {
 			})
 			if !has(r, HistoryCodeCompletionUnaudited) || r.Obligations[1].State != HistoryStateInvalid {
 				t.Fatalf("%s: %v", name, r.Blockers)
+			}
+			// An obligation whose completion is unproven is not counted as completed: it is still open.
+			if r.Completed != 0 || r.Open != 2 {
+				t.Fatalf("%s: completed=%d open=%d", name, r.Completed, r.Open)
 			}
 		}
 	})

@@ -52,7 +52,7 @@ var readinessProducers = map[ReadinessKind][]string{
 	ReadinessJourneyBackground: {"adoption-journeys"},
 	ReadinessSourcePolicy:      {"adoption-shadow", "adoption-policy-compare"},
 	ReadinessQueryProfile:      {"qualify"},
-	ReadinessIsolationMatrix:   {"drills", "smoke"},
+	ReadinessIsolationMatrix:   {"smoke"},
 	ReadinessDeliveryPolicy:    {"adoption-policy-compare", "drills"},
 	ReadinessDeletionRestore:   {"drills"},
 	ReadinessExternalDeadman:   {"drills"},
@@ -96,6 +96,10 @@ const (
 	ReadinessBlockReportUnverifiable = "report_unverifiable"
 )
 
+// readinessMaxAgeSeconds bounds the evidence freshness window: 30 days, far below the span at
+// which time.Duration arithmetic overflows.
+const readinessMaxAgeSeconds = 30 * 24 * 3600
+
 var readinessBlockCodes = []string{
 	ReadinessBlockMissing, ReadinessBlockUnknownProducer, ReadinessBlockBadDigest,
 	ReadinessBlockStale, ReadinessBlockFuture, ReadinessBlockWrongScope,
@@ -132,15 +136,11 @@ type AcceptanceLedger struct {
 	Scope string `json:"scope"`
 	// Now is the caller-supplied evaluation instant (RFC 3339).
 	Now time.Time `json:"now"`
-	// MaxAgeSeconds is the freshness window for evidence (required, > 0).
+	// MaxAgeSeconds is the freshness window for evidence (required, > 0, at most 30 days).
 	MaxAgeSeconds int64 `json:"max_age_seconds"`
 	// RequireProduction demands production-environment evidence; staging
 	// evidence is then a production_proof_outstanding blocker.
 	RequireProduction bool `json:"require_production"`
-	// RequireVerifiedReports demands that every reference be backed by a report
-	// body an adapter verified; a producer with no adapter is then a
-	// report_unverifiable blocker rather than an unverified criterion.
-	RequireVerifiedReports bool `json:"require_verified_reports"`
 	// ProductFailureDomain identifies the product's own failure domain; the
 	// external deadman must be in a different, non-empty one.
 	ProductFailureDomain string        `json:"product_failure_domain"`
@@ -185,7 +185,11 @@ type GateCriterion struct {
 
 // ReadyGate is the signed gate record. 08.06 consumes it via VerifyReadyGate.
 // The ed25519 signature covers every other field (ledger digest, criteria,
-// authorizations, instants), serialised by encoding/json.
+// authorizations, instants), serialised by encoding/json. The gate is bound to
+// its scope, criteria and window; LedgerDigest is signed as a record of the
+// ledger that produced the gate, not as a check any consumer makes, so a gate
+// signed over one ledger authorizes the same scope's actions for any other
+// ledger within its window.
 type ReadyGate struct {
 	Version          int                      `json:"version"`
 	Scope            string                   `json:"scope"`
@@ -287,7 +291,7 @@ func readinessCheckRef(l AcceptanceLedger, e EvidenceRef, auths []ReadinessAutho
 		var rb []ReadinessBlocker
 		rb, verified = readinessVerifyReport(e, reports, l.Scope)
 		bl = append(bl, rb...)
-		if _, has := readinessAdapters[e.Producer]; !has && l.RequireVerifiedReports {
+		if _, has := readinessAdapters[e.Producer]; !has {
 			add(ReadinessBlockReportUnverifiable, string(e.Kind)+" evidence from a producer whose report cannot be verified here")
 		}
 	}
@@ -296,7 +300,7 @@ func readinessCheckRef(l AcceptanceLedger, e EvidenceRef, auths []ReadinessAutho
 		add(ReadinessBlockBadEvidence, string(e.Kind)+" evidence has no observation time")
 	case e.ObservedAt.After(l.Now):
 		add(ReadinessBlockFuture, string(e.Kind)+" evidence observed in the future")
-	case l.Now.Sub(e.ObservedAt) > time.Duration(l.MaxAgeSeconds)*time.Second:
+	case l.Now.Sub(e.ObservedAt) >= time.Duration(l.MaxAgeSeconds)*time.Second:
 		add(ReadinessBlockStale, string(e.Kind)+" evidence is older than the freshness window")
 	}
 	if e.Scope != l.Scope {
@@ -359,8 +363,8 @@ func ReadyForCutover(ctx context.Context, l AcceptanceLedger, a Authorizations, 
 		return res, err
 	}
 	res.LedgerDigest = digest
-	if l.Scope == "" || l.Now.IsZero() || l.MaxAgeSeconds <= 0 {
-		res.Blockers = append(res.Blockers, ReadinessBlocker{Code: ReadinessBlockBadLedger, Detail: "ledger needs scope, clock instant and positive freshness window"})
+	if l.Scope == "" || l.Now.IsZero() || l.MaxAgeSeconds <= 0 || l.MaxAgeSeconds > readinessMaxAgeSeconds {
+		res.Blockers = append(res.Blockers, ReadinessBlocker{Code: ReadinessBlockBadLedger, Detail: "ledger needs scope, clock instant and a positive freshness window of at most 30 days"})
 		return res, nil
 	}
 	var crit []GateCriterion

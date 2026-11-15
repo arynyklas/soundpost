@@ -254,6 +254,19 @@ func TestCutoverReadinessRejectsMissingJourneyOrOutageAuthorization(t *testing.T
 	if r := readinessEval(t, zero, a); r.Ready || r.Blockers[0].Code != ReadinessBlockBadLedger {
 		t.Fatal("zero freshness window must be refused")
 	}
+	// An unbounded window overflows time.Duration (m2): it is refused, whatever the evidence.
+	for _, n := range []int64{readinessMaxAgeSeconds + 1, 1 << 40, 1<<63 - 1} {
+		huge := l
+		huge.MaxAgeSeconds = n
+		if r := readinessEval(t, huge, a); r.Ready || len(r.Blockers) != 1 || r.Blockers[0].Code != ReadinessBlockBadLedger {
+			t.Fatalf("max_age_seconds %d must be refused as an invalid ledger: %+v", n, r.Blockers)
+		}
+	}
+	atMax := l
+	atMax.MaxAgeSeconds = readinessMaxAgeSeconds
+	if r := readinessEval(t, atMax, a); !r.Ready {
+		t.Fatalf("the largest allowed window is accepted: %+v", r.Blockers)
+	}
 	if r := readinessEval(t, AcceptanceLedger{}, a); r.Ready || r.Blockers[0].Code != ReadinessBlockBadLedger {
 		t.Fatalf("empty ledger: %+v", r)
 	}
@@ -306,10 +319,16 @@ func TestCutoverReadinessEvidenceBoundaries(t *testing.T) {
 	if r := readinessEval(t, nl, a); r.Ready || !readinessHas(r, ReadinessBlockDeadmanNotIndep, ReadinessExternalDeadman) {
 		t.Fatal("deadman independence needs a declared product domain")
 	}
-	// Freshness edges: exactly at max age is fresh; a second older is stale.
+	// Freshness edges: strictly inside the window is fresh; exactly at max age is stale, because the gate would expire at
+	// its own issue instant and no consumer could ever verify it (m1); evidence observed now is current.
 	reseal := func(l AcceptanceLedger) AcceptanceLedger { l, _ = readinessSeal(l); return l }
-	if r := readinessEval(t, reseal(readinessMutate(l, k, func(e *EvidenceRef) { e.ObservedAt = readinessNow.Add(-time.Hour) })), a); !r.Ready {
-		t.Fatalf("evidence exactly at max age is fresh: %+v", r.Blockers)
+	if r := readinessEval(t, reseal(readinessMutate(l, k, func(e *EvidenceRef) { e.ObservedAt = readinessNow.Add(-time.Hour + time.Second) })), a); !r.Ready {
+		t.Fatalf("evidence just inside max age is fresh: %+v", r.Blockers)
+	} else if !r.Gate.ExpiresAt.After(r.Gate.IssuedAt) {
+		t.Fatalf("a Ready gate must have a non-empty validity window: %v..%v", r.Gate.IssuedAt, r.Gate.ExpiresAt)
+	}
+	if r := readinessEval(t, reseal(readinessMutate(l, k, func(e *EvidenceRef) { e.ObservedAt = readinessNow.Add(-time.Hour) })), a); r.Ready || !readinessHas(r, ReadinessBlockStale, k) {
+		t.Fatalf("evidence exactly at max age leaves an empty gate window and must be stale: %+v", r.Blockers)
 	}
 	if r := readinessEval(t, reseal(readinessMutate(l, k, func(e *EvidenceRef) { e.ObservedAt = readinessNow })), a); !r.Ready {
 		t.Fatalf("evidence observed at now is current: %+v", r.Blockers)
@@ -573,8 +592,8 @@ func TestCutoverReadinessCLI(t *testing.T) {
 		t.Fatalf("incomplete must fail naming blocker: %v", err)
 	}
 	b, _ = os.ReadFile(filepath.Join(dir, "bad.private.json"))
-	if strings.Contains(string(b), `"gate"`) && strings.Contains(string(b), `"signature"`) {
-		t.Fatal("no signed gate when incomplete")
+	if strings.Contains(string(b), `"gate"`) {
+		t.Fatal("no gate member at all when incomplete")
 	}
 	pb, _ := os.ReadFile(filepath.Join(dir, "bad.public.json"))
 	if !strings.Contains(string(pb), `"customer_acceptance": false`) {

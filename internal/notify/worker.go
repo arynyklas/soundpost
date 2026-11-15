@@ -230,7 +230,8 @@ func (w *Worker) deliver(ctx context.Context, scope auth.Scope, at model.UnixNan
 	case "":
 	case control.DeliveryHoldPaused:
 		// A closing deletion pauses derived sends: release the claim as a definite
-		// non-send. The delivery keeps its ID and resumes if the deletion fails.
+		// non-send. The delivery keeps its ID until the deletion closes, when it is
+		// cancelled as deleted (whether the deletion completes or fails).
 		if err = w.queue.Complete(ctx, scope, d.ID, d.Attempt, Outcome{Kind: OutcomeRetry, Code: control.DeliveryHoldPaused}); err != nil {
 			return w.completeFailed(ctx, d, err, report)
 		}

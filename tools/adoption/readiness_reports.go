@@ -29,6 +29,8 @@ import (
 const (
 	readinessMaxReportBytes = 16 << 20
 	readinessMaxReports     = 256
+	// readinessMaxTotalBytes bounds every report body held in memory at once.
+	readinessMaxTotalBytes = 64 << 20
 )
 
 // ReadinessReports holds the producers' report bodies, addressed by the SHA-256
@@ -64,15 +66,29 @@ func readinessReportsFromDir(dir string) (ReadinessReports, error) {
 		return ReadinessReports{}, errors.New("too many report files")
 	}
 	var bodies [][]byte
+	total := 0
 	for _, e := range entries {
 		path := filepath.Join(dir, e.Name())
 		info, err := os.Lstat(path)
 		if err != nil || !info.Mode().IsRegular() || info.Size() > readinessMaxReportBytes {
 			return ReadinessReports{}, errors.New("the reports directory may hold only regular report files within the size bound")
 		}
-		raw, err := os.ReadFile(path)
+		f, err := os.Open(path)
 		if err != nil {
 			return ReadinessReports{}, errors.New("cannot read a report file")
+		}
+		// The bound is on the bytes actually read, not on the size seen by Lstat: a file that grows
+		// between the two is cut off at the bound and refused.
+		raw, err := io.ReadAll(io.LimitReader(f, readinessMaxReportBytes+1))
+		f.Close()
+		if err != nil {
+			return ReadinessReports{}, errors.New("cannot read a report file")
+		}
+		if len(raw) > readinessMaxReportBytes {
+			return ReadinessReports{}, errors.New("the reports directory may hold only regular report files within the size bound")
+		}
+		if total += len(raw); total > readinessMaxTotalBytes {
+			return ReadinessReports{}, errors.New("the report files together exceed the size bound")
 		}
 		bodies = append(bodies, raw)
 	}

@@ -13,7 +13,7 @@ Each criterion needs at least one reference that is fully valid. Missing evidenc
 
 `EvidenceRef`: kind, producer (allowlisted per kind: adoption-journeys, adoption-shadow, adoption-policy-compare, adoption-retention, drills, qualify, smoke), sha256 digest of the producer's report, observed-at, authorization id, scope, environment (`synthetic|staging|production`), result (`pass|fail|not_run`), `disruptive`, and for the deadman a `failure_domain`.
 
-A reference is refused with a named blocker when: producer unknown, digest malformed, observation stale (older than `max_age_seconds`) or future-dated against the ledger clock, scope differs from the ledger's, result `not_run` or `fail`, environment synthetic, environment staging while `require_production` is set (`production_proof_outstanding`, never substituted), no live matching authorization (same id, scope, environment, kind, inside its not-before/expiry window), a disruptive drill without an authorization that explicitly sets `disruptive`, or a deadman whose failure domain is empty or equals `product_failure_domain`.
+A reference is refused with a named blocker when: producer unknown, digest malformed, observation stale (age at or beyond `max_age_seconds`: evidence observed exactly that long ago would leave a gate whose window is empty) or future-dated against the ledger clock, scope differs from the ledger's, result `not_run` or `fail`, environment synthetic, environment staging while `require_production` is set (`production_proof_outstanding`, never substituted), no live matching authorization (same id, scope, environment, kind, inside its not-before/expiry window), a disruptive drill without an authorization that explicitly sets `disruptive`, or a deadman whose failure domain is empty or equals `product_failure_domain`. `max_age_seconds` must be positive and at most 30 days (2592000); a ledger outside that is `invalid_ledger`.
 
 With `require_production` false, staging evidence may pass, but the result and the signed gate record `production_proven: false` / production proof outstanding.
 
@@ -38,7 +38,7 @@ Each failure is a blocker that names the kind (`code:kind` in the CLI error):
 - `report_not_passing`: the body is of the right kind and its own verdict, checks or counts do not pass (table above).
 - `wrong_scope`: besides the reference naming a scope other than the ledger's, the report itself names (adoption-journeys, adoption-shadow, adoption-policy-compare, adoption-retention) a scope other than the ledger's. A report that names no scope is `report_invalid`.
 - `report_time_mismatch`: every producer's report carries the instant it was observed at and the reference's `observed_at` must be exactly that instant: a months-old report cannot be cited as fresh. A report with no usable time is `report_invalid`.
-- `report_unverifiable`: only with `require_verified_reports`, for a producer with no adapter (none is allowlisted today).
+- `report_unverifiable`: a reference whose producer has no adapter is never satisfied by its bare digest (none is allowlisted today; there is no opt-in flag). The reports directory is bounded by 256 files, 16 MiB per file and 64 MiB in total, measured on the bytes actually read.
 
 A satisfied criterion carries `body_verified: true` in the signed gate; `criteria_body_verified` in the public summary counts them.
 
@@ -53,7 +53,7 @@ What the body checks do not establish:
 
 ## Signed gate
 
-`ReadyForCutover(ctx, AcceptanceLedger, Authorizations) (CutoverReadiness, error)` returns blockers, or an unsigned gate when complete. `SignReadyGate` (ed25519, standard library) signs only complete results; the signature covers the ledger digest, criteria, authorizations, scope, issue instant (the ledger clock), expiry and production flag. Expiry is the earliest of each used evidence's observed-at plus the freshness window and each used authorization's expiry.
+`ReadyForCutover(ctx, AcceptanceLedger, Authorizations, ReadinessReports) (CutoverReadiness, error)` returns blockers, or an unsigned gate when complete. `SignReadyGate` (ed25519, standard library) signs only complete results; the signature covers the ledger digest, criteria, authorizations, scope, issue instant (the ledger clock), expiry and production flag. Expiry is the earliest of each used evidence's observed-at plus the freshness window and each used authorization's expiry. The ledger digest is signed as a record of the producing ledger; `VerifyReadyGate` and the cutover consumers check signature, scope, window and production flag, not the digest, so a gate authorizes its scope's actions for any ledger within its window.
 
 `VerifyReadyGate(gate, publicKey, now)` is the consumer entry point (task 08.06). It refuses a bad key, missing/garbled/invalid signature (tamper, wrong key), a malformed shape, a missing or duplicated criterion, future dating, and expiry (`now >= expires_at`), using the caller's clock.
 

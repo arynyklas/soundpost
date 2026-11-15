@@ -162,9 +162,11 @@ entry for the settlement are kept.
 ## Deletion, revocation and destination changes (C12)
 
 * While a deletion that covers a delivery's origin is **closing**, matching derived
-  sends are **paused**: they are neither claimed nor cancelled, and resume if the
-  deletion fails. Completing the deletion cancels them as `deleted`. A delivery
-  records the evidence interval it was derived from; an unknown interval is
+  sends are **paused**: they are neither claimed nor cancelled. Completing the
+  deletion cancels them as `deleted`, and so does failing it: a failed deletion keeps
+  its predicate active (nothing is un-deleted) and drops the bodies of the sends it
+  covers, so they are cancelled as `deleted` and never sent without their bodies.
+  A delivery records the evidence interval it was derived from; an unknown interval is
   treated as covered, and a historical-range deletion covers a delivery for any
   signal of its predicate because a delivery does not record which signal it came
   from.

@@ -371,3 +371,39 @@ func TestStorageErrorSourceRequestAndFilter(t *testing.T) {
 		t.Fatalf("mismatched page = %v", err)
 	}
 }
+
+// An occurrence folded into the issue's compaction is still evidence control
+// accounts for: its deep link is an explicit incomplete state, never the
+// not-found a guessed ID gets, and no stored record is read for it.
+func TestEvidenceOccurrenceFoldedIntoCompactionIsIncompleteNotNotFound(t *testing.T) {
+	issues, errs := &fakeIssues{}, &fakeErrors{}
+	e := newEvEnv(t, nil, issues, true)
+	e.occurrenceEnv(t, issues, errs)
+	p := model.NewID()
+	org := e.org("evidence occurrence folded", p)
+	admin := e.user(org, "occ-folded-admin@example.test")
+	e.cmd(org, "org_admin", auth.AdminPayload{UserID: admin.ID, Enabled: true})
+	e.grant(org, admin, p, true, auth.Read)
+	fp := model.HashCanonical([]byte("folded fingerprint"))
+	folded, foldedLate := model.NewID(), model.NewID()
+	issues.issue = model.GroupingIssue{ID: model.NewID(), Org: org, Project: p, GroupingVersion: 1, Fingerprint: fp, Workflow: "open", Revision: 2,
+		Compacted:     &model.GroupingCompaction{Count: 700, FirstEvent: 1, LastEvent: 80, FirstArrival: 2, LastArrival: 90, Recent: []model.ID{folded}},
+		LateCompacted: &model.GroupingCompaction{Count: 5, FirstEvent: 1, LastEvent: 8, FirstArrival: 2, LastArrival: 9, Recent: []model.ID{foldedLate}}}
+	body := func(occurrence model.ID) map[string]any {
+		return map[string]any{"org": org.String(), "project": p.String(), "issue": issues.issue.ID.String(), "occurrence": occurrence.String()}
+	}
+	before := errs.calls.Load()
+	for name, id := range map[string]model.ID{"folded": folded, "folded late": foldedLate} {
+		status, raw := e.post(admin, "/api/v1/evidence/occurrence", body(id), nil)
+		v := decodeOccurrence(t, raw)
+		if status != 200 || v.State != httpapi.StateIncomplete || v.Reason != httpapi.ReasonEvidenceCompacted || v.Detail != nil {
+			t.Fatalf("%s: %d %s", name, status, raw)
+		}
+	}
+	if errs.calls.Load() != before {
+		t.Fatal("a stored record was read for a folded occurrence")
+	}
+	if status, raw := e.post(admin, "/api/v1/evidence/occurrence", body(model.NewID()), nil); status != 404 {
+		t.Fatalf("a guessed occurrence stays not-found: %d %s", status, raw)
+	}
+}

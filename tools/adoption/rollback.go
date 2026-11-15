@@ -252,7 +252,7 @@ func (d *rollbackDriver) restoreOld(ctx context.Context) error {
 		return cutoverStopErr(CutoverIncompleteLegacyUnexpected, "the old normal route is not enabled after the restore", nil)
 	}
 	rb := d.st.Rollback
-	rb.OldRouteEnabled = true // observed enabled just above, or the restore step stopped
+	rb.OldRouteEnabled = true // restoreOld only reaches here once the old route was observed enabled
 	if _, err = d.deadmanProof(ctx); err != nil {
 		rb.DeadmanArmed = false
 		return err

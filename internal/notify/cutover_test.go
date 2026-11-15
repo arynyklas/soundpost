@@ -1518,11 +1518,26 @@ func TestCutoverRejectsMalformedCommandsAndWrongScopes(t *testing.T) {
 		}
 	})
 	t.Run("a read-only scope", func(t *testing.T) {
-		scope, err := fx.svc.Authorize(fx.ctx, fx.cred, fx.org, []model.ID{fx.project}, auth.Read)
+		// A real telemetry reader of the project: member of the org with exactly a read grant.
+		const password = "a long reader password 2026"
+		reader := model.NewID()
+		fx.admin("create_user", auth.AdminPayload{ID: reader, Email: "cutover-reader@example.test", Password: password})
+		fx.admin("membership", auth.AdminPayload{UserID: reader, Enabled: true})
+		fx.admin("grant", auth.AdminPayload{UserID: reader, ProjectID: fx.project, Enabled: true, Permissions: []string{string(auth.Read)}})
+		session, err := fx.svc.Login(fx.ctx, "cutover-reader@example.test", password, "")
 		if err != nil {
-			t.Skip("fixture owner holds no read grant: " + err.Error())
+			t.Fatal(err)
 		}
-		if _, err = fx.cut.AdvanceCutover(fx.ctx, scope, fx.command(notify.CutoverQuiescingOld)); code(err) != model.NotFound {
+		cred, err := fx.svc.Authenticate(fx.ctx, session.Token)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scope, err := fx.svc.Authorize(fx.ctx, cred, fx.org, []model.ID{fx.project}, auth.Read)
+		if err != nil {
+			t.Fatalf("the reader must hold a read scope: %v", err)
+		}
+		// control's contract (control/cutover_test.go "a read scope"): a reader of a visible project is forbidden, not unseen.
+		if _, err = fx.cut.AdvanceCutover(fx.ctx, scope, fx.command(notify.CutoverQuiescingOld)); code(err) != model.Forbidden {
 			t.Fatalf("a read scope advanced the cutover: %v", err)
 		}
 	})

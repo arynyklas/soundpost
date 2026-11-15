@@ -120,8 +120,9 @@ const (
 	DeliveryReasonRevoked             = "revoked"
 	DeliveryCodeClaimExpired          = "claim_expired"
 	// DeliveryHoldPaused is a hold, not a settlement: a closing C12 deletion
-	// covers the delivery's origin, so nothing may be sent until it fails (the
-	// delivery resumes) or completes (the delivery is cancelled as deleted).
+	// covers the delivery's origin, so nothing may be sent until it closes. Both
+	// outcomes cancel the delivery as deleted: completing, and failing (a failed
+	// operation keeps its predicate active and drops the covered bodies).
 	DeliveryHoldPaused = "paused_deletion"
 )
 

@@ -7,7 +7,7 @@
 2. legacy-history obligations that do not block (see [legacy-history.md](legacy-history.md));
 3. an independent deadman proof from a real outage in which all Soundpost processes were stopped.
 
-Evidence defects are blockers in the returned report (`closed=false`, nil error). Only an unusable call is an error: no clock, an invalid scope, an age bound outside 1 second to 30 days, a cancelled context.
+Evidence defects are blockers in the returned report (`closed=false`, nil error). Only an unusable call is an error: no clock, an invalid scope, an age bound outside 1 second to 30 days, a cancelled context, a history snapshot whose clock differs from the closure's, whose age bound is looser than the closure's, or that names another scope than the closure's (a snapshot with no scope, clock or age bound inherits the closure's).
 
 Closure never deletes, exports or imports history and never certifies a customer. After closure, retention continues until the history owner completes the obligations through a separately authorized, audited action performed outside this tool.
 

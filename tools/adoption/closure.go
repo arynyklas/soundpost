@@ -458,8 +458,17 @@ func CloseAdoption(ctx context.Context, l ClosureLedger) (ClosureReport, error) 
 	case !h.Now.Equal(now):
 		return ClosureReport{}, errors.New("history clock differs from the closure clock")
 	}
-	if h.MaxEvidenceAgeSecs == 0 {
+	switch {
+	case h.MaxEvidenceAgeSecs == 0:
 		h.MaxEvidenceAgeSecs = l.MaxEvidenceAgeSecs
+	case h.MaxEvidenceAgeSecs > l.MaxEvidenceAgeSecs:
+		return ClosureReport{}, errors.New("history age bound is looser than the closure's")
+	}
+	switch {
+	case h.Scope == "":
+		h.Scope = l.Scope
+	case h.Scope != l.Scope:
+		return ClosureReport{}, errors.New("history snapshot is for another scope than the closure's")
 	}
 	history, err := HistoryStatus(ctx, h)
 	if err != nil {

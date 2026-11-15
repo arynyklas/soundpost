@@ -272,25 +272,21 @@ func TestCutoverReadinessReportRulesOfReferences(t *testing.T) {
 	if r := readinessEval(t, l, a); !r.Ready {
 		t.Fatalf("a valid sibling reference satisfies the criterion: %+v", r.Blockers)
 	}
-	// Demanding verified reports blocks a producer whose report this package cannot
-	// verify. Every allowlisted producer has an adapter, so the honest fixture stays ready...
+	// A producer whose report this package cannot verify never satisfies a reference by its bare digest (m4).
+	// Every allowlisted producer has an adapter, so the honest fixture stays ready...
 	l, a = readinessFixture()
-	l.RequireVerifiedReports = true
 	if r := readinessEval(t, l, a); !r.Ready || len(readinessReportCodes(r)) != 0 {
 		t.Fatalf("every producer has an adapter: %+v", r.Blockers)
 	}
-	// ...so the rule is exercised with a producer whose adapter is taken away.
+	// ...so the rule is exercised with a producer whose adapter is taken away. The swap of this
+	// package-global is restored by Cleanup; no readiness test may run in parallel with it (m7c).
 	saved := readinessAdapters["qualify"]
 	delete(readinessAdapters, "qualify")
-	defer func() { readinessAdapters["qualify"] = saved }()
+	t.Cleanup(func() { readinessAdapters["qualify"] = saved })
 	r := readinessEval(t, l, a)
 	codes := readinessReportCodes(r)
 	if r.Ready || len(codes) != 1 || codes[ReadinessBlockReportUnverifiable+":"+string(ReadinessQueryProfile)] != 1 {
-		t.Fatalf("require verified reports: ready=%v %v", r.Ready, codes)
-	}
-	l.RequireVerifiedReports = false
-	if r := readinessEval(t, l, a); !r.Ready || !slices.Equal(r.UnverifiedKinds, []ReadinessKind{ReadinessQueryProfile}) {
-		t.Fatalf("without the rule the reference stays a digest: %+v %v", r.Blockers, r.UnverifiedKinds)
+		t.Fatalf("a producer with no adapter: ready=%v %v", r.Ready, codes)
 	}
 }
 
@@ -514,13 +510,16 @@ func TestCutoverReadinessReportsDirectory(t *testing.T) {
 	if _, err := readinessReportsFromDir(sub); err == nil {
 		t.Fatal("a nested directory is refused")
 	}
-	linked := t.TempDir()
-	write(linked, "target.json", []byte(`{}`))
-	if os.Symlink(filepath.Join(linked, "target.json"), filepath.Join(linked, "link.json")) == nil {
+	t.Run("symlink", func(t *testing.T) {
+		linked := t.TempDir()
+		write(linked, "target.json", []byte(`{}`))
+		if err := os.Symlink(filepath.Join(linked, "target.json"), filepath.Join(linked, "link.json")); err != nil {
+			t.Skipf("symbolic links cannot be created here (%v): the symlink refusal was NOT exercised", err)
+		}
 		if _, err := readinessReportsFromDir(linked); err == nil {
 			t.Fatal("a symbolic link is refused: it can point outside the directory")
 		}
-	}
+	})
 	big := t.TempDir()
 	f, err := os.Create(filepath.Join(big, "big.json"))
 	if err != nil || f.Truncate(readinessMaxReportBytes+1) != nil {
@@ -545,6 +544,26 @@ func TestCutoverReadinessReportsDirectory(t *testing.T) {
 	}
 	if _, err := readinessReportsFromDir(many); err == nil {
 		t.Fatal("too many report files are refused")
+	}
+	// The whole directory is bounded, not only each file (m6): the bodies are all held in memory.
+	sparse := func(dir string, n int) {
+		for i := range n {
+			f, err := os.Create(filepath.Join(dir, strconv.Itoa(i)+".json"))
+			if err != nil || f.Truncate(readinessMaxReportBytes) != nil {
+				t.Fatal("cannot make the sparse fixture")
+			}
+			f.Close()
+		}
+	}
+	within := t.TempDir()
+	sparse(within, readinessMaxTotalBytes/readinessMaxReportBytes)
+	if _, err := readinessReportsFromDir(within); err != nil {
+		t.Fatalf("a directory exactly at the total bound is accepted: %v", err)
+	}
+	over := t.TempDir()
+	sparse(over, readinessMaxTotalBytes/readinessMaxReportBytes+1)
+	if _, err := readinessReportsFromDir(over); err == nil {
+		t.Fatal("a directory over the total bound is refused")
 	}
 }
 
@@ -627,6 +646,16 @@ func TestReadinessEveryProducerHasAnAdapter(t *testing.T) {
 	for p := range readinessAdapters {
 		if !seen[p] {
 			t.Errorf("adapter for %s, which no kind allows", p)
+		}
+	}
+}
+
+// A kind may allowlist drills only if some drills scenario can speak for it: an entry that can never
+// match is a misleading allowlist (m3).
+func TestReadinessDrillsAllowlistEntriesCanMatch(t *testing.T) {
+	for kind, producers := range readinessProducers {
+		if slices.Contains(producers, "drills") && len(readinessDrillScenarios[kind]) == 0 {
+			t.Errorf("%s allowlists drills, but no drills scenario speaks for it", kind)
 		}
 	}
 }

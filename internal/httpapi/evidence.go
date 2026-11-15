@@ -887,10 +887,19 @@ func (e *Evidence) Occurrence(ctx context.Context, admin auth.Scope, read *auth.
 		for i := range list {
 			if list[i].OccurrenceID == body.Occurrence {
 				evidence = &list[i]
+				break
 			}
 		}
 	}
 	if evidence == nil {
+		// An occurrence folded into the compaction is still evidence control accounts for
+		// (its ID is in the retained tail), but its record reference is gone: that is an
+		// explicit incomplete state, not the not-found a guessed ID gets.
+		for _, c := range []*model.GroupingCompaction{issue.Compacted, issue.LateCompacted} {
+			if c != nil && slices.Contains(c.Recent, body.Occurrence) {
+				return unavailableOccurrenceView(body, StateIncomplete, ReasonEvidenceCompacted), nil
+			}
+		}
 		return ErrorOccurrenceView{}, model.Fail(model.NotFound)
 	}
 	if e.occurrences == nil {

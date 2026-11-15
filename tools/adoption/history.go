@@ -379,7 +379,6 @@ func HistoryStatus(ctx context.Context, in HistoryObligations) (HistoryReport, e
 				valid = false
 				block(HistoryCodeCompletionUnaudited)
 			}
-			report.Completed++
 		case !o.DueAt.IsZero() && !o.DueAt.After(now):
 			st.State = HistoryStateOverdue
 			report.Overdue++
@@ -404,6 +403,14 @@ func HistoryStatus(ctx context.Context, in HistoryObligations) (HistoryReport, e
 					st.ReminderDue = true
 					report.RemindersDue++
 				}
+			}
+		}
+		if o.Completed {
+			// An obligation whose completion is unproven (missing record, audit or time) is still open.
+			if valid {
+				report.Completed++
+			} else {
+				report.Open++
 			}
 		}
 		if !valid {
