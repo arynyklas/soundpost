@@ -4,7 +4,7 @@
 // supported run, linked profile chunks, through the REAL queue (closed wire validation, batching, receipts). The transport is a recording
 // ledger that issues genuine receipts; what the real server stores for these records is the Go model test and the journeys smoke.
 import {test,expect} from "bun:test";
-import {init} from "../src/client.ts";
+import {initRuntime as init} from "../src/runtime_client.ts";
 import {runtimeProfileWire,type RuntimeProfileReport} from "../src/profile_wire.ts";
 import {parseSafeRecord} from "../src/wire.ts";
 import type {FrozenBatch,Outcome,ReceiptTransport} from "../src/transport.ts";

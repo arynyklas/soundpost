@@ -394,3 +394,32 @@ test("client.setReplayConsent delegates under policy, and revocation leaves non-
   }
  } finally { await allowed.close(); await denied.close(); }
 });
+
+// The straightforward canonical JSON the recorder shipped with (sort every object's keys, quote every key): the optimized
+// canonicalJSON (cached quoted keys, sort skipped when the keys are already ordered) must produce the same bytes for any value.
+function referenceCanonical(value: unknown): string {
+ if (value === null) return "null";
+ switch (typeof value) {
+  case "boolean": return value ? "true" : "false";
+  case "number": return String(value === 0 ? 0 : value);
+  case "string": return JSON.stringify(value).replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
+  case "object": {
+   if (Array.isArray(value)) return "[" + value.map(referenceCanonical).join(",") + "]";
+   const record = value as Record<string, unknown>;
+   return "{" + Object.keys(record).sort().map(key => JSON.stringify(key) + ":" + referenceCanonical(record[key])).join(",") + "}";
+  }
+  default: throw Error("unsupported");
+ }
+}
+test("canonicalJSON equals the sort-everything reference for ordered, unordered, repeated and exotic keys", () => {
+ const keySets = [["class", "id", "parent", "tag", "text"], ["text", "tag", "parent", "id", "class"], ["b", "a"], ["a", "b"], ["B", "a", "Z", "z"], ["\u00e9", "e", "z"], ["\u{1f600}", "\uffff", "a"], ["1", "10", "2"], ["", "a"]];
+ for (const keys of keySets) {
+  const value: Record<string, unknown> = {};
+  keys.forEach((key, at) => { value[key] = at % 3 === 0 ? "t\u2028\u2029\"" + at : at % 3 === 1 ? at : [{[keys[0]!]: null, [keys[keys.length - 1]!]: true}]; });
+  expect(canonicalJSON(value)).toBe(referenceCanonical(value));
+  expect(canonicalJSON([value, value])).toBe(referenceCanonical([value, value]));
+ }
+ // The quoted-key cache is bounded and keeps answering correctly past its bound.
+ for (let at = 0; at < 1200; at++) { const value = {["k" + (1200 - at)]: at, ["k" + at]: [at]}; expect(canonicalJSON(value)).toBe(referenceCanonical(value)); }
+ expect(() => canonicalJSON({a: undefined})).toThrow();
+});

@@ -1,6 +1,7 @@
 // Copyright 2026 Aryn Yklas
 // SPDX-License-Identifier: Apache-2.0
-import {Client as CoreClient,createTimerCancellationBoundary} from "@soundpost/core";
+import {createTimerCancellationBoundary} from "@soundpost/core";
+import {RuntimeClient as CoreClient} from "@soundpost/core/runtime";
 import type {Config} from "@soundpost/core/types";
 import {types} from "node:util";
 import {AsyncLocalStorage} from "node:async_hooks";

@@ -3,6 +3,7 @@
 import {test,expect} from 'bun:test';
 import {config,signed,ORG,PROJECT,SOURCE,BUILD} from './fixture.ts';
 import {DeliveryQueue,retryDelay} from '../src/queue.ts';
+import {SpoolingDeliveryQueue} from '../src/queue_spool.ts';
 import {routeRecord,ownerKey,nativeCanonical,hashBytes} from '../src/routing.ts';
 import {verifyReceipt,HttpsReceiptTransport,retryAfter,strictJSON,type FrozenBatch,type ReceiptTransport,type Outcome} from '../src/transport.ts';
 import {EncryptedSpool} from '../src/spool.ts';
@@ -69,13 +70,19 @@ test('exporter callbacks cannot recursively capture themselves',async()=>{
  const ledger=new Ledger();ledger.lost=false;let client:Client;const send=ledger.send.bind(ledger);ledger.send=async batch=>{client.captureException(Error('EXPORTER_SECRET'));return send(batch);};
  client=new Client({...settings(),transport:ledger});client.captureException(Error('application'));const report=await client.flush();expect(report.pending).toBe(0);expect(ledger.admitted).toBe(1);expect(client.diagnostics().exporter_recursion).toBe(1);await client.close();
 });
+test('the base delivery queue refuses a spool instead of silently ignoring it',async()=>{
+ let bytes:Uint8Array|undefined;const backend={read:async()=>bytes,write:async(value:Uint8Array)=>{bytes=value.slice();},close(){}};
+ const spool=new EncryptedSpool(backend,new Uint8Array(32),descriptor,'1');
+ expect(()=>new DeliveryQueue(settings(),new Ledger(),{spool})).toThrow('SpoolingDeliveryQueue');
+ expect(()=>new SpoolingDeliveryQueue(settings(),new Ledger(),{spool})).not.toThrow();
+});
 test('backend encrypted spool persists real frozen bytes across lease restart',async()=>{
  const path=join(await mkdtemp(join(tmpdir(),'soundpost-spool-')),'queue'),key=new Uint8Array(32),ledger=new Ledger();
- const spool=await openEncryptedSpool(path,key,descriptor,'1'),q=new DeliveryQueue(settings(),ledger,{spool});q.enqueue(record());const original=q.freeze()[0]!;await q.flush(0);await spool.close();expect(new TextDecoder().decode(await readFile(path))).not.toContain('occurrence_id');
- const restored=await openEncryptedSpool(path,key,descriptor,'1'),restarted=new DeliveryQueue(settings(),ledger,{spool:restored});ledger.lost=false;const report=await restarted.flush(1500);expect(report.pending).toBe(0);expect(ledger.sends[0]).toBe(original.body);await restarted.close();
+ const spool=await openEncryptedSpool(path,key,descriptor,'1'),q=new SpoolingDeliveryQueue(settings(),ledger,{spool});q.enqueue(record());const original=q.freeze()[0]!;await q.flush(0);await spool.close();expect(new TextDecoder().decode(await readFile(path))).not.toContain('occurrence_id');
+ const restored=await openEncryptedSpool(path,key,descriptor,'1'),restarted=new SpoolingDeliveryQueue(settings(),ledger,{spool:restored});ledger.lost=false;const report=await restarted.flush(1500);expect(report.pending).toBe(0);expect(ledger.sends[0]).toBe(original.body);await restarted.close();
 });
 test('disk write failure leaves visible pending without network admission',async()=>{
- const backend={read:async()=>undefined,write:async()=>{throw Error('disk full');},close(){}},spool=new EncryptedSpool(backend,new Uint8Array(32),descriptor,'1'),ledger=new Ledger(),q=new DeliveryQueue(settings(),ledger,{spool});q.enqueue(record());const report=await q.flush(20);expect(report.pending).toBe(1);expect(ledger.admitted).toBe(0);expect(q.diagnostics().spool_failed).toBeGreaterThan(0);
+ const backend={read:async()=>undefined,write:async()=>{throw Error('disk full');},close(){}},spool=new EncryptedSpool(backend,new Uint8Array(32),descriptor,'1'),ledger=new Ledger(),q=new SpoolingDeliveryQueue(settings(),ledger,{spool});q.enqueue(record());const report=await q.flush(20);expect(report.pending).toBe(1);expect(ledger.admitted).toBe(0);expect(q.diagnostics().spool_failed).toBeGreaterThan(0);
  await spool.close();
 });
 test('Go native canonical input goldens retain exact JSON hash',async()=>{
@@ -105,9 +112,9 @@ test('each concurrent flush owns its own deadline without overlapping a lane',as
  const q=new DeliveryQueue(settings(),ledger);q.enqueue(record());const first=q.flush(1000);await entered.promise;const start=performance.now();const second=await q.flush(10);expect(performance.now()-start).toBeLessThan(200);expect(second.pending).toBe(1);expect(second.deadlineExceeded).toBe(true);gate.resolve();expect((await first).pending).toBe(0);expect(ledger.sends.length).toBe(1);
 });
 test('policy-bound spool recovers original historical identity after restrictive policy restart',async()=>{
- const path=join(await mkdtemp(join(tmpdir(),'soundpost-history-')),'queue'),key=new Uint8Array(32),ledger=new Ledger(),old=settings();const spool=await openEncryptedSpool(path,key,descriptor,'1'),q=new DeliveryQueue(old,ledger,{spool});q.enqueue(record());expect((await q.flush(200)).pending).toBe(1);expect(ledger.sends.length).toBe(1);await q.flush(0);await spool.close();ledger.restricted=true;
+ const path=join(await mkdtemp(join(tmpdir(),'soundpost-history-')),'queue'),key=new Uint8Array(32),ledger=new Ledger(),old=settings();const spool=await openEncryptedSpool(path,key,descriptor,'1'),q=new SpoolingDeliveryQueue(old,ledger,{spool});q.enqueue(record());expect((await q.flush(200)).pending).toBe(1);expect(ledger.sends.length).toBe(1);await q.flush(0);await spool.close();ledger.restricted=true;
  const policyDocument=JSON.parse(atob(old.policy.payload.replace(/-/g,'+').replace(/_/g,'/')));policyDocument.revision='2';const current={...old,policy:signed(nativeCanonical(policyDocument)),descriptor:{...descriptor,policy_revision:'2'}};
- const restored=await openEncryptedSpool(path,key,current.descriptor,'2'),restarted=new DeliveryQueue(current,ledger,{spool:restored});const report=await restarted.flush(1000);expect(report.pending).toBe(0);expect(report.receipts[0]?.historical).toBe(true);expect(ledger.admitted).toBe(1);expect(ledger.sends.length).toBe(1);await restarted.close();
+ const restored=await openEncryptedSpool(path,key,current.descriptor,'2'),restarted=new SpoolingDeliveryQueue(current,ledger,{spool:restored});const report=await restarted.flush(1000);expect(report.pending).toBe(0);expect(report.receipts[0]?.historical).toBe(true);expect(ledger.admitted).toBe(1);expect(ledger.sends.length).toBe(1);await restarted.close();
 });
 test('all ten closed native payloads reject unknown nested content before buffering',async()=>{
  const vectors=await Bun.file(new URL('../../../fixtures/sdk/delivery/native-vectors.json',import.meta.url)).json();
@@ -131,10 +138,10 @@ test('approved native profile metadata is closed exact and never persists correc
  }
 });
 test('restart expires a whole frozen lane batch at its earliest capture',async()=>{
- const path=join(await mkdtemp(join(tmpdir(),'soundpost-expiry-')),'queue'),key=new Uint8Array(32),ledger=new Ledger(),spool=await openEncryptedSpool(path,key,descriptor,'1'),q=new DeliveryQueue(settings(),ledger,{spool});
+ const path=join(await mkdtemp(join(tmpdir(),'soundpost-expiry-')),'queue'),key=new Uint8Array(32),ledger=new Ledger(),spool=await openEncryptedSpool(path,key,descriptor,'1'),q=new SpoolingDeliveryQueue(settings(),ledger,{spool});
  for(const id of ['8'.repeat(32),'a'.repeat(32)])q.enqueue(JSON.stringify({id,kind:'log',observed_at_ns:'9007199254740993',policy_revision:'1',payload:{severity:'error',template_id:'operation.failed',template_revision:'1',fields:{status:503},line:'operation failed: 503',stream_labels:[],structured_metadata:{},source_class:'structured'}}));
  await q.flush(0);const stored=object(await spool.load()),first=object(array(stored.entries)[0]);first.wall=Date.now()-300001;object(object(array(stored.batches)[0]).batch).firstCapture=first.wall;await spool.save(stored);await spool.close();
- const recovered=new DeliveryQueue(settings(),ledger,{spool:await openEncryptedSpool(path,key,descriptor,'1')});const report=await recovered.flush();expect(report.pending).toBe(0);expect(report.acknowledgedBatchIds).toEqual([]);expect(recovered.diagnostics().queue_expired).toBe(2);expect(ledger.admitted).toBe(0);await recovered.close();
+ const recovered=new SpoolingDeliveryQueue(settings(),ledger,{spool:await openEncryptedSpool(path,key,descriptor,'1')});const report=await recovered.flush();expect(report.pending).toBe(0);expect(report.acknowledgedBatchIds).toEqual([]);expect(recovered.diagnostics().queue_expired).toBe(2);expect(ledger.admitted).toBe(0);await recovered.close();
 });
 test('resource identities never translate human aliases and instance strings match Go bounds',()=>{
  for(const field of ['service_id','environment_id','build_id'])expect(()=>new Client({...settings(),resource:{...settings().resource,[field]:'display-alias'}})).toThrow();
@@ -191,8 +198,8 @@ test('native loss permission and bounded pending aggregation never manufacture a
  const q=new DeliveryQueue({...lossSettings(),maxBytes:1024,maxRecords:1},new Ledger());expect(q.recordSignalLoss('span','queue_full',1n,'9007199254740993')).toBe(true);const report=await q.flush(10);expect(report.pending).toBe(1);expect(report.acknowledgedBatchIds).toEqual([]);expect(q.signalLossCounters()[0]!.acknowledged_count).toBe('0');
 });
 test('encrypted restart preserves original loss identity and a distinct new producer epoch',async()=>{
- const path=join(await mkdtemp(join(tmpdir(),'soundpost-native-loss-')),'queue'),key=new Uint8Array(32),ledger=new Ledger(),cfg=lossSettings(),spool=await openEncryptedSpool(path,key,descriptor,'1'),q=new DeliveryQueue(cfg,ledger,{spool});await q.flush(0);expect(q.recordSignalLoss('span','policy',1n,'9007199254740993')).toBe(true);expect((await q.flush(200)).pending).toBe(1);expect(ledger.sends.length).toBe(1);const original=ledger.sends[0]!;await q.flush(0);await spool.close();
- const restored=await openEncryptedSpool(path,key,descriptor,'1'),restarted=new DeliveryQueue(cfg,ledger,{spool:restored});await restarted.flush(0);expect(restarted.recordSignalLoss('span','policy',1n,'9007199254740994')).toBe(true);expect((await restarted.flush(1500)).pending).toBe(0);expect(ledger.admitted).toBe(2);expect(ledger.sends[0]).toBe(original);const counters=restarted.signalLossCounters();expect(counters.length).toBe(2);expect(counters[0]!.producer_epoch).not.toBe(counters[1]!.producer_epoch);expect(counters.every(c=>c.acknowledged_count==='1'&&c.pending_count==='0')).toBe(true);await restarted.close();
+ const path=join(await mkdtemp(join(tmpdir(),'soundpost-native-loss-')),'queue'),key=new Uint8Array(32),ledger=new Ledger(),cfg=lossSettings(),spool=await openEncryptedSpool(path,key,descriptor,'1'),q=new SpoolingDeliveryQueue(cfg,ledger,{spool});await q.flush(0);expect(q.recordSignalLoss('span','policy',1n,'9007199254740993')).toBe(true);expect((await q.flush(200)).pending).toBe(1);expect(ledger.sends.length).toBe(1);const original=ledger.sends[0]!;await q.flush(0);await spool.close();
+ const restored=await openEncryptedSpool(path,key,descriptor,'1'),restarted=new SpoolingDeliveryQueue(cfg,ledger,{spool:restored});await restarted.flush(0);expect(restarted.recordSignalLoss('span','policy',1n,'9007199254740994')).toBe(true);expect((await restarted.flush(1500)).pending).toBe(0);expect(ledger.admitted).toBe(2);expect(ledger.sends[0]).toBe(original);const counters=restarted.signalLossCounters();expect(counters.length).toBe(2);expect(counters[0]!.producer_epoch).not.toBe(counters[1]!.producer_epoch);expect(counters.every(c=>c.acknowledged_count==='1'&&c.pending_count==='0')).toBe(true);await restarted.close();
 });
 test('frozen body keeps replacement-pattern characters in record content byte-exact',()=>{
  const tokens=['$&','$$',"$'",'$`','$1','cost $& done $$5'];

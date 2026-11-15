@@ -8,9 +8,10 @@ export interface DomGlobals {
  readonly Node: Proto; readonly Element: Proto; readonly HTMLElement?: Proto; readonly MouseEvent?: Proto; readonly Event?: Proto; readonly MutationRecord?: Proto;
 }
 type Read = (self: object) => unknown;
+const NO_ARGS: readonly unknown[] = Object.freeze([]);
 function getter(proto: object | undefined, name: string): Read | undefined {
  const fn = proto === undefined ? undefined : Object.getOwnPropertyDescriptor(proto, name)?.get;
- return fn === undefined ? undefined : (self: object) => Reflect.apply(fn, self, []);
+ return fn === undefined ? undefined : (self: object) => Reflect.apply(fn, self, NO_ARGS);
 }
 function required(proto: object | undefined, name: string): Read {
  const read = getter(proto, name);
@@ -100,7 +101,7 @@ export function newWalkState(ids: WeakMap<object, number>, allocate: () => numbe
 function emit(state: WalkState, source: object, node: Omit<ReplayNode, "id">, id: number | undefined): void {
  const assigned = id ?? state.allocate();
  state.ids.set(source, assigned);
- state.nodes.push({id: String(assigned), ...node});
+ state.nodes.push({id: String(assigned), parent: node.parent, tag: node.tag, class: node.class, text: node.text});
 }
 
 /**

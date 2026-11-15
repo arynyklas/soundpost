@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Breaking (internal entries): `captureRuntimeProfile` moved off `Client` to the new `@soundpost/core/runtime` entry (`RuntimeClient`, `initRuntime`), and the encrypted-spool persistence/recovery moved off `DeliveryQueue` to `SpoolingDeliveryQueue` (`queue_spool.ts`, installed by `RuntimeClient` through the protected `Client.createDelivery`). The base `Client`/`DeliveryQueue` (what the browser uses, which prohibits a spool) refuse a spool instead of ignoring it. The Node and Bun clients extend `RuntimeClient`. Browser core bundle: 42,603 B -> 40,123 B gzip.
+
 - `Client.captureRuntimeProfile(report)` admits a Node/Bun `runtime_engine_samples` report as a capability record plus linked, size-split `runtime_cpu` chunks (`runtimeProfileWire` in `profile_wire.ts`), with truncated samples recorded as a loss.
 
 - Original JS exception frames (D7): descriptor-only, formatter-safe stack read with a bounded V8/JavaScriptCore/SpiderMonkey parser, `Config.artifactRoot`/`Config.artifactIds`, and the graph reasons `stack_formatter_hooked`, `stack_not_plain`, `stack_unparsed`.

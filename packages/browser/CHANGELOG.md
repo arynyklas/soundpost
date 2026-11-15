@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Replay recorder cost per mutation batch: nodes are sized and canonicalized by the recorder directly (no per-node `JSON.stringify` sizing when the chunk fits, `CanonicalText` for the node array in the hash chain), canonical JSON caches quoted keys and skips an unnecessary sort, SHA-256 reuses one message buffer. Wire bytes and hashes are unchanged (the committed fixtures are byte-identical). Worst per-burst p95 on the real-Chrome spec: 7.2/7.3/6.4 ms -> 4.1/4.7/4.5 ms (budget 5 ms).
+
 - Replay: closed shadow roots attached while capture is active are recorded as opaque nodes (`attachShadow` interception, restored on stop); the 20,000-node cap is a running total over the live tree (a delta that would pass it becomes a fresh, exactly-recounted checkpoint). Roots attached before capture starts remain a documented limitation.
 - Breaking: split the replay recorder and the profiler out of the core entry so the core bundle meets its design 13 budget (<=40 KiB gzip; measured 36,411 B, was 47,728 B with replay and profiler inlined). `@soundpost/browser` no longer exports `createRecorder`, `ReplayStream`, `startProfile` or the replay/profile types, and `Client` no longer has `startReplay`, `setReplayConsent`, `startProfile` or `submitProfile`. Use `@soundpost/browser/replay` (`startReplay(client, config, tap?)`, `setReplayConsent(client, enabled)`, `createRecorder`, `ReplayStream`) and `@soundpost/browser/profile` (`startProfile`, `startClientProfile(client, options)`, `submitProfile(client, report)`, `createProfiler`). Closing a client still closes its recorder.
 

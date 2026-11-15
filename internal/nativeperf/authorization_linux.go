@@ -99,5 +99,10 @@ func authorizeLocal(peer PeerCredential, r CaptureRequest, p OperatorPolicy) (Au
 			return AuthorizedTargets{}, ErrAuthorization
 		}
 	}
-	return AuthorizedTargets{targets: append([]Target(nil), r.Targets...), mode: r.Mode}, nil
+	// The capability owns its targets: the requester keeps r and may rewrite it (including the build-ID slices) afterwards.
+	out := append([]Target(nil), r.Targets...)
+	for i := range out {
+		out[i].AllowedBuildIDs = append([]string(nil), out[i].AllowedBuildIDs...)
+	}
+	return AuthorizedTargets{targets: out, mode: r.Mode}, nil
 }

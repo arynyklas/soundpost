@@ -7,8 +7,7 @@ import {extractException,type ErrorBoundary} from "./errors.ts";
 import type {FrameNaming} from "./frames.ts";
 export type {ErrorBoundary} from "./errors.ts";
 import {DeliveryQueue} from "./queue.ts";
-import {HttpsReceiptTransport} from "./transport.ts";
-import {runtimeProfileWire,type RuntimeProfileReport} from "./profile_wire.ts";
+import {HttpsReceiptTransport,type ReceiptTransport} from "./transport.ts";
 import type {FlushReport} from "./types.ts";
 import {SpanRecorder,createSynchronousMetadataContext,signalAborted,randomHex} from "./tracing.ts";
 import type {MetadataContext,TraceContext,SpanOptions,ActiveSpan,LiveSpan} from "./tracing.ts";
@@ -37,7 +36,6 @@ type RuntimeErrorBoundary=ErrorBoundary&{readonly timerCancellation?:(error:unkn
 export class Client {
  private readonly delivery:DeliveryQueue;
  private readonly counts:Record<string,number>=Object.create(null) as Record<string,number>;
- private profileProcess:string|undefined;
  private readonly policy:SourcePolicy;
  private readonly templates=new Map<string,Template>();
  private readonly clock:()=>string;
@@ -53,7 +51,7 @@ export class Client {
   if(config.integrations?.length)throw Error("integrations not available");
   this.policy=resolve(config);this.clock=config.clockNs??(()=>String(BigInt(Date.now())*1000000n));this.build=config.build;this.frameNaming=frameNaming(config);this.codes=new Set(config.operations??[]);
   this.jobs=new JobRecorder(metadataContext,config.jobRegistry,{clock:()=>this.readClock(),emit:(payload,observed)=>{this.admit({kind:"job_attempt",id:this.id(),observed_at_ns:observed,payload});},capture:error=>this.captureException(error),loss:reason=>this.loss(reason),nativeError:error=>this.errorBoundary!==undefined&&this.errorBoundary.isProxy?.(error)!==true&&this.errorBoundary.isNativeError(error),timerCancellation:error=>this.errorBoundary?.timerCancellation?.(error)??Promise.resolve(false)});
-  this.delivery=new DeliveryQueue(config,config.transport??new HttpsReceiptTransport(config),{context:this.exportContext});
+  this.delivery=this.createDelivery(config,config.transport??new HttpsReceiptTransport(config),{context:this.exportContext});
   this.spans=new SpanRecorder(metadataContext,config.operations??[],config.dependencies??[],config.traceSampleProbability,()=>!this.closed&&this.policy.decision.traces&&!this.exportContext.active(),span=>{if(this.spanDroppedByFullQueue(span.start.wall_ns))return;this.admit({kind:"span",id:this.id(),observed_at_ns:span.start.wall_ns,span});},span=>this.admitLean(span),reason=>{
    this.loss(reason);if(!this.policy.decision.loss||this.closed||this.exportContext.active())return;const nativeReason=reason==="trace_sampled_out"?"policy":reason==="trace_active_limit"?"queue_full":undefined;if(nativeReason===undefined)return;const at=this.readClock();if(at!==undefined&&BigInt(at)<BigInt(this.policy.expiresNs))this.delivery.recordSignalLoss("span",nativeReason,1n,at);
   });
@@ -84,6 +82,8 @@ export class Client {
   this.delivery.enqueueLeanSpan(span,this.policy.decision.revision);
  }
  private id():string{return randomHex(16);}
+ /** The delivery queue. The base queue has no spool (the browser prohibits one); RuntimeClient overrides this with the spooling queue. */
+ protected createDelivery(config:Config,transport:ReceiptTransport,options:{context?:ExportContext}):DeliveryQueue{return new DeliveryQueue(config,transport,options);}
  captureException(error:unknown,options?:{code?:string}):EventId{
   return this.captureError(error,options,"manual",false);
  }
@@ -113,18 +113,6 @@ export class Client {
  private admitProfile(input:CapabilityInput|ProfileInput):boolean{try{return this.admit(input);}catch{this.loss("invalid_profile_record");return false;}}
  /** For adapters whose own profile-to-wire mapping failed before anything reached the queue. */
  profileFailed():void{this.loss("profile_wire_failed");}
- /** Maps a finished Node/Bun `runtime_engine_samples` report to its capability (+ profile chunk) records and enqueues them (see profile_wire.ts for the vocabulary mapping). True only when everything was queued; a mapping failure is counted
-  * as profile_wire_failed. Samples the profiler dropped from the run are a recorded truncated loss whether or not the retained part was queued. Never throws. */
- captureRuntimeProfile(report:RuntimeProfileReport):boolean{
-  let queued:boolean;
-  try{const wire=runtimeProfileWire(report,{process:this.profileProcess??=randomHex(16),id:()=>randomHex(16)});queued=this.captureProfile(wire.capability,wire.chunks);}
-  catch{this.profileFailed();queued=false;}
-  try{
-   let truncated=0n;for(const loss of report.losses)if(loss.reason==="truncated")truncated+=BigInt(loss.count);
-   if(truncated>0n){const start=report.clock.wall_start_ns,end=report.clock.wall_end_ns;this.captureProfileLoss(truncated,BigInt(end)>=BigInt(start)?end:start);}
-  }catch{this.profileFailed();}
-  return queued;
- }
  /** Records `count` profile samples the adapter dropped from one run (past its sample/frame/stack bounds or the browser's buffer) as a native loss of the
   * profile_chunk signal with reason "truncated", the way every other signal loss is recorded (durable `loss` record plus the queue's per-signal counters).
   * The diagnostics counter `profile_samples_truncated` always moves; the durable record only when the signed policy allows loss and the client is open.

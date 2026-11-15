@@ -1,9 +1,17 @@
 // Copyright 2026 Aryn Yklas
 // SPDX-License-Identifier: Apache-2.0
 import type {DomAccessors, EnqueueResult, MutationObserverLike, ReplayChunk, ReplayConfig, ReplayEvent, ReplayEventTargetLike, ReplayNode, ReplayRecorder, ReplayTimers} from "./types.ts";
-import {CHECKPOINT_INTERVAL_MS, EVENT_FLUSH_MS, GAP_EVENT_BYTES, MAX_CHECKPOINTS, MAX_CHUNK_BYTES, MAX_CHUNK_NODES, MAX_MUTATION_RECORDS, MAX_MUTATION_ROOTS, MAX_NODE_ID, MAX_PENDING_EVENTS, MAX_DEPTH, MAX_NODES, MAX_SEQUENCE, RECORDER_VERSION, ZERO_HASH, canonicalJSON, captureAllowed, quantize, sha256Hex} from "./policy.ts";
+import {CHECKPOINT_INTERVAL_MS, EVENT_FLUSH_MS, GAP_EVENT_BYTES, MAX_CHECKPOINTS, MAX_CHUNK_BYTES, MAX_CHUNK_NODES, MAX_MUTATION_RECORDS, MAX_MUTATION_ROOTS, MAX_NODE_ID, MAX_PENDING_EVENTS, MAX_DEPTH, MAX_NODES, MAX_SEQUENCE, RECORDER_VERSION, ZERO_HASH, CanonicalText, canonicalJSON, captureAllowed, quantize, sha256Hex} from "./policy.ts";
 import {captureDomAccessors, fitSubtrees, newWalkState, walk, type DomGlobals} from "./tree.ts";
 
+/** JSON text of one node with every value empty, plus its separator: a recorded node is exactly this plus the lengths of its five values (ids are decimals, tags and masks come from the closed vocabulary, none needs escaping). */
+const NODE_FRAME_BYTES = JSON.stringify({id: "", parent: "", tag: "", class: "", text: ""}).length + 1;
+/** The canonical JSON (keys in code unit order) of a node array the recorder built: every value is a decimal or a closed-vocabulary string, so no value needs escaping. Equals canonicalJSON(nodes). */
+function canonicalNodes(nodes: readonly ReplayNode[]): string {
+ let out = "[";
+ for (let i = 0; i < nodes.length; i++) { const n = nodes[i]!; out += (i === 0 ? "" : ",") + '{"class":"' + n.class + '","id":"' + n.id + '","parent":"' + n.parent + '","tag":"' + n.tag + '","text":"' + n.text + '"}'; }
+ return out + "]";
+}
 const OBSERVE = {childList: true, characterData: true, attributes: true, subtree: true} as const;
 const LISTEN = {capture: true, passive: true} as const;
 const defaultTimers: ReplayTimers = {set: (callback, ms) => globalThis.setTimeout(callback, ms), clear: handle => globalThis.clearTimeout(handle as ReturnType<typeof setTimeout>)};
@@ -192,7 +200,11 @@ class Recorder implements ReplayRecorder {
  private write(nodes: readonly ReplayNode[], events: readonly ReplayEvent[], checkpoint: boolean, gap: boolean): void {
   let budget = GAP_EVENT_BYTES;
   for (const event of events) budget += JSON.stringify(event).length + 1;
-  const fit = fitSubtrees(nodes, MAX_CHUNK_NODES, Math.max(0, MAX_CHUNK_BYTES - budget));
+  const room = Math.max(0, MAX_CHUNK_BYTES - budget);
+ // The recorder builds every node itself, so its JSON size is the frame plus the value lengths: a chunk that fits needs no per-node JSON.stringify sizing.
+ let nodeBytes = 0;
+ for (const node of nodes) nodeBytes += NODE_FRAME_BYTES + node.id.length + node.parent.length + node.tag.length + node.class.length + node.text.length;
+ const fit = nodes.length <= MAX_CHUNK_NODES && nodeBytes <= room ? {nodes, truncated: false, suppressed: []} : fitSubtrees(nodes, MAX_CHUNK_NODES, room);
   let emitted = events, marked = gap;
   if (fit.truncated) {
    for (const id of fit.suppressed) this.suppressed.add(id);
@@ -208,7 +220,7 @@ class Recorder implements ReplayRecorder {
    checkpoint_sequence: String(checkpoint ? sequence : this.checkpointSequence), checkpoint_hash: checkpoint ? this.previousHash : this.checkpointHash,
    clock: {...this.now(), domain: this.config.domain}, nodes: fit.nodes, events: emitted, loss: String(this.loss), gap: marked, capture_policy_revision: this.config.capturePolicyRevision,
   };
-  const hash = sha256Hex(canonicalJSON(chunk));
+  const hash = sha256Hex(canonicalJSON({...chunk, nodes: new CanonicalText(canonicalNodes(fit.nodes))}));
   if (checkpoint) { this.checkpointSequence = sequence; this.checkpointHash = hash; }
   this.previousHash = hash;
   let result: EnqueueResult;

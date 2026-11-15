@@ -7,12 +7,12 @@ import {hashBytes,nativeCanonical,resourceWire,routeRecord,routeSlot,validateDes
 import {verifyReceipt,type FrozenBatch,type ReceiptTransport,type Outcome} from './transport.ts';
 import type {EncryptedSpool} from './spool.ts';
 import {object,array,text,parseSafeRecord,type NativeRecord} from './wire.ts';
-type Entry={text:string;wire:string;wireBytes:number;size:number;at:number;wall:number;kind:string;slot:number;lazy:LiveSpan|undefined;batch?:string;position?:number;lossKey?:string;lossCount?:bigint};
-type BatchState={batch:FrozenBatch;ambiguous:boolean;attempt:number;next:number;rank:number};
+export type Entry={text:string;wire:string;wireBytes:number;size:number;at:number;wall:number;kind:string;slot:number;lazy:LiveSpan|undefined;batch?:string;position?:number;lossKey?:string;lossCount?:bigint};
+export type BatchState={batch:FrozenBatch;ambiguous:boolean;attempt:number;next:number;rank:number};
 type LossBucket={epoch:string;signal:string;reason:string;revision:string;observed:bigint;acked:bigint;unbatched:bigint;start:string|null;end:string|null;at:number;wall:number};
 export function retryDelay(attempt:number,random:()=>number=Math.random):number{const cap=Math.min(30000,250*2**Math.min(attempt,7));return Math.max(250,Math.min(30000,cap*(.5+.5*Math.max(0,Math.min(1,random())))));}
 const id=():string=>randomHex(16);
-const priority=(kind:string):number=>{switch(kind){case 'error':case 'condition':case 'capability':case 'loss':case 'job_attempt':return 2;case 'log':return 1;default:return 0;}};
+export const priority=(kind:string):number=>{switch(kind){case 'error':case 'condition':case 'capability':case 'loss':case 'job_attempt':return 2;case 'log':return 1;default:return 0;}};
 // The fixed parts of a span record's serialization (id, kind and observed_at_ns before the payload, the resource after it), whose lengths the lean path adds up instead of building the text.
 const LEAN_KIND='","kind":"span","observed_at_ns":"',RESOURCE_OPEN=',"resource":',LEAN_HEAD='{"id":"'.length+32+LEAN_KIND.length+'","payload":'.length;
 // A flush works for at most SLICE_MS at a time and then gives the event loop a turn, so a host serving requests is never stalled for the whole flush.
@@ -20,37 +20,41 @@ const SLICE_MS=0.5;
 const immediate:((callback:()=>void)=>unknown)|undefined=Reflect.get(globalThis,'setImmediate');
 const yieldToLoop=():Promise<void>=>new Promise<void>(resolve=>{if(immediate!==undefined)immediate(resolve);else setTimeout(resolve,0);});
 export class DeliveryQueue {
- private held:Entry[]=[];private batches:BatchState[]=[];private bytes=0;private losses=0;private denied=false;private closed=false;private closing=false;
+ protected held:Entry[]=[];protected batches:BatchState[]=[];protected bytes=0;protected losses=0;protected denied=false;protected closed=false;protected closing=false;
  // Unbatched entries per priority class (undefined = recount on demand), and a lower bound of the oldest entry's `at` (stale-low is safe: it only costs one rescan).
- private evictable:number[]|undefined;private oldest=Infinity;
- private get entries():Entry[]{return this.held;}
- private set entries(value:Entry[]){this.held=value;this.evictable=undefined;}
- private readonly now:()=>number;private readonly random:()=>number;private readonly descriptor:RoutingDescriptor;private readonly resource:Record<string,unknown>;private producer:string;private readonly policyExpires:string;private recovering=false;
- private readonly counts:Record<string,number>=Object.create(null) as Record<string,number>;private running:Promise<FlushReport>|undefined;private readonly spool:EncryptedSpool|undefined;private recovered=false;private persistChain:Promise<void>=Promise.resolve();
- private recoveryTask:Promise<void>|undefined;
- private readonly lossEpoch=canonicalId(id());private readonly lossBuckets=new Map<string,LossBucket>();private readonly allowLoss:boolean;private materializingLoss=false;private lastAck:{group:string;index:string}|null=null;
- constructor(private readonly config:Config,private readonly transport:ReceiptTransport,private readonly options:{now?:()=>number;random?:()=>number;spool?:EncryptedSpool;context?:ExportContext}={}){
+ protected evictable:number[]|undefined;protected oldest=Infinity;
+ protected get entries():Entry[]{return this.held;}
+ protected set entries(value:Entry[]){this.held=value;this.evictable=undefined;}
+ protected readonly now:()=>number;protected readonly random:()=>number;protected readonly descriptor:RoutingDescriptor;protected readonly resource:Record<string,unknown>;protected producer:string;protected readonly policyExpires:string;protected recovering=false;
+ protected readonly counts:Record<string,number>=Object.create(null) as Record<string,number>;protected running:Promise<FlushReport>|undefined;protected readonly spool:EncryptedSpool|undefined;protected recovered=false;protected persistChain:Promise<void>=Promise.resolve();
+ protected recoveryTask:Promise<void>|undefined;
+ protected readonly lossEpoch=canonicalId(id());protected readonly lossBuckets=new Map<string,LossBucket>();protected readonly allowLoss:boolean;protected materializingLoss=false;protected lastAck:{group:string;index:string}|null=null;
+ constructor(protected readonly config:Config,protected readonly transport:ReceiptTransport,protected readonly options:{now?:()=>number;random?:()=>number;spool?:EncryptedSpool;context?:ExportContext}={}){
   const envelope=object(JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(config.policy.payload.replace(/-/g,'+').replace(/_/g,'/')),c=>c.charCodeAt(0)))));this.policyExpires=unixNano(envelope.expires_ns);
   const deploymentLoss=object(config).deploymentLoss;this.allowLoss=envelope.loss===true&&(deploymentLoss===undefined||deploymentLoss===true);
   this.descriptor=validateDescriptor(config.descriptor??{version:1,org:config.org,project:config.project,source:config.source,routing_version:1,slots:64,policy_revision:decimal(envelope.revision)});
   if(this.descriptor.org!==config.org||this.descriptor.project!==config.project||this.descriptor.source!==config.source||this.descriptor.policy_revision!==envelope.revision)throw Error('routing identity mismatch');
   this.resource=resourceWire(config.resource,config.build);this.producer=canonicalId(config.producer??id());this.now=options.now??(()=>performance.now());this.random=options.random??Math.random;this.spool=options.spool??config.spool;
- this.spool?.assertBinding(this.descriptor,this.descriptor.policy_revision);this.resourceText=nativeCanonical(this.resource);this.resourceBytes=utf8Size(this.resourceText);
+ if(this.spool!==undefined&&!this.spoolSupported())throw Error('an encrypted spool needs SpoolingDeliveryQueue');this.spool?.assertBinding(this.descriptor,this.descriptor.policy_revision);this.resourceText=nativeCanonical(this.resource);this.resourceBytes=utf8Size(this.resourceText);
   // routeRecord's input for a span, laid out once: length-prefixed org, project, kind and owner (the 32-character trace ID, written per span at spanRouteAt).
   const org=new TextEncoder().encode(this.descriptor.org),project=new TextEncoder().encode(this.descriptor.project),kind=new TextEncoder().encode("span");
   this.spanRoute=new Uint8Array(16+org.length+project.length+kind.length+32);const view=new DataView(this.spanRoute.buffer);let at=0;
   for(const part of [org,project,kind]){view.setUint32(at,part.length,false);at+=4;this.spanRoute.set(part,at);at+=part.length;}
   view.setUint32(at,32,false);this.spanRouteAt=at+4;
  }
- private readonly resourceText:string;private readonly resourceBytes:number;private readonly spanRoute:Uint8Array;private readonly spanRouteAt:number;
+ protected readonly resourceText:string;protected readonly resourceBytes:number;protected readonly spanRoute:Uint8Array;protected readonly spanRouteAt:number;
+ /** True only in SpoolingDeliveryQueue (queue_spool.ts), which carries the persistence and recovery code. */
+ protected spoolSupported():boolean{return false;}
+ persist():Promise<void>{return Promise.resolve();}
+ protected recoverOnce():Promise<void>{return Promise.resolve();}
  /** The queue's two serializations of one parsed record: `safe` (stored and spooled form) and `wire` (batch form with the resource) with the wire's UTF-8 size. The payload is canonicalized once and spliced into both; each object's keys are written in canonical order (id, kind, observed_at_ns, payload, then policy_revision or resource). */
- private serialize(parsed:NativeRecord):{safe:string;wire:string;bytes:number}{
+ protected serialize(parsed:NativeRecord):{safe:string;wire:string;bytes:number}{
   const head='{"id":'+JSON.stringify(parsed.id)+',"kind":'+JSON.stringify(parsed.kind)+',"observed_at_ns":'+JSON.stringify(parsed.observed_at_ns)+',"payload":'+nativeCanonical(parsed.payload);
   const wire=head+',"resource":'+this.resourceText+'}';
   return {safe:head+',"policy_revision":'+JSON.stringify(parsed.policy_revision)+'}',wire,bytes:utf8Size(wire)};
  }
  /** Serializes a lean span's entry (record ID, both texts, route slot); until then the entry holds the span itself. The size was computed exactly when the span was queued; if it ever differed, the accounting follows the real size and the mismatch is counted. */
- private materialize(entry:Entry):void{
+ protected materialize(entry:Entry):void{
   const span=entry.lazy;if(span===undefined)return;entry.lazy=undefined;
   const head='{"id":"'+id()+LEAN_KIND+span.startWall+'","payload":'+leanSpanPayload(span);
   entry.text=head+',"policy_revision":"'+this.descriptor.policy_revision+'"}';entry.wire=head+RESOURCE_OPEN+this.resourceText+'}';
@@ -59,9 +63,9 @@ export class DeliveryQueue {
   const bytes=head.length+RESOURCE_OPEN.length+this.resourceBytes+1;
   if(bytes!==entry.wireBytes){const size=bytes+512;this.bytes+=size-entry.size;entry.size=size;entry.wireBytes=bytes;this.loss("span_size_mismatch");}
  }
- private materializeAll():void{for(const entry of this.entries)if(entry.lazy!==undefined)this.materialize(entry);}
- private lossKey(epoch:string,signal:string,reason:string):string{return epoch+":"+signal+":"+reason;}
- private validSignalLoss(signal:string,reason:string):boolean{return kinds.some(kind=>kind===signal)&&signal!=="loss"&&["queue_full","expired","policy","unsupported","ring_overflow","reorder_gap","transport","shutdown","truncated"].includes(reason);}
+ protected materializeAll():void{for(const entry of this.entries)if(entry.lazy!==undefined)this.materialize(entry);}
+ protected lossKey(epoch:string,signal:string,reason:string):string{return epoch+":"+signal+":"+reason;}
+ protected validSignalLoss(signal:string,reason:string):boolean{return kinds.some(kind=>kind===signal)&&signal!=="loss"&&["queue_full","expired","policy","unsupported","ring_overflow","reorder_gap","transport","shutdown","truncated"].includes(reason);}
  recordSignalLoss(signal:string,reason:string,count:bigint,atNs:string):boolean{
   if(this.closed||this.closing||this.denied||!this.allowLoss||this.options.context?.active()){this.counts.native_loss_unavailable=(this.counts.native_loss_unavailable??0)+1;return false;}
   try{unixNano(atNs);if(typeof signal!=="string"||typeof reason!=="string"||!this.validSignalLoss(signal,reason)||typeof count!=="bigint"||count<=0n||count>18446744073709551615n||BigInt(atNs)>=BigInt(this.policyExpires))throw Error();}catch{this.counts.invalid_signal_loss=(this.counts.invalid_signal_loss??0)+1;return false;}
@@ -72,8 +76,8 @@ export class DeliveryQueue {
   bucket.observed+=count;if(bucket.unbatched===0n){bucket.start=atNs;bucket.end=atNs;bucket.at=this.now();bucket.wall=Date.now();}else{if(BigInt(atNs)<BigInt(bucket.start!))bucket.start=atNs;if(BigInt(atNs)>BigInt(bucket.end!))bucket.end=atNs;}bucket.unbatched+=count;
   this.materializeSignalLosses();if(this.spool)void this.persist().catch(()=>{this.counts.spool_failed=(this.counts.spool_failed??0)+1;});return true;
  }
- private expireSignalLosses():void{for(const bucket of this.lossBuckets.values())if(bucket.unbatched>0n&&this.now()-bucket.at>=300000){bucket.unbatched=0n;bucket.start=null;bucket.end=null;this.loss("native_loss_expired");}}
- private materializeSignalLosses():void{
+ protected expireSignalLosses():void{for(const bucket of this.lossBuckets.values())if(bucket.unbatched>0n&&this.now()-bucket.at>=300000){bucket.unbatched=0n;bucket.start=null;bucket.end=null;this.loss("native_loss_expired");}}
+ protected materializeSignalLosses():void{
   if(this.materializingLoss||this.closed||this.recovering||this.denied)return;this.materializingLoss=true;
   try{for(const [key,bucket] of this.lossBuckets){if(bucket.unbatched===0n)continue;
    if(!this.allowLoss||bucket.revision!==this.descriptor.policy_revision){bucket.unbatched=0n;bucket.start=null;bucket.end=null;this.loss("native_loss_policy");continue;}
@@ -88,24 +92,19 @@ export class DeliveryQueue {
   }}finally{this.materializingLoss=false;}
  }
  signalLossCounters():readonly Readonly<Record<string,string>>[]{this.expire();this.expireSignalLosses();return Object.freeze([...this.lossBuckets].map(([key,b])=>{const pending=this.entries.filter(e=>e.lossKey===key).reduce((n,e)=>n+(e.lossCount??0n),b.unbatched);return Object.freeze({producer_epoch:b.epoch,signal:b.signal,reason:b.reason,observed_count:b.observed.toString(),acknowledged_count:b.acked.toString(),pending_count:pending.toString(),unexported_count:(b.observed-b.acked-pending).toString()});}));}
- private acknowledgeSignalLosses(batch:FrozenBatch,receipt:Record<string,unknown>):void{const cursor=object(receipt.cursor);this.lastAck={group:canonicalId(cursor.group),index:decimal(cursor.index)};for(const entry of this.entries)if(entry.batch===batch.id&&entry.lossKey){const bucket=this.lossBuckets.get(entry.lossKey);if(!bucket||entry.lossCount===undefined||bucket.acked+entry.lossCount>bucket.observed)throw Error("invalid native loss accounting");bucket.acked+=entry.lossCount;}}
- private restoreSignalLosses(value:Record<string,unknown>):void{
-  this.lossBuckets.clear();for(const raw of array(value.loss_buckets)){const b=object(raw),epoch=canonicalId(b.producer_epoch),signal=text(b.signal),reason=text(b.reason),revision=decimal(b.policy_revision);if(!this.validSignalLoss(signal,reason))throw Error("invalid native loss state");const observed=BigInt(decimal(b.observed_count)),acked=BigInt(decimal(b.acknowledged_count)),unbatched=BigInt(decimal(b.unbatched_count));if(acked>observed||unbatched>observed-acked||typeof b.wall!=="number"||!Number.isSafeInteger(b.wall))throw Error("invalid native loss state");if(observed===acked&&unbatched===0n)continue;const start=b.start_ns===null?null:unixNano(b.start_ns),end=b.end_ns===null?null:unixNano(b.end_ns);if(unbatched>0n&&(start===null||end===null||BigInt(end)<BigInt(start)))throw Error("invalid native loss interval");const key=this.lossKey(epoch,signal,reason);if(this.lossBuckets.has(key)||this.bytes+512>(this.config.maxBytes??2097152))throw Error("native loss capacity exceeded");this.lossBuckets.set(key,{epoch,signal,reason,revision,observed,acked,unbatched,start,end,wall:b.wall,at:this.now()-(Date.now()-b.wall)});this.bytes+=512;}
-  if(value.last_ack===null)this.lastAck=null;else{const c=object(value.last_ack);this.lastAck={group:canonicalId(c.group),index:decimal(c.index)};if(this.lastAck.index==="0")throw Error("invalid saved ACK cursor");}
- }
- private markLossEntry(entry:Entry,record:Record<string,unknown>):void{if(record.kind!=="loss")return;const p=object(record.payload),key=this.lossKey(canonicalId(p.producer_epoch),text(p.signal),text(p.reason));if(this.lossBuckets.has(key)){entry.lossKey=key;entry.lossCount=BigInt(decimal(p.count));}}
- private loss(reason:string,count=1):void{this.losses+=count;this.counts[reason]=(this.counts[reason]??0)+count;}
+ protected acknowledgeSignalLosses(batch:FrozenBatch,receipt:Record<string,unknown>):void{const cursor=object(receipt.cursor);this.lastAck={group:canonicalId(cursor.group),index:decimal(cursor.index)};for(const entry of this.entries)if(entry.batch===batch.id&&entry.lossKey){const bucket=this.lossBuckets.get(entry.lossKey);if(!bucket||entry.lossCount===undefined||bucket.acked+entry.lossCount>bucket.observed)throw Error("invalid native loss accounting");bucket.acked+=entry.lossCount;}}
+ protected loss(reason:string,count=1):void{this.losses+=count;this.counts[reason]=(this.counts[reason]??0)+count;}
  /** True when the signed policy has expired at the queue's wall clock, or when that clock cannot be read (expired is the safe answer). Strings only: canonical UnixNano values compare without BigInt. */
- private policyExpired():boolean{
+ protected policyExpired():boolean{
   try{const clock=this.config.clockNs,now=clock?clock():(ms=>ms>0?ms+"000000":String(BigInt(ms)*1000000n))(Date.now());return compareNano(unixNano(now),this.policyExpires)>=0;}catch{return true;}
  }
- private remove(batch:FrozenBatch,reason?:string):void{this.entries=this.entries.filter(e=>{if(e.batch!==batch.id)return true;this.bytes-=e.size;return false;});this.batches=this.batches.filter(s=>s.batch.id!==batch.id);if(reason)this.loss(reason,batch.count);}
- private expire():void{
+ protected remove(batch:FrozenBatch,reason?:string):void{this.entries=this.entries.filter(e=>{if(e.batch!==batch.id)return true;this.bytes-=e.size;return false;});this.batches=this.batches.filter(s=>s.batch.id!==batch.id);if(reason)this.loss(reason,batch.count);}
+ protected expire():void{
   const now=this.now();if(now-this.oldest<300000)return;
   const expired=new Set(this.entries.filter(e=>now-e.at>=300000).map(e=>e.batch).filter((v):v is string=>v!==undefined));for(const b of [...this.batches])if(expired.has(b.batch.id))this.remove(b.batch,'queue_expired');this.entries=this.entries.filter(e=>{if(now-e.at<300000)return true;this.bytes-=e.size;this.loss('queue_expired');return false;});
   let oldest=Infinity;for(const e of this.entries)if(e.at<oldest)oldest=e.at;this.oldest=oldest;
  }
- private unbatchedCounts():number[]{if(!this.evictable){const counts=[0,0,0];for(const e of this.entries)if(!e.batch)counts[priority(e.kind)]!++;this.evictable=counts;}return this.evictable;}
+ protected unbatchedCounts():number[]{if(!this.evictable){const counts=[0,0,0];for(const e of this.entries)if(!e.batch)counts[priority(e.kind)]!++;this.evictable=counts;}return this.evictable;}
  /** True, counted as queue_full exactly as enqueue would, when the record cap is reached and no unbatched entry of lower priority could make room for a record of this kind: enqueue would drop it. O(1), so callers can skip serializing a record that is certain to be dropped. */
  rejectsWhenFull(kind:string):boolean{
   if(this.closed||this.closing&&!this.recovering&&!this.materializingLoss)return false;this.expire();
@@ -131,7 +130,7 @@ export class DeliveryQueue {
   if(!this.recovering&&policyRevision!==this.descriptor.policy_revision)throw Error('policy revision mismatch');
   return this.place("span","","",LEAN_HEAD+span.startWall.length+leanSpanLength(span)+RESOURCE_OPEN.length+this.resourceBytes+1,-1,span);
  }
- private place(kind:string,safe:string,wire:string,recordBytes:number,slot:number,lazy?:LiveSpan):boolean{
+ protected place(kind:string,safe:string,wire:string,recordBytes:number,slot:number,lazy?:LiveSpan):boolean{
   const size=recordBytes+(kind==="loss"?1024:512);
   if(recordBytes>(kind==='replay_chunk'?131072:262144)){if(!this.materializingLoss)this.loss('record_too_large');return false;}
   while(this.entries.length>=(this.config.maxRecords??1024)||this.bytes+size>(this.config.maxBytes??2097152)){
@@ -142,7 +141,7 @@ export class DeliveryQueue {
  }
  freeze():readonly FrozenBatch[]{this.freezeSome(Infinity);return Object.freeze(this.batches.map(s=>s.batch));}
  /** Freezes the unbatched entries slot by slot, stopping between slots once `budgetMs` of work has passed (the delivery loop yields to the event loop in between, so one flush never stalls the host for long). True when nothing unbatched is left. */
- private freezeSome(budgetMs:number):boolean{
+ protected freezeSome(budgetMs:number):boolean{
   const end=performance.now()+budgetMs;
   this.expire();
   this.expireSignalLosses();this.materializeSignalLosses();
@@ -173,46 +172,14 @@ export class DeliveryQueue {
   }
   return true;
  }
- private snapshot():unknown{this.materializeAll();return {version:2,producer:this.producer,last_ack:this.lastAck,loss_buckets:[...this.lossBuckets.values()].map(b=>({producer_epoch:b.epoch,signal:b.signal,reason:b.reason,policy_revision:b.revision,observed_count:b.observed.toString(),acknowledged_count:b.acked.toString(),unbatched_count:b.unbatched.toString(),start_ns:b.start,end_ns:b.end,wall:b.wall})),entries:this.entries.map(e=>({text:e.text||null,position:e.position??null,wall:e.wall,batch:e.batch??null})),batches:this.batches.map(s=>({batch:s.batch,ambiguous:s.ambiguous,attempt:s.attempt}))};}
- async persist():Promise<void>{if(!this.spool)return;await this.recoverOnce();const snapshot=this.snapshot();this.persistChain=this.persistChain.catch(()=>{}).then(()=>{const save=()=>this.spool!.save(snapshot);return this.options.context?this.options.context.run(save):save();});return this.persistChain;}
- private recoverOnce():Promise<void>{return this.recoveryTask??(this.recoveryTask=this.options.context?this.options.context.run(()=>this.recover()):this.recover());}
- private async recover():Promise<void>{
-  if(this.recovered)return;if(!this.spool){this.recovered=true;return;}const raw=await this.spool.load();if(raw===undefined){this.recovered=true;return;}const value=object(raw);
-  const producer=canonicalId(value.producer);if(value.version!==2||this.config.producer!==undefined&&producer!==this.producer)throw Error('spool identity mismatch');
-  const storedEntries=array(value.entries),storedBatches=array(value.batches);if(storedEntries.length>1024)throw Error('invalid spool');
-  const originals=new Map(storedBatches.map(item=>{const state=object(item),batch=object(state.batch);return [canonicalId(batch.id),{revision:decimal(batch.policyRevision),records:array(object(JSON.parse(text(batch.body))).records)}] as const;}));
-  const expiredBatches=new Set(storedEntries.flatMap(item=>{const stored=object(item);if(typeof stored.wall!=='number'||!Number.isSafeInteger(stored.wall))throw Error('invalid spool');const age=Date.now()-stored.wall;return stored.batch!==null&&(age<0||age>=300000)?[canonicalId(stored.batch)]:[];}));
-  const live=this.records();this.entries=[];this.batches=[];this.bytes=0;this.producer=producer;this.recovering=true;
-  try{
-   this.restoreSignalLosses(value);
-   for(const item of storedEntries){
-    const stored=object(item);if(typeof stored.wall!=='number'||!Number.isSafeInteger(stored.wall))throw Error('invalid spool');const age=Date.now()-stored.wall;if(age<0||age>=300000||stored.batch!==null&&expiredBatches.has(canonicalId(stored.batch))){this.loss('queue_expired');continue;}
-    let original:string;let nativeSize:number|undefined;let position:number|undefined;
-    if(stored.batch!==null){const frozen=originals.get(canonicalId(stored.batch));if(!frozen||typeof stored.position!=='number'||!Number.isInteger(stored.position)||stored.position<0||stored.position>=frozen.records.length)throw Error('invalid frozen spool entry');position=stored.position;const record=object(frozen.records[position]);original=nativeCanonical({id:record.id,kind:record.kind,observed_at_ns:record.observed_at_ns,payload:record.payload,policy_revision:frozen.revision});nativeSize=new TextEncoder().encode(nativeCanonical(record)).length+(record.kind==="loss"?1024:512);}
-    else original=text(stored.text);
-    if(stored.batch===null&&parseSafeRecord(original).policy_revision!==this.descriptor.policy_revision){this.loss('policy_changed');continue;}if(!this.enqueue(original))throw Error('spool capacity exceeded');const entry=this.entries[this.entries.length-1]!;entry.wall=stored.wall;entry.at=this.now()-age;
-    this.markLossEntry(entry,object(JSON.parse(original)));
-    if(stored.batch!==null){entry.batch=canonicalId(stored.batch);if(position!==undefined)entry.position=position;if(nativeSize!==undefined){this.bytes+=nativeSize-entry.size;entry.size=nativeSize;}entry.text='';entry.wire='';}
-   }
-   if(this.bytes>(this.config.maxBytes??2097152))throw Error('spool capacity exceeded');
-   for(const item of storedBatches){const state=object(item),b=object(state.batch),batchId=canonicalId(b.id);const entries=this.entries.filter(e=>e.batch===batchId);if(!entries.length)continue;
-    const body=text(b.body),wire=object(JSON.parse(body)),slot=b.route_slot,revision=decimal(b.policyRevision);if(typeof slot!=='number'||!Number.isInteger(slot)||slot<0||slot>=64||wire.id!==batchId||wire.source!==this.descriptor.source||wire.project!==this.descriptor.project||wire.producer!==producer||wire.route_slot!==slot||wire.policy_revision!==revision||hashBytes(body)!==b.hash||b.producer!==producer||b.source!==this.descriptor.source||b.count!==entries.length||typeof state.attempt!=='number'||!Number.isSafeInteger(state.attempt)||state.attempt<0)throw Error('invalid frozen spool');
-    const signals=array(b.kinds).map(text),actual=[...new Set(entries.map(e=>e.kind))].sort();if(signals.join(',')!==actual.join(',')||array(wire.records).length!==entries.length||entries.some(e=>e.slot!==slot))throw Error('invalid frozen spool');
-    const batch:FrozenBatch=Object.freeze({id:batchId,source:this.descriptor.source,producer,route_slot:slot,hash:text(b.hash),body,count:entries.length,kinds:Object.freeze(signals),firstCapture:Math.min(...entries.map(e=>e.wall)),policyRevision:revision});this.batches.push({batch,ambiguous:true,attempt:state.attempt,next:0,rank:Math.max(0,...signals.map(priority))});
-   }
-   if(this.entries.some(e=>e.batch&&!this.batches.some(s=>s.batch.id===e.batch)))throw Error('orphan frozen spool');
-   for(const [key,b] of this.lossBuckets){const queued=this.entries.filter(e=>e.lossKey===key).reduce((n,e)=>n+(e.lossCount??0n),0n);if(queued+b.unbatched+b.acked>b.observed)throw Error("invalid native loss accounting");}
-   for(const original of live)if(!this.enqueue(original))this.loss('recovery_pressure');this.recovered=true;
-  }finally{this.recovering=false;this.evictable=undefined;this.oldest=-Infinity;}
- }
  flush(timeoutMs=2000):Promise<FlushReport>{
   if(!Number.isFinite(timeoutMs)||timeoutMs<0)throw Error('invalid flush deadline');
   // ES2022 core has no Promise.withResolvers; each waiter still owns its timer.
   if(this.running){const running=this.running;return new Promise<FlushReport>((resolve,reject)=>{const timer=setTimeout(()=>resolve(this.report([],this.pending>0)),timeoutMs);running.then(report=>{clearTimeout(timer);resolve(report);},error=>{clearTimeout(timer);reject(error);});});}
   const job=this.deliver(timeoutMs);this.running=job;void job.finally(()=>{if(this.running===job)this.running=undefined;}).catch(()=>{});return job;
  }
- private async freezeSliced():Promise<void>{while(!this.freezeSome(SLICE_MS))await yieldToLoop();}
- private async deliver(timeout:number):Promise<FlushReport>{
+ protected async freezeSliced():Promise<void>{while(!this.freezeSome(SLICE_MS))await yieldToLoop();}
+ protected async deliver(timeout:number):Promise<FlushReport>{
   const deadline=this.now()+timeout,wireDeadline=performance.now()+timeout,receipts:Record<string,unknown>[]=[];await this.recoverOnce();await this.freezeSliced();try{if(this.spool)await this.persist();}catch{this.counts.spool_failed=(this.counts.spool_failed??0)+1;return this.report(receipts,this.pending>0);}
   while(!this.denied&&!this.closed&&this.pending&&this.now()<deadline&&performance.now()<wireDeadline){
    await this.freezeSliced();
@@ -244,6 +211,6 @@ export class DeliveryQueue {
   }
   return this.report(receipts,this.pending>0&&(this.now()>=deadline||performance.now()>=wireDeadline));
  }
- private report(receipts:Record<string,unknown>[],exceeded:boolean):FlushReport{return Object.freeze({acknowledgedBatchIds:Object.freeze(receipts.map(r=>r.batch_id as string)),acknowledgedCursors:Object.freeze(receipts.map(r=>{const c=r.cursor as {group:string;index:string};return c.group+':'+c.index;})),receipts:Object.freeze(receipts),pending:this.pending,lost:this.lost,deadlineExceeded:exceeded});}
+ protected report(receipts:Record<string,unknown>[],exceeded:boolean):FlushReport{return Object.freeze({acknowledgedBatchIds:Object.freeze(receipts.map(r=>r.batch_id as string)),acknowledgedCursors:Object.freeze(receipts.map(r=>{const c=r.cursor as {group:string;index:string};return c.group+':'+c.index;})),receipts:Object.freeze(receipts),pending:this.pending,lost:this.lost,deadlineExceeded:exceeded});}
  async close():Promise<void>{if(this.closed)return;this.closing=true;try{await this.flush();}finally{this.closed=true;try{await this.transport.close();}finally{try{await this.persist();}finally{try{await this.spool?.close();}finally{this.options.context?.close();if(!this.spool){this.loss('closed_pending',this.entries.length+[...this.lossBuckets.values()].filter(b=>b.unbatched>0n).length);for(const b of this.lossBuckets.values()){b.unbatched=0n;b.start=null;b.end=null;}this.entries=[];this.batches=[];this.bytes=512*this.lossBuckets.size;}}}}}}
 }

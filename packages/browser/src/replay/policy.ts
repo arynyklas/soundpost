@@ -56,15 +56,19 @@ const K = Uint32Array.from([
  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2]);
 /** Synchronous SHA-256 hex of a UTF-8 string (WebCrypto is async; the hash chain must be built inline). Measured: the chain hash was ~70% of the recorder's per-batch time (03.09-W3), so the block loop is allocation-free and fully inlined (Int32 arithmetic, no closures, no per-block array destructuring). */
 const encoder = new TextEncoder(), schedule = new Int32Array(64), state = new Int32Array(8);
+/** One reusable message buffer (UTF-8 bytes + padding), grown when a longer input arrives: no per-hash allocation or copy of the encoded bytes. */
+let message = new Uint8Array(1 << 17);
 export function sha256Hex(input: string): string {
- const data = encoder.encode(input), padded = new Uint8Array(((data.length + 9 + 63) >> 6) << 6);
- padded.set(data); padded[data.length] = 0x80;
- const bits = data.length * 8, high = Math.floor(bits / 4294967296), tail = padded.length - 8;
+ const most = input.length * 3 + 72;
+ if (message.length < most) message = new Uint8Array(Math.max(most, message.length * 2));
+ const length = encoder.encodeInto(input, message).written, padded = message, paddedLength = ((length + 9 + 63) >> 6) << 6;
+ padded.fill(0, length, paddedLength); padded[length] = 0x80;
+ const bits = length * 8, high = Math.floor(bits / 4294967296), tail = paddedLength - 8;
  padded[tail] = high >>> 24; padded[tail + 1] = (high >>> 16) & 255; padded[tail + 2] = (high >>> 8) & 255; padded[tail + 3] = high & 255;
  padded[tail + 4] = (bits >>> 24) & 255; padded[tail + 5] = (bits >>> 16) & 255; padded[tail + 6] = (bits >>> 8) & 255; padded[tail + 7] = bits & 255;
  const w = schedule, h = state;
  h[0] = 0x6a09e667; h[1] = 0xbb67ae85 | 0; h[2] = 0x3c6ef372; h[3] = 0xa54ff53a | 0; h[4] = 0x510e527f; h[5] = 0x9b05688c | 0; h[6] = 0x1f83d9ab; h[7] = 0x5be0cd19;
- for (let off = 0; off < padded.length; off += 64) {
+ for (let off = 0; off < paddedLength; off += 64) {
   for (let i = 0; i < 16; i++) { const at = off + i * 4; w[i] = (padded[at]! << 24) | (padded[at + 1]! << 16) | (padded[at + 2]! << 8) | padded[at + 3]!; }
   for (let i = 16; i < 64; i++) {
    const a = w[i - 15]!, b = w[i - 2]!;
@@ -89,8 +93,18 @@ export function sha256Hex(input: string): string {
  * computing replays.ChunkHash over the same chunk gets the same hash regardless of this object's key order.
  */
 const SEPARATORS = /[\u2028\u2029]/;
+/** JSON-quoted object keys, cached: the chunk vocabulary is a few dozen names that repeat for every node and event. Bounded so a hostile key set cannot grow it. */
+const quotedKeys = new Map<string, string>();
+function quoteKey(key: string): string {
+ let quoted = quotedKeys.get(key);
+ if (quoted === undefined) { quoted = JSON.stringify(key); if (quotedKeys.size < 512) quotedKeys.set(key, quoted); }
+ return quoted;
+}
+/** Canonical JSON text a caller already built (the recorder writes its own nodes straight into canonical form); canonicalJSON embeds it as is. */
+export class CanonicalText { constructor(readonly text: string) {} }
 export function canonicalJSON(value: unknown): string {
  if (value === null) return "null";
+ if (value instanceof CanonicalText) return value.text;
  switch (typeof value) {
   case "boolean": return value ? "true" : "false";
   case "number":
@@ -99,9 +113,11 @@ export function canonicalJSON(value: unknown): string {
   case "string": { const quoted = JSON.stringify(value); return SEPARATORS.test(quoted) ? quoted.replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029") : quoted; }
   case "object": {
    if (Array.isArray(value)) { let out = "["; for (let i = 0; i < value.length; i++) out += (i === 0 ? "" : ",") + canonicalJSON(value[i]); return out + "]"; }
-   const record = value as Record<string, unknown>, keys = Object.keys(record).sort();
+   const record = value as Record<string, unknown>, keys = Object.keys(record);
+   // Keys are ordered by UTF-16 code unit, the order `<` and the default sort use; the sort is skipped when the keys already are in that order.
+   for (let i = 1; i < keys.length; i++) if (keys[i - 1]! > keys[i]!) { keys.sort(); break; }
    let out = "{";
-   for (let i = 0; i < keys.length; i++) { const key = keys[i]!; out += (i === 0 ? "" : ",") + JSON.stringify(key) + ":" + canonicalJSON(record[key]); }
+   for (let i = 0; i < keys.length; i++) { const key = keys[i]!; out += (i === 0 ? "" : ",") + quoteKey(key) + ":" + canonicalJSON(record[key]); }
    return out + "}";
   }
   default: throw Error("replay_canonical_value");

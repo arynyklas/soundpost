@@ -7,6 +7,7 @@ import {test,expect} from "bun:test";
 import {sha256} from "@noble/hashes/sha256";
 import type {SignedPolicy} from "../src/types.ts";
 import {Client,checkedTraceContext} from "../src/client.ts";
+import {RuntimeClient} from "../src/runtime_client.ts";
 import {createTraceClock,leanSpanLength,leanSpanPayload,type LiveSpan,type MetadataContext,type TraceContext,type TraceClock} from "../src/tracing.ts";
 import {EncryptedSpool} from "../src/spool.ts";
 import {nativeCanonical,resourceWire,routeRecord,routeSlot,validateDescriptor} from "../src/routing.ts";
@@ -31,7 +32,8 @@ function context(options:{generic?:boolean;current?:()=>TraceContext|undefined;w
 }
 function client(ctx:MetadataContext,extra:Record<string,unknown>={}){
  const transport=new Recorder();
- return {client:new Client({...config(),operations:["op","other"],dependencies:["db"],policy:sealed(),transport,...extra},undefined,undefined,ctx),transport};
+ const Make=extra.spool===undefined?Client:RuntimeClient;
+ return {client:new Make({...config(),operations:["op","other"],dependencies:["db"],policy:sealed(),transport,...extra},undefined,undefined,ctx),transport};
 }
 const mask=(text:string):string=>text.replace(/"mono_ns":"\d+"/g,'"mono_ns":"#"').replace(/"(id|trace_id|span_id|parent_id|boot|host|runtime)":"[0-9a-f]+"/g,'"$1":"#"');
 type Scenario=(c:Client)=>void;
