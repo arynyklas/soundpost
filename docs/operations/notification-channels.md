@@ -47,9 +47,10 @@ package; the composition binds them.
   is the console's hash form, `<origin>/#view=<incidents|issues|queue>&org=<org>&projects=<project>&incident=<project>:<id>`
   (issues use `target=` instead of `incident=`; a condition opens the queue). It
   carries IDs only: the console opens on the last 24 hours in UTC and the viewer's
-  own session decides what is readable. The server serves one shell at `/` and
-  answers path-shaped addresses such as `/incidents/<id>` with 404, so the links
-  never use that form. A delivery stored before the template carried its project
+  own session decides what is readable. The notification carries the hash form
+  directly; the server also opens a path-shaped address such as
+  `/incidents/<project>:<id>?org=<org>` to the same public shell, which the
+  console rewrites to the hash form (decision D33). A delivery stored before the template carried its project
   links to `<origin>/`. No log, error message, source, replay or profile text
   exists in a delivery, so none can be pasted outward.
 

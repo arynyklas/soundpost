@@ -167,12 +167,49 @@ func TestUIDeepLinksNeverBypassAuthAndPathGuessesAreNotSilentlyRewritten(t *test
 			}
 		}
 	}
-	// A path that is not a file is 404, never the shell: an API typo must not look like a working page, and a
-	// path-shaped "deep link" must not pretend that the server authorized anything.
-	for _, path := range []string{"/incidents/" + strings.Repeat("a", 32), "/api/v1/nowhere", "/assets", "/assets/sub", "/assets/..%2findex.html"} {
+	// A path that is not a console link or a file is 404, never the shell: an API typo must not look like a working page.
+	for _, path := range []string{"/api/v1/nowhere", "/assets", "/assets/sub", "/assets/..%2findex.html", "/incidents/nope", "/incidents/" + strings.Repeat("A", 32), "/queue/" + strings.Repeat("a", 32), "/settings/", "/incidents/", "/incidents/" + strings.Repeat("a", 32) + "/x", "/incident", "/index.html", "/nowhere"} {
 		response, body := uiGet(t, server, path)
 		if response.StatusCode != 404 || strings.Contains(body, `id="root"`) {
 			t.Fatalf("%s: status %d, want 404 and no shell", path, response.StatusCode)
 		}
+	}
+}
+
+// D33: the console views stay hash-routed, and the server also serves the same public shell, with the same security
+// headers, for GET on the known console path prefixes so a path-shaped link opens; the shell rewrites the path to its hash
+// route. The shell carries no data, so a path link reads nothing before the console's own authenticated API calls.
+func TestUIConsolePathLinksServeTheSamePublicShell(t *testing.T) {
+	server := uiServer(t)
+	rootResponse, root := uiGet(t, server, "/")
+	id, other := strings.Repeat("a", 32), strings.Repeat("b", 32)
+	paths := []string{"/queue", "/explore", "/settings", "/incidents", "/issues", "/releases", "/traces", "/services", "/jobs", "/replays", "/profiles"}
+	for _, section := range []string{"incidents", "issues", "releases", "traces", "services", "jobs", "replays", "profiles"} {
+		paths = append(paths, "/"+section+"/"+id, "/"+section+"/"+other+":"+id, "/"+section+"/"+other+"%3A"+id)
+	}
+	for _, p := range paths {
+		response, body := uiGet(t, server, p+"?org="+other+"&projects="+id)
+		if response.StatusCode != 200 || body != root {
+			t.Fatalf("%s: status %d, shell equal to the root's %v", p, response.StatusCode, body == root)
+		}
+		for _, name := range []string{"Content-Security-Policy", "X-Content-Type-Options", "Referrer-Policy", "Cache-Control", "Content-Type"} {
+			if response.Header.Get(name) != rootResponse.Header.Get(name) || response.Header.Get(name) == "" {
+				t.Fatalf("%s: header %s = %q, the root's is %q", p, name, response.Header.Get(name), rootResponse.Header.Get(name))
+			}
+		}
+		if strings.Contains(body, id) || strings.Contains(body, other) {
+			t.Fatalf("%s: the shell echoes the link", p)
+		}
+	}
+	// Only GET and HEAD read a shell; the console API stays the only place a request is authenticated, and a path link
+	// never reaches it.
+	request, _ := http.NewRequest(http.MethodPost, server.URL+"/incidents/"+id, strings.NewReader("{}"))
+	response, err := server.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("POST to a console path: status %d, want 405", response.StatusCode)
 	}
 }

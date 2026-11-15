@@ -522,8 +522,9 @@ func safe(s string) string {
 	return b.String()
 }
 
-// link is the web view of the entity, in the console's hash form (the server
-// serves one shell at "/" and 404s path-shaped deep links). It carries only IDs;
+// link is the web view of the entity, in the console's hash form (the console is
+// hash-routed; the server also opens a path-shaped link to the same shell, D33,
+// but a notification carries the hash form directly). It carries only IDs;
 // the console supplies the time window and zone. A delivery without a project
 // (stored before the field existed) links to the console root.
 func link(origin string, org model.ID, t notify.Template) string {

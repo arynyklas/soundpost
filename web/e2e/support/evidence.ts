@@ -32,6 +32,8 @@ export interface RealStackFrame{function:string;line:number;column:number}
 export interface RealBundle{generated:Buffer;map:Buffer;sourceFile:string;throwLine:number;callLine:number;frames:RealStackFrame[]}
 export interface EvidenceSeed{
  org:string;project:string;otherOrg:string;otherProject:string;source:string;build:string;otherBuild:string;
+ /** The error source of the project (its credential admits more occurrences of this build). */
+ errorSource:Source;
  artifact:string;mapHash:string;mapBytes:string;
  admin:Member;analyst:Member;srcOwner:Member;mapOnly:Member;telemetry:Member;outsider:Member;
  releases:{root:string;child:string;sibling:string;orphan:string;missingParent:string;unregistered:string};
@@ -243,7 +245,7 @@ export async function seedEvidence(owner:Page,browser:Browser):Promise<EvidenceS
   }
  };
 
- return {org,project,otherOrg,otherProject,source,build,otherBuild,artifact,mapHash:sha(map),mapBytes:map.toString(),admin,analyst,srcOwner,mapOnly,telemetry,outsider,releases,
+ return {org,project,otherOrg,otherProject,source,build,otherBuild,errorSource,artifact,mapHash:sha(map),mapBytes:map.toString(),admin,analyst,srcOwner,mapOnly,telemetry,outsider,releases,
   issue:{id:issue,fingerprint,knownOccurrence,unknownOccurrence},
   real:{issue:realIssue,fingerprint:realFingerprint,occurrence:realOccurrence,trace,span,release:releases.child,bundle,sha256Generated:sha(generated)},
   actions:{issue:actionsIssue,fingerprint:actionsFingerprint,occurrence:actionsOccurrence},

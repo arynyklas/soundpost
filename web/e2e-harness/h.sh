@@ -125,6 +125,14 @@ const args=['--ignore-certificate-errors-spki-list='+process.env.E2E_SPKI];
 const headed=process.env.E2E_HEADED==='1';
 export default {...base,outputDir:process.env.E2E_OUT_DIR||'test-results',use:{...base.use,...(headed?{headless:false,screenshot:'on',trace:'on'}:{})},projects:base.projects.filter((p)=>p.name==='chromium').map((p)=>({...p,use:{...p.use,launchOptions:{executablePath:process.env.CHROME,args,...(headed?{slowMo:120}:{})}}}))};
 XX
+	# E2E_BROWSER=firefox|webkit selects the Playwright-bundled browser (PLAYWRIGHT_BROWSERS_PATH); neither takes Chrome's SPKI pin flag, so the
+	# loopback private-CA origin is trusted with ignoreHTTPSErrors (the origin is 127.0.0.1 and the CA is this run's own).
+	cat >zz-pw.other.config.ts <<'XX'
+import base from './playwright.config';
+const headed=process.env.E2E_HEADED==='1';
+const name=process.env.E2E_BROWSER||'firefox';
+export default {...base,outputDir:process.env.E2E_OUT_DIR||'test-results',use:{...base.use,ignoreHTTPSErrors:true,...(headed?{headless:false,screenshot:'on',trace:'on'}:{})},projects:base.projects.filter((p)=>p.name===name).map((p)=>({...p,use:{...p.use,launchOptions:{...(headed?{slowMo:120}:{})}}}))};
+XX
 	cat >zz-pw.provision.config.ts <<'XX'
 import base from './playwright.provision.config';
 const args=['--ignore-certificate-errors-spki-list='+process.env.E2E_SPKI];
@@ -145,8 +153,8 @@ case "${1:-}" in
 prep) prep ;;
 up) shift; up "$@" ;;
 down) down ;;
-pw) shift; cfgs; case " $* " in *" --project"*) ;; *) set -- --project=chromium "$@" ;; esac; pw_env exec_pw -c zz-pw.local.config.ts "$@" ;;
-headed) shift; cfgs; E2E_HEADED=1 pw_env xvfb-run -a -s "-screen 0 1440x1000x24" sh -c "cd '$ROOT/web' && exec node node_modules/@playwright/test/cli.js test -c zz-pw.local.config.ts --project=chromium \"\$@\"" sh "$@" ;;
+pw) shift; cfgs; b=${E2E_BROWSER:-chromium}; cfg=zz-pw.local.config.ts; [ "$b" = chromium ] || cfg=zz-pw.other.config.ts; case " $* " in *" --project"*) ;; *) set -- --project=$b "$@" ;; esac; pw_env exec_pw -c $cfg "$@" ;;
+headed) shift; cfgs; b=${E2E_BROWSER:-chromium}; cfg=zz-pw.local.config.ts; [ "$b" = chromium ] || cfg=zz-pw.other.config.ts; E2E_HEADED=1 pw_env xvfb-run -a -s "-screen 0 1440x1000x24" sh -c "cd '$ROOT/web' && exec node node_modules/@playwright/test/cli.js test -c $cfg --project=$b \"\$@\"" sh "$@" ;;
 run) shift; mode=$1; shift; oidc=$1; shift; [ "$oidc" = oidc ] || oidc=""; rc=0; up $oidc && sh "$0" "$mode" "$@" || rc=$?; down >/dev/null; exit $rc ;;
 *) echo "usage: $0 prep|up [oidc]|pw ARGS|headed ARGS|down" >&2; exit 2 ;;
 esac

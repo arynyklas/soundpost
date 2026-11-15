@@ -5,29 +5,27 @@ import {mkdirSync,readFileSync,writeFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import {join} from 'node:path';
 import {login,owner} from './support/real';
-import {deepLink,seedJourney,type JourneySeed} from './support/journey';
+import {deepLink,realLink,seedJourney,seedRealJourney,type JourneySeed,type RealJourneySeed} from './support/journey';
 
-// Real server, real Chrome, real data. One reader works through the investigation with the KEYBOARD ONLY (real Tab, Space, Enter and
-// typed characters; the only non-keyboard navigation is the first address, which is how a person opens a pasted deep link): sign-in
-// form, queue, incident, trace, log, metric, release, replay, profile and job. The organization, project and time window stay
-// visible on every leg and are compared to the window the deep link carried.
+// Real server, real Chrome, real data. Two readers work through the investigation with the KEYBOARD ONLY (real Tab, Space, Enter and
+// typed characters; the only non-keyboard navigation is the first address of a leg group, which is how a person opens a pasted deep link).
+// The organization, project and time window stay visible on every leg and are compared to the window the deep link carried.
 //
-// WHAT THIS DOES NOT SATISFY (each leg is recorded in docs/user/investigation-acceptance.md with its reason):
-//  - queue -> incident: incidents have no committed create route, so the queue is really empty and has no incident link to follow;
-//    the incident leg asserts the typed not-found answer for an incident that cannot exist.
-//  - release: the release registry is readable only by an organization administrator and has no committed create route; the leg asserts
-//    the typed not-available answer a telemetry reader really gets.
-//  - job: no SDK-to-backend path creates job attempts and the seed route that does is not committed (SOUNDPOST_E2E_JOB_SEED); the leg
-//    asserts the real empty state, so scheduled failure -> retry is NOT satisfied in the browser (the 07.04 smoke owns that journey).
-//  - frontend -> API -> database with a real source map: no committed route renders a mapped frame without the uncommitted issue and release
-//    seed routes; the overlapping-span trace is driven, the source-map part is NOT.
-//  - replay: chunks are the closed format the Go validator accepts; real recorder chunks are refused by the committed validator.
+// Organization A (a telemetry/replay/profile reader): sign-in form, trace (frontend -> API -> database, overlapping branches), trace
+// (gateway -> dependency), log, metric, replay, profile.
+// Organization B (an organization administrator who also holds telemetry and artifact reads; every record is made by a real route):
+//  - queue -> incident: the incident the leader-only runner opened from an ingested error is a link in the queue, and the keyboard follows it;
+//  - trace -> failure -> issue -> mapped frame: three real spans (frontend, API, PostgreSQL), the real failure of a real minified bundle
+//    recorded in the API span, the issue the runner's producer made of it, and its frames mapped by the REAL source map the real
+//    symbolication worker reads (original function and line); this needs the symbolication sandbox (h.sh E2E_SANDBOX=1);
+//  - release: the release the occurrence ran in, registered through the real registration route, with its artifact binding and ancestry;
+//  - job: a run the real Python SDK produced (attempt 1 raises, the retry succeeds), read as recovered with its captured error as the cause.
+//    The SDK records a manual execution (no schedule definition is reported by the SDK); schedule-derived evidence is job-history.spec.ts.
 test.describe.configure({mode:'serial'});
-let br:Browser,owners:Page,seed:JourneySeed,page:Page,windowText='';
+let br:Browser,owners:Page,seed:JourneySeed,real:RealJourneySeed,page:Page,windowText='',scope={org:'',project:''};
 const shots=process.env.SOUNDPOST_SHOT_DIR;
 const evidenceFile=process.env.SOUNDPOST_EVIDENCE_FILE;
 const evidence:Record<string,unknown>[]=[];
-const NONE='b'.repeat(32);
 
 /** Presses Tab (or Shift+Tab when the target lies before the focused element, as a person would) until `target` holds focus. The
  * keyboard is the only way the page moves. */
@@ -48,10 +46,19 @@ async function goTo(name:string):Promise<void>{
  await activate(section(name));
  await expect(page.getByRole('heading',{level:2,name:`Investigation: ${name}`})).toBeFocused();
 }
+/** The sign-in form with the keyboard alone: typed characters and Enter. */
+async function signIn(email:string,password:string):Promise<void>{
+ await expect(page.getByRole('heading',{level:1,name:'Access your installation'})).toBeVisible();
+ await typeInto(page.getByLabel('Email'),email);
+ await keyTo(page.getByLabel('Password',{exact:true}));
+ await page.keyboard.type(password);
+ await page.keyboard.press('Enter');
+ await expect(page.getByRole('heading',{level:1,name:'Account access'})).toBeVisible();
+}
 /** The organization, project and window are on screen, and the window is the one the deep link carried. */
 async function scopeVisible():Promise<void>{
- await expect(page.getByTestId('visible-org')).toHaveText(seed.explore.org);
- await expect(page.getByTestId('visible-projects')).toHaveText(seed.explore.p1);
+ await expect(page.getByTestId('visible-org')).toHaveText(scope.org);
+ await expect(page.getByTestId('visible-projects')).toHaveText(scope.project);
  const win=page.getByRole('term').filter({hasText:'Window'}).locator('xpath=following-sibling::dd[1]');
  const text=(await win.innerText()).trim();
  if(windowText==='')windowText=text;
@@ -64,51 +71,33 @@ async function record(leg:string,detail:Record<string,unknown>):Promise<void>{
  if(shots){shot=join(shots,`journey-${leg}.png`);await page.screenshot({path:shot,fullPage:true});}
  evidence.push({leg,url:page.url().replace(/#.*/,'#…'),window:windowText,screenshot:shot,...detail});
 }
-const statusWords=async():Promise<string>=>(await page.locator('main .status').first().innerText()).replace(/\s+/g,' ').trim();
 
 test.beforeAll(async({browser})=>{
- test.setTimeout(280_000);
+ test.setTimeout(420_000);
  br=browser;
  const o=owner();
  owners=await (await browser.newContext()).newPage();
  await login(owners,o.email,o.password);
- seed=await seedJourney(owners,await pwRequest.newContext());
+ const api=await pwRequest.newContext();
+ seed=await seedJourney(owners,api);
+ real=await seedRealJourney(owners,browser,api);
  if(shots)mkdirSync(shots,{recursive:true});
 });
 test.afterAll(()=>{
- if(evidenceFile)writeFileSync(evidenceFile,JSON.stringify({ids:{org:seed.explore.org,project:seed.explore.p1,otherProject:seed.explore.p2,reader:seed.explore.reader.id,cleanTrace:seed.traces.clean.trace,gatewayTrace:seed.traces.gateway.trace,replay:seed.replays.clean.replay,profile:seed.profile,metricSource:seed.explore.metricP1.id,logSource:seed.explore.logP1.id,policyRevisions:{metric:seed.explore.metricP1.policyRevision,log:seed.explore.logP1.policyRevision}},legs:evidence},null,1));
+ if(evidenceFile)writeFileSync(evidenceFile,JSON.stringify({ids:{org:seed.explore.org,project:seed.explore.p1,otherProject:seed.explore.p2,reader:seed.explore.reader.id,cleanTrace:seed.traces.clean.trace,gatewayTrace:seed.traces.gateway.trace,replay:seed.replays.clean.replay,profile:seed.profile,metricSource:seed.explore.metricP1.id,logSource:seed.explore.logP1.id,policyRevisions:{metric:seed.explore.metricP1.policyRevision,log:seed.explore.logP1.policyRevision},
+  real:{org:real.ev.org,project:real.ev.project,reader:real.reader.id,incident:real.incident,trace:real.trace.trace,occurrence:real.trace.occurrence,issue:real.ev.real.issue,release:real.ev.real.release,artifact:real.ev.artifact,job:real.job.job,run:real.job.run}},legs:evidence},null,1));
 });
 
 test('sign in with the keyboard alone, then open a native deep link: the scope is on screen',async()=>{
  const ctx=await br.newContext();
  page=await ctx.newPage();
+ scope={org:seed.explore.org,project:seed.explore.p1};
  await page.goto('/');
- await expect(page.getByRole('heading',{level:1,name:'Access your installation'})).toBeVisible();
- await typeInto(page.getByLabel('Email'),seed.explore.reader.email);
- await keyTo(page.getByLabel('Password',{exact:true}));
- await page.keyboard.type(seed.explore.reader.password);
- await page.keyboard.press('Enter');
- await expect(page.getByRole('heading',{level:1,name:'Account access'})).toBeVisible();
+ await signIn(seed.explore.reader.email,seed.explore.reader.password);
  // A deep link is an address, so opening it is the one step that is not a key press on the page.
  await page.goto(deepLink(seed,'queue'));
  await expect(page.getByRole('heading',{level:2,name:'Investigation: Queue'})).toBeFocused();
  await scopeVisible();
-});
-
-test('queue: really empty, with the unbuilt parts said to be not available; no incident exists to follow (NOT satisfied: queue to incident link)',async()=>{
- await expect(page.locator('main .status[data-state="empty"]')).toBeVisible();
- await expect(page.locator('main [data-section="urgency"][data-state="not_available"]')).toBeVisible();
- await expect(page.locator('main tr[data-incident]')).toHaveCount(0);
- await record('queue',{state:'empty',words:await statusWords(),satisfied:'queue reached; the incident link cannot be followed because no incident can be created through a committed route'});
-});
-
-test('incident: the keyboard opens an incident ID form and an incident that cannot exist reads Not found',async()=>{
- await goTo('Incidents');
- await typeInto(page.getByLabel('Incident ID'),NONE);
- await page.keyboard.press('Enter');
- await expect(page.getByRole('heading',{level:2,name:`Incident ${NONE}`})).toBeFocused();
- await expect(page.locator('main .status[data-state="unauthorized"]')).toContainText('Not found');
- await record('incident',{state:'unauthorized (not found)',words:await statusWords(),satisfied:false,reason:'no committed incident create route'});
 });
 
 test('trace (frontend to API to database): overlapping branches give an exact duration and the dependency boundary is stated',async()=>{
@@ -118,7 +107,7 @@ test('trace (frontend to API to database): overlapping branches give an exact du
  await expect(page.getByRole('heading',{level:2,name:`Trace ${seed.traces.clean.trace}`})).toBeFocused();
  await expect(page.getByTestId('observed-duration')).toHaveText('Observed duration of this trace: exactly 100 ms.');
  await expect(page.getByTestId('limits').locator('[data-limit="dependency_boundary"]')).toContainText('dependency boundary');
- await record('trace-frontend-api-database',{state:'ready',trace:seed.traces.clean.trace,sourceMap:'NOT satisfied: no mapped frame without uncommitted seed routes'});
+ await record('trace-frontend-api-database',{state:'ready',trace:seed.traces.clean.trace});
 });
 
 test('trace (gateway to dependency): the dependency call ends at the boundary, stated in words',async()=>{
@@ -158,15 +147,6 @@ test('metric: PromQL chosen by the keyboard returns the exact ingested sample',a
  await record('metric',{state:'ready',value:'48',evaluatedWith:(await page.getByTestId('evaluated-with').innerText()).replace(/\s+/g,' ').trim()});
 });
 
-test('release: a telemetry reader gets the typed not-available answer for the release registry (NOT satisfied: no committed release create route)',async()=>{
- await goTo('Releases');
- await typeInto(page.getByLabel('Release ID'),NONE);
- await page.keyboard.press('Enter');
- await expect(page.getByRole('heading',{level:2,name:`Release ${NONE}`})).toBeFocused();
- await expect(page.locator('main .status[data-state="unsupported"]')).toContainText('organization administrator');
- await record('release',{state:'unsupported (not available)',words:await statusWords(),satisfied:false,reason:'registry is administrator-only and has no committed create route'});
-});
-
 test('replay: the keyboard opens the masked replay and steps it; the viewer reports a real status',async()=>{
  await goTo('Replays');
  await typeInto(page.getByLabel('Replay ID'),seed.replays.clean.replay);
@@ -175,7 +155,7 @@ test('replay: the keyboard opens the masked replay and steps it; the viewer repo
  await expect(page.getByTestId('replay-frame')).toBeVisible();
  await activate(page.getByRole('button',{name:'Step to the next event'}));
  await expect(page.getByTestId('viewer-status')).not.toHaveAttribute('data-status','none');
- await record('replay',{state:'ready',replay:seed.replays.clean.replay,viewerStatus:await page.getByTestId('viewer-status').getAttribute('data-status'),chunks:'closed format, not recorder chunks'});
+ await record('replay',{state:'ready',replay:seed.replays.clean.replay,viewerStatus:await page.getByTestId('viewer-status').getAttribute('data-status'),chunks:'closed format; the real recorder path is replay-profile.spec.ts'});
 });
 
 test('profile: the keyboard opens the native profile with its measurement kinds kept apart',async()=>{
@@ -188,19 +168,108 @@ test('profile: the keyboard opens the native profile with its measurement kinds 
  await record('profile',{state:'ready',profile:seed.profile});
 });
 
-test('job: the real jobs read is empty and says so (NOT satisfied: scheduled failure to retry needs job attempts no committed route can create)',async()=>{
- await goTo('Jobs');
- await expect(page.locator('main .status[data-state="empty"]')).toBeVisible();
- await expect(page.getByText('This project has no jobs. Nothing is missing.')).toBeVisible();
- await record('job',{state:'empty',words:await statusWords(),satisfied:false,reason:'no SDK-to-backend job attempt path; the seed route is not committed'});
-});
-
 test('the contextual scope never left the screen: the last address still carries the organization, project and window of the first',async()=>{
  const hash=new URLSearchParams(new URL(page.url()).hash.slice(1));
  expect(hash.get('org')).toBe(seed.explore.org);
  expect(hash.get('projects')).toBe(seed.explore.p1);
  expect(hash.get('start')).toBe(String(seed.start));
  expect(hash.get('end')).toBe(String(seed.end));
+});
+
+// ---- organization B: the journeys whose records are made by the runner, the release registry, the symbolication worker and the SDK ----
+
+test('an organization administrator signs in with the keyboard alone and opens the queue of the real-journey organization',async()=>{
+ const ctx=await br.newContext();
+ page=await ctx.newPage();
+ windowText='';
+ scope={org:real.ev.org,project:real.ev.project};
+ await page.goto('/');
+ await signIn(real.reader.email,real.reader.password);
+ await page.goto(realLink(real,'queue'));
+ await expect(page.getByRole('heading',{level:2,name:'Investigation: Queue'})).toBeFocused();
+ await scopeVisible();
+});
+
+test('queue to incident: the incident the runner opened from an ingested error is a link in the queue, and the keyboard follows it',async()=>{
+ const row=page.locator(`tr[data-incident="${real.incident}"]`);
+ await expect(row).toBeVisible();
+ await activate(row.getByRole('link'));
+ await expect(page.getByRole('heading',{level:2,name:`Incident ${real.incident}`})).toBeFocused();
+ await expect(page.getByTestId('revision')).toBeVisible();
+ await expect(page.getByTestId('source-badge')).toBeVisible();
+ await record('queue-to-incident',{state:'ready',incident:real.incident,words:await page.getByTestId('response-words').innerText()});
+});
+
+test('trace to source: frontend, API and database in one trace, the real failure on the API span, its issue and its frames mapped by the real source map',async()=>{
+ const {bundle}=real.ev.real;
+ await goTo('Traces');
+ await typeInto(page.getByLabel('Trace ID'),real.trace.trace);
+ await page.keyboard.press('Enter');
+ await expect(page.getByRole('heading',{level:2,name:`Trace ${real.trace.trace}`})).toBeFocused();
+ await expect(page.locator('table.path-table tbody tr[data-span]')).toHaveCount(3);
+ await expect(page.getByTestId('limits').locator('[data-limit="dependency_boundary"]')).toContainText('dependency boundary');
+ await activate(page.getByRole('button',{name:'Show details of span op.api, server, level 2'}));
+ const details=page.getByTestId('span-details');
+ await expect(details.locator('[data-target-kind="error"][data-target-available="yes"]')).toContainText(real.trace.occurrence);
+ await activate(details.getByRole('link',{name:'Open the issue holding this occurrence'}));
+ await expect(page.getByRole('heading',{level:2,name:`Issue ${real.ev.real.issue}`})).toBeFocused();
+ await activate(page.getByRole('button',{name:`Show stored detail of occurrence ${real.trace.occurrence}`}));
+ const frames=page.getByTestId('stored-frames').getByRole('article');
+ await expect(frames).toHaveCount(2);
+ for(const [i,f] of bundle.frames.entries()){
+  await expect(frames.nth(i).getByTestId('frame-state')).toHaveText('Mapped');
+  await expect(frames.nth(i).getByTestId('frame-original')).toContainText(`${real.ev.artifact}:${f.line}:${f.column} in ${f.function}`);
+  await expect(frames.nth(i).getByTestId('frame-mapped')).toContainText(real.ev.mapHash);
+ }
+ await expect(frames.nth(0).getByTestId('frame-mapped')).toContainText(`${bundle.sourceFile}:${bundle.throwLine}:`);
+ await expect(frames.nth(1).getByTestId('frame-mapped')).toContainText(`${bundle.sourceFile}:${bundle.callLine}:`);
+ await expect(frames.nth(1).getByTestId('frame-mapped')).toContainText('in riskyCheckout');
+ // The private source text the map carries is never shown to a reader without the sources grant.
+ await expect(page.locator('body')).not.toContainText('PRIVATE-SOURCE-CANARY');
+ await record('trace-to-mapped-frame',{state:'ready',trace:real.trace.trace,issue:real.ev.real.issue,occurrence:real.trace.occurrence,mapped:await frames.getByTestId('frame-mapped').allInnerTexts()});
+});
+
+test('release: the occurrence names the release it ran in; the keyboard opens the registered release with its artifact binding and its ancestry',async()=>{
+ await activate(page.getByTestId('occ-release-link'));
+ await expect(page.getByRole('heading',{level:2,name:`Release ${real.ev.real.release}`})).toBeFocused();
+ await expect(page.getByTestId('release-label')).toContainText('v1.1');
+ await expect(page.getByTestId('release-artifacts')).toContainText(real.ev.artifact);
+ await expect(page.getByTestId('release-artifacts')).toContainText(real.ev.debugId);
+ await expect(page.getByTestId('release-build')).toContainText(real.ev.build);
+ await expect(page.getByTestId('release-parents').locator('li').first()).toContainText(real.ev.releases.root);
+ await expect(page.getByTestId('release-parents').locator('li').first()).toContainText('registered');
+ await record('release',{state:'ready',release:real.ev.real.release,parent:real.ev.releases.root,artifact:real.ev.artifact});
+});
+
+test('job: a run the real Python SDK produced (attempt 1 raised, the retry succeeded) reads as recovered with its captured error as the cause',async()=>{
+ const {job,run}=real.job;
+ await goTo('Jobs');
+ const row=page.locator(`[data-testid=job-row][data-job="${job}"]`);
+ await expect(row).toContainText('Succeeded');
+ await activate(row.getByRole('button',{name:`Open job ${job}`}));
+ await expect(page.getByRole('heading',{name:`Job ${job}`})).toBeVisible();
+ await expect(page.getByTestId('job-health')).toContainText('Current job health: Succeeded');
+ const runRow=page.locator(`[data-testid=run-row][data-run="${run}"]`);
+ await expect(runRow).toContainText('Run recovery: Recovered after retry');
+ await expect(runRow).toContainText('1 failed of 2 attempts');
+ await activate(runRow.getByRole('button',{name:`Open run ${run}`}));
+ await expect(page.getByRole('heading',{name:`Run ${run}`})).toBeVisible();
+ const attempts=page.locator('[data-testid=attempt-row]');
+ await expect(attempts).toHaveCount(2);
+ await expect(attempts.nth(0)).toHaveAttribute('data-attempt',real.job.failedAttempt);
+ await expect(attempts.nth(0)).toHaveAttribute('data-state','failed');
+ await expect(attempts.nth(1)).toHaveAttribute('data-attempt',real.job.retryAttempt);
+ await expect(attempts.nth(1)).toHaveAttribute('data-state','succeeded');
+ await expect(page.getByTestId('cause-links')).toContainText(real.job.error);
+ await record('job-retry',{state:'ready',job,run,failedAttempt:real.job.failedAttempt,retryAttempt:real.job.retryAttempt});
+});
+
+test('the contextual scope of the real-journey organization never left the screen: the last address carries its organization, project and window',async()=>{
+ const hash=new URLSearchParams(new URL(page.url()).hash.slice(1));
+ expect(hash.get('org')).toBe(real.ev.org);
+ expect(hash.get('projects')).toBe(real.ev.project);
+ expect(hash.get('start')).toBe(real.start);
+ expect(hash.get('end')).toBe(real.end);
 });
 
 test('this spec drives the page with the keyboard only: no pointer or fill call appears outside the fixture',()=>{
