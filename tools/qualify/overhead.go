@@ -558,8 +558,45 @@ func (rc *runCtx) recorderOverhead(spec RowSpec) (*sdkOverheadRun, *probeResult,
 		return nil, p, why
 	}
 	env := []string{"SOUNDPOST_BUN=" + bun, "SOUNDPOST_CHROME=" + p.Path}
-	args := []string{"fixtures/sdk/overhead.mjs", "--only", "recorder"}
-	res := rc.exec(20*time.Minute, rc.root, env, nodePath, args...)
+	run := rc.recorderHarness(nodePath, env, "recorder", 20*time.Minute)
+	rc.cache[key] = run
+	return run, p, ""
+}
+
+// recorderQueueOverhead runs the harness for the recorder's queue bound alone (--only recorder_queue). The bound is measured by
+// fixtures/sdk/replay/queue-bound.ts under Bun with a scripted page: no browser starts, so the row is built on Bun (the runtime
+// that runs it), not on a Chrome it never uses, and it has its own harness run and timeout, so a browser spec that fails or
+// times out in the shared recorder run cannot fail or hide this row.
+func (rc *runCtx) recorderQueueOverhead(spec RowSpec) (*sdkOverheadRun, *probeResult, string) {
+	p := rc.probe(spec.Build)
+	if !p.Found {
+		return nil, p, p.Reason
+	}
+	if why := rc.needsMissing(spec); why != "" {
+		return nil, p, why
+	}
+	key := "sdk-overhead-recorder-queue:" + spec.Build
+	if v, ok := rc.cache[key]; ok {
+		return v.(*sdkOverheadRun), p, ""
+	}
+	nodePath := ""
+	for _, need := range spec.Needs {
+		if nb := rc.probe(need); nb.Build.Family == "node" {
+			nodePath = nb.Path
+		}
+	}
+	if nodePath == "" {
+		return nil, p, "the recorder queue row needs a Node build to run the harness, and none is listed in its needs"
+	}
+	run := rc.recorderHarness(nodePath, []string{"SOUNDPOST_BUN=" + p.Path}, "recorder_queue", 10*time.Minute)
+	rc.cache[key] = run
+	return run, p, ""
+}
+
+// recorderHarness runs fixtures/sdk/overhead.mjs for one --only selection and decodes its result.
+func (rc *runCtx) recorderHarness(nodePath string, env []string, only string, timeout time.Duration) *sdkOverheadRun {
+	args := []string{"fixtures/sdk/overhead.mjs", "--only", only}
+	res := rc.exec(timeout, rc.root, env, nodePath, args...)
 	run := &sdkOverheadRun{Exit: res.Exit, Command: "node " + strings.Join(args, " "), Elapsed: res.Duration}
 	var out sdkOverhead
 	if err := json.NewDecoder(strings.NewReader(res.Stdout)).Decode(&out); err != nil || res.Exit != 0 {
@@ -567,8 +604,7 @@ func (rc *runCtx) recorderOverhead(spec RowSpec) (*sdkOverheadRun, *probeResult,
 	} else {
 		run.Result, run.Raw = &out, []byte(res.Stdout)
 	}
-	rc.cache[key] = run
-	return run, p, ""
+	return run
 }
 
 // runOverheadRecorderBatch judges the recorder's p95 cost per mutation batch, per burst size and as the worst of them, against the
@@ -638,7 +674,7 @@ type recorderQueue struct {
 // within browser_recorder_queue_bytes (2 MiB). The verdict is derived here from the raw maximum; the harness's own verdict is never
 // trusted. A flood that never reached the bound (no refusal counted) is recorded as a limit: the bound is then observed, not exercised.
 func runOverheadRecorderQueue(rc *runCtx, spec RowSpec) Row {
-	run, p, why := rc.recorderOverhead(spec)
+	run, p, why := rc.recorderQueueOverhead(spec)
 	if why != "" {
 		return notExercised(why)
 	}
@@ -646,7 +682,7 @@ func runOverheadRecorderQueue(rc *runCtx, spec RowSpec) Row {
 	if len(run.Raw) > 0 {
 		row.Evidence = append(row.Evidence, rc.writeEvidence("recorder-queue-"+spec.Build+".json", run.Raw))
 	}
-	row.Evidence = append(row.Evidence, "overhead harness fixtures/sdk/overhead.mjs --only recorder: fixtures/sdk/replay/queue-bound.ts run by Bun")
+	row.Evidence = append(row.Evidence, "overhead harness fixtures/sdk/overhead.mjs --only recorder_queue: fixtures/sdk/replay/queue-bound.ts run by Bun (no browser)")
 	if run.Result == nil {
 		row.Outcome, row.Failures = OutcomeFailed, []string{run.Failure}
 		return row

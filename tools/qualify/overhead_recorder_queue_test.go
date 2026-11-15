@@ -5,6 +5,8 @@ package qualify
 
 import (
 	"encoding/json"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -12,13 +14,13 @@ import (
 func queueRun(raw string) *sdkOverheadRun {
 	res := &sdkOverhead{}
 	res.Rows.RecorderQueue = json.RawMessage(raw)
-	return &sdkOverheadRun{Result: res, Raw: []byte(`{}`), Command: "node overhead.mjs --only recorder"}
+	return &sdkOverheadRun{Result: res, Raw: []byte(`{}`), Command: "node overhead.mjs --only recorder_queue"}
 }
 
 func runQueueRow(t *testing.T, run *sdkOverheadRun) Row {
 	t.Helper()
 	rc := overheadCtx(t)
-	rc.cache["sdk-overhead-recorder:node"] = run
+	rc.cache["sdk-overhead-recorder-queue:node"] = run
 	spec := RowSpec{ID: "overhead.x", Suite: SuiteOverhead, Build: "node"}
 	row := runOverheadRecorderQueue(rc, spec)
 	row.ID, row.Suite, row.Required, row.Subject = spec.ID, spec.Suite, true, rc.subject(spec)
@@ -77,4 +79,35 @@ func TestOverheadRecorderQueueRefusesWhatWasNotMeasured(t *testing.T) {
 	if row := runQueueRow(t, &sdkOverheadRun{Failure: "harness exited 1", Command: "node overhead.mjs", Exit: 1}); row.Outcome != OutcomeFailed || row.State != StateExercised {
 		t.Errorf("a failed harness is a failed row: %+v", row)
 	}
+}
+
+// M6: the queue row has its own harness run. A browser recorder run that failed or timed out (the shared run the batch row uses)
+// neither fails nor hides it.
+func TestOverheadRecorderQueueRowIsIndependentOfTheBrowserRecorderRun(t *testing.T) {
+	rc := overheadCtx(t)
+	rc.cache["sdk-overhead-recorder:node"] = &sdkOverheadRun{Failure: "the browser spec timed out", Exit: 124, Command: "node overhead.mjs --only recorder"}
+	rc.cache["sdk-overhead-recorder-queue:node"] = queueRun(queueJSON("1000", "3"))
+	row := runOverheadRecorderQueue(rc, RowSpec{ID: "overhead.x", Suite: SuiteOverhead, Build: "node"})
+	if row.State != StateExercised || row.Outcome != OutcomePassed {
+		t.Fatalf("the queue row followed the browser run: %+v", row)
+	}
+}
+
+// M1: the queue bound is measured by Bun with a scripted page, no browser. Its row is built on the Bun build that runs it, not on a
+// Chrome 142 that never takes part, and it needs the Node build that runs the harness.
+func TestMatrixQueueBoundRowIsBuiltOnBunNotOnAChromeItNeverRuns(t *testing.T) {
+	m, err := LoadMatrix(filepath.Join(repoRoot(t), "qualification", "matrix.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range m.Rows {
+		if r.ID != "overhead.browser.recorder_queue_bound" {
+			continue
+		}
+		if r.Runner != "overhead_recorder_queue" || r.Build != "bun-1.3.14-linux-amd64" || !slices.Contains(r.Needs, "node-22-linux-amd64") || slices.ContainsFunc(r.Needs, func(n string) bool { return strings.HasPrefix(n, "chrome") }) {
+			t.Fatalf("queue-bound row: runner %s build %s needs %v", r.Runner, r.Build, r.Needs)
+		}
+		return
+	}
+	t.Fatal("no overhead.browser.recorder_queue_bound row")
 }

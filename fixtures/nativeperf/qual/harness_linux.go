@@ -854,6 +854,7 @@ type CaptureResult struct {
 	LostSamples uint64
 	Complete    bool
 	Proofs      []nativeperf.AcquisitionProof
+	ProofAt     []int // ProofAt[i] is how many Events preceded Proofs[i] on the stream
 	StartedNs   uint64
 	EndedNs     uint64
 }
@@ -1022,6 +1023,7 @@ loop:
 				p := *reply.Proof
 				p.CPUs = append([]uint32(nil), p.CPUs...)
 				res.Proofs = append(res.Proofs, p)
+				res.ProofAt = append(res.ProofAt, len(res.Events))
 			case reply.Event != nil:
 				ev := *reply.Event
 				if ev.Loss != nil {
@@ -1234,20 +1236,32 @@ type Correlation struct {
 	LossEvents    int
 	CPUs          int
 	FinalThrough  uint64
+	// ProgressProofs is how many mid-capture drained-prefix proofs were applied;
+	// PeakHeapEvents is the most events the bounded correlation buffer held.
+	ProgressProofs int
+	PeakHeapEvents int
 }
 
 // Correlate configures a Correlator from the capture initial topology proof,
-// consumes every event, reports the final proof for every CPU and finalizes.
-// Nothing is inferred: a capture without both proofs yields an error, never
-// intervals.
+// consumes every event in stream order, applies each progress proof (every CPU
+// reported drained through it, then Advance) where it arrived so the bounded
+// buffer drains during the capture, reports the final proof for every CPU and
+// finalizes. Nothing is inferred: a capture without both proofs yields an
+// error, never intervals.
 func Correlate(res CaptureResult, cfg nativeperf.Config) Correlation {
 	var out Correlation
 	var initial, final *nativeperf.AcquisitionProof
 	for i := range res.Proofs {
-		if res.Proofs[i].Final {
-			final = &res.Proofs[i]
-		} else if initial == nil {
-			initial = &res.Proofs[i]
+		switch p := &res.Proofs[i]; {
+		case p.Final:
+			final = p
+		case p.Progress:
+			if len(res.ProofAt) != len(res.Proofs) || res.ProofAt[i] < 0 || res.ProofAt[i] > len(res.Events) {
+				out.Err = "progress proof without a recorded position in the event stream"
+				return out
+			}
+		case initial == nil:
+			initial = p
 		}
 	}
 	if initial == nil || final == nil {
@@ -1257,11 +1271,45 @@ func Correlate(res CaptureResult, cfg nativeperf.Config) Correlation {
 	out.CPUs = len(initial.CPUs)
 	out.FinalThrough = uint64(final.Through)
 	c := nativeperf.NewCorrelator(cfg)
-	if err := c.Configure(initial.Domain, initial.CPUs, 16<<20); err != nil {
+	// 32 MiB of the 64 MiB aggregate budget (the other working sets of one capture
+	// charge about 26 MiB): about 1000 buffered events, enough for the 100 ms
+	// reorder window of a contended CPU (several thousand events per second).
+	if err := c.Configure(initial.Domain, initial.CPUs, 32<<20); err != nil {
 		out.Err = "configure: " + err.Error()
 		return out
 	}
-	for _, e := range res.Events {
+	next := 0 // the next proof to apply
+	applyProofs := func(before int) bool {
+		for ; next < len(res.Proofs) && res.Proofs[next].Progress && res.ProofAt[next] <= before; next++ {
+			p := res.Proofs[next]
+			for _, cpu := range p.CPUs {
+				if err := c.ReportProgress(cpu, p.Through); err != nil {
+					out.Err = "report progress: " + err.Error()
+					return false
+				}
+			}
+			got, err := c.Advance(p.Through)
+			out.Intervals = append(out.Intervals, got...)
+			if err != nil {
+				out.Err = "advance: " + err.Error()
+				return false
+			}
+			out.ProgressProofs++
+		}
+		return true
+	}
+	// Proofs that are not progress proofs (the initial topology proof, the final
+	// one) are skipped by position: only progress proofs act mid-stream.
+	skip := func() {
+		for next < len(res.Proofs) && !res.Proofs[next].Progress {
+			next++
+		}
+	}
+	for i, e := range res.Events {
+		skip()
+		if !applyProofs(i) {
+			return out
+		}
 		switch {
 		case e.Switch != nil:
 			out.SwitchEvents++
@@ -1281,6 +1329,11 @@ func Correlate(res CaptureResult, cfg nativeperf.Config) Correlation {
 			}
 		}
 	}
+	skip()
+	if !applyProofs(len(res.Events)) {
+		return out
+	}
+	out.PeakHeapEvents = c.Stats().PeakHeapEvents
 	for _, cpu := range final.CPUs {
 		if err := c.ReportProgress(cpu, final.Through); err != nil {
 			out.Err = "report progress: " + err.Error()

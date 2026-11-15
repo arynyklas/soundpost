@@ -20,7 +20,10 @@ import (
 // says the scheduler tracepoints can be opened.
 func (a *accept) runSchedulerScenarios(base nativeperf.Config) {
 	cfg := base
-	cfg.RingBytes = 64 << 10
+	// The product's default ring (256 KiB per stream): a pinned contended CPU emits
+	// several thousand scheduler records a second, and a 64 KiB ring overflows
+	// (explicit kernel loss, which revokes coverage) between two reads of one stream.
+	cfg.RingBytes = 256 << 10
 	for _, item := range []struct {
 		name string
 		secs float64
@@ -57,7 +60,7 @@ func (a *accept) corrSummary(r *scenResult) map[string]any {
 	}
 	m["correlation"] = map[string]any{
 		"error": c.Err, "consume_errors": c.ConsumeErrors, "first_consume_error": c.FirstError, "scheduler_switch_events": c.SwitchEvents, "scheduler_wakeup_events": c.WakeupEvents,
-		"cpu_samples_in_same_capture": c.CPUSamples, "loss_events": c.LossEvents, "cpus": c.CPUs, "interval_kinds": kinds,
+		"cpu_samples_in_same_capture": c.CPUSamples, "loss_events": c.LossEvents, "cpus": c.CPUs, "interval_kinds": kinds, "progress_proofs_applied": c.ProgressProofs, "peak_buffered_events": c.PeakHeapEvents,
 		"blocked_ns_all_authorized_tasks": blocked, "runnable_ns_all_authorized_tasks": runnable, "censored_ns": censored, "unknown_ns": unknown,
 	}
 	return m
@@ -85,6 +88,8 @@ func (a *accept) deriveSchedulerFromCaptures(res *qual.QualificationResult, deta
 				why = r.Corr.Err
 			}
 			*row = qual.Row{State: qual.StateFailed, Reason: what + ": scheduler capture could not be correlated: " + why + " (stream end: " + r.Cap.ErrorCode + r.Cap.ReadError + ")", Exercised: true, Detail: d}
+		case r.Corr.ConsumeErrors > 0:
+			*row = qual.Row{State: qual.StateFailed, Reason: fmt.Sprintf("%s: the scheduler correlation overflowed its bounded buffer %d time(s) (first: %s), so its coverage was revoked", what, r.Corr.ConsumeErrors, r.Corr.FirstError), Exercised: true, Detail: d}
 		default:
 			return true
 		}
@@ -117,17 +122,52 @@ func (a *accept) deriveSchedulerFromCaptures(res *qual.QualificationResult, deta
 		}
 	}
 	if state(sc, &res.RunqueueSplit, rq, "runqueue_split") {
+		// The contended threads are the CPU-bound ones: each holds at least a tenth
+		// of the capture's CPU samples (the pinned workers hold about half each). The
+		// workload's coordinator, which sleeps in 1 ms polls for the whole run and is
+		// sampled only when it happens to be running, is blocked by design and is not
+		// part of the contention truth.
+		perThread, total := map[uint32]int{}, 0
+		for _, e := range sc.Cap.Events {
+			if e.CPUEvent != nil {
+				perThread[e.Task.TID]++
+				total++
+			}
+		}
+		contended := map[uint32]bool{}
+		for tid, n := range perThread {
+			if n*10 >= total {
+				contended[tid] = true
+			}
+		}
 		var native []nativeperf.Interval
+		var processBlocked, unknownContended, censoredContended uint64
+		corrections := map[string]int{}
 		for _, iv := range sc.Corr.Intervals {
-			if uint32(iv.Task.TGID) == uint32(sc.TargetTID) {
+			if iv.Correction {
+				corrections[string(iv.Reason)]++
+			}
+			if uint32(iv.Task.TGID) != uint32(sc.TargetTID) {
+				continue
+			}
+			if iv.Kind == nativeperf.IntervalBlocked && !iv.Correction {
+				processBlocked += uint64(iv.End - iv.Start)
+			}
+			if contended[iv.Task.TID] {
 				native = append(native, iv)
+				switch {
+				case iv.Kind == nativeperf.IntervalUnknown && !iv.Correction:
+					unknownContended += uint64(iv.End - iv.Start)
+				case iv.Kind == nativeperf.IntervalCensored:
+					censoredContended += uint64(iv.End - iv.Start)
+				}
 			}
 		}
 		truth, _ := sc.Extra["runnable_delay_truth_ns"].(uint64)
 		verdict, runnable := qual.CompareRunnable(truth, native)
 		var blocked uint64
 		for _, iv := range native {
-			if iv.Kind == nativeperf.IntervalBlocked {
+			if iv.Kind == nativeperf.IntervalBlocked && !iv.Correction {
 				blocked += uint64(iv.End - iv.Start)
 			}
 		}
@@ -135,14 +175,14 @@ func (a *accept) deriveSchedulerFromCaptures(res *qual.QualificationResult, deta
 		if truth > 0 {
 			ratio = float64(runnable) / float64(truth)
 		}
-		rq["comparison"] = map[string]any{"verdict": verdict, "runnable_truth_ns": truth, "native_runnable_ns": runnable, "native_blocked_ns_same_task": blocked, "native_over_truth": ratio}
+		rq["comparison"] = map[string]any{"verdict": verdict, "runnable_truth_ns": truth, "native_runnable_ns": runnable, "native_blocked_ns_contended_threads": blocked, "native_unknown_split_ns_contended_threads": unknownContended, "native_censored_ns_contended_threads": censoredContended, "native_blocked_ns_whole_process": processBlocked, "coverage_corrections_by_reason": corrections, "contended_threads": len(contended), "native_over_truth": ratio, "tolerance": qual.BlockedTolerance}
 		switch {
 		case len(sc.Failures) > 0:
 			res.RunqueueSplit = qual.Failed("contention scenario assertions: "+fmt.Sprint(sc.Failures), rq)
 		case verdict == qual.VerdictPass:
-			res.RunqueueSplit = qual.Supported([]string{fmt.Sprintf("native runnable delay %d ns (ground truth wall-minus-CPU %d ns) distinct from native blocked time %d ns", runnable, truth, blocked)}, rq)
+			res.RunqueueSplit = qual.Supported([]string{fmt.Sprintf("native runnable delay %d ns of the %d contended threads vs the workload's wall-minus-CPU ground truth %d ns (%.1f%%, limit +-%.0f%%), distinct from the %d ns those threads were blocked", runnable, len(contended), truth, ratio*100, qual.BlockedTolerance*100, blocked)}, rq)
 		case verdict == qual.VerdictFail:
-			res.RunqueueSplit = qual.Failed("runnable delay not distinct from blocked time", rq)
+			res.RunqueueSplit = qual.Failed(fmt.Sprintf("runnable delay not distinct from blocked time or not the measured contention: native runnable %d ns vs ground truth %d ns (%.1f%%, limit +-%.0f%%), blocked %d ns of the same threads", runnable, truth, ratio*100, qual.BlockedTolerance*100, blocked), rq)
 		default:
 			res.RunqueueSplit = qual.Unqualified("scheduler_evidence_unknown: no runnable evidence for the contended threads", rq)
 		}

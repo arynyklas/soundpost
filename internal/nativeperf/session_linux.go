@@ -13,6 +13,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"syscall"
+
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 type socketSource struct {
@@ -31,6 +33,7 @@ type socketSource struct {
 	writeMu      sync.Mutex
 	stopSent     bool
 	initialProof *AcquisitionProof
+	lastThrough  model.MonoNano
 }
 
 func newSocketSource(ctx context.Context, c *net.UnixConn) *socketSource {
@@ -123,19 +126,30 @@ func (s *socketSource) NextItem(ctx context.Context) (AcquisitionItem, error) {
 	}
 	if reply.Proof != nil {
 		p := reply.Proof
-		if !p.valid() || s.finalSeen || p.Final && !s.topologySeen || !p.Final && s.topologySeen {
+		if !p.valid() || s.finalSeen {
 			return fail(ErrAcquisitionFailed)
 		}
-		if p.Final {
-			if s.initialProof == nil || p.Domain != s.initialProof.Domain || !reflect.DeepEqual(p.CPUs, s.initialProof.CPUs) || p.Through < s.initialProof.Through {
+		switch {
+		case p.Final:
+			if !s.topologySeen || p.Domain != s.initialProof.Domain || !reflect.DeepEqual(p.CPUs, s.initialProof.CPUs) || p.Through < s.lastThrough {
 				return fail(ErrAcquisitionFailed)
 			}
 			s.finalSeen = true
-		} else {
+		case p.Progress:
+			// A drained-prefix proof of the same topology that strictly advances.
+			if !s.topologySeen || p.Domain != s.initialProof.Domain || !reflect.DeepEqual(p.CPUs, s.initialProof.CPUs) || p.Through <= s.lastThrough {
+				return fail(ErrAcquisitionFailed)
+			}
+			s.lastThrough = p.Through
+		default:
+			if s.topologySeen {
+				return fail(ErrAcquisitionFailed)
+			}
 			s.topologySeen = true
 			copyProof := *p
 			copyProof.CPUs = append([]uint32(nil), p.CPUs...)
 			s.initialProof = &copyProof
+			s.lastThrough = p.Through
 		}
 		return AcquisitionItem{Proof: p}, nil
 	}

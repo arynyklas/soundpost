@@ -113,9 +113,12 @@ func diff(a, b uint64) uint64 {
 	return b - a
 }
 
-// CompareRunnable requires nonzero native runnable delay that is distinct from
-// blocked time when the workload's own ground truth says its pinned threads
-// waited for the CPU. Without any runnable evidence it is unknown.
+// CompareRunnable judges the intervals of the threads that contended for the
+// CPU (the caller passes only those): the native runnable delay must be nonzero,
+// match the workload's own wall-minus-CPU ground truth within BlockedTolerance
+// in both directions, and exceed the blocked time those same threads show, so the
+// two are visibly separate. Without any runnable evidence or ground truth it is
+// unknown.
 func CompareRunnable(truthNs uint64, native []nativeperf.Interval) (verdict string, nativeNs uint64) {
 	var blocked uint64
 	for _, iv := range native {
@@ -134,6 +137,8 @@ func CompareRunnable(truthNs uint64, native []nativeperf.Interval) (verdict stri
 		return VerdictUnknown, nativeNs
 	case blocked >= nativeNs:
 		return VerdictFail, nativeNs // contention that is not clearly distinct from blocked time
+	case float64(diff(nativeNs, truthNs))/float64(truthNs) > BlockedTolerance:
+		return VerdictFail, nativeNs // not the contention the workload measured
 	}
 	return VerdictPass, nativeNs
 }

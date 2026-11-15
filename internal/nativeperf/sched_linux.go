@@ -40,7 +40,19 @@ type schedulerSource struct {
 	end             model.MonoNano
 	terminal        error
 	pendingEvent    *SanitizedEvent
+	// pendingCPU is a CPU sample drained while an older scheduler event was
+	// waiting; it leaves right after that event so neither stream starves the other.
+	pendingCPU *SanitizedEvent
+	// lastProgress is the Through of the last progress proof; lastProgressAt
+	// only throttles how often an idle pass becomes one.
+	lastProgress   model.MonoNano
+	lastProgressAt time.Time
 }
+
+// schedulerProgressInterval is the least wall time between two progress proofs:
+// the correlator holds every event of the last reorder window (100 ms) plus one
+// proof interval, and its buffer is a few hundred events.
+const schedulerProgressInterval = 10 * time.Millisecond
 
 // NewNativeAcquisition selects solely the already authorized signed mode.
 func NewNativeAcquisition(ctx context.Context, a AuthorizedTargets, c Config, r *Reservation) (EventSource, error) {
@@ -313,6 +325,14 @@ capture:
 				return AcquisitionItem{}, e
 			}
 		}
+		if s.pendingCPU != nil {
+			event := *s.pendingCPU
+			s.pendingCPU = nil
+			if s.stopped && event.Time > s.end {
+				continue capture
+			}
+			return s.publish(event)
+		}
 		if s.pendingEvent != nil {
 			progressed := false
 			for _, ring := range s.cpu.rings {
@@ -331,6 +351,19 @@ capture:
 					if s.stopped && cpuEvent.Kind == EventLoss && cpuEvent.Time > s.end {
 						cpuEvent.Time = s.end
 					}
+					if cpuEvent.Kind != EventLoss && cpuEvent.Time > s.pendingEvent.Time {
+						// Newer than the waiting scheduler event: hold the sample and
+						// let the older scheduler event leave first, so a CPU backlog
+						// cannot starve the scheduler stream of a lagging consumer.
+						held := *cpuEvent
+						s.pendingCPU = &held
+						event := *s.pendingEvent
+						s.pendingEvent = nil
+						if s.stopped && event.Time > s.end {
+							continue capture
+						}
+						return s.publish(event)
+					}
 					return s.publish(*cpuEvent)
 				}
 			}
@@ -343,6 +376,17 @@ capture:
 				continue capture
 			}
 			return s.publish(event)
+		}
+		// A pass that finds every stream empty after this instant proves the
+		// prefix through it was delivered (see AcquisitionProof).
+		var passStart model.MonoNano
+		wantProgress := !s.stopped && time.Since(s.lastProgressAt) >= schedulerProgressInterval
+		if wantProgress {
+			var e error
+			if passStart, e = schedulerNow(); e != nil {
+				s.terminal = e
+				return AcquisitionItem{}, e
+			}
 		}
 		total := len(s.rings) + len(s.cpu.rings)
 		hadRecord := false
@@ -406,6 +450,10 @@ capture:
 			}
 			s.finalSent = true
 			return AcquisitionItem{Proof: &AcquisitionProof{Domain: s.cpu.domain, CPUs: append([]uint32(nil), s.cpus...), Through: s.end, Final: true}}, nil
+		}
+		if wantProgress && passStart > s.start && passStart > s.lastProgress {
+			s.lastProgress, s.lastProgressAt = passStart, time.Now()
+			return AcquisitionItem{Proof: &AcquisitionProof{Domain: s.cpu.domain, CPUs: append([]uint32(nil), s.cpus...), Through: passStart, Progress: true}}, nil
 		}
 		timer := time.NewTimer(5 * time.Millisecond)
 		s.mu.Unlock()

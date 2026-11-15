@@ -85,11 +85,42 @@ func TestCompareRunnableNeedsNonzeroDistinctEvidence(t *testing.T) {
 	if v, _ := CompareRunnable(500, nil); v != VerdictUnknown {
 		t.Errorf("no runnable evidence: %s", v)
 	}
-	r := []nativeperf.Interval{{Kind: nativeperf.IntervalRunnable, Start: 10, End: 40}}
-	if v, n := CompareRunnable(500, r); v != VerdictPass || n != 30 {
+	r := []nativeperf.Interval{{Kind: nativeperf.IntervalRunnable, Start: 10, End: 490}}
+	if v, n := CompareRunnable(500, r); v != VerdictPass || n != 480 {
 		t.Errorf("runnable evidence: %s %d", v, n)
 	}
 	if v, _ := CompareRunnable(0, r); v != VerdictUnknown {
 		t.Errorf("no ground-truth contention: %s", v)
+	}
+}
+
+// A sliver of runnable delay against seconds of ground-truth contention is not
+// a measurement of it; the native runnable time has to match the workload's own
+// wall-minus-CPU truth within the approved tolerance, in both directions.
+func TestCompareRunnableMustMatchTheGroundTruthWithinTheTolerance(t *testing.T) {
+	runnable := func(ns uint64) []nativeperf.Interval {
+		return []nativeperf.Interval{{Kind: nativeperf.IntervalRunnable, Start: 0, End: model.MonoNano(ns)}}
+	}
+	for name, tc := range map[string]struct {
+		ns   uint64
+		want string
+	}{"lower edge": {750, VerdictPass}, "upper edge": {1250, VerdictPass}, "below": {749, VerdictFail}, "a sliver": {30, VerdictFail}, "above": {1251, VerdictFail}} {
+		if v, n := CompareRunnable(1000, runnable(tc.ns)); v != tc.want || n != tc.ns {
+			t.Errorf("%s: %s %d, want %s", name, v, n, tc.want)
+		}
+	}
+}
+
+func TestCompareRunnableFailsWhenBlockedTimeOfTheSameThreadsIsNotSmaller(t *testing.T) {
+	in := []nativeperf.Interval{
+		{Kind: nativeperf.IntervalRunnable, Start: 0, End: 900},
+		{Kind: nativeperf.IntervalBlocked, Start: 1000, End: 1900},
+	}
+	if v, _ := CompareRunnable(1000, in); v != VerdictFail {
+		t.Errorf("blocked >= runnable: %s", v)
+	}
+	in[1].End = 1100
+	if v, _ := CompareRunnable(1000, in); v != VerdictPass {
+		t.Errorf("blocked << runnable: %s", v)
 	}
 }

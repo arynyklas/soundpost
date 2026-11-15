@@ -341,7 +341,7 @@ function recorderQueueFromOutput(stdout,exitCode,stderrTail=""){
 }
 
 async function parentMain(){
- const rps=Number(option("--requests-per-second","1000")),seconds=Number(option("--duration-s","3")),runs=Number(option("--runs","5")),profileRuns=Number(option("--profile-runs","7")),outPath=option("--out",""),only=option("--only","server,bun,python,profile,bundle,recorder").split(",");
+ const rps=Number(option("--requests-per-second","1000")),seconds=Number(option("--duration-s","3")),runs=Number(option("--runs","5")),profileRuns=Number(option("--profile-runs","7")),outPath=option("--out",""),only=option("--only","server,bun,python,profile,bundle,recorder,recorder_queue").split(",");
  const bun=bunPath();if(!bun)throw new Error("overhead measurement requires SOUNDPOST_BUN or the pinned Bun 1.3.14 to bundle the SDK");
  const dir=mkdtempSync(join(os.tmpdir(),"soundpost-overhead-"));
  const result={fixture:"overhead",schema:1,recorded_at:new Date().toISOString(),command:"node fixtures/sdk/overhead.mjs "+args.join(" "),budgets_from_design_section_13:BUDGET,machine_class:machineClass(),runtimes:{node:process.version,bun:spawnSync(bun,["--version"],{encoding:"utf8"}).stdout.trim()},rows:{}};
@@ -483,8 +483,9 @@ print(json.dumps({"runtime_version": sys.version.split()[0], "rows": rows}))
     profile_module:profile?{raw_bytes:raw(profile),gzip_bytes:gz(profile)}:{not_measured:"packages/browser/src/profile.ts absent"}};
   }
   // Recorder cost per MutationObserver batch (03.09-W3): the committed real-browser spec fixtures/sdk/replay/mutation-batch.spec.ts run through Playwright; its MUTATION_BATCH_P95 line is the measurement, judged against the 5 ms p95 budget here. A failing budget is a measurement, so the spec's own exit code is recorded, not required to be 0.
-  if(only.includes("recorder")){result.rows.browser_recorder_mutation_batch_p95=recorderBatchRow(bun);result.rows.browser_recorder_queue_bound=recorderQueueRow(bun);}
-  else{result.rows.browser_recorder_mutation_batch_p95={not_measured:"--only did not include recorder"};result.rows.browser_recorder_queue_bound={not_measured:"--only did not include recorder"};}
+  // The recorder queue bound (queue-bound.ts, run by Bun, no browser) is its own selection so it is neither tied to nor failed by the Playwright batch spec.
+  result.rows.browser_recorder_mutation_batch_p95=only.includes("recorder")?recorderBatchRow(bun):{not_measured:"--only did not include recorder"};
+  result.rows.browser_recorder_queue_bound=only.includes("recorder_queue")?recorderQueueRow(bun):{not_measured:"--only did not include recorder_queue"};
   // Bun core server capture: the same deterministic handler and open-loop load against Bun.serve, with and without the Bun SDK's serve integration (installServe), flush() every 100 ms through the in-process ACKing transport.
   if(only.includes("bun")){
    const bunSdk=buildBundle(bun,sdkEntry(join(root,"packages/bun/src/index.ts"),"installServe"),dir,"bunsdk","bun");
