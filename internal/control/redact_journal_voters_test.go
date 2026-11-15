@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -31,13 +32,15 @@ type voterMesh struct {
 	groups  map[uint64]*replica.Group
 	queues  map[uint64]chan voterMsg
 	blocked map[uint64]bool
+	gated   map[uint64]bool
+	stash   map[uint64][]voterMsg
 	stop    chan struct{}
 	wg      sync.WaitGroup
 	once    sync.Once
 }
 
 func newVoterMesh() *voterMesh {
-	return &voterMesh{groups: map[uint64]*replica.Group{}, queues: map[uint64]chan voterMsg{}, blocked: map[uint64]bool{}, stop: make(chan struct{})}
+	return &voterMesh{groups: map[uint64]*replica.Group{}, queues: map[uint64]chan voterMsg{}, blocked: map[uint64]bool{}, gated: map[uint64]bool{}, stash: map[uint64][]voterMsg{}, stop: make(chan struct{})}
 }
 func (m *voterMesh) set(id uint64, g *replica.Group) { m.mu.Lock(); m.groups[id] = g; m.mu.Unlock() }
 func (m *voterMesh) cut(id uint64, down bool)        { m.mu.Lock(); m.blocked[id] = down; m.mu.Unlock() }
@@ -112,19 +115,48 @@ func (m *voterMesh) deliver(to uint64, q <-chan voterMsg) {
 			return
 		case in := <-q:
 			m.mu.Lock()
-			dst, src := m.groups[to], m.groups[in.from]
-			down := m.blocked[in.from] || m.blocked[to]
+			if m.gated[to] && (in.m.GetType() == pb.MsgApp || in.m.GetType() == pb.MsgSnap) {
+				m.stash[to] = append(m.stash[to], in)
+				m.mu.Unlock()
+				continue
+			}
 			m.mu.Unlock()
-			var err error
-			if dst == nil || down {
-				err = replica.ErrUnavailable
-			} else if stepped := dst.Step(context.Background(), in.m); errors.Is(stepped, replica.ErrUnavailable) {
-				err = stepped
-			}
-			if src != nil {
-				src.ReportDelivery(to, in.m.GetType() == pb.MsgSnap, err)
-			}
+			m.step(to, in)
 		}
+	}
+}
+
+// step hands one message to its destination and reports the delivery to the sender.
+func (m *voterMesh) step(to uint64, in voterMsg) {
+	m.mu.Lock()
+	dst, src := m.groups[to], m.groups[in.from]
+	down := m.blocked[in.from] || m.blocked[to]
+	m.mu.Unlock()
+	var err error
+	if dst == nil || down {
+		err = replica.ErrUnavailable
+	} else if stepped := dst.Step(context.Background(), in.m); errors.Is(stepped, replica.ErrUnavailable) {
+		err = stepped
+	}
+	if src != nil {
+		src.ReportDelivery(to, in.m.GetType() == pb.MsgSnap, err)
+	}
+}
+
+// gateAppends holds back every log append and snapshot message addressed to voter id while on is
+// true (its heartbeats, votes and read-index traffic still flow), which makes the voter a connected
+// follower that lags in apply: the control group commits without it and it learns of the commit
+// only when the gate opens, which delivers what was held back in order.
+func (m *voterMesh) gateAppends(id uint64, on bool) {
+	m.mu.Lock()
+	m.gated[id] = on
+	var held []voterMsg
+	if !on {
+		held, m.stash[id] = m.stash[id], nil
+	}
+	m.mu.Unlock()
+	for _, in := range held {
+		m.step(id, in)
 	}
 }
 
@@ -146,7 +178,11 @@ type voterGenesis struct {
 	application, index, term uint64
 }
 
-func newControlVoters(t *testing.T) *controlVoters {
+func newControlVoters(t *testing.T) *controlVoters { t.Helper(); return newControlVotersWith(t) }
+
+// newControlVotersWith leaves the retention dispatchers of the voters in ownRetention unbound: a
+// test that builds a retention.Service over that voter's store gets them from retention.New.
+func newControlVotersWith(t *testing.T, ownRetention ...uint64) *controlVoters {
 	t.Helper()
 	genesis := newEraseFx(t)
 	seed, application, err := genesis.store.ReplicationSeed()
@@ -181,7 +217,11 @@ func newControlVoters(t *testing.T) *controlVoters {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, bind := range []func() error{store.BindRuleEvaluation, store.BindIncidentAction, store.BindConditionApply, store.BindDeliveryOutbox, store.BindRetention} {
+		binds := []func() error{store.BindRuleEvaluation, store.BindIncidentAction, store.BindConditionApply, store.BindDeliveryOutbox}
+		if !slices.Contains(ownRetention, id) { // a retention.Service binds its own dispatchers (retention.New)
+			binds = append(binds, store.BindRetention)
+		}
+		for _, bind := range binds {
 			if err = bind(); err != nil {
 				t.Fatal(err)
 			}

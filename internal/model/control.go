@@ -85,6 +85,15 @@ type ControlState struct {
 	Audits               []ControlAudit
 	Commands             map[string]ControlResult
 	CommandOwners        map[string]string
+	// RevisionClock dates the control revisions coarsely, for the age of the applied-command log
+	// (control.Store.ExpireControlLog): the update that commits revision R records (R, the
+	// leader's clock) when the last stamp is at least a minute old, and drops every stamp that
+	// is older than the dedup window except the newest of them. A command whose Revision is at
+	// or below the Revision of a stamp was therefore committed no later than that stamp's time.
+	// It holds at most a window's worth of minutes (about 1440 entries), whatever the traffic,
+	// where a time per command would be the size of the command log. Never read for an access
+	// decision.
+	RevisionClock        []RevisionStamp `json:"revision_clock,omitempty"`
 	OIDC                 map[string]json.RawMessage
 	ServerTokens         map[string]ControlServerToken
 	Sources              map[string]SourceAuthority
@@ -181,3 +190,9 @@ const (
 	ArtifactLedgerKeyPrefix      = "artifact_refs:"
 	ArtifactLedgerIndexKeyPrefix = "artifact_refs_index:"
 )
+
+// RevisionStamp says that control revision Revision had been committed by At (Unix nanoseconds).
+type RevisionStamp struct {
+	Revision Revision `json:"revision"`
+	At       int64    `json:"at"`
+}

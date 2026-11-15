@@ -6,11 +6,15 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/arynyklas/soundpost/internal/auth"
 	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replica"
 	bolt "go.etcd.io/bbolt"
 	"sort"
+	"strings"
+	"time"
 )
 
 func applyPolicyChange(scope auth.Scope, st *State, cmd Command) (Effect, error) {
@@ -249,5 +253,224 @@ func (s *Store) AppliedHolds(prev HoldSnapshot) (HoldSnapshot, error) {
 		sort.Slice(out.Holds, func(i, j int) bool { return out.Holds[i].ID.String() < out.Holds[j].ID.String() })
 		return nil
 	})
+	return out, err
+}
+
+// CurrentHolds is AppliedHolds after a linearizable read: it first waits (ReadIndex, the same
+// wait View makes) until this node has applied every control command that was committed when the
+// call began, so a hold whose placement was acknowledged before the call is in the answer, and
+// only then reads the applied state. It is what the erasing path asks right before it takes the
+// engine lock (storage.EraseCandidate.Sync): the local-only AppliedHolds cannot see a hold that
+// committed in the control group and has not been applied on this node yet. It fails closed: a
+// node that cannot confirm it is current (no leader, partitioned, group failed) returns the
+// error and the caller erases nothing.
+func (s *Store) CurrentHolds(ctx context.Context, prev HoldSnapshot) (HoldSnapshot, error) {
+	if err := ctx.Err(); err != nil {
+		return prev, err
+	}
+	if s.repl != nil {
+		if _, err := s.repl.group.ReadIndex(ctx); err != nil {
+			return prev, replicaFault(err)
+		}
+	}
+	return s.AppliedHolds(prev)
+}
+
+// ControlLogPolicy says what ExpireControlLog may drop from the control log (design section 12,
+// bounded control state). Zero values of the command bounds take the D4 retry-table bounds.
+type ControlLogPolicy struct {
+	// Now is the pass's clock.
+	Now time.Time
+	// AuditDays is the audit retention in days (365 by default). An organization's own "audit"
+	// retention setting (admin retention command, signal audit) can only lengthen it for that
+	// organization: an administrator cannot shorten the record of their own actions.
+	AuditDays uint32
+	// CommandWindow and CommandMax bound the applied-command log (Commands, CommandOwners): an
+	// entry lives CommandWindow (default and ceiling replica.DefaultRetryWindow, 24 h: the revision
+	// clock keeps that much history) or until the log holds more than CommandMax entries (default
+	// replica.DefaultRetryMax), oldest first, whichever bounds first. A retry older than that is
+	// answered as a fresh command, which the expected-revision rule rejects.
+	CommandWindow time.Duration
+	CommandMax    int
+}
+
+// ControlLogReport is what one expiry pass dropped (or, for a pass that found nothing, zeros).
+type ControlLogReport struct {
+	Audits   int // audit entries older than their organization's audit retention
+	Commands int // applied commands older than the dedup window, and orphaned owner rows
+	Capped   int // applied commands dropped by the count bound, oldest first
+}
+
+func (r ControlLogReport) none() bool { return r == ControlLogReport{} }
+
+// revisionStampEvery is the finest age resolution of the applied-command log: the update funnel
+// adds a RevisionClock stamp only when the newest one is at least this old.
+const revisionStampEvery = time.Minute
+
+// noteRevisionTime is the update funnel's stamp (replicatedUpdate), called with the state whose
+// Revision is the one being committed: it records (Revision, now) when the newest stamp is at
+// least revisionStampEvery old (the first update of a state that has none, a legacy state, stamps
+// at once), then drops every stamp older than the dedup window except the newest of them, which
+// stays as the anchor "everything up to this revision is at least that old". The clock holds at
+// most about a window's worth of minutes, whatever the traffic and whether or not an expiry pass
+// ever runs. A clock that moves backwards only delays the next stamp.
+func noteRevisionTime(st *State, now int64) {
+	if n := len(st.RevisionClock); n > 0 && now < st.RevisionClock[n-1].At+int64(revisionStampEvery) {
+		return
+	}
+	st.RevisionClock = append(st.RevisionClock, model.RevisionStamp{Revision: st.Revision, At: now})
+	cutoff := now - int64(replica.DefaultRetryWindow)
+	drop := 0
+	for drop+1 < len(st.RevisionClock) && st.RevisionClock[drop+1].At < cutoff {
+		drop++
+	}
+	if drop > 0 {
+		st.RevisionClock = append(st.RevisionClock[:0], st.RevisionClock[drop:]...)
+	}
+}
+
+// auditDays is the audit retention that applies to an organization's audits: the default, or the
+// longest "audit" retention setting the organization's administrators stored (never shorter).
+func auditDays(st *State, org string, floor uint32) uint32 {
+	days := floor
+	o, ok := st.Orgs[org]
+	if !ok {
+		return days
+	}
+	for key, raw := range o.Settings {
+		if !strings.HasPrefix(key, "retention:") {
+			continue
+		}
+		var cfg auth.RetentionConfig
+		if json.Unmarshal(raw, &cfg) == nil && cfg.Signal == "audit" && cfg.Days > days {
+			days = cfg.Days
+		}
+	}
+	return days
+}
+
+// expireControlLog applies the policy to st in place and reports what it dropped. It is a pure
+// function of (st, policy): nothing reads a clock or a map order, so the planning read and the
+// committing update compute the same answer from the same state.
+//
+// Never expired: the erasing and scrubbing audits (their ordinals and counts are the control
+// scrub, journal-residue and attestation accounting, and are bounded by the permanent deletion
+// tombstones), and audits with no time (nothing to age them by).
+func expireControlLog(st *State, p ControlLogPolicy) ControlLogReport {
+	var rep ControlLogReport
+	now := p.Now.UnixNano()
+
+	if len(st.Audits) > 0 {
+		perOrg := map[string]int64{} // org -> oldest retained audit time (ns)
+		kept := st.Audits[:0]
+		for _, a := range st.Audits {
+			exempt := a.Action == controlErasedAction || a.Action == controlScrubbedAction || a.Time <= 0
+			if !exempt {
+				cutoff, ok := perOrg[a.Org]
+				if !ok {
+					cutoff = now - int64(auditDays(st, a.Org, p.AuditDays))*int64(24*time.Hour)
+					perOrg[a.Org] = cutoff
+				}
+				if a.Time < cutoff {
+					rep.Audits++
+					continue
+				}
+			}
+			kept = append(kept, a)
+		}
+		if rep.Audits > 0 {
+			clear(st.Audits[len(kept):]) // the dropped tail must not keep the dropped entries reachable
+			st.Audits = kept
+		}
+	}
+
+	window := p.CommandWindow
+	if window <= 0 || window > replica.DefaultRetryWindow {
+		window = replica.DefaultRetryWindow
+	}
+	limit := p.CommandMax
+	if limit <= 0 {
+		limit = replica.DefaultRetryMax
+	}
+	drop := func(id string) {
+		delete(st.Commands, id)
+		delete(st.CommandOwners, id)
+	}
+	// The newest revision the clock proves is older than the window: a command at or below it was
+	// committed no later than that stamp. A command above the newest stamp has no upper bound on
+	// its age yet and stays; so does one with no revision (nothing to date it by).
+	cutoff := now - int64(window)
+	var cut model.Revision
+	for _, stamp := range st.RevisionClock {
+		if stamp.At < cutoff && stamp.Revision > cut {
+			cut = stamp.Revision
+		}
+	}
+	if cut > 0 {
+		for id, c := range st.Commands {
+			if c.Revision != 0 && c.Revision <= cut {
+				drop(id)
+				rep.Commands++
+			}
+		}
+	}
+	if over := len(st.Commands) - limit; over > 0 {
+		type aged struct {
+			id       string
+			revision model.Revision
+		}
+		all := make([]aged, 0, len(st.Commands))
+		for id, c := range st.Commands {
+			all = append(all, aged{id, c.Revision})
+		}
+		sort.Slice(all, func(i, j int) bool {
+			if all[i].revision != all[j].revision {
+				return all[i].revision < all[j].revision
+			}
+			return all[i].id < all[j].id
+		})
+		for _, c := range all[:over] {
+			drop(c.id)
+			rep.Capped++
+		}
+	}
+	// The owner row of a command that is gone would otherwise stay forever.
+	for id := range st.CommandOwners {
+		if _, ok := st.Commands[id]; !ok {
+			delete(st.CommandOwners, id)
+			rep.Commands++
+		}
+	}
+	return rep
+}
+
+// ExpireControlLog drops what the policy no longer keeps from the control log: audits older than
+// their organization's audit retention and applied commands past the dedup window or the count
+// bound. It reads the log first and commits nothing when nothing is due, so an idle installation
+// pays one linearizable read. The commit leaves AuthorityRevision alone (writerExpireControlLog):
+// it removes log rows and nothing an access decision reads, and the replay protection of an id the
+// log forgot is the expected-revision rule, not the log.
+func (s *Store) ExpireControlLog(ctx context.Context, p ControlLogPolicy) (ControlLogReport, error) {
+	if p.Now.IsZero() || p.AuditDays == 0 {
+		return ControlLogReport{}, model.Fail(model.Invalid)
+	}
+	var plan ControlLogReport
+	if err := s.View(ctx, func(st State) error { plan = expireControlLog(&st, p); return nil }); err != nil {
+		return ControlLogReport{}, err
+	}
+	if plan.none() {
+		return plan, nil
+	}
+	var out ControlLogReport
+	err := s.updateAs(ctx, writerExpireControlLog, func(st *State) error {
+		out = expireControlLog(st, p)
+		if out.none() {
+			return errNothingToSettle // another voter's pass expired it first: commit nothing
+		}
+		return nil
+	})
+	if errors.Is(err, errNothingToSettle) {
+		return ControlLogReport{}, nil
+	}
 	return out, err
 }

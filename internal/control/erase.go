@@ -435,8 +435,11 @@ func stateTimes(raw json.RawMessage, visit func(key string, at model.UnixNano)) 
 	return !bad
 }
 
-// scrubDebt is the control.db scrub one operation still owes: the position of its
-// newest erasing audit in the audit log and that audit's time.
+// scrubDebt is the control.db scrub one operation still owes: the ordinal of its newest
+// erasing audit among the erasing audits of the log (0 for the first one ever committed) and
+// that audit's time. It is an ordinal of erasing audits, not a position in the audit log: the
+// log is expired (ExpireControlLog) and a position would shift under a scrub that read the log
+// before an expiry and settles after it, while erasing audits are never expired.
 type scrubDebt struct {
 	last int
 	at   model.UnixNano
@@ -450,12 +453,14 @@ type scrubDebt struct {
 // failed operation, whose physical step is never recorded, owes it too).
 func owedScrubs(audits []model.ControlAudit) map[model.ID]scrubDebt {
 	debts := map[model.ID]scrubDebt{}
-	for i, a := range audits {
+	erasures := 0
+	for _, a := range audits {
 		switch a.Action {
 		case controlErasedAction:
 			for _, id := range a.Targets {
-				debts[id] = scrubDebt{last: i, at: model.UnixNano(a.Time)}
+				debts[id] = scrubDebt{last: erasures, at: model.UnixNano(a.Time)}
 			}
+			erasures++
 		case controlScrubbedAction:
 			for _, id := range a.Targets {
 				delete(debts, id)
@@ -734,7 +739,7 @@ func (s *Store) ScrubErased(ctx context.Context) error {
 	}
 	// The scrub covers exactly the erasures committed before it read the state:
 	// an erasure committed while it runs freed pages it may have passed.
-	through := len(st.Audits)
+	through := scrubCoverage(st.Audits)
 	replicated := len(owedScrubs(st.Audits)) != 0
 	if !replicated && !local.owed {
 		return nil
@@ -769,11 +774,15 @@ func (s *Store) ScrubErased(ctx context.Context) error {
 	return s.settleScrub(ctx, through)
 }
 
+// scrubCoverage is what a scrub carries from its read of the log to its settle: how many erasing
+// audits it saw (see scrubDebt: an ordinal of erasing audits, which no expiry shifts).
+func scrubCoverage(audits []model.ControlAudit) int { return erasureCount(audits) }
+
 // settleScrub appends one scrubbed audit per operation whose erasing audits all
-// precede position `through` of the audit log (the scrub's coverage) and are not
-// settled yet. The audit's time is the newest erasure's own time (the scrub
-// knows no clock of its own and no transition reads one), so what is appended is
-// a function of the committed state and `through` only.
+// precede erasing audit number `through` (the scrub's coverage: how many erasing audits the log
+// held when the scrub read it) and are not settled yet. The audit's time is the newest erasure's
+// own time (the scrub knows no clock of its own and no transition reads one), so what is
+// appended is a function of the committed state and `through` only.
 func (s *Store) settleScrub(ctx context.Context, through int) error {
 	err := s.Update(ctx, func(st *State) error {
 		debts := owedScrubs(st.Audits)

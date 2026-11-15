@@ -51,7 +51,7 @@ func sortedKeys[K ~string, V any](m map[K]V) []string {
 // The tables ARE the review surface of the AuthorityRevision design: this test pins their exact
 // content, so adding or moving a writer is a change a reviewer has to look at in this file too.
 func TestAuthorityClassificationTablesAreExact(t *testing.T) {
-	if got, want := strings.Join(sortedKeys(nonAuthorityWriters), ","), "ArtifactLedger,AttestControl,CancelAdmission,FinalizeAdmission,PublishArtifact,ReconcileAdmissions,RedactNoop,ReplayIndex,ReserveAdmission,ReserveArtifact,SessionCreate,TransactIssues,TransactJobs"; got != want {
+	if got, want := strings.Join(sortedKeys(nonAuthorityWriters), ","), "ArtifactLedger,AttestControl,CancelAdmission,ExpireControlLog,FinalizeAdmission,PublishArtifact,ReconcileAdmissions,RedactNoop,ReplayIndex,ReserveAdmission,ReserveArtifact,SessionCreate,TransactIssues,TransactJobs"; got != want {
 		t.Fatalf("non-authority writers: %s, want %s", got, want)
 	}
 	if got, want := strings.Join(sortedKeys(nonAuthorityKinds), ","), "ApplyCondition,ApplyIssueEvidence,ApplyRuleEvaluation,ClaimDelivery,CompleteDelivery,IncidentAction,RegisterRelease,UpdateJob"; got != want {
@@ -152,6 +152,9 @@ func TestEveryControlWriterIsClassified(t *testing.T) {
 		// Reference / Unreference ledger bookkeeping (10.29): see writerArtifactLedger; the GC
 		// fence and the retire transition keep bumping.
 		"UpdateArtifactReferences": "writerArtifactLedger",
+		// The control log expiry (retention.go): expired audit rows and applied-command rows only
+		// (writerExpireControlLog says why that cannot change authority).
+		"ExpireControlLog": "writerExpireControlLog",
 		// A voter's own attestation record (attest.go): evidence about its files only.
 		"syncAttestation": "writerAttestControl",
 		// The dispatcher itself.

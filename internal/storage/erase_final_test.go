@@ -17,13 +17,21 @@ func TestEraseGuardIsConsultedAgainInsideTheErasingTransaction(t *testing.T) {
 	x := newEraseEnv(t)
 	hit := x.appendMixed(eraseCanary, bothDeadlines)
 	pred := []model.DeletePredicate{x.rangePredicate(0, 10, model.Metric)}
-	var scans, finals []EraseCandidate
+	var scans, finals, syncs []EraseCandidate
+	var order []string
 	report, err := x.e.EraseDeleted(context.Background(), pred, func(_ context.Context, c EraseCandidate) (bool, error) {
+		if c.Sync {
+			syncs = append(syncs, c)
+			order = append(order, "sync")
+			return true, nil // only an error from a Sync consultation counts
+		}
 		if c.Final {
 			finals = append(finals, c)
+			order = append(order, "final")
 			return false, nil // became true after the scan
 		}
 		scans = append(scans, c)
+		order = append(order, "scan")
 		return true, nil
 	})
 	if err != nil {
@@ -32,8 +40,8 @@ func TestEraseGuardIsConsultedAgainInsideTheErasingTransaction(t *testing.T) {
 	if report.Held != 1 || report.Records != 0 || report.Batches != 0 {
 		t.Fatalf("a veto that arrived after the scan did not stop the erasure: %+v", report)
 	}
-	if len(scans) != 1 || len(finals) != 1 {
-		t.Fatalf("%d scan and %d final consultations, want one each", len(scans), len(finals))
+	if len(scans) != 1 || len(finals) != 1 || len(syncs) != 1 || len(order) != 3 || order[0] != "scan" || order[1] != "sync" || order[2] != "final" {
+		t.Fatalf("%d scan, %d sync and %d final consultations in order %v, want one each: scan, sync (outside the lock, once per erasing transaction), final", len(scans), len(syncs), len(finals), order)
 	}
 	same := scans[0]
 	same.Final = true

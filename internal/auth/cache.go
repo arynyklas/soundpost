@@ -34,17 +34,28 @@ func (s *Service) SourceLifecycleGenerations() DeleteGenerations { return source
 
 type sourceLifecycle struct{ service *Service }
 
+// StateDeleteGenerations is optionally implemented by a DeleteGenerations that can derive the
+// generation from a control state the caller already holds (the source-lifecycle base and the
+// retention service do). The cache binding then reads the control state once, linearizably, and
+// answers "is the scope still authorized" and "which generation" from that one snapshot, instead
+// of one read for the revalidation and one more for every component of the generation.
+// derived false means this implementation cannot answer from a state (a component it sums needs
+// its own read): the caller falls back to DeleteGeneration.
+type StateDeleteGenerations interface {
+	DeleteGenerationFromState(st model.ControlState, org model.ID, projects []model.ID) (generation uint64, derived bool, err error)
+}
+
 func (g sourceLifecycle) DeleteGeneration(ctx context.Context, org model.ID, projects []model.ID) (uint64, error) {
 	var out uint64
 	err := g.service.store.View(ctx, func(st model.ControlState) (err error) {
-		out, err = g.DeleteGenerationFromState(st, org, projects)
+		out, _, err = g.DeleteGenerationFromState(st, org, projects)
 		return err
 	})
 	return out, err
 }
-func (g sourceLifecycle) DeleteGenerationFromState(st model.ControlState, org model.ID, _ []model.ID) (uint64, error) {
+func (g sourceLifecycle) DeleteGenerationFromState(st model.ControlState, org model.ID, _ []model.ID) (uint64, bool, error) {
 	if _, ok := st.Orgs[org.String()]; !ok {
-		return 0, model.Fail(model.NotFound)
+		return 0, true, model.Fail(model.NotFound)
 	}
 	var out uint64
 	for _, src := range st.Sources {
@@ -52,7 +63,7 @@ func (g sourceLifecycle) DeleteGenerationFromState(st model.ControlState, org mo
 			out++
 		}
 	}
-	return out, nil
+	return out, true, nil
 }
 
 const (
@@ -121,16 +132,33 @@ type cacheBinding struct {
 
 // bind revalidates the scope (authoritative ReadIndex-backed read) and only
 // then consults the deletion generation. No cache or index is touched before.
+//
+// One control read answers both when the DeleteGenerations can derive its generation from a state
+// (StateDeleteGenerations): the generation is computed from the very snapshot the revalidation
+// accepted, so it can never be older than the authorization it is bound to, and a cached read
+// costs one ReadIndex and one decode instead of one for the revalidation and one per component of
+// the generation. Any other implementation keeps the two-step path.
 func (c *Cache) bind(ctx context.Context, scope Scope) (cacheBinding, error) {
 	if scope.service != c.service || scope.sourceCredential != nil || scope.fingerprint == "" {
 		return cacheBinding{}, model.Fail(model.NotFound)
 	}
-	if err := c.service.Revalidate(ctx, scope); err != nil {
+	var gen uint64
+	derived := false
+	if from, ok := c.deletes.(StateDeleteGenerations); ok {
+		if err := c.service.revalidate(ctx, scope, func(st model.ControlState) (err error) {
+			gen, derived, err = from.DeleteGenerationFromState(st, scope.org, scope.projects)
+			return err
+		}); err != nil {
+			return cacheBinding{}, err
+		}
+	} else if err := c.service.Revalidate(ctx, scope); err != nil {
 		return cacheBinding{}, err
 	}
-	gen, err := c.deletes.DeleteGeneration(ctx, scope.org, scope.projects)
-	if err != nil {
-		return cacheBinding{}, err
+	if !derived {
+		var err error
+		if gen, err = c.deletes.DeleteGeneration(ctx, scope.org, scope.projects); err != nil {
+			return cacheBinding{}, err
+		}
 	}
 	return cacheBinding{scope.fingerprint, scope.epoch, gen}, nil
 }

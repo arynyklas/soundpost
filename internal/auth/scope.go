@@ -208,6 +208,17 @@ func joinSorted(v []string) string {
 	return string(b)
 }
 func (s *Service) Revalidate(ctx context.Context, scope Scope) error {
+	return s.revalidate(ctx, scope, nil)
+}
+
+// revalidate is Revalidate with a callback that runs, with the control state the revalidation
+// just accepted, inside the same linearizable read: one ReadIndex and one decode answer both
+// "is this scope still authorized" and whatever the caller needs from that same state (the cache
+// binding derives the delete generation from it). The credential check is the state check
+// validateCredentialState makes inside that read (session or token present, not expired, user not
+// disabled): a separate Authenticate read before it would repeat it. within runs only for a
+// scope that passed every check, and not at all for a source scope (RevalidateSource).
+func (s *Service) revalidate(ctx context.Context, scope Scope, within func(model.ControlState) error) error {
 	if scope.sourceCredential != nil {
 		if scope.service != s || len(scope.projects) != 1 || len(scope.sources) != 1 {
 			return model.Fail(model.Forbidden)
@@ -235,11 +246,14 @@ func (s *Service) Revalidate(ctx context.Context, scope Scope) error {
 			if err := s.validateSystemState(st, scope); err != nil {
 				return err
 			}
-			return s.grantLease(scope, st, checkedAt)
+			if err := s.grantLease(scope, st, checkedAt); err != nil {
+				return err
+			}
+			if within != nil {
+				return within(st)
+			}
+			return nil
 		})
-	}
-	if _, e := s.Authenticate(ctx, scope.credential.token); e != nil {
-		return e
 	}
 	return s.store.View(ctx, func(st model.ControlState) error {
 		if err := s.validateCredentialState(st, scope.credential); err != nil {
@@ -252,6 +266,12 @@ func (s *Service) Revalidate(ctx context.Context, scope Scope) error {
 		if !ok || o.Epoch != scope.epoch {
 			return model.Fail(model.NotFound)
 		}
-		return s.grantLease(scope, st, checkedAt)
+		if err := s.grantLease(scope, st, checkedAt); err != nil {
+			return err
+		}
+		if within != nil {
+			return within(st)
+		}
+		return nil
 	})
 }

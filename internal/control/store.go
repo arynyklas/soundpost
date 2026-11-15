@@ -29,7 +29,25 @@ type Store struct {
 	handlers   map[CommandKind]Handler
 	updateMu   sync.Mutex
 	repl       *replicatedControl
+	clock      func() time.Time // the leader's wall clock for RevisionClock; nil is time.Now
 }
+
+// SetClock replaces the wall clock the update funnel dates revisions with (RevisionClock), time.Now
+// by default. A deployment has no reason to: it exists so that a long run can be simulated.
+func (s *Store) SetClock(now func() time.Time) {
+	s.updateMu.Lock()
+	s.clock = now
+	s.updateMu.Unlock()
+}
+
+// clockNow is the funnel's clock; the caller holds updateMu.
+func (s *Store) clockNow() time.Time {
+	if s.clock != nil {
+		return s.clock()
+	}
+	return time.Now()
+}
+
 type User = model.ControlUser
 type Session = model.ControlSession
 type Team = model.ControlTeam

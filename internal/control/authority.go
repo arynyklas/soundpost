@@ -101,6 +101,15 @@ const (
 	// DeleteGenerations counter, the retired project set) is NOT masked and keeps bumping, as do
 	// the GC fence callers (they use the unclassified Update).
 	writerArtifactLedger writer = "ArtifactLedger"
+	// writerExpireControlLog: the control log expiry (ExpireControlLog, retention.go). It drops
+	// audit rows past their retention and applied-command rows past the dedup window, with the
+	// owner and time rows of those commands; it writes no grant, policy, hold, deletion, access
+	// or authority record. Replay protection for an id the log forgot is the expected-revision
+	// rule, which does not depend on the log: a retention kind's own commit bumped
+	// AuthorityRevision past the view it carried, and every other kind needs Revision to equal
+	// the view. Without this entry every hourly expiry would move AuthorityRevision and make a
+	// deletion Begin holding a view older than it conflict once.
+	writerExpireControlLog writer = "ExpireControlLog"
 )
 
 // nonAuthorityWriters is the closed allowlist of updateAs writers that leave AuthorityRevision
@@ -119,6 +128,7 @@ var nonAuthorityWriters = map[writer]string{
 	writerAttestControl:       "a voter's control residue attestation record (evidence about its own files)",
 	writerSessionCreate:       "a new session record for an existing user (no existing session or user changed)",
 	writerArtifactLedger:      "artifact reference ledger and index entry (retention bookkeeping, not access state)",
+	writerExpireControlLog:    "expired audit rows and applied-command rows (log retention, not access state)",
 }
 
 // nonAuthorityKinds is the closed allowlist of Transact kinds whose commit leaves

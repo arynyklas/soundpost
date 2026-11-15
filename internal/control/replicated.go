@@ -142,6 +142,9 @@ func (s *Store) replicatedUpdate(ctx context.Context, bump bool, force *bool, fn
 		return model.Fail(model.Unavailable)
 	}
 	st.Revision = expected + 1
+	// The revision clock is stamped after fn like the revision itself: the age of the applied-command
+	// log is read from it (retention.go, ExpireControlLog).
+	noteRevisionTime(&st, s.clockNow().UnixNano())
 	// Set after fn, never before: fn cannot forge, lower or suppress the field. A writer on the
 	// non-authority allowlist leaves the value it found.
 	if bump || force != nil && *force {

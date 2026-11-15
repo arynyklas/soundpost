@@ -38,6 +38,10 @@ type EraseCandidate struct {
 	// transaction (under the engine lock), immediately before the candidate's bytes are
 	// removed. See EraseGuard.
 	Final bool
+	// Sync is set on the consultation made once per erasing transaction, outside every lock,
+	// right before the transaction starts (see syncGuard). The guard may take as long as a
+	// network round trip to answer it; its answer is ignored except for an error.
+	Sync bool
 }
 
 // EraseGuard is how holds, reference counting and the evidence gate veto physical removal.
@@ -50,8 +54,23 @@ type EraseCandidate struct {
 // pass was running) is honoured at the instant the bytes would be destroyed; a vetoed
 // candidate is counted in EraseReport.Held and stays. A Final call must therefore be cheap,
 // must answer from current state rather than from what the scan saw, and must not call back
-// into the Engine.
+// into the Engine. Between the two, right before each erasing transaction takes the engine lock,
+// the guard is consulted once more with Sync set (see syncGuard): that call may block on a
+// linearizable read, so that the Final call can stay local and still see every veto that was
+// acknowledged before the transaction began.
 type EraseGuard func(ctx context.Context, c EraseCandidate) (allow bool, err error)
+
+// syncGuard consults the guard with Sync set, once per erasing transaction, before the engine
+// lock is taken. The guard may block here (a linearizable read of the control group): it must,
+// so that the cheap Final consultation that follows inside the transaction answers from state
+// that includes every veto acknowledged before this call. Only the error counts: a guard that
+// cannot establish current state aborts the pass (fail closed) and nothing in the transaction
+// is erased; the veto itself is decided by the Final consultation.
+func syncGuard(ctx context.Context, guard EraseGuard, c EraseCandidate) error {
+	c.Sync = true
+	_, err := guard(ctx, c)
+	return err
+}
 
 type eraseSelector struct {
 	operations []model.ID
@@ -284,6 +303,11 @@ func (e *Engine) eraseCandidates(ctx context.Context, sel eraseSelector, guard E
 }
 
 func (e *Engine) eraseBatch(ctx context.Context, guard EraseGuard, job eraseBatchJob, ops []model.ID) (records, pages, held uint64, err error) {
+	if len(job.cands) > 0 {
+		if err = syncGuard(ctx, guard, job.cands[0]); err != nil {
+			return 0, 0, 0, err
+		}
+	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.closed || e.failed {
@@ -550,6 +574,9 @@ func unionIDs(a, b []model.ID) []model.ID {
 }
 
 func (e *Engine) eraseBlob(ctx context.Context, guard EraseGuard, job eraseBlobJob, ops []model.ID) (erased bool, held uint64, err error) {
+	if err = syncGuard(ctx, guard, job.cand); err != nil {
+		return false, 0, err
+	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.closed || e.failed {

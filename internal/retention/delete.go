@@ -159,7 +159,22 @@ func receiptOf(st control.State, op model.DeletionOperation) DeleteReceipt {
 // advance the counter through control BEFORE they report their phase, so a
 // cache entry, cursor, replay position or export ticket minted under an older
 // generation is dead.
+//
+// With a base that derives its part from a state (auth.StateDeleteGenerations, which the
+// application's base does) the two parts come from one linearizable read of the control state; a
+// base that does not costs one read of its own.
 func (s *Service) DeleteGeneration(ctx context.Context, org model.ID, projects []model.ID) (uint64, error) {
+	if _, ok := s.cfg.Base.(auth.StateDeleteGenerations); ok {
+		var out uint64
+		derived := false
+		err := s.cfg.Control.View(ctx, func(st control.State) (err error) {
+			out, derived, err = s.DeleteGenerationFromState(st, org, projects)
+			return err
+		})
+		if err != nil || derived {
+			return out, err
+		}
+	}
 	base, err := s.cfg.Base.DeleteGeneration(ctx, org, projects)
 	if err != nil {
 		return 0, err
@@ -169,6 +184,25 @@ func (s *Service) DeleteGeneration(ctx context.Context, org model.ID, projects [
 		return 0, err
 	}
 	return base + own, nil
+}
+
+// DeleteGenerationFromState implements auth.StateDeleteGenerations: DeleteGeneration computed from
+// a control state the caller read, so that a cache binding can take the generation from the same
+// snapshot it revalidated a scope against. derived is false when the base cannot derive its part
+// from a state; the caller then asks DeleteGeneration.
+func (s *Service) DeleteGenerationFromState(st control.State, org model.ID, projects []model.ID) (uint64, bool, error) {
+	base, ok := s.cfg.Base.(auth.StateDeleteGenerations)
+	if !ok {
+		return 0, false, nil
+	}
+	part, derived, err := base.DeleteGenerationFromState(st, org, projects)
+	if err != nil || !derived {
+		return 0, false, err
+	}
+	if _, found := st.Orgs[org.String()]; !found {
+		return 0, true, model.Fail(model.NotFound)
+	}
+	return part + st.DeleteGenerations[org.String()], true, nil
 }
 
 // BuildLedger derives the digest ledger (and the exact tombstones) of every

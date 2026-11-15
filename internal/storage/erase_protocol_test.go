@@ -110,9 +110,17 @@ func TestAReceiptReadOnAnotherVoterIsDirtyFromTheNoticeOfASnapshotToAnAcknowledg
 	// Node 3 falls behind and the leaders cut a snapshot that predates any erasure.
 	f.v.lead(f.t, func(int) uint64 { return 1 })
 	f.v.mesh.partition(3, true)
+	// None of the kept batches may route to slot 0, the slot that carries the notices and the
+	// acknowledgements. A snapshot of it would be held in the mesh with every message queued behind
+	// it, so node 3's slot 0 would hear nothing, and the notice that voids its acknowledgement could
+	// never reach its own state, which is what this test reads. (Which slots the series hash to
+	// changes per run: the org and project IDs are new each time.)
 	var more []model.NormalizedBatch
-	for i := 2100; i < 2130; i++ {
+	for i := 2100; len(more) < 30; i++ {
 		_, b := distinctBatch(f.t, f.store, f.service, f.credential, f.descriptor, i)
+		if b.RouteSlot == eraseAckSlot {
+			continue
+		}
 		more = append(more, b)
 	}
 	f.ack(more)
@@ -127,6 +135,11 @@ func TestAReceiptReadOnAnotherVoterIsDirtyFromTheNoticeOfASnapshotToAnAcknowledg
 		return replicatedNotice(t, f.v.engines[2], 3) > 0 && replicatedNotice(t, f.v.engines[1], 3) > 0
 	}) {
 		t.Fatal("no notice naming node 3 was ever committed before the snapshot was sent")
+	}
+	// Slot 0 needs no snapshot, so the notice reaches node 3 through the log; wait for it rather
+	// than rely on how long the erasures below take.
+	if !eventually(30*time.Second, func() bool { return replicatedNotice(t, f.v.engines[3], 3) > 0 }) {
+		t.Fatal("node 3 never applied the notice that names it")
 	}
 	if f.v.engines[3].Incarnation() == "" {
 		t.Fatal("no incarnation")

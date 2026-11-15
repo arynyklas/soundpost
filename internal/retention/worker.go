@@ -26,6 +26,11 @@ type WorkerStatus struct {
 	Snapshots     uint64
 	GapsRecorded  uint64
 	ExpiryErased  uint64
+	// ExpiredAudits and ExpiredCommands count the control log entries the expiry pass dropped:
+	// audits past their retention (365 days by default) and applied commands past the dedup
+	// window or the count bound (control.Store.ExpireControlLog).
+	ExpiredAudits   uint64
+	ExpiredCommands uint64
 	// UnfencedBlobs counts expired artifact roots an expiry pass kept because no References
 	// source is bound: without one nothing proves a root is retired, and erasing it would leave
 	// a published intent over missing bytes.
@@ -108,10 +113,14 @@ func (s *Service) RunOnce(ctx context.Context) error {
 	s.mu.Unlock()
 	expired := false
 	if expiryDue {
+		// The control log is bounded on the same schedule: audits past their retention and applied
+		// commands past the dedup window. A failure of either step is retried on the next pass.
+		logErr := s.expireControlLog(ctx, now)
+		step(logErr)
 		n, err := s.expire(ctx)
 		step(err)
 		expired = n > 0
-		if err == nil {
+		if err == nil && logErr == nil {
 			s.mu.Lock()
 			s.last.expiry = now
 			s.mu.Unlock()
@@ -409,11 +418,17 @@ func (s *Service) physical(ctx context.Context) error {
 // holdGuard builds the EraseGuard. Legal holds veto against the CURRENT applied control state,
 // re-read for every candidate (and again with Final set, inside the erasing transaction): the
 // guard is a check at erase time, not a snapshot of the instant the pass started, so a hold that
-// committed while the pass was running still protects what it covers. A linearizable read at
-// build time makes this node catch up with everything committed before the pass began; after
-// that the read is local (see control.Store.AppliedHolds). A hold committed in the control group
-// but not yet applied on this node is the residual window. For expiry the extra check runs
-// after the holds, at scan time only.
+// committed while the pass was running still protects what it covers. Right before every erasing
+// transaction takes the engine lock the engine consults the guard with Sync set, and that
+// consultation is a linearizable read of the control group (control.Store.CurrentHolds): this
+// node first applies everything the group had committed when the read began, so a hold whose
+// placement was acknowledged before the transaction started is seen by the Final consultation
+// inside it, which stays a local read of the applied state (control.Store.AppliedHolds). A node
+// that cannot establish current state (partitioned from the control quorum, no leader) fails the
+// consultation and the pass erases nothing. The residual window is a hold that commits after
+// that read and before the removal inside the transaction: the bytes go and the receipt says
+// held, never done (RecordPhysicalCleanup, WorkerStatus.ErasedBeforeHold). For expiry the extra
+// check runs after the holds, at scan time only.
 func (s *Service) holdGuard(ctx context.Context, extra storage.EraseGuard) (storage.EraseGuard, error) {
 	if err := s.cfg.Control.View(ctx, func(control.State) error { return nil }); err != nil {
 		return nil, err
@@ -421,7 +436,12 @@ func (s *Service) holdGuard(ctx context.Context, extra storage.EraseGuard) (stor
 	var holds control.HoldSnapshot
 	return func(ctx context.Context, c storage.EraseCandidate) (bool, error) {
 		var err error
-		if holds, err = s.cfg.Control.AppliedHolds(holds); err != nil {
+		if c.Sync {
+			holds, err = s.cfg.Control.CurrentHolds(ctx, holds)
+		} else {
+			holds, err = s.cfg.Control.AppliedHolds(holds)
+		}
+		if err != nil {
 			return false, err // fail closed
 		}
 		for _, h := range holds.Holds {
@@ -429,7 +449,7 @@ func (s *Service) holdGuard(ctx context.Context, extra storage.EraseGuard) (stor
 				return false, nil
 			}
 		}
-		if c.Final {
+		if c.Final || c.Sync {
 			return true, nil
 		}
 		if extra != nil {
@@ -665,4 +685,19 @@ func wrapDry(g storage.EraseGuard) storage.EraseGuard {
 		}
 		return false, nil
 	}
+}
+
+// expireControlLog drops the control log entries that are past their retention (design section
+// 12: audit 365 days; the applied-command log keeps the D4 retry window), so the control state a
+// long-running installation re-reads and re-proposes on every control transition stays bounded.
+func (s *Service) expireControlLog(ctx context.Context, now time.Time) error {
+	rep, err := s.cfg.Control.ExpireControlLog(ctx, control.ControlLogPolicy{Now: now, AuditDays: Defaults().AuditDays})
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.status.ExpiredAudits += uint64(rep.Audits)
+	s.status.ExpiredCommands += uint64(rep.Commands + rep.Capped)
+	s.mu.Unlock()
+	return nil
 }
