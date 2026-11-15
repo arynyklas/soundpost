@@ -28,7 +28,7 @@ func openThreadCPU(t TaskKey, c Config, method SamplingMethod) (*Ring, error) {
 	mapping, e := syscall.Mmap(int(fd), 0, length, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED)
 	if e != nil {
 		r.Close()
-		return nil, &CapabilityError{Error, ReasonEvent}
+		return nil, mmapFailure(e)
 	}
 	r.mapping = mapping
 	r.meta = mapping[:os.Getpagesize()]

@@ -43,7 +43,7 @@ func (r *Reservation) ReserveCPURings(total uint64, c Config, page uint64) (func
 	oldRings, oldOwned := r.cpuRings, len(r.owned)
 	extra := total - oldRings
 	per := c.RingBytes + page
-	if extra > c.MaxMemory/per {
+	if extra > c.MaxMemory/per || r.lockBytes != 0 && total > r.lockBytes/per {
 		return nil, ErrResources
 	}
 	memory := extra * per

@@ -151,7 +151,7 @@ func (h *Helper) serveConnection(parent context.Context, c *net.UnixConn) {
 		deny(ErrResources)
 		return
 	}
-	lease, e := h.Budget.Reserve(a, req.Config, Topology{CPUs: uint64(len(cpus)), FDLimit: limit.Cur, OpenFDs: uint64(len(fds)), PageBytes: uint64(os.Getpagesize())}, usage)
+	lease, e := h.Budget.Reserve(a, req.Config, Topology{CPUs: uint64(len(cpus)), FDLimit: limit.Cur, OpenFDs: uint64(len(fds)), PageBytes: uint64(os.Getpagesize()), LockBytes: perfLockBytes(uint64(len(cpus)))}, usage)
 	if e != nil {
 		deny(e)
 		return

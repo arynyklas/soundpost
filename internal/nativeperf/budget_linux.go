@@ -8,7 +8,8 @@ import (
 	"sync"
 )
 
-type Topology struct{ CPUs, FDLimit, OpenFDs, PageBytes uint64 }
+// LockBytes is the perf mapping bound the kernel enforces through the per-user perf allowance and RLIMIT_MEMLOCK (see perfLockBytes); zero is unbounded.
+type Topology struct{ CPUs, FDLimit, OpenFDs, PageBytes, LockBytes uint64 }
 type MemoryUsage struct{ HelperRSS, ExportRSS uint64 }
 type ResourceBudget struct {
 	mu          sync.Mutex
@@ -25,6 +26,7 @@ type Reservation struct {
 	owned               []io.Closer
 	cpuRings, fdCeiling uint64
 	workingLimit        uint64
+	lockBytes           uint64
 }
 
 func (b *ResourceBudget) Reserve(a AuthorizedTargets, c Config, t Topology, m MemoryUsage) (*Reservation, error) {
@@ -48,7 +50,7 @@ func (b *ResourceBudget) Reserve(a AuthorizedTargets, c Config, t Topology, m Me
 		return nil, ErrResources
 	}
 	per := c.RingBytes + t.PageBytes
-	if rings > c.MaxMemory/per {
+	if rings > c.MaxMemory/per || t.LockBytes != 0 && rings > t.LockBytes/per {
 		return nil, ErrResources
 	}
 	memory := rings * per
@@ -67,7 +69,7 @@ func (b *ResourceBudget) Reserve(a AuthorizedTargets, c Config, t Topology, m Me
 	}
 	b.memory += memory
 	b.fds += fds
-	return &Reservation{budget: b, Memory: memory, FDs: fds, cpuRings: uint64(len(a.targets)), fdCeiling: ceiling, workingLimit: c.MaxMemory}, nil
+	return &Reservation{budget: b, Memory: memory, FDs: fds, cpuRings: uint64(len(a.targets)), fdCeiling: ceiling, workingLimit: c.MaxMemory, lockBytes: t.LockBytes}, nil
 }
 func (r *Reservation) Own(c io.Closer) error {
 	r.mu.Lock()
