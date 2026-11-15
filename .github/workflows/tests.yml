@@ -89,6 +89,9 @@ jobs:
       - name: Test
         env:
           ARGS: ${{ matrix.shard.args }}
+          # The real OCI symbolication tests need a private runtime config that CI does not hold; they require an explicit
+          # choice and run on a host that has it (lane evidence), never silently here.
+          SOUNDPOST_SYMBOLICATE_TEST_OCI: "skip:CI runners hold no private OCI runtime config"
         run: |
           set -eu
           go mod download

@@ -292,9 +292,9 @@
     "cases/logql-syntax-pipeline.json": "88a74606c34f8a8260c09f3fbb246e083224de63be0f6c15da675a0902aadc28",
     "cases/logql-templates.json": "762bfe4da659abec401a45beb09287766891e5bd787916962efe672cf27ba8c6",
     "cases/logql-metrics-order.json": "7c9d0b3bcc9dc40e6c847834a45b6b30cda5b8a1d686fedeb85d07ca650dd0d9",
-    "cases/promql-wave6-regex-utf8-syntax.json": "e7f5724caf2a0940c6b62002f894a6874201227bbca011947a5f3a830fbc6087",
+    "cases/promql-wave6-regex-utf8-syntax.json": "8523e29992d36d66fd3aa5afd2986f3abfbc091c2bac8ef3d9f637699c2150a0",
     "cases/promql-wave6-annotations-nan.json": "d75ae99d3056cd14fbe8090b43ed41569e67b0817e4b7ea5a8598cf583d8387a",
-    "cases/promql-wave6-regex-utf8.json": "eb7cbac94e716888368f9ddc333fffb24863b2f6d810a1a0fc5c444a11b0ee67",
+    "cases/promql-wave6-regex-utf8.json": "15816d1cfe5567b13c6fda3b7acc4f86075957e40e86085a07dd0057772e423e",
     "cases/release-configuration.json": "39997c81a11a7e9ba506e316a0a2194bdf3192a57596e12449b7d7a4ba5e1148",
     "cases/logql-wave2-divergences.json": "67d7115c64d9cffbcb29193c285ea68ae9b0910fd25149ca7c41064274ad6283",
     "cases/release-numeric-facts.json": "1370982e0f979a9401e923939ed5b23f25c2a9dd7d5b2259384346a323f1e430",
@@ -320,8 +320,8 @@
     "generation.json": "4ce2380d94b4b28bf5c658dfed9b361a1c5f92749edd689bfd8f4b5dc9eaf955",
     "release-policy.json": "0125ad8206c9370f08415028fa557fc5c63c84adcbf0ec2a5ae01ec82d4fabd3",
     "regressions/index.json": "f4e101bc07a065e60b9d5a5fac076060897f2e846596bac2ef2bc04d2234080c",
-    "cases/persisted-path.json": "80e7876b6a0828078fb138f5421454a0ab131c497cdd23bd007eb791a2baa684",
-    "cases/profile-cross-products.json": "558c7d17a73b90b99f93a62eb1ff4873dc85eec727f0cf1f6e1a16c16d24cd37"
+    "cases/persisted-path.json": "6536632e0cd035c671f0807d58d738c75255ee049a6c8259dd333b04d18bba66",
+    "cases/profile-cross-products.json": "152b2e666ccc608aa80992b3df8fcbd621bdcd544f8e130b4282132874fd4365"
   },
   "profile_files": {
     "profiles/query/logql-loki-3.5.2.json": "cc57e2e121eee6db798ff192a35f44216ffa241b0130a816a672e004f934e48c",
