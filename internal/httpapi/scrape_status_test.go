@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -184,5 +187,105 @@ func TestScrapeStatusRouteCarriesNoSecretOrURL(t *testing.T) {
 	}
 	if resp.Header.Get("Cache-Control") != "no-store" {
 		t.Fatalf("cache header %q", resp.Header.Get("Cache-Control"))
+	}
+}
+
+// scrapeHostHolding stands for the real scrape host: it holds everything a
+// target is configured with and everything a fetch returned (URL with a query
+// token, secret reference and value, request header, response body, transport
+// error text), and, like the production adapter, answers the route with typed
+// states only. Every string field of ScrapeTargetState is also planted with a
+// canary by reflection, so a field added to the state (and copied to the view)
+// that is not a closed-vocabulary field shows up here.
+type scrapeHostHolding struct {
+	held  map[string]string
+	state httpapi.ScrapeTargetState
+}
+
+func (h *scrapeHostHolding) ScrapeTargets() []httpapi.ScrapeTargetState {
+	return []httpapi.ScrapeTargetState{h.state}
+}
+
+func TestScrapeStatusRouteNeverCarriesWhatTheHostHolds(t *testing.T) {
+	e := newIsoEnv(t)
+	proj := model.NewID()
+	org := e.org("scrape-host-canary", proj)
+	admin := e.user(org, "scrape-host-canary-admin@example.test")
+	e.cmd(org, "org_admin", auth.AdminPayload{UserID: admin.ID, Enabled: true})
+
+	host := &scrapeHostHolding{held: map[string]string{
+		"url":              "https://exporter-canary-8a1f.example.test/metrics?token=canary-query-token-5c2e",
+		"secret reference": "canary-secret-ref-77d0",
+		"secret value":     "CANARY-secret-value-93b4",
+		"authorization":    "Bearer CANARY-bearer-1e6a",
+		"response body":    "node_secret{pw=\"CANARY-body-4d83\"} 1",
+		"transport error":  "Get \"https://exporter-canary-8a1f.example.test/metrics\": dial tcp 10.9.8.7:443: connect: connection refused",
+	}}
+	// every string and number of the state is filled; the closed-vocabulary
+	// fields and the operator alias are the only ones allowed to be answered
+	planted := map[string]string{}
+	v := reflect.ValueOf(&host.state).Elem()
+	for i := range v.NumField() {
+		name, f := v.Type().Field(i).Name, v.Field(i)
+		switch f.Kind() {
+		case reflect.String:
+			planted[name] = "CANARY-" + name + "-3f9a"
+			f.SetString(planted[name])
+		case reflect.Uint64:
+			f.SetUint(7)
+		case reflect.Int:
+			f.SetInt(200)
+		}
+	}
+	host.state.Project = proj
+	host.state.LastAttempt = time.Unix(1_700_000_000, 0).UTC()
+	answered := map[string]bool{"Alias": true, "Health": true, "Reason": true, "Coverage": true}
+
+	srv := httptest.NewTLSServer(httpapi.NewServer("", e.app.Auth, nil, func(mux *http.ServeMux) {
+		httpapi.RegisterScrapeStatusRoutes(mux, e.app.Auth, e.app.Control, host)
+	}).Handler)
+	t.Cleanup(srv.Close)
+	req, _ := http.NewRequest("GET", srv.URL+"/api/v1/admin/scrape/targets?org="+org.String(), nil)
+	req.Header.Set("Cookie", "__Host-soundpost="+admin.Session.Token)
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var sb strings.Builder
+	buf := make([]byte, 4096)
+	for {
+		n, rerr := resp.Body.Read(buf)
+		sb.Write(buf[:n])
+		if rerr != nil {
+			break
+		}
+	}
+	text := sb.String()
+	if resp.StatusCode != 200 {
+		t.Fatalf("status %d: %s", resp.StatusCode, text)
+	}
+	forms := func(s string) []string {
+		q := strconv.Quote(s)
+		return []string{s, q[1 : len(q)-1], url.QueryEscape(s), url.PathEscape(s)}
+	}
+	for what, secret := range host.held {
+		for _, form := range forms(secret) {
+			if strings.Contains(text, form) {
+				t.Errorf("the route carries the host's %s: %s", what, text)
+			}
+		}
+	}
+	for name, canary := range planted {
+		has := strings.Contains(text, canary)
+		switch {
+		case answered[name] && !has:
+			t.Errorf("the planted %s is not answered (the planting is broken): %s", name, text)
+		case !answered[name] && has:
+			t.Errorf("the state field %s reaches the route, but it is not a closed-vocabulary field: %s", name, text)
+		}
+	}
+	if strings.Contains(text, proj.String()) {
+		t.Errorf("a project id reaches the route: %s", text)
 	}
 }

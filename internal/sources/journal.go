@@ -38,11 +38,17 @@ type journalEntry struct {
 // the approved identifiers and units, so entries of other units are never
 // delivered to the agent. Matches are validated at policy time (no leading
 // dash, closed character set), and the process is not run through a shell.
+//
+// A committed cursor resumes with --cursor (inclusive), not --after-cursor: the
+// first entry journalctl returns must be the committed entry itself. Only then
+// is the cursor known to still exist. --after-cursor seeks to the nearest
+// surviving position when the cursor entry was vacuumed and silently returns
+// whatever is left, which would hide the loss.
 func journalArgs(j *JournalSpec, pos Position, lines int) []string {
 	args := []string{"--no-pager", "--quiet", "--output=json", "--output-fields=" + journalFields}
 	switch {
 	case pos.Cursor != "":
-		args = append(args, "--after-cursor="+pos.Cursor)
+		args = append(args, "--cursor="+pos.Cursor)
 	case pos.Since > 0:
 		args = append(args, "--since=@"+strconv.FormatInt(pos.Since, 10))
 	}
@@ -191,6 +197,16 @@ func journalFailure(p SourcePolicy, stderr string, exitErr, err error) error {
 }
 
 // acquireJournal reads up to limit entries after the committed cursor.
+//
+// When the committed cursor entry is no longer in the journal (vacuumed by
+// size/time limits, rotated away, or the journal was recreated) the entries
+// between it and the oldest surviving one are lost. journalctl does not say so,
+// so the first line of a --cursor read is compared with the committed cursor:
+// if it is a different entry, or the journal returns nothing at all (a cursor
+// beyond the end), a loss gap is reported with the same batch discipline as a
+// file rotation gap. Its count is a lower bound (1): the true number is not
+// knowable. Reading then continues from the oldest surviving entry, or, with
+// nothing left, from the current second.
 func acquireJournal(ctx context.Context, p SourcePolicy, cp Checkpoint, limit int) (acquired, error) {
 	acq := acquired{dropped: map[string]uint64{}}
 	j := p.Journal
@@ -206,9 +222,18 @@ func acquireJournal(ctx context.Context, p SourcePolicy, cp Checkpoint, limit in
 			return acquireJournalEnd(ctx, p, command)
 		}
 	}
+	resume := pos.Cursor != ""
+	// the committed entry itself is the first line of a resumed read
+	lineCap := limit
+	if resume {
+		lineCap++
+	}
+	started := p.now()
 	var lastCursor string
 	scanned := 0
-	stderr, exitErr, err := runJournal(ctx, command, journalArgs(j, pos, 0), limit, func(line []byte) error {
+	lines := 0
+	cursorFound := false
+	stderr, exitErr, err := runJournal(ctx, command, journalArgs(j, pos, 0), lineCap, func(line []byte) error {
 		var e journalEntry
 		if json.Unmarshal(line, &e) != nil {
 			return errJournalLine
@@ -216,6 +241,14 @@ func acquireJournal(ctx context.Context, p SourcePolicy, cp Checkpoint, limit in
 		cursor, ok := jsonText(e.Cursor)
 		if !ok || cursor == "" || len(cursor) > 512 {
 			return errJournalLine
+		}
+		lines++
+		if resume && lines == 1 && cursor == pos.Cursor {
+			cursorFound = true
+			return nil
+		}
+		if scanned >= limit {
+			return nil // only the one extra line that a missing cursor adds
 		}
 		lastCursor = cursor
 		scanned++
@@ -255,6 +288,24 @@ func acquireJournal(ctx context.Context, p SourcePolicy, cp Checkpoint, limit in
 	acq.to = pos
 	if lastCursor != "" {
 		acq.to.Cursor, acq.to.Since = lastCursor, 0
+	}
+	if resume && !cursorFound {
+		now := model.UnixNano(started.UnixNano())
+		start := cp.LastRead
+		if start == 0 || start > now {
+			start = now
+		}
+		acq.gaps = append(acq.gaps, Gap{Reason: "truncated", Count: 1, Start: start, End: now})
+		if lastCursor == "" {
+			// Nothing survives after the lost cursor. Without a new position
+			// the same gap would be reported every cycle: continue from now.
+			// A rebuilt range keeps the position it recorded.
+			if pend := cp.Pending; pend != nil && pend.Scanned == 0 && len(pend.Gaps) > 0 {
+				acq.to = pend.To
+			} else {
+				acq.to = Position{Started: true, Since: started.Unix()}
+			}
+		}
 	}
 	return acq, nil
 }

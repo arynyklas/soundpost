@@ -10,6 +10,8 @@ import { RestorePanel } from '../auth/RestorePanel';
 import { SessionContext } from '../auth/ElevationDialog';
 import { PolicySettings } from './PolicySettings';
 import { DestinationSettings } from './DestinationSettings';
+import { CutoverPanel } from './CutoverPanel';
+import { RuleSettings } from './RuleSettings';
 import { SourcePolicies } from './SourcePolicies';
 import { SSOSettings } from './SSOSettings';
 import { TeamSettings } from './TeamSettings';
@@ -129,6 +131,8 @@ function ProjectTab(props: { context: ViewContext }): React.JSX.Element {
       <StatusPanel state={state} />
       {'data' in state && state.data.length > 0 && <ul>{state.data.map((s) => <li key={s.id}><code>{s.id}</code> — class {s.class}, kinds {s.kinds.join(', ')}{s.replay ? ', replay' : ''}</li>)}</ul>}
       <PolicySettings context={c} project={project} />
+      <CutoverPanel context={c} project={project} />
+      <RuleSettings context={c} project={project} />
      </div>
     );
    })}

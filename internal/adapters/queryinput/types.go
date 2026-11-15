@@ -504,6 +504,15 @@ func u64bytes(v uint64) []byte {
 	return b[:]
 }
 
+// requestDigest identifies one request for the deterministic batch and record
+// identifiers: the same request body (and scope) is the same request, so a retry
+// is idempotent. An OpenMetrics exposition that is polled (a scrape) is a
+// different request every time even when the exporter's text is unchanged,
+// because a sample without a timestamp takes the scrape time (DefaultTimestamp)
+// as its time: two scrapes must not share a batch identifier while their records
+// carry different times. Formats that never read DefaultTimestamp keep their
+// digest independent of it, so a retried push does not change identity with the
+// time it arrived.
 func requestDigest(format string, cfg InputProfile, body []byte) [32]byte {
 	h := sha256.New()
 	h.Write([]byte("soundpost.queryinput.request.v1\x00" + format + "\x00"))
@@ -511,6 +520,10 @@ func requestDigest(format string, cfg InputProfile, body []byte) [32]byte {
 	h.Write(cfg.Source[:])
 	h.Write(cfg.Producer[:])
 	h.Write(u64bytes(uint64(cfg.PolicyRevision)))
+	if format == fmtOpenMetrics && cfg.DefaultTimestamp != 0 {
+		h.Write([]byte("default-timestamp\x00"))
+		h.Write(u64bytes(uint64(cfg.DefaultTimestamp)))
+	}
 	h.Write(body)
 	var out [32]byte
 	copy(out[:], h.Sum(nil))

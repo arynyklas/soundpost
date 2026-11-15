@@ -303,6 +303,28 @@ func (w *Workers) decide(ctx context.Context, admin auth.Scope, project model.ID
 		}
 		ref.Config = nil
 	}
+	if len(binding.Recipients) > 0 {
+		// A state starts in active mode, and a pass that failed after the recipient
+		// events committed leaves it there. While the project's cutover is not in
+		// new_active, bring the state to the phase's mode before every decision about
+		// it (a state already in the mode is left alone), so that what the shadow
+		// suppresses is remembered and the end of the shadow reevaluates it once. A
+		// sync that lost an owner-revision race changes nothing and the decision below
+		// is refused for this pass; the next pass converges.
+		moved, err := w.syncSubject(ctx, admin, binding.Policy, subject, lease, at)
+		if err != nil {
+			return submitted, err
+		}
+		if moved {
+			st, found, err := w.policyState(ctx, admin, project, binding.Policy, subject)
+			if err != nil {
+				return submitted, err
+			}
+			if found {
+				ownerRevision = st.OwnerRevision
+			}
+		}
+	}
 	var seq [8]byte
 	binary.BigEndian.PutUint64(seq[:], evidence.seq)
 	kind, tag := notify.EventCondition, "condition"
@@ -322,6 +344,17 @@ func (w *Workers) decide(ctx context.Context, admin auth.Scope, project model.ID
 		submitted++
 	}
 	return submitted, nil
+}
+
+// syncSubject brings the state of one subject to the delivery mode the project's
+// committed cutover phase requires; a project with no cutover record has no mode to
+// sync. It reports whether the state changed.
+func (w *Workers) syncSubject(ctx context.Context, admin auth.Scope, policy model.ID, subject notify.Entity, lease replica.FenceToken, at model.UnixNano) (bool, error) {
+	state, found, err := w.cutover.Cutover(ctx, admin)
+	if err != nil || !found {
+		return false, err
+	}
+	return w.outbox.SyncMode(ctx, admin, lease, state.Phase, state.Cutover, state.Revision, policy, subject, at)
 }
 
 // policyFraming is the policy reference and expected owner revision an event

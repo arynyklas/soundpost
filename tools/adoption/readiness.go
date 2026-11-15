@@ -87,6 +87,13 @@ const (
 	ReadinessBlockDeadmanNotIndep  = "deadman_not_independent"
 	ReadinessBlockBadEvidence      = "invalid_evidence"
 	ReadinessBlockBadLedger        = "invalid_ledger"
+	// A producer report the digest names must be supplied, decode as that
+	// producer's report for that kind, pass, and be of the time claimed.
+	ReadinessBlockReportMissing      = "report_body_missing"
+	ReadinessBlockReportInvalid      = "report_invalid"
+	ReadinessBlockReportNotPassing   = "report_not_passing"
+	ReadinessBlockReportTime         = "report_time_mismatch"
+	ReadinessBlockReportUnverifiable = "report_unverifiable"
 )
 
 var readinessBlockCodes = []string{
@@ -96,11 +103,16 @@ var readinessBlockCodes = []string{
 	ReadinessBlockProductionProof, ReadinessBlockUnauthorized,
 	ReadinessBlockDisruptiveUnauth, ReadinessBlockDeadmanNotIndep,
 	ReadinessBlockBadEvidence, ReadinessBlockBadLedger,
+	ReadinessBlockReportMissing, ReadinessBlockReportInvalid, ReadinessBlockReportNotPassing,
+	ReadinessBlockReportTime, ReadinessBlockReportUnverifiable,
 }
 
 // EvidenceRef is a typed reference to one result produced by a committed tool
-// (08.02-08.04 reports, 07.07 drills, 07.06 qualify, 07.04/09.06 smoke). The
-// digest is the SHA-256 of that tool's report; the report is never re-derived.
+// (08.02-08.04 and 08.07 reports, 07.07 drills, 07.06 qualify, 07.04/09.06
+// smoke). The digest is the SHA-256 of that tool's report. For the producers
+// whose report shape this package owns (readinessAdapters) ReadyForCutover
+// requires the report bytes and checks them against the reference; the others
+// stay references until their tools gain an adapter.
 type EvidenceRef struct {
 	Kind            ReadinessKind `json:"kind"`
 	Producer        string        `json:"producer"`
@@ -126,6 +138,10 @@ type AcceptanceLedger struct {
 	// RequireProduction demands production-environment evidence; staging
 	// evidence is then a production_proof_outstanding blocker.
 	RequireProduction bool `json:"require_production"`
+	// RequireVerifiedReports demands that every reference be backed by a report
+	// body an adapter verified; a producer with no adapter is then a
+	// report_unverifiable blocker rather than an unverified criterion.
+	RequireVerifiedReports bool `json:"require_verified_reports"`
 	// ProductFailureDomain identifies the product's own failure domain; the
 	// external deadman must be in a different, non-empty one.
 	ProductFailureDomain string        `json:"product_failure_domain"`
@@ -155,7 +171,9 @@ type ReadinessBlocker struct {
 	Detail string        `json:"detail"`
 }
 
-// GateCriterion is one satisfied criterion bound into the gate.
+// GateCriterion is one satisfied criterion bound into the gate. BodyVerified
+// says the producer's report bytes were checked against the digest; false means
+// the digest is a reference only.
 type GateCriterion struct {
 	Kind            ReadinessKind `json:"kind"`
 	Producer        string        `json:"producer"`
@@ -163,6 +181,7 @@ type GateCriterion struct {
 	ObservedAt      time.Time     `json:"observed_at"`
 	AuthorizationID string        `json:"authorization_id"`
 	Environment     string        `json:"environment"`
+	BodyVerified    bool          `json:"body_verified"`
 }
 
 // ReadyGate is the signed gate record. 08.06 consumes it via VerifyReadyGate.
@@ -181,11 +200,14 @@ type ReadyGate struct {
 }
 
 // CutoverReadiness is the evaluation result. Gate is populated (unsigned)
-// only when Ready; sign it with SignReadyGate.
+// only when Ready; sign it with SignReadyGate. UnverifiedKinds lists the
+// satisfied kinds whose evidence is a digest reference only (no adapter for the
+// producer): Ready does not mean every report body was verified.
 type CutoverReadiness struct {
 	Ready                      bool               `json:"ready"`
 	Blockers                   []ReadinessBlocker `json:"blockers"`
 	Satisfied                  []ReadinessKind    `json:"satisfied"`
+	UnverifiedKinds            []ReadinessKind    `json:"unverified_kinds"`
 	ProductionProofOutstanding bool               `json:"production_proof_outstanding"`
 	LedgerDigest               string             `json:"ledger_digest"`
 	Gate                       *ReadyGate         `json:"gate,omitempty"`
@@ -246,9 +268,9 @@ func readinessAuthCovers(a ReadinessAuthorization, e EvidenceRef, now time.Time,
 	return found
 }
 
-// readinessCheckRef returns the blockers for one reference (nil when usable)
-// and the matched authorization.
-func readinessCheckRef(l AcceptanceLedger, e EvidenceRef, auths []ReadinessAuthorization) ([]ReadinessBlocker, *ReadinessAuthorization) {
+// readinessCheckRef returns the blockers for one reference (nil when usable),
+// the matched authorization and whether a producer report body verified it.
+func readinessCheckRef(l AcceptanceLedger, e EvidenceRef, auths []ReadinessAuthorization, reports ReadinessReports) ([]ReadinessBlocker, *ReadinessAuthorization, bool) {
 	var bl []ReadinessBlocker
 	add := func(code, detail string) {
 		bl = append(bl, ReadinessBlocker{Code: code, Kind: e.Kind, Detail: detail})
@@ -258,6 +280,17 @@ func readinessCheckRef(l AcceptanceLedger, e EvidenceRef, auths []ReadinessAutho
 	}
 	if !readinessHex64(e.Digest) {
 		add(ReadinessBlockBadDigest, string(e.Kind)+" evidence digest is not a sha256 hex string")
+	}
+	// A reference that already fails (bad digest, not a pass) is blocked for that;
+	// its report is not read for it.
+	verified := false
+	if readinessHex64(e.Digest) && e.Result == ReadinessResultPass {
+		var rb []ReadinessBlocker
+		rb, verified = readinessVerifyReport(e, reports)
+		bl = append(bl, rb...)
+		if _, has := readinessAdapters[e.Producer]; !has && l.RequireVerifiedReports {
+			add(ReadinessBlockReportUnverifiable, string(e.Kind)+" evidence from a producer whose report cannot be verified here")
+		}
 	}
 	switch {
 	case e.ObservedAt.IsZero():
@@ -308,18 +341,20 @@ func readinessCheckRef(l AcceptanceLedger, e EvidenceRef, auths []ReadinessAutho
 			add(ReadinessBlockDeadmanNotIndep, "external_deadman failure domain is not independent of the product's")
 		}
 	}
-	return bl, matched
+	return bl, matched, verified
 }
 
 // ReadyForCutover evaluates the ledger against every required criterion. It
 // never approves from partial evidence: each of the ten kinds needs at least
-// one fully valid reference. Blockers are returned (err stays nil) for
-// anything the evidence fails; err is reserved for cancellation.
-func ReadyForCutover(ctx context.Context, l AcceptanceLedger, a Authorizations) (CutoverReadiness, error) {
+// one fully valid reference, and a reference from a producer this package has a
+// report adapter for is valid only when the report whose digest it names is in
+// reports and confirms it. Blockers are returned (err stays nil) for anything
+// the evidence fails; err is reserved for cancellation.
+func ReadyForCutover(ctx context.Context, l AcceptanceLedger, a Authorizations, reports ReadinessReports) (CutoverReadiness, error) {
 	if err := ctx.Err(); err != nil {
 		return CutoverReadiness{}, err
 	}
-	res := CutoverReadiness{Blockers: []ReadinessBlocker{}, Satisfied: []ReadinessKind{}}
+	res := CutoverReadiness{Blockers: []ReadinessBlocker{}, Satisfied: []ReadinessKind{}, UnverifiedKinds: []ReadinessKind{}}
 	digest, err := readinessDigest(l)
 	if err != nil {
 		return res, err
@@ -343,13 +378,16 @@ func ReadyForCutover(ctx context.Context, l AcceptanceLedger, a Authorizations) 
 				continue
 			}
 			refs++
-			bl, m := readinessCheckRef(l, e, a.Items)
+			bl, m, verified := readinessCheckRef(l, e, a.Items, reports)
 			if len(bl) > 0 {
 				pending = append(pending, bl...)
 				continue
 			}
 			done = true
-			crit = append(crit, GateCriterion{Kind: kind, Producer: e.Producer, Digest: e.Digest, ObservedAt: e.ObservedAt.UTC(), AuthorizationID: e.AuthorizationID, Environment: e.Environment})
+			crit = append(crit, GateCriterion{Kind: kind, Producer: e.Producer, Digest: e.Digest, ObservedAt: e.ObservedAt.UTC(), AuthorizationID: e.AuthorizationID, Environment: e.Environment, BodyVerified: verified})
+			if !verified {
+				res.UnverifiedKinds = append(res.UnverifiedKinds, kind)
+			}
 			if !usedIDs[m.ID] {
 				usedIDs[m.ID] = true
 				used = append(used, *m)
@@ -479,6 +517,7 @@ type ReadinessPublic struct {
 	Ready                      bool             `json:"ready"`
 	CriteriaRequired           int              `json:"criteria_required"`
 	CriteriaSatisfied          int              `json:"criteria_satisfied"`
+	CriteriaBodyVerified       int              `json:"criteria_body_verified"`
 	BlockerCounts              []ReadinessCount `json:"blocker_counts"`
 	ProductionProofOutstanding bool             `json:"production_proof_outstanding"`
 	CustomerAcceptance         bool             `json:"customer_acceptance"`
@@ -492,7 +531,7 @@ type ReadinessCount struct {
 
 // ReadinessPublicSummary projects a result onto the closed public shape.
 func ReadinessPublicSummary(r CutoverReadiness) ReadinessPublic {
-	p := ReadinessPublic{Ready: r.Ready, CriteriaRequired: len(readinessKinds), CriteriaSatisfied: len(r.Satisfied),
+	p := ReadinessPublic{Ready: r.Ready, CriteriaRequired: len(readinessKinds), CriteriaSatisfied: len(r.Satisfied), CriteriaBodyVerified: len(r.Satisfied) - len(r.UnverifiedKinds),
 		BlockerCounts: []ReadinessCount{}, ProductionProofOutstanding: r.ProductionProofOutstanding}
 	for _, code := range readinessBlockCodes {
 		n := 0
@@ -517,12 +556,13 @@ func runReadiness(ctx context.Context, args []string) error {
 	output := fs.String("private-output", "", "new private file for the readiness result and signed gate")
 	summaryPath := fs.String("public-summary", "", "new public closed summary file")
 	nowStr := fs.String("now", "", "evaluation instant RFC 3339 (overrides the ledger clock; default: ledger value)")
+	reportsDir := fs.String("reports", "", "private directory holding the producers' report files (a report's SHA-256 is the digest a reference names)")
 	timeout := fs.Duration("timeout", time.Minute, "overall deadline (positive, at most 1h)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if fs.NArg() != 0 || *ledgerPath == "" || *authPath == "" || *keyPath == "" || *output == "" || *summaryPath == "" {
-		return errors.New("readiness requires --ledger --authorizations --signing-key --private-output --public-summary")
+	if fs.NArg() != 0 || *ledgerPath == "" || *authPath == "" || *keyPath == "" || *output == "" || *summaryPath == "" || *reportsDir == "" {
+		return errors.New("readiness requires --ledger --authorizations --reports --signing-key --private-output --public-summary")
 	}
 	if *timeout <= 0 || *timeout > time.Hour {
 		return errors.New("timeout must be positive and at most 1h")
@@ -549,7 +589,11 @@ func runReadiness(ctx context.Context, args []string) error {
 	if err != nil || len(seed) != ed25519.SeedSize {
 		return errors.New("signing key must be a 32-byte hex seed")
 	}
-	res, err := ReadyForCutover(ctx, l, a)
+	reports, err := readinessReportsFromDir(*reportsDir)
+	if err != nil {
+		return err
+	}
+	res, err := ReadyForCutover(ctx, l, a, reports)
 	if err != nil {
 		return err
 	}

@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -90,6 +91,7 @@ type jtWorld struct {
 	profileViews                                                                  map[model.ID]httpapi.ProfileResponse
 	links                                                                         ExpectedLinks
 	calls                                                                         []string
+	occurrenceFn                                                                  func(httpapi.ErrorOccurrenceBody) (httpapi.ErrorOccurrenceView, error)
 }
 
 func jtHash(raw []byte) model.Hash { return model.HashCanonical(raw) }
@@ -119,6 +121,7 @@ func newJTWorld(t *testing.T) *jtWorld {
 		Occurrences: []httpapi.OccurrenceEvidenceView{{OccurrenceID: jtID(30), RecordID: jtID(31), GroupingVersion: 1, BuildID: &build, ReleaseID: &release, Ancestry: "known", Freshness: "fresh"}}, LateHistory: []httpapi.OccurrenceEvidenceView{},
 		Sections: []httpapi.ViewSection{{Name: "grouping", State: httpapi.StateReady}, {Name: "evidence", State: httpapi.StateReady}, {Name: "occurrence_detail", State: httpapi.StateNotAvailable, Reason: httpapi.ReasonOccurrenceDetail}}}
 	w.framesFn = w.resolveFrames
+	w.occurrenceFn = w.occurrenceView
 	w.buildJobEvents()
 	w.buildReplay()
 	w.profileViews = map[model.ID]httpapi.ProfileResponse{
@@ -141,6 +144,28 @@ func newJTWorld(t *testing.T) *jtWorld {
 		}},
 	}
 	return w
+}
+
+// occurrenceView is the stored error record of the frontend request: the same
+// build and release, the request's trace and the span of its root (the frontend
+// action that raised the error), as the committed occurrence route reports it.
+func (w *jtWorld) occurrenceView(b httpapi.ErrorOccurrenceBody) (httpapi.ErrorOccurrenceView, error) {
+	trace, span, build, release := w.feTrace, jtSpanID(1), w.build, w.release
+	return httpapi.ErrorOccurrenceView{Org: b.Org, Project: b.Project, Issue: b.Issue, Occurrence: b.Occurrence, State: httpapi.StateReady,
+		Detail:   &httpapi.ErrorOccurrenceDetail{Class: "TypeError", Mechanism: "onerror", Build: build, Release: &release, Trace: &trace, Span: &span, Frames: []model.Frame{}},
+		Sections: []httpapi.ViewSection{{Name: "occurrence_detail", State: httpapi.StateReady}}}, nil
+}
+
+// lists reports whether the issue's evidence lists the occurrence, as the route requires.
+func (w *jtWorld) lists(id model.ID) bool {
+	for _, list := range [][]httpapi.OccurrenceEvidenceView{w.issueView.Occurrences, w.issueView.LateHistory} {
+		for _, o := range list {
+			if o.OccurrenceID == id {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // resolveFrames is the symbolicator seam: the real source-map decoder places the
@@ -301,6 +326,15 @@ func (f jtFake) Issue(_ context.Context, b httpapi.IssueBody) (httpapi.IssueView
 		return httpapi.IssueView{}, journeyErrNotFound
 	}
 	return f.w.issueView, nil
+}
+func (f jtFake) Occurrence(_ context.Context, b httpapi.ErrorOccurrenceBody) (httpapi.ErrorOccurrenceView, error) {
+	if err := f.scoped(b.Org, b.Project, "occurrence"); err != nil {
+		return httpapi.ErrorOccurrenceView{}, err
+	}
+	if b.Issue != f.w.issue || !f.w.lists(b.Occurrence) {
+		return httpapi.ErrorOccurrenceView{}, journeyErrNotFound
+	}
+	return f.w.occurrenceFn(b)
 }
 func (f jtFake) Job(_ context.Context, b httpapi.JobViewBody) (httpapi.JobView, error) {
 	if err := f.scoped(b.Org, b.Project, "job"); err != nil {
@@ -691,6 +725,9 @@ func TestJourneyInvalidExpectationsAreRefusedBeforeReading(t *testing.T) {
 		{"frontend chain shorter than frontend-API-DB", JourneyFrontendAPIDB, func(l *ExpectedLinks) { l.Frontend.Chain = l.Frontend.Chain[:2] }},
 		{"frontend hash malformed", JourneyFrontendAPIDB, func(l *ExpectedLinks) { l.Frontend.DebugSHA256 = "abc" }},
 		{"frontend without debug ID", JourneyFrontendAPIDB, func(l *ExpectedLinks) { l.Frontend.DebugID = "" }},
+		{"frontend occurrence not an ID", JourneyFrontendAPIDB, func(l *ExpectedLinks) { l.Frontend.Occurrence = "not-an-id" }},
+		{"frontend error span hop beyond the chain", JourneyFrontendAPIDB, func(l *ExpectedLinks) { hop := len(l.Frontend.Chain); l.Frontend.ErrorSpanHop = &hop }},
+		{"frontend error span hop negative", JourneyFrontendAPIDB, func(l *ExpectedLinks) { hop := -1; l.Frontend.ErrorSpanHop = &hop }},
 		{"scheduler without run", JourneySchedulerRetry, func(l *ExpectedLinks) { l.Scheduler.Run = "" }},
 		{"replay without sentinels", JourneyReplayPrivacy, func(l *ExpectedLinks) { l.Replay.Sentinels = nil }},
 		{"replay with a trivial sentinel", JourneyReplayPrivacy, func(l *ExpectedLinks) { l.Replay.Sentinels = []string{"a"} }},
@@ -1085,6 +1122,13 @@ func jtServe(t *testing.T, w *jtWorld, bearer string, hits *atomic.Int32) *httpt
 		}
 		return fake.Issue(ctx, b)
 	})
+	handle("/api/v1/evidence/occurrence", nil, func(ctx context.Context, raw []byte) (any, error) {
+		var b httpapi.ErrorOccurrenceBody
+		if err := strict(raw, &b); err != nil {
+			return nil, err
+		}
+		return fake.Occurrence(ctx, b)
+	})
 	handle("/api/v1/jobs/view", nil, func(ctx context.Context, raw []byte) (any, error) {
 		var b httpapi.JobViewBody
 		if err := strict(raw, &b); err != nil {
@@ -1124,6 +1168,9 @@ func TestJourneyVerifiesOverLoopbackHTTPWithStrictRequestBodies(t *testing.T) {
 	}
 	if !rep.Passed || hits.Load() < 8 {
 		t.Fatalf("passed=%v hits=%d", rep.Passed, hits.Load())
+	}
+	if !slices.Contains(w.calls, "occurrence") {
+		t.Fatalf("the same-request proof never read the occurrence over HTTP: %v", w.calls)
 	}
 	// A wrong bearer is a closed credential-denied failure that never leaks the token.
 	rep, err = VerifyJourneys(context.Background(), JourneyTargets{ServerURL: srv.URL, Bearer: "wrong-bearer", Org: w.org.String(), Project: w.project.String()}, w.links)
@@ -1656,4 +1703,319 @@ func TestJourneyReplayAndCapabilityEdgeCases(t *testing.T) {
 		v.Frames[0].Reason, v.Frames[0].Resolved, v.Frames[0].MapSHA256 = httpapi.ReasonArtifactGrantAbsent, nil, nil
 	})(w)
 	jtWantFail(t, jtVerify(t, w), JourneyFrontendAPIDB, JourneyCodeViewNotReady)
+}
+
+// ---------------------------------------------------------------- 08.03-W1: error -> trace/span (same request)
+
+func jtOccurrenceReads(w *jtWorld) int {
+	n := 0
+	for _, c := range w.calls {
+		if c == "occurrence" {
+			n++
+		}
+	}
+	return n
+}
+
+// listMapped lists n more occurrences of the world's issue, all mapped to the
+// expected build and release; the i-th happened i seconds after the one before
+// it, so the last is the newest (the world's own occurrence is older than all).
+func (w *jtWorld) listMapped(n int, late bool) []model.ID {
+	build, release := w.build, w.release
+	var ids []model.ID
+	for i := range n {
+		id := jtID(byte(100 + i))
+		at := model.Int64(jtBase + int64(i)*int64(time.Second))
+		o := httpapi.OccurrenceEvidenceView{OccurrenceID: id, RecordID: jtID(byte(150 + i)), GroupingVersion: 1, EventTime: at, ArrivalTime: at, BuildID: &build, ReleaseID: &release, Ancestry: "known", Freshness: "fresh", Late: late}
+		if late {
+			w.issueView.LateHistory = append(w.issueView.LateHistory, o)
+		} else {
+			w.issueView.Occurrences = append(w.issueView.Occurrences, o)
+		}
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+// linkOnly makes only the named occurrences' stored records carry the request's
+// trace; every other occurrence is from some other request.
+func (w *jtWorld) linkOnly(ids ...model.ID) {
+	linked := map[model.ID]bool{}
+	for _, id := range ids {
+		linked[id] = true
+	}
+	w.occurrenceFn = func(b httpapi.ErrorOccurrenceBody) (httpapi.ErrorOccurrenceView, error) {
+		v, err := w.occurrenceView(b)
+		if !linked[b.Occurrence] {
+			other := jtID(77)
+			v.Detail.Trace = &other
+		}
+		return v, err
+	}
+}
+
+// jtFrontendCodes is the exact set of failure codes of the frontend section.
+func jtFrontendCodes(rep JourneyReport) []JourneyCode { return jtCodes(rep, JourneyFrontendAPIDB) }
+
+func TestJourneyErrorOccurrenceMustLinkToTheRequestTrace(t *testing.T) {
+	w := newJTWorld(t)
+	rep := jtVerify(t, w)
+	jtWantPass(t, rep, JourneyFrontendAPIDB)
+	if n := jtOccurrenceReads(w); n != 1 {
+		t.Fatalf("the golden world's one mapped occurrence is read once, not %d times", n)
+	}
+	other, otherSpan, otherRelease := jtID(77), jtSpanID(9), jtID(79)
+	cases := []struct {
+		name string
+		edit func(w *jtWorld, v *httpapi.ErrorOccurrenceView)
+		want JourneyCode
+	}{
+		{"the error record carries another trace", func(w *jtWorld, v *httpapi.ErrorOccurrenceView) { v.Detail.Trace = &other }, JourneyCodeErrorNotLinked},
+		{"the error record has no trace", func(w *jtWorld, v *httpapi.ErrorOccurrenceView) { v.Detail.Trace = nil }, JourneyCodeErrorNotLinked},
+		{"the error record has no span", func(w *jtWorld, v *httpapi.ErrorOccurrenceView) { v.Detail.Span = nil }, JourneyCodeErrorNotLinked},
+		{"the error's span is not a span of the verified chain", func(w *jtWorld, v *httpapi.ErrorOccurrenceView) { v.Detail.Span = &otherSpan }, JourneyCodeErrorNotLinked},
+		{"the error record is of another build", func(w *jtWorld, v *httpapi.ErrorOccurrenceView) { v.Detail.Build = other }, JourneyCodeErrorNotLinked},
+		{"the error record is of another release", func(w *jtWorld, v *httpapi.ErrorOccurrenceView) { v.Detail.Release = &otherRelease }, JourneyCodeErrorNotLinked},
+		{"the error record names no release", func(w *jtWorld, v *httpapi.ErrorOccurrenceView) { v.Detail.Release = nil }, JourneyCodeErrorNotLinked},
+		{"ready without detail", func(w *jtWorld, v *httpapi.ErrorOccurrenceView) { v.Detail = nil }, JourneyCodeViewNotReady},
+		{"detail needs telemetry read", func(w *jtWorld, v *httpapi.ErrorOccurrenceView) {
+			v.State, v.Reason, v.Detail = httpapi.StateNotAvailable, httpapi.ReasonOccurrenceNeedsTelemetry, nil
+		}, JourneyCodeViewNotReady},
+		{"record expired or erased", func(w *jtWorld, v *httpapi.ErrorOccurrenceView) {
+			v.State, v.Reason, v.Detail = httpapi.StateNotAvailable, httpapi.ReasonOccurrenceNotStored, nil
+		}, JourneyCodeViewNotReady},
+		{"partial storage read", func(w *jtWorld, v *httpapi.ErrorOccurrenceView) {
+			v.State, v.Reason, v.Detail = httpapi.StateIncomplete, httpapi.ReasonOccurrenceReadPartial, nil
+		}, JourneyCodeViewNotReady},
+		{"state not ready although a detail is attached", func(w *jtWorld, v *httpapi.ErrorOccurrenceView) { v.State = httpapi.StateIncomplete }, JourneyCodeViewNotReady},
+		{"the view echoes another occurrence", func(w *jtWorld, v *httpapi.ErrorOccurrenceView) { v.Occurrence = other }, JourneyCodeScopeMismatch},
+		{"the view echoes another issue", func(w *jtWorld, v *httpapi.ErrorOccurrenceView) { v.Issue = other }, JourneyCodeScopeMismatch},
+		{"the view echoes another org", func(w *jtWorld, v *httpapi.ErrorOccurrenceView) { v.Org = w.otherOrg }, JourneyCodeScopeMismatch},
+		{"the view echoes another project", func(w *jtWorld, v *httpapi.ErrorOccurrenceView) { v.Project = other }, JourneyCodeScopeMismatch},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			w := newJTWorld(t)
+			w.occurrenceFn = func(b httpapi.ErrorOccurrenceBody) (httpapi.ErrorOccurrenceView, error) {
+				v, err := w.occurrenceView(b)
+				c.edit(w, &v)
+				return v, err
+			}
+			rep := jtVerify(t, w)
+			jtWantFail(t, rep, JourneyFrontendAPIDB, c.want)
+			if got := jtFrontendCodes(rep); !slices.Equal(got, []JourneyCode{c.want}) {
+				t.Fatalf("only the error-to-trace proof may fail: %v", got)
+			}
+		})
+	}
+}
+
+func TestJourneyErrorOccurrenceReadFailuresAreClosedCodes(t *testing.T) {
+	for name, c := range map[string]struct {
+		err  func(b httpapi.ErrorOccurrenceBody) error
+		want JourneyCode
+	}{
+		"credential refused": {func(httpapi.ErrorOccurrenceBody) error { return journeyErrDenied }, JourneyCodeCredentialDenied},
+		"read failed":        {func(httpapi.ErrorOccurrenceBody) error { return journeyErrFailed }, JourneyCodeReadFailed},
+		"not found":          {func(httpapi.ErrorOccurrenceBody) error { return journeyErrNotFound }, JourneyCodeTargetNotFound},
+		// A refused credential is the answer even when another read only found nothing.
+		"not found then refused": {func(b httpapi.ErrorOccurrenceBody) error {
+			if b.Occurrence == jtID(30) {
+				return journeyErrDenied
+			}
+			return journeyErrNotFound
+		}, JourneyCodeCredentialDenied},
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := newJTWorld(t)
+			w.listMapped(1, false) // newer than the world's own occurrence, which is read last
+			w.occurrenceFn = func(b httpapi.ErrorOccurrenceBody) (httpapi.ErrorOccurrenceView, error) {
+				return httpapi.ErrorOccurrenceView{}, c.err(b)
+			}
+			rep := jtVerify(t, w)
+			jtWantFail(t, rep, JourneyFrontendAPIDB, c.want)
+			if got := jtFrontendCodes(rep); !slices.Equal(got, []JourneyCode{c.want}) {
+				t.Fatalf("only the error-to-trace proof may fail: %v", got)
+			}
+			if n := jtOccurrenceReads(w); n != 2 {
+				t.Fatalf("every candidate is read once when none links: %d", n)
+			}
+		})
+	}
+}
+
+func TestJourneyErrorOccurrenceCandidates(t *testing.T) {
+	t.Run("an occurrence that is not mapped to the build and release is never read", func(t *testing.T) {
+		w := newJTWorld(t)
+		other, release := jtID(90), w.release
+		newer := model.Int64(jtBase + int64(time.Hour))
+		w.issueView.Occurrences = append(w.issueView.Occurrences,
+			httpapi.OccurrenceEvidenceView{OccurrenceID: jtID(91), RecordID: jtID(92), GroupingVersion: 1, EventTime: newer, BuildID: &other, ReleaseID: &release, Ancestry: "known", Freshness: "fresh"},
+			httpapi.OccurrenceEvidenceView{OccurrenceID: jtID(93), RecordID: jtID(94), GroupingVersion: 1, EventTime: newer, BuildID: &w.build, ReleaseID: &release, Ancestry: "unknown", Freshness: "fresh"},
+			httpapi.OccurrenceEvidenceView{OccurrenceID: jtID(95), RecordID: jtID(96), GroupingVersion: 1, EventTime: newer, BuildID: &w.build, Ancestry: "known", Freshness: "fresh"})
+		jtWantPass(t, jtVerify(t, w), JourneyFrontendAPIDB)
+		if n := jtOccurrenceReads(w); n != 1 {
+			t.Fatalf("only the mapped occurrence is read, got %d reads", n)
+		}
+	})
+	t.Run("the newest mapped occurrence is read first and the search stops at the first link", func(t *testing.T) {
+		for _, c := range []struct{ link, reads int }{{2, 1}, {1, 2}, {0, 3}, {-1, 4}} {
+			w := newJTWorld(t)
+			ids := w.listMapped(3, false)
+			if c.link >= 0 {
+				w.linkOnly(ids[c.link])
+			} else {
+				w.linkOnly(jtID(30)) // the world's own, oldest occurrence
+			}
+			jtWantPass(t, jtVerify(t, w), JourneyFrontendAPIDB)
+			if n := jtOccurrenceReads(w); n != c.reads {
+				t.Fatalf("link at %d: %d reads, want %d", c.link, n, c.reads)
+			}
+		}
+	})
+	t.Run("at most journeyMaxOccurrenceReads are read, and an explicit occurrence is read alone", func(t *testing.T) {
+		w := newJTWorld(t)
+		ids := w.listMapped(20, false) // ids[19] is the newest
+		w.linkOnly(ids[20-journeyMaxOccurrenceReads])
+		jtWantPass(t, jtVerify(t, w), JourneyFrontendAPIDB)
+		if n := jtOccurrenceReads(w); n != journeyMaxOccurrenceReads {
+			t.Fatalf("the last occurrence inside the bound: %d reads", n)
+		}
+		w = newJTWorld(t)
+		ids = w.listMapped(20, false)
+		w.linkOnly(ids[20-journeyMaxOccurrenceReads-1])
+		rep := jtVerify(t, w)
+		jtWantFail(t, rep, JourneyFrontendAPIDB, JourneyCodeErrorNotLinked)
+		if n := jtOccurrenceReads(w); n != journeyMaxOccurrenceReads {
+			t.Fatalf("the search must stop at the bound: %d reads", n)
+		}
+		w.calls = nil
+		w.links.Frontend.Occurrence = ids[20-journeyMaxOccurrenceReads-1].String()
+		jtWantPass(t, jtVerify(t, w), JourneyFrontendAPIDB)
+		if n := jtOccurrenceReads(w); n != 1 {
+			t.Fatalf("an explicit occurrence is read alone: %d reads", n)
+		}
+	})
+	t.Run("late history is searched", func(t *testing.T) {
+		w := newJTWorld(t)
+		late := w.listMapped(1, true)
+		w.linkOnly(late[0])
+		jtWantPass(t, jtVerify(t, w), JourneyFrontendAPIDB)
+		if n := jtOccurrenceReads(w); n != 1 {
+			t.Fatalf("the newer late occurrence is read first: %d reads", n)
+		}
+	})
+	t.Run("an issue with no mapped occurrence has nothing to tie to the request", func(t *testing.T) {
+		w := newJTWorld(t)
+		w.issueView.Occurrences[0].Ancestry = "unknown"
+		rep := jtVerify(t, w)
+		jtWantFail(t, rep, JourneyFrontendAPIDB, JourneyCodeErrorNotLinked)
+		if !slices.Contains(jtFrontendCodes(rep), JourneyCodeErrorNotMapped) || jtOccurrenceReads(w) != 0 {
+			t.Fatalf("codes %v reads %d", jtFrontendCodes(rep), jtOccurrenceReads(w))
+		}
+	})
+	t.Run("an explicit occurrence the issue does not list is the product's not-found", func(t *testing.T) {
+		w := newJTWorld(t)
+		w.links.Frontend.Occurrence = jtID(120).String()
+		rep := jtVerify(t, w)
+		if got := jtFrontendCodes(rep); !slices.Equal(got, []JourneyCode{JourneyCodeTargetNotFound}) || jtOccurrenceReads(w) != 1 {
+			t.Fatalf("codes %v reads %d", got, jtOccurrenceReads(w))
+		}
+	})
+	t.Run("an unreadable issue is not searched", func(t *testing.T) {
+		w := newJTWorld(t)
+		w.issueView = httpapi.IssueView{Org: w.org, Project: w.project, Issue: w.issue, State: httpapi.StateNotAvailable, Reason: httpapi.ReasonIssueNeedsAdmin}
+		rep := jtVerify(t, w)
+		if got := jtFrontendCodes(rep); !slices.Equal(got, []JourneyCode{JourneyCodeViewNotReady}) || jtOccurrenceReads(w) != 0 {
+			t.Fatalf("codes %v reads %d", got, jtOccurrenceReads(w))
+		}
+		w = newJTWorld(t)
+		w.issueView.Project = jtID(88)
+		rep = jtVerify(t, w)
+		if got := jtFrontendCodes(rep); !slices.Equal(got, []JourneyCode{JourneyCodeScopeMismatch}) || jtOccurrenceReads(w) != 0 {
+			t.Fatalf("codes %v reads %d", got, jtOccurrenceReads(w))
+		}
+	})
+}
+
+func TestJourneyErrorSpanHopPinsTheChainElement(t *testing.T) {
+	// The chain is ui.action (span 1) -> api.handle (span 2) -> db.query (span 3).
+	for _, c := range []struct {
+		hop  *int
+		span uint64
+		ok   bool
+	}{
+		{nil, 1, true}, {nil, 2, true}, {nil, 3, true}, {nil, 4, false},
+		{new(0), 1, true}, {new(0), 2, false}, {new(0), 3, false},
+		{new(1), 2, true}, {new(1), 1, false}, {new(1), 3, false},
+		{new(2), 3, true}, {new(2), 2, false}, {new(2), 1, false},
+	} {
+		name := "unpinned"
+		if c.hop != nil {
+			name = "hop " + strconv.Itoa(*c.hop)
+		}
+		t.Run(name+" span "+strconv.FormatUint(c.span, 10), func(t *testing.T) {
+			w := newJTWorld(t)
+			w.links.Frontend.ErrorSpanHop = c.hop
+			span := jtSpanID(c.span)
+			w.occurrenceFn = func(b httpapi.ErrorOccurrenceBody) (httpapi.ErrorOccurrenceView, error) {
+				v, err := w.occurrenceView(b)
+				v.Detail.Span = &span
+				return v, err
+			}
+			rep := jtVerify(t, w)
+			if c.ok {
+				jtWantPass(t, rep, JourneyFrontendAPIDB)
+			} else {
+				jtWantFail(t, rep, JourneyFrontendAPIDB, JourneyCodeErrorNotLinked)
+			}
+		})
+	}
+}
+
+func TestJourneyErrorTraceNeedsAVerifiedChain(t *testing.T) {
+	w := newJTWorld(t)
+	w.spans[w.feTrace] = w.spans[w.feTrace][:2] // the database span was never recorded
+	rep := jtVerify(t, w)
+	jtWantFail(t, rep, JourneyFrontendAPIDB, JourneyCodeSpanMissing)
+	if !slices.Contains(jtFrontendCodes(rep), JourneyCodeErrorNotLinked) {
+		t.Fatalf("an error cannot be tied to a chain that was not verified: %v", jtFrontendCodes(rep))
+	}
+}
+
+func TestJourneyPublicProjectionCountsUnlinkedErrors(t *testing.T) {
+	w := newJTWorld(t)
+	w.linkOnly() // no occurrence is from the request
+	pub := JourneyPublicProjection(jtVerify(t, w))
+	for _, c := range pub.FailureCodes {
+		if c.Code == JourneyCodeErrorNotLinked && c.Count == 1 {
+			return
+		}
+	}
+	t.Fatalf("the unlinked error is not in the closed failure codes: %+v", pub.FailureCodes)
+}
+
+// ---------------------------------------------------------------- 08.03-W2: no proxy
+
+// The bearer token must go to the named server and nowhere else: the transport
+// must never consult a proxy (the standard library skips proxies only for
+// loopback hosts, so a loopback fixture cannot tell, and the https path to a real
+// server would send the token through whatever HTTPS_PROXY names).
+func TestJourneyHTTPReaderNeverUsesAProxy(t *testing.T) {
+	t.Setenv("HTTPS_PROXY", "http://proxy.invalid:3128")
+	t.Setenv("HTTP_PROXY", "http://proxy.invalid:3128")
+	reader, err := newJourneyHTTPReader("https://soundpost.example.invalid", "synthetic-bearer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr, ok := reader.client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("transport is %T, not the hardened *http.Transport", reader.client.Transport)
+	}
+	if tr.Proxy != nil {
+		t.Fatal("the bearer transport consults a proxy: the token would leave through it")
+	}
+	if !tr.DisableKeepAlives || (tr.TLSClientConfig != nil && tr.TLSClientConfig.InsecureSkipVerify) {
+		t.Fatalf("transport hardening: keepalives disabled=%v tls=%+v", tr.DisableKeepAlives, tr.TLSClientConfig)
+	}
 }

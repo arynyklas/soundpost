@@ -93,6 +93,11 @@ derived for is reported as an `auth` stage error and skipped.
 `soundpost serve` starts the runner next to the fences (leader only; a follower
 returns from each pass at once) with:
 
+* **Rules** (`App.RuleCatalogue`): the rule catalogue in control state. An organization
+  administrator saves rules over `POST /api/v1/rules` (see `docs/user/rules.md`); the runner
+  lists each project's active rules from the committed state at every pass, so a saved rule is
+  evaluated at the next pass and a retired one stops at it. There is no rule file and no
+  reload: control state is the one source.
 * **Producers** (`App.Producers`): turn ingested evidence into control state before
   conditions are consumed (issues and incidents from ingested errors, job books from
   ingested job attempts).
@@ -115,16 +120,34 @@ and metadata ranges can never be allowed), `--notify-ca-file`, `--notify-smtp-*`
 attempt timestamps are recorded once per attempt under `<data-dir>/notify`
 (node-local, 0700, removed after two days).
 
+## The recording source
+
+Alert rules need no credential: they read through the worker principal's project-scoped read
+scope and write only control state. A **recording rule** writes its result back as metric
+samples, which is a data-plane write, and the data plane is open only to a registered
+source: the node needs the credential of one. The operator onboards a source for the project
+(`POST /api/v1/sources`, a source policy that allows `metric`, a registered resource and the
+label values the rule's configured labels may take; the credential is returned once), writes the
+credential to a file readable only by the service user, and starts the node with
+`--recording-source-credential-file <file>`. The node authenticates it at start (a credential
+that is unknown, revoked or expired fails startup with a static reason that does not echo it),
+never stores it, and reads the source's project, resource registry and policy revision from
+control state at every evaluation, so a revoked, expired or re-versioned source applies at the
+next pass. With it the runner wires `OutputAdmission` (admission through the ordinary ingest
+path under that credential, receipt lookup after an ambiguous answer) and the producer resolver
+(one stable producer per source), and the rule route accepts recording rules for that source's
+project. Without it recording rules cannot be saved and `OutputAdmission` stays nil, so a
+recording output would stay pending: nothing is admitted on a node that was not given the
+credential. One node has one recording source, so recording rules are possible for exactly its
+project.
+
 ## What is still not wired
 
-Each seam below is a nil interface in `WorkerConfig`, which switches that stage
-off. None is replaced by a stand-in that reports success.
+Each seam below is a nil interface in `WorkerConfig`, which switches that stage off. None is
+replaced by a stand-in that reports success.
 
-* `RuleSource`: control state has no rule catalogue and no authoring route, so
-  nothing lists rules and no condition is evaluated by a served node.
-* `OutputAdmission`: admitting recording batches needs a recording-source
-  credential; recording outputs stay pending until one is wired.
-* `Producer` (the resolver of the registered recording producer identity).
+* `OutputAdmission` and `Producer` on a node started without
+  `--recording-source-credential-file` (see above).
 
 ## Bounded retention of login and elevation state
 

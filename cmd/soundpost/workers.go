@@ -18,6 +18,7 @@ import (
 
 	"github.com/arynyklas/soundpost/internal/appcore"
 	"github.com/arynyklas/soundpost/internal/notify/providers"
+	"github.com/arynyklas/soundpost/internal/rules"
 )
 
 // workerOptions is the serve flag surface of the leader-only background runner:
@@ -38,6 +39,7 @@ type workerOptions struct {
 	smtpFrom        *string
 	smtpServerName  *string
 	smtpRequireAuth *bool
+	recordingSource *string
 }
 
 func addWorkerFlags(f *flag.FlagSet) workerOptions {
@@ -55,13 +57,15 @@ func addWorkerFlags(f *flag.FlagSet) workerOptions {
 		smtpFrom:        f.String("notify-smtp-from", "", "SMTP envelope and header sender address"),
 		smtpServerName:  f.String("notify-smtp-server-name", "", "name the relay's certificate must match (the host by default)"),
 		smtpRequireAuth: f.Bool("notify-smtp-require-auth", false, "refuse to submit without AUTH credentials"),
+		recordingSource: f.String("recording-source-credential-file", "", "file holding the credential of the registered source recording rules write their samples through (the secret issued when the source was onboarded; read once at start, never stored by the node); without it recording rules cannot be saved and their outputs stay pending"),
 	}
 }
 
 // workerSettings is a validated runner configuration.
 type workerSettings struct {
-	interval time.Duration
-	notify   appcore.NotificationConfig
+	interval        time.Duration
+	notify          appcore.NotificationConfig
+	recordingSecret string // credential of the recording source, "" when none is configured
 }
 
 // settings validates the flags before storage opens, so a bad value fails startup
@@ -108,7 +112,17 @@ func (o workerOptions) settings(listen, dir string) (workerSettings, error) {
 		}
 		cfg.SMTP = &appcore.SMTPSettings{Host: *o.smtpHost, Port: *o.smtpPort, TLS: mode, Username: *o.smtpUser, RequireAuth: *o.smtpRequireAuth, From: *o.smtpFrom, ServerName: *o.smtpServerName}
 	}
-	return workerSettings{interval: *o.interval, notify: cfg}, nil
+	secret := ""
+	if *o.recordingSource != "" {
+		raw, err := os.ReadFile(*o.recordingSource)
+		if err != nil {
+			return workerSettings{}, errors.New("--recording-source-credential-file: unreadable")
+		}
+		if secret = strings.TrimSpace(string(raw)); secret == "" || strings.ContainsAny(secret, "\r\n") {
+			return workerSettings{}, errors.New("--recording-source-credential-file: must hold one credential")
+		}
+	}
+	return workerSettings{interval: *o.interval, notify: cfg, recordingSecret: secret}, nil
 }
 
 // originOf derives the default public origin from the listen address.
@@ -137,6 +151,22 @@ func startWorkers(ctx context.Context, core *appcore.App, s workerSettings) erro
 		Sender:    sender,
 		Producers: core.Producers(),
 		Observe:   observeWorkers(),
+	}
+	// The rules a node evaluates are the catalogue administrators save over
+	// POST /api/v1/rules. Recording rules also need the node's recording source: its
+	// credential admits their samples, its policy bounds their labels.
+	var catalogueOptions []rules.CatalogueOption
+	if s.recordingSecret != "" {
+		recording, err := core.NewRecordingSource(ctx, s.recordingSecret)
+		if err != nil {
+			return errors.New("recording source: the credential was refused")
+		}
+		cfg.Admission, cfg.Producer = recording, recording.Producer
+		catalogueOptions = append(catalogueOptions, rules.WithRecordingSource(recording))
+		core.Policies.UseRecordingSource(recording)
+	}
+	if cfg.Rules, err = core.RuleCatalogue(catalogueOptions...); err != nil {
+		return fmt.Errorf("rule catalogue: %w", err)
 	}
 	if _, err = core.NewWorkers(cfg); err != nil {
 		return fmt.Errorf("background workers: %w", err)

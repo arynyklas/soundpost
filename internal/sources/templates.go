@@ -14,6 +14,8 @@
 package sources
 
 import (
+	"net"
+	"net/netip"
 	"regexp"
 	"sort"
 	"strconv"
@@ -89,15 +91,31 @@ type JournalSpec struct {
 	StartAt     string   `json:"start_at,omitempty"`
 }
 
-// SyslogSpec reads a syslog-framed file (RFC 3164, RFC 3339-timestamp or RFC
-// 5424 lines) written by the local syslog daemon. Only lines whose tag is
-// listed are classified; the host name and process id are never read into a
-// record.
+// SyslogSpec reads syslog-framed messages (RFC 3164, RFC 3339-timestamp or RFC
+// 5424, each with an optional <PRI>) either from a file written by the local
+// syslog daemon (Path, Rotated, StartAt) or from the network (Listen,
+// BufferRecords): exactly one of the two. Only messages whose tag is listed
+// are classified; the host name and process id are never read into a record.
 type SyslogSpec struct {
-	Path    string   `json:"path"`
-	Rotated []string `json:"rotated,omitempty"`
-	Tags    []string `json:"tags"`
-	StartAt string   `json:"start_at,omitempty"`
+	Path          string         `json:"path,omitempty"`
+	Rotated       []string       `json:"rotated,omitempty"`
+	Listen        []SyslogListen `json:"listen,omitempty"`
+	BufferRecords int            `json:"buffer_records,omitempty"`
+	Tags          []string       `json:"tags"`
+	StartAt       string         `json:"start_at,omitempty"`
+}
+
+// SyslogListen is one network listener of a network syslog source: UDP (one
+// message per datagram, RFC 5426), TCP (octet counting or newline framing, RFC
+// 6587) or TLS (RFC 5425; the same framing). Address is "IP:port" with an IP
+// literal (no name is resolved). A TLS listener needs a certificate and key;
+// ClientCAFile additionally requires and verifies a client certificate.
+type SyslogListen struct {
+	Network      string `json:"network"`
+	Address      string `json:"address"`
+	CertFile     string `json:"cert_file,omitempty"`
+	KeyFile      string `json:"key_file,omitempty"`
+	ClientCAFile string `json:"client_ca_file,omitempty"`
 }
 
 // SourcePolicy is the local, operator-approved description of one log source.
@@ -231,7 +249,7 @@ func (p SourcePolicy) Validate() error {
 			return bad()
 		}
 	case KindSyslog:
-		if p.Syslog == nil || !validPath(p.Syslog.Path) || !validPaths(p.Syslog.Rotated) || !validStart(p.Syslog.StartAt) || len(p.Syslog.Tags) == 0 || len(p.Syslog.Tags) > maxSpecs {
+		if p.Syslog == nil || !validSyslogSource(p.Syslog) || len(p.Syslog.Tags) == 0 || len(p.Syslog.Tags) > maxSpecs {
 			return bad()
 		}
 		for _, t := range p.Syslog.Tags {
@@ -275,6 +293,60 @@ func validPaths(l []string) bool {
 }
 
 func validStart(s string) bool { return s == "" || s == StartEnd || s == StartBeginning }
+
+// validSyslogSource checks the file-or-network choice of a syslog source: a
+// file source has a path (and maybe rotated paths, a start) and no listener; a
+// network source has listeners and a buffer size, no path, and no start
+// position (a network stream has no history to start from).
+func validSyslogSource(s *SyslogSpec) bool {
+	if (s.Path != "") == (len(s.Listen) > 0) {
+		return false
+	}
+	if s.Path != "" {
+		return validPath(s.Path) && validPaths(s.Rotated) && validStart(s.StartAt) && s.BufferRecords == 0
+	}
+	if len(s.Rotated) != 0 || len(s.Listen) > maxListeners || s.StartAt != "" && s.StartAt != StartBeginning ||
+		s.BufferRecords < 0 || s.BufferRecords > maxNetBuffer || s.BufferRecords != 0 && s.BufferRecords < 16 {
+		return false
+	}
+	seen := map[string]bool{}
+	for _, l := range s.Listen {
+		if !validListen(l) {
+			return false
+		}
+		if !strings.HasSuffix(l.Address, ":0") {
+			key := l.Network + "|" + l.Address
+			if l.Network == netTLS {
+				key = netTCP + "|" + l.Address // TLS and TCP share a port space
+			}
+			if seen[key] {
+				return false
+			}
+			seen[key] = true
+		}
+	}
+	return true
+}
+
+func validListen(l SyslogListen) bool {
+	host, port, err := net.SplitHostPort(l.Address)
+	if err != nil || len(l.Address) > 64 {
+		return false
+	}
+	if _, err := netip.ParseAddr(host); err != nil {
+		return false
+	}
+	if _, err := strconv.ParseUint(port, 10, 16); err != nil {
+		return false
+	}
+	switch l.Network {
+	case netUDP, netTCP:
+		return l.CertFile == "" && l.KeyFile == "" && l.ClientCAFile == ""
+	case netTLS:
+		return validPath(l.CertFile) && validPath(l.KeyFile) && (l.ClientCAFile == "" || validPath(l.ClientCAFile))
+	}
+	return false
+}
 
 func validLayout(layout string) bool {
 	if layout == "" {

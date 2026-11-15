@@ -62,6 +62,7 @@ func Read(ctx context.Context, p SourcePolicy, cp Checkpoint) ([]model.LogRecord
 		at = pending.At
 	}
 	records, dropped := classifyEntries(p, templates, acq.entries, time.Unix(0, int64(at)).In(p.now().Location()))
+	records = append(records, acq.records...)
 	for k, v := range acq.dropped {
 		dropped[k] += v
 	}
@@ -115,6 +116,9 @@ func acquire(ctx context.Context, p SourcePolicy, cp Checkpoint, limit int) (acq
 	case KindFile:
 		return acquireFile(ctx, p, p.File.Path, p.File.Rotated, p.File.StartAt, cp, limit)
 	case KindSyslog:
+		if p.isNetSyslog() {
+			return acquireSyslogNet(p, cp, limit)
+		}
 		return acquireFile(ctx, p, p.Syslog.Path, p.Syslog.Rotated, p.Syslog.StartAt, cp, limit)
 	case KindJournal:
 		return acquireJournal(ctx, p, cp, limit)

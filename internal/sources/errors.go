@@ -37,6 +37,7 @@ const (
 	ReasonCheckpointCorrup Reason = "checkpoint_corrupt"
 	ReasonReceiptMismatch  Reason = "receipt_mismatch"
 	ReasonCheckpointState  Reason = "checkpoint_state"
+	ReasonListenFailed     Reason = "listen_failed"
 )
 
 // Error is the only error a source adapter returns. The text is source alias,

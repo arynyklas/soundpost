@@ -399,6 +399,9 @@ func (a *Agent) sourceCycle(ctx context.Context, ps *pumpState) SourceReport {
 
 func (a *Agent) sourceCapability(p sources.SourcePolicy, sr SourceReport, at model.UnixNano) (model.Record, error) {
 	method := map[sources.Kind]string{sources.KindFile: "file_tail", sources.KindJournal: "journalctl", sources.KindSyslog: "syslog_file"}[p.Kind]
+	if p.Kind == sources.KindSyslog && p.Syslog != nil && len(p.Syslog.Listen) > 0 {
+		method = "syslog_net"
+	}
 	status, reason, cov := "supported", "ok", "complete"
 	if sr.Err != nil {
 		cov = "unknown"

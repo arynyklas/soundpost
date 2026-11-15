@@ -48,6 +48,7 @@ type JourneyReader interface {
 	Frames(ctx context.Context, body httpapi.FramesBody) (httpapi.FramesView, error)
 	Release(ctx context.Context, body httpapi.ReleaseBody) (httpapi.ReleaseView, error)
 	Issue(ctx context.Context, body httpapi.IssueBody) (httpapi.IssueView, error)
+	Occurrence(ctx context.Context, body httpapi.ErrorOccurrenceBody) (httpapi.ErrorOccurrenceView, error)
 	Job(ctx context.Context, body httpapi.JobViewBody) (httpapi.JobView, error)
 	Replay(ctx context.Context, body httpapi.ReplayBody) ([]httpapi.ReplayLine, error)
 	Profile(ctx context.Context, body httpapi.ProfileBody) (httpapi.ProfileResponse, error)
@@ -169,6 +170,9 @@ func (r *journeyHTTPReader) Release(ctx context.Context, body httpapi.ReleaseBod
 }
 func (r *journeyHTTPReader) Issue(ctx context.Context, body httpapi.IssueBody) (httpapi.IssueView, error) {
 	return journeyPostJSON[httpapi.IssueView](ctx, r, "/api/v1/evidence/issue", body)
+}
+func (r *journeyHTTPReader) Occurrence(ctx context.Context, body httpapi.ErrorOccurrenceBody) (httpapi.ErrorOccurrenceView, error) {
+	return journeyPostJSON[httpapi.ErrorOccurrenceView](ctx, r, "/api/v1/evidence/occurrence", body)
 }
 func (r *journeyHTTPReader) Job(ctx context.Context, body httpapi.JobViewBody) (httpapi.JobView, error) {
 	return journeyPostJSON[httpapi.JobView](ctx, r, "/api/v1/jobs/view", body)

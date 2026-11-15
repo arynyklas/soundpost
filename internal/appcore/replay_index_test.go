@@ -4,6 +4,8 @@ package appcore_test
 
 import (
 	"context"
+	"reflect"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -15,15 +17,32 @@ import (
 	"github.com/arynyklas/soundpost/internal/replays"
 )
 
-// countingAppender counts what reaches the durable appender.
+// countingAppender counts what reaches the durable appender and keeps the receipt of
+// the latest append that was durable, whether or not the layers above it went on to
+// acknowledge it.
 type countingAppender struct {
 	inner   ingest.Appender
 	appends atomic.Int64
+	mu      sync.Mutex
+	durable model.Receipt
 }
 
 func (c *countingAppender) Append(ctx context.Context, s auth.Scope, b model.NormalizedBatch) (model.Receipt, error) {
 	c.appends.Add(1)
-	return c.inner.Append(ctx, s, b)
+	r, err := c.inner.Append(ctx, s, b)
+	if err == nil {
+		c.mu.Lock()
+		c.durable = r
+		c.mu.Unlock()
+	}
+	return r, err
+}
+
+// durableReceipt is the receipt of the latest durable append.
+func (c *countingAppender) durableReceipt() model.Receipt {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.durable
 }
 func (c *countingAppender) LookupReceipt(ctx context.Context, s auth.Scope, q model.ReceiptRequest) (model.Receipt, error) {
 	return c.inner.LookupReceipt(ctx, s, q)
@@ -95,18 +114,45 @@ func (r *indexRig) decorate(store replays.ReferenceStore) (*countingAppender, *c
 	return inner, index
 }
 
+// recorderRoutedTo is a fresh recorder whose first checkpoint belongs to a batch the
+// engine owns in the given slot: the slot of a batch is a hash of the replay ID, so a
+// test that does not choose it runs in a different slot every time.
+func (r *indexRig) recorderRoutedTo(slot uint16) (*replayRecorder, model.ReplayChunk) {
+	r.t.Helper()
+	for range 100000 {
+		rec := newReplayRecorder()
+		cp := rec.cp()
+		if r.replayBatch(cp).RouteSlot == slot {
+			return rec, cp
+		}
+	}
+	r.t.Fatalf("no replay routes to slot %d", slot)
+	return nil, model.ReplayChunk{}
+}
+
 // The process dies after the durable append and before the index step. The
 // sender was not acknowledged. After the restart it retries the SAME batch: the
 // retry returns the original receipt, the index now holds the checkpoint exactly
-// once, and nothing was appended twice.
+// once, and nothing was appended twice. Slot 0 also carries the cluster's erasure
+// statements (notices, acknowledgements) ahead of any batch, so a batch there does
+// not get cursor index 1: the original receipt is whatever the first append
+// returned, not a fixed number.
 func TestReplayIndexConvergesAfterACrashBetweenAppendAndRecord(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		slot uint16
+	}{{"slot 0 shared with the erasure statements", 0}, {"an ordinary slot", 37}} {
+		t.Run(c.name, func(t *testing.T) { crashBetweenAppendAndRecord(t, c.slot) })
+	}
+}
+
+func crashBetweenAppendAndRecord(t *testing.T, slot uint16) {
 	rig := newIndexRig(t)
 	store := &flakyStore{ReferenceStore: rig.app.Control}
 	store.down.Store(true)
 	before, _ := rig.decorate(store)
 
-	rec := newReplayRecorder()
-	cp := rec.cp()
+	rec, cp := rig.recorderRoutedTo(slot)
 	batch := rig.replayBatch(cp)
 	got, err := rig.admit(batch)
 	if codeOf(err) != model.Unavailable || got.BatchID != (model.ID{}) {
@@ -130,11 +176,17 @@ func TestReplayIndexConvergesAfterACrashBetweenAppendAndRecord(t *testing.T) {
 		t.Fatalf("the retry made %d appends and %d records, want one each", after.appends.Load(), index.records.Load())
 	}
 
-	// The original receipt: the same batch, the first (and only) entry of its slot,
-	// identical to what the historical lookup serves.
+	// The original receipt: what the first, unacknowledged durable append returned
+	// (the sender never saw it), the same batch at the same cursor, identical to what
+	// the historical lookup serves. Which index that is depends on what else the
+	// slot has already committed, so it is compared, never assumed to be 1.
+	first := before.durableReceipt()
 	original, err := rig.lookup(batch, receipt.Hash)
-	if err != nil || !original.Historical || original.Cursor != receipt.Cursor || original.BatchID != batch.ID || receipt.Cursor.Index != 1 {
-		t.Fatalf("retry receipt %+v is not the original %+v (%v)", receipt, original, err)
+	if first.BatchID != batch.ID || first.Cursor.Index == 0 || !reflect.DeepEqual(receipt, first) {
+		t.Fatalf("the retry returned %+v, not the receipt of the first append %+v", receipt, first)
+	}
+	if err != nil || !original.Historical || original.Cursor != first.Cursor || original.BatchID != batch.ID {
+		t.Fatalf("historical lookup %+v is not the original %+v (%v)", original, first, err)
 	}
 	if rows := rig.storedRows(rec.replay); rows != 1 {
 		t.Fatalf("%d rows stored after the retry, want the one the first attempt appended", rows)

@@ -420,6 +420,7 @@ func RunHostCollection(args []string) (result error) {
 	flags.SetOutput(io.Discard)
 	artifact := flags.String("artifact-dir", "", "sanitized artifact directory")
 	binary := flags.String("agent-binary", "", "optional compiled soundpost-agent to run once as a separate process")
+	unitFile := flags.String("agent-unit", "", "optional shipped deploy/systemd/soundpost-agent.service: run --agent-binary as a systemd service built from it (Linux, user manager)")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -882,6 +883,21 @@ func RunHostCollection(args []string) (result error) {
 		report.Rows["agent_binary_once"] = "asserted: the compiled agent ran one cycle against the node in its own process and exited 0 and its stderr carries no unregistered content or credential"
 	} else {
 		report.NotRun["agent_binary_once"] = "no --agent-binary given: only the in-process agent logic ran"
+	}
+
+	// ---- optional: the compiled binary as a systemd service built from the shipped unit
+	if *unitFile != "" {
+		stage = "hc_agent_unit"
+		if *binary == "" {
+			return errors.New("--agent-unit needs --agent-binary")
+		}
+		if runtime.GOOS != "linux" {
+			report.NotRun["agent_systemd_unit"] = "not Linux"
+		} else if err := hcAgentUnit(*unitFile, *binary, cfg, node, runID, work, &report); err != nil {
+			return err
+		}
+	} else {
+		report.NotRun["agent_systemd_unit"] = "no --agent-unit given: the shipped unit was not started under systemd"
 	}
 
 	report.Rows["host_os"] = runtime.GOOS + "/" + runtime.GOARCH

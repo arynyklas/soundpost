@@ -24,6 +24,7 @@ import (
 	"github.com/arynyklas/soundpost/internal/jobs"
 	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/notify"
+	"github.com/arynyklas/soundpost/internal/smokecluster"
 )
 
 // These acceptance tests drive a REAL in-process node: appcore.Open (the real
@@ -91,28 +92,54 @@ type accNode struct {
 
 	old, nw, observer, fixtureDomain model.ID
 	tQuiesce                         model.UnixNano
+
+	// layout and cluster say what control group the node is (see
+	// notification_layout_test.go); owner is the bootstrapped owner of the seed
+	// installation a cluster layout continues; leaderID is the voter the journey
+	// drives (0: voter 1).
+	layout   accLayout
+	cluster  *smokecluster.Cluster
+	owner    model.ID
+	leaderID uint64
+
+	// frontierCursor is the cursor of the cutover's source frontier.
+	frontierCursor model.Cursor
 }
 
-func newAccNode(t *testing.T) *accNode {
+// newAccNode is the fixture of the hand-driven journeys: the source's issue
+// checkpoint for the fixture's fake group is committed by hand.
+func newAccNode(t *testing.T, layout accLayout) *accNode { return newAccNodeFor(t, layout, true) }
+
+// newServedNode is the fixture of the served-pipeline journeys: nothing the product
+// would produce itself (checkpoints, issues, incidents) is committed by hand.
+func newServedNode(t *testing.T, layout accLayout) *accNode { return newAccNodeFor(t, layout, false) }
+
+func newAccNodeFor(t *testing.T, layout accLayout, handCheckpoint bool) *accNode {
 	t.Helper()
 	n := &accNode{t: t, ctx: context.Background(), dir: t.TempDir(), org: model.NewID(), project: model.NewID(), source: model.NewID(), policy: model.ID{0xf1}, dest: model.ID{0xd1},
-		group: model.ID{0x07, 0xd0}, clock: &accClock{}, prov: &recProvider{}, old: model.ID{0x01, 0xd0}, nw: model.ID{0x02, 0xd0}, observer: model.ID{0x03, 0xd0}, fixtureDomain: model.ID{0x04, 0xd0}}
+		group: model.ID{0x07, 0xd0}, clock: &accClock{}, prov: &recProvider{}, old: model.ID{0x01, 0xd0}, nw: model.ID{0x02, 0xd0}, observer: model.ID{0x03, 0xd0}, fixtureDomain: model.ID{0x04, 0xd0}, layout: layout}
+	n.frontierCursor = model.Cursor{Group: n.group, Index: 100}
 	n.clock.set(model.UnixNano(time.Now().UnixNano()))
-	t.Cleanup(func() {
-		if n.app != nil {
-			n.app.Close()
+	t.Cleanup(n.shutdown)
+	n.startProduct()
+	if layout == layoutCluster {
+		// The owner was bootstrapped in the seed installation the voters continue.
+		session, err := n.app.Auth.Login(n.ctx, accOwnerEmail, accOwnerPassword, "")
+		if err != nil {
+			t.Fatal(err)
 		}
-	})
-	n.open()
-	boot, err := n.app.Control.BootstrapToken()
-	if err != nil {
-		t.Fatal(err)
+		n.token, n.user = session.Token, n.owner
+	} else {
+		boot, err := n.app.Control.BootstrapToken()
+		if err != nil {
+			t.Fatal(err)
+		}
+		session, err := n.app.Auth.Bootstrap(n.ctx, boot, accOwnerEmail, accOwnerPassword)
+		if err != nil {
+			t.Fatal(err)
+		}
+		n.token, n.user = session.Token, session.User
 	}
-	session, err := n.app.Auth.Bootstrap(n.ctx, boot, "acceptance-owner@example.test", "acceptance password 2026")
-	if err != nil {
-		t.Fatal(err)
-	}
-	n.token, n.user = session.Token, session.User
 	n.authenticate()
 	n.admin("create_org", auth.AdminPayload{Name: "acceptance"})
 	n.admin("create_project", auth.AdminPayload{ID: n.project, Name: "acceptance"})
@@ -121,10 +148,10 @@ func newAccNode(t *testing.T) *accNode {
 	n.admin("destination", auth.AdminPayload{ID: n.dest, Config: json.RawMessage(`{"type":"webhook","endpoint":"https://hooks.example.test/notify","enabled":true}`), Secret: "ACCEPTANCE-DESTINATION-SECRET"})
 	resource := model.Resource{Service: model.NewID(), Environment: model.NewID(), Build: model.NewID(), Instance: "acc-1", Labels: model.Labels{}}
 	n.resource = resource
-	policy := model.SourcePolicy{Revision: 1, Enabled: true, Class: "structured", Kinds: []model.Kind{model.Metric},
+	policy := model.SourcePolicy{Revision: 1, Enabled: true, Class: "structured", Kinds: []model.Kind{model.Metric, model.ErrorKind},
 		Resources:     model.ResourceRegistry{Services: []model.ID{resource.Service}, Environments: []model.ID{resource.Environment}, Builds: []model.ID{resource.Build}, Instances: []string{resource.Instance}},
 		Labels:        map[string][]string{"job": {"canary"}},
-		RetentionDays: map[model.Kind]uint32{model.Metric: 7}, MaxBytes: 64 << 20, MaxSeries: 1000}
+		RetentionDays: map[model.Kind]uint32{model.Metric: 7, model.ErrorKind: 30}, MaxBytes: 64 << 20, MaxSeries: 1000}
 	issued, err := n.app.Auth.OnboardSource(n.ctx, n.cred, auth.SourceOnboarding{CommandID: model.NewID(), Org: n.org, Project: n.project, Source: n.source, Expires: model.UnixNano(time.Now().Add(time.Hour).UnixNano()), Policy: policy, Reason: "acceptance"})
 	if err != nil {
 		t.Fatal(err)
@@ -137,17 +164,11 @@ func newAccNode(t *testing.T) *accNode {
 	if n.version == 0 {
 		t.Fatal("the onboarded source has no committed policy revision")
 	}
-	n.commitCheckpoint(100)
+	if handCheckpoint {
+		n.commitCheckpoint(100)
+	}
 	n.build()
 	return n
-}
-
-func (n *accNode) open() {
-	n.t.Helper()
-	var err error
-	if n.app, err = appcore.Open(n.dir); err != nil {
-		n.t.Fatal(err)
-	}
 }
 
 // build (re)creates the notification services over the open node.
@@ -171,11 +192,8 @@ func (n *accNode) build() {
 // restart is a process restart of the whole node on the same directory.
 func (n *accNode) restart() {
 	n.t.Helper()
-	if err := n.app.Close(); err != nil {
-		n.t.Fatal(err)
-	}
-	n.app = nil
-	n.open()
+	n.stopProduct()
+	n.startProduct()
 	n.authenticate()
 	if n.issued != "" {
 		var err error
@@ -224,7 +242,7 @@ func (n *accNode) scope() auth.Scope {
 
 func (n *accNode) lease() notify.FenceToken {
 	n.t.Helper()
-	l, err := n.app.Control.ReplicaGroup().Fence(n.ctx)
+	l, err := n.leaseOf()
 	if err != nil {
 		n.t.Fatal(err)
 	}
@@ -255,8 +273,12 @@ func (n *accNode) commitCheckpoint(index uint64) {
 
 func h(s string) model.Hash { return model.Hash(sha256.Sum256([]byte(s))) }
 
+// frontier is the one-source manifest the cutover commands carry: the source's
+// policy version and the cursor the old owner is verified up to. The hand-driven
+// journeys use the fixture's fake group at index 100 (whose issue checkpoint they
+// commit by hand); the served journeys set it to a real durable receipt cursor.
 func (n *accNode) frontier() []notify.FrontierEntry {
-	return []notify.FrontierEntry{{Source: n.source, Version: n.version, Cursor: model.Cursor{Group: n.group, Index: 100}}}
+	return []notify.FrontierEntry{{Source: n.source, Version: n.version, Cursor: n.frontierCursor}}
 }
 
 func (n *accNode) cutState() (notify.CutoverState, bool) {
@@ -571,8 +593,9 @@ func writeState(st control.State) map[string]string {
 // one normal owner is active, the product sends only as that owner, the timeline is
 // sanitized, and the cutover touches nothing outside its own books (the legacy side
 // stays read-only: there is nothing here that could import or delete it).
-func TestNotificationCutover(t *testing.T) {
-	n := newAccNode(t)
+func TestNotificationCutover(t *testing.T) { eachLayout(t, notificationCutover) }
+
+func notificationCutover(t *testing.T, n *accNode) {
 	// The old owner is handling an episode the product shadows: a real incident.
 	episode := model.ID{0xe9}
 	incidentID := model.ID{0x53}
@@ -753,8 +776,9 @@ func TestNotificationCutover(t *testing.T) {
 // against the one canonical owner: opening, ACK, worse impact, snooze and its
 // expiry, recovery and resolution, a job's retry history, and a provider that
 // accepts and then the sender dies before the completion.
-func TestConcurrentIncidentDelivery(t *testing.T) {
-	n := newAccNode(t)
+func TestConcurrentIncidentDelivery(t *testing.T) { eachLayout(t, concurrentIncidentDelivery) }
+
+func concurrentIncidentDelivery(t *testing.T, n *accNode) {
 	s := n.activate()
 	n.assertOneOwner(n.nw)
 	_ = s
@@ -959,7 +983,10 @@ func canaryRecord(resource model.Resource, at model.UnixNano, value float64) mod
 // fresh-bootstrap and reconcile flows of internal/auth. What is not exercised: the
 // encrypted backup archive and its driver.
 func TestNotificationDisasterRestoreActivation(t *testing.T) {
-	n := newAccNode(t)
+	eachLayout(t, notificationDisasterRestoreActivation)
+}
+
+func notificationDisasterRestoreActivation(t *testing.T, n *accNode) {
 	n.activate()
 	ownerToken := n.token
 	serverToken := n.issueObserverToken()
@@ -994,11 +1021,8 @@ func TestNotificationDisasterRestoreActivation(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err = n.app.Close(); err != nil {
-		t.Fatal(err)
-	}
-	n.app = nil
-	n.open()
+	n.stopProduct()
+	n.startProduct()
 	n.build()
 
 	// Everything restored is inactive in the new authentication generation.

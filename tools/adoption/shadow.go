@@ -1314,6 +1314,9 @@ func (r *shadowRun) decide(c *shadowLife, in ShadowConditionInput, event model.C
 	evidence := notify.PolicyEvent{Kind: notify.EventCondition, Command: shadowDeriveID("event", r.digest, c.entity.ID.String(), in.Epoch, strconv.FormatUint(in.Sequence, 10), strconv.FormatInt(in.AtNS, 10), in.Status),
 		Org: r.ids.org, Project: r.ids.project, Policy: r.policyID, PolicyRef: notify.PolicyRef{Revision: 1, Config: &r.cfg}, Entity: &c.entity,
 		Condition: &notify.ConditionEvidence{Seq: seq, State: shadowSourceState(in.Status), Freshness: freshness, Severity: shadowSeverity(in.Severity), Episode: episode}}
+	if shadowTwinHook != nil {
+		shadowTwinHook(evidence, model.UnixNano(at))
+	}
 	out, err := c.twin.Apply(evidence, model.UnixNano(at))
 	if err != nil {
 		r.rep.Decisions.Refused++
@@ -1386,6 +1389,12 @@ func shadowSummarize(decisions []notify.ShadowDecision, names map[model.ID]strin
 // a test replaces it to prove a failed reconciliation fails the run.
 var shadowReconcileHook = shadowReconcile
 
+// shadowTwinHook observes each condition evidence event and the decision time
+// the run hands to the policy twin. It is nil in production; a test sets it to
+// pin what the twin is told, because the freshness it was given and the
+// monotonic time it decided at are not visible in the decisions it returns.
+var shadowTwinHook func(ev notify.PolicyEvent, at model.UnixNano)
+
 func (r *shadowRun) parity(ctx context.Context, spec *ShadowParitySpec, rep *ShadowReport) error {
 	pr := &rep.Parity
 	for _, q := range spec.Queries {
@@ -1436,6 +1445,137 @@ func shadowRandomSecret() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
+// shadowScratch is an opened scratch Soundpost application and the bootstrap
+// administrator that provisions tenants in it. One tenant is one org with one
+// project, one onboarded source and one project-scoped reader; tenants never
+// share an identity, so several can live in one application without sharing
+// any readable data.
+type shadowScratch struct {
+	app         *appcore.App
+	admin       auth.Credential
+	email, pass string // the bootstrap administrator's login, kept in memory only
+}
+
+// shadowOpenScratch opens a fresh application in dir (which must not exist) and
+// bootstraps its administrator with a random password nobody keeps.
+func shadowOpenScratch(ctx context.Context, dir string) (*shadowScratch, error) {
+	if _, err := os.Stat(dir); err == nil {
+		return nil, fmt.Errorf("%w: destination directory exists", ErrShadowDestination)
+	}
+	app, err := appcore.Open(dir)
+	if err != nil {
+		return nil, fmt.Errorf("%w: open: %v", ErrShadowDestination, err)
+	}
+	s := &shadowScratch{app: app, email: "shadow-admin@shadow.invalid"}
+	fail := func(err error) (*shadowScratch, error) {
+		s.close()
+		return nil, fmt.Errorf("%w: provisioning: %v", ErrShadowDestination, err)
+	}
+	token, err := app.Control.BootstrapToken()
+	if err != nil {
+		return fail(err)
+	}
+	adminPass, err := shadowRandomSecret()
+	if err != nil {
+		return fail(err)
+	}
+	s.pass = adminPass
+	session, err := app.Auth.Bootstrap(ctx, token, s.email, adminPass)
+	if err != nil {
+		return fail(err)
+	}
+	if s.admin, err = app.Auth.Authenticate(ctx, session.Token); err != nil {
+		return fail(err)
+	}
+	return s, nil
+}
+
+func (s *shadowScratch) close() error { return s.app.Close() }
+
+// refresh logs the administrator in again. A scratch application that many
+// tenants are provisioned in outlives one session (a suite on a loaded host runs
+// for minutes), so every tenant starts from a fresh one.
+func (s *shadowScratch) refresh(ctx context.Context) error {
+	session, err := s.app.Auth.Login(ctx, s.email, s.pass, "")
+	if err != nil {
+		return err
+	}
+	s.admin, err = s.app.Auth.Authenticate(ctx, session.Token)
+	return err
+}
+
+// command runs one administrator command in org at the current control revision.
+func (s *shadowScratch) command(ctx context.Context, org model.ID, kind string, pl auth.AdminPayload) error {
+	var rev model.Revision
+	if err := s.app.Control.View(ctx, func(st model.ControlState) error { rev = st.Revision; return nil }); err != nil {
+		return err
+	}
+	pl.Reason = "shadow isolated destination"
+	raw, err := json.Marshal(pl)
+	if err != nil {
+		return err
+	}
+	_, err = s.app.Auth.AdminCommand(ctx, s.admin, auth.AdminCommandRequest{CommandID: model.NewID(), ExpectedRevision: rev, OrgID: org, Kind: kind, Payload: raw})
+	return err
+}
+
+// provision creates the tenant the mapping's identities name: the org, the
+// project, the onboarded source under sp and the project-scoped reader.
+func (s *shadowScratch) provision(ctx context.Context, ids shadowIDs, sp model.SourcePolicy, digest string) (SoundpostDestination, error) {
+	fail := func(err error) (SoundpostDestination, error) {
+		return SoundpostDestination{}, fmt.Errorf("%w: provisioning: %v", ErrShadowDestination, err)
+	}
+	if err := s.refresh(ctx); err != nil {
+		return fail(err)
+	}
+	command := func(kind string, pl auth.AdminPayload) error { return s.command(ctx, ids.org, kind, pl) }
+	if err := command("create_org", auth.AdminPayload{Name: "shadow"}); err != nil {
+		return fail(err)
+	}
+	if err := command("create_project", auth.AdminPayload{ID: ids.project, Name: "shadow"}); err != nil {
+		return fail(err)
+	}
+	issued, err := s.app.Auth.OnboardSource(ctx, s.admin, auth.SourceOnboarding{CommandID: model.NewID(), Org: ids.org, Project: ids.project, Source: ids.source,
+		Expires: model.UnixNano(time.Now().Add(12 * time.Hour).UnixNano()), Policy: sp, Reason: "shadow isolated destination"})
+	if err != nil {
+		return fail(err)
+	}
+	cred, err := s.app.Auth.AuthenticateSource(ctx, issued.Credential, "", false)
+	if err != nil {
+		return fail(err)
+	}
+	user := model.NewID()
+	readerPass, err := shadowRandomSecret()
+	if err != nil {
+		return fail(err)
+	}
+	// Users are global to the application: the address is unique per tenant.
+	email := "shadow-reader-" + user.String() + "@shadow.invalid"
+	if err := command("create_user", auth.AdminPayload{ID: user, Email: email, Password: readerPass}); err != nil {
+		return fail(err)
+	}
+	if err := command("membership", auth.AdminPayload{UserID: user, Enabled: true}); err != nil {
+		return fail(err)
+	}
+	if err := command("grant", auth.AdminPayload{UserID: user, ProjectID: ids.project, Enabled: true, Permissions: []string{string(auth.Read)}}); err != nil {
+		return fail(err)
+	}
+	login, err := s.app.Auth.Login(ctx, email, readerPass, "")
+	if err != nil {
+		return fail(err)
+	}
+	readerCred, err := s.app.Auth.Authenticate(ctx, login.Token)
+	if err != nil {
+		return fail(err)
+	}
+	scope, err := s.app.Auth.Authorize(ctx, readerCred, ids.org, []model.ID{ids.project}, auth.Read)
+	if err != nil {
+		return fail(err)
+	}
+	return SoundpostDestination{App: s.app, Org: ids.org, Project: ids.project, Source: ids.source, PolicyRevision: uint64(sp.Revision),
+		SourcePolicyClass: sp.Class, SourcePolicySHA256: digest, Credential: &cred, Reader: &scope}, nil
+}
+
 // ShadowProvision builds the isolated in-process destination for a mapping in a
 // fresh directory: an org, a project, one onboarded source with the given
 // source policy and one project-scoped reader. dir must not exist. The returned
@@ -1452,91 +1592,16 @@ func ShadowProvision(ctx context.Context, dir string, m SourceMapping, sp model.
 	if digest != m.SourcePolicySHA256 || uint64(sp.Revision) != m.PolicyRevision {
 		return SoundpostDestination{}, nil, fmt.Errorf("%w: source policy is not the one the mapping binds", ErrShadowDestination)
 	}
-	if _, err := os.Stat(dir); err == nil {
-		return SoundpostDestination{}, nil, fmt.Errorf("%w: destination directory exists", ErrShadowDestination)
-	}
-	app, err := appcore.Open(dir)
+	s, err := shadowOpenScratch(ctx, dir)
 	if err != nil {
-		return SoundpostDestination{}, nil, fmt.Errorf("%w: open: %v", ErrShadowDestination, err)
+		return SoundpostDestination{}, nil, err
 	}
-	cleanup := func() error { return app.Close() }
-	fail := func(err error) (SoundpostDestination, func() error, error) {
-		cleanup()
-		return SoundpostDestination{}, nil, fmt.Errorf("%w: provisioning: %v", ErrShadowDestination, err)
-	}
-	token, err := app.Control.BootstrapToken()
+	dest, err := s.provision(ctx, ids, sp, digest)
 	if err != nil {
-		return fail(err)
+		s.close()
+		return SoundpostDestination{}, nil, err
 	}
-	adminPass, err := shadowRandomSecret()
-	if err != nil {
-		return fail(err)
-	}
-	session, err := app.Auth.Bootstrap(ctx, token, "shadow-admin@shadow.invalid", adminPass)
-	if err != nil {
-		return fail(err)
-	}
-	actor, err := app.Auth.Authenticate(ctx, session.Token)
-	if err != nil {
-		return fail(err)
-	}
-	command := func(kind string, pl auth.AdminPayload) error {
-		var rev model.Revision
-		if err := app.Control.View(ctx, func(st model.ControlState) error { rev = st.Revision; return nil }); err != nil {
-			return err
-		}
-		pl.Reason = "shadow isolated destination"
-		raw, err := json.Marshal(pl)
-		if err != nil {
-			return err
-		}
-		_, err = app.Auth.AdminCommand(ctx, actor, auth.AdminCommandRequest{CommandID: model.NewID(), ExpectedRevision: rev, OrgID: ids.org, Kind: kind, Payload: raw})
-		return err
-	}
-	if err := command("create_org", auth.AdminPayload{Name: "shadow"}); err != nil {
-		return fail(err)
-	}
-	if err := command("create_project", auth.AdminPayload{ID: ids.project, Name: "shadow"}); err != nil {
-		return fail(err)
-	}
-	issued, err := app.Auth.OnboardSource(ctx, actor, auth.SourceOnboarding{CommandID: model.NewID(), Org: ids.org, Project: ids.project, Source: ids.source,
-		Expires: model.UnixNano(time.Now().Add(12 * time.Hour).UnixNano()), Policy: sp, Reason: "shadow isolated destination"})
-	if err != nil {
-		return fail(err)
-	}
-	cred, err := app.Auth.AuthenticateSource(ctx, issued.Credential, "", false)
-	if err != nil {
-		return fail(err)
-	}
-	user := model.NewID()
-	readerPass, err := shadowRandomSecret()
-	if err != nil {
-		return fail(err)
-	}
-	email := "shadow-reader@shadow.invalid"
-	if err := command("create_user", auth.AdminPayload{ID: user, Email: email, Password: readerPass}); err != nil {
-		return fail(err)
-	}
-	if err := command("membership", auth.AdminPayload{UserID: user, Enabled: true}); err != nil {
-		return fail(err)
-	}
-	if err := command("grant", auth.AdminPayload{UserID: user, ProjectID: ids.project, Enabled: true, Permissions: []string{string(auth.Read)}}); err != nil {
-		return fail(err)
-	}
-	login, err := app.Auth.Login(ctx, email, readerPass, "")
-	if err != nil {
-		return fail(err)
-	}
-	readerCred, err := app.Auth.Authenticate(ctx, login.Token)
-	if err != nil {
-		return fail(err)
-	}
-	scope, err := app.Auth.Authorize(ctx, readerCred, ids.org, []model.ID{ids.project}, auth.Read)
-	if err != nil {
-		return fail(err)
-	}
-	return SoundpostDestination{App: app, Org: ids.org, Project: ids.project, Source: ids.source, PolicyRevision: uint64(sp.Revision),
-		SourcePolicyClass: sp.Class, SourcePolicySHA256: digest, Credential: &cred, Reader: &scope}, cleanup, nil
+	return dest, s.close, nil
 }
 
 // ---- CLI ----------------------------------------------------------------

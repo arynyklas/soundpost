@@ -168,6 +168,13 @@ type ControlState struct {
 	// authority: it moves neither an organization's policy epoch nor
 	// AuthorityRevision.
 	SavedViewBooks map[string]json.RawMessage `json:",omitempty"`
+	// Rule catalogue (plan 02 task 11, 11.01-W1). "org:project:rule" holds the
+	// control package's closed RuleDefinitionRecord DTO: the newest definition
+	// of one rule (opaque JSON the rules package validates at save), its
+	// revision (the compare-and-set token) and whether it is retired. A
+	// retirement of the owning project drops them
+	// (internal/control/rule_catalogue.go). Authoring never changes authority.
+	RuleDefinitions map[string]json.RawMessage `json:",omitempty"`
 }
 type ControlCommand struct {
 	CommandID        ID

@@ -24,9 +24,12 @@ type entry struct {
 }
 
 // acquired is what one acquisition produced: the transient entries, the
-// position just after them, and the gaps/drops found on the way.
+// position just after them, and the gaps/drops found on the way. records are
+// entries that the source already classified (the network syslog receiver does
+// that on arrival, so that nothing but approved records is kept).
 type acquired struct {
 	entries []entry
+	records []model.LogRecord
 	to      Position
 	scanned uint32
 	gaps    []Gap

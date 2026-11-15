@@ -47,6 +47,9 @@ type RuleCommand struct {
 	Output     *RuleOutputApply     `json:"output,omitempty"`
 	Stage      *RuleStageApply      `json:"stage,omitempty"`
 	Retire     *RuleRetireApply     `json:"retire,omitempty"`
+	// Definition is the arm of the catalogue operations (RuleOpDefine,
+	// RuleOpRetireRule): an administrator's authoring, carrying no lease.
+	Definition *RuleDefinitionApply `json:"definition,omitempty"`
 }
 
 // RuleRetireApply is the garbage collection of one retired project's rule facts.
@@ -384,13 +387,21 @@ func applyRuleEvaluation(scope auth.Scope, st *State, cmd Command) (Effect, erro
 		return Effect{}, err
 	}
 	arms := 0
-	for _, present := range []bool{c.Evaluation != nil, c.Missed != nil, c.Replay != nil, c.Output != nil, c.Stage != nil, c.Retire != nil} {
+	for _, present := range []bool{c.Evaluation != nil, c.Missed != nil, c.Replay != nil, c.Output != nil, c.Stage != nil, c.Retire != nil, c.Definition != nil} {
 		if present {
 			arms++
 		}
 	}
 	if arms != 1 {
 		return Effect{}, model.Fail(model.Invalid)
+	}
+	if c.Operation == RuleOpDefine || c.Operation == RuleOpRetireRule {
+		// Authoring the catalogue is a human administrator's act on no lease: the
+		// scheduler leader evaluates rules, it never defines one.
+		if c.Definition == nil || c.Lease != nil {
+			return Effect{}, model.Fail(model.Invalid)
+		}
+		return applyRuleDefinitionArm(scope, st, cmd, c.Operation, *c.Definition)
 	}
 	if c.Operation == RuleOpRetire {
 		// The collection of a retired project's rule facts is an administrator's

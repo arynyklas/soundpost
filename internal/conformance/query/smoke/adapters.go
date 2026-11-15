@@ -186,6 +186,9 @@ type adapterFeed struct {
 	kind string
 	// direct is the feed's fixed batches for the direct_json wire.
 	direct []model.Batch
+	// scrapedAt is the time of the feed's one scrape: a retry of that scrape resends it with the same
+	// time (a sample without a timestamp takes it), so the retry is the same request.
+	scrapedAt time.Time
 }
 
 func (f *adapterFeed) anchorNS() int64 { return f.anchor * 1e6 }
@@ -355,7 +358,10 @@ func (f *adapterFeed) scrapeOnce() feedAdmission {
 	if producer == (model.ID{}) {
 		producer = src.ID
 	}
-	now := time.Now()
+	if f.scrapedAt.IsZero() {
+		f.scrapedAt = time.Now()
+	}
+	now := f.scrapedAt
 	profile := queryinput.InputProfile{
 		Project: src.Project, Source: src.ID, Producer: producer, PolicyRevision: src.Policy.Revision, Resource: f.src.Resource,
 		Limits:       queryinput.DefaultLimits(),

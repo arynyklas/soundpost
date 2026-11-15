@@ -22,12 +22,15 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/arynyklas/soundpost/internal/auth"
 	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/notify"
+	"github.com/arynyklas/soundpost/internal/policy"
 	"github.com/arynyklas/soundpost/internal/privacl"
 )
 
@@ -41,15 +44,64 @@ const (
 )
 
 type shadowFx struct {
-	t    *testing.T
-	ctx  context.Context
-	pub  ed25519.PublicKey
-	priv ed25519.PrivateKey
-	sp   model.SourcePolicy
-	m    SourceMapping
-	p    ShadowPolicy
-	dest SoundpostDestination
-	ids  shadowIDs
+	t       *testing.T
+	ctx     context.Context
+	pub     ed25519.PublicKey
+	priv    ed25519.PrivateKey
+	sp      model.SourcePolicy
+	m       SourceMapping
+	p       ShadowPolicy
+	dest    SoundpostDestination
+	ids     shadowIDs
+	scratch *shadowScratch
+}
+
+// shadowSharedScratch is the one scratch application every fixture provisions
+// its own tenant in (its own org, project, source and reader: tenants share no
+// identity and no readable data). A suite that opened an application per test
+// spent most of its time in appcore.Open, whose startup deadline is fixed in
+// the product: on a loaded host, or under the race detector, one of ~25 opens
+// eventually ran past it and failed the test for a reason that has nothing to do
+// with shadow ingestion. Opening once leaves a single open exposed to that
+// deadline, and ShadowProvision (the exported one-tenant path) is still
+// exercised end to end by TestShadowProvisionBuildsTheMappedDestination and the
+// CLI test. A failed open is not cached: the next fixture tries again.
+var shadowSharedScratch struct {
+	mu  sync.Mutex
+	dir string
+	s   *shadowScratch
+}
+
+func shadowTestScratch(t testing.TB) *shadowScratch {
+	t.Helper()
+	sh := &shadowSharedScratch
+	sh.mu.Lock()
+	defer sh.mu.Unlock()
+	if sh.s != nil {
+		return sh.s
+	}
+	root, err := os.MkdirTemp("", "shadow-shared-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := shadowOpenScratch(context.Background(), filepath.Join(root, "app"))
+	if err != nil {
+		os.RemoveAll(root)
+		t.Fatal(err)
+	}
+	sh.dir, sh.s = root, s
+	return s
+}
+
+// TestMain closes the shared scratch application and removes its directory.
+func TestMain(m *testing.M) {
+	code := m.Run()
+	sh := &shadowSharedScratch
+	if sh.s != nil {
+		sh.s.close()
+		os.RemoveAll(sh.dir)
+	}
+	os.Exit(code)
 }
 
 func shadowTestScalar(t testing.TB, s string) model.Scalar {
@@ -120,12 +172,11 @@ func newShadowFx(t *testing.T) *shadowFx {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dest, closeDest, err := ShadowProvision(fx.ctx, filepath.Join(t.TempDir(), "dest"), fx.m, fx.sp)
+	fx.scratch = shadowTestScratch(t)
+	fx.dest, err = fx.scratch.provision(fx.ctx, fx.ids, fx.sp, digest)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { closeDest() })
-	fx.dest = dest
 	return fx
 }
 
@@ -1472,15 +1523,6 @@ func TestShadowDecisionSummaryCountsSuppressionExactly(t *testing.T) {
 	}
 }
 
-func TestShadowReaderScopeMustBeTheMappedProject(t *testing.T) {
-	fx, other := newShadowFx(t), newShadowFx(t)
-	d := fx.dest
-	d.Reader = other.dest.Reader // read access to another org and project
-	if _, err := RunShadow(fx.ctx, fx.m, d, fx.p); !errors.Is(err, ErrShadowDestination) {
-		t.Fatalf("foreign read scope accepted: %v", err)
-	}
-}
-
 func TestShadowReconcileChecksEachInvariantOnItsOwn(t *testing.T) {
 	fx := newShadowFx(t)
 	fx.deliver(ShadowAdapterConditions, "c", shadowCondBody(shadowCond("a", 1, "firing", 0), shadowCond("a", 1, "firing", 0)))
@@ -1676,5 +1718,216 @@ func TestShadowCLIEndToEnd(t *testing.T) {
 	}
 	if _, err := os.Stat(s3); err == nil {
 		t.Fatal("public summary emitted for a failed run")
+	}
+}
+
+// ---- 08.02-W2: mutation survivors C07, C08, D04b, F19 -----------------------
+
+// newRun is what RunShadow builds before its first delivery, for the tests that
+// inject a fault into one step of the run.
+func (fx *shadowFx) newRun() *shadowRun {
+	fx.t.Helper()
+	digest, err := shadowVerifyMapping(fx.m, fx.p, shadowNow(fx.p))
+	if err != nil {
+		fx.t.Fatal(err)
+	}
+	ids := fx.ids
+	ids.producer = shadowDeriveID("producer", digest)
+	ps, err := policy.New(fx.dest.App.Auth, nil)
+	if err != nil {
+		fx.t.Fatal(err)
+	}
+	return newShadowRun(fx.m, ids, fx.dest, fx.p, digest, ps)
+}
+
+// addProject creates a second project in the fixture's own org.
+func (fx *shadowFx) addProject() model.ID {
+	fx.t.Helper()
+	id := model.NewID()
+	if err := fx.scratch.command(fx.ctx, fx.ids.org, "create_project", auth.AdminPayload{ID: id, Name: "other"}); err != nil {
+		fx.t.Fatal(err)
+	}
+	return id
+}
+
+// readerOver is a scope of the given action over projects of the fixture's org,
+// held by a new user with exactly the given grants.
+func (fx *shadowFx) readerOver(grants map[model.ID][]string, action auth.Permission, projects ...model.ID) auth.Scope {
+	fx.t.Helper()
+	user := model.NewID()
+	pass, err := shadowRandomSecret()
+	if err != nil {
+		fx.t.Fatal(err)
+	}
+	email := "shadow-extra-" + user.String() + "@shadow.invalid"
+	cmd := func(kind string, pl auth.AdminPayload) {
+		fx.t.Helper()
+		if err := fx.scratch.command(fx.ctx, fx.ids.org, kind, pl); err != nil {
+			fx.t.Fatal(kind, err)
+		}
+	}
+	cmd("create_user", auth.AdminPayload{ID: user, Email: email, Password: pass})
+	cmd("membership", auth.AdminPayload{UserID: user, Enabled: true})
+	for project, perms := range grants {
+		cmd("grant", auth.AdminPayload{UserID: user, ProjectID: project, Enabled: true, Permissions: perms})
+	}
+	login, err := fx.dest.App.Auth.Login(fx.ctx, email, pass, "")
+	if err != nil {
+		fx.t.Fatal(err)
+	}
+	cred, err := fx.dest.App.Auth.Authenticate(fx.ctx, login.Token)
+	if err != nil {
+		fx.t.Fatal(err)
+	}
+	scope, err := fx.dest.App.Auth.Authorize(fx.ctx, cred, fx.ids.org, projects, action)
+	if err != nil {
+		fx.t.Fatal(err)
+	}
+	return scope
+}
+
+// D04b: a read scope that is not exactly read access to the mapped project is
+// refused, whatever else it can read. Every case below is a scope the
+// destination's own authorizer really issued; the foreign-org scope alone could
+// not isolate the project check, because the org check refuses it first.
+func TestShadowReaderScopeIsExactlyReadOnTheMappedProject(t *testing.T) {
+	fx := newShadowFx(t)
+	fx.deliver(ShadowAdapterConditions, "c", shadowCondBody(shadowCond("a", 1, "firing", 0)))
+	mapped, read := fx.ids.project, []string{string(auth.Read)}
+	other := fx.addProject()
+
+	// Positive control: the same helper, with exactly the scope the provisioner issues, runs.
+	d := fx.dest
+	good := fx.readerOver(map[model.ID][]string{mapped: read}, auth.Read, mapped)
+	d.Reader = &good
+	if _, err := RunShadow(fx.ctx, fx.m, d, fx.p); err != nil {
+		t.Fatalf("a read scope over exactly the mapped project must run: %v", err)
+	}
+
+	cases := map[string]auth.Scope{
+		"same org, another project only":       fx.readerOver(map[model.ID][]string{other: read}, auth.Read, other),
+		"same org, mapped and another project": fx.readerOver(map[model.ID][]string{mapped: read, other: read}, auth.Read, mapped, other),
+		"same org, mapped project, raw read":   fx.readerOver(map[model.ID][]string{mapped: {string(auth.Read), string(auth.RawRead)}}, auth.RawRead, mapped),
+		"another org, another project":         *newShadowFx(t).dest.Reader,
+	}
+	for name, scope := range cases {
+		t.Run(name, func(t *testing.T) {
+			d := fx.dest
+			s := scope
+			d.Reader = &s
+			if _, err := RunShadow(fx.ctx, fx.m, d, fx.p); !errors.Is(err, ErrShadowDestination) {
+				t.Fatalf("scope accepted: %v", err)
+			}
+		})
+	}
+}
+
+// C07 and C08: the policy twin is told the freshness the owned reducer holds for
+// the event (an unknown status is unknown data, never fresh) and a decision time
+// that never moves backwards, whatever event time a late or time-less event
+// carries. Neither is visible in the decisions the twin returns for fresh data,
+// so the evidence and time handed to it are observed.
+func TestShadowTwinIsToldUnknownFreshnessAndNeverGoesBackInTime(t *testing.T) {
+	type told struct {
+		seq   uint64
+		state notify.SourceState
+		fresh notify.Freshness
+		at    int64
+	}
+	var got []told
+	shadowTwinHook = func(ev notify.PolicyEvent, at model.UnixNano) {
+		got = append(got, told{ev.Condition.Seq, ev.Condition.State, ev.Condition.Freshness, int64(at)})
+	}
+	defer func() { shadowTwinHook = nil }()
+
+	fx := newShadowFx(t)
+	name := "disk-full"
+	timeless := shadowCond(name, 4, "firing", 0)
+	timeless.AtNS = 0 // a source that sends no event time
+	fx.deliver(ShadowAdapterConditions, "d1", shadowCondBody(
+		shadowCond(name, 1, "firing", 20),
+		shadowCond(name, 2, "unknown", 30),
+		shadowCond(name, 3, "recovered", 25), // the source's clock stepped back: earlier than v2
+		timeless,
+	))
+	rep := fx.mustRun()
+	at := func(s int64) int64 { return shadowT0ns + s*1_000_000_000 }
+	want := []told{
+		{1, notify.SourceFiring, notify.FreshnessFresh, at(20)},
+		{2, notify.SourceUnknown, notify.FreshnessUnknown, at(30)},
+		{3, notify.SourceRecovered, notify.FreshnessFresh, at(30)},
+		{4, notify.SourceFiring, notify.FreshnessFresh, at(30)},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("the twin was told:\n got %+v\nwant %+v", got, want)
+	}
+	// A decision time of zero is refused by the twin: it never reached it.
+	if rep.Decisions.Refused != 0 {
+		t.Fatalf("the twin refused %d events: a decision time went backwards", rep.Decisions.Refused)
+	}
+	if c := rep.Conditions[0]; c.SourceVersion != 4 || c.Phase != "firing" {
+		t.Fatalf("lifecycle: %+v", c)
+	}
+}
+
+// F19: a scratch file the run cannot write rejects that delivery with the
+// source's own reason, counts nothing as admitted or received, submits no batch
+// and leaves the recording deliverable once the scratch works again. The
+// scratch directory is one that does not exist, so the write fails on every
+// platform and for any user.
+func TestShadowScratchWriteFailureRejectsTheDeliveryAndLosesNothing(t *testing.T) {
+	fx := newShadowFx(t)
+	file := []byte("2023-11-14T22:13:20Z service started unit alpha\n2023-11-14T22:13:21Z service started unit beta\n")
+	del := ShadowDelivery{ID: "f1", OriginalSource: shadowTestSource, Adapter: ShadowAdapterLogFile, Body: file}
+	r := fx.newRun()
+	r.scratch = filepath.Join(t.TempDir(), "never-created")
+	if err := r.process(fx.ctx, 0, del); err != nil {
+		t.Fatalf("a scratch write failure is a rejected delivery, not a run error: %v", err)
+	}
+	rep, err := r.finish(fx.ctx)
+	if err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	wantReject := map[string]int{shadowSourcePrefix + "unavailable": 1}
+	if rep.Deliveries.Received != 1 || rep.Deliveries.Accepted != 0 || rep.Deliveries.Rejected != 1 || !reflect.DeepEqual(rep.Deliveries.RejectedByReason, wantReject) {
+		t.Fatalf("deliveries: %+v", rep.Deliveries)
+	}
+	if rep.Records.Received != 0 || rep.Records.Admitted != 0 || rep.Records.Dropped != 0 || rep.BatchesSubmitted != 0 || !rep.Reconciled {
+		t.Fatalf("records after a failed scratch write: %+v batches=%d reconciled=%v", rep.Records, rep.BatchesSubmitted, rep.Reconciled)
+	}
+	if len(rep.Ledger) != 1 || rep.Ledger[0].Kind != "delivery" || rep.Ledger[0].Outcome != "rejected" || rep.Ledger[0].Reason != shadowSourcePrefix+"unavailable" {
+		t.Fatalf("ledger: %+v", rep.Ledger)
+	}
+
+	// The same recording is not poisoned: through a working scratch it is admitted whole, none of it a duplicate.
+	r.scratch = t.TempDir()
+	if err := r.process(fx.ctx, 1, del); err != nil {
+		t.Fatal(err)
+	}
+	rep, err = r.finish(fx.ctx)
+	if err != nil {
+		t.Fatalf("finish after the scratch works: %v", err)
+	}
+	if rep.Deliveries.Accepted != 1 || rep.Records.Received != 2 || rep.Records.Admitted != 2 || rep.Records.Dropped != 0 || rep.BatchesSubmitted != 1 || !rep.Reconciled {
+		t.Fatalf("recording after the scratch recovered: %+v %+v batches=%d", rep.Deliveries, rep.Records, rep.BatchesSubmitted)
+	}
+}
+
+// ShadowProvision is the one-tenant path the CLI uses: its own application, the
+// tenant the mapping names and exactly the scopes the run requires.
+func TestShadowProvisionBuildsTheMappedDestination(t *testing.T) {
+	fx := newShadowFx(t)
+	dest, closeDest, err := ShadowProvision(fx.ctx, filepath.Join(t.TempDir(), "dest"), fx.m, fx.sp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { closeDest() })
+	if dest.Org != fx.ids.org || dest.Project != fx.ids.project || dest.Source != fx.ids.source || dest.App == fx.dest.App {
+		t.Fatalf("destination: %+v", dest)
+	}
+	fx.dest = dest
+	fx.deliver(ShadowAdapterConditions, "c", shadowCondBody(shadowCond("a", 1, "firing", 0)))
+	if rep := fx.mustRun(); rep.Deliveries.Accepted != 1 || rep.Records.Admitted != 1 || !rep.Reconciled {
+		t.Fatalf("run in the provisioned destination: %+v %+v", rep.Deliveries, rep.Records)
 	}
 }

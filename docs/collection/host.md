@@ -33,13 +33,35 @@ model metric and capability records.
 | cgroup | cgroup v2 only | unsupported | unsupported | unsupported |
 
 Verification status, stated plainly: Linux is run against fixtures and the
-real `/proc`, `/sys/fs/cgroup` of a WSL2 host; Windows is run on the Windows
-toolchain, but its smoke did not run the process-count, journal or
+real `/proc`, `/sys/fs/cgroup` of a WSL2 host and of one Debian 13 VM (kernel
+6.12, systemd 257 as PID 1, cgroup v2, no `hidepid`, unprivileged account).
+On that VM `go run ./tools/smoke host-collection --agent-binary B --agent-unit
+deploy/systemd/soundpost-agent.service` passed: CPU busy delta, filesystem
+free delta, process-count delta, real journal lines, the compiled agent
+`-once`, and the compiled agent as a systemd **service** built from the shipped
+unit. That service ran in the account's systemd *user* manager (no root was
+available), with `User=`/`Group=` removed, the state directory renamed,
+`LoadCredential=` pointed at the smoke's credential file, `ExecStart=` at the
+smoke's binary and `ProtectHome=yes` replaced by `ProtectHome=tmpfs` plus a
+read-only bind of the one directory holding the binary and configuration; every
+other line of the unit, including the whole hardening block, is verbatim (the
+smoke fails if a replaced line disappears from the unit). Observed: active and
+running with no restart, `credential_file` = the path systemd gave the loaded
+credential and the node stored the service's samples, main process `CapEff` and
+`CapBnd` zero, `NoNewPrivs` 1, seccomp filter on, a clean stop
+(`Result=success`), `systemd-analyze security` exposure 2.4. Windows is run on
+the Windows toolchain, but its smoke did not run the process-count, journal or
 permission-denied rows (`system-logs.md` lists them as **not run** there), so
 the Windows `process_count` cell above is implemented, not smoke-verified;
 **macOS is compiled and vetted only, never run** (no macOS machine
 was available, and the CPU group is not implemented there); other OSes are
 only compile-checked (`GOOS=freebsd`).
+
+**Not run:** the system-level unit as installed (`User=soundpost-agent`,
+`/usr/local/bin`, `/etc/soundpost`, `ProtectHome=yes` unchanged) because that
+needs root and the VM allows none (`sudo` asks for a password); a root agent
+(and so the `CAP_SYS_PTRACE` question); `hidepid` hosts; cgroup v1 or hybrid
+hosts (the VM is pure cgroup v2); other kernels, bare metal and containers.
 
 ## Metric catalogue
 

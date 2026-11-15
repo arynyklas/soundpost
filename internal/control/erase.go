@@ -188,6 +188,7 @@ func eraseBooks(st *State, op model.DeletionOperation, at model.UnixNano, rule s
 		func() (n int, err error) { n, over.jobs, err = eraseJobBooksBy(st, p, at, rule); return },
 		func() (int, error) { return eraseCutoverBooks(st, p, at) },
 		func() (int, error) { return eraseSavedViews(st, p) },
+		func() (int, error) { return eraseRuleDefinitions(st, p) },
 		func() (int, error) { return eraseControlText(st, p) },
 	} {
 		n, err := erase()

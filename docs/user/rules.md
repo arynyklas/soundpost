@@ -2,14 +2,51 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Alert rules and conditions
 
-An alert rule is meant to be evaluated by Soundpost on a fixed schedule against your own
-stored telemetry. **Status:** the evaluation runner exists (`internal/appcore/workers.go`)
-but `soundpost serve` does not start it and no rule catalogue is wired to it, so no running
-node evaluates rules today (`docs/operations/background-workers.md`); this page describes the
-behavior the runner implements. Each series the rule's expression returns becomes an *alert
-condition*: a record of whether that series is a problem right now and how far
-that answer can be trusted. A condition is deliberately separate from the error
+An alert rule is evaluated by Soundpost on a fixed schedule against your own stored
+telemetry. **Status:** `soundpost serve` starts the background runner
+(`docs/operations/background-workers.md`), which evaluates every rule an organization
+administrator has saved in the project's rule catalogue (see "Authoring rules" below), opens
+conditions and notifies the organization's destinations. Each series the rule's expression
+returns becomes an *alert condition*: a record of whether that series is a problem right now
+and how far that answer can be trusted. A condition is deliberately separate from the error
 issue and the human incident it may be linked to (see `incidents.md`).
+
+## Authoring rules
+
+Rules live in control state, one catalogue per project, and are written over
+`POST /api/v1/rules` (the **Rules** section of the project's settings page in the console).
+The request is closed: `operation` is one of `list`, `save`, `retire` or `replay`.
+
+| Operation | Who | What it does |
+| --- | --- | --- |
+| `list` | a reader of the project, or an organization administrator | the project's rules (retired ones included) with each rule's `revision` and `version`, the pinned profiles and feature sets a rule may name, and whether the caller may author |
+| `save` | an organization administrator | commits the next version of a rule (`command_id`, `rule_id`, `expected_revision`, `reason`, `rule`) |
+| `retire` | an organization administrator | takes a rule out of evaluation; its record and history stay (`command_id`, `rule_id`, `expected_revision`, `reason`) |
+| `replay` | an organization administrator | the operator's replay declaration (`rule_id`, `reason`, `replay.from_ns`, `replay.to_ns`); see "Late evaluations and notifications" |
+
+A save is an audited command. The `command_id` is replayed idempotently (repeating it answers
+the first result). `expected_revision` is the catalogue revision the author read, `0` for a
+rule that does not exist yet: a stale author loses with a `409` instead of overwriting, and a
+save made before a retirement cannot silently bring the rule back. The server assigns the
+pinned **version** (one more than the previous), so a changed rule is always a new version and
+its evaluations are committed under that version. `rules.write` is reserved and authorizes
+nothing here: authoring needs organization administration, as destinations do.
+
+Saving is the one moment a rule is judged. The expression is parsed and type-checked under the
+pinned profile and feature set, and it must be an instant vector; a rule whose expression does
+not parse, gives a scalar, a range or log streams, names an unknown profile or feature set,
+carries a severity outside `info`, `warning`, `error` and `critical`, or sets an interval
+outside 1 s to 24 h is refused with `400` and nothing is committed. A **recording rule**
+(`kind: recording`, with `record_name` and optional `labels`) is also checked against the node's
+recording source (see the operations page): the node must have one for the rule's project, and every
+configured label must be a value that source's policy enumerates, so a rule that saves is not
+one whose output is refused for its labels (`recording_source_unavailable`,
+`recording_label_not_allowed`).
+
+A saved rule takes effect at the next background pass and a retired one stops at it. The
+commit is audited with the reason (`rules.define`, `rules.retire`, `rules.operator_replay`),
+never with the expression, and moves neither the organization's policy epoch nor any
+authority. The rules of a project are dropped when the project is retired.
 
 ## What a rule says
 
@@ -80,7 +117,8 @@ Both the event time and the arrival time of what was accepted are kept.
 A rule evaluated on time is *live*. An evaluation computed one interval or more
 after its scheduled time is a *backfill*: it updates the lifecycle but never
 carries permission to notify, so a late catch-up cannot send a retroactive
-notification. An operator can declare a replay window, which is audited, to let
+notification. An operator can declare a replay window (`operation: replay`, an
+organization administrator, audited, committed once however often it is repeated), to let
 a window of late evaluations notify.
 
 ## Only one writer, only the leader

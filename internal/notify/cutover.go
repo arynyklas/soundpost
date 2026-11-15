@@ -657,27 +657,58 @@ func (o *Outbox) SyncModes(ctx context.Context, scope auth.Scope, lease FenceTok
 	want := ModeFor(phase)
 	changed := 0
 	for _, rec := range recs {
-		var ps PolicyState
-		if err = json.Unmarshal(rec.State, &ps); err != nil {
-			return changed, model.Fail(model.Corrupt)
-		}
-		if ps.Mode == want {
-			continue
-		}
-		command := commandID([]byte("cutover-sync"), orgBytes(scope), project[:], cutover[:], u64(uint64(revision)), []byte(rec.Subject), rec.Policy[:])
-		owner := ps.Owner
-		ev := PolicyEvent{Kind: EventCutover, Command: command, Org: scope.OrgID(), Project: project, Policy: ps.Policy, PolicyRef: PolicyRef{Revision: ps.PolicyRevision},
-			OwnerRevision: ps.OwnerRevision, Entity: &owner, Cutover: &OwnerCutover{Command: command, To: owner, Mode: want}}
-		sub, err := o.Submit(ctx, scope, lease, ps.Subject, ev, at)
-		if reason, ok := ReasonOf(err); ok && reason == ReasonOwnerRevision {
-			continue
-		}
+		moved, err := o.syncState(ctx, scope, lease, project, rec, want, cutover, revision, at)
 		if err != nil {
 			return changed, err
 		}
-		if !sub.Unchanged {
+		if moved {
 			changed++
 		}
 	}
 	return changed, nil
+}
+
+// SyncMode is SyncModes for the one state of a subject under a policy: it is what a
+// worker runs right after the first events of a new subject created its state (a
+// state starts in active mode), so that the first decision about the subject is taken
+// in the mode its project's phase requires and a shadow's suppressions are remembered
+// for the end-of-shadow reevaluation. A subject with no state yet changes nothing.
+func (o *Outbox) SyncMode(ctx context.Context, scope auth.Scope, lease FenceToken, phase CutoverPhase, cutover model.ID, revision model.Revision, policy model.ID, subject Entity, at model.UnixNano) (bool, error) {
+	project, err := o.project(scope)
+	if err != nil {
+		return false, err
+	}
+	if err = validLease(lease); err != nil || !phase.Valid() || cutover == (model.ID{}) || revision == 0 || at <= 0 || policy == (model.ID{}) || subject.ID == (model.ID{}) {
+		return false, model.Fail(model.Invalid)
+	}
+	rec, found, err := o.store.PolicyRecord(ctx, scope, project, policy, string(subject.Kind)+":"+subject.ID.String())
+	if err != nil || !found {
+		return false, err
+	}
+	return o.syncState(ctx, scope, lease, project, rec, ModeFor(phase), cutover, revision, at)
+}
+
+// syncState submits the idempotent owner_cutover event that moves one state to the
+// wanted mode, and reports whether it changed anything. A state that moved under it
+// (a decision advanced its owner revision first) is left for the next call.
+func (o *Outbox) syncState(ctx context.Context, scope auth.Scope, lease FenceToken, project model.ID, rec control.PolicyRecord, want DeliveryMode, cutover model.ID, revision model.Revision, at model.UnixNano) (bool, error) {
+	var ps PolicyState
+	if err := json.Unmarshal(rec.State, &ps); err != nil {
+		return false, model.Fail(model.Corrupt)
+	}
+	if ps.Mode == want {
+		return false, nil
+	}
+	command := commandID([]byte("cutover-sync"), orgBytes(scope), project[:], cutover[:], u64(uint64(revision)), []byte(rec.Subject), rec.Policy[:])
+	owner := ps.Owner
+	ev := PolicyEvent{Kind: EventCutover, Command: command, Org: scope.OrgID(), Project: project, Policy: ps.Policy, PolicyRef: PolicyRef{Revision: ps.PolicyRevision},
+		OwnerRevision: ps.OwnerRevision, Entity: &owner, Cutover: &OwnerCutover{Command: command, To: owner, Mode: want}}
+	sub, err := o.Submit(ctx, scope, lease, ps.Subject, ev, at)
+	if reason, ok := ReasonOf(err); ok && reason == ReasonOwnerRevision {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return !sub.Unchanged, nil
 }

@@ -219,12 +219,9 @@ func FetchScrape(ctx context.Context, grant policy.SourceGrant, target ScrapeTar
 		}
 		if derr == nil {
 			res.Coverage = CoverageComplete
-			// The decoder derives batch and record IDs from the request body
-			// only, so two scrapes of an unchanged exporter would reuse one
-			// batch ID for different observed times (a receipt-ledger
-			// conflict). The scrape time makes each scrape a distinct, still
-			// retry-idempotent admission.
-			scrapeRekey(target.Alias, startNs, batches)
+			// The decoder binds the scrape time (cfg.DefaultTimestamp) into the
+			// batch and record identifiers, so each scrape is a distinct admission
+			// and a retry of one scrape is idempotent.
 			res.Batches = batches
 			seen := map[string]SeriesRef{}
 			for _, b := range batches {
@@ -509,19 +506,6 @@ func scrapeU64(v uint64) []byte {
 	var b [8]byte
 	binary.BigEndian.PutUint64(b[:], v)
 	return b[:]
-}
-
-// scrapeRekey replaces the decoder's body-derived batch and record identifiers
-// with ones that also bind the target alias and the scrape time.
-func scrapeRekey(alias string, at model.UnixNano, batches []model.Batch) {
-	for i := range batches {
-		b := &batches[i]
-		b.ID = scrapeID("batch", []byte(alias), scrapeU64(uint64(at)), b.ID[:])
-		for j := range b.Records {
-			r := &b.Records[j]
-			r.ID = scrapeID("record", []byte(alias), scrapeU64(uint64(at)), r.ID[:])
-		}
-	}
 }
 
 // scrapeStaleBatches builds stale-marker batches grouped per owner slot with

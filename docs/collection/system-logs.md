@@ -64,15 +64,37 @@ refuses a batch (nothing in the pending intent is content).
 | Kind | Reads | Selection | Position |
 | --- | --- | --- | --- |
 | `file` | one append-only text file | the path; optional `time_layout`; `rotated` paths | file identity + byte offset + tail hash |
-| `syslog` | a syslog-framed file written by the local syslog daemon (RFC 3164, rsyslog RFC 3339 file format, RFC 5424, each with optional `<PRI>`) | the path and a **required** list of approved tags; `rotated` paths | as `file` |
+| `syslog` | syslog-framed messages (RFC 3164, rsyslog RFC 3339 file format, RFC 5424, each with optional `<PRI>`): from a file written by the local syslog daemon, or from the network (UDP, TCP, TLS) | the path (file) or `listen` addresses (network), and a **required** list of approved tags; `rotated` paths (file only) | file: as `file`; network: receiver epoch + sequence |
 | `journal` | the systemd journal through `journalctl` | **required** approved `SYSLOG_IDENTIFIER` and/or `_SYSTEMD_UNIT` matches, passed to the journal as match arguments | the journal cursor |
 
 - `StartAt` is `end` by default: history that predates the agent is not swept
   in. `beginning` starts at the first byte or entry.
-- The syslog adapter reads files only. It reads the tag and message of a line
-  and skips the host name and process id; neither is ever returned. A network
-  syslog receiver (UDP/TCP/`/dev/log`) is **not implemented**: it has no
-  replayable position, which the checkpoint discipline below needs.
+- The syslog adapter reads a file (`path`) or listens on the network
+  (`listen`), never both. It reads the tag and message of a line and skips the
+  host name and process id; neither is ever returned.
+- Network syslog (`listen`: a list of `{network: udp|tcp|tls, address:
+  "IP:port", cert_file, key_file, client_ca_file}`; `buffer_records`, default
+  4096). UDP is one message per datagram (RFC 5426); TCP and TLS accept RFC
+  6587 octet counting or newline framing (RFC 5425 for TLS; `client_ca_file`
+  requires and verifies a client certificate). Addresses are IP literals; a
+  non-loopback listener is open to whoever can reach it, so use TLS with a
+  client CA or a firewall. Every message is classified on arrival with the file
+  rules (framing, tag allowlist, registered template, approved values); only the
+  typed record of an approved message, or the drop reason of any other, is kept
+  (in memory, in a bounded sequence-numbered buffer; nothing received is
+  written to disk). The position is (receiver epoch, last committed sequence),
+  so the checkpoint rules above hold unchanged: the pending range is rebuilt
+  identically after a lost acknowledgement. What a memory-only receiver cannot
+  replay is declared: a UDP datagram that finds the buffer full is a loss
+  `queue_full` with the exact count; TCP/TLS senders are not dropped (the
+  connection is not read while the buffer is full); the first read after the
+  agent restarted (new epoch) reports one loss `shutdown` (count 1, a lower
+  bound) for the uncommitted range and everything sent while it was down.
+  `start_at` is `beginning` only (a stream has no history). The listeners start
+  at the first read of the source (or `sources.StartSyslogReceiver`) and live
+  until the process ends. A listener that cannot bind is `unknown/listen_failed`
+  (`denied/permission_denied` for a privileged port). Capability method:
+  `syslog_net:<name>`. A `-once` run only listens for the duration of the cycle.
 - The journal adapter runs `journalctl` with a fixed argument vector (never a
   shell), a three-variable environment (not the agent's), and
   `--output-fields=MESSAGE,PRIORITY,SYSLOG_IDENTIFIER,_SYSTEMD_UNIT`, so fields
@@ -136,17 +158,28 @@ committed offset (the *tail*).
 | open denied | `denied/permission_denied`; the position does not move, and the health is recorded. Reading resumes where it stopped when access returns. Denial is not a loss |
 | `rotated` path unreadable and the continuation not found | `denied/permission_denied`, not a gap: nothing is declared lost that may still exist (implemented; no test exercises it) |
 
-Journal: the cursor is the position. Permission denial (`journalctl` says
+Journal: the cursor is the position. A resume uses `journalctl --cursor`
+(inclusive) and requires the first entry returned to be the committed cursor
+entry. If it is a different entry (the cursor was vacuumed: `journalctl`
+silently seeks to the nearest survivor), or nothing comes back at all, the
+entries in between are lost and are exposed as a `loss` record with reason
+`truncated`, signal `log`, count 1 (a lower bound), with the same batch
+discipline as a file gap; reading continues at the oldest survivor, or from the
+current second when nothing survives, so the gap is reported once. This was
+checked against systemd 257 (`--after-cursor` returns every survivor silently;
+`--cursor` of a missing entry returns a different first entry or nothing).
+Permission denial (`journalctl` says
 "insufficient permissions", or hints that it is not showing messages of other
 users and the system) is `denied/permission_denied`; a missing `journalctl` is
 `unsupported/not_present`; any other failure is `unknown/journal_failed`. A
-vacuumed cursor is **not** detected as a gap (no test exercises it).
+changed policy that no longer selects the committed entry reports one
+conservative gap.
 
 ## Capabilities
 
 Every cycle the agent sends `capability` records: one per host metric group
 (see `host.md`) and one per log source with signal `log`, method
-`file_tail:<name>`, `syslog_file:<name>` or `journalctl:<name>`, status
+`file_tail:<name>`, `syslog_file:<name>`, `syslog_net:<name>` or `journalctl:<name>`, status
 `supported`, `denied`, `unsupported` or `error` (an unknown state; the wire
 vocabulary has no `unknown`) and a reason. A source that cannot be read is
 therefore an explicit stored state, never an empty source. Coverage fields are
@@ -192,6 +225,9 @@ process-count, journal and permission-denied rows need `sleep`, `journalctl`
 and POSIX permissions and were **not run** there).
 
 **Not run:** macOS (compiled only); the compiled agent binary on Windows; a
-vacuumed journal; a network syslog receiver (not built); `hidepid` hosts;
-file rotation on Windows (the file-identity code is compiled and vetted, not
-exercised); any non-WSL2 Linux (bare metal, containers, other kernels).
+vacuumed journal against a real journald that rotated by itself (the gap was
+exercised with a fake `journalctl` and the real systemd 257 `journalctl`
+behaviour for missing cursors, not a size-limit vacuum of the system journal);
+network syslog on Windows/macOS and from real network devices (loopback senders
+only); `hidepid` hosts; file rotation on Windows; any non-WSL2 Linux except the
+one Debian 13 VM named in `host.md`.

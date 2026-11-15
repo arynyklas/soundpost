@@ -296,6 +296,13 @@ func (s *StateStore) Read(ctx context.Context, scope auth.Scope, ruleID model.ID
 	if !found {
 		return State{}, nil
 	}
+	if len(book.Versions) == 0 {
+		// An operator's replay declaration made before the rule's first evaluation
+		// leaves a book with its windows and no version: no state yet, not corrupt.
+		var state State
+		attach(&state, book)
+		return state, nil
+	}
 	head, ok := book.Version(book.Head)
 	if !ok || len(head.Recent) == 0 || len(head.Recent[len(head.Recent)-1].Payload) == 0 {
 		return State{}, model.Fail(model.Corrupt)

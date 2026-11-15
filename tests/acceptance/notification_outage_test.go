@@ -49,8 +49,9 @@ import (
 // path, credentials and schedule (docs/operations/external-deadman.md). No real
 // SMTP, Telegram or webhook provider is contacted: the destination is a loopback
 // receiver the observer was explicitly authorized for.
-func TestNotificationOutage(t *testing.T) {
-	n := newAccNode(t)
+func TestNotificationOutage(t *testing.T) { eachLayout(t, notificationOutage) }
+
+func notificationOutage(t *testing.T, n *accNode) {
 	s := n.activate()
 	n.assertOneOwner(n.nw)
 	_ = s
@@ -137,10 +138,7 @@ func TestNotificationOutage(t *testing.T) {
 	// The whole product goes away: heartbeat endpoints, the notification worker, the node.
 	stoppedAt := time.Now()
 	hb.stop()
-	if err := n.app.Close(); err != nil {
-		t.Fatal(err)
-	}
-	n.app = nil
+	n.stopProduct()
 
 	// The observer keeps running and detects every missing heartbeat within its interval.
 	waitFor(t, 20*time.Second, "the observer to alert on all three missing heartbeats", func() bool {
@@ -208,7 +206,7 @@ func TestNotificationOutage(t *testing.T) {
 	}
 
 	// The product comes back. Its own history is intact; the observer's record is not erased.
-	n.open()
+	n.startProduct()
 	n.authenticate()
 	if n.issued != "" {
 		var e error

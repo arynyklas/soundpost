@@ -67,17 +67,19 @@ type Producer interface {
 }
 
 // RuleSource lists the active rule definitions of one project (the newest
-// version of each). There is no rule catalogue in control state yet, so there is
-// no production implementation: a node without a RuleSource schedules no rule.
+// version of each). Production binds the rule catalogue (App.RuleCatalogue, the
+// definitions an administrator saves over POST /api/v1/rules); a node without a
+// RuleSource schedules no rule.
 // The scope is the project-scoped read scope of the worker principal.
 type RuleSource interface {
 	Rules(ctx context.Context, scope auth.Scope, project model.ID) ([]rules.Rule, error)
 }
 
 // OutputAdmission admits recording-rule batches through the data plane and looks
-// receipts up again. It needs a source credential of the recording producer; no
-// production implementation is wired, so without one recording outputs stay
-// pending in the control outbox. Condition outputs do not need it.
+// receipts up again. It needs the source credential of the recording producer:
+// production binds App.NewRecordingSource (the operator hands the node the
+// credential of a registered source at start). Without one, recording outputs
+// stay pending in the control outbox. Condition outputs do not need it.
 type OutputAdmission interface {
 	rules.Admitter
 	rules.ReceiptLookup

@@ -6,8 +6,10 @@ package main
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,6 +40,7 @@ func readinessFixture() (AcceptanceLedger, Authorizations) {
 		}
 		l.Evidence = append(l.Evidence, e)
 	}
+	l, _ = readinessSeal(l)
 	a := Authorizations{Items: []ReadinessAuthorization{{ID: "auth-1", Scope: l.Scope,
 		Environment: ReadinessEnvProduction, Kinds: append([]ReadinessKind(nil), readinessKinds...),
 		Disruptive: true, NotBefore: readinessNow.Add(-time.Hour), Expires: readinessNow.Add(24 * time.Hour)}}}
@@ -46,11 +49,65 @@ func readinessFixture() (AcceptanceLedger, Authorizations) {
 
 func readinessEval(t *testing.T, l AcceptanceLedger, a Authorizations) CutoverReadiness {
 	t.Helper()
-	r, err := ReadyForCutover(context.Background(), l, a)
+	r, err := ReadyForCutover(context.Background(), l, a, readinessReportsFor(l))
 	if err != nil {
 		t.Fatal(err)
 	}
 	return r
+}
+
+// readinessBody is the report the producer writes for a run observed at `at`
+// that supports a reference of its kind; nil for a producer whose report this
+// package does not verify.
+func readinessBody(producer string, at time.Time) []byte {
+	var v any
+	switch producer {
+	case "adoption-journeys":
+		r := JourneyReport{SchemaVersion: journeySchemaVersion, VerifiedAt: at, Passed: true}
+		for _, k := range journeyKinds {
+			r.Results = append(r.Results, JourneyResult{Kind: k, Status: JourneyPassed, Checks: []JourneyCheck{{Name: JourneyCheckRead, Passed: true}}})
+		}
+		v = r
+	case "adoption-shadow":
+		v = ShadowReport{SchemaVersion: shadowSchemaVersion, Reconciled: true, PolicyViolations: []string{}, Records: ShadowCounts{Received: 2, Admitted: 2},
+			Parity: ShadowParityReport{QueriesCompared: 1, Mismatches: []ShadowMismatch{}}}
+	case "adoption-policy-compare":
+		v = PolicyReport{SchemaVersion: 1, Compared: 3, Identical: 3, Verdict: policyVerdictReconciled}
+	case "adoption-retention":
+		v = HistoryReport{SchemaVersion: historySchemaVersion, EvaluatedAt: at, Clear: true, Blockers: []HistoryCode{}, Completed: 1,
+			Obligations: []HistoryObligationStatus{{State: HistoryStateCompleted}}}
+	default:
+		return nil
+	}
+	raw, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
+	}
+	return raw
+}
+
+// readinessSeal makes every reference of a producer this package verifies name
+// the digest of the report that producer would have written for it, and returns
+// those report bodies.
+func readinessSeal(l AcceptanceLedger) (AcceptanceLedger, [][]byte) {
+	ev := append([]EvidenceRef(nil), l.Evidence...)
+	var bodies [][]byte
+	for i := range ev {
+		if b := readinessBody(ev[i].Producer, ev[i].ObservedAt); b != nil {
+			sum := sha256.Sum256(b)
+			ev[i].Digest = hex.EncodeToString(sum[:])
+			bodies = append(bodies, b)
+		}
+	}
+	l.Evidence = ev
+	return l, bodies
+}
+
+// readinessReportsFor are the report bodies the ledger's references would have
+// today. A reference whose digest was edited after sealing finds none.
+func readinessReportsFor(l AcceptanceLedger) ReadinessReports {
+	_, bodies := readinessSeal(l)
+	return NewReadinessReports(bodies...)
 }
 
 func readinessWithout(l AcceptanceLedger, k ReadinessKind) AcceptanceLedger {
@@ -281,6 +338,7 @@ func TestCutoverReadinessSignedGate(t *testing.T) {
 	bad := map[string]func(*ReadyGate){
 		"ledger digest": func(g *ReadyGate) { g.LedgerDigest = strings.Repeat("0", 64) },
 		"criterion":     func(g *ReadyGate) { g.Criteria[0].Digest = strings.Repeat("f", 64) },
+		"body verified": func(g *ReadyGate) { g.Criteria[0].BodyVerified = !g.Criteria[0].BodyVerified },
 		"authorization": func(g *ReadyGate) { g.Authorizations[0].Disruptive = false },
 		"scope":         func(g *ReadyGate) { g.Scope = "other" },
 		"expiry":        func(g *ReadyGate) { g.ExpiresAt = g.ExpiresAt.Add(time.Hour) },
@@ -352,6 +410,7 @@ func TestCutoverReadinessSignedGate(t *testing.T) {
 	// Gate lifetime is the minimum over criteria, whatever their order.
 	l3, a3 := readinessFixture()
 	l3 = readinessMutate(l3, ReadinessLegacyRetention, func(e *EvidenceRef) { e.ObservedAt = readinessNow.Add(-50 * time.Minute) })
+	l3, _ = readinessSeal(l3)
 	g3, err := SignReadyGate(readinessEval(t, l3, a3), priv)
 	if err != nil || !g3.ExpiresAt.Equal(readinessNow.Add(10*time.Minute)) {
 		t.Fatalf("lifetime must be the minimum: %v %v", err, g3.ExpiresAt)
@@ -369,7 +428,7 @@ func TestCutoverReadinessPublicProjectionIsClosed(t *testing.T) {
 	b, _ := json.Marshal(p)
 	var m map[string]any
 	_ = json.Unmarshal(b, &m)
-	if len(m) != 6 {
+	if len(m) != 7 {
 		t.Fatalf("closed shape: %s", b)
 	}
 	for _, s := range []string{"synthetic-scope", "auth-1", "product-domain", "external-domain", "0000000000", "2026"} {
@@ -394,6 +453,16 @@ func TestCutoverReadinessCLI(t *testing.T) {
 		return p
 	}
 	l, a := readinessFixture()
+	reports := filepath.Join(dir, "reports")
+	if err := os.Mkdir(reports, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	_, bodies := readinessSeal(l)
+	for i, body := range bodies {
+		if err := os.WriteFile(filepath.Join(reports, fmt.Sprintf("report-%d.json", i)), body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	seed := make([]byte, ed25519.SeedSize)
 	for i := range seed {
 		seed[i] = byte(i + 1)
@@ -402,7 +471,7 @@ func TestCutoverReadinessCLI(t *testing.T) {
 	_ = os.WriteFile(key, []byte(hex.EncodeToString(seed)+"\n"), 0o600)
 	pub, _ := readinessKeys(t)
 	args := func(ledger, tag string) []string {
-		return []string{"--ledger", ledger, "--authorizations", write("auth.json", a), "--signing-key", key,
+		return []string{"--ledger", ledger, "--authorizations", write("auth.json", a), "--reports", reports, "--signing-key", key,
 			"--private-output", filepath.Join(dir, tag+".private.json"), "--public-summary", filepath.Join(dir, tag+".public.json")}
 	}
 	ok := write("ok.json", l)

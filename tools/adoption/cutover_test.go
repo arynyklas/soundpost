@@ -218,7 +218,8 @@ func (w *cutoverWorld) makeGate(now time.Time) ReadyGate {
 		a.Items[i].NotBefore = now.Add(-time.Hour)
 		a.Items[i].Expires = now.Add(24 * time.Hour)
 	}
-	res, err := ReadyForCutover(w.ctx, l, a)
+	l, _ = readinessSeal(l) // the producers' reports are of the adjusted times
+	res, err := ReadyForCutover(w.ctx, l, a, readinessReportsFor(l))
 	if err != nil || !res.Ready {
 		w.t.Fatalf("gate fixture not ready: %v %+v", err, res.Blockers)
 	}
@@ -244,7 +245,8 @@ func (w *cutoverWorld) makeStagingGate(now time.Time) ReadyGate {
 		a.Items[i].Expires = now.Add(24 * time.Hour)
 		a.Items[i].Environment = ReadinessEnvStaging
 	}
-	res, err := ReadyForCutover(w.ctx, l, a)
+	l, _ = readinessSeal(l)
+	res, err := ReadyForCutover(w.ctx, l, a, readinessReportsFor(l))
 	if err != nil || !res.Ready {
 		w.t.Fatalf("staging gate fixture not ready: %v %+v", err, res.Blockers)
 	}

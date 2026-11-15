@@ -135,10 +135,11 @@ evidence from the product's view, not from memory.
 
 While the project is not `new_active`, `SyncModes` brings every policy state to
 shadow mode (`ModeFor`), so the policy reducer still decides everything but
-records nothing as deliverable. Run it after every transition and on every worker
-pass. A subject whose policy state is created while the project is not `new_active`
-starts in active mode until the next sync; control already records its deliveries
-as suppressed, so the gap is safe but the state's own mode lags.
+records nothing as deliverable. The workers run it on every pass. A subject whose
+policy state is created while the project is not `new_active` starts in active mode;
+the worker brings it to the phase's mode (`Outbox.SyncMode`) before the subject's
+first decision, so that what the shadow suppresses is remembered and the end of the
+shadow can reevaluate it. Control records the deliveries as suppressed either way.
 
 When the product becomes the active owner, the policy's own rule for the end of a
 shadow applies: what a subject had suppressed while the product only watched is
@@ -209,17 +210,66 @@ truncated.
 ## Application wiring
 
 The cutover arm is part of the delivery handler, so `Store.BindDeliveryOutbox()`
-(already bound by `appcore.Open`) is all control needs. The composition builds
-`notify.NewCutoverService(app.Control, clock)` for the operator flow and the C11 views,
-and every worker pass calls `Outbox.SyncModes` with the committed cutover state before
-`RunOnce`. The deletion hook adds one line to `eraseControlBooks`:
+(already bound by `appcore.Open`) is all control needs. The workers of a served node
+(`appcore.Workers`) build `notify.NewCutoverService(app.Control, clock)` themselves and
+call `Outbox.SyncModes` with the committed cutover state on every pass; the read view
+is registered with the policy routes (`httpapi.RegisterPolicyRoutes`). The deletion
+hook is the line of `eraseControlBooks`:
 `func() (int, error) { return eraseCutoverBooks(st, p, at) },`.
+
+## Reading the cutover
+
+`POST /api/v1/cutover` with `{"org": "<id>", "project_id": "<id>"}` is the read-only
+console view of one project's notification ownership (`control.CutoverViewOf`, one
+consistent snapshot of committed control state; it changes nothing). It needs
+`policy.write` on the project or organization administration, like the settings
+page; anyone else, another project and a missing project are the one not-found
+answer. It shows:
+
+* **the cutover**: phase, epoch, the old and new owner, the active owner (none or
+  exactly one), the source frontier, whether a disaster-restore generation is still
+  to be acknowledged, and the sanitized timeline (revision, transition, instant,
+  command, the operator's principal, the digests of the command and of the
+  evidence; never the operator's reason or the evidence payload). `cutover` is
+  `null` for a project with none: the product is then its only notification owner;
+* **the accounting**: pending, claimed, lapsed and unknown deliveries and the digest
+  of the unknown set, the same figures the barrier is verified against;
+* **the shadow**: whether new decisions are shadow decisions (`observing`, true in
+  every phase but `new_active`), how many shadow decisions the project holds, by
+  kind, and the newest 50, each with its stable delivery ID (its dedup identity),
+  subject, kind, recipient, instant and digest. Shadow decisions are recorded and
+  never sent. The legacy decision stream a parity comparison needs is the adoption
+  flow's data and is not held here: compare these rows with it decision by decision
+  (`notify.CompareParity` is the comparison);
+* **the history boundary**: the legacy owner, the statement that legacy history is
+  read-only and external (there is no importer and nothing is deleted), and the
+  stretches of ownership between the committed transitions: `legacy` while the old
+  owner is active, `product` while the new owner is, `handover` while none is. The
+  product's own notification history lies inside its `product` stretches.
+
+The view is the operator's picture of the same record `AdvanceCutover` writes; the
+cutover itself is still advanced only by the operator flow.
+
+## How it is qualified
+
+`tests/acceptance` runs the cutover, outage, concurrent-delivery and disaster-restore
+journeys on two control groups, the one-voter node and a real three-voter group (three
+`appcore.OpenDistributed` voters on their own directories behind real mTLS peer
+listeners: the control group and the 64 data groups each have three voters; Linux
+only). `TestNotificationCutoverThroughTheServedPipeline` runs the ownership journey
+with nothing produced by hand: fatal errors are posted to the ingest route, and the
+issues, incidents, policy decisions, deliveries and modes are produced by the worker
+passes of a served node (`appcore.NewWorkers` over `Producers()`, `OrgRouting()` and the
+delivery worker); the source frontier is the durable receipt cursor of the ingest
+route and the barrier only verifies once the issue producer has committed its own
+checkpoint to it. On the three-voter group the leader of every group dies while the
+new owner is active; the surviving voters elect another and the journey carries on
+through it without re-announcing anything.
 
 ## Not covered here
 
-The product has no HTTP routes or C11 views for the cutover yet: the read API is
-`CutoverService.Cutover`/`Facts`, and the view wiring belongs to the application
-composition. The adoption flow that produces the evidence, disables the old
-sender and re-enables it on rollback is the adoption plan's, with the customer's
-authorization. No real customer, sender or provider is contacted by anything in
+The adoption flow that produces the evidence, disables the old sender and re-enables
+it on rollback is the adoption plan's, with the customer's authorization. The
+condition leg of the pipeline needs a rule catalogue to evaluate; the journeys above
+feed the issue leg. No real customer, sender or provider is contacted by anything in
 this repository's qualification of this feature.

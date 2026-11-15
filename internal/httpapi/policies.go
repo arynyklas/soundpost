@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"github.com/arynyklas/soundpost/internal/auth"
 	"github.com/arynyklas/soundpost/internal/control"
@@ -169,7 +170,12 @@ type PolicyWriteAnswer struct {
 }
 
 // Policies serves the policy reads and writes over the control store.
-type Policies struct{ directory Directory }
+type Policies struct {
+	directory Directory
+	// recording is the node's recording source (UseRecordingSource), which the
+	// rule routes check recording rules against; nil on a node that has none.
+	recording atomic.Pointer[recordingBinding]
+}
 
 // NewPolicies requires the committed-state reader.
 func NewPolicies(directory Directory) (*Policies, error) {
@@ -410,6 +416,8 @@ func (req PolicyRequest) command() (auth.AdminCommandRequest, error) {
 // scope.
 func RegisterPolicyRoutes(mux *http.ServeMux, authority *auth.Service, policies *Policies) {
 	registerDestinationRoutes(mux, authority, policies)
+	registerCutoverRoutes(mux, authority, policies)
+	registerRuleRoutes(mux, authority, policies)
 	mux.HandleFunc("POST /api/v1/policies", func(w http.ResponseWriter, r *http.Request) {
 		credential, err := artifactCredential(authority, w, r)
 		if err != nil {

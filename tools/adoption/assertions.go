@@ -3,6 +3,7 @@
 package main
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"reflect"
@@ -83,6 +84,8 @@ type journeyFrontendExpect struct {
 	debugSHA              model.Hash
 	frame                 model.Frame
 	original              JourneyOriginalPosition
+	occurrence            model.ID // zero: read the issue's newest mapped occurrences
+	errorHop              int      // chain element the error's span must be; -1: any verified chain span
 }
 
 func journeyParseID(label, value string) (model.ID, string) {
@@ -128,6 +131,18 @@ func journeyParseFrontend(l *JourneyFrontendLink) (journeyFrontendExpect, string
 	col := l.Frame.Column
 	e.frame = model.Frame{Module: l.Frame.Module, Function: l.Frame.Function, Artifact: l.Artifact, Line: l.Frame.Line, Column: &col, InApp: true}
 	e.original = l.Original
+	e.errorHop = -1
+	if l.Occurrence != "" {
+		if e.occurrence, bad = journeyParseID("occurrence", l.Occurrence); bad != "" {
+			return e, bad
+		}
+	}
+	if l.ErrorSpanHop != nil {
+		if *l.ErrorSpanHop < 0 || *l.ErrorSpanHop >= len(l.Chain) {
+			return e, "error span hop must name an element of the chain"
+		}
+		e.errorHop = *l.ErrorSpanHop
+	}
 	return e, ""
 }
 
@@ -409,32 +424,38 @@ func journeyAssertGateway(link *JourneyGatewayLink, org, project, trace model.ID
 
 // journeyAssertChain checks frontend -> API -> DB: element 0 is the parentless
 // request root and each next element a DIRECT child (by parent span ID) of one
-// resolved for the element before it.
-func journeyAssertChain(chain []JourneySpanMatch, org, project, trace model.ID, view httpapi.TraceView) []JourneyCheck {
+// resolved for the element before it. The second result holds, per chain
+// element, the IDs of the spans that satisfied it; it is nil unless every
+// element resolved.
+func journeyAssertChain(chain []JourneySpanMatch, org, project, trace model.ID, view httpapi.TraceView) ([]JourneyCheck, [][]model.SpanID) {
 	checks, ok := journeyTraceGate(org, project, trace, view)
 	if !ok {
-		return checks
+		return checks, nil
 	}
 	ix := newJourneyIndex(view.Path)
 	roots, rootCheck := journeyRoots(ix, chain[0])
 	checks = append(checks, rootCheck)
 	if !rootCheck.Passed {
-		return checks
+		return checks, nil
 	}
 	chosen := map[model.SpanID]bool{ix.spans[roots[0]].ID: true}
+	hops := [][]model.SpanID{{ix.spans[roots[0]].ID}}
 	anchors := journeySet(roots)
 	for _, m := range chain[1:] {
 		found, code := journeyResolve(ix, m, anchors, true)
 		if code != "" {
-			return append(checks, journeyBad(JourneyCheckDependency, code, "chain span is not a direct child of the previous hop: "+string(code)))
+			return append(checks, journeyBad(JourneyCheckDependency, code, "chain span is not a direct child of the previous hop: "+string(code))), nil
 		}
 		checks = append(checks, journeyOK(JourneyCheckDependency))
+		hop := make([]model.SpanID, 0, len(found))
 		for _, i := range found {
 			chosen[ix.spans[i].ID] = true
+			hop = append(hop, ix.spans[i].ID)
 		}
+		hops = append(hops, hop)
 		anchors = journeySet(found)
 	}
-	return append(checks, journeyClockCheck(view.Path, chosen))
+	return append(checks, journeyClockCheck(view.Path, chosen)), hops
 }
 
 // ---------------------------------------------------------------- release and source map
@@ -505,10 +526,115 @@ func journeyAssertIssue(exp journeyFrontendExpect, org, project model.ID, view h
 	if !ready || view.Grouping == nil || !journeySectionReady(view.Sections, "grouping") || !journeySectionReady(view.Sections, "evidence") {
 		return append(checks, journeyBad(JourneyCheckErrorMap, JourneyCodeViewNotReady, "issue evidence is not available to this credential"))
 	}
-	mapped := slices.ContainsFunc(view.Occurrences, func(o httpapi.OccurrenceEvidenceView) bool {
-		return o.BuildID != nil && *o.BuildID == exp.build && o.ReleaseID != nil && *o.ReleaseID == exp.release && o.Ancestry == "known"
-	})
+	mapped := slices.ContainsFunc(view.Occurrences, func(o httpapi.OccurrenceEvidenceView) bool { return journeyOccurrenceMapped(exp, o) })
 	return append(checks, journeyCheck(mapped, JourneyCheckErrorMap, JourneyCodeErrorNotMapped, "no stored occurrence of the issue is mapped to the expected build and release with known ancestry"))
+}
+
+// journeyOccurrenceMapped says whether a stored occurrence is mapped to the
+// expected build and release with known ancestry.
+func journeyOccurrenceMapped(exp journeyFrontendExpect, o httpapi.OccurrenceEvidenceView) bool {
+	return o.BuildID != nil && *o.BuildID == exp.build && o.ReleaseID != nil && *o.ReleaseID == exp.release && o.Ancestry == "known"
+}
+
+// journeyMaxOccurrenceReads bounds how many of an issue's occurrences are read
+// while looking for the one the request produced.
+const journeyMaxOccurrenceReads = 16
+
+// journeyOccurrenceCandidates are the occurrences to read for the same-request
+// proof: exactly the one the expectation names, or the issue's stored
+// occurrences (late history included) that are mapped to the expected build and
+// release, newest event first, at most journeyMaxOccurrenceReads.
+func journeyOccurrenceCandidates(exp journeyFrontendExpect, view httpapi.IssueView) []model.ID {
+	if exp.occurrence != (model.ID{}) {
+		return []model.ID{exp.occurrence}
+	}
+	var mapped []httpapi.OccurrenceEvidenceView
+	for _, list := range [][]httpapi.OccurrenceEvidenceView{view.Occurrences, view.LateHistory} {
+		for _, o := range list {
+			if journeyOccurrenceMapped(exp, o) {
+				mapped = append(mapped, o)
+			}
+		}
+	}
+	slices.SortStableFunc(mapped, func(a, b httpapi.OccurrenceEvidenceView) int {
+		if c := cmp.Compare(b.EventTime, a.EventTime); c != 0 {
+			return c
+		}
+		return cmp.Compare(b.ArrivalTime, a.ArrivalTime)
+	})
+	if len(mapped) > journeyMaxOccurrenceReads {
+		mapped = mapped[:journeyMaxOccurrenceReads]
+	}
+	ids := make([]model.ID, len(mapped))
+	for i, o := range mapped {
+		ids[i] = o.OccurrenceID
+	}
+	return ids
+}
+
+// journeyOccurrenceRead is one occurrence detail read: the view the product
+// answered, or the closed error of the read.
+type journeyOccurrenceRead struct {
+	ID   model.ID
+	View httpapi.ErrorOccurrenceView
+	Err  error
+}
+
+// journeyOccurrenceLinked says whether a stored error record proves the error
+// came from the verified request: the record itself names the expected build and
+// release, carries the expected trace, and its span is one of the spans the
+// request chain verified (the pinned chain element when the expectation pins
+// one). The ID of a trace the record merely echoes is not enough: the span must
+// be a span the trace view reported for that chain.
+func journeyOccurrenceLinked(exp journeyFrontendExpect, hops [][]model.SpanID, v httpapi.ErrorOccurrenceView) bool {
+	d := v.Detail
+	if v.State != httpapi.StateReady || d == nil || d.Build != exp.build || d.Release == nil || *d.Release != exp.release || d.Trace == nil || *d.Trace != exp.trace || d.Span == nil {
+		return false
+	}
+	if exp.errorHop >= 0 {
+		return exp.errorHop < len(hops) && slices.Contains(hops[exp.errorHop], *d.Span)
+	}
+	return slices.ContainsFunc(hops, func(hop []model.SpanID) bool { return slices.Contains(hop, *d.Span) })
+}
+
+// journeyAssertErrorTrace is the same-request proof of the frontend journey: some
+// stored occurrence of the issue links to the verified request chain (trace and
+// span), as the product's own error record says. Without it a mapped release and
+// a resolved frame show the error is in the build, not that this request raised it.
+func journeyAssertErrorTrace(exp journeyFrontendExpect, org, project model.ID, hops [][]model.SpanID, reads []journeyOccurrenceRead) []JourneyCheck {
+	if len(reads) == 0 {
+		return []JourneyCheck{journeyBad(JourneyCheckErrorTrace, JourneyCodeErrorNotLinked, "no occurrence of the issue was available to tie the error to the request")}
+	}
+	var checks []JourneyCheck
+	ready, errored := 0, 0
+	var readErr error // the closed error of the reads that failed; a refused credential dominates
+	for _, r := range reads {
+		switch {
+		case r.Err != nil:
+			errored++
+			if readErr == nil || errors.Is(r.Err, journeyErrDenied) {
+				readErr = r.Err
+			}
+			continue
+		case r.View.Org != org || r.View.Project != project || r.View.Issue != exp.issue || r.View.Occurrence != r.ID:
+			return append(checks, journeyBad(JourneyCheckScope, JourneyCodeScopeMismatch, "occurrence view does not echo the requested org, project, issue and occurrence"))
+		case r.View.State == httpapi.StateReady && r.View.Detail != nil:
+			ready++
+		}
+	}
+	switch {
+	case hops == nil:
+		return append(checks, journeyBad(JourneyCheckErrorTrace, JourneyCodeErrorNotLinked, "the request chain was not verified, so the error's span cannot be tied to it"))
+	case slices.ContainsFunc(reads, func(r journeyOccurrenceRead) bool {
+		return r.Err == nil && journeyOccurrenceLinked(exp, hops, r.View)
+	}):
+		return append(checks, journeyOK(JourneyCheckErrorTrace))
+	case ready == 0 && errored == len(reads):
+		return append(checks, journeyBad(JourneyCheckErrorTrace, journeyReadCode(readErr), "the occurrence detail could not be read: "+string(journeyReadCode(readErr))))
+	case ready == 0:
+		return append(checks, journeyBad(JourneyCheckErrorTrace, JourneyCodeViewNotReady, "occurrence detail is not readable (it needs an organization administrator with telemetry.read on the project)"))
+	}
+	return append(checks, journeyBad(JourneyCheckErrorTrace, JourneyCodeErrorNotLinked, "no stored occurrence of the issue carries the expected trace and a span of the verified request chain"))
 }
 
 // journeyAssertLocalMap cross-checks the expectation against the operator's own

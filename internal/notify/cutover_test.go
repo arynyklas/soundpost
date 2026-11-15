@@ -2011,6 +2011,51 @@ func TestCutoverSyncModesFollowsThePhaseAndRefusesNonsense(t *testing.T) {
 	}
 }
 
+// SyncMode is SyncModes for one subject: a state is brought to the phase's mode once,
+// by the same idempotent event, a subject with no state changes nothing, a state
+// already in the mode is left alone, and the arguments are validated first.
+func TestCutoverSyncModeMovesOneSubjectOnly(t *testing.T) {
+	fx := newCutoverFx(t)
+	fx.forward()
+	fx.decideOpening()
+	subject := notify.Entity{Kind: notify.EntityIncident, ID: incident.ID}
+	rolled := fx.advance(notify.CutoverRollbackQuiescing)
+	revision := fx.policyState().OwnerRevision
+	ob, scope, lease := fx.ob, fx.scope(), fx.lease()
+	moved, err := ob.SyncMode(fx.ctx, scope, lease, rolled.Phase, rolled.Cutover, rolled.Revision, fx.policy, subject, fx.clock.Now())
+	if err != nil || !moved {
+		t.Fatalf("sync of the one subject into rollback_quiescing: %v %v", moved, err)
+	}
+	if st := fx.policyState(); st.Mode != notify.ModeShadow || st.OwnerRevision != revision+1 {
+		t.Fatalf("after the sync: mode %s owner revision %d (was %d)", st.Mode, st.OwnerRevision, revision)
+	}
+	if moved, err = ob.SyncMode(fx.ctx, scope, lease, rolled.Phase, rolled.Cutover, rolled.Revision, fx.policy, subject, fx.clock.Now()); err != nil || moved {
+		t.Fatalf("a second sync: %v %v", moved, err)
+	}
+	// A subject that has no state yet is not an error and changes nothing.
+	if moved, err = ob.SyncMode(fx.ctx, scope, lease, rolled.Phase, rolled.Cutover, rolled.Revision, fx.policy, notify.Entity{Kind: notify.EntityIncident, ID: model.ID{0x7f}}, fx.clock.Now()); err != nil || moved {
+		t.Fatalf("a subject without a state: %v %v", moved, err)
+	}
+	for name, call := range map[string]func() (bool, error){
+		"an unknown phase": func() (bool, error) {
+			return ob.SyncMode(fx.ctx, scope, lease, "bogus", rolled.Cutover, rolled.Revision, fx.policy, subject, 1)
+		},
+		"a zero policy": func() (bool, error) {
+			return ob.SyncMode(fx.ctx, scope, lease, rolled.Phase, rolled.Cutover, rolled.Revision, model.ID{}, subject, 1)
+		},
+		"a zero subject": func() (bool, error) {
+			return ob.SyncMode(fx.ctx, scope, lease, rolled.Phase, rolled.Cutover, rolled.Revision, fx.policy, notify.Entity{Kind: notify.EntityIncident}, 1)
+		},
+		"a zero lease": func() (bool, error) {
+			return ob.SyncMode(fx.ctx, scope, notify.FenceToken{}, rolled.Phase, rolled.Cutover, rolled.Revision, fx.policy, subject, 1)
+		},
+	} {
+		if _, err := call(); code(err) != model.Invalid {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+}
+
 // racingStore performs a cutover transition between the outbox's read of the cutover
 // revision and its first claim commit: the situation the claim's owner revision decides.
 type racingStore struct {

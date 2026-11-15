@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"time"
 
@@ -98,6 +99,7 @@ const (
 	JourneyCodeFrameMismatch        JourneyCode = "frame_position_mismatch"
 	JourneyCodeLocalMapInconsistent JourneyCode = "local_map_inconsistent"
 	JourneyCodeErrorNotMapped       JourneyCode = "error_release_not_mapped"
+	JourneyCodeErrorNotLinked       JourneyCode = "error_trace_not_linked"
 	JourneyCodeFailedAttemptMissing JourneyCode = "failed_attempt_missing"
 	JourneyCodeFailedAttemptChanged JourneyCode = "failed_attempt_overwritten"
 	JourneyCodeRecoveryMissing      JourneyCode = "recovery_attempt_missing"
@@ -122,7 +124,7 @@ var journeyCodes = map[JourneyCode]bool{
 	JourneyCodeFailedAttemptMissing: true, JourneyCodeFailedAttemptChanged: true, JourneyCodeRecoveryMissing: true,
 	JourneyCodeAttemptIDsNotUnique: true, JourneyCodeAttemptOrder: true, JourneyCodeRunNotRecovered: true,
 	JourneyCodeHistoryErased: true, JourneyCodeCauseMismatch: true, JourneyCodeReplayIncomplete: true,
-	JourneyCodePrivacyViolation: true, JourneyCodeCapabilityMismatch: true,
+	JourneyCodePrivacyViolation: true, JourneyCodeCapabilityMismatch: true, JourneyCodeErrorNotLinked: true,
 }
 
 // JourneyCheckName is the closed set of checks a section can run.
@@ -142,6 +144,7 @@ const (
 	JourneyCheckFrame        JourneyCheckName = "frame_mapping"
 	JourneyCheckLocalMap     JourneyCheckName = "local_map"
 	JourneyCheckErrorMap     JourneyCheckName = "error_release"
+	JourneyCheckErrorTrace   JourneyCheckName = "error_trace"
 	JourneyCheckFailed       JourneyCheckName = "failed_attempt"
 	JourneyCheckRecovery     JourneyCheckName = "recovery_attempt"
 	JourneyCheckIdentity     JourneyCheckName = "attempt_identity"
@@ -272,6 +275,15 @@ type JourneyFrontendLink struct {
 	Original    JourneyOriginalPosition `json:"original"`
 	MapFile     string                  `json:"map_file,omitempty"`
 	MapBytes    []byte                  `json:"-"`
+
+	// Occurrence optionally names the issue occurrence of the error this request
+	// raised. Without it the newest occurrences of the issue that are mapped to
+	// Build and Release are read (at most journeyMaxOccurrenceReads) and one of
+	// them must carry Trace and a span of Chain.
+	Occurrence string `json:"occurrence,omitempty"`
+	// ErrorSpanHop optionally pins the chain element (0 = the request root) the
+	// error's span must be; unset, any span the chain verified is accepted.
+	ErrorSpanHop *int `json:"error_span_hop,omitempty"`
 }
 
 // JourneySchedulerLink is scheduler/background failure -> retry/recovery. Both
@@ -447,13 +459,16 @@ func journeyRunFrontend(ctx context.Context, rd JourneyReader, org, project mode
 		return true, nil
 	}
 
+	var hops [][]model.SpanID
 	trace, err := rd.Trace(ctx, httpapi.TraceBody{ScopeFields: httpapi.ScopeFields{Org: org}, Project: project, Trace: exp.trace, Window: exp.window})
 	if err != nil {
 		if _, ctxErr := fail(err); ctxErr != nil {
 			return JourneyResult{}, ctxErr
 		}
 	} else {
-		res.Checks = append(res.Checks, journeyAssertChain(link.Chain, org, project, exp.trace, trace)...)
+		var checks []JourneyCheck
+		checks, hops = journeyAssertChain(link.Chain, org, project, exp.trace, trace)
+		res.Checks = append(res.Checks, checks...)
 	}
 
 	release, err := rd.Release(ctx, httpapi.ReleaseBody{Org: org, Project: project, Release: exp.release})
@@ -480,7 +495,30 @@ func journeyRunFrontend(ctx context.Context, rd JourneyReader, org, project mode
 			return JourneyResult{}, ctxErr
 		}
 	} else {
-		res.Checks = append(res.Checks, journeyAssertIssue(exp, org, project, issue)...)
+		issueChecks := journeyAssertIssue(exp, org, project, issue)
+		res.Checks = append(res.Checks, issueChecks...)
+		// The same-request proof needs a readable, in-scope issue; otherwise the
+		// failed issue check above already says why.
+		if !slices.ContainsFunc(issueChecks, func(c JourneyCheck) bool {
+			return !c.Passed && (c.Code == JourneyCodeScopeMismatch || c.Code == JourneyCodeViewNotReady)
+		}) {
+			var reads []journeyOccurrenceRead
+			for _, id := range journeyOccurrenceCandidates(exp, issue) {
+				view, err := rd.Occurrence(ctx, httpapi.ErrorOccurrenceBody{Org: org, Project: project, Issue: exp.issue, Occurrence: id})
+				if err != nil {
+					if ctx.Err() != nil {
+						return JourneyResult{}, ctx.Err()
+					}
+					reads = append(reads, journeyOccurrenceRead{ID: id, Err: err})
+					continue
+				}
+				reads = append(reads, journeyOccurrenceRead{ID: id, View: view})
+				if journeyOccurrenceLinked(exp, hops, view) {
+					break
+				}
+			}
+			res.Checks = append(res.Checks, journeyAssertErrorTrace(exp, org, project, hops, reads)...)
+		}
 	}
 
 	checks, rows := journeyAssertLocalMap(link)
