@@ -1192,13 +1192,29 @@ func (r *shadowRun) conditionDelivery(sd shadowDel) string {
 }
 
 func shadowSeverity(s string) notify.Severity {
-	switch strings.ToLower(s) {
-	case "critical", "page", "fatal":
+	switch shadowConditionSeverity(s) {
+	case "critical":
 		return notify.SeverityCritical
-	case "major", "high", "error":
+	case "error":
 		return notify.SeverityMajor
 	}
 	return notify.SeverityMinor
+}
+
+// shadowConditionSeverity maps a legacy sender's free-text severity onto the closed condition set
+// (info, warning, error, critical) the reducer admits; the legacy text itself is never stored.
+func shadowConditionSeverity(s string) string {
+	switch strings.ToLower(s) {
+	case "critical", "page", "fatal":
+		return "critical"
+	case "major", "high", "error":
+		return "error"
+	case "warning", "warn", "minor", "medium":
+		return "warning"
+	case "info", "low":
+		return "info"
+	}
+	return s // anything else, the empty string included, stays invalid for the reducer
 }
 
 func shadowSourceState(status string) notify.SourceState {
@@ -1233,7 +1249,7 @@ func (r *shadowRun) applyCondition(sd shadowDel, ord int, in ShadowConditionInpu
 		r.conds[in.Condition], r.byEntity[id], r.condIDs[in.Condition] = c, in.Condition, id
 	}
 	event := model.ConditionEvent{Condition: c.id, Epoch: shadowDeriveID("epoch", r.digest, in.Epoch), Sequence: model.Uint64(in.Sequence), At: model.UnixNano(in.AtNS),
-		Status: in.Status, Severity: in.Severity, Labels: labels}
+		Status: in.Status, Severity: shadowConditionSeverity(in.Severity), Labels: labels}
 	next, err := conditions.Reduce(c.state, event)
 	if err != nil {
 		var f *model.Fault
