@@ -12,6 +12,7 @@ import (
 	"github.com/arynyklas/soundpost/internal/query"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -218,12 +219,14 @@ func TestInvestigateRestrictedSourceNeverLeaksToTelemetryOnlyReader(t *testing.T
 type fakeLinks struct {
 	available map[model.ID]bool
 	calls     int
+	lastKind  string
 }
 
 func (f *fakeLinks) Resolve(_ context.Context, _ auth.Scope, refs []link.Reference) ([]link.ResolvedReference, error) {
 	f.calls++
 	out := make([]link.ResolvedReference, len(refs))
 	for i, r := range refs {
+		f.lastKind = r.Kind
 		if f.available[r.ID] {
 			owned := r
 			out[i] = link.ResolvedReference{Reference: &owned, Available: true}
@@ -267,7 +270,7 @@ func TestInvestigateKindsReportTruthfulStates(t *testing.T) {
 		return inv.Investigate(e.ctx, scope, httpapi.InvestigationRequest{Kind: kind, Projects: []model.ID{p}, Target: target, Window: win, Limit: 10})
 	}
 	// Nothing for these kinds is built: never an empty success.
-	for _, kind := range []httpapi.InvestigationKind{httpapi.KindQueue, httpapi.KindIncident, httpapi.KindIssue, httpapi.KindRelease, httpapi.KindJob, httpapi.KindReplay, httpapi.KindProfile} {
+	for _, kind := range []httpapi.InvestigationKind{httpapi.KindQueue, httpapi.KindIncident, httpapi.KindIssue, httpapi.KindRelease, httpapi.KindJob} {
 		v, err := read(kind, nil)
 		if err != nil || v.State != httpapi.StateNotAvailable || v.Reason == "" || v.Kind != kind || v.Org != org || len(v.MetricNames) != 0 || v.Freshness != nil {
 			t.Fatalf("%s: %+v %v", kind, v, err)
@@ -276,15 +279,46 @@ func TestInvestigateKindsReportTruthfulStates(t *testing.T) {
 			t.Fatalf("%s: unbuilt kind answered as success", kind)
 		}
 	}
-	// Replay/profile need their own grant, which does not exist: they must not
-	// even probe for the target through the telemetry.read scope.
+	// Replay and profile need their own grant: without it (Investigate holds none) the answer is the one typed grant-required view and
+	// the target is never probed through the telemetry.read scope; a request without a target is invalid.
 	for _, kind := range []httpapi.InvestigationKind{httpapi.KindReplay, httpapi.KindProfile} {
-		if _, err := read(kind, &trace); err != nil {
-			t.Fatal(err)
+		v, err := read(kind, &trace)
+		if err != nil || v.State != httpapi.StateNotAvailable || v.Reason != httpapi.ReasonGrantRequired || v.Link != nil {
+			t.Fatalf("%s without the separate grant: %+v %v", kind, v, err)
+		}
+		if _, err := read(kind, nil); faultCode(err) != model.Invalid {
+			t.Fatalf("%s without a target: %v", kind, err)
 		}
 	}
 	if links.calls != 0 {
 		t.Fatal("replay/profile resolved a target under telemetry.read")
+	}
+	// With the grant the investigation navigates to the target: a Ready link of the requested kind, resolved as that kind; the other
+	// kind's grant, or an unresolvable target, never yields a link.
+	holds := func(kinds ...string) httpapi.TargetGrant {
+		return func(_ context.Context, _ model.ID, kind string) bool { return slices.Contains(kinds, kind) }
+	}
+	for _, kind := range []httpapi.InvestigationKind{httpapi.KindReplay, httpapi.KindProfile} {
+		req := httpapi.InvestigationRequest{Kind: kind, Projects: []model.ID{p}, Target: &trace, Window: win, Limit: 10}
+		v, err := inv.InvestigateGranted(e.ctx, scope, req, holds(string(kind)))
+		if err != nil || v.State != httpapi.StateReady || v.Link == nil || !v.Link.Available || v.Link.Kind != string(kind) || v.Link.ID != trace || v.Link.ProjectID != p || links.lastKind != string(kind) {
+			t.Fatalf("%s with the grant: %+v %v (resolved as %q)", kind, v, err, links.lastKind)
+		}
+		if st := sectionStates(v); st["link"] != httpapi.StateReady || len(v.Sections) != 1 {
+			t.Fatalf("%s sections: %+v", kind, v.Sections)
+		}
+		other := httpapi.KindProfile
+		if kind == httpapi.KindProfile {
+			other = httpapi.KindReplay
+		}
+		if v, err = inv.InvestigateGranted(e.ctx, scope, req, holds(string(other))); err != nil || v.State != httpapi.StateNotAvailable || v.Reason != httpapi.ReasonGrantRequired || v.Link != nil {
+			t.Fatalf("%s holding only the %s grant: %+v %v", kind, other, v, err)
+		}
+		missing := model.NewID()
+		req.Target = &missing
+		if _, err = inv.InvestigateGranted(e.ctx, scope, req, holds(string(kind))); faultCode(err) != model.NotFound {
+			t.Fatalf("%s: an unresolvable target must be not-found: %v", kind, err)
+		}
 	}
 	// Trace: link only when this scope resolves it; content is a separate not-built section.
 	v, err := read(httpapi.KindTrace, &trace)

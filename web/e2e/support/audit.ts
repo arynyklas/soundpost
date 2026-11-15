@@ -3,7 +3,7 @@
 // First-party DOM audits for the 05.09 accessibility spec. They SUPPLEMENT the real keyboard, focus and visual checks of
 // that spec and replace nothing: no third-party audit library is used. Each rule reports plain violations; an empty list is the
 // only passing result. The page function is self-contained (it is serialized into the browser).
-import type {Page} from '@playwright/test';
+import type {Locator,Page} from '@playwright/test';
 
 export interface Violation{rule:string;node:string;detail:string}
 
@@ -197,3 +197,31 @@ export async function tabStops(page:Page,max:number):Promise<Stop[]>{
 
 /** A stop shows where focus is when the browser draws a visible outline or a box shadow ring on it. */
 export const focusIndicated=(s:Stop):boolean=>(!s.outline.startsWith('none')&&!s.outline.endsWith(' 0px'))||(s.shadow!==''&&s.shadow!=='none');
+
+/**
+ * Whether the browser's Tab key reaches links at all. Chromium and Firefox do; WebKit on macOS and Windows skips them unless the
+ * platform preference "press Tab to highlight each item" is on (Linux WPE reaches them). Probed once per browser on a page of its own, so
+ * the answer is what the browser really does, not a guess from its name. The specs keep every assertion strict where Tab reaches
+ * links, and where it does not they move focus to a link the way the platform's own key (Option+Tab) would and say so.
+ */
+export async function tabReachesLinks(page:Page):Promise<boolean>{
+ // E2E_TAB_SKIPS_LINKS=1 makes the specs take the Tab-skips-links branch on a browser that reaches links, so that branch is exercised too.
+ if(process.env.E2E_TAB_SKIPS_LINKS==='1')return false;
+ const probe=await page.context().newPage();
+ try{
+  await probe.setContent('<button>b</button><a href="#x">a</a>');
+  await probe.evaluate(()=>(document.querySelector('button') as HTMLElement).focus());
+  await probe.keyboard.press('Tab');
+  return await probe.evaluate(()=>document.activeElement?.tagName==='A');
+ }finally{await probe.close();}
+}
+
+/**
+ * Focus a link the way a keyboard user's link key does where Tab skips links. A scripted focus matches :focus-visible (draws the ring)
+ * only when the browser is in keyboard modality and the previously focused element showed its ring, so a real Tab press (which lands on
+ * the next control Tab does reach) comes first, then the link is focused.
+ */
+export async function focusLinkByKeyboard(page:Page,link:Locator):Promise<void>{
+ await page.keyboard.press('Tab');
+ await link.focus();
+}

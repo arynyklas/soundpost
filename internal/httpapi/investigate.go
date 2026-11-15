@@ -67,7 +67,7 @@ func validInvestigation(req InvestigationRequest) error {
 	if req.Window.Start >= req.Window.End || req.Limit == 0 || req.Limit > MaxInvestigationLimit {
 		return model.Fail(model.Invalid)
 	}
-	if req.Target != nil && (*req.Target == (model.ID{}) || req.Kind == KindQueue) || req.Kind == KindTrace && req.Target == nil {
+	if req.Target != nil && (*req.Target == (model.ID{}) || req.Kind == KindQueue) || (req.Kind == KindTrace || req.Kind == KindReplay || req.Kind == KindProfile) && req.Target == nil {
 		return model.Fail(model.Invalid)
 	}
 	if req.Environment != nil && (*req.Environment == (model.ID{}) || req.Kind != KindService) {
@@ -79,10 +79,19 @@ func validInvestigation(req InvestigationRequest) error {
 	return nil
 }
 
-// Investigate returns the view of one typed request under scope. Every
-// requested project must be inside the scope; anything else is the same
-// NotFound a missing project gives.
+// TargetGrant reports whether the caller of a request holds the separate grant a target kind needs on one project (replay.read
+// for "replay", profiles.read for "profile").
+type TargetGrant func(ctx context.Context, project model.ID, kind string) bool
+
+// Investigate returns the view of one typed request under scope with no separate grant held: replay and profile requests are the
+// typed grant-required answer. Every requested project must be inside the scope; anything else is the same NotFound a missing
+// project gives.
 func (i *Investigator) Investigate(ctx context.Context, scope auth.Scope, req InvestigationRequest) (InvestigationView, error) {
+	return i.InvestigateGranted(ctx, scope, req, nil)
+}
+
+// InvestigateGranted is Investigate for a caller whose separate grants granted answers (nil: none).
+func (i *Investigator) InvestigateGranted(ctx context.Context, scope auth.Scope, req InvestigationRequest, granted TargetGrant) (InvestigationView, error) {
 	if err := validInvestigation(req); err != nil {
 		return InvestigationView{}, err
 	}
@@ -101,9 +110,25 @@ func (i *Investigator) Investigate(ctx context.Context, scope auth.Scope, req In
 	case KindTrace:
 		return i.trace(ctx, scope, req, view)
 	case KindReplay, KindProfile:
-		// Their own grants (replay.read, profiles.read) are not built, so a
-		// telemetry.read scope must not even probe whether the target exists.
-		return unavailable(view, ReasonGrantNotBuilt), nil
+		// Their own grants (replay.read, profiles.read) are separate from telemetry.read: a caller without the grant on
+		// every requested project gets one typed answer and the target is never probed, so a telemetry.read scope cannot
+		// learn whether a replay or profile exists.
+		if granted == nil {
+			return unavailable(view, ReasonGrantRequired), nil
+		}
+		for _, p := range req.Projects {
+			if !granted(ctx, p, string(req.Kind)) {
+				return unavailable(view, ReasonGrantRequired), nil
+			}
+		}
+		view, err := i.targetLink(ctx, scope, req, view, string(req.Kind))
+		if err != nil {
+			return InvestigationView{}, err
+		}
+		// The investigation gives the way to the target; the replay stream and the profile view are their own reads.
+		view.State = StateReady
+		view.Sections = []ViewSection{{Name: "link", State: StateReady}}
+		return view, nil
 	}
 	return unavailable(view, ReasonServiceNotBuilt), nil
 }
@@ -114,10 +139,12 @@ func unavailable(view InvestigationView, reason string) InvestigationView {
 	return view
 }
 
-func (i *Investigator) trace(ctx context.Context, scope auth.Scope, req InvestigationRequest, view InvestigationView) (InvestigationView, error) {
+// targetLink resolves req.Target as a record of kind in the requested projects under scope and sets view.Link; a target no project
+// resolves is the one NotFound.
+func (i *Investigator) targetLink(ctx context.Context, scope auth.Scope, req InvestigationRequest, view InvestigationView, kind string) (InvestigationView, error) {
 	refs := make([]link.Reference, len(req.Projects))
 	for n, p := range req.Projects {
-		refs[n] = link.Reference{Project: p, Kind: "trace", ID: *req.Target, Relation: link.RelationExplicit}
+		refs[n] = link.Reference{Project: p, Kind: kind, ID: *req.Target, Relation: link.RelationExplicit}
 	}
 	resolved, err := i.links.Resolve(ctx, scope, refs)
 	if err != nil {
@@ -125,12 +152,20 @@ func (i *Investigator) trace(ctx context.Context, scope auth.Scope, req Investig
 	}
 	for n, r := range resolved {
 		if n < len(refs) && r.Available && r.Reference != nil && r.Reference.ID == refs[n].ID && r.Reference.Project == refs[n].Project {
-			view.Link = &TargetLink{Kind: "trace", ProjectID: refs[n].Project, ID: refs[n].ID, Available: true}
+			view.Link = &TargetLink{Kind: kind, ProjectID: refs[n].Project, ID: refs[n].ID, Available: true}
 			break
 		}
 	}
 	if view.Link == nil {
 		return InvestigationView{}, model.Fail(model.NotFound)
+	}
+	return view, nil
+}
+
+func (i *Investigator) trace(ctx context.Context, scope auth.Scope, req InvestigationRequest, view InvestigationView) (InvestigationView, error) {
+	view, err := i.targetLink(ctx, scope, req, view, "trace")
+	if err != nil {
+		return InvestigationView{}, err
 	}
 	view.State, view.Reason = StateIncomplete, ReasonSectionsAbsent
 	view.Sections = []ViewSection{{Name: "link", State: StateReady}, {Name: "content", State: StateNotAvailable, Reason: ReasonViewNotBuilt}}
@@ -379,7 +414,10 @@ func RegisterInvestigateRoutes(mux *http.ServeMux, authority *auth.Service, inve
 			queryReply(w, nil, err)
 			return
 		}
-		view, err := investigator.Investigate(r.Context(), scope, body.InvestigationRequest)
+		granted := func(ctx context.Context, project model.ID, kind string) bool {
+			return holdsTargetGrant(ctx, authority, credential, scope.OrgID(), project, kind)
+		}
+		view, err := investigator.InvestigateGranted(r.Context(), scope, body.InvestigationRequest, granted)
 		if err == nil {
 			err = authority.Revalidate(r.Context(), scope)
 		}

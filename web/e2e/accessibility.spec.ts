@@ -4,7 +4,7 @@ import {test,expect,request as pwRequest,type Browser,type BrowserContext,type P
 import {mkdirSync} from 'node:fs';
 import {join} from 'node:path';
 import {adminCommand,createOrg,createProject,field,id,ingestError,login,onboardErrorSource,owner,postJson} from './support/real';
-import {auditDom,focusIndicated,tabStops,type Violation} from './support/audit';
+import {auditDom,focusIndicated,focusLinkByKeyboard,tabReachesLinks,tabStops,type Violation} from './support/audit';
 import {deepLink,seedJourney,type JourneySeed} from './support/journey';
 
 // Real server, real Chrome, real data (see support/journey.ts). The first-party DOM audits in support/audit.ts SUPPLEMENT the real
@@ -14,7 +14,10 @@ import {deepLink,seedJourney,type JourneySeed} from './support/journey';
 // NOT covered here, on purpose and stated (see docs/user/investigation-acceptance.md):
 //  - stale: no committed route returns a stale investigation view; the component is covered by the bun test src/app/accessibility.test.tsx;
 //  - error and rate_limited are produced by a transport-level fault (the browser is answered 500 / 429 for one request), not by the server.
-// Firefox and WebKit are configured in playwright.config.ts and are NOT installed on this host: they are not run.
+// Firefox and WebKit are configured in playwright.config.ts (E2E_BROWSER selects them in web/e2e-harness/h.sh). Where a browser's Tab key
+// skips links (WebKit on macOS and Windows without the platform preference; `tabReachesLinks` probes the real browser) the Tab-order
+// assertions about links are replaced by programmatic focus on the link plus the same focus-ring assertion; Chromium, Firefox and Linux
+// WebKit (which reach links) stay strict.
 test.describe.configure({mode:'serial'});
 let br:Browser,ctx:BrowserContext,owners:Page,seed:JourneySeed;
 const shots=process.env.SOUNDPOST_SHOT_DIR;
@@ -93,9 +96,20 @@ test('keyboard: the first Tab stop is the skip link, every stop shows a focus ri
  await visit(page,'traces',target(seed.traces.clean.trace));
  await page.evaluate(()=>{(document.activeElement as HTMLElement|null)?.blur();window.scrollTo(0,0);});
  await page.locator('body').evaluate((b)=>{b.setAttribute('tabindex','-1');b.focus();b.removeAttribute('tabindex');});
+ const linkTab=await tabReachesLinks(page);
  const stops=await tabStops(page,160);
- expect(stops.length).toBeGreaterThan(20);
- expect(stops[0]?.name).toBe('Skip to content');
+ if(linkTab){
+  expect(stops.length).toBeGreaterThan(20);
+  expect(stops[0]?.name).toBe('Skip to content');
+ }else{
+  // Tab skips links here: the controls are the stops; the skip link is focused programmatically and must still show a ring.
+  expect(stops.length).toBeGreaterThan(5);
+  const skip=page.getByRole('link',{name:'Skip to content'});
+  await focusLinkByKeyboard(page,skip);
+  await expect(skip).toBeFocused();
+  const ring=await skip.evaluate((e)=>{const s=getComputedStyle(e);return {outline:`${s.outlineStyle} ${s.outlineWidth}`,shadow:s.boxShadow};});
+  stops.push({tag:'a',name:'Skip to content',outline:ring.outline,shadow:ring.shadow,inView:true,path:'a.skip-link'});
+ }
  const unseen=stops.filter((s)=>!focusIndicated(s)).map((s)=>`${s.path} "${s.name}" outline=${s.outline} shadow=${s.shadow}`);
  expect(unseen).toEqual([]);
  expect(stops.filter((s)=>!s.inView).map((s)=>s.path)).toEqual([]);
@@ -106,7 +120,8 @@ test('keyboard: the skip link moves focus to the main landmark and the investiga
  await visit(page,'queue');
  const before=page.url();
  await page.locator('body').evaluate((b)=>{b.setAttribute('tabindex','-1');b.focus();b.removeAttribute('tabindex');});
- await page.keyboard.press('Tab');
+ if(await tabReachesLinks(page))await page.keyboard.press('Tab');
+ else await focusLinkByKeyboard(page,page.getByRole('link',{name:'Skip to content'}));
  await expect(page.getByRole('link',{name:'Skip to content'})).toBeFocused();
  await page.keyboard.press('Enter');
  await expect(page.locator('main')).toBeFocused();

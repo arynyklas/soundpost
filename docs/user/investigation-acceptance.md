@@ -72,8 +72,12 @@ page the app renders, and real keyboard checks. No third-party audit library was
   produced by a **transport fault injected in the browser** (one request answered 500 / 429) in `accessibility.spec.ts`; `error` is
   additionally observed **produced by the server** in `server-states.spec.ts` (every shard removed under a fault-tagged server, the
   real Explore query then shows the Error state, `role=alert`, assertive, clean audit). `rate_limited` cannot be produced by any
-  committed read route (no investigation read answers 429) and `stale` needs a minimum read cursor no console page sends, so
-  `rate_limited` stays injected and `stale` is covered only by the server-rendered unit test `web/src/app/accessibility.test.ts`.
+  committed read route a console investigation page calls (no such read answers 429: query budgets are 429 on the wire but the client
+  words them as an error on purpose, and the login throttle and upload quotas are not load states), so it stays injected. `stale` is the
+  query engine's read fence (a replica that has not applied a requested minimum cursor) and the console sends no minimum cursor; the
+  existing fault seam removes shards (error, partial) but cannot make a replica lag, so no console-visible server-produced stale exists;
+  the API-level stale answer is driven in `shard-loss.spec.ts` and the state itself is covered by the server-rendered unit test
+  `web/src/app/accessibility.test.ts` (wave 12 record, not widened into a product change).
 - Reduced motion: under `prefers-reduced-motion: reduce` no animation, transition or smooth scroll runs, even against an author rule
   that tries to animate (control: the same rule animates when motion is allowed). The rule itself already existed in `style.css`.
 - Conflict dialog: verified in Chrome on a real incident (opened by the runner from an ingested error, found through `POST /api/v1/queue`):

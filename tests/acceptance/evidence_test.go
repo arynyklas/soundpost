@@ -26,6 +26,7 @@ import (
 	"testing"
 	"time"
 
+	recorderfixtures "github.com/arynyklas/soundpost/fixtures/replays/recorder"
 	"github.com/arynyklas/soundpost/internal/appcore"
 	"github.com/arynyklas/soundpost/internal/auth"
 	"github.com/arynyklas/soundpost/internal/backup"
@@ -53,13 +54,8 @@ import (
 // exporter, the retention deletion saga, the backup/restore/authority drill.
 //
 // What is NOT real, and each is recorded as an unsatisfied row (never as success):
-//   - the browser recorder's own chunks (the closed format refuses them: a known
-//     cross-language gap), so the replay here is hand-chained through the closed format;
 //   - an SDK profile (no SDK profile reaches the backend); the profile is the real
-//     assembler/exporter fed constructed sanitized events, not perf-captured samples;
-//   - an issue grouped from the ingested occurrence (nothing turns an admitted
-//     occurrence into a GroupingIssue);
-//   - replay and profile investigation links (investigate answers grant_not_built).
+//     assembler/exporter fed constructed sanitized events, not perf-captured samples.
 //
 // The fixture directory comes from SOUNDPOST_SOURCEMAP_FIXTURE_DIR (the output of
 // `node fixtures/artifacts/generate.mjs <dir>`): a missing fixture is a failure,
@@ -81,6 +77,7 @@ func TestEvidenceRealFrameReplayAndScopeLifecycle(t *testing.T) {
 	n.traceInvestigateRows(r)
 	n.replayRows(r)
 	n.profileRows(r)
+	n.investigateReplayProfileRows(r)
 	n.isolationRows(r)
 	n.backupRow(r)
 	n.revokeStreamRow(r)
@@ -797,14 +794,48 @@ func (n *evNode) releaseIssueRows(r *evReport) {
 	}
 	r.add("release_registry_view", true, true, "admin reads the release bound to the exact build and artifact; project reader gets the typed release_records_need_org_admin")
 
-	// The issue route needs a grouped issue. Nothing in the tree turns an admitted
-	// occurrence into a GroupingIssue, so the only observable behaviour is the typed
-	// not-found of an unknown issue.
+	// The issue route reads what the leader-only issue producer (the one a served process runs, appcore.App.IssueProducer) grouped from the
+	// error occurrence ingested above. A control pass is run exactly as the served process runs it; nothing is seeded.
 	got = n.post(n.adminA, "/api/v1/evidence/issue", httpapi.IssueBody{Org: n.orgA, Project: n.projA, Issue: model.NewID()})
 	if got.status != 404 {
 		t.Fatalf("an unknown issue is not a typed not-found: %d %s", got.status, got.body)
 	}
-	r.add("issue_evidence_of_ingested_error", true, false, "no component groups an admitted occurrence into a GroupingIssue (internal/releases only migrates, internal/control stores): the occurrence cannot be read back through /api/v1/evidence/issue; an unknown issue is the typed 404")
+	workers, err := n.app.NewWorkers(appcore.WorkerConfig{Orgs: []model.ID{n.orgA}, Producers: []appcore.Producer{n.app.IssueProducer()}, Interval: 10 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	system, err := n.app.Auth.AuthorizeSystem(n.ctx, n.orgA, []model.ID{n.projA}, auth.IssuesWrite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var book control.IssueSnapshot
+	for range 100 {
+		if rep := workers.Tick(n.ctx); len(rep.Errors) != 0 {
+			t.Fatalf("issue producer pass: %+v", rep.Errors)
+		}
+		if book, err = n.app.Control.IssueBook(n.ctx, system, n.projA); err != nil {
+			t.Fatal(err)
+		}
+		if len(book.Issues) > 0 {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if len(book.Issues) != 1 {
+		t.Fatalf("the issue producer grouped %d issues from the one ingested error occurrence, want 1", len(book.Issues))
+	}
+	occurrence := n.errorBatch.Records[0].Payload.Error.Occurrence
+	issue := book.Issues[0]
+	got = n.post(n.adminA, "/api/v1/evidence/issue", httpapi.IssueBody{Org: n.orgA, Project: n.projA, Issue: issue.ID})
+	var iv httpapi.IssueView
+	// The view is Incomplete as a whole for an organization administrator without a telemetry read scope: the occurrence payload detail is a
+	// section of its own (occurrence_payload_view_not_built); the stored grouping evidence section is what this row is about.
+	decoded := json.Unmarshal(got.body, &iv) == nil
+	evidenceReady := slices.ContainsFunc(iv.Sections, func(s httpapi.ViewSection) bool { return s.Name == "evidence" && s.State == httpapi.StateReady })
+	if got.status != 200 || !decoded || !evidenceReady || iv.Grouping == nil || iv.Grouping.Fingerprint != issue.Fingerprint || len(iv.Occurrences) != 1 || iv.Occurrences[0].OccurrenceID != occurrence || iv.Occurrences[0].Fingerprint != issue.Fingerprint {
+		t.Fatalf("issue view of the grouped occurrence %s: %d %s", occurrence, got.status, got.body)
+	}
+	r.add("issue_evidence_of_ingested_error", true, true, "the error occurrence ingested over the real route was grouped by the real issue producer pass into one issue; /api/v1/evidence/issue reads its stored evidence section Ready with the same occurrence ID and the same fingerprint; an unknown issue is the typed 404")
 }
 
 // ---------------------------------------------------------------------------
@@ -826,15 +857,7 @@ func (n *evNode) traceInvestigateRows(r *evReport) {
 		t.Fatalf("authorized trace link from the error: %d %s", got.status, got.body)
 	}
 	r.add("trace_view_and_link", true, true, "the error's trace opens through /traces/view and /investigate (link available)")
-	for _, kind := range []string{"replay", "profile"} {
-		inv["kind"], inv["target"] = kind, n.smallReplay
-		got = n.post(n.analyst, "/api/v1/investigate", inv)
-		iv = httpapi.InvestigationView{}
-		if got.status != 200 || json.Unmarshal(got.body, &iv) != nil || iv.State != httpapi.StateNotAvailable || iv.Reason != httpapi.ReasonGrantNotBuilt || iv.Link != nil {
-			t.Fatalf("investigate %s must be the typed not_available: %d %s", kind, got.status, got.body)
-		}
-	}
-	r.add("investigate_replay_profile_links", true, false, "/api/v1/investigate answers grant_not_built for replay and profile targets: an error cannot navigate to its replay/profile through the investigation route (direct /replays/stream and /profiles/view reads are exercised separately)")
+	// The replay and profile targets of the error are read after they are ingested: investigateReplayProfileRows.
 }
 
 // ---------------------------------------------------------------------------
@@ -1084,7 +1107,7 @@ func (n *evNode) replayRows(r *evReport) {
 		t.Fatalf("a telemetry-only reader opened the replay stream: %d", st)
 	}
 	r.add("replay_closed_format_stream_and_gap", true, true, "hand-chained closed-format chunks through the real route; real stream shows an explicit missing_chunk gap and masked text only; raw text refused without echo")
-	r.add("replay_real_recorder_chunks", true, false, "the browser recorder's own chunks are refused by the Go validator (known cross-language gap): no recorder chunk was admitted, only closed-format chunks built here")
+	n.recorderChainRow(r, producer)
 	// Does the route enforce the closed-format chain? A first chunk that names a
 	// previous hash is rejected by replays.ValidateChunk (Invalid).
 	chainBad := newEvRecorder(model.NewID(), 1).next(t, true)
@@ -1892,4 +1915,79 @@ func (n *evNode) restoreProbeRow(r *evReport) {
 		return
 	}
 	r.add("restore_project_without_metric_series", true, false, fmt.Sprintf("activation of a restore whose project holds admitted batches but no metric series fails with %q while the same restore with one metric series succeeds: CommitQuotaReconciliation (internal/storage/snapshot.go) compares the certificate's per-project series digests, which exist for every project with consumed batches even when the series set is empty (line ~739), against a recompute that only creates an entry for projects holding metric records (line ~971): the restore of such a node cannot activate", err))
+}
+
+// recorderChainRow sends the chunks the real browser recorder emitted (fixtures/replays/recorder, generated by
+// packages/browser/test/replay-wire.test.ts) through the real ingest route, one batch each and in order, with no conversion, then reads the
+// replay back through the real stream: it must be one continuous chain carrying exactly the hashes the recorder computed in the browser.
+func (n *evNode) recorderChainRow(r *evReport, producer model.ID) {
+	t := n.t
+	t.Helper()
+	scenario, err := recorderfixtures.Load("session")
+	if err != nil {
+		t.Fatalf("recorder fixtures unreadable: %v", err)
+	}
+	chunks, err := scenario.Chunks()
+	if err != nil {
+		t.Fatalf("the closed Go schema refused the recorder's own chunks: %v", err)
+	}
+	hashes := make([]model.Hash, len(chunks))
+	for i := range chunks {
+		if hashes[i], err = replays.ChunkHash(chunks[i]); err != nil {
+			t.Fatalf("recorder chunk %d has no canonical hash: %v", i+1, err)
+		}
+		rec := model.Record{ID: model.NewID(), Kind: model.Replay, ObservedAt: chunks[i].Clock.Wall, Resource: n.res, Payload: model.Payload{Replay: &chunks[i]}}
+		raw, _ := json.Marshal(n.batchFor(n.projA, n.srcA, n.orgA, producer, rec))
+		if got := n.ingest(n.credA, raw); got.status != 200 {
+			t.Fatalf("the real ingest route refused recorder chunk %d: %d %s", i+1, got.status, got.body)
+		}
+	}
+	s, status, body := n.openStream(n.analyst, n.orgA, n.projA, chunks[0].Replay, false)
+	if status != 200 {
+		t.Fatalf("stream of the recorder replay: %d %s", status, body)
+	}
+	lines := n.drain(s)
+	s.close()
+	const want = "open C1 D2 D3 D4 C5 D6 end"
+	if got := evRender(lines); got != want {
+		t.Fatalf("the stored recorder replay read back as %q, want %q", got, want)
+	}
+	for _, l := range lines {
+		if (l.Type == "checkpoint" || l.Type == "delta") && (l.Sequence == nil || l.Hash == nil || *l.Sequence < 1 || int(*l.Sequence) > len(hashes) || *l.Hash != hashes[*l.Sequence-1]) {
+			t.Fatal("a stored recorder chunk came back with a hash other than the one the recorder computed")
+		}
+	}
+	r.add("replay_real_recorder_chunks", true, true, fmt.Sprintf("%d chunks emitted by the real recorder admitted unconverted over the real route and read back as %q with the recorder's own chain hashes", len(chunks), want))
+}
+
+// investigateReplayProfileRows: the error occurrence names a replay and a profile, both now stored; /api/v1/investigate navigates to
+// each for a caller who holds the separate grant (replay.read, profiles.read) and answers one typed grant-required view, with no link
+// and no probe of the target, for a caller who holds only the telemetry read.
+func (n *evNode) investigateReplayProfileRows(r *evReport) {
+	t := n.t
+	t.Helper()
+	window := map[string]any{"start": model.UnixNano(time.Now().Add(-time.Hour).UnixNano()), "end": model.UnixNano(time.Now().Add(time.Hour).UnixNano())}
+	errored := n.errorBatch.Records[0].Payload.Error
+	if errored.Replay == nil || errored.Profile == nil {
+		t.Fatal("the ingested error occurrence names no replay or profile")
+	}
+	targets := map[string]model.ID{"replay": *errored.Replay, "profile": *errored.Profile}
+	for _, kind := range []string{"replay", "profile"} {
+		inv := map[string]any{"org": n.orgA, "kind": kind, "projects": []model.ID{n.projA}, "target": targets[kind], "window": window, "limit": 10}
+		got := n.post(n.analyst, "/api/v1/investigate", inv)
+		var iv httpapi.InvestigationView
+		if got.status != 200 || json.Unmarshal(got.body, &iv) != nil || iv.State != httpapi.StateReady || iv.Link == nil || !iv.Link.Available || iv.Link.Kind != kind || iv.Link.ID != targets[kind] || iv.Link.ProjectID != n.projA {
+			t.Fatalf("investigate %s of the error's own %s with the separate grant: %d %s", kind, kind, got.status, got.body)
+		}
+		got = n.post(n.plain, "/api/v1/investigate", inv)
+		iv = httpapi.InvestigationView{}
+		if got.status != 200 || json.Unmarshal(got.body, &iv) != nil || iv.State != httpapi.StateNotAvailable || iv.Reason != httpapi.ReasonGrantRequired || iv.Link != nil || bytes.Contains(got.body, []byte(targets[kind].String())) {
+			t.Fatalf("investigate %s without the separate grant must be the typed grant-required view: %d %s", kind, got.status, got.body)
+		}
+		unknown := map[string]any{"org": n.orgA, "kind": kind, "projects": []model.ID{n.projA}, "target": model.NewID(), "window": window, "limit": 10}
+		if got = n.post(n.analyst, "/api/v1/investigate", unknown); got.status != 404 {
+			t.Fatalf("investigate %s of an unknown target: %d %s", kind, got.status, got.body)
+		}
+	}
+	r.add("investigate_replay_profile_links", true, true, "/api/v1/investigate navigates from the error's replay and profile IDs to each (Ready link) for the caller holding replay.read / profiles.read; a telemetry-only reader gets the typed separate_grant_required with no link and no echo of the target; an unknown target is the one 404")
 }

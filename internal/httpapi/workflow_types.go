@@ -70,7 +70,7 @@ const (
 // telemetry or caller text.
 const (
 	ReasonServiceNotBuilt = "service_not_built"
-	ReasonGrantNotBuilt   = "separate_grant_not_built"
+	ReasonGrantRequired   = "separate_grant_required"
 	ReasonViewNotBuilt    = "view_not_built"
 	ReasonSectionsAbsent  = "sections_not_available"
 	ReasonShardsMissing   = "shards_missing"

@@ -46,6 +46,7 @@ var EvidenceRowIDs = []string{
 	"serve_https_ready",
 	"artifact_upload_read_policy",
 	"error_occurrence_ingest",
+	"issue_evidence_of_ingested_error",
 	"frame_real_mapping",
 	"replay_closed_format_ingest",
 	"replay_stream_readable_with_gap",

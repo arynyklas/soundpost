@@ -5,6 +5,7 @@ import {mkdirSync,readFileSync,writeFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import {join} from 'node:path';
 import {login,owner} from './support/real';
+import {focusLinkByKeyboard,tabReachesLinks} from './support/audit';
 import {deepLink,realLink,seedJourney,seedRealJourney,type JourneySeed,type RealJourneySeed} from './support/journey';
 
 // Real server, real Chrome, real data. Two readers work through the investigation with the KEYBOARD ONLY (real Tab, Space, Enter and
@@ -27,10 +28,15 @@ const shots=process.env.SOUNDPOST_SHOT_DIR;
 const evidenceFile=process.env.SOUNDPOST_EVIDENCE_FILE;
 const evidence:Record<string,unknown>[]=[];
 
+let linkTab:boolean|undefined;
 /** Presses Tab (or Shift+Tab when the target lies before the focused element, as a person would) until `target` holds focus. The
  * keyboard is the only way the page moves. */
 async function keyTo(target:Locator,max=200):Promise<number>{
  await expect(target).toBeVisible();
+ linkTab??=await tabReachesLinks(page);
+ // Where Tab skips links (WebKit on macOS/Windows without the platform preference) a link is focused as that platform's own link key
+ // does; everywhere else Tab itself must reach it.
+ if(!linkTab&&await target.evaluate((e)=>e.tagName==='A'))await focusLinkByKeyboard(page,target);
  for(let i=0;i<max;i++){
   const where=await target.evaluate((e)=>{const a=document.activeElement;if(e===a)return 'here';if(!a||a===document.body)return 'forward';return (e.compareDocumentPosition(a)&Node.DOCUMENT_POSITION_FOLLOWING)!==0?'back':'forward';});
   if(where==='here')return i;

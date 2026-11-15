@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
@@ -28,6 +29,7 @@ import (
 
 	"github.com/arynyklas/soundpost/internal/auth"
 	"github.com/arynyklas/soundpost/internal/httpapi"
+	"github.com/arynyklas/soundpost/internal/issues"
 	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/replays"
 
@@ -510,6 +512,22 @@ func (s *evidenceServer) journey(fx *evidenceFixture) *evidenceRows {
 	if err != nil {
 		return fail("tenants", true, "analyst setup refused")
 	}
+	orgAdmin := &evidenceUser{site: newInstallSiteLike(s.site), id: model.NewID(), email: "orgadmin@evidence-smoke.invalid"}
+	for _, step := range []struct {
+		kind string
+		p    auth.AdminPayload
+	}{
+		{"create_user", auth.AdminPayload{ID: orgAdmin.id, Email: orgAdmin.email, Password: password}},
+		{"membership", auth.AdminPayload{UserID: orgAdmin.id, Enabled: true}},
+		{"org_admin", auth.AdminPayload{UserID: orgAdmin.id, Enabled: true}},
+	} {
+		if err = admin(orgA, step.kind, step.p); err != nil {
+			return fail("tenants", true, "organization administrator setup refused")
+		}
+	}
+	if status, raw, err = orgAdmin.site.post("/api/v1/login", map[string]string{"Email": orgAdmin.email, "Password": password, "Code": ""}, "", ""); requireSmokeResponse("login", status, 200, raw, err) != nil || json.Unmarshal(raw, &orgAdmin.session) != nil {
+		return fail("tenants", true, "organization administrator login refused")
+	}
 	revoked, err := newUser(orgA, "revoked", auth.ArtifactRead, auth.Read, httpapi.ReplayRead)
 	if err != nil {
 		return fail("tenants", true, "second reader setup refused")
@@ -595,6 +613,45 @@ func (s *evidenceServer) journey(fx *evidenceFixture) *evidenceRows {
 			rows.add("error_occurrence_ingest", true, false, "a message-bearing payload was admitted or echoed")
 		} else {
 			rows.add("error_occurrence_ingest", true, true, "real occurrence with exact build and artifact frame admitted over HTTPS; message-bearing payload refused without echo")
+		}
+	}
+
+	// The issue the leader-only issue producer of the served process makes from the occurrence just admitted: its identity is the grouping
+	// contract (issues.Fingerprint, then the issue ID over organization, project, version and fingerprint), so it is computed here and
+	// read through the real route as an organization administrator. The producer runs on the served process's own schedule.
+	{
+		fp, ferr := issues.Fingerprint(1, orgA, projA, occ)
+		if ferr != nil {
+			rows.add("issue_evidence_of_ingested_error", true, false, "harness: fingerprint of the ingested occurrence: "+ferr.Error())
+		} else {
+			h := sha256.New()
+			h.Write([]byte("soundpost.issue.v1"))
+			h.Write(orgA[:])
+			h.Write(projA[:])
+			h.Write([]byte{0, 1})
+			h.Write(fp[:])
+			var issueID model.ID
+			copy(issueID[:], h.Sum(nil))
+			ok, detail := false, "the served process never grouped the ingested occurrence into an issue within 90 s"
+			for deadline := time.Now().Add(90 * time.Second); time.Now().Before(deadline); time.Sleep(time.Second) {
+				st, rawIssue := s.post(orgAdmin, "/api/v1/evidence/issue", httpapi.IssueBody{Org: orgA, Project: projA, Issue: issueID})
+				if st == 404 {
+					continue
+				}
+				var iv httpapi.IssueView
+				if st != 200 || json.Unmarshal(rawIssue, &iv) != nil {
+					detail = fmt.Sprintf("issue read: status %d %s", st, truncate(rawIssue))
+					break
+				}
+				evidenceReady := slices.ContainsFunc(iv.Sections, func(s httpapi.ViewSection) bool { return s.Name == "evidence" && s.State == httpapi.StateReady })
+				if evidenceReady && iv.Grouping != nil && iv.Grouping.Fingerprint == model.Hash(fp) && len(iv.Occurrences) == 1 && iv.Occurrences[0].OccurrenceID == occ.Occurrence {
+					ok, detail = true, "the occurrence ingested over the real route was grouped by the served process's issue producer; /api/v1/evidence/issue reads its stored evidence section Ready with the same occurrence ID and fingerprint (the view as a whole is incomplete for an administrator without a telemetry read scope: the occurrence payload detail is a section of its own)"
+				} else {
+					detail = fmt.Sprintf("issue read does not match the ingested occurrence: state %q occurrences %d", iv.State, len(iv.Occurrences))
+				}
+				break
+			}
+			rows.add("issue_evidence_of_ingested_error", true, ok, detail)
 		}
 	}
 

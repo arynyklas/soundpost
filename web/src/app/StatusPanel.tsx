@@ -5,7 +5,7 @@ import { EVIDENCE_REASON } from '../evidence/model';
 
 const REASONS: Record<string, string> = {
  service_not_built: 'The service behind this view is not available in this installation yet.',
- separate_grant_not_built: 'Access to this data needs a separate grant that this installation does not offer yet.',
+ separate_grant_required: 'This data needs a separate grant (replay or profile access) that your account does not hold on this project.',
  view_not_built: 'This part of the view is not available yet.',
  service_not_selected: 'Open one service to see this part. A service list does not state health, dependencies or releases for every service at once.',
  resource_filter_unavailable: 'Telemetry cannot be narrowed to one service or environment by this installation, so no project-wide answer is shown in its place.',
