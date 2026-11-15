@@ -77,3 +77,22 @@ func TestOpenWiresThePolicyRoute(t *testing.T) {
 		t.Fatalf("POST /api/v1/policies without a credential answered %d, want 401 or 403", rec.Code)
 	}
 }
+
+// The default Open mounts the three input-adapter bridge routes (POST only).
+// Without a credential each must answer a refusal, never a 404/405.
+func TestOpenWiresTheInputAdapterRoutes(t *testing.T) {
+	app, err := appcore.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.Close()
+	mux := http.NewServeMux()
+	app.Register(mux)
+	for _, path := range []string{"/adapters/v1/prometheus/write", "/adapters/v1/loki/push", "/adapters/v1/conditions"} {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, path, strings.NewReader("{}")))
+		if rec.Code != http.StatusUnauthorized && rec.Code != http.StatusForbidden {
+			t.Fatalf("POST %s without a credential answered %d, want 401 or 403", path, rec.Code)
+		}
+	}
+}

@@ -48,33 +48,37 @@ func ingestReply(w http.ResponseWriter, r *http.Request, v any, e error) {
 	}
 	copyF := *f
 	copyF.RequestID = model.RequestCorrelationID(r.Context(), model.ID{})
-	status := 422
-	switch f.Code {
-	case model.Unauthenticated:
-		status = 401
-	case model.Forbidden:
-		status = 403
-	case model.NotFound:
-		status = 404
-	case model.Conflict:
-		status = 409
-	case model.TooLarge:
-		status = 413
-	case model.Unsupported:
-		status = 415
-	case model.Quota:
-		status = 429
-	case model.Unavailable, model.Corrupt, model.Timeout, model.Stale:
-		status = 503
-	case model.Cancelled:
-		status = 503
-	}
+	status := ingestStatus(f.Code)
 	if status == 429 || status == 503 {
 		copyF.Retryable = true
 		w.Header().Set("Retry-After", "1")
 	}
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(copyF)
+}
+
+// ingestStatus is the HTTP status of a source-facing fault. 429 and 503 are the
+// retryable answers; every other status is final for the same request.
+func ingestStatus(code model.Code) int {
+	switch code {
+	case model.Unauthenticated:
+		return 401
+	case model.Forbidden:
+		return 403
+	case model.NotFound:
+		return 404
+	case model.Conflict:
+		return 409
+	case model.TooLarge:
+		return 413
+	case model.Unsupported:
+		return 415
+	case model.Quota:
+		return 429
+	case model.Unavailable, model.Corrupt, model.Timeout, model.Stale, model.Cancelled:
+		return 503
+	}
+	return 422
 }
 func RegisterIngestRoutes(mux *http.ServeMux, a *auth.Service, s *ingest.Service) {
 	RegisterSourcePolicyRoutes(mux, a)

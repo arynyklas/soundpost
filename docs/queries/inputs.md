@@ -106,3 +106,71 @@ are static tokens; input content never appears in an error or report.
 harness encodes into the real wire formats. Expected values are authored from
 the format specifications; no upstream parser output was recorded, and every row
 says so in `binding_scope`.
+
+## HTTP bridge routes
+
+`internal/httpapi/input_adapters.go` mounts three POST-only migration bridges
+(`httpapi.RegisterInputAdapterRoutes`): `/adapters/v1/prometheus/write`,
+`/adapters/v1/loki/push` and `/adapters/v1/conditions`. They are explicit input
+bridges, not an upstream backend: no read route, storage layout or admin API of
+Prometheus or Loki is promised.
+
+- **Authority.** A bearer source credential only; a cookie, an `Origin` or an
+  `X-Soundpost-Source` header is refused. Project, source, policy revision and
+  producer (the credential ID) come from the authenticated source, never from the
+  body or a header. The resource of every record is the only entry of the source
+  policy's registry per dimension, or an explicit `X-Soundpost-Service`,
+  `-Environment`, `-Build`, `-Instance` header; the source policy still decides
+  at admission whether that resource may be emitted.
+- **Wire selection.** Remote-write: `Content-Type: application/x-protobuf`
+  with optional `;proto=io.prometheus.write.v2.Request` for v2, and
+  `Content-Encoding: snappy`. Loki: `application/json` (plain or
+  `Content-Encoding: gzip`) or `application/x-protobuf` with
+  `Content-Encoding: snappy`; the log template is `X-Soundpost-Template` plus
+  `X-Soundpost-Template-Revision` (or the policy's only template),
+  `X-Soundpost-Line-Field` (default `line`) and `X-Soundpost-Metadata-Fields`.
+  Conditions: `application/json`. Anything else is 415.
+- **ACK after every child receipt.** The decoded request becomes one-slot child
+  batches (see above); each is admitted under a freshly resolved grant. The sender
+  gets 200 only when every child has a durable receipt. Otherwise the answer is
+  the retryable status (429/503) of the first retryable child failure, or the
+  first failure's final status, with a body naming every child:
+  `{"adapter","admitted","failed","children":[{"batch_id","route_slot","records","status":"admitted|failed|not_attempted","receipt","fault"}]}`.
+  A failing child does not stop the others; an authority or cancellation failure
+  does (the remaining children are `not_attempted`).
+- **Partial-retry identity.** Child batch IDs derive from the request body and the
+  authenticated scope, so the same request retried after a lost response yields
+  the same children and the ledger answers each already-durable child with its
+  original receipt: nothing is duplicated, and an identical body from another
+  project's source gets different identities and lands only in its own project.
+- **Defaults.** Seven days of backfill and one hour of future skew, native
+  histograms preserved, exemplars and HELP text rejected (`InputAdapterConfig`
+  can choose `ExemplarsTraceLink` / `HelpDiscard`; the owner decision on those two
+  modes is open, see 02.08-W6). The v2 reply carries
+  `X-Prometheus-Remote-Write-{Samples,Histograms,Exemplars}-Written`.
+
+## Condition webhook
+
+`POST /adapters/v1/conditions` takes a closed, versioned body of C04 condition
+events and nothing else (`queryinput.DecodeConditions`):
+
+```json
+{"version":1,"events":[{
+  "condition":"checkout-latency", "epoch":"2026-11-15.1", "sequence":"42",
+  "event_time_ns":"1700000000000000000",
+  "status":"firing", "severity":"critical",
+  "labels":{"job":"api"}, "links":[]}]}
+```
+
+Unknown fields, duplicate keys, trailing data, free text, URLs and annotations
+are rejected; `condition` and `epoch` are the source's own names
+(`[A-Za-z0-9_.:-]`, at most 128 bytes); `sequence` is optional, a canonical
+decimal string at least 1 (without it the event is ordered by time and can never
+overwrite a newer sequenced one); `status` is `firing`, `recovered` or `unknown`
+(unknown is never a recovery) and `severity` one of `info`, `warning`, `error`,
+`critical`, the values admission accepts; labels must be approved by the source
+policy. Condition and epoch identities are derived from the names and bound to
+the authenticated project and source, so equal names from two sources never
+collide. One `(condition, epoch, sequence)` is one event: an identical repeat
+collapses, different content is a conflict and the whole request is rejected
+before admission.

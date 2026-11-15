@@ -1,6 +1,6 @@
 // Copyright 2026 Aryn Yklas
 // SPDX-License-Identifier: Apache-2.0
-package queryinput
+package queryinput_test
 
 import (
 	"bytes"
@@ -15,18 +15,12 @@ import (
 	"testing"
 	"time"
 
+	. "github.com/arynyklas/soundpost/internal/adapters/queryinput"
+	"github.com/arynyklas/soundpost/internal/adapters/queryinput/corpus"
 	"github.com/arynyklas/soundpost/internal/auth"
 	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/policy"
 )
-
-func reasonOf(err error) Reason {
-	var qe *Error
-	if errors.As(err, &qe) {
-		return qe.Reason
-	}
-	return ""
-}
 
 // compareInputs is the input gate that runs before any evaluator comparison.
 func compareInputs(t testing.TB, expected []any, actual []any) error {
@@ -47,78 +41,31 @@ func differential(t testing.TB, expected, actual []any, evaluate func() error) e
 // runCase decodes one corpus row and reports (batches, report, error).
 func (f *fixture) runCase(c corpusCase) ([]model.Batch, NormalizationReport, error) {
 	f.t.Helper()
-	cfg := f.profileFor(c)
-	var rep NormalizationReport
-	cfg.Report = func(r NormalizationReport) { rep = r }
-	batches, err := f.decode(c, cfg, c.wire(f.t, cfg.Loki.Encoding))
-	return batches, rep, err
+	out, err := f.Harness.RunCase(queryDir(f.t), c)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return out.Batches, out.Report, out.Err
 }
 
 func TestInputNormalizationPreservesKinds(t *testing.T) {
 	f := newFixture(t)
 	cases := loadCorpus(t)
-	if len(cases) < 30 {
-		t.Fatalf("corpus floor: %d rows", len(cases))
-	}
 	positive, negative := 0, 0
 	for _, c := range cases {
 		t.Run(c.ID, func(t *testing.T) {
-			f.t = t
-			if !strings.Contains(c.BindingScope, "authored from the format specifications") {
-				t.Fatalf("row lacks honest binding_scope: %q", c.BindingScope)
-			}
-			batches, rep, err := f.runCase(c)
 			if c.Expected.Error != nil {
 				negative++
-				if err == nil {
-					t.Fatalf("accepted input that must be rejected as %s", c.Expected.Error.Reason)
-				}
-				if reasonOf(err) != Reason(c.Expected.Error.Reason) {
-					t.Fatalf("reason %q want %q (%v)", reasonOf(err), c.Expected.Error.Reason, err)
-				}
-				var fault *model.Fault
-				if !errors.As(err, &fault) || fault.Code == "" {
-					t.Fatalf("rejection is not a typed model fault: %v", err)
-				}
-				return
+			} else {
+				positive++
 			}
-			positive++
-			if err != nil {
+			if _, err := f.Harness.CheckCase(queryDir(t), c); err != nil {
 				t.Fatal(err)
-			}
-			if err := compareInputs(t, c.Expected.Records, projectBatches(t, batches)); err != nil {
-				t.Fatalf("%v\nwant %v\ngot  %v", err, sortedProjection(t, c.Expected.Records), sortedProjection(t, projectBatches(t, batches)))
-			}
-			want := c.Expected.Report
-			if want == nil {
-				want = map[string]uint64{}
-			}
-			got := rep.Counts
-			if got == nil {
-				got = map[string]uint64{}
-			}
-			if !reflect.DeepEqual(want, got) {
-				t.Fatalf("report %v want %v", got, want)
-			}
-			// Every decoded batch must be admissible under the real source policy.
-			for _, b := range batches {
-				if len(b.Records) == 0 || len(b.Records) > 512 {
-					t.Fatalf("batch size %d", len(b.Records))
-				}
-				if _, err := policy.Normalize(f.grant(), b); err != nil {
-					t.Fatalf("decoded batch is not admissible: %v", err)
-				}
-				for _, r := range b.Records {
-					slot, _ := model.OwnerSlot(f.org, f.project, f.source, b.Producer, r)
-					if slot != b.RouteSlot {
-						t.Fatal("batch spans more than one owner slot")
-					}
-				}
 			}
 		})
 	}
-	if positive < 7 || negative < 20 {
-		t.Fatalf("corpus row floor: positive %d negative %d", positive, negative)
+	if len(cases) < corpus.CorpusMinRows || positive < corpus.CorpusMinPositive || negative < corpus.CorpusMinNegative {
+		t.Fatalf("corpus floor: %d rows, positive %d negative %d", len(cases), positive, negative)
 	}
 }
 
@@ -354,7 +301,7 @@ func TestAdapterScopeAndRawPolicy(t *testing.T) {
 	}
 	unknown := f.profile()
 	unknown.Loki.TemplateID = "no.such.template"
-	body := lokiBody(t, "alpha").wire(t, EncodingJSON)
+	body := wireOf(t, lokiBody(t, "alpha"), EncodingJSON)
 	nb, err := DecodeLokiPush(f.ctx, f.grant(), bytes.NewReader(body), unknown)
 	if err != nil {
 		t.Fatal(err)
@@ -430,24 +377,24 @@ func TestAdapterScopeAndRawPolicy(t *testing.T) {
 		"gzip truncated": {func() error {
 			c := bad
 			c.Loki.Encoding = EncodingJSONGzip
-			z := gz(lokiBody(t, "alpha").wire(t, EncodingJSON))
+			z := gz(wireOf(t, lokiBody(t, "alpha"), EncodingJSON))
 			_, err := DecodeLokiPush(f.ctx, f.grant(), bytes.NewReader(z[:len(z)-6]), c)
 			return err
 		}, ReasonCompression},
 		"line above limit": {func() error {
-			_, err := DecodeLokiPush(f.ctx, f.grant(), bytes.NewReader(lokiBody(t, strings.Repeat("a", 5000)).wire(t, EncodingJSON)), bad)
+			_, err := DecodeLokiPush(f.ctx, f.grant(), bytes.NewReader(wireOf(t, lokiBody(t, strings.Repeat("a", 5000)), EncodingJSON)), bad)
 			return err
 		}, ReasonTooLarge},
 		"label value above limit": {func() error {
 			c := bad
 			c.Limits.MaxLabelValueBytes = 2 // stream label value "web" is 3 bytes
-			_, err := DecodeLokiPush(f.ctx, f.grant(), bytes.NewReader(lokiBody(t, "alpha").wire(t, EncodingJSON)), c)
+			_, err := DecodeLokiPush(f.ctx, f.grant(), bytes.NewReader(wireOf(t, lokiBody(t, "alpha"), EncodingJSON)), c)
 			return err
 		}, ReasonLimit},
 		"wire body above limit": {func() error {
 			c := bad
 			c.Limits.MaxCompressedBytes = 16
-			_, err := DecodeLokiPush(f.ctx, f.grant(), bytes.NewReader(lokiBody(t, "alpha").wire(t, EncodingJSON)), c)
+			_, err := DecodeLokiPush(f.ctx, f.grant(), bytes.NewReader(wireOf(t, lokiBody(t, "alpha"), EncodingJSON)), c)
 			return err
 		}, ReasonTooLarge},
 		"gzip bomb above decoded limit": {func() error {
@@ -476,7 +423,7 @@ func TestNormalizationPrecedesDifferential(t *testing.T) {
 	check := func(id string, mutate func([]byte) []byte) error {
 		c := corpusByID(t, id)
 		cfg := f.profileFor(c)
-		body := c.wire(t, cfg.Loki.Encoding)
+		body := wireOf(t, c, cfg.Loki.Encoding)
 		if mutate != nil {
 			body = mutate(body)
 		}
@@ -499,7 +446,7 @@ func TestNormalizationPrecedesDifferential(t *testing.T) {
 	dropped := func([]byte) []byte {
 		c := corpusByID(t, "input-remote-write-v2-lossless-kinds")
 		var in semRW
-		if err := json.Unmarshal(c.semantic(t), &in); err != nil {
+		if err := json.Unmarshal(semanticOf(t, c), &in); err != nil {
 			t.Fatal(err)
 		}
 		kept := in.Timeseries[:0]
@@ -518,7 +465,7 @@ func TestNormalizationPrecedesDifferential(t *testing.T) {
 	rounded := func([]byte) []byte {
 		c := corpusByID(t, "input-loki-push-json-equal-time-multiplicity")
 		var in semLoki
-		if err := json.Unmarshal(c.semantic(t), &in); err != nil {
+		if err := json.Unmarshal(semanticOf(t, c), &in); err != nil {
 			t.Fatal(err)
 		}
 		for si := range in.Streams {
@@ -666,7 +613,7 @@ func TestHostileInputsAreBoundedAndTyped(t *testing.T) {
 	for _, id := range []string{"input-remote-write-v1-lossless-kinds", "input-remote-write-v2-lossless-kinds", "input-openmetrics-families-created-exemplar", "input-loki-push-json-equal-time-multiplicity", "input-loki-push-json-gzip-equal-time-multiplicity", "input-loki-push-protobuf-snappy-equal-time-multiplicity"} {
 		c := corpusByID(t, id)
 		cfg := f.profileFor(c)
-		seeds[id] = c.wire(t, cfg.Loki.Encoding)
+		seeds[id] = wireOf(t, c, cfg.Loki.Encoding)
 	}
 	rng := rand.New(rand.NewSource(20261110))
 	var before, after runtime.MemStats

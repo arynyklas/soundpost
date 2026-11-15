@@ -952,5 +952,80 @@
       "sha256": "ca66dd2de12674ed76bb4fbdb1743ef54e48421e46b53398de349404a5693826",
       "policy": "Independently authored rules; factual upstream names/signatures/source-location hashes only."
     }
+  ],
+  "adapter_formats_policy": "Adapter wire-format provenance: factual field numbers/grammar facts only; no upstream code, proto text or spec text is copied into the product. Each entry pins the exact upstream commit, the sha256 of the exact bytes fetched from url on 2026-11-15, and the SPDX licence taken from the LICENSE file actually present at that commit (license_path/license_sha256). The decoders and encoders are first-party. Loki pkg/push carries its own Apache-2.0 LICENSE; the Loki repository root LICENSE is AGPL-3.0 and is not used.",
+  "adapter_formats": [
+    {
+      "id": "remote_write_v1:3.1.0:prompb/types.proto", "format": "remote_write_v1", "upstream": "prometheus/prometheus", "ref": "v3.1.0",
+      "commit": "7086161a93b262aa0949dbf2aba15a5a7b13e0a3", "path": "prompb/types.proto",
+      "url": "https://raw.githubusercontent.com/prometheus/prometheus/7086161a93b262aa0949dbf2aba15a5a7b13e0a3/prompb/types.proto",
+      "sha256": "8a5bbe5e908327875f21108fbda9296678f333392dd12d887f7687ff58e25aea", "spdx_license": "Apache-2.0",
+      "license_path": "LICENSE", "license_sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+      "used_for": "Remote-write v1 message field numbers and wire types (TimeSeries, Label, Sample, Exemplar, Histogram, MetricMetadata) used by the first-party decoder in internal/adapters/queryinput/remote_write.go and the authored test encoders; no code copied."
+    },
+    {
+      "id": "remote_write_v1:3.1.0:prompb/remote.proto", "format": "remote_write_v1", "upstream": "prometheus/prometheus", "ref": "v3.1.0",
+      "commit": "7086161a93b262aa0949dbf2aba15a5a7b13e0a3", "path": "prompb/remote.proto",
+      "url": "https://raw.githubusercontent.com/prometheus/prometheus/7086161a93b262aa0949dbf2aba15a5a7b13e0a3/prompb/remote.proto",
+      "sha256": "489d69b2a18db3394dc471ca9d4acf984f202b90b7fc89cdd6df605fb29135cb", "spdx_license": "Apache-2.0",
+      "license_path": "LICENSE", "license_sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+      "used_for": "WriteRequest field numbers (timeseries=1, metadata=3) used by the first-party remote-write v1 decoder; no code copied."
+    },
+    {
+      "id": "remote_write_v1:3.13.5:prompb/types.proto", "format": "remote_write_v1", "upstream": "prometheus/prometheus", "ref": "v3.13.5",
+      "commit": "f497435984d1ca1d84cda5ed309387ac2eb1f8f6", "path": "prompb/types.proto",
+      "url": "https://raw.githubusercontent.com/prometheus/prometheus/f497435984d1ca1d84cda5ed309387ac2eb1f8f6/prompb/types.proto",
+      "sha256": "e89cd64c7b7131c3fc5305272c0716ba203636795a8e4e55bdec64c92106bbfe", "spdx_license": "Apache-2.0",
+      "license_path": "LICENSE", "license_sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+      "used_for": "Remote-write v1 message field numbers and wire types as of Prometheus 3.13.5, checked against the 3.1.0 numbering for the first-party decoder; no code copied."
+    },
+    {
+      "id": "remote_write_v1:3.13.5:prompb/remote.proto", "format": "remote_write_v1", "upstream": "prometheus/prometheus", "ref": "v3.13.5",
+      "commit": "f497435984d1ca1d84cda5ed309387ac2eb1f8f6", "path": "prompb/remote.proto",
+      "url": "https://raw.githubusercontent.com/prometheus/prometheus/f497435984d1ca1d84cda5ed309387ac2eb1f8f6/prompb/remote.proto",
+      "sha256": "489d69b2a18db3394dc471ca9d4acf984f202b90b7fc89cdd6df605fb29135cb", "spdx_license": "Apache-2.0",
+      "license_path": "LICENSE", "license_sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+      "used_for": "WriteRequest field numbers as of Prometheus 3.13.5 (byte-identical to 3.1.0); no code copied."
+    },
+    {
+      "id": "remote_write_v2:3.1.0:prompb/io/prometheus/write/v2/types.proto", "format": "remote_write_v2", "upstream": "prometheus/prometheus", "ref": "v3.1.0",
+      "commit": "7086161a93b262aa0949dbf2aba15a5a7b13e0a3", "path": "prompb/io/prometheus/write/v2/types.proto",
+      "url": "https://raw.githubusercontent.com/prometheus/prometheus/7086161a93b262aa0949dbf2aba15a5a7b13e0a3/prompb/io/prometheus/write/v2/types.proto",
+      "sha256": "772846f0991cede7634cbbba1b978ae0412e04ceb9658242d2864b75285c67c8", "spdx_license": "Apache-2.0",
+      "license_path": "LICENSE", "license_sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+      "used_for": "Remote-write v2 Request/TimeSeries/Sample/Histogram/Metadata field numbers and the symbols table layout used by the first-party decoder; no code copied."
+    },
+    {
+      "id": "remote_write_v2:3.13.5:prompb/io/prometheus/write/v2/types.proto", "format": "remote_write_v2", "upstream": "prometheus/prometheus", "ref": "v3.13.5",
+      "commit": "f497435984d1ca1d84cda5ed309387ac2eb1f8f6", "path": "prompb/io/prometheus/write/v2/types.proto",
+      "url": "https://raw.githubusercontent.com/prometheus/prometheus/f497435984d1ca1d84cda5ed309387ac2eb1f8f6/prompb/io/prometheus/write/v2/types.proto",
+      "sha256": "a34d320a205d86b18000231644d144a899f9b9031ce472cbe62e5dba1bc756d1", "spdx_license": "Apache-2.0",
+      "license_path": "LICENSE", "license_sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+      "used_for": "Remote-write v2 field numbers as of Prometheus 3.13.5 (differs from 3.1.0 bytes; numbering used by the decoder re-read at this pin); no code copied."
+    },
+    {
+      "id": "openmetrics_1_0:specification/OpenMetrics.md", "format": "openmetrics_1_0", "upstream": "prometheus/OpenMetrics", "ref": "main",
+      "commit": "b299efb0524d1efa1cb968e44dbb67ef4cf96252", "path": "specification/OpenMetrics.md",
+      "url": "https://raw.githubusercontent.com/prometheus/OpenMetrics/b299efb0524d1efa1cb968e44dbb67ef4cf96252/specification/OpenMetrics.md",
+      "sha256": "3115ed69476ddb5e4b64ebf363f1a8f5d0f0a7cc2a6263ea612360d5357f877e", "spdx_license": "Apache-2.0",
+      "license_path": "LICENSE", "license_sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+      "used_for": "OpenMetrics 1.0 text exposition grammar read to author the first-party parser in internal/adapters/queryinput/openmetrics.go; the repository was formerly OpenObservability/OpenMetrics (now prometheus/OpenMetrics); no spec text or code copied."
+    },
+    {
+      "id": "loki_push:pkg/push/push.proto", "format": "loki_push", "upstream": "grafana/loki", "ref": "v3.5.2",
+      "commit": "257d2f62bf8a81b44dea6fe88968d1d28c8e01e7", "path": "pkg/push/push.proto",
+      "url": "https://raw.githubusercontent.com/grafana/loki/257d2f62bf8a81b44dea6fe88968d1d28c8e01e7/pkg/push/push.proto",
+      "sha256": "47456eccd4f53369c8abf26d490058b48ed0b02c41a76e1fdc1b0ff8bc594aee", "spdx_license": "Apache-2.0",
+      "license_path": "pkg/push/LICENSE", "license_sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "used_for": "PushRequest/Stream/Entry/LabelPair field numbers used by the first-party Loki push decoder in internal/adapters/queryinput/loki_push.go; licence taken from the pkg/push/LICENSE present at this commit (Apache-2.0), not the AGPL-3.0 repository root; no code copied."
+    },
+    {
+      "id": "snappy_block:format_description.txt", "format": "snappy_block", "upstream": "google/snappy", "ref": "main",
+      "commit": "946606459314e55d029c85f9a8c46f8809467f0f", "path": "format_description.txt",
+      "url": "https://raw.githubusercontent.com/google/snappy/946606459314e55d029c85f9a8c46f8809467f0f/format_description.txt",
+      "sha256": "1c0b26655d222a24d83707cea12611fa224cc3b128399976bb3fbee2a02fc05a", "spdx_license": "BSD-3-Clause",
+      "license_path": "COPYING", "license_sha256": "55172044f7e241207117448a4d9d6ba1d0925c8ad66b5d4c08c70adfa9cc3de6",
+      "used_for": "Snappy block format (varint length, literal/copy tags) read to write the product's own first-party bounded decoder in internal/adapters/queryinput/remote_write.go; google/snappy code is neither linked nor copied."
+    }
   ]
 }

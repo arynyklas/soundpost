@@ -578,6 +578,8 @@ func normalizeRecords(format string, in []model.Record, cfg InputProfile) ([]mod
 	var rep NormalizationReport
 	metrics := make([]keyedRecord, 0, len(in))
 	logs := make([]model.Record, 0)
+	conditions := make([]model.Record, 0)
+	seenEvent := map[string][]byte{}
 	seenID := map[model.ID][]byte{}
 	seenPoint := map[string][]byte{}
 	for i := range in {
@@ -640,6 +642,37 @@ func normalizeRecords(format string, in []model.Record, cfg InputProfile) ([]mod
 			}
 			seenID[r.ID] = []byte(sig)
 			logs = append(logs, r)
+		case model.Condition:
+			if r.Payload.Condition == nil {
+				return nil, rep, fail(format, ReasonMalformed, "condition_payload")
+			}
+			c := *r.Payload.Condition
+			raw, err := model.CanonicalJSON(c)
+			if err != nil {
+				return nil, rep, fail(format, ReasonMalformed, "condition_encoding")
+			}
+			sig := string(u64bytes(uint64(r.ObservedAt))) + string(raw)
+			if prev, ok := seenID[r.ID]; ok {
+				if string(prev) != sig {
+					return nil, rep, fail(format, ReasonConflict, "record_id")
+				}
+				rep.add(ReportExactDuplicateCollapsed, 1)
+				continue
+			}
+			seenID[r.ID] = []byte(sig)
+			if c.Sequence > 0 {
+				// One (condition, epoch, sequence) is one event: a replay with other content is a conflict.
+				key := string(c.Condition[:]) + string(c.Epoch[:]) + string(u64bytes(uint64(c.Sequence)))
+				if prev, ok := seenEvent[key]; ok {
+					if string(prev) != sig {
+						return nil, rep, fail(format, ReasonConflict, "condition_sequence")
+					}
+					rep.add(ReportExactDuplicateCollapsed, 1)
+					continue
+				}
+				seenEvent[key] = []byte(sig)
+			}
+			conditions = append(conditions, r)
 		default:
 			return nil, rep, fail(format, ReasonUnrepresentable, "record_kind")
 		}
@@ -668,7 +701,8 @@ func normalizeRecords(format string, in []model.Record, cfg InputProfile) ([]mod
 	for _, k := range metrics {
 		out = append(out, k.rec)
 	}
-	return append(out, logs...), rep, nil
+	out = append(out, logs...)
+	return append(out, conditions...), rep, nil
 }
 
 func normalizeMetric(format string, m *model.MetricPoint, ts model.UnixNano, cfg InputProfile, rep *NormalizationReport) error {

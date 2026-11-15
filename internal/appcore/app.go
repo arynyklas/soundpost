@@ -4,6 +4,7 @@ package appcore
 
 import (
 	"context"
+	"github.com/arynyklas/soundpost/internal/adapters/queryinput"
 	"github.com/arynyklas/soundpost/internal/artifacts"
 	"github.com/arynyklas/soundpost/internal/auth"
 	"github.com/arynyklas/soundpost/internal/control"
@@ -341,6 +342,8 @@ func (a *App) RestoreReady() error {
 }
 func (a *App) Register(mux *http.ServeMux) {
 	httpapi.RegisterIngestRoutes(mux, a.Auth, a.Ingest)
+	// D23: HELP text is discarded (counted in the normalization report), exemplars stay rejected.
+	httpapi.RegisterInputAdapterRoutes(mux, a.Auth, a.Ingest, httpapi.InputAdapterConfig{Help: queryinput.HelpDiscard})
 	httpapi.RegisterCapabilityRoutes(mux, a.Auth)
 	httpapi.RegisterExportRoutes(mux, a.Auth, a.Exports)
 	httpapi.RegisterQueryRoutes(mux, a.Auth, a.Query)

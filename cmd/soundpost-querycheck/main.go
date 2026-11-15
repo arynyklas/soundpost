@@ -31,6 +31,9 @@ func run() error {
 	if os.Args[1] == "compare" {
 		return runCompare(os.Args[2:])
 	}
+	if os.Args[1] == "normalize" {
+		return runNormalize(os.Args[2:])
+	}
 	if os.Args[1] == "adapter" {
 		if len(os.Args) != 3 {
 			return fmt.Errorf("adapter requires exact profile ID")
