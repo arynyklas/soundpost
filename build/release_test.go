@@ -274,3 +274,77 @@ func TestVerifyInputsMissingToolchainMessages(t *testing.T) {
 		t.Fatalf("offline module cache message: %v", err)
 	}
 }
+
+func pnpmPins(integrity string) pins {
+	var p pins
+	p.Pnpm = "10.20.0"
+	p.PnpmTarball.URL = "https://registry.example/pnpm-10.20.0.tgz"
+	p.PnpmTarball.Integrity = integrity
+	p.Go.LinuxARM64.CrossBuiltFrom = "linux_amd64"
+	p.Go.LinuxARM64.URL = "https://go.example/go.linux-arm64.tar.gz"
+	p.Go.LinuxARM64.SHA256 = strings.Repeat("b", 64)
+	return p
+}
+
+func TestPnpmPinNeedsIntegrityMatchingVersionAndArm64Statement(t *testing.T) {
+	root := t.TempDir()
+	tarball := filepath.Join(root, "pnpm.tgz")
+	write(t, tarball, "pnpm tarball bytes")
+	t.Setenv("SOUNDPOST_PNPM_TARBALL", tarball)
+	good, err := fileIntegrity(tarball)
+	if err != nil || !validIntegrity(good) {
+		t.Fatalf("%q %v", good, err)
+	}
+	write(t, filepath.Join(root, "package.json"), `{"packageManager":"pnpm@10.20.0"}`)
+
+	var in Inputs
+	if err = verifyPnpmPin(root, pnpmPins(good), &in); err != nil || in.PnpmTarball != "verified" || in.PnpmIntegrity != good || in.GoARM64 == "" {
+		t.Fatalf("good pin: %+v %v", in, err)
+	}
+	other, _ := fileIntegrity(filepath.Join(root, "package.json"))
+	if err = verifyPnpmPin(root, pnpmPins(other), &in); err == nil || !strings.Contains(err.Error(), "does not match the pin") {
+		t.Fatalf("a tarball that differs from the pin was accepted: %v", err)
+	}
+	if err = verifyPnpmPin(root, pnpmPins("sha512-short"), &in); err == nil || !strings.Contains(err.Error(), "integrity") {
+		t.Fatalf("a short integrity was accepted: %v", err)
+	}
+	noArm := pnpmPins(good)
+	noArm.Go.LinuxARM64.CrossBuiltFrom = ""
+	if err = verifyPnpmPin(root, noArm, &in); err == nil || !strings.Contains(err.Error(), "linux_arm64") {
+		t.Fatalf("an undeclared arm64 toolchain was accepted: %v", err)
+	}
+	write(t, filepath.Join(root, "package.json"), `{"packageManager":"pnpm@9.0.0"}`)
+	if err = verifyPnpmPin(root, pnpmPins(good), &in); err == nil || !strings.Contains(err.Error(), "packageManager") {
+		t.Fatalf("a drifted packageManager was accepted: %v", err)
+	}
+	// A supplied arm64 archive must match its pin.
+	write(t, filepath.Join(root, ".tools", "go1.27.3.linux-arm64.tar.gz"), "not the arm64 archive")
+	armPins := pnpmPins(good)
+	armPins.Go.Version = "1.27.3"
+	if err = verifyPnpmPin(root, armPins, &in); err == nil || !strings.Contains(err.Error(), "arm64 archive sha256") {
+		t.Fatalf("a wrong arm64 archive was accepted: %v", err)
+	}
+	if err = os.Remove(filepath.Join(root, ".tools", "go1.27.3.linux-arm64.tar.gz")); err != nil {
+		t.Fatal(err)
+	}
+	// Without the tarball the pin is still checked, and the record says it was not content-verified.
+	write(t, filepath.Join(root, "package.json"), `{"packageManager":"pnpm@10.20.0"}`)
+	t.Setenv("SOUNDPOST_PNPM_TARBALL", filepath.Join(root, "absent.tgz"))
+	in = Inputs{}
+	if err = verifyPnpmPin(root, pnpmPins(good), &in); err != nil || in.PnpmTarball != "pin_only" {
+		t.Fatalf("absent tarball: %+v %v", in, err)
+	}
+}
+
+// The repository's own pin file must satisfy the verification it feeds.
+func TestRepositoryPinsDeclarePnpmIntegrityAndArm64(t *testing.T) {
+	p, err := loadPins("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SOUNDPOST_PNPM_TARBALL", filepath.Join(t.TempDir(), "absent.tgz"))
+	var in Inputs
+	if err = verifyPnpmPin("..", p, &in); err != nil {
+		t.Fatal(err)
+	}
+}

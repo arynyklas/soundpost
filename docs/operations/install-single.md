@@ -57,7 +57,7 @@ systemctl daemon-reload && systemctl enable --now soundpost
 
 ## 5. Readiness: what "ready" means
 
-`GET /readyz` is the only unauthenticated route besides the UI. It answers `200` only when the node's own state says it can take traffic and `503` otherwise, with a closed JSON body: `{"ready":true,"version":"…","applied_cursor":{…}}` or `{"ready":false,"reason":"…"}`. It never carries an error string, path, address or credential, and unready answers carry nothing but the reason. A node is ready only when **all** of these hold on this node, read from its real state (not a listening port):
+`GET /readyz` is the only unauthenticated route besides the UI. It answers `200` only when the node's own state says it can take traffic and `503` otherwise, with a closed JSON body: `{"ready":true,"version":"…","applied_cursor":{…}}` (a member of a replicated cluster also carries `"role"` (`leader`/`follower`), `"leader"` (member ID) and `"term"` of its control group, so a leader change is visible) or `{"ready":false,"reason":"…"}`. It never carries an error string, path, address or credential, and unready answers carry nothing but the reason. A node is ready only when **all** of these hold on this node, read from its real state (not a listening port):
 
 | `reason` when not | check |
 |---|---|

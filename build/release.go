@@ -26,7 +26,9 @@ import (
 	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
+	"crypto/sha512"
 	"debug/elf"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -90,7 +92,20 @@ type pins struct {
 			URL    string `json:"url"`
 			SHA256 string `json:"sha256"`
 		} `json:"linux_amd64"`
+		// LinuxARM64 pins the arm64 archive and records how linux/arm64 binaries are produced:
+		// the release host is amd64, so arm64 binaries are cross-compiled by the pinned
+		// linux-amd64 toolchain; the arm64 archive is pinned so nothing else can stand in for it.
+		LinuxARM64 struct {
+			URL            string `json:"url"`
+			SHA256         string `json:"sha256"`
+			CrossBuiltFrom string `json:"cross_built_from"`
+		} `json:"linux_arm64"`
 	} `json:"go"`
+	Pnpm        string `json:"pnpm"`
+	PnpmTarball struct {
+		URL       string `json:"url"`
+		Integrity string `json:"integrity"`
+	} `json:"pnpm_tarball"`
 }
 
 // Inputs is the verified input record that goes into release.json.
@@ -101,6 +116,10 @@ type Inputs struct {
 	GoModSHA256       string            `json:"go_mod_sha256"`
 	GoSumSHA256       string            `json:"go_sum_sha256"`
 	GoModVerify       string            `json:"go_mod_verify"`
+	GoARM64           string            `json:"go_linux_arm64"`
+	PnpmVersion       string            `json:"pnpm_version"`
+	PnpmIntegrity     string            `json:"pnpm_tarball_integrity"`
+	PnpmTarball       string            `json:"pnpm_tarball"`
 	PnpmLockSHA256    string            `json:"pnpm_lock_sha256"`
 	LicenseInventory  string            `json:"node_license_inventory"`
 	PythonLocks       map[string]string `json:"python_locks_sha256"`
@@ -340,6 +359,9 @@ func verifyInputs(root, archive string) (Inputs, error) {
 		return in, errors.New("go mod verify failed: " + strings.TrimSpace(string(output)) + " (the build runs with GOPROXY=off: every module in go.sum must already be in the Go module cache; download them with network access first, e.g. `go mod download`, before building offline; docs/operations/install-single.md, section 1)")
 	}
 	in.GoModVerify = "all modules verified"
+	if err = verifyPnpmPin(root, p, &in); err != nil {
+		return in, err
+	}
 	if in.PnpmLockSHA256, err = sha256File(filepath.Join(root, "pnpm-lock.yaml")); err != nil {
 		return in, err
 	}
@@ -374,6 +396,86 @@ func verifyInputs(root, archive string) (Inputs, error) {
 		return in, errors.New("a Python lock has a requirement without a sha256 hash")
 	}
 	return in, nil
+}
+
+// fileIntegrity is the npm "sha512-<base64>" integrity string of a file.
+func fileIntegrity(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha512.New()
+	if _, err = io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return "sha512-" + base64.StdEncoding.EncodeToString(h.Sum(nil)), nil
+}
+
+func validIntegrity(s string) bool {
+	raw, ok := strings.CutPrefix(s, "sha512-")
+	if !ok {
+		return false
+	}
+	b, err := base64.StdEncoding.DecodeString(raw)
+	return err == nil && len(b) == sha512.Size
+}
+
+// verifyPnpmPin proves the pnpm pin: the pinned version is the one package.json's
+// packageManager names, the pin carries a full sha512 integrity of the registry tarball, and
+// the linux/arm64 archive is pinned by sha256 (verified when present at
+// .tools/go<version>.linux-arm64.tar.gz) and arm64 is declared cross-built from the pinned amd64 toolchain. When the tarball is present (SOUNDPOST_PNPM_TARBALL or
+// .tools/pnpm-<version>.tgz) its integrity must equal the pin; the record says which it was.
+func verifyPnpmPin(root string, p pins, in *Inputs) error {
+	arm := p.Go.LinuxARM64
+	if arm.CrossBuiltFrom != "linux_amd64" || len(arm.SHA256) != 64 || arm.URL == "" {
+		return errors.New("build/toolchains.json must pin go.linux_arm64 (url, 64-hex sha256) and declare cross_built_from = linux_amd64")
+	}
+	in.GoARM64 = "cross-compiled by the pinned linux-amd64 toolchain; arm64 archive sha256 pinned (not present)"
+	armArchive := filepath.Join(root, ".tools", "go"+p.Go.Version+".linux-arm64.tar.gz")
+	if _, err := os.Stat(armArchive); err == nil {
+		got, err := sha256File(armArchive)
+		if err != nil {
+			return err
+		}
+		if got != arm.SHA256 {
+			return fmt.Errorf("Go arm64 archive sha256 %s does not match the pin %s", got, arm.SHA256)
+		}
+		in.GoARM64 = "cross-compiled by the pinned linux-amd64 toolchain; arm64 archive sha256 verified"
+	}
+	if p.Pnpm == "" || !validIntegrity(p.PnpmTarball.Integrity) || p.PnpmTarball.URL == "" {
+		return errors.New("build/toolchains.json has no pinned pnpm tarball integrity (sha512)")
+	}
+	raw, err := os.ReadFile(filepath.Join(root, "package.json"))
+	if err != nil {
+		return err
+	}
+	var pkg struct {
+		PackageManager string `json:"packageManager"`
+	}
+	if err = json.Unmarshal(raw, &pkg); err != nil {
+		return err
+	}
+	if pkg.PackageManager != "pnpm@"+p.Pnpm {
+		return fmt.Errorf("package.json packageManager %q does not match the pnpm pin %q", pkg.PackageManager, p.Pnpm)
+	}
+	in.PnpmVersion, in.PnpmIntegrity, in.PnpmTarball = p.Pnpm, p.PnpmTarball.Integrity, "pin_only"
+	tarball := os.Getenv("SOUNDPOST_PNPM_TARBALL")
+	if tarball == "" {
+		tarball = filepath.Join(root, ".tools", "pnpm-"+p.Pnpm+".tgz")
+	}
+	if _, err = os.Stat(tarball); err != nil {
+		return nil
+	}
+	got, err := fileIntegrity(tarball)
+	if err != nil {
+		return err
+	}
+	if got != p.PnpmTarball.Integrity {
+		return fmt.Errorf("pnpm tarball %s integrity %s does not match the pin %s", tarball, got, p.PnpmTarball.Integrity)
+	}
+	in.PnpmTarball = "verified"
+	return nil
 }
 
 // treeDigest hashes a directory deterministically: sorted slash paths with each file's sha256.

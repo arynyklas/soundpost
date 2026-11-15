@@ -57,6 +57,10 @@ func AuditGoSource(p Policy, filename, src string, printOK func(*ast.CallExpr) b
 			add(imp.Pos(), "forbidden_import", path)
 		}
 	}
+	// os.Stderr / os.Stdout are a way to write a transient value out without a print call; the only
+	// admitted use is inside a reviewed print call (printOK).
+	type span struct{ from, to token.Pos }
+	var reviewed []span
 	rawCalls := map[string]bool{"Syscall": true, "Syscall6": true, "RawSyscall": true, "RawSyscall6": true}
 	ast.Inspect(file, func(n ast.Node) bool {
 		switch x := n.(type) {
@@ -76,6 +80,15 @@ func AuditGoSource(p Policy, filename, src string, printOK func(*ast.CallExpr) b
 		case *ast.SelectorExpr:
 			if id, ok := x.X.(*ast.Ident); ok && id.Name == "syscall" && !symbol.MatchString(x.Sel.Name) {
 				add(x.Pos(), "syscall_symbol_not_allowlisted", x.Sel.Name)
+			}
+			if id, ok := x.X.(*ast.Ident); ok && id.Name == "os" && (x.Sel.Name == "Stderr" || x.Sel.Name == "Stdout") {
+				inside := false
+				for _, r := range reviewed {
+					inside = inside || x.Pos() >= r.from && x.End() <= r.to
+				}
+				if !inside {
+					add(x.Pos(), "writes_to_process_output", "os."+x.Sel.Name)
+				}
 			}
 		case *ast.CallExpr:
 			if sel, ok := x.Fun.(*ast.SelectorExpr); ok {
@@ -110,6 +123,8 @@ func AuditGoSource(p Policy, filename, src string, printOK func(*ast.CallExpr) b
 				prints := pkg != nil && (pkg.Name == "log" || pkg.Name == "fmt" && (strings.HasPrefix(sel.Sel.Name, "Print") || strings.HasPrefix(sel.Sel.Name, "Fprint")))
 				if prints && (printOK == nil || !printOK(x)) {
 					add(x.Pos(), "prints_values", pkg.Name+"."+sel.Sel.Name)
+				} else if prints {
+					reviewed = append(reviewed, span{x.Pos(), x.End()})
 				}
 			}
 			if id, ok := x.Fun.(*ast.Ident); ok && (id.Name == "print" || id.Name == "println") {

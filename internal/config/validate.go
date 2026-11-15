@@ -159,6 +159,7 @@ type LocalBackup struct {
 type Store struct {
 	Kind      string    `yaml:"kind"` // s3 | dir
 	Endpoint  Endpoint  `yaml:"endpoint,omitempty"`
+	Region    string    `yaml:"region,omitempty"`
 	Bucket    string    `yaml:"bucket,omitempty"`
 	Prefix    string    `yaml:"prefix,omitempty"`
 	AccessKey SecretRef `yaml:"access_key,omitempty"`

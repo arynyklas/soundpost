@@ -137,33 +137,45 @@ func (c *BackupChecker) Check(ctx context.Context, cfg InstallConfig) (BackupSta
 	case BackupLocal:
 		return BackupStatus{Label: LabelLocalRecoveryCopy}, nil
 	}
+	head, err := c.CheckAuthority(ctx, cfg.Backup.Authority.ID)
+	if err != nil {
+		return BackupStatus{Label: LabelNone}, err
+	}
+	return BackupStatus{Label: LabelDeletionSafeDisasterBackup, Head: head}, nil
+}
+
+// CheckAuthority is the proof Check rests on, usable on its own by a process that holds no
+// InstallConfig but must not take an off-host backup without it: the authority store proves
+// conditional create, a fresh verified head names want (any authority when want is empty) at or
+// above every sequence seen before. Every failure is a typed NotReadyError.
+func (c *BackupChecker) CheckAuthority(ctx context.Context, want string) (AuthorityHead, error) {
 	if c.Probe == nil || c.Now == nil {
-		return BackupStatus{Label: LabelNone}, notReady(ReasonConditionalCreateFailed)
+		return AuthorityHead{}, notReady(ReasonConditionalCreateFailed)
 	}
 	if err := c.Probe.VerifyConditionalCreate(ctx); err != nil {
-		return BackupStatus{Label: LabelNone}, notReady(ReasonConditionalCreateFailed)
+		return AuthorityHead{}, notReady(ReasonConditionalCreateFailed)
 	}
 	head, err := c.Probe.CurrentHead(ctx)
 	if err != nil || head.Authority == "" {
-		return BackupStatus{Label: LabelNone}, notReady(ReasonHeadUnavailable)
+		return AuthorityHead{}, notReady(ReasonHeadUnavailable)
 	}
 	limit := c.MaxHeadAge
 	if limit <= 0 {
 		limit = defaultHeadAge
 	}
 	if age := c.Now().Sub(head.ReadAt); age > limit || age < -futureSkew {
-		return BackupStatus{Label: LabelNone}, notReady(ReasonHeadStale)
+		return AuthorityHead{}, notReady(ReasonHeadStale)
 	}
-	if want := cfg.Backup.Authority.ID; want != "" && want != head.Authority {
-		return BackupStatus{Label: LabelNone}, notReady(ReasonForeignAuthority)
+	if want != "" && want != head.Authority {
+		return AuthorityHead{}, notReady(ReasonForeignAuthority)
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if head.Sequence < c.floor {
-		return BackupStatus{Label: LabelNone}, notReady(ReasonAuthorityRolledBack)
+		return AuthorityHead{}, notReady(ReasonAuthorityRolledBack)
 	}
 	c.floor = head.Sequence
-	return BackupStatus{Label: LabelDeletionSafeDisasterBackup, Head: head}, nil
+	return head, nil
 }
 
 // maxBackupRetentionDays is the manifest lifetime backup.Config enforces.

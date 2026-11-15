@@ -636,6 +636,7 @@ func Release(ctx context.Context, commit string, r Reports) (ReleaseManifest, er
 		m.Checks = append(m.Checks, checkEvidenceOf(k, r, commit))
 	}
 	m.Checks = append(m.Checks, checkSupplyChain(r, &m)...)
+	m.Checks = append(m.Checks, checkAGPLOf(r))
 	m.Checks = append(m.Checks, checkArtifacts(r, commit, &m), checkSignatureOf(r, &m), checkHandlesOf(r), checkApprovalOf(r, commit))
 	for i := range m.Checks {
 		c := &m.Checks[i]

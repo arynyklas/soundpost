@@ -171,3 +171,60 @@ func TestReasonSetIsClosed(t *testing.T) {
 		t.Fatal("free text accepted as a reason")
 	}
 }
+
+// A ready answer carries the control group's election state: this member's role, the leader's
+// member ID and the term, so an operator (and the distributed smoke) can see a leader change.
+// The data group's leader is not what is reported, and an unready answer carries none of it.
+func TestReadinessReportsTheControlGroupRoleLeaderAndTerm(t *testing.T) {
+	st := healthy()
+	st.groups[0].Node, st.groups[0].Leader, st.groups[0].Term = 2, 3, 99
+	st.groups[1].Node, st.groups[1].Leader, st.groups[1].Term = 2, 2, 7
+	got, err := Ready(context.Background(), st)
+	if err != nil || !got.Ready || got.Role != RoleLeader || got.Leader != 2 || got.Term != 7 {
+		t.Fatalf("leader: %+v %v", got, err)
+	}
+	st.groups[1].Leader, st.groups[1].Term = 3, 8
+	if got, err = Ready(context.Background(), st); err != nil || got.Role != RoleFollower || got.Leader != 3 || got.Term != 8 {
+		t.Fatalf("follower: %+v %v", got, err)
+	}
+	st.groups[1].Leader = 0
+	if got, err = Ready(context.Background(), st); err != nil || !got.Ready || got.Role != "" || got.Leader != 0 || got.Term != 0 {
+		t.Fatalf("a member that knows no leader reports no role: %+v %v", got, err)
+	}
+	st.groups[1].Quorum = false
+	raw, _ := json.Marshal(mustReady(t, st))
+	if strings.Contains(string(raw), "role") || strings.Contains(string(raw), "leader") {
+		t.Fatalf("an unready answer carries election state: %s", raw)
+	}
+}
+
+func mustReady(t *testing.T, st *fakeState) Readiness {
+	t.Helper()
+	got, err := Ready(context.Background(), st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
+// A control-state read that fails while a group has no quorum is the quorum loss itself and is
+// reported as no_quorum; the same read failure with every group in quorum stays state_unavailable.
+func TestReadinessControlReadFailureDuringQuorumLossIsNoQuorum(t *testing.T) {
+	st := healthy()
+	st.schemaErr = errors.New("control read timed out")
+	st.groups[1].Quorum = false
+	if got := mustReady(t, st); got.Ready || got.Reason != ReasonNoQuorum {
+		t.Fatalf("schema read failed during quorum loss: %+v", got)
+	}
+	st = healthy()
+	st.fencesErr = errors.New("control read timed out")
+	st.groups[0].Quorum = false
+	if got := mustReady(t, st); got.Ready || got.Reason != ReasonNoQuorum {
+		t.Fatalf("fence read failed during quorum loss: %+v", got)
+	}
+	st = healthy()
+	st.schemaErr = errors.New("boom")
+	if got := mustReady(t, st); got.Reason != ReasonStateUnavailable {
+		t.Fatalf("schema read failed with quorum intact: %+v", got)
+	}
+}

@@ -147,6 +147,15 @@ func RunInstallDistributed(args []string) (result error) {
 		return err
 	}
 	report["ready_after_s"] = time.Since(started).Round(time.Second).Seconds()
+	stage = "dist_initial_leadership"
+	initial, err := leadership(sites, []uint64{1, 2, 3}, 60*time.Second)
+	if err != nil {
+		return err
+	}
+	if initial.leader != 1 {
+		return &smokeFailure{Stage: stage, Code: "initial_leader_not_member_1"}
+	}
+	report["initial_leadership"] = map[string]any{"leader": initial.leader, "term": initial.term}
 	// Each member has its own reader session (cookie jar and CSRF token).
 	sessions := map[uint64]auth.Session{}
 	login := func(id uint64) error {
@@ -216,6 +225,12 @@ func RunInstallDistributed(args []string) (result error) {
 		}
 	}
 	report["writes_commit_with_one_member_down"] = true
+	stage = "dist_leader_change_observed"
+	changed, err := leaderChange(sites, []uint64{2, 3}, initial, 90*time.Second)
+	if err != nil {
+		return err
+	}
+	report["leader_after_kill"] = map[string]any{"leader": changed.leader, "term": changed.term}
 
 	stage = "dist_rejoin_converge"
 	if err = cluster.start(1); err != nil {
@@ -240,40 +255,67 @@ func RunInstallDistributed(args []string) (result error) {
 	}
 	report["killed_member_rejoined_and_converged"] = true
 
+	// restartMember is one step of the documented one-at-a-time order: the member goes down, the
+	// others still commit a write (acknowledged through via), the member returns, is ready, answers
+	// every acknowledged value and the control cursors converge. It returns the first-ack time.
+	restartMember := func(id, via uint64, label string) (float64, error) {
+		if err := cluster.kill(id); err != nil {
+			return 0, err
+		}
+		killed := time.Now()
+		if err := ledger.write(sites[via], fx, label+"_"+strconv.FormatUint(id, 10)); err != nil {
+			return 0, err
+		}
+		firstAck := time.Since(killed).Round(100 * time.Millisecond).Seconds()
+		if err := cluster.start(id); err != nil {
+			return 0, err
+		}
+		var err error
+		if sites[id], err = cluster.site(id); err != nil {
+			return 0, err
+		}
+		if err = waitNodeReady(sites[id], 180*time.Second); err != nil {
+			return 0, err
+		}
+		if err = login(id); err != nil {
+			return 0, err
+		}
+		for _, other := range []uint64{1, 2, 3} {
+			if _, err = eventuallyQuery(sites[other], nfx(other), ledger, 90*time.Second); err != nil {
+				return 0, err
+			}
+		}
+		_, err = converged(sites, 90*time.Second)
+		return firstAck, err
+	}
 	// ---- the documented rolling order: each remaining member, one at a time, gated on readiness ----
 	stage = "dist_rolling_restart"
 	rolling := map[string]any{}
 	for _, step := range []struct{ id, via uint64 }{{3, 1}, {2, 3}} {
-		if err = cluster.kill(step.id); err != nil {
+		ack, err := restartMember(step.id, step.via, "rolling")
+		if err != nil {
 			return err
 		}
-		killed := time.Now()
-		if err = ledger.write(sites[step.via], fx, "rolling_"+strconv.FormatUint(step.id, 10)); err != nil {
-			return err
-		}
-		rolling["first_ack_s_member_"+strconv.FormatUint(step.id, 10)+"_down"] = time.Since(killed).Round(100 * time.Millisecond).Seconds()
-		if err = cluster.start(step.id); err != nil {
-			return err
-		}
-		if sites[step.id], err = cluster.site(step.id); err != nil {
-			return err
-		}
-		if err = waitNodeReady(sites[step.id], 180*time.Second); err != nil {
-			return err
-		}
-		if err = login(step.id); err != nil {
-			return err
-		}
-		for _, id := range []uint64{1, 2, 3} {
-			if _, err = eventuallyQuery(sites[id], nfx(id), ledger, 90*time.Second); err != nil {
-				return err
-			}
-		}
-		if _, err = converged(sites, 90*time.Second); err != nil {
-			return err
-		}
+		rolling["first_ack_s_member_"+strconv.FormatUint(step.id, 10)+"_down"] = ack
 	}
 	report["rolling_restart_one_member_at_a_time"] = rolling
+
+	// ---- mTLS certificate rotation (leaf under the same CA, then CA bundle rotation), one member at a time ----
+	if rotator, ok := cluster.(mtlsRotator); ok {
+		stage = "dist_mtls_rotation"
+		if err = rotator.rotateMTLS(func(id uint64, label string) error {
+			via := uint64(1)
+			if id == 1 {
+				via = 2
+			}
+			_, err := restartMember(id, via, "mtls_"+label)
+			return err
+		}, report); err != nil {
+			return err
+		}
+	} else {
+		report["mtls_rotation"] = "not run in this mode (member certificates are files in a Compose volume)"
+	}
 
 	// ---- quorum loss: two members down, one survivor ----
 	stage = "dist_quorum_loss"
@@ -292,16 +334,15 @@ func RunInstallDistributed(args []string) (result error) {
 			var st installReadiness
 			_ = json.Unmarshal(raw, &st)
 			lastSeen = strconv.Itoa(code) + "_" + safeToken(st.Reason)
-			if code == 503 && (st.Reason == "no_quorum" || st.Reason == "state_unavailable") {
+			if code == 503 && st.Reason == "no_quorum" {
 				reason = st.Reason
 				break
 			}
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	// The decision function reports no_quorum when a ReadIndex round fails inside the 3 s
-	// evaluation bound and state_unavailable when the bound itself elapses first; both are the
-	// closed 503 not-ready answer and neither is ever 200.
+	// The survivor's quorum read is bounded below the 3 s evaluation deadline (cmd/soundpost
+	// health_adapter.go), so a real quorum loss is the designed no_quorum, never state_unavailable.
 	if reason == "" {
 		return &smokeFailure{Stage: stage, Code: "survivor_never_reported_not_ready_last_" + lastSeen}
 	}
@@ -448,7 +489,7 @@ var distNodes = []distNode{{1, "a", "node-a"}, {2, "b", "node-b"}, {3, "c", "nod
 
 // distPKI writes a throwaway cluster CA and one certificate per member. Each certificate
 // carries the member's URI SAN spiffe://soundpost/node/<identity> and its dial names.
-func distPKI(dir string, sans map[uint64][]string, ips []net.IP) (ca string, certs, keys map[uint64]string, material []string, err error) {
+func distPKI(dir string, sans map[uint64][]string, ips []net.IP) (ca string, certs, keys map[uint64]string, material []string, signer *distCA, err error) {
 	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return
@@ -463,6 +504,7 @@ func distPKI(dir string, sans map[uint64][]string, ips []net.IP) (ca string, cer
 	if err = os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o600); err != nil {
 		return
 	}
+	signer = &distCA{template: authority, key: caKey, pem: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})}
 	certs, keys = map[uint64]string{}, map[uint64]string{}
 	for _, n := range distNodes {
 		var private *ecdsa.PrivateKey
@@ -541,6 +583,56 @@ func safeToken(s string) string {
 	return s
 }
 
+type leaderView struct{ leader, term uint64 }
+
+// leadership reads the control group's election state of the given members and requires them
+// to agree on one leader and term, with exactly the leader reporting the leader role.
+func leadership(sites map[uint64]*installSite, ids []uint64, limit time.Duration) (leaderView, error) {
+	deadline := time.Now().Add(limit)
+	last := "no_answer"
+	for time.Now().Before(deadline) {
+		var agreed leaderView
+		ok, leaders := true, 0
+		for i, id := range ids {
+			code, raw, err := sites[id].get("/readyz")
+			var st installReadiness
+			if err != nil || code != 200 || json.Unmarshal(raw, &st) != nil || !st.Ready || st.Leader == 0 || st.Term == 0 || (st.Role != "leader" && st.Role != "follower") {
+				ok, last = false, "member_"+strconv.FormatUint(id, 10)+"_without_election_state"
+				break
+			}
+			if st.Role == "leader" {
+				leaders++
+				if st.Leader != id {
+					ok, last = false, "leader_role_on_other_member"
+					break
+				}
+			}
+			if i == 0 {
+				agreed = leaderView{st.Leader, st.Term}
+			} else if agreed != (leaderView{st.Leader, st.Term}) {
+				ok, last = false, "members_disagree"
+			}
+		}
+		if ok && leaders == 1 {
+			return agreed, nil
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return leaderView{}, &smokeFailure{Stage: "leadership", Code: "no_agreed_leader_" + safeToken(last)}
+}
+
+// leaderChange waits until the given surviving members agree on a leader that is not the old one,
+// in a term greater than the old term.
+func leaderChange(sites map[uint64]*installSite, survivors []uint64, old leaderView, limit time.Duration) (leaderView, error) {
+	deadline := time.Now().Add(limit)
+	for time.Now().Before(deadline) {
+		if now, err := leadership(sites, survivors, 5*time.Second); err == nil && now.leader != old.leader && now.term > old.term {
+			return now, nil
+		}
+	}
+	return leaderView{}, &smokeFailure{Stage: "leader_change", Code: "no_new_leader_after_kill"}
+}
+
 // converged waits until every member reports the same control applied cursor.
 func converged(sites map[uint64]*installSite, limit time.Duration) (map[string]uint64, error) {
 	deadline := time.Now().Add(limit)
@@ -571,11 +663,20 @@ func converged(sites map[uint64]*installSite, limit time.Duration) (map[string]u
 
 func loginReader(site *installSite, fx *installFixture) (auth.Session, error) {
 	var session auth.Session
-	status, raw, err := site.post("/api/v1/login", map[string]string{"Email": fx.readerEmail, "Password": "install smoke reader password 2026", "Code": ""}, "", "")
-	if err = requireSmokeResponse("reader_login", status, 200, raw, err); err != nil {
-		return session, err
+	// A member that has not yet applied the control state (just restarted, or a follower) refuses a login
+	// with the typed `stale`; the login is retried until it applies (never past a minute).
+	deadline := time.Now().Add(time.Minute)
+	for {
+		status, raw, err := site.post("/api/v1/login", map[string]string{"Email": fx.readerEmail, "Password": "install smoke reader password 2026", "Code": ""}, "", "")
+		if err == nil && status != 200 && time.Now().Before(deadline) {
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+		if err = requireSmokeResponse("reader_login", status, 200, raw, err); err != nil {
+			return session, err
+		}
+		return session, json.Unmarshal(raw, &session)
 	}
-	return session, json.Unmarshal(raw, &session)
 }
 
 // distLedger records every acknowledged write so the final query can name the exact latest value.
@@ -708,6 +809,7 @@ type processCluster struct {
 	sites        map[uint64]*installSite
 	boot         installHost
 	keys         []string
+	pki          *processPKI
 	mu           sync.Mutex
 }
 
@@ -723,11 +825,12 @@ func newProcessCluster(binary, release, work string, report map[string]any) (dis
 		return nil, err
 	}
 	sans := map[uint64][]string{1: {"localhost"}, 2: {"localhost"}, 3: {"localhost"}}
-	ca, certs, keys, material, err := distPKI(pki, sans, []net.IP{net.ParseIP("127.0.0.1")})
+	ca, certs, keys, material, signer, err := distPKI(pki, sans, []net.IP{net.ParseIP("127.0.0.1")})
 	if err != nil {
 		return nil, err
 	}
 	c.keys = material
+	c.pki = &processPKI{dir: pki, caFile: ca, ca: signer, certs: certs, keys: keys}
 	c.seed = filepath.Join(work, "cluster.seed")
 	nodes := []config.Node{}
 	for _, n := range distNodes {
@@ -980,7 +1083,7 @@ func newComposeCluster(image, file, work string, report map[string]any) (distClu
 		return nil, err
 	}
 	sans := map[uint64][]string{1: {"soundpost-a"}, 2: {"soundpost-b"}, 3: {"soundpost-c"}}
-	ca, certs, keys, material, err := distPKI(pki, sans, nil)
+	ca, certs, keys, material, _, err := distPKI(pki, sans, nil)
 	if err != nil {
 		return nil, err
 	}

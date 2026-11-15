@@ -60,7 +60,11 @@ func runReady(args []string, out io.Writer) error {
 		if result.Applied != nil {
 			cursor = fmt.Sprintf(" applied=%s:%d", result.Applied.Group, result.Applied.Index)
 		}
-		fmt.Fprintf(out, "ready version=%s%s\n", result.Version, cursor)
+		role := ""
+		if result.Role != "" {
+			role = fmt.Sprintf(" role=%s leader=%d term=%d", result.Role, result.Leader, result.Term)
+		}
+		fmt.Fprintf(out, "ready version=%s%s%s\n", result.Version, cursor, role)
 	} else {
 		fmt.Fprintf(out, "not ready: %s\n", result.Reason)
 	}

@@ -48,6 +48,9 @@ type Group struct {
 	Commit  uint64
 	Applied uint64
 	Cursor  model.Cursor
+	// Node is this member's ID in the group; Leader the member ID it currently believes leads
+	// (0 when it knows none); Term the election term.
+	Node, Leader, Term uint64
 }
 
 // LocalState is what readiness needs from the running node. appcore.App satisfies it
@@ -82,9 +85,22 @@ func Ready(ctx context.Context, s LocalState) (Readiness, error) {
 	if s.RestoreHold() {
 		return unready(ReasonRestorePending)
 	}
+	// A control-state read that fails while a group cannot complete a quorum read is the quorum loss
+	// itself (the control state is read through the group): the designed answer is no_quorum, not an
+	// unexplained dependency failure.
+	failed := func() (Readiness, error) {
+		if groups, gerr := s.Groups(ctx); gerr == nil {
+			for _, g := range groups {
+				if !g.Quorum {
+					return unready(ReasonNoQuorum)
+				}
+			}
+		}
+		return unready(ReasonStateUnavailable)
+	}
 	schema, err := s.Schema(ctx)
 	if err != nil {
-		return unready(ReasonStateUnavailable)
+		return failed()
 	}
 	if schema.Observed < schema.Supported {
 		return unready(ReasonSchemaOld)
@@ -122,7 +138,7 @@ func Ready(ctx context.Context, s LocalState) (Readiness, error) {
 	}
 	fences, err := s.PendingPolicyFences(ctx)
 	if err != nil {
-		return unready(ReasonStateUnavailable)
+		return failed()
 	}
 	if fences > 0 {
 		return unready(ReasonPolicyStale)
@@ -138,5 +154,13 @@ func Ready(ctx context.Context, s LocalState) (Readiness, error) {
 		return Readiness{}, err
 	}
 	cursor := control.Cursor
-	return Readiness{Ready: true, Version: s.Version(), Applied: &cursor}, nil
+	out := Readiness{Ready: true, Version: s.Version(), Applied: &cursor}
+	if control.Leader != 0 && control.Node != 0 {
+		out.Leader, out.Term = control.Leader, control.Term
+		out.Role = RoleFollower
+		if control.Leader == control.Node {
+			out.Role = RoleLeader
+		}
+	}
+	return out, nil
 }

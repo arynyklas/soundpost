@@ -125,9 +125,14 @@ func RunInstallSingle(args []string) (result error) {
 	if err != nil {
 		return err
 	}
-	report["signals_ingested"] = []string{"metric_float", "metric_integer_histogram", "log", "error", "span"}
+	report["signals_ingested"] = []string{"metric_float", "metric_integer_histogram", "log", "error", "span", "job_attempt", "replay_chunk", "profile_chunk", "capability_native_cpu", "capability_native_offcpu", "capability_native_runqueue_split"}
 	stage = "install_query"
 	queryBefore, err := queryInstalled(site, fx)
+	if err != nil {
+		return err
+	}
+	stage = "install_investigate"
+	investigateBefore, err := investigateInstalled(site, fx)
 	if err != nil {
 		return err
 	}
@@ -215,6 +220,15 @@ func RunInstallSingle(args []string) (result error) {
 		return &smokeFailure{Stage: stage, Code: "query_changed_across_restart"}
 	}
 	report["query_identical_after_restart"] = true
+	stage = "install_same_investigation"
+	investigateAfter, err := investigateInstalled(site, fx)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(investigateBefore, investigateAfter) {
+		return &smokeFailure{Stage: stage, Code: "investigation_changed_across_restart"}
+	}
+	report["investigate_identical_after_restart"] = true
 
 	stage = "install_graceful_stop"
 	if err = run.stop(); err != nil {
@@ -259,6 +273,9 @@ type installReadiness struct {
 	Reason  string         `json:"reason"`
 	Version string         `json:"version"`
 	Applied *model.Cursor  `json:"applied_cursor"`
+	Role    string         `json:"role"`
+	Leader  uint64         `json:"leader"`
+	Term    uint64         `json:"term"`
 	Code    int            `json:"-"`
 	Raw     map[string]any `json:"-"`
 }
@@ -826,6 +843,7 @@ type installFixture struct {
 	reader                      auth.Session
 	service, environment, build model.ID
 	queryTime                   string
+	trace                       model.ID
 }
 
 func requireNoDefaultAccess(site *installSite, report map[string]any) error {
@@ -892,11 +910,11 @@ func bootstrapInstallation(site *installSite, token string) (*installFixture, er
 	fx.service, fx.environment, fx.build = model.NewID(), model.NewID(), model.NewID()
 	var approved model.Scalar
 	_ = json.Unmarshal([]byte(`503`), &approved)
-	policy := model.SourcePolicy{Revision: 1, Enabled: true, Class: "structured", Kinds: []model.Kind{model.Metric, model.Log, model.ErrorKind, model.SpanKind},
+	policy := model.SourcePolicy{Revision: 1, Enabled: true, Class: "structured", Kinds: append([]model.Kind{model.Metric, model.Log, model.ErrorKind, model.SpanKind}, installKinds...), Replay: true,
 		Resources:     model.ResourceRegistry{Services: []model.ID{fx.service}, Environments: []model.ID{fx.environment}, Builds: []model.ID{fx.build}, Instances: []string{"instance"}},
 		Templates:     []model.LogTemplate{{ID: "failed", Revision: 1, Line: "operation failed: {status}", Severity: "error", Fields: []model.TemplateField{{Name: "status", Type: "int64", MaxBytes: 16, Sensitivity: "metadata", Values: []model.Scalar{approved}}}}},
 		Operations:    []string{"operation"},
-		RetentionDays: map[model.Kind]uint32{model.Metric: 30, model.Log: 14, model.ErrorKind: 30, model.SpanKind: 14}, MaxBytes: 1 << 30, MaxSeries: 1000}
+		RetentionDays: map[model.Kind]uint32{model.Metric: 30, model.Log: 14, model.ErrorKind: 30, model.SpanKind: 14, model.JobAttempt: 30, model.Replay: 14, model.Profile: 7, model.CapabilityKind: 30, model.Loss: 30}, MaxBytes: 1 << 30, MaxSeries: 1000}
 	status, raw, err = site.post("/api/v1/sources", auth.SourceOnboarding{CommandID: model.NewID(), Org: fx.org, Project: fx.project, Source: fx.source, Expires: model.UnixNano(time.Now().Add(time.Hour).UnixNano()), Policy: policy, Reason: "install smoke"}, fx.session.CSRF, "")
 	if err = requireSmokeResponse("source_onboard", status, 200, raw, err); err != nil {
 		return fx, err
@@ -928,6 +946,7 @@ func ingestEverySignal(site *installSite, fx *installFixture) ([]installReceipt,
 	histogram := &model.NativeHistogram{Integer: &model.IntegerHistogram{Flavor: "counter", Schema: 0, ZeroThreshold: model.FloatBits(0), Sum: model.FloatBits(0), Count: 9007199254740993, ZeroCount: 9007199254740993, ResetHint: "unknown"}}
 	var approved model.Scalar
 	_ = json.Unmarshal([]byte(`503`), &approved)
+	fx.trace = model.NewID()
 	spanStart := model.UnixNano(now - int64(4*time.Second))
 	clock := model.TraceClock{Wall: 1, Mono: 1, Domain: model.ClockDomain{Host: model.NewID(), Boot: model.NewID(), Runtime: model.NewID()}}
 	end := clock
@@ -942,7 +961,17 @@ func ingestEverySignal(site *installSite, fx *installFixture) ([]installReceipt,
 		{"metric_integer_histogram", model.Record{ID: model.NewID(), Kind: model.Metric, ObservedAt: 9007199254740993, Resource: resource, Payload: model.Payload{Metric: &model.MetricPoint{Name: "install_smoke_latency", Labels: model.Labels{}, SampleKind: "integer_histogram", Histogram: histogram, Unit: "1", Type: "histogram"}}}},
 		{"log", model.Record{ID: model.NewID(), Kind: model.Log, ObservedAt: model.UnixNano(now - int64(3*time.Second)), Resource: resource, Payload: model.Payload{Log: &model.LogRecord{TemplateID: "failed", TemplateRevision: 1, Fields: map[string]model.Scalar{"status": approved}, StreamLabels: model.Labels{}, Metadata: map[string]model.Scalar{}, SourceClass: "structured"}}}},
 		{"error", model.Record{ID: model.NewID(), Kind: model.ErrorKind, ObservedAt: model.UnixNano(now - int64(2*time.Second)), Resource: resource, Payload: model.Payload{Error: &model.ErrorOccurrence{Occurrence: model.NewID(), Class: "TypeError", Mechanism: "manual", Build: fx.build, Handled: true, Frames: []model.Frame{}}}}},
-		{"span", model.Record{ID: model.NewID(), Kind: model.SpanKind, ObservedAt: spanStart, Resource: resource, Payload: model.Payload{Span: &model.Span{Trace: model.NewID(), ID: spanID, Kind: "internal", Operation: "operation", Start: clock, End: &end, Status: "ok", SampleProbability: model.FloatBits(0x3ff0000000000000), SampleDecision: "keep"}}}},
+		{"span", model.Record{ID: model.NewID(), Kind: model.SpanKind, ObservedAt: spanStart, Resource: resource, Payload: model.Payload{Span: &model.Span{Trace: fx.trace, ID: spanID, Kind: "internal", Operation: "operation", Start: clock, End: &end, Status: "ok", SampleProbability: model.FloatBits(0x3ff0000000000000), SampleDecision: "keep"}}}},
+	}
+	extra, err := installExtraRecords(resource, now)
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range extra {
+		records = append(records, struct {
+			name   string
+			record model.Record
+		}{r.name, r.record})
 	}
 	var out []installReceipt
 	for _, r := range records {

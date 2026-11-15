@@ -192,3 +192,43 @@ func TestAppStateReportsAnArmedRestoreHold(t *testing.T) {
 		t.Fatalf("restored installation before activation: %+v", got)
 	}
 }
+
+// A quorum read that never completes (a real quorum loss: the leader is gone and no majority
+// answers) must end inside the evaluation budget as the group's own no_quorum, not consume the
+// whole readiness deadline: when the deadline itself elapses health.Ready can only return its
+// context error, which the HTTP layer renders as state_unavailable (07.01-W4).
+func TestAppStateQuorumReadThatNeverCompletesReportsNoQuorumInsideTheDeadline(t *testing.T) {
+	app, err := appcore.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.Close()
+	state := newAppState(app, "x")
+	state.quorumBound = 100 * time.Millisecond
+	state.readIndex = func(ctx context.Context, _ model.ID) error {
+		<-ctx.Done() // a quorum read with no majority only ends when its context does
+		return ctx.Err()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	start := time.Now()
+	got, err := health.Ready(ctx, state)
+	if err != nil {
+		t.Fatalf("readiness returned its context error instead of an answer: %v after %v", err, time.Since(start))
+	}
+	if got.Ready || got.Reason != health.ReasonNoQuorum {
+		t.Fatalf("quorum loss answered %+v, want unready no_quorum", got)
+	}
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Fatalf("quorum loss took %v: the quorum read is not bounded below the evaluation deadline", elapsed)
+	}
+}
+
+// The quorum read bound must stay below the readiness evaluation deadline (httpapi readyEvalTimeout, 3 s),
+// or a quorum loss consumes the deadline and surfaces as state_unavailable instead of no_quorum.
+func TestDefaultQuorumBoundIsBelowTheReadinessDeadline(t *testing.T) {
+	const readyEvalTimeout = 3 * time.Second
+	if defaultQuorumBound <= 0 || defaultQuorumBound >= readyEvalTimeout {
+		t.Fatalf("defaultQuorumBound %v must be in (0, %v)", defaultQuorumBound, readyEvalTimeout)
+	}
+}

@@ -96,7 +96,7 @@ A member loads its certificate, key and CA once at start (`tls.LoadX509KeyPair`,
 * **CA rotation.** (1) Put the old and new CA certificates in one bundle file and roll every member to trust the bundle. (2) Roll every member to a leaf issued by the new CA. (3) Remove the old CA from the bundle and roll every member again. Each step is a full one-at-a-time roll; the installation is never trusting a CA that was not distributed everywhere first.
 * Expiry: certificates must outlive your roll time by a wide margin. A member whose certificate has expired cannot be reached by peers and is a lost voter (two members still serve; a second expiry loses quorum).
 
-This release rotates by restart. The live-rotation behaviour is documented from the code (`internal/appcore/replicated.go`), and the `install-distributed` smoke does not exercise a rotation.
+This release rotates by restart. The live-rotation behaviour is documented from the code (`internal/appcore/replicated.go`), and the `install-distributed` smoke (process mode) exercises both procedures above: a leaf rotation under the same CA, then a CA rotation (bundle, new-CA leaves, bundle without the old CA), restarting one member at a time with the cluster ready and converged after each, and then requires a peer to refuse a client presenting an old-CA leaf. Container (Compose) mode does not run the rotation.
 
 ## Replacing a lost voter
 

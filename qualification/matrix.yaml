@@ -10,6 +10,10 @@
 # is never an arm64 row; Node success never qualifies Bun; Chrome 156 never qualifies Chrome 142).
 # Each result carries exactly one of exercised, not_exercised, unsupported or denied.
 #
+# HAND-MAINTAINED: there is no generator. Only the `native:` section expands (qualify.LoadMatrix); every other row is
+# written here and guarded by tools/qualify/matrix_drift_test.go (build keys agree with their builds, runtime row ids
+# encode their build, every in-scope build is used by a row).
+#
 # Build locations: the environment variable first, then PATH names, then repository-relative paths (also
 # resolved against $SOUNDPOST_TOOLS_ROOT, the directory holding an unpacked `.tools`).
 #

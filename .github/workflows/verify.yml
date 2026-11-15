@@ -44,6 +44,14 @@ jobs:
           tar -C .tools/linux -xzf "$archive"
           .tools/linux/go/bin/go version
 
+      - name: Fetch the pinned pnpm tarball and linux-arm64 Go archive (build verify compares both with their pins)
+        run: |
+          set -eu
+          pnpm_version=$(jq -r .pnpm build/toolchains.json)
+          curl --fail --location --silent --show-error --output ".tools/pnpm-${pnpm_version}.tgz" "$(jq -r .pnpm_tarball.url build/toolchains.json)"
+          go_version=$(jq -r .go.version build/toolchains.json)
+          curl --fail --location --silent --show-error --output ".tools/go${go_version}.linux-arm64.tar.gz" "$(jq -r .go.linux_arm64.url build/toolchains.json)"
+
       - name: Cache Go modules and build outputs (test results are never reused, -count=1)
         uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:

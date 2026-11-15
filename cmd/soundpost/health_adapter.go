@@ -9,6 +9,7 @@ import (
 	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/storage"
 	"sync"
+	"time"
 )
 
 // supportedSchema is the control-state format this binary reads: the persisted bearer-hash
@@ -23,10 +24,29 @@ const supportedSchema = 1
 type appState struct {
 	app     *appcore.App
 	version string
+	// quorumBound caps one quorum read round. It sits below the readiness evaluation deadline
+	// (httpapi readyEvalTimeout, 3 s): a read that cannot reach a majority only ends when its
+	// context does, and if that context were the evaluation deadline itself, health.Ready would
+	// have nothing left to answer with and the loss would surface as state_unavailable instead of
+	// the designed no_quorum.
+	quorumBound time.Duration
+	// readIndex is one quorum read of a group; tests replace it.
+	readIndex func(ctx context.Context, group model.ID) error
 }
 
+const defaultQuorumBound = time.Second
+
 func newAppState(app *appcore.App, version string) *appState {
-	return &appState{app: app, version: version}
+	s := &appState{app: app, version: version, quorumBound: defaultQuorumBound}
+	s.readIndex = func(ctx context.Context, group model.ID) error {
+		node := app.ReplicaNode()
+		if node == nil {
+			return model.Fail(model.Unavailable)
+		}
+		_, err := node.ReadIndex(ctx, group)
+		return err
+	}
+	return s
 }
 
 func (s *appState) Version() string { return s.version }
@@ -35,6 +55,8 @@ func (s *appState) RestoreHold() bool { return s.app.Storage.RestoreReady() != n
 
 func (s *appState) Schema(ctx context.Context) (health.Schema, error) {
 	out := health.Schema{Supported: supportedSchema}
+	ctx, cancel := context.WithTimeout(ctx, s.quorumBound)
+	defer cancel()
 	err := s.app.Control.View(ctx, func(st model.ControlState) error {
 		out.Observed = uint32(st.BearerHashKeyVersion)
 		return nil
@@ -46,8 +68,7 @@ func (s *appState) Schema(ctx context.Context) (health.Schema, error) {
 // run concurrently under ctx so 65 groups cost one round trip, not 65.
 func (s *appState) Groups(ctx context.Context) ([]health.Group, error) {
 	statuses := s.app.ReplicationStatus()
-	node := s.app.ReplicaNode()
-	if len(statuses) == 0 || node == nil {
+	if len(statuses) == 0 || s.app.ReplicaNode() == nil {
 		return nil, model.Fail(model.Unavailable)
 	}
 	control := s.app.Control.ReplicaGroup()
@@ -58,12 +79,13 @@ func (s *appState) Groups(ctx context.Context) ([]health.Group, error) {
 	out := make([]health.Group, len(statuses))
 	var wg sync.WaitGroup
 	for i, st := range statuses {
-		out[i] = health.Group{ID: st.Group, Control: st.Group == controlID, Failed: st.Failed, Commit: st.Commit, Applied: st.Applied, Cursor: st.ApplicationCursor}
+		out[i] = health.Group{ID: st.Group, Control: st.Group == controlID, Failed: st.Failed, Commit: st.Commit, Applied: st.Applied, Cursor: st.ApplicationCursor, Node: st.ID, Leader: st.Leader, Term: st.Term}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := node.ReadIndex(ctx, st.Group)
-			out[i].Quorum = err == nil
+			read, cancel := context.WithTimeout(ctx, s.quorumBound)
+			defer cancel()
+			out[i].Quorum = s.readIndex(read, st.Group) == nil
 		}()
 	}
 	wg.Wait()
@@ -74,6 +96,8 @@ func (s *appState) Groups(ctx context.Context) ([]health.Group, error) {
 // draining: until they do, an old source policy can still be honoured by some data group.
 func (s *appState) PendingPolicyFences(ctx context.Context) (uint64, error) {
 	var pending uint64
+	ctx, cancel := context.WithTimeout(ctx, s.quorumBound)
+	defer cancel()
 	err := s.app.Control.View(ctx, func(st model.ControlState) error {
 		for _, f := range st.SourceFences {
 			if f.Phase == "fencing" {

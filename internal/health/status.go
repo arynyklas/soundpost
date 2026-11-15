@@ -55,12 +55,28 @@ func (r Reason) Valid() bool {
 
 // Readiness is the whole public answer. Version and the applied cursor are present
 // only when Ready is true; an unready answer carries the reason and nothing else.
+//
+// Role, Leader and Term are the control group's own election state as this member sees it,
+// present only on a ready answer: Leader is the member ID of the leader this member follows
+// (or its own ID), Term the election term, Role this member's part (leader or follower). A
+// leader change shows as a different Leader and a larger Term. They name no host or address.
 type Readiness struct {
 	Ready   bool          `json:"ready"`
 	Reason  Reason        `json:"reason,omitempty"`
 	Version string        `json:"version,omitempty"`
 	Applied *model.Cursor `json:"applied_cursor,omitempty"`
+	Role    Role          `json:"role,omitempty"`
+	Leader  uint64        `json:"leader,omitempty"`
+	Term    uint64        `json:"term,omitempty"`
 }
+
+// Role is this member's part in the control group.
+type Role string
+
+const (
+	RoleLeader   Role = "leader"
+	RoleFollower Role = "follower"
+)
 
 // Unready builds the answer for a reason that is not part of Ready's evaluation (the
 // startup gate uses it before any state exists).

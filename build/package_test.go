@@ -715,3 +715,54 @@ func TestGateAcceptsOutOfReleaseScopeOnlyForPlatformsOutsideTheRelease(t *testin
 		})
 	}
 }
+
+// Plan-named release tests (07.08): the gate refuses a release whose native, replay, SSO or profile
+// evidence row has no result or is skipped, and one with an unreviewed license or a skipped semantic.
+func TestReleaseRejectsMissingNativeReplaySSOOrProfileEvidence(t *testing.T) {
+	for _, row := range []string{"runtime.native.linux-6.6.amd64.cpu", "browser.replay.chrome-142", "privacy.sso.oidc", "runtime.profile.view"} {
+		f := newFixture(t).signed()
+		raw, _ := json.Marshal(EvidenceReport{Schema: evidenceSchema, Kind: "runtime", Commit: testCommit, Expected: []string{"row-1", row}, Rows: []EvidenceRow{{ID: "row-1", Status: "passed"}}})
+		write(t, f.evidence["runtime"], string(raw))
+		r := f.reports()
+		r.ApprovalPath = f.approve(testCommit)
+		m, err := Release(context.Background(), testCommit, r)
+		if err == nil || m.Ready || !strings.Contains(strings.Join(m.Blocking, "\n"), "runtime expected row "+row+" has no result") {
+			t.Fatalf("%s: %v %v", row, m.Blocking, err)
+		}
+	}
+}
+
+func TestReleaseRejectsUnreviewedLicenseOrSkippedSemantics(t *testing.T) {
+	f := newFixture(t).signed()
+	write(t, filepath.Join(f.root, "sdk/python/requirements-dev.lock"), "somepkg==1.0 \\\n    --hash=sha256:00\n")
+	f.writeEvidence(f.evidence["language"], "language", "skipped")
+	r := f.reports()
+	r.ApprovalPath = f.approve(testCommit)
+	m, err := Release(context.Background(), testCommit, r)
+	joined := strings.Join(m.Blocking, "\n")
+	if err == nil || !strings.Contains(joined, "licenses: pypi somepkg@1.0: license NOASSERTION") || !strings.Contains(joined, "language row row-1 is skipped") {
+		t.Fatalf("%v %v", m.Blocking, err)
+	}
+}
+
+// An AGPL header, license text or AGPL-licensed corpus manifest in a first-party tree blocks the gate;
+// a clean tree and a fixture string inside a Go test file do not.
+func TestReleaseRejectsAGPLDerivedSourceOrCorpus(t *testing.T) {
+	f := newFixture(t).signed()
+	if got := agplFindings(f.root); len(got) != 0 {
+		t.Fatalf("clean tree flagged: %v", got)
+	}
+	write(t, filepath.Join(f.root, "internal", "x", "x_test.go"), "package x\nvar _ = \"AGPL-3.0-only\"\n")
+	if got := agplFindings(f.root); len(got) != 0 {
+		t.Fatalf("test fixture string flagged: %v", got)
+	}
+	write(t, filepath.Join(f.root, "internal", "x", "copied.go"), "// SPDX-License-Identifier: AGPL-3.0-only\npackage x\n")
+	write(t, filepath.Join(f.root, "internal", "corpus", "provenance.json"), `{"license": "AGPL-3.0-only"}`)
+	r := f.reports()
+	r.ApprovalPath = f.approve(testCommit)
+	m, err := Release(context.Background(), testCommit, r)
+	joined := strings.Join(m.Blocking, "\n")
+	if err == nil || !strings.Contains(joined, "agpl_derived: internal/x/copied.go") || !strings.Contains(joined, "agpl_derived: internal/corpus/provenance.json") {
+		t.Fatalf("%v %v", m.Blocking, err)
+	}
+}

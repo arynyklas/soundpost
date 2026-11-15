@@ -10,6 +10,12 @@
     "linux_amd64": {
       "url": "https://go.dev/dl/go1.27.3.linux-amd64.tar.gz",
       "sha256": "65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40"
+    },
+    "linux_arm64": {
+      "url": "https://go.dev/dl/go1.27.3.linux-arm64.tar.gz",
+      "sha256": "a06e99309dbcbdca1a8ccd2282c3ee146e55930886e26b4f1193269587165f49",
+      "cross_built_from": "linux_amd64",
+      "note": "The release host is linux/amd64: arm64 binaries are cross-compiled by the pinned linux-amd64 toolchain. The arm64 archive is pinned so build verify can prove a supplied copy."
     }
   },
   "bun": {
@@ -34,5 +40,9 @@
     "observed_windows_24": "24.16.0"
   },
   "pnpm": "10.20.0",
+  "pnpm_tarball": {
+    "url": "https://registry.npmjs.org/pnpm/-/pnpm-10.20.0.tgz",
+    "integrity": "sha512-z5mYIiFi3YWGTQqBAueJLnukzq3rv1ox+cL85I384xepxTufZGTR75BCy6LgKuAqn3wUOitDjNk8kYQPAZK53Q=="
+  },
   "qualification": "Toolchain installation is not product or platform qualification. Unexecuted matrix rows remain not_run."
 }
