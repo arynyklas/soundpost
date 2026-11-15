@@ -17,6 +17,38 @@ A reference is refused with a named blocker when: producer unknown, digest malfo
 
 With `require_production` false, staging evidence may pass, but the result and the signed gate record `production_proven: false` / production proof outstanding.
 
+## Producer reports (08.05-W1)
+
+A digest is not accepted as a bare reference. `ReadyForCutover(ctx, ledger, authorizations, reports)` takes the producers' report bodies (`NewReadinessReports`; the CLI reads them from `--reports DIR`, one regular file per report, at most 256 files of 16 MiB, nothing else in the directory). A body is found only by the SHA-256 of its own bytes, so a reference cannot name one digest and be satisfied by other bytes. For every reference that is not already refused for a malformed digest or a result other than `pass`, the body named by the digest is decoded strictly (unknown fields and trailing data are refused) and judged by the adapter of the reference's producer. Every allowlisted producer has one; the gate itself checks the 10 kinds below and no producer stays a bare digest.
+
+| Producer | Report that the digest names | Kinds | Passes only when |
+|---|---|---|---|
+| `adoption-journeys` (08.03) | `journeys.json` (`JourneyReport`) | the three `journey_*` | schema version known, `verified_at` present, the section of the kind exists exactly once, has at least one check and every check passed; `verified_at` equals the reference's `observed_at` |
+| `adoption-shadow` (08.02) | private shadow report (`ShadowReport`) | `source_policy` | reconciled, no policy violation, no external send, no normal delivery, parity equal over at least one comparison, at least one record received |
+| `adoption-policy-compare` (08.04) | policy comparison report (`PolicyReport`) | `source_policy`, `delivery_policy` | verdict `reconciled`, at least one comparison, no missing urgency |
+| `adoption-retention` (08.07) | legacy-history status (`HistoryReport`) | `legacy_retention_export` | clear, no blocker, at least one recorded obligation, none overdue, no active writer on the legacy history; `evaluated_at` equals the reference's `observed_at` |
+| `qualify` (07.05) | `campaign-report.json` (`soundpost-query-campaign/1`) | `query_profile` | verified, nothing missing, no failure, every row verified, a release row and a smoke row for every required layout |
+| `smoke` (07.04) | `isolation.json` of `smoke isolation` | `isolation_matrix` | version 1, at least one denial row (error status, outcome `indistinguishable_from_guess`) and one own-read row (status 200, outcome `only_own_scope`), no other row, every row names actor, target and surface |
+| `drills` (07.07) | the `<scenario>.json` of one `drills` scenario, target `isolated` | `delivery_policy` (`provider-failure-outage`, `owner-cutover-rollback`), `deletion_restore` (`stale-policy-delete-barrier`, `backup-predates-deletion`, `restore-authority-unavailable`), `external_deadman` (`external-deadman`) | status `passed` and at least one check, every check ok |
+
+Each failure is a blocker that names the kind (`code:kind` in the CLI error):
+
+- `report_body_missing`: no supplied body has the digest. A body altered after its digest was recorded has another digest, so it is reported this way too: the gate cannot tell a missing report from a changed one.
+- `report_invalid`: the body is not a report of that producer that can speak for that kind: not JSON, unknown field, trailing data, another schema or version, another producer's report, another kind's report (for example a deletion drill for the deadman) or a drill of a target other than `isolated`.
+- `report_not_passing`: the body is of the right kind and its own verdict, checks or counts do not pass (table above).
+- `report_time_mismatch`: the report carries the time it was observed at (journeys, retention) and the reference claims another. The other producers' reports carry no observation time, so the reference's `observed_at` is a claim this gate cannot check against them.
+- `report_unverifiable`: only with `require_verified_reports`, for a producer with no adapter (none is allowlisted today).
+
+A satisfied criterion carries `body_verified: true` in the signed gate; `criteria_body_verified` in the public summary counts them.
+
+What the body checks do not establish:
+
+- A `drills` body that passes may record parts of itself as `not_run_items` (the deadman drill always records `independent failure domain` and `real alert destination` as not run on the isolated host). They are the drill's own statement and are not interpreted here; independence of the deadman remains the ledger's `failure_domain` claim, checked against `product_failure_domain` only.
+- The `drills` and `smoke` bodies are decoded with a mirror of the JSON those `package main` tools write (`readinessDrillReport`, `readinessIsolationReport`); a change of their shape must change the mirror. The `qualify` body is decoded with its own exported `CampaignReport`.
+- The `smoke isolation` matrix covers capabilities and exports, not every denial surface named by the criterion (artifact, tail, replay, profile).
+- Which scenario of a kind the operator references is the operator's choice: one valid reference satisfies a kind.
+- Reports of the closure (08.07 `closure.go`), cutover (08.06) and readiness (08.05) tools are not producers of evidence references.
+
 ## Signed gate
 
 `ReadyForCutover(ctx, AcceptanceLedger, Authorizations) (CutoverReadiness, error)` returns blockers, or an unsigned gate when complete. `SignReadyGate` (ed25519, standard library) signs only complete results; the signature covers the ledger digest, criteria, authorizations, scope, issue instant (the ledger clock), expiry and production flag. Expiry is the earliest of each used evidence's observed-at plus the freshness window and each used authorization's expiry.
@@ -26,18 +58,18 @@ With `require_production` false, staging evidence may pass, but the result and t
 ## CLI
 
 ```
-adoption readiness --ledger L.json --authorizations A.json --signing-key KEYFILE \
+adoption readiness --ledger L.json --authorizations A.json --reports REPORTS_DIR --signing-key KEYFILE \
   --private-output NEW_PRIVATE.json --public-summary NEW_PUBLIC.json [--now RFC3339] [--timeout 1m]
 ```
 
-`KEYFILE` holds a hex 32-byte ed25519 seed. `--now` overrides the ledger clock. Exit 0 and a signed gate in the private output only when complete; otherwise a non-zero exit listing `code:kind` blockers. Output files are created exclusively (never overwritten).
+`--reports` is required: a digest is never accepted without its report. `KEYFILE` holds a hex 32-byte ed25519 seed. `--now` overrides the ledger clock. Exit 0 and a signed gate in the private output only when complete; otherwise a non-zero exit listing `code:kind` blockers. Output files are created exclusively (never overwritten).
 
 ## Public projection
 
-Closed shape: `ready`, `criteria_required`, `criteria_satisfied`, `blocker_counts` (blocker code → count), `production_proof_outstanding`, `customer_acceptance` (always `false`). No scope, ids, digests, domains or times.
+Closed shape: `ready`, `criteria_required`, `criteria_satisfied`, `criteria_body_verified`, `blocker_counts` (blocker code → count), `production_proof_outstanding`, `customer_acceptance` (always `false`). No scope, ids, digests, domains or times.
 
 ## Trust boundaries and what is synthetic-only
 
-- The ledger, authorizations and gate are private; only the public summary may leave. Evidence digests are trusted as references to the producers' reports: this tool checks structure, freshness, scope, authorization and independence claims, not the report contents. Verifying that a digest matches a real report is the producer pipeline's job.
+- The ledger, authorizations, report bodies and gate are private; only the public summary may leave. Evidence digests are verified against the producers' report bodies (see above); the gate trusts those bodies as far as the producers' own verdicts go and does not re-run any producer.
 - Authorizations are caller-supplied data; this tool does not prove who issued them.
 - The test suite runs only against synthetic fixtures in memory and temporary directories. No customer system was contacted. The gate is never customer acceptance, and no drill is run by this tool; the authorized drills against a real or staged topology are not done here.

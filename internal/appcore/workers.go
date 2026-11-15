@@ -45,6 +45,18 @@ type ProducerScopes struct {
 	authority *auth.Service
 	org       model.ID
 	project   model.ID
+	clock     WorkerClock
+}
+
+// Now is the runner's clock of this pass (WorkerConfig.Clock): every instant a
+// producer stamps or compares with comes from it, never from the wall clock, so
+// the test clock and the production clock drive the producers alike. A scope
+// built without a pass (tests of one producer) reads the system clock.
+func (p ProducerScopes) Now() model.UnixNano {
+	if p.clock == nil {
+		return systemWorkerClock{}.Now()
+	}
+	return p.clock.Now()
 }
 
 // Org and Project name what the scopes are for.
@@ -403,7 +415,7 @@ func (w *Workers) Tick(ctx context.Context) PassReport {
 // or a restarted process) before the first pass serves any project, and again
 // while it fails.
 type Acquirer interface {
-	Acquired(ctx context.Context, lease replica.FenceToken) error
+	Acquired(ctx context.Context, lease replica.FenceToken, now model.UnixNano) error
 }
 
 func (w *Workers) acquire(ctx context.Context, lease replica.FenceToken, report *PassReport) {
@@ -416,7 +428,7 @@ func (w *Workers) acquire(ctx context.Context, lease replica.FenceToken, report 
 		if !ok {
 			continue
 		}
-		if err := a.Acquired(ctx, lease); err != nil {
+		if err := a.Acquired(ctx, lease, w.cfg.Clock.Now()); err != nil {
 			done = false
 			if deposed(err) {
 				report.Deposed = true
@@ -563,7 +575,7 @@ func (w *Workers) serveProject(ctx context.Context, org, project model.ID, lease
 			return
 		}
 	}
-	scopes := ProducerScopes{authority: w.app.Auth, org: org, project: project}
+	scopes := ProducerScopes{authority: w.app.Auth, org: org, project: project, clock: w.cfg.Clock}
 	for _, producer := range w.cfg.Producers {
 		n, err := producer.Produce(ctx, scopes, lease)
 		report.Produced += n

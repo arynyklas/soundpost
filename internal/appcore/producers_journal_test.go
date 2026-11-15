@@ -63,7 +63,8 @@ func (r *journalRig) entries() []storage.ExpiringEntry {
 func (r *journalRig) expiry(lead time.Duration) *appcore.Workers {
 	r.t.Helper()
 	w, err := r.app.NewWorkers(r.config(func(c *appcore.WorkerConfig) {
-		c.Producers = []appcore.Producer{r.app.JournalExpiryProducerWith(appcore.JournalExpiryConfig{Lead: lead, ReserveBytes: 1, Clock: r.clock})}
+		c.Clock = r.clock
+		c.Producers = []appcore.Producer{r.app.JournalExpiryProducerWith(appcore.JournalExpiryConfig{Lead: lead, ReserveBytes: 1})}
 	}))
 	if err != nil {
 		r.t.Fatal(err)

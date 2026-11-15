@@ -20,6 +20,12 @@ type ScanRequest struct {
 	Selectors  []Matcher
 	Projection []Field
 	Fence      ReadFence
+	// After is the resume position of a consumer that applies rows idempotently by
+	// origin: a row whose origin index in its group is at or below the entry of that
+	// group is skipped before its page is read or decoded. A group with no entry is
+	// read whole. It is a read optimization, never a visibility rule: rows the
+	// caller still needs are the ones above its own checkpoint.
+	After []model.Cursor
 }
 type MatchOp uint8
 

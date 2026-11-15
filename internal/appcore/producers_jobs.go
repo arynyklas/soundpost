@@ -27,37 +27,50 @@ import (
 // derived from the record's origin (group, index, record ID) and the reducer
 // dedups an event by (epoch, sequence), so applying a row any number of times,
 // after any crash, commits it at most once and reports jobs.Duplicate afterwards.
-// The producer's own position is therefore only an optimization of where to
-// read next. It is kept in memory: a restart re-reads from the start of the
-// journal through duplicates and never skips a row.
+// The producer's position is therefore only an optimization of what to read.
 //
-// Rows are read in the scan's order (observed time, record ID, origin). Two
-// positions per project serve different needs:
+// The position is a per-group origin cursor, "through": every row of the project's
+// job_attempt journal whose origin index in its group is at or below it has been
+// applied (or refused for good). A pass reads only above it (storage.ScanRequest.After
+// skips the rest at the index, without reading a page) and a row that reaches the
+// journal late, however far behind the newest event time its stamp is, has a higher
+// origin index than anything covered and is therefore read by the very next pass: there
+// is no sweep with a rest and no lookback window.
 //
-//   - the tail, the last row covered in scan order, is where every pass starts
-//     reading, so fresh evidence is applied promptly;
-//   - the lookback re-reads the rows in the last jobLookback of event time before the
-//     tail on every pass and applies those it has not covered, so an event that reached
-//     the journal slightly out of order (a finished attempt delivered after later-stamped
-//     rows of other attempts) is applied on the next pass instead of waiting for the
-//     sweep: a finished attempt does not read "started" for the sweep's rest;
-//   - the sweep walks the journal from its start up to the tail, a bounded chunk
-//     per pass, so a row that reached the journal behind the tail (a retried old
-//     event, a producer with a slow clock) is still found. When it reaches the
-//     tail it rests for sweepRest before starting over.
-//
+// Reading is organised in epochs. An epoch starts when the journal's watermark of
+// some group is above through; it fixes those watermarks, reads the rows above through
+// in scan order (observed time) in bounded chunks over as many passes as it takes, and
+// when it reaches the end of the journal, through moves to the fixed watermarks. Rows
+// that arrive during an epoch have an index above them and belong to the next epoch.
 // A call reads at most bound rows in total. A row the reducer rejects for good
 // (invalid, contradicting committed evidence, over a quota) is skipped; any other
 // failure ends the call with the row not covered.
+//
+// The position is kept in memory: a restart reads from the start of the journal
+// through duplicates and never skips a row.
+//
+// The producer is also the observer of the jobs an administrator defined in the job
+// schedule-definition catalogue (jobs.Catalogue, POST /api/v1/jobs/definitions): after the
+// journal is read it feeds jobs.Service.ObserveSchedule for every active entry, carrying
+// the definition, under the runner's policy.write scope and a fixed observer identity, at
+// most once per quarter of the definition's observer staleness bound. What the observation
+// attests is deliberately narrow: Healthy says this pass completed, and CompleteThrough is
+// the least, over the sources that delivered the job's events, of the newest event time each has
+// delivered (as of a read that reached the journal's end), less the late-arrival allowance
+// jobLookback. A source that falls silent stops advancing the attestation of its own jobs, so its
+// silence is never read as a missed run; a job whose runs stop while its source keeps delivering
+// other events is attested through those events, and its missed occurrences are declared.
 
 const (
 	defaultJobProducerBound = 256
-	defaultJobSweepRest     = 5 * time.Minute
-	// jobLookback is how far (event time) behind the tail a pass looks for rows that arrived out of order, and
-	// maxCoveredRows bounds the rows remembered for it; past the bound a pass skips the lookback (the sweep still finds the row).
-	jobLookback    = 15 * time.Minute
-	maxCoveredRows = 8192
+	// jobLookback is the allowance for evidence delivered after an event of a later time: what a
+	// complete read attests is the newest event time minus this.
+	jobLookback = 15 * time.Minute
 )
+
+// jobCatalogueObserver is the identity every catalogue observation carries. It is not a
+// principal: it names the observer in the job state, apart from any external observer.
+var jobCatalogueObserver = model.ID{'s', 'p', '.', 'j', 'o', 'b', 's', '.', 'c', 'a', 't', 'a', 'l', 'o', 'g', '.'}
 
 // rowKey is the scan order of a journal row: observed time, record ID, origin.
 type rowKey struct {
@@ -92,31 +105,46 @@ func (k rowKey) start() model.UnixNano {
 	return k.at
 }
 
+// jobPositions is the position of one project: through is the committed
+// per-group frontier, epoch the read in progress (nil between epochs).
 type jobPositions struct {
-	tail, sweep rowKey
-	restUntil   time.Time
-	// covered holds the rows covered within the lookback window: the lookback applies only rows not in it.
-	covered map[rowKey]struct{}
+	through map[model.ID]model.Uint64
+	epoch   *jobEpoch
+	// newest is, per source, the newest event time of the rows covered by reads that
+	// reached the journal's end, and sources the sources each job's rows came from;
+	// observed remembers when each catalogue job was last observed. synced is set once a
+	// pass found the journal read to its end (a restart starts unsynced, and observes
+	// nothing until it is: an observation made before the journal is re-read would claim less
+	// than the one before the restart).
+	newest   map[model.ID]model.UnixNano
+	sources  map[model.ID]map[model.ID]struct{}
+	observed map[model.ID]model.UnixNano
+	synced   bool
+}
+
+// jobEpoch is one read of the rows above through: marks are the watermarks it
+// fixed when it started and from is the scan-order position it has reached.
+type jobEpoch struct {
+	marks   []model.Cursor
+	from    rowKey
+	newest  map[model.ID]model.UnixNano
+	sources map[model.ID]map[model.ID]struct{}
 }
 
 type jobProducer struct {
 	app   *App
 	bound int
-	rest  time.Duration
-	now   func() time.Time
 
 	mu  sync.Mutex
 	pos map[[2]model.ID]*jobPositions
 }
 
 func newJobProducer(a *App, bound int) *jobProducer {
-	return &jobProducer{app: a, bound: bound, rest: defaultJobSweepRest, now: time.Now, pos: map[[2]model.ID]*jobPositions{}}
+	return &jobProducer{app: a, bound: bound, pos: map[[2]model.ID]*jobPositions{}}
 }
 
 // JobProducer is the runner's job stage: it applies the project's ingested
-// job_attempt evidence to the job books (see jobs.Service.ApplyAttempt). It
-// observes no schedule: there is no committed source of schedule definitions
-// (docs/user/jobs.md), so schedule health stays with the external observer.
+// job_attempt evidence to the job books (see jobs.Service.ApplyAttempt).
 func (a *App) JobProducer() Producer { return newJobProducer(a, defaultJobProducerBound) }
 
 // Produce applies the next bounded chunk of the project's job evidence.
@@ -141,30 +169,60 @@ func (p *jobProducer) Produce(ctx context.Context, scopes ProducerScopes, lease 
 	key := [2]model.ID{scopes.Org(), scopes.Project()}
 	pos := p.pos[key]
 	if pos == nil {
-		pos = &jobPositions{covered: map[rowKey]struct{}{}}
+		pos = &jobPositions{through: map[model.ID]model.Uint64{}, newest: map[model.ID]model.UnixNano{}, sources: map[model.ID]map[model.ID]struct{}{}, observed: map[model.ID]model.UnixNano{}}
 		p.pos[key] = pos
 	}
-	run := jobRun{p: p, group: group, lease: lease, read: read, write: write, project: scopes.Project(), budget: p.bound, covered: pos.covered}
-	end, err := run.drain(ctx, &pos.tail, rowKey{}, false, false)
-	if err != nil {
+	run := jobRun{p: p, group: group, lease: lease, read: read, write: write, project: scopes.Project(), budget: p.bound, newest: map[model.ID]model.UnixNano{}, sources: map[model.ID]map[model.ID]struct{}{}}
+	if err = run.epoch(ctx, pos); err != nil {
 		return run.committed, err
 	}
-	if end && pos.tail.set {
-		if err = run.lookback(ctx, pos); err != nil {
-			return run.committed, err
-		}
+	pos.synced = pos.synced || pos.epoch == nil
+	if !pos.synced {
+		return run.committed, nil
 	}
-	if end && run.budget > 0 && pos.tail.set && !p.now().Before(pos.restUntil) {
-		swept, err := run.drain(ctx, &pos.sweep, pos.tail, true, false)
+	n, err := p.observe(ctx, scopes, read, write, pos)
+	return run.committed + n, err
+}
+
+// observe feeds the schedule observations of the catalogue's active jobs (see the file comment).
+func (p *jobProducer) observe(ctx context.Context, scopes ProducerScopes, read, write auth.Scope, pos *jobPositions) (int, error) {
+	catalogue, err := p.app.JobCatalogue()
+	if err != nil {
+		return 0, err
+	}
+	entries, err := catalogue.List(ctx, read, scopes.Project())
+	if err != nil {
+		return 0, err
+	}
+	now := scopes.Now()
+	committed := 0
+	for _, entry := range entries {
+		if entry.Retired {
+			delete(pos.observed, entry.Job)
+			continue
+		}
+		every := entry.Definition.ObserverStaleAfter
+		if every <= 0 {
+			every = jobs.Duration(jobs.DefaultObserverStaleAfter)
+		}
+		if last, ok := pos.observed[entry.Job]; ok && now-last < model.UnixNano(every)/4 && now >= last {
+			continue
+		}
+		definition := entry.Definition
+		completeThrough := pos.completeThrough(entry.Job, now)
+		_, err = p.app.Jobs.ObserveSchedule(ctx, write, jobs.ScheduleEvidence{CommandID: model.NewID(), Project: scopes.Project(), Job: entry.Job, Observer: jobCatalogueObserver,
+			ObservedAt: now, CompleteThrough: completeThrough, Healthy: true, Definition: &definition})
 		if err != nil {
-			return run.committed, err
+			if rejectedForGood(err) {
+				pos.observed[entry.Job] = now // a definition the reducer refuses for good is retried on the cadence, not every pass
+				continue
+			}
+			return committed, err
 		}
-		if swept {
-			pos.sweep = rowKey{}
-			pos.restUntil = p.now().Add(p.rest)
-		}
+		pos.observed[entry.Job] = now
+		committed++
 	}
-	return run.committed, nil
+	return committed, nil
 }
 
 type jobRun struct {
@@ -176,39 +234,107 @@ type jobRun struct {
 	project   model.ID
 	budget    int
 	committed int
-	covered   map[rowKey]struct{}
+	newest    map[model.ID]model.UnixNano
+	sources   map[model.ID]map[model.ID]struct{}
 }
 
-// lookback applies the rows within jobLookback behind the tail that no pass has covered yet, and forgets the covered
-// rows older than that window. It never spends budget on a row it already covered.
-func (r *jobRun) lookback(ctx context.Context, pos *jobPositions) error {
-	floor := pos.tail.at - model.UnixNano(jobLookback)
-	for k := range r.covered {
-		if k.at < floor {
-			delete(r.covered, k)
-		}
+// epoch reads the rows above the project's through frontier, starting an epoch
+// when the journal has moved past it and finishing it when its end is reached.
+func (r *jobRun) epoch(ctx context.Context, pos *jobPositions) error {
+	after := make([]model.Cursor, 0, len(pos.through))
+	for g, i := range pos.through {
+		after = append(after, model.Cursor{Group: g, Index: i})
 	}
-	if len(r.covered) > maxCoveredRows {
-		clear(r.covered)
-		return nil
+	from := rowKey{}
+	if pos.epoch != nil {
+		from = pos.epoch.from
 	}
-	if r.budget == 0 {
-		return nil
-	}
-	from := rowKey{set: true, at: floor}
-	_, err := r.drain(ctx, &from, pos.tail, true, true)
-	return err
-}
-
-// drain covers rows after *from in scan order, advancing *from past each row it
-// covers, until the journal (or, when bounded, the row `until`) ends or the
-// call's budget is spent. It reports whether it reached that end.
-func (r *jobRun) drain(ctx context.Context, from *rowKey, until rowKey, bounded, skipCovered bool) (bool, error) {
-	it, err := r.p.app.Storage.Scan(ctx, r.read, storage.ScanRequest{Projects: []model.ID{r.project}, Signal: model.JobAttempt, Start: from.start(), End: math.MaxInt64})
+	it, err := r.p.app.Storage.Scan(ctx, r.read, storage.ScanRequest{Projects: []model.ID{r.project}, Signal: model.JobAttempt, Start: from.start(), End: math.MaxInt64, After: after})
 	if err != nil {
-		return false, err
+		return err
 	}
 	defer it.Close()
+	if pos.epoch == nil {
+		marks := it.Watermarks()
+		if marks == nil || !movedPast(marks, pos.through) {
+			return nil
+		}
+		pos.epoch = &jobEpoch{marks: marks, newest: map[model.ID]model.UnixNano{}, sources: map[model.ID]map[model.ID]struct{}{}}
+	}
+	end, err := r.drain(ctx, it, &pos.epoch.from)
+	mergeNewest(pos.epoch.newest, r.newest)
+	mergeSources(pos.epoch.sources, r.sources)
+	if err != nil || !end {
+		return err
+	}
+	mergeNewest(pos.newest, pos.epoch.newest)
+	mergeSources(pos.sources, pos.epoch.sources)
+	for _, m := range pos.epoch.marks {
+		if m.Index > pos.through[m.Group] {
+			pos.through[m.Group] = m.Index
+		}
+	}
+	pos.epoch = nil
+	return nil
+}
+
+// completeThrough is what the product's journal attests for one job: the least, over the
+// sources that delivered the job's events, of the newest event time each has delivered,
+// less the late-arrival allowance (and never after now). A job no source has delivered
+// an event for is attested through nothing; a source that falls silent holds back its own
+// jobs only.
+func (pos *jobPositions) completeThrough(job model.ID, now model.UnixNano) model.UnixNano {
+	sources := pos.sources[job]
+	if len(sources) == 0 {
+		return 0
+	}
+	through := now
+	for source := range sources {
+		through = min(through, pos.newest[source])
+	}
+	return max(through-model.UnixNano(jobLookback), 0)
+}
+
+// note records that a row of job came from source at event time at.
+func (r *jobRun) note(job, source model.ID, at model.UnixNano) {
+	r.newest[source] = max(r.newest[source], at)
+	if r.sources[job] == nil {
+		r.sources[job] = map[model.ID]struct{}{}
+	}
+	r.sources[job][source] = struct{}{}
+}
+
+func mergeNewest(into, from map[model.ID]model.UnixNano) {
+	for source, at := range from {
+		into[source] = max(into[source], at)
+	}
+}
+
+func mergeSources(into, from map[model.ID]map[model.ID]struct{}) {
+	for job, sources := range from {
+		if into[job] == nil {
+			into[job] = map[model.ID]struct{}{}
+		}
+		for source := range sources {
+			into[job][source] = struct{}{}
+		}
+	}
+}
+
+// movedPast reports whether some group's watermark is above its through frontier.
+func movedPast(marks []model.Cursor, through map[model.ID]model.Uint64) bool {
+	for _, m := range marks {
+		if m.Index > through[m.Group] {
+			return true
+		}
+	}
+	return false
+}
+
+// drain covers the rows of it after *from in scan order, advancing *from past each
+// row it covers, until the journal ends or the call's budget is spent. It reports
+// whether it reached the end of the journal.
+func (r *jobRun) drain(ctx context.Context, it storage.RowIterator, from *rowKey) (bool, error) {
 	for {
 		page, err := it.Next(ctx)
 		if errors.Is(err, io.EOF) {
@@ -225,14 +351,6 @@ func (r *jobRun) drain(ctx context.Context, from *rowKey, until rowKey, bounded,
 			if !row.after(*from) {
 				continue
 			}
-			if bounded && row.after(until) {
-				return true, nil
-			}
-			if skipCovered {
-				if _, done := r.covered[row]; done {
-					continue
-				}
-			}
 			if r.budget == 0 {
 				return false, nil
 			}
@@ -248,7 +366,7 @@ func (r *jobRun) drain(ctx context.Context, from *rowKey, until rowKey, bounded,
 				r.committed++
 			}
 			*from = row
-			r.covered[row] = struct{}{}
+			r.note(event.Job, page.Sources[i], page.Times[i])
 			r.budget--
 		}
 	}

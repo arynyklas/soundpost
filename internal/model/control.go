@@ -175,6 +175,13 @@ type ControlState struct {
 	// retirement of the owning project drops them
 	// (internal/control/rule_catalogue.go). Authoring never changes authority.
 	RuleDefinitions map[string]json.RawMessage `json:",omitempty"`
+	// Job schedule-definition catalogue (plan 11.01-W2). "org:project:job" holds
+	// the control package's closed JobDefinitionRecord DTO: the newest schedule
+	// definition of one job (opaque JSON the jobs package validates at save), its
+	// revision (the compare-and-set token) and whether it is retired. A
+	// retirement of the owning project drops them
+	// (internal/control/job_definitions.go). Authoring never changes authority.
+	JobDefinitions map[string]json.RawMessage `json:",omitempty"`
 }
 type ControlCommand struct {
 	CommandID        ID

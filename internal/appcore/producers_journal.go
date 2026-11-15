@@ -52,8 +52,6 @@ type JournalExpiryConfig struct {
 	// ReserveBytes is the canonical batch bytes a held journal may still grow by
 	// (default 64 MiB).
 	ReserveBytes uint64
-	// Clock stamps the gap; default the system clock.
-	Clock WorkerClock
 }
 
 const (
@@ -81,11 +79,13 @@ func (a *App) JournalExpiryProducerWith(cfg JournalExpiryConfig) Producer {
 	if cfg.ReserveBytes == 0 {
 		cfg.ReserveBytes = defaultJournalReserve
 	}
-	if cfg.Clock == nil {
-		cfg.Clock = systemWorkerClock{}
-	}
 	return &journalExpiryProducer{app: a, cfg: cfg}
 }
+
+// atClock is a clock frozen at one instant: the instant a leadership was acquired.
+type atClock model.UnixNano
+
+func (c atClock) Now() model.UnixNano { return model.UnixNano(c) }
 
 type journalProject struct{ org, project model.ID }
 
@@ -171,14 +171,13 @@ func (p *journalExpiryProducer) unprocessed(mine []storage.ExpiringEntry, state 
 // that no gap or checkpoint covers. Holding it here closes the window until the
 // project's first Produce pass (which releases the hold again once its gap
 // commits, or finds nothing left to protect).
-func (p *journalExpiryProducer) Acquired(ctx context.Context, lease replica.FenceToken) error {
+func (p *journalExpiryProducer) Acquired(ctx context.Context, lease replica.FenceToken, now model.UnixNano) error {
 	if err := p.app.leaseGate(ctx, lease); err != nil {
 		return err
 	}
 	p.mu.Lock()
 	p.plan = nil // a fresh plan: the cache of the previous leadership is not evidence
 	p.mu.Unlock()
-	now := p.cfg.Clock.Now()
 	plan, err := p.expiring(ctx, now)
 	if err != nil {
 		return err
@@ -190,7 +189,7 @@ func (p *journalExpiryProducer) Acquired(ctx context.Context, lease replica.Fenc
 		if err == nil {
 			var store *issues.ControlStore
 			var state issues.State
-			if _, store, err = (&issueProducer{app: p.app, clock: p.cfg.Clock}).service(lease); err == nil {
+			if _, store, err = (&issueProducer{app: p.app, clock: atClock(now)}).service(lease); err == nil {
 				state, err = store.Load(ctx, write, key.project)
 			}
 			if err == nil {
@@ -212,7 +211,7 @@ func (p *journalExpiryProducer) Produce(ctx context.Context, scopes ProducerScop
 	if err := p.app.leaseGate(ctx, lease); err != nil {
 		return 0, err
 	}
-	now := p.cfg.Clock.Now()
+	now := scopes.Now()
 	plan, err := p.expiring(ctx, now)
 	if err != nil {
 		return 0, err
@@ -227,7 +226,7 @@ func (p *journalExpiryProducer) Produce(ctx context.Context, scopes ProducerScop
 	if err != nil {
 		return 0, err
 	}
-	producer := &issueProducer{app: p.app, clock: p.cfg.Clock}
+	producer := &issueProducer{app: p.app, clock: scopesClock{scopes}}
 	svc, store, err := producer.service(lease)
 	if err != nil {
 		return 0, err

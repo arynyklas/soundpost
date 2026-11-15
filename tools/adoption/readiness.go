@@ -108,11 +108,10 @@ var readinessBlockCodes = []string{
 }
 
 // EvidenceRef is a typed reference to one result produced by a committed tool
-// (08.02-08.04 and 08.07 reports, 07.07 drills, 07.06 qualify, 07.04/09.06
-// smoke). The digest is the SHA-256 of that tool's report. For the producers
-// whose report shape this package owns (readinessAdapters) ReadyForCutover
-// requires the report bytes and checks them against the reference; the others
-// stay references until their tools gain an adapter.
+// (08.02-08.04 and 08.07 reports, 07.07 drills, 07.05 qualify, 07.04 smoke). The
+// digest is the SHA-256 of that tool's report. Every producer has a report
+// adapter (readinessAdapters): ReadyForCutover requires the report bytes and
+// checks them against the reference.
 type EvidenceRef struct {
 	Kind            ReadinessKind `json:"kind"`
 	Producer        string        `json:"producer"`
@@ -201,8 +200,8 @@ type ReadyGate struct {
 
 // CutoverReadiness is the evaluation result. Gate is populated (unsigned)
 // only when Ready; sign it with SignReadyGate. UnverifiedKinds lists the
-// satisfied kinds whose evidence is a digest reference only (no adapter for the
-// producer): Ready does not mean every report body was verified.
+// satisfied kinds whose evidence is a digest reference only (a producer with no
+// adapter; none of the allowlisted producers is one today).
 type CutoverReadiness struct {
 	Ready                      bool               `json:"ready"`
 	Blockers                   []ReadinessBlocker `json:"blockers"`

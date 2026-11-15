@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/arynyklas/soundpost/internal/appcore"
 	"github.com/arynyklas/soundpost/internal/auth"
 	"github.com/arynyklas/soundpost/internal/control"
 	"github.com/arynyklas/soundpost/internal/incidents"
@@ -101,6 +102,13 @@ func notificationOutage(t *testing.T, n *accNode) {
 		"-poll", "product=" + hb.url("product") + ",ingest=" + hb.url("ingest") + ",notification=" + hb.url("notification"),
 		"-interval", interval.String(), "-missing-after", missing.String(), "-timeout", "400ms",
 		"-destination", recv.URL(), "-authorized-destination", recv.Host(), "-test-allow-loopback",
+	})
+	t.Cleanup(func() {
+		if t.Failed() {
+			st, _ := obs.state()
+			hb.diag.Range(func(k, v any) bool { t.Logf("heartbeat %v last refused: %v", k, v); return true })
+			t.Logf("observer state at the end: %+v", st)
+		}
 	})
 	waitFor(t, 15*time.Second, "the observer to be armed on all three heartbeats", func() bool {
 		st, err := obs.state()
@@ -373,14 +381,18 @@ func (n *accNode) issueObserverToken() string {
 }
 
 type heartbeat struct {
-	t     *testing.T
-	n     *accNode
-	token string
-	addr  string
-	mu    sync.Mutex
-	srv   *http.Server
-	seq   atomic.Uint64
-	pass  atomic.Int64
+	t          *testing.T
+	n          *accNode
+	token      string
+	addr       string
+	mu         sync.Mutex
+	srv        *http.Server
+	seq        atomic.Uint64
+	pass       atomic.Int64
+	canaryOK   atomic.Int64 // unix ns of the last canary admission that was acknowledged
+	stopCanary context.CancelFunc
+	canaryDone chan struct{}
+	diag       sync.Map // component -> last refusal, kept so a timed-out wait can say why
 }
 
 func newHeartbeat(t *testing.T, n *accNode, token string) *heartbeat {
@@ -420,13 +432,62 @@ func (h *heartbeat) start() {
 	}
 	h.srv = &http.Server{Handler: mux}
 	go h.srv.Serve(ln)
+	canaryCtx, stop := context.WithCancel(context.Background())
+	h.stopCanary, h.canaryDone = stop, make(chan struct{})
+	go h.runCanary(canaryCtx, h.canaryDone)
+}
+
+// runCanary admits one canary sample at a time through the production C03 path while
+// the product is up and records when the last one was acknowledged. It stops with the
+// heartbeat endpoints: a product that is gone stops proving itself.
+func (h *heartbeat) runCanary(ctx context.Context, done chan struct{}) {
+	defer close(done)
+	for ctx.Err() == nil {
+		app := h.n.app
+		if app != nil {
+			c, cancel := context.WithTimeout(ctx, 5*time.Second)
+			err := h.canary(c, app)
+			cancel()
+			if err == nil {
+				h.canaryOK.Store(time.Now().UnixNano())
+			} else {
+				h.diag.Store("ingest", err.Error())
+			}
+		}
+		select {
+		case <-ctx.Done():
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
+func (h *heartbeat) canary(ctx context.Context, app *appcore.App) error {
+	record := canaryRecord(h.n.resource, model.UnixNano(time.Now().UnixNano()), float64(h.seq.Load()))
+	producer := model.ID{0xd1}
+	slot, err := model.OwnerSlot(h.n.org, h.n.project, h.n.source, producer, record)
+	if err != nil {
+		return err
+	}
+	batch := model.Batch{Version: 1, Project: h.n.project, Source: h.n.source, Producer: producer, ID: model.NewID(), PolicyRevision: 1, RouteSlot: slot, Records: []model.Record{record}}
+	grant, err := app.Ingest.ResolveSource(ctx, h.n.srcCred, batch)
+	if err == nil {
+		_, err = app.Ingest.Admit(ctx, grant, batch)
+	}
+	return err
 }
 
 func (h *heartbeat) stop() {
 	h.mu.Lock()
 	srv := h.srv
 	h.srv = nil
+	stop, done := h.stopCanary, h.canaryDone
+	h.stopCanary, h.canaryDone = nil, nil
 	h.mu.Unlock()
+	if stop != nil {
+		// The prover reads the node (app, source credential): it must be gone before the node is stopped.
+		stop()
+		<-done
+	}
 	if srv != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
@@ -441,7 +502,11 @@ func (h *heartbeat) stop() {
 // notification = the worker completed a pass recently.
 func (h *heartbeat) handler(component string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		fail := func(code int) { w.WriteHeader(code) }
+		start := time.Now()
+		fail := func(code int) {
+			h.diag.Store(component, fmt.Sprintf("%d after %v", code, time.Since(start)))
+			w.WriteHeader(code)
+		}
 		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		if token == "" || h.n.app == nil {
 			fail(http.StatusUnauthorized)
@@ -466,19 +531,11 @@ func (h *heartbeat) handler(component string) http.HandlerFunc {
 				return
 			}
 		case "ingest":
-			record := canaryRecord(h.n.resource, model.UnixNano(time.Now().UnixNano()), float64(h.seq.Load()))
-			producer := model.ID{0xd1}
-			slot, e := model.OwnerSlot(h.n.org, h.n.project, h.n.source, producer, record)
-			if e != nil {
-				fail(http.StatusServiceUnavailable)
-				return
-			}
-			batch := model.Batch{Version: 1, Project: h.n.project, Source: h.n.source, Producer: producer, ID: model.NewID(), PolicyRevision: 1, RouteSlot: slot, Records: []model.Record{record}}
-			grant, e := app.Ingest.ResolveSource(ctx, h.n.srcCred, batch)
-			if e == nil {
-				_, e = app.Ingest.Admit(ctx, grant, batch)
-			}
-			if e != nil {
+			// The canary runs in the background (see runCanary): a request-bound probe is
+			// cut off by the observer's own request timeout, which a replicated admission
+			// under the race detector exceeds without anything being unhealthy. What the
+			// endpoint reports is how recently an admission was acknowledged.
+			if time.Since(time.Unix(0, h.canaryOK.Load())) > 2*time.Second {
 				fail(http.StatusServiceUnavailable)
 				return
 			}

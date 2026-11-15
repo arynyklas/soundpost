@@ -63,8 +63,8 @@ func readinessReportCodes(r CutoverReadiness) map[string]int {
 }
 
 var (
-	readinessVerifiedKinds   = []ReadinessKind{ReadinessJourneyGateway, ReadinessJourneyFrontend, ReadinessJourneyBackground, ReadinessSourcePolicy, ReadinessDeliveryPolicy, ReadinessLegacyRetention}
-	readinessUnverifiedKinds = []ReadinessKind{ReadinessQueryProfile, ReadinessIsolationMatrix, ReadinessDeletionRestore, ReadinessExternalDeadman}
+	readinessVerifiedKinds   = readinessKinds
+	readinessUnverifiedKinds = []ReadinessKind{}
 )
 
 func TestCutoverReadinessVerifiesDigestsAgainstProducerReports(t *testing.T) {
@@ -116,10 +116,10 @@ func TestCutoverReadinessVerifiesDigestsAgainstProducerReports(t *testing.T) {
 	}
 
 	// A body that is another producer's report, or not a report, cannot speak for the kind.
-	journeys := readinessBody("adoption-journeys", readinessNow.Add(-10*time.Minute))
-	shadow := readinessBody("adoption-shadow", readinessNow)
-	policy := readinessBody("adoption-policy-compare", readinessNow)
-	history := readinessBody("adoption-retention", readinessNow.Add(-10*time.Minute))
+	journeys := readinessBody("adoption-journeys", ReadinessJourneyGateway, readinessNow.Add(-10*time.Minute))
+	shadow := readinessBody("adoption-shadow", ReadinessSourcePolicy, readinessNow)
+	policy := readinessBody("adoption-policy-compare", ReadinessDeliveryPolicy, readinessNow)
+	history := readinessBody("adoption-retention", ReadinessLegacyRetention, readinessNow.Add(-10*time.Minute))
 	for name, c := range map[string]struct {
 		kind ReadinessKind
 		body []byte
@@ -163,7 +163,7 @@ func TestCutoverReadinessVerifiesDigestsAgainstProducerReports(t *testing.T) {
 func TestCutoverReadinessRequiresTheProducerReportToPass(t *testing.T) {
 	l, a := readinessFixture()
 	at := readinessNow.Add(-10 * time.Minute)
-	edit := func(producer string, f func(v any)) []byte {
+	edit := func(producer string, kind ReadinessKind, f func(v any)) []byte {
 		var v any
 		switch producer {
 		case "adoption-journeys":
@@ -175,7 +175,7 @@ func TestCutoverReadinessRequiresTheProducerReportToPass(t *testing.T) {
 		default:
 			v = new(HistoryReport)
 		}
-		if err := json.Unmarshal(readinessBody(producer, at), v); err != nil {
+		if err := json.Unmarshal(readinessBody(producer, kind, at), v); err != nil {
 			t.Fatal(err)
 		}
 		f(v)
@@ -223,7 +223,7 @@ func TestCutoverReadinessRequiresTheProducerReportToPass(t *testing.T) {
 		{"history writers", ReadinessLegacyRetention, "adoption-retention", func(v any) { v.(*HistoryReport).ActiveWriters = 1 }},
 	}
 	for _, c := range cases {
-		el, reports := readinessSwap(l, c.kind, edit(c.producer, c.f))
+		el, reports := readinessSwap(l, c.kind, edit(c.producer, c.kind, c.f))
 		got := readinessReportCodes(readinessEvalWith(t, el, a, reports))
 		if got[ReadinessBlockReportNotPassing+":"+string(c.kind)] != 1 || len(got) != 1 {
 			t.Errorf("%s: want exactly report_not_passing on %s, got %v", c.name, c.kind, got)
@@ -238,14 +238,14 @@ func TestCutoverReadinessRequiresTheProducerReportToPass(t *testing.T) {
 		{ReadinessJourneyGateway, "adoption-journeys", func(v any) { v.(*JourneyReport).VerifiedAt = at.Add(time.Second) }},
 		{ReadinessLegacyRetention, "adoption-retention", func(v any) { v.(*HistoryReport).EvaluatedAt = at.Add(-time.Second) }},
 	} {
-		el, reports := readinessSwap(l, c.kind, edit(c.producer, c.f))
+		el, reports := readinessSwap(l, c.kind, edit(c.producer, c.kind, c.f))
 		got := readinessReportCodes(readinessEvalWith(t, el, a, reports))
 		if got[ReadinessBlockReportTime+":"+string(c.kind)] != 1 || len(got) != 1 {
 			t.Errorf("%s time: %v", c.kind, got)
 		}
 	}
 	// The honest body edited back to its own claim is accepted: the cases above fail for their edit alone.
-	el, reports := readinessSwap(l, ReadinessSourcePolicy, edit("adoption-shadow", func(any) {}))
+	el, reports := readinessSwap(l, ReadinessSourcePolicy, edit("adoption-shadow", ReadinessSourcePolicy, func(any) {}))
 	if r := readinessEvalWith(t, el, a, reports); !r.Ready {
 		t.Fatalf("an unedited report: %+v", r.Blockers)
 	}
@@ -272,18 +272,25 @@ func TestCutoverReadinessReportRulesOfReferences(t *testing.T) {
 	if r := readinessEval(t, l, a); !r.Ready {
 		t.Fatalf("a valid sibling reference satisfies the criterion: %+v", r.Blockers)
 	}
-	// Demanding verified reports blocks the producers whose report this package cannot verify.
+	// Demanding verified reports blocks a producer whose report this package cannot
+	// verify. Every allowlisted producer has an adapter, so the honest fixture stays ready...
 	l, a = readinessFixture()
 	l.RequireVerifiedReports = true
+	if r := readinessEval(t, l, a); !r.Ready || len(readinessReportCodes(r)) != 0 {
+		t.Fatalf("every producer has an adapter: %+v", r.Blockers)
+	}
+	// ...so the rule is exercised with a producer whose adapter is taken away.
+	saved := readinessAdapters["qualify"]
+	delete(readinessAdapters, "qualify")
+	defer func() { readinessAdapters["qualify"] = saved }()
 	r := readinessEval(t, l, a)
 	codes := readinessReportCodes(r)
-	if r.Ready || len(codes) != len(readinessUnverifiedKinds) {
+	if r.Ready || len(codes) != 1 || codes[ReadinessBlockReportUnverifiable+":"+string(ReadinessQueryProfile)] != 1 {
 		t.Fatalf("require verified reports: ready=%v %v", r.Ready, codes)
 	}
-	for _, k := range readinessUnverifiedKinds {
-		if codes[ReadinessBlockReportUnverifiable+":"+string(k)] != 1 {
-			t.Fatalf("%s must be report_unverifiable: %v", k, codes)
-		}
+	l.RequireVerifiedReports = false
+	if r := readinessEval(t, l, a); !r.Ready || !slices.Equal(r.UnverifiedKinds, []ReadinessKind{ReadinessQueryProfile}) {
+		t.Fatalf("without the rule the reference stays a digest: %+v %v", r.Blockers, r.UnverifiedKinds)
 	}
 }
 
@@ -409,15 +416,228 @@ func TestCutoverReadinessCLIVerifiesReports(t *testing.T) {
 		t.Fatalf("every report supplied: %v", err)
 	}
 	pb, _ := os.ReadFile(filepath.Join(dir, "ok.public.json"))
-	if !strings.Contains(string(pb), `"criteria_body_verified": 6`) {
+	if !strings.Contains(string(pb), `"criteria_body_verified": 10`) {
 		t.Fatalf("public summary: %s", pb)
 	}
 	if runReadiness(context.Background(), args("", "noflag")) == nil {
 		t.Fatal("--reports is required: a digest is never accepted without its report")
 	}
-	history := readinessBody("adoption-retention", readinessNow.Add(-10*time.Minute))
+	history := readinessBody("adoption-retention", ReadinessLegacyRetention, readinessNow.Add(-10*time.Minute))
 	err := runReadiness(context.Background(), args(reports("partial", func(b []byte) bool { return string(b) == string(history) }), "partial"))
 	if err == nil || !strings.Contains(err.Error(), "report_body_missing:legacy_retention_export") {
 		t.Fatalf("a missing report must block naming its kind: %v", err)
+	}
+}
+
+// readinessEditJSON decodes a report body into a generic document, applies f and
+// encodes it again.
+func readinessEditJSON(t testing.TB, body []byte, f func(m map[string]any)) []byte {
+	t.Helper()
+	var m map[string]any
+	if err := json.Unmarshal(body, &m); err != nil {
+		t.Fatal(err)
+	}
+	f(m)
+	return readinessJSON(t, m)
+}
+
+func TestReadinessEveryProducerHasAnAdapter(t *testing.T) {
+	seen := map[string]bool{}
+	for kind, producers := range readinessProducers {
+		for _, p := range producers {
+			seen[p] = true
+			if readinessAdapters[p] == nil {
+				t.Errorf("%s names producer %s, which has no report adapter: its digest would stay a bare reference", kind, p)
+			}
+		}
+	}
+	for p := range readinessAdapters {
+		if !seen[p] {
+			t.Errorf("adapter for %s, which no kind allows", p)
+		}
+	}
+}
+
+// 08.05-W1: the reports of qualify (07.05), smoke (07.04) and drills (07.07),
+// the producers whose tools are not part of this package, are decoded and
+// judged like the adoption reports.
+func TestCutoverReadinessVerifiesTheDrillQualifyAndSmokeReports(t *testing.T) {
+	l, a := readinessFixture()
+	// A passing body of each producer, for every scenario that may speak for the kind.
+	for kind, scenarios := range readinessDrillScenarios {
+		for _, scenario := range scenarios {
+			el := readinessMutate(l, kind, func(e *EvidenceRef) { e.Producer = "drills" })
+			el, reports := readinessSwap(el, kind, readinessDrillBody(scenario))
+			if r := readinessEvalWith(t, el, a, reports); !r.Ready || len(readinessReportCodes(r)) != 0 {
+				t.Errorf("%s drill report for %s must pass: %+v", scenario, kind, r.Blockers)
+			}
+		}
+	}
+
+	campaign, isolation := readinessCampaignBody(), readinessIsolationBody()
+	deletion := readinessDrillBody("backup-predates-deletion")
+	deadman := readinessDrillBody("external-deadman")
+	for _, c := range []struct {
+		name     string
+		kind     ReadinessKind
+		producer string
+		body     []byte
+	}{
+		// right shape, other kind or target
+		{"smoke report for the query profile", ReadinessQueryProfile, "smoke", isolation},
+		{"campaign report for the isolation matrix", ReadinessIsolationMatrix, "qualify", campaign},
+		{"drills report for the isolation matrix", ReadinessIsolationMatrix, "drills", deadman},
+		{"drills report for the query profile", ReadinessQueryProfile, "drills", deadman},
+		{"deletion drill for the deadman", ReadinessExternalDeadman, "drills", deletion},
+		{"deadman drill for deletion and restore", ReadinessDeletionRestore, "drills", deadman},
+		{"deadman drill for the delivery policy", ReadinessDeliveryPolicy, "drills", deadman},
+		{"retention scenario for deletion", ReadinessDeletionRestore, "drills", readinessDrillBody("evidence-gap-after-retention")},
+		{"membership scenario for delivery policy", ReadinessDeliveryPolicy, "drills", readinessDrillBody("membership-replace")},
+		{"drill of another target", ReadinessExternalDeadman, "drills", readinessEditJSON(t, deadman, func(m map[string]any) { m["target"] = "production" })},
+		{"drill without a target", ReadinessExternalDeadman, "drills", readinessEditJSON(t, deadman, func(m map[string]any) { delete(m, "target") })},
+		{"drill of an unknown status", ReadinessExternalDeadman, "drills", readinessEditJSON(t, deadman, func(m map[string]any) { m["status"] = "ok" })},
+		{"drill with an unknown field", ReadinessExternalDeadman, "drills", readinessEditJSON(t, deadman, func(m map[string]any) { m["verdict"] = "passed" })},
+		{"drill check of another shape", ReadinessExternalDeadman, "drills", readinessEditJSON(t, deadman, func(m map[string]any) { m["checks"] = "all ok" })},
+		{"campaign of another schema", ReadinessQueryProfile, "qualify", readinessEditJSON(t, campaign, func(m map[string]any) { m["schema"] = "soundpost-query-campaign/2" })},
+		{"campaign with an unknown field", ReadinessQueryProfile, "qualify", readinessEditJSON(t, campaign, func(m map[string]any) { m["passed"] = true })},
+		{"isolation of another version", ReadinessIsolationMatrix, "smoke", readinessEditJSON(t, isolation, func(m map[string]any) { m["Version"] = 2 })},
+		{"isolation without its qualification", ReadinessIsolationMatrix, "smoke", readinessEditJSON(t, isolation, func(m map[string]any) { m["Qualification"] = "" })},
+		{"isolation with an unknown field", ReadinessIsolationMatrix, "smoke", readinessEditJSON(t, isolation, func(m map[string]any) { m["Passed"] = true })},
+		{"drill report for a qualify reference", ReadinessQueryProfile, "qualify", deadman},
+		{"campaign report for a smoke reference", ReadinessIsolationMatrix, "smoke", campaign},
+		{"isolation report for a drills reference", ReadinessExternalDeadman, "drills", isolation},
+		{"not JSON (qualify)", ReadinessQueryProfile, "qualify", []byte("this is not a report")},
+		{"not JSON (smoke)", ReadinessIsolationMatrix, "smoke", []byte("this is not a report")},
+		{"not JSON (drills)", ReadinessExternalDeadman, "drills", []byte("this is not a report")},
+		{"empty object (qualify)", ReadinessQueryProfile, "qualify", []byte("{}")},
+		{"empty object (smoke)", ReadinessIsolationMatrix, "smoke", []byte("{}")},
+		{"empty object (drills)", ReadinessExternalDeadman, "drills", []byte("{}")},
+		{"trailing JSON (qualify)", ReadinessQueryProfile, "qualify", append(append([]byte(nil), campaign...), []byte(" {}")...)},
+		{"trailing JSON (smoke)", ReadinessIsolationMatrix, "smoke", append(append([]byte(nil), isolation...), []byte(" {}")...)},
+		{"trailing JSON (drills)", ReadinessExternalDeadman, "drills", append(append([]byte(nil), deadman...), []byte(" {}")...)},
+	} {
+		el := readinessMutate(l, c.kind, func(e *EvidenceRef) { e.Producer = c.producer })
+		el, reports := readinessSwap(el, c.kind, c.body)
+		if got := readinessReportCodes(readinessEvalWith(t, el, a, reports)); got[ReadinessBlockReportInvalid+":"+string(c.kind)] != 1 || len(got) != 1 {
+			t.Errorf("%s: want exactly report_invalid on %s, got %v", c.name, c.kind, got)
+		}
+	}
+
+	// Bodies of the right kind whose own verdict is not a pass: report_not_passing, and nothing else.
+	rows := func(m map[string]any) []any { return m["rows"].([]any) }
+	row := func(m map[string]any, i int) map[string]any { return rows(m)[i].(map[string]any) }
+	matrix := func(m map[string]any) []any { return m["Matrix"].([]any) }
+	for _, c := range []struct {
+		name string
+		kind ReadinessKind
+		body []byte
+	}{
+		{"campaign not verified", ReadinessQueryProfile, readinessEditJSON(t, campaign, func(m map[string]any) { m["verified"] = false })},
+		{"campaign row not verified", ReadinessQueryProfile, readinessEditJSON(t, campaign, func(m map[string]any) { row(m, 0)["verified"] = false })},
+		{"campaign row with a failure", ReadinessQueryProfile, readinessEditJSON(t, campaign, func(m map[string]any) { row(m, 1)["failures"] = []string{"unbound 785"} })},
+		{"campaign missing evidence", ReadinessQueryProfile, readinessEditJSON(t, campaign, func(m map[string]any) { m["missing_evidence"] = []string{"release/default/seed/2"} })},
+		{"campaign failure", ReadinessQueryProfile, readinessEditJSON(t, campaign, func(m map[string]any) { m["failures"] = []string{"matrix pin"} })},
+		{"campaign without rows", ReadinessQueryProfile, readinessEditJSON(t, campaign, func(m map[string]any) { m["rows"] = []any{} })},
+		{"campaign without a release row", ReadinessQueryProfile, readinessEditJSON(t, campaign, func(m map[string]any) { m["rows"] = rows(m)[1:] })},
+		{"campaign without the distributed", ReadinessQueryProfile, readinessEditJSON(t, campaign, func(m map[string]any) { m["rows"] = rows(m)[:2] })},
+		{"campaign without the single", ReadinessQueryProfile, readinessEditJSON(t, campaign, func(m map[string]any) { m["rows"] = append(rows(m)[:1:1], rows(m)[2]) })},
+		{"isolation without rows", ReadinessIsolationMatrix, readinessEditJSON(t, isolation, func(m map[string]any) { m["Matrix"] = []any{} })},
+		{"isolation extra row of an unknown outcome", ReadinessIsolationMatrix, readinessEditJSON(t, isolation, func(m map[string]any) {
+			m["Matrix"] = append(matrix(m), map[string]any{"actor": "x", "target": "y", "surface": "z", "status": 200, "outcome": "leaked"})
+		})},
+		{"isolation without denials", ReadinessIsolationMatrix, readinessEditJSON(t, isolation, func(m map[string]any) { m["Matrix"] = matrix(m)[1:] })},
+		{"isolation without own reads", ReadinessIsolationMatrix, readinessEditJSON(t, isolation, func(m map[string]any) { m["Matrix"] = matrix(m)[:1] })},
+		{"isolation unknown outcome", ReadinessIsolationMatrix, readinessEditJSON(t, isolation, func(m map[string]any) { matrix(m)[0].(map[string]any)["outcome"] = "leaked" })},
+		{"isolation denial answered 200", ReadinessIsolationMatrix, readinessEditJSON(t, isolation, func(m map[string]any) { matrix(m)[0].(map[string]any)["status"] = 200 })},
+		{"isolation own read refused", ReadinessIsolationMatrix, readinessEditJSON(t, isolation, func(m map[string]any) { matrix(m)[1].(map[string]any)["status"] = 404 })},
+		{"isolation row without an actor", ReadinessIsolationMatrix, readinessEditJSON(t, isolation, func(m map[string]any) { matrix(m)[1].(map[string]any)["actor"] = "" })},
+		{"isolation row without a target", ReadinessIsolationMatrix, readinessEditJSON(t, isolation, func(m map[string]any) { matrix(m)[1].(map[string]any)["target"] = "" })},
+		{"isolation row without a surface", ReadinessIsolationMatrix, readinessEditJSON(t, isolation, func(m map[string]any) { matrix(m)[1].(map[string]any)["surface"] = "" })},
+		{"deadman drill failed", ReadinessExternalDeadman, readinessEditJSON(t, deadman, func(m map[string]any) { m["status"] = "failed" })},
+		{"deadman drill not run", ReadinessExternalDeadman, readinessEditJSON(t, deadman, func(m map[string]any) { m["status"] = "not_run" })},
+		{"deadman drill with a failed check", ReadinessExternalDeadman, readinessEditJSON(t, deadman, func(m map[string]any) {
+			m["checks"] = append(m["checks"].([]any), map[string]any{"name": "outage_kept", "ok": false})
+		})},
+		{"deadman drill without checks", ReadinessExternalDeadman, readinessEditJSON(t, deadman, func(m map[string]any) { m["checks"] = []any{} })},
+		{"deletion drill failed", ReadinessDeletionRestore, readinessEditJSON(t, deletion, func(m map[string]any) { m["status"] = "failed" })},
+		{"delivery drill with a failed check", ReadinessDeliveryPolicy, readinessEditJSON(t, readinessDrillBody("owner-cutover-rollback"), func(m map[string]any) {
+			m["checks"] = append(m["checks"].([]any), map[string]any{"name": "one_owner", "ok": false})
+		})},
+	} {
+		el := l
+		if c.kind == ReadinessDeliveryPolicy { // the only drills report in this table that is not the fixture's producer
+			el = readinessMutate(l, c.kind, func(e *EvidenceRef) { e.Producer = "drills" })
+		}
+		el, reports := readinessSwap(el, c.kind, c.body)
+		got := readinessReportCodes(readinessEvalWith(t, el, a, reports))
+		if got[ReadinessBlockReportNotPassing+":"+string(c.kind)] != 1 || len(got) != 1 {
+			t.Errorf("%s: want exactly report_not_passing on %s, got %v", c.name, c.kind, got)
+		}
+	}
+}
+
+// The adoption adapters judge the kind the reference claims, not only the shape
+// of the body: a producer's genuine report cannot speak for a kind that producer
+// does not serve, and a report of another schema is refused.
+func TestCutoverReadinessAdoptionReportsOfAnotherKindOrSchema(t *testing.T) {
+	l, a := readinessFixture()
+	at := readinessNow.Add(-10 * time.Minute)
+	journeys := readinessBody("adoption-journeys", ReadinessJourneyGateway, at)
+	shadow := readinessBody("adoption-shadow", ReadinessSourcePolicy, at)
+	policy := readinessBody("adoption-policy-compare", ReadinessSourcePolicy, at)
+	history := readinessBody("adoption-retention", ReadinessLegacyRetention, at)
+	journeysOtherSchema := func() []byte {
+		var r JourneyReport
+		if err := json.Unmarshal(journeys, &r); err != nil {
+			t.Fatal(err)
+		}
+		r.SchemaVersion++
+		return readinessJSON(t, r)
+	}()
+	policyOtherSchema := func() []byte {
+		var r PolicyReport
+		if err := json.Unmarshal(policy, &r); err != nil {
+			t.Fatal(err)
+		}
+		r.SchemaVersion++
+		return readinessJSON(t, r)
+	}()
+	historyOtherSchema := func() []byte {
+		var r HistoryReport
+		if err := json.Unmarshal(history, &r); err != nil {
+			t.Fatal(err)
+		}
+		r.SchemaVersion++
+		return readinessJSON(t, r)
+	}()
+	historyNoTime := func() []byte {
+		var r HistoryReport
+		if err := json.Unmarshal(history, &r); err != nil {
+			t.Fatal(err)
+		}
+		r.EvaluatedAt = time.Time{}
+		return readinessJSON(t, r)
+	}()
+	for _, c := range []struct {
+		name     string
+		kind     ReadinessKind
+		producer string
+		body     []byte
+	}{
+		{"shadow report for delivery policy", ReadinessDeliveryPolicy, "adoption-shadow", shadow},
+		{"shadow report for a journey", ReadinessJourneyGateway, "adoption-shadow", shadow},
+		{"policy report for legacy retention", ReadinessLegacyRetention, "adoption-policy-compare", policy},
+		{"history report for source policy", ReadinessSourcePolicy, "adoption-retention", history},
+		{"journeys report for source policy", ReadinessSourcePolicy, "adoption-journeys", journeys},
+		{"journeys report of another schema", ReadinessJourneyGateway, "adoption-journeys", journeysOtherSchema},
+		{"policy report of another schema", ReadinessDeliveryPolicy, "adoption-policy-compare", policyOtherSchema},
+		{"history report of another schema", ReadinessLegacyRetention, "adoption-retention", historyOtherSchema},
+		{"history report with no evaluation time", ReadinessLegacyRetention, "adoption-retention", historyNoTime},
+	} {
+		el := readinessMutate(l, c.kind, func(e *EvidenceRef) { e.Producer = c.producer })
+		el, reports := readinessSwap(el, c.kind, c.body)
+		if got := readinessReportCodes(readinessEvalWith(t, el, a, reports)); got[ReadinessBlockReportInvalid+":"+string(c.kind)] != 1 || len(got) != 1 {
+			t.Errorf("%s: want exactly report_invalid on %s, got %v", c.name, c.kind, got)
+		}
 	}
 }

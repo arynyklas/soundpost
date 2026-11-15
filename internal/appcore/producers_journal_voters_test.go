@@ -139,7 +139,8 @@ func TestJournalHoldIsRederivedWhenAVoterBecomesLeader(t *testing.T) {
 	mk := func(id uint64) *appcore.Workers {
 		w, err := r.app.NewWorkers(r.config(func(c *appcore.WorkerConfig) {
 			c.Fence = electedFence{id: id, voter: groups[id], inner: inner}
-			c.Producers = []appcore.Producer{failingProducer{}, r.app.JournalExpiryProducerWith(appcore.JournalExpiryConfig{Lead: 24 * time.Hour, ReserveBytes: 1, Clock: r.clock})}
+			c.Clock = r.clock
+			c.Producers = []appcore.Producer{failingProducer{}, r.app.JournalExpiryProducerWith(appcore.JournalExpiryConfig{Lead: 24 * time.Hour, ReserveBytes: 1})}
 		}))
 		if err != nil {
 			t.Fatal(err)

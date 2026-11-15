@@ -8,7 +8,7 @@ import {join,resolve} from 'node:path';
 import {promisify} from 'node:util';
 import {test,expect,type APIRequestContext,type Browser,type BrowserContext,type Page} from '@playwright/test';
 import {setPermissions} from './support/replay';
-import {createOrg,createProject,createReader,field,id,ingestJobAttempt,login,onboardJobSource,onboardSdkJobSource,owner,postJson,sdkConfig,setGrant,tcpPath,type JobAttemptInput,type Reader,type Source} from './support/real';
+import {createOrg,createProject,createReader,field,id,ingestJobAttempt,listJobDefinitions,login,onboardJobSource,onboardSdkJobSource,owner,postJson,saveJobDefinition,sdkConfig,setGrant,tcpPath,type JobAttemptInput,type Reader,type Source} from './support/real';
 
 // Real server, real Chrome, real HTTPS, real sessions, real routes only. The job data is produced the product's own way:
 //   source credential -> POST /ingest/v1/batches (kind job_attempt) -> the leader-only background runner (`soundpost serve`, its job
@@ -17,9 +17,10 @@ import {createOrg,createProject,createReader,field,id,ingestJobAttempt,login,onb
 //
 // The external schedule observer speaks through its own route (POST /api/v1/jobs/schedule-evidence) and corrections through
 // POST /api/v1/jobs/correct; one test drives both. One test drives the job API of the real Python SDK (web/e2e/support/sdk_job_retry.py).
+// The schedule definitions come from the product's own catalogue (POST /api/v1/jobs/definitions, authored by a policy.write member); the
+// runner's observer stage feeds them to the reducer, so one test checks the definition text and a Missed verdict derived from the journal.
 // Still not covered here because the real path cannot reproduce it:
-//  - a local time that does not exist (skipped by DST) reported as skipped, and the schedule-derived expected occurrences;
-//  - the per-occurrence overlap policy text derived from a definition ("allow: ..."): the per-run overlap sentence from attempt times IS kept.
+//  - a local time that does not exist (skipped by DST) reported as skipped.
 // KEPT (all through ingest): start -> failure -> retry -> success, the next occurrence, redelivery counted nowhere, a late old completion
 // that never overwrites current health, cancellation never success, ID-only cause links, Refresh keeping the selection, the repeated local
 // time (fold 1) carried by the occurrence key itself, overlap sentences, scope and revocation.
@@ -129,7 +130,7 @@ test('start, failure, retry, success, the next occurrence, then a late old compl
  await expect(health).not.toContainText('Failed');
  await expect(page.getByTestId('job-source')).toContainText(/Committed source version \d+/);
  await expect(page.getByTestId('job-source')).toContainText(/Origin cursor of the newest attempt evidence: [0-9a-f]{32}:\d+/);
- // No schedule-definition source is committed: the job reads as attempt evidence only.
+ // This job has no catalogue entry: the job reads as attempt evidence only.
  await expect(page.getByTestId('job-definition')).toContainText('No job definition has been reported');
 
  // Runs, newest first.
@@ -311,6 +312,40 @@ test('the external schedule observer feed: missed with its evidence, an outage o
  await expect(attempt).toContainText('Original result: Failed');
  await expect(attempt.getByTestId('correction')).toContainText(`Corrected to Succeeded (correction version 1 by ${observer.id}`);
  await expect(attempt.getByTestId('correction')).toContainText(reason);
+});
+
+test('a schedule definition authored over the catalogue route is shown, and the runner reads the job Missed from the product\'s own journal',async()=>{
+ // The author is its own account holding policy.write only; the route is the product's own authoring surface.
+ const author=await createReader(owners,org,[p1]);
+ await setPermissions(owners,org,author.id,p1,true,['policy.write']);
+ const ap=await loggedIn(author);
+ const definition={revision:'1',effective_from_ns:ns(Date.now()-24*3600_000),schedule:{cron:'* * * * *',timezone:'UTC'},grace_ns:'60000000000',max_runtime_ns:'0',observer_stale_after_ns:'600000000000',overlap:'allow'};
+ const scheduled=id();
+ // Authoring is a write: the telemetry-only reader may not use it, and a stale author loses instead of overwriting.
+ expect((await saveJobDefinition(api,org,p1,scheduled,definition)).status).not.toBe(200);
+ const saved=await saveJobDefinition(ap,org,p1,scheduled,definition);
+ expect(saved.status,saved.text).toBe(200);
+ expect((await saveJobDefinition(ap,org,p1,scheduled,{...definition,revision:'2'},'0')).status).toBe(409);
+ const list=await listJobDefinitions(api,org,p1);
+ expect(list.status,list.text).toBe(200);
+ expect(field(list.json,'can_author')).toBe(false);
+ // Fresh evidence from the project's job sources: the newest applied event bounds what the runner may attest.
+ const F={job:id(),run:id(),att:id()};
+ await send({job:F.job,run:F.run,attempt:F.att,occurrence:'manual.fresh',ordinal:1,sequence:1,state:'started',observed:Date.now()-5000});
+ await send({job:F.job,run:F.run,attempt:F.att,occurrence:'manual.fresh',ordinal:1,sequence:2,state:'succeeded',observed:Date.now()-5000,terminal:Date.now()-4000});
+ await applied(F.job,{[F.run]:2});
+ const page=await rctx.newPage();
+ // The runner's observer stage feeds the catalogue on its next pass; the job never reported a run, so it reads Missed.
+ await expect(async()=>{
+  await open(page);
+  await expect(row(page,scheduled)).toContainText('Missed',{timeout:2000});
+ }).toPass({timeout:90_000,intervals:[1000,2000,5000]});
+ await openJob(page,scheduled);
+ await expect(page.getByTestId('job-health')).toContainText('Missed');
+ await expect(page.getByTestId('job-definition')).toContainText('Time zone: UTC');
+ await expect(page.getByTestId('job-definition')).toContainText('Schedule: * * * * *');
+ await expect(page.getByTestId('job-definition')).toContainText('allow: a run that starts while another runs is recorded, never dropped or merged');
+ await expect(page.getByTestId('job-observer')).toContainText('Schedule observer: fresh');
 });
 
 test('a run produced by the real Python SDK job API (first attempt raises, the retry succeeds) reads as recovered with its captured error as the cause',async()=>{

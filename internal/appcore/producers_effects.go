@@ -63,7 +63,7 @@ func (p *effectProducer) Produce(ctx context.Context, scopes ProducerScopes, lea
 	if err != nil {
 		return 0, err
 	}
-	producer := &issueProducer{app: p.app, clock: systemWorkerClock{}}
+	producer := &issueProducer{app: p.app, clock: scopesClock{scopes}}
 	_, store, err := producer.service(lease)
 	if err != nil {
 		return 0, err

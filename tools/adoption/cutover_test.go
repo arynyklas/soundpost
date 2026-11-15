@@ -19,6 +19,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -51,6 +52,39 @@ func (c *cutoverClock) add(d model.UnixNano) { c.v.Add(int64(d)) }
 // cutoverCrashSignal is the panic that models a process death: no tool code
 // runs after it, so only what was persisted before it survives.
 type cutoverCrashSignal struct{ point string }
+
+// cutoverManualContext is a context the test ends by hand, at an exact moment
+// and with the cause it names: no timer, no sleep, so the moment the run is
+// interrupted never depends on how fast the machine is.
+type cutoverManualContext struct {
+	context.Context
+	done chan struct{}
+	mu   sync.Mutex
+	err  error
+}
+
+func newCutoverManualContext(parent context.Context) *cutoverManualContext {
+	return &cutoverManualContext{Context: parent, done: make(chan struct{})}
+}
+
+func (c *cutoverManualContext) Done() <-chan struct{} { return c.done }
+
+func (c *cutoverManualContext) Err() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.err
+}
+
+// end interrupts the run with cause (context.DeadlineExceeded or
+// context.Canceled); only the first call counts.
+func (c *cutoverManualContext) end(cause error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.err == nil {
+		c.err = cause
+		close(c.done)
+	}
+}
 
 type cutoverWorld struct {
 	t   *testing.T
@@ -413,6 +447,10 @@ type cutoverTestEngine struct {
 	// what it answers when read: an engine that is wrong or moved by someone else.
 	tamper     func(c notify.CutoverCommand, st *notify.CutoverState)
 	readTamper func(st *notify.CutoverState)
+	// factsHook runs before every Facts call with the call's number (1, 2, ...);
+	// an error it returns is the call's answer: an engine that fails mid-wait.
+	factsHook func(call int) error
+	facts     int
 }
 
 func (e *cutoverTestEngine) AdvanceCutover(ctx context.Context, scope auth.Scope, c notify.CutoverCommand) (notify.CutoverState, error) {
@@ -447,6 +485,12 @@ func (e *cutoverTestEngine) Cutover(ctx context.Context, scope auth.Scope) (noti
 }
 
 func (e *cutoverTestEngine) Facts(ctx context.Context, scope auth.Scope) (notify.CutoverFacts, error) {
+	e.facts++
+	if e.factsHook != nil {
+		if err := e.factsHook(e.facts); err != nil {
+			return notify.CutoverFacts{}, err
+		}
+	}
 	f, err := e.inner.Facts(ctx, scope)
 	if err == nil && e.inflate != 0 {
 		if e.inflate > 0 {
@@ -2088,6 +2132,26 @@ func TestRollbackRefusesWhatIsNotAnAuthorizedReasonedRollbackOfThisRun(t *testin
 			t.Fatalf("%v %v %+v", crashed, err, rb)
 		}
 	})
+	t.Run("a receipt without an absolute state path is refused for that reason alone", func(t *testing.T) {
+		// a copy of the run's own state file sits under the relative name in the
+		// working directory: the receipt must be refused before any file is read
+		raw, err := os.ReadFile(w.plan.StatePath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dir := t.TempDir()
+		if err = os.WriteFile(filepath.Join(dir, "state.json"), raw, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		t.Chdir(dir)
+		for _, statePath := range []string{"", "state.json"} {
+			r := done
+			r.StatePath = statePath
+			if rb, err := Rollback(w.rtctx(), r, reason, w.grant); err == nil || rb.Version != 0 || !strings.Contains(err.Error(), "names no state file") {
+				t.Fatalf("state path %q: %v %+v", statePath, err, rb)
+			}
+		}
+	})
 }
 
 func TestRollbackIsIndependentOfTheReadyGate(t *testing.T) {
@@ -2129,6 +2193,42 @@ func TestRollbackStopsWhenItsAuthorizationLapsesBetweenPhases(t *testing.T) {
 	}
 }
 
+// TestRollbackGuardStopsAtEveryPhaseBoundaryWhenItsAuthorizationLapses lapses the
+// grant right after an engine command committed, so that only the guard in
+// front of the next phase can stop the rollback: the engine's own barrier would
+// not (the legacy restore never asks it), and where it would, the stop must still
+// be the guard's and name the authorization. A rollback-only grant is enough.
+func TestRollbackGuardStopsAtEveryPhaseBoundaryWhenItsAuthorizationLapses(t *testing.T) {
+	reason := Reason{Code: RollbackReasonOperator, Text: "drill"}
+	for _, c := range []struct {
+		name, point string
+		completed   []string
+	}{
+		{"after the new owner quiesced", "engine.after.rollback_quiescing", []string{rollbackStepNewQuiesced}},
+		{"after the old owner was recorded", "engine.after.old_active", []string{rollbackStepNewQuiesced, rollbackStepOldRecorded}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			w := newCutoverWorld(t)
+			done := w.mustCutover()
+			grant := cutoverCloneGrant(t, w.grant)
+			grant.Scopes[0].Collectors = []string{"rollback"} // a grant for rollback alone
+			grant.ExpiresAt = w.now().Add(10 * time.Minute)
+			w.observe(c.point, func() { w.advance(15 * time.Minute) })
+			rb, err := Rollback(w.rtctx(), done, reason, grant)
+			if err == nil || !strings.Contains(err.Error(), "authorization") || rb.Phase != CutoverPhaseIncomplete || rb.IncompleteCode != CutoverIncompleteGuard || !slices.Equal(rb.Completed, c.completed) {
+				t.Fatalf("err=%v %+v", err, rb)
+			}
+			if w.legacy.enabled || w.legacy.restoreEffects != 0 || w.newActive() {
+				t.Fatalf("a lapsed rollback must leave nobody sending: legacy=%v restores=%d owners=%v", w.legacy.enabled, w.legacy.restoreEffects, w.owners())
+			}
+			grant.ExpiresAt = w.now().Add(time.Hour) // a renewed grant resumes it
+			if rb, err = Rollback(w.rtctx(), done, reason, grant); err != nil || rb.Phase != CutoverPhaseDone || !w.legacy.enabled || w.legacy.restoreEffects != 1 || !slices.Equal(w.owners(), []model.ID{w.old}) {
+				t.Fatalf("resume: %v %+v", err, rb)
+			}
+		})
+	}
+}
+
 func TestRollbackWaitsForLiveClaimsBeforeRecordingTheOldOwner(t *testing.T) {
 	reason := Reason{Code: RollbackReasonOperator, Text: "drill"}
 	t.Run("claims drain", func(t *testing.T) {
@@ -2150,28 +2250,196 @@ func TestRollbackWaitsForLiveClaimsBeforeRecordingTheOldOwner(t *testing.T) {
 			t.Fatalf("the old owner was recorded or restored before the claims drained: %v", w.events)
 		}
 	})
-	t.Run("claims never drain", func(t *testing.T) {
+	// The interruption is an event of the test, not a timer: the engine's third
+	// answer to "are claims still live" ends the run's context. Once the engine
+	// answers normally and the wait sees the end of the run itself; once the
+	// engine fails across it with an error of its own that wraps no context
+	// error. Either way the rollback is an explicit incomplete run that
+	// restored nothing, coded as the run's own deadline or cancellation.
+	for _, interruption := range []struct {
+		name  string
+		cause error
+		want  string
+	}{{"deadline", context.DeadlineExceeded, CutoverIncompleteTimeout}, {"cancellation", context.Canceled, CutoverIncompleteCancelled}} {
+		for _, failTheCall := range []bool{false, true} {
+			t.Run(fmt.Sprintf("claims never drain: %s, engine failing across it=%v", interruption.name, failTheCall), func(t *testing.T) {
+				w := newCutoverWorld(t)
+				done := w.mustCutover()
+				w.engine.inflate = -1
+				mc := newCutoverManualContext(w.rtctx())
+				base := w.engine.facts
+				w.engine.factsHook = func(call int) error {
+					if call-base < 3 {
+						return nil
+					}
+					mc.end(interruption.cause)
+					if failTheCall {
+						return errors.New("engine transport closed")
+					}
+					return nil
+				}
+				rb, err := Rollback(mc, done, reason, w.grant)
+				if err == nil || rb.Phase != CutoverPhaseIncomplete || rb.IncompleteCode != interruption.want || len(rb.Completed) != 0 {
+					t.Fatalf("err=%v %+v", err, rb)
+				}
+				if got := w.engine.facts - base; got < 3 || failTheCall && got != 3 {
+					t.Fatalf("the wait asked %d times whether claims were live", got)
+				}
+				if es, _ := w.engineState(); es.Phase != notify.CutoverRollbackQuiescing || len(w.owners()) != 0 || w.legacy.enabled || w.legacy.restoreEffects != 0 || w.indexOf("engine:old_active") >= 0 {
+					t.Fatalf("a rollback that cannot quiesce the new owner must restore nothing: %s %v", es.Phase, w.owners())
+				}
+				if got := w.state().Rollback; got == nil || got.Phase != CutoverPhaseIncomplete || got.IncompleteCode != interruption.want {
+					t.Fatalf("durable record: %+v", got)
+				}
+				w.engine.factsHook, w.engine.inflate = nil, 0
+				if rb, _, err = w.rollback(done, reason); err != nil || rb.Phase != CutoverPhaseDone || !slices.Equal(w.owners(), []model.ID{w.old}) {
+					t.Fatalf("resume: %v %+v", err, rb)
+				}
+			})
+		}
+	}
+	t.Run("claims never drain: a run cancelled before it starts", func(t *testing.T) {
 		w := newCutoverWorld(t)
 		done := w.mustCutover()
 		w.engine.inflate = -1
-		ctx, cancel := context.WithTimeout(w.rtctx(), 100*time.Millisecond)
-		defer cancel()
-		rb, err := Rollback(ctx, done, reason, w.grant)
-		if err == nil || rb.Phase != CutoverPhaseIncomplete || rb.IncompleteCode != CutoverIncompleteTimeout || len(rb.Completed) != 0 {
-			t.Fatalf("err=%v %+v", err, rb)
-		}
-		if es, _ := w.engineState(); es.Phase != notify.CutoverRollbackQuiescing || len(w.owners()) != 0 || w.legacy.enabled || w.legacy.restoreEffects != 0 || w.indexOf("engine:old_active") >= 0 {
-			t.Fatalf("a rollback that cannot quiesce the new owner must restore nothing: %s %v", es.Phase, w.owners())
-		}
-		// Cancellation is reported as such.
-		ctx2, cancel2 := context.WithCancel(w.rtctx())
-		cancel2()
-		if rb, err = Rollback(ctx2, done, reason, w.grant); err == nil || rb.IncompleteCode != CutoverIncompleteCancelled {
+		ctx, cancel := context.WithCancel(w.rtctx())
+		cancel()
+		if rb, err := Rollback(ctx, done, reason, w.grant); err == nil || rb.IncompleteCode != CutoverIncompleteCancelled {
 			t.Fatalf("cancelled: %v %+v", err, rb)
 		}
 		w.engine.inflate = 0
-		if rb, _, err = w.rollback(done, reason); err != nil || rb.Phase != CutoverPhaseDone || !slices.Equal(w.owners(), []model.ID{w.old}) {
+		if rb, _, err := w.rollback(done, reason); err != nil || rb.Phase != CutoverPhaseDone || !slices.Equal(w.owners(), []model.ID{w.old}) {
 			t.Fatalf("resume: %v %+v", err, rb)
+		}
+	})
+}
+
+// TestCutoverStopCodeCtxMapsOnlyAdapterFailuresToTheInterruption pins the rule
+// of cutoverStopCodeCtx: an adapter failure seen after the run's own deadline or
+// cancellation is reported as that deadline or cancellation, whatever the
+// adapter returned; a failure with a code of its own keeps it, and a failure
+// while the run is live stays the adapter's. The interruption is an event of
+// the test (cutoverManualContext): nothing here depends on a timer.
+func TestCutoverStopCodeCtxMapsOnlyAdapterFailuresToTheInterruption(t *testing.T) {
+	plain := errors.New("transport closed") // wraps no context error
+	adapter := cutoverFail(plain)
+	cases := []struct {
+		name string
+		end  error // how the run was interrupted; nil: not at all
+		err  error
+		want string
+	}{
+		{"live run, adapter failure", nil, adapter, CutoverIncompleteAdapter},
+		{"live run, bare adapter error", nil, plain, CutoverIncompleteAdapter},
+		{"live run, barrier refusal", nil, cutoverStopErr(CutoverIncompleteBarrier, "", nil), CutoverIncompleteBarrier},
+		{"deadline, adapter failure", context.DeadlineExceeded, adapter, CutoverIncompleteTimeout},
+		{"deadline, bare adapter error", context.DeadlineExceeded, plain, CutoverIncompleteTimeout},
+		{"cancellation, adapter failure", context.Canceled, adapter, CutoverIncompleteCancelled},
+		{"cancellation, bare adapter error", context.Canceled, plain, CutoverIncompleteCancelled},
+		{"deadline, barrier refusal keeps its code", context.DeadlineExceeded, cutoverStopErr(CutoverIncompleteBarrier, "", nil), CutoverIncompleteBarrier},
+		{"cancellation, guard refusal keeps its code", context.Canceled, cutoverStopErr(CutoverIncompleteGuard, "authorization", nil), CutoverIncompleteGuard},
+		{"cancellation, unreviewed unknown outcomes keep their code", context.Canceled, cutoverStopErr(CutoverIncompleteUnknown, "", nil), CutoverIncompleteUnknown},
+		{"cancellation, the adapter reported its own deadline", context.Canceled, cutoverFail(fmt.Errorf("provider call: %w", context.DeadlineExceeded)), CutoverIncompleteTimeout},
+		{"deadline, the adapter reported a cancellation", context.DeadlineExceeded, cutoverFail(fmt.Errorf("provider call: %w", context.Canceled)), CutoverIncompleteCancelled},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			mc := newCutoverManualContext(context.Background())
+			if c.end != nil {
+				mc.end(c.end)
+			}
+			if got := cutoverStopCodeCtx(mc, c.err); got != c.want {
+				t.Fatalf("code %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+// TestCutoverStopsAsTheRunsInterruptionWhenAnAdapterFailsAfterIt drives both
+// call sites of cutoverStopCodeCtx (the cutover's and the rollback's stop): the
+// legacy operator fails with an error of its own at the moment the test ends
+// the run's context, so the durable record and the receipt must say timeout or
+// cancelled, never adapter_error. Controls: the same failure on a live run is
+// the adapter's, and a stop that has a code of its own keeps it.
+func TestCutoverStopsAsTheRunsInterruptionWhenAnAdapterFailsAfterIt(t *testing.T) {
+	plain := errors.New("legacy operator connection reset") // wraps no context error
+	reason := Reason{Code: RollbackReasonOperator, Text: "drill"}
+	for _, c := range []struct {
+		name  string
+		cause error
+		want  string
+	}{{"deadline", context.DeadlineExceeded, CutoverIncompleteTimeout}, {"cancellation", context.Canceled, CutoverIncompleteCancelled}} {
+		t.Run("cutover, adapter fails after the "+c.name, func(t *testing.T) {
+			w := newCutoverWorld(t)
+			mc := newCutoverManualContext(w.rtctx())
+			w.faults["legacy.before.QuiesceNormal"] = func() error { mc.end(c.cause); return plain }
+			rcpt, err := Cutover(mc, w.gate, w.plan, w.grant)
+			if !errors.Is(err, plain) || rcpt.Phase != CutoverPhaseIncomplete || rcpt.IncompleteCode != c.want || !slices.Equal(rcpt.Completed, []string{cutoverStepPreflight}) {
+				t.Fatalf("err=%v %+v", err, rcpt)
+			}
+			if got := w.state(); got.Phase != CutoverPhaseIncomplete || got.IncompleteCode != c.want {
+				t.Fatalf("durable record %q %q, want incomplete %q", got.Phase, got.IncompleteCode, c.want)
+			}
+			w.assertConverged(w.mustCutover()) // an interrupted run is an ordinary incomplete run
+		})
+		t.Run("cutover, a stop with a code of its own after the "+c.name, func(t *testing.T) {
+			w := newCutoverWorld(t)
+			mc := newCutoverManualContext(w.rtctx())
+			w.legacy.reenableOnQuiet = true
+			w.faults["legacy.before.QuiesceNormal"] = func() error { mc.end(c.cause); return nil }
+			rcpt, err := Cutover(mc, w.gate, w.plan, w.grant)
+			if err == nil || rcpt.Phase != CutoverPhaseIncomplete || rcpt.IncompleteCode != CutoverIncompleteQuiescence {
+				t.Fatalf("err=%v %+v", err, rcpt)
+			}
+			if got := w.state(); got.IncompleteCode != CutoverIncompleteQuiescence {
+				t.Fatalf("durable record %q", got.IncompleteCode)
+			}
+		})
+		t.Run("rollback, adapter fails after the "+c.name, func(t *testing.T) {
+			w := newCutoverWorld(t)
+			done := w.mustCutover()
+			mc := newCutoverManualContext(w.rtctx())
+			w.faults["legacy.before.RestoreNormal"] = func() error { mc.end(c.cause); return plain }
+			rb, err := Rollback(mc, done, reason, w.grant)
+			if !errors.Is(err, plain) || rb.Phase != CutoverPhaseIncomplete || rb.IncompleteCode != c.want ||
+				!slices.Equal(rb.Completed, []string{rollbackStepNewQuiesced, rollbackStepOldRecorded}) || w.legacy.restoreEffects != 0 {
+				t.Fatalf("err=%v restores=%d %+v", err, w.legacy.restoreEffects, rb)
+			}
+			if got := w.state().Rollback; got == nil || got.Phase != CutoverPhaseIncomplete || got.IncompleteCode != c.want {
+				t.Fatalf("durable record: %+v", got)
+			}
+			if rb, _, err = w.rollback(done, reason); err != nil || rb.Phase != CutoverPhaseDone || !w.legacy.enabled || w.legacy.restoreEffects != 1 {
+				t.Fatalf("resume: %v %+v", err, rb)
+			}
+		})
+		t.Run("rollback, a stop with a code of its own after the "+c.name, func(t *testing.T) {
+			w := newCutoverWorld(t)
+			done := w.mustCutover()
+			w.route.unknown["unknown-id-4417"] = true
+			w.emit("unknown-id-4417", false)
+			mc := newCutoverManualContext(w.rtctx())
+			w.faults["route.Delivered"] = func() error { mc.end(c.cause); return nil }
+			rb, err := Rollback(mc, done, reason, w.grant)
+			if err == nil || rb.Phase != CutoverPhaseIncomplete || rb.IncompleteCode != CutoverIncompleteUnknown {
+				t.Fatalf("err=%v %+v", err, rb)
+			}
+		})
+	}
+	t.Run("cutover, the same failure on a live run is the adapter's", func(t *testing.T) {
+		w := newCutoverWorld(t)
+		w.failAt("legacy.before.QuiesceNormal", plain)
+		rcpt, _, err := w.cutover()
+		if !errors.Is(err, plain) || rcpt.Phase != CutoverPhaseIncomplete || rcpt.IncompleteCode != CutoverIncompleteAdapter {
+			t.Fatalf("err=%v %+v", err, rcpt)
+		}
+	})
+	t.Run("rollback, the same failure on a live run is the adapter's", func(t *testing.T) {
+		w := newCutoverWorld(t)
+		done := w.mustCutover()
+		w.failAt("legacy.before.RestoreNormal", plain)
+		rb, _, err := w.rollback(done, reason)
+		if !errors.Is(err, plain) || rb.Phase != CutoverPhaseIncomplete || rb.IncompleteCode != CutoverIncompleteAdapter {
+			t.Fatalf("err=%v %+v", err, rb)
 		}
 	})
 }
@@ -2235,6 +2503,45 @@ func TestRollbackResumeMustRepeatTheSameReason(t *testing.T) {
 	rb, _, err := w.rollback(done, reason)
 	if err != nil || rb.Phase != CutoverPhaseDone {
 		t.Fatalf("%v %+v", err, rb)
+	}
+	// The attestation belongs to the call, not to the run: the durable record
+	// keeps the reason's code and text and never the attestation, so no later
+	// call can inherit it.
+	if got := w.state().Rollback; got == nil || got.Reason != (Reason{Code: reason.Code, Text: reason.Text}) {
+		t.Fatalf("durable reason %+v: want the code and text of %+v and no attestation", got, reason)
+	}
+}
+
+// TestRollbackResumeWithoutTheAttestationHoldsTheOldOwnerBack: the attestation
+// that the unknown provider outcomes were reviewed is the call's, so a resume
+// that does not repeat it cannot record the old owner while the engine still
+// holds an unknown outcome: the engine's barrier refuses and nothing is restored.
+func TestRollbackResumeWithoutTheAttestationHoldsTheOldOwnerBack(t *testing.T) {
+	w := newCutoverWorld(t)
+	w.commitPendingDecision(true) // one unknown outcome in the product's own set
+	w.plan.UnknownReviewed = true
+	done := w.mustCutover()
+	reason := Reason{Code: RollbackReasonOperator, Text: "drill", UnknownReviewed: true}
+	w.crashAt("engine.before.old_active")
+	if _, crashed, _ := w.rollback(done, reason); !crashed {
+		t.Fatal("setup crash")
+	}
+	// The attestation of the call that created the record is not in the record.
+	if got := w.state().Rollback; got == nil || got.Reason != (Reason{Code: reason.Code, Text: reason.Text}) {
+		t.Fatalf("durable reason %+v: want the code and text of %+v and no attestation", got, reason)
+	}
+	reason.UnknownReviewed = false
+	rb, crashed, err := w.rollback(done, reason)
+	if crashed || err == nil || rb.Phase != CutoverPhaseIncomplete || rb.IncompleteCode != CutoverIncompleteBarrier || !strings.Contains(err.Error(), "unknown_unreviewed") ||
+		!slices.Equal(rb.Completed, rollbackSteps[:1]) {
+		t.Fatalf("crashed=%v err=%v %+v", crashed, err, rb)
+	}
+	if es, _ := w.engineState(); es.Phase != notify.CutoverRollbackQuiescing || len(w.owners()) != 0 || w.legacy.enabled || w.legacy.restoreEffects != 0 {
+		t.Fatalf("an unattested resume must hold the old owner back: %s owners=%v legacy=%v", es.Phase, w.owners(), w.legacy.enabled)
+	}
+	reason.UnknownReviewed = true
+	if rb, _, err = w.rollback(done, reason); err != nil || rb.Phase != CutoverPhaseDone || !w.legacy.enabled || !slices.Equal(w.owners(), []model.ID{w.old}) {
+		t.Fatalf("attested again: %v %+v", err, rb)
 	}
 }
 
@@ -2859,6 +3166,10 @@ func TestCutoverRefusesAMalformedPlanAndAcceptsEveryBoundary(t *testing.T) {
 	}
 	for name, mutate := range refused {
 		t.Run("refuses "+name, func(t *testing.T) {
+			// A plan whose state path is relative must be refused; were it ever
+			// accepted, the run's files belong in a directory the test deletes, not
+			// in the package directory where a later run would resume them.
+			t.Chdir(t.TempDir())
 			w := newCutoverWorld(t)
 			mutate(w)
 			w.wantRefusal("invalid ownership plan")

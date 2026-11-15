@@ -29,6 +29,7 @@ type rowIterator struct {
 	partition int
 	last      []byte
 	marks     []model.Cursor
+	after     map[model.ID]uint64
 	matchers  []compiledMatcher
 	page      Page
 	closed    bool
@@ -170,6 +171,14 @@ func (e *Engine) Scan(ctx context.Context, scope auth.Scope, req ScanRequest) (R
 	req.Selectors = append([]Matcher(nil), req.Selectors...)
 	req.Projection = append([]Field(nil), req.Projection...)
 	req.Fence.Min = append([]model.Cursor(nil), req.Fence.Min...)
+	var after map[model.ID]uint64
+	if len(req.After) > 0 {
+		after = make(map[model.ID]uint64, len(req.After))
+		for _, c := range req.After {
+			after[c.Group] = max(after[c.Group], uint64(c.Index))
+		}
+	}
+	req.After = nil
 	marks, partial, err := e.replicaReadFence(ctx, req.Fence.Min, req.Fence.AllowPartial)
 	if err != nil {
 		return nil, err
@@ -191,7 +200,7 @@ func (e *Engine) Scan(ctx context.Context, scope auth.Scope, req ScanRequest) (R
 			prefixes[i] = termPrefix(prefix, term)
 		}
 	}
-	it := &rowIterator{e: e, scope: scope, req: req, prefixes: prefixes, marks: marks, matchers: ms, ctx: ctx, posting: term, partial: partial}
+	it := &rowIterator{e: e, scope: scope, req: req, prefixes: prefixes, marks: marks, after: after, matchers: ms, ctx: ctx, posting: term, partial: partial}
 	e.scans[it] = struct{}{}
 	e.storageStats.ActiveIterators++
 	it.stop = context.AfterFunc(ctx, func() { e.mu.Lock(); defer e.mu.Unlock(); it.terminal = model.Fail(model.Cancelled); it.closeLocked() })
@@ -239,6 +248,7 @@ func (it *rowIterator) closeLocked() {
 	it.req.Selectors = nil
 	it.req.Projection = nil
 	it.req.Fence.Min = nil
+	it.after = nil
 	delete(it.e.scans, it)
 	it.e.storageStats.ActiveIterators--
 }
@@ -335,6 +345,10 @@ func (it *rowIterator) Next(ctx context.Context) (Page, error) {
 				var group model.ID
 				copy(group[:], suffix[24:40])
 				originIndex := binary.BigEndian.Uint64(suffix[40:48])
+				if through, ok := it.after[group]; ok && originIndex <= through {
+					it.last = append(it.last[:0], k...)
+					continue
+				}
 				visible := false
 				for _, mark := range it.marks {
 					if mark.Group == group && originIndex <= uint64(mark.Index) {

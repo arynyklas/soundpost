@@ -56,26 +56,21 @@ const (
 // per data group it resumes strictly after the committed checkpoint, groups the
 // next bounded run of occurrences by fingerprint and commits them with the
 // checkpoint in one control transaction (issues.Service.ApplyThrough).
-func (a *App) IssueProducer() Producer { return a.IssueProducerWithClock(systemWorkerClock{}) }
-
-// IssueProducerWithClock is IssueProducer with the clock that stamps the
-// lifecycle ledger's arrival time (the data plane keeps no arrival instant).
-func (a *App) IssueProducerWithClock(clock WorkerClock) Producer {
-	return &issueProducer{app: a, clock: clock}
-}
+//
+// The lifecycle ledger's arrival time (the data plane keeps no arrival instant) is
+// the pass's clock (ProducerScopes.Now).
+func (a *App) IssueProducer() Producer { return &issueProducer{app: a} }
 
 // IncidentProducer opens one incident for every open issue episode that has
 // none: the first episode of an issue, and every regression (a reopening) after
 // it. Incident, command, condition and episode IDs derive from the issue and
 // its episode ordinal, so a repeated pass changes nothing.
-func (a *App) IncidentProducer() Producer { return a.IncidentProducerWithClock(systemWorkerClock{}) }
+//
+// The incident timeline is stamped with the pass's clock (ProducerScopes.Now).
+func (a *App) IncidentProducer() Producer { return &incidentProducer{app: a} }
 
-// IncidentProducerWithClock is IncidentProducer with the clock that stamps the
-// incident timeline.
-func (a *App) IncidentProducerWithClock(clock WorkerClock) Producer {
-	return &incidentProducer{app: a, clock: clock}
-}
-
+// issueProducer's clock is set for the duration of one pass: Produce works on a copy
+// carrying ProducerScopes.Now, so the producer itself holds no clock.
 type issueProducer struct {
 	app   *App
 	clock WorkerClock
@@ -85,6 +80,11 @@ type incidentProducer struct {
 	app   *App
 	clock WorkerClock
 }
+
+// scopesClock adapts the pass's scopes to the WorkerClock the issue service takes.
+type scopesClock struct{ scopes ProducerScopes }
+
+func (c scopesClock) Now() model.UnixNano { return c.scopes.Now() }
 
 // leaseGate re-proves the leadership lease against the control group before an
 // effect; a deposed leader's effect is refused.
@@ -241,6 +241,7 @@ func (b *issueBacklog) take() []issueRow {
 }
 
 func (p *issueProducer) Produce(ctx context.Context, scopes ProducerScopes, lease replica.FenceToken) (int, error) {
+	p = &issueProducer{app: p.app, clock: scopesClock{scopes}}
 	if err := p.app.leaseGate(ctx, lease); err != nil {
 		return 0, err
 	}
@@ -318,7 +319,13 @@ func (p *issueProducer) Produce(ctx context.Context, scopes ProducerScopes, leas
 // within what the scan's watermark proves complete).
 func (p *issueProducer) scan(ctx context.Context, read auth.Scope, scopes ProducerScopes, state issues.State) (map[model.ID]*issueBacklog, error) {
 	org, project := scopes.Org(), scopes.Project()
-	it, err := p.app.Storage.Scan(ctx, read, storage.ScanRequest{Projects: []model.ID{project}, Signal: model.ErrorKind, Start: math.MinInt64, End: math.MaxInt64})
+	// The committed checkpoints are the resume position: the occurrences at or below them are
+	// skipped by the scan before a page is read, so a pass costs what arrived since, not the journal.
+	after := make([]model.Cursor, 0, len(state.Checkpoints))
+	for group, index := range state.Checkpoints {
+		after = append(after, model.Cursor{Group: group, Index: index})
+	}
+	it, err := p.app.Storage.Scan(ctx, read, storage.ScanRequest{Projects: []model.ID{project}, Signal: model.ErrorKind, Start: math.MinInt64, End: math.MaxInt64, After: after})
 	if err != nil {
 		return nil, err
 	}
@@ -432,6 +439,7 @@ func episodeOf(rec issues.Record) (uint32, model.ID, bool) {
 }
 
 func (p *incidentProducer) Produce(ctx context.Context, scopes ProducerScopes, lease replica.FenceToken) (int, error) {
+	p = &incidentProducer{app: p.app, clock: scopesClock{scopes}}
 	if err := p.app.leaseGate(ctx, lease); err != nil {
 		return 0, err
 	}

@@ -111,6 +111,9 @@ type JobUpdateCommand struct {
 	State           json.RawMessage `json:"state"`
 	Origin          *model.Cursor   `json:"origin,omitempty"`
 	Audit           *JobAudit       `json:"audit,omitempty"`
+	// Definition is the arm of the catalogue kinds (JobKindDefine, JobKindRetire),
+	// which carry no State and no versions.
+	Definition *JobDefinitionApply `json:"definition,omitempty"`
 }
 
 // JobCommandEntry remembers one applied command of a job.
@@ -323,7 +326,10 @@ func applyJobUpdate(scope auth.Scope, st *State, cmd Command) (model.ID, model.R
 	if err := jobWriteScope(scope, st, c.Project); err != nil {
 		return model.ID{}, 0, "", err
 	}
-	if cmd.CommandID == (model.ID{}) || c.Job == (model.ID{}) || c.InputDigest == (model.Hash{}) || c.NewVersion != c.ExpectedVersion+1 || c.NewVersion == 0 {
+	if c.Kind == JobKindDefine || c.Kind == JobKindRetire {
+		return applyJobDefinition(scope, st, cmd, c)
+	}
+	if cmd.CommandID == (model.ID{}) || c.Job == (model.ID{}) || c.InputDigest == (model.Hash{}) || c.NewVersion != c.ExpectedVersion+1 || c.NewVersion == 0 || c.Definition != nil {
 		return model.ID{}, 0, "", model.Fail(model.Invalid)
 	}
 	switch c.Kind {

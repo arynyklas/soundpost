@@ -418,6 +418,7 @@ func RegisterPolicyRoutes(mux *http.ServeMux, authority *auth.Service, policies 
 	registerDestinationRoutes(mux, authority, policies)
 	registerCutoverRoutes(mux, authority, policies)
 	registerRuleRoutes(mux, authority, policies)
+	registerJobDefinitionRoutes(mux, authority, policies)
 	mux.HandleFunc("POST /api/v1/policies", func(w http.ResponseWriter, r *http.Request) {
 		credential, err := artifactCredential(authority, w, r)
 		if err != nil {

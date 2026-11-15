@@ -110,7 +110,7 @@ func (r *issueRig) incidentRecords() []control.IncidentRecord {
 
 func (r *issueRig) producers() func(*appcore.WorkerConfig) {
 	return func(c *appcore.WorkerConfig) {
-		c.Producers = []appcore.Producer{r.app.IssueProducerWithClock(r.clock), r.app.IncidentProducerWithClock(r.clock)}
+		c.Producers = []appcore.Producer{r.app.IssueProducer(), r.app.IncidentProducer()}
 	}
 }
 
@@ -615,5 +615,53 @@ func TestAckSurvivesAnEqualImpactObservationButNotAWorseOne(t *testing.T) {
 	worse, err := r.app.Incidents.Act(r.ctx, r.admin(), impact(model.NewID()), 0)
 	if err != nil || worse.AckCurrent() || worse.ImpactRevision != acked.ImpactRevision+1 {
 		t.Fatalf("a new episode must make the ACK stale: %v %+v", err, worse)
+	}
+}
+
+// The producers stamp what they commit with the runner's clock (WorkerConfig.Clock), not the wall
+// clock: an incident opened by a pass whose clock is far from the wall carries the pass's instant.
+func TestProducersStampWithTheRunnerClock(t *testing.T) {
+	r := newIssueRig(t)
+	const runnerNow = model.UnixNano(1_000_000_000_000_000_000) // 2001: nowhere near the wall clock
+	r.clock.v.Store(int64(runnerNow))
+	r.ingest("TypeError", 5, false, true)
+	w := r.workers()
+	if rep := r.tick(w); rep.Produced != 2 {
+		t.Fatalf("first tick: %+v", rep)
+	}
+	recs := r.incidentRecords()
+	if len(recs) != 1 {
+		t.Fatalf("%d incidents", len(recs))
+	}
+	var st incidents.State
+	if err := json.Unmarshal(recs[0].State, &st); err != nil || len(st.Timeline) == 0 {
+		t.Fatalf("incident state: %v %+v", err, st)
+	}
+	for _, e := range st.Timeline {
+		if e.At != runnerNow {
+			t.Fatalf("timeline entry %s stamped %d, want the runner's clock %d", e.Action.Type, e.At, runnerNow)
+		}
+	}
+}
+
+// A pass costs what arrived since the committed checkpoint, not the whole journal: the occurrences at or
+// below the checkpoint are skipped by the scan before their pages are read.
+func TestIssueProducerSeeksPastItsCheckpoint(t *testing.T) {
+	r := newIssueRig(t)
+	ids := r.idsInOneSlot(14)
+	for i, id := range ids[:12] {
+		r.ingestBatch(r.record("TypeError", model.UnixNano(5+i), false, true, id))
+	}
+	w := r.workers()
+	r.tick(w)
+	r.ingestBatch(r.record("TypeError", 40, false, true, ids[12]))
+	before := r.app.Storage.Stats().PagesRead
+	r.tick(w)
+	pages := r.app.Storage.Stats().PagesRead - before
+	if sum := len(r.snapshot().Issues[0].Occurrences); sum != 13 {
+		t.Fatalf("%d occurrences after the second pass, want 13", sum)
+	}
+	if pages > 4 {
+		t.Fatalf("the pass over one new occurrence read %d pages of a 13-batch journal: the checkpoint is not a seek", pages)
 	}
 }

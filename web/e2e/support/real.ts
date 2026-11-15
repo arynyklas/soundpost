@@ -72,6 +72,20 @@ export async function csrf(page:Page):Promise<string>{
 export async function postJson(page:Page,path:string,data:unknown):Promise<Reply>{
  return reply(await page.request.post(url(path),{headers:{'X-CSRF-Token':await csrf(page),Origin:origin()},data}));
 }
+/** The job definition as the schedule catalogue stores it (the same fields `schedule-evidence` carries). */
+export interface JobDefinitionInput{revision:string;effective_from_ns:string;schedule?:{cron:string;timezone:string};grace_ns?:string;max_runtime_ns?:string;observer_stale_after_ns?:string;overlap?:string}
+/** Author (save) one job's schedule definition through the real POST /api/v1/jobs/definitions as the page's session (policy.write on the project). `expectedRevision` is the catalogue revision the author read ('0' = the job is not in the catalogue yet). */
+export async function saveJobDefinition(page:Page,org:string,project:string,job:string,definition:JobDefinitionInput,expectedRevision='0',reason='e2e schedule definition'):Promise<Reply>{
+ return postJson(page,'/api/v1/jobs/definitions',{org,project_id:project,operation:'save',command_id:id(),job_id:job,expected_revision:expectedRevision,reason,definition});
+}
+/** Take one job out of the observer's feed through the same route (the entry and its history stay). */
+export async function retireJobDefinition(page:Page,org:string,project:string,job:string,expectedRevision:string,reason='e2e retire schedule definition'):Promise<Reply>{
+ return postJson(page,'/api/v1/jobs/definitions',{org,project_id:project,operation:'retire',command_id:id(),job_id:job,expected_revision:expectedRevision,reason});
+}
+/** The project's catalogue as the route lists it (needs telemetry.read). */
+export async function listJobDefinitions(page:Page,org:string,project:string):Promise<Reply>{
+ return postJson(page,'/api/v1/jobs/definitions',{org,project_id:project,operation:'list'});
+}
 /** The session cookie and CSRF token of a logged-in page, for clients that are not the browser (Node fetch SSE). */
 export async function sessionCredentials(page:Page):Promise<{cookie:string;csrf:string}>{
  const cookie=(await page.context().cookies(origin())).find((c)=>c.name==='__Host-soundpost');

@@ -30,26 +30,39 @@ import (
 // provider (a recording Sender behind the committed interface) and the clock (the
 // worker's Clock seam) are the test's.
 type servedPipeline struct {
-	n       *accNode
-	srv     *httptest.Server
+	n   *accNode
+	srv *httptest.Server
+	// tls serves the same routes over TLS: session-authenticated routes (rule
+	// authoring) need the console's cookie and are refused over plain HTTP.
+	tls     *httptest.Server
 	workers *appcore.Workers
 	// viewToken is a service credential with policy.write on the project: what the
 	// console's cutover page reads the view with.
 	viewToken string
 }
 
-func (n *accNode) serve() *servedPipeline {
+func (n *accNode) serve() *servedPipeline { return n.serveWith(nil) }
+
+// serveWith is serve with the worker configuration adjusted by extra (the rule
+// catalogue of the condition journey).
+func (n *accNode) serveWith(extra func(*appcore.WorkerConfig)) *servedPipeline {
 	n.t.Helper()
 	mux := http.NewServeMux()
 	n.app.Register(mux)
 	srv := httptest.NewServer(mux)
 	n.t.Cleanup(srv.Close)
-	w, err := n.app.NewWorkers(appcore.WorkerConfig{
+	tlsSrv := httptest.NewTLSServer(mux)
+	n.t.Cleanup(tlsSrv.Close)
+	cfg := appcore.WorkerConfig{
 		Producers: n.app.Producers(),
 		Routing:   n.app.OrgRouting(),
 		Sender:    n.prov,
 		Clock:     n.clock,
-	})
+	}
+	if extra != nil {
+		extra(&cfg)
+	}
+	w, err := n.app.NewWorkers(cfg)
 	if err != nil {
 		n.t.Fatal(err)
 	}
@@ -60,7 +73,7 @@ func (n *accNode) serve() *servedPipeline {
 	if err != nil {
 		n.t.Fatal("view credential:", err)
 	}
-	return &servedPipeline{n: n, srv: srv, workers: w, viewToken: issued.Token}
+	return &servedPipeline{n: n, srv: srv, tls: tlsSrv, workers: w, viewToken: issued.Token}
 }
 
 // ingestError sends one fatal error occurrence through the real ingest route with

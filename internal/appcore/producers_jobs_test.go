@@ -291,7 +291,7 @@ func TestJobProducerTurnsIngestedAttemptsIntoJobBooks(t *testing.T) {
 func TestJobProducerResumesAfterTheRowsItAlreadyCovered(t *testing.T) {
 	r := newJobRig(t)
 	s := r.ingestScenario()
-	w := r.workers(appcore.NewJobProducerForTest(r.app, 2, time.Hour))
+	w := r.workers(appcore.NewJobProducerForTest(r.app, 2))
 	total := 0
 	for i := range 8 {
 		rep := r.tick(w)
@@ -309,11 +309,11 @@ func TestJobProducerResumesAfterTheRowsItAlreadyCovered(t *testing.T) {
 }
 
 // Rows can reach the journal behind the frontier (an SDK retry of an old event):
-// the sweep over the journal behind the tail finds them.
-func TestJobProducerSweepFindsEvidenceBehindTheFrontier(t *testing.T) {
+// the next pass finds them.
+func TestJobProducerFindsEvidenceBehindTheFrontier(t *testing.T) {
 	r := newJobRig(t)
 	s := r.ingestScenario()
-	w := r.workers(appcore.NewJobProducerForTest(r.app, 256, 0))
+	w := r.workers(appcore.NewJobProducerForTest(r.app, 256))
 	if rep := r.tick(w); rep.Produced != scenarioApplied {
 		t.Fatalf("first pass: %+v", rep)
 	}
@@ -327,12 +327,11 @@ func TestJobProducerSweepFindsEvidenceBehindTheFrontier(t *testing.T) {
 	}
 }
 
-// An attempt that finished is never left reading "started" for the sweep's rest: its terminal event is stamped with the
-// attempt's start and reaches the journal after rows of later-started attempts were already covered. The rest between sweeps
-// is an hour here; only the lookback behind the tail can apply it on the next pass.
-func TestJobProducerAppliesAFinishedAttemptThatArrivedBehindTheFrontierWithoutWaitingForTheSweep(t *testing.T) {
+// An attempt that finished is never left reading "started": its terminal event is stamped with the attempt's start and
+// reaches the journal after rows of later-started attempts were already covered.
+func TestJobProducerAppliesAFinishedAttemptThatArrivedBehindTheFrontier(t *testing.T) {
 	r := newJobRig(t)
-	w := r.workers(appcore.NewJobProducerForTest(r.app, 256, time.Hour))
+	w := r.workers(appcore.NewJobProducerForTest(r.app, 256))
 	slow, other := model.ID{0x71, 1}, model.ID{0x71, 2}
 	runSlow, runOther, attSlow, attOther := model.NewID(), model.NewID(), model.NewID(), model.NewID()
 	r.ingest(r.event(slow, runSlow, attSlow, "manual.slow", 1, 1, "started", 20*time.Second, 0))
@@ -352,6 +351,30 @@ func TestJobProducerAppliesAFinishedAttemptThatArrivedBehindTheFrontierWithoutWa
 		t.Fatalf("a finished attempt still reads %v", got)
 	}
 	// Covered rows are not re-applied or re-counted by later passes.
+	if rep := r.tick(w); rep.Produced != 0 {
+		t.Fatalf("a pass over covered rows produced %d", rep.Produced)
+	}
+}
+
+// A result that reaches the journal HOURS behind the newest event time is applied by the very next pass: the position is an
+// origin cursor, so how far back the event is stamped does not matter (there is no lookback window and no sweep to wait for).
+func TestJobProducerAppliesEvidenceStampedHoursBehindTheFrontierOnTheNextPass(t *testing.T) {
+	r := newJobRig(t)
+	w := r.workers(appcore.NewJobProducerForTest(r.app, 256))
+	slow, other := model.ID{0x72, 1}, model.ID{0x72, 2}
+	runSlow, runOther, attSlow, attOther := model.NewID(), model.NewID(), model.NewID(), model.NewID()
+	r.ingest(r.event(slow, runSlow, attSlow, "manual.slow", 1, 1, "started", -4*time.Hour, 0))
+	r.ingest(r.event(other, runOther, attOther, "manual.other", 1, 1, "started", -time.Minute, 0))
+	if rep := r.tick(w); rep.Produced != 2 {
+		t.Fatalf("first pass: %+v", rep)
+	}
+	r.ingest(r.event(slow, runSlow, attSlow, "manual.slow", 1, 2, "failed", -4*time.Hour, -4*time.Hour+30*time.Second))
+	if rep := r.tick(w); rep.Produced != 1 {
+		t.Fatalf("the result stamped four hours behind the frontier was not applied on the next pass: %+v", rep)
+	}
+	if got := r.view(slow, runSlow).Run.Attempts[0].Effective; got != jobs.AttemptFailed {
+		t.Fatalf("the attempt still reads %v", got)
+	}
 	if rep := r.tick(w); rep.Produced != 0 {
 		t.Fatalf("a pass over covered rows produced %d", rep.Produced)
 	}
@@ -649,5 +672,143 @@ func TestJobIngestAcceptsALateResendOfAnOlderEventOfASettledAttempt(t *testing.T
 	report, err := r.app.Jobs.Health(r.ctx, r.humanRead(), r.project, job)
 	if err != nil || len(report.State.Attempts) != 1 || report.State.Attempts[attempt].Terminal == nil || len(report.State.Attempts[attempt].Events) != 2 {
 		t.Fatalf("the attempt must hold its two distinct events once: %v %+v", err, report.State.Attempts)
+	}
+}
+
+func (r *jobRig) catalogueScope() auth.Scope {
+	r.t.Helper()
+	_, cred := r.member("job-author@example.test", auth.Read, auth.PolicyWrite)
+	return r.scopeOf(cred, auth.PolicyWrite)
+}
+
+// The job producer is the observer of the jobs the catalogue defines: a defined job is observed with its
+// definition under the runner's clock, at a bounded cadence and never after it is retired, and what is attested
+// as complete is only what the product's own journal delivered (the newest event time less the late allowance):
+// the source of a job that went silent is never read as having missed its runs.
+func TestJobProducerObservesTheJobsTheCatalogueDefines(t *testing.T) {
+	r := newJobRig(t)
+	wall := model.UnixNano(time.Now().UnixNano())
+	r.clock.v.Store(int64(wall))
+	s := r.ingestScenario()
+	catalogue, err := r.app.JobCatalogue()
+	if err != nil {
+		t.Fatal(err)
+	}
+	author := r.catalogueScope()
+	def := jobs.Definition{Revision: 1, EffectiveFrom: wall - model.UnixNano(24*time.Hour), Schedule: &jobs.Schedule{Cron: "* * * * *", Timezone: "UTC"}, Grace: jobs.Duration(time.Minute), ObserverStaleAfter: jobs.Duration(8 * time.Minute)}
+	if _, err = catalogue.Save(r.ctx, author, jobs.SaveCommand{CommandID: model.NewID(), Project: r.project, Job: s.job, ExpectedRevision: 0, Definition: def, Reason: "schedule"}); err != nil {
+		t.Fatal(err)
+	}
+	w := r.workers(r.app.JobProducer())
+	if rep := r.tick(w); rep.Produced != scenarioApplied+1 {
+		t.Fatalf("first pass produced %d, want %d attempts + 1 observation: %+v", rep.Produced, scenarioApplied, rep)
+	}
+	rep, err := r.app.Jobs.Health(r.ctx, r.humanRead(), r.project, s.job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := rep.State
+	if st.Definition.Revision != 1 || st.Definition.Schedule == nil || st.Definition.Schedule.Cron != "* * * * *" {
+		t.Fatalf("the definition was not adopted: %+v", st.Definition)
+	}
+	if st.Observer == nil || !st.Observer.Healthy || st.Observer.ObservedAt != wall {
+		t.Fatalf("observation: %+v, want healthy at the runner's clock %d", st.Observer, wall)
+	}
+	// Complete through the newest event of the journal (stamped 10 s after the base, an hour ago) less the 15 minute allowance.
+	newest := r.at(10 * time.Second)
+	if want := newest - model.UnixNano(15*time.Minute); st.Observer.CompleteThrough != want {
+		t.Fatalf("complete through %d, want %d (newest event %d less the late allowance)", st.Observer.CompleteThrough, want, newest)
+	}
+	version := st.Version
+	// Within a quarter of the staleness bound (2 min) nothing is observed again; after it, once.
+	r.clock.v.Store(int64(wall + model.UnixNano(time.Minute)))
+	if rep := r.tick(w); rep.Produced != 0 {
+		t.Fatalf("a pass within the cadence produced %d", rep.Produced)
+	}
+	r.clock.v.Store(int64(wall + model.UnixNano(3*time.Minute)))
+	if rep := r.tick(w); rep.Produced != 1 {
+		t.Fatalf("a pass after the cadence produced %d, want the one observation", rep.Produced)
+	}
+	if again, _ := r.app.Jobs.Health(r.ctx, r.humanRead(), r.project, s.job); again.State.Version != version+1 || again.State.Observer.ObservedAt != wall+model.UnixNano(3*time.Minute) {
+		t.Fatalf("the second observation: %+v", again.State.Observer)
+	}
+	// A retired definition is observed no more.
+	entries, err := catalogue.List(r.ctx, r.humanRead(), r.project)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("catalogue: %v %v", entries, err)
+	}
+	if _, err = catalogue.Retire(r.ctx, author, jobs.RetireCommand{CommandID: model.NewID(), Project: r.project, Job: s.job, ExpectedRevision: entries[0].Revision, Reason: "retire"}); err != nil {
+		t.Fatal(err)
+	}
+	r.clock.v.Store(int64(wall + model.UnixNano(10*time.Minute)))
+	if rep := r.tick(w); rep.Produced != 0 {
+		t.Fatalf("a retired job was observed: %+v", rep)
+	}
+}
+
+// A pass costs what arrived since the committed position, not the journal: with nothing new a pass reads no page at all,
+// and one new row costs a read of that row's page only (the rows at or below the position are skipped at the index).
+func TestJobProducerReadsOnlyWhatArrivedSinceItsPosition(t *testing.T) {
+	r := newJobRig(t)
+	s := r.ingestScenario()
+	w := r.workers(appcore.NewJobProducerForTest(r.app, 256))
+	r.tick(w)
+	pages := func() uint64 { return r.app.Storage.Stats().PagesRead }
+	before := pages()
+	if rep := r.tick(w); rep.Produced != 0 {
+		t.Fatalf("an idle pass produced %d", rep.Produced)
+	}
+	if got := pages() - before; got != 0 {
+		t.Fatalf("an idle pass read %d pages of a %d-row journal", got, scenarioApplied+1)
+	}
+	r.ingest(r.event(s.job, s.run2, model.NewID(), "job-run-2", 2, 1, "started", 20*time.Second, 0))
+	before = pages()
+	if rep := r.tick(w); rep.Produced != 1 {
+		t.Fatalf("the pass after one new row produced %d", rep.Produced)
+	}
+	if got := pages() - before; got > 2 {
+		t.Fatalf("one new row cost %d pages of a %d-row journal: the position is not a seek", got, scenarioApplied+2)
+	}
+}
+
+// What the journal attests is per source: the job of a source that fell silent is attested only through that source's
+// own newest event, however far another source has moved on, so the silence is never read as a missed run.
+func TestJobProducerAttestsEachJobOnlyThroughItsOwnSource(t *testing.T) {
+	r := newJobRig(t)
+	wall := model.UnixNano(time.Now().UnixNano())
+	r.clock.v.Store(int64(wall))
+	silent, live := model.NewID(), model.NewID()
+	r.ingest(r.event(silent, model.NewID(), model.NewID(), "manual.a", 1, 1, "started", 10*time.Second, 0))
+	// A second source, with its own credential, delivers a later event of another job.
+	firstSource, firstID := r.source, r.sourceID
+	r.sourceID = model.NewID()
+	issued, err := r.app.Auth.OnboardSource(r.ctx, r.actor, auth.SourceOnboarding{CommandID: model.NewID(), Org: r.org, Project: r.project, Source: r.sourceID, Expires: model.UnixNano(time.Now().Add(time.Hour).UnixNano()),
+		Policy: model.SourcePolicy{Revision: 1, Enabled: true, Class: "structured", Kinds: []model.Kind{model.JobAttempt}, Resources: model.ResourceRegistry{Services: []model.ID{r.resource.Service}, Environments: []model.ID{r.resource.Environment}, Builds: []model.ID{r.resource.Build}, Instances: []string{"job-host"}},
+			RetentionDays: map[model.Kind]uint32{model.JobAttempt: 30}, MaxBytes: 8 << 20, MaxSeries: 100, Expires: model.UnixNano(time.Now().Add(20 * time.Minute).UnixNano())}, Reason: "second source"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.source = issued.Credential
+	r.ingest(r.event(live, model.NewID(), model.NewID(), "manual.b", 1, 1, "started", 40*time.Minute, 0))
+	r.source, r.sourceID = firstSource, firstID
+
+	catalogue, err := r.app.JobCatalogue()
+	if err != nil {
+		t.Fatal(err)
+	}
+	author := r.catalogueScope()
+	for _, job := range []model.ID{silent, live} {
+		def := jobs.Definition{Revision: 1, EffectiveFrom: wall - model.UnixNano(24*time.Hour), Schedule: &jobs.Schedule{Cron: "* * * * *", Timezone: "UTC"}, Grace: jobs.Duration(time.Minute)}
+		if _, err = catalogue.Save(r.ctx, author, jobs.SaveCommand{CommandID: model.NewID(), Project: r.project, Job: job, Definition: def, Reason: "schedule"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w := r.workers(r.app.JobProducer())
+	r.tick(w)
+	for job, want := range map[model.ID]model.UnixNano{silent: r.at(10*time.Second) - model.UnixNano(15*time.Minute), live: r.at(40*time.Minute) - model.UnixNano(15*time.Minute)} {
+		rep, err := r.app.Jobs.Health(r.ctx, r.humanRead(), r.project, job)
+		if err != nil || rep.State.Observer == nil || rep.State.Observer.CompleteThrough != want {
+			t.Fatalf("job %s: observer %+v err %v, want complete through %d", job, rep.State.Observer, err, want)
+		}
 	}
 }

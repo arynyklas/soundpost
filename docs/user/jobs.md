@@ -111,7 +111,32 @@ Write side (`internal/httpapi/jobs_write.go`), each needing `policy.write` on th
 
 Both answer `{state: "committed", job, version}`.
 
+## Schedule catalogue
+
+The schedule catalogue is the committed set of schedule definitions of a project's jobs, kept in control state (`ControlState.JobDefinitions`, key `org:project:job`; `internal/control/job_definitions.go`, `internal/jobs/catalogue.go`). It is written through the same `UpdateJob` command as the job books (kinds `define_job` and `retire_job`), so it has the same scope check, and nothing else stores it. `App.JobCatalogue()` is the node's catalogue.
+
+`POST /api/v1/jobs/definitions` (`internal/httpapi/jobs_definitions.go`) is the authoring route. The body is closed (an unknown field, a missing field of the operation or a field the operation does not take is refused) and names the organization and project as selectors:
+
+- `operation: "list"` returns `{org, project_id, can_author, jobs[]}`: every catalogue entry of the project, retired ones included, in job ID order, each with its catalogue `revision`, `retired`, `created_ns`, `updated_ns` and `definition`. It needs `telemetry.read` on the project; `can_author` says whether the caller also holds `policy.write`.
+- `operation: "save"` takes `command_id`, `job_id`, `expected_revision`, `reason` and `definition` (the fields of `schedule-evidence`'s `definition`) and answers `{state: "committed", job}` with the entry as committed.
+- `operation: "retire"` takes `command_id`, `job_id`, `expected_revision` and `reason`. The entry and its definition history stay; a retired job is no longer fed to the observer, retiring it again changes nothing, and saving its next definition brings it back.
+
+Who may author: a human principal with `policy.write` on exactly this project, the permission every other job mutation needs. The runner's system scope reads the catalogue and can never write it; a scope of another project or organization gets the same not-found an absent project gives. Every save and retirement is one audit entry (`jobs.define`, `jobs.retire`) with the actor and the reason, never the definition.
+
+Rules of a save, all checked before anything is committed:
+
+- `expected_revision` is the catalogue revision the author read (`0` = the job is not in the catalogue yet); a stale author gets a conflict instead of overwriting, and a retirement is never silently undone by a save made from an older read;
+- `definition.revision` is the previous definition's revision plus one (`1` for a new job), `effective_from_ns` is not earlier than the previous definition's and not more than 400 days ahead of the server clock, and the schedule is validated exactly as `ObserveSchedule` validates it (five-field cron, IANA zone, grace, runtime and staleness bounds);
+- the command ID makes a retry of the latest command idempotent; a retry of an older command gets a conflict;
+- a definition is at most 8 KiB and a project holds at most 64 catalogue entries, retired ones included.
+
+A retirement of the owning project or organization drops its catalogue entries with the deletion.
+
+The background runner:
+
+- The served node's background runner (`App.JobProducer`, `internal/appcore/producers_jobs.go`) reads the data-group job-attempt journal and calls `ApplyAttempt` under the in-process `system:runner` principal (see `docs/operations/background-workers.md`). Its position is a per-group origin cursor (every row at or below it has been applied): a pass reads only what reached the journal after it (`storage.ScanRequest.After` skips the rest at the index, without reading a page), so an event that arrives late, however far behind the newest event time it is stamped, is applied by the very next pass; there is no sweep and no lookback window. The position is kept in memory: after a restart the first reads go through the journal again and the reducer reports the rows it already holds as duplicates.
+- The runner's observer stage feeds the schedule catalogue (above) to `ObserveSchedule`: for every non-retired catalogue entry of a project it submits the entry's definition under one fixed system observer ID with `healthy: true`, at the runner's clock, at most once per quarter of the definition's `observer_stale_after` (default 10 minutes), and `complete_through` = the least, over the sources that delivered that job's events, of the newest event time each source has delivered (as of a read that reached the end of the journal), minus the 15-minute late-arrival allowance, never after the observation's own time (zero for a job no source has delivered an event for; nothing is observed until the first read after a start has reached the journal's end). That attestation says only that the product's own journal is processed up to the newest evidence the job's sources delivered, less the allowance. It never says that a source was producing: a source that went silent stops advancing the attestation of its own jobs, so the runner never infers a missed run from that silence; a job whose runs stop while its source keeps delivering other events is attested through them and its missed occurrences are declared.
+
 Still not wired:
 
-- The served node's background runner (`App.JobProducer`, `internal/appcore/producers_jobs.go`) reads the data-group job-attempt journal and calls `ApplyAttempt` under the in-process `system:runner` principal (see `docs/operations/background-workers.md`). The runner itself observes no schedule: a scheduled job reads `unknown / no_schedule_observer` until an external observer feeds `schedule-evidence`. Besides the tail and the periodic sweep it re-reads the last 15 minutes of event time behind the tail on every pass (rows already covered are skipped), so an event that arrives slightly out of order is applied on the next pass instead of waiting for the sweep.
 - The SDKs send `manual.<run id>` unless the caller supplies the scheduled instant.

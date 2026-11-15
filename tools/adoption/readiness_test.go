@@ -25,7 +25,7 @@ func readinessFixture() (AcceptanceLedger, Authorizations) {
 	producer := map[ReadinessKind]string{
 		ReadinessJourneyGateway: "adoption-journeys", ReadinessJourneyFrontend: "adoption-journeys",
 		ReadinessJourneyBackground: "adoption-journeys", ReadinessSourcePolicy: "adoption-shadow",
-		ReadinessQueryProfile: "qualify", ReadinessIsolationMatrix: "drills",
+		ReadinessQueryProfile: "qualify", ReadinessIsolationMatrix: "smoke",
 		ReadinessDeliveryPolicy: "adoption-policy-compare", ReadinessDeletionRestore: "drills",
 		ReadinessExternalDeadman: "drills", ReadinessLegacyRetention: "adoption-retention",
 	}
@@ -56,10 +56,63 @@ func readinessEval(t *testing.T, l AcceptanceLedger, a Authorizations) CutoverRe
 	return r
 }
 
+// readinessDrillScenarioFor is the drills scenario whose report the fixture
+// holds for a kind.
+var readinessDrillScenarioFor = map[ReadinessKind]string{
+	ReadinessDeliveryPolicy:  "provider-failure-outage",
+	ReadinessDeletionRestore: "backup-predates-deletion",
+	ReadinessExternalDeadman: "external-deadman",
+}
+
+// readinessCampaignBody is a verified query-campaign report (qualify, 07.05).
+func readinessCampaignBody() []byte {
+	raw, err := json.Marshal(map[string]any{
+		"schema": readinessCampaignSchema, "verified": true, "missing_evidence": []string{}, "failures": []string{},
+		"counts": map[string]int{},
+		"rows": []map[string]any{
+			{"id": "release/default/seed/1", "kind": "release", "profile": "default", "seed": 1, "report": "release-1.json", "verified": true},
+			{"id": "smoke/single", "kind": "smoke", "layout": "single", "report": "smoke-single.json", "verified": true},
+			{"id": "smoke/distributed", "kind": "smoke", "layout": "distributed", "report": "smoke-distributed.json", "verified": true},
+		},
+	})
+	if err != nil {
+		panic(err)
+	}
+	return raw
+}
+
+// readinessIsolationBody is the isolation.json a passing `smoke isolation` writes.
+func readinessIsolationBody() []byte {
+	raw, err := json.Marshal(map[string]any{
+		"Version": 1, "Qualification": "real appcore over HTTPS with real sessions",
+		"Matrix": []map[string]any{
+			{"actor": "carol(no grant)", "target": "orgA/P1", "surface": "capabilities", "status": 404, "outcome": "indistinguishable_from_guess"},
+			{"actor": "alice(P1 grant)", "target": "orgA/P1", "surface": "export_own_rows", "status": 200, "outcome": "only_own_scope"},
+		},
+	})
+	if err != nil {
+		panic(err)
+	}
+	return raw
+}
+
+// readinessDrillBody is the <scenario>.json a passing `drills` run writes.
+func readinessDrillBody(scenario string) []byte {
+	raw, err := json.Marshal(map[string]any{
+		"scenario": scenario, "target": "isolated", "status": "passed", "started_at": "2026-11-10T11:00:00Z", "elapsed_ms": 1200,
+		"ack_ledger": []any{}, "failed_attempts": []any{},
+		"checks":        []map[string]any{{"name": "exact_reconciliation", "ok": true, "detail": "3 acknowledged ids retained"}},
+		"not_run_items": []map[string]any{{"item": "real alert destination", "reason": "isolated host"}},
+	})
+	if err != nil {
+		panic(err)
+	}
+	return raw
+}
+
 // readinessBody is the report the producer writes for a run observed at `at`
-// that supports a reference of its kind; nil for a producer whose report this
-// package does not verify.
-func readinessBody(producer string, at time.Time) []byte {
+// that supports a reference of the kind.
+func readinessBody(producer string, kind ReadinessKind, at time.Time) []byte {
 	var v any
 	switch producer {
 	case "adoption-journeys":
@@ -76,6 +129,15 @@ func readinessBody(producer string, at time.Time) []byte {
 	case "adoption-retention":
 		v = HistoryReport{SchemaVersion: historySchemaVersion, EvaluatedAt: at, Clear: true, Blockers: []HistoryCode{}, Completed: 1,
 			Obligations: []HistoryObligationStatus{{State: HistoryStateCompleted}}}
+	case "qualify":
+		return readinessCampaignBody()
+	case "smoke":
+		return readinessIsolationBody()
+	case "drills":
+		if scenario, ok := readinessDrillScenarioFor[kind]; ok {
+			return readinessDrillBody(scenario)
+		}
+		return nil
 	default:
 		return nil
 	}
@@ -86,14 +148,13 @@ func readinessBody(producer string, at time.Time) []byte {
 	return raw
 }
 
-// readinessSeal makes every reference of a producer this package verifies name
-// the digest of the report that producer would have written for it, and returns
-// those report bodies.
+// readinessSeal makes every reference name the digest of the report its
+// producer would have written for it, and returns those report bodies.
 func readinessSeal(l AcceptanceLedger) (AcceptanceLedger, [][]byte) {
 	ev := append([]EvidenceRef(nil), l.Evidence...)
 	var bodies [][]byte
 	for i := range ev {
-		if b := readinessBody(ev[i].Producer, ev[i].ObservedAt); b != nil {
+		if b := readinessBody(ev[i].Producer, ev[i].Kind, ev[i].ObservedAt); b != nil {
 			sum := sha256.Sum256(b)
 			ev[i].Digest = hex.EncodeToString(sum[:])
 			bodies = append(bodies, b)

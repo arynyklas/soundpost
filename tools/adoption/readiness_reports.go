@@ -13,7 +13,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
+
+	"github.com/arynyklas/soundpost/tools/qualify"
 )
 
 // This file is how the readiness gate stops trusting a digest it was merely
@@ -90,14 +93,22 @@ var errReadinessReportShape = errors.New("not a report of this producer for this
 
 type readinessAdapter func(body []byte, kind ReadinessKind) (readinessVerdict, error)
 
-// readinessAdapters are the producers whose report shape this package owns
-// (plan 08 tasks 02, 03, 04 and 07). The 07.x producers (drills, qualify, smoke)
-// write their own shapes in their own tools; their digests stay references.
+// readinessAdapters are the producers a readiness reference can name: every
+// producer of readinessProducers has one, so no reference stays a bare digest.
+// The adoption producers (08.02, 08.03, 08.04, 08.07) are decoded with this
+// package's own report types; qualify (07.05) with its exported CampaignReport;
+// smoke (07.04) and drills (07.07) are package main tools, so their reports are
+// decoded with a mirror of the JSON they write (readinessIsolationReport,
+// readinessDrillReport). A producer added to readinessProducers needs an entry
+// here (TestReadinessEveryProducerHasAnAdapter).
 var readinessAdapters = map[string]readinessAdapter{
 	"adoption-journeys":       readinessJourneysReport,
 	"adoption-shadow":         readinessShadowReport,
 	"adoption-policy-compare": readinessPolicyReport,
 	"adoption-retention":      readinessHistoryReport,
+	"qualify":                 readinessQualifyReport,
+	"smoke":                   readinessSmokeReport,
+	"drills":                  readinessDrillsReport,
 }
 
 func readinessStrictDecode(body []byte, v any) error {
@@ -179,6 +190,149 @@ func readinessHistoryReport(body []byte, kind ReadinessKind) (readinessVerdict, 
 	}
 	pass := r.Clear && len(r.Blockers) == 0 && len(r.Obligations) > 0 && r.Overdue == 0 && r.ActiveWriters == 0
 	return readinessVerdict{Pass: pass, At: r.EvaluatedAt}, nil
+}
+
+// readinessCampaignSchema is the schema of the 07.05 query-campaign report
+// (tools/qualify keeps the constant unexported).
+const readinessCampaignSchema = "soundpost-query-campaign/1"
+
+// readinessQualifyReport: the 07.05 query-campaign report names no missing
+// evidence and no failure, every row of it is verified, a release row exists
+// and the smoke rows cover every layout the campaign requires. The report
+// carries no time.
+func readinessQualifyReport(body []byte, kind ReadinessKind) (readinessVerdict, error) {
+	var r qualify.CampaignReport
+	if kind != ReadinessQueryProfile || readinessStrictDecode(body, &r) != nil || r.Schema != readinessCampaignSchema {
+		return readinessVerdict{}, errReadinessReportShape
+	}
+	pass := r.Verified && len(r.Missing) == 0 && len(r.Failures) == 0
+	release := false
+	var layouts []string
+	for _, row := range r.Rows {
+		pass = pass && row.Verified && len(row.Failures) == 0
+		switch row.Kind {
+		case "release":
+			release = true
+		case "smoke":
+			layouts = append(layouts, row.Layout)
+		}
+	}
+	for _, want := range qualify.RequiredLayouts {
+		pass = pass && slices.Contains(layouts, want)
+	}
+	return readinessVerdict{Pass: pass && release}, nil
+}
+
+// readinessIsolationReport mirrors the isolation.json that `smoke isolation`
+// (tools/smoke/isolation.go, package main) writes after every check held.
+type readinessIsolationReport struct {
+	Version       int                     `json:"Version"`
+	Matrix        []readinessIsolationRow `json:"Matrix"`
+	Qualification string                  `json:"Qualification"`
+}
+
+type readinessIsolationRow struct {
+	Actor   string `json:"actor"`
+	Target  string `json:"target"`
+	Surface string `json:"surface"`
+	Status  int    `json:"status"`
+	Outcome string `json:"outcome"`
+}
+
+const (
+	readinessIsolationDenied = "indistinguishable_from_guess"
+	readinessIsolationOwn    = "only_own_scope"
+)
+
+// readinessSmokeReport: the isolation matrix holds only the two outcomes the
+// smoke records (a denial answered like a guess with an error status, an own
+// read answered 200 with only the caller's scope) and both occur. The report
+// carries no time.
+func readinessSmokeReport(body []byte, kind ReadinessKind) (readinessVerdict, error) {
+	var r readinessIsolationReport
+	if kind != ReadinessIsolationMatrix || readinessStrictDecode(body, &r) != nil || r.Version != 1 || r.Qualification == "" {
+		return readinessVerdict{}, errReadinessReportShape
+	}
+	pass := true
+	denied, own := 0, 0
+	for _, row := range r.Matrix {
+		pass = pass && row.Actor != "" && row.Target != "" && row.Surface != ""
+		switch {
+		case row.Outcome == readinessIsolationDenied && row.Status >= 400 && row.Status < 600:
+			denied++
+		case row.Outcome == readinessIsolationOwn && row.Status == 200:
+			own++
+		default:
+			pass = false
+		}
+	}
+	return readinessVerdict{Pass: pass && denied > 0 && own > 0}, nil
+}
+
+// readinessDrillScenarios names, per kind, the drills scenarios (drills/scenarios.yaml)
+// whose report may speak for it. A scenario outside the list is another kind's report.
+var readinessDrillScenarios = map[ReadinessKind][]string{
+	ReadinessDeliveryPolicy:  {"provider-failure-outage", "owner-cutover-rollback"},
+	ReadinessDeletionRestore: {"stale-policy-delete-barrier", "backup-predates-deletion", "restore-authority-unavailable"},
+	ReadinessExternalDeadman: {"external-deadman"},
+}
+
+// readinessDrillTarget is the only target the drills tool executes against.
+const readinessDrillTarget = "isolated"
+
+// readinessDrillReport mirrors the per-scenario <scenario>.json of `drills`
+// (tools/drills Report, package main). The nested timelines are not read here.
+type readinessDrillReport struct {
+	Scenario       string                 `json:"scenario"`
+	Target         string                 `json:"target"`
+	Status         string                 `json:"status"`
+	Reason         string                 `json:"reason,omitempty"`
+	StartedAt      string                 `json:"started_at"`
+	ElapsedMS      int64                  `json:"elapsed_ms"`
+	AckLedger      json.RawMessage        `json:"ack_ledger"`
+	FailedAttempts json.RawMessage        `json:"failed_attempts"`
+	Reconciliation json.RawMessage        `json:"reconciliation,omitempty"`
+	Cursors        json.RawMessage        `json:"cursors,omitempty"`
+	Fences         json.RawMessage        `json:"fences,omitempty"`
+	PolicyTimeline json.RawMessage        `json:"policy_timeline,omitempty"`
+	Notifications  json.RawMessage        `json:"notification_timeline,omitempty"`
+	Checks         []readinessDrillCheck  `json:"checks"`
+	Facts          json.RawMessage        `json:"facts,omitempty"`
+	NotRunItems    []readinessDrillNotRun `json:"not_run_items,omitempty"`
+}
+
+type readinessDrillCheck struct {
+	Name   string `json:"name"`
+	OK     bool   `json:"ok"`
+	Detail string `json:"detail,omitempty"`
+}
+
+type readinessDrillNotRun struct {
+	Item   string `json:"item"`
+	Reason string `json:"reason"`
+}
+
+// readinessDrillsReport: the drill report is of a scenario that can speak for
+// the kind, was run against the isolated target, says it passed and every named
+// check of it is ok. Parts the drill itself records as not run (not_run_items)
+// are its own business and are not read; the report carries no observation time
+// (started_at is when the run began, not when it was observed).
+func readinessDrillsReport(body []byte, kind ReadinessKind) (readinessVerdict, error) {
+	var r readinessDrillReport
+	scenarios := readinessDrillScenarios[kind]
+	if readinessStrictDecode(body, &r) != nil || r.Target != readinessDrillTarget || !slices.Contains(scenarios, r.Scenario) {
+		return readinessVerdict{}, errReadinessReportShape
+	}
+	switch r.Status {
+	case "passed", "failed", "not_run":
+	default:
+		return readinessVerdict{}, errReadinessReportShape
+	}
+	pass := r.Status == "passed" && len(r.Checks) > 0
+	for _, c := range r.Checks {
+		pass = pass && c.OK
+	}
+	return readinessVerdict{Pass: pass}, nil
 }
 
 // readinessVerifyReport checks one reference's report body. verified is true

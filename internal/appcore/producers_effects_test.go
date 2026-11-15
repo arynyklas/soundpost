@@ -43,8 +43,8 @@ func (r *issueRig) effects() []control.IssueEffect { return r.snapshot().Effects
 // and an acknowledged intent is gone for good.
 func TestRegressionEffectIsAcknowledgedOnceItsIncidentExists(t *testing.T) {
 	r := newIssueRig(t)
-	issuesOnly := r.only(r.app.IssueProducerWithClock(r.clock))
-	incidentsOnly := r.only(r.app.IncidentProducerWithClock(r.clock))
+	issuesOnly := r.only(r.app.IssueProducer())
+	incidentsOnly := r.only(r.app.IncidentProducer())
 	consumer := r.only(r.app.IssueEffectProducer())
 	svc := r.resolver(1_000_000)
 
@@ -108,7 +108,7 @@ func TestRegressionEffectIsAcknowledgedOnceItsIncidentExists(t *testing.T) {
 func TestEffectConsumerAcknowledgesOnlyWhatItCanAct(t *testing.T) {
 	r := newIssueRig(t)
 	r.ingest("TypeError", 5, true, false)
-	r.tick(r.only(r.app.IssueProducerWithClock(r.clock)))
+	r.tick(r.only(r.app.IssueProducer()))
 	snap := r.snapshot()
 	issue, occurrence := snap.Issues[0], snap.Issues[0].Occurrences[0].OccurrenceID
 	store, err := issues.NewControlStore(r.app.Control)
@@ -136,7 +136,7 @@ func TestEffectConsumerAcknowledgesOnlyWhatItCanAct(t *testing.T) {
 // the consumer acknowledges, the regression commits.
 func TestEffectCapCannotWedgeRegressionCommits(t *testing.T) {
 	r := newIssueRig(t)
-	issuesOnly := r.only(r.app.IssueProducerWithClock(r.clock))
+	issuesOnly := r.only(r.app.IssueProducer())
 	consumer := r.only(r.app.IssueEffectProducer())
 	svc := r.resolver(1_000_000)
 	r.ingest("TypeError", 5, true, false)
@@ -191,8 +191,8 @@ func TestEffectCapCannotWedgeRegressionCommits(t *testing.T) {
 // the incident producer opens one only for the current episode of an open issue.
 func TestEffectOfASupersededEpisodeIsAcknowledged(t *testing.T) {
 	r := newIssueRig(t)
-	issuesOnly := r.only(r.app.IssueProducerWithClock(r.clock))
-	incidentsOnly := r.only(r.app.IncidentProducerWithClock(r.clock))
+	issuesOnly := r.only(r.app.IssueProducer())
+	incidentsOnly := r.only(r.app.IncidentProducer())
 	consumer := r.only(r.app.IssueEffectProducer())
 	svc := r.resolver(1_000_000)
 	r.ingest("TypeError", 5, true, false)
