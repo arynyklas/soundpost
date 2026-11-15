@@ -143,6 +143,34 @@ func TestDeleteWithViewOlderThanAuthorityChangeStillConflicts(t *testing.T) {
 				t.Fatal(err)
 			}
 		}, false},
+		{"org creation admin command", func(f *fenceFx) {
+			f.admin("create_org", model.NewID(), auth.AdminPayload{Name: "second org", Reason: "new org"})
+		}, true},
+		{"user creation admin command", func(f *fenceFx) {
+			f.admin("create_user", f.org, auth.AdminPayload{ID: model.NewID(), Email: "second@example.test", Password: "a long test password 2026", Reason: "new user"})
+		}, true},
+		{"org admin admin command", func(f *fenceFx) {
+			f.admin("org_admin", f.org, auth.AdminPayload{UserID: f.user, Enabled: true, Reason: "org admin"})
+		}, true},
+		{"grant admin command", func(f *fenceFx) {
+			f.admin("grant", f.org, auth.AdminPayload{UserID: f.user, ProjectID: f.otherProject, Enabled: true, Permissions: []string{string(auth.Read)}, Reason: "grant"})
+		}, true},
+		{"team admin command", func(f *fenceFx) {
+			cfg, _ := json.Marshal(model.ControlTeam{Members: []model.ID{f.user}, Projects: []model.ID{f.project}, Permissions: []string{string(auth.Read)}, Enabled: true})
+			f.admin("team", f.org, auth.AdminPayload{ID: model.NewID(), Config: cfg, Reason: "team"})
+		}, true},
+		{"sso admin command", func(f *fenceFx) {
+			cfg := json.RawMessage(`{"Issuer":"https://idp.example.test","ClientID":"client","ClientSecret":"","RedirectURL":"https://app.example.test/callback","Subjects":null}`)
+			f.admin("sso", f.org, auth.AdminPayload{ID: model.NewID(), Config: cfg, Reason: "sso"})
+		}, true},
+		{"destination admin command", func(f *fenceFx) {
+			cfg := json.RawMessage(`{"type":"webhook","endpoint":"https://hooks.example.test/notify","enabled":true}`)
+			f.admin("destination", f.org, auth.AdminPayload{ID: model.NewID(), Config: cfg, Secret: "sender signing secret", Reason: "destination"})
+		}, true},
+		{"retention admin command", func(f *fenceFx) {
+			cfg, _ := json.Marshal(auth.RetentionConfig{ProjectID: f.project, Signal: "metrics", Days: 30})
+			f.admin("retention", f.org, auth.AdminPayload{ID: model.NewID(), Config: cfg, Reason: "retention"})
+		}, true},
 	}
 	for _, c := range classes {
 		t.Run(c.name, func(t *testing.T) {

@@ -118,12 +118,12 @@ func TestReservationNotRefundedOnAmbiguousAppend(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer engine.Close()
-	engine.fault = func(at string) error {
+	engine.setFault(func(at string) error {
 		if at == "wal_sync" {
 			return errors.New("sync fault")
 		}
 		return nil
-	}
+	})
 	if _, e = engine.Append(context.Background(), scope, b); e == nil {
 		t.Fatal("fault ACK")
 	}

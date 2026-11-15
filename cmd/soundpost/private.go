@@ -14,6 +14,44 @@ import (
 // errInsecureMode means a directory or key that must be private is reachable by other users.
 var errInsecureMode = errors.New("insecure file mode")
 
+// errLegacyVolumeLayout means the data directory is the data/ subdirectory of a volume whose
+// root still holds a data directory of the earlier chart layout.
+var errLegacyVolumeLayout = errors.New("data of the earlier volume-root layout")
+
+// legacyVolumeLayoutLine is what serve prints for errLegacyVolumeLayout: a typed code, what to do,
+// and no path.
+const legacyVolumeLayoutLine = "soundpost: legacy_volume_layout: the volume root next to this data directory still holds a data directory of the earlier layout (control.db or raft/ beside data/); starting here would run this member on a fresh state while its real data sits one level up. Nothing was opened or changed. With the member stopped, move the whole old root, including its own data/, into data/ (or delete a stale copy when data/ already holds the member's data), then start it again: docs/operations/upgrade.md"
+
+// refuseLegacyVolumeLayout refuses to start a member on data/ when the volume it sits in holds
+// control.db or raft/ at its root. Earlier charts passed the volume root itself as --data-dir;
+// the chart now passes its data/ subdirectory (a PVC root cannot be private, see
+// docs/operations/upgrade.md). The old root holds the storage engine's own data/ directory, so
+// the new data directory is that engine directory: a member upgraded without the one-time move
+// would start with a fresh control state there while its control.db and raft/ sit unread one
+// level up. Only a directory named data is judged: any other layout has no such history. The
+// check runs before preparePrivate creates or opens anything, so the refusal leaves the volume
+// exactly as the operator left it.
+func refuseLegacyVolumeLayout(dir string) error {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return err
+	}
+	if filepath.Base(abs) != "data" {
+		return nil
+	}
+	root := filepath.Dir(abs)
+	for _, marker := range []string{"control.db", "raft"} {
+		_, err = os.Lstat(filepath.Join(root, marker))
+		if err == nil {
+			return errLegacyVolumeLayout
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
+}
+
 // preparePrivate makes sure the data directory exists as a private (0700) directory. A
 // directory this process may chmod (a hand-made or volume-provided 0755 one) is tightened to
 // 0700; one it cannot make private is refused, and so is an operator-supplied TLS private
@@ -22,8 +60,12 @@ var errInsecureMode = errors.New("insecure file mode")
 // are already 0600; the directory mode is what keeps them unreachable. POSIX modes say nothing
 // about Windows ACLs, so there the directory's DACL is read instead and, when it grants
 // anyone but the owner, SYSTEM and Administrators access, replaced with exactly that
-// (docs/operations/bootstrap.md).
+// (docs/operations/bootstrap.md). A data/ directory on a volume that still holds the earlier
+// volume-root layout is refused first (refuseLegacyVolumeLayout), before anything is created.
 func preparePrivate(dir, tlsKey string) error {
+	if err := refuseLegacyVolumeLayout(dir); err != nil {
+		return err
+	}
 	if err := durablefs.MkdirAll(dir); err != nil {
 		return err
 	}

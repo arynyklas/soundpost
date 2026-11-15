@@ -112,8 +112,8 @@ type hookPlane struct {
 	afterBegin func()
 }
 
-func (p *hookPlane) Begin(ctx context.Context, cut storage.ControlCut) (backup.PlaneSession, error) {
-	s, err := p.DataPlane.Begin(ctx, cut)
+func (p *hookPlane) Begin(ctx context.Context, owner model.ID, cut storage.ControlCut) (backup.PlaneSession, error) {
+	s, err := p.DataPlane.Begin(ctx, owner, cut)
 	if err == nil && p.afterBegin != nil {
 		p.afterBegin()
 	}

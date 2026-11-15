@@ -638,12 +638,12 @@ func TestDeleteCrashHooksReopenCleanlyAndRerunCompletes(t *testing.T) {
 			x := newEraseEnv(t)
 			hit := x.appendMixed(eraseCanary, bothDeadlines)
 			x.coldCanary(eraseCanary)
-			x.e.fault = func(at string) error {
+			x.e.setFault(func(at string) error {
 				if at == hook {
 					return errors.New("crash at " + at)
 				}
 				return nil
-			}
+			})
 			preds := []model.DeletePredicate{x.rangePredicate(0, 10, model.Metric)}
 			if _, err := x.e.EraseDeleted(context.Background(), preds, nil); err == nil {
 				t.Fatalf("hook %s never fired", hook)

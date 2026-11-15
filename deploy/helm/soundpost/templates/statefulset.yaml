@@ -91,7 +91,10 @@ spec:
             - --mode=distributed
             - --node-id={{ $m.id }}
             - --cluster-config=/etc/soundpost/config/node-{{ $m.id }}.json
-            # A SUBDIRECTORY of the volume, never the mount root (see fsGroup above).
+            # A SUBDIRECTORY of the volume, never the mount root (see fsGroup above). serve refuses
+            # to start on a data/ whose volume root still holds control.db or raft/ (the earlier
+            # layout, `legacy_volume_layout`): move that data into data/ first, see
+            # docs/operations/upgrade.md. The flag must stay <mount>/data, which that check judges.
             - --data-dir=/var/lib/soundpost/data
             - --listen=0.0.0.0:{{ $root.Values.ports.public }}
           ports:

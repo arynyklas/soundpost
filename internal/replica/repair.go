@@ -382,6 +382,7 @@ type JournalPin struct {
 	path    string
 	next    uint64 // first physical index not yet in the archive
 	owner   model.ID
+	stamp   model.ID
 	created int64 // lease, Unix nanoseconds
 	expires int64
 }
@@ -397,6 +398,8 @@ type pinHeader struct {
 	// Owner is the Group instance that created the pin: a process lifetime, not a node identity.
 	// A pin whose Owner is not this instance was left by a process that is gone.
 	Owner model.ID `json:"owner"`
+	// Stamp identifies the backup attempt that holds the pin (absent: unstamped).
+	Stamp *model.ID `json:"stamp,omitempty"`
 	// Created and Expires are the lease, in Unix nanoseconds.
 	Created int64 `json:"created,string"`
 	Expires int64 `json:"expires,string"`
@@ -411,6 +414,8 @@ type PinInfo struct {
 	// Orphaned: created by an earlier instance of this group, a process that is gone. Nothing in
 	// this process holds the pin; it only archives until it expires or is dropped.
 	Orphaned bool
+	// Stamp is the owner stamp given to PinJournalFor (zero for an unstamped pin).
+	Stamp model.ID
 }
 
 // Pins lists the durable journal pins of this group after dropping every pin whose lease lapsed.
@@ -427,7 +432,7 @@ func (g *Group) Pins() ([]PinInfo, error) {
 	}
 	out := make([]PinInfo, 0, len(g.pins))
 	for _, p := range g.pins {
-		out = append(out, PinInfo{ID: p.id, After: p.after, Created: time.Unix(0, p.created), Expires: time.Unix(0, p.expires), Orphaned: p.owner != g.owner})
+		out = append(out, PinInfo{ID: p.id, After: p.after, Stamp: p.stamp, Created: time.Unix(0, p.created), Expires: time.Unix(0, p.expires), Orphaned: p.owner != g.owner})
 	}
 	sort.Slice(out, func(i, j int) bool { return bytes.Compare(out[i].ID[:], out[j].ID[:]) < 0 })
 	return out, nil
@@ -476,6 +481,13 @@ func (g *Group) pinDir() string { return filepath.Join(g.dir, "pins") }
 // PinJournal atomically protects the committed journal beyond after. It is a
 // crash-durable registration: pins are reloaded on Open and keep archiving.
 func (g *Group) PinJournal(after uint64) (*JournalPin, error) {
+	return g.PinJournalFor(after, model.ID{})
+}
+
+// PinJournalFor is PinJournal with an owner stamp: the identity of the backup attempt that holds
+// the pin. The stamp is durable in the pin header, is reported by Pins and lets a reaper drop
+// exactly the pins of one dead owner (DropPin by ID after filtering on Stamp).
+func (g *Group) PinJournalFor(after uint64, stamp model.ID) (*JournalPin, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.failed || g.closed {
@@ -487,9 +499,13 @@ func (g *Group) PinJournal(after uint64) (*JournalPin, error) {
 	commit := g.raw.BasicStatus().HardState.GetCommit()
 	first, _ := g.memory.FirstIndex()
 	created := g.now().UnixNano()
-	p := &JournalPin{g: g, id: model.NewID(), after: after, next: first, owner: g.owner, created: created, expires: created + int64(g.pinTTL)}
+	p := &JournalPin{g: g, id: model.NewID(), after: after, next: first, owner: g.owner, stamp: stamp, created: created, expires: created + int64(g.pinTTL)}
 	p.path = filepath.Join(g.pinDir(), p.id.String()+".pin")
-	if err := p.appendLocked(nil, &pinHeader{ID: p.id, After: after, Next: first, Owner: p.owner, Created: p.created, Expires: p.expires}); err != nil {
+	var header *model.ID
+	if stamp != (model.ID{}) {
+		header = &stamp
+	}
+	if err := p.appendLocked(nil, &pinHeader{ID: p.id, After: after, Next: first, Owner: p.owner, Stamp: header, Created: p.created, Expires: p.expires}); err != nil {
 		return nil, err
 	}
 	if err := g.archiveRangeLocked(p, commit); err != nil {
@@ -797,7 +813,11 @@ func (g *Group) loadPins() error {
 		if next < first {
 			next = first
 		}
-		g.pins[h.ID] = &JournalPin{g: g, id: h.ID, after: h.After, path: path, next: next, owner: h.Owner, created: h.Created, expires: h.Expires}
+		var stamp model.ID
+		if h.Stamp != nil {
+			stamp = *h.Stamp
+		}
+		g.pins[h.ID] = &JournalPin{g: g, id: h.ID, after: h.After, path: path, next: next, owner: h.Owner, stamp: stamp, created: h.Created, expires: h.Expires}
 	}
 	return nil
 }

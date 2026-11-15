@@ -1119,18 +1119,10 @@ func drStalePolicyDeleteBarrier(env *Env, rep *Report) error {
 		wg.Add(1)
 		go func() { defer wg.Done(); f() }()
 	}
-	// Writers hold the read side of the gate around every send. The deletion's Begin is an
-	// optimistic control commit keyed on the control revision, which intake advances on every
-	// admission: under full intake it can starve. Begin is therefore tried under full load first
-	// (the conflict count is reported) and then under a short write lock that only pauses NEW
-	// sends for the duration of that single commit; the barriers, the policy fence and the
-	// apply-time rejection all still run under full concurrent load.
-	var gate sync.RWMutex
-	gsend := func(p *drProject, b model.Batch) (model.Receipt, error) {
-		gate.RLock()
-		defer gate.RUnlock()
-		return s.send(p, b)
-	}
+	// No write pause: the deletion's Begin is an optimistic control commit keyed on the control
+	// revision. It runs under full concurrent intake (conflicts are counted and reported), and the
+	// barriers, the policy fence and the apply-time rejection run under the same load.
+	gsend := s.send
 	// legitimate writers: the sibling project and the doomed project OUTSIDE the range
 	spawn(func() {
 		for i := 0; i < 600 && !stop.Load(); i++ {
@@ -1207,11 +1199,7 @@ func drStalePolicyDeleteBarrier(env *Env, rep *Report) error {
 	atBegin := count.snapshot()
 
 	// begin the deletion (a revision conflict means intake moved the control revision: re-read)
-	beginOnce := func(gated bool) (retention.DeleteReceipt, error) {
-		if gated {
-			gate.Lock()
-			defer gate.Unlock()
-		}
+	beginOnce := func() (retention.DeleteReceipt, error) {
 		scope, err := s.adminScope()
 		if err != nil {
 			return retention.DeleteReceipt{}, err
@@ -1224,8 +1212,8 @@ func drStalePolicyDeleteBarrier(env *Env, rep *Report) error {
 	}
 	var receipt retention.DeleteReceipt
 	beginConflicts := 0
-	for attempt := 0; attempt < 400; attempt++ {
-		r, err := beginOnce(attempt >= 60)
+	for range 400 {
+		r, err := beginOnce()
 		if drFault(err) == model.Conflict {
 			beginConflicts++
 			continue
@@ -1238,7 +1226,7 @@ func drStalePolicyDeleteBarrier(env *Env, rep *Report) error {
 		receipt = r
 		break
 	}
-	rep.Fact("delete_begin", map[string]any{"conflicts_before_begin_committed": beginConflicts, "attempts_under_full_intake_before_the_gate": 60})
+	rep.Fact("delete_begin", map[string]any{"conflicts_before_begin_committed": beginConflicts, "attempts": beginConflicts + 1, "write_pause": false})
 	if receipt.OperationID == (model.ID{}) {
 		stop.Store(true)
 		wg.Wait()
@@ -3075,17 +3063,13 @@ func drRetireRace(s *drSite, rep *Report, kinds []model.Kind, days map[model.Kin
 		}
 		return n
 	}
-	// As in the range-deletion race, Begin is an optimistic control commit keyed on the control
-	// revision that every admission (and every login) advances: it is tried under full load first
-	// and then under a short write lock that pauses only NEW racer iterations for that one commit.
-	var gate sync.RWMutex
+	// As in the range-deletion race, Begin is an optimistic control commit; it runs under full load
+	// with no write pause (the racers are never held back) and its conflicts are reported.
 	wg.Add(2)
 	go func() { // a sender holding the project's current policy revision
 		defer wg.Done()
 		for !stop.Load() {
 			func() {
-				gate.RLock()
-				defer gate.RUnlock()
 				after := begun.Load()
 				b, rec, err := proj.metric(s.org, 1, 4000+seq.Add(1), name+"_race", 1, -1)
 				if err != nil {
@@ -3106,8 +3090,6 @@ func drRetireRace(s *drSite, rep *Report, kinds []model.Kind, days map[model.Kin
 		defer wg.Done()
 		for !stop.Load() {
 			func() {
-				gate.RLock()
-				defer gate.RUnlock()
 				after := begun.Load()
 				cred, err := s.fresh()
 				if err != nil {
@@ -3131,11 +3113,7 @@ func drRetireRace(s *drSite, rep *Report, kinds []model.Kind, days map[model.Kin
 			return errors.New("the retirement racers did not start")
 		}
 	}
-	beginOnce := func(gated bool) (retention.DeleteReceipt, error) {
-		if gated {
-			gate.Lock()
-			defer gate.Unlock()
-		}
+	beginOnce := func() (retention.DeleteReceipt, error) {
 		scope, err := s.adminScope()
 		if err != nil {
 			return retention.DeleteReceipt{}, err
@@ -3152,8 +3130,8 @@ func drRetireRace(s *drSite, rep *Report, kinds []model.Kind, days map[model.Kin
 	}
 	var receipt retention.DeleteReceipt
 	beginConflicts := 0
-	for attempt := 0; attempt < 200; attempt++ {
-		receipt, err = beginOnce(attempt >= 20)
+	for range 400 {
+		receipt, err = beginOnce()
 		if drFault(err) != model.Conflict {
 			break
 		}
@@ -3163,7 +3141,7 @@ func drRetireRace(s *drSite, rep *Report, kinds []model.Kind, days map[model.Kin
 		halt()
 		return fmt.Errorf("retire begin: %w", err)
 	}
-	rep.Fact("retire_begin", map[string]any{"conflicts_before_begin_committed": beginConflicts, "attempts_under_full_load_before_the_gate": 20})
+	rep.Fact("retire_begin", map[string]any{"conflicts_before_begin_committed": beginConflicts, "attempts": beginConflicts + 1, "write_pause": false})
 	samples := []drFenceSample{drSample(1, receipt)}
 	var done retention.DeleteReceipt
 	for deadline := time.Now().Add(5 * time.Minute); ; time.Sleep(25 * time.Millisecond) {

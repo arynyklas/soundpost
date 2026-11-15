@@ -4,6 +4,7 @@ package control
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -233,5 +234,104 @@ func TestCD8RedactionIsIdempotentAndKeepsClosedReasons(t *testing.T) {
 	after, _ := json.Marshal(f.st)
 	if string(before) != string(after) || len(f.st.Audits) != audits {
 		t.Error("a second erasure pass changed the state or added an erasing audit")
+	}
+}
+
+// An erasure replaces the stored reason of a rule output with controlTextErased. The worker that
+// retries the same settle step afterwards still carries its original reason, and the idempotent
+// compare (applyRuleOutputArm's same) must call that the same step, not a conflict: for a
+// suppression, for a recording output's settled phase and for the late duplicate of an earlier
+// step. The tolerance is exactly the redacted token: any other differing reason, receipt or hash
+// is still a conflict.
+func TestCD8SettleStepRetriedAfterRedactionIsTheSameStepNotAConflict(t *testing.T) {
+	f := newTextFx()
+	receipt := model.Cursor{Group: model.ID{0x77}, Index: 9}
+	hash := model.Hash{0x42}
+	otherHash := model.Hash{0x43}
+	book := &RuleBook{Org: f.org, Project: f.project, Rule: f.rule}
+	put := func(id byte, phase string, kind string, reason string) RuleOutput {
+		o := RuleOutput{ID: model.ID{0xc0, id}, Org: f.org, Project: f.project, Rule: f.rule, Version: 1, At: 60, Kind: kind, Signal: model.Metric, Mode: RuleModeLive, Phase: phase, Reason: reason}
+		if kind == RuleOutputRecording && phase != RulePhaseSuppress {
+			o.Receipt, o.Hash = &receipt, &hash
+		}
+		if err := storeRuleOutput(f.st, o); err != nil {
+			t.Fatal(err)
+		}
+		return o
+	}
+	redact := func() {
+		op := model.DeletionOperation{Phase: model.DeletePhaseFencing, Predicate: model.DeletePredicate{Operation: model.ID{0xdd}, Org: f.org, Mode: model.DeleteHistoricalRange, Projects: []model.ID{f.project}, Signals: []model.Kind{model.Metric}, Start: 40, End: 100}}
+		if err := eraseControlPayloads(f.st, &op, 5); err != nil {
+			t.Fatal(err)
+		}
+	}
+	suppressed := put(1, RulePhaseSuppress, RuleOutputRecording, "series_conflict:"+textCanary)
+	finalized := put(2, RulePhaseFinalized, RuleOutputRecording, "series_conflict:"+textCanary)
+	redact()
+	for _, o := range []RuleOutput{suppressed, finalized} {
+		if got, _, _ := loadRuleOutput(f.st, o.ID); got.Reason != controlTextErased {
+			t.Fatalf("fixture invalid: the reason of %v was not redacted: %q", o.ID, got.Reason)
+		}
+	}
+	want := func(name string, u RuleOutputApply, conflict bool) {
+		t.Helper()
+		u.Project, u.Rule = f.project, f.rule
+		effect, err := applyRuleOutputArm(f.st, book, u)
+		if conflict {
+			var fault *model.Fault
+			if err == nil || !errors.As(err, &fault) || fault.Code != model.Conflict {
+				t.Errorf("%s: want a conflict, got %v", name, err)
+			}
+			return
+		}
+		if err != nil || effect.Phase != "unchanged" {
+			t.Errorf("%s: want unchanged, got %+v %v", name, effect, err)
+		}
+	}
+	want("suppress retried with its original reason", RuleOutputApply{Output: suppressed.ID, To: RulePhaseSuppress, Reason: "series_conflict:" + textCanary}, false)
+	want("finalized retried with its original reason", RuleOutputApply{Output: finalized.ID, To: RulePhaseFinalized, Receipt: &receipt, Hash: &hash, Reason: "series_conflict:" + textCanary}, false)
+	want("late duplicate of the admitted step", RuleOutputApply{Output: finalized.ID, To: RulePhaseAdmitted, Receipt: &receipt, Hash: &hash, Reason: "series_conflict:" + textCanary}, false)
+	want("finalized retried with another hash", RuleOutputApply{Output: finalized.ID, To: RulePhaseFinalized, Receipt: &receipt, Hash: &otherHash, Reason: "x"}, true)
+	// Not redacted: a different reason is a different step.
+	live := put(3, RulePhaseSuppress, RuleOutputRecording, "obsolete_origin")
+	want("suppress retried with another reason when nothing was redacted", RuleOutputApply{Output: live.ID, To: RulePhaseSuppress, Reason: "other_reason"}, true)
+	liveFinal := put(4, RulePhaseFinalized, RuleOutputRecording, "kept_reason")
+	want("finalized retried with another reason when nothing was redacted", RuleOutputApply{Output: liveFinal.ID, To: RulePhaseFinalized, Receipt: &receipt, Hash: &hash, Reason: "other_reason"}, true)
+}
+
+// State.EvidenceGaps[].Reason is kept by every range or retirement erasure: the backup
+// attestation binds the committed gap to that exact text (backup.GapDigest), so redacting it
+// would break the restore proof. The text is capped at 64 bytes (recordGap) and the worker writes a
+// closed vocabulary into it; docs/privacy/retention.md records the owner acceptance as a
+// decision proposed by lane 1 wave 7. This test pins the behaviour the decision rests on: the
+// committed gap fact is untouched and the issue-book copy is redacted.
+func TestCD8CommittedEvidenceGapKeepsItsReasonForTheBackupDigest(t *testing.T) {
+	f := newTextFx()
+	gap := model.EvidenceGap{ID: model.ID{0xe9}, Org: f.org, Project: f.project, Group: model.ID{0x99}, Start: 50, End: 70, Signals: []model.Kind{model.ErrorKind}, Reason: "unprocessed_expiry"}
+	f.st.EvidenceGaps = map[string]model.EvidenceGap{gap.ID.String(): gap}
+	op := model.DeletionOperation{Phase: model.DeletePhaseFencing, Predicate: model.DeletePredicate{Operation: model.ID{0xdd}, Org: f.org, Mode: model.DeleteRetireProject, Projects: []model.ID{f.project}}}
+	if err := eraseControlPayloads(f.st, &op, 5); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.st.EvidenceGaps[gap.ID.String()]; got.Reason != gap.Reason {
+		t.Errorf("the committed gap fact's reason was rewritten to %q: the backup GapDigest would no longer bind it", got.Reason)
+	}
+}
+
+// A range redacts a grouping migration whose time lies in the half-open [start,end): the one at
+// start goes, the one at end is kept.
+func TestCD8RangeRedactsAMigrationAtStartAndKeepsOneAtEnd(t *testing.T) {
+	f := newTextFx()
+	f.st.GroupingMigrations["at start"] = model.GroupingMigration{ID: model.ID{0xc4}, Org: f.org, Project: f.project, From: model.ID{0xf1}, To: model.ID{0xf2}, At: 40, Reason: "migrate: " + textCanary}
+	f.st.GroupingMigrations["at end"] = model.GroupingMigration{ID: model.ID{0xc5}, Org: f.org, Project: f.project, From: model.ID{0xf1}, To: model.ID{0xf2}, At: 100, Reason: "migrate: " + textCanary}
+	op := model.DeletionOperation{Phase: model.DeletePhaseFencing, Predicate: model.DeletePredicate{Operation: model.ID{0xdd}, Org: f.org, Mode: model.DeleteHistoricalRange, Projects: []model.ID{f.project}, Signals: []model.Kind{model.ErrorKind}, Start: 40, End: 100}}
+	if err := eraseControlPayloads(f.st, &op, 5); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(f.st.GroupingMigrations["at start"].Reason, textCanary) {
+		t.Error("the migration at the range's start kept its text")
+	}
+	if !strings.Contains(f.st.GroupingMigrations["at end"].Reason, textCanary) {
+		t.Error("the migration at the range's end (outside [start,end)) was redacted")
 	}
 }

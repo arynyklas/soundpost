@@ -36,12 +36,23 @@ const (
 // cluster attestation (internal/control/attest.go) on it. ProofWithdrawn is called with the
 // group lock held, from the apply path: it must return at once and must not call back into the
 // group (a channel send that cannot block is the intended body).
-type ProofWatcher interface{ ProofWithdrawn() }
+type ProofWatcher interface{ ProofWithdrawn(ProofWithdrawal) }
+
+// ProofWithdrawal says where and why the group dropped its redaction proof.
+type ProofWithdrawal struct {
+	// Index is the replica index of the event: the physical index of the stale command, or of
+	// the installed snapshot. An attestation its proposer wrote at an applied index below it
+	// vouches for files this event may have changed.
+	Index uint64
+	// Install is true for a snapshot install (this node's own files are replaced) and false
+	// for a stale committed command (every node of the group applies it, at the same index).
+	Install bool
+}
 
 // proofWithdrawn tells the machine, when it is a ProofWatcher, that the proof is gone.
-func (g *Group) proofWithdrawn() {
-	if w, ok := g.machine.(ProofWatcher); ok {
-		w.ProofWithdrawn()
+func (g *Group) proofWithdrawn(w ProofWithdrawal) {
+	if p, ok := g.machine.(ProofWatcher); ok {
+		p.ProofWithdrawn(w)
 	}
 }
 

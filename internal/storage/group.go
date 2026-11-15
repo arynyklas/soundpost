@@ -34,14 +34,14 @@ type Engine struct {
 	mu           sync.Mutex
 	proposalMu   sync.Mutex
 	repl         *replicatedEngine
-	db           *bolt.DB
+	db           *trackedDB
 	dir          string
 	identity     model.ID
 	incarnation  string // hex; the random id of this disk's data directory (ensureIncarnation)
 	files        [64]*os.File
 	indexes      [64]uint64
 	validator    Revalidator
-	fault        func(string) error
+	faultHook    atomic.Pointer[func(string) error]
 	injected     atomic.Pointer[func(string) error]
 	failed       bool
 	closed       bool
@@ -134,7 +134,7 @@ func Open(dir string, v Revalidator) (*Engine, error) {
 	if e != nil {
 		return nil, e
 	}
-	out := &Engine{db: db, dir: dir, validator: v}
+	out := &Engine{db: &trackedDB{DB: db}, dir: dir, validator: v}
 	if e = durablefs.SyncFileAndDir(path); e != nil {
 		db.Close()
 		return nil, e
@@ -241,9 +241,19 @@ func (e *Engine) Close() error {
 	}
 	return err
 }
+
+// setFault installs (or, with nil, removes) the in-package fault hook; group goroutines may be
+// consulting trip while a test replaces it.
+func (e *Engine) setFault(hook func(string) error) {
+	if hook == nil {
+		e.faultHook.Store(nil)
+		return
+	}
+	e.faultHook.Store(&hook)
+}
 func (e *Engine) trip(at string) error {
-	if e.fault != nil {
-		return e.fault(at)
+	if h := e.faultHook.Load(); h != nil {
+		return (*h)(at)
 	}
 	if h := e.injected.Load(); h != nil {
 		return (*h)(at)

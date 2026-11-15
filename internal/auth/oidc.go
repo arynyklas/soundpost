@@ -213,12 +213,20 @@ func expiredOIDC(key string, raw json.RawMessage, now int64) bool {
 	return ok && exp <= now
 }
 
-// sweepExpiredState deletes expired records. Audit rows are never touched and
-// the result does not depend on map iteration order.
+// sweepExpiredState deletes expired pending logins, elevation records and
+// sessions (a session expires at the instant Authenticate refuses it). Audit
+// rows are never touched here (the control log expiry owns them) and the result
+// does not depend on map iteration order.
 func sweepExpiredState(st *model.ControlState, now int64) (removed int) {
 	for k, raw := range st.OIDC {
 		if expiredOIDC(k, raw, now) {
 			delete(st.OIDC, k)
+			removed++
+		}
+	}
+	for k, v := range st.Sessions {
+		if v.Expires <= now {
+			delete(st.Sessions, k)
 			removed++
 		}
 	}
@@ -237,16 +245,23 @@ func (s *Service) OIDCCapacity(ctx context.Context) error {
 	})
 }
 
-// SweepExpired removes expired pending OIDC state and expired elevation records
-// from replicated control state and returns how many were removed. The instant
-// is read once here, on the caller (leader); the transition itself is a pure
-// function of (state, instant). Run it periodically (RunFences cadence).
+// SweepExpired removes expired pending OIDC state, expired elevation records and
+// expired sessions from replicated control state and returns how many were
+// removed. The instant is read once here, on the caller (leader); the
+// transition itself is a pure function of (state, instant). Run it periodically
+// (RunFences cadence).
 func (s *Service) SweepExpired(ctx context.Context) (int, error) {
 	now := s.now().Unix()
 	pending := false
 	if err := s.store.View(ctx, func(st model.ControlState) error {
 		for k, raw := range st.OIDC {
 			if expiredOIDC(k, raw, now) {
+				pending = true
+				break
+			}
+		}
+		for _, v := range st.Sessions {
+			if v.Expires <= now {
 				pending = true
 				break
 			}

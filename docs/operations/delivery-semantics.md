@@ -7,8 +7,11 @@ does not, and how a delivery that did not end cleanly looks to an operator. The
 policy that decides *what* is sent is described in
 [notification policy](../user/notification-policy.md); the provider adapters (SMTP,
 Telegram, signed webhooks) exist as a tested package (`internal/notify/providers`,
-see [notification channels](notification-channels.md)), but `soundpost serve` does not
-wire them or start the runner that sends, so a served node sends nothing. The code is
+see [notification channels](notification-channels.md)); `soundpost serve` wires them
+and starts the runner that sends (owner decision D1; see
+[background workers](background-workers.md)), but real SMTP and Telegram delivery has
+never been run against a real server or account, so those two channels are untested
+outside loopback protocol fixtures. The code is
 `internal/notify/{outbox,worker}.go` and, in the control group,
 `internal/control/delivery_outbox.go`.
 
@@ -200,4 +203,4 @@ leader at each boundary of the pipeline. They do **not** cross separate OS
 processes, the mTLS transport, a wall clock or the data groups, and no real
 provider has been called.
 
-Not built at the time of this task's commit and since added elsewhere: the provider adapters (`internal/notify/providers/{smtp,telegram,webhook}`, see `notification-channels.md`). Still not part of this document's scope: the application wiring of the worker (the control handler is bound with `Store.BindDeliveryOutbox()`; `soundpost serve` does not start the worker, see `background-workers.md`) and a scheduler that mints a fresh scope and lease per pass.
+Not built at the time of this task's commit and since added elsewhere: the provider adapters (`internal/notify/providers/{smtp,telegram,webhook}`, see `notification-channels.md`) and the application wiring of the worker: `soundpost serve` binds the control handler (`Store.BindDeliveryOutbox()`), starts the runner under the per-organization system principal and passes the `Sender`, with a scope and lease derived afresh every pass (owner decision D1; see `background-workers.md`). Still open and not part of this document's scope: real SMTP and Telegram delivery has never been run against a real server or account, and the alert-rule stage has no rule catalogue.

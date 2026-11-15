@@ -44,6 +44,14 @@ func reply(w http.ResponseWriter, v any, e error) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "application/json")
 	if e != nil {
+		var limited *auth.RateLimitedError
+		if errors.As(e, &limited) {
+			seconds := int((limited.RetryAfter + time.Second - 1) / time.Second)
+			w.Header().Set("Retry-After", strconv.Itoa(seconds))
+			w.WriteHeader(http.StatusTooManyRequests)
+			_ = json.NewEncoder(w).Encode(&model.Fault{Code: "rate_limited", Retryable: true, SafeDetail: "rate_limited", RequestID: model.NewID()})
+			return
+		}
 		var f *model.Fault
 		if !errors.As(e, &f) {
 			f = model.Fail(model.Unavailable)
@@ -164,16 +172,6 @@ func RegisterSessionRoutes(mux *http.ServeMux, s *auth.Service) {
 			}
 		}
 		v, e := s.Login(auth.WithSource(r.Context(), host), q.Email, q.Password, q.Code)
-		var limited *auth.RateLimitedError
-		if errors.As(e, &limited) {
-			seconds := int((limited.RetryAfter + time.Second - 1) / time.Second)
-			w.Header().Set("Cache-Control", "no-store")
-			w.Header().Set("Content-Type", "application/json")
-			w.Header().Set("Retry-After", strconv.Itoa(seconds))
-			w.WriteHeader(http.StatusTooManyRequests)
-			_ = json.NewEncoder(w).Encode(&model.Fault{Code: "rate_limited", Retryable: true, SafeDetail: "rate_limited", RequestID: model.NewID()})
-			return
-		}
 		if e == nil {
 			if old := token(r); old != "" {
 				_ = s.Logout(r.Context(), old)

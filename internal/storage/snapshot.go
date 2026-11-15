@@ -373,12 +373,16 @@ func evidenceDigest(entry walEntry) (model.Hash, error) {
 // ---- C12 certificates (typed interface; no other module defines these yet) ----
 
 // ControlCut is the control checkpoint C taken at installation backup: the
-// processed evidence highwater H of every data group and the reservations
-// control held at C.
+// processed evidence highwater H of every data group, the reservations
+// control held at C and, once control settled windows (model.Settlement), what it
+// kept of the consumed reservations it no longer holds as rows: the settled
+// windows and their folded charge. A settled window's reservations are proven by
+// the data window (QuotaEvidence), never listed.
 type ControlCut struct {
 	Revision     model.Revision                        `json:"revision"`
 	Processed    []model.Cursor                        `json:"processed"`
 	Reservations map[string]model.AdmissionReservation `json:"reservations"`
+	Settlement   *model.Settlement                     `json:"settlement,omitempty"`
 }
 
 // DeclaredGap mirrors a committed RecordEvidenceGap: evidence in (After,Through]
@@ -511,10 +515,18 @@ type Backup struct {
 	sealed  bool
 }
 
-// BeginBackup validates C/H and atomically pins the post-H journal of every
+// BeginBackup is BeginBackupOwned for a caller with no attempt identity: its pins carry no owner
+// stamp, so no reaper can attribute them to a backup.
+func (e *Engine) BeginBackup(ctx context.Context, cut ControlCut) (*Backup, error) {
+	return e.BeginBackupOwned(ctx, model.ID{}, cut)
+}
+
+// BeginBackupOwned validates C/H and atomically pins the post-H journal of every
 // group before returning. A cut that names a group more or fewer than the
 // installation owns, or a highwater beyond what the group applied, is refused.
-func (e *Engine) BeginBackup(ctx context.Context, cut ControlCut) (*Backup, error) {
+// owner (the backup attempt ID) is stamped durably into every pin, so JournalPins reports
+// who holds each pin and a reaper can drop exactly the pins of a dead owner.
+func (e *Engine) BeginBackupOwned(ctx context.Context, owner model.ID, cut ControlCut) (*Backup, error) {
 	if e.repl == nil {
 		return nil, model.Fail(model.Unavailable)
 	}
@@ -539,7 +551,7 @@ func (e *Engine) BeginBackup(ctx context.Context, cut ControlCut) (*Backup, erro
 			b.release()
 			return nil, model.Fail(model.Stale)
 		}
-		pin, err := group.PinJournal(uint64(after))
+		pin, err := group.PinJournalFor(uint64(after), owner)
 		if err != nil {
 			b.release()
 			return nil, snapshotFault(err)
@@ -616,7 +628,7 @@ func (b *Backup) Seal(ctx context.Context, gaps []DeclaredGap) (SealedBackup, er
 		intervals = append(intervals, runs...)
 		manifests = append(manifests, snapshot.Manifest)
 	}
-	slots, err := quotaEvidenceFor(cut.Slots, b.cut.Reservations, false)
+	slots, err := quotaEvidenceFor(cut.Slots, b.cut, false)
 	if err != nil {
 		return SealedBackup{}, err
 	}
@@ -828,6 +840,22 @@ func ReconcileQuota(bundle BackupBundle) (QuotaReconciliation, error) {
 			}
 		}
 	}
+	settled := bundle.Cut.Settlement
+	if settled != nil {
+		if err = settled.Check(); err != nil {
+			return QuotaReconciliation{}, err
+		}
+		if bundle.Version == 1 && !settledMatchesEvidence(settled, evidence) {
+			return QuotaReconciliation{}, model.Fail(model.Corrupt) // the listed consumption is not what control settled
+		}
+		for key, charge := range settled.Charges {
+			c := QuotaCharge{Bytes: charge.Bytes, Series: make(map[string]uint64, len(charge.Series))}
+			for s, n := range charge.Series {
+				c.Series[s] = n
+			}
+			cert.Charges[key] = c
+		}
+	}
 	ids := make([]string, 0, len(bundle.Cut.Reservations))
 	for id := range bundle.Cut.Reservations {
 		ids = append(ids, id)
@@ -866,6 +894,9 @@ func ReconcileQuota(bundle BackupBundle) (QuotaReconciliation, error) {
 		if _, known := bundle.Cut.Reservations[c.ID.String()]; known {
 			continue
 		}
+		if _, inSettled := settled.Window(c.Cursor); inSettled {
+			continue // charged once already, inside the settled charge
+		}
 		touch(c.Org, c.Project, c.Source) // created after C, consumed in D: reconstruct its single charge
 		charged[c.ID] = live{c.Org, c.Project, c.Source, c.Bytes, c.Series}
 		cert.Consumed = append(cert.Consumed, c.ID)
@@ -881,8 +912,25 @@ func ReconcileQuota(bundle BackupBundle) (QuotaReconciliation, error) {
 			cert.Charges[key] = c
 		}
 	}
-	// Consumed-only series per project for the restored-index cross-check.
+	// Consumed-only series per project for the restored-index cross-check. What the settled
+	// windows hold is their folded series refcounts, corrected by the reservations the evidence
+	// lists for them (a window redacted since: its erased records' series are charged but no
+	// longer indexed), so a series counts once one settled reservation still indexes it.
 	perProject := map[string]map[string]bool{}
+	refs := map[string]map[string]int64{}
+	if settled != nil {
+		for key, charge := range settled.Charges {
+			k, ok := strings.CutPrefix(key, "project:")
+			if !ok {
+				continue
+			}
+			perProject[k] = map[string]bool{}
+			refs[k] = make(map[string]int64, len(charge.Series))
+			for s, n := range charge.Series {
+				refs[k][s] = int64(n)
+			}
+		}
+	}
 	for _, c := range evidence {
 		k := c.Org.String() + ":" + c.Project.String()
 		if perProject[k] == nil {
@@ -892,8 +940,30 @@ func ReconcileQuota(bundle BackupBundle) (QuotaReconciliation, error) {
 		if c.Redacted {
 			indexed = c.Retained // erased records' series are charged but no longer indexed
 		}
+		if _, inSettled := settled.Window(c.Cursor); inSettled {
+			if refs[k] == nil {
+				return QuotaReconciliation{}, model.Fail(model.Corrupt)
+			}
+			for _, s := range c.Series {
+				refs[k][s]--
+			}
+			for _, s := range indexed {
+				refs[k][s]++
+			}
+			continue
+		}
 		for _, s := range indexed {
 			perProject[k][s] = true
+		}
+	}
+	for k, counts := range refs {
+		for s, n := range counts {
+			if n < 0 {
+				return QuotaReconciliation{}, model.Fail(model.Corrupt)
+			}
+			if n > 0 {
+				perProject[k][s] = true
+			}
 		}
 	}
 	for k, set := range perProject {
@@ -986,7 +1056,7 @@ func (e *Engine) InstallBackup(ctx context.Context, raftDirectory string, bundle
 		installed[slot] = current
 	}
 	// The consumption/release proof must be exactly what the installed bytes carry.
-	evidence, err := quotaEvidenceFor(installed, bundle.Cut.Reservations, true)
+	evidence, err := quotaEvidenceFor(installed, bundle.Cut, true)
 	if err != nil {
 		return err
 	}

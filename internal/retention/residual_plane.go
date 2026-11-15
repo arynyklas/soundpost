@@ -50,6 +50,31 @@ func (p ResidualPlane) controlResiduals() []string {
 	return p.control.ResidualStores()
 }
 
+// OperationResidualSource is a ClusterResidualSource that can also answer for one deletion
+// (control.Store.ClusterOperationResidual): the stores the erasure of that operation still owes
+// on some node, not the stores a later erasure owes.
+type OperationResidualSource interface {
+	ClusterOperationResidual(op model.ID) []string
+}
+
+// OperationResidualPlane is a DataPlane that answers a receipt for one operation.
+type OperationResidualPlane interface {
+	OperationResidual(op model.ID) []string
+}
+
+// OperationResidual is what the receipt of the operation names: the engine's residual stores,
+// what the engine's per-voter bookkeeping still owes the operation (ErasureResidual) and the
+// control stores that the erasure of THIS operation still owes (OperationResidualSource): the
+// receipt of an earlier deletion does not name stores that only a later one is still cleaning.
+// A control source that cannot answer per operation answers for everything (ResidualStores).
+func (p ResidualPlane) OperationResidual(op model.ID) []string {
+	out := mergeResidual(p.DataPlane.ResidualStores(), p.ErasureResidual(op))
+	if c, ok := p.control.(OperationResidualSource); ok {
+		return mergeResidual(out, c.ClusterOperationResidual(op))
+	}
+	return mergeResidual(out, p.controlResiduals())
+}
+
 // ResidualStores is the union of the engine's and the control store's residual
 // stores, each name once, sorted; nil when neither owes anything.
 func (p ResidualPlane) ResidualStores() []string {

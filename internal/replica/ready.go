@@ -567,7 +567,7 @@ func (g *Group) applyCommitted(ent *pb.Entry) error {
 		c.Outcome = "conflict"
 		if c.Entry.Kind == Control {
 			g.machineRules = 0 // a stale command still carries the state it was built from
-			g.proofWithdrawn()
+			g.proofWithdrawn(ProofWithdrawal{Index: c.Index})
 		}
 	}
 	g.applied = ent.GetIndex()
@@ -666,7 +666,7 @@ func (g *Group) restoreSnapshot(snap *pb.Snapshot) error {
 		g.completed[c.Entry.ID] = g.retained(c)
 	}
 	g.rebuildRetryOrder()
-	g.proofWithdrawn()
+	g.proofWithdrawn(ProofWithdrawal{Index: index, Install: true})
 	return nil
 }
 
@@ -716,9 +716,7 @@ func (g *Group) sendGatedSnapshot(m *pb.Message) {
 		token, err := g.gate.BeforeSnapshotSend(ctx, m.GetTo())
 		cancel()
 		if err == nil {
-			if len(token) > 0 {
-				m.Context = token
-			}
+			m.Context = gateContext(token)
 			err = g.transport.Send(g.group, m)
 		}
 		if err != nil {

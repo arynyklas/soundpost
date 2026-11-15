@@ -40,6 +40,9 @@ func failureLine(args []string, err error) string {
 	if errors.Is(err, errInsecureMode) {
 		return "soundpost: the data directory or TLS private key is accessible to other users; it must be mode 0700 and the key 0600"
 	}
+	if errors.Is(err, errLegacyVolumeLayout) {
+		return legacyVolumeLayoutLine
+	}
 	var failStop *storageFailStopError
 	if errors.As(err, &failStop) {
 		return failStop.Error()

@@ -5,6 +5,7 @@ package control
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -573,15 +574,46 @@ func oweLocalScrub(control *bolt.Bucket) error {
 // bounded, redundant scrub for a node that had already scrubbed or never erased anything, and
 // the key is written either way so no later Open owes it again. A file Open creates gets the
 // settled key in Open itself. A key that is already there is never rewritten: an owed marker
-// stays owed under its generation, a settled one stays settled. A key is only evidence about
-// commits a build with the marker made: running an earlier build on the file after this one
-// has settled it (a downgrade) and then this build again is not detected, and is not a
-// supported path.
+// stays owed under its generation, a settled one stays settled.
+//
+// A downgrade is detected through the state seal (stateSealKey): every state write of this
+// build stores the SHA-256 of the exact state bytes beside them, so an earlier build that
+// commits on the file (it knows no seal and leaves it as it was) makes the stored state differ
+// from the seal, and Open refuses the file with Unsupported instead of trusting a settled key
+// that build never maintained. A file that has no seal yet (written before this build) gets
+// one here. An earlier build that opened the file and committed nothing leaves state and seal
+// equal and is not detectable, and needs no detection: nothing changed.
 func markOpenedFile(control *bolt.Bucket) error {
+	if seal := control.Get(stateSealKey); seal != nil {
+		sum := sha256.Sum256(control.Get([]byte("state")))
+		if !bytes.Equal(seal, sum[:]) {
+			return model.Fail(model.Unsupported)
+		}
+	} else if err := sealState(control); err != nil {
+		return err
+	}
 	if control.Get(localScrubKey) != nil {
 		return nil
 	}
 	return oweLocalScrub(control)
+}
+
+// stateSealKey holds the SHA-256 of the bytes stored under "state" by the last write of a
+// build that knows the seal. It is local to the file like localScrubKey.
+var stateSealKey = []byte("state_seal")
+
+// putState writes the state and its seal in the caller's transaction; every state write goes
+// through it.
+func putState(control *bolt.Bucket, raw []byte) error {
+	if err := control.Put([]byte("state"), raw); err != nil {
+		return err
+	}
+	return sealState(control)
+}
+
+func sealState(control *bolt.Bucket) error {
+	sum := sha256.Sum256(control.Get([]byte("state")))
+	return control.Put(stateSealKey, sum[:])
 }
 
 // oweInstalledScrub runs inside the write transaction that installs a snapshot, before it

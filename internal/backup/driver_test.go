@@ -30,6 +30,7 @@ type fakePlane struct {
 	aborts   int
 	seals    int
 	cut      storage.ControlCut
+	owner    model.ID
 	gaps     []storage.DeclaredGap
 	beginErr error
 	sealErr  error
@@ -47,8 +48,9 @@ func newFakePlane() *fakePlane {
 	return p
 }
 func (p *fakePlane) Applied() []model.Cursor { return append([]model.Cursor(nil), p.applied...) }
-func (p *fakePlane) Begin(ctx context.Context, cut storage.ControlCut) (backup.PlaneSession, error) {
+func (p *fakePlane) Begin(ctx context.Context, owner model.ID, cut storage.ControlCut) (backup.PlaneSession, error) {
 	p.begins++
+	p.owner = owner
 	p.cut = cut
 	if p.onBegin != nil {
 		p.onBegin()
@@ -307,7 +309,7 @@ func TestStartupReaperDropsPinsOfAttemptsThatNeverCompleted(t *testing.T) {
 	if err := f.attempt.Finish(ctx, finished.ID, "completed"); err != nil {
 		t.Fatal(err)
 	}
-	f.pins.pins = []backup.Pin{{ID: "pin-slot-0", Group: "g0"}, {ID: "pin-slot-1", Group: "g1"}}
+	f.pins.pins = []backup.Pin{{ID: "pin-slot-0", Group: "g0", Owner: died.ID.String()}, {ID: "pin-slot-1", Group: "g1", Owner: died.ID.String()}}
 	// A fresh Service instance is the restarted process.
 	report, err := f.svc.Reap(ctx)
 	if err != nil {
@@ -332,12 +334,52 @@ func TestStartupReaperDropsPinsOfAttemptsThatNeverCompleted(t *testing.T) {
 			t.Fatalf("unowned pin handling: %+v %v", report, err)
 		}
 	})
-	t.Run("a pin that cannot be dropped keeps the attempt open and fails loudly", func(t *testing.T) {
+	t.Run("a pin of another owner is never dropped, an abandoned owner's pin is", func(t *testing.T) {
 		g := newDriverFixture(t)
-		if err := g.attempt.Begin(ctx, backup.Attempt{ID: model.NewID(), StartedAt: 3, ControlRevision: 9}); err != nil {
+		dead, live := model.NewID(), model.NewID()
+		if err := g.attempt.Begin(ctx, backup.Attempt{ID: dead, StartedAt: 5, ControlRevision: 1}); err != nil {
 			t.Fatal(err)
 		}
-		g.pins.pins = []backup.Pin{{ID: "pin-a"}, {ID: "pin-stuck"}}
+		// Owner "live" is a backup whose attempt is no longer incomplete (it finished, or runs under a
+		// different log): its pins are not the dead attempt's and must survive the reap.
+		if err := g.attempt.Begin(ctx, backup.Attempt{ID: live, StartedAt: 6, ControlRevision: 1}); err != nil {
+			t.Fatal(err)
+		}
+		if err := g.attempt.Finish(ctx, live, "completed"); err != nil {
+			t.Fatal(err)
+		}
+		g.pins.pins = []backup.Pin{
+			{ID: "dead-0", Group: "g0", Owner: dead.String()},
+			{ID: "live-0", Group: "g0", Owner: live.String()},
+			{ID: "dead-1", Group: "g1", Owner: dead.String()},
+			{ID: "unstamped", Group: "g1"},
+		}
+		report, err := g.svc.Reap(ctx)
+		sort.Strings(g.pins.dropped)
+		if err != nil || report.Attempts != 1 || report.Dropped != 2 || report.Unowned != 2 || len(g.pins.dropped) != 2 || g.pins.dropped[0] != "dead-0" || g.pins.dropped[1] != "dead-1" {
+			t.Fatalf("reap: %+v %v dropped=%v", report, err, g.pins.dropped)
+		}
+		if len(g.pins.pins) != 2 {
+			t.Fatalf("another owner's pins must remain: %v", g.pins.pins)
+		}
+	})
+	t.Run("a backup stamps its pins with the attempt that took them", func(t *testing.T) {
+		g := newDriverFixture(t)
+		var open []backup.Attempt
+		g.plane.onBegin = func() { open, _ = g.attempt.Incomplete(ctx) }
+		g.plane.sealErr = errors.New("seal failed") // the fake plane cannot complete a whole backup; Begin ran by now
+		_, _ = g.svc.Run(ctx, auth.Scope{}, g.dest)
+		if len(open) != 1 || g.plane.owner != open[0].ID || g.plane.owner == (model.ID{}) {
+			t.Fatalf("pins were taken for owner %v while the open attempt was %v", g.plane.owner, open)
+		}
+	})
+	t.Run("a pin that cannot be dropped keeps the attempt open and fails loudly", func(t *testing.T) {
+		g := newDriverFixture(t)
+		stuck := model.NewID()
+		if err := g.attempt.Begin(ctx, backup.Attempt{ID: stuck, StartedAt: 3, ControlRevision: 9}); err != nil {
+			t.Fatal(err)
+		}
+		g.pins.pins = []backup.Pin{{ID: "pin-a", Owner: stuck.String()}, {ID: "pin-stuck", Owner: stuck.String()}}
 		g.pins.failOn = "pin-stuck"
 		if _, err := g.svc.Reap(ctx); err == nil {
 			t.Fatal("a stuck pin was reported as reaped")

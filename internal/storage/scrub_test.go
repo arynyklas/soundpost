@@ -113,14 +113,14 @@ func TestEraseScrubDefersWhileAReaderIsOpenThenCompletes(t *testing.T) {
 	x.appendMixed(eraseCanary, bothDeadlines)
 	x.e.scrub = scrubConfig{attempts: 1}
 	var reader *bolt.Tx
-	x.e.fault = func(at string) error {
+	x.e.setFault(func(at string) error {
 		if at == "erase_scrub" && reader == nil {
 			var err error
 			reader, err = x.e.db.Begin(false)
 			return err
 		}
 		return nil
-	}
+	})
 	preds := []model.DeletePredicate{x.rangePredicate(0, 10, model.Metric)}
 	first, err := x.e.EraseDeleted(context.Background(), preds, nil)
 	if err != nil {
@@ -162,13 +162,13 @@ func TestEraseScrubCrashPointsAreRepairedByRerun(t *testing.T) {
 			hit := x.appendMixed(eraseCanary, bothDeadlines)
 			x.e.scrub = scrubConfig{chunkPages: 4}
 			fired := false
-			x.e.fault = func(at string) error {
+			x.e.setFault(func(at string) error {
 				if at == hook && !fired {
 					fired = true
 					return errors.New("crash at " + at)
 				}
 				return nil
-			}
+			})
 			preds := []model.DeletePredicate{x.rangePredicate(0, 10, model.Metric)}
 			if _, err := x.e.EraseDeleted(context.Background(), preds, nil); err == nil || !fired {
 				t.Fatalf("hook %s never fired (%v)", hook, err)

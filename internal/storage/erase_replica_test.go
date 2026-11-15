@@ -158,13 +158,13 @@ func TestEraseRedactionCrashPointsConverge(t *testing.T) {
 			pred := x.rangePredicate(0, 10, model.Metric)
 			barrierAll(t, x.e, pred)
 			fired := false
-			x.e.fault = func(at string) error {
+			x.e.setFault(func(at string) error {
 				if at == hook && !fired {
 					fired = true
 					return errors.New("crash at " + at)
 				}
 				return nil
-			}
+			})
 			if _, err := x.e.EraseDeleted(ctx, []model.DeletePredicate{pred}, nil); err == nil || !fired {
 				t.Fatalf("hook %s never interrupted the erasure (%v)", hook, err)
 			}
@@ -195,13 +195,13 @@ func TestSnapshotCutFinishesAnOwedRedactionFirst(t *testing.T) {
 	pred := x.rangePredicate(0, 10, model.Metric)
 	barrierAll(t, x.e, pred)
 	fired := false
-	x.e.fault = func(at string) error { // the erasing transaction commits, the replica is not told
+	x.e.setFault(func(at string) error { // the erasing transaction commits, the replica is not told
 		if at == "redact_replica" && !fired {
 			fired = true
 			return errors.New("redaction interrupted")
 		}
 		return nil
-	}
+	})
 	if _, err := x.e.EraseDeleted(ctx, []model.DeletePredicate{pred}, nil); err == nil || !fired {
 		t.Fatalf("the erasure was not interrupted before the replica was told: %v", err)
 	}

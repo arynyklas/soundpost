@@ -42,7 +42,7 @@ func controlView(cut map[string]model.AdmissionReservation, spans map[model.ID]u
 // fromCommands the windows are re-derived from the command files themselves (restore); without it
 // the window table the cut wrote is trusted (the cut has just derived it, and the replay check
 // reads the tail windows' commands).
-func quotaEvidenceFor(slots []replica.Snapshot, cut map[string]model.AdmissionReservation, fromCommands bool) (QuotaEvidence, error) {
+func quotaEvidenceFor(slots []replica.Snapshot, cut ControlCut, fromCommands bool) (QuotaEvidence, error) {
 	compact := 0
 	for _, s := range slots {
 		if _, ok, err := compactState(s); err != nil {
@@ -60,7 +60,7 @@ func quotaEvidenceFor(slots []replica.Snapshot, cut map[string]model.AdmissionRe
 	return QuotaEvidence{}, model.Fail(model.Corrupt)
 }
 
-func quotaEvidenceWindowed(slots []replica.Snapshot, cut map[string]model.AdmissionReservation, fromCommands bool) (QuotaEvidence, error) {
+func quotaEvidenceWindowed(slots []replica.Snapshot, cut ControlCut, fromCommands bool) (QuotaEvidence, error) {
 	states := make([]slotSnapshotV2, len(slots))
 	spans := map[model.ID]uint64{}
 	for i, s := range slots {
@@ -71,7 +71,18 @@ func quotaEvidenceWindowed(slots []replica.Snapshot, cut map[string]model.Admiss
 		states[i] = st
 		spans[s.Manifest.Group] = uint64(st.Span)
 	}
-	view := controlView(cut, spans)
+	view := controlView(cut.Reservations, spans)
+	settled := cut.Settlement
+	// A settled window's reservations are no longer rows of the control cut: the window's own
+	// charge digest must equal the digest control settled it with, and, when the windows are
+	// re-derived from the command files (restore), what the sidecars of every settled window
+	// charge must add up to exactly the charge control folded (QuotaEvidence cannot list them,
+	// that is the point of settling).
+	var sums map[string]model.SettledCharge
+	if fromCommands && settled != nil {
+		sums = map[string]model.SettledCharge{}
+	}
+	seen := map[string]bool{}
 	out := QuotaEvidence{Version: 2, Consumed: []ReservationEvidence{}, Cancelled: []CancellationEvidence{}}
 	for i, s := range slots {
 		group := s.Manifest.Group
@@ -89,23 +100,49 @@ func quotaEvidenceWindowed(slots []replica.Snapshot, cut map[string]model.Admiss
 					return QuotaEvidence{}, model.Fail(model.Corrupt)
 				}
 			}
-			list := view[winKey{group, w.N}]
-			detail := w.Redacted != 0 || chargeDigest(list) != w.Charge
+			key := model.SettledKey(group, w.N)
+			sw, isSettled := settled.Lookup(key)
+			var detail bool
+			if isSettled {
+				if sw.Span != uint64(states[i].Span) || sw.Charge != w.Charge || sw.Count != w.Batches {
+					return QuotaEvidence{}, model.Fail(model.Corrupt)
+				}
+				seen[key] = true
+				detail = w.Redacted != 0
+			} else {
+				detail = w.Redacted != 0 || chargeDigest(view[winKey{group, w.N}]) != w.Charge
+			}
 			out.Windows = append(out.Windows, WindowEvidence{Group: group, N: w.N, First: w.First, Count: w.Count, Span: uint64(states[i].Span), Batches: w.Batches, Redacted: w.Redacted, Charge: w.Charge, Identity: w.Identity, Detail: detail})
-			if !detail && w.Cancels == 0 {
+			needSidecar := detail || w.Cancels != 0 || isSettled && sums != nil
+			if !needSidecar {
 				continue
 			}
 			sc, err := readSidecar(s, w)
 			if err != nil {
 				return QuotaEvidence{}, err
 			}
-			if detail {
+			if detail || isSettled && sums != nil {
 				if chargeDigest(sc.Consumed) != w.Charge {
 					return QuotaEvidence{}, model.Fail(model.Corrupt)
 				}
+			}
+			if isSettled && sums != nil {
+				addCharges(sums, sc.Consumed)
+			}
+			if detail {
 				out.Consumed = append(out.Consumed, sc.Consumed...)
 			}
 			out.Cancelled = append(out.Cancelled, sc.Cancelled...)
+		}
+	}
+	if settled != nil {
+		for key := range settled.Windows {
+			if !seen[key] {
+				return QuotaEvidence{}, model.Fail(model.Corrupt) // a settled window the data does not hold
+			}
+		}
+		if sums != nil && !equalSettledCharges(sums, settled.Charges) {
+			return QuotaEvidence{}, model.Fail(model.Corrupt) // control folded another charge than the data windows carry
 		}
 	}
 	sort.Slice(out.Consumed, func(i, j int) bool { return bytes.Compare(out.Consumed[i].ID[:], out.Consumed[j].ID[:]) < 0 })
@@ -114,11 +151,50 @@ func quotaEvidenceWindowed(slots []replica.Snapshot, cut map[string]model.Admiss
 	return out, nil
 }
 
+// addCharges adds what the consumed reservations charge on every quota key they touch.
+func addCharges(sums map[string]model.SettledCharge, consumed []ReservationEvidence) {
+	for _, c := range consumed {
+		for _, key := range quotaKeys(c.Org, c.Project, c.Source) {
+			s := sums[key]
+			if s.Series == nil {
+				s.Series = map[string]uint64{}
+			}
+			s.Bytes += c.Bytes
+			for _, id := range c.Series {
+				s.Series[id]++
+			}
+			sums[key] = s
+		}
+	}
+}
+
+// equalSettledCharges reports whether two charge tables are identical (an absent key and a key
+// with no bytes and no series are different tables: both sides are built from reservations).
+func equalSettledCharges(a, b map[string]model.SettledCharge) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for key, x := range a {
+		y, ok := b[key]
+		if !ok || x.Bytes != y.Bytes || len(x.Series) != len(y.Series) {
+			return false
+		}
+		for id, n := range x.Series {
+			if y.Series[id] != n {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // resolve returns every consumed reservation the evidence proves. Version 1 lists them. In version
 // 2 a Detail window's reservations are listed and every other window's are the ones the control
 // cut holds as consumed in it, which the window's charge digest must equal exactly: a digest that
-// does not match is corruption, never a reason to trust the cut's side of it.
-func (q QuotaEvidence) resolve(cut map[string]model.AdmissionReservation) ([]ReservationEvidence, error) {
+// does not match is corruption, never a reason to trust the cut's side of it. A window control
+// settled holds no rows in the cut: its charge digest must equal the digest control settled it
+// with, and it contributes the reservations of its Detail listing only (a window redacted since).
+func (q QuotaEvidence) resolve(cut ControlCut) ([]ReservationEvidence, error) {
 	if q.Version == 1 {
 		return q.Consumed, nil
 	}
@@ -147,13 +223,24 @@ func (q QuotaEvidence) resolve(cut map[string]model.AdmissionReservation) ([]Res
 		}
 		byWindow[k] = append(byWindow[k], c)
 	}
-	view := controlView(cut, spans)
+	if cut.Settlement != nil {
+		for key, sw := range cut.Settlement.Windows {
+			w, ok := wins[winKey{sw.Group, sw.N}]
+			if !ok || key != model.SettledKey(sw.Group, sw.N) || sw.Span != w.Span || sw.Charge != w.Charge || sw.Count != w.Batches {
+				return nil, model.Fail(model.Corrupt)
+			}
+		}
+	}
+	view := controlView(cut.Reservations, spans)
 	out := append([]ReservationEvidence(nil), q.Consumed...)
 	for k, w := range wins {
 		if w.Detail {
 			if chargeDigest(byWindow[k]) != w.Charge {
 				return nil, model.Fail(model.Corrupt)
 			}
+			continue
+		}
+		if _, settled := cut.Settlement.Lookup(model.SettledKey(k.group, k.n)); settled {
 			continue
 		}
 		if chargeDigest(view[k]) != w.Charge {
@@ -165,9 +252,11 @@ func (q QuotaEvidence) resolve(cut map[string]model.AdmissionReservation) ([]Res
 }
 
 // ConsumedEvidence is every consumed reservation the bundle's evidence proves, in the form
-// ReconcileQuota and the control-state reconciliation work from.
+// ReconcileQuota and the control-state reconciliation work from. The reservations of a settled
+// window are not among them unless the window is a Detail window (see resolve): their charge is
+// the cut's Settlement.Charges.
 func (b BackupBundle) ConsumedEvidence() ([]ReservationEvidence, error) {
-	return b.Quota.resolve(b.Cut.Reservations)
+	return b.Quota.resolve(b.Cut)
 }
 
 // evidenceDigests returns, for a slot snapshot in either form, the replay digest of every
@@ -261,4 +350,28 @@ func BatchReservations(snapshot replica.Snapshot, only func(n uint64) bool) (map
 		}
 	}
 	return out, nil
+}
+
+// settledMatchesEvidence reports whether a version 1 evidence (every consumed reservation listed)
+// holds exactly the reservations control settled: per settled window the digest and the count, and
+// over all of them the folded charge.
+func settledMatchesEvidence(s *model.Settlement, evidence []ReservationEvidence) bool {
+	byWindow := map[string][]ReservationEvidence{}
+	var all []ReservationEvidence
+	for _, c := range evidence {
+		if w, ok := s.Window(c.Cursor); ok {
+			key := model.SettledKey(w.Group, w.N)
+			byWindow[key] = append(byWindow[key], c)
+			all = append(all, c)
+		}
+	}
+	for key, w := range s.Windows {
+		list := byWindow[key]
+		if uint64(len(list)) != w.Count || chargeDigest(list) != w.Charge {
+			return false
+		}
+	}
+	sums := map[string]model.SettledCharge{}
+	addCharges(sums, all)
+	return equalSettledCharges(sums, s.Charges)
 }

@@ -50,7 +50,7 @@ type PlaneSession interface {
 // adapts *storage.Engine.
 type DataPlane interface {
 	Applied() []model.Cursor // application cursor per data group, slot order
-	Begin(ctx context.Context, cut storage.ControlCut) (PlaneSession, error)
+	Begin(ctx context.Context, owner model.ID, cut storage.ControlCut) (PlaneSession, error)
 }
 
 type enginePlane struct{ e *storage.Engine }
@@ -68,8 +68,8 @@ func (p enginePlane) Applied() []model.Cursor {
 	return out
 }
 
-func (p enginePlane) Begin(ctx context.Context, cut storage.ControlCut) (PlaneSession, error) {
-	b, err := p.e.BeginBackup(ctx, cut)
+func (p enginePlane) Begin(ctx context.Context, owner model.ID, cut storage.ControlCut) (PlaneSession, error) {
+	b, err := p.e.BeginBackupOwned(ctx, owner, cut)
 	if err != nil {
 		return nil, err
 	}
@@ -109,18 +109,17 @@ type InstanceAuthorizer interface {
 type Pin struct {
 	ID    string
 	Group string
+	Owner string // the backup attempt that took the pin; empty if unstamped
 }
 
 // PinReaper is the consumer-owned view of durable journal pins (IMP-1): a backup
 // that died between BeginBackup and Seal/Abort leaves pins nothing else lists or
 // drops. The parent adapts the replica group pin accessors to it.
 //
-// A Pin carries no owner, so Service.Reap cannot tell the pins of a dead attempt
-// from those of a backup running now: when any attempt is incomplete it drops
-// every pin Pins reports. Call Reap only before a backup of the installation
-// can be in flight (process start; `backup create` opens the installation
-// exclusively). Stamping the attempt ID into each pin and filtering Pins by it is
-// what would make a scheduled in-process reap safe.
+// Every pin a backup takes carries the attempt ID that took it (Pin.Owner). Service.Reap
+// drops exactly the pins whose Owner is an incomplete attempt; a pin of any other owner (a
+// backup running now) or an unstamped pin is counted as Unowned and left alone, so a
+// scheduled in-process reap cannot free a live backup's pins.
 type PinReaper interface {
 	Pins() ([]Pin, error)
 	DropPin(id string) error
@@ -140,7 +139,7 @@ func (p enginePins) Pins() ([]Pin, error) {
 	}
 	out := make([]Pin, len(infos))
 	for i, in := range infos {
-		out[i] = Pin{ID: in.ID, Group: in.Group}
+		out[i] = Pin{ID: in.ID, Group: in.Group, Owner: in.Owner}
 	}
 	return out, nil
 }
@@ -263,6 +262,10 @@ type Config struct {
 	Pins       PinReaper // optional; without it Reap cannot clean a dead attempt
 	Clock      func() time.Time
 	Retention  time.Duration // backup lifetime; default and maximum 30 days
+	// ChunkSize is the plaintext size of one sealed chunk of every backup object; zero means
+	// DefaultChunkSize. It is recorded in the manifest and honoured on restore; it must be a
+	// power of two between MinChunkSize and MaxChunkSize.
+	ChunkSize uint32
 	// Replication reports the status of every replication group of this node (control and
 	// the 64 data groups: appcore.App.ReplicationStatus). Optional; when supplied the
 	// manifest records the topology and a backup is refused while the groups disagree on
@@ -282,6 +285,12 @@ func New(cfg Config) (*Service, error) {
 		return nil, model.Fail(model.Invalid)
 	}
 	if !keyID.MatchString(cfg.DataKEK) || !keyID.MatchString(cfg.SecretKEK) || cfg.DataKEK == cfg.SecretKEK {
+		return nil, model.Fail(model.Invalid)
+	}
+	if cfg.ChunkSize == 0 {
+		cfg.ChunkSize = DefaultChunkSize
+	}
+	if !ValidChunkSize(cfg.ChunkSize) {
 		return nil, model.Fail(model.Invalid)
 	}
 	if cfg.Clock == nil {
@@ -381,6 +390,7 @@ func (s *Service) once(ctx context.Context, scope auth.Scope, dest Destination) 
 	for id, r := range state.Reservations {
 		cut.Reservations[id] = r
 	}
+	cut.Settlement = state.Settlement
 	declared, facts, err := committedGaps(state, groups)
 	if err != nil {
 		return BackupManifest{}, err
@@ -397,7 +407,7 @@ func (s *Service) once(ctx context.Context, scope auth.Scope, dest Destination) 
 		}
 		_ = s.cfg.Attempts.Finish(context.WithoutCancel(ctx), attempt.ID, outcome)
 	}()
-	session, err := s.cfg.Data.Begin(ctx, cut)
+	session, err := s.cfg.Data.Begin(ctx, attempt.ID, cut)
 	if err != nil {
 		return BackupManifest{}, err
 	}
@@ -584,7 +594,15 @@ func (s *Service) Reap(ctx context.Context) (ReapReport, error) {
 		return ReapReport{}, model.Fail(model.Unavailable) // cannot drop pins: the attempts stay open
 	}
 	report := ReapReport{}
+	owned := map[string]bool{}
+	for _, a := range open {
+		owned[a.ID.String()] = true
+	}
 	for _, p := range pins {
+		if !owned[p.Owner] { // another owner's pin (a backup running now) or an unstamped one: never ours to drop
+			report.Unowned++
+			continue
+		}
 		if err = s.cfg.Pins.DropPin(p.ID); err != nil {
 			return report, model.Fail(model.Unavailable)
 		}
@@ -629,11 +647,11 @@ func (s *Service) Backup(ctx context.Context, scope auth.Scope, set SnapshotSet,
 	if bundle.Version != 1 && bundle.Version != 2 || len(set.Sealed.Snapshots) != 64 || len(bundle.Snapshots) != 64 || bundle.Cut.Revision != state.Revision {
 		return BackupManifest{}, model.Fail(model.Invalid)
 	}
-	reservations, err := canonicalReservations(state.Reservations)
+	reservations, err := canonicalCutBinding(state.Reservations, state.Settlement)
 	if err != nil {
 		return BackupManifest{}, model.Fail(model.Corrupt)
 	}
-	cutReservations, err := canonicalReservations(bundle.Cut.Reservations)
+	cutReservations, err := canonicalCutBinding(bundle.Cut.Reservations, bundle.Cut.Settlement)
 	if err != nil || !bytes.Equal(reservations, cutReservations) {
 		return BackupManifest{}, model.Fail(model.Corrupt) // the cut and the stored control state must be one revision
 	}
@@ -646,7 +664,7 @@ func (s *Service) Backup(ctx context.Context, scope auth.Scope, set SnapshotSet,
 		return BackupManifest{}, err
 	}
 	id := model.NewID()
-	out := &export{s: s, ctx: ctx, id: id, dest: dest, deks: map[string][]byte{}}
+	out := &export{s: s, ctx: ctx, id: id, dest: dest, deks: map[string][]byte{}, unit: int(s.cfg.ChunkSize)}
 	defer out.wipe()
 	// Dated before the first object: a backup that never gets a manifest is told apart from one
 	// still uploading by this stamp (ExpireBackups).
@@ -665,7 +683,7 @@ func (s *Service) Backup(ctx context.Context, scope auth.Scope, set SnapshotSet,
 		}
 		manifest.Encryption.Keys = append(manifest.Encryption.Keys, ref)
 	}
-	manifest.Encryption.Algorithm, manifest.Encryption.ChunkSize = AlgorithmAES256GCM, chunkSize
+	manifest.Encryption.Algorithm, manifest.Encryption.ChunkSize = AlgorithmAES256GCM, uint32(out.unit)
 	// The control state travels without its envelope key files; those go into a
 	// separate object under the separate key. It also travels without the
 	// quarantine stash of the restore that built THIS installation, if any: that
@@ -784,6 +802,7 @@ type export struct {
 	id   model.ID
 	dest Destination
 	deks map[string][]byte // class -> data key
+	unit int
 }
 
 func (e *export) wipe() {
@@ -825,12 +844,12 @@ func (e *export) put(name, class string, src io.Reader, size int64) (ObjectRef, 
 	}
 	done := make(chan outcome, 1)
 	go func() {
-		res, err := encryptStream(dek, objectAAD(e.id, name, class), src, pw)
+		res, err := encryptStream(dek, objectAAD(e.id, name, class), e.unit, src, pw)
 		pw.CloseWithError(err)
 		done <- outcome{res, err}
 	}()
 	object := ObjectName(e.id, name)
-	createErr := e.dest.Create(e.ctx, object, pr, encryptedSize(size))
+	createErr := e.dest.Create(e.ctx, object, pr, encryptedSize(size, e.unit))
 	pr.Close()
 	res := <-done
 	if res.err != nil {
@@ -1011,6 +1030,23 @@ func canonicalReservations(r map[string]model.AdmissionReservation) ([]byte, err
 		r = map[string]model.AdmissionReservation{}
 	}
 	return model.CanonicalJSON(r)
+}
+
+// canonicalCutBinding is what the manifest and the bundle must agree on about the reservations
+// control held: the canonical reservation set and, once control settled windows
+// (model.Settlement), the settlement that stands for the consumed reservations it no longer
+// holds. Without a settlement it is canonicalReservations exactly, so a backup of an
+// installation that never settled keeps its binding.
+func canonicalCutBinding(r map[string]model.AdmissionReservation, s *model.Settlement) ([]byte, error) {
+	raw, err := canonicalReservations(r)
+	if err != nil || s == nil {
+		return raw, err
+	}
+	settled, err := model.CanonicalJSON(s)
+	if err != nil {
+		return nil, err
+	}
+	return append(append(raw, "\nsettlement\n"...), settled...), nil
 }
 
 // bindingOf is the authority position one verified read stands at.
@@ -1241,7 +1277,7 @@ func (r *Restorer) fetch(ctx context.Context, m BackupManifest, deks map[string]
 			rc.Close()
 			return stagedObjects{}, err
 		}
-		res, err := decryptStream(deks[ref.Class], objectAAD(m.ID, ref.Name, ref.Class), rc, f)
+		res, err := decryptStream(deks[ref.Class], objectAAD(m.ID, ref.Name, ref.Class), int(m.Encryption.ChunkSize), rc, f)
 		rc.Close()
 		if cerr := f.Close(); err == nil {
 			err = cerr
@@ -1322,8 +1358,8 @@ func reassembleSeed(stateObject, keysObject []byte) ([]byte, model.ControlState,
 }
 
 func verifyControl(m BackupManifest, b storage.BackupBundle, st model.ControlState) error {
-	reservations, err := canonicalReservations(st.Reservations)
-	cut, err2 := canonicalReservations(b.Cut.Reservations)
+	reservations, err := canonicalCutBinding(st.Reservations, st.Settlement)
+	cut, err2 := canonicalCutBinding(b.Cut.Reservations, b.Cut.Settlement)
 	policies, err3 := model.CanonicalJSON(st.RetentionPolicies)
 	if err != nil || err2 != nil || err3 != nil || st.Installation != m.Control.Installation || st.Revision != m.Control.Revision || st.Revision != b.Cut.Revision || model.HashCanonical(reservations) != m.Control.ReservationsSHA256 || !bytes.Equal(reservations, cut) || model.HashCanonical(policies) != m.Retention.PolicyDigest {
 		return model.Fail(model.Corrupt)

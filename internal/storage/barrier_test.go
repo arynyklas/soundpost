@@ -93,12 +93,12 @@ func TestCrashReplayCommitsUnappliedBatch(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	engine.fault = func(at string) error {
+	engine.setFault(func(at string) error {
 		if at == "before_apply" {
 			return model.Fail(model.Unavailable)
 		}
 		return nil
-	}
+	})
 	if _, e = engine.Append(context.Background(), scope, b); e == nil {
 		t.Fatal("unapplied ACK")
 	}

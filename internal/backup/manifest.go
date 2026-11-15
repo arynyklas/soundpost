@@ -209,7 +209,7 @@ func ParseManifest(raw []byte) (BackupManifest, error) {
 }
 
 func (m BackupManifest) validate() error {
-	if m.Version != ManifestVersion || m.ID == (model.ID{}) || m.Encryption.Algorithm != AlgorithmAES256GCM || m.Encryption.ChunkSize != chunkSize || m.ExpiresAt <= m.CreatedAt || len(m.Data.Applied) != 64 || len(m.Data.Processed) != 64 {
+	if m.Version != ManifestVersion || m.ID == (model.ID{}) || m.Encryption.Algorithm != AlgorithmAES256GCM || !ValidChunkSize(m.Encryption.ChunkSize) || m.ExpiresAt <= m.CreatedAt || len(m.Data.Applied) != 64 || len(m.Data.Processed) != 64 {
 		return model.Fail(model.Corrupt)
 	}
 	if err := m.Topology.validate(); err != nil {

@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -30,6 +31,10 @@ type Store struct {
 	updateMu   sync.Mutex
 	repl       *replicatedControl
 	clock      func() time.Time // the leader's wall clock for RevisionClock; nil is time.Now
+	// settledSeen is set once this store has seen a state with settled admission windows (settle.go):
+	// ReserveAdmission then asks the owner about a key it has no row for before its first update
+	// instead of after an aborted one. A hint only: the update decides on the state it reads.
+	settledSeen atomic.Bool
 }
 
 // SetClock replaces the wall clock the update funnel dates revisions with (RevisionClock), time.Now
@@ -109,7 +114,7 @@ func Open(dir string) (*Store, error) {
 		if e != nil {
 			return e
 		}
-		if e = b.Put([]byte("state"), v); e != nil {
+		if e = putState(b, v); e != nil {
 			return e
 		}
 		return writeLocalScrub(b, localScrub{})

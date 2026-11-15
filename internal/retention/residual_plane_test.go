@@ -109,8 +109,9 @@ func TestDoneReceiptNeverHidesAControlResidual(t *testing.T) {
 	}
 
 	// Another deletion of the same organization failed after it erased control
-	// payloads: its control.db scrub is owed, and the first operation's receipt
-	// (still "done") names it until the worker has run it.
+	// payloads: the node owes the control.db scrub of THAT deletion. The first
+	// operation's receipt (still "done") answers for the first operation only, and
+	// its own pages were scrubbed by its physical step, so it does not name it.
 	f.seedIncident(f.other, "CANARYOWED7c41e90d2b86a0f")
 	second, err := f.del(model.DeleteRetireProject, func(r *retention.DeleteRequest) { r.ProjectIDs = []model.ID{f.other} })
 	if err != nil {
@@ -119,9 +120,12 @@ func TestDoneReceiptNeverHidesAControlResidual(t *testing.T) {
 	if _, err = f.store.FailDeletion(f.ctx, second.OperationID, model.UnixNano(f.at().UnixNano()), "operator_failed"); err != nil {
 		t.Fatal(err)
 	}
+	if got := f.store.ResidualStores(); !hasResidual(got, control.ResidualControlState) {
+		t.Fatalf("setup: a failed deletion erased control payloads and the control store does not owe the scrub: %v", got)
+	}
 	owed := f.poll(receipt.OperationID)
-	if owed.Physical != retention.PhysicalDone || !hasResidual(owed.Residual, control.ResidualControlState) || !hasResidual(owed.Residual, control.ResidualControlJournal) {
-		t.Fatalf("a done receipt hides an owed control.db scrub: %+v", owed)
+	if owed.Physical != retention.PhysicalDone || hasResidual(owed.Residual, control.ResidualControlState) || !hasResidual(owed.Residual, control.ResidualControlJournal) {
+		t.Fatalf("the first operation's receipt must name its own journal residue and not the scrub the failed deletion owes: %+v", owed)
 	}
 
 	// The worker runs the scrub of a failed deletion (it is never recorded as
@@ -170,8 +174,13 @@ func TestReceiptDropsTheControlJournalAfterThePass(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := f.poll(first.OperationID); !hasResidual(got.Residual, control.ResidualControlJournal) {
-		t.Fatalf("a newer erasure is owed and the done receipt hides it: %+v", got)
+	// The node owes the journal again (a newer erasure), but the first operation's receipt answers for
+	// the first operation only: its own erasure was proven, so it no longer names the journal.
+	if got := f.store.ResidualStores(); !hasResidual(got, control.ResidualControlJournal) {
+		t.Fatalf("a newer erasure is owed and the control store does not owe the journal: %v", got)
+	}
+	if got := f.poll(first.OperationID); hasResidual(got.Residual, control.ResidualControlJournal) {
+		t.Fatalf("the first operation's receipt names the journal a newer erasure owes: %+v", got)
 	}
 	// A pass that cannot complete keeps naming it: a backup pin is live.
 	pin, err := f.store.ReplicaGroup().PinJournal(0)

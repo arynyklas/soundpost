@@ -51,7 +51,7 @@ func sortedKeys[K ~string, V any](m map[K]V) []string {
 // The tables ARE the review surface of the AuthorityRevision design: this test pins their exact
 // content, so adding or moving a writer is a change a reviewer has to look at in this file too.
 func TestAuthorityClassificationTablesAreExact(t *testing.T) {
-	if got, want := strings.Join(sortedKeys(nonAuthorityWriters), ","), "ArtifactLedger,AttestControl,CancelAdmission,ExpireControlLog,FinalizeAdmission,PublishArtifact,ReconcileAdmissions,RedactNoop,ReplayIndex,ReserveAdmission,ReserveArtifact,SessionCreate,TransactIssues,TransactJobs"; got != want {
+	if got, want := strings.Join(sortedKeys(nonAuthorityWriters), ","), "ArtifactLedger,AttestControl,CancelAdmission,ExpireControlLog,FinalizeAdmission,PublishArtifact,ReconcileAdmissions,RedactNoop,ReplayIndex,ReserveAdmission,ReserveArtifact,SessionCreate,SettleAdmissions,TransactIssues,TransactJobs"; got != want {
 		t.Fatalf("non-authority writers: %s, want %s", got, want)
 	}
 	if got, want := strings.Join(sortedKeys(nonAuthorityKinds), ","), "ApplyCondition,ApplyIssueEvidence,ApplyRuleEvaluation,ClaimDelivery,CompleteDelivery,IncidentAction,RegisterRelease,SavedView,UpdateJob"; got != want {
@@ -142,6 +142,7 @@ func TestEveryControlWriterIsClassified(t *testing.T) {
 		"FinalizeAdmission":   "writerFinalizeAdmission",
 		"CancelAdmission":     "writerCancelAdmission",
 		"ReconcileAdmissions": "writerReconcileAdmissions",
+		"SettleAdmissions":    "writerSettleAdmissions",
 		"ReserveArtifact":     "writerReserveArtifact",
 		"PublishArtifact":     "writerPublishArtifact",
 		"TransactIssues":      "writerTransactIssues",

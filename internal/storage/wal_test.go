@@ -169,12 +169,12 @@ func TestSyncFailureNeverAcknowledges(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer engine.Close()
-			engine.fault = func(at string) error {
+			engine.setFault(func(at string) error {
 				if at == point {
 					return errors.New("disk fault")
 				}
 				return nil
-			}
+			})
 			if receipt, err := engine.Append(context.Background(), scope, b); err == nil || receipt.Cursor.Index != 0 {
 				t.Fatal("false ACK")
 			}

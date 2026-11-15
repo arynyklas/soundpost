@@ -121,6 +121,8 @@ type options struct {
 	// controlResiduals wires the service's data plane through
 	// retention.NewResidualPlane, as the application does.
 	controlResiduals bool
+	// dataPlane, when set, builds the service's data plane from the fixture's plane.
+	dataPlane func(*fx) retention.DataPlane
 }
 
 func newFx(t *testing.T, o options) *fx {
@@ -198,6 +200,9 @@ func newFx(t *testing.T, o options) *fx {
 	var data retention.DataPlane = f.plane
 	if o.controlResiduals {
 		data = retention.NewResidualPlane(f.plane, f.store)
+	}
+	if o.dataPlane != nil {
+		data = o.dataPlane(f)
 	}
 	f.svc, err = retention.New(retention.Config{Control: f.store, Data: data, Base: f.auth.SourceLifecycleGenerations(), Authority: o.authority, Pressure: pressure, Processed: o.processed, References: o.refs, Clock: now})
 	if err != nil {

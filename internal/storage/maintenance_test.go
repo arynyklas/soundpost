@@ -463,7 +463,7 @@ func TestPublicationRejectsANewSegmentThatDoesNotReadBack(t *testing.T) {
 	if _, err = engine.Append(ctx, scope, b); err != nil {
 		t.Fatal(err)
 	}
-	engine.fault = func(at string) error {
+	engine.setFault(func(at string) error {
 		if at != "segment_sync" {
 			return nil
 		}
@@ -489,9 +489,9 @@ func TestPublicationRejectsANewSegmentThatDoesNotReadBack(t *testing.T) {
 			_, err = f.WriteAt(last[:], info.Size()-1)
 			return err
 		})
-	}
+	})
 	err = engine.Flush(ctx)
-	engine.fault = nil
+	engine.setFault(nil)
 	var fault *model.Fault
 	if !errors.As(err, &fault) || fault.Code != model.Corrupt {
 		t.Fatalf("a segment that does not read back was published: %v", err)

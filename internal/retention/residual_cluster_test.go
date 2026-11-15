@@ -62,3 +62,34 @@ func TestWorkerPassAttestsSoTheReceiptCanBeClean(t *testing.T) {
 		t.Fatalf("the worker did not leave an attestation record: %v", err)
 	}
 }
+
+// fakeOperationCluster answers for the cluster with one list and for one deletion with its own.
+type fakeOperationCluster struct {
+	fakeCluster
+	byOp map[model.ID][]string
+}
+
+func (c *fakeOperationCluster) ClusterOperationResidual(op model.ID) []string { return c.byOp[op] }
+
+// The receipt of one deletion asks the control source about that operation: a source that can
+// answer per operation is not asked for everything the cluster still owes.
+func TestReceiptAsksTheControlSourceAboutItsOperation(t *testing.T) {
+	src := &fakeOperationCluster{fakeCluster: fakeCluster{cluster: []string{control.ResidualControlJournal, control.ResidualControlState}}, byOp: map[model.ID][]string{}}
+	f := newFx(t, options{dataPlane: func(f *fx) retention.DataPlane { return retention.NewResidualPlane(f.plane, src) }})
+	if _, _, err := f.append(5, "requests"); err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := f.del(model.DeleteRetireProject, func(r *retention.DeleteRequest) { r.ProjectIDs = []model.ID{f.project} })
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.run()
+	done := f.poll(receipt.OperationID)
+	if done.Physical != retention.PhysicalDone || len(done.Residual) != 0 {
+		t.Fatalf("the cluster owes later erasures, this operation owes nothing, and the receipt names %+v", done)
+	}
+	src.byOp[receipt.OperationID] = []string{control.ResidualControlJournal}
+	if again := f.poll(receipt.OperationID); !reflect.DeepEqual(again.Residual, []string{control.ResidualControlJournal}) {
+		t.Fatalf("the receipt does not show what the control source owes this operation: %+v", again.Residual)
+	}
+}

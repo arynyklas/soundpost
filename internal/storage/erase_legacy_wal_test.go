@@ -187,13 +187,13 @@ func TestLegacyWALIsNamedAsAResidualStoreUntilItIsRewritten(t *testing.T) {
 		t.Fatalf("residual stores before any erasure: %v", got)
 	}
 	fired := false
-	x.e.fault = func(at string) error {
+	x.e.setFault(func(at string) error {
 		if at == HookLegacyWALBegin && !fired {
 			fired = true
 			return errors.New("interrupted at " + at)
 		}
 		return nil
-	}
+	})
 	if _, err := x.e.EraseDeleted(ctx, []model.DeletePredicate{pred}, nil); err == nil || !fired {
 		t.Fatalf("the erasure pass was not interrupted before the legacy WAL was rewritten: %v", err)
 	}
@@ -226,13 +226,13 @@ func TestLegacyWALRedactionCrashPointsConverge(t *testing.T) {
 			pred := x.rangePredicate(0, 10, model.Metric)
 			barrierAll(t, x.e, pred)
 			fired := false
-			x.e.fault = func(at string) error {
+			x.e.setFault(func(at string) error {
 				if at == hook && !fired {
 					fired = true
 					return errors.New("crash at " + at)
 				}
 				return nil
-			}
+			})
 			if _, err := x.e.EraseDeleted(ctx, []model.DeletePredicate{pred}, nil); err == nil || !fired {
 				t.Fatalf("hook %s never interrupted the erasure (%v)", hook, err)
 			}

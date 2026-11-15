@@ -5,6 +5,7 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"github.com/arynyklas/soundpost/internal/model"
 	"time"
 )
@@ -35,6 +36,10 @@ func (s *Service) Elevate(ctx context.Context, session Session, reason string, o
 	if err != nil {
 		return Elevation{}, err
 	}
+	if err := s.throttle.credentialCheck(&s.throttle.elevStart, "elevation-start", c.token); err != nil {
+		return Elevation{}, err
+	}
+	s.throttle.credentialRecord(&s.throttle.elevStart, "elevation-start", c.token)
 	if !c.admin || !c.Fresh() || reason == "" || len(reason) > 512 || len(orgs) == 0 {
 		return Elevation{}, model.Fail(model.Forbidden)
 	}
@@ -69,6 +74,9 @@ func (s *Service) ResolveElevation(ctx context.Context, c Credential, id model.I
 	if _, err := s.Authenticate(ctx, c.token); err != nil {
 		return Elevation{}, err
 	}
+	if err := s.throttle.credentialCheck(&s.throttle.elevRead, "elevation-read", c.token); err != nil {
+		return Elevation{}, err
+	}
 	var out Elevation
 	err := s.store.View(ctx, func(st model.ControlState) error {
 		var r elevationRecord
@@ -83,6 +91,10 @@ func (s *Service) ResolveElevation(ctx context.Context, c Credential, id model.I
 		out = Elevation{s, c, append([]model.ID(nil), r.Orgs...), r.Audit, time.Unix(r.Expires, 0)}
 		return nil
 	})
+	var fault *model.Fault
+	if errors.As(err, &fault) && fault.Code == model.NotFound {
+		s.throttle.credentialRecord(&s.throttle.elevRead, "elevation-read", c.token)
+	}
 	return out, err
 }
 func (s *Service) ElevatedScope(ctx context.Context, e Elevation, org model.ID, projects []model.ID, action Permission) (Scope, error) {

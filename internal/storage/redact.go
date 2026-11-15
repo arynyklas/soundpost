@@ -221,6 +221,8 @@ type JournalPinInfo struct {
 	Expires time.Time
 	// Orphaned: created by an earlier process; no backup in this process holds it.
 	Orphaned bool
+	// Owner is the backup attempt that took the pin (BeginBackupOwned); empty for an unstamped pin.
+	Owner string
 }
 
 // JournalPins lists every durable journal pin of every group, after dropping those whose lease
@@ -247,7 +249,11 @@ func (e *Engine) JournalPins() ([]JournalPinInfo, error) {
 			return nil, storageReplicaFault(err)
 		}
 		for _, p := range pins {
-			out = append(out, JournalPinInfo{ID: p.ID.String(), Group: e.group(uint16(slot)).String(), After: p.After, Created: p.Created, Expires: p.Expires, Orphaned: p.Orphaned})
+			stamp := ""
+			if p.Stamp != (model.ID{}) {
+				stamp = p.Stamp.String()
+			}
+			out = append(out, JournalPinInfo{ID: p.ID.String(), Group: e.group(uint16(slot)).String(), Owner: stamp, After: p.After, Created: p.Created, Expires: p.Expires, Orphaned: p.Orphaned})
 		}
 	}
 	return out, nil

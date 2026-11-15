@@ -175,7 +175,15 @@ func (s *Service) Admit(ctx context.Context, g SourceGrant, b Batch) (Receipt, e
 		return Receipt{}, e
 	}
 	// A committed data receipt is already authoritative. A failed control finalize
-	// remains conservatively charged and is recoverable; it never refunds bytes.
+	// remains conservatively charged and is recoverable; it never refunds bytes. A retry of a
+	// batch whose reservation control already holds as consumed at this receipt's cursor (or whose
+	// settled window it answers as consumed) has nothing left to finalize.
+	if reservation.State == "consumed" && reservation.Cursor != nil && *reservation.Cursor == r.Cursor {
+		if e = g.Revalidate(ctx); e != nil {
+			return Receipt{}, e
+		}
+		return r, nil
+	}
 	if e = s.quota.FinalizeAdmission(ctx, scope, model.FinalizeAdmission{ReservationID: reservation.ID, Cursor: r.Cursor}); e != nil {
 		return Receipt{}, model.Fail(model.Unavailable)
 	}

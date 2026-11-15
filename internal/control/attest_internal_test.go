@@ -47,6 +47,8 @@ func TestClusterUnattestedRules(t *testing.T) {
 		records                map[string]json.RawMessage
 		members                replica.Members
 		wantJournal, wantState bool
+		stale                  uint64
+		need                   uint64
 	}{
 		{name: "every voter attested", records: map[string]json.RawMessage{attestKey(1): ok(1), attestKey(2): ok(2), attestKey(3): ok(3)}, members: attestMembers(1, 2, 3)},
 		{name: "one of three has not attested", records: map[string]json.RawMessage{attestKey(1): ok(1), attestKey(2): ok(2)}, members: attestMembers(1, 2, 3), wantJournal: true, wantState: true},
@@ -67,13 +69,49 @@ func TestClusterUnattestedRules(t *testing.T) {
 		{name: "a fact without an applied index", records: map[string]json.RawMessage{attestKey(1): json.RawMessage(fmt.Sprintf(`{"node":1,"identity":"node-1","journal":{"erasures":%d,"applied":0},"state":{"erasures":%d,"applied":0}}`, erasures, erasures))}, members: attestMembers(1), wantJournal: true, wantState: true},
 		{name: "garbage", records: map[string]json.RawMessage{attestKey(1): json.RawMessage(`[1]`)}, members: attestMembers(1), wantJournal: true, wantState: true},
 		{name: "a learner counts (it holds the same files)", records: map[string]json.RawMessage{attestKey(1): ok(1)}, members: replica.Members{Revision: 1, Nodes: append(attestMembers(1).Nodes, replica.Member{ID: 9, NodeIdentity: "node-9", Learner: true})}, wantJournal: true, wantState: true},
+		{name: "a journal fact written before the last stale command does not count", records: map[string]json.RawMessage{attestKey(1): ok(1), attestKey(2): ok(2)}, members: attestMembers(1, 2), stale: 8, wantJournal: true},
+		{name: "a journal fact written at the stale command's index counts", records: map[string]json.RawMessage{attestKey(1): ok(1), attestKey(2): ok(2)}, members: attestMembers(1, 2), stale: 7},
+		{name: "a fact for more erasures than the deletion needs covers it", records: map[string]json.RawMessage{attestKey(1): ok(1), attestKey(2): ok(2)}, members: attestMembers(1, 2), need: erasures - 1},
+		{name: "a fact for fewer erasures than the deletion needs does not", records: map[string]json.RawMessage{attestKey(1): attestRecord(t, 1, "node-1", erasures-1, erasures-1)}, members: attestMembers(1), need: erasures, wantJournal: true, wantState: true},
+	}
+	audits := make([]model.ControlAudit, erasures)
+	for i := range audits {
+		audits[i] = model.ControlAudit{Action: controlErasedAction}
 	}
 	for _, c := range cases {
-		st := State{OIDC: c.records}
-		journal, state := clusterUnattested(st, c.members, erasures)
+		st := State{OIDC: c.records, Audits: audits}
+		need := uint64(erasures)
+		if c.need != 0 {
+			need = c.need
+		}
+		journal, state := clusterUnattested(st, c.members, need, c.stale, 0)
 		if journal != c.wantJournal || state != c.wantState {
 			t.Errorf("%s: unattested journal=%v state=%v, want journal=%v state=%v", c.name, journal, state, c.wantJournal, c.wantState)
 		}
+	}
+}
+
+// A snapshot install replaces this node's own files: no record it wrote at an applied index below
+// the install's is trusted for them, journal or state, and the floor never moves back. A stale
+// command is not an install: its index is stored durably by Apply (staleAppliedKey) and raises
+// the journal floor of every node, never the state floor.
+func TestAttestFloorsFollowInstallsAndStaleCommands(t *testing.T) {
+	f := newInstallFx(t)
+	journal, state := f.s.attestFloors()
+	if journal >= 1000 || state >= 1000 {
+		t.Fatalf("fixture invalid: a fresh node has floors %d, %d", journal, state)
+	}
+	f.s.repl.ProofWithdrawn(replica.ProofWithdrawal{Index: 1000, Install: true})
+	if journal, state = f.s.attestFloors(); journal != 1000 || state != 1000 {
+		t.Fatalf("after an install at 1000 the floors are journal %d, state %d, want 1000 and 1000", journal, state)
+	}
+	f.s.repl.ProofWithdrawn(replica.ProofWithdrawal{Index: 500, Install: true})
+	if journal, state = f.s.attestFloors(); journal != 1000 || state != 1000 {
+		t.Fatalf("an older install moved the floors back: journal %d, state %d", journal, state)
+	}
+	f.s.repl.ProofWithdrawn(replica.ProofWithdrawal{Index: 2000})
+	if journal, state = f.s.attestFloors(); journal != 1000 || state != 1000 {
+		t.Fatalf("a stale command's withdrawal signal changed the install floors: journal %d, state %d", journal, state)
 	}
 }
 

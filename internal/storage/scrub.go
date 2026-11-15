@@ -144,7 +144,7 @@ func (e *Engine) scrubChunk(ctx context.Context, file *os.File, first, last, pag
 	for attempt := 0; ; attempt++ {
 		zeroed = 0
 		err = e.db.Update(func(tx *bolt.Tx) error {
-			if e.db.Stats().OpenTxN > 0 {
+			if e.db.openReaders() > 0 || e.db.Stats().OpenTxN > 0 {
 				return errScrubBusy
 			}
 			for id := first; id < last; {

@@ -53,6 +53,10 @@ const (
 	writerCancelAdmission writer = "CancelAdmission"
 	// writerReconcileAdmissions: consumed marking from the owner's durable outcomes.
 	writerReconcileAdmissions writer = "ReconcileAdmissions"
+	// writerSettleAdmissions: replaces the rows of consumed reservations of a sealed data window
+	// by their settled digest and folded charge (Reservations, AdmissionKeys, Settlement). Quotas,
+	// grants and policy are not touched.
+	writerSettleAdmissions writer = "SettleAdmissions"
 	// writerReserveArtifact: artifact upload reservation and quota charge.
 	writerReserveArtifact writer = "ReserveArtifact"
 	// writerPublishArtifact: consumes artifact reservations and records the published
@@ -119,6 +123,7 @@ var nonAuthorityWriters = map[writer]string{
 	writerFinalizeAdmission:   "reservation consumed marker",
 	writerCancelAdmission:     "reservation cancelled marker and quota refund",
 	writerReconcileAdmissions: "reservation consumed marker from the owner's durable proof",
+	writerSettleAdmissions:    "consumed reservation rows replaced by a settled window digest and folded charge (no quota or access change)",
 	writerReserveArtifact:     "artifact upload reservation and quota charge",
 	writerPublishArtifact:     "published artifact reference intent",
 	writerTransactIssues:      "issue lifecycle book commit",

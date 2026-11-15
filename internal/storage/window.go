@@ -145,28 +145,16 @@ func commandIdentity(raw []byte) model.Hash {
 	return model.HashCanonical(raw)
 }
 
-type chargeTuple struct {
-	ID      model.ID     `json:"id"`
-	Org     model.ID     `json:"org"`
-	Project model.ID     `json:"project"`
-	Source  model.ID     `json:"source"`
-	Hash    model.Hash   `json:"hash"`
-	Bytes   model.Uint64 `json:"bytes"`
-	Series  []string     `json:"series"`
-	Cursor  model.Cursor `json:"cursor"`
-}
-
 // chargeDigest is the digest of what a set of consumed reservations charges, in cursor order. A
 // window's digest and the same digest derived from the control cut's consumed reservations agree
-// exactly when control already holds every one of them with the same charge.
+// exactly when control already holds every one of them with the same charge (model.ChargeDigest:
+// control computes it too, when it settles a window).
 func chargeDigest(ev []ReservationEvidence) model.Hash {
-	items := make([]chargeTuple, len(ev))
+	items := make([]model.ChargeItem, len(ev))
 	for i, e := range ev {
-		items[i] = chargeTuple{e.ID, e.Org, e.Project, e.Source, e.Hash, e.Bytes, append([]string{}, e.Series...), e.Cursor}
+		items[i] = model.ChargeItem{ID: e.ID, Org: e.Org, Project: e.Project, Source: e.Source, Hash: e.Hash, Bytes: e.Bytes, Series: e.Series, Cursor: e.Cursor}
 	}
-	sort.SliceStable(items, func(i, j int) bool { return items[i].Cursor.Index < items[j].Cursor.Index })
-	raw, _ := json.Marshal(items)
-	return model.HashCanonical(raw)
+	return model.ChargeDigest(items)
 }
 
 // batchEvidence derives the consumption evidence of one stored batch command.

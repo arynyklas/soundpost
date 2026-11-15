@@ -45,3 +45,24 @@ func TestCD9ImportedRangeErasesExactlyAndCountsWhatHasNoWindow(t *testing.T) {
 		t.Fatalf("a repeated import changed over_erased: %+v", again.OverErased)
 	}
 }
+
+// An imported range erases with the begin rule, not the late one: a state that spans the range
+// (its oldest evidence before start, its newest after end, nothing inside) is a window that meets
+// the range and goes, whereas the late pass keeps it. A restore that imports the tombstone over
+// states the restore brought back must not leave such a state behind.
+func TestCD9ImportedRangeErasesAStateThatSpansItWithNothingInside(t *testing.T) {
+	f := newEraseFx(t)
+	const span, outside = "CANARYIMPORTSPAN7c41e90d2b86a", "CANARYIMPORTOUTSIDE51f0aa93c7de"
+	f.commitIncidentSpan(f.newSeed(f.project, span), 10, 1000)
+	f.commitIncidentSpan(f.newSeed(f.project, outside), 500, 1000)
+	pred := model.DeletePredicate{Operation: model.NewID(), Org: f.org, Mode: model.DeleteHistoricalRange, Projects: []model.ID{f.project}, Signals: []model.Kind{model.Metric}, Start: 40, End: 100, Generation: 1}
+	if err := f.store.ImportDeletions(f.ctx, []model.DeletePredicate{pred}, model.UnixNano(f.now.UnixNano())); err != nil {
+		t.Fatal(err)
+	}
+	if f.stateHolds(span) {
+		t.Fatal("an imported range kept a state whose window spans it")
+	}
+	if !f.stateHolds(outside) {
+		t.Fatal("an imported range erased a state whose window lies after its end")
+	}
+}

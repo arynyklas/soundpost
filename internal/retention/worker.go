@@ -31,6 +31,11 @@ type WorkerStatus struct {
 	// window or the count bound (control.Store.ExpireControlLog).
 	ExpiredAudits   uint64
 	ExpiredCommands uint64
+	// SettledWindows and SettledReservations count the sealed data windows whose consumed
+	// admission reservations control replaced by a settled digest, and the reservation rows that
+	// dropped (control.SettleAdmissions).
+	SettledWindows      uint64
+	SettledReservations uint64
 	// UnfencedBlobs counts expired artifact roots an expiry pass kept because no References
 	// source is bound: without one nothing proves a root is retired, and erasing it would leave
 	// a published intent over missing bytes.
@@ -690,6 +695,8 @@ func wrapDry(g storage.EraseGuard) storage.EraseGuard {
 // expireControlLog drops the control log entries that are past their retention (design section
 // 12: audit 365 days; the applied-command log keeps the D4 retry window), so the control state a
 // long-running installation re-reads and re-proposes on every control transition stays bounded.
+// It then settles the consumed admission reservations of the sealed data windows (settleAdmissions),
+// the third unbounded part of that state.
 func (s *Service) expireControlLog(ctx context.Context, now time.Time) error {
 	rep, err := s.cfg.Control.ExpireControlLog(ctx, control.ControlLogPolicy{Now: now, AuditDays: Defaults().AuditDays})
 	if err != nil {
@@ -699,5 +706,49 @@ func (s *Service) expireControlLog(ctx context.Context, now time.Time) error {
 	s.status.ExpiredAudits += uint64(rep.Audits)
 	s.status.ExpiredCommands += uint64(rep.Commands + rep.Capped)
 	s.mu.Unlock()
+	return s.settleAdmissions(ctx)
+}
+
+// settler is what a data plane offers when it can settle consumed reservations (the storage engine).
+type settler interface {
+	SettleCandidates(ctx context.Context) ([]model.SettleCandidate, error)
+}
+
+// SettleCandidates forwards to the wrapped data plane when it can list settleable windows (the
+// application wraps the engine in a ResidualPlane, which would otherwise hide the method from the
+// worker's type assertion); a plane that cannot offers none.
+func (p ResidualPlane) SettleCandidates(ctx context.Context) ([]model.SettleCandidate, error) {
+	if s, ok := p.DataPlane.(settler); ok {
+		return s.SettleCandidates(ctx)
+	}
+	return nil, nil
+}
+
+// settleAdmissions offers the sealed data windows to control, which replaces the rows of the
+// consumed reservations of each by a settled digest and a folded charge (control.SettleAdmissions):
+// control state stops growing with the number of batches ever admitted. A data plane that cannot
+// list its windows leaves the rows as they are.
+func (s *Service) settleAdmissions(ctx context.Context) error {
+	p, ok := s.cfg.Data.(settler)
+	if !ok {
+		return nil
+	}
+	candidates, err := p.SettleCandidates(ctx)
+	if err != nil {
+		return err
+	}
+	for len(candidates) > 0 {
+		rep, err := s.cfg.Control.SettleAdmissions(ctx, candidates)
+		if err != nil {
+			return err
+		}
+		s.mu.Lock()
+		s.status.SettledWindows += uint64(rep.Windows)
+		s.status.SettledReservations += uint64(rep.Reservations)
+		s.mu.Unlock()
+		if rep.Windows == 0 {
+			break // nothing left that control can prove equal to its rows
+		}
+	}
 	return nil
 }

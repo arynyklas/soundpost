@@ -211,16 +211,16 @@ func TestManifestFailurePreservesReadableCommittedCopy(t *testing.T) {
 	if _, err = e.Append(context.Background(), write, b); err != nil {
 		t.Fatal(err)
 	}
-	e.fault = func(at string) error {
+	e.setFault(func(at string) error {
 		if at == "manifest_publish" {
 			return errors.New("fixture")
 		}
 		return nil
-	}
+	})
 	if err = e.Flush(context.Background()); err == nil {
 		t.Fatal("publication fault ignored")
 	}
-	e.fault = nil
+	e.setFault(nil)
 	if got := collectPages(t, e, read, ScanRequest{Projects: []model.ID{d.Project}, Signal: model.Metric, End: 2}); len(got) != 1 {
 		t.Fatal("publication lost committed rows")
 	}

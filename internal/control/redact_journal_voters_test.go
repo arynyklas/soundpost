@@ -240,9 +240,8 @@ func newControlVotersWith(t *testing.T, ownRetention ...uint64) *controlVoters {
 		fence.store, fence.svc, fence.dir = store, svc, v.dirs[id]
 		v.fx[id] = &eraseFx{&delFx{fenceFx: &fence, dest: genesis.dest, policy: genesis.policy, subject: genesis.subject}}
 	}
-	if err = v.stores[1].ReplicaGroup().Campaign(); err != nil {
-		t.Fatal(err)
-	}
+	// leaderIs campaigns (a Campaign that races the group's start is retried, not fatal) and
+	// returns only once voter 1 leads and a Fence round has committed under it.
 	v.leaderIs(1)
 	session, err := v.fx[1].svc.Login(genesis.ctx, "owner@example.test", "a long test password 2026", "")
 	if err != nil {
@@ -251,6 +250,7 @@ func newControlVotersWith(t *testing.T, ownRetention ...uint64) *controlVoters {
 	if v.fx[1].cred, err = v.fx[1].svc.Authenticate(genesis.ctx, session.Token); err != nil {
 		t.Fatal(err)
 	}
+	v.leaderIs(1) // the login proposed through the group: lead again before any test proposes
 	return v
 }
 

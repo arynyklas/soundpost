@@ -158,11 +158,18 @@ elevation bookkeeping, so both are bounded:
   route returns a retryable `unavailable` (HTTP 503, `Retry-After: 60`) before
   any provider discovery fetch or state write.
 * `auth.Service.SweepExpired` (run on the fence cadence, about once a minute)
-  deletes pending OIDC records (5-minute life) and elevation records (15-minute
-  life) once expired; a start also collects expired pending records. The expiry
-  instant is read by the proposing node and the result is replicated as state, so
-  replicas hold identical bytes.
-* Retained on purpose: every audit row (`elevate`, `elevated_read` and the
-  per-response release audit, about 300 bytes each). They are the evidence that
-  an elevated read was audited before release and are not collected by this
-  sweep. Sessions and other control state are not touched by it.
+  deletes pending OIDC records (5-minute life), elevation records (15-minute
+  life) and sessions (12-hour life) once expired; a start also collects expired
+  pending records. A session goes at the instant `Authenticate` refuses it. The
+  expiry instant is read by the proposing node and the result is replicated as
+  state, so replicas hold identical bytes.
+* Audit rows (`elevate`, `elevated_read` and the per-response release audit, about
+  300 bytes each) are not collected by this sweep. Decision proposed by lane 1
+  wave 7, recommendation: accept: elevation audits have no retention of their own;
+  they follow the one audit-log retention of the control state, which the
+  retention worker's hourly `ExpireControlLog` pass already applies (365 days by
+  default; an organization's own `audit` retention setting can only lengthen it;
+  the erasing and scrubbing audits are never expired). An elevation lives 15
+  minutes, so after the audit row is dropped nothing references it. Raising or
+  shortening the 365-day default is an owner decision on audit retention and a
+  one-line change to `retention.Defaults().AuditDays`.

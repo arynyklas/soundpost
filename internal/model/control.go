@@ -109,6 +109,11 @@ type ControlState struct {
 	GroupingMigrations   map[string]GroupingMigration
 	ArtifactIntents      map[string]ArtifactReferenceIntent
 	ArtifactReservations map[string]ArtifactQuotaReservation
+	// Settlement is what control kept of the consumed admission reservations whose rows it
+	// dropped (internal/control/settle.go): per data-group window one digest of the reservations
+	// it held, and the charge those reservations put on every quota key. Nil until a window is
+	// settled.
+	Settlement *Settlement `json:"settlement,omitempty"`
 	// Retention, deletion and holds (plan 01 task 08). Every map is additive and
 	// keyed by canonical lowercase IDs; none of them ever shrinks (a completed
 	// deletion is a permanent tombstone), so the retained-operation count and the

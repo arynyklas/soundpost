@@ -40,7 +40,7 @@ func randomBytes(t *testing.T, n int) []byte {
 func sealAll(t *testing.T, dek, aad, plain []byte) ([]byte, streamResult) {
 	t.Helper()
 	var out bytes.Buffer
-	res, err := encryptStream(dek, aad, bytes.NewReader(plain), &out)
+	res, err := encryptStream(dek, aad, chunkSize, bytes.NewReader(plain), &out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,14 +56,14 @@ func TestStreamRoundTripAtChunkBoundaries(t *testing.T) {
 	for _, n := range []int{0, 1, chunkSize - 1, chunkSize, chunkSize + 1, 3*chunkSize + 5} {
 		plain := randomBytes(t, n)
 		sealed, res := sealAll(t, dek, aad, plain)
-		if res.Plain != int64(n) || res.Cipher != int64(len(sealed)) || res.Cipher != encryptedSize(int64(n)) {
-			t.Fatalf("n=%d: reported plain=%d cipher=%d, actual cipher=%d, predicted=%d", n, res.Plain, res.Cipher, len(sealed), encryptedSize(int64(n)))
+		if res.Plain != int64(n) || res.Cipher != int64(len(sealed)) || res.Cipher != encryptedSize(int64(n), chunkSize) {
+			t.Fatalf("n=%d: reported plain=%d cipher=%d, actual cipher=%d, predicted=%d", n, res.Plain, res.Cipher, len(sealed), encryptedSize(int64(n), chunkSize))
 		}
 		if res.PlainSum != model.Hash(sha256.Sum256(plain)) || res.CipherSum != model.Hash(sha256.Sum256(sealed)) {
 			t.Fatalf("n=%d: stream hashes do not match the bytes", n)
 		}
 		var back bytes.Buffer
-		got, err := decryptStream(dek, aad, bytes.NewReader(sealed), &back)
+		got, err := decryptStream(dek, aad, chunkSize, bytes.NewReader(sealed), &back)
 		if err != nil || !bytes.Equal(back.Bytes(), plain) || got.PlainSum != res.PlainSum {
 			t.Fatalf("n=%d: round trip failed: %v", n, err)
 		}
@@ -79,7 +79,7 @@ func TestStreamRejectsTamperTruncationReorderWrongKeyAndWrongContext(t *testing.
 	open := func(name string, key, context, data []byte) {
 		t.Helper()
 		var out bytes.Buffer
-		if _, err := decryptStream(key, context, bytes.NewReader(data), &out); err == nil {
+		if _, err := decryptStream(key, context, chunkSize, bytes.NewReader(data), &out); err == nil {
 			t.Fatalf("%s: tampered stream decrypted (%d bytes released)", name, out.Len())
 		}
 	}

@@ -19,11 +19,26 @@ import (
 // an already issued session is never touched; the tradeoff is that an attacker
 // who can reach the login route can delay a victim's NEW login by up to one
 // window.
+//
+// Each table holds at most throttleMaxKeys keys. A blocked key is never evicted
+// to make room: when the table is full of blocked keys a NEW key is refused with
+// the same 429 until the earliest block expires, so a flood of throwaway keys
+// can never reset a victim's block. Blocks live in memory only and are per
+// process: with N nodes each node applies the limits independently, so the
+// cluster-wide limit is up to N times the per-node one (decision proposed by
+// lane 1 wave 7, recommendation: accept; see docs/operations/bootstrap.md).
+//
+// Elevation start and elevation read are throttled per credential (the session
+// token digest), separately from login: start counts every attempt, read counts
+// only lookups that found no usable elevation (guessing).
 const (
 	throttleWindow       = 5 * time.Minute
 	throttleAddressLimit = 10
 	throttleSourceLimit  = 50
 	throttleMaxKeys      = 4096
+
+	throttleElevationStartLimit    = 10
+	throttleElevationReadMissLimit = 30
 )
 
 // RateLimitedError is the typed refusal of a throttled attempt.
@@ -55,18 +70,43 @@ type throttleTable struct {
 }
 
 type loginThrottle struct {
-	mu      sync.Mutex
-	now     func() time.Time
-	address throttleTable
-	source  throttleTable
+	mu        sync.Mutex
+	now       func() time.Time
+	address   throttleTable
+	source    throttleTable
+	elevStart throttleTable // per credential: every elevation start
+	elevRead  throttleTable // per credential: elevation reads that found nothing
 }
 
 func newLoginThrottle(now func() time.Time) *loginThrottle {
-	return &loginThrottle{
-		now:     now,
-		address: throttleTable{limit: throttleAddressLimit, keys: map[[32]byte]*failureWindow{}},
-		source:  throttleTable{limit: throttleSourceLimit, keys: map[[32]byte]*failureWindow{}},
+	table := func(limit int) throttleTable {
+		return throttleTable{limit: limit, keys: map[[32]byte]*failureWindow{}}
 	}
+	return &loginThrottle{
+		now:       now,
+		address:   table(throttleAddressLimit),
+		source:    table(throttleSourceLimit),
+		elevStart: table(throttleElevationStartLimit),
+		elevRead:  table(throttleElevationReadMissLimit),
+	}
+}
+
+// credentialCheck refuses with 429 when the credential already holds the limit
+// of attempts in the table inside the window.
+func (l *loginThrottle) credentialCheck(t *throttleTable, kind, token string) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if wait := t.wait(throttleDigest(kind, hashToken(token)), l.now()); wait > 0 {
+		return &RateLimitedError{RetryAfter: wait}
+	}
+	return nil
+}
+
+// credentialRecord counts one attempt against the credential.
+func (l *loginThrottle) credentialRecord(t *throttleTable, kind, token string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	t.fail(throttleDigest(kind, hashToken(token)), l.now())
 }
 
 func throttleDigest(kind, v string) [32]byte {
@@ -97,11 +137,14 @@ func (t *throttleTable) prune(k [32]byte, w *failureWindow, now time.Time) {
 	}
 }
 
-// wait returns how long until key may try again; zero when allowed.
+// wait returns how long until key may try again; zero when allowed. A key the
+// table does not track is refused too while the table is saturated (full of
+// blocked keys, no slack key to give up): a new key cannot be recorded then, so
+// it is refused instead of being let through unmetered.
 func (t *throttleTable) wait(k [32]byte, now time.Time) time.Duration {
 	w := t.keys[k]
 	if w == nil {
-		return 0
+		return t.saturatedWait(now)
 	}
 	t.prune(k, w, now)
 	if len(w.times) < t.limit {
@@ -110,11 +153,36 @@ func (t *throttleTable) wait(k [32]byte, now time.Time) time.Duration {
 	return w.times[0].Add(throttleWindow).Sub(now)
 }
 
+// saturatedWait is zero unless the table is at its cap, holds no expired key
+// and no slack key; then it is the time until the first blocked key expires.
+func (t *throttleTable) saturatedWait(now time.Time) time.Duration {
+	if len(t.keys) < throttleMaxKeys {
+		return 0
+	}
+	var first time.Time
+	for k, w := range t.keys {
+		t.prune(k, w, now)
+		if len(w.times) == 0 {
+			continue
+		}
+		if len(w.times) < t.limit {
+			return 0
+		}
+		if exp := w.times[0].Add(throttleWindow); first.IsZero() || exp.Before(first) {
+			first = exp
+		}
+	}
+	if len(t.keys) < throttleMaxKeys || first.IsZero() {
+		return 0
+	}
+	return first.Sub(now)
+}
+
 func (t *throttleTable) fail(k [32]byte, now time.Time) {
 	w := t.keys[k]
 	if w == nil {
-		if len(t.keys) >= throttleMaxKeys {
-			t.makeRoom(now)
+		if len(t.keys) >= throttleMaxKeys && !t.makeRoom(now) {
+			return // saturated: wait() refuses this key, nothing is evicted
 		}
 		w = &failureWindow{}
 		t.keys[k] = w
@@ -125,32 +193,36 @@ func (t *throttleTable) fail(k [32]byte, now time.Time) {
 	w.times = append(w.times, now)
 }
 
-// makeRoom drops expired keys, then, if the table is still full, one more key:
-// the key with the oldest latest failure among those that are not blocking
-// anyone yet (fewer failures than the limit), and only when every tracked key is
-// blocked, the blocked key whose latest failure is oldest. A flood of throwaway
-// addresses therefore cannot free an address that is currently refusing attempts
-// while slack keys exist. The table never exceeds throttleMaxKeys. The cost of a
-// full table of blocked keys is that the oldest of them is released.
-func (t *throttleTable) makeRoom(now time.Time) {
+// makeRoom drops expired keys, then, if the table is still full, the key with
+// the oldest latest failure among those that are not blocking anyone yet (fewer
+// failures than the limit). A blocked key is never evicted: when every tracked
+// key is blocked makeRoom reports false and the caller refuses the new key (429)
+// instead. A flood of throwaway addresses therefore can neither free a blocked
+// address nor reset a victim's block; its cost is that new keys are refused for
+// up to one window while the table holds throttleMaxKeys blocked keys.
+func (t *throttleTable) makeRoom(now time.Time) bool {
 	for k, w := range t.keys {
 		t.prune(k, w, now)
 	}
 	if len(t.keys) < throttleMaxKeys {
-		return
+		return true
 	}
 	var oldest [32]byte
 	var at time.Time
-	found, slack := false, false
+	found := false
 	for k, w := range t.keys {
-		last := w.times[len(w.times)-1]
-		isSlack := len(w.times) < t.limit
-		switch {
-		case !found, isSlack && !slack, isSlack == slack && last.Before(at):
-			oldest, at, found, slack = k, last, true, isSlack
+		if len(w.times) >= t.limit {
+			continue
+		}
+		if last := w.times[len(w.times)-1]; !found || last.Before(at) {
+			oldest, at, found = k, last, true
 		}
 	}
+	if !found {
+		return false
+	}
 	delete(t.keys, oldest)
+	return true
 }
 
 // check refuses with the longer of the address and source waits.

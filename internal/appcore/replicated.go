@@ -148,7 +148,8 @@ func openControl(dir string, options *replicationOptions) (*control.Store, error
 	}
 	return control.Open(dir)
 }
-func (a *App) enableReplication(ctx context.Context, dir string, options *replicationOptions) (err error) {
+func (a *App) enableReplication(dir string, options *replicationOptions, budget time.Duration) (err error) {
+	ctx := context.Background()
 	// A node whose journal is behind what it acknowledged fails closed while it starts (a peer's heartbeat
 	// commits beyond its journal); the startup step that notices it next only sees unavailable or stale.
 	// Report the cause, so the operator gets reason=journal_behind_acknowledged.
@@ -229,13 +230,16 @@ func (a *App) enableReplication(ctx context.Context, dir string, options *replic
 	if err != nil {
 		return err
 	}
+	// Opened: from here the budget is the wait for each group's quorum.
+	ready, cancel := context.WithTimeout(context.Background(), budget)
+	defer cancel()
 	for _, g := range lifecycle.groups {
-		if err = awaitReady(ctx, g); err != nil {
+		if err = awaitReady(ready, g); err != nil {
 			return err
 		}
 	}
 	if controlGroup.Status().Leader == cfg.ID {
-		if err = model.RetryWhileStale(ctx, func() error { return a.Control.ReconcileAdmissions(ctx) }); err != nil {
+		if err = model.RetryWhileStale(ready, func() error { return a.Control.ReconcileAdmissions(ready) }); err != nil {
 			return err
 		}
 	}

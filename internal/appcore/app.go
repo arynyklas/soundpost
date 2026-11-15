@@ -273,12 +273,15 @@ func openWith(dir string, options *replicationOptions, meter storage.DiskMeter, 
 	if options != nil {
 		startupTimeout = 60 * time.Second
 	}
-	startup, cancel := context.WithTimeout(context.Background(), startupTimeout)
-	defer cancel()
-	if e = out.enableReplication(startup, dir, options); e != nil {
+	// The budget bounds the wait for each group's quorum and the steps after it, not the time the
+	// journals take to open: that is bounded by the disk (about 1000 fsyncs for a fresh open), and on a
+	// loaded one it exceeded the whole budget and failed a healthy open with replica.ErrStale.
+	if e = out.enableReplication(dir, options, startupTimeout); e != nil {
 		out.CloseReplication()
 		return fail(e)
 	}
+	startup, cancel := context.WithTimeout(context.Background(), startupTimeout)
+	defer cancel()
 	if !initialized {
 		if e = c.Update(startup, func(st *model.ControlState) error { st.DataInitialized = true; return nil }); e != nil {
 			out.CloseReplication()

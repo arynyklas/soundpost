@@ -63,6 +63,9 @@ func secondaryScope(ctx context.Context, s *auth.Service, c auth.Credential, org
 // do not depend on the target stay distinct: a dead credential and
 // infrastructure faults.
 func collapseElevationDenial(err error) error {
+	if errors.As(err, new(*auth.RateLimitedError)) {
+		return err
+	}
 	var f *model.Fault
 	if errors.As(err, &f) {
 		switch f.Code {

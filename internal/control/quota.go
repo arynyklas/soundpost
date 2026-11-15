@@ -4,6 +4,7 @@ package control
 
 import "sort"
 import "bytes"
+import "errors"
 import (
 	"context"
 	"github.com/arynyklas/soundpost/internal/auth"
@@ -52,7 +53,9 @@ func (s *Store) ReserveAdmission(ctx context.Context, scope auth.Scope, b model.
 	if r.Slot >= 64 || r.Bytes == 0 {
 		return r, model.Fail(model.Invalid)
 	}
-	e := s.updateAs(ctx, writerReserveAdmission, func(st *State) error {
+	var looked bool
+	var admitted *model.Receipt
+	body := func(st *State) error {
 		if e := scope.ValidateSourceState(*st, r.Project, r.Source, true); e != nil {
 			return e
 		}
@@ -85,6 +88,25 @@ func (s *Store) ReserveAdmission(ctx context.Context, scope auth.Scope, b model.
 			}
 			r = old
 			return nil
+		}
+		if st.Settlement != nil && len(st.Settlement.Windows) != 0 {
+			// No row for this key although windows were settled: the batch may be one of them.
+			if !looked {
+				return errNeedsAdmittedLookup
+			}
+			if admitted != nil {
+				if admitted.Hash != r.Hash {
+					return model.Fail(model.Conflict)
+				}
+				if _, ok := st.Settlement.Window(admitted.Cursor); ok {
+					// The batch is in the data and its reservation was settled: the answer its
+					// row gave, consumed at the receipt's cursor, charged once already. Nothing
+					// is stored for it again.
+					cursor := admitted.Cursor
+					r.State, r.Cursor = "consumed", &cursor
+					return nil
+				}
+			}
 		}
 		p := st.Sources[r.Source.String()].Policy
 		if p.MaxBytes == 0 || p.MaxSeries == 0 {
@@ -138,8 +160,43 @@ func (s *Store) ReserveAdmission(ctx context.Context, scope auth.Scope, b model.
 		st.Reservations[r.ID.String()] = r
 		st.AdmissionKeys[reservationKey(r)] = r.ID.String()
 		return nil
-	})
+	}
+	// Once windows were settled, a key with no row may be a retry of a settled batch, which only
+	// the owner's receipts can tell: the first run reports it (errNeedsAdmittedLookup, nothing
+	// committed), the owner is asked, and the update runs again with its answer. A node that
+	// already knows windows were settled asks before the first run.
+	run := func() (e error) {
+		looked, admitted = true, nil
+		if admitted, e = s.admittedBatch(ctx, r); e != nil {
+			return e
+		}
+		return s.updateAs(ctx, writerReserveAdmission, body)
+	}
+	var e error
+	if s.settledSeen.Load() {
+		e = run()
+	} else if e = s.updateAs(ctx, writerReserveAdmission, body); errors.Is(e, errNeedsAdmittedLookup) {
+		s.settledSeen.Store(true)
+		e = run()
+	}
 	return r, e
+}
+
+// admittedBatch asks the installed owner whether the data holds the batch r names. No owner, or an
+// owner that cannot tell, is Unavailable: a settled retry must never be charged twice.
+func (s *Store) admittedBatch(ctx context.Context, r model.AdmissionReservation) (*model.Receipt, error) {
+	s.registryMu.RLock()
+	owner := s.ownerProof
+	s.registryMu.RUnlock()
+	lookup, ok := owner.(admittedBatches)
+	if !ok {
+		return nil, model.Fail(model.Unavailable)
+	}
+	receipt, found, err := lookup.AdmittedBatch(ctx, r)
+	if err != nil || !found {
+		return nil, err
+	}
+	return &receipt, nil
 }
 func (s *Store) FinalizeAdmission(ctx context.Context, scope auth.Scope, r FinalizeAdmission) error {
 	s.registryMu.RLock()
@@ -154,6 +211,9 @@ func (s *Store) FinalizeAdmission(ctx context.Context, scope auth.Scope, r Final
 	return s.updateAs(ctx, writerFinalizeAdmission, func(st *State) error {
 		old, ok := st.Reservations[r.ReservationID.String()]
 		if !ok {
+			if _, settled := st.Settlement.Window(r.Cursor); settled {
+				return nil // consumed and folded into a settled window already (settle.go)
+			}
 			return model.Fail(model.NotFound)
 		}
 		if e := scope.ValidateSourceState(*st, old.Project, old.Source, false); e != nil {

@@ -333,7 +333,7 @@ func TestSnapshotPinsSegmentsRetiredDuringCopy(t *testing.T) {
 	}
 	var once sync.Once
 	var compactErr error
-	engine.fault = func(at string) error {
+	engine.setFault(func(at string) error {
 		if at == replica.HookSnapshotFileWrite {
 			once.Do(func() {
 				_, extra := normalized(t, store, service, credential, descriptor)
@@ -345,9 +345,9 @@ func TestSnapshotPinsSegmentsRetiredDuringCopy(t *testing.T) {
 			})
 		}
 		return nil
-	}
+	})
 	cut, err := engine.CreateSnapshots(context.Background())
-	engine.fault = nil
+	engine.setFault(nil)
 	if compactErr != nil {
 		t.Fatal(compactErr)
 	}
@@ -546,7 +546,7 @@ func TestSnapshotCrashPointsKeepAckedReceipts(t *testing.T) {
 				}
 				acked[b.ID] = r
 			}
-			engine.fault = onceAt(p.hook, p.occurrence)
+			engine.setFault(onceAt(p.hook, p.occurrence))
 			_, err = engine.CreateSnapshots(context.Background())
 			if err == nil {
 				err = engine.CompactJournals(context.Background())
@@ -592,6 +592,7 @@ func controlCut(t *testing.T, e *Engine, store *control.Store) ControlCut {
 		for id, r := range st.Reservations {
 			cut.Reservations[id] = r
 		}
+		cut.Settlement = st.Settlement
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -937,11 +938,11 @@ func TestRestoreRebuildsPostControlCutQuota(t *testing.T) {
 	if restored.RestoreReady() == nil {
 		t.Fatal("failed reconciliation opened intake")
 	}
-	restored.fault = onceAt("quota_certificate_persisted", 1)
+	restored.setFault(onceAt("quota_certificate_persisted", 1))
 	if err = restored.CommitQuotaReconciliation(context.Background(), cert); err == nil {
 		t.Fatal("hook did not interrupt the commit")
 	}
-	restored.fault = nil
+	restored.setFault(nil)
 	if restored.RestoreReady() == nil {
 		t.Fatal("intake opened although the commit was interrupted")
 	}

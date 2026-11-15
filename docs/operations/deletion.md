@@ -36,7 +36,7 @@ Mode shapes are the control-store rules (`retire_project` needs projects and not
 |---|---|---|
 | `202` | `DeletionReceipt` (`phase: fencing`) | Begun. Reads of the covered data are denied **now**; the erasure is not complete. |
 | `200` | `DeletionReceipt` (`phase: complete`) | Only a retry of a command that has since completed. |
-| `409` | `{code:"conflict", detail:"deletion_held", receipt}` | A legal hold blocks the begin. Reads are untouched. The retry of the same `command_id` returns this same receipt. Placing/releasing holds and `Resume` have no HTTP route today (service calls only), so releasing a hold and resuming a held deletion is not possible through the product yet. |
+| `409` | `{code:"conflict", detail:"deletion_held", receipt}` | A legal hold blocks the begin (or a resume while the hold is still active). Reads are untouched. The retry of the same `command_id` returns this same receipt. Release the hold and resume the deletion with the routes in [Holds and resume](#holds-and-resume). |
 | `409` | `{code:"conflict", detail:"deletion_failed", receipt}` | The saga ended failed (retry of an old command); `receipt.safe_reason` says why. |
 | `409` | fault `conflict` | `expected_revision` is stale for a **new** command. |
 | `501` | `{state:"not_available", reason:"deletion_authority_not_wired"}` | The process was built without a deletion authority. Nothing changed. |
@@ -45,6 +45,20 @@ Mode shapes are the control-store rules (`retire_project` needs projects and not
 `DeletionReceipt` carries `operation_id`, `mode`, `phase`, `generation`, `revision`, `progress`, `physical`, `physical_deadline_ns`, `backup_deadline_ns`, optional `holds`, `safe_reason`, `over_erased`, `residual_stores`. `over_erased` is a list of `{"book": "incident"|"condition"|"job", "count": "<n>"}`: how many opaque control states the erasure dropped without being able to show that they intersect a range deletion's window (a state that records no evidence time is erased fail-closed; see [retention.md](../privacy/retention.md), "Control state"). It is omitted when the erasure was exact, and always for a retirement or an entity deletion. The reason text is never in a response.
 
 A retry with the same `command_id` returns the original receipt even though the control revision has moved on. (The control store records a no-op replicated entry for the replay, so the revision still advances by one; no second saga or audit entry is created.)
+
+## Holds and resume
+
+Decision proposed by lane 1 wave 7, recommendation: accept. The three routes below are served by the same `RegisterDeletionRoutes` call and the same `*retention.Service` (it is a `httpapi.HoldManager`), so `internal/appcore/app.go` needed no change. A process whose deleter is not a `HoldManager` answers all three `501 {state:"not_available", reason:"deletion_authority_not_wired"}`.
+
+Admission is identical to the begin route and in the same order: credential (session with CSRF and same-origin `Origin`, or server credential), fresh reauthentication (`403`; server tokens are never fresh), availability (`501`), closed JSON body of at most 64 KiB (`400`), and only then the organization-admin authority for `org_id` (`404` for a member, another organization's admin and an organization that does not exist alike). Nothing is committed on a refusal and no request text is echoed.
+
+| Route | Body | Success |
+|---|---|---|
+| `POST /api/v1/admin/holds` | `{command_id, expected_revision, org_id, project_ids?, signals?, start_ns?, end_ns?, entity_ids?, reason}` (the hold id is `command_id`; the same shape limits as a deletion) | `201 {hold_id, org_id, state:"active"}` |
+| `POST /api/v1/admin/holds/{hold}/release` | `{command_id, expected_revision, org_id, reason}` | `200 {hold_id, org_id, state:"released"}` (an unknown hold or one of another organization is `404`) |
+| `POST /api/v1/admin/deletions/{operation}/resume` | `{org_id}` | the begin route's answers: `202` fencing once no active hold blocks it, `409 deletion_held` while one still does |
+
+A release never starts a held deletion by itself: the operator resumes it explicitly.
 
 ## Polling
 

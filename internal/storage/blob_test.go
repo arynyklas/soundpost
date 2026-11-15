@@ -62,7 +62,7 @@ func TestArtifactFragmentDurabilityAndWholePublication(t *testing.T) {
 		t.Fatal(err)
 	}
 	commits := 0
-	engine.fault = func(at string) error {
+	engine.setFault(func(at string) error {
 		if at == "blob_fragment_committed" {
 			commits++
 			if commits == 1 {
@@ -70,7 +70,7 @@ func TestArtifactFragmentDurabilityAndWholePublication(t *testing.T) {
 			}
 		}
 		return nil
-	}
+	})
 	if receipt, err := engine.WriteBlob(ctx, scope, m, bytes.NewReader(raw)); err == nil || receipt.Cursor.Index != 0 {
 		t.Fatal("partial blob ACK")
 	}

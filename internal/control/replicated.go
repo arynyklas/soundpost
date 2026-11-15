@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/arynyklas/soundpost/internal/durablefs"
@@ -26,9 +27,13 @@ type replicatedControl struct {
 	// withdraw, ctx, cancel and done belong to withdrawLoop (attest.go): the group signals on
 	// withdraw when it drops its redaction proof; close cancels ctx and waits for done.
 	withdraw chan struct{}
-	ctx      context.Context
-	cancel   context.CancelFunc
-	done     chan struct{}
+	// installAt is the highest snapshot index this process installed; settled is true once
+	// this process reconciled its own attestation record (attest.go).
+	installAt atomic.Uint64
+	settled   atomic.Bool
+	ctx       context.Context
+	cancel    context.CancelFunc
+	done      chan struct{}
 }
 type controlReplacement struct {
 	Expected model.Revision     `json:"expected"`
@@ -244,17 +249,26 @@ func (m *replicatedControl) Apply(c replica.CommittedEntry) error {
 				if err := meta.Put([]byte("rejected:"+c.Entry.ID.String()), []byte{1}); err != nil {
 					return err
 				}
+				// The group drops its redaction proof on every node for a stale command: the index
+				// is durable so a receipt can tell an attestation written before it (staleCutoff,
+				// attest.go).
+				if err := meta.Put(staleAppliedKey, watermarkBytes(c.Index)); err != nil {
+					return err
+				}
 			} else {
 				// An erasing audit this commit adds means it frees the pages that held what was
 				// erased: this file owes a scrub whatever any later record says another node did.
 				owe = erasureCount(next.State.Audits) > erasureCount(current.Audits)
 				current = next.State
+				if current.Settlement != nil {
+					m.store.settledSeen.Store(true)
+				}
 			}
 			raw, e := json.Marshal(current)
 			if e != nil {
 				return e
 			}
-			if e = b.Put([]byte("state"), raw); e != nil {
+			if e = putState(b, raw); e != nil {
 				return e
 			}
 			if owe {
@@ -368,7 +382,7 @@ func (m *replicatedControl) restore(raw []byte, physical uint64, owe bool) error
 		if err != nil {
 			return err
 		}
-		if err = tx.Bucket([]byte("control")).Put([]byte("state"), state); err != nil {
+		if err = putState(tx.Bucket([]byte("control")), state); err != nil {
 			return err
 		}
 		for name, value := range snapshot.Metadata {
@@ -403,27 +417,35 @@ func (s *Store) ReconcileAdmissions(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	for _, proof := range proofs {
-		needed := false
-		if err = s.View(ctx, func(st State) error {
+	// One linearizable read decides which outcomes still need a commit: a reservation control
+	// holds that has no cursor yet. An outcome whose reservation control no longer holds is fine
+	// only when its cursor lies in a settled window (settle.go): its charge is folded already.
+	var pending []model.FinalizeAdmission
+	if err = s.View(ctx, func(st State) error {
+		for _, proof := range proofs {
 			old, ok := st.Reservations[proof.ReservationID.String()]
-			if !ok || old.State == "cancelled" {
+			if !ok {
+				if _, settled := st.Settlement.Window(proof.Cursor); settled {
+					continue
+				}
+				return model.Fail(model.Corrupt)
+			}
+			if old.State == "cancelled" {
 				return model.Fail(model.Corrupt)
 			}
 			if old.Cursor != nil {
 				if *old.Cursor != proof.Cursor {
 					return model.Fail(model.Conflict)
 				}
-				return nil
+				continue
 			}
-			needed = true
-			return nil
-		}); err != nil {
-			return err
+			pending = append(pending, proof)
 		}
-		if !needed {
-			continue
-		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	for _, proof := range pending {
 		if err = owner.VerifyFinalization(ctx, proof); err != nil {
 			return err
 		}
@@ -500,7 +522,7 @@ func OpenSeed(dir string, raw []byte) (*Store, error) {
 		if e != nil {
 			return e
 		}
-		if e = b.Put([]byte("state"), state); e != nil {
+		if e = putState(b, state); e != nil {
 			return e
 		}
 		return writeLocalScrub(b, localScrub{})
@@ -509,7 +531,12 @@ func OpenSeed(dir string, raw []byte) (*Store, error) {
 		err = (&replicatedControl{store: s}).restore(raw, 0, false)
 	}
 	if err != nil {
+		// The file was created by this call and holds only the seed: a rejected seed must not
+		// leave a settled key (and a state) behind for the next Open to trust.
 		db.Close()
+		if rerr := durablefs.Remove(path); rerr != nil {
+			return nil, errors.Join(err, rerr)
+		}
 		return nil, err
 	}
 	return s, nil
@@ -674,7 +701,7 @@ func (s *Store) InitializeBearerHashKey(ctx context.Context, sealed string, vers
 		if err != nil {
 			return err
 		}
-		return bucket.Put([]byte("state"), raw)
+		return putState(bucket, raw)
 	})
 }
 

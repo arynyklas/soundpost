@@ -33,9 +33,18 @@ import (
 // a repeated nonce, chunks cannot be reordered, dropped or duplicated, and a
 // stream cut at a chunk boundary does not authenticate. Bundle data keys are
 // wrapped under a key-encryption key (KEK) that lives outside the destination.
+
+// DefaultChunkSize is used when Config.ChunkSize is zero; Min/MaxChunkSize bound what a
+// manifest may declare (a power of two), so a hostile manifest cannot demand a huge buffer.
+const (
+	DefaultChunkSize = 1 << 20
+	MinChunkSize     = 4 << 10
+	MaxChunkSize     = 16 << 20
+)
+
 const (
 	AlgorithmAES256GCM = "aes-256-gcm-chunked-v1"
-	chunkSize          = 1 << 20
+	chunkSize          = DefaultChunkSize
 	streamMagic        = "SPB1"
 	saltSize           = 16
 	headerSize         = len(streamMagic) + saltSize
@@ -262,10 +271,17 @@ func unwrapKey(kek Key, wrapped, aad []byte) ([]byte, error) {
 	return dek, nil
 }
 
-// encryptedSize is the exact ciphertext length of plain bytes (so a destination
-// that needs Content-Length can be told before the first byte is encrypted).
-func encryptedSize(plain int64) int64 {
-	chunks := (plain + chunkSize - 1) / chunkSize
+// ValidChunkSize reports whether n is an accepted backup chunk size: a power of two between
+// MinChunkSize and MaxChunkSize.
+func ValidChunkSize[T ~int | ~uint32](n T) bool {
+	v := int64(n)
+	return v >= MinChunkSize && v <= MaxChunkSize && v&(v-1) == 0
+}
+
+// encryptedSize is the exact ciphertext length of plain bytes in chunk-byte chunks (so a
+// destination that needs Content-Length can be told before the first byte is encrypted).
+func encryptedSize(plain int64, chunk int) int64 {
+	chunks := (plain + int64(chunk) - 1) / int64(chunk)
 	if chunks == 0 {
 		chunks = 1
 	}
@@ -311,8 +327,11 @@ func readFull(r io.Reader, buf []byte) (int, error) {
 	return n, err
 }
 
-// encryptStream reads r to EOF and writes the encrypted object to w.
-func encryptStream(dek, aad []byte, r io.Reader, w io.Writer) (streamResult, error) {
+// encryptStream reads r to EOF and writes the encrypted object to w in chunk-byte chunks.
+func encryptStream(dek, aad []byte, chunk int, r io.Reader, w io.Writer) (streamResult, error) {
+	if !ValidChunkSize(chunk) {
+		return streamResult{}, model.Fail(model.Invalid)
+	}
 	var salt [saltSize]byte
 	if _, err := rand.Read(salt[:]); err != nil {
 		return streamResult{}, err
@@ -326,16 +345,16 @@ func encryptStream(dek, aad []byte, r io.Reader, w io.Writer) (streamResult, err
 	if _, err = out.Write(append([]byte(streamMagic), salt[:]...)); err != nil {
 		return streamResult{}, err
 	}
-	cur, nxt := make([]byte, chunkSize), make([]byte, chunkSize)
+	cur, nxt := make([]byte, chunk), make([]byte, chunk)
 	curN, err := readFull(r, cur)
 	if err != nil {
 		return streamResult{}, err
 	}
 	var total int64
-	sealed := make([]byte, 0, chunkSize+tagSize)
+	sealed := make([]byte, 0, chunk+tagSize)
 	for counter := uint64(0); ; counter++ {
 		final, nxtN := true, 0
-		if curN == chunkSize {
+		if curN == chunk {
 			if nxtN, err = readFull(r, nxt); err != nil {
 				return streamResult{}, err
 			}
@@ -362,7 +381,10 @@ func encryptStream(dek, aad []byte, r io.Reader, w io.Writer) (streamResult, err
 // decryptStream authenticates and decrypts an object, releasing each chunk's
 // plaintext to w only after that chunk verified. A failure means the object is
 // unusable; callers write to a temporary file and discard it.
-func decryptStream(dek, aad []byte, r io.Reader, w io.Writer) (streamResult, error) {
+func decryptStream(dek, aad []byte, chunk int, r io.Reader, w io.Writer) (streamResult, error) {
+	if !ValidChunkSize(chunk) {
+		return streamResult{}, model.Fail(model.Corrupt)
+	}
 	cipherSum := sha256.New()
 	tee := io.TeeReader(r, cipherSum)
 	header := make([]byte, headerSize)
@@ -374,17 +396,17 @@ func decryptStream(dek, aad []byte, r io.Reader, w io.Writer) (streamResult, err
 		return streamResult{}, err
 	}
 	plain := sha256.New()
-	cur, nxt := make([]byte, chunkSize+tagSize), make([]byte, chunkSize+tagSize)
+	cur, nxt := make([]byte, chunk+tagSize), make([]byte, chunk+tagSize)
 	curN, err := readFull(tee, cur)
 	if err != nil {
 		return streamResult{}, model.Fail(model.Unavailable)
 	}
 	cipherLen := int64(headerSize)
 	var total int64
-	open := make([]byte, 0, chunkSize)
+	open := make([]byte, 0, chunk)
 	for counter := uint64(0); ; counter++ {
 		final, nxtN := true, 0
-		if curN == chunkSize+tagSize {
+		if curN == chunk+tagSize {
 			if nxtN, err = readFull(tee, nxt); err != nil {
 				return streamResult{}, model.Fail(model.Unavailable)
 			}

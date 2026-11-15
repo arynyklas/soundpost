@@ -153,26 +153,20 @@ func nilDeleter(d Deleter) bool {
 // another org, a non-admin and a missing org are the same NotFound. A retry of
 // the same CommandID returns the original receipt. Poll with
 // GET /api/v1/operations/{id}?org= (or the /api/v1/lifecycle alias).
+//
+// Three more routes share the exact admission order of the begin route
+// (credential, fresh reauthentication, availability, closed body, then the
+// org-admin authority) and are mounted when the Deleter is also a HoldManager:
+//
+//	POST /api/v1/admin/holds                          HoldRequest        -> 201 HoldReceipt
+//	POST /api/v1/admin/holds/{hold}/release           HoldReleaseRequest -> 200 HoldReceipt
+//	POST /api/v1/admin/deletions/{operation}/resume   ResumeRequest      -> DeletionReceipt (statuses as begin)
 func RegisterDeletionRoutes(mux *http.ServeMux, authority *auth.Service, deleter Deleter) {
+	manager, _ := deleter.(HoldManager)
 	mux.HandleFunc("POST /api/v1/admin/deletions", func(w http.ResponseWriter, r *http.Request) {
-		credential, err := artifactCredential(authority, w, r)
-		if err != nil {
-			queryReply(w, nil, err)
-			return
-		}
-		if !credential.Fresh() {
-			queryReply(w, nil, model.Fail(model.Forbidden))
-			return
-		}
-		if nilDeleter(deleter) {
-			writeJSON(w, http.StatusNotImplemented, DeletionNotAvailable{State: "not_available", Reason: ReasonDeletionNotWired})
-			return
-		}
-		r.Body = http.MaxBytesReader(w, r.Body, deletionBodyLimit)
-		raw, err := io.ReadAll(r.Body)
 		var body DeletionRequest
-		if err != nil || model.StrictJSON(raw, &body) != nil {
-			queryReply(w, nil, invalid("deletion_body_invalid"))
+		credential, ok := adminBody(authority, w, r, !nilDeleter(deleter), &body)
+		if !ok {
 			return
 		}
 		req, err := deletionRequest(body)
@@ -180,10 +174,7 @@ func RegisterDeletionRoutes(mux *http.ServeMux, authority *auth.Service, deleter
 			queryReply(w, nil, err)
 			return
 		}
-		scope, err := authority.Authorize(r.Context(), credential, req.OrgID, nil, auth.OrgAdmin)
-		if err == nil && scope.OrgID() != req.OrgID {
-			err = model.Fail(model.NotFound)
-		}
+		scope, err := orgAdminScope(r.Context(), authority, credential, req.OrgID)
 		if err != nil {
 			queryReply(w, nil, err)
 			return
@@ -193,18 +184,202 @@ func RegisterDeletionRoutes(mux *http.ServeMux, authority *auth.Service, deleter
 			queryReply(w, nil, err)
 			return
 		}
-		view := deletionReceipt(receipt)
-		switch receipt.Phase {
-		case model.DeletePhaseFencing:
-			writeJSON(w, http.StatusAccepted, view)
-		case model.DeletePhaseComplete:
-			writeJSON(w, http.StatusOK, view)
-		case model.DeletePhaseHeld:
-			writeJSON(w, http.StatusConflict, DeletionRefused{Code: string(model.Conflict), Detail: DetailDeletionHeld, Receipt: view, RequestID: w.Header().Get("X-Request-ID")})
-		case model.DeletePhaseFailed:
-			writeJSON(w, http.StatusConflict, DeletionRefused{Code: string(model.Conflict), Detail: DetailDeletionFailed, Receipt: view, RequestID: w.Header().Get("X-Request-ID")})
-		default:
-			queryReply(w, nil, model.Fail(model.Unavailable))
-		}
+		writeReceipt(w, receipt)
 	})
+	mux.HandleFunc("POST /api/v1/admin/deletions/{operation}/resume", func(w http.ResponseWriter, r *http.Request) {
+		var body ResumeRequest
+		credential, ok := adminBody(authority, w, r, manager != nil && !nilDeleter(deleter), &body)
+		if !ok {
+			return
+		}
+		operation, err := model.ParseID(r.PathValue("operation"))
+		if err != nil || operation == (model.ID{}) || body.OrgID == (model.ID{}) {
+			queryReply(w, nil, invalid("deletion_ids_required"))
+			return
+		}
+		scope, err := orgAdminScope(r.Context(), authority, credential, body.OrgID)
+		if err != nil {
+			queryReply(w, nil, err)
+			return
+		}
+		receipt, err := manager.Resume(r.Context(), scope, operation)
+		if err != nil {
+			queryReply(w, nil, err)
+			return
+		}
+		writeReceipt(w, receipt)
+	})
+	mux.HandleFunc("POST /api/v1/admin/holds", func(w http.ResponseWriter, r *http.Request) {
+		var body HoldRequest
+		credential, ok := adminBody(authority, w, r, manager != nil && !nilDeleter(deleter), &body)
+		if !ok {
+			return
+		}
+		req, err := holdRequest(body)
+		if err != nil {
+			queryReply(w, nil, err)
+			return
+		}
+		scope, err := orgAdminScope(r.Context(), authority, credential, body.OrgID)
+		if err != nil {
+			queryReply(w, nil, err)
+			return
+		}
+		hold, err := manager.PlaceHold(r.Context(), scope, req)
+		if err != nil {
+			queryReply(w, nil, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, HoldReceipt{HoldID: hold, OrgID: body.OrgID, State: "active"})
+	})
+	mux.HandleFunc("POST /api/v1/admin/holds/{hold}/release", func(w http.ResponseWriter, r *http.Request) {
+		var body HoldReleaseRequest
+		credential, ok := adminBody(authority, w, r, manager != nil && !nilDeleter(deleter), &body)
+		if !ok {
+			return
+		}
+		hold, err := model.ParseID(r.PathValue("hold"))
+		if err != nil || hold == (model.ID{}) || body.CommandID == (model.ID{}) || body.OrgID == (model.ID{}) {
+			queryReply(w, nil, invalid("deletion_ids_required"))
+			return
+		}
+		if !validDeletionReason(body.Reason) {
+			queryReply(w, nil, invalid("deletion_reason_invalid"))
+			return
+		}
+		scope, err := orgAdminScope(r.Context(), authority, credential, body.OrgID)
+		if err != nil {
+			queryReply(w, nil, err)
+			return
+		}
+		if err = manager.ReleaseHold(r.Context(), scope, body.CommandID, model.Revision(body.ExpectedRevision), hold, body.Reason); err != nil {
+			queryReply(w, nil, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, HoldReceipt{HoldID: hold, OrgID: body.OrgID, State: "released"})
+	})
+}
+
+// HoldManager is the legal-hold and resume half of the C11 service
+// (*retention.Service implements it). RegisterDeletionRoutes mounts the hold
+// and resume routes against it when the Deleter it was given also implements
+// it; with a Deleter that does not, they answer 501 DeletionNotAvailable.
+type HoldManager interface {
+	PlaceHold(ctx context.Context, scope auth.Scope, r retention.HoldRequest) (model.ID, error)
+	ReleaseHold(ctx context.Context, scope auth.Scope, command model.ID, expected model.Revision, hold model.ID, reason string) error
+	Resume(ctx context.Context, scope auth.Scope, operation model.ID) (retention.DeleteReceipt, error)
+}
+
+// ResumeRequest is the closed body of POST /api/v1/admin/deletions/{operation}/resume.
+type ResumeRequest struct {
+	OrgID model.ID `json:"org_id"`
+}
+
+// HoldRequest is the closed body of POST /api/v1/admin/holds. Its ID is the
+// command ID.
+type HoldRequest struct {
+	CommandID        model.ID     `json:"command_id"`
+	ExpectedRevision model.Uint64 `json:"expected_revision"`
+	OrgID            model.ID     `json:"org_id"`
+	ProjectIDs       []model.ID   `json:"project_ids,omitempty"`
+	Signals          []model.Kind `json:"signals,omitempty"`
+	Start            model.Int64  `json:"start_ns,omitempty"`
+	End              model.Int64  `json:"end_ns,omitempty"`
+	EntityIDs        []model.ID   `json:"entity_ids,omitempty"`
+	Reason           string       `json:"reason"`
+}
+
+// HoldReleaseRequest is the closed body of POST /api/v1/admin/holds/{hold}/release.
+type HoldReleaseRequest struct {
+	CommandID        model.ID     `json:"command_id"`
+	ExpectedRevision model.Uint64 `json:"expected_revision"`
+	OrgID            model.ID     `json:"org_id"`
+	Reason           string       `json:"reason"`
+}
+
+// HoldReceipt is the response of a hold placement (201, state active) and of a
+// release (200, state released).
+type HoldReceipt struct {
+	HoldID model.ID `json:"hold_id"`
+	OrgID  model.ID `json:"org_id"`
+	State  string   `json:"state"`
+}
+
+func validDeletionReason(reason string) bool {
+	return strings.TrimSpace(reason) != "" && len(reason) <= maxDeletionReason && utf8.ValidString(reason)
+}
+
+func holdRequest(q HoldRequest) (retention.HoldRequest, error) {
+	if q.CommandID == (model.ID{}) || q.OrgID == (model.ID{}) {
+		return retention.HoldRequest{}, invalid("deletion_ids_required")
+	}
+	if !validDeletionReason(q.Reason) {
+		return retention.HoldRequest{}, invalid("deletion_reason_invalid")
+	}
+	if len(q.ProjectIDs) > maxDeletionProject || len(q.Signals) > maxDeletionSignals || len(q.EntityIDs) > maxDeletionEntity {
+		return retention.HoldRequest{}, invalid("deletion_scope_too_large")
+	}
+	for _, id := range append(append([]model.ID(nil), q.ProjectIDs...), q.EntityIDs...) {
+		if id == (model.ID{}) {
+			return retention.HoldRequest{}, invalid("deletion_ids_required")
+		}
+	}
+	return retention.HoldRequest{CommandID: q.CommandID, ExpectedRevision: model.Revision(q.ExpectedRevision), ProjectIDs: q.ProjectIDs, Signals: q.Signals, Start: model.UnixNano(q.Start), End: model.UnixNano(q.End), EntityIDs: q.EntityIDs, Reason: q.Reason}, nil
+}
+
+// adminBody is the shared admission order of every route in this file, in
+// this order and no other: credential (session CSRF/Origin bound, or server
+// credential), fresh reauthentication, availability (501), then the closed
+// body (64 KiB). Only after it does a handler consult the organization
+// authority, so an unauthenticated or stale caller learns nothing about which
+// organizations or operations exist.
+func adminBody(authority *auth.Service, w http.ResponseWriter, r *http.Request, available bool, body any) (auth.Credential, bool) {
+	credential, err := artifactCredential(authority, w, r)
+	if err != nil {
+		queryReply(w, nil, err)
+		return auth.Credential{}, false
+	}
+	if !credential.Fresh() {
+		queryReply(w, nil, model.Fail(model.Forbidden))
+		return auth.Credential{}, false
+	}
+	if !available {
+		writeJSON(w, http.StatusNotImplemented, DeletionNotAvailable{State: "not_available", Reason: ReasonDeletionNotWired})
+		return auth.Credential{}, false
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, deletionBodyLimit)
+	raw, err := io.ReadAll(r.Body)
+	if err != nil || model.StrictJSON(raw, body) != nil {
+		queryReply(w, nil, invalid("deletion_body_invalid"))
+		return auth.Credential{}, false
+	}
+	return credential, true
+}
+
+// orgAdminScope is the organization-admin scope of the CALLER for org. Another
+// organization, a non-admin and a missing organization are the same NotFound.
+func orgAdminScope(ctx context.Context, authority *auth.Service, credential auth.Credential, org model.ID) (auth.Scope, error) {
+	scope, err := authority.Authorize(ctx, credential, org, nil, auth.OrgAdmin)
+	if err == nil && scope.OrgID() != org {
+		err = model.Fail(model.NotFound)
+	}
+	return scope, err
+}
+
+// writeReceipt answers a begun or resumed deletion: 202 fencing, 200 complete,
+// 409 held or failed.
+func writeReceipt(w http.ResponseWriter, receipt retention.DeleteReceipt) {
+	view := deletionReceipt(receipt)
+	switch receipt.Phase {
+	case model.DeletePhaseFencing:
+		writeJSON(w, http.StatusAccepted, view)
+	case model.DeletePhaseComplete:
+		writeJSON(w, http.StatusOK, view)
+	case model.DeletePhaseHeld:
+		writeJSON(w, http.StatusConflict, DeletionRefused{Code: string(model.Conflict), Detail: DetailDeletionHeld, Receipt: view, RequestID: w.Header().Get("X-Request-ID")})
+	case model.DeletePhaseFailed:
+		writeJSON(w, http.StatusConflict, DeletionRefused{Code: string(model.Conflict), Detail: DetailDeletionFailed, Receipt: view, RequestID: w.Header().Get("X-Request-ID")})
+	default:
+		queryReply(w, nil, model.Fail(model.Unavailable))
+	}
 }

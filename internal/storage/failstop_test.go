@@ -90,12 +90,12 @@ func TestAnApplyFailureFailStopsEveryGroupOfTheNode(t *testing.T) {
 	store, service, credential, descriptor := fixture(t)
 	domain := replica.NewFailDomain()
 	engine := openDomainEngine(t, service, store, domain)
-	engine.fault = func(at string) error {
+	engine.setFault(func(at string) error {
 		if at == "before_apply" {
 			return model.Fail(model.Unavailable)
 		}
 		return nil
-	}
+	})
 	scope, batch := normalized(t, store, service, credential, descriptor)
 	if _, err := engine.Append(context.Background(), scope, batch); err == nil {
 		t.Fatal("a batch whose apply failed was acknowledged")

@@ -136,8 +136,9 @@ type Machine interface {
 //     error refuses the message (the sender sees a failed delivery). release is called once Step
 //     returned, whatever its outcome.
 //
-// A message without a token (its sender does not implement the gate, or declined to gate it) is
-// admitted with an empty token.
+// A message whose Context does not start with the gate's advertisement (its sender does not
+// implement the gate) is refused by a receiver that does; a gated sender always advertises, with an
+// empty token when its gate declined to state anything yet (snapshot_gate.go).
 type SnapshotGate interface {
 	BeforeSnapshotSend(ctx context.Context, to uint64) ([]byte, error)
 	AdmitSnapshot(token []byte) (release func(), err error)
@@ -507,7 +508,11 @@ func (g *Group) Step(ctx context.Context, m *pb.Message) (err error) {
 		return ErrInvalid
 	}
 	if g.gate != nil && m.GetType() == pb.MsgSnap {
-		release, err := g.gate.AdmitSnapshot(m.GetContext())
+		token, advertised := gateToken(m.GetContext())
+		if !advertised {
+			return ErrUnavailable // its sender runs no gate: nothing was ordered before this install
+		}
+		release, err := g.gate.AdmitSnapshot(token)
 		if err != nil {
 			return ErrUnavailable
 		}

@@ -167,6 +167,25 @@ func measureCut(t *testing.T, n int) {
 			t.Fatal(err)
 		}
 	}
+	// SOUNDPOST_CUT_SETTLE=1: the retention worker's settlement pass runs before the control cut is
+	// taken (control.SettleAdmissions over the sealed windows the engine offers).
+	settleOn := os.Getenv("SOUNDPOST_CUT_SETTLE") != ""
+	settledWindows := 0
+	if settleOn {
+		if err = store.ReconcileAdmissions(ctx); err != nil {
+			t.Fatal(err)
+		}
+		candidates, err := e.SettleCandidates(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rep, err := store.SettleAdmissions(ctx, candidates)
+		if err != nil {
+			t.Fatal(err)
+		}
+		settledWindows = rep.Windows
+	}
+	controlNow := controlState(t, store)
 	cut := controlCut(t, e, store)
 	backup, err := e.BeginBackup(ctx, cut)
 	if err != nil {
@@ -197,8 +216,16 @@ func measureCut(t *testing.T, n int) {
 	envelope := fileSize(filepath.Join(sealed.Snapshots[slot].Dir(), "envelope.json"))
 	records, _, _ := retryShape(t, e, slot)
 	windows := (uint64(n) + 128 + snapshotWindow - 1) / snapshotWindow
-	t.Logf("MEASURE history=%d windows=%d compacted=%t cut_cold_ms=%.1f cut_incremental_ms=%.1f seal_ms=%.1f compact_ms=%.1f seal_peak_heap_mb=%.1f seal_alloc_mb=%.1f warm_cut_commands_read=%d seal_commands_read=%d bundle_bytes=%d bundle_cut_bytes=%d bundle_evidence_bytes=%d envelope_bytes=%d ready_wal_bytes=%d retry_records=%d",
-		n, windows, compactBetween, ms(cold), ms(warm), ms(sealTime), ms(compactTime), float64(peak)/(1<<20), float64(allocated)/(1<<20), warmRead, sealRead, bundle, bundleCut, bundleEvidence, envelope, wal, records)
+	controlBytes, _ := jsonSize(controlNow)
+	// What one control transition costs on this state: the mean of 16 admissions' reservations.
+	reserveTime := timed(func() {
+		for range 16 {
+			measureNormalized(t, store, service, credential, descriptor, producer, at)
+			at++
+		}
+	}) / 16
+	t.Logf("MEASURE history=%d windows=%d compacted=%t settled=%t settled_windows=%d control_rows=%d control_state_bytes=%d reserve_ms=%.2f cut_cold_ms=%.1f cut_incremental_ms=%.1f seal_ms=%.1f compact_ms=%.1f seal_peak_heap_mb=%.1f seal_alloc_mb=%.1f warm_cut_commands_read=%d seal_commands_read=%d bundle_bytes=%d bundle_cut_bytes=%d bundle_evidence_bytes=%d envelope_bytes=%d ready_wal_bytes=%d retry_records=%d",
+		n, windows, compactBetween, settleOn, settledWindows, len(controlNow.Reservations), controlBytes, ms(reserveTime), ms(cold), ms(warm), ms(sealTime), ms(compactTime), float64(peak)/(1<<20), float64(allocated)/(1<<20), warmRead, sealRead, bundle, bundleCut, bundleEvidence, envelope, wal, records)
 }
 
 func ms(d time.Duration) float64 { return float64(d.Microseconds()) / 1000 }

@@ -761,11 +761,11 @@ func TestDeleteRestoreGateRequiresLedgerAndThenSuppresses(t *testing.T) {
 		t.Fatal("a refused ledger opened the gate")
 	}
 	// One unavailable slot leaves the gate closed; a retry completes (idempotent).
-	restored.fault = onceAt("tombstone_slot", 5)
+	restored.setFault(onceAt("tombstone_slot", 5))
 	if err = restored.ApplyDeletionLedger(ctx, ledger, []model.DeletePredicate{p}); err == nil {
 		t.Fatal("interrupted ledger application reported success")
 	}
-	restored.fault = nil
+	restored.setFault(nil)
 	if restored.RestoreReady() == nil {
 		t.Fatal("gate opened although a slot was missing")
 	}

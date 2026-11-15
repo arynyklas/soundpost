@@ -148,7 +148,8 @@ entry, `facts` and `not_run_items`. No secret or raw telemetry content is writte
    have leaked quota before the fix was not checked.
 2. Post-deletion backups could not be activated in the case below. **Fixed** (dc732a8):
    `restore-authority-unavailable` now runs on a backup taken after a deletion whose erased
-   rows carried a series no retained row has, and its restore and activation checks pass.
+   rows carried a series no retained row has, and its restore and activation checks pass
+   (re-run on the lane 1 wave 7 tree: `restore-authority-unavailable: passed`, exit 0).
 3. With an old backup, only the independent current authority HEAD protects
    against a rolled-back authority journal: the negative control of
    `backup-predates-deletion` shows a pre-deletion journal copy brings back the
@@ -156,7 +157,7 @@ entry, `facts` and `not_run_items`. No secret or raw telemetry content is writte
 4. Deletion `Begin` was an optimistic commit on the one global control revision and
    starved under saturating intake (60/60 and 20/20 conflicts observed in 07.07; every
    intake admission is a control transition and moves that revision between the
-   caller's view and its commit), so the drill takes a short write pause for that
+   caller's view and its commit), so the drill took a short write pause for that
    single commit. **Changed (10.05):** control now keeps `AuthorityRevision` (the
    revision of the last transition that could change authority, policy, retention,
    deletion or access state) and the retention commands (`DeleteScope`, `BeginFence`,
@@ -165,20 +166,46 @@ entry, `facts` and `not_run_items`. No secret or raw telemetry content is writte
    writers do not move `AuthorityRevision`. `TestDeleteBeginDoesNotStarveUnderSaturatingIntake`
    (`internal/retention`) shows it: four goroutines reserving admissions without pause,
    Begin conflicts 8/8 (natural race) and 8/8 (view forced stale by intake) on the
-   unchanged tree, 0/8 and 0/8 after. In the `stale-policy-delete-barrier` drill itself
-   (one run on Linux against a release built from this tree), `delete_begin` recorded
-   0 conflicts before the Begin committed (60 of 60 in 07.07) and `retire_begin`
-   recorded 2 (20 of 20 in 07.07). I did not isolate the 2; the likely cause (inferred,
-   not measured) is the first deletion's own barriers and fence steps, which are
-   authority-class commits that run while the second Begin is being decided.
-   **Still a limit:** the drill's own write pause
-   and its 60-attempt retry loop are unchanged (this change did not remove them); a
+   unchanged tree, 0/8 and 0/8 after. **The drill's write pause is removed (lane 1 wave 7):**
+   `stale-policy-delete-barrier` no longer holds a gate over the racing writers; both
+   Begins (`delete_begin`, `retire_begin`) run under the full concurrent load of
+   legitimate, in-range, stale, replaying and cached-policy writers, with a retry bound of
+   400 attempts. Ten consecutive runs on Linux (one VM, a release-style `sp-bin` built from
+   the tree, `go run -tags soundpost_faults ./tools/drills --scenario
+   stale-policy-delete-barrier ...`), all `passed`, exit 0: every run recorded `delete_begin`
+   and `retire_begin` with 1 attempt and 0 conflicts before the Begin committed (the facts
+   carry `"write_pause": false`). Conflict distribution of the writers' refused attempts
+   (the report's `failed_attempts`, ten runs, totals 8819 `refused:stale` and 797
+   `refused:conflict`):
+
+   | run | refused:stale | refused:conflict | acknowledged |
+   | --- | --- | --- | --- |
+   | 1 | 891 | 79 | 214 |
+   | 2 | 916 | 83 | 217 |
+   | 3 | 929 | 81 | 216 |
+   | 4 | 930 | 79 | 215 |
+   | 5 | 909 | 78 | 213 |
+   | 6 | 930 | 77 | 215 |
+   | 7 | 862 | 78 | 213 |
+   | 8 | 894 | 79 | 213 |
+   | 9 | 743 | 81 | 215 |
+   | 10 | 815 | 82 | 216 |
+
+   `refused:stale` are, by the codes' names (inferred, not separately measured per writer), the stale/replaying/cached-policy writers refused after the policy
+   changed, `refused:conflict` are racers refused for a revision conflict; neither is a
+   deletion Begin, and the drill's reconciliation accepted every ACKed row in all ten runs.
+   The earlier reading of 2 `retire_begin` conflicts (one run, with the pause still in the
+   drill) did not recur: 0 in ten runs; its cause was never isolated. **Still a limit:** a
    Begin still conflicts, as it must, when its view predates an authority-class change,
-   and a writer of another package (replay checkpoint index, artifact reference ledger,
-   login/session writes) bumps `AuthorityRevision` until it is classified in
-   `internal/control/authority.go`, so heavy traffic of those kinds can still make a
-   Begin retry. The classification table is the review surface: a writer wrongly
-   classified as non-authority would let a deletion commit on an outdated view.
+   and a writer of another package that is not classified in `internal/control/authority.go`
+   bumps `AuthorityRevision`, so heavy traffic of those kinds can still make a Begin retry
+   (the drill's writers are intake only). The classification table is the review surface: a
+   writer wrongly classified as non-authority would let a deletion commit on an outdated
+   view. `TestDeleteWithViewOlderThanAuthorityChangeStillConflicts` now has a stale-view
+   subtest for every admin kind that reaches `Store.Update` (`create_org`, `create_user`,
+   `create_project`, `membership`, `org_admin`, `grant`, `team`, `source_policy`, `sso`,
+   `destination`, `retention`); `notification_policy` is reached only through
+   `PolicyCommand` (a retention-class policy kind) and has no subtest of its own.
 5. The source label policy admits label values from an allow-list, which bounds
    how many distinct batches the cluster drills can identify (700 pre-declared ids).
 6. **A node whose storage failed kept leading groups (fixed, 11.14).** With every fsync of the initial leader answering EIO, the two healthy members answered 503 for more than 120 s while the failed member stayed up (`/readyz` `state_unavailable`). Cause: only the group that noticed the failed write failed closed; every other group of that node (control and the 64 data groups) kept ticking and answering heartbeats, so the survivors never elected a replacement, while each proposal reaching the zombie leader was refused by its validator (its control state was unreadable) before anything was persisted, so those groups never failed either. The same cause stopped the survivors when member 3's disk vanished after member 3 had become the leader of some groups. Fix: `replica.FailDomain`, see `distributed.md`; red test `TestAStorageFailureInOneGroupFailStopsEveryGroupOfTheNode` (and the engine tests in `internal/storage/failstop_test.go`). The drills no longer exempt the leader phase: the survivors must acknowledge inside the scenario window in every phase.

@@ -330,6 +330,7 @@ func backupCreate(args []string) error {
 	dataKEK := f.String("data-kek", "", "")
 	secretKEK := f.String("secret-kek", "", "")
 	attempts := f.String("attempts-dir", "", "")
+	chunkSize := f.Uint("chunk-size", 0, "")
 	keysPath := f.String("authority-keys", "", "")
 	dest := newDestinationFlags(f, "dest")
 	authorityDest := newDestinationFlags(f, "authority")
@@ -367,7 +368,7 @@ func backupCreate(args []string) error {
 	}
 	defer app.Close()
 	plane := backup.EngineDataPlane(app.Storage)
-	svc, err := backup.New(backup.Config{Control: app.Control, Data: plane, Processed: backup.AppliedProcessed(plane), Authority: authority, Authorizer: app.Auth, Keys: backup.KeyDir(*keyDir), DataKEK: *dataKEK, SecretKEK: *secretKEK, Attempts: backup.DirAttempts(*attempts), Pins: backup.EnginePins(app.Storage), Replication: app.ReplicationStatus, Clock: time.Now})
+	svc, err := backup.New(backup.Config{Control: app.Control, Data: plane, Processed: backup.AppliedProcessed(plane), Authority: authority, Authorizer: app.Auth, Keys: backup.KeyDir(*keyDir), DataKEK: *dataKEK, SecretKEK: *secretKEK, Attempts: backup.DirAttempts(*attempts), Pins: backup.EnginePins(app.Storage), ChunkSize: uint32(*chunkSize), Replication: app.ReplicationStatus, Clock: time.Now})
 	if err != nil {
 		return err
 	}

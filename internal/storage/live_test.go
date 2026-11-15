@@ -594,12 +594,12 @@ func TestUncommittedAppendNeverPublishes(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer it.Close()
-	e.fault = func(at string) error {
+	e.setFault(func(at string) error {
 		if at == "before_apply" {
 			return io.ErrShortWrite
 		}
 		return nil
-	}
+	})
 	if _, err = e.Append(context.Background(), write, b); err == nil {
 		t.Fatal("unapplied entry ACKed")
 	}
