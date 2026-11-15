@@ -219,6 +219,12 @@ func (r *run) adoptPolicy() error {
 	return nil
 }
 
+// Validate reports whether c is a notification policy the engine would adopt:
+// the same check adoptPolicy applies to a revision's config, exported so a
+// settings write is refused before it is committed rather than never adopted.
+// The error is a typed *Error (code Invalid).
+func (c Config) Validate() error { return c.validate() }
+
 func (c Config) validate() error {
 	if c.MinOperations == 0 || c.MinFailures == 0 || c.RateBasisPoints == 0 || c.RateBasisPoints > 10000 || c.RegressionMin == 0 ||
 		c.FirstReminder <= 0 || c.ReminderEvery <= 0 || c.MaxSuppression <= 0 || c.MaxSuppression > MaxSuppressionHard ||

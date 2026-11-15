@@ -274,11 +274,13 @@ func (a *App) NotificationSender(cfg NotificationConfig) (notify.Sender, error) 
 }
 
 // orgRouting routes the conditions and incidents of every project to every
-// enabled destination of the project's organization, under the approved default
-// notification policy. There is no per-project policy catalogue: the organization's
-// destinations are the routes (what `destination` admin commands configure), a new
-// enabled destination is picked up at the next pass, and a project belongs to
-// exactly one organization so no notification can cross one.
+// enabled destination of the project's organization, under the project's
+// notification policy: the approved default (revision 1) until a settings write
+// (auth.PolicyCommand) commits one, then that policy at its committed revision,
+// which the engine adopts as a newer revision at the next pass. The
+// organization's destinations are the routes (what `destination` admin commands
+// configure), a new enabled destination is picked up at the next pass, and a
+// project belongs to exactly one organization so no notification can cross one.
 type orgRouting struct{ a *App }
 
 // OrgRouting is the NotificationRouting of a served node (see orgRouting).
@@ -286,6 +288,7 @@ func (a *App) OrgRouting() NotificationRouting { return orgRouting{a} }
 
 func (r orgRouting) Routing(ctx context.Context, scope auth.Scope, project model.ID) (NotificationBinding, bool, error) {
 	var recipients []model.ID
+	var written *auth.NotificationPolicyRecord
 	err := r.a.Control.View(ctx, func(st model.ControlState) error {
 		if _, retired := st.RetiredOrgs[scope.OrgID().String()]; retired {
 			return nil
@@ -312,6 +315,11 @@ func (r orgRouting) Routing(ctx context.Context, scope auth.Scope, project model
 				recipients = append(recipients, id)
 			}
 		}
+		if rec, found, err := auth.ReadNotificationPolicy(o, project); err != nil {
+			return err
+		} else if found {
+			written = &rec
+		}
 		return nil
 	})
 	if err != nil || len(recipients) == 0 {
@@ -320,5 +328,11 @@ func (r orgRouting) Routing(ctx context.Context, scope auth.Scope, project model
 	sort.Slice(recipients, func(i, j int) bool { return recipients[i].String() < recipients[j].String() })
 	org := scope.OrgID()
 	policy := policyCommand([]byte("soundpost/default-notification-policy"), org[:], project[:])
-	return NotificationBinding{Policy: policy, Revision: 1, Config: notify.DefaultConfig(), Recipients: recipients}, true, nil
+	binding := NotificationBinding{Policy: policy, Revision: 1, Config: notify.DefaultConfig(), Recipients: recipients}
+	if written != nil {
+		binding.Revision, binding.Config = written.Revision, notify.Config{MinOperations: written.MinOperations, MinFailures: written.MinFailures, RateBasisPoints: written.RateBasisPoints,
+			RegressionMin: written.RegressionMin, CriticalCodes: append([]string(nil), written.CriticalCodes...), FirstReminder: model.UnixNano(written.FirstReminder),
+			ReminderEvery: model.UnixNano(written.ReminderEvery), MaxSuppression: model.UnixNano(written.MaxSuppression), DefaultZone: written.DefaultZone}
+	}
+	return binding, true, nil
 }

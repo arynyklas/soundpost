@@ -441,3 +441,39 @@ export interface JobView {
  definition?: JobDefinition; definition_revisions: number; health?: JobHealth; observer?: JobObserverView; loss?: JobLossView; total_runs: number; total_attempts: number;
  compaction?: JobCompaction; latest_occurrence?: string; runs: JobRunView[]; runs_truncation?: JobTruncation; run?: JobRunDetail; sections: ViewSection[];
 }
+
+// ---- C11 /api/v1/policies (internal/httpapi/policies.go) ----
+export interface NotificationPolicyView {
+ /** "default" until a policy is written for the project. */
+ source: 'default' | 'project';
+ revision: string;
+ min_operations: number; min_failures: number; rate_basis_points: number; regression_min: number;
+ critical_codes: string[];
+ first_reminder_ns: string; reminder_every_ns: string; max_suppression_ns: string;
+ default_zone: string;
+}
+/** A notification destination of the organization. It never carries a secret or an endpoint path: only whether a secret is sealed. */
+export interface DestinationView { id: Id; type: string; endpoint_host?: string; address?: string; enabled: boolean; has_secret: boolean }
+export interface RetentionView { signal: string; days: number }
+export interface PolicyView {
+ org: Id; project_id: Id;
+ /** The control revision a write must be based on. */
+ revision: string;
+ manage_destinations: boolean;
+ notification: NotificationPolicyView;
+ destinations: DestinationView[];
+ retention: RetentionView[];
+}
+export interface NotificationChange {
+ min_operations: number; min_failures: number; rate_basis_points: number; regression_min: number;
+ critical_codes: string[];
+ first_reminder_ns: string; reminder_every_ns: string; max_suppression_ns: string;
+ default_zone: string;
+}
+export interface DestinationChange { id: Id; type: string; endpoint?: string; address?: string; enabled: boolean; secret?: string }
+export type PolicyChange =
+ | { kind: 'retention'; retention: RetentionView }
+ | { kind: 'notification_policy'; notification: NotificationChange }
+ | { kind: 'destination'; destination: DestinationChange };
+export interface PolicyWriteRequest { org: Id; project_id: Id; command_id: Id; expected_revision: string; reason: string; change: PolicyChange }
+export interface PolicyWriteAnswer { state: 'committed'; revision: string; policy: PolicyView }

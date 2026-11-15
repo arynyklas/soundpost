@@ -209,7 +209,7 @@ test('two browsers act on one real incident without a silent overwrite',async({p
 
  // Project settings: real capabilities only; everything without a committed route says so, and an unknown operation is not found.
  await pageA.goto(`/${hash(org,project,'settings')}`);
- await expect(pageA.locator('[data-section="settings-not-available"]')).toContainText('Not available');
+ await expect(pageA.locator('[data-section="policy-notification"]')).toContainText('approved default policy');
  await pageA.getByLabel('Operation ID',{exact:true}).fill(id());
  await pageA.getByRole('button',{name:'Show progress',exact:true}).click();
  await expect(pageA.locator('[data-section="operations"] [data-state="unauthorized"]')).toBeVisible();

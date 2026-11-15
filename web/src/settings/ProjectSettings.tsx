@@ -5,6 +5,13 @@ import type { Id, LifecycleOperation, LoadState, VisibleSource } from '../api/ty
 import { formatNs, isId, scopeKey, type ViewContext } from '../app/context';
 import { StatusPanel } from '../app/StatusPanel';
 import { describeReason } from '../incidents/model';
+import { OrganizationSettings } from './OrganizationSettings';
+import { RestorePanel } from '../auth/RestorePanel';
+import { SessionContext } from '../auth/ElevationDialog';
+import { PolicySettings } from './PolicySettings';
+import { SourcePolicies } from './SourcePolicies';
+import { SSOSettings } from './SSOSettings';
+import { TeamSettings } from './TeamSettings';
 
 /** What an operation's phase means, in words. Only a complete operation with physical erasure done
  * is reported as finished; fencing, held and failed are never success, and a logically complete
@@ -83,12 +90,15 @@ function OperationPanel(props: { context: ViewContext }): React.JSX.Element {
  );
 }
 
-/** Project settings as far as committed routes allow: the readable source capabilities and the
- * progress of long-running operations. Policies, notification destinations, retention, SSO and
- * organization/team administration have no committed read route, so they are listed as not
- * available instead of being drawn from invented data. */
-export function ProjectSettings(props: { context: ViewContext }): React.JSX.Element {
+export type SettingsTab = 'project' | 'organization' | 'teams' | 'sources' | 'sso';
+export const SETTINGS_TABS: readonly { id: SettingsTab; label: string }[] = [
+ { id: 'project', label: 'Project' }, { id: 'organization', label: 'Organization' }, { id: 'teams', label: 'Teams' }, { id: 'sources', label: 'Source policies' }, { id: 'sso', label: 'Single sign-on' },
+];
+
+function ProjectTab(props: { context: ViewContext }): React.JSX.Element {
  const c = props.context;
+ const session = React.useContext(SessionContext);
+ const restored = session?.session.restore?.pending ?? 0;
  const [held, setHeld] = React.useState<{ key: string; byProject: Record<string, LoadState<VisibleSource[]>> }>({ key: '', byProject: {} });
  const key = `${scopeKey(c)}|${c.generation}`;
  React.useEffect(() => {
@@ -104,8 +114,11 @@ export function ProjectSettings(props: { context: ViewContext }): React.JSX.Elem
   // eslint-disable-next-line react-hooks/exhaustive-deps
  }, [key]);
  return (
-  <section className="panel" aria-labelledby="view-heading">
-   <h2 id="view-heading">Project settings</h2>
+  <div data-settings-page="project">
+   {restored > 0 && session && (
+    <RestorePanel csrf={session.session.csrf} pending={restored} label="Restored sources and senders" title="Restored: inactive sources and senders" only={(item) => item.kind === 'source' || (item.kind === 'integration' && (item.key ?? '').startsWith('destination:') && item.org === c.org)}
+     intro="This installation was restored from a backup. Its sources and notification senders are disabled: a source's credential is revoked and a sender's endpoint secret is sealed away, so nothing is ingested or sent through them until an instance administrator reauthorizes each one here, with fresh authentication and an audit record. Reauthorizing a source issues a new credential, shown once." />
+   )}
    <p>Source capabilities this account may read. A project with no readable source is empty, not unhealthy.</p>
    {c.projects.map((project) => {
     const state: LoadState<VisibleSource[]> = held.key === key ? held.byProject[project] ?? { kind: 'loading' } : { kind: 'loading' };
@@ -114,16 +127,35 @@ export function ProjectSettings(props: { context: ViewContext }): React.JSX.Elem
       <h3>Project <code>{project}</code></h3>
       <StatusPanel state={state} />
       {'data' in state && state.data.length > 0 && <ul>{state.data.map((s) => <li key={s.id}><code>{s.id}</code> — class {s.class}, kinds {s.kinds.join(', ')}{s.replay ? ', replay' : ''}</li>)}</ul>}
+      <PolicySettings context={c} project={project} />
      </div>
     );
    })}
-   <h3>Policies and administration</h3>
-   <ul className="sections" data-section="settings-not-available">
-    {['Notification destinations and policy', 'Retention settings', 'Source policy, template and replay enablement', 'Single sign-on mapping', 'Organization and team administration'].map((name) => (
-     <li key={name}><strong>{name}</strong>: Not available — the administration routes this page would read do not exist in this installation yet, so nothing is shown rather than a guess. No destination secret is ever shown.</li>
-    ))}
-   </ul>
    <OperationPanel context={c} />
+  </div>
+ );
+}
+
+/** Settings: one project's readable sources, notification policy, destinations and retention (C11 /api/v1/policies), the progress of
+ * long-running operations, and the organization's own administration: organization and grants, teams, source policies and single
+ * sign-on, over the closed admin routes. Each page is read and written under the caller's own authority: another organization's
+ * administrator and an ordinary member see an administration page as not found. */
+export function ProjectSettings(props: { context: ViewContext }): React.JSX.Element {
+ const c = props.context;
+ const [tab, setTab] = React.useState<SettingsTab>('project');
+ return (
+  <section className="panel" aria-labelledby="view-heading">
+   <h2 id="view-heading">Project settings</h2>
+   <nav aria-label="Settings pages">
+    <ul className="nav-list">
+     {SETTINGS_TABS.map((t) => <li key={t.id}><button type="button" aria-current={t.id === tab ? 'page' : undefined} data-settings-tab={t.id} onClick={() => setTab(t.id)}>{t.label}</button></li>)}
+    </ul>
+   </nav>
+   {tab === 'project' && <ProjectTab context={c} />}
+   {tab === 'organization' && <OrganizationSettings context={c} />}
+   {tab === 'teams' && <TeamSettings context={c} />}
+   {tab === 'sources' && <SourcePolicies context={c} />}
+   {tab === 'sso' && <SSOSettings context={c} />}
   </section>
  );
 }

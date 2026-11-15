@@ -8,9 +8,15 @@ import (
 	"github.com/arynyklas/soundpost/internal/model"
 )
 
+// AdminCommandRequest is one audited admin command. A command on an existing organization carries ONE precondition: ExpectedEpoch, the
+// organization policy epoch the caller read (AdminView.Epoch), or, when it is absent, ExpectedRevision, the global control revision.
+// The epoch moves only when the organization changes, so a login or a background commit elsewhere is no reason to refuse a save and a
+// change made since the caller read the organization is a lost update that is refused. create_org and create_user have no
+// organization to compare: they take the revision, and an epoch on them is invalid.
 type AdminCommandRequest struct {
 	CommandID        model.ID        `json:"command_id"`
 	ExpectedRevision model.Revision  `json:"expected_revision"`
+	ExpectedEpoch    *model.Uint64   `json:"expected_epoch,omitempty"`
 	OrgID            model.ID        `json:"org_id"`
 	Kind             string          `json:"kind"`
 	Payload          json.RawMessage `json:"payload"`
@@ -33,10 +39,13 @@ type AdminReadRequest struct {
 	Kind  string   `json:"kind"`
 }
 type AdminView struct {
-	Revision      model.Revision             `json:"revision"`
+	Revision model.Revision `json:"revision"`
+	// Epoch is the organization policy epoch of an organization-scoped read: the precondition an admin command on it carries.
+	Epoch         model.Uint64               `json:"epoch,omitempty"`
 	Organizations []OrgView                  `json:"organizations,omitempty"`
 	Audits        []model.ControlAudit       `json:"audits,omitempty"`
 	Settings      map[string]json.RawMessage `json:"settings,omitempty"`
+	Sources       []AdminSource              `json:"sources,omitempty"`
 }
 type OrgView struct {
 	ID       model.ID                     `json:"id"`
@@ -49,6 +58,15 @@ type OrgView struct {
 }
 
 func (s *Service) AdminCommand(ctx context.Context, c Credential, r AdminCommandRequest) (model.ControlResult, error) {
+	return s.adminCommand(ctx, c, r, nil)
+}
+
+// adminCommand is the one audited admin transition. pw is nil for an organization
+// administrator's command; a non-nil pw is the narrow policy.write path
+// (PolicyCommand): the same transition, the same revision compare, audit and
+// command-ID binding, but authorized by a scope for one project and limited to the
+// kinds a project's settings page changes.
+func (s *Service) adminCommand(ctx context.Context, c Credential, r AdminCommandRequest, pw *policyWriter) (model.ControlResult, error) {
 	if c.service != s || !c.Fresh() {
 		return model.ControlResult{}, model.Fail(model.Forbidden)
 	}
@@ -61,6 +79,13 @@ func (s *Service) AdminCommand(ctx context.Context, c Credential, r AdminCommand
 	}
 	if p.Reason == "" || len(p.Reason) > 512 {
 		return model.ControlResult{}, model.Fail(model.Invalid)
+	}
+	if pw != nil {
+		if e := pw.allows(r.Kind, p); e != nil {
+			return model.ControlResult{}, e
+		}
+	} else if r.Kind == "notification_policy" {
+		return model.ControlResult{}, model.Fail(model.Invalid) // only the policy.write path writes one
 	}
 	audit := model.ControlAudit{ID: model.NewID(), Principal: c.user, Action: r.Kind, Reason: p.Reason, Time: s.now().UnixNano(), Org: r.OrgID.String(), RequestID: model.RequestCorrelationID(ctx, r.CommandID), Outcome: model.AuditAllowed}
 	var passwordHash string
@@ -99,22 +124,41 @@ func (s *Service) AdminCommand(ctx context.Context, c Credential, r AdminCommand
 				if !current.Admin {
 					return model.Fail(model.Forbidden)
 				}
+			} else if pw != nil {
+				if err := pw.authorize(s, *st, c, r.OrgID); err != nil {
+					return err
+				}
 			} else if !st.Orgs[r.OrgID.String()].Admins[c.user.String()] {
 				return model.Fail(model.NotFound)
 			}
 			out = old
 			return nil
 		}
-		if r.CommandID == (model.ID{}) || r.ExpectedRevision != st.Revision {
+		if r.CommandID == (model.ID{}) || pw == nil && r.ExpectedEpoch == nil && r.ExpectedRevision != st.Revision {
 			return model.Fail(model.Conflict)
+		}
+		if r.ExpectedEpoch != nil && (pw != nil || r.Kind == "create_org" || r.Kind == "create_user") {
+			return model.Fail(model.Invalid)
 		}
 		o, exists := st.Orgs[r.OrgID.String()]
 		if r.Kind == "create_org" || r.Kind == "create_user" {
 			if !st.Users[c.user.String()].Admin {
 				return model.Fail(model.Forbidden)
 			}
-		} else if !exists || !o.Admins[c.user.String()] {
+		} else if !exists {
 			return model.Fail(model.NotFound)
+		} else if pw != nil {
+			if err := pw.authorize(s, *st, c, r.OrgID); err != nil {
+				return err
+			}
+		} else if !o.Admins[c.user.String()] {
+			return model.Fail(model.NotFound)
+		}
+		if pw != nil && r.ExpectedRevision != model.Revision(o.Epoch) || r.ExpectedEpoch != nil && *r.ExpectedEpoch != model.Uint64(o.Epoch) {
+			// A settings write is based on the organization's policy epoch it read, not
+			// on the global control revision: a login or a background commit elsewhere
+			// is no reason to refuse a person's save, an administration change is.
+			return model.Fail(model.Conflict)
 		}
 		if _, retired := st.RetiredOrgs[r.OrgID.String()]; retired && r.Kind != "create_user" {
 			return model.Fail(model.NotFound) // retirement is permanent
@@ -224,6 +268,13 @@ func (s *Service) AdminCommand(ctx context.Context, c Credential, r AdminCommand
 			if p.Secret != "" {
 				o.Secrets[r.Kind+":"+p.ID.String()] = sealedSecret
 			}
+		case "notification_policy":
+			// Reached only through PolicyCommand (allows refused any other caller): the
+			// payload ID is the project and the stored record carries the next revision,
+			// which the notification worker adopts as a newer policy revision.
+			if err := writeNotificationPolicy(&o, p); err != nil {
+				return err
+			}
 		default:
 			return model.Fail(model.Invalid)
 		}
@@ -290,9 +341,12 @@ func (s *Service) AdminRead(ctx context.Context, c Credential, r AdminReadReques
 		if !ok || !o.Admins[c.user.String()] {
 			return model.Fail(model.NotFound)
 		}
+		out.Epoch = model.Uint64(o.Epoch)
 		switch r.Kind {
 		case "organization":
 			out.Organizations = []OrgView{{ID: o.ID, Name: o.Name, Projects: o.Projects, Members: o.Members, Admins: o.Admins, Grants: o.Grants, Teams: o.Teams}}
+		case "source":
+			out.Sources = adminSources(st, r.OrgID)
 		case "audit":
 			for _, a := range st.Audits {
 				if a.Org == r.OrgID.String() {

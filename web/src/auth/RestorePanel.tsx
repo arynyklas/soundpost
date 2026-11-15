@@ -23,7 +23,7 @@ export function reconciliation(item: RestoreItem, reason: string): Record<string
 }
 
 /** The restored-installation state: what the backup held that is still inactive, and one audited reauthorization per item. */
-export function RestorePanel(props: { csrf: string; pending: number }): React.JSX.Element {
+export function RestorePanel(props: { csrf: string; pending: number; /** A scoped panel (settings pages): its own region name and heading, the items it lists and the sentence that introduces them. */ label?: string; title?: string; intro?: string; only?: (item: RestoreItem) => boolean }): React.JSX.Element {
  const csrf = React.useRef(props.csrf);
  React.useEffect(() => { csrf.current = props.csrf; }, [props.csrf]);
  const [view, setView] = React.useState<RestoreView | null>(null);
@@ -56,11 +56,12 @@ export function RestorePanel(props: { csrf: string; pending: number }): React.JS
   } catch (e) { setError(e instanceof Error ? e.message : 'The reauthorization was not confirmed.'); }
   finally { setBusy(false); }
  }
- const items = view?.items ?? [];
- return <section className="panel notice" aria-label="Restored installation" data-restore-pending={view ? String(view.pending) : props.pending}>
-  <h2>Restored installation: access is bootstrap-only</h2>
-  <p>This installation was restored from a backup. Every earlier session, token, source credential and sender is inactive, and the accounts, memberships, grants, teams and integrations the backup held stay inactive until an instance administrator reauthorizes them here, one item at a time, with fresh authentication and an audit record. Logouts, revocations and demotions made after the backup are not undone by a restore.</p>
-  <p role="status" aria-live="polite">{view ? `${view.pending} item${view.pending === 1 ? '' : 's'} still inactive.` : loadError ? '' : 'Reading the restored items…'}</p>
+ const items = (view?.items ?? []).filter(props.only ?? (() => true));
+ const Heading = props.title ? 'h3' : 'h2';
+ return <section className="panel notice" aria-label={props.label ?? 'Restored installation'} data-restore-pending={view ? String(view.pending) : props.pending}>
+  <Heading>{props.title ?? 'Restored installation: access is bootstrap-only'}</Heading>
+  <p>{props.intro ?? 'This installation was restored from a backup. Every earlier session, token, source credential and sender is inactive, and the accounts, memberships, grants, teams and integrations the backup held stay inactive until an instance administrator reauthorizes them here, one item at a time, with fresh authentication and an audit record. Logouts, revocations and demotions made after the backup are not undone by a restore.'}</p>
+  <p role="status" aria-live="polite">{view ? (props.only ? `${items.length} of the ${view.pending} inactive item${view.pending === 1 ? '' : 's'} of this installation ${items.length === 1 ? 'belongs' : 'belong'} here.` : `${view.pending} item${view.pending === 1 ? '' : 's'} still inactive.`) : loadError ? '' : 'Reading the restored items…'}</p>
   {loadError && <p role="alert" className="error">{loadError}</p>}
   {done && <p role="status" data-restore-done="true">{done}</p>}
   {credential && <p>New source credential, shown once: <output className="secret">{credential}</output></p>}

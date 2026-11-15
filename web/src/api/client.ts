@@ -1,7 +1,7 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
 import { ANCESTRY_ORDERS, ApiFault, COMPLETENESS, EXPORT_PHASES, INVESTIGATION_KINDS, LIVE_EVENT_TYPES, OutcomeUnknown, QueryFault, VersionConflict, type ActionRequest, type ActionResponse, type AncestryOrder, type Completeness, type DiscoveryRequest, type DiscoveryResult, type ExemplarRequest, type ExemplarResult, type ExportGrant, type ExportOperation, type ExportPhase, type ExportSignal, type FormatRequest, type FormatResult, type FramesRequest, type FramesView, type Id, type IncidentView, type InvestigationKind, type InvestigationRequest, type InvestigationView, type IssueEvidenceView, type LifecycleOperation, type LiveEvent, type LiveEventType, type LiveTicket, type LiveTicketRequest, type LoadState, type QueryRequest, type QueryResult, type QueueView, type ReleaseView, type SafeFrame, type ViewState, type VisibleSource } from './types';
 import { SseProtocolError, readSse, type SseFrame } from './sse';
-import type { TraceView } from './types';
+import type { DestinationView, PolicyView, PolicyWriteAnswer, PolicyWriteRequest, RetentionView, TraceView } from './types';
 import { parseTraceView } from '../traces/model';
 import { lineSplitter, parseReplayLine, type ReplayLine } from '../replays/model';
 import { parseProfileResponse } from '../profiles/model';
@@ -422,7 +422,7 @@ export function stateOfQueryFault(error: unknown): LoadState<never> {
  }
 }
 
-function jsonPost(path: string, body: unknown, signal: AbortSignal): Promise<Response> {
+export function jsonPost(path: string, body: unknown, signal: AbortSignal): Promise<Response> {
  return fetch(path, {
   method: 'POST', credentials: 'same-origin', cache: 'no-store', signal,
   headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...(csrf ? { 'X-CSRF-Token': csrf } : {}) },
@@ -974,4 +974,53 @@ export async function getJob(org: Id, project: Id, job: Id, options: { run?: Id;
  const response = await jsonPost('/api/v1/jobs/view', body, signal);
  if (!response.ok) throw await apiFault(response);
  return parseJobView(await response.json() as unknown, { org, project, job, ...(options.run === undefined ? {} : { run: options.run }), ...(options.runsLimit === undefined ? {} : { runsLimit: options.runsLimit }) });
+}
+
+// ---- C11 policies: project settings (internal/httpapi/policies.go) ----
+const POLICY_SOURCES: readonly string[] = ['default', 'project'];
+const isU32 = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 4294967295;
+const isStr = (v: unknown, max = 256): v is string => typeof v === 'string' && v.length <= max;
+
+/** Accepts a policy view only for exactly the requested organization and project, and copies only the fields a settings page shows:
+ * a field this client does not know (a secret that should never have been sent) is not kept. */
+export function parsePolicyView(raw: unknown, want: { org: Id; project: Id }): PolicyView {
+ if (!isRecord(raw) || raw.org !== want.org || raw.project_id !== want.project || !decLike(raw.revision) || typeof raw.manage_destinations !== 'boolean') return badResponse();
+ const n = raw.notification;
+ if (!isRecord(n) || !POLICY_SOURCES.includes(n.source as string) || !decLike(n.revision) || !isU32(n.min_operations) || !isU32(n.min_failures) || !isU32(n.rate_basis_points) || !isU32(n.regression_min)
+  || !Array.isArray(n.critical_codes) || !n.critical_codes.every((c) => isStr(c, 64)) || !decLike(n.first_reminder_ns) || !decLike(n.reminder_every_ns) || !decLike(n.max_suppression_ns) || !isStr(n.default_zone, 64)) return badResponse();
+ if (!Array.isArray(raw.destinations) || !Array.isArray(raw.retention)) return badResponse();
+ const destinations = raw.destinations.map((d: unknown): DestinationView => {
+  if (!isRecord(d) || !idLike(d.id) || !isStr(d.type, 32) || typeof d.enabled !== 'boolean' || typeof d.has_secret !== 'boolean' || (d.endpoint_host !== undefined && !isStr(d.endpoint_host)) || (d.address !== undefined && !isStr(d.address))) return badResponse();
+  return { id: d.id, type: d.type, enabled: d.enabled, has_secret: d.has_secret, ...(d.endpoint_host !== undefined ? { endpoint_host: d.endpoint_host } : {}), ...(d.address !== undefined ? { address: d.address } : {}) };
+ });
+ const retention = raw.retention.map((r: unknown): RetentionView => {
+  if (!isRecord(r) || !isStr(r.signal, 32) || !isU32(r.days)) return badResponse();
+  return { signal: r.signal, days: r.days };
+ });
+ return {
+  org: raw.org, project_id: raw.project_id, revision: raw.revision, manage_destinations: raw.manage_destinations, destinations, retention,
+  notification: { source: n.source as 'default' | 'project', revision: n.revision, min_operations: n.min_operations, min_failures: n.min_failures, rate_basis_points: n.rate_basis_points, regression_min: n.regression_min, critical_codes: [...(n.critical_codes as string[])], first_reminder_ns: n.first_reminder_ns, reminder_every_ns: n.reminder_every_ns, max_suppression_ns: n.max_suppression_ns, default_zone: n.default_zone },
+ };
+}
+
+/** POST /api/v1/policies {operation: read}: the project's notification policy, the organization's destinations (never a secret) and the project's retention, under the caller's own policy.write grant or organization administration. */
+export async function getPolicies(org: Id, project: Id, signal: AbortSignal): Promise<PolicyView> {
+ const response = await jsonPost('/api/v1/policies', { org, project_id: project, operation: 'read' }, signal);
+ if (!response.ok) throw await apiFault(response);
+ return parsePolicyView(await response.json() as unknown, { org, project });
+}
+
+/** POST /api/v1/policies {operation: write}: one audited settings change. The answer is the committed settings; nothing is committed on any other status. A 409 is a stale revision (the server changed since the page read it); a transport failure is OutcomeUnknown and the same command ID may be resent (the server returns the original result). */
+export async function writePolicy(req: PolicyWriteRequest, signal: AbortSignal): Promise<PolicyWriteAnswer> {
+ let response: Response;
+ try {
+  response = await jsonPost('/api/v1/policies', { org: req.org, project_id: req.project_id, operation: 'write', command_id: req.command_id, expected_revision: req.expected_revision, reason: req.reason, change: req.change }, signal);
+ } catch (error) {
+  if (isAbort(error)) throw error;
+  throw new OutcomeUnknown();
+ }
+ if (!response.ok) throw await apiFault(response);
+ const raw: unknown = await response.json();
+ if (!isRecord(raw) || raw.state !== 'committed' || !decLike(raw.revision)) return badResponse();
+ return { state: 'committed', revision: raw.revision, policy: parsePolicyView(raw.policy, { org: req.org, project: req.project_id }) };
 }

@@ -32,7 +32,7 @@ test('restored accounts and credentials are inactive; the recovery bootstrap sho
  await expect(panel.locator('[data-restore-kind="account"]',{hasText:readerEmail})).toBeVisible();
  await expect(panel.locator('[data-restore-kind="org_admin"]',{hasText:env('SOUNDPOST_RESTORE_ADMIN_EMAIL')})).toHaveCount(1);
  await expect(panel.locator('[data-restore-kind="grant"]')).toHaveCount(1);
- const sso=panel.locator('[data-restore-kind="integration"]',{hasText:'sso:'});
+ const sso=panel.locator('[data-restore-kind="integration"]',{hasText:`sso:${env('SOUNDPOST_RESTORE_PROVIDER')}`});
  await expect(sso).toHaveCount(1);
  // No old single sign-on activation is offered, and nothing of the old identity authority is reinstated.
  await expect(sso.getByRole('button')).toHaveCount(0);
@@ -66,4 +66,61 @@ test('the recovery administrator reauthorizes one account with fresh authenticat
  expect(await loginStatus(page,readerEmail,readerPassword)).toBe(200);
  await expect(panel.locator('[data-restore-kind="grant"]')).toHaveCount(1);
  await expect(panel.locator('[data-restore-kind="membership"]',{hasText:readerEmail})).toHaveCount(1);
+});
+
+// [05.03-W7] The settings page of the restored organization: its sources and notification senders are inactive, listed there, and
+// each is reauthorized by the recovery administrator with fresh authentication and an audit record; nothing else comes back.
+const nsOf=(ms:number):string=>String(BigInt(ms)*1_000_000n);
+test('project settings after a restore list the inactive sources and senders, and each reauthorization is one audited step',async({page,request})=>{
+ test.setTimeout(180_000);
+ const org=env('SOUNDPOST_RESTORE_ORG'),project=env('SOUNDPOST_RESTORE_PROJECT'),source=env('SOUNDPOST_RESTORE_SOURCE'),destination=env('SOUNDPOST_RESTORE_DESTINATION'),oldCredential=env('SOUNDPOST_RESTORE_SOURCE_CREDENTIAL');
+ const ingest=async(credential:string):Promise<string>=>{const r=await request.post(`${origin}/ingest/v1/batches`,{headers:{Authorization:`Bearer ${credential}`},data:{}});return `${r.status()} ${(await r.text()).slice(0,200)}`;};
+ // The source credential of the backup is dead on the restored installation (403); a live credential reaches the batch check (422 for an empty batch).
+ expect(await ingest(oldCredential)).toMatch(/^403 /);
+ await page.goto('/');
+ await page.getByLabel('Email',{exact:true}).fill(recovery.email);
+ await page.getByLabel('Password',{exact:true}).fill(recovery.password);
+ await page.getByRole('button',{name:'Sign in',exact:true}).click();
+ await expect(page.getByRole('region',{name:'Restored installation'})).toBeVisible();
+ const params=new URLSearchParams({org,projects:project,start:nsOf(Date.now()-3*3600_000),end:nsOf(Date.now()+3*3600_000),tz:'UTC',view:'settings'});
+ await page.goto(`/#${params}`);
+ await page.reload();
+ const panel=page.getByRole('region',{name:'Restored sources and senders'});
+ await expect(panel).toBeVisible();
+ await expect(panel.getByRole('heading',{name:'Restored: inactive sources and senders'})).toBeVisible();
+ // Exactly this organization's source and sender: not the accounts, the grant or the single sign-on provider.
+ await expect(panel.locator('[data-restore-kind]')).toHaveCount(2);
+ await expect(panel.locator('[data-restore-kind="source"]')).toContainText(source);
+ const sender=panel.locator('[data-restore-kind="integration"]');
+ await expect(sender).toHaveCount(1);
+ await expect(sender).toContainText(`destination:${destination}`);
+ await expect(panel.getByRole('status').first()).toContainText('2 of the');
+ await expect(panel.locator('[data-restore-kind="source"] button')).toHaveText('Reauthorize');
+
+ // The source: fresh authentication, one audit record, a new credential shown once; the old one stays dead.
+ await panel.getByRole('button',{name:`Reauthorize Source: source ${source}`}).click();
+ await panel.getByLabel('Reason',{exact:true}).fill('Restored source reactivated by the recovery administrator');
+ await panel.getByLabel('Current password',{exact:true}).fill(recovery.password);
+ await panel.getByRole('button',{name:'Reauthenticate and reauthorize'}).click();
+ const done=panel.locator('[data-restore-done="true"]');
+ await expect(done).toContainText(`Reinstated: source ${source}`);
+ await expect(done).toContainText(/Audit record [0-9a-f]{32}/);
+ await expect(panel.locator('output.secret')).toBeVisible();
+ const fresh=(await panel.locator('output.secret').innerText()).trim();
+ expect(fresh.length).toBeGreaterThan(20);
+ expect(fresh).not.toBe(oldCredential);
+ await expect(panel.locator('[data-restore-kind="source"]')).toHaveCount(0);
+ await expect(panel.locator('[data-restore-kind="integration"]')).toHaveCount(1);
+ expect(await ingest(oldCredential)).toMatch(/^403 /);
+ expect(await ingest(fresh)).toMatch(/^422 /);
+
+ // The sender: its own audited step; nothing else in this panel is left.
+ await panel.getByRole('button',{name:new RegExp(`^Reauthorize Integration: destination:${destination}`)}).click();
+ await panel.getByLabel('Reason',{exact:true}).fill('Restored sender reactivated by the recovery administrator');
+ await panel.getByLabel('Current password',{exact:true}).fill(recovery.password);
+ await panel.getByRole('button',{name:'Reauthenticate and reauthorize'}).click();
+ await expect(done).toContainText(/Reinstated: .*destination:/);
+ await expect(done).toContainText(/Audit record [0-9a-f]{32}/);
+ await expect(panel.locator('[data-restore-kind]')).toHaveCount(0);
+ await expect(panel.getByRole('status').first()).toContainText('0 of the');
 });
