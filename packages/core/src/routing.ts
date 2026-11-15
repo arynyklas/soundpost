@@ -7,7 +7,7 @@ import {object,text} from './wire.ts';
 export const kinds=['metric','log','span','error','job_attempt','replay_chunk','profile_chunk','capability','loss','condition'] as const;
 const lineSeparators=/[\u2028\u2029]/,encoder=new TextEncoder();
 export function nativeCanonical(value:unknown):string{const out=canonical(value);return lineSeparators.test(out)?out.replace(/\u2028/g,'\\u2028').replace(/\u2029/g,'\\u2029'):out;}
-type BuiltinCrypto={createHash(name:string):{update(data:string,encoding:'utf8'):{digest(encoding:'hex'):string}};hash?(algorithm:string,data:string|Uint8Array,outputEncoding:'hex'):string};
+type BuiltinCrypto={createHash(name:string):{update(data:string,encoding:'utf8'):{digest(encoding:'hex'):string}};hash?:{(algorithm:string,data:string|Uint8Array,outputEncoding:'hex'):string;(algorithm:string,data:string|Uint8Array,outputEncoding:'buffer'):Uint8Array}};
 interface NodeHost {readonly versions?:{readonly node?:string};getBuiltinModule?(id:string):unknown}
 function isBuiltinCrypto(value:unknown):value is BuiltinCrypto{return typeof value==='object'&&value!==null&&'createHash' in value&&typeof value.createHash==='function';}
 /** The runtime's native SHA-256 when this is Node or Bun: the pure-JS hash runs its 64 rounds in JavaScript, which is far slower than a native call while the code is still cold. Same digest either way. */
@@ -24,7 +24,7 @@ export function hashBytes(value:string):string{
 }
 /** Byte 7 of SHA-256(input) modulo 64: the route slot of a routing input. */
 export function routeSlot(input:Uint8Array):number{
- if(nativeCrypto?.hash)return Number.parseInt(nativeCrypto.hash('sha256',input,'hex').slice(14,16),16)%64;
+ if(nativeCrypto?.hash)return nativeCrypto.hash('sha256',input,'buffer')[7]!%64;
  return sha256(input)[7]!%64;
 }
 const validated=new WeakSet<RoutingDescriptor>();

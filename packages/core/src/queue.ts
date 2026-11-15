@@ -11,6 +11,7 @@ export type Entry={text:string;wire:string;wireBytes:number;size:number;at:numbe
 export type BatchState={batch:FrozenBatch;ambiguous:boolean;attempt:number;next:number;rank:number};
 type LossBucket={epoch:string;signal:string;reason:string;revision:string;observed:bigint;acked:bigint;unbatched:bigint;start:string|null;end:string|null;at:number;wall:number};
 export function retryDelay(attempt:number,random:()=>number=Math.random):number{const cap=Math.min(30000,250*2**Math.min(attempt,7));return Math.max(250,Math.min(30000,cap*(.5+.5*Math.max(0,Math.min(1,random())))));}
+const routeEncoder=new TextEncoder();
 const id=():string=>randomHex(16);
 export const priority=(kind:string):number=>{switch(kind){case 'error':case 'condition':case 'capability':case 'loss':case 'job_attempt':return 2;case 'log':return 1;default:return 0;}};
 // The fixed parts of a span record's serialization (id, kind and observed_at_ns before the payload, the resource after it), whose lengths the lean path adds up instead of building the text.
@@ -40,9 +41,9 @@ export class DeliveryQueue {
   const org=new TextEncoder().encode(this.descriptor.org),project=new TextEncoder().encode(this.descriptor.project),kind=new TextEncoder().encode("span");
   this.spanRoute=new Uint8Array(16+org.length+project.length+kind.length+32);const view=new DataView(this.spanRoute.buffer);let at=0;
   for(const part of [org,project,kind]){view.setUint32(at,part.length,false);at+=4;this.spanRoute.set(part,at);at+=part.length;}
-  view.setUint32(at,32,false);this.spanRouteAt=at+4;
+  view.setUint32(at,32,false);this.spanRouteAt=at+4;this.spanRouteTail=this.spanRoute.subarray(this.spanRouteAt);
  }
- protected readonly resourceText:string;protected readonly resourceBytes:number;protected readonly spanRoute:Uint8Array;protected readonly spanRouteAt:number;
+ protected readonly resourceText:string;protected readonly resourceBytes:number;protected readonly spanRoute:Uint8Array;protected readonly spanRouteAt:number;protected readonly spanRouteTail:Uint8Array;
  /** True only in SpoolingDeliveryQueue (queue_spool.ts), which carries the persistence and recovery code. */
  protected spoolSupported():boolean{return false;}
  persist():Promise<void>{return Promise.resolve();}
@@ -58,7 +59,7 @@ export class DeliveryQueue {
   const span=entry.lazy;if(span===undefined)return;entry.lazy=undefined;
   const head='{"id":"'+id()+LEAN_KIND+span.startWall+'","payload":'+leanSpanPayload(span);
   entry.text=head+',"policy_revision":"'+this.descriptor.policy_revision+'"}';entry.wire=head+RESOURCE_OPEN+this.resourceText+'}';
-  const route=this.spanRoute,traceId=span.context.traceId;for(let at=0;at<32;at++)route[this.spanRouteAt+at]=traceId.charCodeAt(at);
+  const route=this.spanRoute;routeEncoder.encodeInto(span.context.traceId,this.spanRouteTail);
   entry.slot=routeSlot(route);
   const bytes=head.length+RESOURCE_OPEN.length+this.resourceBytes+1;
   if(bytes!==entry.wireBytes){const size=bytes+512;this.bytes+=size-entry.size;entry.size=size;entry.wireBytes=bytes;this.loss("span_size_mismatch");}

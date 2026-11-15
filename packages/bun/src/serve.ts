@@ -4,6 +4,8 @@ import type {Client} from "@soundpost/core";
 import {parsePropagation} from "./workers.ts";
 export interface ServeIntegrationConfig {readonly operation:string}
 export type ServeHandler=(request:Request,server:Bun.Server<any>)=>Response|void|Promise<Response|void>;
+// D31: Bun reports a body it already holds in memory (string, ArrayBuffer/typed array, Blob, FormData, URLSearchParams, Bun.file) in its Response summary as "Response (N bytes)" or "Response (N.NN KB|MB|GB)" (one or two decimals); a stream, an already-used or touched body and Response.error() report "(0 KB)". Reading `.body` would create a stream and defeat Bun's native buffered send, so the summary is the probe; anything not recognised is treated as streaming and wrapped.
+const bufferedSummary=/^Response \((?:\d+ bytes|\d+\.\d+ (?:KB|MB|GB|TB))\)/;
 const installed=new WeakMap<Client,ServeLease>();
 export class ServeLease {
  private closed=false;private readonly pending=new Set<()=>void>();private readonly operation:string;
@@ -18,7 +20,8 @@ export class ServeLease {
    const response=(value:Response|void):Response|void=>{
     if(!value){end("incomplete");return value;}
     const status=value.status>=400?"error":"ok";
-    if(!value.body||request.method==="HEAD"){end(status);return value;}
+    if(request.method==="HEAD"||bufferedSummary.test(Bun.inspect(value,{depth:0,colors:false}))){end(status);return value;}
+    if(!value.body){end(status);return value;}
     if(value.status===0||value.body.locked){end("incomplete");return value;}
     const reader=value.body.getReader(),client=this.client;
     // One pull at a time; no body bytes enter telemetry, no eager body materialization.

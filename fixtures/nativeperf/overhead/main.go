@@ -125,7 +125,7 @@ func main() {
 	seconds := flag.Int("seconds", 120, "seconds per run")
 	repeats := flag.Int("repeats", 5, "baseline/capture pairs")
 	workload := flag.String("workload", "fixtures/nativeperf/acceptance/workloads", "compiled workloads binary")
-	fixtures := flag.String("fixtures", "cpu", "comma separated workload modes to measure (cpu, fanout)")
+	fixtures := flag.String("fixtures", "cpu", "comma separated workload modes to measure (cpu, fanout, fanout64, fanout256)")
 	out := flag.String("out", "", "write the JSON report here instead of stdout")
 	flag.Parse()
 	if *hz != 99 || *seconds < 3 || *repeats < 1 || flag.NArg() != 0 {
@@ -152,7 +152,7 @@ func main() {
 	ok := true
 	for _, name := range strings.Split(*fixtures, ",") {
 		name = strings.TrimSpace(name)
-		if name != "cpu" && name != "fanout" {
+		if name != "cpu" && name != "fanout" && name != "fanout64" && name != "fanout256" {
 			fmt.Fprintln(os.Stderr, "usage: unknown fixture", name)
 			os.Exit(qual.ExitUsage)
 		}

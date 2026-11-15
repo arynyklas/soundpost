@@ -128,7 +128,7 @@ func openSchedulerRing(cpu uint32, l NumericLayout, c Config) (*Ring, error) {
 	r.meta = mapping[:os.Getpagesize()]
 	offset := *(*uint64)(unsafe.Pointer(&mapping[1040]))
 	size := *(*uint64)(unsafe.Pointer(&mapping[1048]))
-	if offset != uint64(os.Getpagesize()) || size != c.RingBytes {
+	if !ringLayoutOK(offset, size, len(mapping), os.Getpagesize(), c.RingBytes) {
 		r.Close()
 		return nil, ErrRingMalformed
 	}

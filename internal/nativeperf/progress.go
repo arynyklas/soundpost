@@ -26,7 +26,7 @@ type AcquisitionItem struct {
 }
 
 func (p AcquisitionProof) valid() bool {
-	if !p.Domain.valid() || len(p.CPUs) == 0 || len(p.CPUs) > 256 {
+	if !p.Domain.valid() || len(p.CPUs) == 0 || len(p.CPUs) > 256 || p.Through == 0 {
 		return false
 	}
 	for i, cpu := range p.CPUs {

@@ -1,7 +1,7 @@
 // Copyright 2026 Aryn Yklas
 // SPDX-License-Identifier: Apache-2.0
 import {test,expect} from "bun:test";
-import {createServer,request as nativeRequest,type Server,type ClientRequest} from "node:http";
+import {createServer,request as nativeRequest,type Server,type ClientRequest,type IncomingMessage,type ServerResponse} from "node:http";
 import {once} from "node:events";
 import {createRequire} from "node:module";
 import {init,type Client} from "../src/index.ts";
@@ -65,3 +65,39 @@ test("HTTP wrapper keeps application headers for Headers, array and object input
    expect(await call((input,options)=>lease.request(input,options as never),registered,make()),name).toBe("ok");const observed=seen.pop()!;expect(observed["x-app"],name).toBe("kept");expect(observed.authorization,name).toBe("Bearer a");expect(observed.traceparent,name).toMatch(/^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/);
   }}finally{lease.close();server.closeAllConnections();server.close();await client.close();}
 });
+// The server listener ends a request's span from the response `close` (status from writableFinished and the status code) or the request `aborted`: no `finish` listener, cancellation on a lost connection, `incomplete` on lease close.
+test("HTTP server listener ends the span from one close listener with the right status",async()=>{
+ const client=init(settings()),lease=installHttp(client,{operation:"request"});
+ const seen:Record<string,number[]>={},closed:PromiseWithResolvers<void>[]=[];
+ const route=(label:string,request:IncomingMessage,response:ServerResponse)=>{
+  seen[label]=[response.listenerCount("finish"),response.listenerCount("close"),request.listenerCount("aborted")];
+  // The lease's listeners were added first, so when this one runs the span has ended. A lost connection is awaited through the request's `aborted` (Bun's node:http emits no response `close` for it).
+  if(label==="wrapped"){const gate=Promise.withResolvers<void>();closed.push(gate);if(request.url==="/hang")request.once("aborted",gate.resolve);else response.once("close",gate.resolve);}
+  if(request.url==="/ok")response.end("fine");
+  else if(request.url==="/fail"){response.statusCode=500;response.end("failed");}
+  else response.write("partial");// /hang: headers and a first chunk, never finished
+ };
+ const plain=createServer((request,response)=>route("plain",request,response)),wrapped=createServer(lease.listener((request,response)=>route("wrapped",request,response)));
+ const plainOrigin=await listening(plain),wrappedOrigin=await listening(wrapped);
+ try{
+  expect(await (await fetch(plainOrigin+"/ok")).text()).toBe("fine");
+  expect(await (await fetch(wrappedOrigin+"/ok")).text()).toBe("fine");
+  expect(seen.wrapped![0],"finish listeners").toBe(seen.plain![0]);
+  expect(seen.wrapped![1],"close listeners").toBe(seen.plain![1]!+1);
+  expect(seen.wrapped![2],"aborted listeners").toBe(seen.plain![2]!+1);
+  await closed[0]!.promise;expect(spans(client).map(s=>s.status)).toEqual(["ok"]);
+  expect((await fetch(wrappedOrigin+"/fail")).status).toBe(500);
+  await closed[1]!.promise;expect(spans(client).map(s=>s.status)).toEqual(["ok","error"]);
+  // A connection lost before the response finished is cancelled, not ok.
+  const headers=Promise.withResolvers<IncomingMessage>(),call=nativeRequest(wrappedOrigin+"/hang",headers.resolve);call.on("error",()=>{});call.end();
+  const incoming=await headers.promise;incoming.on("error",()=>{});incoming.destroy();call.destroy();
+  await closed[2]!.promise;expect(spans(client).map(s=>s.status)).toEqual(["ok","error","cancelled"]);
+  // Closing the lease ends an in-flight request's span as incomplete and detaches the listener.
+  const held=Promise.withResolvers<IncomingMessage>(),second=nativeRequest(wrappedOrigin+"/hang",held.resolve);second.on("error",()=>{});second.end();
+  const reply=await held.promise;reply.on("error",()=>{});
+  expect(spans(client).length).toBe(3);
+  lease.close();
+  expect(spans(client).map(s=>s.status)).toEqual(["ok","error","cancelled","incomplete"]);
+  reply.destroy();second.destroy();
+ }finally{lease.close();plain.closeAllConnections();wrapped.closeAllConnections();plain.close();wrapped.close();await client.close();}
+},30000);

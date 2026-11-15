@@ -36,7 +36,7 @@ func openThreadCPU(t TaskKey, c Config, method SamplingMethod) (*Ring, error) {
 	// unexpected layout; never interpret metadata pages as sample payload.
 	offset := *(*uint64)(unsafe.Pointer(&mapping[1040]))
 	size := *(*uint64)(unsafe.Pointer(&mapping[1048]))
-	if offset != uint64(os.Getpagesize()) || size != c.RingBytes || offset+size != uint64(length) {
+	if !ringLayoutOK(offset, size, length, os.Getpagesize(), c.RingBytes) {
 		r.Close()
 		return nil, ErrRingMalformed
 	}

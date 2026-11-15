@@ -6,7 +6,7 @@
 // Native profiling acceptance workloads (task 04.09). Build:
 //   cc -O2 -pthread -fno-omit-frame-pointer -g -o fixtures/nativeperf/acceptance/workloads fixtures/nativeperf/acceptance/workloads.c
 // Usage: workloads <mode> <ground-truth-file> <seconds> <nonce>
-// Modes: cpu | nofp | fanout (16 hot threads) | blocking | contend | migrate | exec
+// Modes: cpu | nofp | fanout (16 hot threads) | fanout64 | fanout256 (64 / 256 hot threads, overhead measurement) | blocking | contend | migrate | exec
 //
 // The program creates every thread (and, for the blocking mode, the one foreign
 // waker process) BEFORE it prints "ready <pid>": a capture armed afterwards sees
@@ -180,8 +180,8 @@ static void *thread_main(void *arg) {
 
 /* Worker threads are created BEFORE the ready line, so a capture armed after
    ready sees the complete thread set (the helper refuses a thread-set change). */
-static pthread_t pool_th[32];
-static struct worker pool_w[32];
+static pthread_t pool_th[256];
+static struct worker pool_w[256];
 static int pool_n;
 static void spawn_threads(int n, int variant, uint64_t ns, int cpu) {
 	pool_n = n;
@@ -328,6 +328,8 @@ int main(int argc, char **argv) {
 	if (!strcmp(mode_name, "cpu")) spawn_threads(1, 0, ns, -1);
 	else if (!strcmp(mode_name, "nofp")) spawn_threads(1, 1, ns, -1);
 	else if (!strcmp(mode_name, "fanout")) spawn_threads(16, 0, ns, -1);
+	else if (!strcmp(mode_name, "fanout64")) { expect_hot = 0; spawn_threads(64, 0, ns, -1); } /* oversubscribed on any realistic host: threads time-share, so the 80 percent on-CPU assertion does not apply */
+	else if (!strcmp(mode_name, "fanout256")) { expect_hot = 0; spawn_threads(256, 0, ns, -1); }
 	else if (!strcmp(mode_name, "contend")) {
 		cpu_set_t all;
 		sched_getaffinity(0, sizeof all, &all);

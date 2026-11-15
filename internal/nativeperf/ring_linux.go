@@ -106,3 +106,8 @@ func drainRing(r *Ring, emit func(SanitizedEvent) error) error {
 		return emit(event)
 	})
 }
+
+// ringLayoutOK is the mmap layout the kernel must report for a perf ring: the data area starts exactly one page in, has exactly the requested size and ends exactly at the mapping's end (the metadata page is never read as payload).
+func ringLayoutOK(offset, size uint64, mappingBytes, page int, ringBytes uint64) bool {
+	return offset == uint64(page) && size == ringBytes && offset+size == uint64(mappingBytes)
+}

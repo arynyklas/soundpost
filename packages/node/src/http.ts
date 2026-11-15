@@ -18,12 +18,13 @@ export class HttpLease {
   return function(this:unknown,request:IncomingMessage,response:ServerResponse):void{
    if(lease.closed){Reflect.apply(handler,this,[request,response]);return;}
    const parent=requestPropagation(request),span=lease.client.startAdapterSpan(lease.operation,"server",undefined,parent??null);
+   // `close` decides the status on completion and (Node) on connection loss; a runtime whose ServerResponse does not emit `close` for an aborted connection (Bun's node:http) still reports it through the request's `aborted`. The pending set holds `end` itself: three closures per request, no `finish` listener, no listener removal on the normal path.
    let ended=false;
-   const cleanup=():void=>{response.removeListener("finish",finish);response.removeListener("close",close);request.removeListener("aborted",cancel);lease.pending.delete(incomplete);};
-   const end=(status:"ok"|"error"|"cancelled"|"incomplete"):void=>{if(ended)return;ended=true;cleanup();span.end(status);};
-   const finish=():void=>end(response.statusCode>=400?"error":"ok"),close=():void=>end(response.writableFinished?(response.statusCode>=400?"error":"ok"):"cancelled"),cancel=():void=>end("cancelled"),incomplete=():void=>end("incomplete");
+   const end=(status:"ok"|"error"|"cancelled"|"incomplete"="incomplete"):void=>{if(ended)return;ended=true;response.removeListener("close",close);request.removeListener("aborted",cancel);lease.pending.delete(end);span.end(status);};
+   const close=():void=>{if(ended)return;ended=true;request.removeListener("aborted",cancel);lease.pending.delete(end);span.end(response.writableFinished?(response.statusCode>=400?"error":"ok"):"cancelled");};
+   const cancel=():void=>end("cancelled");
    if(lease.pending.size>=1024){span.end("incomplete");Reflect.apply(handler,this,[request,response]);return;}
-   lease.pending.add(incomplete);response.once("finish",finish);response.once("close",close);request.once("aborted",cancel);
+   lease.pending.add(end);response.once("close",close);request.once("aborted",cancel);
    try{span.run(()=>Reflect.apply(handler,this,[request,response]));}catch(error){span.run(()=>lease.client.captureException(error));end("error");throw error;}
    // Do not attach promise rejection/error listeners: native HTTP ignores the return
    // value, and observing it here would change the application's fatal behavior.

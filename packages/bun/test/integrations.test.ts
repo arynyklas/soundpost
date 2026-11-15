@@ -1,6 +1,7 @@
 // Copyright 2026 Aryn Yklas
 // SPDX-License-Identifier: Apache-2.0
 import {test,expect} from "bun:test";
+import type {Client} from "@soundpost/core";
 import {createRequire} from "node:module";
 import {once} from "node:events";
 import {createServer,request as nativeRequest,type ClientRequest} from "node:http";
@@ -50,3 +51,71 @@ test("HTTP wrapper keeps application headers for Headers, array and object input
    expect(await call((input,options)=>lease.request(input,options as never),registered,make()),name).toBe("ok");const observed=seen.pop()!;expect(observed["x-app"],name).toBe("kept");expect(observed.authorization,name).toBe("Bearer a");expect(observed.traceparent,name).toMatch(/^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/);
   }}finally{lease.close();server.closeAllConnections();server.close();await client.close();}
 });
+// D31: a fully buffered Response ends the server span when it is returned and is handed back unchanged; a streaming body is still wrapped and ends the span on completion, error or cancellation.
+const spansOf=(client:Client)=>client.bufferedRecords().map(text=>JSON.parse(text)).filter(record=>record.kind==="span");
+const request=()=>new Request("https://fixture.invalid");
+test("D31 a fully buffered Response ends the server span at return and is not re-wrapped",async()=>{
+ const bodies:Array<[string,()=>Response,number]>=[
+  ["string",()=>new Response("hello"),5],
+  ["Uint8Array",()=>new Response(new Uint8Array(7)),7],
+  ["ArrayBuffer",()=>new Response(new ArrayBuffer(9)),9],
+  ["Blob",()=>new Response(new Blob(["blob"])),4],
+  ["FormData",()=>{const form=new FormData();form.set("a","1");return new Response(form);},-1],
+  ["URLSearchParams",()=>new Response(new URLSearchParams("a=1&b=2")),7],
+  ["5000 byte string",()=>new Response("x".repeat(5000)),5000],
+  ["3 MiB Uint8Array",()=>new Response(new Uint8Array(3<<20)),3<<20],
+  ["JSON",()=>Response.json({a:1}),7],
+  ["500 status",()=>new Response("failure",{status:500}),7],
+ ];
+ const client=init(settings());
+ try{
+  for(const [name,make,length] of bodies)for(const asynchronous of [false,true]){
+   const lease=installServe(client,{operation:"request"}),before=spansOf(client).length;
+   try{
+    const original=make(),handler=lease.handler(()=>asynchronous?Promise.resolve(original):original);
+    const returned=handler(request(),undefined as never);
+    const result=asynchronous?await returned:returned;
+    expect(result,name).toBe(original);
+    const spans=spansOf(client);
+    expect(spans.length-before,name).toBe(1);
+    expect(spans.at(-1).payload.status,name).toBe(original.status>=400?"error":"ok");
+    // The body was never touched: Bun still reports the in-memory size, and the whole body is readable afterwards.
+    expect(Bun.inspect(original,{depth:0,colors:false}),name).toMatch(/^Response \((?:\d+ bytes|\d+\.\d+ (?:KB|MB|GB))\)/);
+    const bytes=(await original.arrayBuffer()).byteLength;
+    if(length>=0)expect(bytes,name).toBe(length);else expect(bytes,name).toBeGreaterThan(0);
+   }finally{lease.close();}
+  }
+ }finally{await client.close();}
+},30000);
+test("D31 streaming and unknown bodies stay wrapped and end the span on completion, error or cancellation",async()=>{
+ const encoder=new TextEncoder();
+ const bodies:Array<[string,()=>Response]>=[
+  ["ReadableStream",()=>new Response(new ReadableStream({pull(controller){controller.enqueue(encoder.encode("chunk"));controller.close();}},{highWaterMark:0}))],
+  ["async generator",()=>new Response((async function*(){yield "chunk";})() as never)],
+  ["body touched by the handler",()=>{const touched=new Response("chunk");void touched.body;return touched;}],
+ ];
+ const client=init(settings());
+ try{
+  for(const [name,make] of bodies){
+   const lease=installServe(client,{operation:"request"}),before=spansOf(client).length;
+   try{
+    const original=make(),result=lease.handler(()=>original)(request(),undefined as never);
+    if(!result||result instanceof Promise)throw Error("fixture_response_missing");
+    expect(result,name).not.toBe(original);
+    expect(spansOf(client).length-before,name).toBe(0);
+    expect(await result.text(),name).toBe("chunk");
+    const spans=spansOf(client);expect(spans.length-before,name).toBe(1);expect(spans.at(-1).payload.status,name).toBe("ok");
+   }finally{lease.close();}
+  }
+  const lease=installServe(client,{operation:"request"}),before=spansOf(client).length;let cancelled=false;
+  try{
+   const original=new Response(new ReadableStream({pull(controller){controller.enqueue(encoder.encode("chunk"));},cancel(){cancelled=true;}},{highWaterMark:0}));
+   const result=lease.handler(()=>original)(request(),undefined as never);
+   if(!result||result instanceof Promise)throw Error("fixture_response_missing");
+   expect(spansOf(client).length-before).toBe(0);
+   const reader=result.body!.getReader();await reader.read();expect(spansOf(client).length-before).toBe(0);
+   await reader.cancel();expect(cancelled).toBe(true);
+   const spans=spansOf(client);expect(spans.length-before).toBe(1);expect(spans.at(-1).payload.status).toBe("cancelled");
+  }finally{lease.close();}
+ }finally{await client.close();}
+},30000);
