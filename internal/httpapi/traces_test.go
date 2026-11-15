@@ -239,8 +239,10 @@ func deepChain(trace model.ID, n int) []model.Span {
 type fakeScanner struct {
 	req       storage.ScanRequest  // the span scan
 	loss      *storage.ScanRequest // the loss scan, when one was made
+	errs      *storage.ScanRequest // the error scan, when one was made
 	pages     []storage.Page       // served for the span scan
 	lossPages []storage.Page       // served for the loss scan
+	errPages  []storage.Page       // served for the error scan
 	err       error
 	scope     auth.Scope
 }
@@ -265,6 +267,10 @@ func (f *fakeScanner) Scan(_ context.Context, scope auth.Scope, req storage.Scan
 	if req.Signal == model.Loss {
 		f.loss = &req
 		return &fakeRows{pages: f.lossPages}, nil
+	}
+	if req.Signal == model.ErrorKind {
+		f.errs = &req
+		return &fakeRows{pages: f.errPages}, nil
 	}
 	f.req = req
 	if f.err != nil {

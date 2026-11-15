@@ -9,6 +9,7 @@ import { OrganizationSettings } from './OrganizationSettings';
 import { RestorePanel } from '../auth/RestorePanel';
 import { SessionContext } from '../auth/ElevationDialog';
 import { PolicySettings } from './PolicySettings';
+import { DestinationSettings } from './DestinationSettings';
 import { SourcePolicies } from './SourcePolicies';
 import { SSOSettings } from './SSOSettings';
 import { TeamSettings } from './TeamSettings';
@@ -90,9 +91,9 @@ function OperationPanel(props: { context: ViewContext }): React.JSX.Element {
  );
 }
 
-export type SettingsTab = 'project' | 'organization' | 'teams' | 'sources' | 'sso';
+export type SettingsTab = 'project' | 'organization' | 'teams' | 'sources' | 'sso' | 'destinations';
 export const SETTINGS_TABS: readonly { id: SettingsTab; label: string }[] = [
- { id: 'project', label: 'Project' }, { id: 'organization', label: 'Organization' }, { id: 'teams', label: 'Teams' }, { id: 'sources', label: 'Source policies' }, { id: 'sso', label: 'Single sign-on' },
+ { id: 'project', label: 'Project' }, { id: 'organization', label: 'Organization' }, { id: 'teams', label: 'Teams' }, { id: 'sources', label: 'Source policies' }, { id: 'sso', label: 'Single sign-on' }, { id: 'destinations', label: 'Destinations' },
 ];
 
 function ProjectTab(props: { context: ViewContext }): React.JSX.Element {
@@ -156,6 +157,7 @@ export function ProjectSettings(props: { context: ViewContext }): React.JSX.Elem
    {tab === 'teams' && <TeamSettings context={c} />}
    {tab === 'sources' && <SourcePolicies context={c} />}
    {tab === 'sso' && <SSOSettings context={c} />}
+   {tab === 'destinations' && <DestinationSettings context={c} />}
   </section>
  );
 }

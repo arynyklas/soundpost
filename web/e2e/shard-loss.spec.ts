@@ -188,14 +188,13 @@ test('shards removed under an open live view: the stream ends with a stated erro
  for(let i=0;i<3;i++)await ingestLog(api,logSource,{at:at(i+1),name:`user${i}`});
  await expect(rowsOf(page)).toHaveCount(3);
  expect(await removeShards(Array.from({length:32},(_,i)=>i))).toBe(32);
- // Nothing is committed after the removal: the stream has to notice the missing shard by itself, within its idle fence (10 s).
- // The stream must end visibly: with the server's own stated error, or (when the server closes without delivering a final event) as a lost connection. Never as a silent "connected".
- const end=page.locator('[data-end="error"],[data-end="interrupted"]');
+ // Nothing is committed after the removal: the stream has to notice the missing shard by itself, within its idle fence (10 s),
+ // and the server must say so with its own terminal error event before it closes (never as a lost connection, never as a silent "connected").
+ const end=page.locator('[data-end="error"]');
  await expect(end).toBeVisible({timeout:40_000});
- if(await end.getAttribute('data-end')==='error'){
-  await expect(end).toHaveAttribute('data-reason','feed_error');
-  await expect(end).toContainText('this is not a complete tail');
- }else await expect(end).toContainText('The connection ended without a final event.');
+ await expect(end).toHaveAttribute('data-reason','feed_error');
+ await expect(end).toContainText('this is not a complete tail');
+ await expect(page.locator('[data-end="interrupted"]')).toHaveCount(0);
  await expect(page.getByTestId('live-status')).toHaveText('Ended.');
  await expect(rowsOf(page)).toHaveCount(3);
  await page.getByRole('button',{name:'Start a new live view',exact:true}).click();

@@ -1,7 +1,7 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
 // Pure view mapping for the trace page. Every limit of the analysis is turned into a sentence here, so no state of a trace
 // is carried by colour or position alone. Nanoseconds are decimal strings on the wire and BigInt here, never `number`.
-import { ApiFault, type DurationBounds, type Id, type PathResult, type ProducerGap, type PathSegment, type SpanId, type SpanReport, type TraceView, type ViewState } from '../api/types';
+import { ApiFault, type DurationBounds, type Id, type PathResult, type ProducerGap, type PathSegment, type SpanId, type SpanReport, type SpanTarget, type TraceView, type ViewState } from '../api/types';
 
 const ID32 = /^[0-9a-f]{32}$/;
 const ID16 = /^[0-9a-f]{16}$/;
@@ -11,6 +11,8 @@ const STATES: readonly ViewState[] = ['ready', 'empty', 'incomplete', 'stale', '
 const BASES = ['same_domain_monotonic', 'wall_clock_with_uncertainty'];
 const FLAGS = ['open', 'end_before_start', 'cross_domain_duration', 'dependency_boundary', 'cancelled', 'incomplete', 'async', 'duplicate_id', 'in_cycle', 'orphan', 'late'];
 const EDGE_KINDS = ['missing_parent', 'parent_ambiguous', 'parent_in_cycle', 'cycle', 'duplicate_span_id', 'multiple_roots', 'no_root', 'sequential_order_uncertain', 'critical_branch_ambiguous', 'link_unresolved', 'link_foreign_trace'];
+const TARGET_KINDS = ['job', 'replay', 'profile', 'error'];
+const TARGET_RELATIONS = ['explicit', 'time_overlap_inference'];
 /** Bounds on what a page renders; the server caps the trace at the same order of magnitude. */
 export const MAX_RENDER_SPANS = 100_000;
 const MAX_TEXT = 256;
@@ -36,11 +38,15 @@ export function parseTraceView(raw: unknown, want: { org: Id; project: Id; trace
  // ready always carries a path; empty and not_available never do; a partial or stale read may or may not have spans to analyze.
  if ((raw.state === 'ready' && !hasPath) || ((raw.state === 'empty' || raw.state === 'not_available') && hasPath)) return bad();
  if (raw.reason !== undefined && (typeof raw.reason !== 'string' || !CODE.test(raw.reason))) return bad();
- if (hasPath) parsePath(raw.path, want.trace);
+ const ids = hasPath ? parsePath(raw.path, want.trace) : new Set<string>();
+ if (raw.targets !== undefined) {
+  if (!hasPath || !list(raw.targets, 128)) return bad();
+  for (const t of raw.targets) if (!isRec(t) || !spanId(t.span_id) || !ids.has(t.span_id) || !TARGET_KINDS.includes(t.kind as string) || typeof t.id !== 'string' || !ID32.test(t.id) || !TARGET_RELATIONS.includes(t.relation as string) || typeof t.available !== 'boolean') return bad();
+ }
  return raw as unknown as TraceView;
 }
 
-function parsePath(raw: unknown, trace: Id): void {
+function parsePath(raw: unknown, trace: Id): Set<string> {
  if (!isRec(raw) || raw.trace_id !== trace || !ID32.test(trace) || !list(raw.spans) || raw.span_count !== (raw.spans as unknown[]).length) return bad();
  if (!list(raw.trees) || !list(raw.edges) || !list(raw.clock_issues) || !list(raw.late_spans) || !list(raw.producer_gaps, 100) || !list(raw.reasons, 64) || !boundsOk(raw.observed) || typeof raw.complete !== 'boolean' || typeof raw.unlike_clock_domains !== 'boolean' || !dec(raw.max_uncertainty_ns)) return bad();
  const ids = new Set<string>();
@@ -64,6 +70,12 @@ function parsePath(raw: unknown, trace: Id): void {
  if (!(raw.reasons as unknown[]).every((r) => typeof r === 'string' && CODE.test(r))) return bad();
  const s = raw.sampling;
  if (!isRec(s) || typeof s.kept !== 'number' || typeof s.dropped !== 'number' || typeof s.min_probability !== 'number' || typeof s.sampled !== 'boolean' || typeof s.invalid_probability !== 'number') return bad();
+ return ids;
+}
+
+/** The references of one span that the server resolved, in the server's order. */
+export function targetsOf(targets: readonly SpanTarget[] | undefined, span: SpanId, kind: SpanTarget['kind']): SpanTarget[] {
+ return targets?.filter((t) => t.span_id === span && t.kind === kind) ?? [];
 }
 
 // ---- durations ---------------------------------------------------------------------------------------------------

@@ -259,7 +259,7 @@ func openWith(dir string, options *replicationOptions, meter storage.DiskMeter, 
 	// sandbox configuration (ConfigureSymbolicator) every frame answers the typed
 	// sandbox_unavailable reason with its original frame kept.
 	evidence := httpapi.NewEvidence(sandboxUnavailable{}, r, r)
-	traces := httpapi.NewTraces(httpapi.NewStorageSpanSource(engine))
+	traces := httpapi.NewTraces(httpapi.NewStorageSpanSource(engine)).WithLinks(resolver)
 	out := &App{Control: c, Auth: a, Storage: engine, Ingest: i, Releases: r, Artifacts: artifactService, ArtifactLifecycle: artifactLifecycle, Cache: cache, Exports: exportService, Retention: ret, Query: queryEngine, Live: liveService, Investigator: investigator, Incidents: incidentService, Jobs: jobService, Actions: actions, Policies: policies, Evidence: evidence, Traces: traces, Replays: httpapi.NewReplays(replayService)}
 	if e = out.BindIssueActions(); e != nil {
 		return fail(e)

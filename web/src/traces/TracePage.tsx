@@ -1,7 +1,7 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
 import * as React from 'react';
 import { getTrace } from '../api/client';
-import type { Id, SpanId, SpanReport, TraceView } from '../api/types';
+import type { Id, SpanId, SpanReport, SpanTarget, TraceView } from '../api/types';
 import { encodeHash, formatNs, scopeKey, type ViewContext } from '../app/context';
 import { StatusPanel } from '../app/StatusPanel';
 import { EvidenceSections } from '../evidence/Sections';
@@ -20,13 +20,23 @@ export function TracePage(props: { id: Id; project: Id; context: ViewContext }):
   const w = exploreWindow(span);
   return encodeHash({ ...context, start: w.start, end: w.end }, 'explore');
  };
+ // Jobs, replays and profiles open in their own view, which checks the scope again; an error occurrence is opened from its issue.
+ const targetHref = (target: SpanTarget): string | null => {
+  const ref = { project, id: target.id };
+  switch (target.kind) {
+   case 'job': return encodeHash(context, 'jobs', '', null, ref);
+   case 'replay': return encodeHash(context, 'replays', '', null, ref);
+   case 'profile': return encodeHash(context, 'profiles', '', null, ref);
+   case 'error': return null;
+  }
+ };
  return (
   <section className="panel" aria-labelledby="trace-heading">
    <h2 id="trace-heading">Trace <code>{id}</code></h2>
    <p>Spans are read from {formatNs(context.start, context.timezone)} to {formatNs(context.end, context.timezone)} ({context.timezone}). A span outside this window or outside your access is not shown, and its absence is not proof that no work happened.</p>
    <StatusPanel state={evidence.state} />
    {view && <EvidenceSections sections={view.sections} />}
-   {view?.path && <CriticalPath path={view.path} partial={view.partial} selectedSpan={selected?.key === key ? selected.span : null} onSelect={(span) => setSelected({ key, span })} exploreHref={exploreHref} />}
+   {view?.path && <CriticalPath path={view.path} partial={view.partial} selectedSpan={selected?.key === key ? selected.span : null} onSelect={(span) => setSelected({ key, span })} exploreHref={exploreHref} targets={view.targets} targetHref={targetHref} />}
   </section>
  );
 }

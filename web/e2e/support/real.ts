@@ -250,11 +250,11 @@ export async function ingestJobAttempt(request:APIRequestContext,s:Source,e:JobA
 export function onboardErrorSource(page:Page,org:string,project:string):Promise<Source>{
  return onboard(page,org,project,{kinds:['error'],templates:[],labels:{},operations:[]});
 }
-export interface ErrorInput{at:Ns;class?:string;handled?:boolean;fatal?:boolean;/** a registered release this occurrence ran in (known ancestry) */release?:string}
+export interface ErrorInput{at:Ns;class?:string;handled?:boolean;fatal?:boolean;/** a registered release this occurrence ran in (known ancestry) */release?:string;/** the trace and span this occurrence was recorded in */trace?:string;span?:string}
 /** One frameless error occurrence as its own real batch; returns its occurrence ID. The issue producer groups it by class and mechanism. */
 export async function ingestError(request:APIRequestContext,s:Source,e:ErrorInput):Promise<string>{
  const occurrence=id();
- const payload:Record<string,unknown>={occurrence_id:occurrence,exception_class:e.class??'E2eFailure',mechanism:'manual',frames:[],code:null,build_id:s.build,handled:e.handled??false,fatal:e.fatal??true,...(e.release?{release_id:e.release}:{})};
+ const payload:Record<string,unknown>={occurrence_id:occurrence,exception_class:e.class??'E2eFailure',mechanism:'manual',frames:[],code:null,build_id:s.build,handled:e.handled??false,fatal:e.fatal??true,...(e.release?{release_id:e.release}:{}),...(e.trace?{trace_id:e.trace}:{}),...(e.span?{span_id:e.span}:{})};
  await ingestBatch(request,s,[{id:id(),kind:'error',observed_at_ns:ns(e.at),resource:resourceWire(s),payload}]);
  return occurrence;
 }

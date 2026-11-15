@@ -1,6 +1,7 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
 import {test,expect,request as pwRequest,type APIRequestContext,type BrowserContext,type Locator,type Page} from '@playwright/test';
-import {at,createOrg,createProject,createReader,id,login,owner,spanId,type Reader} from './support/real';
+import {at,createOrg,createProject,createReader,id,ingestError,ingestJobAttempt,login,onboardErrorSource,onboardJobSource,owner,spanId,type Reader} from './support/real';
+import {NATIVE_PROFILE,onboardReplaySource,seedProfiles,seedReplays,setPermissions} from './support/replay';
 import {ANCHOR,domain,ingestSpanLoss,ingestTrace,onboardSpanSource,seedTraces,type TraceSeed} from './support/trace';
 // Real server, real Chrome. Every span below was admitted through the real ingest route with a real source credential and is
 // read back through the real POST /api/v1/traces/view route (the real storage scan) by a real reader holding telemetry.read
@@ -196,4 +197,72 @@ test('a span reported long after it ended and a loss its producer reported are l
  const clean=await open(seed.clean.trace);
  await expect(clean.getByTestId('producer-gaps')).toHaveCount(0);
  await expect(clean.getByTestId('late-spans')).toHaveCount(0);
+});
+
+test('a selected span links to its job, replay, profile and error through the server\'s authorized resolution: an anchor opens the target, one outside the reader\'s grants is one generic sentence',async({browser})=>{
+ test.setTimeout(240_000);
+ // Real records of every kind, each admitted through the real ingest route by a source of its own.
+ const spans=await onboardSpanSource(owners,org,p1);
+ const jobs=await onboardJobSource(owners,org,p1);
+ const errors=await onboardErrorSource(owners,org,p1);
+ const replaySource=await onboardReplaySource(owners,org,p1);
+ const replays=await seedReplays(api,replaySource);
+ await seedProfiles(api,replaySource);
+ const job=id(),neverRecorded=id();
+ const recent=String(BigInt(Date.now()-120_000)*1_000_000n);
+ await ingestJobAttempt(api,jobs,{job,run:id(),attempt:id(),occurrence:'trace-link-1',ordinal:1,epoch:id(),sequence:1,state:'succeeded',observed:recent,terminal:recent});
+ const d=domain();
+ const t={trace:id(),root:spanId(),child:spanId(),third:spanId()};
+ await ingestTrace(api,spans,t.trace,[
+  {span:t.root,kind:'server',operation:'op.frontend',startMs:0,endMs:100,domain:d,job},
+  {span:t.child,parent:t.root,kind:'internal',operation:'op.api',startMs:10,endMs:60,domain:d,replay:replays.clean.replay,profile:NATIVE_PROFILE},
+  {span:t.third,parent:t.child,kind:'internal',operation:'op.query',startMs:20,endMs:50,domain:d,job:neverRecorded}, // the only branch: it is on the path, so its button exists
+ ]);
+ const occurrence=await ingestError(api,errors,{at:at(20),trace:t.trace,span:t.child});
+ const selectSpan=async(page:Page,name:string):Promise<Locator>=>{
+  await path(page).getByRole('button',{name}).click();
+  return page.getByTestId('span-details');
+ };
+ const target=(details:Locator,kind:string,available:'yes'|'no'):Locator=>details.locator(`[data-target-kind="${kind}"][data-target-available="${available}"]`);
+
+ // A reader that holds telemetry.read only: the job and the error are theirs to read, the replay and the profile need their own grants.
+ const page=await open(t.trace);
+ let details=await selectSpan(page,'Show details of span op.api, internal, level 2');
+ await expect(target(details,'error','yes')).toContainText(occurrence);
+ await expect(target(details,'error','yes')).toContainText('readable by this account');
+ await expect(target(details,'replay','no')).toContainText('not available to this account.');
+ await expect(target(details,'profile','no')).toContainText('not available to this account.');
+ await expect(details.getByRole('link',{name:/^Open this (replay|profile)$/})).toHaveCount(0);
+ // A job nothing recorded is the same sentence as a target the reader may not read.
+ details=await selectSpan(page,'Show details of span op.query, internal, level 3');
+ await expect(target(details,'job','no')).toContainText('not available to this account.');
+ await expect(details.getByRole('link',{name:'Open this job'})).toHaveCount(0);
+ // The job of the root opens in the Jobs view, which checks the scope again.
+ details=await selectSpan(page,'Show details of span op.frontend, server, level 1');
+ await expect(target(details,'job','yes')).toContainText('Access is checked again when it opens.');
+ await details.getByRole('link',{name:'Open this job'}).click();
+ await expect(page.getByRole('heading',{name:'Jobs',exact:true})).toBeVisible();
+ await expect(page.getByTestId('job-panel')).toHaveAttribute('data-job',job);
+ await page.close();
+
+ // A reader that also holds replay.read and profiles.read: the same references resolve, and each opens in its own view.
+ const rich=await createReader(owners,org,[p1]);
+ await setPermissions(owners,org,rich.id,p1,true,['telemetry.read','replay.read','profiles.read']);
+ const rctx=await browser.newContext();
+ const rp=await rctx.newPage();
+ await login(rp,rich.email,rich.password);
+ await rp.goto(`/${hashFor(t.trace)}`);
+ await expect(rp.getByRole('heading',{name:/^Trace /})).toBeVisible();
+ details=await selectSpan(rp,'Show details of span op.api, internal, level 2');
+ await expect(target(details,'replay','yes')).toContainText(replays.clean.replay);
+ await expect(target(details,'profile','yes')).toContainText(NATIVE_PROFILE);
+ await details.getByRole('link',{name:'Open this replay'}).click();
+ await expect(rp).toHaveURL(new RegExp(`view=replays&target=${p1}%3A${replays.clean.replay}`));
+ await expect(rp.getByRole('heading',{name:/^Replay/i}).first()).toBeVisible();
+ await rp.goBack();
+ await expect(rp.getByRole('heading',{name:/^Trace /})).toBeVisible();
+ details=await selectSpan(rp,'Show details of span op.api, internal, level 2');
+ await details.getByRole('link',{name:'Open this profile'}).click();
+ await expect(rp).toHaveURL(new RegExp(`view=profiles&target=${p1}%3A${NATIVE_PROFILE}`));
+ await rctx.close();
 });

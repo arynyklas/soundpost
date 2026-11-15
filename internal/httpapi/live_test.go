@@ -104,6 +104,12 @@ func (e *liveEnv) admit(s sourceFixture, name string) {
 
 func (e *liveEnv) request(who person, method, path string, body any, headers map[string]string) *http.Request {
 	e.t.Helper()
+	return e.requestOn(e.server, who, method, path, body, headers)
+}
+
+// requestOn builds the request against another server over the same handler.
+func (e *liveEnv) requestOn(srv *httptest.Server, who person, method, path string, body any, headers map[string]string) *http.Request {
+	e.t.Helper()
 	var reader io.Reader
 	if body != nil {
 		raw, err := json.Marshal(body)
@@ -112,7 +118,7 @@ func (e *liveEnv) request(who person, method, path string, body any, headers map
 		}
 		reader = bytes.NewReader(raw)
 	}
-	req, err := http.NewRequest(method, e.server.URL+path, reader)
+	req, err := http.NewRequest(method, srv.URL+path, reader)
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -120,7 +126,7 @@ func (e *liveEnv) request(who person, method, path string, body any, headers map
 		req.Header.Set("Cookie", "__Host-soundpost="+who.Session.Token)
 		req.Header.Set("X-CSRF-Token", who.Session.CSRF)
 	}
-	req.Header.Set("Origin", e.server.URL)
+	req.Header.Set("Origin", srv.URL)
 	req.Header.Set("Content-Type", "application/json")
 	for k, v := range headers {
 		req.Header.Set(k, v)
@@ -173,13 +179,19 @@ type sseConn struct {
 
 func (e *liveEnv) connect(who person, ticket, lastEventID string) (*sseConn, int, []byte) {
 	e.t.Helper()
+	return e.connectOn(e.server, who, ticket, lastEventID)
+}
+
+// connectOn opens the stream on srv with srv's own client (an HTTP/2 server speaks HTTP/2).
+func (e *liveEnv) connectOn(srv *httptest.Server, who person, ticket, lastEventID string) (*sseConn, int, []byte) {
+	e.t.Helper()
 	headers := map[string]string{}
 	if lastEventID != "" {
 		headers["Last-Event-ID"] = lastEventID
 	}
-	req := e.request(who, "GET", "/api/v1/live?ticket="+ticket, nil, headers)
+	req := e.requestOn(srv, who, "GET", "/api/v1/live?ticket="+ticket, nil, headers)
 	ctx, cancel := context.WithCancel(context.Background())
-	resp, err := e.client.Do(req.WithContext(ctx))
+	resp, err := srv.Client().Do(req.WithContext(ctx))
 	if err != nil {
 		cancel()
 		e.t.Fatal(err)

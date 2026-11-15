@@ -181,6 +181,13 @@ func liveParams(r *http.Request) (query.LiveTicketID, *uint64, error) {
 // streamLive writes events as server-sent events until the stream ends, the
 // consumer goes away or a write cannot complete within liveWriteTimeout (a slow
 // reader is dropped, never buffered for).
+//
+// The write deadline is armed only around one write and disarmed as soon as it
+// completed. Under HTTP/2 the deadline is a per-stream timer that resets the stream
+// when it fires even if nothing is being written, so a deadline left armed would
+// kill every stream that is idle (no commit, next heartbeat or terminal frame not
+// yet due) for longer than liveWriteTimeout, and the consumer would never receive
+// the terminal event the server was about to send.
 func streamLive(w http.ResponseWriter, r *http.Request, it query.LiveIterator) {
 	rc := http.NewResponseController(w)
 	_ = rc.SetReadDeadline(time.Time{})
@@ -194,7 +201,11 @@ func streamLive(w http.ResponseWriter, r *http.Request, it query.LiveIterator) {
 		if _, err := w.Write(frame); err != nil {
 			return false
 		}
-		return rc.Flush() == nil
+		if rc.Flush() != nil {
+			return false
+		}
+		_ = rc.SetWriteDeadline(time.Time{})
+		return true
 	}
 	if !write([]byte(": soundpost live\n\n")) {
 		return

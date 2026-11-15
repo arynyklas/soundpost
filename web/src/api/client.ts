@@ -2,7 +2,7 @@
 import { ANCESTRY_ORDERS, ApiFault, COMPLETENESS, EXPORT_PHASES, INVESTIGATION_KINDS, LIVE_EVENT_TYPES, OutcomeUnknown, QUERY_LANGUAGES, QueryFault, VersionConflict, type SavedView, type SavedViewDeleteRequest, type SavedViewRequest, type SavedViewSaveRequest, type QueryLanguage, type ActionRequest, type ActionResponse, type AncestryOrder, type Completeness, type DiscoveryRequest, type DiscoveryResult, type ExemplarRequest, type ExemplarResult, type ExportGrant, type ExportOperation, type ExportPhase, type ExportSignal, type FormatRequest, type FormatResult, type FramesRequest, type FramesView, type Id, type IncidentView, type InvestigationKind, type InvestigationRequest, type InvestigationView, type IssueEvidenceView, type LifecycleOperation, type LiveEvent, type LiveEventType, type LiveTicket, type LiveTicketRequest, type LoadState, type QueryRequest, type QueryResult, type QueueView, type ReleaseView, type SafeFrame, type ViewState, type VisibleSource } from './types';
 import { SseProtocolError, readSse, type SseFrame } from './sse';
 import { parseProfileRegistry, type ProfileInfo } from '../explore/profiles';
-import type { DestinationView, ErrorOccurrenceView, ExceptionChain, IssueActionView, PolicyView, PolicyWriteAnswer, PolicyWriteRequest, RetentionView, TraceView } from './types';
+import type { DestinationSaveRequest, DestinationView, ErrorOccurrenceView, ExceptionChain, IssueActionView, ManagedDestination, PolicyView, PolicyWriteAnswer, PolicyWriteRequest, RetentionView, TraceView } from './types';
 import { parseTraceView } from '../traces/model';
 import { lineSplitter, parseReplayLine, type ReplayLine } from '../replays/model';
 import { parseProfileResponse } from '../profiles/model';
@@ -1159,4 +1159,40 @@ export async function writePolicy(req: PolicyWriteRequest, signal: AbortSignal):
  const raw: unknown = await response.json();
  if (!isRecord(raw) || raw.state !== 'committed' || !decLike(raw.revision)) return badResponse();
  return { state: 'committed', revision: raw.revision, policy: parsePolicyView(raw.policy, { org: req.org, project: req.project_id }) };
+}
+
+// ---- /api/v1/destinations: the organization's notification destinations, versioned (internal/httpapi/destinations.go) ----
+const DESTINATION_CHANNELS: readonly string[] = ['webhook', 'smtp', 'telegram'];
+/** Copies only the fields a destination page shows (a secret or an endpoint path that should never have been sent is not kept). */
+export function parseManagedDestination(raw: unknown): ManagedDestination {
+ if (!isRecord(raw) || !idLike(raw.id) || !isStr(raw.channel, 32) || !DESTINATION_CHANNELS.includes(raw.channel) || !isStr(raw.display) || typeof raw.has_secret !== 'boolean' || typeof raw.enabled !== 'boolean' || !decLike(raw.version)) return badResponse();
+ return { id: raw.id, channel: raw.channel, display: raw.display, has_secret: raw.has_secret, enabled: raw.enabled, version: raw.version };
+}
+
+/** POST /api/v1/destinations {operation: list}: the organization's destinations, redacted, each with the version a save must be based on. Needs policy.write on the named project. */
+export async function listDestinations(org: Id, project: Id, signal: AbortSignal): Promise<ManagedDestination[]> {
+ const response = await jsonPost('/api/v1/destinations', { org, project_id: project, operation: 'list' }, signal);
+ if (!response.ok) throw await apiFault(response);
+ const raw: unknown = await response.json();
+ if (!isRecord(raw) || raw.org !== org || !Array.isArray(raw.destinations)) return badResponse();
+ return raw.destinations.map(parseManagedDestination);
+}
+
+/** POST /api/v1/destinations {operation: save}: one audited save of one destination, based on the version the caller read (0 = it must not exist). The answer is the destination as committed;
+ * nothing is committed on any other status (409: the destination changed since it was read; 403: not an organization administrator, or no fresh sign-in). A transport failure is
+ * OutcomeUnknown and the same command ID may be resent (the server applies a command once). */
+export async function saveDestination(req: DestinationSaveRequest, signal: AbortSignal): Promise<ManagedDestination> {
+ let response: Response;
+ try {
+  response = await jsonPost('/api/v1/destinations', { org: req.org, project_id: req.project_id, operation: 'save', command_id: req.command_id, expected_version: req.expected_version, reason: req.reason, destination: req.destination }, signal);
+ } catch (error) {
+  if (isAbort(error)) throw error;
+  throw new OutcomeUnknown();
+ }
+ if (!response.ok) throw await apiFault(response);
+ const raw: unknown = await response.json();
+ if (!isRecord(raw) || raw.state !== 'committed') return badResponse();
+ const saved = parseManagedDestination(raw.destination);
+ if (saved.id !== req.destination.id) return badResponse();
+ return saved;
 }

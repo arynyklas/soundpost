@@ -109,3 +109,16 @@ func TestOpenBindsTheIssueActions(t *testing.T) {
 		t.Fatal("Open left the issue lifecycle unbound: every issue action answers not_available")
 	}
 }
+
+// The default Open binds the link resolver to the trace view; without it every
+// trace answers its links section as not_available.
+func TestOpenWiresTheTraceLinks(t *testing.T) {
+	app, err := appcore.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.Close()
+	if !app.Traces.LinksWired() {
+		t.Fatal("Open left the trace view without a link resolver: every trace answers links not_available")
+	}
+}

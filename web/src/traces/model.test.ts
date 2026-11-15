@@ -2,7 +2,7 @@
 import { describe, expect, test } from 'bun:test';
 import { ApiFault, type PathResult, type TraceView } from '../api/types';
 import { MS, ORG, PROJECT, TRACE, bounds, cleanPath, segment, sid, span, tree, unknownBounds, viewOf } from './fixture';
-import { basisWords, boundsText, detailsOf, durationText, exploreWindow, flagWords, gapWords, limits, observedWords, offPath, parseTraceView, rows } from './model';
+import { basisWords, boundsText, detailsOf, durationText, exploreWindow, flagWords, gapWords, limits, observedWords, offPath, parseTraceView, rows, targetsOf } from './model';
 
 const want = { org: ORG, project: PROJECT, trace: TRACE };
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
@@ -232,5 +232,30 @@ describe('late spans and producer gaps are parsed strictly and said in words', (
   const d = detailsOf(p, p.spans[1]!.span_id)!;
   expect(d.find((x) => x.label === 'Reported by its producer')!.value).toBe('at wall time 1700000020060000000 ns (late)');
   expect(d.find((x) => x.label === 'Limits of this span')!.value).toContain('reported more than five seconds');
+ });
+});
+
+describe('span targets resolved by the server', () => {
+ const target = (n: number, kind: 'job' | 'replay' | 'profile' | 'error', over: Record<string, unknown> = {}): Record<string, unknown> => ({ span_id: sid(n), kind, id: String(n).repeat(32), relation: 'explicit', available: true, ...over });
+ const withTargets = (targets: unknown): unknown => ({ ...clone(viewOf(cleanPath())), targets });
+ test('targets of spans in the path are accepted and selected per span and kind, in the server order', () => {
+  const v = parseTraceView(withTargets([target(1, 'job'), target(1, 'replay', { available: false }), target(2, 'job')]), want);
+  expect(targetsOf(v.targets, sid(1), 'job').map((t) => t.id)).toEqual(['1'.repeat(32)]);
+  expect(targetsOf(v.targets, sid(1), 'replay')[0]?.available).toBe(false);
+  expect(targetsOf(v.targets, sid(1), 'profile')).toEqual([]);
+  expect(targetsOf(undefined, sid(1), 'job')).toEqual([]);
+ });
+ test('a view without targets means the server did not resolve them: none are shown', () => {
+  expect(parseTraceView(clone(viewOf(cleanPath())), want).targets).toBeUndefined();
+ });
+ test('a target of a span outside the path, of an unknown kind, relation or id, or with a non-boolean availability is refused', () => {
+  refuses(withTargets([target(9, 'job')]));
+  refuses(withTargets([target(1, 'metric' as 'job')]));
+  refuses(withTargets([target(1, 'job', { relation: 'guess' })]));
+  refuses(withTargets([target(1, 'job', { id: 'not an id' })]));
+  refuses(withTargets([target(1, 'job', { available: 'yes' })]));
+  refuses(withTargets('job'));
+  refuses(withTargets(Array.from({ length: 129 }, () => target(1, 'job'))));
+  refuses({ ...clone(viewOf(undefined, { state: 'incomplete', partial: true, reason: 'spans_partial' })), targets: [target(1, 'job')] });
  });
 });

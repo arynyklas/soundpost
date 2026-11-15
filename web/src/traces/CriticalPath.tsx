@@ -1,13 +1,29 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
 import * as React from 'react';
-import type { PathResult, SpanId, SpanReport } from '../api/types';
-import { basisWords, boundsText, detailsOf, flagWords, gapWords, limits, observedWords, offPath, rows } from './model';
+import type { PathResult, SpanId, SpanReport, SpanTarget } from '../api/types';
+import { basisWords, boundsText, detailsOf, flagWords, gapWords, limits, observedWords, offPath, rows, targetsOf } from './model';
 
 const MAX_ROWS = 1000;
 const MAX_OFF_PATH = 200;
 
+const TARGET_WORDS: Record<SpanTarget['kind'], string> = { job: 'Job', replay: 'Replay', profile: 'Profile', error: 'Error occurrence' };
+const TARGET_KINDS: readonly SpanTarget['kind'][] = ['job', 'replay', 'profile', 'error'];
+
+/** One reference of the selected span, resolved by the server under this account's scope. An available one is an anchor (or, for an error occurrence, a statement) that opens the target, which checks the scope again;
+ * an unavailable one is one sentence that does not say whether it is missing, elsewhere or not readable. */
+function TargetItem(props: { target: SpanTarget; href: string | null }): React.JSX.Element {
+ const { target, href } = props;
+ const word = TARGET_WORDS[target.kind];
+ if (!target.available) return <li data-target-kind={target.kind} data-target-available="no">{word} <code>{target.id}</code>: not available to this account.</li>;
+ return (
+  <li data-target-kind={target.kind} data-target-available="yes">
+   {word} <code>{target.id}</code>: {href !== null ? <a href={href}>Open this {word.toLowerCase()}</a> : 'readable by this account; its stored detail is opened from its issue.'} Access is checked again when it opens.
+  </li>
+ );
+}
+
 /** The critical path of one trace as the analysis found it: what lies on the path, the observed duration as bounds, and every limit in words. Every value from the trace is a text node; nothing here is markup. Colour never carries a state: each limit, ambiguity and gap is a sentence. */
-export function CriticalPath(props: { path: PathResult; selectedSpan: SpanId | null; partial?: boolean; onSelect?: (id: SpanId) => void; exploreHref?: (span: SpanReport) => string }): React.JSX.Element {
+export function CriticalPath(props: { path: PathResult; selectedSpan: SpanId | null; partial?: boolean; onSelect?: (id: SpanId) => void; exploreHref?: (span: SpanReport) => string; targets?: readonly SpanTarget[] | undefined; targetHref?: (target: SpanTarget) => string | null }): React.JSX.Element {
  const { path, selectedSpan } = props;
  const all = React.useMemo(() => rows(path), [path]);
  const shown = all.slice(0, MAX_ROWS);
@@ -87,9 +103,10 @@ export function CriticalPath(props: { path: PathResult; selectedSpan: SpanId | n
      <>
       <dl className="scope-bar">{details.map((d, i) => <React.Fragment key={`${i}:${d.label}`}><dt>{d.label}</dt><dd>{d.value}</dd></React.Fragment>)}</dl>
       <ul className="span-links">
-       {selected?.job_id && <li>Job <code>{selected.job_id}</code>: open Jobs for this ID; its access is checked there, not here.</li>}
-       {selected?.replay_id && <li>Replay <code>{selected.replay_id}</code>: open Replays for this ID; its access is checked there, not here.</li>}
-       {selected?.profile_id && <li>Profile <code>{selected.profile_id}</code>: open Profiles for this ID; its access is checked there, not here.</li>}
+       {selected && props.targets !== undefined && TARGET_KINDS.flatMap((kind) => targetsOf(props.targets, selected.span_id, kind)).map((t) => <TargetItem key={`${t.kind}:${t.id}`} target={t} href={props.targetHref?.(t) ?? null} />)}
+       {selected && props.targets === undefined && selected.job_id && <li>Job <code>{selected.job_id}</code>: open Jobs for this ID; its access is checked there, not here.</li>}
+       {selected && props.targets === undefined && selected.replay_id && <li>Replay <code>{selected.replay_id}</code>: open Replays for this ID; its access is checked there, not here.</li>}
+       {selected && props.targets === undefined && selected.profile_id && <li>Profile <code>{selected.profile_id}</code>: open Profiles for this ID; its access is checked there, not here.</li>}
        {selected && props.exploreHref && <li><a href={props.exploreHref(selected)}>Explore metrics and logs in the window of this span</a></li>}
       </ul>
      </>

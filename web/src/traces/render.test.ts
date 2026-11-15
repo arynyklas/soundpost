@@ -3,6 +3,7 @@
 import { describe, expect, test } from 'bun:test';
 import * as React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import type { SpanTarget } from '../api/types';
 import { CriticalPath } from './CriticalPath';
 import { MS, bounds, cleanPath, segment, sid, span, tree, unknownBounds } from './fixture';
 
@@ -76,6 +77,35 @@ describe('CriticalPath markup', () => {
   const html = render(React.createElement(CriticalPath, { path: cleanPath({ spans: [span(1, null, 0, 100, { job_id: '1'.repeat(32), replay_id: '2'.repeat(32), profile_id: '3'.repeat(32) }), span(2, 1, 0, 70), span(3, 1, 0, 40)] }), selectedSpan: sid(1) }));
   for (const c of ['1', '2', '3']) expect(html).toContain(c.repeat(32));
   expect(html).toContain('its access is checked there, not here');
+ });
+ test('resolved targets of the selected span: an available one opens its target and says access is checked again, an unavailable one is one sentence, an error occurrence is a statement', () => {
+  const p = cleanPath({ spans: [span(1, null, 0, 100, { job_id: '1'.repeat(32), replay_id: '2'.repeat(32), profile_id: '3'.repeat(32) }), span(2, 1, 0, 70), span(3, 1, 0, 40)] });
+  const targets: SpanTarget[] = [
+   { span_id: sid(1), kind: 'job', id: '1'.repeat(32), relation: 'explicit', available: true },
+   { span_id: sid(1), kind: 'replay', id: '2'.repeat(32), relation: 'explicit', available: false },
+   { span_id: sid(1), kind: 'profile', id: '3'.repeat(32), relation: 'explicit', available: true },
+   { span_id: sid(1), kind: 'error', id: '4'.repeat(32), relation: 'explicit', available: true },
+   { span_id: sid(2), kind: 'job', id: '5'.repeat(32), relation: 'explicit', available: true },
+  ];
+  const html = render(React.createElement(CriticalPath, { path: p, selectedSpan: sid(1), targets, targetHref: (t) => (t.kind === 'error' ? null : `#open-${t.kind}-${t.id.slice(0, 2)}`) }));
+  expect(html).toContain('data-target-kind="job" data-target-available="yes"');
+  expect(html).toContain('<a href="#open-job-11">Open this job</a>');
+  expect(html).toContain('<a href="#open-profile-33">Open this profile</a>');
+  expect(html).toContain('data-target-kind="replay" data-target-available="no"');
+  expect(html).toContain('not available to this account.');
+  expect(html).not.toContain('open-replay');
+  expect(html).toContain('Error occurrence <code>' + '4'.repeat(32) + '</code>: readable by this account');
+  expect((html.match(/Access is checked again when it opens/g) ?? []).length).toBe(3);
+  // Another span's reference is not listed on this one, and the old "checked there, not here" statement is only for an unresolved view.
+  expect(html).not.toContain('5'.repeat(32));
+  expect(html).not.toContain('its access is checked there, not here');
+ });
+ test('an empty list of resolved targets shows none, and a view the server did not resolve keeps the plain statement', () => {
+  const p = cleanPath({ spans: [span(1, null, 0, 100, { job_id: '1'.repeat(32) }), span(2, 1, 0, 70), span(3, 1, 0, 40)] });
+  const resolvedNone = render(React.createElement(CriticalPath, { path: p, selectedSpan: sid(1), targets: [] }));
+  expect(resolvedNone).not.toContain('data-target-kind');
+  expect(resolvedNone).not.toContain('its access is checked there, not here');
+  expect(render(React.createElement(CriticalPath, { path: p, selectedSpan: sid(1) }))).toContain('its access is checked there, not here');
  });
  test('producer gaps and late spans are sections of text, and a hostile reason or operation stays escaped', () => {
   const p = cleanPath({

@@ -202,7 +202,7 @@ export function App(): React.JSX.Element {
      {section.id === 'replays' && <TargetEntry context={context} noun="replay" target={nav.target} open={(ref) => go(context, 'replays', '', null, ref)}>{(ref) => <ReplayPage key={`${ref.project}:${ref.id}`} id={ref.id} project={ref.project} context={context} />}</TargetEntry>}
      {section.id === 'profiles' && <TargetEntry context={context} noun="profile" target={nav.target} open={(ref) => go(context, 'profiles', '', null, ref)}>{(ref) => <ProfilePage key={`${ref.project}:${ref.id}`} id={ref.id} project={ref.project} context={context} />}</TargetEntry>}
      {section.id === 'services' && <ServiceEntry key={nav.service} context={context} service={nav.service} open={(id) => go(context, 'services', id)} />}
-     {section.id === 'jobs' && <JobsPage context={context} />}
+     {section.id === 'jobs' && <JobsPage key={nav.target ? `${nav.target.project}:${nav.target.id}` : ''} context={context} target={nav.target} />}
      {section.kind !== null && section.id !== 'services' && section.id !== 'jobs' && section.id !== 'queue' && section.id !== 'incidents' && section.id !== 'issues' && section.id !== 'releases' && section.id !== 'traces' && section.id !== 'replays' && section.id !== 'profiles' && <KindView context={context} kind={section.kind} label={section.label} />}
     </>
    )}

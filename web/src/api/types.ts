@@ -437,7 +437,9 @@ export interface PathResult {
  trace_id: Id; span_count: number; spans: SpanReport[]; trees: TreePath[]; observed: DurationBounds; edges: EdgeIssue[]; clock_issues: ClockIssue[];
  unlike_clock_domains: boolean; max_uncertainty_ns: string; sampling: SamplingReport; late_spans: LateSpan[]; producer_gaps: ProducerGap[]; complete: boolean; reasons: string[];
 }
-export interface TraceView { org: Id; project: Id; trace: Id; state: ViewState; reason?: string; partial: boolean; path?: PathResult; sections: ViewSection[] }
+/** One reference a span carries (its job, replay or profile, or an error occurrence recorded inside it) and whether the server's C04 resolution could reach it under this account's scope. An unavailable target is one value: missing, in another project and not readable cannot be told apart. */
+export interface SpanTarget { span_id: SpanId; kind: 'job' | 'replay' | 'profile' | 'error'; id: Id; relation: 'explicit' | 'time_overlap_inference'; available: boolean }
+export interface TraceView { org: Id; project: Id; trace: Id; state: ViewState; reason?: string; partial: boolean; path?: PathResult; /** Present only when the server resolved the references through C04. */ targets?: SpanTarget[]; sections: ViewSection[] }
 
 // ---- Job run and attempt investigation (POST /api/v1/jobs/list, /api/v1/jobs/view; internal/httpapi/jobs_view.go, internal/jobs/types.go) ----
 // Nanosecond times, durations, versions, ordinals and counters of the journal are decimal strings; IDs are 32 lowercase hexadecimal characters.
@@ -521,3 +523,10 @@ export type PolicyChange =
  | { kind: 'destination'; destination: DestinationChange };
 export interface PolicyWriteRequest { org: Id; project_id: Id; command_id: Id; expected_revision: string; reason: string; change: PolicyChange }
 export interface PolicyWriteAnswer { state: 'committed'; revision: string; policy: PolicyView }
+
+// ---- /api/v1/destinations (internal/httpapi/destinations.go): the organization's notification destinations, each with its own version ----
+/** One destination as the destination route reports it: redacted (a host or domain, never a path, token or secret) with the version a save must be based on. */
+export interface ManagedDestination { id: Id; channel: string; display: string; has_secret: boolean; enabled: boolean; version: string }
+/** The destination a save writes. `type` and `endpoint`/`address` may be left out when changing an existing destination: they stay as committed. `secret` is write-only. */
+export interface DestinationSave { id: Id; type?: string; endpoint?: string; address?: string; enabled: boolean; secret?: string }
+export interface DestinationSaveRequest { org: Id; project_id: Id; command_id: Id; expected_version: string; reason: string; destination: DestinationSave }

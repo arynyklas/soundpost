@@ -72,6 +72,8 @@ func recordTargets(kind string) (recordTarget, bool) {
 		return recordTarget{model.Replay, "replay_id"}, true
 	case "error":
 		return recordTarget{model.ErrorKind, "occurrence_id"}, true
+	case "job":
+		return recordTarget{model.JobAttempt, "job_id"}, true
 	}
 	return recordTarget{}, false
 }

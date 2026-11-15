@@ -131,12 +131,14 @@ func TestResolveAuthorizesBeforeAnyLookupAndHidesDifference(t *testing.T) {
 		ref(p1, "metric", present, link.RelationExplicit),           // unsupported kind
 		ref(p1, "artifact", present, link.RelationExplicit),         // no artifact reader configured
 		ref(p1, "error", present, link.RelationTimeOverlap),
+		ref(p1, "job", present, link.RelationExplicit), // a job is resolved through its attempt records
+		ref(p1, "job", absent, link.RelationExplicit),
 	}
 	out, err := resolver.Resolve(ctx, scope, refs)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i, want := range []bool{true, false, false, false, false, false, false, false, true} {
+	for i, want := range []bool{true, false, false, false, false, false, false, false, true, true, false} {
 		if out[i].Available != want || (out[i].Reference != nil) != want {
 			t.Fatalf("reference %d available=%v", i, out[i].Available)
 		}
@@ -148,8 +150,13 @@ func TestResolveAuthorizesBeforeAnyLookupAndHidesDifference(t *testing.T) {
 		t.Fatal("inference was reported as explicit")
 	}
 	// Only in-scope, well-formed record references reached an index.
-	if len(records.scans) != 3 {
-		t.Fatalf("index lookups %d, want 3 (present, absent, present again)", len(records.scans))
+	if len(records.scans) != 5 {
+		t.Fatalf("index lookups %d, want 5 (present, absent, present again, job present, job absent)", len(records.scans))
+	}
+	for _, req := range records.reqs[3:] {
+		if req.Signal != model.JobAttempt || req.Selectors[0].Name != "job_id" {
+			t.Fatalf("a job probe reads %v by %q, want job attempts by job_id", req.Signal, req.Selectors[0].Name)
+		}
 	}
 	// An existence probe reads one projected page: no payload, resource or observed-time column
 	// is decoded for a target that is only being looked up.

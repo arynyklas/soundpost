@@ -2,7 +2,7 @@
 import * as React from 'react';
 import { getJob, isAbort, listJobs, stateOfFault } from '../api/client';
 import type { Id, JobRunView, JobsListView, JobSummaryView, JobView, LoadState } from '../api/types';
-import { latestOnly, scopeKey, type Latest, type ViewContext } from '../app/context';
+import { latestOnly, scopeKey, type IncidentRef, type Latest, type ViewContext } from '../app/context';
 import { StatusPanel } from '../app/StatusPanel';
 import { EvidenceSections } from '../evidence/Sections';
 import { dataOf, stateOfEvidence, useEvidence } from '../evidence/useEvidence';
@@ -173,14 +173,16 @@ function JobPanel(props: { context: ViewContext; project: Id; job: Id; run: Id |
 interface Selection { scope: string; job: Id | ''; run: Id | ''; runsLimit: number }
 interface More { base: JobsListView; jobs: JobSummaryView[]; next: Id | null; status: LoadState<unknown> | null; busy: boolean }
 
-/** The jobs of one project under the caller's own scope, and one job with its runs and attempts. The project, job and run the user selected are kept here, so the shell's Refresh re-reads them in place instead of jumping to another run. */
-export function JobsPage(props: { context: ViewContext }): React.JSX.Element {
+/** The jobs of one project under the caller's own scope, and one job with its runs and attempts. The project, job and run the user selected are kept here, so the shell's Refresh re-reads them in place instead of jumping to another run.
+ * `target` is a job named by a link (a trace's span): its project and job open first, and the server checks the scope of that read like any other. */
+export function JobsPage(props: { context: ViewContext; target?: IncidentRef | null }): React.JSX.Element {
  const { context } = props;
- const [projectChoice, setProjectChoice] = React.useState('');
+ const [projectChoice, setProjectChoice] = React.useState(props.target?.project ?? '');
  const project = chooseProject(projectChoice, context.projects);
  const scope = `${scopeKey(context)}|${project}`;
+ const linked: Id | '' = props.target?.project === project ? props.target.id : '';
  const [selection, setSelection] = React.useState<Selection>({ scope: '', job: '', run: '', runsLimit: DEFAULT_RUNS_LIMIT });
- const current: Selection = selection.scope === scope ? selection : { scope, job: '', run: '', runsLimit: DEFAULT_RUNS_LIMIT };
+ const current: Selection = selection.scope === scope ? selection : { scope, job: linked, run: '', runsLimit: DEFAULT_RUNS_LIMIT };
  const list = useEvidence<JobsListView>(scope, (signal) => listJobs(context.org, project, '', JOBS_PAGE_LIMIT, signal));
  useRefreshOnGeneration(scope, context.generation, list.reload);
 

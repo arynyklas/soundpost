@@ -39,6 +39,12 @@ prep() {
 		sed -i 's|^\tincidentService, e := incidents.New(c, releaseActionClock{})|\tinvestigator.WithHealth(c)\n&|' "$ROOT/internal/appcore/app.go"
 		grep -q 'investigator.WithHealth(c)' "$ROOT/internal/appcore/app.go" || { echo "health wiring did not apply" >&2; exit 1; }
 	fi
+	# E2E_WIRE_TRACE_LINKS=1 applies, to this run's VM copy only, the one-line wiring the parent applies to internal/appcore/app.go:
+	# the trace route resolves span links through the C04 resolver built a few lines above it.
+	if [ "${E2E_WIRE_TRACE_LINKS:-}" = 1 ] && ! grep -q 'NewStorageSpanSource(engine)).WithLinks(resolver)' "$ROOT/internal/appcore/app.go"; then
+		sed -i 's|^\ttraces := httpapi.NewTraces(httpapi.NewStorageSpanSource(engine))$|\ttraces := httpapi.NewTraces(httpapi.NewStorageSpanSource(engine)).WithLinks(resolver)|' "$ROOT/internal/appcore/app.go"
+		grep -q 'NewStorageSpanSource(engine)).WithLinks(resolver)' "$ROOT/internal/appcore/app.go" || { echo "trace link wiring did not apply" >&2; exit 1; }
+	fi
 	# E2E_FAULTS=1 builds the server with the soundpost_faults tag: it then reads shard-removal requests from $T/fault (cmd/soundpost/faultcontrol.go).
 	( cd "$ROOT" && go build ${E2E_FAULTS:+-tags soundpost_faults} -o "$BIN" ./cmd/soundpost )
 	( cd "$ROOT/web" && node node_modules/typescript/bin/tsc -p tsconfig.json && node node_modules/vite/bin/vite.js build 2>&1 | tail -2 )

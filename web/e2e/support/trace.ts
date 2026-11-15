@@ -17,7 +17,7 @@ export interface Domain{host:string;boot:string;runtime:string;base:bigint}
 let domains=0;
 /** A clock domain; its monotonic readings start at a base unrelated to every other domain's. */
 export const domain=():Domain=>({host:id(),boot:id(),runtime:id(),base:1_000_000_000_000n+BigInt(++domains)*7_919_000_000_000n});
-export interface SpanSpec{span:string;parent?:string;kind?:'internal'|'server'|'client'|'producer'|'consumer';operation:string;dependency?:string;startMs:number;endMs?:number;domain:Domain;skewMs?:number;uncertaintyMs?:number;status?:'ok'|'error'|'cancelled'|'incomplete';/** when the producer reported the span, in ms from ANCHOR (default: its start) */observedMs?:number;links?:{trace:string;span:string}[];probability?:number;decision?:'keep'|'drop'}
+export interface SpanSpec{span:string;parent?:string;kind?:'internal'|'server'|'client'|'producer'|'consumer';operation:string;dependency?:string;startMs:number;endMs?:number;domain:Domain;skewMs?:number;uncertaintyMs?:number;status?:'ok'|'error'|'cancelled'|'incomplete';/** when the producer reported the span, in ms from ANCHOR (default: its start) */observedMs?:number;links?:{trace:string;span:string}[];probability?:number;decision?:'keep'|'drop';/** the job, replay and profile this span names (record fields job_id, replay_id, profile_id) */job?:string;replay?:string;profile?:string}
 
 /** The anchor every fixture offset is measured from: at(10) of the shared test epoch, inside the window the spec opens. */
 export const ANCHOR=at(10);
@@ -28,7 +28,7 @@ export async function ingestTrace(request:APIRequestContext,s:Source,trace:strin
  const records=specs.map((sp)=>{
   const stamp=(ms:number)=>({wall_ns:(ANCHOR+BigInt(ms)*MS+BigInt(Math.round((sp.skewMs??0)*1e6))).toString(),mono_ns:(sp.domain.base+BigInt(ms)*MS).toString(),domain:{host:sp.domain.host,boot:sp.domain.boot,runtime:sp.domain.runtime},uncertainty_ns:(BigInt(sp.uncertaintyMs??0)*MS).toString()});
   const end=sp.endMs===undefined?null:stamp(sp.endMs);
-  const payload={trace_id:trace,span_id:sp.span,parent_id:sp.parent??null,span_kind:sp.kind??'internal',operation:sp.operation,start:stamp(sp.startMs),end,status:sp.status??'ok',dependency_alias:sp.dependency??'',links:(sp.links??[]).map((l)=>({trace_id:l.trace,span_id:l.span})),sample_probability:bitsOf(sp.probability??1),sample_decision:sp.decision??'keep'};
+  const payload={trace_id:trace,span_id:sp.span,parent_id:sp.parent??null,span_kind:sp.kind??'internal',operation:sp.operation,start:stamp(sp.startMs),end,status:sp.status??'ok',dependency_alias:sp.dependency??'',links:(sp.links??[]).map((l)=>({trace_id:l.trace,span_id:l.span})),sample_probability:bitsOf(sp.probability??1),sample_decision:sp.decision??'keep',...(sp.job?{job_id:sp.job}:{}),...(sp.replay?{replay_id:sp.replay}:{}),...(sp.profile?{profile_id:sp.profile}:{})};
   return {id:id(),kind:'span' as const,observed_at_ns:(ANCHOR+BigInt(sp.observedMs??sp.startMs)*MS).toString(),resource:resource(s),payload};
  });
  await ingestBatch(request,s,records);

@@ -159,8 +159,15 @@ holder is refused). A save carries a command ID, the expected destination versio
 (0 = must not exist; a stale version is a conflict), a reason and a write-only
 secret, and commits as the audited `destination` admin command. The answer is a
 redacted view: host or domain, whether a secret exists, enabled, version; never
-the endpoint path, token or secret. The web console has no destination settings
-page yet.
+the endpoint path, token or secret.
+
+The web console has a page for it under Settings > Destinations: it lists the
+organization's destinations (an account holding only `policy.write` on the project
+reads them and is told it cannot change them), adds a webhook (https endpoint),
+an email recipient or a Telegram chat, pauses or resumes a destination and rotates
+its secret. Every save is based on the version the page read, so a destination
+changed by someone else since is shown as a conflict and nothing is overwritten;
+an unconfirmed save is resent as the same command and applied once.
 
 ## What is verified, and what is not
 
