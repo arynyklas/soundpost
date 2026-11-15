@@ -36,13 +36,13 @@ A dependency's `third_party_internals` declares, with a mandatory reason, that s
 
 ```
 SOUNDPOST_JOURNEY_BEARER=<token> adoption journeys \
-  --server https://<soundpost-host> --org <org-id> --project <project-id> \
+  --server https://<soundpost-host> --org <org-id> --project <project-id> --scope <ledger-scope> \
   --expected <private-expected-links.json> --authorization <private-grant.json> \
   --private-output <external-private-directory> --public-summary <new-summary-file> \
   [--timeout 2m]
 ```
 
-(The parent dispatches `journeys` to `runJourneys` with the flags that follow it.) `--timeout` is positive and at most one hour.
+(The parent dispatches `journeys` to `runJourneys` with the flags that follow it.) `--timeout` is positive and at most one hour. `--scope` is required: the private report records it, and the readiness gate refuses the report for an acceptance ledger of another scope ([readiness-gate.md](readiness-gate.md)).
 
 ### Expected links (synthetic placeholders)
 

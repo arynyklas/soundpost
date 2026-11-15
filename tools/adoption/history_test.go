@@ -1343,6 +1343,7 @@ func TestClosureCLIBlockedDecisionIsNonzeroButWritesEvidence(t *testing.T) {
 func TestClosureCLIHistoryModeAndUsage(t *testing.T) {
 	inputs, private := t.TempDir(), privateTempDir(t)
 	h := closureHistoryFixture(time.Now().UTC())
+	h.Scope = "synthetic-scope"
 	hPath, summary := filepath.Join(inputs, "history.json"), filepath.Join(inputs, "public.json")
 	if err := writeExclusive(hPath, h); err != nil {
 		t.Fatal(err)
@@ -1355,8 +1356,19 @@ func TestClosureCLIHistoryModeAndUsage(t *testing.T) {
 	if err := readInput(summary, &pub); err != nil || !pub.Clear || pub.CustomerAcceptance || pub.ActiveReaders != 1 {
 		t.Fatalf("%v %+v", err, pub)
 	}
-	if _, err := os.Stat(filepath.Join(private, "history.json")); err != nil {
+	var priv HistoryReport
+	if err := readInput(filepath.Join(private, "history.json"), &priv); err != nil || priv.Scope != "synthetic-scope" {
+		t.Fatalf("the private history report must record the scope (%v): %q", err, priv.Scope)
+	}
+	// A snapshot that names no scope is refused: the report would be bound to nothing (08.05-W2 review M2).
+	unscoped := h
+	unscoped.Scope = ""
+	uPath, uPrivate := filepath.Join(inputs, "history-unscoped.json"), privateTempDir(t)
+	if err := writeExclusive(uPath, unscoped); err != nil {
 		t.Fatal(err)
+	}
+	if err := runClosure(context.Background(), []string{"--mode", "history", "--ledger", uPath, "--private-output", uPrivate, "--public-summary", filepath.Join(inputs, "public-unscoped.json")}); err == nil || !strings.Contains(err.Error(), "scope") {
+		t.Fatalf("an unscoped history snapshot must be refused naming the scope: %v", err)
 	}
 	// A blocked history is non-zero and still recorded.
 	h.Boundary.Visible = false

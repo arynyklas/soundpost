@@ -661,6 +661,9 @@ func runClosure(ctx context.Context, args []string) error {
 		if readInput(*ledgerPath, &in) != nil {
 			return errors.New("invalid private operator input")
 		}
+		if in.Scope == "" {
+			return errors.New("the history snapshot must name the acceptance-ledger scope it is evidence for (\"scope\")")
+		}
 		in.Now = now
 		report, err := HistoryStatus(ctx, in)
 		if err != nil {

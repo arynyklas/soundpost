@@ -211,6 +211,10 @@ type ShadowPolicy struct {
 	EnabledSenders         []string           `json:"enabled_senders"`
 	AcceptRawSources       bool               `json:"accept_raw_sources"`
 	DisableLegacySenders   bool               `json:"disable_legacy_senders"`
+	// Scope is the acceptance-ledger scope this run is evidence for: the report
+	// records it, so the readiness gate can refuse the report for another scope.
+	// The shadow command requires it.
+	Scope string `json:"scope"`
 
 	// Clock replaces the wall clock (mapping validity); tests only.
 	Clock func() time.Time `json:"-"`
@@ -341,7 +345,12 @@ type ShadowDecisions struct {
 // series and case IDs and is never published; Public yields the closed
 // allowlisted projection.
 type ShadowReport struct {
-	SchemaVersion        int                        `json:"schema_version"`
+	SchemaVersion int `json:"schema_version"`
+	// Scope and ObservedAt bind the report to the ledger scope it was run for
+	// (the policy's scope) and to the instant the run began; the readiness gate
+	// checks both against the reference that cites this report.
+	Scope                string                     `json:"scope"`
+	ObservedAt           time.Time                  `json:"observed_at"`
 	MappingDigest        string                     `json:"mapping_digest"`
 	OriginalSource       string                     `json:"original_source"`
 	OriginalVersion      string                     `json:"original_version"`
@@ -801,7 +810,7 @@ func newShadowRun(m SourceMapping, ids shadowIDs, d SoundpostDestination, p Shad
 	for _, a := range m.Adapters {
 		r.decls[a.Kind] = a
 	}
-	r.rep = ShadowReport{SchemaVersion: shadowSchemaVersion, MappingDigest: digest, OriginalSource: m.OriginalSource, OriginalVersion: m.OriginalVersion,
+	r.rep = ShadowReport{SchemaVersion: shadowSchemaVersion, Scope: p.Scope, ObservedAt: shadowNow(p), MappingDigest: digest, OriginalSource: m.OriginalSource, OriginalVersion: m.OriginalVersion,
 		Adapters:   append([]ShadowAdapterDeclaration(nil), m.Adapters...),
 		Deliveries: ShadowDeliveryCounts{RejectedByReason: map[string]int{}}, Records: ShadowCounts{DroppedByReason: map[string]int{}},
 		PerAdapter: map[string]ShadowCounts{}, Decisions: ShadowDecisions{Suppressed: map[string]int{}, Kinds: map[string]int{}, Items: []ShadowDecisionItem{}},
@@ -1656,6 +1665,9 @@ func runShadow(ctx context.Context, args []string) error {
 	}
 	if err := shadowReadJSON(*sourcePolicyPath, &sp); err != nil {
 		return errors.New("invalid operator input")
+	}
+	if p.Scope == "" {
+		return errors.New("the shadow policy must name the acceptance-ledger scope the run is evidence for (\"scope\")")
 	}
 	info, err := os.Stat(*workdir)
 	if err != nil || !info.IsDir() {

@@ -167,7 +167,7 @@ func newShadowFx(t *testing.T) *shadowFx {
 	}
 	fx.m = fx.sign(unsigned)
 	fx.p = ShadowPolicy{SchemaVersion: shadowSchemaVersion, TrustedKeys: []ShadowTrustedKey{{ID: "k1", PublicKey: pubB64(pub)}},
-		AllowedOriginalSources: []string{shadowTestSource}, MaxDeliveries: 1000, MaxBodyBytes: 1 << 20}
+		AllowedOriginalSources: []string{shadowTestSource}, MaxDeliveries: 1000, MaxBodyBytes: 1 << 20, Scope: "synthetic-scope"}
 	fx.ids, err = shadowParseIDs(fx.m)
 	if err != nil {
 		t.Fatal(err)
@@ -1657,7 +1657,7 @@ func TestShadowCLIEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	var rep ShadowReport
-	if err := shadowReadJSON(report, &rep); err != nil || rep.Records.Admitted != 2 || !rep.Reconciled || !rep.Parity.Equal() {
+	if err := shadowReadJSON(report, &rep); err != nil || rep.Records.Admitted != 2 || !rep.Reconciled || !rep.Parity.Equal() || rep.Scope != "synthetic-scope" || rep.ObservedAt.IsZero() {
 		t.Fatalf("report: %v %+v", err, rep.Records)
 	}
 	var pub ShadowPublicSummary
@@ -1675,7 +1675,20 @@ func TestShadowCLIEndToEnd(t *testing.T) {
 	if err := runShadow(context.Background(), args(report, filepath.Join(dir, "summary2.json"))); err == nil {
 		t.Fatal("existing report overwritten")
 	}
-
+	// A policy that names no scope is refused: the report would be bound to nothing (08.05-W2 review M2).
+	unscoped := fx.p
+	unscoped.Scope = ""
+	r1, s1 := filepath.Join(dir, "r1.json"), filepath.Join(dir, "s1.json")
+	a1 := args(r1, s1)
+	a1[3] = write("policy-unscoped.json", unscoped)
+	if err := runShadow(context.Background(), a1); err == nil || !strings.Contains(err.Error(), "scope") {
+		t.Fatalf("a policy without a scope must be refused naming it: %v", err)
+	}
+	for _, p := range []string{r1, s1} {
+		if _, err := os.Stat(p); err == nil {
+			t.Fatalf("%s written for an unscoped policy", p)
+		}
+	}
 	// A policy that tries to enable a sender is refused before anything runs.
 	bad := fx.p
 	bad.ExternalDelivery = true

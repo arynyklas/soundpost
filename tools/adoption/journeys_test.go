@@ -1288,7 +1288,7 @@ func TestRunJourneysCLIWritesPrivateReportAndClosedSummary(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("SOUNDPOST_JOURNEY_BEARER", "synthetic-bearer")
-	args := []string{"--server", srv.URL, "--org", w.org.String(), "--project", w.project.String(), "--expected", expectedPath, "--authorization", grantPath, "--private-output", private, "--public-summary", summary}
+	args := []string{"--server", srv.URL, "--org", w.org.String(), "--project", w.project.String(), "--scope", "synthetic-scope", "--expected", expectedPath, "--authorization", grantPath, "--private-output", private, "--public-summary", summary}
 	if err := runJourneys(context.Background(), args); err != nil {
 		t.Fatal(err)
 	}
@@ -1300,7 +1300,7 @@ func TestRunJourneysCLIWritesPrivateReportAndClosedSummary(t *testing.T) {
 		t.Fatalf("summary: %+v", pub)
 	}
 	var priv JourneyReport
-	if err := readInput(filepath.Join(private, "journeys.json"), &priv); err != nil || !priv.Passed || len(priv.Results) != 5 {
+	if err := readInput(filepath.Join(private, "journeys.json"), &priv); err != nil || !priv.Passed || len(priv.Results) != 5 || priv.Scope != "synthetic-scope" {
 		t.Fatalf("private report: %v %+v", err, priv.Passed)
 	}
 	raw, _ := os.ReadFile(filepath.Join(private, "journeys.json"))
@@ -1330,7 +1330,7 @@ func TestRunJourneysCLIFailedAcceptanceIsNonzeroButWritesEvidence(t *testing.T) 
 		t.Fatal(err)
 	}
 	t.Setenv("SOUNDPOST_JOURNEY_BEARER", "synthetic-bearer")
-	err := runJourneys(context.Background(), []string{"--server", srv.URL, "--org", w.org.String(), "--project", w.project.String(), "--expected", expectedPath, "--authorization", grantPath, "--private-output", private, "--public-summary", summary})
+	err := runJourneys(context.Background(), []string{"--server", srv.URL, "--org", w.org.String(), "--project", w.project.String(), "--scope", "synthetic-scope", "--expected", expectedPath, "--authorization", grantPath, "--private-output", private, "--public-summary", summary})
 	if err == nil || !strings.Contains(err.Error(), "journey acceptance failed") {
 		t.Fatalf("failed acceptance must be an error: %v", err)
 	}
@@ -1376,7 +1376,7 @@ func TestRunJourneysCLIRefusesWithoutExactAuthorization(t *testing.T) {
 			t.Fatal(err)
 		}
 		summary := filepath.Join(inputs, strings.ReplaceAll(name, " ", "-")+".summary.json")
-		err := runJourneys(context.Background(), []string{"--server", srv.URL, "--org", w.org.String(), "--project", w.project.String(), "--expected", expectedPath, "--authorization", grantPath, "--private-output", private, "--public-summary", summary})
+		err := runJourneys(context.Background(), []string{"--server", srv.URL, "--org", w.org.String(), "--project", w.project.String(), "--scope", "synthetic-scope", "--expected", expectedPath, "--authorization", grantPath, "--private-output", private, "--public-summary", summary})
 		if err == nil {
 			t.Fatalf("%s: accepted", name)
 		}
@@ -1395,8 +1395,12 @@ func TestRunJourneysCLIRefusesWithoutExactAuthorization(t *testing.T) {
 	if err := writeExclusive(grantPath, base); err != nil {
 		t.Fatal(err)
 	}
-	if err := runJourneys(context.Background(), []string{"--server", srv.URL, "--org", w.org.String(), "--project", w.project.String(), "--expected", expectedPath, "--authorization", grantPath, "--private-output", private, "--public-summary", filepath.Join(inputs, "t.json"), "--timeout", "2h"}); err == nil {
+	if err := runJourneys(context.Background(), []string{"--server", srv.URL, "--org", w.org.String(), "--project", w.project.String(), "--scope", "synthetic-scope", "--expected", expectedPath, "--authorization", grantPath, "--private-output", private, "--public-summary", filepath.Join(inputs, "t.json"), "--timeout", "2h"}); err == nil {
 		t.Fatal("unbounded timeout accepted")
+	}
+	// The report is bound to a scope: a run without --scope is refused (08.05-W2 review M2).
+	if err := runJourneys(context.Background(), []string{"--server", srv.URL, "--org", w.org.String(), "--project", w.project.String(), "--expected", expectedPath, "--authorization", grantPath, "--private-output", private, "--public-summary", filepath.Join(inputs, "u.json")}); err == nil || !strings.Contains(err.Error(), "--scope") {
+		t.Fatalf("a run without --scope must be refused naming it: %v", err)
 	}
 }
 

@@ -150,7 +150,10 @@ type HistoryObligation struct {
 // HistoryObligations is the private operator-supplied snapshot. Now is the
 // caller's clock; it is never read from the snapshot file.
 type HistoryObligations struct {
-	Now                time.Time           `json:"-"`
+	Now time.Time `json:"-"`
+	// Scope is the acceptance-ledger scope the status is evidence for; the
+	// report records it (the closure history mode requires it).
+	Scope              string              `json:"scope"`
 	ObservedAt         time.Time           `json:"observed_at"`
 	MaxEvidenceAgeSecs int64               `json:"max_evidence_age_seconds"`
 	Origin             HistoryOrigin       `json:"origin"`
@@ -184,6 +187,7 @@ type HistoryObligationStatus struct {
 // deleting or exporting anything.
 type HistoryReport struct {
 	SchemaVersion int                       `json:"schema_version"`
+	Scope         string                    `json:"scope"`
 	EvaluatedAt   time.Time                 `json:"evaluated_at"`
 	Clear         bool                      `json:"clear"`
 	Blockers      []HistoryCode             `json:"blockers"`
@@ -270,7 +274,7 @@ func HistoryStatus(ctx context.Context, in HistoryObligations) (HistoryReport, e
 	now := in.Now.UTC()
 	blockers := map[HistoryCode]bool{}
 	block := func(c HistoryCode) { blockers[c] = true }
-	report := HistoryReport{SchemaVersion: historySchemaVersion, EvaluatedAt: now, Blockers: []HistoryCode{}, Obligations: []HistoryObligationStatus{}}
+	report := HistoryReport{SchemaVersion: historySchemaVersion, Scope: in.Scope, EvaluatedAt: now, Blockers: []HistoryCode{}, Obligations: []HistoryObligationStatus{}}
 
 	switch {
 	case in.ObservedAt.IsZero() || now.Sub(in.ObservedAt) > time.Duration(in.MaxEvidenceAgeSecs)*time.Second:

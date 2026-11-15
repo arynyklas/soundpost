@@ -56,7 +56,7 @@ go run ./tools/adoption closure --mode history --ledger <private-history.json> \
   --private-output <external-private-directory> --public-summary <new-summary-file>
 ```
 
-Writes `history.json` (private, exclusive creation) and the public summary; a blocked status is written and then returns a non-zero error. The subcommand is `runClosure`; see [closure.md](closure.md) for the whole flag set.
+Writes `history.json` (private, exclusive creation) and the public summary; a blocked status is written and then returns a non-zero error. The snapshot file must carry `scope` (the acceptance-ledger scope the status is evidence for; the mode refuses a snapshot without it); the private report records it next to `evaluated_at`, and the readiness gate checks both. The subcommand is `runClosure`; see [closure.md](closure.md) for the whole flag set.
 
 ## Not done by this tool
 

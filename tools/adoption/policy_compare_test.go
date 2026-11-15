@@ -1466,7 +1466,10 @@ func TestComparisonCommand(t *testing.T) {
 		}
 		return p
 	}
-	lp, cp, ap := write("legacy.json", l), write("canonical.json", c), write("approved.json", a)
+	scoped := a
+	scoped.Scope = "synthetic-scope"
+	lp, cp, ap := write("legacy.json", l), write("canonical.json", c), write("approved.json", scoped)
+	unscoped := write("approved-unscoped.json", a)
 	run := func(private, summary string, extra ...string) error {
 		args := []string{"--legacy", lp, "--canonical", cp, "--approved-policy", ap, "--private-output", private, "--public-summary", summary}
 		return runPolicyCompare(context.Background(), append(args, extra...))
@@ -1488,8 +1491,23 @@ func TestComparisonCommand(t *testing.T) {
 		if err := readInput(filepath.Join(private, "policy-report.json"), &rep); err != nil || rep.Verdict != policyVerdictReconciled {
 			t.Fatalf("%v %+v", err, rep.Verdict)
 		}
+		// The report records the scope it was compared for and when the command ran,
+		// so the readiness gate can bind it (08.05-W2 review M1, M2).
+		if rep.Scope != "synthetic-scope" || rep.ObservedAt.IsZero() || time.Since(rep.ObservedAt) > time.Minute || rep.ObservedAt.After(time.Now()) {
+			t.Fatalf("scope %q observed %v", rep.Scope, rep.ObservedAt)
+		}
 		if err := run(private, filepath.Join(inputs, "summary2.json")); err == nil {
 			t.Fatal("overwrote the private report")
+		}
+	})
+	t.Run("an approved policy without a scope is refused", func(t *testing.T) {
+		private := privateTempDir(t)
+		args := []string{"--legacy", lp, "--canonical", cp, "--approved-policy", unscoped, "--private-output", private, "--public-summary", filepath.Join(inputs, "unscoped-summary.json")}
+		if err := runPolicyCompare(context.Background(), args); err == nil || !strings.Contains(err.Error(), "scope") {
+			t.Fatalf("an unscoped approved policy must be refused naming the scope: %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(private, "policy-report.json")); err == nil {
+			t.Fatal("a report was written for an unscoped policy")
 		}
 	})
 	t.Run("an unreconciled window still writes evidence and fails the command", func(t *testing.T) {

@@ -499,7 +499,10 @@ func RunIsolation(args []string) (result error) {
 		Version       int
 		Matrix        []isoRow
 		Qualification string
-	}{1, matrix, "real appcore over HTTPS with real sessions; capabilities and exports only; investigation/workflow handlers belong to plan05"}
+		// ObservedAt is when the matrix was complete; the adoption readiness gate
+		// checks it against the reference that cites this file.
+		ObservedAt time.Time
+	}{1, matrix, "real appcore over HTTPS with real sessions; capabilities and exports only; investigation/workflow handlers belong to plan05", time.Now().UTC()}
 	data, err := json.MarshalIndent(evidence, "", "  ")
 	if err != nil {
 		return err

@@ -188,7 +188,13 @@ type PolicyControlCounts struct {
 // PolicyReport is the PRIVATE comparison record: it names entities and keyed
 // recipient pseudonyms. Publish only PolicyPublic(report).
 type PolicyReport struct {
-	SchemaVersion  int                 `json:"schema_version"`
+	SchemaVersion int `json:"schema_version"`
+	// Scope and ObservedAt bind the report to the ledger scope it was compared
+	// for (the approved policy's scope) and to the instant the command ran;
+	// ComparePolicy leaves ObservedAt zero (it is a pure function of its inputs)
+	// and the policy-compare command stamps it.
+	Scope          string              `json:"scope"`
+	ObservedAt     time.Time           `json:"observed_at"`
 	PolicyRevision uint64              `json:"policy_revision"`
 	Compared       int                 `json:"compared"`
 	Identical      int                 `json:"identical"`
@@ -354,6 +360,9 @@ type PolicyControlDisposition struct {
 // ApprovedPolicy is the owner-approved policy revision under comparison, with
 // its approved differences and the disposition of each delegated control.
 type ApprovedPolicy struct {
+	// Scope is the acceptance-ledger scope the comparison is evidence for; the
+	// report records it (policy-compare requires it).
+	Scope     string                     `json:"scope"`
 	Revision  uint64                     `json:"revision"`
 	Config    notify.Config              `json:"config"`
 	Approvals []PolicyApproval           `json:"approvals,omitempty"`
@@ -1407,7 +1416,7 @@ func (p *policyRun) ownershipCheck() PolicyCheckStatus {
 }
 
 func (p *policyRun) report() PolicyReport {
-	r := PolicyReport{SchemaVersion: 1, PolicyRevision: p.approved.Revision, Compared: p.parity.Compared, Ledger: p.red.Stats,
+	r := PolicyReport{SchemaVersion: 1, Scope: p.approved.Scope, PolicyRevision: p.approved.Revision, Compared: p.parity.Compared, Ledger: p.red.Stats,
 		MissingUrgency: []PolicyDifference{}, Noise: []PolicyDifference{}, Intentional: []PolicyDifference{}, Inert: []PolicyDifference{}}
 	bad := map[ledgerKey]bool{}
 	for _, m := range p.parity.Mismatches {
@@ -1538,7 +1547,11 @@ func runPolicyCompare(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	if approved.Scope == "" {
+		return errors.New("the approved policy must name the acceptance-ledger scope the comparison is evidence for (\"scope\")")
+	}
 	report, err := ComparePolicy(ctx, legacy, canonical, approved)
+	report.ObservedAt = time.Now().UTC()
 	if err != nil {
 		return err
 	}

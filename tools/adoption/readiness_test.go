@@ -19,8 +19,15 @@ import (
 
 var readinessNow = time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
 
+// readinessFixtureScope is the scope of the fixture ledger, and of every report
+// body the fixture's producers write for it; readinessFixtureAt is when they
+// were observed.
+const readinessFixtureScope = "synthetic-scope"
+
+var readinessFixtureAt = readinessNow.Add(-10 * time.Minute)
+
 func readinessFixture() (AcceptanceLedger, Authorizations) {
-	l := AcceptanceLedger{Scope: "synthetic-scope", Now: readinessNow, MaxAgeSeconds: 3600,
+	l := AcceptanceLedger{Scope: readinessFixtureScope, Now: readinessNow, MaxAgeSeconds: 3600,
 		RequireProduction: true, ProductFailureDomain: "product-domain"}
 	producer := map[ReadinessKind]string{
 		ReadinessJourneyGateway: "adoption-journeys", ReadinessJourneyFrontend: "adoption-journeys",
@@ -32,7 +39,7 @@ func readinessFixture() (AcceptanceLedger, Authorizations) {
 	for i, k := range readinessKinds {
 		e := EvidenceRef{Kind: k, Producer: producer[k],
 			Digest:     strings.Repeat(string("0123456789"[i]), 64),
-			ObservedAt: readinessNow.Add(-10 * time.Minute), AuthorizationID: "auth-1",
+			ObservedAt: readinessFixtureAt, AuthorizationID: "auth-1",
 			Scope: l.Scope, Environment: ReadinessEnvProduction, Result: ReadinessResultPass}
 		if k == ReadinessExternalDeadman {
 			e.FailureDomain = "external-domain"
@@ -65,9 +72,12 @@ var readinessDrillScenarioFor = map[ReadinessKind]string{
 }
 
 // readinessCampaignBody is a verified query-campaign report (qualify, 07.05).
-func readinessCampaignBody() []byte {
+func readinessCampaignBody() []byte { return readinessCampaignBodyAt(readinessFixtureAt) }
+
+func readinessCampaignBodyAt(at time.Time) []byte {
 	raw, err := json.Marshal(map[string]any{
-		"schema": readinessCampaignSchema, "verified": true, "missing_evidence": []string{}, "failures": []string{},
+		"observed_at": at,
+		"schema":      readinessCampaignSchema, "verified": true, "missing_evidence": []string{}, "failures": []string{},
 		"counts": map[string]int{},
 		"rows": []map[string]any{
 			{"id": "release/default/seed/1", "kind": "release", "profile": "default", "seed": 1, "report": "release-1.json", "verified": true},
@@ -82,9 +92,11 @@ func readinessCampaignBody() []byte {
 }
 
 // readinessIsolationBody is the isolation.json a passing `smoke isolation` writes.
-func readinessIsolationBody() []byte {
+func readinessIsolationBody() []byte { return readinessIsolationBodyAt(readinessFixtureAt) }
+
+func readinessIsolationBodyAt(at time.Time) []byte {
 	raw, err := json.Marshal(map[string]any{
-		"Version": 1, "Qualification": "real appcore over HTTPS with real sessions",
+		"Version": 1, "Qualification": "real appcore over HTTPS with real sessions", "ObservedAt": at,
 		"Matrix": []map[string]any{
 			{"actor": "carol(no grant)", "target": "orgA/P1", "surface": "capabilities", "status": 404, "outcome": "indistinguishable_from_guess"},
 			{"actor": "alice(P1 grant)", "target": "orgA/P1", "surface": "export_own_rows", "status": 200, "outcome": "only_own_scope"},
@@ -98,8 +110,12 @@ func readinessIsolationBody() []byte {
 
 // readinessDrillBody is the <scenario>.json a passing `drills` run writes.
 func readinessDrillBody(scenario string) []byte {
+	return readinessDrillBodyAt(scenario, readinessFixtureAt)
+}
+
+func readinessDrillBodyAt(scenario string, at time.Time) []byte {
 	raw, err := json.Marshal(map[string]any{
-		"scenario": scenario, "target": "isolated", "status": "passed", "started_at": "2026-11-10T11:00:00Z", "elapsed_ms": 1200,
+		"scenario": scenario, "target": "isolated", "status": "passed", "started_at": at.Format(time.RFC3339), "elapsed_ms": 1200,
 		"ack_ledger": []any{}, "failed_attempts": []any{},
 		"checks":        []map[string]any{{"name": "exact_reconciliation", "ok": true, "detail": "3 acknowledged ids retained"}},
 		"not_run_items": []map[string]any{{"item": "real alert destination", "reason": "isolated host"}},
@@ -116,26 +132,26 @@ func readinessBody(producer string, kind ReadinessKind, at time.Time) []byte {
 	var v any
 	switch producer {
 	case "adoption-journeys":
-		r := JourneyReport{SchemaVersion: journeySchemaVersion, VerifiedAt: at, Passed: true}
+		r := JourneyReport{SchemaVersion: journeySchemaVersion, Scope: readinessFixtureScope, VerifiedAt: at, Passed: true}
 		for _, k := range journeyKinds {
 			r.Results = append(r.Results, JourneyResult{Kind: k, Status: JourneyPassed, Checks: []JourneyCheck{{Name: JourneyCheckRead, Passed: true}}})
 		}
 		v = r
 	case "adoption-shadow":
-		v = ShadowReport{SchemaVersion: shadowSchemaVersion, Reconciled: true, PolicyViolations: []string{}, Records: ShadowCounts{Received: 2, Admitted: 2},
+		v = ShadowReport{SchemaVersion: shadowSchemaVersion, Scope: readinessFixtureScope, ObservedAt: at, Reconciled: true, PolicyViolations: []string{}, Records: ShadowCounts{Received: 2, Admitted: 2},
 			Parity: ShadowParityReport{QueriesCompared: 1, Mismatches: []ShadowMismatch{}}}
 	case "adoption-policy-compare":
-		v = PolicyReport{SchemaVersion: 1, Compared: 3, Identical: 3, Verdict: policyVerdictReconciled}
+		v = PolicyReport{SchemaVersion: 1, Scope: readinessFixtureScope, ObservedAt: at, Compared: 3, Identical: 3, Verdict: policyVerdictReconciled}
 	case "adoption-retention":
-		v = HistoryReport{SchemaVersion: historySchemaVersion, EvaluatedAt: at, Clear: true, Blockers: []HistoryCode{}, Completed: 1,
+		v = HistoryReport{SchemaVersion: historySchemaVersion, Scope: readinessFixtureScope, EvaluatedAt: at, Clear: true, Blockers: []HistoryCode{}, Completed: 1,
 			Obligations: []HistoryObligationStatus{{State: HistoryStateCompleted}}}
 	case "qualify":
-		return readinessCampaignBody()
+		return readinessCampaignBodyAt(at)
 	case "smoke":
-		return readinessIsolationBody()
+		return readinessIsolationBodyAt(at)
 	case "drills":
 		if scenario, ok := readinessDrillScenarioFor[kind]; ok {
-			return readinessDrillBody(scenario)
+			return readinessDrillBodyAt(scenario, at)
 		}
 		return nil
 	default:
@@ -291,10 +307,11 @@ func TestCutoverReadinessEvidenceBoundaries(t *testing.T) {
 		t.Fatal("deadman independence needs a declared product domain")
 	}
 	// Freshness edges: exactly at max age is fresh; a second older is stale.
-	if r := readinessEval(t, readinessMutate(l, k, func(e *EvidenceRef) { e.ObservedAt = readinessNow.Add(-time.Hour) }), a); !r.Ready {
+	reseal := func(l AcceptanceLedger) AcceptanceLedger { l, _ = readinessSeal(l); return l }
+	if r := readinessEval(t, reseal(readinessMutate(l, k, func(e *EvidenceRef) { e.ObservedAt = readinessNow.Add(-time.Hour) })), a); !r.Ready {
 		t.Fatalf("evidence exactly at max age is fresh: %+v", r.Blockers)
 	}
-	if r := readinessEval(t, readinessMutate(l, k, func(e *EvidenceRef) { e.ObservedAt = readinessNow }), a); !r.Ready {
+	if r := readinessEval(t, reseal(readinessMutate(l, k, func(e *EvidenceRef) { e.ObservedAt = readinessNow })), a); !r.Ready {
 		t.Fatalf("evidence observed at now is current: %+v", r.Blockers)
 	}
 	// Authorization boundaries: expiry, not-yet-valid, wrong scope/env/kind.

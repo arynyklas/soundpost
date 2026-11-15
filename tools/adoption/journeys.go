@@ -186,19 +186,25 @@ type JourneyResult struct {
 // JourneyPublicProjection.
 type JourneyReport struct {
 	SchemaVersion int
-	VerifiedAt    time.Time
-	Passed        bool
-	Results       []JourneyResult
+	// Scope is the acceptance-ledger scope the verification is evidence for
+	// (JourneyTargets.Scope); the readiness gate refuses the report for another.
+	Scope      string
+	VerifiedAt time.Time
+	Passed     bool
+	Results    []JourneyResult
 }
 
 // JourneyTargets names where evidence is read. Org and Project are the scope
 // the reads are made under; every response must echo exactly this scope.
 type JourneyTargets struct {
-	ServerURL string        `json:"server_url"`
-	Bearer    string        `json:"-"`
-	Org       string        `json:"org"`
-	Project   string        `json:"project"`
-	Reader    JourneyReader `json:"-"` // in-process alternative to ServerURL+Bearer
+	ServerURL string `json:"server_url"`
+	Bearer    string `json:"-"`
+	Org       string `json:"org"`
+	Project   string `json:"project"`
+	// Scope is the acceptance-ledger scope the report is evidence for (a label
+	// recorded in the report; the journeys command requires it).
+	Scope  string        `json:"scope"`
+	Reader JourneyReader `json:"-"` // in-process alternative to ServerURL+Bearer
 }
 
 // JourneyWindow is the half-open [start,end) nanosecond range spans or samples
@@ -388,7 +394,7 @@ func VerifyJourneys(ctx context.Context, targets JourneyTargets, links ExpectedL
 	if err != nil {
 		return JourneyReport{}, err
 	}
-	report := JourneyReport{SchemaVersion: journeySchemaVersion, VerifiedAt: time.Now().UTC(), Passed: true}
+	report := JourneyReport{SchemaVersion: journeySchemaVersion, Scope: targets.Scope, VerifiedAt: time.Now().UTC(), Passed: true}
 	sections := []func() (JourneyResult, error){
 		func() (JourneyResult, error) { return journeyRunGateway(ctx, reader, org, project, links.Gateway) },
 		func() (JourneyResult, error) { return journeyRunFrontend(ctx, reader, org, project, links.Frontend) },
@@ -763,6 +769,7 @@ func journeyLoadMap(path string) ([]byte, error) {
 //
 //	--server URL                    exact Soundpost server base URL (matches the grant)
 //	--org ID --project ID           scope of every read
+//	--scope LABEL                   acceptance-ledger scope the report is evidence for
 //	--expected FILE                 private ExpectedLinks JSON
 //	--authorization FILE            private read-only grant for this exact URL
 //	--private-output DIRECTORY      existing external private directory
@@ -775,6 +782,7 @@ func runJourneys(ctx context.Context, args []string) error {
 	server := fs.String("server", "", "exact Soundpost server base URL")
 	org := fs.String("org", "", "organization ID")
 	project := fs.String("project", "", "project ID")
+	scope := fs.String("scope", "", "acceptance-ledger scope the report is evidence for")
 	expectedPath := fs.String("expected", "", "private expected links JSON")
 	grantPath := fs.String("authorization", "", "private read-only grant JSON")
 	output := fs.String("private-output", "", "external private directory")
@@ -784,8 +792,8 @@ func runJourneys(ctx context.Context, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if fs.NArg() != 0 || !nonempty(*server, *org, *project, *expectedPath, *grantPath, *output, *summaryPath, *bearerEnv) {
-		return errors.New("usage: adoption journeys --server URL --org ID --project ID --expected FILE --authorization FILE --private-output DIRECTORY --public-summary FILE")
+	if fs.NArg() != 0 || !nonempty(*server, *org, *project, *scope, *expectedPath, *grantPath, *output, *summaryPath, *bearerEnv) {
+		return errors.New("usage: adoption journeys --server URL --org ID --project ID --scope LABEL --expected FILE --authorization FILE --private-output DIRECTORY --public-summary FILE")
 	}
 	if *timeout <= 0 || *timeout > time.Hour {
 		return errors.New("timeout must be positive and at most 1h")
@@ -811,7 +819,7 @@ func runJourneys(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	report, err := VerifyJourneys(ctx, JourneyTargets{ServerURL: *server, Bearer: os.Getenv(*bearerEnv), Org: *org, Project: *project}, links)
+	report, err := VerifyJourneys(ctx, JourneyTargets{ServerURL: *server, Bearer: os.Getenv(*bearerEnv), Org: *org, Project: *project, Scope: *scope}, links)
 	if err != nil {
 		if ctx.Err() != nil {
 			return errors.New("journey verification cancelled or deadline exceeded")

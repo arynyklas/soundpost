@@ -285,7 +285,7 @@ func readinessCheckRef(l AcceptanceLedger, e EvidenceRef, auths []ReadinessAutho
 	verified := false
 	if readinessHex64(e.Digest) && e.Result == ReadinessResultPass {
 		var rb []ReadinessBlocker
-		rb, verified = readinessVerifyReport(e, reports)
+		rb, verified = readinessVerifyReport(e, reports, l.Scope)
 		bl = append(bl, rb...)
 		if _, has := readinessAdapters[e.Producer]; !has && l.RequireVerifiedReports {
 			add(ReadinessBlockReportUnverifiable, string(e.Kind)+" evidence from a producer whose report cannot be verified here")

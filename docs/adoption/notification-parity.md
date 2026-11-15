@@ -75,7 +75,7 @@ The parent wires `policy-compare` to `runPolicyCompare(ctx, args)` with the argu
 go run ./tools/adoption policy-compare --legacy <legacy.json> --canonical <canonical.json> --approved-policy <approved.json> --private-output <external-private-directory> --public-summary <new-summary-file> [--timeout 2m]
 ```
 
-It writes `policy-report.json` (private, exclusive, mode 0600) into the private directory and the closed public summary to a new file, then exits non-zero unless the verdict is `reconciled`; the evidence is written in either case. Existing files are never overwritten. The private directory checks are the intake tool's and need a valid local Git context.
+It writes `policy-report.json` (private, exclusive, mode 0600) into the private directory and the closed public summary to a new file, then exits non-zero unless the verdict is `reconciled`; the evidence is written in either case. Existing files are never overwritten. The approved policy file must carry `scope` (the acceptance-ledger scope the comparison is evidence for; the command refuses one without it); the private report records it and `observed_at` (the instant the command ran), and the readiness gate checks both. The private directory checks are the intake tool's and need a valid local Git context.
 
 ## Not covered here
 

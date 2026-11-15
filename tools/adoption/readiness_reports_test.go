@@ -294,6 +294,179 @@ func TestCutoverReadinessReportRulesOfReferences(t *testing.T) {
 	}
 }
 
+// readinessTimeField is the JSON member in which each producer's report records
+// when it was observed.
+var readinessTimeField = map[string]string{
+	"adoption-journeys": "VerifiedAt", "adoption-shadow": "observed_at", "adoption-policy-compare": "observed_at",
+	"adoption-retention": "evaluated_at", "qualify": "observed_at", "smoke": "ObservedAt", "drills": "started_at",
+}
+
+// 08.05-W2 review M1: the observation time of the evidence is read from the
+// producer's report, for every producer, not taken from the reference alone. A
+// months-old report cited as observed ten minutes ago, and a report that records
+// no time at all, both block.
+func TestCutoverReadinessChecksTheObservationTimeOfEveryProducerReport(t *testing.T) {
+	l, a := readinessFixture()
+	seen := map[string]bool{}
+	for _, e := range l.Evidence {
+		for name, body := range map[string][]byte{
+			"observed a second later":   readinessBody(e.Producer, e.Kind, e.ObservedAt.Add(time.Second)),
+			"observed months earlier":   readinessBody(e.Producer, e.Kind, e.ObservedAt.Add(-90*24*time.Hour)),
+			"observed a second earlier": readinessBody(e.Producer, e.Kind, e.ObservedAt.Add(-time.Second)),
+		} {
+			el, reports := readinessSwap(l, e.Kind, body)
+			got := readinessReportCodes(readinessEvalWith(t, el, a, reports))
+			if got[ReadinessBlockReportTime+":"+string(e.Kind)] != 1 || len(got) != 1 {
+				t.Errorf("%s %s (%s): want exactly report_time_mismatch, got %v", e.Producer, e.Kind, name, got)
+			}
+		}
+		field := readinessTimeField[e.Producer]
+		honest := readinessBody(e.Producer, e.Kind, e.ObservedAt)
+		for name, body := range map[string][]byte{
+			"no time":    readinessEditJSON(t, honest, func(m map[string]any) { delete(m, field) }),
+			"zero time":  readinessEditJSON(t, honest, func(m map[string]any) { m[field] = "0001-01-01T00:00:00Z" }),
+			"not a time": readinessEditJSON(t, honest, func(m map[string]any) { m[field] = "yesterday" }),
+		} {
+			el, reports := readinessSwap(l, e.Kind, body)
+			got := readinessReportCodes(readinessEvalWith(t, el, a, reports))
+			if got[ReadinessBlockReportInvalid+":"+string(e.Kind)] != 1 || len(got) != 1 {
+				t.Errorf("%s %s (%s): want exactly report_invalid, got %v", e.Producer, e.Kind, name, got)
+			}
+		}
+		// The report observed exactly when the reference says is accepted.
+		el, reports := readinessSwap(l, e.Kind, honest)
+		if r := readinessEvalWith(t, el, a, reports); !r.Ready {
+			t.Errorf("%s %s: an honest report must be ready: %+v", e.Producer, e.Kind, r.Blockers)
+		}
+		seen[e.Producer] = true
+	}
+	for producer := range readinessAdapters {
+		if !seen[producer] {
+			t.Errorf("producer %s has no time check in this test", producer)
+		}
+	}
+}
+
+// readinessScopeField is, for the producers whose report records the ledger scope
+// it was produced for, the JSON member that does. qualify (07.05), smoke (07.04)
+// and drills (07.07) describe the product build or an isolated harness, not a
+// customer scope; they stay unbound by design (docs/adoption/readiness-gate.md).
+var readinessScopeField = map[string]string{
+	"adoption-journeys": "Scope", "adoption-shadow": "scope", "adoption-policy-compare": "scope", "adoption-retention": "scope",
+}
+
+// 08.05-W2 review M2: a producer report is bound to the scope it was produced
+// for. One honest run's report cannot satisfy a ledger of another scope, and a
+// report that names no scope cannot satisfy any.
+func TestCutoverReadinessBindsAdoptionReportsToTheirScope(t *testing.T) {
+	l, a := readinessFixture()
+	for _, e := range l.Evidence {
+		field, bound := readinessScopeField[e.Producer]
+		if !bound {
+			continue
+		}
+		honest := readinessBody(e.Producer, e.Kind, e.ObservedAt)
+		for name, body := range map[string][]byte{
+			"another scope":             readinessEditJSON(t, honest, func(m map[string]any) { m[field] = "other-scope" }),
+			"scope with different case": readinessEditJSON(t, honest, func(m map[string]any) { m[field] = strings.ToUpper(readinessFixtureScope) }),
+		} {
+			el, reports := readinessSwap(l, e.Kind, body)
+			r := readinessEvalWith(t, el, a, reports)
+			wrong := 0
+			for _, b := range r.Blockers {
+				if b.Code == ReadinessBlockWrongScope && b.Kind == e.Kind {
+					wrong++
+				}
+			}
+			if r.Ready || wrong != 1 || len(readinessReportCodes(r)) != 0 {
+				t.Errorf("%s %s (%s): want exactly one wrong_scope blocker, got ready=%v %+v", e.Producer, e.Kind, name, r.Ready, r.Blockers)
+			}
+		}
+		for name, body := range map[string][]byte{
+			"no scope member": readinessEditJSON(t, honest, func(m map[string]any) { delete(m, field) }),
+			"empty scope":     readinessEditJSON(t, honest, func(m map[string]any) { m[field] = "" }),
+		} {
+			el, reports := readinessSwap(l, e.Kind, body)
+			if got := readinessReportCodes(readinessEvalWith(t, el, a, reports)); got[ReadinessBlockReportInvalid+":"+string(e.Kind)] != 1 || len(got) != 1 {
+				t.Errorf("%s %s (%s): want exactly report_invalid, got %v", e.Producer, e.Kind, name, got)
+			}
+		}
+	}
+	// The same honest reports of another ledger scope are refused wholesale: no
+	// reference of the other ledger is satisfied by this scope's bodies.
+	other, a2 := readinessFixture()
+	other.Scope = "other-scope"
+	for i := range other.Evidence {
+		other.Evidence[i].Scope = other.Scope
+	}
+	a2.Items[0].Scope = other.Scope
+	r := readinessEvalWith(t, other, a2, readinessReportsFor(l))
+	bound := 0
+	for _, b := range r.Blockers {
+		if b.Code == ReadinessBlockWrongScope {
+			bound++
+		}
+	}
+	if r.Ready || bound != 6 { // 3 journeys + source policy + delivery policy + legacy retention
+		t.Fatalf("reports of scope %q for a ledger of another scope: ready=%v wrong_scope=%d %+v", l.Scope, r.Ready, bound, r.Blockers)
+	}
+}
+
+// The mirrors of the package-main producers (smoke, drills) and the qualify
+// report must keep decoding what those tools really write. With
+// SOUNDPOST_READINESS_REAL_REPORTS set to a directory holding files a real run
+// produced (isolation.json of `smoke isolation`, campaign-report.json of
+// `query-campaign`, <scenario>.json of `drills`) every such file is fed to the
+// adapter of its producer: it must decode, carry an observation time, and for
+// isolation.json pass. Skipped without the variable (the files need a Linux
+// run of those tools).
+func TestReadinessAdaptersDecodeTheProducersRealOutput(t *testing.T) {
+	dir := os.Getenv("SOUNDPOST_READINESS_REAL_REPORTS")
+	if dir == "" {
+		t.Skip("SOUNDPOST_READINESS_REAL_REPORTS is not set: no real producer output to decode")
+	}
+	type target struct {
+		producer string
+		kind     ReadinessKind
+		mustPass bool
+	}
+	byFile := map[string]target{
+		"isolation.json":       {"smoke", ReadinessIsolationMatrix, true},
+		"campaign-report.json": {"qualify", ReadinessQueryProfile, false},
+	}
+	checked := 0
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		tg, ok := byFile[e.Name()]
+		if !ok {
+			scenario := strings.TrimSuffix(e.Name(), ".json")
+			for kind, names := range readinessDrillScenarios {
+				if slices.Contains(names, scenario) {
+					tg, ok = target{"drills", kind, false}, true
+				}
+			}
+		}
+		if !ok {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		v, err := readinessAdapters[tg.producer](raw, tg.kind)
+		if err != nil || v.At.IsZero() || time.Since(v.At) > 24*time.Hour || (tg.mustPass && !v.Pass) {
+			t.Errorf("%s: %s adapter: err=%v at=%v pass=%v", e.Name(), tg.producer, err, v.At, v.Pass)
+		}
+		checked++
+	}
+	if checked == 0 {
+		t.Fatalf("%s holds no report of a known producer", dir)
+	}
+}
+
 func TestCutoverReadinessReportsAreAddressedByTheirDigest(t *testing.T) {
 	body := []byte(`{"a":1}`)
 	sum := sha256.Sum256(body)

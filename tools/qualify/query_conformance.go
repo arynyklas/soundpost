@@ -24,6 +24,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -147,6 +148,10 @@ type CampaignReport struct {
 	Missing  []string    `json:"missing_evidence"`
 	Failures []string    `json:"failures"`
 	Verified bool        `json:"verified"`
+	// ObservedAt is when the campaign verified the rows (stamped when the report
+	// is written); the adoption readiness gate checks it against the reference
+	// that cites this report.
+	ObservedAt time.Time `json:"observed_at"`
 }
 
 // RunQueryConformance executes the locked smoke (one run per required layout)
@@ -234,6 +239,7 @@ func VerifyQueryEvidence(matrix QueryMatrix, artifactDir string) (CampaignReport
 }
 
 func finish(rep CampaignReport, artifactDir string) (CampaignReport, error) {
+	rep.ObservedAt = time.Now().UTC()
 	if raw, err := json.MarshalIndent(rep, "", "  "); err == nil {
 		if err = os.WriteFile(filepath.Join(artifactDir, "campaign-report.json"), append(raw, '\n'), 0o644); err != nil {
 			return rep, err

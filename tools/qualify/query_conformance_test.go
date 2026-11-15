@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	q "github.com/arynyklas/soundpost/internal/conformance/query"
 )
@@ -335,6 +336,27 @@ func writeJSON(t *testing.T, path string, v any) {
 	}
 	if err = os.WriteFile(path, raw, 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// The adoption readiness gate checks the observation time of a campaign report
+// against the reference that cites it (08.05-W2 review M1): the report records
+// when the campaign verified its rows, in the returned value and on disk.
+func TestCampaignReportRecordsWhenItWasObserved(t *testing.T) {
+	m := realMatrix(t)
+	dir := copyArtifacts(t)
+	before := time.Now().UTC()
+	rep, _ := VerifyQueryEvidence(m, dir)
+	after := time.Now().UTC()
+	var disk CampaignReport
+	readJSON(t, filepath.Join(dir, "campaign-report.json"), &disk)
+	for name, got := range map[string]time.Time{"returned": rep.ObservedAt, "on disk": disk.ObservedAt} {
+		if got.IsZero() || got.Before(before.Add(-time.Second)) || got.After(after.Add(time.Second)) {
+			t.Errorf("%s observed_at %v not within [%v, %v]", name, got, before, after)
+		}
+	}
+	if !disk.ObservedAt.Equal(rep.ObservedAt) {
+		t.Errorf("disk %v != returned %v", disk.ObservedAt, rep.ObservedAt)
 	}
 }
 
