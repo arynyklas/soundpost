@@ -8,6 +8,7 @@ import (
 	"github.com/arynyklas/soundpost/internal/artifacts/refledger"
 	"github.com/arynyklas/soundpost/internal/auth"
 	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/storage"
 	"slices"
 	"time"
 )
@@ -405,4 +406,51 @@ func (l *Lifecycle) Unreference(ctx context.Context, scope auth.Scope, id Artifa
 // settingsOf is an org's settings (where ledgers live) in a read-only snapshot.
 func settingsOf(st model.ControlState, org model.ID) map[string]json.RawMessage {
 	return st.Orgs[org.String()].Settings
+}
+
+// ReconcileRetired is the restore-activation reconciliation of artifact retirement. A restore
+// from a backup older than a retirement brings back the published intent and the unfenced ledger
+// of a map that the installation had already retired: its bytes are present again and nothing
+// records that it was gone. A retirement is only ever taken after the map's effective retention
+// (the upload's deadline and every unreleased reference) elapsed, and time does not go back, so
+// every published map whose retention is over now is retired again here, through the same fenced
+// decision retention takes (LatestReference: deletion precedence, snapshot pins, the verified
+// ledger), instead of staying readable until the next expiry pass reaches it. A map that is still
+// retained, or held by a pin, is left to the pass. A ledger that does not verify fails the
+// reconciliation closed. It returns how many maps it retired; it is idempotent.
+func (l *Lifecycle) ReconcileRetired(ctx context.Context) (int, error) {
+	now := model.UnixNano(l.cfg.Now().UnixNano())
+	var due []model.BlobManifest
+	if err := l.cfg.State.View(ctx, func(st model.ControlState) error {
+		for _, intent := range st.ArtifactIntents {
+			if intent.State != intentPublished || deletionCovers(st, intent.Map.Manifest) {
+				continue
+			}
+			m := intent.Map.Manifest
+			led, err := refledger.Load(settingsOf(st, m.Org), m.Project, m.Root)
+			if err != nil {
+				return err
+			}
+			if max(m.RetainUntil, led.Latest()) <= now {
+				due = append(due, m)
+			}
+		}
+		return nil
+	}); err != nil {
+		return 0, err
+	}
+	retired := 0
+	for _, m := range due {
+		if err := ctx.Err(); err != nil {
+			return retired, model.Fail(model.Cancelled)
+		}
+		latest, err := l.LatestReference(ctx, storage.EraseCandidate{Org: m.Org, Project: m.Project, Blob: &m})
+		if err != nil {
+			return retired, err
+		}
+		if latest == 0 {
+			retired++
+		}
+	}
+	return retired, nil
 }

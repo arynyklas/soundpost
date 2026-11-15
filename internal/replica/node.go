@@ -4,7 +4,6 @@ package replica
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -659,7 +658,7 @@ func (g *Group) propose(ctx context.Context, e Entry, from *Proposer) (Committed
 		}
 		e.CommitSet = &CommitSetWatermark{Group: g.group, Term: s.HardState.GetTerm(), PhysicalCommit: s.HardState.GetCommit(), PhysicalLast: last, ApplicationApplied: g.application, Reservation: *e.ReservationID}
 	}
-	raw, err := json.Marshal(e)
+	raw, err := encodeEntry(e)
 	if err != nil {
 		g.mu.Unlock()
 		return CommittedEntry{}, err

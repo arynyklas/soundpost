@@ -13,6 +13,10 @@ import (
 
 func fixedPins(n int, err error) func() (int, error) { return func() (int, error) { return n, err } }
 
+func heldRoot(held bool, err error) func(_, _, _ model.ID) (bool, error) {
+	return func(_, _, _ model.ID) (bool, error) { return held, err }
+}
+
 func pinnedCode(err error) model.Code {
 	var fault *model.Fault
 	if errors.As(err, &fault) {
@@ -33,13 +37,13 @@ func TestJournalPinsAreConservativeAndFailClosed(t *testing.T) {
 		pinned bool
 		code   model.Code
 	}{
-		"no pins":                 {journalPins{data: fixedPins(0, nil), control: fixedPins(0, nil)}, false, ""},
-		"a data pin":              {journalPins{data: fixedPins(1, nil), control: fixedPins(0, nil)}, true, ""},
-		"a control pin":           {journalPins{data: fixedPins(0, nil), control: fixedPins(2, nil)}, true, ""},
-		"data pins unreadable":    {journalPins{data: fixedPins(0, model.Fail(model.Unavailable)), control: fixedPins(0, nil)}, false, model.Unavailable},
-		"control pins unreadable": {journalPins{data: fixedPins(0, nil), control: fixedPins(0, model.Fail(model.Corrupt))}, false, model.Corrupt},
+		"no pins":                 {journalPins{data: heldRoot(false, nil), control: fixedPins(0, nil)}, false, ""},
+		"a data pin holds":        {journalPins{data: heldRoot(true, nil), control: fixedPins(0, nil)}, true, ""},
+		"a control pin":           {journalPins{data: heldRoot(false, nil), control: fixedPins(2, nil)}, true, ""},
+		"data pins unreadable":    {journalPins{data: heldRoot(false, model.Fail(model.Unavailable)), control: fixedPins(0, nil)}, false, model.Unavailable},
+		"control pins unreadable": {journalPins{data: heldRoot(false, nil), control: fixedPins(0, model.Fail(model.Corrupt))}, false, model.Corrupt},
 		"no data source":          {journalPins{control: fixedPins(0, nil)}, false, model.Unavailable},
-		"no control source":       {journalPins{data: fixedPins(0, nil)}, false, model.Unavailable},
+		"no control source":       {journalPins{data: heldRoot(false, nil)}, false, model.Unavailable},
 	} {
 		got, err := ask(tc.p)
 		if got != tc.pinned || pinnedCode(err) != tc.code {
@@ -48,7 +52,7 @@ func TestJournalPinsAreConservativeAndFailClosed(t *testing.T) {
 	}
 	cancelled, cancel := context.WithCancel(ctx)
 	cancel()
-	if got, err := (journalPins{data: fixedPins(0, nil), control: fixedPins(0, nil)}).Pinned(cancelled, model.ID{}, model.ID{}, root); got || err == nil {
+	if got, err := (journalPins{data: heldRoot(false, nil), control: fixedPins(0, nil)}).Pinned(cancelled, model.ID{}, model.ID{}, root); got || err == nil {
 		t.Errorf("a cancelled context answered %v %v", got, err)
 	}
 	var _ artifacts.SnapshotPins = journalPins{}

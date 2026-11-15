@@ -15,10 +15,10 @@ import (
 )
 
 // writeBlobAllocBound is the cumulative-allocation ceiling of one replicated WriteBlob, as a
-// multiple of the input for an 8 MiB blob. Measured on Linux: HEAD e805349 61.3x (one run); after
-// the change 40.5x-40.8x over repeated runs, so 52x leaves 25% headroom over the stable value and
-// is below the HEAD figure.
-const writeBlobAllocBound = 52
+// multiple of the input for an 8 MiB blob. Measured on Linux: HEAD e805349 61.3x (one run); 40.5x-40.8x
+// before the single-allocation fragment encoder (encodeFragmentJSON); 33.4x after it (one run, lane 1
+// wave 8), so 42x leaves 25% headroom over the measured value.
+const writeBlobAllocBound = 42
 
 // blobFixtureSized is blobFixture with an input of size bytes.
 func blobFixtureSized(t *testing.T, size int) (*control.Store, *auth.Service, auth.Scope, model.BlobManifest, []byte) {

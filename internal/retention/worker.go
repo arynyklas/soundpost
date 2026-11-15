@@ -55,6 +55,27 @@ type WorkerStatus struct {
 
 func (s *Service) Status() WorkerStatus { s.mu.Lock(); defer s.mu.Unlock(); return s.status }
 
+// UseClock replaces the time source of a Service (Config.Clock, the wall clock unless
+// the builder set one) with clock. The application builds the Service itself with the
+// wall clock, and a pass that has to see a later instant than the wall's (declared
+// retention runs for days; the worker's expiry is driven by the same reading) is run
+// by a test that installs its own clock here, then calls RunOnce. It is refused with
+// Conflict while the worker is started (its goroutine reads the clock on every
+// pass) and with Invalid for a nil clock. The schedule state (the instants of the
+// last snapshot and expiry) is not rewritten: the new clock continues it.
+func (s *Service) UseClock(clock func() time.Time) error {
+	if clock == nil {
+		return model.Fail(model.Invalid)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cancel != nil {
+		return model.Fail(model.Conflict)
+	}
+	s.clock.Store(&clock)
+	return nil
+}
+
 // Start runs RunOnce every Interval until Close or ctx ends.
 func (s *Service) Start(ctx context.Context) error {
 	s.mu.Lock()
@@ -67,7 +88,7 @@ func (s *Service) Start(ctx context.Context) error {
 	// start: a freshly started (or joining) node must not begin with two
 	// fsync-heavy snapshot cuts while it is still catching up. Deletions are
 	// driven on every pass regardless.
-	started := s.cfg.Clock()
+	started := s.timeNow()
 	s.last.snapshot, s.last.expiry = started, started
 	s.cancel, s.done = cancel, make(chan struct{})
 	go func(done chan struct{}) {
@@ -111,7 +132,7 @@ func (s *Service) RunOnce(ctx context.Context) error {
 		}
 	}
 	step(s.driveDeletions(ctx))
-	now := s.cfg.Clock()
+	now := s.timeNow()
 	s.mu.Lock()
 	expiryDue := s.last.expiry.IsZero() || now.Sub(s.last.expiry) >= s.worker.ExpiryInterval
 	snapDue := s.last.snapshot.IsZero() || now.Sub(s.last.snapshot) >= s.worker.SnapshotInterval
@@ -180,7 +201,7 @@ func (s *Service) maintainJournal(ctx context.Context, afterErasure bool) error 
 	}
 	s.mu.Lock()
 	s.status.Snapshots++
-	s.last.snapshot = s.cfg.Clock() // any completed maintenance, including a deletion's, satisfies the schedule
+	s.last.snapshot = s.timeNow() // any completed maintenance, including a deletion's, satisfies the schedule
 	s.mu.Unlock()
 	return nil
 }

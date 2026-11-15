@@ -685,7 +685,9 @@ func TestWiredLifecycleSnapshotPinsHoldMaps(t *testing.T) {
 				if len(groups) == 0 {
 					t.Fatal("no data group")
 				}
-				pin, err := groups[0].PinJournal(0)
+				// A data pin holds the roots of its own group (D: per-root pins), so pin the group
+				// that owns the artifact.
+				pin, err := groups[model.BlobOwnerSlot(r.org, r.project, a.ID)].PinJournal(0)
 				if err != nil {
 					t.Fatal(err)
 				}

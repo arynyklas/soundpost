@@ -3,6 +3,7 @@
 package replica
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"github.com/arynyklas/soundpost/internal/model"
 )
@@ -23,6 +24,57 @@ type entryWire struct {
 
 func (w entryWire) entry() Entry {
 	return Entry{ID: w.ID, Kind: w.Kind, Payload: w.Payload, ReservationID: w.ReservationID, ApplicationIndex: uint64(w.Application), CommitSet: w.CommitSet, Original: w.Original, Proposer: w.Proposer, At: int64(w.At)}
+}
+
+// entryHead and entryTail are the members of an Entry that json.Marshal writes before and after
+// the payload, with the tags of Entry. TestEntryJSONHeadAndTailCoverEntry keeps them in step.
+type entryHead struct {
+	ID   model.ID `json:"id"`
+	Kind Kind     `json:"kind"`
+}
+type entryTail struct {
+	ReservationID    *model.ID           `json:"reservation_id,omitempty"`
+	ApplicationIndex uint64              `json:"application_index,string"`
+	CommitSet        *CommitSetWatermark `json:"commit_set,omitempty"`
+	Original         *model.Hash         `json:"original,omitempty"`
+	Proposer         *Proposer           `json:"proposer,omitempty"`
+	At               int64               `json:"at,omitempty,string"`
+}
+
+// encodeEntry is json.Marshal(e) without the copies json.Marshal makes of a large payload: the
+// text is assembled once, at its exact size, with the payload's base64 written straight into it.
+// json.Marshal grows its own buffer to hold the same text and then returns a copy of it, so a
+// payload of n bytes costs about three times n of allocation (and more through every regrowth)
+// where this costs the one output buffer.
+func encodeEntry(e Entry) ([]byte, error) {
+	head, err := json.Marshal(entryHead{ID: e.ID, Kind: e.Kind})
+	if err != nil {
+		return nil, err
+	}
+	tail, err := json.Marshal(entryTail{ReservationID: e.ReservationID, ApplicationIndex: e.ApplicationIndex, CommitSet: e.CommitSet, Original: e.Original, Proposer: e.Proposer, At: e.At})
+	if err != nil {
+		return nil, err
+	}
+	// head is {"id":..,"kind":..}; tail is never empty because application_index is always written.
+	const payloadKey = `,"payload":`
+	size := len(head) - 1 + len(payloadKey) + len(tail)
+	if e.Payload == nil {
+		size += len("null")
+	} else {
+		size += base64.StdEncoding.EncodedLen(len(e.Payload)) + 2
+	}
+	out := make([]byte, 0, size)
+	out = append(out, head[:len(head)-1]...)
+	out = append(out, payloadKey...)
+	if e.Payload == nil {
+		out = append(out, "null"...)
+	} else {
+		out = append(out, '"')
+		out = base64.StdEncoding.AppendEncode(out, e.Payload)
+		out = append(out, '"')
+	}
+	out = append(out, ',')
+	return append(out, tail[1:]...), nil
 }
 
 func (p *Proposer) UnmarshalJSON(raw []byte) error {

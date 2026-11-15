@@ -351,11 +351,16 @@ func (l *live) liveRows() map[int64]bool {
 
 type activation struct {
 	*storage.Engine
-	svc *retention.Service
+	svc       *retention.Service
+	reconcile func(context.Context) (int, error)
 }
 
 func (a activation) RestoreDeletions(ctx context.Context, authority retention.Authority) error {
 	return a.svc.Restore(ctx, authority)
+}
+
+func (a activation) ReconcileRetiredArtifacts(ctx context.Context) (int, error) {
+	return a.reconcile(ctx)
 }
 
 type restored struct {
@@ -397,7 +402,7 @@ func (l *live) openRestored(root string) *restored {
 	return &restored{l: l, root: root, app: app, svc: svc}
 }
 func (r *restored) activate(ledger backup.DeletionLedger) (backup.ActivationReport, error) {
-	return r.l.restorer(r.l.keys, r.l.dest).Activate(r.l.ctx, backup.DestinationRoot(r.root), activation{Engine: r.app.Storage, svc: r.svc}, ledger)
+	return r.l.restorer(r.l.keys, r.l.dest).Activate(r.l.ctx, backup.DestinationRoot(r.root), activation{Engine: r.app.Storage, svc: r.svc, reconcile: r.app.ArtifactLifecycle.ReconcileRetired}, ledger)
 }
 
 // recoveryAdmin bootstraps the fresh recovery admin from the one-time token the restore armed.

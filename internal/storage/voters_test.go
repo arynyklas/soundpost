@@ -29,9 +29,11 @@ type testMesh struct {
 	// holdSnap, per destination node, blocks the delivery of snapshot messages until it is closed:
 	// a snapshot the sender cut and sent that is still in transit.
 	holdSnap map[uint64]chan struct{}
-	stop     chan struct{}
-	wg       sync.WaitGroup
-	once     sync.Once
+	// snaps counts the snapshot messages delivered to each node.
+	snaps map[uint64]int
+	stop  chan struct{}
+	wg    sync.WaitGroup
+	once  sync.Once
 }
 type meshQueueKey struct {
 	to    uint64
@@ -47,7 +49,7 @@ type meshTransport struct {
 }
 
 func newTestMesh() *testMesh {
-	return &testMesh{groups: map[uint64]map[model.ID]*replica.Group{}, queues: map[meshQueueKey]chan meshMessage{}, blocked: map[uint64]bool{}, holdSnap: map[uint64]chan struct{}{}, stop: make(chan struct{})}
+	return &testMesh{groups: map[uint64]map[model.ID]*replica.Group{}, queues: map[meshQueueKey]chan meshMessage{}, blocked: map[uint64]bool{}, holdSnap: map[uint64]chan struct{}{}, snaps: map[uint64]int{}, stop: make(chan struct{})}
 }
 func (m *testMesh) register(node uint64, groups []*replica.Group) {
 	// Status takes the group mutex, which a ticking group holds while it calls
@@ -136,6 +138,9 @@ func (m *testMesh) deliver(key meshQueueKey, queue <-chan meshMessage) {
 			m.mu.Lock()
 			destination, source := m.groups[key.to][key.group], m.groups[in.from][key.group]
 			down := m.blocked[in.from] || m.blocked[key.to]
+			if in.m.GetType() == pb.MsgSnap && !down && destination != nil {
+				m.snaps[key.to]++
+			}
 			m.mu.Unlock()
 			var err error
 			switch {

@@ -1484,11 +1484,15 @@ type Activation interface {
 	CommitQuotaReconciliation(ctx context.Context, cert storage.QuotaReconciliation) error
 	RestoreDeletions(ctx context.Context, authority retention.Authority) error
 	RestoreReady() error
+	// ReconcileRetiredArtifacts retires, in the control state, every artifact whose retention
+	// is over (artifacts.Lifecycle.ReconcileRetired) and reports how many it retired.
+	ReconcileRetiredArtifacts(ctx context.Context) (int, error)
 }
 
 type ActivationReport struct {
 	AuthorityGeneration uint64
 	Tombstones          int
+	ArtifactsRetired    int // artifacts whose retention was over and were retired again (ReconcileRetiredArtifacts)
 }
 
 // Activate finishes a restore on an opened restored installation: it commits
@@ -1563,6 +1567,12 @@ func Activate(ctx context.Context, root DestinationRoot, target Activation, ledg
 	if err = target.RestoreDeletions(ctx, cur.AsAuthority()); err != nil {
 		return ActivationReport{}, err
 	}
+	// The backup may predate a retirement: the map it brings back is published and readable in
+	// the restored state. Retire every map whose retention is over before the engine opens.
+	retired, err := target.ReconcileRetiredArtifacts(ctx)
+	if err != nil {
+		return ActivationReport{}, err
+	}
 	if err = target.RestoreReady(); err != nil {
 		return ActivationReport{}, err
 	}
@@ -1570,7 +1580,7 @@ func Activate(ctx context.Context, root DestinationRoot, target Activation, ledg
 	if err = rewriteState(path, state); err != nil {
 		return ActivationReport{}, err
 	}
-	return ActivationReport{AuthorityGeneration: cur.Head.Generation, Tombstones: len(cur.Tombstones)}, nil
+	return ActivationReport{AuthorityGeneration: cur.Head.Generation, Tombstones: len(cur.Tombstones), ArtifactsRetired: retired}, nil
 }
 
 func rewriteState(path string, state restoreState) error {

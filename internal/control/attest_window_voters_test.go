@@ -172,3 +172,48 @@ func TestAReceiptNamesControlStoresOnlyForTheOperationItAnswers(t *testing.T) {
 	}
 	w.stop()
 }
+
+// The window of a snapshot install (decision proposed by lane 1 wave 8, recommendation: accept; see
+// docs/privacy/retention.md "Still open, by construction"). An install is local to the installing
+// node, not in the log: while that node cannot commit its withdrawal (cut off here), the other
+// voters still answer a receipt from its old records (the installing node's own receipt is judged
+// from its own files, which a real install owes a scrub: TestAnAttestationIsSupersededByASnapshotInstall).
+// The test pins the window, then that it closes: once the node reaches
+// a leader again the records are replaced by ones made after the install, and no receipt names
+// the stores for good.
+func TestAReceiptOfAnotherVoterTrustsAnInstallersRecordsOnlyUntilItsWithdrawalCommits(t *testing.T) {
+	v := newControlVoters(t)
+	w := v.watch(installTestBudget())
+	const gone = "CANARYINSTALLWINDOW8e41c7d0b5a3"
+	w.at("fixture: erasure, every voter attests")
+	v.erasedWithVoter3Idle(gone)
+	v.attest(1)
+	v.attest(2)
+	v.finish(3)
+	v.converge()
+	op := v.lastErasedOp(1)
+	w.at("voter 3 is cut off and learns of an install")
+	v.mesh.cut(3, true)
+	if err := control.SignalInstallDirect(v.stores[3]); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []uint64{1, 2} {
+		if got := v.operationReceiptOn(id, op); len(got) != 0 {
+			t.Fatalf("voter %d cannot see an install that is not in the log and its receipt names %v (the window moved: update the decision text)", id, got)
+		}
+	}
+	w.at("voter 3 reaches a leader again")
+	v.mesh.cut(3, false)
+	v.eventually("no receipt trusts a record from before the install any more", func() bool {
+		for id := uint64(1); id <= 3; id++ {
+			if len(v.operationReceiptOn(id, op)) != 0 {
+				return false
+			}
+		}
+		return true
+	})
+	if j, s := v.facts(1, 3); !j || !s {
+		t.Fatalf("voter 3 never re-attested after the install: journal=%v state=%v", j, s)
+	}
+	w.stop()
+}

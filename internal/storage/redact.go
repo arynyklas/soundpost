@@ -223,6 +223,10 @@ type JournalPinInfo struct {
 	Orphaned bool
 	// Owner is the backup attempt that took the pin (BeginBackupOwned); empty for an unstamped pin.
 	Owner string
+	// RootsKnown says the pin recorded the artifact roots its group held when it was taken
+	// (BeginBackupOwned); Roots is that set. A pin without it holds every root of its group.
+	RootsKnown bool
+	Roots      []model.ID
 }
 
 // JournalPins lists every durable journal pin of every group, after dropping those whose lease
@@ -253,7 +257,7 @@ func (e *Engine) JournalPins() ([]JournalPinInfo, error) {
 			if p.Stamp != (model.ID{}) {
 				stamp = p.Stamp.String()
 			}
-			out = append(out, JournalPinInfo{ID: p.ID.String(), Group: e.group(uint16(slot)).String(), Owner: stamp, After: p.After, Created: p.Created, Expires: p.Expires, Orphaned: p.Orphaned})
+			out = append(out, JournalPinInfo{ID: p.ID.String(), Group: e.group(uint16(slot)).String(), Owner: stamp, After: p.After, Created: p.Created, Expires: p.Expires, Orphaned: p.Orphaned, RootsKnown: p.RootsKnown, Roots: p.Roots})
 		}
 	}
 	return out, nil

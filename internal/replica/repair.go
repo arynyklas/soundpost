@@ -13,6 +13,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -385,6 +386,7 @@ type JournalPin struct {
 	stamp   model.ID
 	created int64 // lease, Unix nanoseconds
 	expires int64
+	roots   *[]model.ID // artifact roots held at the pin; nil: unknown
 }
 
 type pinRecord struct {
@@ -403,6 +405,8 @@ type pinHeader struct {
 	// Created and Expires are the lease, in Unix nanoseconds.
 	Created int64 `json:"created,string"`
 	Expires int64 `json:"expires,string"`
+	// Roots is the set of artifact roots the group held when the pin was taken; absent: unknown.
+	Roots *[]model.ID `json:"roots,omitempty"`
 }
 
 // PinInfo describes one durable journal pin.
@@ -416,6 +420,11 @@ type PinInfo struct {
 	Orphaned bool
 	// Stamp is the owner stamp given to PinJournalFor (zero for an unstamped pin).
 	Stamp model.ID
+	// RootsKnown says the pin recorded the artifact roots the group held when it was taken
+	// (PinJournalForRoots); Roots is that set. A pin without it (an older or unstamped pin) holds
+	// every root of its group as far as a reader can tell.
+	RootsKnown bool
+	Roots      []model.ID
 }
 
 // Pins lists the durable journal pins of this group after dropping every pin whose lease lapsed.
@@ -432,7 +441,12 @@ func (g *Group) Pins() ([]PinInfo, error) {
 	}
 	out := make([]PinInfo, 0, len(g.pins))
 	for _, p := range g.pins {
-		out = append(out, PinInfo{ID: p.id, After: p.after, Stamp: p.stamp, Created: time.Unix(0, p.created), Expires: time.Unix(0, p.expires), Orphaned: p.owner != g.owner})
+		info := PinInfo{ID: p.id, After: p.after, Stamp: p.stamp, Created: time.Unix(0, p.created), Expires: time.Unix(0, p.expires), Orphaned: p.owner != g.owner}
+		if p.roots != nil {
+			info.RootsKnown = true
+			info.Roots = slices.Clone(*p.roots)
+		}
+		out = append(out, info)
 	}
 	sort.Slice(out, func(i, j int) bool { return bytes.Compare(out[i].ID[:], out[j].ID[:]) < 0 })
 	return out, nil
@@ -488,6 +502,21 @@ func (g *Group) PinJournal(after uint64) (*JournalPin, error) {
 // the pin. The stamp is durable in the pin header, is reported by Pins and lets a reaper drop
 // exactly the pins of one dead owner (DropPin by ID after filtering on Stamp).
 func (g *Group) PinJournalFor(after uint64, stamp model.ID) (*JournalPin, error) {
+	return g.pinJournal(after, stamp, nil)
+}
+
+// PinJournalForRoots is PinJournalFor that also records the artifact roots the group holds at the
+// instant of the pin (a non-nil slice, possibly empty; nil means "unknown"). The set is durable in
+// the pin header and is reported by Pins (PinInfo.Roots), so a reader can answer "does this pin
+// hold that root" per root instead of treating a pin as holding every root of the group.
+func (g *Group) PinJournalForRoots(after uint64, stamp model.ID, roots []model.ID) (*JournalPin, error) {
+	if roots == nil {
+		roots = []model.ID{}
+	}
+	return g.pinJournal(after, stamp, &roots)
+}
+
+func (g *Group) pinJournal(after uint64, stamp model.ID, roots *[]model.ID) (*JournalPin, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.failed || g.closed {
@@ -499,13 +528,13 @@ func (g *Group) PinJournalFor(after uint64, stamp model.ID) (*JournalPin, error)
 	commit := g.raw.BasicStatus().HardState.GetCommit()
 	first, _ := g.memory.FirstIndex()
 	created := g.now().UnixNano()
-	p := &JournalPin{g: g, id: model.NewID(), after: after, next: first, owner: g.owner, stamp: stamp, created: created, expires: created + int64(g.pinTTL)}
+	p := &JournalPin{g: g, id: model.NewID(), after: after, next: first, owner: g.owner, stamp: stamp, roots: roots, created: created, expires: created + int64(g.pinTTL)}
 	p.path = filepath.Join(g.pinDir(), p.id.String()+".pin")
 	var header *model.ID
 	if stamp != (model.ID{}) {
 		header = &stamp
 	}
-	if err := p.appendLocked(nil, &pinHeader{ID: p.id, After: after, Next: first, Owner: p.owner, Stamp: header, Created: p.created, Expires: p.expires}); err != nil {
+	if err := p.appendLocked(nil, &pinHeader{ID: p.id, After: after, Next: first, Owner: p.owner, Stamp: header, Roots: roots, Created: p.created, Expires: p.expires}); err != nil {
 		return nil, err
 	}
 	if err := g.archiveRangeLocked(p, commit); err != nil {
@@ -817,7 +846,7 @@ func (g *Group) loadPins() error {
 		if h.Stamp != nil {
 			stamp = *h.Stamp
 		}
-		g.pins[h.ID] = &JournalPin{g: g, id: h.ID, after: h.After, path: path, next: next, owner: h.Owner, stamp: stamp, created: h.Created, expires: h.Expires}
+		g.pins[h.ID] = &JournalPin{g: g, id: h.ID, after: h.After, path: path, next: next, owner: h.Owner, stamp: stamp, roots: h.Roots, created: h.Created, expires: h.Expires}
 	}
 	return nil
 }

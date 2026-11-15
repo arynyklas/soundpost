@@ -18,21 +18,34 @@ import (
 	"github.com/arynyklas/soundpost/internal/storage"
 )
 
-// refsRig is the replay rig plus the composite References source and the real
-// storage erase pass driven at a clock the test chooses: appcore.Open's own
-// retention service runs on the wall clock, a replay is retained for days, and a
-// second retention.Service over the same Store cannot be built (retention.New
-// registers on the Store once). pass is the pass the retention worker makes:
-// a dry plan over every candidate (nothing is erased; an error ends the pass), then
-// the erase with the same guard (retention/worker.go, extra and EraseExpired).
+// refsRig is the replay rig plus the composite References source. The node's real
+// retention service (app.Retention) runs on a clock the test moves
+// (retention.Service.UseClock): runAt is one real RunOnce. pass is the simulated pass,
+// kept beside it, that drives the same engine erase at any instant without the
+// worker's hourly expiry schedule: a dry plan over every candidate (nothing is
+// erased; an error ends the pass), then the erase with the same guard
+// (retention/worker.go, extra and EraseExpired).
 type refsRig struct {
 	*indexRig
-	refs retention.References
+	refs   retention.References
+	clock  *retentionClock
+	writer *auth.Scope // the artifact writer of uploadBlob, once there is one
 }
+
+// retentionClock is the time source of the node's real retention service, moved by
+// the test (retention.Service.UseClock): appcore.Open reads the wall clock, and a
+// replay is retained for days.
+type retentionClock struct{ v atomic.Int64 }
+
+func (c *retentionClock) now() time.Time { return time.Unix(0, c.v.Load()) }
 
 func newRefsRig(t *testing.T) *refsRig {
 	t.Helper()
-	r := &refsRig{indexRig: newIndexRig(t)}
+	r := &refsRig{indexRig: newIndexRig(t), clock: &retentionClock{}}
+	r.clock.v.Store(time.Now().UnixNano())
+	if err := r.app.Retention.UseClock(r.clock.now); err != nil {
+		t.Fatal(err)
+	}
 	replay, err := appcore.NewReplayService(r.app.Storage, r.app.Auth, r.app.Control)
 	if err != nil {
 		t.Fatal(err)
@@ -41,6 +54,12 @@ func newRefsRig(t *testing.T) *refsRig {
 		t.Fatal(err)
 	}
 	return r
+}
+
+// runAt is one real Retention.RunOnce of the node, the retention clock set to now.
+func (r *refsRig) runAt(now model.UnixNano) error {
+	r.clock.v.Store(int64(now))
+	return r.app.Retention.RunOnce(r.ctx)
 }
 
 func (r *refsRig) pass(now model.UnixNano) error {
@@ -70,10 +89,19 @@ func replayDeadlineOf(rc model.Receipt) model.UnixNano {
 	return 0
 }
 
-// replayChain admits a checkpoint and a delta and moves the retention group of the
-// replay ten minutes past the checkpoint's own deadline, as a chunk admitted later
-// would. It returns the checkpoint's own deadline and the replay.
+// replayChain is replayChainFor with the group ten minutes past the checkpoint's own
+// deadline: the span of the simulated pass, which is driven at any instant.
 func (r *refsRig) replayChain() (model.UnixNano, model.ID) {
+	r.t.Helper()
+	return r.replayChainFor(10 * time.Minute)
+}
+
+// replayChainFor admits a checkpoint and a delta and moves the retention group of the
+// replay the given span past the checkpoint's own deadline, as a chunk admitted later
+// would. It returns the checkpoint's own deadline and the replay. The real retention
+// worker runs its expiry once an hour (retention.WorkerConfig.ExpiryInterval), so a
+// test that runs it twice makes the span longer than that.
+func (r *refsRig) replayChainFor(span time.Duration) (model.UnixNano, model.ID) {
 	r.t.Helper()
 	rec := newReplayRecorder()
 	cp, d := rec.cp(), rec.delta()
@@ -102,7 +130,7 @@ func (r *refsRig) replayChain() (model.UnixNano, model.ID) {
 		r.t.Fatal(err)
 	}
 	own := replayDeadlineOf(first)
-	if err = replay.RecordScope(r.ctx, scope, r.project, d, own+model.UnixNano(10*time.Minute)); err != nil {
+	if err = replay.RecordScope(r.ctx, scope, r.project, d, own+model.UnixNano(span)); err != nil {
 		r.t.Fatal(err)
 	}
 	if r.storedRows(rec.replay) != 2 {
@@ -224,10 +252,12 @@ func (f *failingReplaySource) LatestReference(ctx context.Context, c storage.Era
 	return f.References.LatestReference(ctx, c)
 }
 
-// uploadBlob puts one real artifact (a blob root that expires an hour from now)
-// into the replay rig's node, through a user who holds artifacts.write.
-func (r *refsRig) uploadBlob(debug string) artifacts.Artifact {
+// writerScope is a scope of a user who holds artifacts.write on the rig's project.
+func (r *refsRig) writerScope() auth.Scope {
 	r.t.Helper()
+	if r.writer != nil {
+		return *r.writer
+	}
 	writer := model.NewID()
 	r.command("create_user", auth.AdminPayload{ID: writer, Email: "blob-writer@example.test", Password: "blob writer password 2026"})
 	r.command("membership", auth.AdminPayload{UserID: writer, Enabled: true})
@@ -244,6 +274,15 @@ func (r *refsRig) uploadBlob(debug string) artifacts.Artifact {
 	if err != nil {
 		r.t.Fatal(err)
 	}
+	r.writer = &scope
+	return scope
+}
+
+// uploadBlob puts one real artifact (a blob root that expires an hour from now)
+// into the replay rig's node, through a user who holds artifacts.write.
+func (r *refsRig) uploadBlob(debug string) artifacts.Artifact {
+	r.t.Helper()
+	scope := r.writerScope()
 	raw := []byte(`{"version":3,"sources":["a.ts"],"names":[],"mappings":"AAAA"}`)
 	m := artifacts.Manifest{Version: 1, Org: r.org, Project: r.project, Source: r.source, Build: r.resource.Build, DebugID: debug,
 		GeneratedSHA256: model.HashCanonical([]byte("generated")), MapSHA256: model.HashCanonical(raw), Path: "dist/" + debug + ".js",
@@ -297,5 +336,131 @@ func TestMixedBlobAndReplayPassFailsClosedWhenOneSourceFails(t *testing.T) {
 	}
 	if rows := r.storedRows(replay); rows != 0 {
 		t.Fatalf("%d replay rows remain after the healthy pass", rows)
+	}
+}
+
+// breakReplayState makes the replay reference state of the rig's project unreadable
+// and returns the function that puts the readable state back.
+func (r *refsRig) breakReplayState() (restore func()) {
+	r.t.Helper()
+	key := "replay_pins:" + r.project.String()
+	var saved json.RawMessage
+	set := func(raw json.RawMessage, remember bool) {
+		if err := r.app.Control.Update(r.ctx, func(st *model.ControlState) error {
+			o := st.Orgs[r.org.String()]
+			if remember {
+				saved = o.Settings[key]
+			}
+			o.Settings[key] = raw
+			st.Orgs[r.org.String()] = o
+			return nil
+		}); err != nil {
+			r.t.Fatal(err)
+		}
+	}
+	set(json.RawMessage(`"unreadable"`), true)
+	return func() { set(saved, false) }
+}
+
+// The node's own retention service (the one appcore.Open builds and a served process
+// runs), driven by RunOnce on a clock moved past the retention of a replay: a replay
+// checkpoint stays while the group of a retained chunk needs it, and the whole group
+// is erased by the first pass after the group deadline. 10.12-W1, 09.05-W2.
+func TestRealRetentionPassExpiresAReplayGroupAtTheInjectedClock(t *testing.T) {
+	r := newRefsRig(t)
+	own, replay := r.replayChainFor(3 * time.Hour)
+	before := r.app.Retention.Status().ExpiryErased
+
+	if err := r.runAt(own + model.UnixNano(90*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if rows := r.storedRows(replay); rows != 2 {
+		t.Fatalf("%d rows remain after a real pass past the checkpoint's own deadline while the group is retained, want 2", rows)
+	}
+	if got := r.app.Retention.Status().ExpiryErased - before; got != 0 {
+		t.Fatalf("the pass inside the group's retention erased %d rows", got)
+	}
+
+	if err := r.runAt(own + model.UnixNano(4*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if rows := r.storedRows(replay); rows != 0 {
+		t.Fatalf("%d rows remain after a real pass past the group deadline", rows)
+	}
+	if got := r.app.Retention.Status().ExpiryErased - before; got != 2 {
+		t.Fatalf("the real pass past the group deadline erased %d rows, want 2 (checkpoint and delta)", got)
+	}
+}
+
+// A blob root and a replay chunk are both due in one real RunOnce, and the replay's
+// reference state cannot be read: the pass fails, and the blob that the broken source
+// does not guard is not erased either. The next real pass, the state readable again,
+// erases the blob and the replay chunks together. 10.12-W2, 09.05-W2, 09.04-W4.
+func TestRealRetentionPassFailsClosedForBlobAndReplayWhenTheReplaySourceFails(t *testing.T) {
+	r := newRefsRig(t)
+	own, replay := r.replayChainFor(3 * time.Hour)
+	blob := r.uploadBlob("real-mixed-pass")
+	if err := r.app.Storage.VerifyBlob(r.ctx, blob.Map); err != nil {
+		t.Fatalf("fixture: the blob must be stored: %v", err)
+	}
+	now := own + model.UnixNano(4*time.Hour)
+	if int64(blob.Map.Manifest.RetainUntil) >= int64(now) {
+		t.Fatal("fixture: the blob must be due at the pass clock")
+	}
+	before := r.app.Retention.Status().ExpiryErased
+
+	restore := r.breakReplayState()
+	if err := r.runAt(now); err == nil {
+		t.Fatal("a real pass with unreadable replay reference state succeeded")
+	}
+	if err := r.app.Storage.VerifyBlob(r.ctx, blob.Map); err != nil {
+		t.Fatalf("the failed real pass erased the blob that the broken source does not guard: %v", err)
+	}
+	if rows := r.storedRows(replay); rows != 2 {
+		t.Fatalf("%d replay rows remain after the failed real pass, want 2", rows)
+	}
+	if got := r.app.Retention.Status().ExpiryErased - before; got != 0 {
+		t.Fatalf("the failed real pass counted %d erased", got)
+	}
+
+	restore()
+	if err := r.runAt(now); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.app.Storage.VerifyBlob(r.ctx, blob.Map); err == nil {
+		t.Fatal("the blob survived the real pass that every source answered")
+	}
+	if rows := r.storedRows(replay); rows != 0 {
+		t.Fatalf("%d replay rows remain after the healthy real pass", rows)
+	}
+	if got := r.app.Retention.Status().ExpiryErased - before; got != 3 {
+		t.Fatalf("the healthy real pass erased %d, want 3 (blob, checkpoint, delta)", got)
+	}
+}
+
+// A map that an error references past its own upload retention stays through a real
+// pass at the clock that has the upload due, and is erased by the first real pass after
+// the reference ends, with no waiting on the wall clock. 09.04-W4.
+func TestRealRetentionPassKeepsAReferencedMapUntilTheReferenceEnds(t *testing.T) {
+	r := newRefsRig(t)
+	blob := r.uploadBlob("real-referenced")
+	due := blob.Map.Manifest.RetainUntil
+	refUntil := due + model.UnixNano(5*time.Hour)
+	origin := artifacts.OriginCursor{Kind: artifacts.ReferenceError, Cursor: model.Cursor{Group: model.NewID(), Index: 1}}
+	if err := r.app.ArtifactLifecycle.Reference(r.ctx, r.writerScope(), blob.ID, origin, refUntil); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := r.runAt(due + model.UnixNano(2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.app.Storage.VerifyBlob(r.ctx, blob.Map); err != nil {
+		t.Fatalf("a real pass past the upload retention erased a map an error still references: %v", err)
+	}
+	if err := r.runAt(refUntil + model.UnixNano(2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.app.Storage.VerifyBlob(r.ctx, blob.Map); err == nil {
+		t.Fatal("the map survived the real pass after its reference ended")
 	}
 }

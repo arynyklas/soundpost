@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/arynyklas/soundpost/internal/auth"
@@ -21,6 +22,7 @@ import (
 type Service struct {
 	cfg    Config
 	worker WorkerConfig
+	clock  atomic.Pointer[func() time.Time] // Config.Clock until UseClock replaces it
 	mu     sync.Mutex
 	cancel context.CancelFunc
 	done   chan struct{}
@@ -40,7 +42,9 @@ func New(cfg Config) (*Service, error) {
 	if err := cfg.Control.BindRetention(); err != nil {
 		return nil, err
 	}
-	return &Service{cfg: cfg, worker: cfg.Worker.withDefaults()}, nil
+	s := &Service{cfg: cfg, worker: cfg.Worker.withDefaults()}
+	s.clock.Store(&cfg.Clock)
+	return s, nil
 }
 
 func (s *Service) authority() Authority {
@@ -67,7 +71,10 @@ func (s *Service) UseAuthority(a Authority) error {
 	return nil
 }
 
-func (s *Service) now() model.UnixNano { return model.UnixNano(s.cfg.Clock().UnixNano()) }
+// timeNow is the Service's time source: Config.Clock, or the one UseClock installed.
+func (s *Service) timeNow() time.Time { return (*s.clock.Load())() }
+
+func (s *Service) now() model.UnixNano { return model.UnixNano(s.timeNow().UnixNano()) }
 
 // Delete is C11 Delete: one durable control command begins the saga (read
 // denial, generation advance) and returns the 202-style fencing receipt, or a

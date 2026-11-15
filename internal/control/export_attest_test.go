@@ -40,3 +40,16 @@ func ApplyStaleCommandDirect(s *Store) error {
 		Entry:             replica.Entry{ID: model.NewID(), Kind: replica.Control, Payload: payload},
 	})
 }
+
+// SignalInstallDirect tells the control machine of s that its group installed a snapshot at the
+// next replica index, exactly as the group does after an install (replica.ProofWatcher). It
+// changes no file: the node's own truth stays clean, so the test sees only what the signal does
+// to the records that predate it.
+func SignalInstallDirect(s *Store) error {
+	physical, err := s.appliedIndex()
+	if err != nil {
+		return err
+	}
+	s.repl.ProofWithdrawn(replica.ProofWithdrawal{Index: physical + 1, Install: true})
+	return nil
+}

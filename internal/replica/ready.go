@@ -4,12 +4,14 @@ package replica
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"hash/crc32"
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/arynyklas/soundpost/internal/durablefs"
@@ -256,30 +258,127 @@ func (w *readyWAL) tornFinal(offset, frame int64) (bool, error) {
 	return true, nil
 }
 func (w *readyWAL) Close() error { return w.file.Close() }
-func (w *readyWAL) persist(rd raft.Ready) error {
-	r := readyRecord{Group: w.group, Node: w.node, Members: cloneMembers(w.members)}
-	var err error
+
+// readyHead is the leading members of a readyRecord, with the tags of readyRecord.
+// TestReadyRecordWriterMatchesJSONMarshal keeps the writer below in step with readyRecord.
+type readyHead struct {
+	Group   model.ID `json:"group"`
+	Node    uint64   `json:"node,string"`
+	Members Members  `json:"members"`
+}
+
+// readyBuffer is the memory one journal record is built in: the record text and the protobuf
+// scratch of one entry. A record carries every entry of a Ready (a fragment of 256 KiB is about
+// 0.6 MiB of text), so the buffers are reused across records instead of allocated for each.
+type readyBuffer struct{ record, scratch []byte }
+
+// readyBufferKeep is the largest buffer the pool keeps; a bigger one (a rare 100 MiB batch) is
+// left to the collector rather than held for the life of the process.
+const readyBufferKeep = 16 << 20
+
+var readyBuffers = sync.Pool{New: func() any { return new(readyBuffer) }}
+
+func (b *readyBuffer) release() {
+	if cap(b.record) > readyBufferKeep {
+		b.record = nil
+	}
+	if cap(b.scratch) > readyBufferKeep {
+		b.scratch = nil
+	}
+	readyBuffers.Put(b)
+}
+
+// appendRecord builds the journal record of rd in b.record and returns it. The bytes are those of
+// json.Marshal(readyRecord{Group, Node, Members, Hard, Snapshot, Entries}) with the protobuf
+// encodings of the hard state, the snapshot and every entry: the base64 of each is written
+// straight into the record, where json.Marshal would hold a protobuf copy of every entry, the
+// text in its own buffer and a copy of that text.
+func (w *readyWAL) appendRecord(b *readyBuffer, rd raft.Ready) ([]byte, error) {
+	head, err := json.Marshal(readyHead{Group: w.group, Node: w.node, Members: cloneMembers(w.members)})
+	if err != nil {
+		return nil, ErrInvalid
+	}
+	// The record is sized once: the head, then the base64 of every part and its separators.
+	const separators = len(`,"hard":"",`) + len(`"snapshot":"",`) + len(`"entries":[]}`)
+	need := len(head) + separators
+	scratch := 0
+	size := func(m proto.Message) int {
+		n := proto.Size(m)
+		scratch = max(scratch, n)
+		return base64.StdEncoding.EncodedLen(n)
+	}
 	if rd.HardState != nil {
-		r.Hard, err = proto.Marshal(rd.HardState)
-		if err != nil {
-			return err
-		}
+		need += size(rd.HardState)
 	}
 	if rd.Snapshot != nil {
-		r.Snapshot, err = proto.Marshal(rd.Snapshot)
-		if err != nil {
-			return err
-		}
+		need += size(rd.Snapshot)
 	}
 	for _, ent := range rd.Entries {
-		raw, e := proto.Marshal(ent)
-		if e != nil {
-			return e
-		}
-		r.Entries = append(r.Entries, raw)
+		need += size(ent) + len(`"",`)
 	}
-	raw, err := json.Marshal(r)
-	if err != nil || len(raw) > maxReadyBytes {
+	if cap(b.record) < need {
+		b.record = make([]byte, 0, need)
+	}
+	if cap(b.scratch) < scratch {
+		b.scratch = make([]byte, 0, scratch)
+	}
+	out := append(b.record[:0], head[:len(head)-1]...)
+	part := func(m proto.Message) ([]byte, error) {
+		raw, err := proto.MarshalOptions{}.MarshalAppend(b.scratch[:0], m)
+		if err != nil {
+			return nil, err
+		}
+		b.scratch = raw
+		return raw, nil
+	}
+	// omitempty drops a hard state or snapshot whose encoding is empty, exactly as it does a
+	// nil or empty []byte field.
+	for _, field := range []struct {
+		key string
+		msg proto.Message
+		set bool
+	}{{`,"hard":"`, rd.HardState, rd.HardState != nil}, {`,"snapshot":"`, rd.Snapshot, rd.Snapshot != nil}} {
+		if !field.set {
+			continue
+		}
+		raw, err := part(field.msg)
+		if err != nil {
+			return nil, err
+		}
+		if len(raw) == 0 {
+			continue
+		}
+		out = append(out, field.key...)
+		out = base64.StdEncoding.AppendEncode(out, raw)
+		out = append(out, '"')
+	}
+	if len(rd.Entries) > 0 {
+		out = append(out, `,"entries":[`...)
+		for i, ent := range rd.Entries {
+			raw, err := part(ent)
+			if err != nil {
+				return nil, err
+			}
+			if i > 0 {
+				out = append(out, ',')
+			}
+			out = append(out, '"')
+			out = base64.StdEncoding.AppendEncode(out, raw)
+			out = append(out, '"')
+		}
+		out = append(out, ']')
+	}
+	b.record = append(out, '}')
+	return b.record, nil
+}
+func (w *readyWAL) persist(rd raft.Ready) error {
+	buf := readyBuffers.Get().(*readyBuffer)
+	defer buf.release()
+	raw, err := w.appendRecord(buf, rd)
+	if err != nil {
+		return err
+	}
+	if len(raw) > maxReadyBytes {
 		return ErrInvalid
 	}
 	var header [16]byte

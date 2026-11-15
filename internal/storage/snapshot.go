@@ -540,6 +540,10 @@ func (e *Engine) BeginBackupOwned(ctx context.Context, owner model.ID, cut Contr
 		}
 		processed[c.Group] = c.Index
 	}
+	roots, err := e.rootsBySlot()
+	if err != nil {
+		return nil, err
+	}
 	b := &Backup{engine: e, cut: cut, pins: make([]*replica.JournalPin, 64)}
 	for slot, group := range e.repl.groups {
 		after, ok := processed[e.group(uint16(slot))]
@@ -551,7 +555,7 @@ func (e *Engine) BeginBackupOwned(ctx context.Context, owner model.ID, cut Contr
 			b.release()
 			return nil, model.Fail(model.Stale)
 		}
-		pin, err := group.PinJournalFor(uint64(after), owner)
+		pin, err := group.PinJournalForRoots(uint64(after), owner, roots[uint16(slot)])
 		if err != nil {
 			b.release()
 			return nil, snapshotFault(err)
