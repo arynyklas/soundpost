@@ -94,7 +94,7 @@ func openVotersWith(t *testing.T, service *auth.Service, authority ReplicatedAut
 		} else if err = engine.InstallReplicationIdentity(seed.Identity); err != nil {
 			t.Fatal(err)
 		}
-		groups, err := engine.EnableReplication(replica.Config{ID: node, Directory: filepath.Join(dir, "raft"), Transport: meshTransport{mesh: v.mesh, node: node}, Members: members, TickInterval: 20 * time.Millisecond}, &seed, authority)
+		groups, err := engine.EnableReplication(replica.Config{ID: node, Directory: filepath.Join(dir, "raft"), Transport: meshTransport{mesh: v.mesh, node: node}, Members: members, TickInterval: voterTick()}, &seed, authority)
 		if err != nil {
 			t.Fatal(err)
 		}

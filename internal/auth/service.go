@@ -156,9 +156,30 @@ var dummyDigest = sync.OnceValue(func() string {
 	return "soundpost-dummy-salt:" + password("soundpost dummy password", "soundpost-dummy-salt")
 })
 
+// loginStaleBudget bounds how long one login waits for its control write to stop being stale.
+const loginStaleBudget = 15 * time.Second
+
+// retryStale repeats fn, pausing briefly between attempts, for as long as it fails with the typed
+// retryable Stale fault and ctx is alive. The last Stale is returned when ctx ends; every other
+// result is returned at once.
+func retryStale(ctx context.Context, fn func() error) error {
+	for {
+		err := fn()
+		var fault *model.Fault
+		if err == nil || ctx.Err() != nil || !errors.As(err, &fault) || fault.Code != model.Stale {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(25 * time.Millisecond):
+		}
+	}
+}
+
 func (s *Service) login(ctx context.Context, email, p, code string) (Session, error) {
 	out := s.newSession(model.ID{})
-	e := s.updateSession(ctx, func(st *model.ControlState) error {
+	transition := func(st *model.ControlState) error {
 		for k, u := range st.Users {
 			if u.Email != email || u.Disabled {
 				continue
@@ -185,7 +206,15 @@ func (s *Service) login(ctx context.Context, email, p, code string) (Session, er
 		}
 		checkPassword(dummyDigest(), p)
 		return model.Fail(model.Unauthenticated)
-	})
+	}
+	// The transition reads only the state it is handed (the session token and CSRF value were drawn
+	// above, outside it), so repeating it against a fresher state is safe; a refused attempt committed
+	// nothing. A write that is stale because the node is still catching up with the cluster (a restart
+	// is the common case) or lost the race for its index to another control write is therefore waited
+	// out for loginStaleBudget instead of being answered to the caller.
+	wait, cancel := context.WithTimeout(ctx, loginStaleBudget)
+	defer cancel()
+	e := retryStale(wait, func() error { return s.updateSession(wait, transition) })
 	return out, e
 }
 func (s *Service) Authenticate(ctx context.Context, token string) (Credential, error) {

@@ -5,17 +5,13 @@ package main
 import (
 	"context"
 	"github.com/arynyklas/soundpost/internal/appcore"
+	"github.com/arynyklas/soundpost/internal/auth"
 	"github.com/arynyklas/soundpost/internal/health"
 	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/storage"
 	"sync"
 	"time"
 )
-
-// supportedSchema is the control-state format this binary reads: the persisted bearer-hash
-// key format marker (auth refuses any other value at open). A stored 0 is the pre-marker
-// layout that needs the one-time initialization; a larger value was written by a newer binary.
-const supportedSchema = 1
 
 // appState adapts the running appcore.App to health.LocalState. Everything it reports is read
 // from the node's real state: the replication groups' own status and one quorum read round
@@ -53,8 +49,13 @@ func (s *appState) Version() string { return s.version }
 
 func (s *appState) RestoreHold() bool { return s.app.Storage.RestoreReady() != nil }
 
+// Schema reports the stored control-state format marker against auth.SchemaMarker, the format
+// this binary reads. A node that was started on a foreign marker never reaches this method:
+// auth.NewService refuses it at open (auth.SchemaError) and `serve` then answers the same
+// decision, schema_newer or schema_old, from its startup gate. This method decides the marker of
+// a node that is running, whose state changed under it.
 func (s *appState) Schema(ctx context.Context) (health.Schema, error) {
-	out := health.Schema{Supported: supportedSchema}
+	out := health.Schema{Supported: uint32(auth.SchemaMarker)}
 	ctx, cancel := context.WithTimeout(ctx, s.quorumBound)
 	defer cancel()
 	err := s.app.Control.View(ctx, func(st model.ControlState) error {

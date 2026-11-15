@@ -10,6 +10,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/arynyklas/soundpost/internal/auth"
 	"github.com/arynyklas/soundpost/internal/health"
 	"github.com/arynyklas/soundpost/internal/httpapi"
 	"io"
@@ -160,4 +161,39 @@ func (e *earlyServer) waitStartupHold(ctx context.Context, path string) error {
 		case <-time.After(50 * time.Millisecond):
 		}
 	}
+}
+
+// refuseSchema is the whole life of a member whose stored control-state format is not the one this
+// binary supports (auth.SchemaError: newer, written by a newer build, or older, a layout that needs
+// a migration this build does not run). It opens nothing further and serves nothing: every route
+// but /readyz answers the gate's retryable 503, and /readyz answers unready with schema_newer or
+// schema_old, the decision health.Ready makes for a running node, taken before the node exists. It
+// is not corruption and not a failed start, so the process stays up (a probe, `soundpost ready` or
+// a Compose health check reads the reason instead of finding a crash loop) until it is stopped.
+func (e *earlyServer) refuseSchema(ctx context.Context, schema *auth.SchemaError) error {
+	reason := health.ReasonSchemaOld
+	if schema.Newer() {
+		reason = health.ReasonSchemaNewer
+	}
+	e.gate.SetReason(reason)
+	fmt.Fprintln(os.Stderr, schemaRefusalLine(reason, schema.Observed))
+	select {
+	case <-ctx.Done():
+		return nil
+	case err := <-e.done:
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return err
+	}
+}
+
+// schemaRefusalLine is the one line logged when a member refuses its data directory's format. It
+// carries the two format numbers and the closed reason, never a path.
+func schemaRefusalLine(reason health.Reason, observed uint8) string {
+	direction := "older than"
+	if reason == health.ReasonSchemaNewer {
+		direction = "newer than"
+	}
+	return fmt.Sprintf("soundpost: %s: the control-state format marker of this data directory (%d) is %s the one this binary supports (%d); nothing is served and /readyz stays unready with this reason. Run the release that wrote the data, or restore a backup taken before the format changed (docs/operations/upgrade.md)", reason, observed, direction, auth.SchemaMarker)
 }

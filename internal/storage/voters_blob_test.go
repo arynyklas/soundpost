@@ -38,6 +38,28 @@ func orphanManifest(t *testing.T, c *control.Store, scope auth.Scope, m model.Bl
 	return r.Manifest
 }
 
+// writeBlob writes m through voter 1 as a client would. The in-process mesh has no proposal
+// forwarder, so a write is leader-bound: before each attempt voter 1 is confirmed as the leader of
+// the artifact's owner slot, and an attempt that still lost the leadership (typed unavailable or
+// stale, nothing acknowledged) is repeated; WriteBlob resumes after the fragments already
+// committed. Any other error, including an injected fault, is returned as it is.
+func (x *blobOnVoters) writeBlob(ctx context.Context, t *testing.T, m model.BlobManifest) (model.BlobReceipt, error) {
+	t.Helper()
+	slot := int(model.BlobOwnerSlot(m.Org, m.Project, m.Root))
+	var last error
+	for ctx.Err() == nil {
+		x.v.leadSlot(t, slot, 1, time.Now().Add(30*time.Second))
+		receipt, err := x.v.engines[1].WriteBlob(ctx, x.scope, m, bytes.NewReader(x.raw))
+		var fault *model.Fault
+		if err == nil || !errors.As(err, &fault) || fault.Code != model.Unavailable && fault.Code != model.Stale {
+			return receipt, err
+		}
+		last = err
+		time.Sleep(20 * time.Millisecond)
+	}
+	return model.BlobReceipt{}, last
+}
+
 // newBlobOnVoters publishes the artifact through voter 1 while voter 3 is partitioned (when cut) and
 // leaves an orphan behind: the writer of the orphan fails after its first fragment committed.
 func newBlobOnVoters(t *testing.T, cutVoter3 bool) *blobOnVoters {
@@ -52,7 +74,7 @@ func newBlobOnVoters(t *testing.T, cutVoter3 bool) *blobOnVoters {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	var err error
-	if x.receipt, err = x.v.engines[1].WriteBlob(ctx, scope, m, bytes.NewReader(raw)); err != nil {
+	if x.receipt, err = x.writeBlob(ctx, t, m); err != nil {
 		t.Fatal(err)
 	}
 	if len(x.receipt.Fragments) < 2 {
@@ -69,10 +91,13 @@ func newBlobOnVoters(t *testing.T, cutVoter3 bool) *blobOnVoters {
 		}
 		return nil
 	})
-	if _, err = x.v.engines[1].WriteBlob(ctx, scope, x.orphan, bytes.NewReader(raw)); err == nil {
+	if _, err = x.writeBlob(ctx, t, x.orphan); err == nil {
 		t.Fatal("fixture invalid: the orphan writer was not interrupted")
 	}
 	x.v.engines[1].setFault(nil)
+	if commits != 1 {
+		t.Fatalf("fixture invalid: the orphan writer committed %d fragments before it was interrupted, want exactly 1", commits)
+	}
 	return x
 }
 

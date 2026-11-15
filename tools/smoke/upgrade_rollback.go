@@ -34,15 +34,13 @@ import (
 //     and the old binary started; again every answer must equal the first one;
 //  3. crosses schema versions: on a copy the persisted control-state format marker is set to
 //     the future (2) and to the past (0); the new binary must refuse each with the typed reason
-//     schema_newer / schema_old, stay unready and not acknowledge intake; with the marker restored
-//     it must be ready again and answer as before;
+//     schema_newer / schema_old, stay unready and not acknowledge intake; with the directory restored
+//     from its copy (the marker unchanged) it must be ready again and answer as before;
 //  4. records, without asserting a promise the product does not make, what the OLD binary does on a
 //     directory the NEW binary has written (docs: not supported).
 //
 // To register (tools/smoke/main.go is frozen for lanes; the parent adds it): case "upgrade-rollback": return RunUpgradeRollback(os.Args[2:]).
 // Until then it runs through TestUpgradeRollbackOfProducedBinaries (env SOUNDPOST_UPGRADE_*).
-// Known red: the schema-crossing stage fails against the current product, which exits at start with reason=corrupt
-// instead of answering schema_newer/schema_old (see the lane 4 wave 12 report, item for lane 1).
 func RunUpgradeRollback(args []string) (result error) {
 	stage := "upgrade_flags"
 	defer func() { result = annotateSmokeFailure("upgrade_rollback", stage, model.ID{}, result) }()
@@ -221,6 +219,18 @@ func RunUpgradeRollback(args []string) (result error) {
 	}
 
 	// ---- 3. schema versions: future and past markers on the new binary ----
+	// A data directory whose marker the binary does not support is refused by appcore.Open by design
+	// (the member stays unready, see docs/operations/upgrade.md), so the marker cannot be put back through
+	// the application: each case starts from, and ends by restoring, a file copy of the directory.
+	stage = "schema_baseline"
+	schemaBaseline, err := os.MkdirTemp("", "soundpost-upgrade-schema-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(schemaBaseline)
+	if err = copyDataDir(oldHost.dir, schemaBaseline); err != nil {
+		return err
+	}
 	for _, c := range []struct {
 		name   string
 		marker uint8
@@ -270,7 +280,7 @@ func RunUpgradeRollback(args []string) (result error) {
 		_ = raw
 		report["schema_"+c.name+"_reason"] = got.Reason
 		run.kill()
-		if _, err = setSchemaMarker(oldHost.dir, original); err != nil {
+		if err = replaceDataDir(oldHost.dir, schemaBaseline); err != nil {
 			return err
 		}
 	}

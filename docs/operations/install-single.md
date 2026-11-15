@@ -62,7 +62,7 @@ systemctl daemon-reload && systemctl enable --now soundpost
 | `reason` when not | check |
 |---|---|
 | `restore_pending` | a disaster-restored installation has been activated |
-| `schema_old` / `schema_newer` | the stored control-state format equals what this binary supports (old needs a migration, newer was written by a newer binary) |
+| `schema_old` / `schema_newer` | the stored control-state format equals what this binary supports (old needs a migration, newer was written by a newer binary). A data directory whose marker differs is refused at start, before the hash key, any store or any replication group is touched: the process stays up on its listener, answers this reason on `/readyz` (and `soundpost ready` prints `not ready: schema_newer`), serves nothing else, and logs one line without a path. An unreadable marker, or a supported marker over lost key material, is `corrupt` (the process exits with `reason=corrupt`), never one of these. `docs/operations/upgrade.md` |
 | `sync_failed` | no replication group (the control group and every data group) has stopped after a failed durable write |
 | `no_quorum` | every group completes one quorum read round now |
 | `apply_lag` | no group has more than 256 committed-but-unapplied entries |

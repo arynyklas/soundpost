@@ -189,7 +189,7 @@ func openVoters(t *testing.T, service *auth.Service, store *control.Store) *vote
 		} else if err = engine.InstallReplicationIdentity(seed.Identity); err != nil {
 			t.Fatal(err)
 		}
-		groups, err := engine.EnableReplication(replica.Config{ID: node, Directory: filepath.Join(dir, "raft"), Transport: meshTransport{mesh: v.mesh, node: node}, Members: members, TickInterval: 20 * time.Millisecond}, &seed, store)
+		groups, err := engine.EnableReplication(replica.Config{ID: node, Directory: filepath.Join(dir, "raft"), Transport: meshTransport{mesh: v.mesh, node: node}, Members: members, TickInterval: voterTick()}, &seed, store)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -200,30 +200,50 @@ func openVoters(t *testing.T, service *auth.Service, store *control.Store) *vote
 	return v
 }
 
+// voterTick is the fixture's Raft tick. The race detector slows every goroutine several times
+// over, and the fixture runs 192 groups on one process: with the 20 ms tick (election timeout 200
+// ms) a delayed heartbeat or a starved leader's lost quorum contact moves a group's leadership
+// off the voter a test just made leader, and the test's leader-bound write then answers
+// unavailable (the in-process mesh has no proposal forwarder, so a follower cannot take it). The
+// longer tick under -race keeps the fixture's leadership assumptions; the product's timing is not
+// changed (the same fix as internal/control's voterTick, commit 21ca7d7).
+func voterTick() time.Duration {
+	if raceEnabled {
+		return 100 * time.Millisecond
+	}
+	return 20 * time.Millisecond
+}
+
 // lead makes assign(slot) the leader of every data group, using real
 // campaigns and leadership transfers.
 func (v *voters) lead(t *testing.T, assign func(slot int) uint64) {
 	t.Helper()
 	deadline := time.Now().Add(90 * time.Second)
 	for slot := range 64 {
-		want := assign(slot)
-		for {
-			if time.Now().After(deadline) {
-				t.Fatalf("slot %d never moved to node %d", slot, want)
-			}
-			leader := v.groups[want][slot].Status().Leader
-			if leader == want {
-				break
-			}
-			if leader == 0 {
-				_ = v.groups[want][slot].Campaign()
-				time.Sleep(20 * time.Millisecond)
-				continue
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			_ = v.groups[leader][slot].TransferLeadership(ctx, want)
-			cancel()
+		v.leadSlot(t, slot, assign(slot), deadline)
+	}
+}
+
+// leadSlot waits until node want leads the data group of slot, campaigning when the group has no
+// leader and asking the current leader to hand over otherwise.
+func (v *voters) leadSlot(t *testing.T, slot int, want uint64, deadline time.Time) {
+	t.Helper()
+	for {
+		if time.Now().After(deadline) {
+			t.Fatalf("slot %d never moved to node %d", slot, want)
 		}
+		leader := v.groups[want][slot].Status().Leader
+		if leader == want {
+			return
+		}
+		if leader == 0 {
+			_ = v.groups[want][slot].Campaign()
+			time.Sleep(20 * time.Millisecond)
+			continue
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = v.groups[leader][slot].TransferLeadership(ctx, want)
+		cancel()
 	}
 }
 

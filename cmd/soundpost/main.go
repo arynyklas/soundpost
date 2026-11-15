@@ -171,6 +171,12 @@ func run() error {
 	}
 	core, e := openConfiguredCore(*dir, *mode, *clusterConfig, *nodeID)
 	if e != nil {
+		// A stored format this binary does not support is not a failed start: the member answers
+		// /readyz with schema_newer or schema_old and serves nothing until it is stopped.
+		var schema *auth.SchemaError
+		if errors.As(e, &schema) {
+			return early.refuseSchema(ctx, schema)
+		}
 		return e
 	}
 	defer core.Close()
