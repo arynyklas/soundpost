@@ -107,6 +107,18 @@ harness encodes into the real wire formats. Expected values are authored from
 the format specifications; no upstream parser output was recorded, and every row
 says so in `binding_scope`.
 
+`conformance/query/fixtures/adapters/real/` is the opposite: bytes emitted by real
+senders (Prometheus 3.13.5 remote-write v1/v2 requests through golang/snappy;
+Loki 3.5.2's OpenMetrics exposition), hash-pinned in `PROVENANCE.json` with the
+generator config, decoded by `internal/adapters/queryinput/real_wire_test.go`
+against values taken from the scraped exposition. Findings from that comparison:
+OpenMetrics descriptors are accepted in any order (real producers emit
+`HELP`, `TYPE`, `UNIT`); a metadata-only v1 request is a no-op; Prometheus
+drops custom-bucket histograms for v1, so they arrive only in v2; Loki's
+exposition declares `go_memstats_alloc_bytes` twice (gauge and counter) and stays
+refused as `family_redeclared`. A real Loki push client is not available
+offline, so Loki push remains authored-spec only.
+
 ## HTTP bridge routes
 
 `internal/httpapi/input_adapters.go` mounts three POST-only migration bridges
@@ -144,9 +156,15 @@ Prometheus or Loki is promised.
   original receipt: nothing is duplicated, and an identical body from another
   project's source gets different identities and lands only in its own project.
 - **Defaults.** Seven days of backfill and one hour of future skew, native
-  histograms preserved, exemplars and HELP text rejected (`InputAdapterConfig`
-  can choose `ExemplarsTraceLink` / `HelpDiscard`; the owner decision on those two
-  modes is open, see 02.08-W6). The v2 reply carries
+  histograms preserved. Decision D23 (02.08-W6): the served bridge discards HELP
+  text (`HelpDiscard`, counted as `help_text_discarded`; `appcore` wires it) so
+  real Prometheus v2 senders are admitted, and exemplars stay rejected
+  (`ExemplarsReject`). Consequence, measured with Prometheus 3.13.5: a sender with
+  `send_exemplars: true` ships exemplars as series entries of their own (no
+  samples), which no mode can attach to a point, so such a request is refused
+  `unrepresentable: exemplar_only_series`; keep `send_exemplars` off. A v1 request
+  that carries only metadata (Prometheus sends them separately) is acknowledged
+  with no admitted child. The v2 reply carries
   `X-Prometheus-Remote-Write-{Samples,Histograms,Exemplars}-Written`.
 
 ## Condition webhook

@@ -93,7 +93,7 @@ func commandPayload(eval Evaluation) ([]byte, model.Hash, error) {
 // reason code, or "" when it fits. An evaluation that cannot be serialised at all
 // cannot be committed either, and Commit reports that; it is not an overflow.
 func overflow(eval Evaluation) string {
-	if len(eval.Recording)+len(eval.Conditions) > control.MaxRuleOutputs {
+	if len(eval.Recording)+len(eval.Conditions) > control.MaxRuleEvaluationOutputs {
 		return ReasonTooManyOutputs
 	}
 	payload, _, err := commandPayload(eval)
@@ -182,9 +182,27 @@ func (c *Committer) Commit(ctx context.Context, scope auth.Scope, eval Evaluatio
 		}
 		apply.Outputs = append(apply.Outputs, control.RuleOutputIntent{ID: intent.ID, Kind: control.RuleOutputCondition, Signal: eval.Signal, Notify: intent.Notify, Payload: raw, Inputs: append([]model.Cursor{}, eval.Cursors...)})
 	}
+	// An evaluation with more outputs than one command may carry commits them in
+	// several commands under one identity: the surplus is staged (inert) first and
+	// the evaluation command, last, promotes it together with the evaluation. A
+	// crash in between leaves nothing a consumer can see, and every command is
+	// idempotent, so a retry of the whole sequence completes it.
+	if len(apply.Outputs) > control.MaxRuleOutputs {
+		surplus := apply.Outputs[control.MaxRuleOutputs:]
+		apply.Outputs = apply.Outputs[:control.MaxRuleOutputs]
+		apply.Staged = uint32(len(surplus))
+		for chunk := uint64(0); len(surplus) > 0; chunk++ {
+			n := min(len(surplus), control.MaxRuleOutputs)
+			stage := derive("stage", eval.Org[:], eval.Project[:], eval.Rule[:], u64(uint64(eval.Version)), u64(uint64(eval.At)), digest[:], u64(chunk))
+			if _, err := transact(ctx, c.control, scope, stage, control.RuleCommand{Operation: control.RuleOpStage, Lease: &lease, Stage: &control.RuleStageApply{
+				Project: eval.Project, Rule: eval.Rule, Version: eval.Version, At: eval.At, Mode: string(eval.Mode), Digest: digest, Outputs: surplus[:n]}}); err != nil {
+				return control.Result{}, err
+			}
+			surplus = surplus[n:]
+		}
+	}
 	id := derive("apply", eval.Org[:], eval.Project[:], eval.Rule[:], u64(uint64(eval.Version)), u64(uint64(eval.At)), digest[:])
-	res, err := transact(ctx, c.control, scope, id, control.RuleCommand{Operation: control.RuleOpEvaluation, Lease: &lease, Evaluation: apply})
-	return res, err
+	return transact(ctx, c.control, scope, id, control.RuleCommand{Operation: control.RuleOpEvaluation, Lease: &lease, Evaluation: apply})
 }
 
 // RecordMissed commits evidence that grid points [from, to] of the rule version

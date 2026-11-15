@@ -45,6 +45,7 @@ type RuleCommand struct {
 	Missed     *RuleMissedApply     `json:"missed,omitempty"`
 	Replay     *RuleReplayApply     `json:"replay,omitempty"`
 	Output     *RuleOutputApply     `json:"output,omitempty"`
+	Stage      *RuleStageApply      `json:"stage,omitempty"`
 	Retire     *RuleRetireApply     `json:"retire,omitempty"`
 }
 
@@ -59,6 +60,7 @@ const (
 	RuleOpMissed     = "missed_interval"
 	RuleOpReplay     = "operator_replay"
 	RuleOpOutput     = "output"
+	RuleOpStage      = "stage_outputs"
 	RuleOpRetire     = "retire_project"
 )
 
@@ -69,6 +71,14 @@ const (
 	RuleModeBackfill = "backfill"
 	RuleModeReplay   = "replay"
 )
+
+// RulePhaseStaged is an output created by a staging command whose evaluation has
+// not been finalized yet. It is invisible to every consumer (never listed
+// unless asked for by name, never released) until the finalizing command of the
+// same evaluation identity and digest promotes it to pending in its own
+// transition; a staged output of an evaluation that never finalizes is
+// garbage-collected by the next staging or finalizing command of the rule.
+const RulePhaseStaged = "staged"
 
 // Input health of an evaluation.
 const (
@@ -104,6 +114,13 @@ const (
 	maxRuleSettledOutputs  = 256
 )
 
+// MaxRuleEvaluationOutputs bounds the outputs of one evaluation across its
+// finalizing command (at most MaxRuleOutputs) and the staging commands that
+// precede it (at most MaxRuleOutputs each). The evaluation payload (1 MiB, which
+// embeds the per-series state) is reached first: about 1,600 series with a
+// typical instance label, so the output bound is not the practical ceiling.
+const MaxRuleEvaluationOutputs = 2048
+
 // RuleEvaluationApply commits one evaluation: its identity (rule, version, at),
 // the opaque committed payload and its digest, the state revision it was
 // computed from, and the outputs it produced.
@@ -123,6 +140,9 @@ type RuleEvaluationApply struct {
 	Payload json.RawMessage    `json:"payload"`
 	Cursors []model.Cursor     `json:"cursors"`
 	Outputs []RuleOutputIntent `json:"outputs"`
+	// Staged is the number of outputs staged under this evaluation's identity and
+	// digest by earlier staging commands; the evaluation promotes exactly those.
+	Staged uint32 `json:"staged,omitempty"`
 }
 
 // RuleOutputIntent is one internal output created by an evaluation.
@@ -156,6 +176,19 @@ type RuleReplayApply struct {
 	To      model.UnixNano `json:"to_ns"`
 	Reason  string         `json:"reason"`
 	At      model.UnixNano `json:"at_ns"`
+}
+
+// RuleStageApply stages outputs of an evaluation that will be finalized by a
+// later RuleEvaluationApply with the same identity and Digest (see
+// RulePhaseStaged). Outputs carries at most MaxRuleOutputs intents.
+type RuleStageApply struct {
+	Project model.ID           `json:"project"`
+	Rule    model.ID           `json:"rule"`
+	Version model.Revision     `json:"version"`
+	At      model.UnixNano     `json:"at_ns"`
+	Mode    string             `json:"mode"`
+	Digest  model.Hash         `json:"digest"`
+	Outputs []RuleOutputIntent `json:"outputs"`
 }
 
 // RuleOutputApply advances one outbox record. pending->admitted records the
@@ -235,7 +268,9 @@ func (b RuleBook) Version(v model.Revision) (RuleVersionRecord, bool) {
 
 // RuleOutput is one internal output outbox record. Obsolete is computed at read
 // from the committed deletion and retirement facts: an obsolete intent must be
-// suppressed, never released.
+// suppressed, never released. Stage is the digest of the evaluation a staged
+// output belongs to; it stays on the record after promotion as evidence of which
+// evaluation created it.
 type RuleOutput struct {
 	ID       model.ID        `json:"id"`
 	Org      model.ID        `json:"org"`
@@ -255,6 +290,7 @@ type RuleOutput struct {
 	Hash     *model.Hash     `json:"receipt_hash,omitempty"`
 	Reason   string          `json:"reason,omitempty"`
 	Created  model.Revision  `json:"created"`
+	Stage    model.Hash      `json:"stage,omitempty"`
 	Obsolete bool            `json:"obsolete,omitempty"`
 }
 
@@ -348,7 +384,7 @@ func applyRuleEvaluation(scope auth.Scope, st *State, cmd Command) (Effect, erro
 		return Effect{}, err
 	}
 	arms := 0
-	for _, present := range []bool{c.Evaluation != nil, c.Missed != nil, c.Replay != nil, c.Output != nil, c.Retire != nil} {
+	for _, present := range []bool{c.Evaluation != nil, c.Missed != nil, c.Replay != nil, c.Output != nil, c.Stage != nil, c.Retire != nil} {
 		if present {
 			arms++
 		}
@@ -374,6 +410,8 @@ func applyRuleEvaluation(scope auth.Scope, st *State, cmd Command) (Effect, erro
 		project, rule = c.Replay.Project, c.Replay.Rule
 	case c.Operation == RuleOpOutput && c.Output != nil:
 		project, rule = c.Output.Project, c.Output.Rule
+	case c.Operation == RuleOpStage && c.Stage != nil:
+		project, rule = c.Stage.Project, c.Stage.Rule
 	default:
 		return Effect{}, model.Fail(model.Invalid)
 	}
@@ -414,6 +452,8 @@ func applyRuleEvaluation(scope auth.Scope, st *State, cmd Command) (Effect, erro
 		effect, err = applyRuleMissedArm(&book, *c.Missed)
 	case RuleOpReplay:
 		effect, err = applyRuleReplayArm(scope, st, cmd, &book, *c.Replay)
+	case RuleOpStage:
+		effect, err = applyRuleStageArm(st, &book, *c.Stage)
 	default:
 		effect, err = applyRuleOutputArm(st, &book, *c.Output)
 	}
@@ -424,8 +464,12 @@ func applyRuleEvaluation(scope auth.Scope, st *State, cmd Command) (Effect, erro
 		lease := *c.Lease
 		book.Fence = &lease
 	}
-	if err = storeRuleBook(st, key, book); err != nil {
-		return Effect{}, err
+	// A staging command that precedes the rule's first evaluation leaves no book
+	// behind: a book without a version is not a state any reader understands.
+	if c.Operation != RuleOpStage || exists {
+		if err = storeRuleBook(st, key, book); err != nil {
+			return Effect{}, err
+		}
 	}
 	// An evaluation that read its batch before a barrier can commit after its
 	// deletion completed: the covered payload never lands (eraseLateEffect).
@@ -437,7 +481,7 @@ func applyRuleEvaluation(scope auth.Scope, st *State, cmd Command) (Effect, erro
 
 func applyRuleEvaluationArm(st *State, book *RuleBook, e RuleEvaluationApply) (Effect, error) {
 	if e.Version == 0 || e.At < 0 || e.Digest == (model.Hash{}) || len(e.Payload) < 2 || len(e.Payload) > MaxRuleEvaluationBytes || !json.Valid(e.Payload) ||
-		model.Hash(sha256.Sum256(e.Payload)) != e.Digest || !validRuleCursors(e.Cursors) || len(e.Outputs) > MaxRuleOutputs {
+		model.Hash(sha256.Sum256(e.Payload)) != e.Digest || !validRuleCursors(e.Cursors) || len(e.Outputs) > MaxRuleOutputs || uint64(len(e.Outputs))+uint64(e.Staged) > MaxRuleEvaluationOutputs {
 		return Effect{}, model.Fail(model.Invalid)
 	}
 	switch e.Mode {
@@ -450,20 +494,8 @@ func applyRuleEvaluationArm(st *State, book *RuleBook, e RuleEvaluationApply) (E
 	default:
 		return Effect{}, model.Fail(model.Invalid)
 	}
-	ids := make(map[model.ID]bool, len(e.Outputs))
-	for _, o := range e.Outputs {
-		if o.ID == (model.ID{}) || ids[o.ID] || len(o.Payload) < 2 || len(o.Payload) > MaxRuleOutputBytes || !json.Valid(o.Payload) || !validRuleCursors(o.Inputs) {
-			return Effect{}, model.Fail(model.Invalid)
-		}
-		ids[o.ID] = true
-		if o.Kind != RuleOutputRecording && o.Kind != RuleOutputCondition || o.Signal != "" && !o.Signal.Valid() || o.Notify && o.Kind != RuleOutputCondition {
-			return Effect{}, model.Fail(model.Invalid)
-		}
-		// A backfilled evaluation can never notify: retroactive live notification
-		// needs the explicit replay mode, which needs a committed declaration.
-		if o.Notify && e.Mode == RuleModeBackfill {
-			return Effect{}, ruleFault(model.Invalid, "backfill_cannot_notify")
-		}
+	if err := validateRuleOutputs(e.Outputs, e.Mode); err != nil {
+		return Effect{}, err
 	}
 	idx := -1
 	for i := range book.Versions {
@@ -522,6 +554,18 @@ func applyRuleEvaluationArm(st *State, book *RuleBook, e RuleEvaluationApply) (E
 			return Effect{}, ruleFault(model.Conflict, "rule_output_exists")
 		}
 	}
+	staged, orphans, err := stagedOf(st, book, e.Version, e.At, e.Digest)
+	if err != nil {
+		return Effect{}, err
+	}
+	if len(staged) != int(e.Staged) {
+		return Effect{}, ruleFault(model.Conflict, "rule_staged_outputs_missing")
+	}
+	for _, o := range staged {
+		if o.Mode != e.Mode {
+			return Effect{}, ruleFault(model.Conflict, "rule_staged_outputs_missing")
+		}
+	}
 	if idx < 0 {
 		book.Versions = append(book.Versions, RuleVersionRecord{Version: e.Version})
 		sort.Slice(book.Versions, func(i, j int) bool { return book.Versions[i].Version < book.Versions[j].Version })
@@ -550,28 +594,26 @@ func applyRuleEvaluationArm(st *State, book *RuleBook, e RuleEvaluationApply) (E
 		}
 	}
 	for _, o := range e.Outputs {
-		signal := o.Signal
-		if signal == "" {
-			signal = model.Metric
-		}
-		raw, err := json.Marshal(struct {
-			ID      model.ID        `json:"id"`
-			Kind    string          `json:"kind"`
-			Notify  bool            `json:"notify"`
-			Payload json.RawMessage `json:"payload"`
-		}{o.ID, o.Kind, o.Notify, o.Payload})
+		out, err := newRuleOutput(book, o, e.Version, e.At, e.Mode, RulePhasePending, revision, model.Hash{})
 		if err != nil {
-			return Effect{}, model.Fail(model.Invalid)
-		}
-		out := RuleOutput{ID: o.ID, Org: book.Org, Project: book.Project, Rule: book.Rule, Version: e.Version, At: e.At, Kind: o.Kind, Signal: signal, Notify: o.Notify, Mode: e.Mode, Phase: RulePhasePending,
-			Digest: model.HashCanonical(raw), Payload: append(json.RawMessage(nil), o.Payload...), Inputs: append([]model.Cursor(nil), o.Inputs...), Created: revision}
-		if out.Inputs == nil {
-			out.Inputs = []model.Cursor{}
+			return Effect{}, err
 		}
 		if err = storeRuleOutput(st, out); err != nil {
 			return Effect{}, err
 		}
 	}
+	// Promote the staged outputs of this identity in the same transition and drop
+	// the orphans of an abandoned one.
+	for _, o := range orphans {
+		delete(st.RuleOutputs, o.ID.String())
+	}
+	for i := range staged {
+		staged[i].Phase, staged[i].Created = RulePhasePending, revision
+		if err := storeRuleOutput(st, staged[i]); err != nil {
+			return Effect{}, err
+		}
+	}
+	promoted := staged
 	if err := pruneRuleOutputs(st, book); err != nil {
 		return Effect{}, err
 	}
@@ -579,7 +621,177 @@ func applyRuleEvaluationArm(st *State, book *RuleBook, e RuleEvaluationApply) (E
 	for _, o := range e.Outputs {
 		affected = append(affected, o.ID)
 	}
+	for _, o := range promoted {
+		affected = append(affected, o.ID)
+	}
 	return Effect{AffectedIDs: affected, Phase: "applied"}, nil
+}
+
+// stagedOf splits the staged outputs of one rule into those that belong to the
+// evaluation identity (version, at, evaluation digest) and the orphans of any
+// other identity (an evaluation that was staged and never finalized). Both are
+// in ID order, so the result never depends on map iteration.
+func stagedOf(st *State, book *RuleBook, version model.Revision, at model.UnixNano, stage model.Hash) (mine []RuleOutput, orphans []RuleOutput, err error) {
+	ids := make([]string, 0, len(st.RuleOutputs))
+	for id := range st.RuleOutputs {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		var o RuleOutput
+		if err := json.Unmarshal(st.RuleOutputs[id], &o); err != nil {
+			return nil, nil, model.Fail(model.Corrupt)
+		}
+		if o.Phase != RulePhaseStaged || o.Org != book.Org || o.Project != book.Project || o.Rule != book.Rule {
+			continue
+		}
+		if o.Version == version && o.At == at && o.Stage == stage {
+			mine = append(mine, o)
+		} else {
+			orphans = append(orphans, o)
+		}
+	}
+	return mine, orphans, nil
+}
+
+// validateRuleOutputs checks the intents of one command (the finalizing command
+// or one staging command) against the per-output bounds.
+func validateRuleOutputs(outs []RuleOutputIntent, mode string) error {
+	ids := make(map[model.ID]bool, len(outs))
+	for _, o := range outs {
+		if o.ID == (model.ID{}) || ids[o.ID] || len(o.Payload) < 2 || len(o.Payload) > MaxRuleOutputBytes || !json.Valid(o.Payload) || !validRuleCursors(o.Inputs) {
+			return model.Fail(model.Invalid)
+		}
+		ids[o.ID] = true
+		if o.Kind != RuleOutputRecording && o.Kind != RuleOutputCondition || o.Signal != "" && !o.Signal.Valid() || o.Notify && o.Kind != RuleOutputCondition {
+			return model.Fail(model.Invalid)
+		}
+		// A backfilled evaluation can never notify: retroactive live notification
+		// needs the explicit replay mode, which needs a committed declaration.
+		if o.Notify && mode == RuleModeBackfill {
+			return ruleFault(model.Invalid, "backfill_cannot_notify")
+		}
+	}
+	return nil
+}
+
+// newRuleOutput builds the outbox record of one intent in the given phase.
+func newRuleOutput(book *RuleBook, o RuleOutputIntent, version model.Revision, at model.UnixNano, mode, phase string, created model.Revision, stage model.Hash) (RuleOutput, error) {
+	signal := o.Signal
+	if signal == "" {
+		signal = model.Metric
+	}
+	raw, err := json.Marshal(struct {
+		ID      model.ID        `json:"id"`
+		Kind    string          `json:"kind"`
+		Notify  bool            `json:"notify"`
+		Payload json.RawMessage `json:"payload"`
+	}{o.ID, o.Kind, o.Notify, o.Payload})
+	if err != nil {
+		return RuleOutput{}, model.Fail(model.Invalid)
+	}
+	out := RuleOutput{ID: o.ID, Org: book.Org, Project: book.Project, Rule: book.Rule, Version: version, At: at, Kind: o.Kind, Signal: signal, Notify: o.Notify, Mode: mode, Phase: phase,
+		Digest: model.HashCanonical(raw), Payload: append(json.RawMessage(nil), o.Payload...), Inputs: append([]model.Cursor(nil), o.Inputs...), Created: created, Stage: stage}
+	if out.Inputs == nil {
+		out.Inputs = []model.Cursor{}
+	}
+	return out, nil
+}
+
+// applyRuleStageArm stores outputs of an evaluation that is not finalized yet.
+// An evaluation with more outputs than one command may carry is committed in
+// several commands under one identity (rule, version, at, evaluation digest):
+// staging commands first, the finalizing evaluation command last, which promotes
+// every staged output in the same transition that commits the evaluation. A
+// staged output is inert, so an evaluation abandoned half way commits nothing a
+// consumer can see. The arm is idempotent: an output that is already staged with
+// the same content is a no-op; the same ID in any other state or with other
+// content is a conflict. Once the evaluation identity is committed a stage
+// command changes nothing.
+func applyRuleStageArm(st *State, book *RuleBook, s RuleStageApply) (Effect, error) {
+	if s.Version == 0 || s.At < 0 || s.Digest == (model.Hash{}) || len(s.Outputs) == 0 || len(s.Outputs) > MaxRuleOutputs {
+		return Effect{}, model.Fail(model.Invalid)
+	}
+	switch s.Mode {
+	case RuleModeLive, RuleModeBackfill, RuleModeReplay:
+	default:
+		return Effect{}, model.Fail(model.Invalid)
+	}
+	if err := validateRuleOutputs(s.Outputs, s.Mode); err != nil {
+		return Effect{}, err
+	}
+	for i := range book.Versions {
+		v := book.Versions[i]
+		if v.Version != s.Version {
+			continue
+		}
+		var known *RuleEvaluationRecord
+		if v.Last != nil && v.Last.At == s.At {
+			known = v.Last
+		}
+		for j := range v.Recent {
+			if v.Recent[j].At == s.At {
+				known = &v.Recent[j]
+			}
+		}
+		if known != nil {
+			if known.Digest != s.Digest {
+				return Effect{}, ruleFault(model.Conflict, "rule_evaluation_conflict")
+			}
+			return Effect{AffectedIDs: []model.ID{book.Rule}, Phase: "unchanged"}, nil
+		}
+		if v.Last != nil && s.At <= v.Last.At {
+			return Effect{}, ruleFault(model.Stale, "rule_evaluation_out_of_order")
+		}
+	}
+	if s.Version < book.Head {
+		return Effect{}, ruleFault(model.Stale, "rule_version_superseded")
+	}
+	mine, orphans, err := stagedOf(st, book, s.Version, s.At, s.Digest)
+	if err != nil {
+		return Effect{}, err
+	}
+	have := make(map[model.ID]RuleOutput, len(mine))
+	for _, o := range mine {
+		have[o.ID] = o
+	}
+	revision := st.Revision + 1
+	var fresh []RuleOutput
+	var affected []model.ID
+	for _, intent := range s.Outputs {
+		out, err := newRuleOutput(book, intent, s.Version, s.At, s.Mode, RulePhaseStaged, revision, s.Digest)
+		if err != nil {
+			return Effect{}, err
+		}
+		if prev, ok := have[intent.ID]; ok {
+			if prev.Digest != out.Digest || prev.Mode != out.Mode {
+				return Effect{}, ruleFault(model.Conflict, "rule_output_exists")
+			}
+			continue
+		}
+		if _, ok, err := loadRuleOutput(st, intent.ID); err != nil {
+			return Effect{}, err
+		} else if ok {
+			return Effect{}, ruleFault(model.Conflict, "rule_output_exists")
+		}
+		fresh = append(fresh, out)
+		affected = append(affected, out.ID)
+	}
+	if len(mine)+len(fresh) > MaxRuleEvaluationOutputs {
+		return Effect{}, model.Fail(model.Invalid)
+	}
+	for _, o := range orphans {
+		delete(st.RuleOutputs, o.ID.String())
+	}
+	for _, out := range fresh {
+		if err := storeRuleOutput(st, out); err != nil {
+			return Effect{}, err
+		}
+	}
+	if len(fresh) == 0 && len(orphans) == 0 {
+		return Effect{AffectedIDs: []model.ID{book.Rule}, Phase: "unchanged"}, nil
+	}
+	return Effect{AffectedIDs: append([]model.ID{book.Rule}, affected...), Phase: "staged"}, nil
 }
 
 // pruneRuleOutputs bounds the settled (finalized or suppressed) outbox history
@@ -844,7 +1056,7 @@ func eraseRuleFacts(st *State, p model.DeletePredicate, suppress bool) (affected
 			continue
 		}
 		changed := false
-		if suppress && (o.Phase == RulePhasePending || o.Phase == RulePhaseAdmitted) {
+		if suppress && (o.Phase == RulePhasePending || o.Phase == RulePhaseAdmitted || o.Phase == RulePhaseStaged) {
 			o.Phase, o.Reason, changed = RulePhaseSuppress, ruleRetiredReason, true
 		}
 		if !textErased(o.Reason) {
@@ -985,7 +1197,7 @@ func (s *Store) RuleOutputs(ctx context.Context, scope auth.Scope, project, rule
 			if e := json.Unmarshal(raw, &o); e != nil {
 				return model.Fail(model.Corrupt)
 			}
-			if o.Org != scope.OrgID() || o.Project != project || rule != (model.ID{}) && o.Rule != rule || phase != "" && o.Phase != phase {
+			if o.Org != scope.OrgID() || o.Project != project || rule != (model.ID{}) && o.Rule != rule || phase != "" && o.Phase != phase || phase == "" && o.Phase == RulePhaseStaged {
 				continue
 			}
 			o.Obsolete = ruleOutputObsolete(st, o)

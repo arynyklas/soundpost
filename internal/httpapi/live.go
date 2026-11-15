@@ -14,6 +14,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"sync/atomic"
 	"time"
 )
 
@@ -42,9 +43,19 @@ type liveCarrier struct {
 	Permission string   `json:"permission,omitempty"`
 }
 
-// liveWriteTimeout bounds one blocked write to a slow consumer; the server's
-// global write timeout would otherwise end every long-lived stream.
-const liveWriteTimeout = 10 * time.Second
+// defaultLiveWriteTimeout bounds one blocked write to a slow consumer; the
+// server's global write timeout would otherwise end every long-lived stream.
+const defaultLiveWriteTimeout = 10 * time.Second
+
+// liveWriteTimeoutNS overrides the default (tests only; zero means default).
+var liveWriteTimeoutNS atomic.Int64
+
+func liveWriteTimeout() time.Duration {
+	if v := liveWriteTimeoutNS.Load(); v > 0 {
+		return time.Duration(v)
+	}
+	return defaultLiveWriteTimeout
+}
 
 // liveSession is a digest of the presented credential: a ticket is usable only
 // by the session that created it, and the credential itself is never stored.
@@ -179,7 +190,7 @@ func streamLive(w http.ResponseWriter, r *http.Request, it query.LiveIterator) {
 	h.Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 	write := func(frame []byte) bool {
-		_ = rc.SetWriteDeadline(time.Now().Add(liveWriteTimeout))
+		_ = rc.SetWriteDeadline(time.Now().Add(liveWriteTimeout()))
 		if _, err := w.Write(frame); err != nil {
 			return false
 		}

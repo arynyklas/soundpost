@@ -73,6 +73,8 @@ type Source struct {
 	Credential string
 	Resource   model.Resource
 	Cred       auth.SourceCredential
+	// logTemplate is the registered template of a log source (nil otherwise).
+	logTemplate *model.LogTemplate
 }
 
 // gate is the scan seam with two switches: it can hold a scan open until
@@ -85,6 +87,8 @@ type gate struct {
 	down  bool
 	open  int
 	held  int
+	// inflight counts scans executing inside the inner scanner.
+	inflight int
 }
 
 func (g *gate) arm() chan struct{} {
@@ -101,6 +105,16 @@ func (g *gate) disarm() {
 func (g *gate) setDown(v bool) { g.mu.Lock(); g.down = v; g.mu.Unlock() }
 func (g *gate) openCount() int { g.mu.Lock(); defer g.mu.Unlock(); return g.open }
 func (g *gate) heldCount() int { g.mu.Lock(); defer g.mu.Unlock(); return g.held }
+
+// outstandingRPC is every scan the engine still owes the storage layer: waiting
+// at the gate, executing inside the scanner (a distributed scan is one or more
+// RPCs there) or returned as an iterator that has not been closed (its stream is
+// still open).
+func (g *gate) outstandingRPC() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.held + g.inflight + g.open
+}
 
 func (g *gate) Scan(ctx context.Context, scope auth.Scope, req storage.ScanRequest) (storage.RowIterator, error) {
 	g.mu.Lock()
@@ -125,7 +139,13 @@ func (g *gate) Scan(ctx context.Context, scope auth.Scope, req storage.ScanReque
 		g.held--
 		g.mu.Unlock()
 	}
+	g.mu.Lock()
+	g.inflight++
+	g.mu.Unlock()
 	it, err := g.inner.Scan(ctx, scope, req)
+	g.mu.Lock()
+	g.inflight--
+	g.mu.Unlock()
 	if err != nil {
 		return nil, err
 	}

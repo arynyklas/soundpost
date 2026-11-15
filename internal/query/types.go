@@ -84,7 +84,11 @@ type Budget struct {
 
 // Request is the C06 query request. Source is only for raw.read scopes: the one
 // named restricted source whose logs are read (it is never an authorization
-// carrier, the scope must already allow it).
+// carrier, the scope must already allow it). Source, LogLimit/LogOrder (and
+// DiscoveryRequest.Source/Profile/FeatureSet) are additive optional fields
+// beyond the plan's request shape; decision D24 (02.09-W3) confirms them: each
+// is optional, none widens authority, and every omitted field keeps the plan's
+// behaviour.
 type Request struct {
 	Language     string         `json:"language"`
 	Profile      string         `json:"profile"`
@@ -306,8 +310,10 @@ type ProjectResult struct {
 }
 
 // Result holds one project result for each requested project, ordered by
-// project ID. Series never combine across projects and no project label is
-// ever injected.
+// project ID (decision D24, 02.09-W3: the order is a property of the response,
+// not of the request, so one request body has one response whatever order its
+// projects were listed in). Series never combine across projects and no project
+// label is ever injected.
 type Result struct {
 	Projects []ProjectResult `json:"projects"`
 }

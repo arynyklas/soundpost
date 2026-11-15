@@ -1564,3 +1564,48 @@ func TestLiveExpiredTicketsArePurged(t *testing.T) {
 		t.Fatalf("expired mint-only tickets must be purged: %d tickets remain", n)
 	}
 }
+
+// TestLiveRevalidationCostPerEvent measures what the per-event revalidation
+// costs on the real auth service (policy lookup, epochs, delete generation) and
+// holds it to a stated budget: at 1,000 events per second across all streams the
+// revalidation alone must stay under 20% of one core, and a delivered event (push,
+// revalidate, pipeline, hand-off) under 100%. Measured on the 8-vCPU test VM:
+// about 70 us per Revalidate and 320 us per delivered event (decision D25, 02.10-W2).
+func TestLiveRevalidationCostPerEvent(t *testing.T) {
+	const eventsPerSecond = 1000
+	e := newLiveEnv(t, nil)
+	org, project, _, scope := fixture(t, e)
+	_ = org
+	it, _ := e.mustOpen(t, scope, e.req(`{app="web"}`, project), nil)
+	defer it.Close()
+	feed := e.feed.last()
+
+	revalidate := testing.Benchmark(func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			if err := e.fx.svc.Revalidate(e.ctx, scope); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+	at := uint64(101)
+	source := model.NewID()
+	deliver := testing.Benchmark(func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			feed.push(rowsPage(t, project, source, at, "event"))
+			at++
+			nextEvent(t, it)
+		}
+	})
+	cpu := func(r testing.BenchmarkResult) float64 { return float64(r.NsPerOp()) * eventsPerSecond / 1e9 * 100 }
+	t.Logf("per-event Revalidate: %d ns/op (%d runs) = %.2f%% of one core at %d events/s", revalidate.NsPerOp(), revalidate.N, cpu(revalidate), eventsPerSecond)
+	t.Logf("per-event delivery (push, revalidate, pipeline, hand-off): %d ns/op (%d runs) = %.2f%% of one core at %d events/s", deliver.NsPerOp(), deliver.N, cpu(deliver), eventsPerSecond)
+	if revalidate.N == 0 || deliver.N == 0 {
+		t.Fatal("benchmark did not run")
+	}
+	if c := cpu(revalidate); c > 20 {
+		t.Fatalf("revalidation alone costs %.1f%% of a core at %d events/s", c, eventsPerSecond)
+	}
+	if c := cpu(deliver); c > 100 {
+		t.Fatalf("event delivery costs %.1f%% of a core at %d events/s", c, eventsPerSecond)
+	}
+}

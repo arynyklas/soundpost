@@ -7,6 +7,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,6 +35,7 @@ type ownedFile struct {
 
 type ownedStepSpec struct {
 	ID       string          `json:"id"`
+	Language string          `json:"language"`
 	Route    string          `json:"route"`
 	As       string          `json:"as"`
 	HoldScan bool            `json:"hold_scan"`
@@ -42,19 +47,50 @@ type ownedStepSpec struct {
 	Expect map[string]json.RawMessage `json:"expect"`
 }
 
+type logPoint struct {
+	Source string `json:"source"`
+	App    string `json:"app"`
+	TimeNS string `json:"time_ns"`
+	Value  string `json:"value"`
+}
+
 type fixture struct {
 	Projects []string `json:"projects"`
 	Sources  []struct {
-		ID      string              `json:"id"`
-		Project string              `json:"project"`
-		Kinds   []string            `json:"kinds"`
-		Labels  map[string][]string `json:"labels"`
+		ID          string              `json:"id"`
+		Project     string              `json:"project"`
+		Kinds       []string            `json:"kinds"`
+		Labels      map[string][]string `json:"labels"`
+		LogTemplate *struct {
+			ID       string   `json:"id"`
+			Revision uint32   `json:"revision"`
+			Line     string   `json:"line"`
+			Field    string   `json:"field"`
+			Values   []string `json:"values"`
+		} `json:"log_template"`
 	} `json:"sources"`
-	MetricPoints []point `json:"metric_points"`
+	MetricPoints []point    `json:"metric_points"`
+	LogRecords   []logPoint `json:"log_records"`
 	Principals   []struct {
 		ID     string              `json:"id"`
 		Grants map[string][]string `json:"grants"`
 	} `json:"principals"`
+}
+
+// ownedLanguage is the query language a pinned profile id belongs to.
+func ownedLanguage(profileID string) string {
+	if strings.HasPrefix(profileID, "logql-") {
+		return "logql"
+	}
+	return "promql"
+}
+
+// language is the language a step is written in; steps default to PromQL.
+func (s ownedStepSpec) language() string {
+	if s.Language == "" {
+		return "promql"
+	}
+	return s.Language
 }
 
 // Load builds the fixture on the node: projects, sources, principals and the
@@ -68,7 +104,20 @@ func (f fixture) Load(e *Env) []model.Receipt {
 		for _, k := range s.Kinds {
 			kinds = append(kinds, model.Kind(k))
 		}
-		e.AddSource(SourceSpec{Name: s.ID, Project: s.Project, Kinds: kinds, Labels: s.Labels})
+		spec := SourceSpec{Name: s.ID, Project: s.Project, Kinds: kinds, Labels: s.Labels}
+		if lt := s.LogTemplate; lt != nil {
+			var values []model.Scalar
+			for _, name := range lt.Values {
+				var v model.Scalar
+				check(json.Unmarshal([]byte(strconv.Quote(name)), &v))
+				values = append(values, v)
+			}
+			tpl := model.LogTemplate{ID: lt.ID, Revision: model.Revision(lt.Revision), Line: lt.Line, Severity: "info",
+				Fields: []model.TemplateField{{Name: lt.Field, Type: "string", MaxBytes: 16, Sensitivity: "metadata", Values: values}}}
+			spec.Logs = &tpl
+		}
+		src := e.AddSource(spec)
+		src.logTemplate = spec.Logs
 	}
 	for _, p := range f.Principals {
 		e.AddPerson(p.ID)
@@ -87,7 +136,27 @@ func (f fixture) Load(e *Env) []model.Receipt {
 		}
 		receipts = append(receipts, e.Ingest(s, e.MetricRecord(s, pt.Name, pt.Labels, mustInt(pt.TimeNS), mustHex(pt.ValueBits), exemplar)))
 	}
+	for _, lr := range f.LogRecords {
+		s := e.Sources[lr.Source]
+		checkf(s != nil, "unknown source %s", lr.Source)
+		receipts = append(receipts, e.Ingest(s, logRecord(e, s, lr)))
+	}
 	return receipts
+}
+
+// logRecord builds one record of the source's log template at lr.TimeNS, with
+// the app=<label> stream label the source policy allows.
+func logRecord(e *Env, s *Source, lr logPoint) model.Record {
+	var v model.Scalar
+	value, err := json.Marshal(lr.Value)
+	check(err)
+	check(json.Unmarshal(value, &v))
+	ts := model.UnixNano(mustInt(lr.TimeNS))
+	return model.Record{ID: model.NewID(), Kind: model.Log, ObservedAt: ts, Resource: s.Resource, Payload: model.Payload{Log: &model.LogRecord{
+		Timestamp: &ts, TemplateID: s.logTemplate.ID, TemplateRevision: s.logTemplate.Revision,
+		Fields:       map[string]model.Scalar{s.logTemplate.Fields[0].Name: v},
+		StreamLabels: model.Labels{{Name: "app", Value: lr.App}}, Metadata: map[string]model.Scalar{},
+	}}}
 }
 
 func mustInt(s string) int64 {
@@ -207,12 +276,15 @@ func RunOwned(ctx context.Context, layout Layout, dir, path string) (steps []Ste
 	check(err)
 	defer env.Close()
 	receipts := file.Fixture.Load(env)
-	steps = append(steps, StepResult{Name: "fixture-admitted", Passed: len(receipts) == len(file.Fixture.MetricPoints), Detail: fmt.Sprintf("%d receipts for %d points", len(receipts), len(file.Fixture.MetricPoints))})
+	admitted := len(file.Fixture.MetricPoints) + len(file.Fixture.LogRecords)
+	steps = append(steps, StepResult{Name: "fixture-admitted", Passed: len(receipts) == admitted, Detail: fmt.Sprintf("%d receipts for %d records", len(receipts), admitted)})
+	ran := map[string]int{}
 	for _, profileID := range file.Runner.Profiles {
-		if !strings.HasPrefix(profileID, "promql-") {
-			continue // the authored steps are PromQL and discovery steps only
-		}
 		for _, st := range file.Steps {
+			if st.language() != ownedLanguage(profileID) {
+				continue
+			}
+			ran[profileID]++
 			name := profileID + "/" + st.ID
 			result := StepResult{Name: name}
 			func() {
@@ -230,6 +302,11 @@ func RunOwned(ctx context.Context, layout Layout, dir, path string) (steps []Ste
 			}()
 			steps = append(steps, result)
 		}
+	}
+	// A profile the runner names must execute steps; skipping it silently would
+	// report a pass for work that never ran.
+	for _, profileID := range file.Runner.Profiles {
+		steps = append(steps, StepResult{Name: profileID + "/executed-steps", Passed: ran[profileID] > 0, Detail: fmt.Sprintf("%d steps executed", ran[profileID])})
 	}
 	// Forbidden routes: GET query routes and upstream-shaped routes are absent.
 	forbidden := StepResult{Name: "forbidden-routes-absent", Passed: true}
@@ -252,7 +329,7 @@ func RunOwned(ctx context.Context, layout Layout, dir, path string) (steps []Ste
 func (e *Env) ownedStep(ctx context.Context, file *ownedFile, st ownedStepSpec, profileID string) {
 	who := e.People[st.As]
 	checkf(who != nil, "unknown principal %s", st.As)
-	language := "promql"
+	language := ownedLanguage(profileID)
 	body := e.body(st.Body, language, profileID)
 	if st.Route == "/api/v1/query/format" {
 		body["projects"] = []string{e.Projects["project-a"].String()}
@@ -386,6 +463,7 @@ func (e *Env) revocationDuringCompute(route string, who *Person, body map[string
 }
 
 func (e *Env) cancellationReleasesEverything(route string, who *Person, body map[string]any, expect map[string]json.RawMessage) {
+	spillBefore := e.spillFiles()
 	release := e.gate.arm()
 	defer e.gate.disarm()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -398,10 +476,59 @@ func (e *Env) cancellationReleasesEverything(route string, who *Person, body map
 	close(release)
 	waitFor(func() bool {
 		u := e.engine.Usage()
-		return e.gate.openCount() == 0 && e.gate.heldCount() == 0 && u.OpenIterators == 0 && u.MemoryUsed == 0 && u.ActiveQueries == 0 && u.QueuedQueries == 0
+		return e.gate.outstandingRPC() == 0 && u.OpenIterators == 0 && u.MemoryUsed == 0 && u.ActiveQueries == 0 && u.QueuedQueries == 0
 	}, "resources remained after cancellation")
 	u := e.engine.Usage()
 	checkf(u.LeakedBytes == 0 && u.OverReleasedBytes == 0, "accounting violation leaked=%d over=%d", u.LeakedBytes, u.OverReleasedBytes)
+	// The case states what must remain; every figure is measured, never assumed.
+	measured := map[string]int64{
+		"open_iterators":         u.OpenIterators,
+		"accounted_memory_bytes": u.MemoryUsed,
+		"temporary_spill_files":  int64(len(e.spillFiles().without(spillBefore))),
+		"outstanding_rpc":        int64(e.gate.outstandingRPC()),
+	}
+	for _, key := range []string{"open_iterators", "accounted_memory_bytes", "temporary_spill_files", "outstanding_rpc"} {
+		want, ok := jsonField[int64](expect, key)
+		checkf(ok, "the case does not state %s", key)
+		checkf(measured[key] == want, "%s measured %d, the case requires %d", key, measured[key], want)
+	}
+}
+
+// spillSet is a set of file paths.
+type spillSet map[string]bool
+
+func (s spillSet) without(old spillSet) []string {
+	var out []string
+	for p := range s {
+		if !old[p] {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// spillFiles lists the temporary files a query could have left behind: entries
+// whose name says "spill" directly under the process temp directory and anywhere
+// under the installation directory.
+func (e *Env) spillFiles() spillSet {
+	found := spillSet{}
+	add := func(path string) {
+		if strings.Contains(strings.ToLower(filepath.Base(path)), "spill") {
+			found[path] = true
+		}
+	}
+	if entries, err := os.ReadDir(os.TempDir()); err == nil {
+		for _, ent := range entries {
+			add(filepath.Join(os.TempDir(), ent.Name()))
+		}
+	}
+	_ = filepath.WalkDir(e.dir, func(path string, d fs.DirEntry, err error) error {
+		if err == nil {
+			add(path)
+		}
+		return nil
+	})
+	return found
 }
 
 func waitFor(cond func() bool, what string) {

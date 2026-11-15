@@ -60,6 +60,7 @@ type omFamily struct {
 	typ     string
 	unit    string
 	declare bool
+	sampled bool
 }
 
 func (f *omFamily) has(n string) bool {
@@ -168,9 +169,6 @@ func (p *omParser) meta(s string) error {
 		if len(parts) != 4 || !validMetricName(name, p.cfg.Names, 1024) {
 			return p.bad("type_line")
 		}
-		if _, dup := p.fams[name]; dup {
-			return p.bad("family_redeclared")
-		}
 		switch rest {
 		case "counter", "gauge", "histogram", "summary", "unknown":
 		case "gaugehistogram", "info", "stateset":
@@ -178,19 +176,23 @@ func (p *omParser) meta(s string) error {
 		default:
 			return p.bad("metric_type")
 		}
-		f := &omFamily{name: name, typ: rest, declare: true}
-		p.fams[name] = f
-		p.cur = f
+		f, ok := p.descriptor(name)
+		if !ok || f.declare || f.sampled {
+			return p.bad("family_redeclared")
+		}
+		f.typ = rest
+		f.declare = true
 	case "UNIT":
-		if p.cur == nil || p.cur.name != name || len(parts) < 3 {
+		f, ok := p.descriptor(name)
+		if !ok || len(parts) < 3 {
 			return p.bad("unit_line")
 		}
 		if rest != "" && !safeUnit(rest) {
 			return p.bad("unit")
 		}
-		p.cur.unit = rest
+		f.unit = rest
 	case "HELP":
-		if p.cur == nil || p.cur.name != name {
+		if _, ok := p.descriptor(name); !ok {
 			return p.bad("help_line")
 		}
 		if p.cfg.Help == HelpReject {
@@ -205,15 +207,32 @@ func (p *omParser) meta(s string) error {
 
 func (p *omParser) family(name string) (*omFamily, error) {
 	if p.cur != nil && p.cur.has(name) {
+		p.cur.sampled = true
 		return p.cur, nil
 	}
 	if _, exists := p.fams[name]; exists {
 		return nil, p.bad("interleaved_family")
 	}
-	f := &omFamily{name: name, typ: "unknown"}
+	f := &omFamily{name: name, typ: "unknown", sampled: true}
 	p.fams[name] = f
 	p.cur = f
 	return f, nil
+}
+
+// descriptor returns the family a HELP/UNIT/TYPE line belongs to. The
+// OpenMetrics ABNF allows the descriptors of one family in any order and real
+// producers emit HELP, TYPE, UNIT; the first descriptor opens the family.
+func (p *omParser) descriptor(name string) (*omFamily, bool) {
+	if p.cur != nil && p.cur.name == name {
+		return p.cur, true
+	}
+	if _, exists := p.fams[name]; exists {
+		return nil, false
+	}
+	f := &omFamily{name: name, typ: "unknown"}
+	p.fams[name] = f
+	p.cur = f
+	return f, true
 }
 
 func (p *omParser) sample(s string) error {

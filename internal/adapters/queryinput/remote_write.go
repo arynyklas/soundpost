@@ -60,6 +60,10 @@ func DecodeRemoteWrite(ctx context.Context, grant policy.SourceGrant, version Wi
 	if err != nil {
 		return nil, err
 	}
+	if d.metadataOnly && len(a.recs) == 0 {
+		// Prometheus sends metadata in requests of its own; nothing to admit.
+		return nil, nil
+	}
 	return a.finish(ctx)
 }
 
@@ -228,6 +232,8 @@ type rwDecoder struct {
 	series   int
 	points   int
 	unusedMD int
+	// metadataOnly marks a v1 request that carries metadata and no series.
+	metadataOnly bool
 }
 
 func (d *rwDecoder) bad(detail string) error { return fail(d.format, ReasonMalformed, detail) }
@@ -603,6 +609,7 @@ func (d *rwDecoder) parseV1(b []byte) error {
 	if err != nil {
 		return err
 	}
+	d.metadataOnly = len(rawSeries) == 0 && len(rawMeta) > 0
 	type meta struct {
 		typ        uint64
 		help, unit string

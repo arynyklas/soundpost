@@ -2,3 +2,5 @@
 # their trailing whitespace is part of the text, not a style error.
 /THIRD_PARTY_NOTICES -whitespace
 /build/dependencies/license-texts/** -whitespace
+# Real upstream wire captures are kept byte for byte (e.g. Loki emits "# HELP name " with empty text).
+/conformance/query/fixtures/adapters/real/** -whitespace

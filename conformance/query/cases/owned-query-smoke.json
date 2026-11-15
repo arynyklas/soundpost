@@ -45,6 +45,22 @@
             "api"
           ]
         }
+      },
+      {
+        "id": "logs-a",
+        "project": "project-a",
+        "class": "structured",
+        "kinds": ["log"],
+        "labels": {"app": ["web"]},
+        "log_template": {"id": "signin", "revision": 1, "line": "user {name} signed in", "field": "name", "values": ["alice", "bob", "carol", "dave"]}
+      },
+      {
+        "id": "logs-b",
+        "project": "project-b",
+        "class": "structured",
+        "kinds": ["log"],
+        "labels": {"app": ["web"]},
+        "log_template": {"id": "signin", "revision": 1, "line": "user {name} signed in", "field": "name", "values": ["alice", "bob", "carol", "dave"]}
       }
     ],
     "metric_points": [
@@ -85,6 +101,12 @@
         "time_ns": "10000000000",
         "value_bits": "4014000000000000"
       }
+    ],
+    "log_records": [
+      {"source": "logs-a", "app": "web", "time_ns": "10000000000", "value": "alice"},
+      {"source": "logs-a", "app": "web", "time_ns": "10000100000", "value": "bob"},
+      {"source": "logs-a", "app": "web", "time_ns": "10000200000", "value": "carol"},
+      {"source": "logs-b", "app": "web", "time_ns": "10000000000", "value": "dave"}
     ],
     "principals": [
       {
@@ -325,6 +347,86 @@
         "projects": [
           "project-a"
         ]
+      },
+      "expect": {
+        "open_iterators": 0,
+        "accounted_memory_bytes": 0,
+        "temporary_spill_files": 0,
+        "outstanding_rpc": 0
+      }
+    },
+    {
+      "id": "logql-discover-label-values",
+      "language": "logql",
+      "method": "POST",
+      "route": "/api/v1/discover",
+      "as": "reader",
+      "body": {
+        "projects": ["project-a", "project-b"],
+        "signal": "log",
+        "kind": "label_values",
+        "field": "app",
+        "matchers": [],
+        "time": {"start": "9999999000", "end": "10001000000"},
+        "limit": 100
+      },
+      "expect": {"status": 200, "items": ["web"], "more": false, "completeness": "complete"}
+    },
+    {
+      "id": "logql-exemplars-not-applicable",
+      "language": "logql",
+      "method": "POST",
+      "route": "/api/v1/exemplars",
+      "as": "reader",
+      "body": {
+        "projects": ["project-a"],
+        "expression": "up",
+        "window": {"start": "9999999000", "end": "10000001000"},
+        "limit": 10
+      },
+      "expect": {"status": 400, "code": "invalid", "no_value_in_body": true}
+    },
+    {
+      "id": "logql-format",
+      "language": "logql",
+      "method": "POST",
+      "route": "/api/v1/query/format",
+      "as": "reader",
+      "body": {"language": "logql", "expression": "{app=\"web\"}   |=  \"alice\""},
+      "expect": {"status": 200, "formatted": "{app=\"web\"} |= \"alice\""}
+    },
+    {
+      "id": "logql-query-project-partitioned",
+      "language": "logql",
+      "method": "POST",
+      "route": "/api/v1/query",
+      "as": "reader",
+      "body": {
+        "language": "logql",
+        "expression": "count_over_time({app=\"web\"}[1h])",
+        "evaluation": {"instant": true, "time": "10001000000"},
+        "projects": ["project-a", "project-b"]
+      },
+      "expect": {
+        "status": 200,
+        "completeness": "complete",
+        "per_project_float_bits": {"project-a": "4008000000000000", "project-b": "3ff0000000000000"},
+        "never_merged_value_bits": "4010000000000000"
+      }
+    },
+    {
+      "id": "logql-cancellation-releases-everything",
+      "language": "logql",
+      "method": "POST",
+      "route": "/api/v1/query",
+      "as": "reader",
+      "hold_scan": true,
+      "then": "client disconnects",
+      "body": {
+        "language": "logql",
+        "expression": "count_over_time({app=\"web\"}[1h])",
+        "evaluation": {"instant": true, "time": "10001000000"},
+        "projects": ["project-a"]
       },
       "expect": {
         "open_iterators": 0,

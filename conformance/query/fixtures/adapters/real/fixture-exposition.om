@@ -1,0 +1,21 @@
+# HELP soundpost_fixture_requests Requests served by the fixture.
+# TYPE soundpost_fixture_requests counter
+# UNIT soundpost_fixture_requests requests
+soundpost_fixture_requests_total{method="get",code="200"} 1027 # {trace_id="0af7651916cd43dd8448eb211c80319c",span_id="b7ad6b7169203331"} 1 1700000000.123
+soundpost_fixture_requests_total{method="post",code="500"} 3
+soundpost_fixture_requests_created{method="get",code="200"} 1700000000.0
+# HELP soundpost_fixture_temperature_celsius Room temperature.
+# TYPE soundpost_fixture_temperature_celsius gauge
+# UNIT soundpost_fixture_temperature_celsius celsius
+soundpost_fixture_temperature_celsius{room="lab"} 21.5
+soundpost_fixture_temperature_celsius{room="cellar"} -3.25
+# HELP soundpost_fixture_latency_seconds Request latency.
+# TYPE soundpost_fixture_latency_seconds histogram
+# UNIT soundpost_fixture_latency_seconds seconds
+soundpost_fixture_latency_seconds_bucket{le="0.1"} 5
+soundpost_fixture_latency_seconds_bucket{le="0.5"} 12
+soundpost_fixture_latency_seconds_bucket{le="2.5"} 14
+soundpost_fixture_latency_seconds_bucket{le="+Inf"} 15
+soundpost_fixture_latency_seconds_sum 9.75
+soundpost_fixture_latency_seconds_count 15
+# EOF
