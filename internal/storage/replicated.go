@@ -503,7 +503,7 @@ func (e *Engine) commitReplicated(slot uint16, index uint64, entry walEntry) err
 	if slot >= 64 || index == 0 || index != e.indexes[slot]+1 {
 		return model.Fail(model.Stale)
 	}
-	raw, err := encodeWAL(entry)
+	raw, err := e.encodeProposal(entry)
 	if err != nil {
 		return model.Fail(model.Invalid)
 	}

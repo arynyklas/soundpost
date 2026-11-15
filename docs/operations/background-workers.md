@@ -157,12 +157,18 @@ elevation bookkeeping, so both are bounded:
 * Live (unexpired) pending OIDC logins are capped at 1024. At the cap the start
   route returns a retryable `unavailable` (HTTP 503, `Retry-After: 60`) before
   any provider discovery fetch or state write.
-* `auth.Service.SweepExpired` (run on the fence cadence, about once a minute)
-  deletes pending OIDC records (5-minute life), elevation records (15-minute
-  life) and sessions (12-hour life) once expired; a start also collects expired
-  pending records. A session goes at the instant `Authenticate` refuses it. The
-  expiry instant is read by the proposing node and the result is replicated as
-  state, so replicas hold identical bytes.
+* `auth.Service.SweepExpired` (run on the 5-second reconcile tick of the fence
+  cadence) deletes pending OIDC records (5-minute life), elevation records
+  (15-minute life) and sessions (12-hour life) once expired; a start also
+  collects expired pending records. A session goes at the instant `Authenticate`
+  refuses it. The expiry instant is read by the proposing node and the result is
+  replicated as state, so replicas hold identical bytes. A tick with nothing
+  expired commits nothing. The commit that removes expired records goes through
+  `control.Store.UpdateSweepExpired` and does not move the control
+  `AuthorityRevision`: every use already refuses such a record at the same
+  instant, so removing it widens and narrows no access. The writer is guarded:
+  a sweep that removed a live record, added or altered one, or changed anything
+  else bumps the revision like an unclassified writer.
 * Audit rows (`elevate`, `elevated_read` and the per-response release audit, about
   300 bytes each) are not collected by this sweep. Decision proposed by lane 1
   wave 7, recommendation: accept: elevation audits have no retention of their own;

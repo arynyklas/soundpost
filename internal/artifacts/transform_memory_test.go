@@ -66,7 +66,9 @@ func peakOf(fn func()) (total, peak uint64) {
 func TestUploadFrontEndMemory(t *testing.T) {
 	raw := memMap(16 << 20)
 	in := uint64(len(raw))
-	var pub, priv []byte
+	var pub *publicMap
+	var priv []byte
+	var pubSize int64
 	var err error
 	total, peak := peakOf(func() {
 		// Same buffering Put performs before transformMap.
@@ -78,11 +80,14 @@ func TestUploadFrontEndMemory(t *testing.T) {
 		b := buf.Bytes()
 		buf = nil
 		pub, priv, err = transformMap(b, true)
+		if err == nil {
+			pubSize, err = pub.WriteTo(io.Discard)
+		}
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("FRONTEND-MEM input=%d total_alloc=%d (%.1fx) peak_live=%d (%.1fx) public=%d private=%d", in, total, float64(total)/float64(in), peak, float64(peak)/float64(in), len(pub), len(priv))
+	t.Logf("FRONTEND-MEM input=%d total_alloc=%d (%.1fx) peak_live=%d (%.1fx) public=%d private=%d", in, total, float64(total)/float64(in), peak, float64(peak)/float64(in), pubSize, len(priv))
 	// Peak live heap is sampled and GC-timing dependent, so it is reported
 	// above, not asserted. Cumulative allocation is deterministic.
 	if !raceEnabled && total > 12*in {

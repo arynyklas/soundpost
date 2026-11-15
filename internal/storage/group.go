@@ -58,6 +58,10 @@ type Engine struct {
 	erasure      erasureState
 	ver          verifyState // bounded startup verification (D15)
 	closing      atomic.Bool // set when Close starts: long publications stop at their next check
+	// fragmentEnvelope selects the binary wire form for artifact fragment proposals
+	// (envelope.go); envelopesProposed counts the proposals that used it.
+	fragmentEnvelope  atomic.Bool
+	envelopesProposed atomic.Uint64
 }
 type walEntry struct {
 	Type       string                      `json:"type"`

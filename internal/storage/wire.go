@@ -109,9 +109,20 @@ func encodeFragmentJSON(entry walEntry) (raw []byte, ok bool, err error) {
 	return append(out, end...), true, nil
 }
 
-// decodeWAL is json.Unmarshal(raw, &entry) without the outer pass that only re-validates and
-// copies raw before handing it to UnmarshalJSON, which validates strictly itself.
+// decodeWAL reads a replicated command in either wire form: the binary fragment envelope
+// (envelope.go) or the JSON text every other command, and every command a build that predates
+// the envelope wrote, has. The JSON path is decodeWALJSON, which is also exactly what such a
+// build runs on every payload.
 func decodeWAL(raw []byte) (walEntry, error) {
+	if isEnvelope(raw) {
+		return decodeFragmentEnvelope(raw)
+	}
+	return decodeWALJSON(raw)
+}
+
+// decodeWALJSON is json.Unmarshal(raw, &entry) without the outer pass that only re-validates and
+// copies raw before handing it to UnmarshalJSON, which validates strictly itself.
+func decodeWALJSON(raw []byte) (walEntry, error) {
 	var entry walEntry
 	err := entry.UnmarshalJSON(raw)
 	return entry, err

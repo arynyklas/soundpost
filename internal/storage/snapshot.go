@@ -664,8 +664,8 @@ func intervalDigest(entries map[uint64]model.Hash, after, through uint64) model.
 func replayIntervals(group model.ID, after, through uint64, entries []replica.ReplayEntry, gaps []DeclaredGap) ([]ReplayInterval, error) {
 	digests := map[uint64]model.Hash{}
 	for _, r := range entries {
-		var walled walEntry
-		if json.Unmarshal(r.Payload, &walled) != nil {
+		walled, err := decodeWAL(r.Payload)
+		if err != nil {
 			return nil, model.Fail(model.Corrupt)
 		}
 		d, err := evidenceDigest(walled)

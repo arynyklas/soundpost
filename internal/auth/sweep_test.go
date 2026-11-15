@@ -107,6 +107,49 @@ func TestSweepRemovesExpiredAbandonedOIDCStarts(t *testing.T) {
 	}
 }
 
+// 09.04x review Major: the sweep deletes only records every use already refuses, so neither an
+// idle sweep nor one that removes expired records moves AuthorityRevision; a real authority
+// change still does.
+func TestSweepDoesNotMoveAuthorityRevision(t *testing.T) {
+	f := newSweepFixture(t)
+	authority := func() model.Revision {
+		var a model.Revision
+		_ = f.store.View(f.ctx, func(st control.State) error { a = st.AuthorityRevision; return nil })
+		return a
+	}
+	for range 3 {
+		if _, err := f.service.OIDCStart(f.ctx, f.cfg, "binding"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	base := authority()
+	for range 2 {
+		if n, err := f.service.SweepExpired(f.ctx); err != nil || n != 0 {
+			t.Fatalf("idle sweep: %d %v", n, err)
+		}
+	}
+	if got := authority(); got != base {
+		t.Fatalf("idle sweeps moved AuthorityRevision %d -> %d", base, got)
+	}
+	*f.now = f.now.Add(6 * time.Minute)
+	if n, err := f.service.SweepExpired(f.ctx); err != nil || n != 3 {
+		t.Fatalf("expiry sweep: %d %v", n, err)
+	}
+	*f.now = f.now.Add(13 * time.Hour)
+	if n, err := f.service.SweepExpired(f.ctx); err != nil || n != 1 {
+		t.Fatalf("session sweep: %d %v", n, err)
+	}
+	if got := authority(); got != base {
+		t.Fatalf("sweeping expired records moved AuthorityRevision %d -> %d", base, got)
+	}
+	if err := f.store.Update(f.ctx, func(*control.State) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if got := authority(); got == base {
+		t.Fatal("a real authority change did not advance AuthorityRevision")
+	}
+}
+
 // A live pending record is still consumed by its callback; an expired one is refused.
 func TestSweepKeepsLiveStateAndExpiredCallbackRefused(t *testing.T) {
 	f := newSweepFixture(t)

@@ -271,9 +271,21 @@ func (s *Service) SweepExpired(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	removed := 0
-	err := s.store.Update(ctx, func(st *model.ControlState) error {
+	sweep := func(st *model.ControlState) error {
 		removed = sweepExpiredState(st, now)
 		return nil
-	})
+	}
+	if u, ok := s.store.(expirySweeper); ok {
+		err := u.UpdateSweepExpired(ctx, now, func(k string, raw json.RawMessage) bool { return expiredOIDC(k, raw, now) }, sweep)
+		return removed, err
+	}
+	err := s.store.Update(ctx, sweep)
 	return removed, err
+}
+
+// expirySweeper is implemented by *control.Store: the sweep commit that does not move the
+// control AuthorityRevision when it only deletes records already expired at now. A ControlStore
+// without it falls back to Update.
+type expirySweeper interface {
+	UpdateSweepExpired(ctx context.Context, now int64, residentExpired func(key string, raw json.RawMessage) bool, fn func(*model.ControlState) error) error
 }

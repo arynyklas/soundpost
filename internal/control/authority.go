@@ -114,6 +114,13 @@ const (
 	// the view. Without this entry every hourly expiry would move AuthorityRevision and make a
 	// deletion Begin holding a view older than it conflict once.
 	writerExpireControlLog writer = "ExpireControlLog"
+	// writerSweepExpired: the auth sweep of pending OIDC logins, elevation records and sessions
+	// whose expiry is at or before the sweep instant. Every such record is already refused at
+	// every use (Authenticate, the callback and elevation resolution compare the same instant
+	// with the same boundary), so deleting it widens and narrows nothing. updateAsGuardedChecked
+	// masks Sessions and OIDC and separately requires that nothing was added or altered and
+	// that every removed record was expired; anything else bumps like an unclassified writer.
+	writerSweepExpired writer = "SweepExpired"
 )
 
 // nonAuthorityWriters is the closed allowlist of updateAs writers that leave AuthorityRevision
@@ -134,6 +141,7 @@ var nonAuthorityWriters = map[writer]string{
 	writerSessionCreate:       "a new session record for an existing user (no existing session or user changed)",
 	writerArtifactLedger:      "artifact reference ledger and index entry (retention bookkeeping, not access state)",
 	writerExpireControlLog:    "expired audit rows and applied-command rows (log retention, not access state)",
+	writerSweepExpired:        "expired pending login, elevation and session records (already refused everywhere)",
 }
 
 // nonAuthorityKinds is the closed allowlist of Transact kinds whose commit leaves
@@ -241,6 +249,48 @@ func (s *Store) UpdateReplayIndex(ctx context.Context, fn func(*State) error) er
 // bumps as an unclassified writer does.
 func (s *Store) UpdateSessionCreate(ctx context.Context, fn func(*State) error) error {
 	return s.updateAsGuardedChecked(ctx, writerSessionCreate, stateWithoutSessions, sessionsOnlyGrow, fn)
+}
+
+// UpdateSweepExpired commits fn, the removal of expired sessions and expired OIDC residents,
+// without moving AuthorityRevision when fn only deleted records that were expired at now
+// (sessionExpires <= now; residentExpired reports an OIDC resident as expired) and left every
+// other record byte for byte as it was. Any other difference bumps as an unclassified writer
+// does. A commit that removed nothing leaves AuthorityRevision alone as well.
+func (s *Store) UpdateSweepExpired(ctx context.Context, now int64, residentExpired func(key string, raw json.RawMessage) bool, fn func(*State) error) error {
+	preserve := func(st *State) func(*State) bool {
+		sessions, oidc := maps.Clone(st.Sessions), maps.Clone(st.OIDC)
+		return func(after *State) bool {
+			for k, v := range after.Sessions {
+				if before, ok := sessions[k]; !ok || before != v {
+					return false
+				}
+			}
+			for k, v := range sessions {
+				if _, ok := after.Sessions[k]; !ok && v.Expires > now {
+					return false
+				}
+			}
+			for k, v := range after.OIDC {
+				if before, ok := oidc[k]; !ok || !bytes.Equal(before, v) {
+					return false
+				}
+			}
+			for k, v := range oidc {
+				if _, ok := after.OIDC[k]; !ok && !residentExpired(k, v) {
+					return false
+				}
+			}
+			return true
+		}
+	}
+	return s.updateAsGuardedChecked(ctx, writerSweepExpired, stateWithoutSweepable, preserve, fn)
+}
+
+// stateWithoutSweepable is the canonical encoding of st with the Sessions and OIDC maps removed.
+func stateWithoutSweepable(st *State) ([]byte, error) {
+	masked := *st
+	masked.Sessions, masked.OIDC = nil, nil
+	return json.Marshal(masked)
 }
 
 // UpdateArtifactReferences commits fn, a reference-ledger write, without moving

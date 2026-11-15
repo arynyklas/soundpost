@@ -66,13 +66,36 @@ func (s *Service) Put(ctx context.Context, scope auth.Scope, m Manifest, input i
 	if err != nil {
 		return Artifact{}, err
 	}
+	// The public document is never held as bytes: one pass hashes and counts it (the manifest
+	// names both before any reservation), a second pass feeds the blob write as it is produced.
+	digest := sha256.New()
+	publicSize, err := public.WriteTo(digest)
+	if err != nil {
+		return Artifact{}, model.Fail(model.Invalid)
+	}
+	if publicSize+int64(len(private)) > model.ArtifactBundleLimit {
+		return Artifact{}, model.Fail(model.TooLarge)
+	}
 	id := artifactID(m)
-	manifest := model.BlobManifest{Org: m.Org, Project: m.Project, Source: m.Source, Root: id, Build: m.Build, DebugID: m.DebugID, Path: m.Path, GeneratedSHA256: m.GeneratedSHA256, MapSHA256: m.MapSHA256, Hash: model.HashCanonical(public), Size: model.Uint64(len(public)), PolicyEpoch: model.Uint64(scope.PolicyEpoch()), PolicyRevision: revision, RetainUntil: m.RetainUntil}
+	manifest := model.BlobManifest{Org: m.Org, Project: m.Project, Source: m.Source, Root: id, Build: m.Build, DebugID: m.DebugID, Path: m.Path, GeneratedSHA256: m.GeneratedSHA256, MapSHA256: m.MapSHA256, PolicyEpoch: model.Uint64(scope.PolicyEpoch()), PolicyRevision: revision, RetainUntil: m.RetainUntil}
+	copy(manifest.Hash[:], digest.Sum(nil))
+	manifest.Size = model.Uint64(publicSize)
 	reservation, err := s.metadata.ReserveArtifact(ctx, scope, manifest)
 	if err != nil {
 		return Artifact{}, err
 	}
-	receipt, err := s.blobs.WriteBlob(ctx, scope, reservation.Manifest, bytes.NewReader(public))
+	pipeReader, pipeWriter := io.Pipe()
+	produced := make(chan struct{})
+	go func() {
+		defer close(produced)
+		_, werr := public.WriteTo(pipeWriter)
+		pipeWriter.CloseWithError(werr)
+	}()
+	receipt, err := s.blobs.WriteBlob(ctx, scope, reservation.Manifest, pipeReader)
+	// WriteBlob may return without draining the pipe (a refusal before it reads): closing the
+	// read side releases the producer, and waiting for it keeps public from outliving the call.
+	pipeReader.CloseWithError(io.ErrClosedPipe)
+	<-produced
 	if err != nil {
 		return Artifact{}, err
 	}

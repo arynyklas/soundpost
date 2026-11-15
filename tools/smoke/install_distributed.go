@@ -426,7 +426,13 @@ func RunInstallDistributed(args []string) (result error) {
 	}
 	report["acknowledged_batches"] = len(ledger.accepted)
 	report["recovered_after_quorum_loss"] = true
+	report["login_stale_retries_before_success"] = loginStaleRetries
 
+	stage = "dist_artifact_replication"
+	artifactSecrets, err := distributedArtifactLeg(cluster, sites, fx, report)
+	if err != nil {
+		return err
+	}
 	stage = "dist_stop_private_modes_logs"
 	if err = cluster.stop(report); err != nil {
 		return err
@@ -434,7 +440,7 @@ func RunInstallDistributed(args []string) (result error) {
 	if err = cluster.checkPrivate(report); err != nil {
 		return err
 	}
-	if err = cluster.checkLogs([]string{fx.credential, fx.password, "install smoke reader password 2026", fx.session.Token, fx.session.CSRF, fx.reader.Token, fx.reader.CSRF}, cluster.keyMaterial()); err != nil {
+	if err = cluster.checkLogs(append([]string{fx.credential, fx.password, "install smoke reader password 2026", fx.session.Token, fx.session.CSRF, fx.reader.Token, fx.reader.CSRF}, artifactSecrets...), cluster.keyMaterial()); err != nil {
 		return err
 	}
 	report["server_logs_free_of_credentials_and_private_keys"] = true
@@ -661,22 +667,30 @@ func converged(sites map[uint64]*installSite, limit time.Duration) (map[string]u
 	return nil, &smokeFailure{Stage: "converge", Code: "applied_cursors_differ"}
 }
 
+// postRetryStale is site.post that repeats a request answered with the typed retryable `stale`
+// fault (HTTP 400, code "stale"): a control write that lost the race for its index against another
+// node's write. Nothing was committed, so repeating the same request is the documented client
+// behaviour; any other answer is returned as is. Every repeat is counted in stale.
+func postRetryStale(site *installSite, path string, body any, csrf, bearer string, stale *int) (int, []byte, error) {
+	for attempt := 0; ; attempt++ {
+		status, raw, err := site.post(path, body, csrf, bearer)
+		if err != nil || status != 400 || !bytes.Contains(raw, []byte(`"stale"`)) || attempt >= 40 {
+			return status, raw, err
+		}
+		*stale++
+		time.Sleep(250 * time.Millisecond)
+	}
+}
+
+var loginStaleRetries int
+
 func loginReader(site *installSite, fx *installFixture) (auth.Session, error) {
 	var session auth.Session
-	// A member that has not yet applied the control state (just restarted, or a follower) refuses a login
-	// with the typed `stale`; the login is retried until it applies (never past a minute).
-	deadline := time.Now().Add(time.Minute)
-	for {
-		status, raw, err := site.post("/api/v1/login", map[string]string{"Email": fx.readerEmail, "Password": "install smoke reader password 2026", "Code": ""}, "", "")
-		if err == nil && status != 200 && time.Now().Before(deadline) {
-			time.Sleep(500 * time.Millisecond)
-			continue
-		}
-		if err = requireSmokeResponse("reader_login", status, 200, raw, err); err != nil {
-			return session, err
-		}
-		return session, json.Unmarshal(raw, &session)
+	status, raw, err := postRetryStale(site, "/api/v1/login", map[string]string{"Email": fx.readerEmail, "Password": "install smoke reader password 2026", "Code": ""}, "", "", &loginStaleRetries)
+	if err = requireSmokeResponse("reader_login", status, 200, raw, err); err != nil {
+		return session, err
 	}
+	return session, json.Unmarshal(raw, &session)
 }
 
 // distLedger records every acknowledged write so the final query can name the exact latest value.

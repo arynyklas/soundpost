@@ -88,6 +88,12 @@ The replicated acknowledgements a deletion receipt waits for (`docs/privacy/rete
 3. Once the last member declared, the new shapes start on their own; every voter acknowledges its completed deletions once more (previous-shape acknowledgements of a voter that declared its disk never stand), so receipts name the data store again until each voter has.
 4. Never add a member that runs the older binary to an installation that already declared the protocol: it cannot apply the new entries and its group would fail. Upgrade a replacement before it joins.
 
+## Fragment envelope (artifact fragments on the wire)
+
+An artifact fragment is proposed to the replica group either as the JSON command every release has used (the fragment base64-encoded, then base64-encoded again by the replica layer) or, in this release, as a binary envelope (`internal/storage/envelope.go`: magic `0xF7 S P F`, version 1, head JSON, SHA-256, cursor, raw bytes). The envelope is a wire form only: every voter decodes either form, re-verifies the fragment digest while decoding, and stores the command as the same JSON text, so `replica_commands`, snapshots, backups, redaction digests and state digests do not depend on which form a proposer chose (`TestMixedFormatProposersLeaveIdenticalState`). Records written by older releases are JSON and keep reading (`TestDualFormatReaderReadsOldRecords`, golden `e805349` fragment).
+
+A release without the dual-format reader refuses an envelope: its JSON decoder answers the typed `corrupt` fault for the leading `0xF7` byte (never a misread), and on a voter that is an apply failure of that group. So the envelope is off by default (`Engine.EnableFragmentEnvelope`), and the rule is: roll every voter to a release that reads both forms first, and enable proposing only after the last voter runs it; never add a member that runs an older release once it is enabled (the same rule as the erase protocol above). A reader that knows the envelope but not its version byte answers `invalid` with the detail `unsupported_fragment_envelope_version`.
+
 ## mTLS certificate rotation
 
 A member loads its certificate, key and CA once at start (`tls.LoadX509KeyPair`, one CA pool); rotation therefore replaces files and **restarts that member**, one at a time, under the rules above. Identities never change: the leaf's URI SAN stays `spiffe://soundpost/node/<identity>` and its DNS/IP SANs still cover the member's peer address. A certificate with another identity or without the exact peer name is refused by the other members.

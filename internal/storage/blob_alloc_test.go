@@ -20,6 +20,11 @@ import (
 // wave 8), so 42x leaves 25% headroom over the measured value.
 const writeBlobAllocBound = 42
 
+// writeBlobEnvelopeAllocBound is the same ceiling with the binary fragment envelope on. Measured on
+// Linux (lane 1 wave 9): 26.4x with the envelope against 32.9x for the JSON form in the same run;
+// 33x leaves 25% headroom over the envelope figure.
+const writeBlobEnvelopeAllocBound = 33
+
 // blobFixtureSized is blobFixture with an input of size bytes.
 func blobFixtureSized(t *testing.T, size int) (*control.Store, *auth.Service, auth.Scope, model.BlobManifest, []byte) {
 	t.Helper()
@@ -79,5 +84,33 @@ func TestWriteBlobCumulativeAllocationIsBounded(t *testing.T) {
 	t.Logf("WRITEBLOB-MEM input=%d total_alloc=%d (%.1fx) wall=%s", len(raw), total, ratio, wall)
 	if ratio > writeBlobAllocBound {
 		t.Fatalf("WriteBlob allocated %.1fx its input (bound %dx)", ratio, writeBlobAllocBound)
+	}
+}
+
+// The same write with fragments proposed in the binary envelope: the payload is no longer base64
+// text inside base64 text, so the path allocates less (envelope.go).
+func TestWriteBlobCumulativeAllocationWithEnvelope(t *testing.T) {
+	const size = 8 << 20
+	c, a, scope, m, raw := blobFixtureSized(t, size)
+	e := openDeleteEngine(t, t.TempDir(), a, c)
+	e.EnableFragmentEnvelope(true)
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	start := time.Now()
+	r, err := e.WriteBlob(context.Background(), scope, m, bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wall := time.Since(start)
+	runtime.ReadMemStats(&after)
+	total := after.TotalAlloc - before.TotalAlloc
+	ratio := float64(total) / float64(len(raw))
+	t.Logf("WRITEBLOB-ENVELOPE-MEM input=%d total_alloc=%d (%.1fx) wall=%s", len(raw), total, ratio, wall)
+	if e.envelopesProposed.Load() != uint64(len(r.Fragments)) {
+		t.Fatalf("%d envelope proposals for %d fragments", e.envelopesProposed.Load(), len(r.Fragments))
+	}
+	if ratio > writeBlobEnvelopeAllocBound {
+		t.Fatalf("WriteBlob with the envelope allocated %.1fx its input (bound %dx)", ratio, writeBlobEnvelopeAllocBound)
 	}
 }

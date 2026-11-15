@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -18,10 +19,12 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -442,4 +445,222 @@ func requireMultiFragment(r model.BlobReceipt, minBytes uint64) error {
 		return fmt.Errorf("retained map is %d bytes; need at least %d", n, minBytes)
 	}
 	return nil
+}
+
+// distributedArtifactLeg is the artifact phase of the distributed install smoke (09.01-W2): a
+// genuine multi-fragment artifact is uploaded through the cluster's HTTP API and every voter
+// must serve it back byte-identical, including a voter that was down for the upload and caught
+// up by the replica layer afterwards. Credentials are server tokens issued over HTTP by the
+// owner session, exactly as an operator would; a bogus bearer and a read-only token must not
+// release or write bytes. It returns the secrets the log check must not find.
+func distributedArtifactLeg(cluster distCluster, sites map[uint64]*installSite, fx *installFixture, report map[string]any) ([]string, error) {
+	leg := map[string]any{}
+	report["artifact_replication"] = leg
+	fail := func(code string) error { return &smokeFailure{Stage: "dist_artifact_replication", Code: code} }
+
+	// The owner gets a session of its own on a client that shares no cookie jar with the reader.
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		return nil, err
+	}
+	ownerClient := *sites[1].client
+	ownerClient.Jar = jar
+	owner := &installSite{base: sites[1].base, client: &ownerClient}
+	staleRetries := 0
+	status, raw, err := postRetryStale(owner, "/api/v1/login", map[string]string{"Email": "owner@install-smoke.invalid", "Password": fx.password, "Code": ""}, "", "", &staleRetries)
+	if err = requireSmokeResponse("artifact_owner_login", status, 200, raw, err); err != nil {
+		return nil, err
+	}
+	var session auth.Session
+	if err = json.Unmarshal(raw, &session); err != nil {
+		return nil, err
+	}
+	adminCommand := func(kind string, payload auth.AdminPayload) error {
+		payload.Reason = "distributed artifact smoke"
+		encoded, _ := json.Marshal(payload)
+		for attempt := 0; ; attempt++ {
+			status, raw, err := owner.post("/api/v1/admin/read", struct {
+				Kind string `json:"kind"`
+			}{"organizations"}, session.CSRF, "")
+			if err = requireSmokeResponse("artifact_admin_read", status, 200, raw, err); err != nil {
+				return err
+			}
+			var view auth.AdminView
+			if err = json.Unmarshal(raw, &view); err != nil {
+				return err
+			}
+			status, raw, err = owner.post("/api/v1/admin/commands", auth.AdminCommandRequest{CommandID: model.NewID(), ExpectedRevision: view.Revision, OrgID: fx.org, Kind: kind, Payload: encoded}, session.CSRF, "")
+			// A write that lost its index race, or whose revision moved between the read and the
+			// command, committed nothing: read again and repeat.
+			if err == nil && (status == 400 || status == 409) && (bytes.Contains(raw, []byte(`"stale"`)) || bytes.Contains(raw, []byte(`"conflict"`))) && attempt < 40 {
+				staleRetries++
+				time.Sleep(250 * time.Millisecond)
+				continue
+			}
+			return requireSmokeResponse("artifact_admin_"+kind, status, 200, raw, err)
+		}
+	}
+	if err = adminCommand("membership", auth.AdminPayload{UserID: session.User, Enabled: true}); err != nil {
+		return nil, err
+	}
+	if err = adminCommand("grant", auth.AdminPayload{UserID: session.User, ProjectID: fx.project, Enabled: true, Permissions: []string{string(auth.ArtifactWrite), string(auth.ArtifactRead)}}); err != nil {
+		return nil, err
+	}
+	issue := func(permission auth.Permission) (string, error) {
+		status, raw, err := postRetryStale(owner, "/api/v1/admin/tokens/issue", map[string]any{"org_id": fx.org, "principal": session.User, "projects": []model.ID{fx.project}, "permissions": []auth.Permission{permission}, "expires": model.Int64(time.Now().Add(time.Hour).Unix()), "reason": "distributed artifact smoke"}, session.CSRF, "", &staleRetries)
+		if err = requireSmokeResponse("artifact_issue_"+string(permission), status, 200, raw, err); err != nil {
+			return "", err
+		}
+		var issued auth.IssuedServerToken
+		if err = json.Unmarshal(raw, &issued); err != nil || issued.Token == "" {
+			return "", fail("token_decode")
+		}
+		return issued.Token, nil
+	}
+	writer, err := issue(auth.ArtifactWrite)
+	if err != nil {
+		return nil, err
+	}
+	reader, err := issue(auth.ArtifactRead)
+	if err != nil {
+		return nil, err
+	}
+	secrets := []string{writer, reader, session.CSRF, session.Token}
+
+	// A retained map of about 700 KiB: three or more 256 KiB fragments, so each artifact spans
+	// several replicated commands.
+	buildMap := func(salt string) []byte {
+		var b bytes.Buffer
+		b.WriteString(`{"version":3,"file":"` + salt + `.js","sources":["` + salt + `.ts"],"names":[],"mappings":"`)
+		line := "AAAA" + strings.Repeat(",CAAC", 15) + ";"
+		for b.Len() < 700<<10 {
+			b.WriteString(line)
+		}
+		b.WriteString(`"}`)
+		return b.Bytes()
+	}
+	upload := func(site *installSite, token, salt string, content []byte) (int, model.ArtifactReferenceIntent, error) {
+		mapHash := sha256.Sum256(content)
+		generated := sha256.Sum256([]byte("generated " + salt))
+		manifest := artifacts.Manifest{Version: 1, Org: fx.org, Project: fx.project, Source: fx.source, Build: fx.build, DebugID: "dist-" + salt, GeneratedSHA256: generated, MapSHA256: mapHash, Path: salt + ".js.map", Size: model.Uint64(len(content)), RetainUntil: model.UnixNano(time.Now().Add(time.Hour).UnixNano())}
+		var body bytes.Buffer
+		w := multipart.NewWriter(&body)
+		part, err := w.CreateFormField("manifest")
+		if err != nil {
+			return 0, model.ArtifactReferenceIntent{}, err
+		}
+		encoded, _ := json.Marshal(manifest)
+		if _, err = part.Write(encoded); err != nil {
+			return 0, model.ArtifactReferenceIntent{}, err
+		}
+		if part, err = w.CreateFormFile("file", "artifact.map"); err != nil {
+			return 0, model.ArtifactReferenceIntent{}, err
+		}
+		if _, err = part.Write(content); err != nil {
+			return 0, model.ArtifactReferenceIntent{}, err
+		}
+		if err = w.Close(); err != nil {
+			return 0, model.ArtifactReferenceIntent{}, err
+		}
+		request, err := http.NewRequest("POST", site.base+"/api/v1/artifacts", &body)
+		if err != nil {
+			return 0, model.ArtifactReferenceIntent{}, err
+		}
+		request.Header.Set("Authorization", "Bearer "+token)
+		request.Header.Set("Content-Type", w.FormDataContentType())
+		client := *site.client
+		client.Jar = nil
+		client.Timeout = 120 * time.Second
+		response, err := client.Do(request)
+		if err != nil {
+			return 0, model.ArtifactReferenceIntent{}, err
+		}
+		defer response.Body.Close()
+		reply, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+		if err != nil || response.StatusCode != http.StatusOK {
+			return response.StatusCode, model.ArtifactReferenceIntent{}, err
+		}
+		var published model.ArtifactReferenceIntent
+		if model.StrictJSON(reply, &published) != nil {
+			return response.StatusCode, published, fail("receipt_decode")
+		}
+		return response.StatusCode, published, nil
+	}
+	read := func(site *installSite, token string, published model.ArtifactReferenceIntent) (int, []byte, error) {
+		return site.post("/api/v1/artifacts", httpapi.ArtifactReadRequest{Operation: "read", Org: fx.org, Project: fx.project, ID: published.ID}, "", token)
+	}
+	// servedEverywhere reads the artifact from each listed voter (waiting for a voter that is
+	// still catching up) and requires the exact retained bytes.
+	servedEverywhere := func(published model.ArtifactReferenceIntent, ids []uint64, limit time.Duration) error {
+		if err := requireMultiFragment(published.Map, 2*model.ArtifactFragmentLimit+1); err != nil {
+			return &smokeFailure{Stage: "dist_artifact_replication", Code: "not_multi_fragment"}
+		}
+		for _, id := range ids {
+			deadline := time.Now().Add(limit)
+			for {
+				status, body, err := read(sites[id], reader, published)
+				if err == nil && status == http.StatusOK && model.HashCanonical(body) == published.Map.Hash && uint64(len(body)) == retainedBytes(published.Map) {
+					break
+				}
+				if time.Now().After(deadline) {
+					return &smokeFailure{Stage: "dist_artifact_replication", Code: "voter_" + strconv.FormatUint(id, 10) + "_does_not_serve_the_artifact_status_" + strconv.Itoa(status)}
+				}
+				time.Sleep(time.Second)
+			}
+		}
+		return nil
+	}
+
+	// (1) All three voters up: upload through a follower, read it back from every voter.
+	status, first, err := upload(sites[2], writer, "all-up", buildMap("all-up"))
+	if err != nil || status != http.StatusOK {
+		return nil, &smokeFailure{Stage: "dist_artifact_replication", Code: "upload_all_up_status_" + strconv.Itoa(status)}
+	}
+	if err = servedEverywhere(first, []uint64{1, 2, 3}, 60*time.Second); err != nil {
+		return nil, err
+	}
+	leg["all_up_fragments"] = len(first.Map.Fragments)
+	leg["all_up_retained_bytes"] = retainedBytes(first.Map)
+
+	// (2) One voter down for the upload: the artifact commits on the other two and the voter,
+	// restarted, carries every fragment too.
+	if err = cluster.kill(3); err != nil {
+		return nil, err
+	}
+	status, second, err := upload(sites[1], writer, "voter-3-down", buildMap("voter-3-down"))
+	if err != nil || status != http.StatusOK {
+		return nil, &smokeFailure{Stage: "dist_artifact_replication", Code: "upload_one_down_status_" + strconv.Itoa(status)}
+	}
+	if err = cluster.start(3); err != nil {
+		return nil, err
+	}
+	if sites[3], err = cluster.site(3); err != nil {
+		return nil, err
+	}
+	if err = waitNodeReady(sites[3], 180*time.Second); err != nil {
+		return nil, err
+	}
+	if err = servedEverywhere(second, []uint64{1, 2, 3}, 120*time.Second); err != nil {
+		return nil, err
+	}
+	if err = servedEverywhere(first, []uint64{3}, 30*time.Second); err != nil {
+		return nil, err
+	}
+	leg["restarted_voter_serves_artifact_uploaded_while_down"] = true
+	leg["one_down_fragments"] = len(second.Map.Fragments)
+
+	// (3) Credentials that must not work: an unknown bearer reads nothing, a read-only token
+	// writes nothing.
+	for _, id := range []uint64{1, 2, 3} {
+		status, body, err := read(sites[id], "not-a-token-"+strconv.FormatUint(id, 10), first)
+		if err != nil || status != 401 && status != 403 && status != 404 || bytes.Contains(body, []byte(`"version"`)) {
+			return nil, fail("unknown_bearer_released_a_read")
+		}
+	}
+	if status, _, _ := upload(sites[1], reader, "read-token-write", buildMap("read-token-write")); status == http.StatusOK || status == 0 {
+		return nil, fail("read_token_wrote_an_artifact")
+	}
+	leg["unknown_bearer_and_read_only_token_refused"] = true
+	leg["stale_retries_before_success"] = staleRetries
+	return secrets, nil
 }
