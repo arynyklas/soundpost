@@ -10,7 +10,7 @@ import {DeliveryQueue} from "./queue.ts";
 import {HttpsReceiptTransport} from "./transport.ts";
 import type {FlushReport} from "./types.ts";
 import {SpanRecorder,createSynchronousMetadataContext,signalAborted,randomHex} from "./tracing.ts";
-import type {MetadataContext,TraceContext,SpanOptions,ActiveSpan} from "./tracing.ts";
+import type {MetadataContext,TraceContext,SpanOptions,ActiveSpan,LiveSpan} from "./tracing.ts";
 import {JobRecorder} from "./jobs.ts";
 export {checkedTraceContext,createTraceClock} from "./tracing.ts";
 export {createTimerCancellationBoundary} from "./jobs.ts";
@@ -50,7 +50,7 @@ export class Client {
   this.policy=resolve(config);this.clock=config.clockNs??(()=>String(BigInt(Date.now())*1000000n));this.build=config.build;this.frameNaming=frameNaming(config);this.codes=new Set(config.operations??[]);
   this.jobs=new JobRecorder(metadataContext,config.jobRegistry,{clock:()=>this.readClock(),emit:(payload,observed)=>{this.admit({kind:"job_attempt",id:this.id(),observed_at_ns:observed,payload});},capture:error=>this.captureException(error),loss:reason=>this.loss(reason),nativeError:error=>this.errorBoundary!==undefined&&this.errorBoundary.isProxy?.(error)!==true&&this.errorBoundary.isNativeError(error),timerCancellation:error=>this.errorBoundary?.timerCancellation?.(error)??Promise.resolve(false)});
   this.delivery=new DeliveryQueue(config,config.transport??new HttpsReceiptTransport(config),{context:this.exportContext});
-  this.spans=new SpanRecorder(metadataContext,config.operations??[],config.dependencies??[],config.traceSampleProbability,()=>!this.closed&&this.policy.decision.traces&&!this.exportContext.active(),span=>{if(this.spanDroppedByFullQueue(span.start.wall_ns))return;this.admit({kind:"span",id:this.id(),observed_at_ns:span.start.wall_ns,span});},reason=>{
+  this.spans=new SpanRecorder(metadataContext,config.operations??[],config.dependencies??[],config.traceSampleProbability,()=>!this.closed&&this.policy.decision.traces&&!this.exportContext.active(),span=>{if(this.spanDroppedByFullQueue(span.start.wall_ns))return;this.admit({kind:"span",id:this.id(),observed_at_ns:span.start.wall_ns,span});},span=>this.admitLean(span),reason=>{
    this.loss(reason);if(!this.policy.decision.loss||this.closed||this.exportContext.active())return;const nativeReason=reason==="trace_sampled_out"?"policy":reason==="trace_active_limit"?"queue_full":undefined;if(nativeReason===undefined)return;const at=this.readClock();if(at!==undefined&&BigInt(at)<BigInt(this.policy.expiresNs))this.delivery.recordSignalLoss("span",nativeReason,1n,at);
   });
   for(const template of config.templates??[])this.registerTemplate(template);
@@ -72,6 +72,12 @@ export class Client {
   if(this.closed){this.loss("closed");return false;}if(this.exportContext.active()){this.loss("exporter_recursion");return false;}const result=normalizeRecord(this.policy,input,this.templates);
   if(!result.record){this.loss(result.reason??"policy_rejected");return false;}
   return this.delivery.enqueue(canonical(result.record));
+ }
+ /** admit() for a lean span (see LiveSpan): the same closed, recursion and policy refusals in the same order and with the same loss reasons, then the queue, which keeps the raw span and serializes it at flush time. */
+ private admitLean(span:LiveSpan):void{
+  if(this.closed){this.loss("closed");return;}if(this.exportContext.active()){this.loss("exporter_recursion");return;}
+  const refusal=policyRefusal(this.policy,"span",span.startWall);if(refusal!==undefined){this.loss(refusal);return;}
+  this.delivery.enqueueLeanSpan(span,this.policy.decision.revision);
  }
  private id():string{return randomHex(16);}
  captureException(error:unknown,options?:{code?:string}):EventId{
@@ -133,6 +139,8 @@ export class Client {
  traceContext():TraceContext|undefined{return this.spans.current();}
  withTraceContext<T>(context:TraceContext|null,callback:()=>T):T{if(this.closed)throw Error("client closed");if(context&&this.errorBoundary?.isProxy?.(context))throw Error("invalid_trace_context");return this.spans.run(context,callback);}
  startSpan(operation:string,options?:SpanOptions):ActiveSpan{if(this.closed)throw Error("client closed");return this.spans.start(operation,options);}
+ /** startSpan() for an adapter that builds its own options (no options object to read): the same operation, dependency, kind and parent checks. `parent` null starts a new trace, undefined continues the current context. */
+ startAdapterSpan(operation:string,kind:NonNullable<SpanOptions["kind"]>,dependency:string|undefined,parent:TraceContext|null|undefined):ActiveSpan{if(this.closed)throw Error("client closed");return this.spans.begin(operation,dependency,kind,parent);}
  async withSpan<T>(operation:string,callback:()=>Promise<T>,options?:SpanOptions):Promise<T>{
   const span=this.startSpan(operation,options),signal=options?Object.getOwnPropertyDescriptor(options,"signal")?.value:undefined;
   try{const value=await span.run(callback);span.end(signalAborted(signal)?"cancelled":"ok");return value;}catch(error){span.run(()=>this.captureException(error));span.end(signalAborted(signal)?"cancelled":"error");throw error;}

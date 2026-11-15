@@ -52,6 +52,25 @@ async function roleServer(){
  server.listen(0,"127.0.0.1",()=>process.stdout.write("LISTENING "+server.address().port+"\n"));
  process.stdin.resume();process.stdin.on("end",()=>process.exit(0));
 }
+// ---------------------------------------------------------------- role: server-bun (spawned by the parent, run by Bun)
+async function roleServerBun(){
+ const mode=option("--mode","baseline"),bundle=option("--bundle",""),hashes=Number(option("--hashes","3"));
+ let count=0,client;
+ let handler=()=>new Response(requestWork(count++,hashes),{headers:{"content-type":"application/json"}});
+ if(mode!=="baseline"){
+  const sdk=await import(pathToFileURL(bundle).href);
+  client=sdk.makeClient();
+  const inner=handler;
+  handler=sdk.installServe(client,{operation:"request"}).handler(request=>{if(count%100===99)client.captureException(new Error("fixture handled error"));return inner(request);});
+  if(mode==="capture-delivered"){const flusher=setInterval(()=>{void client.flush(1000).catch(()=>{});},100);flusher.unref();}
+ }
+ const server=Bun.serve({hostname:"127.0.0.1",port:0,fetch(request,srv){
+  if(request.url.endsWith("/__cpu")){const c=process.cpuUsage();return new Response(JSON.stringify({user_us:c.user,system_us:c.system,elu_active_ms:0,requests:count,queue_bytes:client?client.bufferedRecords().reduce((n,r)=>n+Buffer.byteLength(r),0):0,max_queue_bytes:0,diagnostics:client?client.diagnostics():{}}));}
+  return handler(request,srv);
+ }});
+ process.stdout.write("LISTENING "+server.port+"\n");
+ process.stdin.resume();process.stdin.on("end",()=>process.exit(0));
+}
 
 // ---------------------------------------------------------------- role: load (open loop, spawned by the parent)
 function get(agent,port,path){
@@ -129,9 +148,11 @@ function runChild(execPath,argv,{stdinKeep=false}={}){
 // --cpu-prof-dir DIR: every non-baseline server child writes a V8 CPU profile (100 us sampling) there when it ends; profiling
 // perturbs the run, so a profiled run is for attributing cost, never for the budget rows.
 const cpuProfDir=option("--cpu-prof-dir","");
-async function serverScenario(bundle,mode,rps,seconds,hashes){
- const profiled=cpuProfDir!==""&&mode!=="baseline";
- const server=runChild(process.execPath,[...(profiled?["--cpu-prof","--cpu-prof-dir="+cpuProfDir,"--cpu-prof-interval=100","--cpu-prof-name=server-"+mode+"-"+hashes+"-"+Date.now()+".cpuprofile"]:[]),here,"--role","server","--mode",mode,"--bundle",bundle,"--hashes",String(hashes)],{stdinKeep:true});
+async function serverScenario(target,mode,rps,seconds,hashes){
+ // `target` is a Node SDK bundle path (served by this node binary) or a function (mode,hashes)=>({exec,args}) for another runtime.
+ const profiled=typeof target==="string"&&cpuProfDir!==""&&mode!=="baseline";
+ const spec=typeof target==="string"?{exec:process.execPath,args:[...(profiled?["--cpu-prof","--cpu-prof-dir="+cpuProfDir,"--cpu-prof-interval=100","--cpu-prof-name=server-"+mode+"-"+hashes+"-"+Date.now()+".cpuprofile"]:[]),here,"--role","server","--mode",mode,"--bundle",target,"--hashes",String(hashes)]}:target(mode,hashes);
+ const server=runChild(spec.exec,spec.args,{stdinKeep:true});
  const port=await new Promise((res,rej)=>{const t=setTimeout(()=>rej(new Error("server did not start")),20000);const poll=setInterval(()=>{const m=/LISTENING (\d+)/.exec(server.out);if(m){clearInterval(poll);clearTimeout(t);res(Number(m[1]));}},20);});
  const load=runChild(process.execPath,[here,"--role","load","--port",String(port),"--rps",String(rps),"--seconds",String(seconds)]);
  const done=await load.done;
@@ -140,6 +161,136 @@ async function serverScenario(bundle,mode,rps,seconds,hashes){
  if(profiled)await Promise.race([server.done,sleep(10000)]);
  server.child.kill();await server.done.catch(()=>{});
  return JSON.parse(done.out.trim().split("\n").at(-1));
+}
+/** Delivered-mode rows for a runtime other than Node: the same deterministic handler, load and alternating baseline/capture runs as node_http_server_delivered_capture, judged on the same budgets. `target` is a function (mode,hashes)=>{exec,args}; the server child prints `LISTENING <port>` and answers /__cpu with its CPU counters. No event-loop series: only Node has eventLoopUtilization. */
+async function deliveredRows(target,weights,rps,seconds,runs,description){
+ const rows=[];
+ for(const hashes of weights){
+  const collected={baseline:[],"capture-delivered":[]};
+  for(let run=0;run<runs;run++){
+   for(const mode of run%2===0?["baseline","capture-delivered"]:["capture-delivered","baseline"]){
+    const r=await serverScenario(target,mode,rps,seconds,hashes);
+    collected[mode].push({stats:latencyStats(r.latencies_ms),cpu_us_per_request:r.server.cpu_us/Math.max(1,r.server.requests),achieved_rps:r.sent/r.wall_s,errors:r.errors,server:r.server});
+   }
+  }
+  const series=(mode,pick)=>collected[mode].map(pick);
+  const metric=pick=>({baseline:summary(series("baseline",pick)),capture:summary(series("capture-delivered",pick)),...compare(series("baseline",pick),series("capture-delivered",pick))});
+  const p95=metric(r=>r.stats.p95_ms),cpu=metric(r=>r.cpu_us_per_request),lost=series("capture-delivered",r=>(r.server.diagnostics.queue_full??0));
+  rows.push({
+   workload:`${description}; ${hashes}x sha256 over 1 KiB + JSON of 16 fields per request, open-loop load at ${rps} req/s from a separate process, ${seconds} s measured after 1 s warm-up, ${runs} alternating runs per mode; capture mode flushes every 100 ms through the ACKing receipt transport (batching, hashing, receipts and acknowledgement measured; no TLS or network)`,
+   handler_hashes:hashes,requests_per_second_requested:rps,
+   p95_latency_ms:p95,p99_latency_ms:metric(r=>r.stats.p99_ms),p50_latency_ms:metric(r=>r.stats.p50_ms),
+   process_cpu_us_per_request:cpu,
+   achieved_rps:{baseline:summary(series("baseline",r=>r.achieved_rps)),capture:summary(series("capture-delivered",r=>r.achieved_rps))},
+   queue_full_drops:lost,
+   errors:{baseline:series("baseline",r=>r.errors),capture:series("capture-delivered",r=>r.errors)},
+   budget:{p95_percent:BUDGET.server_p95_latency_percent,cpu_percent:BUDGET.server_cpu_percent},
+   verdict:{p95:p95.delta_percent<=BUDGET.server_p95_latency_percent?"within_budget_point_estimate":"exceeds_budget",process_cpu:cpu.delta_percent<=BUDGET.server_cpu_percent?"within_budget_point_estimate":"exceeds_budget",delivered_without_queue_full:lost.every(n=>n===0)},
+  });
+ }
+ return rows;
+}
+/** The SDK bundle entry of a non-Node runtime: the same fixture policy, ACKing in-process transport and operation as the Node bundle, with the runtime package's own init and `installName` integration. */
+function sdkEntry(index,installName){
+ return `import {init,${installName}} from ${fwd(index)};
+import {config,signed} from ${fwd(join(root,"packages/core/test/fixture.ts"))};
+const receipt=(batch)=>({version:1,batch_id:batch.id,hash:batch.hash,cursor:{group:"9".repeat(32),index:"9007199254740993"},retain_until_ns:"9007199254740994",signal_deadlines:batch.kinds.map(kind=>({kind,retain_until_ns:"9007199254740994"})),dedup_until_ns:"9007199254740995"});
+export function makeClient(){
+ const base=config(),keys:Record<string,number>={version:0,org:0,project:0,source:0,revision:0,expires_ns:0,errors:0,logs:0,replay:0,bodies:0,traces:0,jobs:0};
+ const policy=signed(JSON.stringify({version:1,org:base.org,project:base.project,source:base.source,revision:"1",expires_ns:"9223372036854775807",errors:true,logs:true,replay:false,bodies:false,traces:true,jobs:false},Object.keys(keys).sort()));
+ const transport={async send(batch:any){return {kind:"receipt",receipt:receipt(batch)};},async lookup(){return {kind:"not_found"};},close(){}};
+ return init({...base,operations:["request"],policy,transport:transport as never});
+}
+export {${installName}};
+`;
+}
+/** The Python server child: a WSGI application behind http.server's threading server, wrapped by the SDK's WSGIMiddleware in capture mode. Same handler work as the Node and Bun servers. */
+function pythonServerScript(sdkSrc){
+ return `import base64, hashlib, io, json, os, sys, threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+sys.path.insert(0, ${JSON.stringify(sdkSrc.replaceAll("\\","/"))})
+mode = sys.argv[sys.argv.index("--mode") + 1]
+hashes = int(sys.argv[sys.argv.index("--hashes") + 1])
+payload = bytes([7]) * 1024
+def request_work(seed):
+    digest = payload
+    tag = str(seed).encode()
+    for _ in range(hashes):
+        digest = hashlib.sha256(digest + tag).digest()
+    body = {}
+    for i in range(16):
+        body["field" + str(i)] = (digest[i] * (i + 1)) % 977
+    return json.dumps(body, separators=(",", ":")).encode()
+count = [0]
+client = None
+def app(environ, start_response):
+    n = count[0]
+    count[0] = n + 1
+    if client is not None and n % 100 == 99:
+        client.capture_exception(ValueError("fixture handled error"))
+    body = request_work(n)
+    start_response("200 OK", [("Content-Type", "application/json"), ("Content-Length", str(len(body)))])
+    return [body]
+if mode != "baseline":
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from soundpost import Config, SignedPolicy, Resource, init
+    from soundpost.integrations.wsgi import WSGIMiddleware
+    from soundpost.transport import Outcome
+    key = Ed25519PrivateKey.from_private_bytes(bytes(range(32)))
+    def b64(value): return base64.urlsafe_b64encode(value).rstrip(b"=").decode()
+    org, project, source, build = "1" * 32, "2" * 32, "3" * 32, "4" * 32
+    doc = json.dumps(dict(version=1, org=org, source=source, project=project, revision="1", expires_ns="9223372036854775807", errors=True, logs=True, replay=False, bodies=False, traces=True), sort_keys=True, separators=(",", ":")).encode()
+    class Transport:
+        def send(self, batch, deadline):
+            receipt = {"version": 1, "batch_id": batch.id, "hash": batch.hash, "cursor": {"group": "9" * 32, "index": "9007199254740993"}, "retain_until_ns": "9007199254740994", "signal_deadlines": [{"kind": k, "retain_until_ns": "9007199254740994"} for k in batch.kinds], "dedup_until_ns": "9007199254740995"}
+            return Outcome("receipt", receipt)
+        def lookup(self, batch, deadline): return Outcome("not_found")
+        def close(self): pass
+    client = init(Config(org=org, project=project, source=source, endpoint="https://example.invalid/ingest/v1/batches", credential="SECRET", build=build,
+        policy=SignedPolicy(1, "Ed25519", "test", b64(doc), b64(key.sign(doc))), trusted_keys={"test": key.public_key().public_bytes_raw()},
+        resource=Resource("6" * 32, "7" * 32, build, "worker-1"), operations=("request",), transport=Transport()))
+    app = WSGIMiddleware(app, client, operation="request")
+    def flusher():
+        import time
+        while True:
+            time.sleep(0.1)
+            try: client.flush(1.0)
+            except Exception: pass
+    if mode == "capture-delivered":
+        threading.Thread(target=flusher, daemon=True).start()
+def cpu_json():
+    t = os.times()
+    return json.dumps({"requests": count[0], "user_us": t.user * 1e6, "system_us": t.system * 1e6, "elu_active_ms": 0, "queue_bytes": 0, "max_queue_bytes": 0, "diagnostics": client.diagnostics() if client is not None else {}}).encode()
+class Handler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+    def log_message(self, *args): pass
+    def do_GET(self):
+        if self.path == "/__cpu":
+            body = cpu_json()
+            self.send_response(200); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body); return
+        environ = {"REQUEST_METHOD": "GET", "PATH_INFO": self.path, "SERVER_PROTOCOL": "HTTP/1.1", "wsgi.version": (1, 0), "wsgi.url_scheme": "http", "wsgi.input": io.BytesIO(b""), "wsgi.errors": sys.stderr, "wsgi.multithread": True, "wsgi.multiprocess": False, "wsgi.run_once": False}
+        for name, value in self.headers.items():
+            environ["HTTP_" + name.upper().replace("-", "_")] = value
+        sent = []
+        def start_response(status, headers, exc_info=None):
+            sent[:] = [status, headers]
+            return lambda data: None
+        result = app(environ, start_response)
+        try:
+            body = b"".join(result)
+        finally:
+            close = getattr(result, "close", None)
+            if close is not None: close()
+        self.send_response(int(sent[0][:3]))
+        for name, value in sent[1]: self.send_header(name, value)
+        self.end_headers(); self.wfile.write(body)
+class Server(ThreadingHTTPServer):
+    daemon_threads = True
+    request_queue_size = 256
+server = Server(("127.0.0.1", 0), Handler)
+sys.stdout.write("LISTENING " + str(server.server_address[1]) + chr(10)); sys.stdout.flush()
+server.serve_forever()
+`;
 }
 function latencyStats(latencies){const s=[...latencies].sort((a,b)=>a-b);return {count:s.length,p50_ms:quantile(s,0.5),p95_ms:quantile(s,0.95),p99_ms:quantile(s,0.99),max_ms:s.at(-1)};}
 function bunPath(){return [process.env.SOUNDPOST_BUN,join(root,".tools/bun-1.3.14/package/bin/bun.exe"),join(root,".tools/bun-1.3.14/package/bin/bun"),"/opt/bun/bin/bun"].filter(Boolean).find(existsSync);}
@@ -153,7 +304,7 @@ function buildBundle(bun,entrySource,dir,name,target="node",extra=[]){
 const fwd=p=>JSON.stringify(p.replaceAll("\\","/"));
 
 async function parentMain(){
- const rps=Number(option("--requests-per-second","1000")),seconds=Number(option("--duration-s","3")),runs=Number(option("--runs","5")),profileRuns=Number(option("--profile-runs","7")),outPath=option("--out",""),only=option("--only","server,profile,bundle").split(",");
+ const rps=Number(option("--requests-per-second","1000")),seconds=Number(option("--duration-s","3")),runs=Number(option("--runs","5")),profileRuns=Number(option("--profile-runs","7")),outPath=option("--out",""),only=option("--only","server,bun,python,profile,bundle").split(",");
  const bun=bunPath();if(!bun)throw new Error("overhead measurement requires SOUNDPOST_BUN or the pinned Bun 1.3.14 to bundle the SDK");
  const dir=mkdtempSync(join(os.tmpdir(),"soundpost-overhead-"));
  const result={fixture:"overhead",schema:1,recorded_at:new Date().toISOString(),command:"node fixtures/sdk/overhead.mjs "+args.join(" "),budgets_from_design_section_13:BUDGET,machine_class:machineClass(),runtimes:{node:process.version,bun:spawnSync(bun,["--version"],{encoding:"utf8"}).stdout.trim()},rows:{}};
@@ -295,7 +446,29 @@ print(json.dumps({"runtime_version": sys.version.split()[0], "rows": rows}))
     profile_module:profile?{raw_bytes:raw(profile),gzip_bytes:gz(profile)}:{not_measured:"packages/browser/src/profile.ts absent"}};
    result.rows.browser_recorder_mutation_batch_p95={not_measured:"requires a real browser mutation-storm run; fixtures/sdk/replay/recorder.spec.ts asserts behavior, not this timing budget. Budget 5 ms p95 per batch is NOT claimed."};
   }
-  result.rows.python_core_capture={not_measured:"Python handler capture overhead is not measured by this script (no Python HTTP workload is driven here); the 5% p95/CPU budget for Python core capture is NOT claimed."};
+  // Bun core server capture: the same deterministic handler and open-loop load against Bun.serve, with and without the Bun SDK's serve integration (installServe), flush() every 100 ms through the in-process ACKing transport.
+  if(only.includes("bun")){
+   const bunSdk=buildBundle(bun,sdkEntry(join(root,"packages/bun/src/index.ts"),"installServe"),dir,"bunsdk","bun");
+   const rows=await deliveredRows((mode,hashes)=>({exec:bun,args:[here,"--role","server-bun","--mode",mode,"--bundle",bunSdk,"--hashes",String(hashes)]}),option("--handler-hashes","3,100").split(",").map(Number),rps,seconds,runs,"Bun.serve (Bun SDK installServe: root span per request, one handled error per 100 requests)");
+   result.rows.bun_http_server_delivered_capture=rows.map(row=>({runtime:"bun",runtime_version:result.runtimes.bun,...row}));
+  }
+  // Python core server capture: a WSGI application (stdlib http.server front end, one thread per connection) with and without the Python SDK's WSGI middleware.
+  if(only.includes("python")){
+   const python=[process.env.SOUNDPOST_PYTHON,join(root,".venv/Scripts/python.exe"),join(root,".venv/bin/python")].filter(Boolean).find(existsSync);
+   if(!python)result.rows.python_http_server_delivered_capture={not_measured:"no SOUNDPOST_PYTHON or repo venv Python found"};
+   else{
+    const script=join(dir,"python_server.py");writeFileSync(script,pythonServerScript(join(root,"sdk/python/src")));
+    const version=spawnSync(python,["-c","import sys;print(sys.version.split()[0])"],{encoding:"utf8"}).stdout.trim();
+    const probe=spawnSync(python,["-c","import cryptography"],{encoding:"utf8"});
+    if(probe.status!==0)result.rows.python_http_server_delivered_capture={not_measured:"the Python at "+python+" cannot import cryptography (a dependency of the SDK): "+(probe.stderr||"").slice(-200)};
+    else{
+     const rows=await deliveredRows((mode,hashes)=>({exec:python,args:[script,"--mode",mode,"--hashes",String(hashes)]}),option("--handler-hashes","3,100").split(",").map(Number),rps,seconds,runs,"WSGI application on http.server (Python SDK WSGIMiddleware: root span per request, one handled error per 100 requests)");
+     result.rows.python_http_server_delivered_capture=rows.map(row=>({runtime:"cpython",runtime_version:version,...row}));
+    }
+   }
+  }
+  if(!only.includes("python"))result.rows.python_http_server_delivered_capture={not_measured:"--only did not include python"};
+  if(!only.includes("bun"))result.rows.bun_http_server_delivered_capture={not_measured:"--only did not include bun"};
  }finally{rmSync(dir,{recursive:true,force:true});}
  const text=JSON.stringify(result,null,1);
  if(outPath)writeFileSync(outPath,text+"\n");
@@ -304,6 +477,7 @@ print(json.dumps({"runtime_version": sys.version.split()[0], "rows": rows}))
 
 const role=option("--role","");
 if(role==="server")await roleServer();
+else if(role==="server-bun")await roleServerBun();
 else if(role==="load")await roleLoad();
 else if(role==="profile-work")await roleProfileWork();
 else await parentMain();

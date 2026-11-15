@@ -173,7 +173,10 @@ type sdkOverhead struct {
 		Delivered []sdkHTTPRow `json:"node_http_server_delivered_capture"`
 		Acking    sdkQueueRow  `json:"node_queue_acking_transport"`
 		Stalled   sdkQueueRow  `json:"node_queue_cap_stalled_transport"`
-		Bundles   struct {
+		// BunHTTP and PythonHTTP are the other runtimes' delivered-mode rows (03.09): a list of rows, or an object that says why the runtime was not measured.
+		BunHTTP    json.RawMessage `json:"bun_http_server_delivered_capture"`
+		PythonHTTP json.RawMessage `json:"python_http_server_delivered_capture"`
+		Bundles    struct {
 			Index   sdkBundle `json:"browser_index"`
 			Replay  sdkBundle `json:"replay_only"`
 			Profile sdkBundle `json:"profile_module"`
@@ -255,21 +258,28 @@ func runOverheadSDKServer(rc *runCtx, spec RowSpec) Row {
 		return row
 	}
 	want, _ := strconv.Atoi(spec.Params["handler_hashes"])
-	var hr, saturated *sdkHTTPRow
-	for i := range run.Result.Rows.Delivered {
-		if run.Result.Rows.Delivered[i].HandlerHashes == want {
-			hr = &run.Result.Rows.Delivered[i]
-		}
-	}
-	for i := range run.Result.Rows.HTTP {
-		if run.Result.Rows.HTTP[i].HandlerHashes == want {
-			saturated = &run.Result.Rows.HTTP[i]
-		}
-	}
+	hr, saturated := findHashRow(run.Result.Rows.Delivered, want), findHashRow(run.Result.Rows.HTTP, want)
 	if hr == nil {
 		row.Outcome, row.Failures = OutcomeFailed, []string{fmt.Sprintf("the harness result has no delivered-mode handler_hashes=%d row", want)}
 		return row
 	}
+	return rc.judgeServerRow(row, p, run, hr, saturated, want)
+}
+
+// findHashRow is the last row measured with the given handler weight, or nil.
+func findHashRow(rows []sdkHTTPRow, hashes int) *sdkHTTPRow {
+	var found *sdkHTTPRow
+	for i := range rows {
+		if rows[i].HandlerHashes == hashes {
+			found = &rows[i]
+		}
+	}
+	return found
+}
+
+// judgeServerRow compares a delivered-mode row's p95 latency and process CPU per request with the pinned budgets. The
+// verdict is computed here from the raw series; nothing can adjust the limits. Node, Bun and Python rows share it.
+func (rc *runCtx) judgeServerRow(row Row, p *probeResult, run *sdkOverheadRun, hr, saturated *sdkHTTPRow, want int) Row {
 	row.Series = []Series{
 		{Name: "p95_latency", Unit: "ms", Mode: "baseline", Values: floatsOf(hr.P95.Baseline.Values)},
 		{Name: "p95_latency", Unit: "ms", Mode: "capture", Values: floatsOf(hr.P95.Capture.Values)},
@@ -299,7 +309,7 @@ func runOverheadSDKServer(rc *runCtx, spec RowSpec) Row {
 		row.Outcome, row.Failures = OutcomeFailed, []string{"a baseline reads zero (clock too coarse): the ratio is not measurable, so no budget claim is made"}
 		return row
 	}
-	row.Budgets = []BudgetResult{rc.budget("server_p95_latency_percent", p95, method), rc.budget("server_cpu_percent", cpu, method+"; process.cpuUsage")}
+	row.Budgets = []BudgetResult{rc.budget("server_p95_latency_percent", p95, method), rc.budget("server_cpu_percent", cpu, method+"; process CPU time (process.cpuUsage in Node and Bun, os.times in CPython)")}
 	row.Outcome = OutcomePassed
 	for _, b := range row.Budgets {
 		if !b.Within {
@@ -324,13 +334,117 @@ func runOverheadSDKServer(rc *runCtx, spec RowSpec) Row {
 		fmt.Sprintf("handler = %d x sha256 over 1 KiB + 16-field JSON; loopback HTTP; no TLS or network export cost measured", want),
 		fmt.Sprintf("host %s %s, %.0f logical CPUs, fixed-work noise CV %.0f %% on a shared workstation (other jobs ran concurrently); %s",
 			run.Result.MachineClass.Platform, run.Result.MachineClass.Arch, run.Result.MachineClass.CPUs, run.Result.MachineClass.Noise.CV, separation(hr.P95, hr.CPU)),
-		"event-loop active time is recorded as a separate high-resolution series without a budget",
 		"full workload of design section 13 (representative 1k req/s handler) is approximated by a synthetic handler; " + rc.workloads.SDKServer.FullCommand,
+	}
+	if len(hr.ELU.Baseline.Values) > 0 {
+		row.Limits = append(row.Limits, "event-loop active time is recorded as a separate high-resolution series without a budget")
 	}
 	if p.Build.OS == "windows" {
 		row.Limits = append(row.Limits, "process CPU on Windows has a ~15.6 ms tick (coarse for short windows)")
 	}
 	return row
+}
+
+// runtimeRows decodes one runtime's delivered-mode rows from the harness result: the rows, or the harness's own
+// statement of why that runtime was not measured.
+func (o *sdkOverhead) runtimeRows(runtime string) ([]sdkHTTPRow, string) {
+	raw := o.Rows.BunHTTP
+	if runtime == "python" {
+		raw = o.Rows.PythonHTTP
+	}
+	if len(raw) == 0 {
+		return nil, "the harness result has no " + runtime + " row"
+	}
+	var rows []sdkHTTPRow
+	if err := json.Unmarshal(raw, &rows); err == nil {
+		return rows, ""
+	}
+	var absent struct {
+		NotMeasured string `json:"not_measured"`
+	}
+	if err := json.Unmarshal(raw, &absent); err == nil && absent.NotMeasured != "" {
+		return nil, absent.NotMeasured
+	}
+	return nil, "the harness " + runtime + " row is neither a list of rows nor a not_measured statement"
+}
+
+// runtimeOverhead runs the committed overhead harness for one non-Node runtime (--only bun | python). The row's build is the
+// runtime under test; a Node build from the row's needs runs the harness, which bundles the SDK with Bun (a Bun build in needs, or the
+// row's own build for Bun) and starts the runtime's server as a child.
+func (rc *runCtx) runtimeOverhead(spec RowSpec, runtime string) (*sdkOverheadRun, *probeResult, string) {
+	p := rc.probe(spec.Build)
+	if !p.Found {
+		return nil, p, p.Reason
+	}
+	if why := rc.needsMissing(spec); why != "" {
+		return nil, p, why
+	}
+	key := "sdk-overhead-" + runtime + ":" + spec.Build
+	if v, ok := rc.cache[key]; ok {
+		return v.(*sdkOverheadRun), p, ""
+	}
+	var env []string
+	nodePath := ""
+	for _, need := range spec.Needs {
+		switch nb := rc.probe(need); nb.Build.Family {
+		case "node":
+			nodePath = nb.Path
+		case "bun":
+			env = append(env, "SOUNDPOST_BUN="+rc.nativePath(nb.Build.OS, nb.Path))
+		}
+	}
+	switch runtime {
+	case "bun":
+		env = append(env, "SOUNDPOST_BUN="+rc.nativePath(p.Build.OS, p.Path))
+	case "python":
+		env = append(env, "SOUNDPOST_PYTHON="+rc.nativePath(p.Build.OS, p.Path))
+	}
+	if nodePath == "" {
+		return nil, p, "the " + runtime + " overhead row needs a Node build to run the harness, and none is listed in its needs"
+	}
+	w := rc.workloads.SDKServer
+	var hashes []string
+	for _, h := range w.HandlerHashes {
+		hashes = append(hashes, strconv.Itoa(h))
+	}
+	args := []string{"fixtures/sdk/overhead.mjs", "--requests-per-second", strconv.Itoa(w.RPS), "--duration-s", strconv.Itoa(w.DurationS), "--runs", strconv.Itoa(w.Runs), "--only", runtime, "--handler-hashes", strings.Join(hashes, ",")}
+	res := rc.exec(45*time.Minute, rc.root, env, nodePath, args...)
+	run := &sdkOverheadRun{Exit: res.Exit, Command: "node " + strings.Join(args, " "), Elapsed: res.Duration}
+	var out sdkOverhead
+	if err := json.NewDecoder(strings.NewReader(res.Stdout)).Decode(&out); err != nil || res.Exit != 0 {
+		run.Failure = fmt.Sprintf("overhead harness exited %d without a usable result: %s", res.Exit, tail(rc.rel(res.Stderr), 240))
+	} else {
+		run.Result, run.Raw = &out, []byte(res.Stdout)
+	}
+	rc.cache[key] = run
+	return run, p, ""
+}
+
+// runOverheadRuntimeServer measures core capture of Bun (Bun.serve + installServe) or CPython (WSGI + WSGIMiddleware) on the same
+// deterministic handler and load as the Node row, against the same <=5 % p95 and CPU budgets (03.09). The runtime comes from the
+// row's `runtime` param and the handler weight from `handler_hashes`.
+func runOverheadRuntimeServer(rc *runCtx, spec RowSpec) Row {
+	runtime := spec.Params["runtime"]
+	run, p, why := rc.runtimeOverhead(spec, runtime)
+	if why != "" {
+		return notExercised(why)
+	}
+	row := rc.sdkRowBase(p, run, "sdk-overhead-"+runtime+"-"+spec.Build+".json")
+	if run.Result == nil {
+		row.Outcome, row.Failures = OutcomeFailed, []string{run.Failure}
+		return row
+	}
+	rows, absent := run.Result.runtimeRows(runtime)
+	if absent != "" {
+		return notExercised(absent)
+	}
+	want, _ := strconv.Atoi(spec.Params["handler_hashes"])
+	hr := findHashRow(rows, want)
+	if hr == nil {
+		row.Outcome, row.Failures = OutcomeFailed, []string{fmt.Sprintf("the harness result has no %s delivered-mode handler_hashes=%d row", runtime, want)}
+		return row
+	}
+	return rc.judgeServerRow(row, p, run, hr, nil, want)
 }
 
 // runOverheadSDKQueue compares the SDK queue high-water mark (acking and

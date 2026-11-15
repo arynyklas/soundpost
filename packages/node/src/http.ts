@@ -17,7 +17,7 @@ export class HttpLease {
   const lease=this;
   return function(this:unknown,request:IncomingMessage,response:ServerResponse):void{
    if(lease.closed){Reflect.apply(handler,this,[request,response]);return;}
-   const parent=requestPropagation(request),span=lease.client.startSpan(lease.operation,{kind:"server",parent:parent??null});
+   const parent=requestPropagation(request),span=lease.client.startAdapterSpan(lease.operation,"server",undefined,parent??null);
    let ended=false;
    const cleanup=():void=>{response.removeListener("finish",finish);response.removeListener("close",close);request.removeListener("aborted",cancel);lease.pending.delete(incomplete);};
    const end=(status:"ok"|"error"|"cancelled"|"incomplete"):void=>{if(ended)return;ended=true;cleanup();span.end(status);};

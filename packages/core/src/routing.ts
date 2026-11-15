@@ -7,10 +7,10 @@ import {object,text} from './wire.ts';
 export const kinds=['metric','log','span','error','job_attempt','replay_chunk','profile_chunk','capability','loss','condition'] as const;
 const lineSeparators=/[\u2028\u2029]/,encoder=new TextEncoder();
 export function nativeCanonical(value:unknown):string{const out=canonical(value);return lineSeparators.test(out)?out.replace(/\u2028/g,'\\u2028').replace(/\u2029/g,'\\u2029'):out;}
-type BuiltinCrypto={createHash(name:string):{update(data:string,encoding:'utf8'):{digest(encoding:'hex'):string}}};
+type BuiltinCrypto={createHash(name:string):{update(data:string,encoding:'utf8'):{digest(encoding:'hex'):string}};hash?(algorithm:string,data:string|Uint8Array,outputEncoding:'hex'):string};
 interface NodeHost {readonly versions?:{readonly node?:string};getBuiltinModule?(id:string):unknown}
 function isBuiltinCrypto(value:unknown):value is BuiltinCrypto{return typeof value==='object'&&value!==null&&'createHash' in value&&typeof value.createHash==='function';}
-/** The runtime's native SHA-256 when this is Node or Bun (batch bodies are hundreds of KiB; the pure-JS hash is the slower path there). Same digest either way. */
+/** The runtime's native SHA-256 when this is Node or Bun: the pure-JS hash runs its 64 rounds in JavaScript, which is far slower than a native call while the code is still cold. Same digest either way. */
 const nativeCrypto:BuiltinCrypto|undefined=(()=>{
  try{
   const host:NodeHost|undefined=Reflect.get(globalThis,'process');
@@ -19,8 +19,13 @@ const nativeCrypto:BuiltinCrypto|undefined=(()=>{
  }catch{return undefined;}
 })();
 export function hashBytes(value:string):string{
- if(nativeCrypto&&value.length>=1024)return nativeCrypto.createHash('sha256').update(value,'utf8').digest('hex');
+ if(nativeCrypto&&value.length>=128)return nativeCrypto.hash?nativeCrypto.hash('sha256',value,'hex'):nativeCrypto.createHash('sha256').update(value,'utf8').digest('hex');
  return Array.from(sha256(encoder.encode(value)),b=>b.toString(16).padStart(2,'0')).join('');
+}
+/** Byte 7 of SHA-256(input) modulo 64: the route slot of a routing input. */
+export function routeSlot(input:Uint8Array):number{
+ if(nativeCrypto?.hash)return Number.parseInt(nativeCrypto.hash('sha256',input,'hex').slice(14,16),16)%64;
+ return sha256(input)[7]!%64;
 }
 const validated=new WeakSet<RoutingDescriptor>();
 export function validateDescriptor(d:RoutingDescriptor):RoutingDescriptor{
@@ -57,5 +62,5 @@ export function routeRecord(record:unknown,descriptor:RoutingDescriptor,producer
  const parts=[encoder.encode(d.org),encoder.encode(d.project),encoder.encode(text(r.kind)),ownerKey(r,d,producer)];
  const length=parts.reduce((n,p)=>n+4+p.length,0),input=new Uint8Array(length),view=new DataView(input.buffer);let at=0;
  for(const p of parts){view.setUint32(at,p.length,false);at+=4;input.set(p,at);at+=p.length;}
- const hash=sha256(input);return hash[7]!%64;
+ return routeSlot(input);
 }

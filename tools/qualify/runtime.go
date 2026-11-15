@@ -46,21 +46,22 @@ type probeResult struct {
 }
 
 var runners = map[string]runner{
-	"build_probe":              runBuildProbe,
-	"sdk_profile":              runSDKProfile,
-	"unmeasured":               runUnmeasured,
-	"journeys_smoke_row":       runJourneysRow,
-	"native_capability":        runNativeCapability,
-	"native_identity":          runNativeIdentity,
-	"native_gap":               runNativeGap,
-	"native_controls":          runNativeControls,
-	"playwright_test":          runPlaywrightTest,
-	"privacy_scanner_controls": runPrivacyScannerControls,
-	"privacy_native":           runPrivacyNative,
-	"overhead_sdk_server":      runOverheadSDKServer,
-	"overhead_sdk_queue":       runOverheadSDKQueue,
-	"overhead_bundle":          runOverheadBundle,
-	"overhead_native":          runOverheadNative,
+	"build_probe":                 runBuildProbe,
+	"sdk_profile":                 runSDKProfile,
+	"unmeasured":                  runUnmeasured,
+	"journeys_smoke_row":          runJourneysRow,
+	"native_capability":           runNativeCapability,
+	"native_identity":             runNativeIdentity,
+	"native_gap":                  runNativeGap,
+	"native_controls":             runNativeControls,
+	"playwright_test":             runPlaywrightTest,
+	"privacy_scanner_controls":    runPrivacyScannerControls,
+	"privacy_native":              runPrivacyNative,
+	"overhead_sdk_server":         runOverheadSDKServer,
+	"overhead_sdk_runtime_server": runOverheadRuntimeServer,
+	"overhead_sdk_queue":          runOverheadSDKQueue,
+	"overhead_bundle":             runOverheadBundle,
+	"overhead_native":             runOverheadNative,
 }
 
 // subject is what the row claims to qualify, taken from its build or inline.

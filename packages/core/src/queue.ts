@@ -1,18 +1,24 @@
 // Copyright 2026 Aryn Yklas
 // SPDX-License-Identifier: Apache-2.0
 import type {Config,FlushReport,RoutingDescriptor,ExportContext} from './types.ts';
-import {randomHex} from './tracing.ts';
-import {decimal,unixNano,canonicalId,utf8Size} from './policy.ts';
-import {hashBytes,nativeCanonical,resourceWire,routeRecord,validateDescriptor,kinds} from './routing.ts';
+import {randomHex,leanSpanLength,leanSpanPayload,type LiveSpan} from './tracing.ts';
+import {decimal,unixNano,canonicalId,utf8Size,compareNano} from './policy.ts';
+import {hashBytes,nativeCanonical,resourceWire,routeRecord,routeSlot,validateDescriptor,kinds} from './routing.ts';
 import {verifyReceipt,type FrozenBatch,type ReceiptTransport,type Outcome} from './transport.ts';
 import type {EncryptedSpool} from './spool.ts';
 import {object,array,text,parseSafeRecord,type NativeRecord} from './wire.ts';
-type Entry={text:string;wire:string;wireBytes:number;size:number;at:number;wall:number;kind:string;slot:number;batch?:string;position?:number;lossKey?:string;lossCount?:bigint};
-type BatchState={batch:FrozenBatch;ambiguous:boolean;attempt:number;next:number};
+type Entry={text:string;wire:string;wireBytes:number;size:number;at:number;wall:number;kind:string;slot:number;lazy:LiveSpan|undefined;batch?:string;position?:number;lossKey?:string;lossCount?:bigint};
+type BatchState={batch:FrozenBatch;ambiguous:boolean;attempt:number;next:number;rank:number};
 type LossBucket={epoch:string;signal:string;reason:string;revision:string;observed:bigint;acked:bigint;unbatched:bigint;start:string|null;end:string|null;at:number;wall:number};
 export function retryDelay(attempt:number,random:()=>number=Math.random):number{const cap=Math.min(30000,250*2**Math.min(attempt,7));return Math.max(250,Math.min(30000,cap*(.5+.5*Math.max(0,Math.min(1,random())))));}
 const id=():string=>randomHex(16);
 const priority=(kind:string):number=>{switch(kind){case 'error':case 'condition':case 'capability':case 'loss':case 'job_attempt':return 2;case 'log':return 1;default:return 0;}};
+// The fixed parts of a span record's serialization (id, kind and observed_at_ns before the payload, the resource after it), whose lengths the lean path adds up instead of building the text.
+const LEAN_KIND='","kind":"span","observed_at_ns":"',RESOURCE_OPEN=',"resource":',LEAN_HEAD='{"id":"'.length+32+LEAN_KIND.length+'","payload":'.length;
+// A flush works for at most SLICE_MS at a time and then gives the event loop a turn, so a host serving requests is never stalled for the whole flush.
+const SLICE_MS=0.5;
+const immediate:((callback:()=>void)=>unknown)|undefined=Reflect.get(globalThis,'setImmediate');
+const yieldToLoop=():Promise<void>=>new Promise<void>(resolve=>{if(immediate!==undefined)immediate(resolve);else setTimeout(resolve,0);});
 export class DeliveryQueue {
  private held:Entry[]=[];private batches:BatchState[]=[];private bytes=0;private losses=0;private denied=false;private closed=false;private closing=false;
  // Unbatched entries per priority class (undefined = recount on demand), and a lower bound of the oldest entry's `at` (stale-low is safe: it only costs one rescan).
@@ -29,15 +35,31 @@ export class DeliveryQueue {
   this.descriptor=validateDescriptor(config.descriptor??{version:1,org:config.org,project:config.project,source:config.source,routing_version:1,slots:64,policy_revision:decimal(envelope.revision)});
   if(this.descriptor.org!==config.org||this.descriptor.project!==config.project||this.descriptor.source!==config.source||this.descriptor.policy_revision!==envelope.revision)throw Error('routing identity mismatch');
   this.resource=resourceWire(config.resource,config.build);this.producer=canonicalId(config.producer??id());this.now=options.now??(()=>performance.now());this.random=options.random??Math.random;this.spool=options.spool??config.spool;
-  this.spool?.assertBinding(this.descriptor,this.descriptor.policy_revision);this.resourceText=nativeCanonical(this.resource);
+ this.spool?.assertBinding(this.descriptor,this.descriptor.policy_revision);this.resourceText=nativeCanonical(this.resource);this.resourceBytes=utf8Size(this.resourceText);
+  // routeRecord's input for a span, laid out once: length-prefixed org, project, kind and owner (the 32-character trace ID, written per span at spanRouteAt).
+  const org=new TextEncoder().encode(this.descriptor.org),project=new TextEncoder().encode(this.descriptor.project),kind=new TextEncoder().encode("span");
+  this.spanRoute=new Uint8Array(16+org.length+project.length+kind.length+32);const view=new DataView(this.spanRoute.buffer);let at=0;
+  for(const part of [org,project,kind]){view.setUint32(at,part.length,false);at+=4;this.spanRoute.set(part,at);at+=part.length;}
+  view.setUint32(at,32,false);this.spanRouteAt=at+4;
  }
- private readonly resourceText:string;
+ private readonly resourceText:string;private readonly resourceBytes:number;private readonly spanRoute:Uint8Array;private readonly spanRouteAt:number;
  /** The queue's two serializations of one parsed record: `safe` (stored and spooled form) and `wire` (batch form with the resource) with the wire's UTF-8 size. The payload is canonicalized once and spliced into both; each object's keys are written in canonical order (id, kind, observed_at_ns, payload, then policy_revision or resource). */
  private serialize(parsed:NativeRecord):{safe:string;wire:string;bytes:number}{
   const head='{"id":'+JSON.stringify(parsed.id)+',"kind":'+JSON.stringify(parsed.kind)+',"observed_at_ns":'+JSON.stringify(parsed.observed_at_ns)+',"payload":'+nativeCanonical(parsed.payload);
   const wire=head+',"resource":'+this.resourceText+'}';
   return {safe:head+',"policy_revision":'+JSON.stringify(parsed.policy_revision)+'}',wire,bytes:utf8Size(wire)};
  }
+ /** Serializes a lean span's entry (record ID, both texts, route slot); until then the entry holds the span itself. The size was computed exactly when the span was queued; if it ever differed, the accounting follows the real size and the mismatch is counted. */
+ private materialize(entry:Entry):void{
+  const span=entry.lazy;if(span===undefined)return;entry.lazy=undefined;
+  const head='{"id":"'+id()+LEAN_KIND+span.startWall+'","payload":'+leanSpanPayload(span);
+  entry.text=head+',"policy_revision":"'+this.descriptor.policy_revision+'"}';entry.wire=head+RESOURCE_OPEN+this.resourceText+'}';
+  const route=this.spanRoute,traceId=span.context.traceId;for(let at=0;at<32;at++)route[this.spanRouteAt+at]=traceId.charCodeAt(at);
+  entry.slot=routeSlot(route);
+  const bytes=head.length+RESOURCE_OPEN.length+this.resourceBytes+1;
+  if(bytes!==entry.wireBytes){const size=bytes+512;this.bytes+=size-entry.size;entry.size=size;entry.wireBytes=bytes;this.loss("span_size_mismatch");}
+ }
+ private materializeAll():void{for(const entry of this.entries)if(entry.lazy!==undefined)this.materialize(entry);}
  private lossKey(epoch:string,signal:string,reason:string):string{return epoch+":"+signal+":"+reason;}
  private validSignalLoss(signal:string,reason:string):boolean{return kinds.some(kind=>kind===signal)&&signal!=="loss"&&["queue_full","expired","policy","unsupported","ring_overflow","reorder_gap","transport","shutdown","truncated"].includes(reason);}
  recordSignalLoss(signal:string,reason:string,count:bigint,atNs:string):boolean{
@@ -55,7 +77,7 @@ export class DeliveryQueue {
   if(this.materializingLoss||this.closed||this.recovering||this.denied)return;this.materializingLoss=true;
   try{for(const [key,bucket] of this.lossBuckets){if(bucket.unbatched===0n)continue;
    if(!this.allowLoss||bucket.revision!==this.descriptor.policy_revision){bucket.unbatched=0n;bucket.start=null;bucket.end=null;this.loss("native_loss_policy");continue;}
-   let expired=true;try{expired=BigInt(unixNano((this.config.clockNs??(()=>String(BigInt(Date.now())*1000000n)))()))>=BigInt(this.policyExpires);}catch{}if(expired)continue;
+   if(this.policyExpired())continue;
    const old=this.entries.find(e=>e.lossKey===key&&!e.batch);let record:Record<string,unknown>;let payload:Record<string,unknown>;let total=bucket.unbatched;
    if(old){record=object(JSON.parse(old.text));payload=object(record.payload);total+=old.lossCount!;const start=text(payload.start_ns),end=text(payload.end_ns);payload.start_ns=BigInt(start)<BigInt(bucket.start!)?start:bucket.start;payload.end_ns=BigInt(end)>BigInt(bucket.end!)?end:bucket.end;record.observed_at_ns=payload.end_ns;}
    else{payload={source:this.descriptor.source,producer:this.producer,producer_epoch:bucket.epoch,start_ns:bucket.start,end_ns:bucket.end,signal:bucket.signal,reason:bucket.reason,count:"0",last_ack:null,queue_bytes:"0",queue_records:"0"};record={id:id(),kind:"loss",observed_at_ns:bucket.end,policy_revision:bucket.revision,payload};}
@@ -73,6 +95,10 @@ export class DeliveryQueue {
  }
  private markLossEntry(entry:Entry,record:Record<string,unknown>):void{if(record.kind!=="loss")return;const p=object(record.payload),key=this.lossKey(canonicalId(p.producer_epoch),text(p.signal),text(p.reason));if(this.lossBuckets.has(key)){entry.lossKey=key;entry.lossCount=BigInt(decimal(p.count));}}
  private loss(reason:string,count=1):void{this.losses+=count;this.counts[reason]=(this.counts[reason]??0)+count;}
+ /** True when the signed policy has expired at the queue's wall clock, or when that clock cannot be read (expired is the safe answer). Strings only: canonical UnixNano values compare without BigInt. */
+ private policyExpired():boolean{
+  try{const clock=this.config.clockNs,now=clock?clock():(ms=>ms>0?ms+"000000":String(BigInt(ms)*1000000n))(Date.now());return compareNano(unixNano(now),this.policyExpires)>=0;}catch{return true;}
+ }
  private remove(batch:FrozenBatch,reason?:string):void{this.entries=this.entries.filter(e=>{if(e.batch!==batch.id)return true;this.bytes-=e.size;return false;});this.batches=this.batches.filter(s=>s.batch.id!==batch.id);if(reason)this.loss(reason,batch.count);}
  private expire():void{
   const now=this.now();if(now-this.oldest<300000)return;
@@ -92,45 +118,62 @@ export class DeliveryQueue {
  /** Destroys every queued record of `kind` that has not been frozen into a batch. Returns the number destroyed; not a loss (the owner chose to discard). */
  discardUnsent(kind:string):number{const keep=this.entries.filter(e=>e.batch!==undefined||e.kind!==kind);const count=this.entries.length-keep.length;if(count>0){this.bytes-=this.entries.filter(e=>e.batch===undefined&&e.kind===kind).reduce((n,e)=>n+e.size,0);this.entries=keep;}return count;}
  diagnostics():Readonly<Record<string,number>>{return Object.freeze({...this.counts});}
- records():readonly string[]{this.expire();const batches=new Map(this.batches.map(s=>[s.batch.id,{revision:s.batch.policyRevision,records:array(object(JSON.parse(s.batch.body)).records)}]));return Object.freeze(this.entries.map(e=>{if(e.text)return e.text;const batch=batches.get(e.batch!);if(!batch||e.position===undefined)throw Error('invalid frozen entry');const r=object(batch.records[e.position]);return nativeCanonical({id:r.id,kind:r.kind,observed_at_ns:r.observed_at_ns,policy_revision:batch.revision,payload:r.payload});}));}
+ records():readonly string[]{this.expire();this.materializeAll();const batches=new Map(this.batches.map(s=>[s.batch.id,{revision:s.batch.policyRevision,records:array(object(JSON.parse(s.batch.body)).records)}]));return Object.freeze(this.entries.map(e=>{if(e.text)return e.text;const batch=batches.get(e.batch!);if(!batch||e.position===undefined)throw Error('invalid frozen entry');const r=object(batch.records[e.position]);return nativeCanonical({id:r.id,kind:r.kind,observed_at_ns:r.observed_at_ns,policy_revision:batch.revision,payload:r.payload});}));}
  enqueue(text:string):boolean{
   if(this.closed||this.closing&&!this.recovering&&!this.materializingLoss){this.loss("closed");return false;}this.expire();
   if(typeof text!=='string')throw Error('serialized safe record required');const parsed=parseSafeRecord(text);if(!this.recovering&&parsed.policy_revision!==this.descriptor.policy_revision)throw Error('policy revision mismatch');
-  const {safe,wire,bytes:recordBytes}=this.serialize(parsed),slot=routeRecord(parsed,this.descriptor,this.producer),size=recordBytes+(parsed.kind==="loss"?1024:512);
-  if(recordBytes>(parsed.kind==='replay_chunk'?131072:262144)){if(!this.materializingLoss)this.loss('record_too_large');return false;}
+  const {safe,wire,bytes:recordBytes}=this.serialize(parsed),slot=routeRecord(parsed,this.descriptor,this.producer);
+  return this.place(parsed.kind,safe,wire,recordBytes,slot);
+ }
+ /** Enqueues an ended lean span (see LiveSpan) without serializing it: the entry keeps the span and its exact serialized size, and the text, route slot and record ID are produced when the batch is frozen. The bytes and slot match `enqueue` of the same record (pinned by a differential test). Only the span recorder reaches this. */
+ enqueueLeanSpan(span:LiveSpan,policyRevision:string):boolean{
+  if(this.closed||this.closing&&!this.recovering&&!this.materializingLoss){this.loss("closed");return false;}this.expire();
+  if(!this.recovering&&policyRevision!==this.descriptor.policy_revision)throw Error('policy revision mismatch');
+  return this.place("span","","",LEAN_HEAD+span.startWall.length+leanSpanLength(span)+RESOURCE_OPEN.length+this.resourceBytes+1,-1,span);
+ }
+ private place(kind:string,safe:string,wire:string,recordBytes:number,slot:number,lazy?:LiveSpan):boolean{
+  const size=recordBytes+(kind==="loss"?1024:512);
+  if(recordBytes>(kind==='replay_chunk'?131072:262144)){if(!this.materializingLoss)this.loss('record_too_large');return false;}
   while(this.entries.length>=(this.config.maxRecords??1024)||this.bytes+size>(this.config.maxBytes??2097152)){
-   const counts=this.unbatchedCounts(),wanted=priority(parsed.kind);let evictable=false;for(let lower=0;lower<wanted;lower++)if(counts[lower]!>0){evictable=true;break;}
+   const counts=this.unbatchedCounts(),wanted=priority(kind);let evictable=false;for(let lower=0;lower<wanted;lower++)if(counts[lower]!>0){evictable=true;break;}
    const index=evictable?this.entries.findIndex(e=>!e.batch&&priority(e.kind)<wanted):-1;if(index<0){if(!this.materializingLoss)this.loss("queue_full");return false;}const [old]=this.entries.splice(index,1);counts[priority(old!.kind)]!--;this.bytes-=old!.size;this.loss("queue_pressure");
   }
-  const at=this.now();this.entries.push({text:safe,wire,wireBytes:recordBytes,size,at,wall:Date.now(),kind:parsed.kind,slot});if(at<this.oldest)this.oldest=at;if(this.evictable)this.evictable[priority(parsed.kind)]!++;this.bytes+=size;if(this.spool&&!this.recovering&&!this.materializingLoss)void this.recoverOnce().then(()=>this.persist()).catch(()=>{this.counts.spool_failed=(this.counts.spool_failed??0)+1;});return true;
+  const at=this.now();this.entries.push({text:safe,wire,wireBytes:recordBytes,size,at,wall:Date.now(),kind,slot,lazy});if(at<this.oldest)this.oldest=at;if(this.evictable)this.evictable[priority(kind)]!++;this.bytes+=size;if(this.spool&&!this.recovering&&!this.materializingLoss)void this.recoverOnce().then(()=>this.persist()).catch(()=>{this.counts.spool_failed=(this.counts.spool_failed??0)+1;});return true;
  }
- freeze():readonly FrozenBatch[]{
+ freeze():readonly FrozenBatch[]{this.freezeSome(Infinity);return Object.freeze(this.batches.map(s=>s.batch));}
+ /** Freezes the unbatched entries slot by slot, stopping between slots once `budgetMs` of work has passed (the delivery loop yields to the event loop in between, so one flush never stalls the host for long). True when nothing unbatched is left. */
+ private freezeSome(budgetMs:number):boolean{
+  const end=performance.now()+budgetMs;
   this.expire();
   this.expireSignalLosses();this.materializeSignalLosses();
+  for(const entry of this.entries)if(entry.lazy!==undefined){this.materialize(entry);if(performance.now()>=end)return false;}
   const bySlot=new Map<number,Entry[]>();
   for(const entry of this.entries)if(!entry.batch){const list=bySlot.get(entry.slot);if(list)list.push(entry);else bySlot.set(entry.slot,[entry]);}
   for(let slot=0;slot<64;slot++){
    const pending=bySlot.get(slot);if(!pending)continue;
    let selected:Entry[]=[],wire:string[]=[],recordBytes=0,batchId=id();
-   const header=():string=>nativeCanonical({version:1,project:this.descriptor.project,source:this.descriptor.source,producer:this.producer,id:batchId,policy_revision:this.descriptor.policy_revision,route_slot:slot,records:[]});
-   const headerBytes=new TextEncoder().encode(header()).length;
+   // The batch's canonical key order is id, policy_revision, producer, project, records, route_slot, source, version; every value is a canonical ID, a decimal or a small integer, so none needs escaping.
+   const lead=',"policy_revision":"'+this.descriptor.policy_revision+'","producer":"'+this.producer+'","project":"'+this.descriptor.project+'","records":[',trail='],"route_slot":'+slot+',"source":"'+this.descriptor.source+'","version":1}';
+   const headerBytes=('{"id":"'+batchId+'"'+lead).length+trail.length;
    const finish=():void=>{
     if(!selected.length)return;
-    // The fixed schema's own empty records token is replaced by canonical records.
-    const body=header().replace('\"records\":[]',()=>'\"records\":['+wire.join(',')+']');
-    const batch:FrozenBatch=Object.freeze({id:batchId,source:this.descriptor.source,producer:this.producer,route_slot:slot,hash:hashBytes(body),body,count:selected.length,kinds:Object.freeze([...new Set(selected.map(e=>e.kind))].sort()),firstCapture:Math.min(...selected.map(e=>e.wall)),policyRevision:this.descriptor.policy_revision});
-    for(const [position,e] of selected.entries()){e.batch=batchId;e.position=position;e.text='';e.wire='';}this.evictable=undefined;
-    this.batches.push({batch,ambiguous:false,attempt:0,next:0});selected=[];wire=[];recordBytes=0;batchId=id();
+    // Records were serialized when queued; the batch body is that text spliced between the fixed header and trailer.
+    const body='{"id":"'+batchId+'"'+lead+wire.join(',')+trail;
+    let wall=selected[0]!.wall;const kindSet=new Set<string>();for(const e of selected){if(e.wall<wall)wall=e.wall;kindSet.add(e.kind);}
+    const batch:FrozenBatch=Object.freeze({id:batchId,source:this.descriptor.source,producer:this.producer,route_slot:slot,hash:hashBytes(body),body,count:selected.length,kinds:Object.freeze([...kindSet].sort()),firstCapture:wall,policyRevision:this.descriptor.policy_revision});
+    for(let position=0;position<selected.length;position++){const e=selected[position]!;e.batch=batchId;e.position=position;e.text='';e.wire='';}this.evictable=undefined;
+    let rank=0;for(const kind of kindSet)rank=Math.max(rank,priority(kind));this.batches.push({batch,ambiguous:false,attempt:0,next:0,rank});selected=[];wire=[];recordBytes=0;batchId=id();
    };
    for(const entry of pending){
     if(selected.length===512||headerBytes+recordBytes+entry.wireBytes+selected.length>1048576)finish();
     selected.push(entry);wire.push(entry.wire);recordBytes+=entry.wireBytes;
    }
    finish();
+   if(performance.now()>=end)return false;
   }
-  return Object.freeze(this.batches.map(s=>s.batch));
+  return true;
  }
- private snapshot():unknown{return {version:2,producer:this.producer,last_ack:this.lastAck,loss_buckets:[...this.lossBuckets.values()].map(b=>({producer_epoch:b.epoch,signal:b.signal,reason:b.reason,policy_revision:b.revision,observed_count:b.observed.toString(),acknowledged_count:b.acked.toString(),unbatched_count:b.unbatched.toString(),start_ns:b.start,end_ns:b.end,wall:b.wall})),entries:this.entries.map(e=>({text:e.text||null,position:e.position??null,wall:e.wall,batch:e.batch??null})),batches:this.batches.map(s=>({batch:s.batch,ambiguous:s.ambiguous,attempt:s.attempt}))};}
+ private snapshot():unknown{this.materializeAll();return {version:2,producer:this.producer,last_ack:this.lastAck,loss_buckets:[...this.lossBuckets.values()].map(b=>({producer_epoch:b.epoch,signal:b.signal,reason:b.reason,policy_revision:b.revision,observed_count:b.observed.toString(),acknowledged_count:b.acked.toString(),unbatched_count:b.unbatched.toString(),start_ns:b.start,end_ns:b.end,wall:b.wall})),entries:this.entries.map(e=>({text:e.text||null,position:e.position??null,wall:e.wall,batch:e.batch??null})),batches:this.batches.map(s=>({batch:s.batch,ambiguous:s.ambiguous,attempt:s.attempt}))};}
  async persist():Promise<void>{if(!this.spool)return;await this.recoverOnce();const snapshot=this.snapshot();this.persistChain=this.persistChain.catch(()=>{}).then(()=>{const save=()=>this.spool!.save(snapshot);return this.options.context?this.options.context.run(save):save();});return this.persistChain;}
  private recoverOnce():Promise<void>{return this.recoveryTask??(this.recoveryTask=this.options.context?this.options.context.run(()=>this.recover()):this.recover());}
  private async recover():Promise<void>{
@@ -155,7 +198,7 @@ export class DeliveryQueue {
    for(const item of storedBatches){const state=object(item),b=object(state.batch),batchId=canonicalId(b.id);const entries=this.entries.filter(e=>e.batch===batchId);if(!entries.length)continue;
     const body=text(b.body),wire=object(JSON.parse(body)),slot=b.route_slot,revision=decimal(b.policyRevision);if(typeof slot!=='number'||!Number.isInteger(slot)||slot<0||slot>=64||wire.id!==batchId||wire.source!==this.descriptor.source||wire.project!==this.descriptor.project||wire.producer!==producer||wire.route_slot!==slot||wire.policy_revision!==revision||hashBytes(body)!==b.hash||b.producer!==producer||b.source!==this.descriptor.source||b.count!==entries.length||typeof state.attempt!=='number'||!Number.isSafeInteger(state.attempt)||state.attempt<0)throw Error('invalid frozen spool');
     const signals=array(b.kinds).map(text),actual=[...new Set(entries.map(e=>e.kind))].sort();if(signals.join(',')!==actual.join(',')||array(wire.records).length!==entries.length||entries.some(e=>e.slot!==slot))throw Error('invalid frozen spool');
-    const batch:FrozenBatch=Object.freeze({id:batchId,source:this.descriptor.source,producer,route_slot:slot,hash:text(b.hash),body,count:entries.length,kinds:Object.freeze(signals),firstCapture:Math.min(...entries.map(e=>e.wall)),policyRevision:revision});this.batches.push({batch,ambiguous:true,attempt:state.attempt,next:0});
+    const batch:FrozenBatch=Object.freeze({id:batchId,source:this.descriptor.source,producer,route_slot:slot,hash:text(b.hash),body,count:entries.length,kinds:Object.freeze(signals),firstCapture:Math.min(...entries.map(e=>e.wall)),policyRevision:revision});this.batches.push({batch,ambiguous:true,attempt:state.attempt,next:0,rank:Math.max(0,...signals.map(priority))});
    }
    if(this.entries.some(e=>e.batch&&!this.batches.some(s=>s.batch.id===e.batch)))throw Error('orphan frozen spool');
    for(const [key,b] of this.lossBuckets){const queued=this.entries.filter(e=>e.lossKey===key).reduce((n,e)=>n+(e.lossCount??0n),0n);if(queued+b.unbatched+b.acked>b.observed)throw Error("invalid native loss accounting");}
@@ -168,28 +211,31 @@ export class DeliveryQueue {
   if(this.running){const running=this.running;return new Promise<FlushReport>((resolve,reject)=>{const timer=setTimeout(()=>resolve(this.report([],this.pending>0)),timeoutMs);running.then(report=>{clearTimeout(timer);resolve(report);},error=>{clearTimeout(timer);reject(error);});});}
   const job=this.deliver(timeoutMs);this.running=job;void job.finally(()=>{if(this.running===job)this.running=undefined;}).catch(()=>{});return job;
  }
+ private async freezeSliced():Promise<void>{while(!this.freezeSome(SLICE_MS))await yieldToLoop();}
  private async deliver(timeout:number):Promise<FlushReport>{
-  const deadline=this.now()+timeout,wireDeadline=performance.now()+timeout,receipts:Record<string,unknown>[]=[];await this.recoverOnce();this.freeze();try{await this.persist();}catch{this.counts.spool_failed=(this.counts.spool_failed??0)+1;return this.report(receipts,this.pending>0);}
+  const deadline=this.now()+timeout,wireDeadline=performance.now()+timeout,receipts:Record<string,unknown>[]=[];await this.recoverOnce();await this.freezeSliced();try{if(this.spool)await this.persist();}catch{this.counts.spool_failed=(this.counts.spool_failed??0)+1;return this.report(receipts,this.pending>0);}
   while(!this.denied&&!this.closed&&this.pending&&this.now()<deadline&&performance.now()<wireDeadline){
-   this.freeze();
-   const heads=this.batches.filter((s,i,a)=>a.findIndex(b=>b.batch.route_slot===s.batch.route_slot)===i).sort((a,b)=>Math.max(...b.batch.kinds.map(priority))-Math.max(...a.batch.kinds.map(priority)));
-   let attempted=false;let wait=Infinity;
-   for(const state of heads){if(this.closed||this.now()>=deadline||performance.now()>=wireDeadline)break;if(state.next>this.now()){wait=Math.min(wait,state.next-this.now());continue;}attempted=true;
-    if(!state.ambiguous){let expired=true;try{expired=BigInt(unixNano((this.config.clockNs??(()=>String(BigInt(Date.now())*1000000n)))()))>=BigInt(this.policyExpires);}catch{}if(expired){this.remove(state.batch,'policy_expired');await this.persist();continue;}}
+   await this.freezeSliced();
+   // The oldest batch of every route slot, highest priority first (a slot's batches go out in order).
+   const firstOfSlot=new Map<number,BatchState>();for(const s of this.batches)if(!firstOfSlot.has(s.batch.route_slot))firstOfSlot.set(s.batch.route_slot,s);
+   const heads=[...firstOfSlot.values()].sort((a,b)=>b.rank-a.rank);
+   let attempted=false;let wait=Infinity;let sliceEnd=performance.now()+SLICE_MS;
+   for(const state of heads){if(performance.now()>=sliceEnd){await yieldToLoop();sliceEnd=performance.now()+SLICE_MS;}if(this.closed||this.now()>=deadline||performance.now()>=wireDeadline)break;if(state.next>this.now()){wait=Math.min(wait,state.next-this.now());continue;}attempted=true;
+    if(!state.ambiguous){if(this.policyExpired()){this.remove(state.batch,'policy_expired');if(this.spool)await this.persist();continue;}}
     // Persist possible-send state BEFORE network: a crash must lookup, not blindly reappend.
     const lookup=state.ambiguous;state.ambiguous=true;
-    try{await this.persist();}catch{this.counts.spool_failed=(this.counts.spool_failed??0)+1;return this.report(receipts,true);}
+    try{if(this.spool)await this.persist();}catch{this.counts.spool_failed=(this.counts.spool_failed??0)+1;return this.report(receipts,true);}
     let out:Outcome;try{const send=()=>lookup?this.transport.lookup(state.batch,wireDeadline):this.transport.send(state.batch,wireDeadline);out=await (this.options.context?this.options.context.run(send):send());}catch{out={kind:'ambiguous'};}
     if(this.closed)return this.report(receipts,this.pending>0);
-    if(out.kind==='receipt'&&verifyReceipt(state.batch,out.receipt,lookup)){this.acknowledgeSignalLosses(state.batch,out.receipt);receipts.push(out.receipt);this.remove(state.batch);await this.persist();continue;}
+    if(out.kind==='receipt'&&verifyReceipt(state.batch,out.receipt,lookup)){this.acknowledgeSignalLosses(state.batch,out.receipt);receipts.push(out.receipt);this.remove(state.batch);if(this.spool)await this.persist();continue;}
     if(out.kind==='denied'){this.denied=true;this.counts.unauthorized=(this.counts.unauthorized??0)+1;break;}
-    if(out.kind==='terminal'&&!lookup){this.remove(state.batch,'terminal_rejected');await this.persist();continue;}
+    if(out.kind==='terminal'&&!lookup){this.remove(state.batch,'terminal_rejected');if(this.spool)await this.persist();continue;}
     if(out.kind==='not_found'&&lookup){
-     if(state.batch.policyRevision!==this.descriptor.policy_revision){this.remove(state.batch,'policy_changed');await this.persist();continue;}
-     let expired=true;try{expired=BigInt(unixNano((this.config.clockNs??(()=>String(BigInt(Date.now())*1000000n)))()))>=BigInt(this.policyExpires);}catch{}
-     if(expired){this.remove(state.batch,'policy_expired');await this.persist();continue;}state.ambiguous=false;
+     if(state.batch.policyRevision!==this.descriptor.policy_revision){this.remove(state.batch,'policy_changed');if(this.spool)await this.persist();continue;}
+     const expired=this.policyExpired();
+     if(expired){this.remove(state.batch,'policy_expired');if(this.spool)await this.persist();continue;}state.ambiguous=false;
     }else if(out.kind==='retryable'&&!lookup)state.ambiguous=false;
-    state.next=this.now()+Math.max(retryDelay(state.attempt++,this.random),out.retryAfterMs??0);await this.persist();
+    state.next=this.now()+Math.max(retryDelay(state.attempt++,this.random),out.retryAfterMs??0);if(this.spool)await this.persist();
    }
    if(this.denied||!this.pending)break;
    // Finish ready ordered work; retry waits are bounded by this flush's deadline.
