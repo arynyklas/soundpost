@@ -24,6 +24,11 @@ type Helper struct {
 	Policy  OperatorPolicy
 	Budget  *ResourceBudget
 	Acquire AcquisitionFactory
+	// rss reads a process's resident size; nil means the real /proc reader. Tests whose process RSS is not under test
+	// (a race-instrumented test binary is larger than the 64 MiB budget by itself) inject a fixed reader.
+	rss func(int) (uint64, error)
+	// closed counts connections by closed, content-free end reason (see ClosedReasons).
+	closed closedReasons
 }
 type helperReply struct {
 	Error    string            `json:"error,omitempty"`
@@ -115,7 +120,11 @@ func (h *Helper) serveConnection(parent context.Context, c *net.UnixConn) {
 	c.SetReadBuffer(maxHelperMessage)
 	c.SetWriteBuffer(maxHelperMessage)
 	c.SetDeadline(time.Now().Add(5 * time.Second))
-	deny := func(e error) { writeMessage(c, helperReply{Error: helperErrorCode(e)}) }
+	deny := func(e error) {
+		code := helperErrorCode(e)
+		h.closed.add(code)
+		writeMessage(c, helperReply{Error: code})
+	}
 	peer, e := peerCredential(c)
 	if e != nil {
 		deny(ErrAuthorization)
@@ -131,7 +140,11 @@ func (h *Helper) serveConnection(parent context.Context, c *net.UnixConn) {
 		deny(e)
 		return
 	}
-	usage, e := chargeableMemory(os.Getpid(), int(peer.PID), processRSS)
+	rss := h.rss
+	if rss == nil {
+		rss = processRSS
+	}
+	usage, e := chargeableMemory(os.Getpid(), int(peer.PID), rss)
 	if e != nil {
 		deny(ErrResources)
 		return
@@ -205,7 +218,7 @@ func (h *Helper) serveConnection(parent context.Context, c *net.UnixConn) {
 		c.Read(extra[:])
 		cancel()
 	}()
-	streamHelperEvents(ctx, c, source)
+	h.closed.add(streamHelperEvents(ctx, c, source))
 }
 
 // The signed grant bounds both acquisition and blocked socket operations. A

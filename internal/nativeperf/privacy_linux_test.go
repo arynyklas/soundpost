@@ -508,17 +508,11 @@ func privacyRequireRealPerf(t *testing.T) {
 	}
 }
 
-// privacyRequireInProcessHelper additionally requires that an in-process helper
-// and exporter peer (both this process) fit the helper's own 64MiB aggregate
-// accounting; the helper charges both RSS values, so a large test binary (the
-// race detector's shadow memory) is refused by the helper itself.
+// privacyRequireInProcessHelper requires real perf; the in-process helper reads a fixed RSS (see s.helper.rss), so a large
+// (race-instrumented) test binary no longer trips the helper's 64MiB aggregate accounting.
 func privacyRequireInProcessHelper(t *testing.T) {
 	t.Helper()
 	privacyRequireRealPerf(t)
-	rss, e := processRSS(os.Getpid())
-	if e != nil || 2*rss+(4<<20) > MaxMemoryBytes {
-		t.Skipf("NOT run: test process RSS %d MiB (err=%v) exceeds the helper's 64MiB two-RSS accounting; the same rows run in the verify fixture process", rss>>20, e)
-	}
 }
 
 type privacyCanary struct {
@@ -808,6 +802,8 @@ func privacyStartSession(t *testing.T, env *privacyEnv, opt privacyOptions) *pri
 		}
 		return out, nil
 	}}
+	// The privacy rows do not measure the helper's RSS accounting (budget tests do); a race-instrumented test binary would otherwise be refused.
+	s.helper.rss = func(int) (uint64, error) { return 8 << 20, nil }
 	s.sock = filepath.Join(t.TempDir(), "acquire.sock")
 	listener, e := net.ListenUnix("unix", &net.UnixAddr{Name: s.sock, Net: "unix"})
 	if e != nil {

@@ -99,6 +99,18 @@ func Decode(r io.Reader, encoding string) (Batch, error) {
 	if model.ValidateJSON(expanded) != nil {
 		return Batch{}, model.Fail(model.Invalid)
 	}
+	// The top level is a closed schema: an unknown (or differently cased) batch field is refused, never silently dropped.
+	var top map[string]json.RawMessage
+	if json.Unmarshal(expanded, &top) != nil {
+		return Batch{}, model.Fail(model.Invalid)
+	}
+	for key := range top {
+		switch key {
+		case "version", "project", "source", "producer", "id", "policy_revision", "route_slot", "records":
+		default:
+			return Batch{}, model.Fail(model.Invalid)
+		}
+	}
 	var raw struct {
 		Records []json.RawMessage `json:"records"`
 	}

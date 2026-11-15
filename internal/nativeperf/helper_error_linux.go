@@ -7,7 +7,46 @@ import (
 	"context"
 	"errors"
 	"net"
+	"sort"
+	"sync"
 )
+
+// Closed reasons are a fixed, content-free vocabulary: every helperErrorCode value plus the stream-end reasons below.
+// The helper counts how many connections ended for each reason; no path, pid, target or error text is ever recorded.
+const (
+	closedComplete      = "stream_complete"
+	closedCanceled      = "stream_canceled"
+	closedWriteFailed   = "stream_write_failed"
+	closedInvalidSource = "stream_invalid_item"
+)
+
+type closedReasons struct {
+	mu sync.Mutex
+	n  map[string]uint64
+}
+
+func (r *closedReasons) add(reason string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.n == nil {
+		r.n = map[string]uint64{}
+	}
+	r.n[reason]++
+}
+
+// ClosedReasons returns a copy of the per-reason connection-close counters, and the sorted reason names.
+func (h *Helper) ClosedReasons() (map[string]uint64, []string) {
+	h.closed.mu.Lock()
+	defer h.closed.mu.Unlock()
+	out := make(map[string]uint64, len(h.closed.n))
+	names := make([]string, 0, len(h.closed.n))
+	for k, v := range h.closed.n {
+		out[k] = v
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	return out, names
+}
 
 // The helper never serializes err.Error(): neither paths nor syscall/config
 // details are part of its closed control protocol.
@@ -68,9 +107,9 @@ func helperCodeError(code string) error {
 
 // This is the real post-authorization stream, also exercised against actual
 // malformed/generation-change ring sources in tests. There is no EOF success.
-func streamHelperEvents(ctx context.Context, c *net.UnixConn, source EventSource) {
+func streamHelperEvents(ctx context.Context, c *net.UnixConn, source EventSource) string {
 	if writeMessage(c, helperReply{Ready: true}) != nil {
-		return
+		return closedWriteFailed
 	}
 	for {
 		if proofSource, ok := source.(interface {
@@ -80,17 +119,20 @@ func streamHelperEvents(ctx context.Context, c *net.UnixConn, source EventSource
 			if e != nil {
 				if errors.Is(e, ErrSourceComplete) {
 					writeMessage(c, helperReply{Complete: true})
-				} else if ctx.Err() == nil {
-					writeMessage(c, helperReply{Error: helperErrorCode(e)})
+					return closedComplete
 				}
-				return
+				if ctx.Err() == nil {
+					writeMessage(c, helperReply{Error: helperErrorCode(e)})
+					return helperErrorCode(e)
+				}
+				return closedCanceled
 			}
 			if (item.Event == nil) == (item.Proof == nil) || item.Event != nil && item.Event.Validate() != nil || item.Proof != nil && !item.Proof.valid() {
 				writeMessage(c, helperReply{Error: "acquisition_failed"})
-				return
+				return closedInvalidSource
 			}
 			if writeMessage(c, helperReply{Event: item.Event, Proof: item.Proof}) != nil {
-				return
+				return closedWriteFailed
 			}
 			continue
 		}
@@ -98,15 +140,16 @@ func streamHelperEvents(ctx context.Context, c *net.UnixConn, source EventSource
 		if e != nil {
 			if ctx.Err() == nil {
 				writeMessage(c, helperReply{Error: helperErrorCode(e)})
+				return helperErrorCode(e)
 			}
-			return
+			return closedCanceled
 		}
 		if event.Validate() != nil {
 			writeMessage(c, helperReply{Error: "acquisition_failed"})
-			return
+			return closedInvalidSource
 		}
 		if writeMessage(c, helperReply{Event: &event}) != nil {
-			return
+			return closedWriteFailed
 		}
 	}
 }

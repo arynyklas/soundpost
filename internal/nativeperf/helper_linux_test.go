@@ -53,6 +53,8 @@ func TestHelperServesOneConnectionAtATime(t *testing.T) {
 	helper := &Helper{
 		Policy: OperatorPolicy{Installation: "fixture", PublicKey: pub, UID: uid, Revision: 1, Allowlist: []Target{fx.target}},
 		Budget: NewResourceBudget(),
+		// The test process (race-instrumented in -race runs) is not what this test measures; a real RSS read would exceed the 64 MiB budget.
+		rss: func(int) (uint64, error) { return 8 << 20, nil },
 		Acquire: func(ctx context.Context, _ AuthorizedTargets, _ Config, _ *Reservation) (EventSource, error) {
 			started.Add(1)
 			now := running.Add(1)
@@ -97,6 +99,8 @@ func TestHelperServesOneConnectionAtATime(t *testing.T) {
 	defer first.Close()
 	select {
 	case <-entered:
+	case r := <-firstReply:
+		t.Fatalf("first connection was answered without reaching acquisition: %+v", r)
 	case <-time.After(5 * time.Second):
 		t.Fatal("first connection never reached acquisition")
 	}
