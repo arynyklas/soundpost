@@ -46,7 +46,7 @@ import (
 // An acknowledgement written before attribution existed (value of one byte, no proposer in the
 // stored command) is never counted: the voter re-acknowledges once.
 //
-// Three more facts keep an acknowledgement from outliving the bytes it measured (task 11.04):
+// Four more facts keep an acknowledgement from outliving the bytes it measured (task 11.04):
 //
 //   - the window between an install and its withdrawal: a snapshot that replays data commands is
 //     preceded by a replicated "erase_notice" the SENDER commits (replica.SnapshotGate:
@@ -60,6 +60,10 @@ import (
 //   - the disk: every data directory carries a random incarnation (ensureIncarnation) and an
 //     acknowledgement stands only for the incarnation its voter last declared in the group, so a
 //     disk that replaced the old one under the same node id and identity never inherits its acks;
+//   - the answering voter: a notice voids an acknowledgement only on a voter that has applied it, so
+//     a receipt is clean only after the slot-0 group confirmed with a read index that the answering
+//     voter has applied everything committed (ErasureResidual); a voter that is cut off or behind
+//     answers dirty;
 //   - the version: the entries above are new shapes an older binary cannot decode, so nothing is
 //     proposed in them until every member of the committed configuration has declared the protocol
 //     (a capability statement in the shape an older binary applies harmlessly, see protocolReady).
@@ -773,8 +777,18 @@ func (e *Engine) AckErasure(ctx context.Context) error {
 // ErasureResidual is what a receipt for the operation must add to ResidualStores: ResidualApplyDB
 // until this voter erased the operation itself and every member of the group's committed
 // configuration has an acknowledgement that stands (attributed to its own proposer and not
-// withdrawn). It reads local state only and never blocks on consensus; a configuration that
-// cannot be read is reported as owed.
+// withdrawn).
+//
+// An acknowledgement stands only while no notice has named its voter since it measured, and a
+// notice reaches a voter's state only when that voter applies it. A voter that is behind (cut off,
+// or slow to apply) would still count an acknowledgement a committed notice has already voided and
+// answer clean while a pre-erasure snapshot is on its way to the acknowledged voter. So the clean
+// answer is given only after the slot-0 group confirmed, with a read index, that this voter has
+// applied everything committed so far (the notice included); a voter that cannot confirm it (no
+// leader or quorum reachable, or not caught up within the read's bound) answers dirty. A dirty
+// answer is decided from local state alone and costs nothing; only a would-be clean one pays the
+// read, so a receipt poll on a healthy group adds one quorum round. A configuration that cannot be
+// read is reported as owed.
 func (e *Engine) ErasureResidual(op model.ID) []string {
 	if !e.ErasedLocally(op) {
 		return []string{ResidualApplyDB}
@@ -782,21 +796,32 @@ func (e *Engine) ErasureResidual(op model.ID) []string {
 	if e.repl == nil {
 		return nil
 	}
+	if e.acknowledgedByEveryMember(op) {
+		if _, err := e.repl.groups[eraseAckSlot].ReadIndex(context.Background()); err == nil && e.acknowledgedByEveryMember(op) {
+			return nil
+		}
+	}
+	return []string{ResidualApplyDB}
+}
+
+// acknowledgedByEveryMember reports, from this voter's applied state, that every member of the
+// slot-0 group's committed configuration holds an acknowledgement of op that stands.
+func (e *Engine) acknowledgedByEveryMember(op model.ID) bool {
 	members := e.repl.groups[eraseAckSlot].Status().Members.Nodes
 	if len(members) == 0 {
-		return []string{ResidualApplyDB}
+		return false
 	}
-	owed := false
+	all := true
 	if err := e.db.View(func(tx *bolt.Tx) error {
 		meta := tx.Bucket([]byte("replica_data"))
 		for _, m := range members {
 			if !ackStands(meta, op, m.ID, m.NodeIdentity) {
-				owed = true
+				all = false
 			}
 		}
 		return nil
-	}); err != nil || owed {
-		return []string{ResidualApplyDB}
+	}); err != nil {
+		return false
 	}
-	return nil
+	return all
 }

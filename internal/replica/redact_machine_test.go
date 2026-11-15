@@ -587,7 +587,7 @@ func TestRedactMachineCommandsAfterARestartConvergesWithoutAConflict(t *testing.
 		t.Fatalf("first pass %+v", res)
 	}
 	s.reopen(newWholeMachine(id))
-	residueIs(t, s.group, 1, ResidueMachineCommands) // the proof does not survive a restart
+	requireResidueWithout(t, s.group, 1, ResidueMachineCommands) // the proof survives a restart (machine_proof.go); the sealed cut it names is still there
 	if res := s.pass(1); res.Floor == 0 {
 		t.Fatalf("second pass %+v", res)
 	}

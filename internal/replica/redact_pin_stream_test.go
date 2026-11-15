@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"testing"
 	"time"
 
@@ -66,9 +67,13 @@ func TestRedactPinArchiveStreamsAndKeepsEveryOtherRecord(t *testing.T) {
 	want := ids[n/2]
 	targets := map[model.ID]*redactTarget{want: {replacement: []byte("redacted")}}
 
-	// The peak heap while the archive is rewritten, sampled; garbage included, so the bound is
-	// generous against a whole-archive read (64 MiB, twice with a second copy) and tight against
-	// one record at a time.
+	// The peak heap while the archive is rewritten, sampled. HeapAlloc counts garbage the collector
+	// has not freed yet, and on a loaded machine the concurrent collector lags behind the
+	// allocation of one 8 KiB record per step, which made this bound flaky (25-38 MiB grown against
+	// 24 MiB). The collector is made eager for the measurement (the live heap here is a few MiB, so
+	// it runs often and cheaply) and the bound is unchanged: it stays generous against a
+	// whole-archive read (64 MiB live, twice with a second copy) and tight against one record at a time.
+	defer debug.SetGCPercent(debug.SetGCPercent(10))
 	runtime.GC()
 	var base runtime.MemStats
 	runtime.ReadMemStats(&base)

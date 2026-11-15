@@ -21,9 +21,12 @@ import (
 
 // TestMeasureCutAndBackup measures, at the history sizes named by SOUNDPOST_CUT_N (commands in one
 // slot, comma separated; skipped when unset), what a snapshot cut, a backup seal and a journal
-// compaction cost and hold. It uses only calls that exist before and after the windowed format, so
-// the same file runs against both trees; SOUNDPOST_CUT_WINDOW sets the window size where windows
-// exist. Output: one MEASURE line per size.
+// compaction cost and hold. SOUNDPOST_CUT_WINDOW sets the window size (the suite default is 4),
+// SOUNDPOST_CUT_RETRY the number of commands a slot's retry table keeps (default slotRetryMax), and
+// SOUNDPOST_CUT_COMPACT=1 compacts the journals after each cut the way the retention worker does every
+// SnapshotInterval (by default the journal keeps everything since the start). Output: one MEASURE
+// line per size, with the sizes of the envelope, the compacted journal and the bundle (its control
+// cut and its evidence apart).
 func TestMeasureCutAndBackup(t *testing.T) {
 	sizes := os.Getenv("SOUNDPOST_CUT_N")
 	if sizes == "" {
@@ -31,6 +34,9 @@ func TestMeasureCutAndBackup(t *testing.T) {
 	}
 	if w, err := strconv.ParseUint(os.Getenv("SOUNDPOST_CUT_WINDOW"), 10, 64); err == nil && w > 0 {
 		setMeasureWindow(w)
+	}
+	if r, err := strconv.Atoi(os.Getenv("SOUNDPOST_CUT_RETRY")); err == nil && r > 0 {
+		defer setSlotRetryMax(r)()
 	}
 	for _, field := range strings.Split(sizes, ",") {
 		n, err := strconv.Atoi(strings.TrimSpace(field))
@@ -136,18 +142,31 @@ func measureCut(t *testing.T, n int) {
 		f()
 		return time.Since(start)
 	}
+	compactBetween := os.Getenv("SOUNDPOST_CUT_COMPACT") != ""
 	var cold, warm time.Duration
 	cold = timed(func() {
 		if _, err = e.CreateSnapshots(ctx); err != nil {
 			t.Fatal(err)
 		}
 	})
+	if compactBetween {
+		if err = e.CompactJournals(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
 	add(64)
+	warmBase := windowCommandsDerived.Load()
 	warm = timed(func() {
 		if _, err = e.CreateSnapshots(ctx); err != nil {
 			t.Fatal(err)
 		}
 	})
+	warmRead := windowCommandsDerived.Load() - warmBase
+	if compactBetween { // the retention worker cuts and compacts every SnapshotInterval; the journal then holds only what came after
+		if err = e.CompactJournals(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
 	cut := controlCut(t, e, store)
 	backup, err := e.BeginBackup(ctx, cut)
 	if err != nil {
@@ -156,6 +175,7 @@ func measureCut(t *testing.T, n int) {
 	add(64)
 	var sealed SealedBackup
 	var sealTime time.Duration
+	sealRead := windowCommandsDerived.Load()
 	peak, allocated := peakHeap(func() {
 		sealTime = timed(func() {
 			if sealed, err = backup.Seal(ctx, nil); err != nil {
@@ -163,14 +183,22 @@ func measureCut(t *testing.T, n int) {
 			}
 		})
 	})
+	sealRead = windowCommandsDerived.Load() - sealRead
 	bundle, _ := jsonSize(sealed.Bundle)
-	if err = e.CompactJournals(ctx); err != nil {
-		t.Fatal(err)
-	}
+	bundleCut, _ := jsonSize(sealed.Bundle.Cut)
+	bundleEvidence, _ := jsonSize(sealed.Bundle.Quota)
+	var compactTime time.Duration
+	compactTime = timed(func() {
+		if err = e.CompactJournals(ctx); err != nil {
+			t.Fatal(err)
+		}
+	})
 	wal := fileSize(filepath.Join(dir, "raft", "slot-"+strconv.Itoa(int(slot)), "ready.wal"))
 	envelope := fileSize(filepath.Join(sealed.Snapshots[slot].Dir(), "envelope.json"))
-	t.Logf("MEASURE history=%d cut_cold_ms=%.1f cut_incremental_ms=%.1f seal_ms=%.1f seal_peak_heap_mb=%.1f seal_alloc_mb=%.1f bundle_bytes=%d envelope_bytes=%d ready_wal_bytes=%d",
-		n, ms(cold), ms(warm), ms(sealTime), float64(peak)/(1<<20), float64(allocated)/(1<<20), bundle, envelope, wal)
+	records, _, _ := retryShape(t, e, slot)
+	windows := (uint64(n) + 128 + snapshotWindow - 1) / snapshotWindow
+	t.Logf("MEASURE history=%d windows=%d compacted=%t cut_cold_ms=%.1f cut_incremental_ms=%.1f seal_ms=%.1f compact_ms=%.1f seal_peak_heap_mb=%.1f seal_alloc_mb=%.1f warm_cut_commands_read=%d seal_commands_read=%d bundle_bytes=%d bundle_cut_bytes=%d bundle_evidence_bytes=%d envelope_bytes=%d ready_wal_bytes=%d retry_records=%d",
+		n, windows, compactBetween, ms(cold), ms(warm), ms(sealTime), ms(compactTime), float64(peak)/(1<<20), float64(allocated)/(1<<20), warmRead, sealRead, bundle, bundleCut, bundleEvidence, envelope, wal, records)
 }
 
 func ms(d time.Duration) float64 { return float64(d.Microseconds()) / 1000 }

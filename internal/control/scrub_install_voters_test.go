@@ -105,6 +105,79 @@ func TestAVoterThatInstalledTheLeadersSnapshotScrubsItsOwnFile(t *testing.T) {
 	}
 }
 
+// A voter that installed the leader's snapshot and whose whole group is restarted (store, replica
+// group, journal and snapshots reopened over the same files) keeps both things the install made:
+// the erasure marker of its own control.db (it still owes the scrub, the bytes are still there)
+// and the state the installed snapshot and the journal replay reach; the leader's later commits
+// reach it, and its own scrub and pass still settle the receipt.
+func TestARestartedVoterThatInstalledTheLeadersSnapshotKeepsItsMarkerAndItsState(t *testing.T) {
+	v := newControlVoters(t)
+	const before, during = "CANARYINSTALLRESTART0d2b86a7c41e", "CANARYINSTALLRSDUR0d2b86a7c41e"
+	leader := v.fx[1]
+	leader.seedAll(leader.newSeed(leader.project, before), 50)
+	v.await(2, v.mustRevision(1))
+	v.await(3, v.mustRevision(1))
+	v.mesh.cut(3, true)
+	leader.seedAll(leader.newSeed(leader.project, during), 60)
+	leader.saga(control.DeleteScope{Mode: model.DeleteRetireProject, Projects: []model.ID{leader.project}})
+	v.await(2, v.mustRevision(1))
+	leader.pass() // compacts the leader's journal past voter 3: it can only be repaired by a snapshot
+	v.mesh.cut(3, false)
+	v.await(3, v.mustRevision(1))
+	if g := v.stores[3].ReplicaGroup(); g == nil || v.fx[3].auditsOf("delete.control_scrubbed") == 0 || v.fx[3].stateHolds(before) {
+		t.Fatal("fixture invalid: voter 3 did not install the leader's erased state")
+	}
+	if hits := controlDBHits(t, v.dirs[3], before); len(hits) == 0 {
+		t.Fatal("fixture invalid: the install left no copy of the replaced state in voter 3's control.db")
+	}
+	if got := v.stores[3].ResidualStores(); !contains(got, control.ResidualControlState) {
+		t.Fatalf("fixture invalid: voter 3 does not owe its scrub after the install: %v", got)
+	}
+	want := leader.canonicalState()
+
+	v.restart(3)
+	voter := v.fx[3]
+	if got := v.stores[3].ResidualStores(); !contains(got, control.ResidualControlState) {
+		t.Fatalf("FALSE CLEAN: the restart of the group forgot the scrub voter 3 owes after its install: %v", got)
+	}
+	if hits := controlDBHits(t, v.dirs[3], before); len(hits) == 0 {
+		t.Fatal("the restart changed the bytes the marker is about")
+	}
+	if voter.canonicalState() != want || voter.stateHolds(before) || voter.stateHolds(during) {
+		t.Fatal("the restart of the group did not reach the state the install and the journal replay made")
+	}
+	if voter.auditsOf("delete.control_scrubbed") == 0 || voter.auditsOf("delete.control_erased") == 0 {
+		t.Fatal("the restart lost the erasing and scrubbed audits of the installed log")
+	}
+
+	// The leader's next commit reaches the restarted voter through its reopened journal.
+	if err := v.stores[1].Update(leader.ctx, func(st *control.State) error {
+		st.Quotas = map[string]model.QuotaState{"after:restart": {MaxBytes: 1}}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	v.await(3, v.mustRevision(1))
+	if leader.canonicalState() != voter.canonicalState() {
+		t.Fatal("the restarted voter diverged from the leader")
+	}
+	if got := v.stores[3].ResidualStores(); !contains(got, control.ResidualControlState) {
+		t.Fatalf("a replicated commit settled the restarted voter's own scrub debt: %v", got)
+	}
+
+	if err := v.stores[3].ScrubErased(voter.ctx); err != nil {
+		t.Fatal(err)
+	}
+	if hits := controlDBHits(t, v.dirs[3], before); len(hits) != 0 {
+		t.Fatalf("voter 3's control.db still holds the erased payload after its own scrub: %v", hits)
+	}
+	voter.pass()
+	v.await(1, v.mustRevision(3))
+	if got := v.stores[3].ResidualStores(); len(got) != 0 {
+		t.Fatalf("the restarted voter after its own scrub and pass: %v", got)
+	}
+}
+
 // A follower that applied the erasure by replaying the log never installed anything, yet the
 // leader's replicated delete.control_scrubbed arrives in the same log: it says the LEADER's
 // file was scrubbed. The follower's own file still holds the erased payload in the pages the

@@ -243,6 +243,9 @@ func (f *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			res.NextContinuationToken = keys[start+f.maxKeys-1]
 		}
 		_ = xml.NewEncoder(w).Encode(res)
+	case r.Method == http.MethodDelete:
+		delete(f.objects, path)
+		w.WriteHeader(http.StatusNoContent)
 	case r.Method == http.MethodGet:
 		body, ok := f.objects[path]
 		if !ok {

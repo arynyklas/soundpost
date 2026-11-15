@@ -102,7 +102,7 @@ soundpost serve --mode=distributed --node-id=1 --cluster-config=/private/node-a.
 
 Start the other configured voter processes concurrently with their own node IDs, certificates and independent private directories. Startup is bounded; lack of quorum, incomplete transfer, authority mismatch or required barrier failure does not open intake. The seed contains private telemetry and installation secrets. Transfer it only through an authenticated confidential operator channel and retain restrictive permissions. New nodes import the same complete authenticated installation seed before auth initializes; they do not independently bootstrap users, source keys or envelope authority.
 
-Do not use an initial seed as an unaudited live membership reset, disaster restore or permission to reuse a lost voter identity. Normal bootstrap does not implement C12 disaster-restore authentication reactivation, backup authority or independent deletion-ledger qualification.
+Do not use an initial seed as an unaudited live membership reset, disaster restore or permission to reuse a lost voter identity. Normal bootstrap does not implement C12 disaster-restore authentication reactivation, backup authority or independent deletion-ledger qualification. A disaster restore into a new three-voter cluster is a different path with its own seed: [backup-restore.md](backup-restore.md), "Backup and restore of a three-voter cluster" (`backup restore`, `backup activate --cluster-seed-out`, fresh node identities; the seed it writes retires the lost cluster's identities).
 
 ## Membership, readiness and maintenance
 

@@ -12,8 +12,10 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
+	"github.com/arynyklas/soundpost/internal/backup"
 	"github.com/arynyklas/soundpost/internal/control"
 	"github.com/arynyklas/soundpost/internal/durablefs"
 	"github.com/arynyklas/soundpost/internal/model"
@@ -28,6 +30,10 @@ type ClusterSeed struct {
 	ControlPhysical    model.Uint64            `json:"control_physical"`
 	ControlTerm        model.Uint64            `json:"control_term"`
 	Data               storage.ReplicationSeed `json:"data"`
+	// Retired are the node identities of the cluster a disaster restore rebuilt this
+	// installation from. OpenDistributed refuses a membership that names one of them, so the
+	// restored cluster has fresh identities and no node of the lost cluster is a member of it.
+	Retired []string `json:"retired_identities,omitempty"`
 }
 type NodeConfig struct {
 	NodeID        uint64          `json:"node_id,string"`
@@ -56,6 +62,8 @@ type replicatedApp struct {
 	// domain is the fate shared by the control group and the 64 data groups of this node: a
 	// storage failure of any of them fails them all closed (replica.FailDomain).
 	domain *replica.FailDomain
+	// dir is the data directory this node was opened on.
+	dir string
 }
 
 // awaitReady waits for one ReadIndex quorum round on a group. Each round has
@@ -90,6 +98,11 @@ func OpenDistributed(dir string, node NodeConfig) (*App, error) {
 	var seed ClusterSeed
 	if model.StrictJSON(raw, &seed) != nil || seed.Version != 1 {
 		return nil, model.Fail(model.Corrupt)
+	}
+	for _, member := range node.Members.Nodes {
+		if slices.Contains(seed.Retired, member.NodeIdentity) {
+			return nil, model.Fail(model.Invalid)
+		}
 	}
 	certificate, err := tls.LoadX509KeyPair(node.Certificate, node.PrivateKey)
 	if err != nil {
@@ -149,6 +162,9 @@ func (a *App) enableReplication(ctx context.Context, dir string, options *replic
 		return err
 	}
 	cfg := replica.Config{ID: 1, Group: installation, Directory: filepath.Join(dir, "raft", "control"), TickInterval: 100 * time.Millisecond, Members: replica.Members{Revision: 1, Nodes: []replica.Member{{ID: 1, Address: "https://single.invalid", NodeIdentity: "single", FailureDomain: "local-disk"}}}}
+	// A restored single-voter root starts its data groups from snapshots cut in the backed-up
+	// installation, possibly a cluster: their membership is this root's, not the source's.
+	cfg.RebaseInstalled = options == nil && backup.IsRestoredRoot(dir)
 	var register func(*replica.Group) error
 	var lifecycle *replicatedApp
 	var dataSeed *storage.ReplicationSeed
@@ -176,6 +192,7 @@ func (a *App) enableReplication(ctx context.Context, dir string, options *replic
 		}
 	}
 	lifecycle.domain = replica.NewFailDomain()
+	lifecycle.dir = dir
 	cfg.Domain = lifecycle.domain
 	a.replication = lifecycle
 	controlGroup, err := a.Control.EnableReplication(cfg)
@@ -260,6 +277,10 @@ func (a *App) WriteClusterSeed(path string) error {
 	if a.replication == nil {
 		return model.Fail(model.Unavailable)
 	}
+	retired, err := a.restoredSourceIdentities()
+	if err != nil {
+		return err
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	for _, g := range a.replication.groups {
@@ -276,11 +297,25 @@ func (a *App) WriteClusterSeed(path string) error {
 	if err != nil {
 		return err
 	}
-	raw, err := json.Marshal(ClusterSeed{Version: 1, Control: controlSeed, ControlApplication: model.Uint64(application), ControlPhysical: model.Uint64(position.Applied), ControlTerm: model.Uint64(position.Term), Data: dataSeed})
+	raw, err := json.Marshal(ClusterSeed{Version: 1, Control: controlSeed, ControlApplication: model.Uint64(application), ControlPhysical: model.Uint64(position.Applied), ControlTerm: model.Uint64(position.Term), Data: dataSeed, Retired: retired})
 	if err != nil {
 		return err
 	}
 	return durablefs.Exclusive(path, raw)
+}
+
+// restoredSourceIdentities are the node identities of the cluster this installation was restored
+// from (none for an installation no restore built). A restored root seeds nothing until its
+// activation completed: before that its engine is closed and the deletion ledger is not applied.
+func (a *App) restoredSourceIdentities() ([]string, error) {
+	source, restored, err := backup.ReadClusterSource(a.replication.dir)
+	if err != nil || !restored {
+		return nil, err
+	}
+	if !source.Activated || a.Storage.RestoreReady() != nil {
+		return nil, model.Fail(model.Conflict)
+	}
+	return source.Retired, nil
 }
 
 func (a *App) ReplicaNode() *replica.Node {

@@ -116,9 +116,9 @@ func (f *eraseFx) pass() {
 }
 
 // The pass changes no state a reader or a replay can see: the live state is byte for byte what it
-// was, a restart reaches it again, the group keeps taking commands, and what the pass proved
-// is a fact about this process: after a restart the receipt names the journal again until the
-// next pass, which finds the files already clean and proves it.
+// was, a restart reaches it again, the group keeps taking commands, and the proof the pass left is
+// durable (replica machine_proof.go): after a restart the receipt does not name the journal
+// again, and a damaged proof record is no proof.
 func TestRedactedControlJournalLeavesTheStateAndSurvivesARestart(t *testing.T) {
 	f := newEraseFx(t)
 	const gone, kept = "CANARYRESTART0d2b86a7c41e9", "CANARYRKEPT51f0aa93c7de1b"
@@ -173,8 +173,41 @@ func TestRedactedControlJournalLeavesTheStateAndSurvivesARestart(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	if got := reopened.ResidualStores(); len(got) != 0 {
+		t.Fatalf("a restart must keep the durable proof the pass left (replica machine.proof): %v", got)
+	}
+	if err = reopened.RedactRetainedControlCommands(f.ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := reopened.ResidualStores(); len(got) != 0 {
+		t.Fatalf("after a second pass on the restarted node: %v", got)
+	}
+	if err = reopened.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// A damaged proof record is no proof: the receipt names the journal again until a pass.
+	proof := filepath.Join(f.dir, "raft-control", "machine.proof")
+	raw, err := os.ReadFile(proof)
+	if err != nil {
+		t.Fatalf("the pass left no durable proof: %v", err)
+	}
+	raw[len(raw)-1] ^= 0xff
+	if err = os.WriteFile(proof, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err = control.Open(f.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	if _, err = auth.NewService(auth.AuthDependencies{Control: reopened}); err != nil {
+		t.Fatal(err)
+	}
+	if err = reopened.EnableSingle(f.ctx, filepath.Join(f.dir, "raft-control")); err != nil {
+		t.Fatal(err)
+	}
 	if got := reopened.ResidualStores(); !reflect.DeepEqual(got, []string{control.ResidualControlJournal}) {
-		t.Fatalf("a restart must withdraw the proof (it is a fact about the process): %v", got)
+		t.Fatalf("a damaged proof record must be no proof: %v", got)
 	}
 	if err = reopened.RedactRetainedControlCommands(f.ctx); err != nil {
 		t.Fatal(err)

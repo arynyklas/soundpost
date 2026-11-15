@@ -16,39 +16,56 @@ import (
 )
 
 // Decision D4. The control journal is cut onto a snapshot and compacted every 4096 commands or
-// 64 MiB, independent of any deletion. Before it, a store that never erased anything kept every
-// command it ever committed (every control command carries the whole next state): measured on a
-// 682-command history, a 269 MB raft log.
+// 8 MiB of applied entry data (D4 said 64 MiB; wave 6 lowered the byte bound after measuring a
+// replay past the startup budget, see cadence.go), independent of any deletion. Before it, a store
+// that never erased anything kept every command it ever committed (every control command carries
+// the whole next state): measured on a 682-command history, a 269 MB raft log.
 
 func TestControlJournalCadenceIsTheApprovedOne(t *testing.T) {
-	if DefaultJournalCadence.Commands != 4096 || DefaultJournalCadence.Bytes != 64<<20 {
-		t.Fatalf("D4: 4096 commands or 64 MiB, have %+v", DefaultJournalCadence)
+	if DefaultJournalCadence.Commands != 4096 || DefaultJournalCadence.Bytes != 8<<20 {
+		t.Fatalf("D4 as amended in wave 6: 4096 commands or 8 MiB, have %+v", DefaultJournalCadence)
 	}
 }
 
 // enableSingleWith is EnableSingle with the journal cadence chosen by the caller.
 func enableSingleWith(t *testing.T, s *Store, directory string, cadence replica.Cadence) {
 	t.Helper()
+	enableSingleTimed(t, s, directory, cadence)
+}
+
+// enableSingleTimed is enableSingleWith and reports where the time went: EnableReplication opens the
+// journal (WAL parse, snapshot restore, rebuildKnown) and replays the committed tail through the
+// machine; Campaign and Ready then only elect and run one ReadIndex round.
+func enableSingleTimed(t testing.TB, s *Store, directory string, cadence replica.Cadence) openPhases {
+	t.Helper()
 	var id model.ID
 	if err := s.View(context.Background(), func(st State) error { id = st.Installation; return nil }); err != nil {
 		t.Fatal(err)
 	}
+	var p openPhases
 	local := replica.NewLoopback()
+	began := time.Now()
 	group, err := s.EnableReplication(replica.Config{ID: 1, Group: id, Directory: directory, Transport: local, Cadence: cadence, Members: replica.Members{Revision: 1, Nodes: []replica.Member{{ID: 1, Address: "https://single.invalid", NodeIdentity: "single", FailureDomain: "local-disk"}}}})
+	p.enable = time.Since(began)
 	if err != nil {
 		local.Close()
 		t.Fatal(err)
 	}
 	s.repl.local = local
+	began = time.Now()
 	if err = local.Register(group); err == nil {
 		err = group.Campaign()
 	}
+	p.campaign = time.Since(began)
+	began = time.Now()
 	if err == nil {
 		err = group.Ready(context.Background())
 	}
+	p.ready = time.Since(began)
 	if err != nil {
 		t.Fatal(err)
 	}
+	return p
 }
 
 type stormResult struct {
@@ -130,8 +147,8 @@ func storm(t *testing.T, commands int, cadence replica.Cadence, wait bool) storm
 	return res
 }
 
-// The same storm at a cadence of 100 commands (the in-suite size; the approved 4096 / 64 MiB run
-// is TestControlCommitStormMeasure).
+// The same storm at a cadence of 100 commands (the in-suite size; the default 4096 commands / 8 MiB
+// run is TestControlCommitStormMeasure).
 func TestControlCommitStormJournalIsBoundedWithoutAnyDeletion(t *testing.T) {
 	const commands = 130
 	cadence := replica.Cadence{Commands: 100}

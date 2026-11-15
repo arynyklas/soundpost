@@ -657,6 +657,37 @@ func (s *Store) localState() (st State, err error) {
 	return
 }
 
+// localStateAt is localState together with the physical index of the replicated command that
+// produced it, read in one transaction (a command's state and its index commit together).
+func (s *Store) localStateAt() (st State, physical uint64, err error) {
+	err = s.db.View(func(tx *bolt.Tx) error {
+		if json.Unmarshal(tx.Bucket([]byte("control")).Get([]byte("state")), &st) != nil {
+			return model.Fail(model.Corrupt)
+		}
+		physical = appliedPhysical(tx)
+		return nil
+	})
+	return
+}
+
+// appliedPhysical is the physical index of the last replicated command the store applied (0 for
+// a store that applied none).
+func appliedPhysical(tx *bolt.Tx) uint64 {
+	if meta := tx.Bucket([]byte("replica_control")); meta != nil {
+		return readWatermark(meta.Get([]byte("physical")))
+	}
+	return 0
+}
+
+// appliedIndex is appliedPhysical in a read transaction of its own.
+func (s *Store) appliedIndex() (physical uint64, err error) {
+	err = s.db.View(func(tx *bolt.Tx) error {
+		physical = appliedPhysical(tx)
+		return nil
+	})
+	return
+}
+
 // ResidualStores names the local control stores that can still hold a copy of
 // erased control payloads right now (same contract as storage.Engine.
 // ResidualStores; it reads this node only and never blocks on consensus):

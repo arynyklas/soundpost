@@ -3,11 +3,17 @@
 package control_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
+	"runtime/pprof"
+	"sort"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -273,16 +279,21 @@ func TestAnAttestationDoesNotMoveAuthorityRevision(t *testing.T) {
 // voter, until the voter has scrubbed, redacted and attested once more.
 func TestAnAttestationIsSupersededByASnapshotInstall(t *testing.T) {
 	v := newControlVoters(t)
+	w := v.watch(installTestBudget())
 	const gone = "CANARYATTESTINSTALL0d2b86a7c41e"
+	w.at("fixture: erasure with voter 3 idle")
 	v.erasedWithVoter3Idle(gone)
+	w.at("attest on voters 1 and 2, finish on voter 3")
 	v.attest(1)
 	v.attest(2)
 	v.finish(3)
 	if got := v.receiptOn(1); len(got) != 0 {
 		t.Fatalf("fixture invalid: every voter attested and the receipt names %v", got)
 	}
+	w.at("cut voter 3 off")
 	v.mesh.cut(3, true)
 	var lead uint64 // the fixture's passes move leadership: find the leader among the connected voters
+	w.at("wait for a leader among voters 1 and 2")
 	v.eventually("a leader among voters 1 and 2", func() bool {
 		for _, id := range []uint64{1, 2} {
 			if st := v.stores[id].ReplicaGroup().Status(); st.Leader == id && st.ID == id {
@@ -292,6 +303,7 @@ func TestAnAttestationIsSupersededByASnapshotInstall(t *testing.T) {
 		}
 		return false
 	})
+	w.at("wait until the leader serves writes (Fence)")
 	v.eventually("the leader serves writes", func() bool {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
@@ -299,6 +311,7 @@ func TestAnAttestationIsSupersededByASnapshotInstall(t *testing.T) {
 		return err == nil
 	})
 	for i := range 60 { // voter 3 never receives these commands; a commit retries while leadership settles
+		w.at(fmt.Sprintf("commit %d of 60 while voter 3 is cut off", i+1))
 		v.eventually("a commit while voter 3 is cut off", func() bool {
 			return v.stores[1].Update(context.Background(), func(st *control.State) error {
 				if st.Quotas == nil {
@@ -309,14 +322,18 @@ func TestAnAttestationIsSupersededByASnapshotInstall(t *testing.T) {
 			}) == nil
 		})
 	}
+	w.at(fmt.Sprintf("cut the journal of leader %d (cutControl)", lead))
 	v.fx[lead].cutControl() // the leader's journal no longer holds what voter 3 needs: it will be sent a snapshot
+	w.at("reconnect voter 3 and wait for it to reach the newest revision")
 	v.mesh.cut(3, false)
 	v.await(3, v.mustRevision(1))
 	// The install withdrew voter 3's proof and owes its file a scrub: voter 1's receipt says so.
+	w.at("wait for voter 1's receipt to name the residue of the install")
 	v.eventually("voter 1's receipt names the residue of the voter that installed a snapshot", func() bool {
 		got := v.receiptOn(1)
 		return contains(got, control.ResidualControlJournal) && contains(got, control.ResidualControlState)
 	})
+	w.at("read the attestation facts")
 	if j, s := v.facts(1, 3); j || s {
 		t.Fatalf("voter 3's attestation outlived the install: journal=%v state=%v", j, s)
 	}
@@ -329,19 +346,239 @@ func TestAnAttestationIsSupersededByASnapshotInstall(t *testing.T) {
 			t.Fatalf("voter %d's attestation was withdrawn by voter 3's install: journal=%v state=%v", id, j, s)
 		}
 	}
+	w.at("voter 3 scrubs, redacts and attests again (finish)")
 	v.finish(3)
+	w.at("converge")
 	v.converge()
+	w.at("final receipts on every voter")
 	for id := uint64(1); id <= 3; id++ {
 		if got := v.receiptOn(id); len(got) != 0 {
 			t.Fatalf("voter 3 scrubbed, redacted and attested again: the receipt answered by voter %d names %v", id, got)
 		}
 	}
 	v.noResidue(gone, 3)
+	w.stop()
 }
 
-// A process that restarted holds no redaction proof (it is memory), so it withdraws what it
-// attested and states it again from its next pass.
-func TestARestartedVoterWithdrawsItsAttestationUntilItsNextPass(t *testing.T) {
+// installTestBudget is how long TestAnAttestationIsSupersededByASnapshotInstall may take before its
+// watchdog reports where it is waiting (the test has been seen to take 20 to 35 s alone, and to hang
+// once past a 200 s wrapper, undiagnosed).
+func installTestBudget() time.Duration {
+	if raceEnabled {
+		return 300 * time.Second
+	}
+	return 120 * time.Second
+}
+
+// voterWatch is a watchdog over one voter test. The test names the step it is in (at); if the test
+// is still running when the budget lapses, the watchdog reports, from its own goroutine, the step it
+// is in and for how long, the steps that finished with their durations, each voter's replica status
+// and the stacks of every goroutine that is inside this module, then fails the test. The report is
+// what a hang past the budget leaves behind: with it a timeout names where it waited, not only that
+// it did. It never stops the test; go test's own timeout still ends a test that never returns.
+type voterWatch struct {
+	mu      sync.Mutex
+	t       failer
+	stores  map[uint64]*control.Store
+	began   time.Time
+	step    string
+	stepAt  time.Time
+	done    []string
+	stopped bool
+	timer   *time.Timer
+}
+
+// failer is what a watchdog reports to: the test, or a recorder in the watchdog's own test.
+type failer interface {
+	Errorf(format string, args ...any)
+}
+
+// watch arms the watchdog; it is disarmed by stop and when the test ends. A test that fails (a
+// fixture helper gave up) logs the same report when it ends, so a failure names the step it was in.
+func (v *controlVoters) watch(budget time.Duration) *voterWatch {
+	v.t.Helper()
+	w := newVoterWatch(v.t, v.stores, budget)
+	v.t.Cleanup(w.stop)
+	v.t.Cleanup(func() {
+		if v.t.Failed() {
+			w.mu.Lock()
+			defer w.mu.Unlock()
+			v.t.Logf("%s", w.describe("the test failed"))
+		}
+	})
+	return w
+}
+
+func newVoterWatch(t failer, stores map[uint64]*control.Store, budget time.Duration) *voterWatch {
+	w := &voterWatch{t: t, stores: map[uint64]*control.Store{}, began: time.Now()}
+	for id, s := range stores {
+		w.stores[id] = s
+	}
+	w.stepAt = w.began
+	w.timer = time.AfterFunc(budget, func() { w.report(budget) })
+	return w
+}
+
+// at records that the test moved on to step.
+func (w *voterWatch) at(step string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	now := time.Now()
+	if w.step != "" {
+		w.done = append(w.done, fmt.Sprintf("%8.1fs  %s", now.Sub(w.stepAt).Seconds(), w.step))
+	}
+	w.step, w.stepAt = step, now
+}
+
+func (w *voterWatch) stop() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.stopped = true
+	w.timer.Stop()
+}
+
+// within runs f and reports whether it returned inside d (a status call that blocks on the group's
+// lock is itself the finding).
+func within(d time.Duration, f func()) bool {
+	finished := make(chan struct{})
+	go func() { f(); close(finished) }()
+	select {
+	case <-finished:
+		return true
+	case <-time.After(d):
+		return false
+	}
+}
+
+func (w *voterWatch) report(budget time.Duration) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.stopped {
+		return
+	}
+	w.t.Errorf("%s", w.describe(fmt.Sprintf("WATCHDOG: the test is still running %v after it began (budget %v)", time.Since(w.began).Round(time.Second), budget)))
+}
+
+// describe is the report: the headline, the step the test is in, the steps that finished, each
+// voter's state and the stacks of the goroutines inside this module. The caller holds w.mu.
+func (w *voterWatch) describe(headline string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s; step %q began %.1fs ago\n", headline, w.step, time.Since(w.stepAt).Seconds())
+	b.WriteString("steps finished (seconds in each):\n")
+	for _, line := range w.done {
+		b.WriteString("  " + line + "\n")
+	}
+	ids := make([]uint64, 0, len(w.stores))
+	for id := range w.stores {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	for _, id := range ids {
+		s := w.stores[id]
+		if s == nil || s.ReplicaGroup() == nil {
+			fmt.Fprintf(&b, "voter %d: no replication group\n", id)
+			continue
+		}
+		var st replica.Status
+		var rev model.Revision
+		var revErr error
+		if !within(2*time.Second, func() { st = s.ReplicaGroup().Status() }) {
+			fmt.Fprintf(&b, "voter %d: Status blocked for 2s (the group's lock is held)\n", id)
+			continue
+		}
+		readDone := within(3*time.Second, func() {
+			revErr = s.View(context.Background(), func(cs control.State) error { rev = cs.Revision; return nil })
+		})
+		switch {
+		case !readDone:
+			fmt.Fprintf(&b, "voter %d: id=%d leader=%d term=%d commit=%d applied=%d last=%d; a linearizable read is still blocked after 3s\n", id, st.ID, st.Leader, st.Term, st.Commit, st.Applied, st.LastIndex)
+		case revErr != nil:
+			fmt.Fprintf(&b, "voter %d: id=%d leader=%d term=%d commit=%d applied=%d last=%d; read failed: %v\n", id, st.ID, st.Leader, st.Term, st.Commit, st.Applied, st.LastIndex, revErr)
+		default:
+			fmt.Fprintf(&b, "voter %d: id=%d leader=%d term=%d commit=%d applied=%d last=%d revision=%d\n", id, st.ID, st.Leader, st.Term, st.Commit, st.Applied, st.LastIndex, rev)
+		}
+	}
+	var stacks bytes.Buffer
+	_ = pprof.Lookup("goroutine").WriteTo(&stacks, 2)
+	b.WriteString("goroutines inside this module (the rest are runtime and test machinery):\n")
+	kept := 0
+	for _, g := range strings.Split(stacks.String(), "\n\n") {
+		if !strings.Contains(g, "soundpost/internal/") || strings.Contains(g, "voterWatch).describe") {
+			continue
+		}
+		if kept++; kept > 40 || b.Len() > 120<<10 {
+			b.WriteString("  ... more goroutines not shown\n")
+			break
+		}
+		b.WriteString(g + "\n\n")
+	}
+	return b.String()
+}
+
+// recorder is a failer that keeps what it was told.
+type recorder struct {
+	mu  sync.Mutex
+	got []string
+}
+
+func (r *recorder) Errorf(format string, args ...any) {
+	r.mu.Lock()
+	r.got = append(r.got, fmt.Sprintf(format, args...))
+	r.mu.Unlock()
+}
+
+func (r *recorder) reports() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.got...)
+}
+
+// parkedInTheWatchdogTest waits for release: the stack the watchdog must show for a goroutine that
+// does not return.
+//
+//go:noinline
+func parkedInTheWatchdogTest(release <-chan struct{}) { <-release }
+
+// A voter test that stalls past its budget has to say where: the step it was in, the steps that
+// finished, every voter's state and the stacks of the goroutines inside this module; a test that
+// finished in time (stop) says nothing.
+func TestAVoterTestWatchdogNamesTheStepAndWhereTheGoroutinesWait(t *testing.T) {
+	rec := &recorder{}
+	w := newVoterWatch(rec, map[uint64]*control.Store{7: nil}, 50*time.Millisecond)
+	defer w.stop()
+	w.at("the first step")
+	w.at("the step that hangs")
+	release := make(chan struct{})
+	defer close(release)
+	go parkedInTheWatchdogTest(release)
+	deadline := time.Now().Add(10 * time.Second)
+	for len(rec.reports()) == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	reports := rec.reports()
+	if len(reports) != 1 {
+		t.Fatalf("a stalled test produced %d watchdog reports, want 1", len(reports))
+	}
+	for _, want := range []string{`step "the step that hangs"`, "the first step", "voter 7: no replication group", "parkedInTheWatchdogTest"} {
+		if !strings.Contains(reports[0], want) {
+			t.Fatalf("the watchdog report does not contain %q:\n%s", want, reports[0])
+		}
+	}
+
+	quiet := &recorder{}
+	finished := newVoterWatch(quiet, nil, 30*time.Millisecond)
+	finished.at("a step")
+	finished.stop()
+	time.Sleep(150 * time.Millisecond)
+	if got := quiet.reports(); len(got) != 0 {
+		t.Fatalf("a watchdog that was stopped reported anyway: %s", got[0])
+	}
+}
+
+// The redaction proof is durable (replica machine.proof): a process that restarted over a record
+// its pass left keeps what it attested. A restart over a missing record holds no proof, so it
+// withdraws what it attested and states it again from its next pass.
+func TestARestartedVoterKeepsItsAttestationOnlyWithItsDurableProof(t *testing.T) {
 	v := newControlVoters(t)
 	const gone = "CANARYATTESTRESTART0d2b86a7c41e"
 	v.erasedWithVoter3Idle(gone)
@@ -352,7 +589,19 @@ func TestARestartedVoterWithdrawsItsAttestationUntilItsNextPass(t *testing.T) {
 		t.Fatalf("fixture invalid: %v", got)
 	}
 	v.restart(3)
-	v.eventually("voter 3's journal attestation is withdrawn by its restart", func() bool {
+	time.Sleep(2 * time.Second) // a withdrawal, if the restart caused one, would have been committed by now
+	if j, s := v.facts(1, 3); !j || !s {
+		t.Fatalf("a restart over the durable proof withdrew voter 3's attestation: journal=%v state=%v", j, s)
+	}
+	if got := v.receiptOn(1); len(got) != 0 {
+		t.Fatalf("a restarted voter holds its durable proof and the receipt names %v", got)
+	}
+
+	if err := os.Remove(filepath.Join(v.dirs[3], "raft-control", "machine.proof")); err != nil {
+		t.Fatalf("the pass left no durable proof: %v", err)
+	}
+	v.restart(3)
+	v.eventually("voter 3's journal attestation is withdrawn by a restart without its proof", func() bool {
 		j, _ := v.facts(1, 3)
 		return !j
 	})

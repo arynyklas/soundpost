@@ -45,11 +45,25 @@ import (
 // to write, roll back or even verify this journal. Restore needs the sealing
 // key and the trusted public key (AuthorityKeys.Restricted) to read it.
 const (
-	authorityRoot   = "authority/ROOT"
-	authorityHeads  = "authority/head/"
+	authorityRoot  = "authority/ROOT"
+	authorityHeads = "authority/head/"
+	// authorityFormat is the first record format: every record holds the WHOLE ledger (O(D^2)
+	// bytes in D deletions). authorityDelta is the current one: a record holds the tombstones
+	// appended since the record before it, and every record whose sequence is a power of two
+	// is a checkpoint holding the whole ledger, which a reader checks against the deltas it
+	// replayed. Journals of the first format stay readable; every writer appends the second.
 	authorityFormat = 1
+	authorityDelta  = 2
 	maxChain        = 1 << 20
+
+	kindDelta      = "delta"
+	kindCheckpoint = "checkpoint"
 )
+
+// checkpointAt reports whether the record at sequence is a checkpoint. Powers of two keep the
+// checkpoints' total size linear in the number of deletions (their sizes sum to under twice
+// the ledger) while a reader never replays more than the ledger's own length.
+func checkpointAt(sequence uint64) bool { return sequence >= 2 && sequence&(sequence-1) == 0 }
 
 func headName(sequence uint64) string { return fmt.Sprintf("%s%020d", authorityHeads, sequence) }
 
@@ -220,7 +234,8 @@ type headRecord struct {
 	Sequence   uint64         `json:"sequence,string"`
 	Prev       model.Hash     `json:"prev"`
 	Generation uint64         `json:"generation,string"`
-	Tombstones uint64         `json:"tombstones,string"`
+	Tombstones uint64         `json:"tombstones,string"` // the ledger's total after this record
+	Kind       string         `json:"kind,omitempty"`    // authorityDelta records only
 	Payload    model.Hash     `json:"payload_sha256"`
 	At         model.UnixNano `json:"at_ns"`
 	KeyID      string         `json:"key_id"`
@@ -229,8 +244,16 @@ type headRecord struct {
 	Signature  []byte         `json:"signature,omitempty"`
 }
 
+// headPayload is the sealed payload of an authorityFormat record: the whole ledger.
 type headPayload struct {
 	Ledger     replica.Ledger          `json:"ledger"`
+	Tombstones []model.DeletePredicate `json:"tombstones"`
+}
+
+// deltaPayload is the sealed payload of an authorityDelta record: the ledger entries and
+// tombstones appended by a delta, or all of them in a checkpoint.
+type deltaPayload struct {
+	Entries    []replica.LedgerEntry   `json:"entries"`
 	Tombstones []model.DeletePredicate `json:"tombstones"`
 }
 
@@ -365,7 +388,9 @@ func (a *Authority) Current(ctx context.Context) (CurrentDeletion, error) {
 	}
 	out := CurrentDeletion{Installation: root.Installation, Root: rootDigest, Head: AuthorityHead{Authority: root.Authority, Digest: rootDigest, At: root.CreatedAt}, Chain: []model.Hash{}, Ledger: replica.Ledger{Version: 1, Group: root.Installation, Entries: []replica.LedgerEntry{}}, Tombstones: []model.DeletePredicate{}}
 	prev := rootDigest
-	var previousSet map[model.Hash]bool = map[model.Hash]bool{}
+	// The ledger as replayed so far: authorityFormat records replace it (each holds all of it), authorityDelta
+	// records extend it, so a read costs the journal's own size and no tombstone is parsed twice.
+	tombstones, entries, operations := []model.DeletePredicate{}, []replica.LedgerEntry{}, map[model.ID]bool{}
 	for i, name := range names {
 		sequence := uint64(i + 1)
 		if name != headName(sequence) {
@@ -376,7 +401,7 @@ func (a *Authority) Current(ctx context.Context) (CurrentDeletion, error) {
 			return CurrentDeletion{}, err
 		}
 		var rec headRecord
-		if model.StrictJSON(raw, &rec) != nil || !canonical(rec, raw) || rec.Version != authorityFormat || rec.Authority != root.Authority || rec.Sequence != sequence || rec.Prev != prev || rec.KeyID != a.keys.ID || rec.Generation < out.Head.Generation {
+		if model.StrictJSON(raw, &rec) != nil || !canonical(rec, raw) || rec.Version != authorityFormat && rec.Version != authorityDelta || rec.Authority != root.Authority || rec.Sequence != sequence || rec.Prev != prev || rec.KeyID != a.keys.ID || rec.Generation < out.Head.Generation || (rec.Version == authorityFormat) != (rec.Kind == "") {
 			return CurrentDeletion{}, model.Fail(model.Corrupt)
 		}
 		signature := rec.Signature
@@ -392,19 +417,59 @@ func (a *Authority) Current(ctx context.Context) (CurrentDeletion, error) {
 		if err != nil || digestOf(plain) != rec.Payload {
 			return CurrentDeletion{}, model.Fail(model.Corrupt)
 		}
-		var payload headPayload
-		if model.StrictJSON(plain, &payload) != nil || uint64(len(payload.Tombstones)) != rec.Tombstones || validateLedger(root.Installation, rec.Generation, payload.Ledger, payload.Tombstones) != nil {
-			return CurrentDeletion{}, model.Fail(model.Corrupt)
+		if rec.Version == authorityFormat {
+			var payload headPayload
+			if model.StrictJSON(plain, &payload) != nil || uint64(len(payload.Tombstones)) != rec.Tombstones || validateLedger(root.Installation, rec.Generation, payload.Ledger, payload.Tombstones) != nil {
+				return CurrentDeletion{}, model.Fail(model.Corrupt)
+			}
+			if !subset(digestSet(tombstones), digestSet(payload.Tombstones)) {
+				return CurrentDeletion{}, model.Fail(model.Corrupt) // a deletion was ever forgotten
+			}
+			tombstones, entries = payload.Tombstones, payload.Ledger.Entries
+			operations = make(map[model.ID]bool, len(tombstones))
+			for _, t := range tombstones {
+				operations[t.Operation] = true
+			}
+		} else {
+			var payload deltaPayload
+			if model.StrictJSON(plain, &payload) != nil || len(payload.Entries) != len(payload.Tombstones) {
+				return CurrentDeletion{}, model.Fail(model.Corrupt)
+			}
+			// A delta holds only what this record appends. A checkpoint holds the whole ledger: it must
+			// begin with exactly the ledger the deltas before it built and then append like a delta.
+			skip := 0
+			switch rec.Kind {
+			case kindCheckpoint:
+				skip = len(tombstones)
+				if len(payload.Tombstones) < skip {
+					return CurrentDeletion{}, model.Fail(model.Corrupt)
+				}
+				for j := range skip {
+					if payload.Entries[j] != entries[j] || payload.Tombstones[j].Digest() != entries[j].Hash {
+						return CurrentDeletion{}, model.Fail(model.Corrupt)
+					}
+				}
+			case kindDelta:
+			default:
+				return CurrentDeletion{}, model.Fail(model.Corrupt)
+			}
+			for j := skip; j < len(payload.Tombstones); j++ {
+				t, entry := payload.Tombstones[j], payload.Entries[j]
+				if t.Validate() != nil || entry.Index != uint64(len(tombstones)+1) || entry.Hash != t.Digest() || operations[t.Operation] {
+					return CurrentDeletion{}, model.Fail(model.Corrupt)
+				}
+				operations[t.Operation] = true
+				tombstones, entries = append(tombstones, t), append(entries, entry)
+			}
+			if uint64(len(tombstones)) != rec.Tombstones {
+				return CurrentDeletion{}, model.Fail(model.Corrupt)
+			}
 		}
-		set := digestSet(payload.Tombstones)
-		if !subset(previousSet, set) {
-			return CurrentDeletion{}, model.Fail(model.Corrupt) // a deletion was ever forgotten
-		}
-		previousSet = set
 		prev = digestOf(raw)
 		out.Chain = append(out.Chain, prev)
 		out.Head = AuthorityHead{Authority: root.Authority, Sequence: sequence, Generation: rec.Generation, Digest: prev, At: rec.At}
-		out.Ledger, out.Tombstones = payload.Ledger, payload.Tombstones
+		out.Ledger = replica.Ledger{Version: 1, Group: root.Installation, Generation: rec.Generation, Entries: entries}
+		out.Tombstones = tombstones
 	}
 	return out, nil
 }
@@ -480,7 +545,7 @@ func (a *Authority) CheckpointDeletion(ctx context.Context, g retention.LedgerGe
 		if subset(want, have) && g.Generation <= cur.Head.Generation {
 			return retention.AuthorityReceipt{Generation: cur.Head.Generation, Head: cur.Head.Digest, At: cur.Head.At}, nil
 		}
-		if !subset(have, want) || g.Generation < cur.Head.Generation {
+		if !subset(have, want) || !extends(cur.Ledger.Entries, g.Ledger.Entries) || g.Generation < cur.Head.Generation {
 			return retention.AuthorityReceipt{}, model.Fail(model.Conflict)
 		}
 		receipt, err := a.advance(ctx, cur, g)
@@ -492,26 +557,57 @@ func (a *Authority) CheckpointDeletion(ctx context.Context, g retention.LedgerGe
 	return retention.AuthorityReceipt{}, model.Fail(model.Conflict)
 }
 
-func (a *Authority) advance(ctx context.Context, cur CurrentDeletion, g retention.LedgerGeneration) (retention.AuthorityReceipt, error) {
-	sequence := cur.Head.Sequence + 1
-	plain, err := json.Marshal(headPayload{Ledger: g.Ledger, Tombstones: g.Tombstones})
+// extends reports whether next begins with exactly the entries of head, in order: the ledger is
+// append-only, so a delta is always a suffix.
+func extends(head, next []replica.LedgerEntry) bool {
+	if len(next) < len(head) {
+		return false
+	}
+	for i := range head {
+		if head[i] != next[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// sealRecord builds the signed, sealed authorityDelta record for sequence that takes the ledger
+// from `have` tombstones to g's: a delta of the entries after the first `have`, or the whole
+// ledger when the sequence is a checkpoint.
+func (a *Authority) sealRecord(authority model.ID, sequence uint64, prev model.Hash, g retention.LedgerGeneration, have int) (headRecord, []byte, error) {
+	kind, from := kindDelta, have
+	if checkpointAt(sequence) {
+		kind, from = kindCheckpoint, 0
+	}
+	return a.sealPayload(authority, sequence, prev, g.Generation, kind, uint64(len(g.Tombstones)), deltaPayload{Entries: g.Ledger.Entries[from:], Tombstones: g.Tombstones[from:]})
+}
+
+// sealPayload seals and signs one authorityDelta record around payload.
+func (a *Authority) sealPayload(authority model.ID, sequence uint64, prev model.Hash, generation uint64, kind string, total uint64, payload deltaPayload) (headRecord, []byte, error) {
+	plain, err := json.Marshal(payload)
 	if err != nil {
-		return retention.AuthorityReceipt{}, model.Fail(model.Invalid)
+		return headRecord{}, nil, model.Fail(model.Invalid)
 	}
 	aead, err := a.keys.seal.aead()
 	if err != nil {
-		return retention.AuthorityReceipt{}, err
+		return headRecord{}, nil, err
 	}
 	nonce := make([]byte, aead.NonceSize())
 	if _, err = rand.Read(nonce); err != nil {
-		return retention.AuthorityReceipt{}, err
+		return headRecord{}, nil, err
 	}
-	rec := headRecord{Version: authorityFormat, Authority: cur.Head.Authority, Sequence: sequence, Prev: cur.Head.Digest, Generation: g.Generation, Tombstones: uint64(len(g.Tombstones)), Payload: digestOf(plain), At: model.UnixNano(a.now().UnixNano()), KeyID: a.keys.ID, Nonce: nonce}
-	rec.Sealed = aead.Seal(nil, nonce, plain, payloadAAD(cur.Head.Authority, sequence, cur.Head.Digest, g.Generation))
+	rec := headRecord{Version: authorityDelta, Authority: authority, Sequence: sequence, Prev: prev, Generation: generation, Tombstones: total, Kind: kind, Payload: digestOf(plain), At: model.UnixNano(a.now().UnixNano()), KeyID: a.keys.ID, Nonce: nonce}
+	rec.Sealed = aead.Seal(nil, nonce, plain, payloadAAD(authority, sequence, prev, generation))
 	if rec.Signature, err = a.sign(rec); err != nil {
-		return retention.AuthorityReceipt{}, err
+		return headRecord{}, nil, err
 	}
 	raw, err := json.Marshal(rec)
+	return rec, raw, err
+}
+
+func (a *Authority) advance(ctx context.Context, cur CurrentDeletion, g retention.LedgerGeneration) (retention.AuthorityReceipt, error) {
+	sequence := cur.Head.Sequence + 1
+	rec, raw, err := a.sealRecord(cur.Head.Authority, sequence, cur.Head.Digest, g, len(cur.Tombstones))
 	if err != nil {
 		return retention.AuthorityReceipt{}, err
 	}

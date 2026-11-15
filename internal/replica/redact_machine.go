@@ -48,10 +48,15 @@ func (g *Group) proofWithdrawn() {
 // MachineRedaction is the state machine's half of redacting its retained commands: given the
 // payload of one retained command it returns the payload to retain instead, and changed=false
 // (replacement ignored) when nothing in it is to be forgotten. It must be a pure function of the
-// payload and of state that does not change while the group lock is held (it is called with the
-// lock held, so it must not call back into the group), idempotent (redacting a replacement
-// changes nothing), and the replacement must be a payload the machine applies to the state the
-// original produces on replay.
+// payload and of the machine's committed state, idempotent (redacting a replacement changes
+// nothing), and the replacement must be a payload the machine applies to the state the original
+// produces on replay.
+//
+// It is called without the group lock held in the pass's first attempts, concurrently with the
+// group's own work, and with it held in the last one; it must not call back into the group. A
+// pass commits only when nothing was applied, appended, cut or compacted since it read the group,
+// and otherwise starts over, calling redact again for every payload: an answer or rule set read
+// from the machine's state is valid only while the machine has applied nothing since it was read.
 type MachineRedaction func(payload []byte) (replacement []byte, changed bool, err error)
 
 // MachineRedactResult is what one RedactMachineCommands call changed (RedactResult.Redacted counts
@@ -91,7 +96,8 @@ type MachineRedactResult struct {
 //
 // ruleSet is an opaque, caller-chosen number stamped on the pass; the caller asks MachineResidue
 // with the rule set that is in force now, and a pass covers every rule set it is not older than.
-// It must not be zero. The proof the pass leaves (MachineResidue) is withdrawn when a snapshot
+// It must not be zero. The proof the pass leaves (MachineResidue) is durable (machine_proof.go: a restart
+// keeps it; a missing or corrupt record is no proof) and is withdrawn, durably, when a snapshot
 // is installed from the leader (it is the leader's retry table as cut) and when a command that
 // was rejected as stale is committed afterwards (it carries the state it was built from).
 // Everything is about THIS voter's copy; other voters redact their own.
@@ -99,6 +105,18 @@ type MachineRedactResult struct {
 // Only commands of kind Control are offered to redact; every other kind is left alone. A
 // redact error, an empty or oversized replacement, or two copies of one command ID that were
 // not proposed with the same payload refuse the whole call before anything is written.
+//
+// The group lock is not held while the pass reads and rewrites: a pass over a journal of a few
+// megabytes takes hundreds of milliseconds, longer than the election timeout of a group that ticks
+// fast, and a leader that can neither tick nor step for that long loses its leadership. The pass
+// takes what it reads under the lock (the retry table's Control commands, the retained log, a
+// handle on the journal and its length), reads and writes the temporary journal without it, and
+// takes the lock again to install the result, but only when nothing was applied, appended, cut,
+// compacted or pinned in between: it is then exactly the pass the lock would have made, over the
+// same state, with the same floor. Otherwise it discards the temporary journal and starts over.
+// The fourth attempt, and any pass over a group with a backup pin live (pin archives are
+// rewritten under the lock), holds the lock throughout, so a group that never stops committing
+// still gets its pass.
 func (g *Group) RedactMachineCommands(ctx context.Context, ruleSet uint64, redact MachineRedaction) (MachineRedactResult, error) {
 	if err := ctx.Err(); err != nil {
 		return MachineRedactResult{}, err
@@ -106,62 +124,184 @@ func (g *Group) RedactMachineCommands(ctx context.Context, ruleSet uint64, redac
 	if ruleSet == 0 || redact == nil {
 		return MachineRedactResult{}, ErrInvalid
 	}
+	g.redactMu.Lock()
+	defer g.redactMu.Unlock()
+	for attempt := 0; ; attempt++ {
+		res, err := g.redactMachineOnce(ruleSet, redact, attempt >= machineRedactUnlockedAttempts)
+		if !errors.Is(err, errRedactRaced) {
+			return res, err
+		}
+	}
+}
+
+// machineRedactUnlockedAttempts is how many times a pass builds its rewrite without the group lock
+// before it builds it under the lock.
+const machineRedactUnlockedAttempts = 3
+
+// errRedactRaced says an unlocked attempt found the group changed between its read and its commit.
+var errRedactRaced = errors.New("replica: the group changed while a redaction pass read it")
+
+// machineInputs is what one attempt of RedactMachineCommands reads from the group, taken with g.mu
+// held: the Control commands the retry table holds a payload for, the retained log, and a handle on
+// the journal and its length. currentLocked says whether the group is still exactly that.
+type machineInputs struct {
+	applied   uint64
+	completed []Entry // by ID
+	log       []*pb.Entry
+	wal       *os.File
+	walInfo   os.FileInfo
+	walSize   int64
+}
+
+func (g *Group) machineInputsLocked() (*machineInputs, error) {
+	in := &machineInputs{applied: g.applied}
+	for _, c := range g.completed {
+		if c.Entry.Kind == Control && len(c.Entry.Payload) > 0 { // an empty payload is a retry-table entry kept by digest
+			in.completed = append(in.completed, c.Entry)
+		}
+	}
+	sort.Slice(in.completed, func(i, j int) bool { return bytes.Compare(in.completed[i].ID[:], in.completed[j].ID[:]) < 0 })
+	var err error
+	if in.log, err = g.memoryLogLocked(); err != nil {
+		return nil, err
+	}
+	if in.wal, err = os.Open(filepath.Join(g.dir, "ready.wal")); err != nil {
+		return nil, err
+	}
+	if in.walInfo, err = in.wal.Stat(); err != nil {
+		in.wal.Close()
+		return nil, err
+	}
+	in.walSize = in.walInfo.Size()
+	return in, nil
+}
+
+func (in *machineInputs) close() { in.wal.Close() }
+
+// journal is the journal as the attempt read it: its first walSize bytes.
+func (in *machineInputs) journal() io.Reader { return io.NewSectionReader(in.wal, 0, in.walSize) }
+
+// currentLocked reports whether the group still holds exactly what the attempt read: the same
+// applied index, the same retained log, the same journal file at the same length (a cut or a
+// compaction replaces the file, an append lengthens it) and no backup pin. g.mu is held.
+func (in *machineInputs) currentLocked(g *Group) (bool, error) {
+	if g.applied != in.applied || len(g.pins) != 0 {
+		return false, nil
+	}
+	log, err := g.memoryLogLocked()
+	if err != nil {
+		return false, err
+	}
+	if len(log) != len(in.log) {
+		return false, nil
+	}
+	for i, ent := range log {
+		if old := in.log[i]; ent != old && (ent.GetIndex() != old.GetIndex() || ent.GetTerm() != old.GetTerm() || ent.GetType() != old.GetType() || !bytes.Equal(ent.GetData(), old.GetData())) {
+			return false, nil
+		}
+	}
+	now, err := g.disk.file.Stat()
+	if err != nil {
+		return false, err
+	}
+	return os.SameFile(now, in.walInfo) && now.Size() == in.walSize, nil
+}
+
+func (g *Group) redactMachineOnce(ruleSet uint64, redact MachineRedaction, locked bool) (MachineRedactResult, error) {
 	g.mu.Lock()
-	defer g.mu.Unlock()
+	held := true
+	defer func() {
+		if held {
+			g.mu.Unlock()
+		}
+	}()
 	if g.failed || g.closed {
 		return MachineRedactResult{}, ErrUnavailable
 	}
-	collect := &machineCollector{redact: redact, memo: map[[32]byte]machineMemo{}, targets: map[model.ID]*redactTarget{}, proposed: map[model.ID]model.Hash{}}
-	completed := make([]model.ID, 0, len(g.completed))
-	for id := range g.completed {
-		completed = append(completed, id)
-	}
-	sort.Slice(completed, func(i, j int) bool { return bytes.Compare(completed[i][:], completed[j][:]) < 0 })
-	for _, id := range completed {
-		if err := collect.consider(g.completed[id].Entry); err != nil {
-			return MachineRedactResult{}, err
-		}
-	}
-	if err := g.eachMemoryEntryLocked(func(ent *pb.Entry) error {
-		if e, ok := parseEntry(ent); ok {
-			return collect.consider(e)
-		}
-		return nil
-	}); err != nil {
+	in, err := g.machineInputsLocked()
+	if err != nil {
 		return MachineRedactResult{}, err
 	}
-	if err := scanJournalEntries(filepath.Join(filepath.Dir(g.disk.file.Name()), "ready.wal"), func(ent *pb.Entry) error {
-		if e, ok := parseEntry(ent); ok {
-			return collect.consider(e)
-		}
-		return nil
-	}); err != nil {
-		return MachineRedactResult{}, err
+	defer in.close()
+	locked = locked || len(g.pins) > 0
+	if !locked {
+		g.mu.Unlock()
+		held = false
 	}
-	for _, p := range g.pins {
-		if err := scanPinArchive(p.path, func(ent *pb.Entry) error {
-			if e, ok := parseEntry(ent); ok {
-				return collect.consider(e)
-			}
+	// relock takes the group lock back before anything is installed and reports errRedactRaced when
+	// the group is no longer what the attempt read; staged, when not nil, is discarded then.
+	relock := func(staged *stagedJournal) error {
+		if locked {
 			return nil
-		}); err != nil {
+		}
+		g.mu.Lock()
+		held = true
+		var err error
+		if g.failed || g.closed {
+			err = ErrUnavailable
+		} else if current, cerr := in.currentLocked(g); cerr != nil {
+			err = cerr
+		} else if !current {
+			err = errRedactRaced
+		}
+		if err != nil && staged != nil {
+			staged.discard()
+		}
+		return err
+	}
+
+	collect := &machineCollector{redact: redact, memo: map[[32]byte]machineMemo{}, targets: map[model.ID]*redactTarget{}, proposed: map[model.ID]model.Hash{}}
+	for _, e := range in.completed {
+		if err := collect.consider(e); err != nil {
 			return MachineRedactResult{}, err
+		}
+	}
+	for _, ent := range in.log {
+		if e, ok := parseEntry(ent); ok {
+			if err := collect.consider(e); err != nil {
+				return MachineRedactResult{}, err
+			}
+		}
+	}
+	if err := scanJournalEntries(in.journal(), func(ent *pb.Entry) error {
+		if e, ok := parseEntry(ent); ok {
+			return collect.consider(e)
+		}
+		return nil
+	}); err != nil {
+		return MachineRedactResult{}, err
+	}
+	if locked { // the pin archives are only read and rewritten under the lock
+		for _, p := range g.pins {
+			if err := scanPinArchive(p.path, func(ent *pb.Entry) error {
+				if e, ok := parseEntry(ent); ok {
+					return collect.consider(e)
+				}
+				return nil
+			}); err != nil {
+				return MachineRedactResult{}, err
+			}
 		}
 	}
 	targets := collect.targets
 	var res MachineRedactResult
 	if len(targets) == 0 {
-		g.machineRules, g.machineFloor = ruleSet, g.applied
+		if err := relock(nil); err != nil {
+			return MachineRedactResult{}, err
+		}
+		if err := g.storeProof(ruleSet, g.applied); err != nil {
+			return MachineRedactResult{}, err
+		}
 		res.Floor = g.applied
 		return res, nil
 	}
 
-	memory, err := g.redactedLogLocked(targets)
+	memory, err := redactedLog(in.log, targets)
 	if err != nil {
 		return MachineRedactResult{}, err
 	}
 	journalChanges := 0
-	if err = scanJournalEntries(filepath.Join(filepath.Dir(g.disk.file.Name()), "ready.wal"), func(ent *pb.Entry) error {
+	if err = scanJournalEntries(in.journal(), func(ent *pb.Entry) error {
 		replaced, rerr := redactedEntry(ent, targets)
 		if replaced != nil {
 			journalChanges++
@@ -173,11 +313,22 @@ func (g *Group) RedactMachineCommands(ctx context.Context, ruleSet uint64, redac
 	if err = g.trip(HookRedactBegin); err != nil {
 		return MachineRedactResult{}, err
 	}
-	if res.Pins, err = g.redactPinsLocked(targets); err != nil {
+	if locked {
+		if res.Pins, err = g.redactPinsLocked(targets); err != nil {
+			return MachineRedactResult{}, err
+		}
+	}
+	var staged *stagedJournal
+	if len(memory) > 0 || journalChanges > 0 {
+		if staged, err = g.stageRedactedJournal(in.journal(), targets); err != nil {
+			return MachineRedactResult{}, err
+		}
+	}
+	if err = relock(staged); err != nil {
 		return MachineRedactResult{}, err
 	}
-	if len(memory) > 0 || journalChanges > 0 {
-		if res.Journal, err = g.rewriteJournalRedacted(targets); err != nil {
+	if staged != nil {
+		if res.Journal, err = g.installRedactedJournal(staged); err != nil {
 			var torn *tornError
 			if errors.As(err, &torn) {
 				g.failStop(FailMaintenance)
@@ -216,7 +367,10 @@ func (g *Group) RedactMachineCommands(ctx context.Context, ruleSet uint64, redac
 		}
 	}
 	g.sendSnap = nil // built from the retry table
-	g.machineRules, g.machineFloor = ruleSet, g.applied
+	if err = g.storeProof(ruleSet, g.applied); err != nil {
+		g.failStop(FailMaintenance)
+		return MachineRedactResult{}, err
+	}
 	res.Floor = g.applied
 	return res, nil
 }
@@ -288,14 +442,21 @@ func (g *Group) eachMemoryEntryLocked(visit func(*pb.Entry) error) error {
 	return nil
 }
 
-// scanJournalEntries reads ready.wal and calls visit for every entry of every record, in file
-// order, superseded entries included. It writes nothing.
-func scanJournalEntries(path string, visit func(*pb.Entry) error) error {
-	in, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
+// memoryLogLocked returns the entries of the retained in-memory log. g.mu is held.
+func (g *Group) memoryLogLocked() ([]*pb.Entry, error) {
+	var out []*pb.Entry
+	err := g.eachMemoryEntryLocked(func(ent *pb.Entry) error {
+		out = append(out, ent)
+		return nil
+	})
+	return out, err
+}
+
+// scanJournalEntries reads the journal records from in (ready.wal, or a prefix of it) and calls
+// visit for every entry of every record, in file order, superseded entries included. It writes
+// nothing.
+func scanJournalEntries(in io.Reader, visit func(*pb.Entry) error) error {
+	var err error
 	for {
 		var header [16]byte
 		if _, err = io.ReadFull(in, header[:]); err == io.EOF {

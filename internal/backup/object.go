@@ -203,6 +203,31 @@ func (d *LocalDestination) List(ctx context.Context, prefix string) ([]string, e
 	return out, nil
 }
 
+// Deleter is implemented by destinations that can remove an object. The backup and the authority
+// never use it (a Destination is create-only); ExpireBackups does, for the objects of backups past
+// their manifest's expiry and of attempts that were abandoned.
+type Deleter interface {
+	Delete(ctx context.Context, name string) error
+}
+
+// Delete removes name; an absent object is not an error.
+func (d *LocalDestination) Delete(ctx context.Context, name string) error {
+	if err := ValidName(name); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	path := d.path(name)
+	if err := os.Remove(path); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return model.Fail(model.Unavailable)
+	}
+	return durablefs.SyncDir(filepath.Dir(path))
+}
+
 // ---- S3-compatible destination -------------------------------------------------
 
 // S3Config describes a path-style S3-compatible bucket. Endpoints must be HTTPS;
@@ -347,6 +372,27 @@ func (d *S3Destination) Open(ctx context.Context, name string) (io.ReadCloser, e
 	}
 	resp.Body.Close()
 	return nil, model.Fail(model.Unavailable)
+}
+
+// Delete removes name; an absent object is not an error (S3 answers 204 for one).
+func (d *S3Destination) Delete(ctx context.Context, name string) error {
+	if err := ValidName(name); err != nil {
+		return err
+	}
+	req, err := d.request(ctx, http.MethodDelete, d.key(name), nil, nil, 0, nil, emptyPayload)
+	if err != nil {
+		return err
+	}
+	resp, err := d.client.Do(req)
+	if err != nil {
+		return model.Fail(model.Unavailable)
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
+	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNoContent || resp.StatusCode == http.StatusNotFound {
+		return nil
+	}
+	return model.Fail(model.Unavailable)
 }
 
 type s3List struct {

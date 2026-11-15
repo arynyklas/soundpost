@@ -22,6 +22,24 @@ import (
 )
 
 type replicatedEngine struct{ groups [64]*replica.Group }
+
+// slotRetryMax is how many applied commands of a slot its replication group keeps in the retry table
+// (replica.Config.RetryMax; the 24 h window of replica.DefaultRetryWindow also applies). The table
+// answers a command retried under the ID it was proposed with, which only the proposer's own call
+// (seconds long) does, and every slot command also carries the application index it expects, so a
+// retry the table no longer recognizes is refused as stale, never applied twice. The table keeps a
+// fixed-size record per command (slotMachine.RetryByDigest), so a slot's snapshot envelope and its
+// journal head are bounded by this number, not by the slot's history.
+var slotRetryMax = 1024
+
+// RetryByDigest makes the slot machine a replica.DigestRetryMachine for every kind of command: the
+// retry table keeps the receipt and the digest of the proposed payload, never the payload (a batch
+// or an artifact fragment is up to hundreds of KiB, which the table kept for every command ever
+// committed).
+func (m *slotMachine) RetryByDigest(replica.Kind) bool { return true }
+
+var _ replica.DigestRetryMachine = (*slotMachine)(nil)
+
 type slotMachine struct {
 	// validated is the last artifact fragment that Validate decoded: the proposer validates the
 	// payload and Apply decodes the same bytes once they commit, and a fragment is hundreds of KiB.
@@ -409,6 +427,9 @@ func (e *Engine) EnableReplication(c replica.Config, seed *ReplicationSeed, auth
 		cfg.Machine = machine
 		cfg.Validate = machine.Validate
 		cfg.Fault = e.trip
+		if cfg.RetryMax <= 0 {
+			cfg.RetryMax = slotRetryMax
+		}
 		var err error
 		if seed != nil {
 			cfg.Seed = seed.Slots[slot]

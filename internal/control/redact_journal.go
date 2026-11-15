@@ -63,23 +63,25 @@ func (s *Store) controlJournalResidue(st State) ([]string, error) {
 }
 
 // controlRedactor is the redaction function handed to the replication layer. It reads the
-// committed state once, under the group lock the replication layer holds while it runs (no
-// command is applied meanwhile), so every retained command is redacted against the same state
-// and the pass's floor is the index that state was at.
+// committed state when it is first asked, and again whenever the store has applied a command since
+// it read: the replication layer commits a pass only when nothing was applied while it read the
+// group, and a pass that starts over asks again, so every retained command of the pass that commits
+// is redacted against one state, and the pass's floor is the index that state was at.
 type controlRedactor struct {
-	s      *Store
-	loaded bool
-	rules  State // the current state with only the finished deletions
-	live   State
-	canon  []byte
+	s       *Store
+	loaded  bool
+	applied uint64 // the physical index the state was read at
+	rules   State  // the current state with only the finished deletions
+	live    State
+	canon   []byte
 }
 
 func (r *controlRedactor) load() error {
-	live, err := r.s.localState()
+	live, applied, err := r.s.localStateAt()
 	if err != nil {
 		return err
 	}
-	r.live = live
+	r.live, r.applied = live, applied
 	if r.canon, err = model.CanonicalJSON(live); err != nil {
 		return err
 	}
@@ -95,7 +97,11 @@ func (r *controlRedactor) load() error {
 }
 
 func (r *controlRedactor) redact(payload []byte) ([]byte, bool, error) {
-	if !r.loaded {
+	applied, err := r.s.appliedIndex()
+	if err != nil {
+		return nil, false, err
+	}
+	if !r.loaded || applied != r.applied {
 		if err := r.load(); err != nil {
 			return nil, false, err
 		}
@@ -150,11 +156,11 @@ func withoutPins(residue []string) []string {
 // the state of THIS voter when the pass reads its rules, so the same command holds different
 // redacted bytes on two voters, and their snapshot envelopes (hence the snap-<index>-<checksum>
 // names and Manifest.Checksum) differ until every voter has run every pass: nothing may
-// compare them across voters. And the rules are read once, when the pass starts: an erasure
-// that commits while it runs leaves its covered payload in the ready.wal the pass rewrites and
-// in the snapshot it cuts, so a pass can introduce a copy of a payload committed after its
-// rules were read. The receipt stays honest (ResidualStores re-reads the live state) and the
-// next pass removes it.
+// compare them across voters. And the rules are those of the state at the pass's floor: an
+// erasure that commits after the pass installed its rewrite leaves its covered payload in the
+// ready.wal the pass rewrote and in the snapshot it cuts, so a pass can leave a copy of a payload
+// committed after its rules were read. The receipt stays honest (ResidualStores re-reads the live
+// state) and the next pass removes it.
 func (s *Store) RedactRetainedControlCommands(ctx context.Context) error {
 	g := s.ReplicaGroup()
 	if g == nil {

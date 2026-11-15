@@ -126,6 +126,27 @@ type PinReaper interface {
 	DropPin(id string) error
 }
 
+type enginePins struct{ e *storage.Engine }
+
+// EnginePins adapts the engine's durable journal pins (storage.Engine.JournalPins and
+// DropJournalPin: every group's pins, after their lapsed leases were dropped) to the PinReaper
+// Config.Pins takes, so Service.Reap can free the pins of a backup that died mid-flight.
+func EnginePins(e *storage.Engine) PinReaper { return enginePins{e} }
+
+func (p enginePins) Pins() ([]Pin, error) {
+	infos, err := p.e.JournalPins()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Pin, len(infos))
+	for i, in := range infos {
+		out[i] = Pin{ID: in.ID, Group: in.Group}
+	}
+	return out, nil
+}
+
+func (p enginePins) DropPin(id string) error { return p.e.DropJournalPin(id) }
+
 // Attempt is the durable marker of a backup that has begun.
 type Attempt struct {
 	ID              model.ID
@@ -223,6 +244,9 @@ type SnapshotSet struct {
 	Gaps        []GapAttestation
 	Authority   CurrentDeletion
 	CreatedAt   time.Time
+	// Topology is the replication membership the set was cut under; nil when the
+	// installation's replication was not supplied (Config.Replication).
+	Topology *Topology
 }
 
 // Config wires a backup Service.
@@ -239,6 +263,11 @@ type Config struct {
 	Pins       PinReaper // optional; without it Reap cannot clean a dead attempt
 	Clock      func() time.Time
 	Retention  time.Duration // backup lifetime; default and maximum 30 days
+	// Replication reports the status of every replication group of this node (control and
+	// the 64 data groups: appcore.App.ReplicationStatus). Optional; when supplied the
+	// manifest records the topology and a backup is refused while the groups disagree on
+	// their membership, a membership change is in flight or a group has failed.
+	Replication func() []replica.Status
 }
 
 // Service takes encrypted installation backups.
@@ -316,6 +345,10 @@ func (s *Service) once(ctx context.Context, scope auth.Scope, dest Destination) 
 	if err = s.cfg.Control.View(ctx, func(model.ControlState) error { return nil }); err != nil {
 		return BackupManifest{}, err
 	}
+	topology, err := s.topology()
+	if err != nil {
+		return BackupManifest{}, err
+	}
 	seed, revision, err := s.cfg.Control.ReplicationSeed()
 	if err != nil {
 		return BackupManifest{}, err
@@ -383,13 +416,74 @@ func (s *Service) once(ctx context.Context, scope auth.Scope, dest Destination) 
 		return BackupManifest{}, err
 	}
 	sealedOK = true
+	// The backup states one membership: it is refused when it moved while the cut was sealed.
+	if after, err := s.topology(); err != nil || !sameTopology(topology, after) {
+		if err != nil {
+			return BackupManifest{}, err
+		}
+		return BackupManifest{}, errRestart
+	}
 	attested, err := attestations(sealed.Bundle.Replay.Intervals, facts, state.Revision)
 	if err != nil {
 		return BackupManifest{}, err
 	}
-	manifest, err = s.Backup(ctx, scope, SnapshotSet{ControlSeed: seed, Sealed: sealed, Gaps: attested, Authority: current, CreatedAt: started}, dest)
+	manifest, err = s.Backup(ctx, scope, SnapshotSet{ControlSeed: seed, Sealed: sealed, Gaps: attested, Authority: current, CreatedAt: started, Topology: topology}, dest)
 	success = err == nil
 	return manifest, err
+}
+
+// topology is the membership this node's groups agree on, nil when the service was not given
+// Config.Replication.
+func (s *Service) topology() (*Topology, error) {
+	if s.cfg.Replication == nil {
+		return nil, nil
+	}
+	return TopologyOf(s.cfg.Replication())
+}
+
+func sameTopology(a, b *Topology) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	if a.Voters != b.Voters || a.SourceNode != b.SourceNode || a.MembersRevision != b.MembersRevision || len(a.Members) != len(b.Members) {
+		return false
+	}
+	for i := range a.Members {
+		if a.Members[i] != b.Members[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// TopologyOf derives the Topology of a node from the status of its groups: the control
+// group and the 64 data groups must all be open and name the same member set at the same
+// revision, with voters only (a learner being added or a replacement in flight is a membership
+// change; a backup taken across one would name a membership that never existed). One voter,
+// or the three of the distributed layout, are the only shapes the engine implements.
+func TopologyOf(statuses []replica.Status) (*Topology, error) {
+	if len(statuses) != 65 {
+		return nil, model.Fail(model.Unavailable)
+	}
+	first := statuses[0]
+	for _, st := range statuses {
+		if st.Failed || st.ID == 0 || st.ID != first.ID || st.Members.Revision != first.Members.Revision || len(st.Members.Nodes) != len(first.Members.Nodes) {
+			return nil, model.Fail(model.Unavailable)
+		}
+		for i, n := range st.Members.Nodes {
+			if n.Learner || n != first.Members.Nodes[i] {
+				return nil, model.Fail(model.Unavailable)
+			}
+		}
+	}
+	t := &Topology{Voters: model.Uint64(len(first.Members.Nodes)), SourceNode: model.Uint64(first.ID), MembersRevision: model.Uint64(first.Members.Revision)}
+	for _, n := range first.Members.Nodes {
+		t.Members = append(t.Members, TopologyMember{ID: model.Uint64(n.ID), Identity: n.NodeIdentity, FailureDomain: n.FailureDomain})
+	}
+	if err := t.validate(); err != nil {
+		return nil, model.Fail(model.Unavailable)
+	}
+	return t, nil
 }
 
 // checkAuthorityCoversControl proves the authority this backup will bind has not
@@ -554,6 +648,11 @@ func (s *Service) Backup(ctx context.Context, scope auth.Scope, set SnapshotSet,
 	id := model.NewID()
 	out := &export{s: s, ctx: ctx, id: id, dest: dest, deks: map[string][]byte{}}
 	defer out.wipe()
+	// Dated before the first object: a backup that never gets a manifest is told apart from one
+	// still uploading by this stamp (ExpireBackups).
+	if err = putStarted(ctx, dest, id, set.CreatedAt); err != nil {
+		return BackupManifest{}, err
+	}
 	manifest := BackupManifest{Version: ManifestVersion, ID: id, CreatedAt: model.UnixNano(set.CreatedAt.UnixNano())}
 	manifest.ExpiresAt = manifest.CreatedAt + model.UnixNano(s.cfg.Retention)
 	for _, k := range []struct {
@@ -631,6 +730,10 @@ func (s *Service) Backup(ctx context.Context, scope auth.Scope, set SnapshotSet,
 		return BackupManifest{}, err
 	}
 	manifest.Gaps = append([]GapAttestation{}, set.Gaps...)
+	if err = set.Topology.validate(); err != nil {
+		return BackupManifest{}, err
+	}
+	manifest.Topology = set.Topology
 	manifest.CompletedAt = model.UnixNano(s.cfg.Clock().UnixNano())
 	// The backup must be restorable before it is published: re-verify what it asserts.
 	if err = verifyGaps(manifest, bundle.Replay.Intervals, state); err != nil {
@@ -841,6 +944,10 @@ type restoreState struct {
 	QuotaStarted   model.UnixNano   `json:"quota_started_ns,omitempty"`
 	QuotaCommitted model.UnixNano   `json:"quota_committed_ns,omitempty"`
 	Activated      model.UnixNano   `json:"activated_ns,omitempty"`
+	// Source is the replication membership the backup was taken from (nil for a backup
+	// taken without it). Its node identities are retired for any cluster seeded from this
+	// root (ClusterSource).
+	Source *Topology `json:"source,omitempty"`
 }
 
 const restoreStateFile = "restore.json"
@@ -851,6 +958,32 @@ const restoreStateFile = "restore.json"
 func IsRestoredRoot(dir string) bool {
 	info, err := os.Stat(filepath.Join(dir, restoreStateFile))
 	return err == nil && info.Mode().IsRegular()
+}
+
+// ClusterSource is what a restored root tells the cluster seeded from it: whether activation
+// completed (a root that still holds its restore hold, or whose deletion ledger is not yet
+// applied, must never seed another installation) and the node identities of the cluster the
+// backup was taken from, which the new cluster must not reuse.
+type ClusterSource struct {
+	Backup    model.ID
+	Activated bool
+	Retired   []string
+}
+
+// ReadClusterSource reads dir's restore bookkeeping. ok is false for a root no restore built.
+func ReadClusterSource(dir string) (source ClusterSource, ok bool, err error) {
+	raw, err := os.ReadFile(filepath.Join(dir, restoreStateFile))
+	if errors.Is(err, os.ErrNotExist) {
+		return ClusterSource{}, false, nil
+	}
+	if err != nil {
+		return ClusterSource{}, false, err
+	}
+	var state restoreState
+	if model.StrictJSON(raw, &state) != nil || state.Version != 1 {
+		return ClusterSource{}, false, model.Fail(model.Corrupt)
+	}
+	return ClusterSource{Backup: state.Backup, Activated: state.Activated != 0, Retired: state.Source.Retired()}, true, nil
 }
 
 // checkAuthority is the single place a restore decides an authority is the
@@ -1021,7 +1154,7 @@ func (r *Restorer) Restore(ctx context.Context, m BackupManifest, root Destinati
 	if err != nil {
 		return RestoreReport{}, err
 	}
-	state2 := restoreState{Version: 1, Backup: m.ID, Control: m.Control.Revision, Cert: cert, Deletion: observed, Installation: m.Control.Installation, At: model.UnixNano(r.cfg.Clock().UnixNano())}
+	state2 := restoreState{Version: 1, Backup: m.ID, Control: m.Control.Revision, Cert: cert, Deletion: observed, Installation: m.Control.Installation, At: model.UnixNano(r.cfg.Clock().UnixNano()), Source: m.Topology}
 	raw, err := json.Marshal(state2)
 	if err != nil {
 		return RestoreReport{}, err

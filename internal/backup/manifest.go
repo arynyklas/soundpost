@@ -104,6 +104,62 @@ type GapAttestation struct {
 	Digest          model.Hash     `json:"digest"`
 }
 
+// TopologyMember is one voter of the replication group the backup was taken from.
+type TopologyMember struct {
+	ID            model.Uint64 `json:"id"`
+	Identity      string       `json:"identity"`
+	FailureDomain string       `json:"failure_domain"`
+}
+
+// Topology records which replicated installation a backup was taken from: the
+// voter that was snapshotted (the three voters of a cluster hold the same applied
+// state, so the backup is one quorum-verified voter's cut, not three copies), the
+// membership every one of its 65 groups (control and 64 data) agreed on at the
+// cut, and the node identities that membership names. A restore into a new
+// cluster retires these identities (appcore.ClusterSeed.Retired): the restored
+// cluster must use fresh ones, so no node of the lost cluster can authenticate to it.
+type Topology struct {
+	Voters          model.Uint64     `json:"voters"`
+	SourceNode      model.Uint64     `json:"source_node"`
+	MembersRevision model.Uint64     `json:"members_revision"`
+	Members         []TopologyMember `json:"members"`
+}
+
+// Retired lists the node identities of the source membership.
+func (t *Topology) Retired() []string {
+	if t == nil {
+		return nil
+	}
+	out := make([]string, 0, len(t.Members))
+	for _, m := range t.Members {
+		out = append(out, m.Identity)
+	}
+	return out
+}
+
+// validate is the structural check of a manifest's topology: one voter, or the
+// three of the distributed layout, every member named once, the source node a member.
+func (t *Topology) validate() error {
+	if t == nil {
+		return nil
+	}
+	if t.Voters != 1 && t.Voters != 3 || uint64(len(t.Members)) != uint64(t.Voters) || t.MembersRevision == 0 {
+		return model.Fail(model.Corrupt)
+	}
+	ids, names, source := map[model.Uint64]bool{}, map[string]bool{}, false
+	for _, m := range t.Members {
+		if m.ID == 0 || m.Identity == "" || m.FailureDomain == "" || ids[m.ID] || names[m.Identity] {
+			return model.Fail(model.Corrupt)
+		}
+		ids[m.ID], names[m.Identity] = true, true
+		source = source || m.ID == t.SourceNode
+	}
+	if !source {
+		return model.Fail(model.Corrupt)
+	}
+	return nil
+}
+
 // BackupManifest is the authenticated description of one backup. It is plain
 // JSON protected by an HMAC under a key derived from the data KEK; everything it
 // names is verified again from the objects themselves.
@@ -120,6 +176,7 @@ type BackupManifest struct {
 	Gaps        []GapAttestation `json:"gaps"`
 	Encryption  Encryption       `json:"encryption"`
 	Objects     []ObjectRef      `json:"objects"`
+	Topology    *Topology        `json:"topology,omitempty"`
 	MAC         model.Hash       `json:"mac"`
 }
 
@@ -154,6 +211,9 @@ func ParseManifest(raw []byte) (BackupManifest, error) {
 func (m BackupManifest) validate() error {
 	if m.Version != ManifestVersion || m.ID == (model.ID{}) || m.Encryption.Algorithm != AlgorithmAES256GCM || m.Encryption.ChunkSize != chunkSize || m.ExpiresAt <= m.CreatedAt || len(m.Data.Applied) != 64 || len(m.Data.Processed) != 64 {
 		return model.Fail(model.Corrupt)
+	}
+	if err := m.Topology.validate(); err != nil {
+		return err
 	}
 	purposes := map[string]bool{}
 	ids := map[string]bool{}

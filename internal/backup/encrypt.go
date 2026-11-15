@@ -3,6 +3,7 @@
 package backup
 
 import (
+	"bytes"
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
@@ -41,6 +42,8 @@ const (
 	tagSize            = 16
 	keyContext         = "soundpost/backup/object/v1\x00"
 	wrapContext        = "soundpost/backup/keywrap/v1\x00"
+	wrapContextV2      = "soundpost/backup/keywrap/v2"
+	wrapMagic          = "SPW2"
 )
 
 var keyID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
@@ -201,24 +204,49 @@ func newDataKey() ([]byte, error) {
 }
 
 // wrapKey seals a data key for storage next to the backup. aad binds backup and purpose.
+//
+// Each wrap uses its own key: HKDF-SHA256 over the key-encryption key, a fresh random 16-byte salt
+// and the wrap context, with a fixed all-zero GCM nonce. No (key, nonce) pair is ever reused, so
+// the birthday bound a random 96-bit nonce under one long-lived KEK carries (about 2^32 wraps) is
+// gone; the salt collides only after about 2^64 wraps. Layout: wrapMagic || salt || ciphertext.
+// Wraps of the first layout (a random nonce, then ciphertext under the KEK itself) still unwrap.
 func wrapKey(kek Key, dek, aad []byte) ([]byte, error) {
 	if !kek.valid() || len(dek) != 32 {
 		return nil, model.Fail(model.Invalid)
 	}
-	g, err := kek.aead()
+	salt := make([]byte, saltSize)
+	if _, err := rand.Read(salt); err != nil {
+		return nil, err
+	}
+	g, err := wrapAEAD(kek, salt)
 	if err != nil {
 		return nil, err
 	}
-	nonce := make([]byte, g.NonceSize(), g.NonceSize()+len(dek)+g.Overhead())
-	if _, err = rand.Read(nonce); err != nil {
+	out := append([]byte(wrapMagic), salt...)
+	return g.Seal(out, make([]byte, g.NonceSize()), dek, append([]byte(wrapContext), aad...)), nil
+}
+
+func wrapAEAD(kek Key, salt []byte) (cipher.AEAD, error) {
+	sub, err := hkdf.Key(sha256.New, kek.material(), salt, wrapContextV2, 32)
+	if err != nil {
 		return nil, err
 	}
-	return g.Seal(nonce, nonce, dek, append([]byte(wrapContext), aad...)), nil
+	defer clear(sub)
+	return gcm(sub)
 }
 
 func unwrapKey(kek Key, wrapped, aad []byte) ([]byte, error) {
 	if !kek.valid() {
 		return nil, model.Fail(model.Invalid)
+	}
+	if bytes.HasPrefix(wrapped, []byte(wrapMagic)) && len(wrapped) >= len(wrapMagic)+saltSize+tagSize {
+		salt := wrapped[len(wrapMagic) : len(wrapMagic)+saltSize]
+		if g, err := wrapAEAD(kek, salt); err == nil {
+			if dek, err := g.Open(nil, make([]byte, g.NonceSize()), wrapped[len(wrapMagic)+saltSize:], append([]byte(wrapContext), aad...)); err == nil && len(dek) == 32 {
+				return dek, nil
+			}
+		}
+		// a first-layout wrap whose random nonce happens to begin with the magic falls through
 	}
 	g, err := kek.aead()
 	if err != nil {

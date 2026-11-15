@@ -97,8 +97,11 @@ func TestEraseRemovesTheDeletedBytesFromTheReplicationLayerAndKeepsTheReceipt(t 
 	barrierAll(t, x.e, pred)
 	for _, c := range []string{eraseCanary, otherCanary} {
 		hits := x.raftHits(c)
-		if !inHits(hits, "ready.wal") || !inHits(hits, "envelope.json") {
-			t.Fatalf("fixture invalid: %s is not in the journal and the snapshot envelope before the erasure: %v", c, hits)
+		if !inHits(hits, "ready.wal") {
+			t.Fatalf("fixture invalid: %s is not in the journal before the erasure: %v", c, hits)
+		}
+		if inHits(hits, "envelope.json") {
+			t.Fatalf("the retry table serialized into the snapshot envelope holds %s: it must keep a digest, not the payload: %v", c, hits)
 		}
 	}
 	if report, err := x.e.EraseDeleted(ctx, []model.DeletePredicate{pred}, nil); err != nil || report.Records < 2 {
@@ -110,7 +113,7 @@ func TestEraseRemovesTheDeletedBytesFromTheReplicationLayerAndKeepsTheReceipt(t 
 		if inHits(hits, "ready.wal") {
 			t.Fatalf("the journal still holds %s right after the erasure: %v", c, hits)
 		}
-		if !inHits(hits, "envelope.json") {
+		if len(pinnedCopyHits(hits)) == 0 {
 			t.Fatalf("fixture invalid: the routine snapshot cannot have been rewritten in place: %v", hits)
 		}
 	}
@@ -256,8 +259,8 @@ func TestEraseInTwoRoundsRedactsTheNarrowerCommand(t *testing.T) {
 	}
 	x.maintain(first)
 	x.requireNoCopy("after the first round", eraseCanary)
-	if hits := x.raftHits(keptName); !inHits(hits, "envelope.json") {
-		t.Fatalf("fixture invalid: the record the first round keeps must still be in the retry table and the snapshot: %v", hits)
+	if hits := x.raftHits(keptName); len(pinnedCopyHits(hits)) == 0 {
+		t.Fatalf("fixture invalid: the record the first round keeps must still be in the snapshot: %v", hits)
 	}
 	second := x.rangePredicate(40, 60, model.Metric)
 	barrierAll(t, x.e, second)
@@ -364,8 +367,11 @@ func TestErasureAtTheLastCutIndexReportsTheSealedJournalHead(t *testing.T) {
 	if first, _ := group.JournalRange(); first <= floor {
 		t.Fatalf("fixture invalid: the journal retains entries at or before the floor (first %d floor %d)", first, floor)
 	}
-	if !inHits(x.raftHits(eraseCanary), "ready.wal") {
-		t.Fatal("fixture invalid: the sealed journal head no longer carries the payload")
+	// The retry table keeps digests and the machine state is compact, so the head holds no payload
+	// of its own; it is still reported, because the replication layer cannot see inside a machine's
+	// state and a head cut at or before the floor may carry what an earlier build wrote.
+	if inHits(x.raftHits(eraseCanary), "ready.wal") {
+		t.Fatal("the journal head carries a payload: the retry table must keep digests, not payloads")
 	}
 	residue, err := group.Residue(floor)
 	if err != nil || strings.Join(residue, ",") != ResidualRaftJournal+","+ResidualRaftSnapshots {
@@ -396,8 +402,8 @@ func TestEraseOfAnArtifactRootRedactsTheReplicationLayer(t *testing.T) {
 	}
 	x.cut() // the routine snapshot, sealed before anyone asked for a deletion
 	hits := x.raftHits(canary)
-	if !inHits(hits, "ready.wal") || !inHits(hits, "envelope.json") {
-		t.Fatalf("fixture invalid: the fragments are not in the journal and the snapshot envelope: %v", hits)
+	if !inHits(hits, "ready.wal") || len(pinnedCopyHits(hits)) == 0 || inHits(hits, "envelope.json") {
+		t.Fatalf("fixture invalid: the fragments must be in the journal and the snapshot's window files, and not in the envelope's retry table: %v", hits)
 	}
 	pred := model.DeletePredicate{Operation: model.NewID(), Org: m.Org, Mode: model.DeleteRetireProject, Projects: []model.ID{m.Project}, Generation: 1}
 	barrierAll(t, x.e, pred)

@@ -126,6 +126,8 @@ func (g *Group) RedactCompleted(ctx context.Context, requests []Redaction) (Reda
 	if len(wanted) == 0 {
 		return RedactResult{}, nil
 	}
+	g.redactMu.Lock() // the journal's temporary file is shared with RedactMachineCommands, which builds it before it takes g.mu
+	defer g.redactMu.Unlock()
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.failed || g.closed {
@@ -149,6 +151,17 @@ func (g *Group) RedactCompleted(ctx context.Context, requests []Redaction) (Reda
 		targets[id] = &redactTarget{replacement: bytes.Clone(replacement)}
 	}
 	res.Absent = len(wanted) - len(found)
+	if res.Absent > 0 {
+		// The retry table is bounded (DigestRetryMachine): a command it has evicted can still have
+		// a copy in the retained log, the journal file (which mirrors it) or a pin archive. Those
+		// copies are located by their application index, so the redaction does not depend on the
+		// table having kept the command.
+		located, err := g.locateRetainedLocked(wanted, found, targets)
+		if err != nil {
+			return RedactResult{}, err
+		}
+		res.Absent -= located
+	}
 	if len(targets) == 0 {
 		return res, nil
 	}
@@ -209,6 +222,68 @@ func (g *Group) RedactCompleted(ctx context.Context, requests []Redaction) (Reda
 	return res, nil
 }
 
+// locateRetainedLocked finds the commands of the requested application indexes that the retry
+// table did not hold (found lists those it did), among the entries of the retained log and of the
+// pin archives, adds them to targets and returns how many requested indexes it located. The retained
+// log mirrors the journal file, so a command located there is rewritten in the file too. The log is
+// read only when the application indexes it spans include a requested one the table lacks, so a
+// group whose old redactions lie below its retained log pays nothing for them. g.mu is held.
+func (g *Group) locateRetainedLocked(wanted map[uint64][]byte, found map[uint64]bool, targets map[model.ID]*redactTarget) (int, error) {
+	located := map[uint64]bool{}
+	visit := func(ent *pb.Entry) error {
+		e, ok := parseEntry(ent)
+		if !ok {
+			return nil
+		}
+		replacement, ok := wanted[e.ApplicationIndex]
+		if !ok || found[e.ApplicationIndex] {
+			return nil
+		}
+		if e.Kind != Data && e.Kind != Artifact {
+			return ErrInvalid
+		}
+		if targets[e.ID] == nil {
+			targets[e.ID] = &redactTarget{replacement: bytes.Clone(replacement)}
+		}
+		located[e.ApplicationIndex] = true
+		return nil
+	}
+	var low uint64
+	errLow := errors.New("replica: first application index found")
+	if err := g.eachMemoryEntryLocked(func(ent *pb.Entry) error {
+		if e, ok := parseEntry(ent); ok {
+			low = e.ApplicationIndex
+			return errLow
+		}
+		return nil
+	}); err != nil && !errors.Is(err, errLow) {
+		return 0, err
+	}
+	inLog := false
+	for index := range wanted {
+		if !found[index] && low != 0 && index >= low && index <= g.logApplication {
+			inLog = true
+			break
+		}
+	}
+	if inLog {
+		if err := g.eachMemoryEntryLocked(func(ent *pb.Entry) error {
+			if ent.GetIndex() > g.applied {
+				return nil
+			}
+			return visit(ent)
+		}); err != nil {
+			return 0, err
+		}
+	}
+	for _, p := range g.pins {
+		if err := scanPinArchive(p.path, visit); err != nil {
+			return 0, err
+		}
+	}
+	return len(located), nil
+}
+
 // redactedCommand is e with its payload replaced; Original keeps the digest of the payload the
 // command was first proposed with, across any number of redactions.
 func redactedCommand(e Entry, replacement []byte) Entry {
@@ -241,23 +316,23 @@ func redactedEntry(ent *pb.Entry, targets map[model.ID]*redactTarget) (*pb.Entry
 // redactedLogLocked lists the retained log entries (by physical index) that the redaction
 // replaces.
 func (g *Group) redactedLogLocked(targets map[model.ID]*redactTarget) (map[uint64]*pb.Entry, error) {
-	first, _ := g.memory.FirstIndex()
-	last, _ := g.memory.LastIndex()
+	entries, err := g.memoryLogLocked()
+	if err != nil {
+		return nil, err
+	}
+	return redactedLog(entries, targets)
+}
+
+// redactedLog lists the entries (by physical index) that the redaction replaces.
+func redactedLog(entries []*pb.Entry, targets map[model.ID]*redactTarget) (map[uint64]*pb.Entry, error) {
 	out := map[uint64]*pb.Entry{}
-	for lo := first; lo <= last; {
-		entries, err := g.memory.Entries(lo, last+1, 8<<20)
+	for _, ent := range entries {
+		replaced, err := redactedEntry(ent, targets)
 		if err != nil {
 			return nil, err
 		}
-		for _, ent := range entries {
-			lo = ent.GetIndex() + 1
-			replaced, err := redactedEntry(ent, targets)
-			if err != nil {
-				return nil, err
-			}
-			if replaced != nil {
-				out[ent.GetIndex()] = replaced
-			}
+		if replaced != nil {
+			out[ent.GetIndex()] = replaced
 		}
 	}
 	return out, nil
@@ -289,25 +364,45 @@ func (g *Group) swapLogLocked(replaced map[uint64]*pb.Entry) error {
 // rewriteJournalRedacted streams the journal into a temporary file with the redacted entries
 // substituted, record by record, and atomically renames it over the journal. Records that
 // carry nothing to redact are copied byte for byte; the snapshot and HardState records are
-// untouched. A crash leaves the complete old or the complete new journal.
+// untouched. A crash leaves the complete old or the complete new journal. g.mu is held.
 func (g *Group) rewriteJournalRedacted(targets map[model.ID]*redactTarget) (int, error) {
-	w := g.disk
-	dir := filepath.Dir(w.file.Name())
-	path := filepath.Join(dir, "ready.wal")
-	temp := filepath.Join(dir, journalRedactTemp)
-	if err := os.Remove(temp); err != nil && !os.IsNotExist(err) {
-		return 0, err
-	}
-	in, err := os.Open(path)
+	in, err := os.Open(filepath.Join(g.dir, "ready.wal"))
 	if err != nil {
 		return 0, err
 	}
 	defer in.Close()
-	out, err := os.OpenFile(temp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	staged, err := g.stageRedactedJournal(in, targets)
 	if err != nil {
 		return 0, err
 	}
-	fail := func(err error) (int, error) { out.Close(); return 0, err }
+	return g.installRedactedJournal(staged)
+}
+
+// stagedJournal is a redacted copy of the journal, complete and synced in its temporary file, not
+// yet in place.
+type stagedJournal struct {
+	temp      string
+	rewritten int
+}
+
+// discard removes the staged copy; the journal is untouched. A copy it cannot remove is overwritten
+// by the next redaction and removed by the next Open.
+func (s *stagedJournal) discard() { _ = os.Remove(s.temp) }
+
+// stageRedactedJournal writes the journal records read from in to the temporary file, the redacted
+// entries substituted, and syncs it. It touches no group state, so it needs no lock: in is the
+// journal (or a prefix of it, read through a handle opened while g.mu was held) as its caller
+// captured it, and the caller decides, under g.mu, whether that is still the journal.
+func (g *Group) stageRedactedJournal(in io.Reader, targets map[model.ID]*redactTarget) (*stagedJournal, error) {
+	temp := filepath.Join(g.dir, journalRedactTemp)
+	if err := os.Remove(temp); err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	out, err := os.OpenFile(temp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if err != nil {
+		return nil, err
+	}
+	fail := func(err error) (*stagedJournal, error) { out.Close(); return nil, err }
 	if err = g.trip(HookRedactWrite); err != nil {
 		return fail(err)
 	}
@@ -377,23 +472,31 @@ func (g *Group) rewriteJournalRedacted(targets map[model.ID]*redactTarget) (int,
 		return fail(err)
 	}
 	if err = out.Close(); err != nil {
+		return nil, err
+	}
+	return &stagedJournal{temp: temp, rewritten: rewritten}, nil
+}
+
+// installRedactedJournal renames the staged copy over the journal and reopens the journal handle.
+// g.mu is held, and the staged copy is of the journal as it is now.
+func (g *Group) installRedactedJournal(staged *stagedJournal) (int, error) {
+	w := g.disk
+	path := filepath.Join(g.dir, "ready.wal")
+	if err := g.trip(HookRedactSwitch); err != nil {
 		return 0, err
 	}
-	if err = g.trip(HookRedactSwitch); err != nil {
-		return 0, err
-	}
-	if err = os.Rename(temp, path); err != nil {
+	if err := os.Rename(staged.temp, path); err != nil {
 		return 0, err
 	}
 	// From here the file on disk is the new journal while the open handle (and the retained
 	// in-memory log) still describe the old one: a failure leaves the group torn.
-	if err = g.trip(HookRedactRenamed); err != nil {
+	if err := g.trip(HookRedactRenamed); err != nil {
 		return 0, &tornError{err}
 	}
-	if err = durablefs.SyncDir(dir); err != nil {
+	if err := durablefs.SyncDir(g.dir); err != nil {
 		return 0, &tornError{err}
 	}
-	if err = w.file.Close(); err != nil {
+	if err := w.file.Close(); err != nil {
 		return 0, &tornError{err}
 	}
 	reopened, err := os.OpenFile(path, os.O_RDWR, 0600)
@@ -405,7 +508,7 @@ func (g *Group) rewriteJournalRedacted(targets map[model.ID]*redactTarget) (int,
 		return 0, &tornError{err}
 	}
 	w.file = reopened
-	return rewritten, nil
+	return staged.rewritten, nil
 }
 
 // tornError marks a failure after the journal was replaced: the group's durable log, its open

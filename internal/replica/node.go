@@ -189,6 +189,11 @@ type Config struct {
 	// Domain is the node's FailDomain, shared by every group of the node: a storage failure of
 	// any of them fails them all closed. Nil: the group fails alone.
 	Domain *FailDomain
+	// RebaseInstalled makes a fresh journal that starts from an installed snapshot take its Raft
+	// configuration and membership from Members instead of the snapshot's: a disaster restore
+	// installs snapshots cut in another cluster (other voters, other identities). Never set for
+	// a repair or a join, which keep the leader's configuration.
+	RebaseInstalled bool
 }
 type proposalResult struct {
 	entry CommittedEntry
@@ -243,9 +248,10 @@ type Group struct {
 	pins           map[model.ID]*JournalPin
 	sendSnap       *pb.Snapshot // snapshot for members added after the stored one; never persisted
 	cutMu          sync.Mutex   // one CreateSnapshot at a time: the incremental cut reuses the selected snapshot's files
-	// machineRules and machineFloor are the proof RedactMachineCommands leaves (memory only):
-	// the rule set the last completed pass covered (0: no proof) and the physical index it
-	// finished at. A snapshot install and a stale committed command withdraw it.
+	redactMu       sync.Mutex   // one journal redaction at a time (RedactMachineCommands builds its rewrite before it takes g.mu); taken before g.mu, never while holding it
+	// machineRules and machineFloor are the proof RedactMachineCommands leaves: the rule set
+	// the last completed pass covered (0: no proof) and the physical index it finished at.
+	// Durable (machine_proof.go); a snapshot install and a stale committed command withdraw it.
 	machineRules uint64
 	machineFloor uint64
 	owner        model.ID // this instance of the group: stamps the pins it creates
@@ -313,6 +319,11 @@ func Open(c Config) (*Group, error) {
 		if installed, err = loadInstalledSeed(snaps); err != nil {
 			return nil, err
 		}
+		if installed != nil && c.RebaseInstalled {
+			if err = installed.rebase(c.Members); err != nil {
+				return nil, err
+			}
+		}
 	}
 	seed := c.Seed
 	if seed == nil && installed == nil && c.SeedFunc != nil {
@@ -371,7 +382,8 @@ func Open(c Config) (*Group, error) {
 			return nil, err
 		}
 	}
-	if last, _ := memory.LastIndex(); c.Machine.Applied() > hard.GetCommit() || hard.GetCommit() > last {
+	last, _ := memory.LastIndex()
+	if c.Machine.Applied() > hard.GetCommit() || hard.GetCommit() > last {
 		disk.Close()
 		return nil, ErrJournalBehind
 	}
@@ -381,6 +393,7 @@ func Open(c Config) (*Group, error) {
 		disk.Close()
 		return nil, err
 	}
+	g.loadProof(last)
 	g.raw, err = raft.NewRawNode(&raft.Config{ID: c.ID, ElectionTick: 10, HeartbeatTick: 1, Storage: snapshotSource{MemoryStorage: memory, g: g}, Applied: g.applied, MaxSizePerMsg: 20 << 20, MaxCommittedSizePerReady: 32 << 20, MaxUncommittedEntriesSize: 64 << 20, MaxInflightMsgs: 32, CheckQuorum: true, PreVote: true, ReadOnlyOption: raft.ReadOnlySafe, DisableProposalForwarding: true})
 	if err != nil {
 		disk.Close()

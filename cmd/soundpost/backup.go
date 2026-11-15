@@ -27,9 +27,11 @@ const backupUsage = `usage: soundpost backup <command> [flags]
   authority-init    (--data-dir DIR | --installation ID) --authority-keys FILE <authority destination>
   create            --data-dir DIR --admin-email EMAIL --key-dir DIR --data-kek ID --secret-kek ID
                     --authority-keys FILE <backup destination> <authority destination>
+                    [--mode distributed --node-id N --cluster-config FILE]  (a node of a three-voter cluster)
   list              <backup destination>
+  expire            --key-dir DIR [--abandoned-after DUR] <backup destination>   delete the objects of expired and abandoned backups
   restore           --backup-id ID --root DIR --key-dir DIR --authority-keys FILE <backup destination> <authority destination>
-  activate          --root DIR --authority-keys FILE <authority destination>
+  activate          --root DIR --authority-keys FILE <authority destination> [--cluster-seed-out FILE]
 
 A destination is --<name>-dir DIR, or --<name>-s3-endpoint URL --<name>-s3-region R --<name>-s3-bucket B
 [--<name>-s3-prefix P]; S3 credentials come from the environment variables
@@ -37,7 +39,10 @@ SOUNDPOST_<NAME>_S3_ACCESS_KEY and SOUNDPOST_<NAME>_S3_SECRET_KEY, never from fl
 <backup destination> uses the name "dest", <authority destination> the name "authority".
 The administrator password for create is read from SOUNDPOST_ADMIN_PASSWORD (and the
 optional one-time code from SOUNDPOST_ADMIN_CODE). create, authority-init (with --data-dir)
-and activate open the installation exclusively: stop the server first.`
+and activate open the installation exclusively: stop the server first. With --mode distributed
+create starts this node as a voter of its cluster, whose other voters must be running.
+restore builds a single-voter root; activate --cluster-seed-out writes the seed a new
+three-voter cluster with fresh node identities is started from.`
 
 // cliError is an operator-facing message written by this file: static text that
 // carries no runtime data (no path, key, input value or error text), so it is
@@ -50,9 +55,16 @@ const (
 	errUsage           = cliError(backupUsage)
 	errBadFlags        = cliError("invalid or unknown flag\n\n" + backupUsage)
 	errNoAuthorityKeys = cliError("--authority-keys is required")
-	// errUnsupportedMode is the typed refusal for a distributed node's directory: backup,
-	// restore and activation implement the single-node layout only.
-	errUnsupportedMode = cliError("unsupported_mode: backup, restore and activate support single-node installations only (--mode single); a distributed node's data directory cannot be backed up or restored (see docs/operations/backup-restore.md)")
+	// errUnsupportedMode is the typed refusal for a distributed node's directory where a
+	// single-voter root is required: `restore --root` and `activate --root` build and open a
+	// single-voter installation (a three-voter cluster is seeded from it afterwards), and an
+	// authority is initialized from an installation ID.
+	errUnsupportedMode = cliError("unsupported_mode: this is a distributed node's data directory; restore and activate work on a single-voter root (activate --cluster-seed-out writes the seed for the new cluster) and authority-init takes --installation here (see docs/operations/backup-restore.md)")
+	// errClusterNodeMode is the typed refusal for taking a backup of a distributed node's
+	// directory without joining its cluster: opening it as a single node fails inside the replica
+	// journal, and a backup needs the quorum.
+	errClusterNodeMode = cliError("unsupported_mode: this is a distributed node's data directory; back it up with --mode distributed --node-id N --cluster-config FILE (the node joins its cluster, whose other voters must be running, for the duration of the backup)")
+	errNotClusterNode  = cliError("unsupported_mode: --mode distributed needs the data directory of a node of a distributed installation")
 )
 
 // parseFlags parses a subcommand's flags. A flag error echoes the operator's own
@@ -120,6 +132,8 @@ func runBackup(args []string) error {
 		return backupCreate(args[1:])
 	case "list":
 		return backupList(args[1:])
+	case "expire":
+		return backupExpire(args[1:])
 	case "restore":
 		return backupRestore(args[1:])
 	case "activate":
@@ -307,6 +321,9 @@ func backupAuthorityInit(args []string) error {
 func backupCreate(args []string) error {
 	f := flagSet("create")
 	dataDir := f.String("data-dir", "", "")
+	mode := f.String("mode", "single", "")
+	nodeID := f.Uint64("node-id", 0, "")
+	clusterConfig := f.String("cluster-config", "", "")
 	email := f.String("admin-email", "", "")
 	reason := f.String("reason", "scheduled backup", "")
 	keyDir := f.String("key-dir", "", "")
@@ -322,8 +339,15 @@ func backupCreate(args []string) error {
 	if *dataDir == "" || *email == "" || *keyDir == "" || *dataKEK == "" || *secretKEK == "" {
 		return errUsage
 	}
-	if err := requireSingleNode(*dataDir); err != nil {
+	distributed, err := backup.IsDistributedDirectory(*dataDir)
+	if err != nil {
 		return err
+	}
+	switch {
+	case *mode == "single" && distributed:
+		return errClusterNodeMode
+	case *mode == "distributed" && !distributed:
+		return errNotClusterNode
 	}
 	if *attempts == "" {
 		*attempts = filepath.Join(*dataDir, "backup-attempts")
@@ -337,13 +361,13 @@ func backupCreate(args []string) error {
 		return err
 	}
 	ctx := context.Background()
-	app, err := appcore.Open(*dataDir)
+	app, err := openConfiguredCore(*dataDir, *mode, *clusterConfig, *nodeID)
 	if err != nil {
 		return err
 	}
 	defer app.Close()
 	plane := backup.EngineDataPlane(app.Storage)
-	svc, err := backup.New(backup.Config{Control: app.Control, Data: plane, Processed: backup.AppliedProcessed(plane), Authority: authority, Authorizer: app.Auth, Keys: backup.KeyDir(*keyDir), DataKEK: *dataKEK, SecretKEK: *secretKEK, Attempts: backup.DirAttempts(*attempts), Clock: time.Now})
+	svc, err := backup.New(backup.Config{Control: app.Control, Data: plane, Processed: backup.AppliedProcessed(plane), Authority: authority, Authorizer: app.Auth, Keys: backup.KeyDir(*keyDir), DataKEK: *dataKEK, SecretKEK: *secretKEK, Attempts: backup.DirAttempts(*attempts), Pins: backup.EnginePins(app.Storage), Replication: app.ReplicationStatus, Clock: time.Now})
 	if err != nil {
 		return err
 	}
@@ -370,7 +394,7 @@ func backupCreate(args []string) error {
 	if err != nil {
 		return err
 	}
-	return printJSON(map[string]any{"backup_id": manifest.ID.String(), "created_at_ns": manifest.CreatedAt, "completed_at_ns": manifest.CompletedAt, "expires_at_ns": manifest.ExpiresAt, "duration_ms": time.Since(started).Milliseconds(), "objects": len(manifest.Objects), "control_revision": manifest.Control.Revision, "authority_sequence": manifest.Deletion.Sequence, "authority_generation": manifest.Deletion.Generation, "gaps": len(manifest.Gaps)})
+	return printJSON(map[string]any{"backup_id": manifest.ID.String(), "created_at_ns": manifest.CreatedAt, "completed_at_ns": manifest.CompletedAt, "expires_at_ns": manifest.ExpiresAt, "duration_ms": time.Since(started).Milliseconds(), "objects": len(manifest.Objects), "control_revision": manifest.Control.Revision, "authority_sequence": manifest.Deletion.Sequence, "authority_generation": manifest.Deletion.Generation, "gaps": len(manifest.Gaps), "voters": topologyVoters(manifest.Topology)})
 }
 
 func backupList(args []string) error {
@@ -393,6 +417,30 @@ func backupList(args []string) error {
 		}
 	}
 	return nil
+}
+
+// backupExpire deletes the objects of backups past their manifest's expiry and of uploads abandoned
+// before they got a manifest (backup.ExpireBackups). It needs the key files to authenticate manifests.
+func backupExpire(args []string) error {
+	f := flagSet("expire")
+	keyDir := f.String("key-dir", "", "")
+	abandoned := f.Duration("abandoned-after", backup.DefaultAbandonedAfter, "")
+	dest := newDestinationFlags(f, "dest")
+	if err := parseFlags(f, args); err != nil {
+		return err
+	}
+	if *keyDir == "" {
+		return errUsage
+	}
+	destination, err := dest.open()
+	if err != nil {
+		return err
+	}
+	report, err := backup.ExpireBackups(context.Background(), destination, backup.ExpireOptions{Keys: backup.KeyDir(*keyDir), Now: time.Now, AbandonedAfter: *abandoned})
+	if err != nil {
+		return err
+	}
+	return printJSON(map[string]any{"expired": report.Expired, "abandoned": report.Abandoned, "kept": report.Kept, "untrusted": report.Untrusted, "objects_deleted": report.Deleted})
 }
 
 func backupRestore(args []string) error {
@@ -436,7 +484,7 @@ func backupRestore(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err = printJSON(map[string]any{"backup_id": report.BackupID.String(), "control_revision": report.ControlRevision, "authority_sequence": report.AuthoritySequence, "authority_generation": report.AuthorityGeneration, "tombstones": report.Tombstones, "objects": report.Objects, "gaps_verified": report.GapsVerified, "quota_certificate": report.QuotaCertificate.String(), "quarantined": report.Quarantined, "duration_ms": time.Since(started).Milliseconds()}); err != nil {
+	if err = printJSON(map[string]any{"backup_id": report.BackupID.String(), "control_revision": report.ControlRevision, "authority_sequence": report.AuthoritySequence, "authority_generation": report.AuthorityGeneration, "tombstones": report.Tombstones, "objects": report.Objects, "gaps_verified": report.GapsVerified, "quota_certificate": report.QuotaCertificate.String(), "quarantined": report.Quarantined, "source_voters": topologyVoters(manifest.Topology), "duration_ms": time.Since(started).Milliseconds()}); err != nil {
 		return err
 	}
 	fmt.Fprintln(os.Stderr, "The restored installation admits nothing and serves nothing until `soundpost backup activate` succeeds.")
@@ -448,6 +496,7 @@ func backupActivate(args []string) error {
 	f := flagSet("activate")
 	root := f.String("root", "", "")
 	keysPath := f.String("authority-keys", "", "")
+	seedOut := f.String("cluster-seed-out", "", "")
 	authorityDest := newDestinationFlags(f, "authority")
 	if err := parseFlags(f, args); err != nil {
 		return err
@@ -477,5 +526,22 @@ func backupActivate(args []string) error {
 	if err != nil {
 		return err
 	}
-	return printJSON(map[string]any{"authority_generation": report.AuthorityGeneration, "tombstones": report.Tombstones, "ready": true})
+	if *seedOut != "" {
+		// The seed of the cluster that continues this installation: written only after the
+		// activation completed, and it names the node identities of the cluster the backup
+		// came from, which the new cluster's members must not reuse.
+		if err = app.WriteClusterSeed(*seedOut); err != nil {
+			return err
+		}
+	}
+	return printJSON(map[string]any{"authority_generation": report.AuthorityGeneration, "tombstones": report.Tombstones, "ready": true, "cluster_seed": *seedOut != ""})
+}
+
+// topologyVoters is the number of voters of the cluster a backup was taken from; zero for a backup
+// that recorded none.
+func topologyVoters(t *backup.Topology) uint64 {
+	if t == nil {
+		return 0
+	}
+	return uint64(t.Voters)
 }

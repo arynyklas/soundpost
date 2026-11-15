@@ -31,10 +31,10 @@ func distributedDirectory(t *testing.T, dir string) {
 	}
 }
 
-// Backup, restore and activation implement the single-node layout only. Pointed at a
-// distributed node's directory they must refuse with the stable code unsupported_mode
-// and a line naming what is supported, never the untyped internal error the replica
-// journal's own refusal used to surface.
+// A distributed node's directory is not a single-voter root. Backup, restore and activation refuse
+// to treat it as one with the stable code unsupported_mode and a line naming what to do instead (back
+// it up as a voter of its cluster; restore into a single-voter root and seed a cluster from it),
+// never the untyped internal error the replica journal's own refusal used to surface.
 func TestBackupRefusesADistributedDirectoryWithATypedCode(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX modes")
@@ -54,18 +54,20 @@ func TestBackupRefusesADistributedDirectoryWithATypedCode(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		args []string
+		say  string
 	}{
-		{"create", append([]string{"backup", "create", "--data-dir", node, "--admin-email", "ops@example.test", "--key-dir", keyDir, "--data-kek", "data-kek", "--secret-kek", "data-kek", "--dest-dir", filepath.Join(work, "dest")}, authority...)},
-		{"authority-init with a data directory", append([]string{"backup", "authority-init", "--data-dir", node}, authority...)},
-		{"activate", append([]string{"backup", "activate", "--root", node}, authority...)},
-		{"restore into a distributed directory", append([]string{"backup", "restore", "--backup-id", "00000000000000000000000000000001", "--root", node, "--key-dir", keyDir, "--dest-dir", filepath.Join(work, "dest")}, authority...)},
+		{"create without joining the cluster", append([]string{"backup", "create", "--data-dir", node, "--admin-email", "ops@example.test", "--key-dir", keyDir, "--data-kek", "data-kek", "--secret-kek", "data-kek", "--dest-dir", filepath.Join(work, "dest")}, authority...), "--mode distributed"},
+		{"authority-init with a data directory", append([]string{"backup", "authority-init", "--data-dir", node}, authority...), "single-voter root"},
+		{"activate", append([]string{"backup", "activate", "--root", node}, authority...), "single-voter root"},
+		{"restore into a distributed directory", append([]string{"backup", "restore", "--backup-id", "00000000000000000000000000000001", "--root", node, "--key-dir", keyDir, "--dest-dir", filepath.Join(work, "dest")}, authority...), "single-voter root"},
+		{"create --mode distributed on a directory that is not a cluster node", append([]string{"backup", "create", "--mode", "distributed", "--node-id", "1", "--cluster-config", filepath.Join(work, "none.json"), "--data-dir", t.TempDir(), "--admin-email", "ops@example.test", "--key-dir", keyDir, "--data-kek", "data-kek", "--secret-kek", "data-kek", "--dest-dir", filepath.Join(work, "dest")}, authority...), "needs the data directory of a node"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			stderr, code := runSoundpost(t, tc.args...)
 			if code != 1 {
 				t.Fatalf("exit code %d, want 1 (stderr %q)", code, stderr)
 			}
-			if !strings.Contains(stderr, "unsupported_mode") || !strings.Contains(stderr, "single-node") {
+			if !strings.Contains(stderr, "unsupported_mode") || !strings.Contains(stderr, tc.say) {
 				t.Fatalf("stderr %q is not the typed refusal naming the supported mode", stderr)
 			}
 			if strings.Contains(stderr, "internal error") || strings.Contains(stderr, work) {

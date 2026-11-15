@@ -119,6 +119,35 @@ func loadInstalledSeed(s *SnapshotStore) (*installedSeed, error) {
 	return seed, nil
 }
 
+// rebase makes the installed snapshot describe members instead of the cluster it was cut in:
+// the Raft configuration lists exactly their voters and learners and the envelope carries their
+// membership (no retiring members). Only a disaster restore asks for it (Config.RebaseInstalled):
+// a repair or join keeps the leader's configuration.
+func (s *installedSeed) rebase(members Members) error {
+	if ValidateMembers(members) != nil {
+		return ErrInvalid
+	}
+	var envelope snapshotEnvelope
+	if model.StrictJSON(s.data, &envelope) != nil {
+		return ErrCorrupt
+	}
+	envelope.Members, envelope.Retiring = cloneMembers(members), nil
+	data, err := json.Marshal(envelope)
+	if err != nil {
+		return err
+	}
+	conf := &pb.ConfState{}
+	for _, m := range members.Nodes {
+		if m.Learner {
+			conf.Learners = append(conf.Learners, m.ID)
+		} else {
+			conf.Voters = append(conf.Voters, m.ID)
+		}
+	}
+	s.data, s.conf = data, conf
+	return nil
+}
+
 // Snapshots exposes the group's snapshot store.
 func (g *Group) Snapshots() *SnapshotStore { return g.snaps }
 

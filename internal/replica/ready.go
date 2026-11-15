@@ -378,6 +378,14 @@ func (g *Group) processReady() error {
 	for g.raw.HasReady() {
 		rd := g.raw.Ready()
 		priorLast, _ := g.memory.LastIndex()
+		if !raft.IsEmptySnap(rd.Snapshot) {
+			// A snapshot from the leader is about to become the journal head: the durable proof
+			// goes first, so a crash between the persist and the restore cannot leave it standing.
+			if err := g.dropProof(); err != nil {
+				g.failStop(FailJournal)
+				return ErrUnavailable
+			}
+		}
 		if len(rd.Entries) > 0 || rd.HardState != nil || rd.Snapshot != nil {
 			if err := g.disk.persist(rd); err != nil {
 				g.failStop(FailJournal)
@@ -532,9 +540,22 @@ func (g *Group) applyCommitted(ent *pb.Entry) error {
 	default:
 		return ErrInvalid
 	}
+	suspended := false
+	if c.Entry.Kind == Control {
+		// The command may turn out stale; the durable proof must not outlive that outcome.
+		var err error
+		if suspended, err = g.suspendProof(); err != nil {
+			return err
+		}
+	}
 	result := g.machine.Apply(c)
 	if result != nil && result != ErrConflict {
 		return result
+	}
+	if result == nil && suspended {
+		if err := g.resumeProof(); err != nil {
+			return err
+		}
 	}
 	if result == ErrConflict && c.Entry.ReservationID != nil {
 		delete(g.known[*c.Entry.ReservationID], c.Index)
@@ -617,7 +638,11 @@ func (g *Group) restoreSnapshot(snap *pb.Snapshot) error {
 	if model.StrictJSON(snap.GetData(), &envelope) != nil || ValidateMembers(envelope.Members) != nil {
 		return ErrInvalid
 	}
-	g.machineRules = 0 // the leader's retry table as it was cut: not covered by any local pass
+	// The leader's retry table as it was cut: not covered by any local pass. The durable proof
+	// goes first, before the machine is restored.
+	if err := g.dropProof(); err != nil {
+		return err
+	}
 	index := snap.GetMetadata().GetIndex()
 	if verifier, ok := g.machine.(interface{ VerifySnapshot([]byte) error }); ok {
 		if err := verifier.VerifySnapshot(envelope.State); err != nil {

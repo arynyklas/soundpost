@@ -82,7 +82,10 @@ func TestRedactorNeverRewritesTheCommandThatIsTheCurrentState(t *testing.T) {
 	op.Phase = model.DeletePhaseFencing
 	current.Deletions[operation.String()] = op
 	fencing := &controlRedactor{s: s}
-	fencing.loaded, fencing.live, fencing.rules = true, current, current
+	fencing.loaded, fencing.live, fencing.rules = true, current, current // the rules as a pass that read the state at the store's applied index holds them
+	if fencing.applied, err = s.appliedIndex(); err != nil {
+		t.Fatal(err)
+	}
 	fencing.rules.Deletions = map[string]model.DeletionOperation{}
 	if _, changed, err = fencing.redact(commandOf(older)); err != nil || changed {
 		t.Fatalf("a fencing deletion redacted a retained command: changed=%v err=%v", changed, err)
@@ -160,5 +163,53 @@ func TestReceiptNamesTheJournalUntilTheCutReplacesTheSealedCopies(t *testing.T) 
 	}
 	if named() {
 		t.Fatalf("the whole pass completed and the store still names %v", s.ResidualStores())
+	}
+}
+
+// The replication layer starts a pass over when a command was applied while it read the group, and
+// asks the redaction again for every payload: a rule set read before that command is not the state
+// the pass that commits is for. The redactor reads the state again as soon as the store applied
+// anything since it read, and not before.
+func TestRedactorReadsTheStateAgainWhenTheStoreAppliedACommand(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err = s.EnableSingle(ctx, filepath.Join(dir, "raft-control")); err != nil {
+		t.Fatal(err)
+	}
+	payload := func() []byte {
+		st, err := s.localState()
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, err := json.Marshal(controlReplacement{Expected: st.Revision - 1, State: st, Keys: map[string][]byte{}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return raw
+	}
+	r := &controlRedactor{s: s}
+	if _, changed, err := r.redact(payload()); err != nil || changed {
+		t.Fatalf("the first redaction: changed=%v %v", changed, err)
+	}
+	read := r.live.Revision
+	if _, _, err = r.redact(payload()); err != nil || r.live.Revision != read {
+		t.Fatalf("a second redaction with nothing applied read the state again: revision %d, was %d (%v)", r.live.Revision, read, err)
+	}
+	if err = s.Update(ctx, func(*State) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = r.redact(payload()); err != nil {
+		t.Fatal(err)
+	}
+	if r.live.Revision != read+1 {
+		t.Fatalf("after a command was applied the redactor still holds the state of revision %d, want %d", r.live.Revision, read+1)
+	}
+	if applied, err := s.appliedIndex(); err != nil || r.applied != applied {
+		t.Fatalf("the redactor's state is read at index %d, the store is at %d (%v)", r.applied, applied, err)
 	}
 }
