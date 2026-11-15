@@ -232,16 +232,23 @@ func (e *Engine) loadVerifiedRecord() {
 	e.ver.rec = rec
 }
 
+// verifiedRec is the current verified record; the background pass may drop it concurrently.
+func (e *Engine) verifiedRec() *verifiedRecord {
+	e.ver.mu.Lock()
+	defer e.ver.mu.Unlock()
+	return e.ver.rec
+}
+
 // verifiedFrom returns the first command index of slot that still needs verification.
 func (e *Engine) verifiedFrom(slot uint16, applied uint64) uint64 {
-	if r := e.ver.rec; r != nil && uint64(r.Groups[slot].Applied) <= applied {
+	if r := e.verifiedRec(); r != nil && uint64(r.Groups[slot].Applied) <= applied {
 		return uint64(r.Groups[slot].Applied) + 1
 	}
 	return 1
 }
 
 func (e *Engine) recordHasSegment(s SegmentManifest) bool {
-	r := e.ver.rec
+	r := e.verifiedRec()
 	if r == nil {
 		return false
 	}

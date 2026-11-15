@@ -119,7 +119,7 @@ func putUint(b *bolt.Bucket, key []byte, value uint64) error {
 // imported. Its loss is corruption, not permission to create a new authority.
 func (e *Engine) validateReplicaNamespaces() error {
 	return e.db.View(func(tx *bolt.Tx) error {
-		return validateReplicaNamespacesTx(tx, e.verifiedFrom, &e.ver.commands, e.ver.rec != nil)
+		return validateReplicaNamespacesTx(tx, e.verifiedFrom, &e.ver.commands, e.verifiedRec() != nil)
 	})
 }
 
