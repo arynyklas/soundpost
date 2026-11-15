@@ -1,29 +1,12 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
 import * as React from 'react';
 import { act, isAbort } from '../api/client';
-import { ApiFault, OutcomeUnknown, VersionConflict, type ActionKind, type ActionRequest, type Id, type IssueActionView, type IssueEvidenceView } from '../api/types';
-import { ISSUE_ACTIONS, ISSUE_ACTION_LABEL, buildIssueAction } from '../evidence/model';
+import type { ActionKind, ActionRequest, Id, IssueEvidenceView } from '../api/types';
+import { ISSUE_ACTIONS, ISSUE_ACTION_LABEL } from '../evidence/model';
 import { describeReason, faultText, newCommandId } from '../incidents/model';
+import { conflictWords, settleIssueAction, submitIssueAction, type IssueOutcome, type Settlement } from './actionModel';
 
-/** What the server has told us about the last action. A committed answer is the issue exactly as the lifecycle committed it; the browser holds no issue state of its own, and `not_available` is shown as exactly that. */
-export type IssueOutcome =
- | { kind: 'idle' }
- | { kind: 'invalid'; text: string }
- | { kind: 'pending' }
- | { kind: 'committed'; action: ActionKind; issue: IssueActionView }
- | { kind: 'not_available'; reason: string }
- | { kind: 'conflict'; detail: string; expected: string; current: string }
- | { kind: 'unknown'; request: ActionRequest }
- | { kind: 'refused'; status: number; detail: string; code: string; requestId: string };
-
-/** The one sentence a conflict gets: a moved revision and a transition the workflow does not allow are different facts and are never merged. */
-export function conflictWords(detail: string, expected: string, current: string): string {
- return detail === 'issue_state_conflict'
-  ? `The issue is at revision ${current}, the revision you acted on, but its workflow state does not allow this action (for example: resolving an issue that is already resolved, or reopening one that is not resolved). Nothing was changed.`
-  : `The issue is now at revision ${current}; you were acting on revision ${expected}. Nothing was changed. The page is reloading the issue so you can act on what is there now.`;
-}
-
-/** Resolve, ignore, stop ignoring and reopen go to the shared version-checked action surface with the revision on screen and a reason. The issue on screen changes only when the server answers committed, and then the page re-reads the stored issue instead of trusting its own guess. */
+/** Resolve, ignore, stop ignoring and reopen go to the shared version-checked action surface with the revision on screen and a reason. The issue on screen changes only when the server answers committed, and then the page re-reads the stored issue instead of trusting its own guess. The transitions themselves are in actionModel.ts. */
 export function IssueActions(props: { org: Id; project: Id; view: IssueEvidenceView; busy: boolean; onChanged: () => void }): React.JSX.Element {
  const [kind, setKind] = React.useState<ActionKind>('resolve');
  const [reason, setReason] = React.useState('');
@@ -38,31 +21,24 @@ export function IssueActions(props: { org: Id; project: Id; view: IssueEvidenceV
   const controller = new AbortController();
   live.current = controller;
   setOutcome({ kind: 'pending' });
+  let settlement: Settlement;
   try {
    const response = await act(request, controller.signal);
    if (controller.signal.aborted) return;
-   if (response.state === 'committed' && response.issue) {
-    setOutcome({ kind: 'committed', action: request.kind, issue: response.issue });
-    setReason('');
-    setFixedIn('');
-    props.onChanged();
-   } else setOutcome({ kind: 'not_available', reason: response.reason ?? 'not_available' });
+   settlement = settleIssueAction(request, { kind: 'answer', response });
   } catch (error) {
    if (isAbort(error) || controller.signal.aborted) return;
-   if (error instanceof VersionConflict) {
-    setOutcome({ kind: 'conflict', detail: error.detail, expected: request.expected_version, current: error.currentVersion });
-    props.onChanged();
-   } else if (error instanceof OutcomeUnknown) setOutcome({ kind: 'unknown', request });
-   else if (error instanceof ApiFault) setOutcome({ kind: 'refused', status: error.status, detail: error.detail, code: error.code, requestId: error.requestId });
-   else setOutcome({ kind: 'refused', status: 0, detail: '', code: 'unavailable', requestId: '' });
+   settlement = settleIssueAction(request, { kind: 'failure', error });
   }
+  setOutcome(settlement.outcome);
+  if (settlement.clearForm) { setReason(''); setFixedIn(''); }
+  if (settlement.reload) props.onChanged();
  };
  const submit = (event: React.FormEvent<HTMLFormElement>): void => {
   event.preventDefault();
-  if (outcome.kind === 'pending' || props.busy) return;
-  const built = buildIssueAction(props.org, props.project, props.view, kind, reason, newCommandId(), kind === 'resolve' ? fixedIn : '');
-  if (!built.ok) { setOutcome({ kind: 'invalid', text: built.error }); return; }
-  void send(built.value);
+  const next = submitIssueAction({ org: props.org, project: props.project, view: props.view, kind, reason, fixedIn, outcome, busy: props.busy, commandId: newCommandId() });
+  if (next.request === null) { if (next.outcome !== outcome) setOutcome(next.outcome); return; }
+  void send(next.request);
  };
  const pending = outcome.kind === 'pending' || props.busy;
  return (

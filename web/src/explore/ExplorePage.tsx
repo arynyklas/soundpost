@@ -1,6 +1,6 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
 import * as React from 'react';
-import { formatExpression, query, stateOfQueryFault } from '../api/client';
+import { formatExpression, isAbort, profileRegistry, query, stateOfFault, stateOfQueryFault } from '../api/client';
 import { ApiFault, QueryFault, type Diagnostic, type FormatResult, type LiveTicketRequest, type LoadState, type ProjectResult, type QueryLanguage, type QueryRequest, type QueryResult, type SourceRange } from '../api/types';
 import { latestOnly, scopeKey, type ViewContext } from '../app/context';
 import { StatusPanel } from '../app/StatusPanel';
@@ -12,7 +12,7 @@ import { LiveLogView } from './LiveLogView';
 import { LogResult } from './LogResult';
 import { MetricResult, TimeText } from './MetricResult';
 import { elapsedText, nsToIso, projectState, resultState, splitByRuneRange } from './model';
-import { featureSetId, profileById, profilesFor } from './profiles';
+import { featureSetId, profileById, profilesFor, type ProfileInfo } from './profiles';
 import { runLatest, type RunState } from './runner';
 import { SavedViews } from './SavedViews';
 
@@ -114,10 +114,10 @@ const featuresLabel = (features: string[]): string => (features.length === 0 ? '
 /** What was actually asked, kept with the result it produced, so changing the form never relabels an answer. */
 interface RunView { key: string; request: QueryRequest; features: string[]; state: LoadState<QueryResult>; id: number }
 
-function ExploreBody(props: { context: ViewContext }): React.JSX.Element {
- const { context } = props;
+function ExploreBody(props: { context: ViewContext; registry: readonly ProfileInfo[] }): React.JSX.Element {
+ const { context, registry } = props;
  const scope = `${scopeKey(context)}|${context.generation}`;
- const [form, setForm] = React.useState<QueryForm>(() => defaultForm(context, 'promql'));
+ const [form, setForm] = React.useState<QueryForm>(() => defaultForm(context, 'promql', registry));
  const [problems, setProblems] = React.useState<string[]>([]);
  const [run, setRun] = React.useState<RunView | null>(null);
  const [formatted, setFormatted] = React.useState<{ key: string; state: LoadState<FormatResult> } | null>(null);
@@ -132,17 +132,17 @@ function ExploreBody(props: { context: ViewContext }): React.JSX.Element {
  React.useEffect(() => () => { latest.current.stop(); formatLatest.current.stop(); }, [scope]);
  React.useEffect(() => { if (view !== null && view.state.kind !== 'loading') heading.current?.focus(); }, [view?.id, view?.state.kind]);
 
- const profile = profileById(form.profileId);
+ const profile = profileById(registry, form.profileId);
  const featureSet = profile === undefined ? null : featureSetId(profile, form.features);
  const set = (over: Partial<QueryForm>): void => setForm((f) => ({ ...f, ...over }));
  const bodyBytes = new TextEncoder().encode(form.expression).length;
 
- const chooseLanguage = (language: QueryLanguage): void => set({ language, profileId: profilesFor(language)[0]?.id ?? '', features: [], mode: language === 'logql' ? 'range' : form.mode, source: language === 'promql' ? '' : form.source });
+ const chooseLanguage = (language: QueryLanguage): void => set({ language, profileId: profilesFor(registry, language)[0]?.id ?? '', features: [], mode: language === 'logql' ? 'range' : form.mode, source: language === 'promql' ? '' : form.source });
  const toggleFeature = (name: string): void => set({ features: form.features.includes(name) ? form.features.filter((f) => f !== name) : [...form.features, name] });
  const toggleProject = (id: string): void => set({ projects: form.projects.includes(id) ? form.projects.filter((p) => p !== id) : context.projects.filter((p) => p === id || form.projects.includes(p)) });
 
  const execute = (): void => {
-  const built = buildQueryRequest(context, form);
+  const built = buildQueryRequest(context, form, registry);
   if (!built.ok) { setProblems(built.problems); return; }
   setProblems([]);
   const request = built.request;
@@ -168,7 +168,7 @@ function ExploreBody(props: { context: ViewContext }): React.JSX.Element {
    else setFormatted({ key: scope, state: stateOfQueryFault(s.error) });
   });
  };
- const live = buildLiveRequest(context, form);
+ const live = buildLiveRequest(context, form, registry);
  const fmt = formatted !== null && formatted.key === scope ? formatted.state : null;
  const running = view?.state.kind === 'loading';
  const data = view !== null && 'data' in view.state ? view.state.data : undefined;
@@ -182,7 +182,7 @@ function ExploreBody(props: { context: ViewContext }): React.JSX.Element {
      <div className="field-row">
       <label className="check"><input type="radio" name="language" checked={form.language === 'promql'} onChange={() => chooseLanguage('promql')} />PromQL</label>
       <label className="check"><input type="radio" name="language" checked={form.language === 'logql'} onChange={() => chooseLanguage('logql')} />LogQL</label>
-      <label>Pinned profile <select value={form.profileId} onChange={(e) => set({ profileId: e.target.value, features: [] })}>{profilesFor(form.language).map((p) => <option key={p.id} value={p.id}>{p.id}</option>)}</select></label>
+      <label>Pinned profile <select value={form.profileId} onChange={(e) => set({ profileId: e.target.value, features: [] })}>{profilesFor(registry, form.language).map((p) => <option key={p.id} value={p.id}>{p.id}</option>)}</select></label>
      </div>
      {profile !== undefined && profile.features.length > 0 && (
       <fieldset>
@@ -277,12 +277,33 @@ function ExploreBody(props: { context: ViewContext }): React.JSX.Element {
       : <p role="status" data-testid="live-unavailable">{live.problems.join(' ')}</p>}
    </section>
    <ExportPanel context={context} />
-   <SavedViews context={context} />
+   <SavedViews context={context} registry={registry} form={form} onOpen={(patch) => { setProblems([]); set(patch); }} />
   </section>
  );
 }
 
-/** The Explore view. Everything it holds (form, results, live stream) belongs to the selected scope and is dropped with it. */
+/**
+ * The Explore view. Everything it holds (form, results, live stream) belongs to the selected scope and is dropped with it.
+ * The pinned profile registry is read from the server before any form is shown: there is no copied table to fall back to, so
+ * a registry that cannot be read is a stated state, never a form that guesses a feature set.
+ */
 export function ExplorePage(props: { context: ViewContext }): React.JSX.Element {
- return <ExploreBody key={scopeKey(props.context)} context={props.context} />;
+ const [registry, setRegistry] = React.useState<LoadState<ProfileInfo[]>>({ kind: 'loading' });
+ React.useEffect(() => {
+  const controller = new AbortController();
+  profileRegistry(controller.signal).then(
+   (profiles) => setRegistry(profiles.length === 0 ? { kind: 'unsupported', reason: 'no_profiles' } : { kind: 'ready', data: profiles }),
+   (error: unknown) => { if (!isAbort(error)) setRegistry(stateOfFault(error)); },
+  );
+  return () => controller.abort();
+ }, []);
+ if (registry.kind !== 'ready') {
+  return (
+   <section className="panel" aria-labelledby="view-heading" data-section="explore">
+    <h2 id="view-heading">Explore</h2>
+    <StatusPanel state={registry} />
+   </section>
+  );
+ }
+ return <ExploreBody key={scopeKey(props.context)} context={props.context} registry={registry.data} />;
 }

@@ -25,4 +25,5 @@ const (
 	KindRegisterRelease     CommandKind = "RegisterRelease"
 	KindUpdateJob           CommandKind = "UpdateJob"
 	KindRecordEvidenceGap   CommandKind = "RecordEvidenceGap"
+	KindSavedView           CommandKind = "SavedView"
 )

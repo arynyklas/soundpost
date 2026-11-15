@@ -1,7 +1,8 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
 import {test,expect,request as pwRequest,type APIRequestContext,type BrowserContext,type Locator,type Page,type Request} from '@playwright/test';
-import {readFileSync} from 'node:fs';
-import {at,createReader,id,login,owner,seedExplore,setGrant,type ExploreSeed} from './support/real';
+import {readFileSync,readdirSync} from 'node:fs';
+import {resolve} from 'node:path';
+import {at,createReader,featureSet,id,login,owner,postJson,seedExplore,setGrant,type ExploreSeed} from './support/real';
 // Real server, real Chrome. Every number, nanosecond and label below was admitted through the real ingest route and is
 // read back through the real C06 query, discovery, exemplar, format, investigate and export routes by a real reader who
 // holds telemetry.read on two projects. Nothing in this file fakes a server answer.
@@ -158,7 +159,8 @@ test('a native histogram is shown bucket by bucket, and mixed float and histogra
  await expect(warning).toHaveCount(1);
  await expect(warning).toContainText('encountered a mix of histograms and floats');
  await expect(warning).toHaveAttribute('data-code','MixedFloatsHistogramsWarning');
- await expect(warning.locator('mark')).toHaveText('sum(explore_mixed)');
+ // The warning is located on the aggregated argument, exactly as the pinned Prometheus oracle positions it (lane 2 wave 2, internal/query/promql/functions_aggregation.go): the range is `explore_mixed`, not the whole `sum(...)`.
+ await expect(warning.locator('mark')).toHaveText('explore_mixed');
 });
 
 test('language errors are typed and located; a disabled feature is refused until it is registered and enabled; the profile is never switched',async()=>{
@@ -385,14 +387,158 @@ test('partial results are requested only after an explicit opt-in',async()=>{
  expect(bodies[0]!.projects).toEqual([seed.p1,seed.p2]);
 });
 
-test('saved views are an explicit not-available state and nothing is stored in the browser',async()=>{
- const page=await open();
- const saved=page.locator('[data-section="saved-views"]');
- await expect(saved).toContainText('Not available');
- await expect(saved.locator('[data-state="unsupported"]')).toBeVisible();
- await expect(saved).toContainText('Nothing is saved, in this browser or on the server');
- await run(page,'explore_gauge');
- expect(await page.evaluate(()=>({local:Object.keys(localStorage).length,session:Object.keys(sessionStorage).length}))).toEqual({local:0,session:0});
+test('the pinned profiles and feature sets are read from the server registry, and the console sends exactly the registered set',async()=>{
+ const page=await ctx.newPage();
+ const read=page.waitForResponse((r)=>new URL(r.url()).pathname==='/api/v1/query/profiles');
+ await page.goto(`/${hashFor(seed.org,[seed.p1,seed.p2])}`);
+ const response=await read;
+ expect(response.request().method()).toBe('GET');
+ expect(response.status()).toBe(200);
+ const registry=await response.json() as {profiles:{id:string;language:string;features:string[];feature_sets:{id:string;enabled:string[]}[]}[]};
+ // The served registry is the committed pinned one (the server holds it; the console carries no copy).
+ const dir=resolve(process.cwd(),'..','profiles','query');
+ const committed=readdirSync(dir).filter((f)=>f.endsWith('.json')).sort().map((f)=>JSON.parse(readFileSync(resolve(dir,f),'utf8')) as {id:string;feature_sets:{id:string;enabled:string[]}[]});
+ expect(registry.profiles.map((p)=>p.id)).toEqual(committed.map((c)=>c.id));
+ for(const c of committed)expect(registry.profiles.find((p)=>p.id===c.id)?.feature_sets).toEqual(c.feature_sets);
+ await expect(page.getByRole('heading',{name:'Explore',exact:true})).toBeVisible();
+ // The profile choices are the served PromQL profiles, in the served order, and LogQL offers the served LogQL profile.
+ const profileSelect=page.getByLabel('Pinned profile');
+ expect(await profileSelect.locator('option').allTextContents()).toEqual(registry.profiles.filter((p)=>p.language==='promql').map((p)=>p.id));
+ await page.getByRole('radio',{name:'LogQL'}).check();
+ expect(await profileSelect.locator('option').allTextContents()).toEqual(registry.profiles.filter((p)=>p.language==='logql').map((p)=>p.id));
+ await page.getByRole('radio',{name:'PromQL'}).check();
+ // Every served feature of the newer PromQL profile is offered, and selecting one shows (and later sends) the served set that enables exactly it.
+ await profileSelect.selectOption(PROM_3135);
+ const served=registry.profiles.find((p)=>p.id===PROM_3135);
+ if(!served)throw Error('the served registry lacks '+PROM_3135);
+ for(const f of served.features)await expect(page.getByRole('checkbox',{name:f,exact:true})).toBeVisible();
+ const feature=served.features[served.features.length-1]!;
+ await page.getByRole('checkbox',{name:feature,exact:true}).check();
+ const want=served.feature_sets.find((s)=>s.enabled.length===1&&s.enabled[0]===feature);
+ if(!want)throw Error('no served set enables exactly '+feature);
+ await expect(page.getByTestId('feature-set')).toContainText(want.id);
+ const sent:{profile:string;feature_set:string}[]=[];
+ page.on('request',(r)=>{if(r.method()==='POST'&&r.url().endsWith('/api/v1/query'))sent.push(r.postDataJSON() as (typeof sent)[number]);});
+ await run(page,'1+1');
+ expect(sent).toEqual([expect.objectContaining({profile:PROM_3135,feature_set:want.id})]);
+});
+
+test('a registry that cannot be read is a stated state and no query form, never a guessed feature set',async()=>{
+ const page=await ctx.newPage();
+ // A transport failure of the one registry request; every other request is the real server's.
+ await page.route((u)=>u.pathname==='/api/v1/query/profiles',(r)=>r.abort('connectionreset'));
+ await page.goto(`/${hashFor(seed.org,[seed.p1,seed.p2])}`);
+ const section=page.locator('[data-section="explore"]');
+ await expect(section.getByRole('alert')).toBeVisible();
+ await expect(page.getByLabel('Query expression')).toHaveCount(0);
+ await expect(page.getByRole('button',{name:'Run query',exact:true})).toHaveCount(0);
+});
+
+test('a saved view is an explicit project-owned action: stored on the server, listed to the project\'s readers, refused to everyone else, and never kept in the browser',async({browser})=>{
+ test.setTimeout(300_000);
+ const author=await createReader(owners,seed.org,[seed.p1,seed.p2]);
+ const peer=await createReader(owners,seed.org,[seed.p1]);
+ const outsider=await createReader(owners,seed.org,[seed.p2]);
+ const contexts:BrowserContext[]=[];
+ const as=async(who:{email:string;password:string},projects:string[]):Promise<Page>=>{
+  const c=await browser.newContext({acceptDownloads:true});contexts.push(c);
+  const p=await c.newPage();
+  await login(p,who.email,who.password);
+  await p.goto(`/${hashFor(seed.org,projects)}`);
+  await expect(p.getByRole('heading',{name:'Explore',exact:true})).toBeVisible();
+  return p;
+ };
+ const section=(p:Page,project:string):Locator=>p.locator(`[data-section="saved-views"] [data-project="${project}"]`);
+ const row=(p:Page,project:string,name:string):Locator=>section(p,project).locator(`[data-view][data-name="${name}"]`);
+ const outcome=(p:Page):Locator=>p.locator('[data-section="saved-views"] [data-outcome]');
+ const TEXT='explore_gauge{job="api"} # saved-view-canary';
+ try{
+  // ---- the author saves: only on an explicit action, the text only in the POST body, nothing in the browser ----
+  const page=await as(author,[seed.p1]);
+  await expect(section(page,seed.p1).getByTestId('saved-none')).toBeVisible();
+  const seen:{url:string;method:string;body:string|null}[]=[];
+  page.on('request',(r)=>{seen.push({url:r.url(),method:r.method(),body:r.postData()});});
+  await page.getByLabel('Query expression').fill(TEXT);
+  await page.waitForTimeout(1500);
+  expect(seen.filter((r)=>r.url.includes('/api/v1/saved-views')&&r.method==='POST'&&r.body?.includes('operation":"save'))).toEqual([]);
+  await page.getByLabel(/^Name/).fill('Gauge by job');
+  await page.getByRole('button',{name:'Save as a new view',exact:true}).click();
+  await expect(page.getByTestId('saved-committed')).toContainText('Saved.');
+  await expect(row(page,seed.p1,'Gauge by job')).toContainText(TEXT);
+  const saves=seen.filter((r)=>r.url.endsWith('/api/v1/saved-views')&&r.method==='POST'&&r.body?.includes('"operation":"save"'));
+  expect(saves).toHaveLength(1);
+  expect((JSON.parse(saves[0]!.body??'{}') as {expression:string;project:string}).expression).toBe(TEXT);
+  expect(seen.filter((r)=>r.url.includes('saved-view-canary')||r.url.includes(encodeURIComponent('explore_gauge'))||(r.method==='GET'&&(r.body??'').includes('saved-view-canary')))).toEqual([]);
+  expect(page.url()).not.toMatch(/explore_gauge|saved-view-canary|expression/i);
+  expect(await page.evaluate(()=>({local:Object.keys(localStorage),session:Object.keys(sessionStorage),cookie:document.cookie}))).toEqual({local:[],session:[],cookie:''});
+
+  // ---- it persists on the server: a fresh page of the same account lists it, and opening it restores the form exactly ----
+  const again=await as(author,[seed.p1]);
+  await expect(row(again,seed.p1,'Gauge by job')).toBeVisible();
+  await row(again,seed.p1,'Gauge by job').getByRole('button',{name:'Open view Gauge by job'}).click();
+  await expect(again.getByLabel('Query expression')).toHaveValue(TEXT);
+  await expect(again.getByTestId('feature-set')).toContainText(featureSet(PROM_310));
+  await run(again,TEXT);
+  await expect(again.getByTestId('evaluated-with')).toContainText(PROM_310);
+
+  // ---- another reader of the project sees it, but is not its owner: the delete is refused and the view stays ----
+  const reader=await as(peer,[seed.p1]);
+  await expect(row(reader,seed.p1,'Gauge by job')).toBeVisible();
+  await row(reader,seed.p1,'Gauge by job').getByRole('button',{name:'Delete view Gauge by job'}).click();
+  await reader.getByRole('button',{name:'Confirm delete of Gauge by job'}).click();
+  await expect(reader.getByTestId('saved-refused')).toContainText('Not applied.');
+  await reader.reload();
+  await expect(row(reader,seed.p1,'Gauge by job')).toBeVisible();
+
+  // ---- a reader without telemetry.read on the project learns nothing: the denial is byte-identical to a project that does not exist ----
+  const stranger=await as(outsider,[seed.p2]);
+  await expect(section(stranger,seed.p2).getByTestId('saved-none')).toBeVisible();
+  await expect(stranger.locator('body')).not.toContainText('saved-view-canary');
+  const strip=(t:string):string=>t.replace(/"request_id":"[0-9a-f]{32}"/g,'');
+  const denied=await postJson(stranger,'/api/v1/saved-views',{org:seed.org,project:seed.p1,operation:'list'});
+  const absent=await postJson(stranger,'/api/v1/saved-views',{org:seed.org,project:id(),operation:'list'});
+  expect([denied.status,absent.status]).toEqual([404,404]);
+  expect(strip(denied.text)).toBe(strip(absent.text));
+  expect(denied.text).not.toContain('saved-view-canary');
+
+  // ---- the owner updates: the revision moves; a page that still holds the old revision is refused, not merged ----
+  const stale=await as(author,[seed.p1]);
+  await expect(row(stale,seed.p1,'Gauge by job')).toBeVisible();
+  await row(page,seed.p1,'Gauge by job').getByRole('button',{name:'Open view Gauge by job'}).click();
+  await page.getByLabel('Query expression').fill('explore_gauge');
+  await page.getByTestId('saved-update').click();
+  await expect(page.getByTestId('saved-committed')).toContainText('Updated.');
+  await expect(row(page,seed.p1,'Gauge by job')).not.toContainText('saved-view-canary');
+  // This page still holds the revision it read before the update.
+  await row(stale,seed.p1,'Gauge by job').getByRole('button',{name:'Open view Gauge by job'}).click();
+  await stale.getByLabel('Query expression').fill('explore_gauge{job="stale"}');
+  await stale.getByTestId('saved-update').click();
+  await expect(stale.getByTestId('saved-conflict')).toContainText('Not applied.');
+  await expect(row(stale,seed.p1,'Gauge by job')).toContainText('explore_gauge');
+  await expect(row(stale,seed.p1,'Gauge by job')).not.toContainText('"stale"');
+
+  // ---- export: exactly the views the server holds for the project ----
+  const [file]=await Promise.all([page.waitForEvent('download'),section(page,seed.p1).getByTestId('saved-export').click()]);
+  const doc=JSON.parse(readFileSync(await file.path(),'utf8')) as {format:string;version:number;org:string;project:string;views:{name:string;expression:string;project:string}[]};
+  expect([doc.format,doc.version,doc.org,doc.project]).toEqual(['soundpost.saved-views',1,seed.org,seed.p1]);
+  expect(doc.views.map((v)=>[v.name,v.expression,v.project])).toEqual([['Gauge by job','explore_gauge',seed.p1]]);
+
+  // ---- revocation: the peer loses the project, and the next read shows Not found with no view text ----
+  await setGrant(owners,seed.org,peer.id,seed.p1,false);
+  await reader.reload();
+  await expect(section(reader,seed.p1)).toHaveAttribute('data-state','unauthorized');
+  await expect(reader.locator('body')).not.toContainText('explore_gauge');
+
+  // ---- the owner deletes with a confirmation; it is gone on a fresh page ----
+  await row(page,seed.p1,'Gauge by job').getByRole('button',{name:'Delete view Gauge by job'}).click();
+  await page.getByRole('button',{name:'Confirm delete of Gauge by job'}).click();
+  await expect(page.getByTestId('saved-deleted')).toContainText('Deleted.');
+  await expect(section(page,seed.p1).getByTestId('saved-none')).toBeVisible();
+  const last=await as(author,[seed.p1]);
+  await expect(section(last,seed.p1).getByTestId('saved-none')).toBeVisible();
+ }finally{
+  for(const c of contexts)await c.close();
+ }
 });
 
 test('an export completes, downloads the exact records, and an export revoked before download yields no bytes',async({browser})=>{

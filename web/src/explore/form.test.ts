@@ -1,13 +1,19 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
 import { describe, expect, test } from 'bun:test';
 import type { ViewContext } from '../app/context';
-import { MAX_BODY_BYTES, buildLiveRequest, buildQueryRequest, defaultForm, type QueryForm } from './form';
-import { PROFILES, featureSetId, profileById } from './profiles';
+import * as F from './form';
+import { MAX_BODY_BYTES, type QueryForm } from './form';
+import { featureSetId, profileById } from './profiles';
+import { REGISTRY } from './testRegistry.test';
+
+const buildQueryRequest = (c: ViewContext, f: QueryForm) => F.buildQueryRequest(c, f, REGISTRY);
+const buildLiveRequest = (c: ViewContext, f: QueryForm) => F.buildLiveRequest(c, f, REGISTRY);
+const defaultForm = (c: ViewContext, language: 'promql' | 'logql') => F.defaultForm(c, language, REGISTRY);
 
 const A = 'a'.repeat(32), P = '1'.repeat(32), Q = '2'.repeat(32), SRC = '5'.repeat(32);
 const ctx: ViewContext = { org: A, projects: [P, Q], environment: '', start: '1730000000000000000', end: '1730000060000000000', timezone: 'UTC', generation: 1 };
 const form = (over: Partial<QueryForm> = {}): QueryForm => ({ ...defaultForm(ctx, 'promql'), profileId: 'promql-prometheus-3.1.0', expression: 'up', ...over });
-const profile = (id: string) => { const p = profileById(id); if (p === undefined) throw new Error('profile'); return p; };
+const profile = (id: string) => { const p = profileById(REGISTRY, id); if (p === undefined) throw new Error('profile'); return p; };
 const problems = (f: QueryForm): string[] => { const b = buildQueryRequest(ctx, f); return b.ok ? [] : b.problems; };
 
 describe('a query request is built from exactly what the form says, and the profile is never switched', () => {
@@ -117,6 +123,13 @@ describe('a live request carries the same selection and never a time range or a 
   expect(b.ok ? [] : b.problems).toContain('Only a LogQL log query can be streamed live.');
  });
  test('the registry has a default for every language', () => {
-  expect(PROFILES.some((p) => p.language === 'logql')).toBe(true);
+  expect(REGISTRY.some((p) => p.language === 'logql')).toBe(true);
+ });
+ test('each language starts on the first profile the server registers for it, never on another language\'s', () => {
+  expect(defaultForm(ctx, 'promql').profileId).toBe('promql-prometheus-3.1.0');
+  expect(defaultForm(ctx, 'logql').profileId).toBe('logql-loki-3.5.2');
+  expect(F.defaultForm(ctx, 'logql', [...REGISTRY].reverse()).profileId).toBe('logql-loki-3.5.2');
+  expect(F.defaultForm(ctx, 'promql', [...REGISTRY].reverse()).profileId).toBe('promql-prometheus-3.13.5');
+  expect(F.defaultForm(ctx, 'logql', REGISTRY.filter((p) => p.language === 'promql')).profileId).toBe('');
  });
 });

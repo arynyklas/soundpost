@@ -4,13 +4,15 @@
 import { describe, expect, test } from 'bun:test';
 import * as React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { QueryFault, type EvaluationWire, type LogEntry, type ProjectResult, type QueryValue, type Sample } from '../api/types';
+import { QueryFault, type EvaluationWire, type LogEntry, type ProjectResult, type QueryValue, type Sample, type ViewContext } from '../api/types';
 import { DiagnosticList, FaultView } from './ExplorePage';
 import { LiveItems } from './LiveLogView';
 import { LogResult } from './LogResult';
 import { MetricResult } from './MetricResult';
 import { SavedViews } from './SavedViews';
 import type { LiveItem } from './liveModel';
+import { defaultForm, type QueryForm } from './form';
+import { REGISTRY } from './testRegistry.test';
 
 const P = '1'.repeat(32), G = '9'.repeat(32), R = '3'.repeat(32);
 const CANARY = '<img src=x onerror="window.__pwn=1"> & <script>window.__pwn=2</script>';
@@ -141,12 +143,23 @@ describe('live rows and gaps', () => {
  });
 });
 
-describe('saved views are an explicit not-available state', () => {
- test('typed unsupported, no list, nothing saved', () => {
-  const html = render(React.createElement(SavedViews, { context: { org: 'a'.repeat(32), projects: [P], environment: '', start: '1', end: '2', timezone: 'UTC', generation: 0 } }));
-  expect(html).toContain('data-state="unsupported"');
-  expect(html).toContain('Not available');
-  expect(html).toContain('Nothing is saved');
-  expect(html).not.toContain('<ul');
+describe('saved views are an explicit, project-owned action', () => {
+ const ctx: ViewContext = { org: 'a'.repeat(32), projects: [P], environment: '', start: '1', end: '2', timezone: 'UTC', generation: 0 };
+ const form: QueryForm = { ...defaultForm(ctx, 'promql', REGISTRY), expression: 'up', projects: [P] };
+ const html = render(React.createElement(SavedViews, { context: ctx, registry: REGISTRY, form, onOpen: () => undefined }));
+ test('the first paint states what saving does, reads the project\'s list and offers nothing as already saved', () => {
+  expect(html).toContain('Saving is an explicit action');
+  expect(html).toContain('telemetry.read on that project');
+  expect(html).toContain('nothing is ever kept in this browser');
+  expect(html).toContain(`data-project="${P}" data-state="loading"`);
+  expect(html).not.toContain('data-testid="saved-none"');
+  expect(html).not.toContain('<table');
+ });
+ test('the save form names the owning project from the selected projects and never offers a view as saved before the server says so', () => {
+  expect(html).toContain('aria-label="Save this query as a view"');
+  expect(html).toContain(`<option value="${P}" selected="">${P}</option>`);
+  expect(html).toContain('Save as a new view');
+  expect(html).not.toContain('saved-committed');
+  expect(html).not.toContain('saved-update');
  });
 });

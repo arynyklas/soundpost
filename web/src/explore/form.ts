@@ -4,7 +4,7 @@
 // sent exactly as typed, sizes and times are exact decimal strings, and partial results are requested only when opted into.
 import type { LiveTicketRequest, QueryLanguage, QueryRequest } from '../api/types';
 import { isId, validWindow, type ViewContext } from '../app/context';
-import { featureSetId, profileById, profilesFor } from './profiles';
+import { featureSetId, profileById, profilesFor, type ProfileInfo } from './profiles';
 
 export interface QueryForm {
  language: QueryLanguage;
@@ -36,19 +36,19 @@ const UINT64_MAX = 18446744073709551615n;
 const wholeNs = (v: string): boolean => /^(0|[1-9][0-9]{0,18})$/.test(v) && BigInt(v) <= INT64_MAX;
 const positive = (v: string, max: bigint): boolean => /^[1-9][0-9]{0,19}$/.test(v) && BigInt(v) <= max;
 
-export function defaultForm(context: ViewContext, language: QueryLanguage): QueryForm {
+export function defaultForm(context: ViewContext, language: QueryLanguage, registry: readonly ProfileInfo[]): QueryForm {
  return {
-  language, profileId: profilesFor(language)[0]?.id ?? '', features: [], expression: '', mode: language === 'logql' ? 'range' : 'instant', instantTime: context.end, stepSeconds: '15',
+  language, profileId: profilesFor(registry, language)[0]?.id ?? '', features: [], expression: '', mode: language === 'logql' ? 'range' : 'instant', instantTime: context.end, stepSeconds: '15',
   projects: context.projects, allowPartial: false, maxReturned: '10000', logLimit: '1000', logOrder: 'backward', source: '',
  };
 }
 
-/** The shared selection checks: profile, registered feature set, projects, expression and restricted source. */
-function selection(context: ViewContext, form: QueryForm): { problems: string[]; featureSet: string } {
+/** The shared selection checks: profile, registered feature set, projects, expression and restricted source. Saving a view uses the same checks as running the query. */
+export function selection(context: ViewContext, form: QueryForm, registry: readonly ProfileInfo[]): { problems: string[]; featureSet: string } {
  const problems: string[] = [];
  let featureSet = '';
  if (form.expression.trim() === '') problems.push('Enter a query expression.');
- const profile = profileById(form.profileId);
+ const profile = profileById(registry, form.profileId);
  if (profile === undefined) problems.push('Choose a pinned profile.');
  else if (profile.language !== form.language) problems.push('The profile does not belong to the selected language.');
  else {
@@ -68,8 +68,8 @@ function selection(context: ViewContext, form: QueryForm): { problems: string[];
 
 const tooLarge = (body: unknown): string | null => (new TextEncoder().encode(JSON.stringify(body)).length > MAX_BODY_BYTES ? `The request is larger than the ${MAX_BODY_BYTES}-byte limit.` : null);
 
-export function buildQueryRequest(context: ViewContext, form: QueryForm): Built<QueryRequest> {
- const { problems, featureSet } = selection(context, form);
+export function buildQueryRequest(context: ViewContext, form: QueryForm, registry: readonly ProfileInfo[]): Built<QueryRequest> {
+ const { problems, featureSet } = selection(context, form, registry);
  let evaluation: QueryRequest['evaluation'] = { instant: true, time: '0', start: '0', end: '0', step: '0' };
  if (form.mode === 'instant') {
   if (!wholeNs(form.instantTime)) problems.push('The evaluation time must be whole nanoseconds.');
@@ -97,8 +97,8 @@ export function buildQueryRequest(context: ViewContext, form: QueryForm): Built<
 }
 
 /** The stored selector of a live stream: a LogQL log query over the selected projects. The stream's own limits are the server's defaults. */
-export function buildLiveRequest(context: ViewContext, form: QueryForm): Built<LiveTicketRequest> {
- const { problems, featureSet } = selection(context, form);
+export function buildLiveRequest(context: ViewContext, form: QueryForm, registry: readonly ProfileInfo[]): Built<LiveTicketRequest> {
+ const { problems, featureSet } = selection(context, form, registry);
  if (form.language !== 'logql') problems.push('Only a LogQL log query can be streamed live.');
  if (problems.length > 0) return { ok: false, problems };
  const request: LiveTicketRequest = {

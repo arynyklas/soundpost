@@ -1,6 +1,7 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
-import { ANCESTRY_ORDERS, ApiFault, COMPLETENESS, EXPORT_PHASES, INVESTIGATION_KINDS, LIVE_EVENT_TYPES, OutcomeUnknown, QueryFault, VersionConflict, type ActionRequest, type ActionResponse, type AncestryOrder, type Completeness, type DiscoveryRequest, type DiscoveryResult, type ExemplarRequest, type ExemplarResult, type ExportGrant, type ExportOperation, type ExportPhase, type ExportSignal, type FormatRequest, type FormatResult, type FramesRequest, type FramesView, type Id, type IncidentView, type InvestigationKind, type InvestigationRequest, type InvestigationView, type IssueEvidenceView, type LifecycleOperation, type LiveEvent, type LiveEventType, type LiveTicket, type LiveTicketRequest, type LoadState, type QueryRequest, type QueryResult, type QueueView, type ReleaseView, type SafeFrame, type ViewState, type VisibleSource } from './types';
+import { ANCESTRY_ORDERS, ApiFault, COMPLETENESS, EXPORT_PHASES, INVESTIGATION_KINDS, LIVE_EVENT_TYPES, OutcomeUnknown, QUERY_LANGUAGES, QueryFault, VersionConflict, type SavedView, type SavedViewDeleteRequest, type SavedViewRequest, type SavedViewSaveRequest, type QueryLanguage, type ActionRequest, type ActionResponse, type AncestryOrder, type Completeness, type DiscoveryRequest, type DiscoveryResult, type ExemplarRequest, type ExemplarResult, type ExportGrant, type ExportOperation, type ExportPhase, type ExportSignal, type FormatRequest, type FormatResult, type FramesRequest, type FramesView, type Id, type IncidentView, type InvestigationKind, type InvestigationRequest, type InvestigationView, type IssueEvidenceView, type LifecycleOperation, type LiveEvent, type LiveEventType, type LiveTicket, type LiveTicketRequest, type LoadState, type QueryRequest, type QueryResult, type QueueView, type ReleaseView, type SafeFrame, type ViewState, type VisibleSource } from './types';
 import { SseProtocolError, readSse, type SseFrame } from './sse';
+import { parseProfileRegistry, type ProfileInfo } from '../explore/profiles';
 import type { DestinationView, ErrorOccurrenceView, ExceptionChain, IssueActionView, PolicyView, PolicyWriteAnswer, PolicyWriteRequest, RetentionView, TraceView } from './types';
 import { parseTraceView } from '../traces/model';
 import { lineSplitter, parseReplayLine, type ReplayLine } from '../replays/model';
@@ -577,6 +578,80 @@ export async function formatExpression(req: FormatRequest, signal: AbortSignal):
  const response = await jsonPost('/api/v1/query/format', req, signal);
  if (!response.ok) throw await queryFaultOf(response);
  return parseFormat(await response.json() as unknown);
+}
+
+/** GET /api/v1/query/profiles: the pinned profile and feature-set registry the server resolves requests against. The console keeps no copy. */
+export async function profileRegistry(signal: AbortSignal): Promise<ProfileInfo[]> {
+ const response = await fetch('/api/v1/query/profiles', { credentials: 'same-origin', cache: 'no-store', signal, headers: { Accept: 'application/json' } });
+ if (!response.ok) throw await apiFault(response);
+ return parseProfileRegistry(await response.json() as unknown);
+}
+
+// ---- C11 saved views (POST /api/v1/saved-views) ----
+/** One saved view, accepted only for exactly the organization and owning project it was asked for, and only as a consistent statement: a view of another project, one that does not run over its own project, or one with a bound broken is a fault, never shown. */
+export function parseSavedView(raw: unknown, org: Id, project: Id): SavedView {
+ if (!isRecord(raw) || !idLike(raw.id) || raw.org !== org || raw.project !== project || !idLike(raw.owner)) return badResponse();
+ if (!textLike(raw.name, 120) || raw.name === '' || !QUERY_LANGUAGES.includes(raw.language as QueryLanguage)) return badResponse();
+ if (!textLike(raw.profile, 200) || !textLike(raw.feature_set, 400) || !textLike(raw.expression, 16384) || raw.expression === '') return badResponse();
+ if (!Array.isArray(raw.projects) || raw.projects.length === 0 || raw.projects.length > 16 || !raw.projects.every(idLike) || !raw.projects.includes(project) || new Set(raw.projects).size !== raw.projects.length) return badResponse();
+ if ((raw.mode !== 'instant' && raw.mode !== 'range') || typeof raw.allow_partial !== 'boolean') return badResponse();
+ if (!u64Like(raw.revision) || !i64Like(raw.created_ns) || !i64Like(raw.updated_ns)) return badResponse();
+ if (raw.step_seconds !== undefined && !u64Like(raw.step_seconds)) return badResponse();
+ if (raw.log_limit !== undefined && !u64Like(raw.log_limit)) return badResponse();
+ if (raw.log_order !== undefined && raw.log_order !== 'backward' && raw.log_order !== 'forward') return badResponse();
+ const view: SavedView = {
+  id: raw.id, org, project, name: raw.name, language: raw.language as QueryLanguage, profile: raw.profile, feature_set: raw.feature_set, expression: raw.expression,
+  projects: [...raw.projects as string[]], mode: raw.mode, allow_partial: raw.allow_partial, owner: raw.owner, created_ns: raw.created_ns, updated_ns: raw.updated_ns, revision: raw.revision,
+ };
+ if (raw.step_seconds !== undefined) view.step_seconds = raw.step_seconds;
+ if (raw.log_limit !== undefined) view.log_limit = raw.log_limit;
+ if (raw.log_order !== undefined) view.log_order = raw.log_order;
+ return view;
+}
+
+/** The answer of a list: exactly the project's views the caller may read, each for that project. */
+export function parseSavedViewList(raw: unknown, org: Id, project: Id): SavedView[] {
+ if (!isRecord(raw) || (raw.state !== 'ready' && raw.state !== 'empty')) return badResponse();
+ const views = listOf(raw.views).map((v) => parseSavedView(v, org, project));
+ if ((raw.state === 'empty') !== (views.length === 0) || new Set(views.map((v) => v.id)).size !== views.length) return badResponse();
+ return views;
+}
+
+/** POST /api/v1/saved-views, operation list: the saved views of one project the caller may read (telemetry.read on it). */
+export async function listSavedViews(org: Id, project: Id, signal: AbortSignal): Promise<SavedView[]> {
+ const response = await jsonPost('/api/v1/saved-views', { org, project, operation: 'list' }, signal);
+ if (!response.ok) throw await apiFault(response);
+ return parseSavedViewList(await response.json() as unknown, org, project);
+}
+
+async function savedViewPost(req: SavedViewRequest, signal: AbortSignal): Promise<Response> {
+ try {
+  return await jsonPost('/api/v1/saved-views', req, signal);
+ } catch (error) {
+  if (isAbort(error)) throw error;
+  // The request may have been applied; resending the same command ID returns the original result.
+  throw new OutcomeUnknown();
+ }
+}
+
+/** POST /api/v1/saved-views, operation save. The committed view must be the one that was sent (same project, name and text; for an update the same view at a newer revision). */
+export async function saveSavedView(req: SavedViewSaveRequest, signal: AbortSignal): Promise<SavedView> {
+ const response = await savedViewPost(req, signal);
+ if (!response.ok) throw await apiFault(response);
+ const raw: unknown = await response.json();
+ if (!isRecord(raw) || raw.state !== 'committed') return badResponse();
+ const view = parseSavedView(raw.view, req.org, req.project);
+ if (view.name !== req.name || view.expression !== req.expression || view.profile !== req.profile || view.feature_set !== req.feature_set || (req.id !== undefined && view.id !== req.id)) return badResponse();
+ if (req.expected_revision !== undefined && BigInt(view.revision) <= BigInt(req.expected_revision)) return badResponse();
+ return view;
+}
+
+/** POST /api/v1/saved-views, operation delete: only a committed answer is a deletion. */
+export async function deleteSavedView(req: SavedViewDeleteRequest, signal: AbortSignal): Promise<void> {
+ const response = await savedViewPost(req, signal);
+ if (!response.ok) throw await apiFault(response);
+ const raw: unknown = await response.json();
+ if (!isRecord(raw) || raw.state !== 'committed') return badResponse();
 }
 
 // ---- async raw-record export (POST /api/v1/exports: create, status, download) ----

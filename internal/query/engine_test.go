@@ -205,6 +205,8 @@ func (r *countingRegistry) Resolve(id, set string) (profile.Profile, error) {
 	return r.inner.Resolve(id, set)
 }
 
+func (r *countingRegistry) Profiles() []profile.Profile { return r.inner.Profiles() }
+
 // countingCache counts lookups of the real C02 cache.
 type countingCache struct {
 	*auth.Cache

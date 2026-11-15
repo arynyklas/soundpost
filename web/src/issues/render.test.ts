@@ -4,7 +4,7 @@ import { describe, expect, test } from 'bun:test';
 import * as React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { ErrorOccurrenceView, RegressionExplanation, ReleaseRegression, ViewContext } from '../api/types';
-import { conflictWords } from './IssueActions';
+import { conflictWords } from './actionModel';
 import { OccurrenceFacts } from './OccurrenceDetail';
 import { RegressionTable } from './RegressionTable';
 

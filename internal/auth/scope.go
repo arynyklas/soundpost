@@ -87,6 +87,14 @@ func (s Scope) ControlAuthorize(ctx context.Context, kind string) error {
 		if kind != IncidentActionKind {
 			return model.Fail(model.Forbidden)
 		}
+	case Read:
+		// The other non-administrator write the control store accepts: a saved
+		// view (save or delete), committed by a caller who reads the project. The
+		// handler re-checks membership, the grant and ownership against the state
+		// the command applies to (internal/control/saved_views.go).
+		if kind != SavedViewKind {
+			return model.Fail(model.Forbidden)
+		}
 	default:
 		return model.Fail(model.Forbidden)
 	}

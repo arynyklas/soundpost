@@ -96,6 +96,10 @@ func (e *Engine) Usage() Usage {
 	return Usage{ActiveQueries: st.Active, QueuedQueries: st.Queued, MemoryUsed: used, MemoryPeak: peak, OpenIterators: e.openIterators.Load(), LeakedBytes: e.leakedBytes.Load(), OverReleasedBytes: e.overReleased.Load()}
 }
 
+// Profiles is the registry the engine resolves every request against: each
+// accepted pinned profile and the feature sets it registers.
+func (e *Engine) Profiles() []profile.Profile { return e.profiles.Profiles() }
+
 func ctxFault(err error) error {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return model.Fail(model.Timeout)

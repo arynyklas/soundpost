@@ -34,6 +34,8 @@ type Revalidator interface {
 // Registry resolves an immutable pinned profile and registered feature set.
 type Registry interface {
 	Resolve(id, featureSet string) (profile.Profile, error)
+	// Profiles lists every accepted profile with its registered feature sets.
+	Profiles() []profile.Profile
 }
 
 // Tickets issues and opens short-lived opaque tokens bound to the issuing

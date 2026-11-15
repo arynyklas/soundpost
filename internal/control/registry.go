@@ -18,7 +18,7 @@ type Effect struct {
 
 func (k CommandKind) Valid() bool {
 	switch k {
-	case KindCreateOrg, KindGrant, KindPolicyChange, KindBeginFence, KindCompleteFence, KindReserveAdmission, KindFinalizeAdmission, KindApplyIssueEvidence, KindApplyCondition, KindApplyRuleEvaluation, KindIncidentAction, KindClaimDelivery, KindCompleteDelivery, KindDeleteScope, KindAudit, KindRegisterRelease, KindUpdateJob, KindRecordEvidenceGap:
+	case KindCreateOrg, KindGrant, KindPolicyChange, KindBeginFence, KindCompleteFence, KindReserveAdmission, KindFinalizeAdmission, KindApplyIssueEvidence, KindApplyCondition, KindApplyRuleEvaluation, KindIncidentAction, KindClaimDelivery, KindCompleteDelivery, KindDeleteScope, KindAudit, KindRegisterRelease, KindUpdateJob, KindRecordEvidenceGap, KindSavedView:
 		return true
 	}
 	return false

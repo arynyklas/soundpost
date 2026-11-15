@@ -10,6 +10,7 @@ import (
 	"github.com/arynyklas/soundpost/internal/auth"
 	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/query"
+	"github.com/arynyklas/soundpost/internal/query/profile"
 	"github.com/arynyklas/soundpost/internal/query/syntax"
 	"io"
 	"net/http"
@@ -23,20 +24,25 @@ type QueryService interface {
 	Discover(ctx context.Context, scope auth.Scope, req query.DiscoveryRequest) (query.DiscoveryResult, error)
 	Exemplars(ctx context.Context, scope auth.Scope, req query.ExemplarRequest) (query.ExemplarResult, error)
 	Format(ctx context.Context, scope auth.Scope, req query.FormatRequest) (query.FormatResult, error)
+	Profiles() []profile.Profile
 }
 
-// RegisterQueryRoutes mounts the four owned C06 routes. They are POST-only so
-// telemetry expressions never appear in a URL, and every one rebuilds the scope
-// from the caller's own credential: no body field can name another principal's
-// scope.
+// RegisterQueryRoutes mounts the owned C06 routes. The telemetry routes are
+// POST-only so telemetry expressions never appear in a URL, and every one
+// rebuilds the scope from the caller's own credential: no body field can name
+// another principal's scope.
 //
 //	POST /api/v1/query         typed Request -> Result{Projects}
 //	POST /api/v1/query/format  FormatRequest -> FormatResult
 //	POST /api/v1/discover      DiscoveryRequest -> DiscoveryResult
 //	POST /api/v1/exemplars     ExemplarRequest -> ExemplarResult
+//	GET  /api/v1/query/profiles  the pinned profile registry (query_profiles.go)
+//	POST /api/v1/saved-views   list, save or delete the project-owned saved views (saved_views.go)
 func RegisterQueryRoutes(mux *http.ServeMux, authority *auth.Service, service QueryService) {
 	registerQuery(mux, authority, service)
+	registerProfiles(mux, authority, service)
 	registerDiscovery(mux, authority, service)
+	registerSavedViews(mux, authority)
 }
 
 // ScopeFields are the authorization fields every C06 body carries next to its

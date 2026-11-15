@@ -133,8 +133,8 @@ var nonAuthorityWriters = map[writer]string{
 
 // nonAuthorityKinds is the closed allowlist of Transact kinds whose commit leaves
 // AuthorityRevision alone: the handlers write only their own book (rule, condition, incident,
-// delivery/cutover, release/issue evidence, job) and audits of that write. A kind absent from the
-// list bumps.
+// delivery/cutover, release/issue evidence, job, saved view) and audits of that write. A kind
+// absent from the list bumps.
 var nonAuthorityKinds = map[CommandKind]string{
 	KindApplyIssueEvidence:  "issue evidence book",
 	KindApplyCondition:      "condition book",
@@ -144,6 +144,7 @@ var nonAuthorityKinds = map[CommandKind]string{
 	KindCompleteDelivery:    "delivery outbox books",
 	KindRegisterRelease:     "release registry",
 	KindUpdateJob:           "job book",
+	KindSavedView:           "saved view book",
 }
 
 // retentionKinds are the kinds BindRetention registers: the commands whose caller view is

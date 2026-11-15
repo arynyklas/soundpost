@@ -72,6 +72,31 @@ func Load(files fs.FS) (Registry, error) {
 	}
 	return r, nil
 }
+
+// Profiles lists every accepted (complete) pinned profile with all its
+// registered feature sets, ordered by profile identifier. The result is a deep
+// copy: nothing in it aliases the registry, and it carries no resolved
+// configuration, only identifiers and the enabled features of each set.
+func (r Registry) Profiles() []Profile {
+	ids := make([]string, 0, len(r.profiles))
+	for id, p := range r.profiles {
+		if p.Complete {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	out := make([]Profile, 0, len(ids))
+	for _, id := range ids {
+		p := r.profiles[id]
+		sets := make([]FeatureSet, len(p.FeatureSets))
+		for i, set := range p.FeatureSets {
+			sets[i] = FeatureSet{ID: set.ID, Enabled: append([]string{}, set.Enabled...)}
+		}
+		out = append(out, Profile{ID: p.ID, Commit: p.Commit, ManifestVersion: p.ManifestVersion, FeatureSets: sets, Complete: true})
+	}
+	return out
+}
+
 func (r Registry) Resolve(id, featureSet string) (Profile, error) {
 	p, ok := r.profiles[id]
 	if !ok {

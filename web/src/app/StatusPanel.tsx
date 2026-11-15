@@ -18,7 +18,6 @@ const REASONS: Record<string, string> = {
  no_visible_sources: 'No readable source was found for this selection.',
  restricted_source_discovery_unavailable: 'Discovery does not run for a restricted source.',
  project_failed: 'This project produced no value. It is not an empty or zero result; the failure is listed below.',
- saved_views_not_built: 'Saved views and their exports need the C11 saved-view actions, which this installation does not have. Nothing is saved, in this browser or on the server.',
  span_source_not_wired: 'This installation has no span reader wired, so no trace can be shown. That is not an empty trace.',
  no_spans_in_window: 'No span of this trace is readable by this account in the selected window. Widen the window; this is not proof that the trace does not exist.',
  replay_service_not_wired: 'This installation has no replay reader wired, so no replay can be shown. That is not an empty replay.',

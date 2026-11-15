@@ -1,29 +1,32 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
 import * as React from 'react';
 import { getErrorOccurrence, getFrames } from '../api/client';
-import type { ErrorOccurrenceDetail, ErrorOccurrenceView, FramesRequest, FramesView, Id, OccurrenceEvidence } from '../api/types';
+import type { ErrorOccurrenceDetail, ErrorOccurrenceView, FramesView, Id, OccurrenceEvidence } from '../api/types';
 import { FramePanel } from '../artifacts/FramePanel';
-import { encodeHash, scopeKey, type ViewContext } from '../app/context';
+import { encodeHash, type ViewContext } from '../app/context';
 import { StatusPanel } from '../app/StatusPanel';
-import { MAX_FRAMES, chainEdgeWords, chainReasonWords, handledFatalWords, mechanismWords } from '../evidence/model';
+import { chainEdgeWords, chainReasonWords, handledFatalWords, mechanismWords } from '../evidence/model';
 import { dataOf, useEvidence } from '../evidence/useEvidence';
+import { occurrenceReadKey, storedFramesPlan, type StoredFramesPlan } from './model';
 
-/** The primary stack of one stored occurrence, resolved through the server under the caller's own scope. The frames are the ones the error record stored, never typed or guessed; an unmapped frame keeps its original sanitized form and says why. At most one lookup's worth of frames is resolved and the rest are counted. */
-function StoredFrames(props: { context: ViewContext; project: Id; detail: ErrorOccurrenceDetail }): React.JSX.Element {
- const { context, project, detail } = props;
- const sent = detail.frames.slice(0, MAX_FRAMES);
- const key = `${scopeKey(context)}|${project}|frames|${detail.build_id}|${JSON.stringify(sent)}|${context.generation}`;
- const request: FramesRequest = { org: context.org, project, build: detail.build_id, frames: sent, include_sources: false };
- const frames = useEvidence<FramesView>(key, (signal) => getFrames(request, signal));
- if (sent.length === 0) return <p data-testid="stored-frames-none">This record stores no frames, so there is nothing to map.</p>;
+function FramesRead(props: { plan: StoredFramesPlan; buildId: Id }): React.JSX.Element {
+ const { plan } = props;
+ const frames = useEvidence<FramesView>(plan.key, (signal) => getFrames(plan.request, signal));
  const view = dataOf(frames.state);
  return (
   <div data-testid="stored-frames">
    <StatusPanel state={frames.state} />
-   {view && view.frames.map((f, i) => <FramePanel key={i} frame={f} buildId={detail.build_id} index={i} />)}
-   {detail.frames.length > sent.length && <p>{detail.frames.length - sent.length} more stored frames are not resolved here.</p>}
+   {view && view.frames.map((f, i) => <FramePanel key={i} frame={f} buildId={props.buildId} index={i} />)}
+   {plan.unsent > 0 && <p>{plan.unsent} more stored frames are not resolved here.</p>}
   </div>
  );
+}
+
+/** The primary stack of one stored occurrence, resolved through the server under the caller's own scope. The frames are the ones the error record stored, never typed or guessed; an unmapped frame keeps its original sanitized form and says why. At most one lookup's worth of frames is resolved and the rest are counted. */
+function StoredFrames(props: { context: ViewContext; project: Id; detail: ErrorOccurrenceDetail }): React.JSX.Element {
+ const plan = storedFramesPlan(props.context, props.project, props.detail);
+ if (plan === null) return <p data-testid="stored-frames-none">This record stores no frames, so there is nothing to map.</p>;
+ return <FramesRead plan={plan} buildId={props.detail.build_id} />;
 }
 
 function Link(props: { href: string; testid: string; children: React.ReactNode }): React.JSX.Element {
@@ -85,7 +88,7 @@ export function OccurrenceFacts(props: { context: ViewContext; project: Id; view
 /** The stored error record behind one occurrence: class, mechanism, handled and fatal, code, exception chain and its frames mapped through the real source map of the record's own build, with links to the release and the trace the record itself names. Read on request, under the caller's own telemetry scope; an administrator without telemetry.read is told so and nothing is shown. */
 export function OccurrenceDetail(props: { context: ViewContext; project: Id; issue: Id; occurrence: OccurrenceEvidence }): React.JSX.Element {
  const { context, project, issue, occurrence } = props;
- const key = `${scopeKey(context)}|${project}|${issue}|${occurrence.occurrence_id}|${context.generation}`;
+ const key = occurrenceReadKey(context, project, issue, occurrence.occurrence_id);
  const evidence = useEvidence<ErrorOccurrenceView>(key, (signal) => getErrorOccurrence(context.org, project, issue, occurrence.occurrence_id, signal));
  const view = dataOf(evidence.state);
  return (

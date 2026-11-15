@@ -160,6 +160,14 @@ type ControlState struct {
 	// evidence. A retirement drops the operator free text and the evidence
 	// payloads and keeps identities, revision, phase and the audit trail.
 	CutoverBooks map[string]json.RawMessage
+	// Saved views (plan 06 task 11, C11). "org:project:view" holds the closed
+	// auth.SavedView DTO of one project-owned saved query. A query text can hold
+	// sensitive literals, so a view is stored only through an explicit save by a
+	// caller who reads the project, and a retirement of the owning project drops
+	// it (internal/control/erase_saved_views.go). Saving never changes
+	// authority: it moves neither an organization's policy epoch nor
+	// AuthorityRevision.
+	SavedViewBooks map[string]json.RawMessage `json:",omitempty"`
 }
 type ControlCommand struct {
 	CommandID        ID

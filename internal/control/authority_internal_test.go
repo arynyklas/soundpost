@@ -54,7 +54,7 @@ func TestAuthorityClassificationTablesAreExact(t *testing.T) {
 	if got, want := strings.Join(sortedKeys(nonAuthorityWriters), ","), "ArtifactLedger,AttestControl,CancelAdmission,ExpireControlLog,FinalizeAdmission,PublishArtifact,ReconcileAdmissions,RedactNoop,ReplayIndex,ReserveAdmission,ReserveArtifact,SessionCreate,TransactIssues,TransactJobs"; got != want {
 		t.Fatalf("non-authority writers: %s, want %s", got, want)
 	}
-	if got, want := strings.Join(sortedKeys(nonAuthorityKinds), ","), "ApplyCondition,ApplyIssueEvidence,ApplyRuleEvaluation,ClaimDelivery,CompleteDelivery,IncidentAction,RegisterRelease,UpdateJob"; got != want {
+	if got, want := strings.Join(sortedKeys(nonAuthorityKinds), ","), "ApplyCondition,ApplyIssueEvidence,ApplyRuleEvaluation,ClaimDelivery,CompleteDelivery,IncidentAction,RegisterRelease,SavedView,UpdateJob"; got != want {
 		t.Fatalf("non-authority kinds: %s, want %s", got, want)
 	}
 	if got, want := strings.Join(sortedKeys(retentionKinds), ","), "BeginFence,CompleteFence,DeleteScope,PolicyChange,RecordEvidenceGap"; got != want {

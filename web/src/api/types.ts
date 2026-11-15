@@ -292,6 +292,26 @@ export interface QueryRequest {
  log_limit?: string;
  log_order?: 'backward' | 'forward';
 }
+
+// ---- C11 saved views (POST /api/v1/saved-views; internal/httpapi/saved_views.go) ----
+// A saved view is a query the person chose to keep, owned by one project. It is stored on the server only through an explicit save
+// and is readable by whoever holds telemetry.read on that project. Revisions and times are decimal strings.
+export type SavedViewMode = 'instant' | 'range';
+export interface SavedView {
+ id: Id; org: Id; project: Id; name: string;
+ language: QueryLanguage; profile: string; feature_set: string; expression: string;
+ projects: Id[]; mode: SavedViewMode; step_seconds?: string; allow_partial: boolean;
+ log_limit?: string; log_order?: 'backward' | 'forward';
+ owner: Id; created_ns: string; updated_ns: string; revision: string;
+}
+/** The body of a save: a create when `id` is absent, otherwise an update of that view at `expected_revision`. */
+export interface SavedViewSaveRequest {
+ org: Id; project: Id; operation: 'save'; command_id: Id; id?: Id; expected_revision?: string; name: string;
+ language: QueryLanguage; profile: string; feature_set: string; expression: string;
+ projects: Id[]; mode: SavedViewMode; step_seconds?: string; allow_partial: boolean; log_limit?: string; log_order?: 'backward' | 'forward';
+}
+export interface SavedViewDeleteRequest { org: Id; project: Id; operation: 'delete'; command_id: Id; id: Id; expected_revision: string }
+export type SavedViewRequest = SavedViewSaveRequest | SavedViewDeleteRequest;
 export type DiscoverSignal = 'metric' | 'log';
 export type DiscoverKind = 'metric_names' | 'label_names' | 'label_values' | 'templates' | 'fields';
 export const DISCOVER_KINDS: Record<DiscoverSignal, readonly DiscoverKind[]> = { metric: ['metric_names', 'label_names', 'label_values'], log: ['label_names', 'label_values', 'templates', 'fields'] };
