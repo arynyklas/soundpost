@@ -532,7 +532,7 @@ func (s *Service) Backup(ctx context.Context, scope auth.Scope, set SnapshotSet,
 		return BackupManifest{}, err
 	}
 	bundle := set.Sealed.Bundle
-	if bundle.Version != 1 || len(set.Sealed.Snapshots) != 64 || len(bundle.Snapshots) != 64 || bundle.Cut.Revision != state.Revision {
+	if bundle.Version != 1 && bundle.Version != 2 || len(set.Sealed.Snapshots) != 64 || len(bundle.Snapshots) != 64 || bundle.Cut.Revision != state.Revision {
 		return BackupManifest{}, model.Fail(model.Invalid)
 	}
 	reservations, err := canonicalReservations(state.Reservations)
@@ -1006,7 +1006,11 @@ func (r *Restorer) Restore(ctx context.Context, m BackupManifest, root Destinati
 	if err != nil {
 		return RestoreReport{}, err
 	}
-	summary, err := installControl(ctx, stage, seed, cert, created, bundle.Quota.Consumed, m.ID, r.cfg.Clock())
+	evidence, err := bundle.ConsumedEvidence()
+	if err != nil {
+		return RestoreReport{}, err
+	}
+	summary, err := installControl(ctx, stage, seed, cert, created, evidence, m.ID, r.cfg.Clock())
 	if err != nil {
 		return RestoreReport{}, err
 	}
@@ -1144,7 +1148,7 @@ func (r *Restorer) fetch(ctx context.Context, m BackupManifest, deks map[string]
 // certificates (storage.ReconcileQuota authenticates the bundle digest and the
 // reservation evidence and returns the quota certificate).
 func verifyBundle(m BackupManifest, b storage.BackupBundle) (storage.QuotaReconciliation, error) {
-	if b.Version != 1 || len(b.Snapshots) != 64 || len(b.Cut.Processed) != 64 || b.Identity != m.Data.Identity || b.Digest != m.Data.BundleDigest || uint64(b.Generation) != uint64(m.Data.Generation) || b.Replay.Digest != m.Data.ReplayDigest || b.Quota.Digest != m.Data.QuotaDigest || b.Cut.Revision != m.Control.Revision {
+	if b.Version != 1 && b.Version != 2 || len(b.Snapshots) != 64 || len(b.Cut.Processed) != 64 || b.Identity != m.Data.Identity || b.Digest != m.Data.BundleDigest || uint64(b.Generation) != uint64(m.Data.Generation) || b.Replay.Digest != m.Data.ReplayDigest || b.Quota.Digest != m.Data.QuotaDigest || b.Cut.Revision != m.Control.Revision {
 		return storage.QuotaReconciliation{}, model.Fail(model.Corrupt)
 	}
 	for i := range 64 {
@@ -1215,6 +1219,24 @@ func (r *Restorer) installData(ctx context.Context, stage, raftData string, b st
 	for _, id := range cert.AddedAfterCut {
 		want[id] = true
 	}
+	// Bundle version 2: a reservation control did not hold at the cut lies in a detail window of
+	// its group, so no other window is read. (Version 1 has no windows: every batch is read.)
+	detailSet := map[model.ID]map[uint64]bool{}
+	for _, w := range b.Quota.Windows {
+		if w.Detail {
+			if detailSet[w.Group] == nil {
+				detailSet[w.Group] = map[uint64]bool{}
+			}
+			detailSet[w.Group][w.N] = true
+		}
+	}
+	detail := map[model.ID]func(uint64) bool{}
+	if b.Version == 2 {
+		for _, s := range b.Snapshots {
+			set := detailSet[s.Group]
+			detail[s.Group] = func(n uint64) bool { return set[n] }
+		}
+	}
 	created := map[model.ID]model.AdmissionReservation{}
 	if len(want) == 0 {
 		return created, nil
@@ -1228,7 +1250,7 @@ func (r *Restorer) installData(ctx context.Context, stage, raftData string, b st
 		if !ok {
 			return nil, model.Fail(model.Corrupt)
 		}
-		found, err := slotReservations(snapshot)
+		found, err := slotReservations(snapshot, detail[b.Snapshots[slot].Group])
 		if err != nil {
 			return nil, err
 		}

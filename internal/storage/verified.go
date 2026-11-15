@@ -458,6 +458,9 @@ func (e *Engine) VerifyFull(ctx context.Context) error {
 		if err := validateIndexIntegrity(tx); err != nil {
 			return err
 		}
+		if err := validateWindowRecordsTx(tx); err != nil {
+			return err
+		}
 		var err error
 		rec, err = e.buildVerifiedRecord(tx, cat)
 		return err

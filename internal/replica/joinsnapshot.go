@@ -36,7 +36,9 @@ func (s snapshotSource) Snapshot() (*pb.Snapshot, error) {
 		return stored, err
 	}
 	g := s.g
-	if confCovers(stored.GetMetadata().GetConfState(), g.conf) {
+	// A machine that cuts compact snapshots (CompactMachine) stores a state that names files; a
+	// peer cannot resolve it, so a snapshot offered to one is always cut whole from the machine.
+	if _, compact := g.machine.(CompactMachine); !compact && confCovers(stored.GetMetadata().GetConfState(), g.conf) {
 		if g.sendSnap != nil && g.sendSnap.GetMetadata().GetIndex() <= stored.GetMetadata().GetIndex() {
 			g.sendSnap = nil
 		}

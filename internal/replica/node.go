@@ -242,6 +242,7 @@ type Group struct {
 	snaps          *SnapshotStore
 	pins           map[model.ID]*JournalPin
 	sendSnap       *pb.Snapshot // snapshot for members added after the stored one; never persisted
+	cutMu          sync.Mutex   // one CreateSnapshot at a time: the incremental cut reuses the selected snapshot's files
 	// machineRules and machineFloor are the proof RedactMachineCommands leaves (memory only):
 	// the rule set the last completed pass covered (0: no proof) and the physical index it
 	// finished at. A snapshot install and a stale committed command withdraw it.
@@ -301,6 +302,9 @@ func Open(c Config) (*Group, error) {
 	snaps, err := OpenSnapshotStore(c.Directory, c.Group, c.Fault)
 	if err != nil {
 		return nil, err
+	}
+	if user, ok := c.Machine.(SnapshotStoreUser); ok {
+		user.UseSnapshotStore(snaps) // before any restoreSnapshot: a compact state is resolved from this store
 	}
 	var installed *installedSeed
 	if _, statErr := os.Stat(filepath.Join(c.Directory, "ready.wal")); os.IsNotExist(statErr) {

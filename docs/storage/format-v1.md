@@ -86,3 +86,16 @@ A scan retains only its bounded current page, last index key, authorized namespa
 ## Startup verification record
 
 A node's data directory holds `verified-record.bin` (magic `SPVR0001`, SHA-256 of the body, JSON body; see `docs/operations/recovery.md`, "Bounded startup verification"). It is derived state: deleting it or any damage to it only forces a full verification before readiness. The guarantee it buys is weaker than verifying everything at every start, in these words: everything written or changed since the last fully verified point is still verified before readiness; bit rot in an older, already verified segment is no longer caught before readiness but by a background full re-verification (at every start and at least daily) that fails the node closed.
+
+## Windowed slot snapshot (01.07-W1)
+
+This is append-only: nothing above changes. A data slot's snapshot directory (`docs/operations/recovery.md`, "Windowed slot snapshots") holds, per window of `span` (4096) consecutive commands (the last window may be shorter), two files under `files/`:
+
+* `win-NNNNNNNN.cmd`: the 8-byte magic `SPWC0001`, the first index (8 bytes, big endian), then each command as a 4-byte big-endian length and the exact bytes stored in `replica_commands`. At most `1<<30` bytes per command.
+* `win-NNNNNNNN.evd`: JSON `{"version":1,"window":N,"consumed":[ReservationEvidence...],"cancelled":[CancellationEvidence...]}`, in command order.
+
+`envelope.json`'s machine state is then `{"version":2,"identity","slot","application","span","windows":[...]}` (strict JSON; `version` 1 is the whole-history state `{"version":1,"identity","slot","application","entries":[...]}`, still read and still what a peer receives). A window entry holds `n`, `first`, `count`, `file` and `ev` (size and SHA-256 of the two files), `identity` (SHA-256 over, for every command in order, its 8-byte index and its identity, where a redacted command's identity is the digest of the bytes it replaced and any other command's is the SHA-256 of its exact bytes), `batches`, `redacted`, `cancels` and `charge` (SHA-256 of the JSON array of `{id, org, project, source, hash, bytes, series, cursor}` of the consumed reservations ordered by cursor index). The windows are contiguous from 0, every window but the last holds exactly `span` commands, the counts sum to `application`, and the table must name the sizes and hashes `MANIFEST.json` lists for the same files.
+
+The apply database keeps, for every sealed window, `replica_data[slot ++ "wrec:" ++ n]`: the JSON of the window entry plus `ledger` (the deletion-ledger entries of the window) and `barriers` (delete barriers, which raise the ledger generation). It is derived state: deleting it only makes the next cut or check derive the window again; redaction deletes it in the transaction that rewrites the command; `VerifyFull` re-derives every record and fails the engine closed on a mismatch.
+
+`BackupBundle` `version` 2 (and `QuotaEvidence.version` 2) adds `quota.windows` (per window of every group: `group`, `n`, `first`, `count`, `span`, `batches`, `redacted`, `charge`, `identity`, and `detail` when the window's reservations are listed) and lists `quota.consumed` only for `detail` windows. A bundle written without those fields is version 1 and keeps its meaning and its digest.

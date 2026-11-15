@@ -66,7 +66,16 @@ type bundleSource struct {
 	name string
 	data []byte
 	path string
+	// reuse names a file of the selected snapshot (same name, size and hash) taken without
+	// being read; size and sum describe it.
+	reuse bool
+	size  uint64
+	sum   model.Hash
 }
+
+// ErrReuseLost means a file the cut meant to take from the selected snapshot is no longer
+// there (another snapshot was selected in between). The cut is repeated.
+var ErrReuseLost = errors.New("replica snapshot file to reuse is gone")
 
 type currentPointer struct {
 	Version  uint16     `json:"version"`
@@ -83,6 +92,11 @@ type SnapshotStore struct {
 	root  string
 	group model.ID
 	fault func(string) error
+	// reuse, set by create while it holds mu, resolves a bundleSource marked reuse from the
+	// selected snapshot. fresh lists the files the last create wrote itself (everything but the
+	// files it reused): VerifyCut hashes exactly those.
+	reuse func(name, dst string) (SnapshotFile, bool, error)
+	fresh []string
 }
 
 // OpenSnapshotStore opens (creating if needed) the store under directory and
@@ -139,6 +153,46 @@ func (s *SnapshotStore) loadCurrent(deep bool) (Snapshot, error) {
 	}
 	if snap.Manifest.Checksum != p.Checksum || dirName(snap.Manifest) != p.Dir {
 		return Snapshot{}, ErrCorrupt
+	}
+	return snap, nil
+}
+
+// VerifyCut is Verify for the snapshot a cut has just published: it re-reads the bytes of the
+// files that cut wrote itself, checks the envelope and the ledger, and checks the rest
+// structurally. The files the cut took from the previous snapshot were hashed when that one was
+// written and are hashed again by every full Verify (CompactJournal runs it before it truncates).
+func (s *SnapshotStore) VerifyCut() (Snapshot, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	snap, err := s.loadCurrent(false)
+	if errors.Is(err, os.ErrNotExist) {
+		return Snapshot{}, ErrNoSnapshot
+	}
+	if err != nil {
+		return Snapshot{}, err
+	}
+	byName := map[string]SnapshotFile{}
+	for _, f := range snap.Manifest.Files {
+		byName[f.Name] = f
+	}
+	for _, name := range s.fresh {
+		f, ok := byName[name]
+		if !ok {
+			return Snapshot{}, ErrCorrupt
+		}
+		in, err := os.Open(filepath.Join(snap.dir, filepath.FromSlash(name)))
+		if err != nil {
+			return Snapshot{}, ErrCorrupt
+		}
+		h := sha256.New()
+		_, err = io.Copy(h, in)
+		in.Close()
+		if err != nil || model.Hash(h.Sum(nil)) != f.SHA256 {
+			return Snapshot{}, ErrCorrupt
+		}
+	}
+	if err = checkContent(snap.dir, snap.Manifest, true); err != nil {
+		return Snapshot{}, err
 	}
 	return snap, nil
 }
@@ -420,6 +474,7 @@ func (s *SnapshotStore) create(ctx context.Context, m SnapshotManifest, ledgerRa
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	const prefix = "snapshot_"
+	s.fresh = nil
 	if fence := s.fenceLocked(); m.Generation < fence {
 		return Snapshot{}, ErrStale
 	}
@@ -438,10 +493,49 @@ func (s *SnapshotStore) create(ctx context.Context, m SnapshotManifest, ledgerRa
 	if err := durablefs.MkdirAll(tmp); err != nil {
 		return Snapshot{}, err
 	}
+	cur, curErr := s.loadCurrent(false)
+	s.reuse = func(name, dst string) (SnapshotFile, bool, error) {
+		for _, src := range sources {
+			if src.name != name || !src.reuse {
+				continue
+			}
+			if curErr != nil {
+				return SnapshotFile{}, false, ErrReuseLost
+			}
+			for _, f := range cur.Manifest.Files {
+				if f.Name != name || f.Size != src.size || f.SHA256 != src.sum {
+					continue
+				}
+				from := filepath.Join(cur.dir, filepath.FromSlash(name))
+				if err := os.MkdirAll(filepath.Dir(dst), 0700); err != nil {
+					return SnapshotFile{}, false, err
+				}
+				if os.Link(from, dst) == nil {
+					return f, true, nil
+				}
+				// No hard links here (another volume, a file system without them): a copy that
+				// is verified against the hash it stands for.
+				in, err := os.Open(from)
+				if err != nil {
+					return SnapshotFile{}, false, ErrReuseLost
+				}
+				want := f
+				file, err := s.copyOut(ctx, prefix, tmp, name, in, &want)
+				in.Close()
+				return file, err == nil, err
+			}
+			return SnapshotFile{}, false, ErrReuseLost
+		}
+		return SnapshotFile{}, false, nil
+	}
+	defer func() { s.reuse = nil }()
 	snap, err := s.build(ctx, prefix, tmp, m, uint64(len(ledger.Entries)), func(name string, want *SnapshotFile) (io.ReadCloser, error) {
 		for _, src := range sources {
 			if src.name != name {
 				continue
+			}
+			if src.reuse {
+				return nil, ErrReuseLost
 			}
 			if src.path != "" {
 				return os.Open(src.path)
@@ -472,7 +566,18 @@ func names(sources []bundleSource) []string {
 // verified against it as it is copied.
 func (s *SnapshotStore) build(ctx context.Context, prefix, tmp string, m SnapshotManifest, ledgerCount uint64, open func(string, *SnapshotFile) (io.ReadCloser, error), order []string, install bool, after func() error) (Snapshot, error) {
 	var files []SnapshotFile
+	if !install {
+		s.fresh = s.fresh[:0]
+	}
 	for i, name := range order {
+		if s.reuse != nil && !install {
+			if file, ok, err := s.reuse(name, filepath.Join(tmp, filepath.FromSlash(name))); err != nil {
+				return Snapshot{}, err
+			} else if ok {
+				files = append(files, file)
+				continue
+			}
+		}
 		var want *SnapshotFile
 		if install {
 			want = &m.Files[i]
@@ -485,6 +590,9 @@ func (s *SnapshotStore) build(ctx context.Context, prefix, tmp string, m Snapsho
 		in.Close()
 		if err != nil {
 			return Snapshot{}, err
+		}
+		if !install {
+			s.fresh = append(s.fresh, name)
 		}
 		files = append(files, file)
 	}

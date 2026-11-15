@@ -74,10 +74,16 @@ type LedgerMachine interface {
 }
 
 // PinnedFile is an immutable file the machine promises not to change or remove
-// until release is called.
+// until release is called. A file with Reuse set has no Path: the machine states its
+// size and SHA-256 and the snapshot store takes it, without reading it, from the
+// selected snapshot when that holds a file of the same name, size and hash (a hard link,
+// or a verified copy where links are unavailable). That is how a cut stays incremental.
 type PinnedFile struct {
-	Name string
-	Path string
+	Name   string
+	Path   string
+	Reuse  bool
+	Size   uint64
+	SHA256 model.Hash
 }
 
 // FileMachine is optionally implemented by machines with authoritative or
@@ -85,6 +91,23 @@ type PinnedFile struct {
 // returned set is internally consistent and survives until release.
 type FileMachine interface {
 	PinFiles() (files []PinnedFile, release func(), err error)
+}
+
+// CompactMachine is optionally implemented by a machine whose locally cut snapshots keep
+// most of their state in snapshot files (FileMachine) instead of inside the envelope.
+// CompactSnapshot is the state such a cut puts in the envelope: it names the files and cannot
+// be installed by a peer, so a snapshot sent to a peer is always cut with Snapshot, which is
+// self-contained. Restore must accept both and resolve a compact state from the store
+// handed over by SnapshotStoreUser.
+type CompactMachine interface {
+	CompactSnapshot() ([]byte, error)
+}
+
+// SnapshotStoreUser is optionally implemented by a machine that resolves a compact state or
+// reuses files from the group's snapshot store. It is called once, before the machine's first
+// Restore, VerifySnapshot or cut.
+type SnapshotStoreUser interface {
+	UseSnapshotStore(*SnapshotStore)
 }
 
 // SnapshotFile is one checksummed byte stream of a snapshot.
@@ -235,6 +258,8 @@ func (s Snapshot) envelopeBytes() ([]byte, error) {
 // supplied by the machine are pinned while they are copied, so a concurrent flush
 // or compaction cannot remove them mid-copy.
 func (g *Group) CreateSnapshot(ctx context.Context, at model.Cursor) (Snapshot, error) {
+	g.cutMu.Lock()
+	defer g.cutMu.Unlock()
 	if at.Group != g.group {
 		return Snapshot{}, ErrInvalid
 	}
@@ -263,7 +288,12 @@ func (g *Group) CreateSnapshot(ctx context.Context, at model.Cursor) (Snapshot, 
 		g.mu.Unlock()
 		return Snapshot{}, err
 	}
-	state, err := g.machine.Snapshot()
+	var state []byte
+	if compact, ok := g.machine.(CompactMachine); ok {
+		state, err = compact.CompactSnapshot()
+	} else {
+		state, err = g.machine.Snapshot()
+	}
 	if err != nil {
 		g.mu.Unlock()
 		return Snapshot{}, err
@@ -336,7 +366,7 @@ func (g *Group) CreateSnapshot(ctx context.Context, at model.Cursor) (Snapshot, 
 		if !safeFileName.MatchString(f.Name) {
 			return Snapshot{}, ErrInvalid
 		}
-		sources = append(sources, bundleSource{name: filePrefix + f.Name, path: f.Path})
+		sources = append(sources, bundleSource{name: filePrefix + f.Name, path: f.Path, reuse: f.Reuse, size: f.Size, sum: f.SHA256})
 	}
 	sort.Slice(sources, func(i, j int) bool { return sources[i].name < sources[j].name })
 	manifest := SnapshotManifest{Version: snapshotFormat, Group: g.group, Index: index, Term: term, Cursor: cursor, Generation: ledger.Generation}

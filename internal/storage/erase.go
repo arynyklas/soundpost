@@ -404,6 +404,9 @@ func (e *Engine) eraseBatchTx(tx *bolt.Tx, job eraseBatchJob, ops []model.ID) (r
 	if err = commands.Put(commandKey(job.slot, job.index), redacted); err != nil {
 		return 0, 0, err
 	}
+	if err = dropWindowTx(tx, job.slot, job.index); err != nil { // the sealed-window record no longer describes this command
+		return 0, 0, err
+	}
 	if err = e.markScrubPendingTx(tx); err != nil {
 		return 0, 0, err
 	}
@@ -634,6 +637,9 @@ func (e *Engine) eraseBlobTx(tx *bolt.Tx, job eraseBlobJob, ops []model.ID) (boo
 				return false, err
 			}
 			if err = commands.Put(ck, redacted); err != nil {
+				return false, err
+			}
+			if err = dropWindowTx(tx, slot, uint64(f.Cursor.Index)); err != nil {
 				return false, err
 			}
 		case "artifact_redacted":

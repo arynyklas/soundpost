@@ -35,6 +35,10 @@ type slotMachine struct {
 	engine    *Engine
 	slot      uint16
 	authority ReplicatedAuthority
+	// snaps is the group's snapshot store (UseSnapshotStore); cut is the window table of the last
+	// compact cut. Both are read and written under engine.mu.
+	snaps *replica.SnapshotStore
+	cut   *cutTable
 }
 type slotSnapshot struct {
 	Version     uint16            `json:"version"`
@@ -380,6 +384,9 @@ func (e *Engine) EnableReplication(c replica.Config, seed *ReplicationSeed, auth
 	if err := e.initializeReplicaNamespace(); err != nil {
 		return nil, err
 	}
+	if err := os.RemoveAll(filepath.Join(e.dir, "snapshot-stage")); err != nil { // window files of a cut a crash interrupted
+		return nil, err
+	}
 	if err := e.loadRestoreHold(); err != nil {
 		return nil, err
 	}
@@ -676,7 +683,35 @@ func (m *slotMachine) Snapshot() ([]byte, error) {
 	}
 	return json.Marshal(slotSnapshot{Version: 1, Identity: e.identity, Slot: m.slot, Application: model.Uint64(e.indexes[m.slot]), Entries: entries})
 }
+
+// UseSnapshotStore hands the machine the group's snapshot store (replica.SnapshotStoreUser): a
+// compact state is resolved from, and an incremental cut reuses files of, its selected snapshot.
+func (m *slotMachine) UseSnapshotStore(s *replica.SnapshotStore) {
+	m.engine.mu.Lock()
+	m.snaps = s
+	m.engine.mu.Unlock()
+}
+
+// CompactSnapshot is the state a locally cut snapshot carries in its envelope (replica.CompactMachine):
+// the window table. The history itself is in the snapshot's window files (PinFiles).
+func (m *slotMachine) CompactSnapshot() ([]byte, error) {
+	e := m.engine
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.failed || e.closed {
+		return nil, model.Fail(model.Unavailable)
+	}
+	table, err := e.windowTableLocked(m.slot, true)
+	if err != nil {
+		return nil, err
+	}
+	m.cut = &cutTable{application: e.indexes[m.slot], windows: table}
+	return json.Marshal(slotSnapshotV2{Version: 2, Identity: e.identity, Slot: m.slot, Application: model.Uint64(e.indexes[m.slot]), Span: model.Uint64(snapshotWindow), Windows: refsOf(table)})
+}
 func (m *slotMachine) VerifySnapshot(raw []byte) error {
+	if stateVersion(raw) == 2 {
+		return m.verifyCompact(raw)
+	}
 	var snapshot slotSnapshot
 	if model.StrictJSON(raw, &snapshot) != nil || snapshot.Version != 1 || snapshot.Identity != m.engine.identity || snapshot.Slot != m.slot || uint64(len(snapshot.Entries)) != uint64(snapshot.Application) {
 		return model.Fail(model.Corrupt)
@@ -704,9 +739,85 @@ func (m *slotMachine) VerifySnapshot(raw []byte) error {
 		return nil
 	})
 }
+
+// verifyCompact checks a compact state against the local commands by window: every window's
+// identity (the redaction-invariant digest of its commands) must equal the local one. A sealed
+// window's local identity is its persisted record; only an unsealed, missing or foreign-sized
+// window is derived from the commands, so the check is bounded by the table and one window. The
+// persisted records themselves are re-derived by the background full verification (VerifyFull).
+func (m *slotMachine) verifyCompact(raw []byte) error {
+	var st slotSnapshotV2
+	e := m.engine
+	if model.StrictJSON(raw, &st) != nil || st.checkWindows() != nil || st.Identity != e.identity || st.Slot != m.slot {
+		return model.Fail(model.Corrupt)
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.indexes[m.slot] < uint64(st.Application) {
+		return nil
+	}
+	return e.db.View(func(tx *bolt.Tx) error {
+		meta, commands := tx.Bucket([]byte("replica_data")), tx.Bucket([]byte("replica_commands"))
+		for _, w := range st.Windows {
+			if uint64(st.Span) == snapshotWindow && w.Count == snapshotWindow {
+				var rec windowRecord
+				if v := meta.Get(wrecKey(m.slot, w.N)); v != nil && json.Unmarshal(v, &rec) == nil && rec.fits(w.N, w.First, w.Count) {
+					if rec.Identity != w.Identity {
+						return model.Fail(model.Corrupt)
+					}
+					continue
+				}
+			}
+			rec, _, err := computeWindow(commands, m.slot, w.N, w.First, w.Count, nil)
+			if err != nil || rec.Identity != w.Identity {
+				return model.Fail(model.Corrupt)
+			}
+			e.ver.commands.Add(w.Count)
+		}
+		return nil
+	})
+}
+
+// compactSource resolves a compact state to the selected snapshot of the group's store, which
+// must be the very snapshot the state belongs to.
+func (m *slotMachine) compactSource(raw []byte) (slotSnapshotV2, replica.Snapshot, error) {
+	var st slotSnapshotV2
+	if model.StrictJSON(raw, &st) != nil || st.checkWindows() != nil || st.Slot != m.slot {
+		return slotSnapshotV2{}, replica.Snapshot{}, model.Fail(model.Corrupt)
+	}
+	m.engine.mu.Lock()
+	store := m.snaps
+	m.engine.mu.Unlock()
+	if store == nil {
+		return slotSnapshotV2{}, replica.Snapshot{}, model.Fail(model.Unavailable)
+	}
+	snap, ok := store.Current()
+	if !ok {
+		return slotSnapshotV2{}, replica.Snapshot{}, model.Fail(model.Unavailable)
+	}
+	have, isCompact, err := compactState(snap)
+	if err != nil || !isCompact || uint64(have.Application) != uint64(st.Application) {
+		return slotSnapshotV2{}, replica.Snapshot{}, model.Fail(model.Corrupt)
+	}
+	want, _ := json.Marshal(st)
+	got, _ := json.Marshal(have)
+	if !bytes.Equal(want, got) {
+		return slotSnapshotV2{}, replica.Snapshot{}, model.Fail(model.Corrupt)
+	}
+	return st, snap, nil
+}
 func (m *slotMachine) Restore(raw []byte, physical uint64) error {
 	var snapshot slotSnapshot
-	if model.StrictJSON(raw, &snapshot) != nil || snapshot.Version != 1 || snapshot.Slot != m.slot || uint64(len(snapshot.Entries)) != uint64(snapshot.Application) {
+	var compact *slotSnapshotV2
+	var source replica.Snapshot
+	if stateVersion(raw) == 2 {
+		st, from, err := m.compactSource(raw)
+		if err != nil {
+			return err
+		}
+		compact, source = &st, from
+		snapshot = slotSnapshot{Version: 1, Identity: st.Identity, Slot: st.Slot, Application: st.Application}
+	} else if model.StrictJSON(raw, &snapshot) != nil || snapshot.Version != 1 || snapshot.Slot != m.slot || uint64(len(snapshot.Entries)) != uint64(snapshot.Application) {
 		return model.Fail(model.Corrupt)
 	}
 	e := m.engine
@@ -723,8 +834,7 @@ func (m *slotMachine) Restore(raw []byte, physical uint64) error {
 	err := e.db.Update(func(tx *bolt.Tx) error {
 		meta := tx.Bucket([]byte("replica_data"))
 		commands := tx.Bucket([]byte("replica_commands"))
-		for index, raw := range snapshot.Entries {
-			logical := uint64(index + 1)
+		install := func(logical uint64, raw []byte) error {
 			var entry walEntry
 			if json.Unmarshal(raw, &entry) != nil {
 				return model.Fail(model.Corrupt)
@@ -747,6 +857,20 @@ func (m *slotMachine) Restore(raw []byte, physical uint64) error {
 			}
 			if entry.Cancel != nil {
 				if err := putUint(meta, metaKey(m.slot, "logical:"+strconv.FormatUint(logical, 10)), physical); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		if compact != nil {
+			for _, w := range compact.Windows {
+				if err := readWindowFile(source, w, install); err != nil {
+					return err
+				}
+			}
+		} else {
+			for index, raw := range snapshot.Entries {
+				if err := install(uint64(index+1), raw); err != nil {
 					return err
 				}
 			}

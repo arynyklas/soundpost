@@ -35,6 +35,7 @@ type ledgerMachine struct {
 	pins     int
 	releases int
 	retired  []string
+	reuse    map[string]PinnedFile // name -> a file offered by name, size and hash only (PinnedFile.Reuse)
 }
 
 type ledgerState struct {
@@ -91,6 +92,10 @@ func (m *ledgerMachine) PinFiles() ([]PinnedFile, func(), error) {
 	m.pins++
 	var out []PinnedFile
 	for name := range m.files {
+		if r, ok := m.reuse[name]; ok {
+			out = append(out, r)
+			continue
+		}
 		out = append(out, PinnedFile{Name: name, Path: filepath.Join(m.dir, name)})
 	}
 	return out, func() {

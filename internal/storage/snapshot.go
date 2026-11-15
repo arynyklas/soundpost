@@ -41,7 +41,10 @@ const (
 
 // DeletionLedger lists every retained tombstone-class command of the slot: source
 // fences, cancellation fences and artifact deletions, each with the digest of its
-// committed bytes. The generation is the storage manifest's tombstone generation.
+// committed bytes. The generation is the storage manifest's tombstone generation, plus
+// one per delete barrier in the history. Each sealed window carries its own share of the
+// ledger in its record, so the ledger is assembled from the window records and the open
+// window instead of reading the whole history.
 func (m *slotMachine) DeletionLedger() (replica.Ledger, error) {
 	e := m.engine
 	e.mu.Lock()
@@ -50,77 +53,132 @@ func (m *slotMachine) DeletionLedger() (replica.Ledger, error) {
 		return replica.Ledger{}, model.Fail(model.Unavailable)
 	}
 	ledger := replica.Ledger{Version: 1, Group: e.group(m.slot), Generation: e.catalog.Manifest.TombstoneGeneration, Entries: []replica.LedgerEntry{}}
-	err := e.db.View(func(tx *bolt.Tx) error {
-		commands := tx.Bucket([]byte("replica_commands"))
-		if commands == nil {
-			return model.Fail(model.Corrupt)
-		}
-		c := commands.Cursor()
-		prefix := slotKey(m.slot)
-		expected := uint64(1)
-		for k, raw := c.Seek(commandKey(m.slot, 1)); k != nil && bytes.HasPrefix(k, prefix); k, raw = c.Next() {
-			if len(k) != 10 || binary.BigEndian.Uint64(k[2:]) != expected {
-				return model.Fail(model.Corrupt)
-			}
-			var entry walEntry
-			if json.Unmarshal(raw, &entry) != nil {
-				return model.Fail(model.Corrupt)
-			}
-			switch entry.Type {
-			case "fence", "cancel", "artifact_gc", "delete_barrier":
-				if entry.Type == "delete_barrier" {
-					ledger.Generation++
-				}
-				ledger.Entries = append(ledger.Entries, replica.LedgerEntry{Index: expected, Kind: entry.Type, Hash: model.HashCanonical(raw)})
-			}
-			expected++
-		}
-		if expected-1 != e.indexes[m.slot] {
-			return model.Fail(model.Corrupt)
-		}
-		return nil
-	})
-	return ledger, err
+	table, err := e.windowTableLocked(m.slot, true)
+	if err != nil {
+		return replica.Ledger{}, err
+	}
+	for _, rec := range table {
+		ledger.Generation += rec.Barriers
+		ledger.Entries = append(ledger.Entries, rec.Ledger...)
+	}
+	return ledger, nil
 }
 
-// PinFiles pins the derived segment transfer set once per snapshot cut (slot 0
-// carries it so 64 slot snapshots do not copy it 64 times). Compaction defers the
-// removal of any pinned segment until release.
+// PinFiles pins the files of a cut (replica.FileMachine). Every slot supplies the window files of
+// the table CompactSnapshot just wrote: a window whose files the selected snapshot already
+// holds is named, not read (replica.PinnedFile.Reuse); any other is written, verified against the
+// table, into a staging directory the release removes. Slot 0 also carries the derived segment
+// transfer set (so 64 slot snapshots do not copy it 64 times), again naming a segment the
+// selected snapshot holds. Compaction defers the removal of any pinned segment until release.
 func (m *slotMachine) PinFiles() ([]replica.PinnedFile, func(), error) {
-	if m.slot != 0 {
-		return nil, func() {}, nil
-	}
 	e := m.engine
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.failed || e.closed {
 		return nil, nil, model.Fail(model.Unavailable)
 	}
-	var files []replica.PinnedFile
-	var paths []string
-	if e.catalog.File != "" {
-		path := filepath.Join(e.dir, e.catalog.File)
-		files = append(files, replica.PinnedFile{Name: "storage-manifest.json", Path: path})
-		paths = append(paths, path)
+	have := map[string]replica.SnapshotFile{}
+	if m.snaps != nil {
+		if cur, ok := m.snaps.Current(); ok {
+			for _, f := range cur.Manifest.Files {
+				have[f.Name] = f
+			}
+		}
 	}
-	for i, s := range e.catalog.Manifest.Segments {
-		path, err := segmentPath(e.dir, s.File)
+	reusable := func(name string, size uint64, sum model.Hash) bool {
+		h, ok := have["files/"+name]
+		return ok && h.Size == size && h.SHA256 == sum
+	}
+	cut := m.cut
+	if cut == nil || cut.application != e.indexes[m.slot] {
+		table, err := e.windowTableLocked(m.slot, true)
 		if err != nil {
 			return nil, nil, err
 		}
-		files = append(files, replica.PinnedFile{Name: fmt.Sprintf("segment-%06d.sps", i), Path: path})
-		paths = append(paths, path)
+		cut = &cutTable{application: e.indexes[m.slot], windows: table}
 	}
-	if e.snap.pinned == nil {
-		e.snap.pinned = map[string]int{}
-		e.snap.retired = map[string]bool{}
+	var files []replica.PinnedFile
+	var stage string
+	removeStage := func() {
+		if stage != "" {
+			_ = os.RemoveAll(stage)
+		}
 	}
-	for _, path := range paths {
-		e.snap.pinned[path]++
+	for _, rec := range cut.windows {
+		type part struct {
+			name  string
+			file  windowFile
+			reuse bool
+		}
+		parts := []part{{name: winName(rec.N), file: rec.File}, {name: evName(rec.N), file: rec.Ev}}
+		fresh := false
+		for i := range parts {
+			parts[i].reuse = reusable(parts[i].name, parts[i].file.Size, parts[i].file.SHA256)
+			fresh = fresh || !parts[i].reuse
+		}
+		if fresh {
+			if stage == "" {
+				parent := filepath.Join(e.dir, "snapshot-stage")
+				if err := os.MkdirAll(parent, 0700); err != nil {
+					return nil, nil, err
+				}
+				var err error
+				if stage, err = os.MkdirTemp(parent, fmt.Sprintf("cut-%d-", m.slot)); err != nil {
+					return nil, nil, err
+				}
+			}
+			err := e.db.View(func(tx *bolt.Tx) error {
+				return writeWindowFiles(tx.Bucket([]byte("replica_commands")), m.slot, rec, stage)
+			})
+			if err != nil {
+				removeStage()
+				return nil, nil, err
+			}
+		}
+		for _, p := range parts {
+			if p.reuse {
+				files = append(files, replica.PinnedFile{Name: p.name, Reuse: true, Size: p.file.Size, SHA256: p.file.SHA256})
+			} else {
+				files = append(files, replica.PinnedFile{Name: p.name, Path: filepath.Join(stage, p.name)})
+			}
+		}
+	}
+	var paths []string
+	if m.slot == 0 {
+		if e.catalog.File != "" {
+			path := filepath.Join(e.dir, e.catalog.File)
+			files = append(files, replica.PinnedFile{Name: "storage-manifest.json", Path: path})
+			paths = append(paths, path)
+		}
+		for i, s := range e.catalog.Manifest.Segments {
+			path, err := segmentPath(e.dir, s.File)
+			if err != nil {
+				removeStage()
+				return nil, nil, err
+			}
+			name := fmt.Sprintf("segment-%06d.sps", i)
+			if reusable(name, s.Bytes, s.Checksum) {
+				files = append(files, replica.PinnedFile{Name: name, Reuse: true, Size: s.Bytes, SHA256: s.Checksum})
+			} else {
+				files = append(files, replica.PinnedFile{Name: name, Path: path})
+			}
+			paths = append(paths, path)
+		}
+		if e.snap.pinned == nil {
+			e.snap.pinned = map[string]int{}
+			e.snap.retired = map[string]bool{}
+		}
+		for _, path := range paths {
+			e.snap.pinned[path]++
+		}
 	}
 	var once sync.Once
 	return files, func() {
 		once.Do(func() {
+			removeStage()
+			if len(paths) == 0 {
+				return
+			}
 			e.mu.Lock()
 			defer e.mu.Unlock()
 			for _, path := range paths {
@@ -183,11 +241,19 @@ func (e *Engine) CreateSnapshots(ctx context.Context) (EngineSnapshot, error) {
 	coverage := make([]model.Cursor, 0, 64)
 	for slot, group := range e.repl.groups {
 		cursor := group.Status().ApplicationCursor
-		snapshot, err := group.CreateSnapshot(ctx, cursor)
+		var snapshot replica.Snapshot
+		var err error
+		for attempt := 0; ; attempt++ {
+			// A redaction between the window table a cut names and the moment its files are written,
+			// or another snapshot selected in between, makes that attempt moot: repeat it.
+			if snapshot, err = group.CreateSnapshot(ctx, cursor); err == nil || attempt >= 3 || !errors.Is(err, errWindowMoved) && !errors.Is(err, replica.ErrReuseLost) {
+				break
+			}
+		}
 		if err != nil {
 			return EngineSnapshot{}, snapshotFault(err)
 		}
-		if _, err = group.Snapshots().Verify(); err != nil {
+		if _, err = group.Snapshots().VerifyCut(); err != nil {
 			return EngineSnapshot{}, snapshotFault(err)
 		}
 		out.Slots = append(out.Slots, snapshot)
@@ -353,9 +419,32 @@ type CancellationEvidence struct {
 	Fence model.Cursor `json:"fence"`
 }
 
-// QuotaEvidence is the reservation consumption/release evidence a sealed D carries.
+// WindowEvidence summarises what one window of one group's history consumed (bundle version 2).
+// Charge is the digest of the window's consumed reservations as the data holds them and Identity
+// the digest of its commands. A window is Detail when control's cut does not already hold exactly
+// those reservations (or the window carries redacted batches, whose retained series control cannot
+// know): the evidence of its reservations is then listed in QuotaEvidence.Consumed. Otherwise the
+// reservations are the ones the control cut holds as consumed in that window, and Charge proves it.
+type WindowEvidence struct {
+	Group    model.ID   `json:"group"`
+	N        uint64     `json:"n,string"`
+	First    uint64     `json:"first,string"`
+	Count    uint64     `json:"count,string"`
+	Span     uint64     `json:"span,string"`
+	Batches  uint64     `json:"batches,string"`
+	Redacted uint64     `json:"redacted,string"`
+	Charge   model.Hash `json:"charge"`
+	Identity model.Hash `json:"identity"`
+	Detail   bool       `json:"detail,omitempty"`
+}
+
+// QuotaEvidence is the reservation consumption/release evidence a sealed D carries. Version 1
+// lists every consumed reservation; version 2 lists the windows of every group and the
+// reservations of the Detail windows only, so its size follows the number of windows and the
+// reservations control does not already hold, not the length of the history.
 type QuotaEvidence struct {
 	Version   uint16                 `json:"version"`
+	Windows   []WindowEvidence       `json:"windows,omitempty"`
 	Consumed  []ReservationEvidence  `json:"consumed"`
 	Cancelled []CancellationEvidence `json:"cancelled"`
 	Digest    model.Hash             `json:"digest"`
@@ -511,11 +600,11 @@ func (b *Backup) Seal(ctx context.Context, gaps []DeclaredGap) (SealedBackup, er
 		intervals = append(intervals, runs...)
 		manifests = append(manifests, snapshot.Manifest)
 	}
-	slots, err := quotaEvidence(cut.Slots)
+	slots, err := quotaEvidenceFor(cut.Slots, b.cut.Reservations, false)
 	if err != nil {
 		return SealedBackup{}, err
 	}
-	bundle := BackupBundle{Version: 1, Identity: e.identity, Cut: b.cut, Snapshots: manifests, Replay: ReplayCertificate{Version: 1, Intervals: intervals}, Quota: slots, Generation: manifests[0].Generation}
+	bundle := BackupBundle{Version: slots.Version, Identity: e.identity, Cut: b.cut, Snapshots: manifests, Replay: ReplayCertificate{Version: 1, Intervals: intervals}, Quota: slots, Generation: manifests[0].Generation}
 	bundle.Replay.Digest = bundle.Replay.seal()
 	bundle.Digest = bundle.seal()
 	if err = verifyReplayAgainstSnapshots(bundle, cut.Slots); err != nil {
@@ -691,11 +780,15 @@ func quotaKeys(org, project, source model.ID) []string {
 // reservation - including reservations created after C - and reconciles those
 // control holds against the cut without an unsafe refund or double charge.
 func ReconcileQuota(bundle BackupBundle) (QuotaReconciliation, error) {
-	if bundle.Version != 1 || bundle.Digest != bundle.seal() || bundle.Quota.Digest != bundle.Quota.seal() || bundle.Quota.Version != 1 {
+	if bundle.Version != 1 && bundle.Version != 2 || bundle.Digest != bundle.seal() || bundle.Quota.Digest != bundle.Quota.seal() || bundle.Quota.Version != bundle.Version {
 		return QuotaReconciliation{}, model.Fail(model.Corrupt)
 	}
+	evidence, err := bundle.ConsumedEvidence()
+	if err != nil {
+		return QuotaReconciliation{}, err
+	}
 	consumed := map[model.ID]ReservationEvidence{}
-	for _, c := range bundle.Quota.Consumed {
+	for _, c := range evidence {
 		if _, dup := consumed[c.ID]; dup {
 			return QuotaReconciliation{}, model.Fail(model.Corrupt)
 		}
@@ -753,7 +846,7 @@ func ReconcileQuota(bundle BackupBundle) (QuotaReconciliation, error) {
 			cert.Pending = append(cert.Pending, r.ID)
 		}
 	}
-	for _, c := range bundle.Quota.Consumed {
+	for _, c := range evidence {
 		if _, known := bundle.Cut.Reservations[c.ID.String()]; known {
 			continue
 		}
@@ -774,7 +867,7 @@ func ReconcileQuota(bundle BackupBundle) (QuotaReconciliation, error) {
 	}
 	// Consumed-only series per project for the restored-index cross-check.
 	perProject := map[string]map[string]bool{}
-	for _, c := range bundle.Quota.Consumed {
+	for _, c := range evidence {
 		k := c.Org.String() + ":" + c.Project.String()
 		if perProject[k] == nil {
 			perProject[k] = map[string]bool{}
@@ -832,7 +925,7 @@ func (q QuotaReconciliation) Apply(quotas map[string]model.QuotaState) map[strin
 // QuotaReconciliation is committed. Missing data or proof fails the whole
 // installation; nothing is selected unless every group verifies.
 func (e *Engine) InstallBackup(ctx context.Context, raftDirectory string, bundle BackupBundle, open func(slot uint16) (io.ReadCloser, error)) error {
-	if e.repl != nil || bundle.Version != 1 || bundle.Identity != e.identity || bundle.Digest != bundle.seal() || len(bundle.Snapshots) != 64 || len(bundle.Replay.Intervals) < 64 || bundle.Replay.Digest != bundle.Replay.seal() || len(bundle.Cut.Processed) != 64 {
+	if e.repl != nil || bundle.Version != 1 && bundle.Version != 2 || bundle.Identity != e.identity || bundle.Digest != bundle.seal() || len(bundle.Snapshots) != 64 || len(bundle.Replay.Intervals) < 64 || bundle.Replay.Digest != bundle.Replay.seal() || len(bundle.Cut.Processed) != 64 {
 		return model.Fail(model.Invalid)
 	}
 	if _, err := ReconcileQuota(bundle); err != nil {
@@ -877,27 +970,17 @@ func (e *Engine) InstallBackup(ctx context.Context, raftDirectory string, bundle
 		installed[slot] = current
 	}
 	// The consumption/release proof must be exactly what the installed bytes carry.
-	evidence, err := quotaEvidence(installed)
+	evidence, err := quotaEvidenceFor(installed, bundle.Cut.Reservations, true)
 	if err != nil {
 		return err
 	}
-	if evidence.Digest != bundle.Quota.Digest {
+	if evidence.Version != bundle.Quota.Version || evidence.Digest != bundle.Quota.Digest {
 		return model.Fail(model.Corrupt)
 	}
 	return nil
 }
 
 func verifyReplayAgainstSnapshotsFor(bundle BackupBundle, snapshot replica.Snapshot) error {
-	entries, err := slotEntries(snapshot)
-	if err != nil {
-		return err
-	}
-	digests := make(map[uint64]model.Hash, len(entries))
-	for i, e := range entries {
-		if digests[uint64(i+1)], err = evidenceDigest(e.entry); err != nil {
-			return model.Fail(model.Corrupt)
-		}
-	}
 	group := snapshot.Manifest.Group
 	var processed uint64
 	for _, c := range bundle.Cut.Processed {
@@ -905,12 +988,16 @@ func verifyReplayAgainstSnapshotsFor(bundle BackupBundle, snapshot replica.Snaps
 			processed = uint64(c.Index)
 		}
 	}
+	digests, total, err := evidenceDigests(snapshot, processed)
+	if err != nil {
+		return err
+	}
 	next, seen := processed, false
 	for _, in := range bundle.Replay.Intervals {
 		if in.Group != group {
 			continue
 		}
-		if uint64(in.After) != next || uint64(in.Through) < uint64(in.After) || uint64(in.Through) > uint64(len(entries)) {
+		if uint64(in.After) != next || uint64(in.Through) < uint64(in.After) || uint64(in.Through) > total {
 			return model.Fail(model.Corrupt)
 		}
 		switch in.Mode {

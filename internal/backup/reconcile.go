@@ -3,7 +3,6 @@
 package backup
 
 import (
-	"encoding/json"
 	"slices"
 
 	"github.com/arynyklas/soundpost/internal/model"
@@ -145,35 +144,11 @@ func verifyGaps(m BackupManifest, intervals []storage.ReplayInterval, st model.C
 	return nil
 }
 
-// slotReservations extracts, from the machine state inside an installed slot
-// snapshot, the full admission reservation of every batch it holds. The sealed
-// QuotaEvidence carries only what quota needs; the idempotency key of a batch
-// admitted after the control cut needs the producer, batch and slot too.
-func slotReservations(snapshot replica.Snapshot) (map[model.ID]model.AdmissionReservation, error) {
-	state, err := snapshot.MachineState()
-	if err != nil {
-		return nil, model.Fail(model.Corrupt)
-	}
-	var machine struct {
-		Entries []json.RawMessage `json:"entries"`
-	}
-	if json.Unmarshal(state, &machine) != nil {
-		return nil, model.Fail(model.Corrupt)
-	}
-	out := map[model.ID]model.AdmissionReservation{}
-	for _, raw := range machine.Entries {
-		var entry struct {
-			Type  string `json:"type"`
-			Batch *struct {
-				Reservation model.AdmissionReservation `json:"reservation"`
-			} `json:"batch"`
-		}
-		if json.Unmarshal(raw, &entry) != nil {
-			return nil, model.Fail(model.Corrupt)
-		}
-		if entry.Type == "batch" && entry.Batch != nil {
-			out[entry.Batch.Reservation.ID] = entry.Batch.Reservation
-		}
-	}
-	return out, nil
+// slotReservations extracts, from an installed slot snapshot, the full admission
+// reservation of every batch it holds. The sealed QuotaEvidence carries only what quota
+// needs; the idempotency key of a batch admitted after the control cut needs the
+// producer, batch and slot too. For a compact snapshot (bundle version 2) only the windows
+// only selects are read: a reservation control does not hold lies in a detail window.
+func slotReservations(snapshot replica.Snapshot, only func(n uint64) bool) (map[model.ID]model.AdmissionReservation, error) {
+	return storage.BatchReservations(snapshot, only)
 }
