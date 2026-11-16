@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -285,6 +286,7 @@ func voterTick() time.Duration {
 func (v *controlVoters) leaderIs(id uint64) {
 	v.t.Helper()
 	deadline := time.Now().Add(60 * time.Second)
+	var last string
 	for round := 0; time.Now().Before(deadline); round++ {
 		g := v.stores[id].ReplicaGroup()
 		if g.Status().Leader == id {
@@ -294,12 +296,44 @@ func (v *controlVoters) leaderIs(id uint64) {
 			if err == nil {
 				return
 			}
+		} else if other := v.currentLeader(id); other != 0 {
+			// Followers that still hear a live leader refuse a Campaign (check-quorum and
+			// pre-vote), so the lead moves back through the leader that holds it.
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			err := v.stores[other].ReplicaGroup().TransferLeadership(ctx, id)
+			cancel()
+			last = fmt.Sprintf("transfer %d->%d: %v", other, id, err)
 		} else if round%10 == 0 {
-			_ = g.Campaign()
+			_ = g.Campaign() // nobody leads: an election is what is missing
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	v.t.Fatalf("voter %d did not become the leader", id)
+	v.t.Fatalf("voter %d did not become the leader (%s%s)", id, v.leaders(), last)
+}
+
+// currentLeader is the reachable voter other than id that leads; 0 when there is none.
+func (v *controlVoters) currentLeader(id uint64) uint64 {
+	for other, store := range v.stores {
+		if other == id || v.down[other] {
+			continue
+		}
+		v.mesh.mu.Lock()
+		cut := v.mesh.blocked[other]
+		v.mesh.mu.Unlock()
+		if st := store.ReplicaGroup().Status(); !cut && st.ID == other && st.Leader == other {
+			return other
+		}
+	}
+	return 0
+}
+
+func (v *controlVoters) leaders() string {
+	var b strings.Builder
+	for id := uint64(1); id <= 3; id++ {
+		st := v.stores[id].ReplicaGroup().Status()
+		fmt.Fprintf(&b, "voter %d leader=%d term=%d; ", id, st.Leader, st.Term)
+	}
+	return b.String()
 }
 
 // revision is the voter's committed revision; ok is false while it cannot serve a read (a voter
