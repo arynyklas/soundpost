@@ -155,7 +155,7 @@ func (s *Service) Read(ctx context.Context, scope auth.Scope, id model.ID, w Win
 	for _, p := range pages {
 		if !p.Complete || !capabilitiesComplete(p) {
 			view.Completeness = "partial"
-			view.Reasons = append(view.Reasons, "missing_capability_or_page")
+			view.Reasons = append(view.Reasons, ReasonMissingCapabilityOrPage)
 		}
 		view.Capabilities = append(view.Capabilities, p.Capabilities...)
 		view.Loss = append(view.Loss, p.Loss...)
@@ -170,7 +170,7 @@ func (s *Service) Read(ctx context.Context, scope auth.Scope, id model.ID, w Win
 		if c.NativeDomain != nil {
 			if uint64(c.Sequence) != expected {
 				view.Completeness = "partial"
-				view.Reasons = append(view.Reasons, "missing_chunk")
+				view.Reasons = append(view.Reasons, ReasonMissingChunk)
 			}
 			if uint64(c.Sequence) < expected {
 				return ProfileView{}, model.Fail(model.Corrupt)
@@ -200,7 +200,7 @@ func (s *Service) Read(ctx context.Context, scope auth.Scope, id model.ID, w Win
 	last := chunks[len(chunks)-1]
 	if last.NativeDomain != nil && !last.Complete || view.Truncated || view.LossCount > 0 || len(view.NativeLoss) > 0 || len(view.Loss) > 0 {
 		view.Completeness = "partial"
-		view.Reasons = append(view.Reasons, "coverage_incomplete")
+		view.Reasons = append(view.Reasons, ReasonCoverageIncomplete)
 	}
 	emitted := uint32(len(view.Samples) + len(view.Intervals))
 	if offset > total {
@@ -214,7 +214,7 @@ func (s *Service) Read(ctx context.Context, scope auth.Scope, id model.ID, w Win
 	}
 	if emitted == 0 {
 		view.Completeness = "partial"
-		view.Reasons = append(view.Reasons, "no_observations_in_window")
+		view.Reasons = append(view.Reasons, ReasonNoObservationsInWindow)
 	}
 	view.Links, e = s.links.Resolve(ctx, scope, refs)
 	if e != nil {

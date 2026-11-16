@@ -22,7 +22,8 @@ import { SectionList, StatusPanel } from './StatusPanel';
  * console) is the user's choice and is never taken. */
 const focusIsFree = (origin: Element | null): boolean => {
  const a = document.activeElement;
- if (a === null || a === document.body) return true;
+ // Nothing is focused: the page itself holds focus, which a browser reports as the body or, in an empty or blurred document, the document element.
+ if (a === null || a === document.body || a === document.documentElement) return true;
  if (origin !== null && a !== origin) return false;
  return document.querySelector('.investigation')?.contains(a) === true;
 };

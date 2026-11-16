@@ -7,7 +7,7 @@ import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {promisify} from 'node:util';
 import {test,expect,request as pwRequest,type APIRequestContext,type Response,type Browser,type BrowserContext,type FrameLocator,type Page} from '@playwright/test';
-import {at,createOrg,createProject,createReader,login,onboardSdkProfileSource,origin,owner,id,sdkConfig,type Reader,type Source} from './support/real';
+import {activate,at,createOrg,createProject,createReader,login,onboardSdkProfileSource,origin,owner,id,sdkConfig,type Reader,type Source} from './support/real';
 import {NATIVE_PROFILE,PROFILE_WINDOW,UNSUPPORTED_PROFILE,deleteEntity,onboardReplaySource,seedOwnProfile,seedOwnReplay,seedProfiles,seedReplays,setPermissions,type ReplaySeed} from './support/replay';
 import {PAGE_CANARIES,onboardBrowserReplaySource,record,recorderApp} from './support/recorder';
 
@@ -28,6 +28,7 @@ const timeline=(page:Page)=>frameOf(page).locator('[data-replay-timeline] li');
 
 async function openReplay(page:Page,replay:string):Promise<void>{
  await page.goto(`/${hash('replays',replay)}`);
+ await activate(page);
  await expect(page.getByRole('heading',{name:/^Replay /})).toBeVisible();
 }
 async function openProfile(page:Page,profile:string):Promise<void>{

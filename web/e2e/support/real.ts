@@ -100,6 +100,29 @@ export async function login(page:Page,email:string,password:string):Promise<void
  if(r.status!==200)throw Error(`login ${email}: HTTP ${r.status} ${r.text}`);
  logins.set(page,{email,password,at:Date.now()});
 }
+/**
+ * Opens a console URL as a fresh document, so the console makes every read again. `page.goto` to the URL the page already shows reloads it in
+ * Chromium and WebKit but is only a same-document fragment navigation in Firefox (the old document, and everything it read, stays), so a spec that
+ * needs the console to read again goes through a blank document first. Never rely on `goto` of the current URL to refresh a page.
+ */
+export async function reopen(page:Page,path:string):Promise<void>{
+ await page.goto('about:blank');
+ await page.goto(path);
+}
+/**
+ * Brings a freshly opened console page to the front and waits until the console's own focus revalidation has finished before the spec acts. The console's
+ * session boundary revalidates on every window `focus` and, while it does, replaces the whole console by a "Revalidating access" screen and mounts it again,
+ * so anything a spec did meanwhile (a ticked box, a started playback) is gone. A page that has just been created receives that focus event at an unpredictable
+ * moment (observed on WebKit and Firefox: a checkbox that "did not change its state", a replay viewer back at "loading" with no event delivered).
+ */
+export async function activate(page:Page):Promise<void>{
+ await page.bringToFront();
+ await page.evaluate(()=>new Promise<void>((done)=>{
+  const settle=():void=>{window.setTimeout(done,400);};
+  if(document.hasFocus())settle();else window.addEventListener('focus',settle,{once:true});
+ }));
+ await page.getByText('Revalidating access…').waitFor({state:'hidden'});
+}
 // Admin commands and source onboarding demand a session authenticated within five minutes; a long spec logs in again
 // (a new session cookie in the same context) before it runs out. Do not drive the browser UI from a page that also
 // issues admin commands for longer than that.
@@ -109,15 +132,23 @@ async function fresh(page:Page):Promise<void>{
 }
 
 // ---- admin commands --------------------------------------------------------------------------------------------
-/** One real admin command as an org admin: reads the current revision, sends the command, retries only a revision race. */
+/**
+ * One real admin command as an org admin: reads the current revision, sends the command and retries a revision race. The revision a command is checked
+ * against is the whole control state's, which the server's own background commits move too, and `create_user` hashes the password before it compares, so a
+ * command can lose to a background commit several times in a row on a busy or slow host. A 409 is a race exactly when the revision moved between the two
+ * reads; the same revision twice means the command itself was refused (a duplicate, say) and is reported at once. A race is retried for up to a minute.
+ */
 export async function adminCommand(page:Page,org:string,kind:string,payload:Record<string,unknown>):Promise<unknown>{
  await fresh(page);
- for(let attempt=0;;attempt++){
+ const give=Date.now()+60_000;
+ let refused:{revision:string;text:string}|undefined;
+ for(;;){
   const read=await postJson(page,'/api/v1/admin/read',{kind:'organizations'});
   const revision=field(read.json,'revision');
   if(read.status!==200||typeof revision!=='string')throw Error(`admin read: HTTP ${read.status} ${read.text}`);
+  if(refused!==undefined&&refused.revision===revision)throw Error(`admin ${kind}: HTTP 409 ${refused.text} (the revision did not move, so this is no revision race)`);
   const r=await postJson(page,'/api/v1/admin/commands',{command_id:id(),expected_revision:revision,org_id:org,kind,payload:{...payload,reason:'Explore e2e fixture'}});
-  if(r.status===409&&attempt<10)continue;
+  if(r.status===409&&Date.now()<give){refused={revision,text:r.text};continue;}
   if(r.status>=300)throw Error(`admin ${kind}: HTTP ${r.status} ${r.text}`);
   return r.json;
  }

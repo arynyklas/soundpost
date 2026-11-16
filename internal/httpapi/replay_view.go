@@ -239,6 +239,12 @@ func (h *Replays) Stream(w http.ResponseWriter, r *http.Request, authority *auth
 			_, _ = rw.write(ReplayLine{Type: "truncated", Next: &next}, true)
 			return nil
 		}
+		if !replays.ReasonAllowed(ev.Kind, ev.Reason) {
+			// The reasons are a closed vocabulary per event kind. An event outside it is corrupt data: the stream ends with the closed
+			// error line, the reason is never forwarded and no viewer is asked to guess what it meant.
+			_, _ = rw.write(codeLine(model.Corrupt, ev.Sequence), true)
+			return nil
+		}
 		line := lineOf(ev)
 		if ev.Kind == replays.EventCheckpoint || ev.Kind == replays.EventDelta {
 			if ferr := revalidateBoth(ctx, authority, scope, gate); ferr != nil {

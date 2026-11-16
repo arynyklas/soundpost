@@ -71,6 +71,26 @@ const (
 	ReasonDeleted            = "deleted"
 )
 
+// ReasonAllowed reports whether reason is one a released event of this kind may carry. The vocabulary is closed and per kind: a gap
+// names why history is missing, an unsupported event names the recorder version, a revoke names why access ended; a checkpoint, a delta
+// and an error carry no reason (an error carries a fault code instead). Anything else is not a reason this package ever produces.
+func ReasonAllowed(kind EventKind, reason string) bool {
+	switch kind {
+	case EventGap:
+		switch reason {
+		case ReasonMissingChunk, ReasonHashMismatch, ReasonDependencyMismatch, ReasonRecorderGap, ReasonConflictingChunk, ReasonInvalidChunk, ReasonIndexMismatch, ReasonNoCheckpoint:
+			return true
+		}
+	case EventUnsupported:
+		return reason == ReasonRecorderVersion
+	case EventRevoke:
+		return reason == ReasonAuthorityRevoked || reason == ReasonDeleted
+	case EventCheckpoint, EventDelta, EventError:
+		return reason == ""
+	}
+	return false
+}
+
 // Event is one released stream item. Chunk is set only for checkpoint and delta.
 // A Gap spans Sequence..Through inclusive; a Revoke or Error ends the stream.
 type Event struct {

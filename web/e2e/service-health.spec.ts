@@ -21,7 +21,7 @@ async function act(page:Page,org:string,project:string,target:string,expected:st
 }
 
 test('a service is derived from source policies and its health from stored incidents; the environment filter is the server\'s',async({page,browser,playwright})=>{
- test.setTimeout(240_000);
+ test.setTimeout(480_000);
  const o=owner();
  await login(page,o.email,o.password);
  const org=await createOrg(page,'service health org'),project=await createProject(page,org,'service health project');
@@ -40,7 +40,9 @@ test('a service is derived from source policies and its health from stored incid
   const first=Array.isArray(entries)?field(entries[0],'incident_id'):undefined;
   target=typeof first==='string'?first:'';
   return target;
- },{message:'the runner opens an incident for the ingested error',timeout:90_000,intervals:[250,500,1000]}).not.toBe('');
+ // The runner visits every project of the installation on each pass: late in the full suite its latency is several times what it is alone (job-history
+ // waits of 42 s against 8 s, l3w15-fine), and an incident needs the issue and the incident stage in turn.
+ },{message:'the runner opens an incident for the ingested error',timeout:240_000,intervals:[250,500,1000]}).not.toBe('');
 
  const ctx=await browser.newContext();
  const ops_=await ctx.newPage();

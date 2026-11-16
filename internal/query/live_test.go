@@ -75,6 +75,15 @@ func (it *fakeIter) Next(ctx context.Context) (storage.ChangePage, error) {
 	case <-it.ctx.Done():
 		return storage.ChangePage{}, model.Fail(model.Cancelled)
 	case err := <-it.errs:
+		// A feed reports a failure AFTER every page it produced before it. The test double keeps two channels, and with a page and the failure both ready
+		// select picks either: the failure could come first and the page the test pushed before it was then never delivered (the flake in
+		// TestLiveFeedErrorIsTerminalAfterBufferedRecords, which asserts what the stream does with a record it HAS received).
+		select {
+		case p := <-it.pages:
+			it.errs <- err
+			return p, nil
+		default:
+		}
 		return storage.ChangePage{}, err
 	case <-it.trip:
 		panic("SECRET-ROW-CONTENT injected pump panic")

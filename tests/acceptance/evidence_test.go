@@ -85,6 +85,10 @@ func TestEvidenceRealFrameReplayAndScopeLifecycle(t *testing.T) {
 	n.restoreRows(r)
 	n.restoreProbeRow(r)
 	n.canaryRows(r, &logs)
+	// The rows are a verdict, not a log: the run fails unless every one comes to the outcome evExpected writes down.
+	if p := r.problems(n.sandboxWhy == ""); len(p) > 0 {
+		t.Errorf("the acceptance rows do not come to what they must (%d):\n  %s", len(p), strings.Join(p, "\n  "))
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -119,6 +123,95 @@ func (r *evReport) log(t *testing.T) {
 		}
 		t.Logf("row %-40s %-8s %-13s %s", row.ID, kind, state, row.Reason)
 	}
+}
+
+// evOutcome is what one acceptance row must come to.
+type evOutcome int
+
+const (
+	// evSatisfied: the row is a required requirement and must be satisfied. An unsatisfied row is a product defect or an inconclusive probe.
+	evSatisfied evOutcome = iota
+	// evUnsatisfiedByDesign: the row states a limit of what this run can observe (it is never claimed satisfied here); a row that starts to
+	// come out satisfied means its observation changed, and this table must change with it.
+	evUnsatisfiedByDesign
+	// evNeedsSandbox: satisfied exactly when the OCI symbolication sandbox is usable on the host; without it the row must be unsatisfied and
+	// the frames must be the typed sandbox_unavailable (the frame code checks that), never a mapped position.
+	evNeedsSandbox
+)
+
+// evExpected lists every row a complete run adds, and what each must come to. A row that is not listed, listed twice or missing fails the run:
+// a new row is a decision (satisfied or not, and why) written here, never a line in a log nobody reads.
+var evExpected = map[string]evOutcome{
+	"artifact_upload_read_policy":              evSatisfied,
+	"error_occurrence_ingest":                  evSatisfied,
+	"frame_real_mapping":                       evNeedsSandbox,
+	"frame_scope_and_build_exactness":          evSatisfied,
+	"release_registry_view":                    evSatisfied,
+	"issue_evidence_of_ingested_error":         evSatisfied,
+	"trace_view_and_link":                      evSatisfied,
+	"replay_closed_format_stream_and_gap":      evSatisfied,
+	"replay_admission_enforces_closed_format":  evSatisfied,
+	"profile_assembler_export_view":            evSatisfied,
+	"profile_real_capture_or_sdk":              evUnsatisfiedByDesign,
+	"isolation_same_ids_other_org":             evSatisfied,
+	"backup_before_deletion":                   evSatisfied,
+	"lifecycle_grant_revoke_halts_stream":      evSatisfied,
+	"lifecycle_deletion_halts_stream":          evSatisfied,
+	"restore_keeps_current_deletion_authority": evSatisfied,
+	"restore_old_credentials_inactive":         evSatisfied,
+	"restore_deleted_not_revived":              evSatisfied,
+	"canary_responses_logs":                    evSatisfied,
+	"canary_storage_scan":                      evSatisfied,
+	"restore_project_without_metric_series":    evSatisfied,
+	"replay_real_recorder_chunks":              evSatisfied,
+	"investigate_replay_profile_links":         evSatisfied,
+}
+
+// problems compares the report with evExpected and returns one line per disagreement (none: the run is acceptable).
+func (r *evReport) problems(sandboxUsable bool) []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []string
+	seen := map[string]int{}
+	for _, row := range r.rows {
+		seen[row.ID]++
+		want, known := evExpected[row.ID]
+		switch {
+		case !known:
+			out = append(out, fmt.Sprintf("row %q is not in evExpected: say what it must come to", row.ID))
+			continue
+		case !row.Required:
+			out = append(out, fmt.Sprintf("row %q is optional; every acceptance row is required", row.ID))
+		case row.Reason == "":
+			out = append(out, fmt.Sprintf("row %q carries no reason", row.ID))
+		}
+		switch want {
+		case evSatisfied:
+			if !row.Satisfied {
+				out = append(out, fmt.Sprintf("row %q must be SATISFIED but is not: %s", row.ID, row.Reason))
+			}
+		case evUnsatisfiedByDesign:
+			if row.Satisfied {
+				out = append(out, fmt.Sprintf("row %q is NOT SATISFIED by design here but came out satisfied: %s", row.ID, row.Reason))
+			}
+		case evNeedsSandbox:
+			if row.Satisfied != sandboxUsable {
+				out = append(out, fmt.Sprintf("row %q must be satisfied exactly when the sandbox is usable (usable=%v) but satisfied=%v: %s", row.ID, sandboxUsable, row.Satisfied, row.Reason))
+			}
+		}
+	}
+	for id := range evExpected {
+		if seen[id] == 0 {
+			out = append(out, fmt.Sprintf("row %q was never added", id))
+		}
+	}
+	for id, n := range seen {
+		if n > 1 {
+			out = append(out, fmt.Sprintf("row %q was added %d times", id, n))
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 type syncLog struct {

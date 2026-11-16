@@ -3,6 +3,23 @@ package profiles
 
 import "github.com/arynyklas/soundpost/internal/model"
 
+// Closed reason codes of ProfileView.Reasons: why a profile is partial. None carries profile content or caller input.
+const (
+	ReasonMissingCapabilityOrPage = "missing_capability_or_page"
+	ReasonMissingChunk            = "missing_chunk"
+	ReasonCoverageIncomplete      = "coverage_incomplete"
+	ReasonNoObservationsInWindow  = "no_observations_in_window"
+)
+
+// ReasonKnown reports whether reason is one of the closed codes Service.Read puts in ProfileView.Reasons.
+func ReasonKnown(reason string) bool {
+	switch reason {
+	case ReasonMissingCapabilityOrPage, ReasonMissingChunk, ReasonCoverageIncomplete, ReasonNoObservationsInWindow:
+		return true
+	}
+	return false
+}
+
 type Window struct {
 	Start      model.UnixNano `json:"start_ns"`
 	End        model.UnixNano `json:"end_ns"`

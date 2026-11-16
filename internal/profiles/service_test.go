@@ -91,3 +91,17 @@ func TestProfileReadKeepsZeroCountThrottleWithoutSchedulerTime(t *testing.T) {
 		t.Fatal("throttle transition dropped, counted or turned into elapsed time")
 	}
 }
+
+// The reasons of a partial view are the four codes Read produces and nothing else; the HTTP layer refuses a view that carries any other.
+func TestReasonKnownIsTheClosedSet(t *testing.T) {
+	for _, r := range []string{ReasonMissingCapabilityOrPage, ReasonMissingChunk, ReasonCoverageIncomplete, ReasonNoObservationsInWindow} {
+		if !ReasonKnown(r) {
+			t.Fatalf("%q is a code Read produces", r)
+		}
+	}
+	for _, r := range []string{"", "profile_partial", "profile_service_not_wired", "hash_mismatch", "Coverage_Incomplete", "coverage_incomplete "} {
+		if ReasonKnown(r) {
+			t.Fatalf("%q is not a profile view reason", r)
+		}
+	}
+}

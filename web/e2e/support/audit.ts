@@ -149,9 +149,11 @@ export async function auditDom(page:Page):Promise<Violation[]>{
   // 10. contrast: WCAG 2.x ratio of rendered text over the first opaque ancestor background (no images or gradients exist under the CSP).
   const parse=(c:string):[number,number,number,number]|null=>{const m=c.match(/rgba?\(([^)]+)\)/);if(!m||!m[1])return null;const p=m[1].split(/[ ,/]+/).filter(Boolean).map(Number);return [p[0]??0,p[1]??0,p[2]??0,p[3]??1];};
   const lum=(c:[number,number,number,number]):number=>{const f=(v:number)=>{const s=v/255;return s<=0.03928?s/12.92:Math.pow((s+0.055)/1.055,2.4);};return 0.2126*f(c[0])+0.7152*f(c[1])+0.0722*f(c[2]);};
-  const backdrop=(el:Element):[number,number,number,number]=>{for(let n:Element|null=el;n;n=n.parentElement){const c=parse(getComputedStyle(n).backgroundColor);if(c&&c[3]>=0.99)return c;}return [255,255,255,1];};
+  let unparsedBackdrop='';
+  const backdrop=(el:Element):[number,number,number,number]=>{for(let n:Element|null=el;n;n=n.parentElement){const raw=getComputedStyle(n).backgroundColor;const c=parse(raw);if(c===null&&raw!==''&&raw!=='transparent')unparsedBackdrop=raw;if(c&&c[3]>=0.99)return c;}return [255,255,255,1];};
   const walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);
   const checked=new Set<Element>();
+  let compared=0;
   for(let n=walker.nextNode();n;n=walker.nextNode()){
    const el=n.parentElement;
    if(!el||checked.has(el)||(n.textContent??'').trim()===''||!visible(el))continue;
@@ -159,15 +161,21 @@ export async function auditDom(page:Page):Promise<Violation[]>{
    checked.add(el);
    const s=getComputedStyle(el);
    if(el instanceof HTMLButtonElement&&el.disabled)continue;
+   unparsedBackdrop='';
    const fg=parse(s.color),bg=backdrop(el);
-   if(!fg)continue;
+   // A colour the rule cannot read is a finding, never a silent skip: a stylesheet written in another colour syntax must not switch the rule off.
+   if(!fg){add('contrast',el,`text colour "${s.color}" is not an rgb() value: its contrast was not measured`);continue;}
+   if(unparsedBackdrop!==''){add('contrast',el,`background colour "${unparsedBackdrop}" is not an rgb() value: its contrast was not measured`);continue;}
    const blend=(a:number,b:number):number=>a*fg[3]+b*(1-fg[3]);
    const eff:[number,number,number,number]=[blend(fg[0],bg[0]),blend(fg[1],bg[1]),blend(fg[2],bg[2]),1];
    const l1=lum(eff),l2=lum(bg),ratio=(Math.max(l1,l2)+0.05)/(Math.min(l1,l2)+0.05);
    const size=parseFloat(s.fontSize),bold=Number(s.fontWeight)>=700;
    const need=size>=24||(size>=18.66&&bold)?3:4.5;
+   compared++;
    if(ratio<need)add('contrast',el,`ratio ${ratio.toFixed(2)} below ${need} for "${(n.textContent??'').trim().slice(0,40)}"`);
   }
+  // An audit that compared no text colour proves nothing about contrast.
+  if(compared===0)out.push({rule:'coverage',node:'document',detail:'no text colour was compared: the contrast rule inspected nothing'});
   return out;
  });
 }

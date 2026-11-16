@@ -1,6 +1,6 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
 import {test,expect,type Browser,type BrowserContext,type Locator,type Page} from '@playwright/test';
-import {adminCommand,createOrg,createProject,field,id,login,onboardMetricSource,owner,postJson,setGrant} from './support/real';
+import {adminCommand,createOrg,createProject,field,id,login,onboardMetricSource,owner,postJson,reopen,setGrant} from './support/real';
 // [05.03-W4] A REAL project deletion observed through the console against the real served process: the deletion is begun through the
 // real admin route (POST /api/v1/admin/deletions), and the settings page polls the C11 contract path GET /api/v1/operations/{id}
 // (no poller double). The leader-only retention worker drives the fence on its own cadence, so the operation really is `fencing` for
@@ -251,7 +251,8 @@ async function signedIn(browser:Browser,p:Person):Promise<{ctx:BrowserContext;pa
 const policyStatus=async(page:Page,org:string,project:string):Promise<number>=>(await postJson(page,'/api/v1/policies',{org,project_id:project,operation:'read'})).status;
 const PAGES:Record<string,string>={organization:'organization',teams:'teams',sources:'source-policies',sso:'sso'};
 async function openTab(page:Page,org:string,project:string,tab:string):Promise<Locator>{
- await page.goto(`/${settings(org,project)}`);
+ // A fresh document every time: the specs that call this after an administration change elsewhere need the console to read the organization again.
+ await reopen(page,`/${settings(org,project)}`);
  await page.locator(`[data-settings-tab="${tab}"]`).click();
  const content=page.locator(`[data-settings-page="${PAGES[tab]}"]`);
  await expect(content).toBeVisible();

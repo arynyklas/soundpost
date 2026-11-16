@@ -184,6 +184,50 @@ func TestProfileViewPartialStaysIncompleteWithItsReason(t *testing.T) {
 	}
 }
 
+// The reason of a partial profile is a closed vocabulary (profiles.ReasonKnown). Every code the profile service produces is forwarded as the
+// response and section reason; a view carrying any other reason, first or later in its list, is refused (503, nothing shown) instead of
+// being forwarded as text the console has no words for.
+func TestProfileViewReasonsArePinnedToTheClosedSet(t *testing.T) {
+	profile := model.NewID()
+	var project model.ID
+	src := &fakeProfiles{}
+	e := newPfEnv(t, src)
+	project = model.NewID()
+	org := e.org("profile reasons", project)
+	reader := e.user(org, "profile-reasons@example.test")
+	e.grant(org, reader, project, true, httpapi.ProfilesRead)
+	answer := func(reasons ...string) {
+		src.answer = func() (profiles.ProfileView, error) {
+			v := completeView(project, profile)
+			v.Completeness, v.Reasons = "partial", reasons
+			return v, nil
+		}
+	}
+	for _, reason := range []string{profiles.ReasonMissingCapabilityOrPage, profiles.ReasonMissingChunk, profiles.ReasonCoverageIncomplete, profiles.ReasonNoObservationsInWindow} {
+		answer(reason)
+		status, raw := e.view(reader, profileBody(org, project, profile))
+		v := decodeProfile(t, raw)
+		if status != 200 || v.State != httpapi.StateIncomplete || v.Reason != reason || len(v.Sections) != 1 || v.Sections[0].Reason != reason {
+			t.Fatalf("%s: %d %s", reason, status, raw)
+		}
+	}
+	for _, c := range []struct {
+		name    string
+		reasons []string
+	}{
+		{"a made-up reason", []string{"the profiler gave up"}},
+		{"the not-wired reason", []string{httpapi.ReasonProfileServiceNotWired}},
+		{"a gap reason of a replay", []string{"hash_mismatch"}},
+		{"a known reason then a made-up one", []string{profiles.ReasonCoverageIncomplete, "later nonsense"}},
+		{"an empty reason", []string{""}},
+	} {
+		answer(c.reasons...)
+		if status, raw := e.view(reader, profileBody(org, project, profile)); status != 503 || strings.Contains(string(raw), "nonsense") || strings.Contains(string(raw), "gave up") {
+			t.Fatalf("%s: %d %s", c.name, status, raw)
+		}
+	}
+}
+
 func TestProfileViewRefusesAViewOfAnotherProjectOrProfile(t *testing.T) {
 	profile := model.NewID()
 	var project model.ID

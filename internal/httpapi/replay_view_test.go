@@ -385,6 +385,68 @@ func TestReplayStreamGapUnsupportedAndErrorLines(t *testing.T) {
 	}
 }
 
+// Every reason the replay package defines passes through under exactly the kinds it belongs to, and a reason outside the closed vocabulary of
+// its kind (a made-up code, one of another kind, a reason on a chunk) is never forwarded: the stream ends with the closed corrupt error line.
+func TestReplayStreamReasonsAreThePinnedClosedSet(t *testing.T) {
+	gapReasons := []string{replays.ReasonMissingChunk, replays.ReasonHashMismatch, replays.ReasonDependencyMismatch, replays.ReasonRecorderGap, replays.ReasonConflictingChunk, replays.ReasonInvalidChunk, replays.ReasonIndexMismatch, replays.ReasonNoCheckpoint}
+	run := func(t *testing.T, ev replays.Event, rest func(i int) (replays.Event, error)) []httpapi.ReplayLine {
+		src := &fakeReplays{}
+		src.answer = func() (replays.ReplayStream, error) {
+			return &scriptedStream{events: func(i int) (replays.Event, error) {
+				if i == 0 {
+					return ev, nil
+				}
+				return rest(i)
+			}}, nil
+		}
+		e := newRpEnv(t, src)
+		p := model.NewID()
+		org := e.org("replay reasons", p)
+		reader := e.user(org, "replay-reasons@example.test")
+		e.grant(org, reader, p, true, auth.Read, httpapi.ReplayRead)
+		return newLines(t, e.open(reader, replayBody(org, p, model.NewID()), nil)).all()
+	}
+	ended := func(int) (replays.Event, error) { return replays.Event{}, io.EOF }
+	more := func(i int) (replays.Event, error) { return deltaEvent(uint64(i + 1)), nil } // whatever follows a refused event must never reach the browser
+	for _, reason := range gapReasons {
+		lines := run(t, replays.Event{Kind: replays.EventGap, Sequence: 2, Through: 3, Reason: reason}, ended)
+		if types(lines) != "open gap end" || lines[1].Reason != reason {
+			t.Fatalf("gap %q: %s %+v", reason, types(lines), lines)
+		}
+	}
+	if lines := run(t, replays.Event{Kind: replays.EventUnsupported, Sequence: 2, Through: 2, Reason: replays.ReasonRecorderVersion}, ended); types(lines) != "open unsupported end" || lines[1].Reason != replays.ReasonRecorderVersion {
+		t.Fatalf("unsupported: %s %+v", types(lines), lines)
+	}
+	for _, reason := range []string{replays.ReasonAuthorityRevoked, replays.ReasonDeleted} {
+		if lines := run(t, replays.Event{Kind: replays.EventRevoke, Sequence: 2, Reason: reason}, more); types(lines) != "open revoke" || lines[1].Reason != reason {
+			t.Fatalf("revoke %q: %s %+v", reason, types(lines), lines)
+		}
+	}
+	for _, bad := range []struct {
+		name string
+		ev   replays.Event
+	}{
+		{"a made-up gap reason", replays.Event{Kind: replays.EventGap, Sequence: 2, Through: 3, Reason: "the recorder sneezed"}},
+		{"a gap without a reason", replays.Event{Kind: replays.EventGap, Sequence: 2, Through: 3}},
+		{"a revoke reason on a gap", replays.Event{Kind: replays.EventGap, Sequence: 2, Through: 3, Reason: replays.ReasonDeleted}},
+		{"a gap reason on an unsupported event", replays.Event{Kind: replays.EventUnsupported, Sequence: 2, Through: 2, Reason: replays.ReasonMissingChunk}},
+		{"a gap reason on a revoke", replays.Event{Kind: replays.EventRevoke, Sequence: 2, Reason: replays.ReasonMissingChunk}},
+		{"a revoke without a reason", replays.Event{Kind: replays.EventRevoke, Sequence: 2}},
+		{"a reason on a delta", func() replays.Event { d := deltaEvent(1); d.Reason = replays.ReasonMissingChunk; return d }()},
+		{"an event kind outside the closed set", replays.Event{Kind: "rewind", Sequence: 2}},
+	} {
+		lines := run(t, bad.ev, more)
+		for _, l := range lines {
+			if l.Type == "gap" || l.Type == "revoke" || l.Type == "unsupported" || l.Type == "delta" || l.Type == "rewind" || l.Reason != "" {
+				t.Fatalf("%s: a refused event reached the wire: %+v", bad.name, l)
+			}
+		}
+		if types(lines) != "open error" || lines[1].Code != string(model.Corrupt) {
+			t.Fatalf("%s: only the closed corrupt error line may follow open: %s %+v", bad.name, types(lines), lines)
+		}
+	}
+}
+
 func TestReplayStreamIsBoundedByEventsAndBytes(t *testing.T) {
 	endless := func() (replays.ReplayStream, error) {
 		return &scriptedStream{events: func(i int) (replays.Event, error) { return deltaEvent(uint64(i + 1)), nil }}, nil

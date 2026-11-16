@@ -2,7 +2,7 @@
 import {test,expect,type Page} from '@playwright/test';
 import {randomBytes} from 'node:crypto';
 import {barrierProxy} from './support/barrier';
-import {field} from './support/real';
+import {field,onboardMetricSource} from './support/real';
 // Real server, real browser. A real investigate response for organization A is held
 // in the network layer (fetched from the real server, fulfilled late) while the
 // browser navigates to organization B: A's late completion must never paint.
@@ -108,15 +108,20 @@ test('a late answer of a superseded read does not replace the newer read when th
  await expect(page.getByTestId('visible-org')).toHaveText(org);
  await expect(page.getByRole('status').filter({hasText:'Loading'})).toBeVisible();
  expect(sent).toHaveLength(1);
+ // While the first read is held, the organization changes: a source is onboarded, so the newer read's answer DIFFERS from the held one
+ // (it lists the source's service, the held one cannot). A late stale answer that replaced it would be visible, not merely a different spinner.
+ const source=await onboardMetricSource(page,org,project);
+ const row=page.locator(`[data-testid=service-row][data-service="${source.service}"]`);
+ await expect(row).toHaveCount(0);
  // Refresh re-reads the same scope: same address, so no hashchange and no remount; the hook starts a second read under a new generation.
  await page.getByRole('button',{name:'Refresh',exact:true}).click();
- await expect(page.locator('[data-state="empty"], [data-state="incomplete"]').first()).toBeVisible();
+ await expect(row).toHaveCount(1);
  expect(sent).toHaveLength(2);
  await expect(page.getByRole('status').filter({hasText:'Loading'})).toHaveCount(0);
- // Now the first read's real answer arrives late.
+ // Now the first read's real answer (computed before the source existed) arrives late.
  release();await served;await page.waitForTimeout(750);
  await expect(page.getByRole('status').filter({hasText:'Loading'})).toHaveCount(0);
- await expect(page.locator('[data-state="empty"], [data-state="incomplete"]').first()).toBeVisible();
+ await expect(row).toHaveCount(1);
  await expect(page.getByTestId('visible-org')).toHaveText(org);
  expect(sent).toHaveLength(2);
 });

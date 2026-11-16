@@ -89,6 +89,11 @@ func (p *Profiles) View(ctx context.Context, authority *auth.Service, credential
 	if view.Project != body.Project || view.Profile != body.Profile || view.Completeness != "complete" && view.Completeness != "partial" {
 		return ProfileResponse{}, auth.Scope{}, model.Fail(model.Corrupt)
 	}
+	for _, reason := range view.Reasons {
+		if !profiles.ReasonKnown(reason) {
+			return ProfileResponse{}, auth.Scope{}, model.Fail(model.Corrupt) // a reason outside the closed set is never forwarded: the console could not describe it
+		}
+	}
 	out := profileResponseOf(body, scope, StateReady, "")
 	out.View = &view
 	if view.Completeness == "partial" || view.Truncated {

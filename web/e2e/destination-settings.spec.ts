@@ -1,6 +1,6 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
 import {test,expect,type Locator,type Page} from '@playwright/test';
-import {adminCommand,createOrg,createProject,field,id,login,owner,postJson} from './support/real';
+import {activate,adminCommand,createOrg,createProject,field,id,login,owner,postJson} from './support/real';
 // The destination settings page over the real served process: POST /api/v1/destinations (list | save). Saving a destination needs organization
 // administration (D30: a destination routes every project of the organization), so an account that holds only policy.write on the project reads the
 // list and is told it cannot change it, and the route itself refuses its save. Every save is an audited command based on the destination's own version:
@@ -123,6 +123,7 @@ test('an organization administrator adds, pauses and rotates destinations throug
 
  // A reload shows what the server holds.
  await page.reload();
+ await activate(page);
  await page.locator('[data-settings-tab="destinations"]').click();
  await expect(page.locator(`[data-destination="${hookId}"]`)).toHaveAttribute('data-destination-version','4');
  await expect(page.locator('[data-destination]')).toHaveCount(3);

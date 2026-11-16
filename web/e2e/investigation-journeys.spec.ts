@@ -23,7 +23,7 @@ import {deepLink,realLink,seedJourney,seedRealJourney,type JourneySeed,type Real
 //  - job: a run the real Python SDK produced (attempt 1 raises, the retry succeeds), read as recovered with its captured error as the cause.
 //    The SDK records a manual execution (no schedule definition is reported by the SDK); schedule-derived evidence is job-history.spec.ts.
 test.describe.configure({mode:'serial'});
-let br:Browser,owners:Page,seed:JourneySeed,real:RealJourneySeed,page:Page,windowText='',scope={org:'',project:''};
+let br:Browser,owners:Page,seed:JourneySeed,real:RealJourneySeed,page:Page,windowText='',scope={org:'',project:'',start:'',end:''};
 const shots=process.env.SOUNDPOST_SHOT_DIR;
 const evidenceFile=process.env.SOUNDPOST_EVIDENCE_FILE;
 const evidence:Record<string,unknown>[]=[];
@@ -61,15 +61,20 @@ async function signIn(email:string,password:string):Promise<void>{
  await page.keyboard.press('Enter');
  await expect(page.getByRole('heading',{level:1,name:'Account access'})).toBeVisible();
 }
-/** The organization, project and window are on screen, and the window is the one the deep link carried. */
+/** The window the console must print for a start and end in nanoseconds: computed here from the seeded values, not by the console's own formatter. */
+const windowWords=(start:string,end:string):string=>{
+ const at=(ns:string):string=>new Intl.DateTimeFormat('en-GB',{timeZone:'UTC',dateStyle:'medium',timeStyle:'medium'}).format(new Date(Number(BigInt(ns)/1_000_000n)));
+ return `${at(start)} to ${at(end)} (end excluded)`;
+};
+/** The organization, project and window are on screen, and the window is the one the deep link carried (the seeded start and end, both ends). */
 async function scopeVisible():Promise<void>{
  await expect(page.getByTestId('visible-org')).toHaveText(scope.org);
  await expect(page.getByTestId('visible-projects')).toHaveText(scope.project);
  const win=page.getByRole('term').filter({hasText:'Window'}).locator('xpath=following-sibling::dd[1]');
- const text=(await win.innerText()).trim();
+ const text=(await win.innerText()).trim().replace(/\s+/g,' ');
+ expect(text).toBe(windowWords(scope.start,scope.end));
  if(windowText==='')windowText=text;
  expect(text).toBe(windowText);
- expect(text).toMatch(/ to /);
 }
 async function record(leg:string,detail:Record<string,unknown>):Promise<void>{
  await scopeVisible();
@@ -97,7 +102,7 @@ test.afterAll(()=>{
 test('sign in with the keyboard alone, then open a native deep link: the scope is on screen',async()=>{
  const ctx=await br.newContext();
  page=await ctx.newPage();
- scope={org:seed.explore.org,project:seed.explore.p1};
+ scope={org:seed.explore.org,project:seed.explore.p1,start:String(seed.start),end:String(seed.end)};
  await page.goto('/');
  await signIn(seed.explore.reader.email,seed.explore.reader.password);
  // A deep link is an address, so opening it is the one step that is not a key press on the page.
@@ -160,7 +165,8 @@ test('replay: the keyboard opens the masked replay and steps it; the viewer repo
  await expect(page.getByRole('heading',{level:2,name:`Replay ${seed.replays.clean.replay}`})).toBeFocused();
  await expect(page.getByTestId('replay-frame')).toBeVisible();
  await activate(page.getByRole('button',{name:'Step to the next event'}));
- await expect(page.getByTestId('viewer-status')).not.toHaveAttribute('data-status','none');
+ await expect(page.getByTestId('viewer-status')).toHaveAttribute('data-status','ready');
+ await expect(page.getByTestId('viewer-status')).toContainText('Events delivered to the viewer: 1');
  await record('replay',{state:'ready',replay:seed.replays.clean.replay,viewerStatus:await page.getByTestId('viewer-status').getAttribute('data-status'),chunks:'closed format; the real recorder path is replay-profile.spec.ts'});
 });
 
@@ -188,7 +194,7 @@ test('an organization administrator signs in with the keyboard alone and opens t
  const ctx=await br.newContext();
  page=await ctx.newPage();
  windowText='';
- scope={org:real.ev.org,project:real.ev.project};
+ scope={org:real.ev.org,project:real.ev.project,start:real.start,end:real.end};
  await page.goto('/');
  await signIn(real.reader.email,real.reader.password);
  await page.goto(realLink(real,'queue'));
@@ -280,6 +286,6 @@ test('the contextual scope of the real-journey organization never left the scree
 
 test('this spec drives the page with the keyboard only: no pointer or fill call appears outside the fixture',()=>{
  const source=readFileSync(fileURLToPath(import.meta.url),'utf8');
- const pointer=new RegExp(`\\.(${['click','dblclick','fill','check','uncheck','selectOption','hover','tap','dragTo','press'+'Sequentially'].join('|')})\\(`);
+ const pointer=new RegExp(`\\.(${['click','dblclick','fill','check','uncheck','selectOption','hover','tap','dragTo','press'+'Sequentially','focus','blur','dispatchEvent'].join('|')})\\(`);
  expect(source.split('\n').filter((l)=>pointer.test(l))).toEqual([]);
 });

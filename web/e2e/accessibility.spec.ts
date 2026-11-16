@@ -255,6 +255,8 @@ test('the audits have teeth: each defect injected into the real rendered page is
   ['svg-alternative',`document.querySelector('main').insertAdjacentHTML('beforeend','<svg width="10" height="10"></svg>')`],
   ['table-structure',`document.querySelector('main').insertAdjacentHTML('beforeend','<table><tr><td>x</td></tr></table>')`],
   ['contrast',`document.querySelector('main').insertAdjacentHTML('beforeend','<p id="faint">faint grey text</p>');document.getElementById('faint').style.color='#bbbbbb'`],
+  // A colour written in a syntax the rule does not parse (oklch is not rgb()) must still be reported, never skipped.
+  ['contrast',`document.querySelector('main').insertAdjacentHTML('beforeend','<p id="faint2">faint text in another colour syntax</p>');document.getElementById('faint2').style.color='oklch(0.92 0 0)'`],
  ];
  for(const [rule,code] of injected){
   const probe=await br.newContext({bypassCSP:true});

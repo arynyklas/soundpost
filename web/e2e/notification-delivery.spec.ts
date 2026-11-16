@@ -48,7 +48,9 @@ async function seed(page:Page,api:APIRequestContext,endpoint:string):Promise<{or
   const first=Array.isArray(entries)?field(entries[0],'incident_id'):undefined;
   incident=typeof first==='string'?first:'';
   return incident;
- },{message:'the runner opens an incident for the ingested error',timeout:90_000,intervals:[250,500,1000]}).not.toBe('');
+ // The runner visits every project of the installation on each pass, so its latency grows with what the specs before this one created (measured in
+ // the full suite, l3w15-fine: job-history waits of 42 s against 8 s alone), and an incident needs the issue and the incident stage in turn.
+ },{message:'the runner opens an incident for the ingested error',timeout:240_000,intervals:[250,500,1000]}).not.toBe('');
  return {org,project,incident};
 }
 /** Polls the real queue route until the incident's delivery attention is the wanted one (the worker has really tried to send). */
@@ -58,11 +60,11 @@ async function until(page:Page,t:{org:string;project:string;incident:string},att
   const entries=field(r.json,'entries');
   const row=Array.isArray(entries)?entries.find((e)=>field(e,'incident_id')===t.incident):undefined;
   return field(field(field(row,'notification'),'delivery'),'attention');
- },{message:`the incident's delivery becomes ${attention}`,timeout:120_000,intervals:[500,1000,2000]}).toBe(attention);
+ },{message:`the incident's delivery becomes ${attention}`,timeout:240_000,intervals:[500,1000,2000]}).toBe(attention);
 }
 
 test('failed, uncertain and accepted delivery are each named in the queue and on the incident',async({page,playwright})=>{
- test.setTimeout(420_000);
+ test.setTimeout(1_200_000);
  const who=owner();
  await login(page,who.email,who.password);
  const api=await playwright.request.newContext();

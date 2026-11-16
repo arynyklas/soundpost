@@ -8,7 +8,7 @@ import {join,resolve} from 'node:path';
 import {promisify} from 'node:util';
 import {test,expect,type APIRequestContext,type Browser,type BrowserContext,type Page} from '@playwright/test';
 import {setPermissions} from './support/replay';
-import {createOrg,createProject,createReader,field,id,ingestJobAttempt,listJobDefinitions,login,onboardJobSource,onboardSdkJobSource,owner,postJson,saveJobDefinition,sdkConfig,setGrant,tcpPath,type JobAttemptInput,type Reader,type Source} from './support/real';
+import {createOrg,createProject,createReader,field,id,ingestJobAttempt,listJobDefinitions,login,onboardJobSource,onboardSdkJobSource,owner,postJson,reopen,saveJobDefinition,sdkConfig,setGrant,tcpPath,type JobAttemptInput,type Reader,type Source} from './support/real';
 
 // Real server, real Chrome, real HTTPS, real sessions, real routes only. The job data is produced the product's own way:
 //   source credential -> POST /ingest/v1/batches (kind job_attempt) -> the leader-only background runner (`soundpost serve`, its job
@@ -60,7 +60,8 @@ async function applied(job:string,runs:Record<string,number>):Promise<void>{
  },{timeout:90_000,intervals:[250,500,1000]}).toEqual(runs);
 }
 async function open(who:Page,view='jobs'):Promise<void>{
- await who.goto(`/${hash(org,p1,view)}`);
+ // A fresh document: the jobs list is read once per document, and a spec calls this again to see jobs and runs ingested since the last call.
+ await reopen(who,`/${hash(org,p1,view)}`);
  await expect(who.getByRole('heading',{name:'Jobs',exact:true})).toBeVisible();
 }
 const row=(page:Page,job:string)=>page.locator(`[data-testid=job-row][data-job="${job}"]`);
@@ -319,7 +320,12 @@ test('a schedule definition authored over the catalogue route is shown, and the 
  const author=await createReader(owners,org,[p1]);
  await setPermissions(owners,org,author.id,p1,true,['policy.write']);
  const ap=await loggedIn(author);
- const definition={revision:'1',effective_from_ns:ns(Date.now()-24*3600_000),schedule:{cron:'* * * * *',timezone:'UTC'},grace_ns:'60000000000',max_runtime_ns:'0',observer_stale_after_ns:'600000000000',overlap:'allow'};
+ // The runner attests a job only through the newest event time a source delivered FOR THAT JOB, less the 15 minute late-arrival allowance
+ // (internal/appcore/producers_jobs.go completeThrough, jobLookback); a job no source delivered an event for is attested through nothing and reads
+ // Unknown, and an occurrence window can only be closed when it ended more than that allowance ago. So the schedule is hourly at a minute whose latest
+ // occurrence was 30 minutes ago, and the job has exactly one run, far older than the window the verdict is about.
+ const cron=`${(new Date().getUTCMinutes()+30)%60} * * * *`;
+ const definition={revision:'1',effective_from_ns:ns(Date.now()-24*3600_000),schedule:{cron,timezone:'UTC'},grace_ns:'60000000000',max_runtime_ns:'0',observer_stale_after_ns:'600000000000',overlap:'allow'};
  const scheduled=id();
  // Authoring is a write: the telemetry-only reader may not use it, and a stale author loses instead of overwriting.
  expect((await saveJobDefinition(api,org,p1,scheduled,definition)).status).not.toBe(200);
@@ -329,13 +335,21 @@ test('a schedule definition authored over the catalogue route is shown, and the 
  const list=await listJobDefinitions(api,org,p1);
  expect(list.status,list.text).toBe(200);
  expect(field(list.json,'can_author')).toBe(false);
- // Fresh evidence from the project's job sources: the newest applied event bounds what the runner may attest.
+ // The job's one run, long before the missed occurrence (its events are the evidence that a source delivered this job's events at all).
+ const S={run:id(),att:id()};
+ await send({job:scheduled,run:S.run,attempt:S.att,occurrence:'manual.before',ordinal:1,sequence:1,state:'started',observed:at(10)});
+ await send({job:scheduled,run:S.run,attempt:S.att,occurrence:'manual.before',ordinal:1,sequence:2,state:'succeeded',observed:at(10),terminal:at(10,30)});
+ await applied(scheduled,{[S.run]:2});
+ // Fresh evidence from the project's job sources: the newest applied event bounds what the runner may attest. An attempt's events all carry
+ // the attempt's one observed time (internal/jobs/reducer.go refuses an event whose observed time differs from the attempt's as a Conflict), so
+ // it is read from the clock once, not once per event.
  const F={job:id(),run:id(),att:id()};
- await send({job:F.job,run:F.run,attempt:F.att,occurrence:'manual.fresh',ordinal:1,sequence:1,state:'started',observed:Date.now()-5000});
- await send({job:F.job,run:F.run,attempt:F.att,occurrence:'manual.fresh',ordinal:1,sequence:2,state:'succeeded',observed:Date.now()-5000,terminal:Date.now()-4000});
+ const fresh=Date.now()-5000;
+ await send({job:F.job,run:F.run,attempt:F.att,occurrence:'manual.fresh',ordinal:1,sequence:1,state:'started',observed:fresh});
+ await send({job:F.job,run:F.run,attempt:F.att,occurrence:'manual.fresh',ordinal:1,sequence:2,state:'succeeded',observed:fresh,terminal:fresh+1000});
  await applied(F.job,{[F.run]:2});
  const page=await rctx.newPage();
- // The runner's observer stage feeds the catalogue on its next pass; the job never reported a run, so it reads Missed.
+ // The runner's observer stage feeds the catalogue on its next pass: the occurrence after the job's only run ended more than 15 minutes ago with no run, so it reads Missed.
  await expect(async()=>{
   await open(page);
   await expect(row(page,scheduled)).toContainText('Missed',{timeout:2000});
@@ -343,7 +357,7 @@ test('a schedule definition authored over the catalogue route is shown, and the 
  await openJob(page,scheduled);
  await expect(page.getByTestId('job-health')).toContainText('Missed');
  await expect(page.getByTestId('job-definition')).toContainText('Time zone: UTC');
- await expect(page.getByTestId('job-definition')).toContainText('Schedule: * * * * *');
+ await expect(page.getByTestId('job-definition')).toContainText(`Schedule: ${cron}`);
  await expect(page.getByTestId('job-definition')).toContainText('allow: a run that starts while another runs is recorded, never dropped or merged');
  await expect(page.getByTestId('job-observer')).toContainText('Schedule observer: fresh');
 });

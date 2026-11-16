@@ -1,7 +1,7 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
 import {test,expect,type Browser,type BrowserContext,type Page,type Request} from '@playwright/test';
 import {createHash} from 'node:crypto';
-import {adminCommand,id,login,origin,owner,postJson,csrf} from './support/real';
+import {activate,adminCommand,id,login,origin,owner,postJson,csrf} from './support/real';
 import {CANARY_FN,CANARY_LABEL,MAP_SECRET,REAL_CLASS,REAL_CODE,groupingFingerprint,issueId,member,revoke,seedEvidence,type EvidenceSeed,type Member} from './support/evidence';
 
 // Real server, real Chrome. The organization, users, grants, source policy and source go through the real admin and
@@ -27,6 +27,7 @@ async function as(m:Member,fragment:string):Promise<Page>{
  const page=await context.newPage();
  await login(page,m.email,m.password);
  await page.goto(`/${fragment}`);
+ await activate(page);
  return page;
 }
 const artifactPost=(page:Page,operation:string,org:string,project:string,artifactId:string)=>
@@ -331,6 +332,9 @@ async function resolve(page:Page,build:string,lines:string[],sources:boolean):Pr
 const frameLine=(artifact:string,line:number,fn:string):string=>`${artifact} ${line} 7 ${fn}`;
 
 test('regression: the stored explanation of each occurrence after a resolution is shown on the issue and on the release; unknown ancestry is decided by the boundary and says so; nothing is inferred from timestamps',async()=>{
+ // Four occurrences are each awaited until the issue producer has recorded them (a runner pass apiece, several seconds each): the 30 s default
+ // is a coin flip on a slower browser (27.8 s on WebKit, over 30 s on Firefox).
+ test.setTimeout(120_000);
  const klass='E2eRegressionTarget';
  await seed.occurrenceOf(klass,seed.releases.root);
  const identity=issueId(seed.org,seed.project,groupingFingerprint(seed.org,seed.project,klass,'manual'));
