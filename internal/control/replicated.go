@@ -200,22 +200,30 @@ func (m *replicatedControl) Apply(c replica.CommittedEntry) error {
 			return err
 		}
 		if !rejected {
-			var expected controlReplacement
-			if model.StrictJSON(c.Entry.Payload, &expected) != nil {
+			cmd, err := decodeControlCommand(c.Entry.Payload)
+			if err != nil {
 				return model.Fail(model.Corrupt)
 			}
-			if err := m.verifyCurrentState(expected.State); err != nil {
+			if cmd.delta != nil {
+				err = m.verifyCurrentDelta(*cmd.delta)
+			} else {
+				err = m.verifyCurrentState(cmd.replacement.State)
+			}
+			if err != nil {
 				return err
 			}
 		}
 	}
 	if c.Index > m.Applied() && c.Entry.Kind != replica.Noop {
-		var next controlReplacement
-		if model.StrictJSON(c.Entry.Payload, &next) != nil {
+		cmd, err := decodeControlCommand(c.Entry.Payload)
+		if err != nil {
 			return model.Fail(model.Corrupt)
 		}
-		if err := m.store.installReplicaKeys(next.Keys); err != nil {
-			return err
+		// A delta carries no key files: only a replacement installs them.
+		if cmd.replacement != nil {
+			if err := m.store.installReplicaKeys(cmd.replacement.Keys); err != nil {
+				return err
+			}
 		}
 	}
 	rejected := false
@@ -239,11 +247,24 @@ func (m *replicatedControl) Apply(c replica.CommittedEntry) error {
 			if c.Entry.Kind != replica.Control {
 				return model.Fail(model.Corrupt)
 			}
-			var next controlReplacement
-			if model.StrictJSON(c.Entry.Payload, &next) != nil || next.State.Installation != current.Installation || next.State.Revision != next.Expected+1 {
+			cmd, derr := decodeControlCommand(c.Entry.Payload)
+			if derr != nil {
 				return model.Fail(model.Corrupt)
 			}
-			if next.Expected != current.Revision {
+			var installation model.ID
+			var expected model.Revision
+			if cmd.delta != nil {
+				installation, expected = cmd.delta.Installation, cmd.delta.Expected
+			} else {
+				if cmd.replacement.State.Revision != cmd.replacement.Expected+1 {
+					return model.Fail(model.Corrupt)
+				}
+				installation, expected = cmd.replacement.State.Installation, cmd.replacement.Expected
+			}
+			if installation != current.Installation {
+				return model.Fail(model.Corrupt)
+			}
+			if expected != current.Revision {
 				rejected = true
 				current.Revision = model.Revision(c.ApplicationCursor.Index)
 				if err := meta.Put([]byte("rejected:"+c.Entry.ID.String()), []byte{1}); err != nil {
@@ -255,14 +276,16 @@ func (m *replicatedControl) Apply(c replica.CommittedEntry) error {
 				if err := meta.Put(staleAppliedKey, watermarkBytes(c.Index)); err != nil {
 					return err
 				}
+			} else if cmd.delta != nil {
+				owe = applyAuditDelta(&current, *cmd.delta)
 			} else {
 				// An erasing audit this commit adds means it frees the pages that held what was
 				// erased: this file owes a scrub whatever any later record says another node did.
-				owe = erasureCount(next.State.Audits) > erasureCount(current.Audits)
-				current = next.State
-				if current.Settlement != nil {
-					m.store.settledSeen.Store(true)
-				}
+				owe = erasureCount(cmd.replacement.State.Audits) > erasureCount(current.Audits)
+				current = cmd.replacement.State
+			}
+			if !rejected && current.Settlement != nil {
+				m.store.settledSeen.Store(true)
 			}
 			raw, e := json.Marshal(current)
 			if e != nil {
@@ -572,16 +595,26 @@ func (m *replicatedControl) Validate(ctx context.Context, command replica.Entry)
 	if command.Kind != replica.Control {
 		return model.Fail(model.Invalid)
 	}
-	var next controlReplacement
-	if model.StrictJSON(command.Payload, &next) != nil || next.State.Revision != next.Expected+1 {
+	cmd, err := decodeControlCommand(command.Payload)
+	if err != nil {
 		return model.Fail(model.Invalid)
+	}
+	var installation model.ID
+	var expected, revision model.Revision
+	if cmd.delta != nil {
+		installation, expected, revision = cmd.delta.Installation, cmd.delta.Expected, cmd.delta.Expected+1
+	} else {
+		if cmd.replacement.State.Revision != cmd.replacement.Expected+1 {
+			return model.Fail(model.Invalid)
+		}
+		installation, expected, revision = cmd.replacement.State.Installation, cmd.replacement.Expected, cmd.replacement.State.Revision
 	}
 	return m.store.db.View(func(tx *bolt.Tx) error {
 		var current State
 		if json.Unmarshal(tx.Bucket([]byte("control")).Get([]byte("state")), &current) != nil {
 			return model.Fail(model.Corrupt)
 		}
-		if next.State.Installation != current.Installation || next.Expected != current.Revision || command.ApplicationIndex != uint64(next.State.Revision) {
+		if installation != current.Installation || expected != current.Revision || command.ApplicationIndex != uint64(revision) {
 			return model.Fail(model.Stale)
 		}
 		return nil

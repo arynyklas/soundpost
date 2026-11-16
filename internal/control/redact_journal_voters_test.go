@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -180,6 +181,16 @@ type controlVoters struct {
 	// beforeRound, when set, runs before each write round of erasedWithVoter3Idle: a test uses it to
 	// disturb the group between rounds, as a starved host does on its own.
 	beforeRound func(round int)
+	// afterLead, when set, runs each time erasedWithVoter3Idle has confirmed voter 1 as the leader and
+	// is about to write (stage names the write that follows): a test uses it to move the lead inside a
+	// step, which is where a starved host moves it on its own.
+	afterLead func(stage string)
+	// pinned is the voter that has to lead while a fixture phase runs (0: any voter may).
+	pinned uint64
+	// retries counts the attempts retryWrite ran again after the lead moved; allowedRetries is the
+	// bound checkRetries holds it to (0: maxFixtureRetries).
+	retries        atomic.Int64
+	allowedRetries int64
 }
 
 type voterGenesis struct {
@@ -211,6 +222,7 @@ func newControlVotersCadence(t *testing.T, cadence replica.Cadence, ownRetention
 	}
 	v := &controlVoters{t: t, mesh: newVoterMesh(), stores: map[uint64]*control.Store{}, dirs: map[uint64]string{}, fx: map[uint64]*eraseFx{}}
 	v.genesis = voterGenesis{seed: seed, application: application, index: position.Applied + 1, term: position.Term + 1}
+	t.Cleanup(v.checkRetries)
 	t.Cleanup(func() {
 		for _, s := range v.stores {
 			s.Close()
@@ -255,6 +267,7 @@ func newControlVotersCadence(t *testing.T, cadence replica.Cadence, ownRetention
 		fence := *genesis.fenceFx
 		fence.store, fence.svc, fence.dir = store, svc, v.dirs[id]
 		v.fx[id] = &eraseFx{&delFx{fenceFx: &fence, dest: genesis.dest, policy: genesis.policy, subject: genesis.subject}}
+		v.fx[id].retry = v.retryWrite
 	}
 	// leaderIs campaigns (a Campaign that races the group's start is retried, not fatal) and
 	// returns only once voter 1 leads and a Fence round has committed under it.
@@ -334,6 +347,101 @@ func (v *controlVoters) leaders() string {
 		fmt.Fprintf(&b, "voter %d leader=%d term=%d; ", id, st.Leader, st.Term)
 	}
 	return b.String()
+}
+
+// led confirms voter 1 as the leader before the write the stage names, then lets a test move the
+// lead (afterLead). It is what the fixture runs before each of its writes.
+func (v *controlVoters) led(stage string) {
+	v.t.Helper()
+	v.leaderIs(1)
+	if v.afterLead != nil {
+		v.afterLead(stage)
+	}
+}
+
+// retryWrite is the retry of every voter's fixture (fenceFx.write). The fixture's leader-bound writes
+// answer unavailable (no voter leads) or with a lease the new leader no longer honours when the
+// lead moves while they run. A host that starves the three voters for longer than an election
+// timeout moves it between any two steps, which the confirmation before each phase cannot
+// prevent; it is the host, not the test, that fails the step. The attempt is run again once the lead
+// is settled; any other error is the test's own and is answered at once.
+func (v *controlVoters) retryWrite(attempt func() error) error {
+	v.t.Helper()
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		err := attempt()
+		if err == nil || !leadMoved(err) || time.Now().After(deadline) {
+			return err
+		}
+		v.retries.Add(1)
+		v.settle()
+		time.Sleep(20 * time.Millisecond) // a group that failed answers at once: no spinning on it
+	}
+}
+
+// maxFixtureRetries is the number of retried attempts a whole test may need before the fixture
+// reports it. A transient lead move costs one retry per step it lands in; a product whose
+// leadership keeps moving without a disturbance retries at every step and would be absorbed
+// silently, so more than this many retries in one test fails it. A test that moves the lead on
+// purpose raises controlVoters.allowedRetries, never this constant.
+const maxFixtureRetries = 10
+
+// checkRetries logs the retries the test needed and fails it when they exceed the bound. It runs
+// once, when the test ends.
+func (v *controlVoters) checkRetries() {
+	n, allowed := v.retries.Load(), v.allowedRetries
+	if allowed == 0 {
+		allowed = maxFixtureRetries
+	}
+	v.t.Logf("fixture retries after a lead move: %d (bound %d)", n, allowed)
+	if err := retryVerdict(n, allowed); err != nil {
+		v.t.Error(err)
+	}
+}
+
+// retryVerdict is the error checkRetries reports for n retried attempts against a bound.
+func retryVerdict(n, allowed int64) error {
+	if n > allowed {
+		return fmt.Errorf("the fixture retried %d attempts after the lead moved, more than the %d a transient move explains: leadership is unstable", n, allowed)
+	}
+	return nil
+}
+
+// settle waits until the lead is where the running phase needs it: on the voter it pins, or, with
+// none pinned, on any reachable voter.
+func (v *controlVoters) settle() {
+	v.t.Helper()
+	if v.pinned != 0 {
+		v.leaderIs(v.pinned)
+		return
+	}
+	deadline := time.Now().Add(60 * time.Second)
+	for time.Now().Before(deadline) {
+		if v.currentLeader(0) != 0 {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	v.t.Fatalf("no voter leads (%s)", v.leaders())
+}
+
+// leadMoved reports whether err is what a leader-bound write answers while the lead is moving:
+// unavailable, or a lease taken from the leader of one term and sent after the next began.
+func leadMoved(err error) bool {
+	if errors.Is(err, replica.ErrUnavailable) {
+		return true
+	}
+	var fault *model.Fault
+	if !errors.As(err, &fault) {
+		return false
+	}
+	switch fault.Code {
+	case model.Unavailable:
+		return true
+	case model.Stale:
+		return fault.SafeDetail == "rule_lease_stale" || fault.SafeDetail == control.ConditionLeaseStale || fault.SafeDetail == control.DeliveryLeaseStale
+	}
+	return false
 }
 
 // revision is the voter's committed revision; ok is false while it cannot serve a read (a voter

@@ -226,10 +226,16 @@ func (s *Store) RedactControlCommand(payload []byte) (replacement []byte, change
 
 // redactControlPayload is RedactControlCommand against an explicit current state.
 func redactControlPayload(current State, payload []byte) (replacement []byte, changed bool, err error) {
-	var next controlReplacement
-	if model.StrictJSON(payload, &next) != nil {
+	cmd, derr := decodeControlCommand(payload)
+	if derr != nil {
 		return nil, false, model.Fail(model.Corrupt)
 	}
+	if cmd.delta != nil {
+		// An audit delta carries audit rows (ids, action, reason), no book a deletion erases: it
+		// is retained as it is. The audit log is append-only evidence (eraseControlText).
+		return payload, false, nil
+	}
+	next := *cmd.replacement
 	ids := make([]string, 0, len(current.Deletions))
 	for id := range current.Deletions {
 		ids = append(ids, id)

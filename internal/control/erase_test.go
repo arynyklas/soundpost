@@ -117,13 +117,20 @@ func (f *eraseFx) newSeed(project model.ID, canary string) eraseSeed {
 // batch) of the given signal, and returns the output ID.
 func (f *eraseFx) commitRule(s eraseSeed, at uint64, signal model.Kind) model.ID {
 	f.t.Helper()
-	lease := f.lease()
 	payload := fmt.Sprintf(`{"series":%q}`, s.canary)
 	out := control.RuleOutputIntent{ID: model.NewID(), Kind: control.RuleOutputRecording, Signal: signal,
 		Payload: json.RawMessage(fmt.Sprintf(`{"batch":{"records":[{"metric":%q}]}}`, s.canary)), Inputs: []model.Cursor{{Group: model.ID{9}, Index: 1}}}
 	e := &control.RuleEvaluationApply{Project: s.project, Rule: s.rule, Version: 1, At: model.UnixNano(at), Mode: control.RuleModeLive, Health: control.RuleHealthOK,
 		Digest: digestOf(payload), Payload: json.RawMessage(payload), Cursors: []model.Cursor{{Group: model.ID{9}, Index: model.Uint64(at)}}, Outputs: []control.RuleOutputIntent{out}}
-	if _, err := f.store.Transact(f.ctx, f.adminScope(), f.cmd(control.KindApplyRuleEvaluation, model.NewID(), control.RuleCommand{Operation: control.RuleOpEvaluation, Lease: &lease, Evaluation: e})); err != nil {
+	id := model.NewID() // one command, however many attempts it takes
+	if err := f.write(func() error {
+		lease, err := f.leaseNow()
+		if err != nil {
+			return err
+		}
+		_, err = f.transactNow(control.KindApplyRuleEvaluation, id, control.RuleCommand{Operation: control.RuleOpEvaluation, Lease: &lease, Evaluation: e})
+		return err
+	}); err != nil {
 		f.t.Fatal(err)
 	}
 	return out.ID
@@ -133,17 +140,28 @@ func (f *eraseFx) commitIncident(s eraseSeed, at int64) {
 	f.t.Helper()
 	state := json.RawMessage(fmt.Sprintf(`{"incident_id":%q,"org_id":%q,"project_id":%q,"version":"1","evidence":%q,"at":"%d"}`, s.inc.String(), f.org.String(), s.project.String(), s.canary, at))
 	c := control.IncidentCommand{Project: s.project, Incident: s.inc, Action: "open", Origin: "human", Actor: f.user, At: 100, NewVersion: 1, State: state, Digest: digest(state)}
-	if _, err := f.store.Transact(f.ctx, f.adminScope(), f.cmd(control.KindIncidentAction, model.NewID(), c)); err != nil {
+	id := model.NewID()
+	if err := f.write(func() error {
+		_, err := f.transactNow(control.KindIncidentAction, id, c)
+		return err
+	}); err != nil {
 		f.t.Fatal(err)
 	}
 }
 
 func (f *eraseFx) commitCondition(s eraseSeed, at int64) {
 	f.t.Helper()
-	lease := f.lease()
 	state := json.RawMessage(fmt.Sprintf(`{"condition_id":%q,"org_id":%q,"project_id":%q,"version":"1","labels":{"host":%q},"event_ns":"%d"}`, s.cond.String(), f.org.String(), s.project.String(), s.canary, at))
-	c := control.ConditionCommand{Project: s.project, Condition: s.cond, Lease: &lease, NewVersion: 1, At: 100, Change: "firing", State: state, Digest: digest(state)}
-	if _, err := f.store.Transact(f.ctx, f.adminScope(), f.cmd(control.KindApplyCondition, model.NewID(), c)); err != nil {
+	id := model.NewID()
+	if err := f.write(func() error {
+		lease, err := f.leaseNow()
+		if err != nil {
+			return err
+		}
+		c := control.ConditionCommand{Project: s.project, Condition: s.cond, Lease: &lease, NewVersion: 1, At: 100, Change: "firing", State: state, Digest: digest(state)}
+		_, err = f.transactNow(control.KindApplyCondition, id, c)
+		return err
+	}); err != nil {
 		f.t.Fatal(err)
 	}
 }
@@ -161,8 +179,15 @@ func (f *eraseFx) commitDelivery(s eraseSeed, from, to model.UnixNano) model.ID 
 	}
 	state := json.RawMessage(fmt.Sprintf(`{"org_id":%q,"version":1,"subject_note":%q}`, f.org.String(), note))
 	e := control.DeliveryEnqueue{Project: s.project, Policy: s.policy, Subject: "incident:" + s.inc.String(), NewVersion: 1, At: 100, State: state, Digest: digest(state), Intents: []control.DeliveryIntent{in}}
-	lease := f.lease()
-	if _, err := f.send(control.KindClaimDelivery, model.NewID(), control.DeliveryCommand{Operation: control.DeliveryOpEnqueue, Lease: &lease, Enqueue: &e}); err != nil {
+	id := model.NewID()
+	if err := f.write(func() error {
+		lease, err := f.leaseNow()
+		if err != nil {
+			return err
+		}
+		_, err = f.transactNow(control.KindClaimDelivery, id, control.DeliveryCommand{Operation: control.DeliveryOpEnqueue, Lease: &lease, Enqueue: &e})
+		return err
+	}); err != nil {
 		f.t.Fatal(err)
 	}
 	return in.ID
@@ -223,23 +248,23 @@ func (f *eraseFx) snapshotHolds(canary string) bool {
 	return eraseDeep(raw, []byte(canary), 3)
 }
 
-// saga drives one deletion through every control step a worker takes.
+// saga drives one deletion through every control step a worker takes. Each step is one write (write):
+// the identity of the deletion and the barriers it records are fixed before the first attempt.
 func (f *eraseFx) saga(req control.DeleteScope) model.ID {
 	f.t.Helper()
-	id, _, err := f.del(req)
-	if err != nil {
-		f.t.Fatal(err)
+	id := model.NewID()
+	step := func(do func() error) {
+		f.t.Helper()
+		if err := f.write(do); err != nil {
+			f.t.Fatal(err)
+		}
 	}
-	if _, err = f.store.RecordBarriers(f.ctx, id, cursors(model.DeleteSlots)); err != nil {
-		f.t.Fatal(err)
-	}
+	step(func() error { _, err := f.delAs(id, req); return err })
+	barriers := cursors(model.DeleteSlots)
+	step(func() error { _, err := f.store.RecordBarriers(f.ctx, id, barriers); return err })
 	at := model.UnixNano(f.now.UnixNano())
-	if _, err = f.store.CompleteDeletion(f.ctx, id, at, nil); err != nil {
-		f.t.Fatal(err)
-	}
-	if _, err = f.store.RecordPhysicalCleanup(f.ctx, f.org, []model.ID{id}, at); err != nil {
-		f.t.Fatal(err)
-	}
+	step(func() error { _, err := f.store.CompleteDeletion(f.ctx, id, at, nil); return err })
+	step(func() error { _, err := f.store.RecordPhysicalCleanup(f.ctx, f.org, []model.ID{id}, at); return err })
 	return id
 }
 

@@ -44,9 +44,13 @@ func (v *controlVoters) erasedWithVoter3Idle(canary string) {
 	v.t.Helper()
 	leader := v.fx[1]
 	// The fixture writes through voter 1, so each write phase starts with voter 1 confirmed as the leader: on a slow
-	// host (a 2-vCPU CI runner) a delayed heartbeat can move the lead between phases, and a write sent to a voter
-	// that stopped leading answers unavailable. The assertions are unchanged; only the fixture's precondition is
-	// re-established.
+	// host (a 4-vCPU CI runner running two test packages at once) a delayed heartbeat can move the lead between phases,
+	// and a write sent to a voter that stopped leading answers unavailable. It can move it inside a phase as well (a
+	// round is four commits, each taking a lease from the leader), so the writes themselves are retried once the lead
+	// is back on voter 1 (fenceFx.write, controlVoters.retryWrite). The assertions are unchanged; only the fixture's
+	// precondition is re-established.
+	v.pinned = 1
+	defer func() { v.pinned = 0 }()
 	// Each round is a replicated commit of the whole control state, which grows with every round, so the
 	// fixture costs the square of the round count (measured under -race on 8 vCPU: 40 rounds took 76 s
 	// before the saga even started and the whole three-voter package ran for hours, with the leader moving
@@ -60,22 +64,22 @@ func (v *controlVoters) erasedWithVoter3Idle(canary string) {
 		if v.beforeRound != nil {
 			v.beforeRound(round)
 		}
-		v.leaderIs(1) // before every round: a leader-bound write answers unavailable while no voter leads
+		v.led(fmt.Sprintf("round %d", round)) // before every round: a leader-bound write answers unavailable while no voter leads
 		leader.seedAll(leader.newSeed(leader.project, canary), 50)
 	}
 	for _, id := range []uint64{2, 3} {
 		v.await(id, v.mustRevision(1))
 	}
-	v.leaderIs(1)
+	v.led("saga")
 	leader.saga(control.DeleteScope{Mode: model.DeleteRetireProject, Projects: []model.ID{leader.project}})
 	for _, id := range []uint64{2, 3} {
 		v.await(id, v.mustRevision(1))
 	}
-	v.leaderIs(1)
+	v.led("voter 1 pass")
 	leader.pass()
-	v.leaderIs(1)
+	v.led("voter 2 pass")
 	v.fx[2].pass()
-	if err := v.stores[2].ScrubErased(context.Background()); err != nil {
+	if err := v.fx[2].write(func() error { return v.stores[2].ScrubErased(context.Background()) }); err != nil {
 		v.t.Fatal(err)
 	}
 	for _, id := range []uint64{1, 2} {
@@ -88,7 +92,7 @@ func (v *controlVoters) erasedWithVoter3Idle(canary string) {
 // attest runs voter id's worker step and waits until every voter has the commit.
 func (v *controlVoters) attest(id uint64) {
 	v.t.Helper()
-	if err := v.stores[id].AttestControlResidue(context.Background()); err != nil {
+	if err := v.fx[id].write(func() error { return v.stores[id].AttestControlResidue(context.Background()) }); err != nil {
 		v.t.Fatalf("voter %d: %v", id, err)
 	}
 	v.converge()
@@ -116,7 +120,7 @@ func (v *controlVoters) converge() {
 // finish is the retention worker's own sequence on voter id.
 func (v *controlVoters) finish(id uint64) {
 	v.t.Helper()
-	if err := v.stores[id].ScrubErased(context.Background()); err != nil {
+	if err := v.fx[id].write(func() error { return v.stores[id].ScrubErased(context.Background()) }); err != nil {
 		v.t.Fatal(err)
 	}
 	v.fx[id].pass()

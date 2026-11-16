@@ -28,13 +28,20 @@ type ControlStore interface {
 // state to many readers at once, each through the read-only interface (control.Store.ViewShared).
 // The reads that are hot on the background workers' path (Revalidate, AuthorizeSystem) use it; a
 // store without it is read with View, whose decode is the reader's own.
+//
+// A type that embeds such a store gets ViewShared promoted, and may override View (a test double
+// that counts reads or injects a fault), which ViewShared would then bypass: SharesViewOf says
+// whether c, the value the service was given, reads through this store's own View. Only then is the
+// shared read used.
 type SharedViewer interface {
 	ViewShared(context.Context, func(model.ReadOnlyControl) error) error
+	SharesViewOf(ControlStore) bool
 }
 
-// viewShared reads the control state through the read-only interface, shared when the store can.
+// viewShared reads the control state through the read-only interface, shared when the store can
+// and the store is not a wrapper of one.
 func (s *Service) viewShared(ctx context.Context, fn func(model.ReadOnlyControl) error) error {
-	if v, ok := s.store.(SharedViewer); ok {
+	if v, ok := s.store.(SharedViewer); ok && v.SharesViewOf(s.store) {
 		return v.ViewShared(ctx, fn)
 	}
 	return s.store.View(ctx, func(st model.ControlState) error { return fn(model.ReadOnlyOf(&st)) })
@@ -166,15 +173,17 @@ func (s *Service) newSession(id model.ID) Session {
 }
 
 // sessionCreator is implemented by *control.Store: an update that does not move the control
-// AuthorityRevision when it only adds a session. A ControlStore without it falls back to
+// AuthorityRevision when it only adds a session. A ControlStore without it, or one that wraps the
+// store and may override Update (SharesUpdateOf, the rule of auditAppender), falls back to
 // Update. Only session-creating logins (password, SSO callback) use it; Bootstrap (creates the
 // admin user), Logout and every credential change keep the always-bumping Update.
 type sessionCreator interface {
 	UpdateSessionCreate(context.Context, func(*model.ControlState) error) error
+	SharesUpdateOf(ControlStore) bool
 }
 
 func (s *Service) updateSession(ctx context.Context, fn func(*model.ControlState) error) error {
-	if u, ok := s.store.(sessionCreator); ok {
+	if u, ok := s.store.(sessionCreator); ok && u.SharesUpdateOf(s.store) {
 		return u.UpdateSessionCreate(ctx, fn)
 	}
 	return s.store.Update(ctx, fn)

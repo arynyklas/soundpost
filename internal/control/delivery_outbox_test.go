@@ -53,11 +53,17 @@ func (f *delFx) setDestination(id model.ID, enabled bool) {
 
 func (f *delFx) lease() replica.FenceToken {
 	f.t.Helper()
-	token, err := f.store.ReplicaGroup().Fence(f.ctx)
+	token, err := f.leaseNow()
 	if err != nil {
 		f.t.Fatal(err)
 	}
 	return token
+}
+
+// leaseNow is lease for a step that handles the error itself (write): Fence answers
+// replica.ErrUnavailable while this store does not lead.
+func (f *delFx) leaseNow() (replica.FenceToken, error) {
+	return f.store.ReplicaGroup().Fence(f.ctx)
 }
 
 // newer is a lease of the next election term: a newer leader.

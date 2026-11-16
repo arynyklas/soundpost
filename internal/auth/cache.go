@@ -376,6 +376,9 @@ func (s *Service) CommitElevatedRead(ctx context.Context, scope Scope, action st
 		return nil
 	}
 	a := model.ControlAudit{ID: model.NewID(), Principal: scope.credential.user, Action: action, Reason: "elevated response released", Time: s.now().UnixNano(), Org: scope.org.String(), PolicyEpoch: scope.epoch, Targets: append([]model.ID{scope.elevation}, targets...), RequestID: model.RequestCorrelationID(ctx, model.ID{}), Outcome: model.AuditAllowed}
+	if d, ok := s.store.(auditDeltaAppender); ok && d.SharesUpdateOf(s.store) {
+		return d.AppendAudit(ctx, scope.ValidateControlStateRO, a)
+	}
 	return s.store.Update(ctx, func(st *model.ControlState) error {
 		if err := scope.ValidateControlState(*st); err != nil {
 			return err

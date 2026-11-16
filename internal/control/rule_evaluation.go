@@ -1229,43 +1229,58 @@ func (s *Store) RuleOutputs(ctx context.Context, scope auth.Scope, project, rule
 		if e := ruleReadScopeRO(scope, st, project); e != nil {
 			return e
 		}
-		for _, key := range st.BookKeys(model.BookRuleOutputs, "") {
-			raw, ok := st.BookRecord(model.BookRuleOutputs, key)
-			if !ok {
-				continue
-			}
-			var o RuleOutput
-			if e := json.Unmarshal(raw, &o); e != nil {
-				return model.Fail(model.Corrupt)
-			}
-			if o.Org != scope.OrgID() || o.Project != project || rule != (model.ID{}) && o.Rule != rule || phase != "" && o.Phase != phase || phase == "" && o.Phase == RulePhaseStaged {
-				continue
-			}
-			o.Obsolete = ruleOutputObsoleteRO(st, o)
-			out = append(out, o)
-		}
-		sort.Slice(out, func(i, j int) bool {
-			if out[i].At != out[j].At {
-				return out[i].At < out[j].At
-			}
-			return out[i].ID.String() < out[j].ID.String()
-		})
-		if limit > 0 && len(out) > limit {
-			out = out[:limit]
-		}
-		return nil
+		var e error
+		out, e = ruleOutputsOf(st, scope.OrgID(), project, rule, phase, limit)
+		return e
 	})
 	return
 }
 
-// ruleOutputObsoleteRO reports whether a committed retirement or deletion now
-// covers an output's origin, so the intent must be suppressed before release. A
-// deletion covers exactly the outputs whose payloads it drops (ruleOutputErased).
-func ruleOutputObsoleteRO(ro model.ReadOnlyControl, o RuleOutput) bool {
+// ruleOutputsOf is the read RuleOutputs makes once the scope allowed it.
+func ruleOutputsOf(st model.ReadOnlyControl, org, project, rule model.ID, phase string, limit int) (out []RuleOutput, err error) {
+	// The view hands out copies of the deletion predicates (lists included): they are asked for once,
+	// at the first output that needs them, not once per output.
+	var predicates []model.DeletePredicate
+	asked := false
+	for _, key := range st.BookKeys(model.BookRuleOutputs, "") {
+		raw, ok := st.BookRecord(model.BookRuleOutputs, key)
+		if !ok {
+			continue
+		}
+		var o RuleOutput
+		if e := json.Unmarshal(raw, &o); e != nil {
+			return nil, model.Fail(model.Corrupt)
+		}
+		if o.Org != org || o.Project != project || rule != (model.ID{}) && o.Rule != rule || phase != "" && o.Phase != phase || phase == "" && o.Phase == RulePhaseStaged {
+			continue
+		}
+		if !asked {
+			predicates, asked = st.DeletionPredicates(model.DeletePhaseFencing, model.DeletePhaseComplete), true
+		}
+		o.Obsolete = ruleOutputObsolete(st, predicates, o)
+		out = append(out, o)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].At != out[j].At {
+			return out[i].At < out[j].At
+		}
+		return out[i].ID.String() < out[j].ID.String()
+	})
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+// ruleOutputObsolete reports whether a committed retirement or deletion now covers an output's
+// origin, so the intent must be suppressed before release. A deletion covers exactly the outputs
+// whose payloads it drops (ruleOutputErased). predicates are those of the deletions in force
+// (fencing or complete), read once by the caller.
+func ruleOutputObsolete(ro model.ReadOnlyControl, predicates []model.DeletePredicate, o RuleOutput) bool {
 	if ro.OrgRetired(o.Org.String()) || ro.ProjectRetired(o.Org.String(), o.Project.String()) {
 		return true
 	}
-	for _, p := range ro.DeletionPredicates(model.DeletePhaseFencing, model.DeletePhaseComplete) {
+	for _, p := range predicates {
 		if ruleOutputErased(p, o) {
 			return true
 		}

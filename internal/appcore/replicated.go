@@ -200,6 +200,9 @@ func (a *App) enableReplication(dir string, options *replicationOptions, budget 
 	// slot-0 group declared the protocol: the gate is in place before the control group can decide a
 	// command, and reads false until storage's replication is up and everyone declared.
 	a.Control.SetBoundedRulesGate(a.Storage.ControlBoundsReady)
+	// The audit delta command of control (control.Store.AppendAudit) is proposed once every member
+	// declared protocol 4; the gate reads false until storage's replication is up and everyone did.
+	a.Control.SetAuditDeltaGate(a.Storage.ControlAuditDeltaReady)
 	controlGroup, err := a.Control.EnableReplication(cfg)
 	if err != nil {
 		return err

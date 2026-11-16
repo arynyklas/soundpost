@@ -159,12 +159,27 @@ func (s *Service) ElevatedScope(ctx context.Context, e Elevation, org model.ID, 
 // write: it validates the credential, reads the organization and projects, and appends one audit
 // row; the scope it releases is not stored. No access decision reads the audit log back. A
 // ControlStore without it falls back to Update.
+//
+// A type that embeds the store and overrides Update (a test double that counts or fails commits)
+// has the method promoted unchanged, and a service that preferred it would skip the override:
+// SharesUpdateOf says whether the service's ControlStore is the store itself, and only then is the
+// optional method used (the rule of SharedViewer, service.go).
 type auditAppender interface {
 	UpdateAuditAppend(ctx context.Context, fn func(*model.ControlState) error) error
+	SharesUpdateOf(ControlStore) bool
+}
+
+// auditDeltaAppender is implemented by *control.Store: the commit of one audit row that checks the
+// committed state through the read-only interface and, once every member of the replica group
+// supports it, replicates the row alone instead of the whole next state (control.Store.AppendAudit).
+// Same wrapper rule as auditAppender.
+type auditDeltaAppender interface {
+	AppendAudit(ctx context.Context, check func(model.ReadOnlyControl) error, a model.ControlAudit) error
+	SharesUpdateOf(ControlStore) bool
 }
 
 func (s *Service) updateAuditAppend(ctx context.Context, fn func(*model.ControlState) error) error {
-	if u, ok := s.store.(auditAppender); ok {
+	if u, ok := s.store.(auditAppender); ok && u.SharesUpdateOf(s.store) {
 		return u.UpdateAuditAppend(ctx, fn)
 	}
 	return s.store.Update(ctx, fn)

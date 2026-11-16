@@ -88,8 +88,13 @@ const (
 	// larger one satisfies every check of a smaller one), so a binary that only knows version 2
 	// still counts a member that declared 3 as ready for the erase entries.
 	boundsProtocol uint64 = 3
+	// auditDeltaProtocol is the declaration of a binary that also decodes and applies the audit
+	// delta command of control (control.Store.AppendAudit, D49): a binary that does not know it
+	// fails to decode the entry and stops applying, so it is proposed only once every member
+	// declared at least this (ControlAuditDeltaReady). Same declaration, same rule as the two above.
+	auditDeltaProtocol uint64 = 4
 	// declaredProtocol is the version this binary declares.
-	declaredProtocol = boundsProtocol
+	declaredProtocol = auditDeltaProtocol
 	// noticeGrace is how long a voter that applied a notice naming it waits for the announced
 	// snapshot before it stops expecting it (and refuses it if it still arrives).
 	noticeGrace = 2 * time.Minute

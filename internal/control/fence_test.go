@@ -27,6 +27,25 @@ type fenceFx struct {
 	source           model.ID
 	sourceCredential string
 	now              time.Time
+	// retry, when set, runs the leader-bound writes of a fixture (write). The fixtures of the
+	// three-voter tests install one that waits out a move of the lead (see controlVoters.retryWrite);
+	// a single store never needs it.
+	retry func(attempt func() error) error
+}
+
+// write runs one leader-bound write of the fixture and answers its error. A single store runs it
+// once. With retry installed, an attempt that found no leader for the moment (the host starved the
+// voters long enough for the lead to move between two steps of the fixture) is run again once the
+// lead is back. attempt must build everything it sends from what is current when it runs (lease,
+// expected revision, scope) and keep the identity of the command it sends from one attempt to the
+// next: a first attempt that did commit is then answered from the stored result of that command, as
+// for any retried command, and never applied twice.
+func (f *fenceFx) write(attempt func() error) error {
+	f.t.Helper()
+	if f.retry == nil {
+		return attempt()
+	}
+	return f.retry(attempt)
 }
 
 func newFenceFx(t *testing.T) *fenceFx {
@@ -72,11 +91,19 @@ func newFenceFx(t *testing.T) *fenceFx {
 	return f
 }
 func (f *fenceFx) revision() model.Revision {
-	var r model.Revision
-	if err := f.store.View(f.ctx, func(st control.State) error { r = st.Revision; return nil }); err != nil {
+	f.t.Helper()
+	r, err := f.revisionNow()
+	if err != nil {
 		f.t.Fatal(err)
 	}
 	return r
+}
+
+// revisionNow is revision for a step that handles the error itself (write).
+func (f *fenceFx) revisionNow() (model.Revision, error) {
+	var r model.Revision
+	err := f.store.View(f.ctx, func(st control.State) error { r = st.Revision; return nil })
+	return r, err
 }
 func (f *fenceFx) admin(kind string, org model.ID, p auth.AdminPayload) {
 	f.t.Helper()
@@ -87,25 +114,64 @@ func (f *fenceFx) admin(kind string, org model.ID, p auth.AdminPayload) {
 }
 func (f *fenceFx) adminScope() auth.Scope {
 	f.t.Helper()
-	s, err := f.svc.Authorize(f.ctx, f.cred, f.org, nil, auth.OrgAdmin)
+	s, err := f.scopeNow()
 	if err != nil {
 		f.t.Fatal(err)
 	}
 	return s
+}
+
+// scopeNow is adminScope for a step that handles the error itself (write).
+func (f *fenceFx) scopeNow() (auth.Scope, error) {
+	return f.svc.Authorize(f.ctx, f.cred, f.org, nil, auth.OrgAdmin)
 }
 func (f *fenceFx) readScope(project model.ID) (auth.Scope, error) {
 	return f.svc.Authorize(f.ctx, f.cred, f.org, []model.ID{project}, auth.Read)
 }
 func (f *fenceFx) cmd(kind control.CommandKind, id model.ID, payload any) control.Command {
 	f.t.Helper()
-	raw, err := json.Marshal(payload)
+	c, err := f.cmdNow(kind, id, payload)
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	return control.Command{CommandID: id, ExpectedRevision: f.revision(), Kind: string(kind), Payload: raw}
+	return c
+}
+
+// cmdNow is cmd for a step that handles the error itself (write): the command expects the
+// revision that is current when it is built.
+func (f *fenceFx) cmdNow(kind control.CommandKind, id model.ID, payload any) (control.Command, error) {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return control.Command{}, err
+	}
+	rev, err := f.revisionNow()
+	if err != nil {
+		return control.Command{}, err
+	}
+	return control.Command{CommandID: id, ExpectedRevision: rev, Kind: string(kind), Payload: raw}, nil
+}
+
+// transactNow is the whole of a command of the fixture's administrator (scope, command, Transact)
+// for a step that handles the error itself (write).
+func (f *fenceFx) transactNow(kind control.CommandKind, id model.ID, payload any) (control.Result, error) {
+	scope, err := f.scopeNow()
+	if err != nil {
+		return control.Result{}, err
+	}
+	cmd, err := f.cmdNow(kind, id, payload)
+	if err != nil {
+		return control.Result{}, err
+	}
+	return f.store.Transact(f.ctx, scope, cmd)
 }
 func (f *fenceFx) del(req control.DeleteScope) (model.ID, control.Result, error) {
 	id := model.NewID()
+	res, err := f.delAs(id, req)
+	return id, res, err
+}
+
+// delAs is del under a command identity the caller keeps (a retried write sends one command).
+func (f *fenceFx) delAs(id model.ID, req control.DeleteScope) (control.Result, error) {
 	if req.At == 0 {
 		req.At = model.UnixNano(f.now.UnixNano())
 	}
@@ -116,8 +182,7 @@ func (f *fenceFx) del(req control.DeleteScope) (model.ID, control.Result, error)
 	if req.Reason == "" {
 		req.Reason = "fixture deletion"
 	}
-	res, err := f.store.Transact(f.ctx, f.adminScope(), f.cmd(control.KindDeleteScope, id, req))
-	return id, res, err
+	return f.transactNow(control.KindDeleteScope, id, req)
 }
 func code(err error) model.Code {
 	var fault *model.Fault

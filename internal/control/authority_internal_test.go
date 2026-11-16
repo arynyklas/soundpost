@@ -166,6 +166,8 @@ func TestEveryControlWriterIsClassified(t *testing.T) {
 		// access grant) and every other auth writer keep the unclassified Update and bump.
 		"UpdatePendingLogin": "writerPendingLogin",
 		"UpdateAuditAppend":  "writerAuditAppend",
+		// The audit delta path (D49): the whole-state fallback of one audit row is the same writer.
+		"AppendAudit": "writerAuditAppend",
 		// A voter's own attestation record (attest.go): evidence about its files only.
 		"syncAttestation": "writerAttestControl",
 		// The dispatchers themselves: updateAs and updateAsGuardedChecked are dropped below, update is

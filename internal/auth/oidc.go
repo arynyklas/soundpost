@@ -275,7 +275,7 @@ func (s *Service) SweepExpired(ctx context.Context) (int, error) {
 		removed = sweepExpiredState(st, now)
 		return nil
 	}
-	if u, ok := s.store.(expirySweeper); ok {
+	if u, ok := s.store.(expirySweeper); ok && u.SharesUpdateOf(s.store) {
 		err := u.UpdateSweepExpired(ctx, now, func(k string, raw json.RawMessage) bool { return expiredOIDC(k, raw, now) }, sweep)
 		return removed, err
 	}
@@ -285,22 +285,26 @@ func (s *Service) SweepExpired(ctx context.Context) (int, error) {
 
 // expirySweeper is implemented by *control.Store: the sweep commit that does not move the
 // control AuthorityRevision when it only deletes records already expired at now. A ControlStore
-// without it falls back to Update.
+// without it, or one that wraps the store (SharesUpdateOf, the rule of auditAppender), falls back
+// to Update.
 type expirySweeper interface {
 	UpdateSweepExpired(ctx context.Context, now int64, residentExpired func(key string, raw json.RawMessage) bool, fn func(*model.ControlState) error) error
+	SharesUpdateOf(ControlStore) bool
 }
 
 // pendingLoginWriter is implemented by *control.Store: the commit of a pending-login record (added
 // by OIDCStart, consumed by the OIDCCallback's first step) that does not move the control
 // AuthorityRevision. A pending login authenticates nobody: the callback still needs the provider's
 // verified id token and an enabled mapped user, and its session is a separate write
-// (updateSession). A ControlStore without it falls back to Update.
+// (updateSession). A ControlStore without it, or one that wraps the store (SharesUpdateOf), falls
+// back to Update.
 type pendingLoginWriter interface {
 	UpdatePendingLogin(ctx context.Context, now int64, pending, residentExpired func(key string, raw json.RawMessage) bool, fn func(*model.ControlState) error) error
+	SharesUpdateOf(ControlStore) bool
 }
 
 func (s *Service) updatePendingLogin(ctx context.Context, now int64, fn func(*model.ControlState) error) error {
-	if u, ok := s.store.(pendingLoginWriter); ok {
+	if u, ok := s.store.(pendingLoginWriter); ok && u.SharesUpdateOf(s.store) {
 		return u.UpdatePendingLogin(ctx, now,
 			func(k string, raw json.RawMessage) bool { _, ok := pendingOIDCRecord(k, raw); return ok },
 			func(k string, raw json.RawMessage) bool { return expiredOIDC(k, raw, now) }, fn)

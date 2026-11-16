@@ -28,6 +28,10 @@ type staleOnLogin struct {
 	beforeWrite func(context.Context, *control.Store)
 }
 
+// SharesUpdateOf: this double is the one that implements UpdateSessionCreate, so the service must
+// call it (a wrapper that does not override the writer answers false, like control.Store does for it).
+func (s *staleOnLogin) SharesUpdateOf(c auth.ControlStore) bool { return c == auth.ControlStore(s) }
+
 func (s *staleOnLogin) UpdateSessionCreate(ctx context.Context, fn func(*model.ControlState) error) error {
 	if s.calls.Add(1) <= s.refuse {
 		return model.Fail(model.Stale)

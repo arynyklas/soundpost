@@ -263,25 +263,45 @@ func (b BackupBundle) ConsumedEvidence() ([]ReservationEvidence, error) {
 // command above after (index -> digest) and the number of commands the snapshot holds. For a
 // compact snapshot only the windows that reach above after are read, one command at a time.
 func evidenceDigests(snapshot replica.Snapshot, after uint64) (map[uint64]model.Hash, uint64, error) {
+	digests, _, total, err := evidenceDigestsAndRejections(snapshot, after)
+	return digests, total, err
+}
+
+// evidenceDigestsAndRejections is evidenceDigests that also names, for every command above after
+// that the machine rejected at apply and stored as a `rejected` stub, the id of the replicated entry
+// it rejected (index -> entry id). The stub is not the command it stands for, so the journal form of
+// that command has another digest: the seal asks which indexes these are (replayIntervals).
+func evidenceDigestsAndRejections(snapshot replica.Snapshot, after uint64) (map[uint64]model.Hash, map[uint64]model.ID, uint64, error) {
 	st, compact, err := compactState(snapshot)
 	if err != nil {
-		return nil, 0, err
+		return nil, nil, 0, err
 	}
-	digests := map[uint64]model.Hash{}
+	digests, rejected := map[uint64]model.Hash{}, map[uint64]model.ID{}
+	take := func(index uint64, entry walEntry) error {
+		d, err := evidenceDigest(entry)
+		if err != nil {
+			return model.Fail(model.Corrupt)
+		}
+		digests[index] = d
+		if entry.Type == "rejected" && entry.Rejection != nil {
+			rejected[index] = *entry.Rejection
+		}
+		return nil
+	}
 	if !compact {
 		entries, err := slotEntries(snapshot)
 		if err != nil {
-			return nil, 0, err
+			return nil, nil, 0, err
 		}
 		for i, e := range entries {
 			if uint64(i+1) <= after {
 				continue
 			}
-			if digests[uint64(i+1)], err = evidenceDigest(e.entry); err != nil {
-				return nil, 0, model.Fail(model.Corrupt)
+			if err = take(uint64(i+1), e.entry); err != nil {
+				return nil, nil, 0, err
 			}
 		}
-		return digests, uint64(len(entries)), nil
+		return digests, rejected, uint64(len(entries)), nil
 	}
 	for _, w := range st.Windows {
 		if w.First+w.Count-1 <= after {
@@ -295,18 +315,13 @@ func evidenceDigests(snapshot replica.Snapshot, after uint64) (map[uint64]model.
 			if json.Unmarshal(raw, &entry) != nil {
 				return model.Fail(model.Corrupt)
 			}
-			d, err := evidenceDigest(entry)
-			if err != nil {
-				return model.Fail(model.Corrupt)
-			}
-			digests[index] = d
-			return nil
+			return take(index, entry)
 		})
 		if err != nil {
-			return nil, 0, err
+			return nil, nil, 0, err
 		}
 	}
-	return digests, uint64(st.Application), nil
+	return digests, rejected, uint64(st.Application), nil
 }
 
 // BatchReservations returns the full admission reservation of every batch a slot snapshot holds

@@ -61,7 +61,7 @@ func TestControlBoundsWaitForEveryMemberToDeclareTheirProtocol(t *testing.T) {
 			t.Fatalf("node %d: bounds ready while node 3 declared only version %d (nodes 1 and 2: %d, %d)", node, declared(3), declared(1), declared(2))
 		}
 	}
-	if declared(1) != boundsProtocol || declared(2) != boundsProtocol || declared(3) != eraseProtocol {
+	if declared(1) != declaredProtocol || declared(2) != declaredProtocol || declared(3) != eraseProtocol {
 		t.Fatalf("declarations %d, %d, %d", declared(1), declared(2), declared(3))
 	}
 	// Node 3 is upgraded and declares: the rules engage on every member.

@@ -57,6 +57,13 @@ func (e *Engine) protocolReady() bool { return e.declaredBy(eraseProtocol) }
 // that member declares.
 func (e *Engine) ControlBoundsReady() bool { return e.declaredBy(boundsProtocol) }
 
+// ControlAuditDeltaReady reports whether every member of the committed configuration of the slot-0
+// group has declared auditDeltaProtocol, so control may propose the audit delta command
+// (control.Store.SetAuditDeltaGate). Until then every elevated read audit is committed through the
+// whole-state path every release applies. Same reading rules as ControlBoundsReady: local replicated
+// state only, evaluated at every use, false without replication.
+func (e *Engine) ControlAuditDeltaReady() bool { return e.declaredBy(auditDeltaProtocol) }
+
 // declaredBy reports whether every member of the slot-0 group's committed configuration declared
 // a protocol of at least version.
 func (e *Engine) declaredBy(version uint64) bool {

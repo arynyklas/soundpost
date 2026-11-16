@@ -110,7 +110,7 @@ func (f *eraseFx) rawRaft(name string) []byte {
 
 func (f *eraseFx) pass() {
 	f.t.Helper()
-	if err := f.store.RedactRetainedControlCommands(context.Background()); err != nil {
+	if err := f.write(func() error { return f.store.RedactRetainedControlCommands(context.Background()) }); err != nil {
 		f.t.Fatal(err)
 	}
 }

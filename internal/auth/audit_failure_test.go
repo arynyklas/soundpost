@@ -25,14 +25,6 @@ func (s *failedCommitStore) Update(ctx context.Context, fn func(*control.State) 
 	return s.Store.Update(ctx, fn)
 }
 
-// UpdateAuditAppend is the guarded commit ElevatedScope's audit row goes through; the injected
-// failure covers it exactly as it covers Update.
-func (s *failedCommitStore) UpdateAuditAppend(ctx context.Context, fn func(*control.State) error) error {
-	if s.fail {
-		return errors.New("injected durable commit failure")
-	}
-	return s.Store.UpdateAuditAppend(ctx, fn)
-}
 func TestElevationCommitFailureReleasesNoScope(t *testing.T) {
 	ctx := context.Background()
 	disk, e := control.Open(t.TempDir())

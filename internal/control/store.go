@@ -37,6 +37,11 @@ type Store struct {
 	settledSeen atomic.Bool
 	// boundedGate says whether the bounded-state rules apply (bounded_rules.go); nil: they do.
 	boundedGate atomic.Pointer[func() bool]
+	// auditDeltaGate says whether the audit delta command may be proposed (audit_delta.go); nil: it may not.
+	auditDeltaGate atomic.Pointer[func() bool]
+	// auditDeltas and auditDeltaBytes count the delta commands AppendAudit proposed and their payload
+	// bytes (read by tests and benchmarks through AuditDeltaStatsForTest).
+	auditDeltas, auditDeltaBytes atomic.Uint64
 }
 
 // SetClock replaces the wall clock the update funnel dates revisions with (RevisionClock), time.Now
@@ -191,6 +196,12 @@ func (s *Store) ViewShared(ctx context.Context, fn func(model.ReadOnlyControl) e
 		return fn(model.ReadOnlyOf(st))
 	})
 }
+
+// SharesViewOf reports whether c reads the control state through this store's own View. A type that
+// embeds the store and overrides View (a test double that counts or fails reads) has ViewShared
+// promoted unchanged, and a reader that preferred ViewShared would skip the override: auth.Service
+// asks first and reads any other value through the View it was given.
+func (s *Store) SharesViewOf(c auth.ControlStore) bool { return c == auth.ControlStore(s) }
 
 // Update commits fn as one control transition. It is an authority transition: it moves
 // AuthorityRevision. The writers that are known not to change authority go through updateAs.

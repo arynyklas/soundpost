@@ -353,9 +353,11 @@ func slotEntries(snapshot replica.Snapshot) ([]slotEntry, error) {
 	return out, nil
 }
 
-// evidenceDigest is the digest of a command's replay-relevant bytes; the
-// CommitSet proof attached at apply time is excluded so the journal form and the
-// stored form agree.
+// evidenceDigest is the digest of a command's replay-relevant bytes. Two things the stored form of a
+// command has and the journal form never does are excluded, so that both forms yield one digest:
+// the CommitSet proof attached at apply time, and the proposer the replica layer recorded for an
+// erase_ack, erase_unack or erase_notice (adaptedEntry copies it into the stored command; the
+// payload the journal holds never carries it).
 func evidenceDigest(entry walEntry) (model.Hash, error) {
 	if entry.Redaction != nil {
 		// A redacted command stands for the journal original: backup replay certificates are
@@ -363,6 +365,7 @@ func evidenceDigest(entry walEntry) (model.Hash, error) {
 		return entry.Redaction.Original, nil
 	}
 	entry.CommitSet = nil
+	entry.Proposer = nil
 	raw, err := json.Marshal(entry)
 	if err != nil {
 		return model.Hash{}, err
@@ -624,7 +627,11 @@ func (b *Backup) Seal(ctx context.Context, gaps []DeclaredGap) (SealedBackup, er
 		if err != nil {
 			return SealedBackup{}, snapshotFault(err)
 		}
-		runs, err := replayIntervals(group, after, through, entries, gaps)
+		_, rejected, _, err := evidenceDigestsAndRejections(snapshot, after)
+		if err != nil {
+			return SealedBackup{}, err
+		}
+		runs, err := replayIntervals(group, after, through, entries, rejected, gaps)
 		if err != nil {
 			return SealedBackup{}, err
 		}
@@ -660,12 +667,18 @@ func intervalDigest(entries map[uint64]model.Hash, after, through uint64) model.
 	return out
 }
 
-func replayIntervals(group model.ID, after, through uint64, entries []replica.ReplayEntry, gaps []DeclaredGap) ([]ReplayInterval, error) {
+func replayIntervals(group model.ID, after, through uint64, entries []replica.ReplayEntry, rejected map[uint64]model.ID, gaps []DeclaredGap) ([]ReplayInterval, error) {
 	digests := map[uint64]model.Hash{}
 	for _, r := range entries {
 		walled, err := decodeWAL(r.Payload)
 		if err != nil {
 			return nil, model.Fail(model.Corrupt)
+		}
+		// A command the machine rejected at apply is stored as a stub that names the entry it rejected,
+		// and the snapshot the digest is checked against holds the stub, not the command the journal
+		// holds. The stub counts for the journal entry it names and for no other.
+		if id, ok := rejected[r.ApplicationIndex]; ok && id == r.ID {
+			walled = walEntry{Type: "rejected", Rejection: &id}
 		}
 		d, err := evidenceDigest(walled)
 		if err != nil {
