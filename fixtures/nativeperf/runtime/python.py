@@ -15,6 +15,7 @@ import json
 import os
 import platform
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -108,7 +109,15 @@ def main():
     t0 = time.perf_counter()
     cpu_loop(seconds * 0.6)
     cpu_seconds = time.perf_counter() - t0
+    wait_start_ns = time.monotonic_ns()  # CLOCK_MONOTONIC: the clock of the native scheduler events
     waited = asyncio.run(http_wait(max(4, int(seconds * 0.4 / 0.06)), 0.05))
+    wait_end_ns = time.monotonic_ns()
+    # The supplement's sampler and timer threads exit when it stops, and the native helper ends a capture when a thread
+    # of its target exits. So the report waits: this line tells the runner the measured phase is over, the runner closes
+    # the native capture (its final proof needs a live, unchanged target) and then answers "exit".
+    print("done", flush=True)
+    if sys.stdin.readline().strip() != "exit":
+        return 2
     report = lease.stop()
     leaves = {}
     for sample in report["samples"]:
@@ -133,10 +142,12 @@ def main():
         },
         "cpu": {"loop_seconds": cpu_seconds, "function": "cpu_loop"},
         "wait": {"kind": "asyncio loopback HTTP", "requests": len(waited), "wait_seconds_total": sum(waited), "wait_seconds_min": min(waited), "server_delay_s": 0.05,
+                 "window_ns": [wait_start_ns, wait_end_ns], "loop_tid": threading.get_native_id(),
                  "database_wait": "not_run: no database engine in this fixture"},
     }
     print(json.dumps(out), flush=True)
-    return 0 if started and report["sample_count"] > 0 else 1
+    code = 0 if started and report["sample_count"] > 0 else 1
+    return code
 
 
 if __name__ == "__main__":

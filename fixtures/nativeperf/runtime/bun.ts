@@ -31,12 +31,19 @@ jsCpuLoop(seconds*600);
 const cpuSeconds=(performance.now()-t0)/1000;
 const waits:number[]=[];
 const requests=Math.max(4,Math.floor(seconds*0.4/0.06));
+const waitStartNs=process.hrtime.bigint(); // CLOCK_MONOTONIC: the clock of the native scheduler events
 for(let i=0;i<requests;i++){
  const started=performance.now();
  const response=await fetch(`http://127.0.0.1:${server.port}/`);
  await response.text();
  waits.push(performance.now()-started);
 }
+const waitEndNs=process.hrtime.bigint();
+// The supplement may start or stop helper threads when it stops, and the native helper ends a capture when a thread of
+// its target comes or goes. So the report waits: this line tells the runner the measured phase is over, the runner
+// closes the native capture (its final proof needs a live, unchanged target) and then answers "exit".
+console.log("done");
+await new Promise<string>((resolveExit)=>{const rl=createInterface({input:process.stdin});rl.once("line",(line)=>{rl.close();resolveExit(line);});});
 const report=await handle.stop();
 server.stop(true);
 const leaves:Record<string,number>={};
@@ -55,6 +62,7 @@ console.log(JSON.stringify({
   native_extension_work:"not_run: no native addon workload in this fixture"},
  cpu:{loop_seconds:cpuSeconds,function:"jsCpuLoop"},
  wait:{kind:"loopback HTTP (Bun.serve and fetch)",requests:waits.length,wait_seconds_total:sum(waits)/1000,wait_seconds_min:Math.min(...waits)/1000,server_delay_s:0.05,
+  window_ns:[Number(waitStartNs),Number(waitEndNs)],loop_tid:process.pid,
   database_wait:"not_run: no database engine in this fixture"},
 }));
 process.exit(report.capability.status==="supported"&&report.sample_count>0?0:1);

@@ -36,6 +36,39 @@ func (a *accept) runSchedulerScenarios(base nativeperf.Config) {
 	}
 }
 
+// memoryVerdict computes the memory ledger of a correlated scheduler capture, stores it in d and returns why the
+// capture does not fit the aggregate budget ("" when it does): the nominal sum (admission charge, the target's thread
+// rings, the correlator's reservation and the events and intervals the harness itself holds), the harness's own
+// working sets against their allowance, the measured resident sizes, and that the product's ProfileSource leases
+// are admitted behind the same admission charge. Whether the leases AND the correlator reservation fit together is
+// reported in the ledger but is not a verdict: the product's assembly does not run a correlator.
+func memoryVerdict(r *scenResult, d map[string]any, what string) string {
+	return ledgerVerdict(qual.LedgerInput{
+		Config: nativeperf.DefaultConfig(1), Admission: r.Admission, CPUs: uint64(r.Corr.CPUs),
+		HelperHWM: r.HelperPeak.HWMKiB << 10, ClientHWM: r.ClientHWMKiB << 10,
+		Correlator: r.Corr.ReservationBytes, Retained: r.RetainedBytes, Intervals: r.Corr.IntervalBytes,
+	}, d, what)
+}
+
+// ledgerVerdict is memoryVerdict over an explicit ledger input.
+func ledgerVerdict(in qual.LedgerInput, d map[string]any, what string) string {
+	l, err := qual.CaptureMemoryLedger(in)
+	d["memory_ledger"] = l.Detail()
+	switch {
+	case err != nil:
+		return what + ": " + err.Error()
+	case !l.NominalFits:
+		return fmt.Sprintf("%s: the capture's admission charge %d B, its thread rings %d B, the correlation reservation %d B and the %d B of retained events and %d B of returned intervals the harness holds come to %d B, over the %d B aggregate budget", what, l.Charge, l.ExtraRings, l.Correlator, l.Retained, l.Intervals, l.Nominal, l.Budget)
+	case !l.ConsumerFits:
+		return fmt.Sprintf("%s: the harness's retained events (%d B) and the intervals the correlator returned (%d B) outgrew their %d B allowance", what, l.Retained, l.Intervals, qual.ConsumerAllowanceBytes)
+	case !l.ProductAdmits:
+		return fmt.Sprintf("%s: the product's ProfileSource working leases (%d B) are refused behind this capture's admission charge: %s", what, l.Leases, l.ProductRefusal)
+	case !l.PhysicalFits:
+		return fmt.Sprintf("%s: measured resident memory of the helper (%d B) and this process (%d B) plus the rings and per-target buffers is %d B, over the %d B aggregate budget", what, l.HelperHWM, l.ClientHWM, l.Physical, l.Budget)
+	}
+	return ""
+}
+
 func (a *accept) corrSummary(r *scenResult) map[string]any {
 	m := r.summary()
 	if r.Corr == nil {
@@ -93,18 +126,11 @@ func (a *accept) deriveSchedulerFromCaptures(res *qual.QualificationResult, deta
 		default:
 			// The correlation reservation has to fit the aggregate budget together with
 			// every other working set of the capture (see qual.MemoryLedger).
-			l, err := qual.CaptureMemoryLedger(nativeperf.DefaultConfig(1), uint64(r.TargetCount), uint64(r.Corr.CPUs), r.HelperBefore.RSSKiB<<10, r.ClientRSSBeforeKiB<<10, r.HelperPeak.HWMKiB<<10, r.ClientHWMKiB<<10, r.Corr.ReservationBytes)
-			d["memory_ledger"] = l.Detail()
-			switch {
-			case err != nil:
-				*row = qual.Row{State: qual.StateFailed, Reason: what + ": " + err.Error(), Exercised: true, Detail: d}
-			case !l.NominalFits:
-				*row = qual.Row{State: qual.StateFailed, Reason: fmt.Sprintf("%s: the capture's admission charge %d B plus the correlation reservation %d B is %d B, over the %d B aggregate budget", what, l.Charge, l.Correlator, l.Nominal, l.Budget), Exercised: true, Detail: d}
-			case !l.PhysicalFits:
-				*row = qual.Row{State: qual.StateFailed, Reason: fmt.Sprintf("%s: measured resident memory of the helper (%d B) and this process (%d B) plus the rings and per-target buffers is %d B, over the %d B aggregate budget", what, l.HelperHWM, l.ClientHWM, l.Physical, l.Budget), Exercised: true, Detail: d}
-			default:
-				return true
+			if why := memoryVerdict(r, d, what); why != "" {
+				*row = qual.Row{State: qual.StateFailed, Reason: why, Exercised: true, Detail: d}
+				return false
 			}
+			return true
 		}
 		return false
 	}

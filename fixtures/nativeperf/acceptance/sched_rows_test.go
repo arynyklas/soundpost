@@ -37,6 +37,7 @@ func contendScenario(coordinatorSamples int, coordinatorBlockedNs uint64, runnab
 // what the real runs measure).
 func giveMemory(sc *scenResult) *scenResult {
 	sc.TargetCount, sc.ClientRSSBeforeKiB, sc.ClientHWMKiB = 1, 12_000, 27_000
+	sc.Admission = qual.AdmissionMemory{Targets: 1, Threads: 3, HelperRSS: 10_000 << 10, ClientRSS: 12_000 << 10}
 	sc.HelperBefore.RSSKiB, sc.HelperPeak.HWMKiB = 10_000, 24_000
 	sc.Corr.CPUs = 8
 	if sc.Corr.ReservationBytes == 0 {
@@ -52,7 +53,7 @@ func giveMemory(sc *scenResult) *scenResult {
 // with memory outside the budget.
 func TestSchedulerRowsFailWhenTheCorrelationReservationDoesNotFitTheBudget(t *testing.T) {
 	for name, mutate := range map[string]func(*scenResult){
-		"admission charge plus reservation": func(sc *scenResult) { sc.ClientRSSBeforeKiB = 16_000 },
+		"admission charge plus reservation": func(sc *scenResult) { sc.Admission.ClientRSS = 16_000 << 10 },
 		"measured resident memory":          func(sc *scenResult) { sc.ClientHWMKiB, sc.HelperPeak.HWMKiB = 30_000, 30_000 },
 	} {
 		a := newAccept()
@@ -72,13 +73,52 @@ func TestSchedulerRowsFailWhenTheCorrelationReservationDoesNotFitTheBudget(t *te
 	}
 }
 
+// The harness's own working sets are part of the budget too: the events it retained and the intervals the
+// correlator returned must fit their allowance, and the product's ProfileSource leases (map-read scratch, assembly,
+// export: 24 MiB for one target) must be admitted behind the same admission charge. A capture that fits the nominal
+// sum but not one of these fails its row.
+func TestSchedulerRowsFailWhenTheHarnessOrTheProductLeasesDoNotFit(t *testing.T) {
+	for name, mutate := range map[string]func(*scenResult){
+		"retained events over their allowance":      func(sc *scenResult) { sc.RetainedBytes = qual.ConsumerAllowanceBytes + 1 },
+		"returned intervals over their allowance":   func(sc *scenResult) { sc.Corr.IntervalBytes = qual.ConsumerAllowanceBytes + 1 },
+		"retained plus returned over the allowance": func(sc *scenResult) { sc.RetainedBytes, sc.Corr.IntervalBytes = 3<<20, 2<<20 },
+		"product leases refused behind the charge": func(sc *scenResult) {
+			// a 30 MiB harness: the capture's own charge and a 12 MiB share fit the 64 MiB, the 24 MiB of leases do not
+			sc.Admission.ClientRSS = 30 << 20
+			sc.Corr.ReservationBytes = 12 << 20
+		},
+	} {
+		a := newAccept()
+		sc := contendScenario(2, 1_000_000, 1_000_000)
+		mutate(sc)
+		a.results["sched_contend"] = sc
+		a.deriveSchedulerFromCaptures(a.res, map[string]any{})
+		if a.res.RunqueueSplit.State != qual.StateFailed {
+			t.Errorf("%s: %+v", name, a.res.RunqueueSplit)
+		}
+	}
+	// the same capture inside every allowance passes, and its ledger names the leases
+	a := newAccept()
+	sc := contendScenario(2, 1_000_000, 1_000_000)
+	sc.RetainedBytes, sc.Corr.IntervalBytes, sc.Corr.ReservationBytes = 2<<20, 1<<20, 28<<20
+	a.results["sched_contend"] = sc
+	a.deriveSchedulerFromCaptures(a.res, map[string]any{})
+	if a.res.RunqueueSplit.State != qual.StateSupported {
+		t.Fatalf("%+v", a.res.RunqueueSplit)
+	}
+	ledger, _ := a.res.RunqueueSplit.Detail["memory_ledger"].(map[string]any)
+	if ledger["profile_source_leases_bytes"] != uint64(24<<20) || ledger["product_admits_leases"] != true || ledger["retained_events_bytes"] != uint64(2<<20) || ledger["returned_intervals_bytes"] != uint64(1<<20) {
+		t.Fatalf("%+v", ledger)
+	}
+}
+
 // A harness that was 21 MiB resident when the capture was admitted (the 6.1 full
 // acceptance run) leaves less than the 32 MiB cap: the correlator is handed what is
 // left, the ledger adds up to the budget, and the row is judged on its split.
 func TestSchedulerRowsPassWhenTheCorrelatorWasHandedWhatTheChargeLeaves(t *testing.T) {
 	sc := contendScenario(2, 1_000_000, 1_000_000)
-	sc.ClientRSSBeforeKiB, sc.HelperBefore.RSSKiB = 21_000, 11_000
-	share, err := qual.CorrelationReservation(nativeperf.DefaultConfig(1), qual.AdmissionMemory{Targets: 1, HelperRSS: 11_000 << 10, ClientRSS: 21_000 << 10}, 8)
+	sc.Admission.ClientRSS, sc.Admission.HelperRSS = 21_000<<10, 11_000<<10
+	share, err := qual.CorrelationReservation(nativeperf.DefaultConfig(1), sc.Admission, 8)
 	if err != nil || share >= qual.CorrelationReservationBytes {
 		t.Fatalf("%d %v", share, err)
 	}

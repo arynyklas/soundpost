@@ -70,3 +70,34 @@ func (l *WorkingLease) Close() error {
 	r.budget.fds -= l.fds
 	return nil
 }
+
+// ProfileAdmissionHeadroom replays the budget side of a profile capture exactly as the product takes it: the
+// capture's own Reserve (rings, per-target buffers, the helper's and the exporting peer's resident size) followed by
+// the three ProfileSource working leases of NewProfileAcquisition. It returns what is left of c.MaxMemory for
+// anything else the capture's consumer holds (a correlator, the retained intervals), or the refusal the product would
+// answer with when the leases do not fit. It touches no process, descriptor or ring: it is the budget arithmetic of
+// the real Reserve/ReserveWorking, not a second copy of it.
+func ProfileAdmissionHeadroom(c Config, offCPU bool, targets, cpus, pageBytes uint64, m MemoryUsage) (uint64, error) {
+	if targets == 0 || targets > 256 {
+		return 0, ErrInvalid
+	}
+	mode := ModeCPU
+	if offCPU {
+		mode = ModeCPUOffCPU
+	}
+	b := NewResourceBudget()
+	r, e := b.Reserve(AuthorizedTargets{targets: make([]Target, targets), mode: mode}, c, Topology{CPUs: cpus, FDLimit: 1024, OpenFDs: 8, PageBytes: pageBytes}, m)
+	if e != nil {
+		return 0, e
+	}
+	defer r.Close()
+	mapping, assembly, export := ProfileWorkingBytes(targets)
+	for _, lease := range []struct{ memory, fds uint64 }{{mapping, targets*3 + 6}, {assembly, 0}, {export, 0}} {
+		if _, e = r.ReserveWorking(lease.memory, lease.fds); e != nil {
+			return 0, e
+		}
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return c.MaxMemory - b.memory, nil
+}

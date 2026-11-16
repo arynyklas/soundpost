@@ -471,8 +471,14 @@ capture:
 		s.mu.Lock()
 	}
 }
+
+// schedulerIdentityInterval is how stale the last successful identity check (the target's process and every thread, a
+// /proc snapshot) may be when an event is published. The CPU stream revalidates every 100 ms and so does the capture
+// loop; a snapshot before every event cost about as much as the event rate a 16-thread runtime reaches.
+const schedulerIdentityInterval = 10 * time.Millisecond
+
 func (s *schedulerSource) publish(event SanitizedEvent) (AcquisitionItem, error) {
-	if !s.stopped {
+	if !s.stopped && time.Since(s.cpu.lastCheck) >= schedulerIdentityInterval {
 		if e := s.identity(); e != nil {
 			s.terminal = e
 			return AcquisitionItem{}, e

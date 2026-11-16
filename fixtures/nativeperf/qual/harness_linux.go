@@ -26,6 +26,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -242,6 +243,17 @@ func ReadProc(pid int) (ProcUsage, error) {
 	return u, nil
 }
 
+// SettleMemory makes this process's resident size mean what it holds now, not what it once held: a full collection
+// hands the freed spans back to the kernel, and the peak resident size (VmHWM) is reset to the current one, so the
+// next capture's admission charge and high-water mark describe that capture and not an earlier scenario's garbage.
+func SettleMemory() {
+	for range 2 {
+		debug.FreeOSMemory()
+		time.Sleep(20 * time.Millisecond)
+	}
+	os.WriteFile("/proc/self/clear_refs", []byte("5"), 0)
+}
+
 // PerfFDs counts this process's perf event file descriptors.
 func PerfFDs() int {
 	ents, _ := os.ReadDir("/proc/self/fd")
@@ -327,6 +339,7 @@ type LaunchOptions struct {
 	ProcExe   bool     // the target binary is whatever /proc/<pid>/exe says (interpreters)
 	RunAs     uint32   // when DropToUID is set, run the workload as this uid/gid
 	DropToUID bool
+	Env       []string // extra environment of the workload
 }
 
 // NewNonce returns a random per-run privacy canary token (hex).
@@ -352,7 +365,7 @@ func LaunchWorkload(o LaunchOptions) (*Workload, error) {
 		args = o.Argv
 	}
 	cmd := exec.Command(exe, args...)
-	cmd.Env = append(os.Environ(), "SPQUAL_ENV_CANARY="+o.Nonce)
+	cmd.Env = append(append(os.Environ(), o.Env...), "SPQUAL_ENV_CANARY="+o.Nonce)
 	if o.DropToUID {
 		cmd.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: o.RunAs, Gid: o.RunAs}}
 		os.Chmod(o.Dir, 0o777) // the unprivileged workload writes its ground-truth file here
@@ -827,6 +840,14 @@ func (h *HelperProc) Stop() {
 
 // ---- capture ----
 
+// EventSink consumes a capture as it streams in. Event is given every event in stream order and returns whether the
+// capture result keeps it (the scheduler events a correlator has consumed need not be kept: holding every one of them
+// is memory the aggregate budget has to cover); Proof is given every acquisition proof in stream order.
+type EventSink interface {
+	Event(e nativeperf.SanitizedEvent) (retain bool)
+	Proof(p nativeperf.AcquisitionProof)
+}
+
 // CaptureOptions configure one capture over the helper socket.
 type CaptureOptions struct {
 	Config      nativeperf.Config
@@ -839,6 +860,7 @@ type CaptureOptions struct {
 	ReadTimeout time.Duration
 	Mode        nativeperf.CaptureMode // default ModeCPU; ModeCPUOffCPU adds the scheduler path
 	StopWhen    func() bool            // polled every 100 ms: end the capture (scheduler mode sends the fixed stop message and drains)
+	Sink        EventSink              // when set, every event and proof is handed to it as it arrives, and only the events it asks to retain stay in the result
 }
 
 // CaptureResult is everything one capture observed on the helper socket.
@@ -1024,13 +1046,17 @@ loop:
 				p.CPUs = append([]uint32(nil), p.CPUs...)
 				res.Proofs = append(res.Proofs, p)
 				res.ProofAt = append(res.ProofAt, len(res.Events))
+				if o.Sink != nil {
+					o.Sink.Proof(p)
+				}
 			case reply.Event != nil:
 				ev := *reply.Event
 				if ev.Loss != nil {
 					res.LossEvents++
 					res.LostSamples += uint64(ev.Loss.Count)
 				}
-				if o.MaxEvents == 0 || len(res.Events) < o.MaxEvents {
+				keep := o.Sink == nil || o.Sink.Event(ev)
+				if keep && (o.MaxEvents == 0 || len(res.Events) < o.MaxEvents) {
 					res.Events = append(res.Events, ev)
 				}
 				if o.StallAfter > 0 && !stalled && len(res.Events) >= o.StallAfter {
@@ -1221,146 +1247,4 @@ func (w *Workload) Output() string {
 		return string(data[i+1:])
 	}
 	return ""
-}
-
-// Correlation is the outcome of replaying one scheduler capture through the
-// committed per-session Correlator.
-type Correlation struct {
-	Intervals     []nativeperf.Interval
-	Err           string // empty on success
-	ConsumeErrors int
-	FirstError    string
-	SwitchEvents  int
-	WakeupEvents  int
-	CPUSamples    int
-	LossEvents    int
-	CPUs          int
-	FinalThrough  uint64
-	// ProgressProofs is how many mid-capture drained-prefix proofs were applied;
-	// PeakHeapEvents is the most events the bounded correlation buffer held;
-	// ReservationBytes is the share of the aggregate budget the correlator got.
-	ProgressProofs   int
-	PeakHeapEvents   int
-	ReservationBytes uint64
-}
-
-// Correlate configures a Correlator from the capture initial topology proof
-// with the fixed CorrelationReservationBytes, consumes every event in stream
-// order, applies each progress proof (every CPU reported drained through it, then
-// Advance) where it arrived so the bounded buffer drains during the capture,
-// reports the final proof for every CPU and finalizes. Nothing is inferred: a
-// capture without both proofs yields an error, never intervals.
-func Correlate(res CaptureResult, cfg nativeperf.Config) Correlation {
-	return correlate(res, cfg, func(uint64) (uint64, error) { return CorrelationReservationBytes, nil })
-}
-
-// CorrelateWithin is Correlate with the correlator handed only what the aggregate
-// budget has left after the capture's own admission charge (at most
-// CorrelationReservationBytes): the capture's rings, per-target buffers and the
-// helper's and this process's resident sizes at admission are charged first.
-func CorrelateWithin(res CaptureResult, cfg nativeperf.Config, m AdmissionMemory) Correlation {
-	return correlate(res, cfg, func(cpus uint64) (uint64, error) { return CorrelationReservation(cfg, m, cpus) })
-}
-
-func correlate(res CaptureResult, cfg nativeperf.Config, reserve func(cpus uint64) (uint64, error)) Correlation {
-	var out Correlation
-	var initial, final *nativeperf.AcquisitionProof
-	for i := range res.Proofs {
-		switch p := &res.Proofs[i]; {
-		case p.Final:
-			final = p
-		case p.Progress:
-			if len(res.ProofAt) != len(res.Proofs) || res.ProofAt[i] < 0 || res.ProofAt[i] > len(res.Events) {
-				out.Err = "progress proof without a recorded position in the event stream"
-				return out
-			}
-		case initial == nil:
-			initial = p
-		}
-	}
-	if initial == nil || final == nil {
-		out.Err = "capture has no initial and final acquisition proof"
-		return out
-	}
-	out.CPUs = len(initial.CPUs)
-	out.FinalThrough = uint64(final.Through)
-	c := nativeperf.NewCorrelator(cfg)
-	reservation, err := reserve(uint64(len(initial.CPUs)))
-	if err != nil {
-		out.Err = "reservation: " + err.Error()
-		return out
-	}
-	out.ReservationBytes = reservation
-	if err := c.Configure(initial.Domain, initial.CPUs, reservation); err != nil {
-		out.Err = "configure: " + err.Error()
-		return out
-	}
-	next := 0 // the next proof to apply
-	applyProofs := func(before int) bool {
-		for ; next < len(res.Proofs) && res.Proofs[next].Progress && res.ProofAt[next] <= before; next++ {
-			p := res.Proofs[next]
-			for _, cpu := range p.CPUs {
-				if err := c.ReportProgress(cpu, p.Through); err != nil {
-					out.Err = "report progress: " + err.Error()
-					return false
-				}
-			}
-			got, err := c.Advance(p.Through)
-			out.Intervals = append(out.Intervals, got...)
-			if err != nil {
-				out.Err = "advance: " + err.Error()
-				return false
-			}
-			out.ProgressProofs++
-		}
-		return true
-	}
-	// Proofs that are not progress proofs (the initial topology proof, the final
-	// one) are skipped by position: only progress proofs act mid-stream.
-	skip := func() {
-		for next < len(res.Proofs) && !res.Proofs[next].Progress {
-			next++
-		}
-	}
-	for i, e := range res.Events {
-		skip()
-		if !applyProofs(i) {
-			return out
-		}
-		switch {
-		case e.Switch != nil:
-			out.SwitchEvents++
-		case e.Wakeup != nil:
-			out.WakeupEvents++
-		case e.CPUEvent != nil:
-			out.CPUSamples++
-		case e.Loss != nil:
-			out.LossEvents++
-		}
-		got, err := c.Consume(e)
-		out.Intervals = append(out.Intervals, got...)
-		if err != nil {
-			out.ConsumeErrors++
-			if out.FirstError == "" {
-				out.FirstError = err.Error()
-			}
-		}
-	}
-	skip()
-	if !applyProofs(len(res.Events)) {
-		return out
-	}
-	out.PeakHeapEvents = c.Stats().PeakHeapEvents
-	for _, cpu := range final.CPUs {
-		if err := c.ReportProgress(cpu, final.Through); err != nil {
-			out.Err = "report progress: " + err.Error()
-			return out
-		}
-	}
-	got, err := c.Finalize(final.Through)
-	out.Intervals = append(out.Intervals, got...)
-	if err != nil {
-		out.Err = "finalize: " + err.Error()
-	}
-	return out
 }

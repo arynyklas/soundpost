@@ -24,6 +24,15 @@ type ProfileSource struct {
 	closed                    bool
 }
 
+// ProfileWorkingBytes is what NewProfileAcquisition leases out of the capture's reservation for a request of the given
+// number of targets: the serialized map-read scratch (12 MiB plus 2 MiB per retained table), the assembly working set
+// (8 MiB) and the export working set (2 MiB). They are charged before anything is allocated and sit on top of the
+// capture's admission charge, so anything else the capture's consumer holds (the correlator) has to fit in what the
+// 64 MiB budget leaves after both.
+func ProfileWorkingBytes(targets uint64) (mapping, assembly, export uint64) {
+	return 12<<20 + targets*(2<<20), 8 << 20, 2 << 20
+}
+
 func NewProfileAcquisition(ctx context.Context, a AuthorizedTargets, c Config, r *Reservation, p SymbolPolicy) (*ProfileSource, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
@@ -37,15 +46,16 @@ func NewProfileAcquisition(ctx context.Context, a AuthorizedTargets, c Config, r
 	// Serialized map reads: 12MiB scratch covers bounded maps/path/ELF metadata
 	// parsing; 2MiB per retained table/identity covers 4096 safe mapping entries.
 	// No debug artifact buffer is allocated: C07 is unavailable and never called.
-	s.mapping, e = r.ReserveWorking((12<<20)+uint64(len(a.targets))*(2<<20), uint64(len(a.targets))*3+6)
+	mapping, assembly, export := ProfileWorkingBytes(uint64(len(a.targets)))
+	s.mapping, e = r.ReserveWorking(mapping, uint64(len(a.targets))*3+6)
 	if e != nil {
 		return fail(e)
 	}
-	s.assembly, e = r.ReserveWorking(8<<20, 0)
+	s.assembly, e = r.ReserveWorking(assembly, 0)
 	if e != nil {
 		return fail(e)
 	}
-	s.export, e = r.ReserveWorking(2<<20, 0)
+	s.export, e = r.ReserveWorking(export, 0)
 	if e != nil {
 		return fail(e)
 	}

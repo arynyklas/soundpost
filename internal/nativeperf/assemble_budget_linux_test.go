@@ -49,3 +49,33 @@ func TestAssembleWorkingBudgetSharesAcquisitionCeiling(t *testing.T) {
 		t.Fatal("closed parent extension")
 	}
 }
+
+// The product's admission of a profile capture is the Reserve charge plus the three ProfileSource leases; the headroom
+// the replay reports is what is left for a consumer, and a capture whose peers already fill the budget is refused by
+// the same ReserveWorking the product calls.
+func TestProfileAdmissionHeadroomIsTheBudgetAfterTheCaptureChargeAndTheLeases(t *testing.T) {
+	cfg := DefaultConfig(1)
+	m := MemoryUsage{HelperRSS: 11 << 20, ExportRSS: 12 << 20}
+	charge, err := CaptureCharge(true, 1, 8, cfg, 4096, m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mapping, assembly, export := ProfileWorkingBytes(1)
+	if mapping != 14<<20 || assembly != 8<<20 || export != 2<<20 {
+		t.Fatalf("leases %d %d %d", mapping, assembly, export)
+	}
+	got, err := ProfileAdmissionHeadroom(cfg, true, 1, 8, 4096, m)
+	if want := cfg.MaxMemory - charge - mapping - assembly - export; err != nil || got != want {
+		t.Fatalf("headroom %d, want %d (%v)", got, want, err)
+	}
+	if more, err := ProfileAdmissionHeadroom(cfg, true, 2, 8, 4096, m); err != nil || more >= got {
+		t.Fatalf("a second target must cost its own rings, buffers and mapping table: %d vs %d (%v)", more, got, err)
+	}
+	// 24 MiB of leases do not fit behind a charge of 45 MiB
+	if _, err = ProfileAdmissionHeadroom(cfg, true, 1, 8, 4096, MemoryUsage{HelperRSS: 20 << 20, ExportRSS: 30 << 20}); err == nil {
+		t.Fatal("the product's leases were admitted behind a charge that leaves less than 24 MiB")
+	}
+	if _, err = ProfileAdmissionHeadroom(cfg, true, 0, 8, 4096, m); err == nil {
+		t.Fatal("no targets")
+	}
+}

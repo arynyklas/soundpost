@@ -79,6 +79,9 @@ type scenResult struct {
 	ClientHWMKiB       uint64
 	ClientRSSBeforeKiB uint64 // this process's resident size when the capture was admitted
 	TargetCount        int    // targets of the capture's request
+	TargetThreads      int    // threads of the target when the capture was admitted (each one gets its own CPU ring)
+	RetainedBytes      uint64 // heap the retained events of the capture hold (qual.EventsFootprint)
+	Admission          qual.AdmissionMemory
 	ClientTicks        uint64
 	Threads            int
 	DistinctCPUs       int
@@ -135,9 +138,14 @@ func (a *accept) runScenario(name, mode string, seconds float64, cfg nativeperf.
 		return r
 	}
 	defer h.Stop()
+	qual.SettleMemory() // admission is charged on what this process holds now, not on an earlier scenario's garbage
+	noteMemory("before scenario " + name)
 	r.HelperBefore, _ = qual.ReadProc(h.PID)
 	clientBefore, _ := qual.ReadProc(0)
 	r.ClientRSSBeforeKiB, r.TargetCount = clientBefore.RSSKiB, 1
+	if ents, err := os.ReadDir(fmt.Sprintf("/proc/%d/task", w.PID)); err == nil {
+		r.TargetThreads = len(ents)
+	}
 
 	var mu sync.Mutex
 	stopSample := make(chan struct{})
@@ -168,6 +176,14 @@ func (a *accept) runScenario(name, mode string, seconds float64, cfg nativeperf.
 	opts := qual.CaptureOptions{Config: cfg, Mode: cm, Duration: time.Duration(seconds+45) * time.Second, Needles: a.needles(), OnReady: func() { w.Go() }, StopWhen: w.DoneSeen}
 	if st != nil {
 		opts.StallAfter, opts.StallFor = st.after, st.dur
+	}
+	var stream *qual.StreamCorrelation
+	if cm == nativeperf.ModeCPUOffCPU {
+		// The scheduler events are correlated as they arrive and not retained: the capture's consumer holds the
+		// correlator's bounded buffer, not the whole capture (see qual.MemoryLedger).
+		r.Admission = qual.AdmissionMemory{Targets: uint64(r.TargetCount), Threads: uint64(r.TargetThreads), HelperRSS: r.HelperBefore.RSSKiB << 10, ClientRSS: r.ClientRSSBeforeKiB << 10}
+		stream = qual.NewStreamCorrelation(cfg, func(cpus uint64) (uint64, error) { return qual.CorrelationReservation(cfg, r.Admission, cpus) })
+		opts.Sink = stream
 	}
 	r.Cap = qual.Capture(a.ctx, h, opts)
 	close(stopSample)
@@ -224,8 +240,9 @@ func (a *accept) runScenario(name, mode string, seconds float64, cfg nativeperf.
 		}
 	}
 	r.Threads, r.DistinctCPUs = len(threads), len(cpus)
-	if cm == nativeperf.ModeCPUOffCPU && r.Cap.Ready {
-		c := qual.CorrelateWithin(r.Cap, cfg, qual.AdmissionMemory{Targets: uint64(r.TargetCount), HelperRSS: r.HelperBefore.RSSKiB << 10, ClientRSS: r.ClientRSSBeforeKiB << 10})
+	r.RetainedBytes = qual.EventsFootprint(r.Cap.Events)
+	if stream != nil && r.Cap.Ready {
+		c := stream.Result()
 		r.Corr = &c
 	}
 	r.TargetTID = uint32(w.PID)
@@ -272,14 +289,21 @@ func (r *scenResult) summary() map[string]any {
 	return m
 }
 
-// runAll runs every scenario in a seed-determined order, then the injections,
-// the runtime columns and derives the rows.
+// runAll runs the scheduler scenarios and the runtime columns, then every other scenario in a seed-determined
+// order, the injections and the permission cases, and derives the rows.
 func (a *accept) runAll() {
 	a.results = map[string]*scenResult{}
 	order := append([]scenSpec(nil), specs...)
 	a.rng.Shuffle(len(order), func(i, j int) { order[i], order[j] = order[j], order[i] })
 	a.probeHost()
 	cfg := nativeperf.DefaultConfig(1)
+	// The captures whose admission is charged against the 64 MiB budget run while this process is still lean: the
+	// admission charge includes the exporting peer's (this process's) resident size, and the results of the other
+	// scenarios are retained until the rows are derived. The scheduler scenarios come first, then the runtime columns.
+	if a.caps.OffCPU == nativeperf.Supported {
+		a.runSchedulerScenarios(cfg)
+	}
+	a.runRuntimes()
 	for _, sp := range order {
 		secs := a.o.duration.Seconds() * sp.frac
 		if secs < 3 {
@@ -290,12 +314,8 @@ func (a *accept) runAll() {
 		a.assert(sp, r)
 		a.results[sp.name] = r
 	}
-	if a.caps.OffCPU == nativeperf.Supported {
-		a.runSchedulerScenarios(cfg)
-	}
 	a.runInjections()
 	a.runPermissionCases(cfg)
-	a.runRuntimes()
 	a.deriveRows()
 }
 
