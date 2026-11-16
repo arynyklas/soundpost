@@ -76,7 +76,7 @@ export function DiagnosticList(props: { diagnostics: Diagnostic[]; expression: s
  );
 }
 
-function ProjectPanel(props: { result: ProjectResult; request: QueryRequest }): React.JSX.Element {
+export function ProjectPanel(props: { result: ProjectResult; request: QueryRequest }): React.JSX.Element {
  const { result: pr, request } = props;
  const state = projectState(pr);
  const reason = state.kind === 'incomplete' || state.kind === 'stale' ? state.reason : '';
@@ -85,8 +85,12 @@ function ProjectPanel(props: { result: ProjectResult; request: QueryRequest }): 
   <section className="panel project-panel" aria-labelledby={headingId} data-project={pr.project_id} data-state={state.kind} data-completeness={pr.completeness}>
    <h3 id={headingId}>Project <code>{pr.project_id}</code></h3>
    <p className="project-state" data-testid="project-state">
-    {state.kind === 'ready' && <><strong>Complete.</strong> Every shard answered.</>}
-    {state.kind === 'empty' && <><strong>Complete and empty.</strong> Nothing matched in this window. Nothing is missing.</>}
+    {state.kind === 'ready' && (pr.stats.cached
+     ? <><strong>Complete when computed.</strong> Every shard had answered then (the computation took {elapsedText(pr.stats.elapsed_ns)}); this answer is served from the result cache and the shards were not asked again.</>
+     : <><strong>Complete.</strong> Every shard answered.</>)}
+    {state.kind === 'empty' && (pr.stats.cached
+     ? <><strong>Complete and empty when computed.</strong> Nothing matched in this window then and nothing was missing; this answer is served from the result cache.</>
+     : <><strong>Complete and empty.</strong> Nothing matched in this window. Nothing is missing.</>)}
     {state.kind === 'incomplete' && <><strong>Partial.</strong> {reason === 'project_failed' ? 'This project produced no value; it is not an empty or zero result.' : 'Some data did not answer. Missing data is not zero.'}</>}
     {state.kind === 'stale' && <><strong>Stale.</strong> The newest data is older than expected.</>}
    </p>

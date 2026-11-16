@@ -113,6 +113,18 @@ test('a reader sees every shard answer before the removal',async()=>{
  }
 });
 
+test('the same query repeated inside the cache minute is labelled as computed earlier, never as every shard answering now (D51)',async()=>{
+ const page=await openExplore([p1,p2]);
+ await run(page,EXPRESSION);
+ await run(page,EXPRESSION);
+ for(const p of [p1,p2]){
+  const state=panel(page,p).getByTestId('project-state');
+  await expect(state).toContainText('Complete when computed.');
+  await expect(state).toContainText('served from the result cache');
+  await expect(state).not.toContainText('Every shard answered');
+ }
+});
+
 const rowsOf=(page:Page)=>page.locator('[data-row]');
 async function startLive(page:Page):Promise<void>{
  await page.getByRole('radio',{name:'LogQL',exact:true}).check();

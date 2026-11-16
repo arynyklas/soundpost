@@ -4,8 +4,8 @@
 import { describe, expect, test } from 'bun:test';
 import * as React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { QueryFault, type EvaluationWire, type LogEntry, type ProjectResult, type QueryValue, type Sample, type ViewContext } from '../api/types';
-import { DiagnosticList, FaultView } from './ExplorePage';
+import { QueryFault, type EvaluationWire, type LogEntry, type ProjectResult, type QueryRequest, type QueryValue, type Sample, type ViewContext } from '../api/types';
+import { DiagnosticList, FaultView, ProjectPanel } from './ExplorePage';
 import { LiveItems } from './LiveLogView';
 import { LogResult } from './LogResult';
 import { MetricResult } from './MetricResult';
@@ -161,5 +161,20 @@ describe('saved views are an explicit, project-owned action', () => {
   expect(html).toContain('Save as a new view');
   expect(html).not.toContain('saved-committed');
   expect(html).not.toContain('saved-update');
+ });
+});
+
+describe('a cached complete answer says when it was complete (D51)', () => {
+ const request = { expression: 'up' } as unknown as QueryRequest;
+ const panel = (cached: boolean): string => render(React.createElement(ProjectPanel, { request, result: { ...project({ type: 'vector', vector: [{ labels: [{ name: 'job', value: 'a' }], sample: sample(0, bitsOf(1)) }] }), stats: { ...stats, elapsed_ns: '2500000', cached } } }));
+ test('a fresh complete answer says every shard answered', () => {
+  expect(panel(false)).toContain('Every shard answered.');
+ });
+ test('a cached complete answer never says it in the present tense; it says it was complete when computed, with its time, from the result cache', () => {
+  const html = panel(true);
+  expect(html).not.toContain('Every shard answered');
+  expect(html).toContain('Complete when computed');
+  expect(html).toContain('served from the result cache');
+  expect(html).toContain('2.5 ms');
  });
 });
