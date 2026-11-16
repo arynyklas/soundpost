@@ -154,7 +154,7 @@ func (e *Engine) initStorage() error {
 		} else if err := validateIndexIntegrity(tx); err != nil {
 			return err
 		}
-		pending, err := e.buildVerifiedRecord(tx, e.catalog)
+		pending, err := e.buildVerifiedRecord(tx, e.identity, e.catalog)
 		if err != nil {
 			return err
 		}

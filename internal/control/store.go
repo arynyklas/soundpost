@@ -161,6 +161,37 @@ func (s *Store) View(ctx context.Context, fn func(State) error) error {
 	})
 }
 
+// ViewShared is View for a reader that only reads. Instead of a decode of its own it is given the
+// decode of the committed revision that every concurrent shared reader uses, through the read-only
+// interface (model.ReadOnlyControl), which has no way to change it or to keep part of it: decoding
+// the whole state once per read made a pass of the background workers cost O(projects squared).
+// The linearizable read barrier is the same as View's, and so is the snapshot: the state is the
+// one of the bolt transaction the read runs in, so a reader sees one whole revision, never a mix.
+// fn must not retain the ReadOnlyControl past its return. A caller that changes what it reads, or
+// needs the State itself, uses View.
+func (s *Store) ViewShared(ctx context.Context, fn func(model.ReadOnlyControl) error) error {
+	if e := ctx.Err(); e != nil {
+		return e
+	}
+	if s.repl != nil {
+		if _, err := s.repl.group.ReadIndex(ctx); err != nil {
+			return replicaFault(err)
+		}
+	}
+	return s.db.View(func(tx *bolt.Tx) error {
+		if d := s.db.decoded.Load(); d != nil && d.txid == tx.ID() {
+			return fn(model.ReadOnlyOf(d.state))
+		}
+		st := new(State)
+		if e := json.Unmarshal(tx.Bucket([]byte("control")).Get([]byte("state")), st); e != nil {
+			return model.Fail(model.Corrupt)
+		}
+		s.db.decodes.Add(1)
+		s.db.publish(&decodedState{txid: tx.ID(), state: st})
+		return fn(model.ReadOnlyOf(st))
+	})
+}
+
 // Update commits fn as one control transition. It is an authority transition: it moves
 // AuthorityRevision. The writers that are known not to change authority go through updateAs.
 func (s *Store) Update(ctx context.Context, fn func(*State) error) error {

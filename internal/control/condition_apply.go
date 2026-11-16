@@ -215,13 +215,14 @@ func (s *Store) Condition(ctx context.Context, scope auth.Scope, project, condit
 
 // Conditions lists one project's condition records in ID order.
 func (s *Store) Conditions(ctx context.Context, scope auth.Scope, project model.ID) (out []ConditionRecord, err error) {
-	err = s.View(ctx, func(st State) error {
-		if e := ruleReadScope(scope, st, project); e != nil {
+	err = s.ViewShared(ctx, func(st model.ReadOnlyControl) error {
+		if e := ruleReadScopeRO(scope, st, project); e != nil {
 			return e
 		}
 		prefix := scope.OrgID().String() + ":" + project.String() + ":"
-		for key, raw := range st.ConditionBooks {
-			if !strings.HasPrefix(key, prefix) {
+		for _, key := range st.BookKeys(model.BookConditions, prefix) {
+			raw, ok := st.BookRecord(model.BookConditions, key)
+			if !ok {
 				continue
 			}
 			var r ConditionRecord

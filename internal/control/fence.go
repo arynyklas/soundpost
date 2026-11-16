@@ -586,27 +586,14 @@ func (s *Store) DeletionOperations(ctx context.Context) (out []model.DeletionOpe
 
 // ActiveDeletions returns the tombstones that hide data right now: operations
 // fencing, complete or failed (held ones have not begun). It implements the
-// storage DeletionView seam.
+// storage DeletionView seam. Every storage read asks, so it reads the shared decode
+// of the committed state (ViewShared); the predicates are copies.
 func (s *Store) ActiveDeletions(ctx context.Context, org model.ID, projects []model.ID) (out []model.DeletePredicate, err error) {
-	err = s.View(ctx, func(st State) error { out = activeDeletions(st, org, projects); return nil })
+	err = s.ViewShared(ctx, func(st model.ReadOnlyControl) error { out = st.ActiveDeletions(org, projects); return nil })
 	return
 }
 func activeDeletions(st State, org model.ID, projects []model.ID) []model.DeletePredicate {
-	var out []model.DeletePredicate
-	for _, op := range st.Deletions {
-		if op.Phase == model.DeletePhaseHeld || op.Predicate.Org != org {
-			continue
-		}
-		hit := len(projects) == 0 || op.Predicate.Mode == model.DeleteRetireOrg
-		for _, p := range projects {
-			hit = hit || op.Predicate.CoversProject(org, p)
-		}
-		if hit {
-			out = append(out, op.Predicate)
-		}
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Operation.String() < out[j].Operation.String() })
-	return out
+	return model.ActiveDeletionsOf(st.Deletions, org, projects)
 }
 
 // EffectSuppressed says whether a derived effect of (org, project, kind, at,

@@ -7,6 +7,12 @@ import (
 )
 
 func (s *Service) validateCredentialState(st model.ControlState, c Credential) error {
+	return s.validateCredentialStateRO(model.ReadOnlyOf(&st), c)
+}
+
+// validateCredentialStateRO is validateCredentialState over the read-only view, which the shared
+// reads (Revalidate, AuthorizeSystem) hand out.
+func (s *Service) validateCredentialStateRO(st model.ReadOnlyControl, c Credential) error {
 	if c.service != s {
 		return model.Fail(model.Unauthenticated)
 	}
@@ -22,17 +28,16 @@ func (s *Service) validateCredentialState(st model.ControlState, c Credential) e
 		// No session or token principal may carry a system principal ID.
 		return model.Fail(model.Unauthenticated)
 	}
+	exists, disabled := st.UserState(c.user.String())
 	if c.machine {
-		token, ok := st.ServerTokens[s.serverTokenDigest(c.token)]
-		user, exists := st.Users[c.user.String()]
-		if !ok || !exists || token.Principal != c.user || user.Disabled || token.Revoked || token.Expires <= s.now().Unix() {
+		token, ok := st.ServerToken(s.serverTokenDigest(c.token))
+		if !ok || !exists || token.Principal != c.user || disabled || token.Revoked || token.Expires <= s.now().Unix() {
 			return model.Fail(model.Unauthenticated)
 		}
 		return nil
 	}
-	session, ok := st.Sessions[hashToken(c.token)]
-	user, exists := st.Users[c.user.String()]
-	if !ok || !exists || session.User != c.user || session.Expires <= s.now().Unix() || user.Disabled {
+	session, ok := st.Session(hashToken(c.token))
+	if !ok || !exists || session.User != c.user || session.Expires <= s.now().Unix() || disabled {
 		return model.Fail(model.Unauthenticated)
 	}
 	return nil
@@ -47,20 +52,28 @@ func (scope Scope) ValidateControlState(st model.ControlState) error {
 		}
 		return scope.ValidateSourceState(st, scope.projects[0], scope.sources[0], !scope.historical)
 	}
-	if scope.service == nil {
+	return scope.ValidateControlStateRO(model.ReadOnlyOf(&st))
+}
+
+// ValidateControlStateRO is ValidateControlState over the read-only view of the control state, for
+// a reader of the shared decode. A source scope is not validated here (the source tables are not
+// part of the view) but refused with Forbidden, which is what ValidateSourceState answers for every
+// action but Ingest; a reader that calls this has refused such a scope by its permission first.
+func (scope Scope) ValidateControlStateRO(st model.ReadOnlyControl) error {
+	if scope.sourceCredential != nil || scope.service == nil {
 		return model.Fail(model.Forbidden)
 	}
 	if scope.credential.system {
-		return scope.service.validateSystemState(st, scope)
+		return scope.service.validateSystemStateRO(st, scope)
 	}
-	if err := scope.service.validateCredentialState(st, scope.credential); err != nil {
+	if err := scope.service.validateCredentialStateRO(st, scope.credential); err != nil {
 		return err
 	}
-	org, ok := st.Orgs[scope.org.String()]
-	if !ok || org.Epoch != scope.epoch {
+	epoch, ok := st.OrgEpoch(scope.org.String())
+	if !ok || epoch != scope.epoch {
 		return model.Fail(model.NotFound)
 	}
-	if !tokenAllows(st, scope.credential, scope.org, scope.projects, scope.action) {
+	if !tokenAllowsRO(st, scope.credential, scope.org, scope.projects, scope.action) {
 		return model.Fail(model.NotFound)
 	}
 	if scope.elevation != (model.ID{}) && !scope.service.now().Before(scope.elevationExpires) {

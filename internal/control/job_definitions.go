@@ -106,6 +106,20 @@ func loadJobDefinition(st *State, key string) (JobDefinitionRecord, bool, error)
 	return rec, true, nil
 }
 
+// loadJobDefinitionRO is loadJobDefinition against a read-only control state; the record is
+// decoded from a copy of the stored bytes.
+func loadJobDefinitionRO(ro model.ReadOnlyControl, key string) (JobDefinitionRecord, bool, error) {
+	raw, ok := ro.BookRecord(model.BookJobDefinitions, key)
+	if !ok {
+		return JobDefinitionRecord{}, false, nil
+	}
+	var rec JobDefinitionRecord
+	if json.Unmarshal(raw, &rec) != nil || jobKey(rec.Org, rec.Project, rec.Job) != key {
+		return JobDefinitionRecord{}, false, model.Fail(model.Corrupt)
+	}
+	return rec, true, nil
+}
+
 // applyJobDefinition commits one catalogue command (see the file comment) for a
 // scope jobWriteScope already admitted. It returns the job, the catalogue
 // revision the command committed at and the phase.
@@ -212,16 +226,13 @@ func applyJobDefinition(scope auth.Scope, st *State, cmd Command, c JobUpdateCom
 // project's job facts (the runner's read scope included). A project the scope
 // does not name is indistinguishable from an absent one.
 func (s *Store) JobDefinitions(ctx context.Context, scope auth.Scope, project model.ID) (out []JobDefinitionRecord, err error) {
-	err = s.View(ctx, func(st State) error {
-		if e := jobReadScope(scope, &st, project); e != nil {
+	err = s.ViewShared(ctx, func(st model.ReadOnlyControl) error {
+		if e := jobReadScopeRO(scope, st, project); e != nil {
 			return e
 		}
 		prefix := jobProjectPrefix(scope.OrgID(), project)
-		for key := range st.JobDefinitions {
-			if !strings.HasPrefix(key, prefix) {
-				continue
-			}
-			rec, _, e := loadJobDefinition(&st, key)
+		for _, key := range st.BookKeys(model.BookJobDefinitions, prefix) {
+			rec, _, e := loadJobDefinitionRO(st, key)
 			if e != nil {
 				return e
 			}
@@ -235,12 +246,12 @@ func (s *Store) JobDefinitions(ctx context.Context, scope auth.Scope, project mo
 
 // JobDefinition reads one job's catalogue record.
 func (s *Store) JobDefinition(ctx context.Context, scope auth.Scope, project, job model.ID) (out JobDefinitionRecord, found bool, err error) {
-	err = s.View(ctx, func(st State) error {
-		if e := jobReadScope(scope, &st, project); e != nil {
+	err = s.ViewShared(ctx, func(st model.ReadOnlyControl) error {
+		if e := jobReadScopeRO(scope, st, project); e != nil {
 			return e
 		}
 		var e error
-		out, found, e = loadJobDefinition(&st, jobKey(scope.OrgID(), project, job))
+		out, found, e = loadJobDefinitionRO(st, jobKey(scope.OrgID(), project, job))
 		return e
 	})
 	return

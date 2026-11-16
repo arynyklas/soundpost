@@ -396,6 +396,10 @@ func (e *Engine) InstallReplicationIdentity(identity model.ID) error {
 	}
 	e.identity = identity
 	e.catalog.Manifest.Group = identity
+	// The verified record names the old identity's groups: it is dropped, and the background
+	// verification, which may be running beside this install, is asked to record the new point.
+	e.dropVerifiedLocked()
+	e.kickVerify()
 	return nil
 }
 func (e *Engine) EnableReplication(c replica.Config, seed *ReplicationSeed, authority ReplicatedAuthority) ([]*replica.Group, error) {
@@ -468,7 +472,9 @@ func (e *Engine) EnableReplication(c replica.Config, seed *ReplicationSeed, auth
 		r.groups[slot] = group
 		out = append(out, group)
 	}
+	e.mu.Lock()
 	e.repl = r
+	e.mu.Unlock()
 	e.seedSnapshotCoverage(out)
 	// Every slot is reconciled once at open: an erasure whose redaction a crash cut short, and a
 	// node whose retry table came from a cut older than the commands it has redacted, converge
@@ -477,7 +483,9 @@ func (e *Engine) EnableReplication(c replica.Config, seed *ReplicationSeed, auth
 		e.redact.dirty[slot].Store(true)
 	}
 	if err := e.redactReplica(context.Background()); err != nil {
+		e.mu.Lock()
 		e.repl = nil
+		e.mu.Unlock()
 		return fail(err)
 	}
 	e.startErasureLoop()

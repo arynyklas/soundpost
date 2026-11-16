@@ -1179,12 +1179,13 @@ func (s *Store) PolicyRecord(ctx context.Context, scope auth.Scope, project, pol
 
 // PolicyRecords lists one project's policy states in (policy, subject) order.
 func (s *Store) PolicyRecords(ctx context.Context, scope auth.Scope, project model.ID) (out []PolicyRecord, err error) {
-	err = s.View(ctx, func(st State) error {
-		if e := ruleReadScope(scope, st, project); e != nil {
+	err = s.ViewShared(ctx, func(st model.ReadOnlyControl) error {
+		if e := ruleReadScopeRO(scope, st, project); e != nil {
 			return e
 		}
-		for key, raw := range st.DeliveryBooks {
-			if !strings.HasPrefix(key, "policy:") {
+		for _, key := range st.BookKeys(model.BookDeliveries, "policy:") {
+			raw, ok := st.BookRecord(model.BookDeliveries, key)
+			if !ok {
 				continue
 			}
 			var r PolicyRecord

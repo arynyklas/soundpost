@@ -31,6 +31,11 @@ type Group interface {
 	Append(context.Context, auth.Scope, model.NormalizedBatch) (model.Receipt, error)
 }
 type Engine struct {
+	// repl and identity are written only by EnableReplication (repl) and
+	// InstallReplicationIdentity (identity, catalog.Manifest.Group) with proposalMu AND mu held,
+	// and by Open before the engine is shared. A reader holds either lock, or runs only after
+	// EnableReplication returned (the replica groups; InstallReplicationIdentity refuses once repl
+	// is set), or is the background verification, which copies identity under mu (VerifyFull).
 	mu           sync.Mutex
 	proposalMu   sync.Mutex
 	repl         *replicatedEngine
@@ -264,14 +269,20 @@ func (e *Engine) trip(at string) error {
 	}
 	return nil
 }
-func (e *Engine) group(slot uint16) model.ID {
+
+// groupOf names the replica group of slot under an identity: the first 16 bytes of
+// SHA-256(identity || slot). It reads no engine state.
+func groupOf(identity model.ID, slot uint16) model.ID {
 	var in [18]byte
-	copy(in[:16], e.identity[:])
+	copy(in[:16], identity[:])
 	binary.BigEndian.PutUint16(in[16:], slot)
 	h := sha256.Sum256(in[:])
 	var id model.ID
 	copy(id[:], h[:16])
 	return id
+}
+func (e *Engine) group(slot uint16) model.ID {
+	return groupOf(e.identity, slot)
 }
 func walName(slot uint16) string { return fmt.Sprintf("slot-%02d.wal", slot) }
 func batchKey(org, project, source, producer model.ID, slot uint16, batch model.ID) []byte {

@@ -80,27 +80,27 @@ func (s *Service) RevokeServerToken(ctx context.Context, actor Credential, org, 
 	})
 }
 func tokenAllows(st model.ControlState, c Credential, org model.ID, projects []model.ID, action Permission) bool {
+	return tokenAllowsRO(model.ReadOnlyOf(&st), c, org, projects, action)
+}
+
+// tokenAllowsRO is tokenAllows over the read-only view of the control state.
+func tokenAllowsRO(st model.ReadOnlyControl, c Credential, org model.ID, projects []model.ID, action Permission) bool {
 	if !c.machine {
 		return true
 	}
 	if c.service == nil {
 		return false
 	}
-	token, ok := st.ServerTokens[c.service.serverTokenDigest(c.token)]
+	digest := c.service.serverTokenDigest(c.token)
+	token, ok := st.ServerToken(digest)
 	if !ok || token.Revoked || token.Org != org {
 		return false
 	}
-	allowed := false
-	for _, v := range token.Permissions {
-		if v == string(action) {
-			allowed = true
-		}
-	}
-	if !allowed {
+	if !st.ServerTokenHasPermission(digest, string(action)) {
 		return false
 	}
 	for _, project := range projects {
-		if !hasID(token.Projects, project) {
+		if !st.ServerTokenHasProject(digest, project) {
 			return false
 		}
 	}

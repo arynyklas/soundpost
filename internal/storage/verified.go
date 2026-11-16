@@ -94,6 +94,7 @@ type verifyState struct {
 	err               error       // set once a background pass failed the engine
 	cancel            context.CancelFunc
 	done              chan struct{}
+	kick              chan struct{} // wakes the background loop before its interval ends (kickVerify)
 }
 
 func (r *verifiedRecord) encode() ([]byte, error) {
@@ -268,11 +269,14 @@ func appliedOf(tx *bolt.Tx, slot uint16) uint64 {
 	return binary.BigEndian.Uint64(raw)
 }
 
-// buildVerifiedRecord states the current state as verified; the caller has just verified it.
-func (e *Engine) buildVerifiedRecord(tx *bolt.Tx, cat manifestState) (*verifiedRecord, error) {
-	rec := &verifiedRecord{Format: verifiedFormat, Identity: e.identity, ManifestDigest: cat.Hash}
+// buildVerifiedRecord states the current state as verified; the caller has just verified it. The
+// identity is the caller's, read under e.mu together with cat: this runs on the background pass
+// beside InstallReplicationIdentity, so it reads neither e.identity nor e.group, and a record is
+// bound to exactly one identity (the identity and its 64 group ids come from one value).
+func (e *Engine) buildVerifiedRecord(tx *bolt.Tx, identity model.ID, cat manifestState) (*verifiedRecord, error) {
+	rec := &verifiedRecord{Format: verifiedFormat, Identity: identity, ManifestDigest: cat.Hash}
 	for slot := range uint16(64) {
-		rec.Groups = append(rec.Groups, verifiedGroup{Group: e.group(slot), Applied: model.Uint64(appliedOf(tx, slot))})
+		rec.Groups = append(rec.Groups, verifiedGroup{Group: groupOf(identity, slot), Applied: model.Uint64(appliedOf(tx, slot))})
 	}
 	for _, s := range cat.Manifest.Segments {
 		rec.Segments = append(rec.Segments, verifiedSegment{ID: s.ID, File: s.File, Checksum: s.Checksum, Bytes: s.Bytes})
@@ -415,13 +419,19 @@ func (e *Engine) VerifyFailure() error {
 
 // VerifyFull re-verifies the whole node (every cold segment, every command, every index entry)
 // and, if everything holds, records the verified point. A mismatch fails the engine closed.
+//
+// The pass runs beside InstallReplicationIdentity, which re-binds an empty engine to the identity
+// of the installation it joins. The identity (and with it the group ids a record names) is read
+// once, under e.mu with the catalog, and the record is kept only if e.identity still is that
+// value when it is committed under e.mu again: a record built across an install is dropped, and
+// the install asks the loop for a new pass (kickVerify).
 func (e *Engine) VerifyFull(ctx context.Context) error {
 	e.mu.Lock()
 	if e.closed || e.failed {
 		e.mu.Unlock()
 		return model.Fail(model.Unavailable)
 	}
-	cat := e.catalog
+	cat, identity := e.catalog, e.identity
 	e.mu.Unlock()
 	for _, s := range cat.Manifest.Segments {
 		if err := ctx.Err(); err != nil {
@@ -462,16 +472,19 @@ func (e *Engine) VerifyFull(ctx context.Context) error {
 			return err
 		}
 		var err error
-		rec, err = e.buildVerifiedRecord(tx, cat)
+		rec, err = e.buildVerifiedRecord(tx, identity, cat)
 		return err
 	})
 	if err != nil {
 		return e.failVerify(err)
 	}
+	if err = e.trip("verify_built"); err != nil {
+		return err
+	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.closed || e.failed || e.catalog.Hash != cat.Hash {
-		return nil // the manifest moved on: the next pass records the new point
+	if e.closed || e.failed || e.catalog.Hash != cat.Hash || e.identity != identity {
+		return nil // the manifest or the identity moved on: the next pass records the new point
 	}
 	e.ver.mu.Lock()
 	defer e.ver.mu.Unlock()
@@ -479,6 +492,30 @@ func (e *Engine) VerifyFull(ctx context.Context) error {
 		e.ver.rec = rec
 	}
 	return nil
+}
+
+// dropVerifiedLocked forgets the verified record and removes its file; e.mu is held. A record
+// states group ids and a manifest digest of one identity, so the identity install calls this: the
+// record of the old identity must neither stay in memory nor be what the next start finds
+// (loadVerifiedRecord would refuse it as foreign, at the price of a full verification).
+func (e *Engine) dropVerifiedLocked() {
+	_ = durablefs.Remove(e.verifiedPath())
+	e.ver.mu.Lock()
+	e.ver.rec = nil
+	e.ver.pending = nil
+	e.ver.mu.Unlock()
+}
+
+// kickVerify asks the background loop for a pass now instead of at the end of its interval; it
+// never blocks and is a no-op once the loop is gone.
+func (e *Engine) kickVerify() {
+	e.ver.mu.Lock()
+	kick := e.ver.kick
+	e.ver.mu.Unlock()
+	select {
+	case kick <- struct{}{}:
+	default:
+	}
 }
 
 // failVerify fails the engine closed: it serves nothing, the node's groups stop with it, and the
@@ -499,12 +536,14 @@ func (e *Engine) failVerify(cause error) error {
 	return err
 }
 
-// startBackgroundVerify runs VerifyFull at start and then every verifyInterval until Close.
+// startBackgroundVerify runs VerifyFull at start, again whenever kickVerify asks, and otherwise
+// every verifyInterval until Close.
 func (e *Engine) startBackgroundVerify() {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
+	kick := make(chan struct{}, 1)
 	e.ver.mu.Lock()
-	e.ver.cancel, e.ver.done = cancel, done
+	e.ver.cancel, e.ver.done, e.ver.kick = cancel, done, kick
 	e.ver.mu.Unlock()
 	go func() {
 		defer close(done)
@@ -519,9 +558,13 @@ func (e *Engine) startBackgroundVerify() {
 			if err := e.VerifyFull(ctx); err != nil && e.VerifyFailure() != nil {
 				return
 			}
+			timer := time.NewTimer(verifyInterval)
 			select {
-			case <-time.After(verifyInterval):
+			case <-timer.C:
+			case <-kick:
+				timer.Stop()
 			case <-ctx.Done():
+				timer.Stop()
 				return
 			}
 		}

@@ -283,15 +283,27 @@ func issueProjectScope(scope auth.Scope, st *State, project model.ID) error {
 	if err := scope.ValidateControlState(*st); err != nil {
 		return err
 	}
+	return issueProjectLive(scope, model.ReadOnlyOf(st), project)
+}
+
+// issueProjectScopeRO is issueProjectScope against a read-only control state.
+func issueProjectScopeRO(scope auth.Scope, ro model.ReadOnlyControl, project model.ID) error {
+	if err := scope.ValidateControlStateRO(ro); err != nil {
+		return err
+	}
+	return issueProjectLive(scope, ro, project)
+}
+
+// issueProjectLive is the part of issueProjectScope that follows the scope's validation.
+func issueProjectLive(scope auth.Scope, ro model.ReadOnlyControl, project model.ID) error {
 	org := scope.OrgID()
-	o, ok := st.Orgs[org.String()]
-	if !ok || project == (model.ID{}) {
+	if _, ok := ro.OrgEpoch(org.String()); !ok || project == (model.ID{}) {
 		return model.Fail(model.NotFound)
 	}
-	if _, ok = o.Projects[project.String()]; !ok {
+	if !ro.OrgHasProject(org.String(), project.String()) {
 		return model.Fail(model.NotFound)
 	}
-	if _, retired := st.RetiredProjects[org.String()+":"+project.String()]; retired {
+	if ro.ProjectRetired(org.String(), project.String()) {
 		return model.Fail(model.NotFound)
 	}
 	if scope.IsSystem() {
@@ -304,12 +316,12 @@ func issueProjectScope(scope auth.Scope, st *State, project model.ID) error {
 	}
 	principal := scope.PrincipalID()
 	if scope.Permission() == auth.OrgAdmin {
-		if !o.Admins[principal.String()] || len(scope.ProjectIDs()) > 0 && !scope.AllowsProject(project) {
+		if !ro.OrgAdmin(org.String(), principal.String()) || len(scope.ProjectIDs()) > 0 && !scope.AllowsProject(project) {
 			return model.Fail(model.NotFound)
 		}
 		return nil
 	}
-	if len(scope.ProjectIDs()) == 0 || !scope.AllowsProject(project) || !o.Members[principal.String()] || !issueGrantHeld(o, principal, project, scope.Permission()) {
+	if len(scope.ProjectIDs()) == 0 || !scope.AllowsProject(project) || !ro.OrgMember(org.String(), principal.String()) || !ro.OrgGrantHeld(org.String(), principal, project, string(scope.Permission())) {
 		return model.Fail(model.NotFound)
 	}
 	return nil
@@ -381,17 +393,39 @@ func (s *Store) AuthorizeIssueWrite(ctx context.Context, scope auth.Scope, proje
 	return s.View(ctx, func(st State) error { return issueWriteScope(scope, &st, project) })
 }
 
-func issueReadScope(scope auth.Scope, st State, project model.ID) error {
+// issueReadScopeRO checks the issue read permission and the project against a read-only control state.
+func issueReadScopeRO(scope auth.Scope, ro model.ReadOnlyControl, project model.ID) error {
+	if err := issueReadPermission(scope); err != nil {
+		return err
+	}
+	return issueProjectScopeRO(scope, ro, project)
+}
+
+// issueReadPermission refuses a scope whose permission is not an issue-read one.
+func issueReadPermission(scope auth.Scope) error {
 	switch scope.Permission() {
 	case auth.Read, issuesWritePermission, auth.OrgAdmin:
-	default:
-		return model.Fail(model.Forbidden)
+		return nil
 	}
-	return issueProjectScope(scope, &st, project)
+	return model.Fail(model.Forbidden)
 }
 
 func loadIssueBook(st *State, org, project model.ID) (IssueBook, bool, error) {
 	raw, ok := st.IssueBooks[issueBookKey(org, project)]
+	if !ok {
+		return IssueBook{Org: org, Project: project}, false, nil
+	}
+	var b IssueBook
+	if err := json.Unmarshal(raw, &b); err != nil || b.Org != org || b.Project != project {
+		return IssueBook{}, false, model.Fail(model.Corrupt)
+	}
+	return b, true, nil
+}
+
+// loadIssueBookRO is loadIssueBook against a read-only control state; the book is decoded from a
+// copy of the stored bytes.
+func loadIssueBookRO(ro model.ReadOnlyControl, org, project model.ID) (IssueBook, bool, error) {
+	raw, ok := ro.BookRecord(model.BookIssues, issueBookKey(org, project))
 	if !ok {
 		return IssueBook{Org: org, Project: project}, false, nil
 	}
@@ -1137,26 +1171,28 @@ func issueReplayable(scope auth.Scope, st *State, cmd Command, binding string) e
 // control read. The scope is checked before the project is looked up; a project
 // the scope does not name, a retired one and a missing one are indistinguishable.
 func (s *Store) IssueBook(ctx context.Context, scope auth.Scope, project model.ID) (out IssueSnapshot, err error) {
-	err = s.View(ctx, func(st State) error {
-		if e := issueReadScope(scope, st, project); e != nil {
+	err = s.ViewShared(ctx, func(st model.ReadOnlyControl) error {
+		if e := issueReadScopeRO(scope, st, project); e != nil {
 			return e
 		}
 		var e error
-		out, e = snapshotIssues(&st, scope.OrgID(), project)
+		out, e = snapshotIssuesRO(st, scope.OrgID(), project)
 		return e
 	})
 	return
 }
 
-func snapshotIssues(st *State, org, project model.ID) (IssueSnapshot, error) {
-	book, _, err := loadIssueBook(st, org, project)
+// snapshotIssuesRO reads the project's issue book from a read-only control state; everything in the
+// snapshot is a copy.
+func snapshotIssuesRO(ro model.ReadOnlyControl, org, project model.ID) (IssueSnapshot, error) {
+	book, _, err := loadIssueBookRO(ro, org, project)
 	if err != nil {
 		return IssueSnapshot{}, err
 	}
 	out := IssueSnapshot{Revision: book.Revision, Explanations: map[model.ID]json.RawMessage{}, Checkpoints: map[model.ID]model.Uint64{}, Commands: map[model.ID]IssueCommandEntry{},
 		Gaps: append([]model.EvidenceGap(nil), book.Gaps...), Effects: append([]IssueEffect(nil), book.Effects...)}
-	for _, gi := range projectIssues(st, org, project) {
-		out.Issues = append(out.Issues, gi)
+	for _, entry := range ro.ProjectIssues(org, project) {
+		out.Issues = append(out.Issues, entry.Issue)
 	}
 	sort.Slice(out.Issues, func(i, j int) bool { return bytes.Compare(out.Issues[i].ID[:], out.Issues[j].ID[:]) < 0 })
 	parse := func(key string) (model.ID, error) {

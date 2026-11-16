@@ -963,14 +963,18 @@ func applyRuleOutputArm(st *State, book *RuleBook, u RuleOutputApply) (Effect, e
 // retiredProjectAdmin admits an organization administrator's unrestricted scope
 // to the rule facts of a project that has been retired (deleted).
 func retiredProjectAdmin(scope auth.Scope, st State, org, project model.ID) error {
+	return retiredProjectAdminRO(scope, model.ReadOnlyOf(&st), org, project)
+}
+
+// retiredProjectAdminRO is retiredProjectAdmin against a read-only control state.
+func retiredProjectAdminRO(scope auth.Scope, ro model.ReadOnlyControl, org, project model.ID) error {
 	if scope.Permission() != auth.OrgAdmin || scope.OrgID() != org || org == (model.ID{}) || project == (model.ID{}) || len(scope.ProjectIDs()) > 0 {
 		return model.Fail(model.NotFound)
 	}
-	authority, ok := st.Orgs[org.String()]
-	if !ok || !authority.Admins[scope.PrincipalID().String()] {
+	if _, ok := ro.OrgEpoch(org.String()); !ok || !ro.OrgAdmin(org.String(), scope.PrincipalID().String()) {
 		return model.Fail(model.NotFound)
 	}
-	if _, retired := st.RetiredProjects[org.String()+":"+project.String()]; !retired {
+	if !ro.ProjectRetired(org.String(), project.String()) {
 		return model.Fail(model.NotFound)
 	}
 	return nil
@@ -1152,26 +1156,48 @@ func eraseRuleFacts(st *State, p model.DeletePredicate, suppress bool) (affected
 // unretired project of the scope's organization and a read-class permission. A
 // project the scope does not name is indistinguishable from an absent one.
 func ruleReadScope(scope auth.Scope, st State, project model.ID) error {
+	if err := ruleReadPermission(scope, project); err != nil {
+		return err
+	}
+	if err := scope.ValidateControlState(st); err != nil {
+		return err
+	}
+	return ruleReadProject(scope, model.ReadOnlyOf(&st), project)
+}
+
+// ruleReadScopeRO is ruleReadScope against a read-only control state.
+func ruleReadScopeRO(scope auth.Scope, ro model.ReadOnlyControl, project model.ID) error {
+	if err := ruleReadPermission(scope, project); err != nil {
+		return err
+	}
+	if err := scope.ValidateControlStateRO(ro); err != nil {
+		return err
+	}
+	return ruleReadProject(scope, ro, project)
+}
+
+// ruleReadPermission is the part of ruleReadScope that precedes the scope's validation.
+func ruleReadPermission(scope auth.Scope, project model.ID) error {
 	if project == (model.ID{}) {
 		return model.Fail(model.Invalid)
 	}
 	switch scope.Permission() {
 	case auth.Read, auth.PolicyWrite, auth.IncidentsWrite, auth.OrgAdmin:
-	default:
-		return model.Fail(model.Forbidden)
+		return nil
 	}
-	if err := scope.ValidateControlState(st); err != nil {
-		return err
-	}
-	org, ok := st.Orgs[scope.OrgID().String()]
-	if !ok {
+	return model.Fail(model.Forbidden)
+}
+
+// ruleReadProject is the part of ruleReadScope that follows the scope's validation.
+func ruleReadProject(scope auth.Scope, ro model.ReadOnlyControl, project model.ID) error {
+	if _, ok := ro.OrgEpoch(scope.OrgID().String()); !ok {
 		return model.Fail(model.NotFound)
 	}
-	if _, ok = org.Projects[project.String()]; !ok {
+	if !ro.OrgHasProject(scope.OrgID().String(), project.String()) {
 		// The rule facts of a retired project stay visible to an organization
 		// administrator, until collected, so they can be suppressed and dropped;
 		// to nobody else.
-		if retiredProjectAdmin(scope, st, scope.OrgID(), project) != nil {
+		if retiredProjectAdminRO(scope, ro, scope.OrgID(), project) != nil {
 			return model.Fail(model.NotFound)
 		}
 		return nil
@@ -1199,11 +1225,15 @@ func (s *Store) RuleBook(ctx context.Context, scope auth.Scope, project, rule mo
 // only those in one phase (all when phase is empty) and for one rule (all when
 // rule is zero). limit <= 0 means every match.
 func (s *Store) RuleOutputs(ctx context.Context, scope auth.Scope, project, rule model.ID, phase string, limit int) (out []RuleOutput, err error) {
-	err = s.View(ctx, func(st State) error {
-		if e := ruleReadScope(scope, st, project); e != nil {
+	err = s.ViewShared(ctx, func(st model.ReadOnlyControl) error {
+		if e := ruleReadScopeRO(scope, st, project); e != nil {
 			return e
 		}
-		for _, raw := range st.RuleOutputs {
+		for _, key := range st.BookKeys(model.BookRuleOutputs, "") {
+			raw, ok := st.BookRecord(model.BookRuleOutputs, key)
+			if !ok {
+				continue
+			}
 			var o RuleOutput
 			if e := json.Unmarshal(raw, &o); e != nil {
 				return model.Fail(model.Corrupt)
@@ -1211,7 +1241,7 @@ func (s *Store) RuleOutputs(ctx context.Context, scope auth.Scope, project, rule
 			if o.Org != scope.OrgID() || o.Project != project || rule != (model.ID{}) && o.Rule != rule || phase != "" && o.Phase != phase || phase == "" && o.Phase == RulePhaseStaged {
 				continue
 			}
-			o.Obsolete = ruleOutputObsolete(st, o)
+			o.Obsolete = ruleOutputObsoleteRO(st, o)
 			out = append(out, o)
 		}
 		sort.Slice(out, func(i, j int) bool {
@@ -1228,21 +1258,15 @@ func (s *Store) RuleOutputs(ctx context.Context, scope auth.Scope, project, rule
 	return
 }
 
-// ruleOutputObsolete reports whether a committed retirement or deletion now
+// ruleOutputObsoleteRO reports whether a committed retirement or deletion now
 // covers an output's origin, so the intent must be suppressed before release. A
 // deletion covers exactly the outputs whose payloads it drops (ruleOutputErased).
-func ruleOutputObsolete(st State, o RuleOutput) bool {
-	if _, retired := st.RetiredOrgs[o.Org.String()]; retired {
+func ruleOutputObsoleteRO(ro model.ReadOnlyControl, o RuleOutput) bool {
+	if ro.OrgRetired(o.Org.String()) || ro.ProjectRetired(o.Org.String(), o.Project.String()) {
 		return true
 	}
-	if _, retired := st.RetiredProjects[o.Org.String()+":"+o.Project.String()]; retired {
-		return true
-	}
-	for _, op := range st.Deletions {
-		if op.Phase != model.DeletePhaseFencing && op.Phase != model.DeletePhaseComplete {
-			continue
-		}
-		if ruleOutputErased(op.Predicate, o) {
+	for _, p := range ro.DeletionPredicates(model.DeletePhaseFencing, model.DeletePhaseComplete) {
+		if ruleOutputErased(p, o) {
 			return true
 		}
 	}

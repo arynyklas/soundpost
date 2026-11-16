@@ -180,12 +180,27 @@ func jobWriteScope(scope auth.Scope, st *State, project model.ID) error {
 }
 
 func jobReadScope(scope auth.Scope, st *State, project model.ID) error {
-	switch scope.Permission() {
-	case auth.Read, auth.PolicyWrite, auth.OrgAdmin:
-	default:
-		return model.Fail(model.Forbidden)
+	if err := jobReadPermission(scope); err != nil {
+		return err
 	}
 	return issueProjectScope(scope, st, project)
+}
+
+// jobReadScopeRO is jobReadScope against a read-only control state.
+func jobReadScopeRO(scope auth.Scope, ro model.ReadOnlyControl, project model.ID) error {
+	if err := jobReadPermission(scope); err != nil {
+		return err
+	}
+	return issueProjectScopeRO(scope, ro, project)
+}
+
+// jobReadPermission refuses a scope whose permission is not a job-read one.
+func jobReadPermission(scope auth.Scope) error {
+	switch scope.Permission() {
+	case auth.Read, auth.PolicyWrite, auth.OrgAdmin:
+		return nil
+	}
+	return model.Fail(model.Forbidden)
 }
 
 func loadJobRecord(st *State, key string) (JobRecord, bool, error) {

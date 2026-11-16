@@ -249,37 +249,38 @@ func (s *Service) revalidate(ctx context.Context, scope Scope, within func(model
 	if scope.service != s {
 		return model.Fail(model.Forbidden)
 	}
+	var check func(model.ReadOnlyControl) error
 	if scope.credential.system {
-		return s.store.View(ctx, func(st model.ControlState) error {
-			if err := s.validateSystemState(st, scope); err != nil {
+		check = func(st model.ReadOnlyControl) error {
+			if err := s.validateSystemStateRO(st, scope); err != nil {
 				return err
 			}
-			if err := s.grantLease(scope, st, checkedAt); err != nil {
+			return s.grantLeaseRO(scope, st, checkedAt)
+		}
+	} else {
+		check = func(st model.ReadOnlyControl) error {
+			if err := s.validateCredentialStateRO(st, scope.credential); err != nil {
 				return err
 			}
-			if within != nil {
-				return within(st)
+			if !tokenAllowsRO(st, scope.credential, scope.org, scope.projects, scope.action) {
+				return model.Fail(model.NotFound)
 			}
-			return nil
-		})
+			epoch, ok := st.OrgEpoch(scope.org.String())
+			if !ok || epoch != scope.epoch {
+				return model.Fail(model.NotFound)
+			}
+			return s.grantLeaseRO(scope, st, checkedAt)
+		}
+	}
+	if within == nil {
+		// The common case (every storage read, every pass of the workers) only asks whether the
+		// scope is still authorized: it reads the shared decode of the committed state.
+		return s.viewShared(ctx, check)
 	}
 	return s.store.View(ctx, func(st model.ControlState) error {
-		if err := s.validateCredentialState(st, scope.credential); err != nil {
+		if err := check(model.ReadOnlyOf(&st)); err != nil {
 			return err
 		}
-		if !tokenAllows(st, scope.credential, scope.org, scope.projects, scope.action) {
-			return model.Fail(model.NotFound)
-		}
-		o, ok := st.Orgs[scope.org.String()]
-		if !ok || o.Epoch != scope.epoch {
-			return model.Fail(model.NotFound)
-		}
-		if err := s.grantLease(scope, st, checkedAt); err != nil {
-			return err
-		}
-		if within != nil {
-			return within(st)
-		}
-		return nil
+		return within(st)
 	})
 }

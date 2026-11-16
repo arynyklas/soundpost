@@ -56,6 +56,20 @@ func loadJobPosition(st *State, key string) (JobPositionRecord, bool, error) {
 	return rec, true, nil
 }
 
+// loadJobPositionRO is loadJobPosition against a read-only control state; the record is decoded
+// from a copy of the stored bytes.
+func loadJobPositionRO(ro model.ReadOnlyControl, key string) (JobPositionRecord, bool, error) {
+	raw, ok := ro.BookRecord(model.BookJobPositions, key)
+	if !ok {
+		return JobPositionRecord{}, false, nil
+	}
+	var rec JobPositionRecord
+	if json.Unmarshal(raw, &rec) != nil || jobPositionKey(rec.Org, rec.Project) != key {
+		return JobPositionRecord{}, false, model.Fail(model.Corrupt)
+	}
+	return rec, true, nil
+}
+
 func applyJobPosition(scope auth.Scope, st *State, c JobUpdateCommand) (model.ID, model.Revision, string, error) {
 	fail := func(err error) (model.ID, model.Revision, string, error) { return model.ID{}, 0, "", err }
 	if !scope.IsSystem() {
@@ -113,11 +127,11 @@ func applyJobPosition(scope auth.Scope, st *State, c JobUpdateCommand) (model.ID
 // advance) through a linearizable control read, to a scope that may read the
 // project's job facts.
 func (s *Store) JobPosition(ctx context.Context, scope auth.Scope, project model.ID) (out []model.Cursor, err error) {
-	err = s.View(ctx, func(st State) error {
-		if e := jobReadScope(scope, &st, project); e != nil {
+	err = s.ViewShared(ctx, func(st model.ReadOnlyControl) error {
+		if e := jobReadScopeRO(scope, st, project); e != nil {
 			return e
 		}
-		rec, _, e := loadJobPosition(&st, jobPositionKey(scope.OrgID(), project))
+		rec, _, e := loadJobPositionRO(st, jobPositionKey(scope.OrgID(), project))
 		out = rec.Through
 		return e
 	})

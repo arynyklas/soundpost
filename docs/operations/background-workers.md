@@ -62,8 +62,13 @@ every producer, routing and a sender configured; one pass over all of them, `Max
 100 projects 12 s, 200 projects 50 s (about 120 ms and 250 ms per project at 100 and 200). With the default `MaxProjects` of 64 a project is served once
 every `ceil(projects/64)` passes, and each pass takes the pass time plus `Interval`, so with a few hundred projects evidence takes minutes (not seconds) to
 become an issue, a job state or an incident. The bounds above (`MaxProjects`, `PassTimeout`) keep every pass finite; they do not make a large installation
-fast. Reusing the decoded state inside `control.Store.View` while the committed state is unchanged is the measured remedy (a probe cut the 100-project pass
-from 12 s to 2.5 s and the 200-project pass from 50 s to 10 s); it is a change to the control store and is not part of the workers.
+fast. Since lane 1 wave 15 the hot control reads share one decode of the committed state (`control.Store.ViewShared`: the decode is made once per committed
+revision and every concurrent reader gets it through the read-only interface `model.ReadOnlyControl`, which has no way to change it; a commit drops it). The
+runner's reads (`ActiveDeletions` for every storage scan, `auth.Service.Revalidate`, `AuthorizeSystem`, the producer fence, the issue, condition, incident,
+job-catalogue, job-position, policy, cutover and rule-output readers) use it; every other read, and every writer, still decodes its own copy with `View`.
+Measured runner pass time on one voter (lane 1 wave 15): 25 projects 0.85-0.98 s before, 0.25-0.38 s after; 100 projects 12.4-13.8 s
+before, 3.0-4.4 s after; 200 projects 48-52 s before, 11.9-17.0 s after. The pass still grows faster than linearly in the project
+count: the readers left on `View` and every writer still decode the whole state.
 
 ## The worker principal
 

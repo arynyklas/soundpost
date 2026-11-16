@@ -214,6 +214,20 @@ func loadCutover(st *State, key string) (CutoverRecord, bool, error) {
 	return r, true, nil
 }
 
+// loadCutoverRO is loadCutover against a read-only control state; the record is decoded from a
+// copy of the stored bytes.
+func loadCutoverRO(ro model.ReadOnlyControl, key string) (CutoverRecord, bool, error) {
+	raw, ok := ro.BookRecord(model.BookCutovers, key)
+	if !ok {
+		return CutoverRecord{}, false, nil
+	}
+	var r CutoverRecord
+	if err := json.Unmarshal(raw, &r); err != nil {
+		return CutoverRecord{}, false, model.Fail(model.Corrupt)
+	}
+	return r, true, nil
+}
+
 func storeCutover(st *State, key string, r CutoverRecord) error {
 	raw, err := json.Marshal(r)
 	if err != nil {
@@ -807,12 +821,12 @@ func (s *Store) TransactCutover(ctx context.Context, scope auth.Scope, id model.
 
 // Cutover reads one project's committed cutover record.
 func (s *Store) Cutover(ctx context.Context, scope auth.Scope, project model.ID) (out CutoverRecord, found bool, err error) {
-	err = s.View(ctx, func(st State) error {
-		if e := ruleReadScope(scope, st, project); e != nil {
+	err = s.ViewShared(ctx, func(st model.ReadOnlyControl) error {
+		if e := ruleReadScopeRO(scope, st, project); e != nil {
 			return e
 		}
 		var e error
-		out, found, e = loadCutover(&st, cutoverKey(scope.OrgID(), project))
+		out, found, e = loadCutoverRO(st, cutoverKey(scope.OrgID(), project))
 		return e
 	})
 	return

@@ -407,11 +407,15 @@ func (s *Store) Incident(ctx context.Context, scope auth.Scope, project, inciden
 
 // Incidents lists one project's incident records in ID order.
 func (s *Store) Incidents(ctx context.Context, scope auth.Scope, project model.ID) (out []IncidentRecord, err error) {
-	err = s.View(ctx, func(st State) error {
-		if e := ruleReadScope(scope, st, project); e != nil {
+	err = s.ViewShared(ctx, func(st model.ReadOnlyControl) error {
+		if e := ruleReadScopeRO(scope, st, project); e != nil {
 			return e
 		}
-		for _, raw := range st.IncidentBooks {
+		for _, key := range st.BookKeys(model.BookIncidents, "") {
+			raw, ok := st.BookRecord(model.BookIncidents, key)
+			if !ok {
+				continue
+			}
 			var r IncidentRecord
 			if e := json.Unmarshal(raw, &r); e != nil {
 				return model.Fail(model.Corrupt)

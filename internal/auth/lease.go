@@ -24,14 +24,22 @@ func (scope Scope) LeaseDeadline() time.Time {
 	return scope.lease.deadline
 }
 
+func (s *Service) grantLease(scope Scope, st model.ControlState, checkedAt time.Time) error {
+	return s.grantLeaseRO(scope, model.ReadOnlyOf(&st), checkedAt)
+}
+
+// grantLeaseRO is grantLease over the read-only view of the control state.
+//
 // grantLease runs before initial scope publication, or while Revalidate holds
 // the lease lock. Start at the authority-read boundary, not after a slow read.
-func (s *Service) grantLease(scope Scope, st model.ControlState, checkedAt time.Time) error {
+func (s *Service) grantLeaseRO(scope Scope, st model.ReadOnlyControl, checkedAt time.Time) error {
 	deadline := checkedAt.Add(5 * time.Second)
 	if !scope.credential.system {
-		credentialExpiry := st.Sessions[hashToken(scope.credential.token)].Expires
+		session, _ := st.Session(hashToken(scope.credential.token))
+		credentialExpiry := session.Expires
 		if scope.credential.machine {
-			credentialExpiry = st.ServerTokens[s.serverTokenDigest(scope.credential.token)].Expires
+			token, _ := st.ServerToken(s.serverTokenDigest(scope.credential.token))
+			credentialExpiry = token.Expires
 		}
 		if credentialExpiry <= deadline.Unix() {
 			deadline = checkedAt.Add(time.Unix(credentialExpiry, 0).Sub(checkedAt))

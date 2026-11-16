@@ -6,6 +6,8 @@ import (
 	"sync/atomic"
 
 	bolt "go.etcd.io/bbolt"
+
+	"github.com/arynyklas/soundpost/internal/model"
 )
 
 // trackedDB is the control store's bbolt handle with an exact count of the read transactions
@@ -22,6 +24,40 @@ type trackedDB struct {
 	// viewGap, when set, runs once in the next View after the reader was counted and before bolt
 	// opened its transaction: tests hold a reader in the window the stat cannot see.
 	viewGap atomic.Pointer[func()]
+	// decoded is the decoded control state of the newest committed bolt transaction a shared read
+	// has seen (ViewShared). An entry is immutable once published; one whose txid is not the
+	// reader's transaction is never used, and Update drops it so that a state that was just
+	// rewritten (an erasure) is not kept in memory until the next read replaces it.
+	decoded atomic.Pointer[decodedState]
+	// decodes counts the whole-state decodes ViewShared made. Tests only.
+	decodes atomic.Uint64
+}
+
+// decodedState is the control state as committed by bolt transaction txid.
+type decodedState struct {
+	txid  int
+	state *model.ControlState
+}
+
+// Update commits fn and drops the shared decode: the state it may have changed is read again
+// by the next shared read.
+func (d *trackedDB) Update(fn func(*bolt.Tx) error) error {
+	err := d.DB.Update(fn)
+	d.decoded.Store(nil)
+	return err
+}
+
+// publish keeps ds as the shared decode unless a newer one is already there.
+func (d *trackedDB) publish(ds *decodedState) {
+	for {
+		cur := d.decoded.Load()
+		if cur != nil && cur.txid >= ds.txid {
+			return
+		}
+		if d.decoded.CompareAndSwap(cur, ds) {
+			return
+		}
+	}
 }
 
 // View counts the reader before bolt registers it and until its transaction ended.

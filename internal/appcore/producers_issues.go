@@ -108,18 +108,17 @@ func (f producerFence) Admit(ctx context.Context, scope auth.Scope, project mode
 		return err
 	}
 	org := scope.OrgID()
-	return f.app.Control.View(ctx, func(st model.ControlState) error {
-		o, ok := st.Orgs[org.String()]
-		if !ok {
+	return f.app.Control.ViewShared(ctx, func(st model.ReadOnlyControl) error {
+		if _, ok := st.OrgEpoch(org.String()); !ok {
 			return model.Fail(model.NotFound)
 		}
-		if _, ok = o.Projects[project.String()]; !ok {
+		if !st.OrgHasProject(org.String(), project.String()) {
 			return model.Fail(model.NotFound)
 		}
-		if _, retired := st.RetiredOrgs[org.String()]; retired {
+		if st.OrgRetired(org.String()) {
 			return model.Fail(model.NotFound)
 		}
-		if _, retired := st.RetiredProjects[org.String()+":"+project.String()]; retired {
+		if st.ProjectRetired(org.String(), project.String()) {
 			return model.Fail(model.NotFound)
 		}
 		return nil

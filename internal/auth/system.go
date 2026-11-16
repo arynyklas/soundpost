@@ -84,30 +84,30 @@ func (s *Service) AuthorizeSystem(ctx context.Context, org model.ID, projects []
 	checkedAt := s.now()
 	c := Credential{service: s, user: SystemPrincipal(org), system: true}
 	out := Scope{service: s, credential: c, org: org, projects: append([]model.ID(nil), projects...), action: action, lease: &scopeLease{}}
-	err := s.store.View(ctx, func(st model.ControlState) error {
-		if err := s.validateCredentialState(st, c); err != nil {
+	err := s.viewShared(ctx, func(st model.ReadOnlyControl) error {
+		if err := s.validateCredentialStateRO(st, c); err != nil {
 			return err
 		}
-		o, ok := st.Orgs[org.String()]
+		epoch, ok := st.OrgEpoch(org.String())
 		if !ok {
 			return model.Fail(model.NotFound)
 		}
-		if _, retired := st.RetiredOrgs[org.String()]; retired {
+		if st.OrgRetired(org.String()) {
 			return model.Fail(model.NotFound)
 		}
 		requested := make([]string, len(projects))
 		for i, p := range projects {
-			if _, ok := o.Projects[p.String()]; !ok {
+			if !st.OrgHasProject(org.String(), p.String()) {
 				return model.Fail(model.NotFound)
 			}
-			if _, retired := st.RetiredProjects[org.String()+":"+p.String()]; retired {
+			if st.ProjectRetired(org.String(), p.String()) {
 				return model.Fail(model.NotFound)
 			}
 			requested[i] = p.String()
 		}
-		out.epoch = o.Epoch
+		out.epoch = epoch
 		out.fingerprint = hashToken(SystemRunner + "|" + org.String() + "|" + string(action) + "|" + joinSorted(requested))
-		return s.grantLease(out, st, checkedAt)
+		return s.grantLeaseRO(out, st, checkedAt)
 	})
 	if err != nil {
 		return Scope{}, err
@@ -115,29 +115,29 @@ func (s *Service) AuthorizeSystem(ctx context.Context, org model.ID, projects []
 	return out, nil
 }
 
-// validateSystemState checks a system scope against a committed state: the
+// validateSystemStateRO checks a system scope against a committed state: the
 // organization still exists, is not retired, and its policy epoch is the one the
 // scope was derived at. A scope that names projects needs each of them to exist
 // and not be retired.
-func (s *Service) validateSystemState(st model.ControlState, scope Scope) error {
+func (s *Service) validateSystemStateRO(st model.ReadOnlyControl, scope Scope) error {
 	if scope.service != s || !scope.credential.system || scope.credential.user != SystemPrincipal(scope.org) {
 		return model.Fail(model.Forbidden)
 	}
 	if !systemRole(scope.action) {
 		return model.Fail(model.Forbidden)
 	}
-	o, ok := st.Orgs[scope.org.String()]
-	if !ok || o.Epoch != scope.epoch {
+	epoch, ok := st.OrgEpoch(scope.org.String())
+	if !ok || epoch != scope.epoch {
 		return model.Fail(model.NotFound)
 	}
-	if _, retired := st.RetiredOrgs[scope.org.String()]; retired {
+	if st.OrgRetired(scope.org.String()) {
 		return model.Fail(model.NotFound)
 	}
 	for _, p := range scope.projects {
-		if _, ok := o.Projects[p.String()]; !ok {
+		if !st.OrgHasProject(scope.org.String(), p.String()) {
 			return model.Fail(model.NotFound)
 		}
-		if _, retired := st.RetiredProjects[scope.org.String()+":"+p.String()]; retired {
+		if st.ProjectRetired(scope.org.String(), p.String()) {
 			return model.Fail(model.NotFound)
 		}
 	}

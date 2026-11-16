@@ -23,6 +23,23 @@ type ControlStore interface {
 	Seal(string) (string, error)
 	OpenSecret(string) (string, error)
 }
+
+// SharedViewer is optionally implemented by a ControlStore that can hand the decoded committed
+// state to many readers at once, each through the read-only interface (control.Store.ViewShared).
+// The reads that are hot on the background workers' path (Revalidate, AuthorizeSystem) use it; a
+// store without it is read with View, whose decode is the reader's own.
+type SharedViewer interface {
+	ViewShared(context.Context, func(model.ReadOnlyControl) error) error
+}
+
+// viewShared reads the control state through the read-only interface, shared when the store can.
+func (s *Service) viewShared(ctx context.Context, fn func(model.ReadOnlyControl) error) error {
+	if v, ok := s.store.(SharedViewer); ok {
+		return v.ViewShared(ctx, fn)
+	}
+	return s.store.View(ctx, func(st model.ControlState) error { return fn(model.ReadOnlyOf(&st)) })
+}
+
 type AuthDependencies struct {
 	Control ControlStore
 	Now     func() time.Time
