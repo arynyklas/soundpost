@@ -41,8 +41,20 @@ type Hash [32]byte
 
 func (h Hash) MarshalJSON() ([]byte, error) { return json.Marshal(hex.EncodeToString(h[:])) }
 func (h *Hash) UnmarshalJSON(b []byte) error {
+	if inner, ok := quotedLowerHex(b, 64); ok {
+		_, _ = hex.Decode(h[:], inner)
+		return nil
+	}
 	var s string
-	if json.Unmarshal(b, &s) != nil || len(s) != 64 {
+	if json.Unmarshal(b, &s) != nil {
+		return Fail(Invalid)
+	}
+	return h.fromString(s)
+}
+
+// fromString decodes the 64 lower-case hex digits of a hash.
+func (h *Hash) fromString(s string) error {
+	if len(s) != 64 {
 		return Fail(Invalid)
 	}
 	v, e := hex.DecodeString(s)

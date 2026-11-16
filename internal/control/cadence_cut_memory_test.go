@@ -127,7 +127,25 @@ func TestControlCutTransientMemoryDoesNotGrowWithTheJournal(t *testing.T) {
 	if limit := small.peakAbove*3/2 + 1<<20; big.peakAbove > limit {
 		t.Errorf("a cut with a journal %d times as long raised the live heap by %d bytes, more than %d (the short journal's cut: %d)", bigJournal/smallJournal, big.peakAbove, limit, small.peakAbove)
 	}
-	if big.allocated*2 > uint64(bigJournal) {
+	// What a cut that works from the journal would allocate is at least the journal's bytes more
+	// for every journal byte more, so the allocation the extra 80 commands added must stay under
+	// half of what they added to the journal. Both builds: measured 0.135 plain, 0.21 under -race.
+	if grown, added := big.allocated-min(big.allocated, small.allocated), uint64(bigJournal-smallJournal); grown*2 > added {
+		t.Errorf("the cut allocated %d bytes more for %d bytes more journal: it works from the journal, not from the state", grown, added)
+	}
+	// The whole allocation of the long journal's cut against half its journal. The state-sized
+	// part of a cut (the envelope is marshalled, verified twice and rewritten) is a constant here:
+	// 60 times the state plain, 68 under -race, and it is not the journal. The race build is
+	// excluded from this one comparison only, for a measured cause: sync.Pool drops one Put in
+	// four under -race (sync/pool.go), and encoding/json takes a pooled decoder or encoder state
+	// for every value it decodes or encodes (jsontext/pools.go), so the many small values of the
+	// retry table allocate that state again. Allocation profile of the cut (-memprofilerate=1,
+	// deltas around each cut; evidence l1w12-evidence/prof): model.ID.UnmarshalJSON 1.8 MB under
+	// -race, 0.05 MB plain, before IDs, hashes and cursors were decoded without it; what remains
+	// is 10.3 MB against 8.3 MB plain at the same journal, which is over journal/2 only because of
+	// this fixture's 19 MB journal. The marginal check above and the live-heap and 1.5 x checks
+	// keep their bounds in the race build.
+	if !raceBuild && big.allocated*2 > uint64(bigJournal) {
 		t.Errorf("the cut allocated %d bytes for a journal of %d: it works from the journal, not from the state", big.allocated, bigJournal)
 	}
 }

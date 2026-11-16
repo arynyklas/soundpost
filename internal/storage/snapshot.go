@@ -540,10 +540,6 @@ func (e *Engine) BeginBackupOwned(ctx context.Context, owner model.ID, cut Contr
 		}
 		processed[c.Group] = c.Index
 	}
-	roots, err := e.rootsBySlot()
-	if err != nil {
-		return nil, err
-	}
 	b := &Backup{engine: e, cut: cut, pins: make([]*replica.JournalPin, 64)}
 	for slot, group := range e.repl.groups {
 		after, ok := processed[e.group(uint16(slot))]
@@ -555,7 +551,10 @@ func (e *Engine) BeginBackupOwned(ctx context.Context, owner model.ID, cut Contr
 			b.release()
 			return nil, model.Fail(model.Stale)
 		}
-		pin, err := group.PinJournalForRoots(uint64(after), owner, roots[uint16(slot)])
+		// No root set is recorded (nil: a known, empty set): RootPinned answers from the
+		// pin's high-water mark and each root's own fragment cursors, so a root that lies
+		// wholly inside the snapshots is not held.
+		pin, err := group.PinJournalForRoots(uint64(after), owner, nil)
 		if err != nil {
 			b.release()
 			return nil, snapshotFault(err)

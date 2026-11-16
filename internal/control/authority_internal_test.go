@@ -168,7 +168,10 @@ func TestEveryControlWriterIsClassified(t *testing.T) {
 		"UpdateAuditAppend":  "writerAuditAppend",
 		// A voter's own attestation record (attest.go): evidence about its files only.
 		"syncAttestation": "writerAttestControl",
-		// The dispatcher itself.
+		// The dispatchers themselves: updateAs and updateAsGuardedChecked are dropped below, update is
+		// the one unguarded entry to replicatedUpdate. A function that commits through
+		// replicatedUpdate directly shows up here and fails until it is reviewed.
+		"update":   "replicated",
 		"updateAs": "dispatcher",
 	}
 	files, err := filepath.Glob("*.go")
@@ -190,6 +193,12 @@ func TestEveryControlWriterIsClassified(t *testing.T) {
 			if !ok || fn.Body == nil {
 				continue
 			}
+			record := func(class string) { // a function that commits through two classes of writer says so
+				if old, dup := got[fn.Name.Name]; dup && old != class {
+					class = old + " + " + class
+				}
+				got[fn.Name.Name] = class
+			}
 			ast.Inspect(fn.Body, func(n ast.Node) bool {
 				call, ok := n.(*ast.CallExpr)
 				if !ok {
@@ -199,25 +208,28 @@ func TestEveryControlWriterIsClassified(t *testing.T) {
 				if !ok || len(call.Args) < 2 {
 					return true
 				}
-				// Our writers take a context first; bolt's db.Update takes a func.
-				if id, ok := call.Args[0].(*ast.Ident); !ok || id.Name != "ctx" {
+				// Our writers take a context first, whatever the caller names it or builds it from; a
+				// call that starts with a function literal is something else (bolt's db.Update).
+				if _, literal := call.Args[0].(*ast.FuncLit); literal {
 					return true
 				}
 				switch sel.Sel.Name {
 				case "Update":
-					got[fn.Name.Name] = "bump"
+					record("bump")
 				case "updateAs", "updateAsGuarded", "updateAsGuardedChecked":
 					if id, ok := call.Args[1].(*ast.Ident); ok {
-						got[fn.Name.Name] = id.Name
+						record(id.Name)
 					} else {
-						got[fn.Name.Name] = "?"
+						record("?")
 					}
 				case "update":
 					if id, ok := call.Args[1].(*ast.Ident); ok && id.Name == "true" {
-						got[fn.Name.Name] = "bump"
+						record("bump")
 					} else {
-						got[fn.Name.Name] = "by kind"
+						record("by kind")
 					}
+				case "replicatedUpdate":
+					record("replicated") // a commit that bypasses every classifying entry
 				}
 				return true
 			})

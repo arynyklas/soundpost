@@ -29,3 +29,9 @@ const ThrottleMaxKeys = throttleMaxKeys
 
 // LoginStaleRetries exposes the count of stale repeats login made (the bounded wait of loginStaleBudget).
 func LoginStaleRetries() int64 { return loginStaleRetries.Load() }
+
+// LimitLoginStaleWaiters lowers how many logins of the service may wait inside the stale budget.
+func (s *Service) LimitLoginStaleWaiters(n int32) { s.staleLimit = n }
+
+// LoginStaleWaiting is how many logins of the service are inside that wait now.
+func (s *Service) LoginStaleWaiting() int32 { return s.staleWaiting.Load() }

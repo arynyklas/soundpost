@@ -505,10 +505,12 @@ func (g *Group) PinJournalFor(after uint64, stamp model.ID) (*JournalPin, error)
 	return g.pinJournal(after, stamp, nil)
 }
 
-// PinJournalForRoots is PinJournalFor that also records the artifact roots the group holds at the
-// instant of the pin (a non-nil slice, possibly empty; nil means "unknown"). The set is durable in
-// the pin header and is reported by Pins (PinInfo.Roots), so a reader can answer "does this pin
-// hold that root" per root instead of treating a pin as holding every root of the group.
+// PinJournalForRoots is PinJournalFor that also records a set of artifact roots the pin holds (nil
+// is recorded as the empty set: use PinJournalFor for a pin that says nothing). The set is durable
+// in the pin header and is reported by Pins (PinInfo.RootsKnown, PinInfo.Roots); a reader answers
+// "does this pin hold that root" from it and from its own knowledge of where the root's evidence
+// lies, instead of treating a pin as holding every root of the group. A backup records the empty
+// set (storage.RootPinned answers from the pin's high-water mark).
 func (g *Group) PinJournalForRoots(after uint64, stamp model.ID, roots []model.ID) (*JournalPin, error) {
 	if roots == nil {
 		roots = []model.ID{}

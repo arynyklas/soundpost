@@ -33,6 +33,10 @@ type Service struct {
 	bearerHashKey [32]byte
 	sourceBarrier SourceBarrier
 	throttle      *loginThrottle
+	// staleWaiting counts the logins inside the bounded stale wait; staleLimit is how many may
+	// (loginStaleWaiters, lowered by tests).
+	staleWaiting atomic.Int32
+	staleLimit   int32
 }
 type Session struct {
 	Token   string      `json:"-"`
@@ -63,7 +67,7 @@ func NewService(d AuthDependencies) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Service{store: d.Control, now: d.Now, bearerHashKey: key, throttle: newLoginThrottle(d.Now)}
+	s := &Service{store: d.Control, now: d.Now, bearerHashKey: key, throttle: newLoginThrottle(d.Now), staleLimit: loginStaleWaiters}
 	// The dummy digest stands in for unknown and disabled addresses. It is derived here, once per
 	// process and before any request is served, so the first unknown-address login costs one KDF
 	// run like every other login instead of two.
@@ -183,19 +187,38 @@ func deriveDummyDigest() string {
 // loginStaleBudget bounds how long one login waits for its control write to stop being stale.
 const loginStaleBudget = 15 * time.Second
 
+// loginStaleWaiters is how many logins of one service may sit in that wait at once. A login past it
+// is answered the typed stale at once, which the caller retries as it would any stale answer: the
+// wait costs a goroutine, a Raft read and a proposal every 25 ms, and a request that is not
+// authenticated yet must not be able to hold fifteen seconds of that for itself in any number.
+const loginStaleWaiters = 16
+
 // loginStaleRetries counts the repeats retryStale made after a typed stale answer, so tests can
 // assert that a login did not need the bounded wait.
 var loginStaleRetries atomic.Int64
 
 // retryStale repeats fn, pausing briefly between attempts, for as long as it fails with the typed
 // retryable Stale fault and ctx is alive. The last Stale is returned when ctx ends; every other
-// result is returned at once.
-func retryStale(ctx context.Context, fn func() error) error {
+// result is returned at once. admit is asked once, after the first stale answer: it returns the
+// function that gives the wait's slot back, or nil when no slot is free, and then the stale answer
+// is returned at once.
+func retryStale(ctx context.Context, fn func() error, admit func() (release func())) error {
+	var release func()
+	defer func() {
+		if release != nil {
+			release()
+		}
+	}()
 	for {
 		err := fn()
 		var fault *model.Fault
 		if err == nil || ctx.Err() != nil || !errors.As(err, &fault) || fault.Code != model.Stale {
 			return err
+		}
+		if release == nil {
+			if release = admit(); release == nil {
+				return err
+			}
 		}
 		select {
 		case <-ctx.Done():
@@ -204,6 +227,15 @@ func retryStale(ctx context.Context, fn func() error) error {
 			loginStaleRetries.Add(1)
 		}
 	}
+}
+
+// admitStaleWaiter takes one of the service's slots in the bounded stale wait, or answers nil.
+func (s *Service) admitStaleWaiter() func() {
+	if s.staleWaiting.Add(1) > s.staleLimit {
+		s.staleWaiting.Add(-1)
+		return nil
+	}
+	return func() { s.staleWaiting.Add(-1) }
 }
 
 func (s *Service) login(ctx context.Context, email, p, code string) (Session, error) {
@@ -273,10 +305,10 @@ func (s *Service) login(ctx context.Context, email, p, code string) (Session, er
 	// repeating the attempt against a fresher state is safe. A write that is stale because the node
 	// is still catching up with the cluster (a restart is the common case) or lost the race for its
 	// index to another control write is therefore waited out for loginStaleBudget instead of being
-	// answered to the caller.
+	// answered to the caller, within loginStaleWaiters logins at a time.
 	wait, cancel := context.WithTimeout(ctx, loginStaleBudget)
 	defer cancel()
-	e := retryStale(wait, func() error { return attempt(wait) })
+	e := retryStale(wait, func() error { return attempt(wait) }, s.admitStaleWaiter)
 	return out, e
 }
 func (s *Service) Authenticate(ctx context.Context, token string) (Credential, error) {

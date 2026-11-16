@@ -176,6 +176,9 @@ type controlVoters struct {
 	down   map[uint64]bool // voters a test took out of the group or off the network for good
 	// genesis is what every voter was opened from; a voter that joins later is opened from the same.
 	genesis voterGenesis
+	// beforeRound, when set, runs before each write round of erasedWithVoter3Idle: a test uses it to
+	// disturb the group between rounds, as a starved host does on its own.
+	beforeRound func(round int)
 }
 
 type voterGenesis struct {

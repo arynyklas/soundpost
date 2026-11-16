@@ -174,3 +174,51 @@ func TestLoginRetriesDoNotRepeatThePasswordKDF(t *testing.T) {
 		t.Fatalf("six attempts of one login ran the password KDF %d times, want 1", got)
 	}
 }
+
+// The wait for a stale control write is bounded in how many logins may sit in it at once, not
+// only in time (review M2 of the login sweep): a login past the limit is answered the typed stale
+// at once instead of holding a goroutine and a Raft round every 25 ms for the whole budget, and the
+// logins inside the limit keep waiting.
+func TestLoginsPastTheStaleWaitLimitAreAnsweredStaleAtOnce(t *testing.T) {
+	service, _ := loginFixture(t, 1<<30)
+	const limit, extra = 2, 3
+	service.LimitLoginStaleWaiters(limit)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	type result struct{ err error }
+	answered := make(chan result, limit+extra)
+	for range limit + extra {
+		go func() {
+			_, err := service.Login(ctx, "stale-login@example.test", "stale login password 2026", "")
+			answered <- result{err}
+		}()
+	}
+	// Every login pays its one KDF, then the `extra` ones past the limit answer; the others stay.
+	for range extra {
+		select {
+		case r := <-answered:
+			assertCode(t, r.err, model.Stale)
+		case <-time.After(30 * time.Second):
+			t.Fatalf("the logins past the limit were not answered within 30 s (%d are inside the wait)", service.LoginStaleWaiting())
+		}
+	}
+	if waiting := service.LoginStaleWaiting(); waiting != limit {
+		t.Fatalf("%d logins are inside the stale wait, want exactly the limit %d", waiting, limit)
+	}
+	select {
+	case r := <-answered:
+		t.Fatalf("a login inside the limit was answered while its control write was still stale: %v", r.err)
+	case <-time.After(300 * time.Millisecond):
+	}
+	cancel()
+	for range limit {
+		select {
+		case <-answered:
+		case <-time.After(10 * time.Second):
+			t.Fatal("a waiting login did not end with its context")
+		}
+	}
+	if waiting := service.LoginStaleWaiting(); waiting != 0 {
+		t.Fatalf("%d logins still counted inside the wait after they all answered", waiting)
+	}
+}

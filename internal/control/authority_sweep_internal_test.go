@@ -40,6 +40,12 @@ func TestUpdateSweepExpiredBumpsOnlyForExpiredRemovals(t *testing.T) {
 			st.Sessions["x"] = model.ControlSession{User: model.ID{1}, Expires: now + 5}
 			return nil
 		}, true},
+		{"resident added", func(st *State) error { st.OIDC["added"] = json.RawMessage(`4`); return nil }, true},
+		{"resident added while an expired one is removed", func(st *State) error {
+			delete(st.OIDC, "old")
+			st.OIDC["added"] = json.RawMessage(`4`)
+			return nil
+		}, true},
 		{"other state changed", func(st *State) error { st.Users = map[string]model.ControlUser{"u": {ID: model.ID{1}}}; return nil }, true},
 	}
 	for _, c := range cases {

@@ -57,9 +57,10 @@ func (v *controlVoters) erasedWithVoter3Idle(canary string) {
 		rounds = 10
 	}
 	for round := range rounds { // the replaced state spans freed pages that later writes do not all reuse
-		if round%10 == 0 {
-			v.leaderIs(1)
+		if v.beforeRound != nil {
+			v.beforeRound(round)
 		}
+		v.leaderIs(1) // before every round: a leader-bound write answers unavailable while no voter leads
 		leader.seedAll(leader.newSeed(leader.project, canary), 50)
 	}
 	for _, id := range []uint64{2, 3} {
@@ -72,6 +73,7 @@ func (v *controlVoters) erasedWithVoter3Idle(canary string) {
 	}
 	v.leaderIs(1)
 	leader.pass()
+	v.leaderIs(1)
 	v.fx[2].pass()
 	if err := v.stores[2].ScrubErased(context.Background()); err != nil {
 		v.t.Fatal(err)

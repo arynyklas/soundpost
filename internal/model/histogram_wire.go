@@ -26,7 +26,26 @@ func (h *IntegerHistogram) UnmarshalJSON(raw []byte) error {
 	*h = IntegerHistogram(value)
 	return nil
 }
+
+// cursorCanonical is the form Cursor marshals to: {"group":"<32 hex>","index":"<decimal>"}.
+const (
+	cursorHead = `{"group":`
+	cursorMid  = `,"index":`
+)
+
+// UnmarshalJSON decodes the canonical form in place (no pooled decoder per cursor: a snapshot or a
+// journal record carries one per entry) and hands every other input to the general decoder, so
+// the answer for them is unchanged.
 func (c *Cursor) UnmarshalJSON(raw []byte) error {
+	if n := len(cursorHead) + 34 + len(cursorMid); len(raw) > n+2 && raw[len(raw)-1] == '}' &&
+		string(raw[:len(cursorHead)]) == cursorHead && string(raw[len(cursorHead)+34:n]) == cursorMid {
+		var group ID
+		var index Uint64
+		if group.UnmarshalJSON(raw[len(cursorHead):len(cursorHead)+34]) == nil && index.UnmarshalJSON(raw[n:len(raw)-1]) == nil {
+			c.Group, c.Index = group, index
+			return nil
+		}
+	}
 	var wire struct {
 		Group ID      `json:"group"`
 		Index *Uint64 `json:"index"`
