@@ -43,12 +43,22 @@ the real release key and the approval decision are owner actions (Aryn Yklas).
 - [ ] `dependency_inventory`: `build/dependencies/node-licenses.json` pins the current `pnpm-lock.yaml`. Stale pins are reported, never silently refreshed; refreshing is a reviewed change.
 - [ ] `licenses`: every in-scope component carries a committed license in the approved set (MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, 0BSD, BlueOak-1.0.0, CC-BY-4.0, Python-2.0, Unlicense, MIT-0, PSF-2.0, MPL-2.0, LGPL-3.0-only). NOASSERTION blocks. PSF-2.0 (typing-extensions), MPL-2.0 (certifi) and LGPL-3.0-only (psycopg, psycopg-binary) were added by owner decision: they are Python test/optional-integration dependencies that users install from PyPI and are never vendored or redistributed in Soundpost artifacts; MPL-2.0 is file-level copyleft and LGPL-3.0 applies to the unmodified library used at runtime.
 - [ ] `notices`: `THIRD_PARTY_NOTICES` equals `go run ./build notices` output and every in-scope component carries license/notice text.
-- [ ] `sbom`: CycloneDX 1.5 and SPDX 2.3 generated twice with identical sha256.
+- [ ] `sbom`: CycloneDX 1.5 and SPDX 2.3 generated twice with identical sha256. Both documents carry one explicit creation time, never the clock: the gate and `build sbom` need `--created YYYY-MM-DDThh:mm:ssZ` (UTC, whole seconds, the form SPDX 2.3 requires). Derive it from the release commit so every run of the same commit writes the same bytes: `TZ=UTC git show -s --date=format-local:%Y-%m-%dT%H:%M:%SZ --format=%cd <commit>`. `build gate` refuses a missing `--version`, `--commit` or `--created`, or a malformed `--created`, before it prints any result.
 - [ ] `checksums`: `SHA256SUMS` matches every artifact and `release.json` (reproducible, `--reproduce`).
 - [ ] `artifacts` (CI step `Deterministic wheel, npm packages and container image` in release.yml; not a `build gate` check): wheel, npm tarballs and image from `go run ./build artifacts --reproduce` are byte-identical across two builds (`SHA256SUMS.artifacts` and `artifacts.json` compare equal); `artifacts.json` records the `release.json` and SBOM digests it was built next to.
 - [ ] `signature`: detached Ed25519 signature over the `release.json` digest verifies against the published public key (`not_signed` blocks).
 - [ ] `handle_check`: npm/PyPI/Go handles checked unclaimed (`not_run` blocks). A handle this project has already published is listed in `build/owned-handles.json` with its evidence and may exist; any other existing handle blocks.
 - [ ] `owner_approval`: signed owner approval for this exact version, commit and manifest digest.
 - [ ] Fresh install-single and install-distributed smokes plus UI/SDK/native/reference smokes run against the produced artifacts.
+
+The documented invocation of the machine form (`docs/releases/security.md` lists every flag):
+
+```sh
+COMMIT=$(git rev-parse HEAD)
+CREATED=$(TZ=UTC git show -s --date=format-local:%Y-%m-%dT%H:%M:%SZ --format=%cd "$COMMIT")
+go run ./build gate --version "$VERSION" --commit "$COMMIT" --created "$CREATED" --ledger tasks.json --artifacts dist/release \
+  --evidence language=language.json --evidence runtime=runtime.json --evidence privacy=privacy.json \
+  --evidence node_loss=node_loss.json --evidence browser=browser.json
+```
 
 Release platform scope (owner decision D10, 2026-11-15): the release contains only linux/amd64, so `go run ./build release` builds `releaseevidence.ReleasePlatforms` only. Qualification rows for other platforms (linux/arm64, Windows and macOS hosts, Safari on macOS, Edge/Firefox on Windows) are reported as `out_of_release_scope` with D10 as the reason, never as passed; they never run, are listed separately from unqualified rows, and do not change the suite exit code. The gate accepts such a required row only when its detail cites D10 and its platform is not a release platform; every other non-`passed` required row still blocks. A later release that adds a platform lists it in `release_platforms` of `qualification/matrix.yaml` and `ReleasePlatforms`, and its rows run unchanged.

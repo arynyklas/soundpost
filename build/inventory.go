@@ -231,12 +231,46 @@ type inventoryOverrides struct {
 	// NPMSPDXText is the explicit allowlist (not a general fallback) of packages that use the
 	// SPDX canonical text because neither package nor repository ships one.
 	NPMSPDXText map[string]spdxTextOverride `json:"npm_spdx_text"`
-	// PyPILicense assigns an SPDX license to a pin whose metadata only carries an ambiguous
-	// classifier, with the reviewer's evidence. Applied only while the record is NOASSERTION.
-	PyPILicense map[string]struct {
-		License  string `json:"license"`
-		Evidence string `json:"evidence"`
-	} `json:"pypi_license"`
+	// PyPILicense assigns an SPDX license to a pin whose metadata only carries an ambiguous declaration, with
+	// the reviewer's evidence. It applies only while the record still equals the value the review covered.
+	PyPILicense map[string]pypiOverride `json:"pypi_license"`
+}
+
+// pypiOverride is one reviewed license decision for a pinned PyPI package.
+type pypiOverride struct {
+	License string `json:"license"`
+	// Declared is the metadata-derived value the review covers: NOASSERTION (the default when omitted) for
+	// metadata that names no license, or the free-text value PyPI carries (for example "BSD"). A package whose
+	// metadata later says something else is not covered by the review and keeps what its metadata says.
+	Declared string `json:"declared,omitempty"`
+	Evidence string `json:"evidence"`
+	// Sources are the upstream license files the reviewer read, pinned by the sha256 of the fetched bytes.
+	Sources []overrideSource `json:"sources,omitempty"`
+}
+
+type overrideSource struct {
+	URL    string `json:"url"`
+	SHA256 string `json:"sha256"`
+}
+
+// coveredDeclared is the metadata-derived license value the review applies to.
+func (o pypiOverride) coveredDeclared() string {
+	if o.Declared == "" {
+		return NoAssertion
+	}
+	return o.Declared
+}
+
+// sourceNote renders the upstream license files the reviewer read, for the inventory's license_source.
+func (o pypiOverride) sourceNote() string {
+	if len(o.Sources) == 0 {
+		return ""
+	}
+	parts := make([]string, len(o.Sources))
+	for i, s := range o.Sources {
+		parts[i] = s.URL + " sha256 " + s.SHA256
+	}
+	return "; upstream license file " + strings.Join(parts, ", ")
 }
 
 // GenerateNodeInventory builds the inventory for exactly the given lock text.
@@ -709,8 +743,8 @@ func GeneratePythonInventory(ctx context.Context, src artifactSource, locks map[
 	}
 	for i := range inv.Packages {
 		p := &inv.Packages[i]
-		if o, ok := ov.PyPILicense[p.Name+"@"+p.Version]; ok && p.License == NoAssertion {
-			p.License, p.LicenseReason, p.LicenseSource = o.License, "", "reviewed override license-overrides.json: "+o.Evidence
+		if o, ok := ov.PyPILicense[p.Name+"@"+p.Version]; ok && p.License == o.coveredDeclared() {
+			p.License, p.LicenseReason, p.LicenseSource = o.License, "", "reviewed override license-overrides.json: "+o.Evidence+o.sourceNote()
 		}
 	}
 	return inv, lt, nil

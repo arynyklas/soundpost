@@ -345,8 +345,12 @@ func checkSupplyChain(r Reports, m *ReleaseManifest) []Check {
 	sb := Check{Name: checkSBOM}
 	cdx, err1 := GenerateCycloneDX(inv, r.Version, r.Created)
 	spdx, err2 := GenerateSPDX(inv, r.Version, r.Created)
-	if err1 != nil || err2 != nil {
-		sb.Blocking = append(sb.Blocking, fmt.Sprintf("SBOM generation failed: cyclonedx=%v spdx=%v", err1, err2))
+	genErr := err1
+	if genErr == nil {
+		genErr = err2
+	}
+	if genErr != nil {
+		sb.Blocking = append(sb.Blocking, "SBOM generation failed: "+genErr.Error())
 	} else {
 		m.CycloneDXSHA256, m.SPDXSHA256, m.Components = ManifestDigest(cdx), ManifestDigest(spdx), len(inv.Components)
 		sb.Detail = fmt.Sprintf("%d components; cyclonedx sha256 %s; spdx sha256 %s", len(inv.Components), m.CycloneDXSHA256, m.SPDXSHA256)
@@ -823,7 +827,7 @@ func runPackage(cmd string, args []string, out io.Writer) error {
 	f := flag.NewFlagSet(cmd, flag.ContinueOnError)
 	root := f.String("root", ".", "repository root")
 	version := f.String("version", "", "release version")
-	created := f.String("created", "", "explicit RFC 3339 timestamp for the SBOM")
+	created := f.String("created", "", "explicit UTC timestamp YYYY-MM-DDThh:mm:ssZ for the SBOM (sbom, gate); never read from the clock")
 	outDir := f.String("out", "", "output directory (sbom) or file (handles, gate)")
 	check := f.Bool("check", false, "notices: fail when THIRD_PARTY_NOTICES is not a fresh generation")
 	commit := f.String("commit", "", "gate: source commit")
@@ -934,6 +938,20 @@ func runPackage(cmd string, args []string, out io.Writer) error {
 		return err
 	}
 	// gate
+	// An incomplete invocation is refused before any result is computed: a partial answer ("blocking=0", or an
+	// SBOM failure among other items) is not a gate answer.
+	var missing []string
+	for _, in := range []struct{ flag, value string }{{"--version", *version}, {"--commit", *commit}, {"--created", *created}} {
+		if in.value == "" {
+			missing = append(missing, in.flag)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("gate needs %s (--created is %s)", strings.Join(missing, ", "), createdHint)
+	}
+	if err := validateCreated(*created); err != nil {
+		return err
+	}
 	r := Reports{Root: absRoot, Version: *version, Created: *created, LedgerPath: *ledger, Evidence: evidence,
 		ArtifactDir: *artifacts, PublicKeyPath: *pubkey, SignaturePath: *sig, ApprovalPath: *approval, AcceptedTasks: map[string]bool{}}
 	for _, id := range accepted {

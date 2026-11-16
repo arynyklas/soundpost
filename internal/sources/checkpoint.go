@@ -266,10 +266,22 @@ func (s *Store) save(cp Checkpoint) error {
 	if err != nil {
 		return newError(cp.Source, StatusUnknown, ReasonReadFailed)
 	}
-	tmp := p + ".tmp"
+	if writeFileAtomic(p, raw) != nil {
+		return newError(cp.Source, StatusUnknown, ReasonReadFailed)
+	}
+	return nil
+}
+
+// writeFileAtomic replaces the file at path with raw so that a crash leaves
+// either the old or the new content, never a mixture: a temporary file in the
+// same directory is written and fsynced, renamed over the target, and the
+// directory is fsynced. The file is private (0600). The checkpoint store and the
+// scrape state store share it.
+func writeFileAtomic(path string, raw []byte) error {
+	tmp := path + ".tmp"
 	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
 	if err != nil {
-		return newError(cp.Source, StatusUnknown, ReasonReadFailed)
+		return err
 	}
 	_, werr := f.Write(raw)
 	if werr == nil {
@@ -278,11 +290,11 @@ func (s *Store) save(cp Checkpoint) error {
 	cerr := f.Close()
 	if werr != nil || cerr != nil {
 		os.Remove(tmp)
-		return newError(cp.Source, StatusUnknown, ReasonReadFailed)
+		return errors.Join(werr, cerr)
 	}
-	if err := durablefs.Rename(tmp, p); err != nil {
+	if err := durablefs.Rename(tmp, path); err != nil {
 		os.Remove(tmp)
-		return newError(cp.Source, StatusUnknown, ReasonReadFailed)
+		return err
 	}
 	return nil
 }

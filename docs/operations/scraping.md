@@ -133,9 +133,12 @@ carried) and a closed `Reason`:
 | `grant_denied` | the credential is unknown, revoked or expired, or does not cover the configured project/source |
 | `policy_stale` | the source's policy revision differs from `policy_revision` |
 | `grant_unavailable` | the node could not answer (not a verdict) |
-| `admit_failed` | a batch was refused or could not be made durable; the stale-marker state is not advanced |
+| `admit_failed` | a batch was refused or could not be made durable; the committed stale-marker state is not advanced |
 | `invalid` | the target or grant failed validation before any request |
 | `cancelled` | the node is stopping |
+| `state_corrupt` | the persisted stale-marker state of the target cannot be trusted (see "Restart"); nothing was scraped or admitted |
+| `state_unavailable` | the state directory or file could not be read or written |
+| `state_too_large` | the carried series would exceed the persisted bound (see "Restart"); nothing was admitted |
 
 A status carries no URL, header, body, secret or transport error text. A failed
 wrong secret therefore shows as `bad_status` (HTTP 401) with nothing admitted.
@@ -152,18 +155,67 @@ or secret, a header, a response body, or a project or source identifier.
 
 ## Restart
 
-The carried series set (what stale markers are computed against) is deliberately
-**not persisted**. After a restart the first cycle has nothing to compare with, so:
+The carried series set (what stale markers are computed against) is **persisted**, so
+a restart of the node does not forget it. `soundpost serve` keeps it in a private
+subdirectory of its own data directory, `<data-dir>/scrape-state/<alias>.scrape-state.json`
+(directory `0700`, file `0600`); nothing is configured for it. A file is written
+atomically (temporary file, fsync, rename, directory fsync) and carries a SHA-256 of
+its content. It is written only for a target whose `stale` policy consumes the set
+(`on_disappear` or `on_failure`), and only when the set changes, not every interval.
 
-* a series that disappeared while the node was down gets no stale marker; its last
-  sample ends at the query lookback like after any scrape gap (the same behaviour
-  as a Prometheus restart);
-* the new process never invents or repeats a marker, and from its first healthy
-  cycle it carries and marks exactly like an uninterrupted scraper;
-* a cycle whose batches could not be admitted does not advance the set, so no
-  marker is lost to an admission failure.
+The rule of one cycle:
 
-`TestScrapeRestartForgetsCarriedSeriesWithoutInventingMarkers` pins this.
+1. The first cycle after a start restores the set from the file. A series that
+   vanished while the node was down therefore gets its stale marker on the **first**
+   cycle after the restart: exactly one, admitted once, and the cycles after it do not
+   repeat it. `on_failure` sees the restored set as well: an exporter that is down on
+   the first cycle has every series the previous process carried marked.
+2. Before the cycle's first batch is submitted the file holds *the previous set ∪ the
+   cycle's own set*. Only after **every** batch has its receipt does it become exactly
+   the cycle's own set: the committed set advances only after the receipts, like the
+   log checkpoint.
+3. A crash, or a lost acknowledgement, between admission and that second write leaves
+   the union on disk, so a restart carries a superset of everything that could have been
+   admitted: **a marker is never skipped**, including the marker of a series that was
+   first seen in the cycle that crashed and vanished right after the restart. The price
+   is at-least-once: a marker whose batch had in fact been admitted, but whose receipt (or
+   the second write) was lost, is produced again on the first cycle after the restart.
+   That repeat is *not* a byte-identical retry: batch and record identifiers bind the
+   target alias and the scrape time, so it is a distinct batch carrying the same series
+   with the same stale value at a later time, which changes no query answer. At most
+   one such repeat per vanished series per lost cycle; the same rule already holds inside
+   one process (a refused cycle marks again on the next one).
+4. The state of a target is keyed by its alias and by a digest of its identity: the
+   organization, project, source and producer it admits as, its resource (service,
+   environment, build, instance, labels), its URL and its stale policy. Another target,
+   or the same alias after one of these changed, does not inherit the series: its first
+   cycle starts empty and its first write replaces the file (the series of the old
+   configuration are not marked, as for a removed target). A policy revision or an interval
+   change is not an identity change.
+5. The carried set is bounded by the target's own series limit (20000 per scrape):
+   at most twice that, the previous committed set plus one cycle's own set, and a file of
+   at most 64 MiB. A cycle that would exceed the bound is refused as `state_too_large`
+   before anything is admitted, and the file is left unchanged; it clears as soon as the
+   exporter's series fit the bound again. A file over the bound at load is refused the
+   same way.
+6. A state file that cannot be trusted (unparseable, checksum or version mismatch, the
+   alias of another target, an invalid series) is **never** read as "nothing seen": that
+   would hide a gap. The target fails every cycle as `state_corrupt` before the exporter is
+   contacted or anything is admitted, and the file is left as it is. To recover, accept the
+   gap and remove `<alias>.scrape-state.json` (the target then starts as a new one), or
+   restore the file; the next cycle picks it up without a restart. An
+   unreadable directory or failed write is `state_unavailable`; if only the second write
+   fails, the cycle's batches are admitted and the file keeps the union, which is safe.
+
+The state is node-local: a node that starts over an empty data directory starts every
+target as new, with no marker for series the previous installation had seen.
+
+`TestScrapeStaleMarkersSurviveARestart`, `TestScrapeLostAckNeverLosesAStaleMarker`,
+`TestScrapeCorruptStateIsATypedErrorNotNothingSeen`, `TestScrapeStateIsNotInheritedByAnotherTarget`
+and `TestScrapeStateIsBounded` (package `internal/sources`) pin the rule;
+`TestServeKeepsTheStaleMarkerStateAcrossAKilledRestart` (package `cmd/soundpost`) runs it
+through the real `soundpost serve` killed with SIGKILL and started again over the same
+data directory.
 
 ## Policy revision
 
@@ -184,6 +236,12 @@ starts the real `soundpost serve` child, an exporter bound to a private IPv4 add
 of the host (skipped when the host has none) and a configuration allowing exactly that
 `/32`; it reads the scraped sample back through the query engine after serve stopped,
 and shows that without the allow prefix the exporter is never contacted.
+
+`go test -run TestServeKeepsTheStaleMarkerStateAcrossAKilledRestart ./cmd/soundpost`
+does the same over a restart: the exporter exposes two series, serve is killed with
+SIGKILL, the exporter drops one while the node is down, and the restarted serve admits
+the stale marker of the dropped series on its first cycle (read back through the query
+engine: the dropped series is no longer returned, while before the restart it still was).
 
 ## Windows
 

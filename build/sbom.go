@@ -23,6 +23,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 // NoAssertion is the SPDX value for "no committed license record".
@@ -570,8 +571,28 @@ type cdxDoc struct {
 
 func isExpression(l string) bool { return strings.Contains(l, " AND ") || strings.Contains(l, " OR ") }
 
+// createdTimestamp is SPDX 2.3's creationInfo.created form: UTC, whole seconds, a Z suffix. CycloneDX takes it too,
+// so one value feeds both documents and is the same text wherever it is derived.
+var createdTimestamp = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$`)
+
+// createdHint describes the one accepted creation-time form and how to derive it from the commit.
+const createdHint = "an explicit UTC timestamp YYYY-MM-DDThh:mm:ssZ, never read from the clock; derive it from the commit time with " +
+	"TZ=UTC git show -s --date=format-local:%Y-%m-%dT%H:%M:%SZ --format=%cd <commit>"
+
+func validateCreated(created string) error {
+	if _, err := time.Parse(time.RFC3339, created); err != nil || !createdTimestamp.MatchString(created) {
+		return fmt.Errorf("--created %q is not %s", created, createdHint)
+	}
+	return nil
+}
+
 // GenerateCycloneDX renders the inventory as CycloneDX 1.5 JSON. created may be empty.
 func GenerateCycloneDX(inv Inventory, version, created string) ([]byte, error) {
+	if created != "" {
+		if err := validateCreated(created); err != nil {
+			return nil, err
+		}
+	}
 	var d cdxDoc
 	d.BOMFormat, d.SpecVersion, d.Version, d.Metadata.Timestamp = "CycloneDX", "1.5", 1, created
 	d.Metadata.Component = cdxComp{Type: "application", BOMRef: "pkg:generic/soundpost@" + version, Name: "soundpost", Version: version, PURL: "pkg:generic/soundpost@" + version,
@@ -650,7 +671,10 @@ type spdxDoc struct {
 // created must be supplied; it is never read from the clock.
 func GenerateSPDX(inv Inventory, version, created string) ([]byte, error) {
 	if created == "" {
-		return nil, errors.New("SPDX creationInfo.created is required: pass an explicit timestamp input")
+		return nil, fmt.Errorf("SPDX creationInfo.created is required: pass --created %s", createdHint)
+	}
+	if err := validateCreated(created); err != nil {
+		return nil, err
 	}
 	var d spdxDoc
 	d.Version, d.DataLic, d.ID, d.Name = "SPDX-2.3", "CC0-1.0", "SPDXRef-DOCUMENT", "soundpost-"+version

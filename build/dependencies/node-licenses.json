@@ -3,7 +3,7 @@
   "license": "Apache-2.0",
   "scope": "Declared licenses and license texts of all current pnpm lock packages, including optional platforms; regenerate with `go run ./build inventory --node`",
   "lock": "pnpm-lock.yaml",
-  "lock_sha256": "b98f6bd81b797eb9b04c15aefeb88d96304ba926e7628c4b8cb64111b117498a",
+  "lock_sha256": "b5f2b48623520061f4fb27a333efc7a4a87ec44ba6de85308b2b79ebbed3abc0",
   "packages": [
     {
       "name": "@esbuild/aix-ppc64",

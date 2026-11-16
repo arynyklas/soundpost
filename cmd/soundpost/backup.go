@@ -26,7 +26,7 @@ const backupUsage = `usage: soundpost backup <command> [flags]
   authority-keygen  --out FILE --id ID [--restricted-out FILE] create the restore authority's signing/sealing keys
   authority-init    (--data-dir DIR | --installation ID) --authority-keys FILE <authority destination>
   create            --data-dir DIR --admin-email EMAIL --key-dir DIR --data-kek ID --secret-kek ID
-                    --authority-keys FILE <backup destination> <authority destination>
+                    --authority-keys FILE [--install-config FILE] <backup destination> <authority destination>
                     [--mode distributed --node-id N --cluster-config FILE]  (a node of a three-voter cluster)
   list              <backup destination>
   expire            --key-dir DIR [--abandoned-after DUR] <backup destination>   delete the objects of expired and abandoned backups
@@ -332,6 +332,7 @@ func backupCreate(args []string) error {
 	attempts := f.String("attempts-dir", "", "")
 	chunkSize := f.Uint("chunk-size", 0, "")
 	keysPath := f.String("authority-keys", "", "")
+	installConfig := f.String("install-config", "", "")
 	dest := newDestinationFlags(f, "dest")
 	authorityDest := newDestinationFlags(f, "authority")
 	if err := parseFlags(f, args); err != nil {
@@ -352,6 +353,11 @@ func backupCreate(args []string) error {
 	}
 	if *attempts == "" {
 		*attempts = filepath.Join(*dataDir, "backup-attempts")
+	}
+	// The installation file's backup gate comes first: nothing is opened, written or advanced until it passes.
+	label, err := backupGate(*installConfig, dest, authorityDest, time.Now)
+	if err != nil {
+		return err
 	}
 	destination, err := dest.open()
 	if err != nil {
@@ -395,7 +401,7 @@ func backupCreate(args []string) error {
 	if err != nil {
 		return err
 	}
-	return printJSON(map[string]any{"backup_id": manifest.ID.String(), "created_at_ns": manifest.CreatedAt, "completed_at_ns": manifest.CompletedAt, "expires_at_ns": manifest.ExpiresAt, "duration_ms": time.Since(started).Milliseconds(), "objects": len(manifest.Objects), "control_revision": manifest.Control.Revision, "authority_sequence": manifest.Deletion.Sequence, "authority_generation": manifest.Deletion.Generation, "gaps": len(manifest.Gaps), "voters": topologyVoters(manifest.Topology)})
+	return printJSON(map[string]any{"backup_id": manifest.ID.String(), "backup_label": label, "created_at_ns": manifest.CreatedAt, "completed_at_ns": manifest.CompletedAt, "expires_at_ns": manifest.ExpiresAt, "duration_ms": time.Since(started).Milliseconds(), "objects": len(manifest.Objects), "control_revision": manifest.Control.Revision, "authority_sequence": manifest.Deletion.Sequence, "authority_generation": manifest.Deletion.Generation, "gaps": len(manifest.Gaps), "voters": topologyVoters(manifest.Topology)})
 }
 
 func backupList(args []string) error {

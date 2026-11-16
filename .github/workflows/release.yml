@@ -17,7 +17,7 @@ on:
         description: Release version to dry-run
         required: true
       created:
-        description: RFC 3339 timestamp recorded in the SBOMs
+        description: UTC timestamp YYYY-MM-DDThh:mm:ssZ recorded in the SBOMs (derive it from the commit time; see docs/releases/checklist.md)
         required: true
       ledger:
         description: Path in the checkout to a copy of the plan ledger (tasks.json)

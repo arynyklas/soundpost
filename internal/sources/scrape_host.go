@@ -39,6 +39,8 @@ type ScrapeHostDeps struct {
 	// Policies reads the live source policy (in production *auth.Service). It
 	// is required only by targets that follow the live policy revision.
 	Policies SourcePolicyReader
+	// State, when set, persists each target's carried-series set.
+	State *ScrapeStateStore
 }
 
 // SourcePolicyReader answers the live authority of a source, including its
@@ -68,6 +70,12 @@ const (
 	ScrapeReasonInvalid ScrapeReason = "invalid"
 	// ScrapeReasonCancelled: the host is stopping.
 	ScrapeReasonCancelled ScrapeReason = "cancelled"
+	// ScrapeReasonStateCorrupt: the persisted stale-marker state of the target cannot be trusted.
+	ScrapeReasonStateCorrupt ScrapeReason = "state_corrupt"
+	// ScrapeReasonStateUnavailable: the persisted stale-marker state could not be read or written.
+	ScrapeReasonStateUnavailable ScrapeReason = "state_unavailable"
+	// ScrapeReasonStateTooLarge: the carried series would exceed the persisted bound.
+	ScrapeReasonStateTooLarge ScrapeReason = "state_too_large"
 )
 
 // scrapeGrantError carries the typed reason of a failed grant resolution
@@ -153,6 +161,7 @@ func startScrapeHost(ctx context.Context, deps ScrapeHostDeps, specs []ScrapeTar
 		t := &scrapeHosted{alias: spec.Target.Alias, project: spec.Project, scraper: &Scraper{
 			Target: spec.Target,
 			Admit:  deps.Ingest.Admit,
+			State:  deps.State,
 		}}
 		t.scraper.Grant = scrapeGrantFunc(deps, spec, &t.revision)
 		if spec.FollowPolicy {
@@ -228,6 +237,7 @@ func scrapeGrantReason(ctx context.Context, err error) ScrapeReason {
 func (h *ScrapeHost) record(t *scrapeHosted, res ScrapeResult, err error) {
 	reason := ScrapeReasonNone
 	var ge *scrapeGrantError
+	var se *ScrapeStateError
 	switch {
 	case err == nil:
 		if res.Health.Status != ScrapeOK {
@@ -235,6 +245,8 @@ func (h *ScrapeHost) record(t *scrapeHosted, res ScrapeResult, err error) {
 		}
 	case errors.As(err, &ge):
 		reason = ge.reason
+	case errors.As(err, &se): // the persisted stale-marker state, before or after the fetch
+		reason = ScrapeReason(se.Reason)
 	case res.Target != "": // the fetch produced batches that could not be admitted
 		reason = ScrapeReasonAdmitFailed
 	case errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded):

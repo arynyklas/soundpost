@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"net/http"
+	"path/filepath"
 	"strconv"
 
 	"github.com/arynyklas/soundpost/internal/appcore"
@@ -20,12 +21,27 @@ import (
 type scrapeOptions struct {
 	config     *string
 	secretsDir *string
+	// dataDir reads --data-dir of the flag set the scrape flags were added to: the
+	// stale-marker state of the scrapers lives in a private subdirectory of the
+	// node's own data directory, so it survives a restart of the same node.
+	dataDir func() string
 }
+
+// scrapeStateDirName is the private subdirectory of the data directory that holds
+// the carried-series state of every scrape target (docs/operations/scraping.md,
+// "Restart").
+const scrapeStateDirName = "scrape-state"
 
 func addScrapeFlags(f *flag.FlagSet) scrapeOptions {
 	return scrapeOptions{
 		config:     f.String("scrape-config", "", "private JSON listing the OpenMetrics scrape targets this node scrapes (mode 0600, not group/world writable); requires --scrape-secrets-dir; see docs/operations/scraping.md"),
 		secretsDir: f.String("scrape-secrets-dir", "", "private (0700) directory of 0600 secret files named by the references in --scrape-config: target credentials and the source credential each target admits as"),
+		dataDir: func() string {
+			if d := f.Lookup("data-dir"); d != nil {
+				return d.Value.String()
+			}
+			return ""
+		},
 	}
 }
 
@@ -33,6 +49,9 @@ func addScrapeFlags(f *flag.FlagSet) scrapeOptions {
 type scrapeSettings struct {
 	specs   []sources.ScrapeTargetSpec
 	secrets sources.SecretReader
+	// stateDir holds the carried-series state of the targets; empty (only for a
+	// flag set without --data-dir, i.e. never in serve) keeps it in memory.
+	stateDir string
 }
 
 // errScrapeFlags is the pairing error of the two flags.
@@ -59,7 +78,25 @@ func (o scrapeOptions) settings() (scrapeSettings, error) {
 	if err != nil {
 		return scrapeSettings{}, err
 	}
-	return scrapeSettings{specs: specs, secrets: secrets}, nil
+	stateDir, err := scrapeStateDir(o.dataDir)
+	if err != nil {
+		return scrapeSettings{}, err
+	}
+	return scrapeSettings{specs: specs, secrets: secrets, stateDir: stateDir}, nil
+}
+
+// scrapeStateDir is the state directory under the data directory named by
+// dataDir (nothing for a flag set that has none). Nothing is created here:
+// start opens it once the node is open.
+func scrapeStateDir(dataDir func() string) (string, error) {
+	if dataDir == nil || dataDir() == "" {
+		return "", nil
+	}
+	abs, err := filepath.Abs(dataDir())
+	if err != nil {
+		return "", &sources.ScrapeStateError{Reason: sources.ScrapeStateUnavailable}
+	}
+	return filepath.Join(abs, scrapeStateDirName), nil
 }
 
 // start runs the scrapers under ctx against the opened node. It returns nil
@@ -69,7 +106,14 @@ func (s scrapeSettings) start(ctx context.Context, core *appcore.App) (*sources.
 	if len(s.specs) == 0 {
 		return nil, nil
 	}
-	return sources.StartScrapeHost(ctx, sources.ScrapeHostDeps{Auth: core.Auth, Ingest: core.Ingest, Secrets: s.secrets, Policies: core.Auth}, s.specs)
+	var state *sources.ScrapeStateStore
+	if s.stateDir != "" {
+		var err error
+		if state, err = sources.OpenScrapeStateStore(s.stateDir); err != nil {
+			return nil, err
+		}
+	}
+	return sources.StartScrapeHost(ctx, sources.ScrapeHostDeps{Auth: core.Auth, Ingest: core.Ingest, Secrets: s.secrets, Policies: core.Auth, State: state}, s.specs)
 }
 
 // scrapeFailureNotice is the one stderr line serve prints when the scrape
@@ -78,11 +122,14 @@ func (s scrapeSettings) start(ctx context.Context, core *appcore.App) (*sources.
 func scrapeFailureNotice(err error) string {
 	var ce *sources.ScrapeConfigError
 	var se *sources.SecretError
+	var st *sources.ScrapeStateError
 	switch {
 	case errors.As(err, &ce):
 		return "scrape: " + ce.Reason
 	case errors.As(err, &se):
 		return "scrape: secrets_" + se.Reason
+	case errors.As(err, &st):
+		return "scrape: " + string(st.Reason)
 	case errors.Is(err, errScrapeFlags):
 		return "scrape: flags_incomplete"
 	}

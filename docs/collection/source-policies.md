@@ -108,7 +108,9 @@ through the existing owner path** and stored in the secrets directory
 (`AuthenticateSource`, then `ingest.Service.ResolveSource` for the configured
 project, source and policy revision), admits through `ingest.Service.Admit`, the
 same service the HTTP ingest route calls, and carries the stale-marker state
-forward only after every batch has its receipt. The node holds no identity of its
+forward only after every batch has its receipt; that state is persisted in a private
+subdirectory of the data directory and survives a restart (rule, bound and typed
+failures: `docs/operations/scraping.md`, "Restart"). The node holds no identity of its
 own: revoking or expiring the source stops admission, typed (`grant_denied`). The
 remote `soundpost-agent` does **not** scrape.
 

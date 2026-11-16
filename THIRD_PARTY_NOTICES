@@ -275,18 +275,18 @@ wrappy 1.0.2 | license ISC | scope optional | text yes
 xtend 4.0.2 | license MIT | scope optional | text yes
 
 == Python packages (sdk/python/requirements-*.lock) ==
-amqp 5.4.2 | license BSD | scope optional | text yes
+amqp 5.4.2 | license BSD-3-Clause | scope optional | text yes
 annotated-doc 0.0.5 | license MIT | scope optional | text yes
 annotated-types 0.8.0 | license MIT | scope optional | text yes
 anyio 4.16.0 | license MIT | scope optional | text yes
-billiard 4.3.2 | license BSD | scope optional | text yes
+billiard 4.3.2 | license BSD-3-Clause | scope optional | text yes
 blinker 1.9.0 | license MIT | scope optional | text yes
 celery 5.7.0 | license BSD-3-Clause | scope optional | text yes
 certifi 2026.10.23 | license MPL-2.0 | scope optional | text yes
 cffi 2.1.1 | license MIT-0 | scope optional | text yes
 charset-normalizer 3.5.2 | license MIT | scope optional | text yes
 click-didyoumean 0.3.1 | license MIT | scope optional | text yes
-click-plugins 1.1.1.2 | license NOASSERTION | scope optional | text yes
+click-plugins 1.1.1.2 | license BSD-3-Clause | scope optional | text yes
 click-repl 0.4.1 | license MIT | scope optional | text yes
 click 8.5.0 | license BSD-3-Clause | scope optional | text yes
 colorama 0.4.6 | license BSD-3-Clause | scope optional | text yes
@@ -304,7 +304,7 @@ kombu 5.7.0 | license BSD-3-Clause | scope optional | text yes
 markupsafe 3.0.4 | license BSD-3-Clause | scope optional | text yes
 packaging 26.3 | license Apache-2.0 OR BSD-2-Clause | scope optional | text yes
 pluggy 1.7.0 | license MIT | scope optional | text yes
-prompt-toolkit 3.0.53 | license NOASSERTION | scope optional | text yes
+prompt-toolkit 3.0.53 | license BSD-3-Clause | scope optional | text yes
 psycopg-binary 3.2.10 | license LGPL-3.0-only | scope optional | text yes
 psycopg 3.2.10 | license LGPL-3.0-only | scope optional | text yes
 pycparser 3.12 | license BSD-3-Clause | scope optional | text yes
@@ -322,7 +322,7 @@ tzdata 2026.6 | license Apache-2.0 | scope optional | text yes
 tzlocal 5.4.5 | license MIT | scope optional | text yes
 urllib3 2.8.0 | license MIT | scope optional | text yes
 uvicorn 0.54.0 | license BSD-3-Clause | scope optional | text yes
-vine 5.1.0 | license BSD | scope optional | text yes
+vine 5.1.0 | license BSD-3-Clause | scope optional | text yes
 wcwidth 0.9.4 | license MIT | scope optional | text yes
 werkzeug 3.1.9 | license BSD-3-Clause | scope optional | text yes
 
