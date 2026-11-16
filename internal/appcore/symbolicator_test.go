@@ -185,6 +185,34 @@ func TestPassingProbesInstallTheRealService(t *testing.T) {
 	}
 }
 
+// The startup sweep of leftover worker containers is reported in the status (so
+// serve logs it), including a runtime that cannot even list; native mode has none.
+func TestSweepOutcomeIsReportedInTheStatus(t *testing.T) {
+	r := newSymRig(t)
+	withProbe(t, probeDenied)
+	oci := symbolicate.Config{Mode: "oci", OCIRuntime: filepath.Join(t.TempDir(), "no-such-runtime"), OCIImage: "sha256:" + strings.Repeat("a", 64), WorkerSHA256: model.HashCanonical([]byte("w"))}
+	if st := r.configure(SymbolicatorSettings{ConfigPath: writeConfig(t, oci)}); st.State != SymbolicatorReady || st.Sweep != "list_failed" {
+		t.Fatalf("status %+v, want ready with sweep list_failed", st)
+	}
+	if st := newSymRig(t).configure(SymbolicatorSettings{ConfigPath: dummyConfig(t)}); st.Sweep != "" {
+		t.Fatalf("native status carries a sweep: %+v", st)
+	}
+	if got := sweepSummary(symbolicate.SweepResult{Ran: true, Removed: []string{"a", "b"}, RemoveFailed: 1, Unparsed: 3}); got != "removed=2 remove_failed=1 unparsed=3" {
+		t.Fatalf("summary %q", got)
+	}
+}
+
+// An App without its parts never panics and never claims a resolver.
+func TestConfigureSymbolicatorOnAnIncompleteAppIsUnavailable(t *testing.T) {
+	if st := (&App{}).ConfigureSymbolicator(context.Background(), SymbolicatorSettings{}); st.State != SymbolicatorUnavailable || st.Reason != "app_incomplete" {
+		t.Fatalf("status %+v", st)
+	}
+	var nilApp *App
+	if st := nilApp.ConfigureSymbolicator(context.Background(), SymbolicatorSettings{}); st.Reason != "app_incomplete" {
+		t.Fatalf("status %+v", st)
+	}
+}
+
 // The operator's explicit off switch: no probe, no child, nothing mapped, a typed
 // answer, even when a working backend is also named.
 func TestDisabledSandboxNeverProbesAndNeverMapsFrames(t *testing.T) {

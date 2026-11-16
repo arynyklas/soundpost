@@ -247,7 +247,36 @@ func TestSweepRemovesOnlyExactMatchingContainersByID(t *testing.T) {
 	if !strings.Contains(ps, "ps -a --no-trunc --filter ancestor="+d.config.OCIImage+" --filter name=soundpost-symbolicate-") || strings.Contains(strings.Join(d.argv(), "\n"), "prune") || strings.Contains(strings.Join(d.argv(), "\n"), "--force") {
 		t.Fatalf("unexpected runtime invocations: %q", d.argv())
 	}
-	if got := SweepOCI(context.Background(), Config{Mode: "native"}); got != nil {
+	if got := SweepOCI(context.Background(), Config{Mode: "native"}); got.Ran || got.Removed != nil {
 		t.Fatal("native mode swept")
+	}
+}
+
+// The sweep reports what it did so the server can log it: removed IDs, a failed
+// `rm`, an unreadable creation time, a failed listing, and not-OCI.
+func TestSweepReportsItsOutcome(t *testing.T) {
+	d := newFakeDocker(t, "ok")
+	hex := strings.Repeat("ab", 16)
+	frac := time.Now().Add(-time.Hour).Format("2006-01-02 15:04:05.999999999 -0700 MST")
+	old := time.Now().Add(-time.Hour).Format("2006-01-02 15:04:05 -0700 MST")
+	rows := []string{
+		"id-frac|soundpost-symbolicate-" + hex + "|exited|" + frac + "|" + d.config.OCIImage,
+		"id-gone|soundpost-symbolicate-" + hex + "|exited|" + old + "|" + d.config.OCIImage,
+		"id-baddate|soundpost-symbolicate-" + hex + "|exited|yesterday|" + d.config.OCIImage,
+	}
+	if err := os.WriteFile(filepath.Join(d.dir, "ps.txt"), []byte(strings.Join(rows, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(d.dir, "containers", "id-frac"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := SweepOCI(context.Background(), d.config)
+	if !got.Ran || got.ListFailed || len(got.Removed) != 1 || got.Removed[0] != "id-frac" || got.RemoveFailed != 1 || got.Unparsed != 1 {
+		t.Fatalf("sweep result %+v, want one removed (id-frac, fractional-second time), one failed rm, one unparsed", got)
+	}
+	broken := d.config
+	broken.OCIRuntime = filepath.Join(d.dir, "no-such-runtime")
+	if got := SweepOCI(context.Background(), broken); !got.Ran || !got.ListFailed {
+		t.Fatalf("a missing runtime: %+v, want Ran and ListFailed", got)
 	}
 }

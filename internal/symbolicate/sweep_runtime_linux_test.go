@@ -86,7 +86,7 @@ func sweepScenario(t *testing.T, c Config, ageIt func(name string)) {
 		t.Fatalf("not a created-state container of the pinned image: %q", row)
 	}
 	id := row[0]
-	for _, r := range SweepOCI(context.Background(), c) {
+	for _, r := range SweepOCI(context.Background(), c).Removed {
 		if r == id {
 			t.Fatalf("a container younger than %s was swept", sweepMinAge)
 		}
@@ -95,7 +95,7 @@ func sweepScenario(t *testing.T, c Config, ageIt func(name string)) {
 		t.Fatal("young container vanished")
 	}
 	ageIt(name)
-	removed := SweepOCI(context.Background(), c)
+	removed := SweepOCI(context.Background(), c).Removed
 	found := false
 	for _, r := range removed {
 		found = found || r == id

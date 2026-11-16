@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/arynyklas/soundpost/internal/auth"
@@ -41,6 +42,11 @@ const (
 type SymbolicatorStatus struct {
 	State  SymbolicatorState
 	Reason string
+	// Sweep is the static summary of the startup sweep of leftover worker
+	// containers (OCI mode only): empty when nothing was found, otherwise a
+	// space-joined subset of "removed=N", "list_failed", "remove_failed=N",
+	// "unparsed=N".
+	Sweep string
 }
 
 // SymbolicatorSettings is the trusted operator configuration of `soundpost serve`.
@@ -112,8 +118,9 @@ func (a *App) ConfigureSymbolicator(ctx context.Context, settings SymbolicatorSe
 }
 
 func buildFrameResolver(ctx context.Context, reader symbolicate.ArtifactReader, deletes auth.DeleteGenerations, s SymbolicatorSettings) (httpapi.FrameResolver, SymbolicatorStatus) {
+	sweep := ""
 	unavailable := func(state SymbolicatorState, reason string) (httpapi.FrameResolver, SymbolicatorStatus) {
-		return sandboxUnavailable{}, SymbolicatorStatus{State: state, Reason: reason}
+		return sandboxUnavailable{}, SymbolicatorStatus{State: state, Reason: reason, Sweep: sweep}
 	}
 	if s.Disabled {
 		return unavailable(SymbolicatorDisabled, "disabled_by_operator")
@@ -124,7 +131,7 @@ func buildFrameResolver(ctx context.Context, reader symbolicate.ArtifactReader, 
 	}
 	// Remove worker containers a killed earlier process left behind (OCI mode only,
 	// exact name/image/state/age match; see symbolicate.SweepOCI).
-	symbolicate.SweepOCI(ctx, config)
+	sweep = sweepSummary(symbolicate.SweepOCI(ctx, config))
 	for _, kind := range startupProbes {
 		r := probeSandbox(ctx, config, kind)
 		if !r.Denied || r.Reason != symbolicate.Resolved {
@@ -135,7 +142,25 @@ func buildFrameResolver(ctx context.Context, reader symbolicate.ArtifactReader, 
 	if err != nil {
 		return unavailable(SymbolicatorUnavailable, "service_invalid")
 	}
-	return svc, SymbolicatorStatus{State: SymbolicatorReady, Reason: "probe_passed"}
+	return svc, SymbolicatorStatus{State: SymbolicatorReady, Reason: "probe_passed", Sweep: sweep}
+}
+
+// sweepSummary renders a SweepResult as static codes and counts.
+func sweepSummary(r symbolicate.SweepResult) string {
+	var parts []string
+	if r.ListFailed {
+		parts = append(parts, "list_failed")
+	}
+	if n := len(r.Removed); n > 0 {
+		parts = append(parts, "removed="+strconv.Itoa(n))
+	}
+	if r.RemoveFailed > 0 {
+		parts = append(parts, "remove_failed="+strconv.Itoa(r.RemoveFailed))
+	}
+	if r.Unparsed > 0 {
+		parts = append(parts, "unparsed="+strconv.Itoa(r.Unparsed))
+	}
+	return strings.Join(parts, " ")
 }
 
 // resolveSymbolicatorConfig returns the symbolicate.Config for the settings, or

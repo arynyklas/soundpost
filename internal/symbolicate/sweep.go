@@ -17,6 +17,22 @@ const sweepMinAge = 30 * time.Second
 
 var sweepName = regexp.MustCompile(`^soundpost-symbolicate-[0-9a-f]{32}$`)
 
+// SweepResult is the outcome of one SweepOCI. It carries counts and IDs only,
+// never runtime error text, so a caller can log it as is.
+type SweepResult struct {
+	// Ran is false when the configuration has nothing to sweep (not OCI mode).
+	Ran bool
+	// ListFailed: the runtime's listing failed (missing binary, non-zero exit, timeout).
+	ListFailed bool
+	// Removed are the exact IDs removed.
+	Removed []string
+	// RemoveFailed counts matching containers whose `rm` failed.
+	RemoveFailed int
+	// Unparsed counts otherwise matching containers whose creation time was not
+	// understood and which were therefore left alone.
+	Unparsed int
+}
+
 // SweepOCI removes worker containers left behind by a process that could not
 // clean up after itself (a killed server or test binary). It only ever removes a
 // container whose name is exactly `soundpost-symbolicate-<32 hex>`, whose image
@@ -28,10 +44,10 @@ var sweepName = regexp.MustCompile(`^soundpost-symbolicate-[0-9a-f]{32}$`)
 //	<runtime> ps -a --no-trunc --filter ancestor=<pinned image> --filter name=soundpost-symbolicate- --format '{{.ID}}|{{.Names}}|{{.State}}|{{.CreatedAt}}|{{.Image}}'
 //	<runtime> rm <exact container id>
 //
-// It returns the IDs it removed. Only the OCI mode has anything to sweep.
-func SweepOCI(ctx context.Context, config Config) []string {
+// It reports what it did (SweepResult). Only the OCI mode has anything to sweep.
+func SweepOCI(ctx context.Context, config Config) SweepResult {
 	if config.Mode != "oci" || !validImage(config.OCIImage) || config.OCIRuntime == "" {
-		return nil
+		return SweepResult{}
 	}
 	ctx, cancel := context.WithTimeout(ctx, ProcessTimeout)
 	defer cancel()
@@ -41,25 +57,31 @@ func SweepOCI(ctx context.Context, config Config) []string {
 	list.Stdout = &out
 	list.Stderr = io.Discard
 	if list.Run() != nil {
-		return nil
+		return SweepResult{Ran: true, ListFailed: true}
 	}
-	var removed []string
+	res := SweepResult{Ran: true}
 	for _, line := range strings.Split(string(out.data), "\n") {
 		f := strings.SplitN(strings.TrimSpace(line), "|", 5)
 		if len(f) != 5 || f[4] != config.OCIImage || f[0] == "" || !sweepName.MatchString(f[1]) || (f[2] != "created" && f[2] != "exited") {
 			continue
 		}
 		created, ok := parseDockerTime(f[3])
-		if !ok || time.Since(created) < sweepMinAge {
+		if !ok {
+			res.Unparsed++
+			continue
+		}
+		if time.Since(created) < sweepMinAge {
 			continue
 		}
 		rm := exec.CommandContext(ctx, config.OCIRuntime, "rm", f[0])
 		rm.Stdout, rm.Stderr = io.Discard, io.Discard
 		if rm.Run() == nil {
-			removed = append(removed, f[0])
+			res.Removed = append(res.Removed, f[0])
+		} else {
+			res.RemoveFailed++
 		}
 	}
-	return removed
+	return res
 }
 
 // parseDockerTime reads the `{{.CreatedAt}}` form, e.g.

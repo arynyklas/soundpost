@@ -79,8 +79,12 @@ func (o symbolicatorOptions) settings() (appcore.SymbolicatorSettings, error) {
 // symbolicatorNotice is the one stderr line serve prints about the sandbox. It
 // carries only the static state and reason codes: never a path, hash or OS error.
 func symbolicatorNotice(status appcore.SymbolicatorStatus) string {
+	line := "symbolicator: " + string(status.State) + " (" + status.Reason + "): frames keep their original identity and answer sandbox_unavailable"
 	if status.State == appcore.SymbolicatorReady {
-		return "symbolicator: ready (sandbox probes passed)"
+		line = "symbolicator: ready (sandbox probes passed)"
 	}
-	return "symbolicator: " + string(status.State) + " (" + status.Reason + "): frames keep their original identity and answer sandbox_unavailable"
+	if status.Sweep != "" {
+		line += "; worker container sweep: " + status.Sweep
+	}
+	return line
 }

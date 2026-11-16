@@ -18,6 +18,9 @@ import (
 // before it so the request that takes it keeps nearly the whole budget.
 var spareMaxAge = 2 * time.Second
 
+// spareKeepWarm is how long after a request expired spares keep being replaced.
+var spareKeepWarm = 30 * time.Second
+
 // spareState is the opt-in warm pool of an OCI service (Config.WarmSpare): at
 // most one worker per request slot (the service runs at most cap(slots)
 // requests at once, so a burst of that size finds a warm worker each) that already passed the full launch handshake (image
@@ -31,7 +34,12 @@ type spareState struct {
 	spares  []*spareWorker
 	pending int
 	// started lets tests wait for background starts.
-	started sync.WaitGroup
+	started startTracker
+	// warmUntil ends the keep-warm window opened by the latest request.
+	warmUntil time.Time
+	// maxAge and keepWarm are spareMaxAge and spareKeepWarm as of New, so a
+	// background goroutine never reads the package variables.
+	maxAge, keepWarm time.Duration
 }
 
 type spareWorker struct {
@@ -107,13 +115,22 @@ func (s *Service) takeSpare() *workerProcess {
 	return nil
 }
 
-// refillSpare tops the pool up to one worker per request slot in the
-// background, off the request's slot and clock. Nothing but a worker that
-// completed its handshake is ever kept.
+// refillSpare is called after each request: it opens (or extends) the keep-warm
+// window and tops the pool up.
 func (s *Service) refillSpare() {
 	if !s.config.WarmSpare {
 		return
 	}
+	s.spares.mu.Lock()
+	s.spares.warmUntil = time.Now().Add(s.spares.keepWarm)
+	s.spares.mu.Unlock()
+	s.topUpSpares()
+}
+
+// topUpSpares starts workers in the background, off the request's slot and
+// clock, until there is one per request slot. Nothing but a worker that
+// completed its handshake is ever kept.
+func (s *Service) topUpSpares() {
 	st := &s.spares
 	st.mu.Lock()
 	missing := cap(s.slots) - len(st.spares) - st.pending
@@ -122,7 +139,7 @@ func (s *Service) refillSpare() {
 		return
 	}
 	st.pending += missing
-	st.started.Add(missing)
+	st.started.add(missing)
 	st.mu.Unlock()
 	for range missing {
 		go s.startSpare()
@@ -131,7 +148,7 @@ func (s *Service) refillSpare() {
 
 func (s *Service) startSpare() {
 	st := &s.spares
-	defer st.started.Done()
+	defer st.started.done()
 	ctx, cancel := context.WithTimeout(context.Background(), ProcessTimeout)
 	p, reason := s.startWorker(ctx)
 	st.mu.Lock()
@@ -144,9 +161,48 @@ func (s *Service) startSpare() {
 	inner := p.cleanup
 	p.cleanup = func() { inner(); cancel() }
 	w := &spareWorker{p: p}
-	w.timer = time.AfterFunc(spareMaxAge, func() { s.expireSpare(w) })
+	w.timer = time.AfterFunc(st.maxAge, func() { s.expireSpare(w) })
 	st.spares = append(st.spares, w)
 	st.mu.Unlock()
+}
+
+// startTracker counts background worker starts in flight and lets a test wait
+// for them to finish. Unlike a sync.WaitGroup it tolerates an add concurrent with
+// a wait (a keep-warm refill triggered by an expiring spare can start at any time).
+type startTracker struct {
+	mu sync.Mutex
+	n  int
+	c  *sync.Cond
+}
+
+func (t *startTracker) cond() *sync.Cond {
+	if t.c == nil {
+		t.c = sync.NewCond(&t.mu)
+	}
+	return t.c
+}
+
+func (t *startTracker) add(n int) {
+	t.mu.Lock()
+	t.n += n
+	t.mu.Unlock()
+}
+
+func (t *startTracker) done() {
+	t.mu.Lock()
+	t.n--
+	t.cond().Broadcast()
+	t.mu.Unlock()
+}
+
+// Wait blocks until no start is in flight.
+func (t *startTracker) Wait() {
+	t.mu.Lock()
+	c := t.cond()
+	for t.n > 0 {
+		c.Wait()
+	}
+	t.mu.Unlock()
 }
 
 // expireSpare discards a spare nobody took in time.
@@ -162,4 +218,13 @@ func (s *Service) expireSpare(w *spareWorker) {
 	w.p.cmd.Process.Kill()
 	w.p.cleanup()
 	w.p.cmd.Wait()
+	// While requests keep coming (one within spareKeepWarm) an expired spare is
+	// replaced, so a request after a short pause still finds a warm worker. An
+	// idle service stops: it never keeps a worker churning forever.
+	s.spares.mu.Lock()
+	warm := time.Now().Before(s.spares.warmUntil)
+	s.spares.mu.Unlock()
+	if warm {
+		s.topUpSpares()
+	}
 }

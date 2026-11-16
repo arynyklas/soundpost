@@ -15,11 +15,61 @@ import (
 	"github.com/arynyklas/soundpost/internal/model"
 )
 
+// fastSpare shortens the spare age bound and turns the keep-warm refill off, so
+// a test sees exactly one pool generation unless it opts in with keepWarm.
 func fastSpare(t *testing.T) {
 	t.Helper()
-	prev := spareMaxAge
-	spareMaxAge = 500 * time.Millisecond
-	t.Cleanup(func() { spareMaxAge = prev })
+	prev, prevWarm := spareMaxAge, spareKeepWarm
+	spareMaxAge, spareKeepWarm = 500*time.Millisecond, 0
+	t.Cleanup(func() { spareMaxAge, spareKeepWarm = prev, prevWarm })
+}
+
+func keepWarm(t *testing.T, d time.Duration) {
+	t.Helper()
+	prev := spareKeepWarm
+	spareKeepWarm = d
+	t.Cleanup(func() { spareKeepWarm = prev })
+}
+
+// A spare that expires while requests are still arriving is replaced, so a
+// request after a short pause still finds a warm worker; once the keep-warm
+// window closes with no request the pool drains and stays empty (no endless
+// container churn on an idle service).
+func TestExpiredSparesAreRefilledWhileWarmAndNotWhenIdle(t *testing.T) {
+	fastRetries(t)
+	fastSpare(t)
+	keepWarm(t, 1500*time.Millisecond)
+	d := newFakeDocker(t, "ok")
+	s := d.warm(t)
+	answered(t, s)
+	s.spares.started.Wait()
+	first := len(d.runNames()) // its own + two spares
+	time.Sleep(spareMaxAge + 300*time.Millisecond)
+	s.spares.started.Wait()
+	if got := len(d.runNames()); got <= first {
+		t.Fatalf("no replacement spare started after the spares expired inside the keep-warm window (%d starts, %d before)", got, first)
+	}
+	if live := d.live(); len(live) == 0 {
+		t.Fatal("the pool is empty right after an expiry inside the keep-warm window")
+	}
+	// Idle past the window: everything drains and no new worker is started.
+	time.Sleep(spareKeepWarm + 2*spareMaxAge + 600*time.Millisecond)
+	s.spares.started.Wait()
+	removeRetries.Wait()
+	if live := d.live(); len(live) != 0 {
+		t.Fatalf("an idle service kept workers alive: %v", live)
+	}
+	settled := len(d.runNames())
+	time.Sleep(2 * spareMaxAge)
+	if got := len(d.runNames()); got != settled {
+		t.Fatalf("an idle service kept starting workers: %d -> %d", settled, got)
+	}
+	counts := d.removeCounts()
+	for _, n := range d.runNames() {
+		if counts[n] < 1 {
+			t.Errorf("container %s was never removed", n)
+		}
+	}
 }
 
 // runNames are the container names of every `run` the fake runtime saw, in order.

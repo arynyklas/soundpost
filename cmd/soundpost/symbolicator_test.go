@@ -92,3 +92,10 @@ func TestSymbolicatorNoticeCarriesOnlyStaticCodes(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+func TestSymbolicatorNoticeReportsTheContainerSweep(t *testing.T) {
+	got := symbolicatorNotice(appcore.SymbolicatorStatus{State: appcore.SymbolicatorReady, Reason: "probe_passed", Sweep: "removed=2 list_failed"})
+	if got != "symbolicator: ready (sandbox probes passed); worker container sweep: removed=2 list_failed" {
+		t.Fatal(got)
+	}
+}

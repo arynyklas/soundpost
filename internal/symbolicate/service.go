@@ -45,6 +45,7 @@ func New(reader ArtifactReader, deletes auth.DeleteGenerations, config Config) (
 	}
 	s := &Service{reader: reader, deletes: deletes, config: config, cache: newCache(n), slots: make(chan struct{}, 2)}
 	s.runner = s.run
+	s.spares.maxAge, s.spares.keepWarm = spareMaxAge, spareKeepWarm
 	return s, nil
 }
 func (s *Service) Resolve(ctx context.Context, scope auth.Scope, build BuildID, frames []model.Frame) ([]SymbolicatedFrame, error) {
