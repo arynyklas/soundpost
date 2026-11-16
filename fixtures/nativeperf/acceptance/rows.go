@@ -68,13 +68,17 @@ func (a *accept) assert(sp scenSpec, r *scenResult) {
 			}
 		}
 	case "contend":
-		runnable := uint64(0)
+		runnable, sleeper := uint64(0), uint64(0)
 		for _, l := range r.GT {
-			if l.Kind == "runnable_delay" {
+			switch l.Kind {
+			case "runnable_delay":
 				runnable += l.EndNs
+			case "sleeper_runnable_bound":
+				sleeper += l.EndNs
 			}
 		}
 		r.Extra["runnable_delay_truth_ns"] = runnable
+		r.Extra["sleeper_runnable_bound_ns"] = sleeper
 		if runnable == 0 {
 			r.fail("no runnable-delay ground truth recorded")
 		}

@@ -1237,18 +1237,32 @@ type Correlation struct {
 	CPUs          int
 	FinalThrough  uint64
 	// ProgressProofs is how many mid-capture drained-prefix proofs were applied;
-	// PeakHeapEvents is the most events the bounded correlation buffer held.
-	ProgressProofs int
-	PeakHeapEvents int
+	// PeakHeapEvents is the most events the bounded correlation buffer held;
+	// ReservationBytes is the share of the aggregate budget the correlator got.
+	ProgressProofs   int
+	PeakHeapEvents   int
+	ReservationBytes uint64
 }
 
-// Correlate configures a Correlator from the capture initial topology proof,
-// consumes every event in stream order, applies each progress proof (every CPU
-// reported drained through it, then Advance) where it arrived so the bounded
-// buffer drains during the capture, reports the final proof for every CPU and
-// finalizes. Nothing is inferred: a capture without both proofs yields an
-// error, never intervals.
+// Correlate configures a Correlator from the capture initial topology proof
+// with the fixed CorrelationReservationBytes, consumes every event in stream
+// order, applies each progress proof (every CPU reported drained through it, then
+// Advance) where it arrived so the bounded buffer drains during the capture,
+// reports the final proof for every CPU and finalizes. Nothing is inferred: a
+// capture without both proofs yields an error, never intervals.
 func Correlate(res CaptureResult, cfg nativeperf.Config) Correlation {
+	return correlate(res, cfg, func(uint64) (uint64, error) { return CorrelationReservationBytes, nil })
+}
+
+// CorrelateWithin is Correlate with the correlator handed only what the aggregate
+// budget has left after the capture's own admission charge (at most
+// CorrelationReservationBytes): the capture's rings, per-target buffers and the
+// helper's and this process's resident sizes at admission are charged first.
+func CorrelateWithin(res CaptureResult, cfg nativeperf.Config, m AdmissionMemory) Correlation {
+	return correlate(res, cfg, func(cpus uint64) (uint64, error) { return CorrelationReservation(cfg, m, cpus) })
+}
+
+func correlate(res CaptureResult, cfg nativeperf.Config, reserve func(cpus uint64) (uint64, error)) Correlation {
 	var out Correlation
 	var initial, final *nativeperf.AcquisitionProof
 	for i := range res.Proofs {
@@ -1271,10 +1285,13 @@ func Correlate(res CaptureResult, cfg nativeperf.Config) Correlation {
 	out.CPUs = len(initial.CPUs)
 	out.FinalThrough = uint64(final.Through)
 	c := nativeperf.NewCorrelator(cfg)
-	// 32 MiB of the 64 MiB aggregate budget (the other working sets of one capture
-	// charge about 26 MiB): about 1000 buffered events, enough for the 100 ms
-	// reorder window of a contended CPU (several thousand events per second).
-	if err := c.Configure(initial.Domain, initial.CPUs, 32<<20); err != nil {
+	reservation, err := reserve(uint64(len(initial.CPUs)))
+	if err != nil {
+		out.Err = "reservation: " + err.Error()
+		return out
+	}
+	out.ReservationBytes = reservation
+	if err := c.Configure(initial.Domain, initial.CPUs, reservation); err != nil {
 		out.Err = "configure: " + err.Error()
 		return out
 	}

@@ -124,3 +124,51 @@ func TestCompareRunnableFailsWhenBlockedTimeOfTheSameThreadsIsNotSmaller(t *test
 		t.Errorf("blocked << runnable: %s", v)
 	}
 }
+
+// A collector that never reports run-queue delay while the workload measured the
+// threads waiting is wrong, not "without evidence": it fails. Missing or
+// unknown-split evidence stays unknown, and the censored tail of a capture does
+// not make the evidence unknown.
+func TestCompareRunnableFailsAZeroRunnableReportWithCompleteBlockedEvidence(t *testing.T) {
+	blocked := nativeperf.Interval{Kind: nativeperf.IntervalBlocked, Start: 0, End: 900}
+	if v, n := CompareRunnable(1000, []nativeperf.Interval{blocked}); v != VerdictFail || n != 0 {
+		t.Errorf("complete blocked evidence, zero runnable: %s %d", v, n)
+	}
+	censored := nativeperf.Interval{Kind: nativeperf.IntervalCensored, Start: 900, End: 1000, Reason: nativeperf.ReasonUnmeasured}
+	if v, _ := CompareRunnable(1000, []nativeperf.Interval{blocked, censored}); v != VerdictFail {
+		t.Errorf("a censored tail hid a zero-runnable collector: %s", v)
+	}
+	unknown := nativeperf.Interval{Kind: nativeperf.IntervalUnknown, Start: 900, End: 1000, Reason: nativeperf.ReasonUnmeasured}
+	if v, _ := CompareRunnable(1000, []nativeperf.Interval{blocked, unknown}); v != VerdictUnknown {
+		t.Errorf("an unknown split is not evidence of zero runnable delay: %s", v)
+	}
+	if v, _ := CompareRunnable(1000, []nativeperf.Interval{{Kind: nativeperf.IntervalCPU}}); v != VerdictUnknown {
+		t.Errorf("no scheduler evidence at all: %s", v)
+	}
+}
+
+// The sleeper's runnable delay cannot exceed what its sleeps overshot (the
+// workload's measurement) by more than the approved tolerance.
+func TestCompareSleeperRunnableIsBoundedByTheMeasuredOvershoot(t *testing.T) {
+	in := func(runnable, blocked uint64) []nativeperf.Interval {
+		return []nativeperf.Interval{
+			{Kind: nativeperf.IntervalRunnable, Start: 0, End: model.MonoNano(runnable)},
+			{Kind: nativeperf.IntervalBlocked, Start: 0, End: model.MonoNano(blocked)},
+		}
+	}
+	for name, tc := range map[string]struct {
+		run, blocked, bound uint64
+		want                string
+	}{
+		"within the bound":                  {80, 5000, 100, VerdictPass},
+		"upper edge":                        {125, 5000, 100, VerdictPass},
+		"blocked time reported as runnable": {5000, 0, 100, VerdictFail},
+		"just above":                        {126, 5000, 100, VerdictFail},
+		"no ground truth":                   {80, 5000, 0, VerdictUnknown},
+		"sleeper never seen":                {0, 0, 100, VerdictUnknown},
+	} {
+		if v, _, _ := CompareSleeperRunnable(tc.bound, in(tc.run, tc.blocked)); v != tc.want {
+			t.Errorf("%s: %s, want %s", name, v, tc.want)
+		}
+	}
+}

@@ -61,32 +61,34 @@ type accept struct {
 
 // scenResult is everything one scenario observed.
 type scenResult struct {
-	Name, Mode      string
-	Seconds         float64
-	Cap             qual.CaptureResult
-	GT              []qual.GroundTruthLine
-	WorkloadExit    int
-	SelfVerified    bool
-	Stats           qual.StackStats
-	CPUSeconds      float64
-	Windows         [][2]uint64
-	CheckErr        error
-	HelperBefore    qual.ProcUsage
-	HelperPeak      qual.ProcUsage
-	HelperTicks     uint64
-	HelperFDsAfter  int
-	HelperPerfAfter int
-	ClientHWMKiB    uint64
-	ClientTicks     uint64
-	Threads         int
-	DistinctCPUs    int
-	Failures        []string
-	Err             string
-	Extra           map[string]any
-	Resolver        *qual.Resolver
-	Blocked         []qual.BlockedTruth
-	Corr            *qual.Correlation
-	TargetTID       uint32
+	Name, Mode         string
+	Seconds            float64
+	Cap                qual.CaptureResult
+	GT                 []qual.GroundTruthLine
+	WorkloadExit       int
+	SelfVerified       bool
+	Stats              qual.StackStats
+	CPUSeconds         float64
+	Windows            [][2]uint64
+	CheckErr           error
+	HelperBefore       qual.ProcUsage
+	HelperPeak         qual.ProcUsage
+	HelperTicks        uint64
+	HelperFDsAfter     int
+	HelperPerfAfter    int
+	ClientHWMKiB       uint64
+	ClientRSSBeforeKiB uint64 // this process's resident size when the capture was admitted
+	TargetCount        int    // targets of the capture's request
+	ClientTicks        uint64
+	Threads            int
+	DistinctCPUs       int
+	Failures           []string
+	Err                string
+	Extra              map[string]any
+	Resolver           *qual.Resolver
+	Blocked            []qual.BlockedTruth
+	Corr               *qual.Correlation
+	TargetTID          uint32
 }
 
 func (r *scenResult) fail(format string, args ...any) {
@@ -135,6 +137,7 @@ func (a *accept) runScenario(name, mode string, seconds float64, cfg nativeperf.
 	defer h.Stop()
 	r.HelperBefore, _ = qual.ReadProc(h.PID)
 	clientBefore, _ := qual.ReadProc(0)
+	r.ClientRSSBeforeKiB, r.TargetCount = clientBefore.RSSKiB, 1
 
 	var mu sync.Mutex
 	stopSample := make(chan struct{})
@@ -222,7 +225,7 @@ func (a *accept) runScenario(name, mode string, seconds float64, cfg nativeperf.
 	}
 	r.Threads, r.DistinctCPUs = len(threads), len(cpus)
 	if cm == nativeperf.ModeCPUOffCPU && r.Cap.Ready {
-		c := qual.Correlate(r.Cap, cfg)
+		c := qual.CorrelateWithin(r.Cap, cfg, qual.AdmissionMemory{Targets: uint64(r.TargetCount), HelperRSS: r.HelperBefore.RSSKiB << 10, ClientRSS: r.ClientRSSBeforeKiB << 10})
 		r.Corr = &c
 	}
 	r.TargetTID = uint32(w.PID)

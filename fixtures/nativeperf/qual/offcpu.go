@@ -118,9 +118,13 @@ func diff(a, b uint64) uint64 {
 // match the workload's own wall-minus-CPU ground truth within BlockedTolerance
 // in both directions, and exceed the blocked time those same threads show, so the
 // two are visibly separate. Without any runnable evidence or ground truth it is
-// unknown.
+// unknown, EXCEPT a split that reports complete blocked intervals (no interval
+// whose blocked/runnable split is unknown; the still-open intervals censored at
+// the end of every capture do not count) and still no runnable delay at all for
+// threads the workload measured as waiting: that is a collector that never
+// reports run-queue delay, so it fails instead of passing as "no evidence".
 func CompareRunnable(truthNs uint64, native []nativeperf.Interval) (verdict string, nativeNs uint64) {
-	var blocked uint64
+	var blocked, uncertain uint64
 	for _, iv := range native {
 		if iv.Correction {
 			continue
@@ -130,10 +134,16 @@ func CompareRunnable(truthNs uint64, native []nativeperf.Interval) (verdict stri
 			nativeNs += uint64(iv.End - iv.Start)
 		case nativeperf.IntervalBlocked:
 			blocked += uint64(iv.End - iv.Start)
+		case nativeperf.IntervalUnknown:
+			uncertain += uint64(iv.End - iv.Start)
 		}
 	}
 	switch {
-	case truthNs == 0 || nativeNs == 0:
+	case truthNs == 0:
+		return VerdictUnknown, nativeNs
+	case nativeNs == 0 && blocked > 0 && uncertain == 0:
+		return VerdictFail, nativeNs // a complete split that never reports the run-queue delay the workload measured
+	case nativeNs == 0:
 		return VerdictUnknown, nativeNs
 	case blocked >= nativeNs:
 		return VerdictFail, nativeNs // contention that is not clearly distinct from blocked time
@@ -141,4 +151,32 @@ func CompareRunnable(truthNs uint64, native []nativeperf.Interval) (verdict stri
 		return VerdictFail, nativeNs // not the contention the workload measured
 	}
 	return VerdictPass, nativeNs
+}
+
+// CompareSleeperRunnable judges the threads that did NOT contend for the CPU but
+// slept (the workload's coordinator, which sleeps in 1 ms polls). A sleeper is
+// blocked, not waiting for a CPU: its run-queue delay is bounded by the time its
+// sleeps overshot what it asked for, which the workload measured itself
+// (boundNs). Native runnable delay beyond that bound (plus the approved
+// tolerance) is blocked time reported as run-queue delay, and fails. A sleeper
+// with no blocked and no runnable evidence, or no ground-truth bound, is unknown.
+func CompareSleeperRunnable(boundNs uint64, native []nativeperf.Interval) (verdict string, runnableNs, blockedNs uint64) {
+	for _, iv := range native {
+		if iv.Correction {
+			continue
+		}
+		switch iv.Kind {
+		case nativeperf.IntervalRunnable:
+			runnableNs += uint64(iv.End - iv.Start)
+		case nativeperf.IntervalBlocked:
+			blockedNs += uint64(iv.End - iv.Start)
+		}
+	}
+	switch {
+	case boundNs == 0 || runnableNs == 0 && blockedNs == 0:
+		return VerdictUnknown, runnableNs, blockedNs
+	case float64(runnableNs) > float64(boundNs)*(1+BlockedTolerance):
+		return VerdictFail, runnableNs, blockedNs
+	}
+	return VerdictPass, runnableNs, blockedNs
 }

@@ -72,6 +72,20 @@ func (c *Correlator) invalidate(at model.MonoNano, reason Reason) []Interval {
 	clear(c.processes)
 	return []Interval{{Domain: c.domain, Kind: IntervalUnknown, Start: 0, End: end, Measure: Measure{Unit: UnitNanoseconds, Value: model.Uint64(end)}, Reason: reason, Correction: true}}
 }
+
+// unmeasuredBefore revokes the coverage of ONE task through `at`: the capture
+// has no switch-out for it, so everything from the start of the epoch to this
+// switch-in is unmeasured for that task (a correction with its TaskKey; a zero
+// Task is the domain-wide form invalidate returns). No other task's retained
+// state or previously returned interval is touched. The correction extent is
+// nonadditive coverage, never measured time.
+func (c *Correlator) unmeasuredBefore(key TaskKey, at model.MonoNano) Interval {
+	end := at
+	if c.processed > end {
+		end = c.processed
+	}
+	return Interval{Task: key, Domain: c.domain, Kind: IntervalUnknown, Start: c.epochStart, End: end, Measure: Measure{Unit: UnitNanoseconds, Value: model.Uint64(end - c.epochStart)}, Reason: ReasonUnmeasured, Correction: true}
+}
 func (c *Correlator) sortedTasks() []TaskKey {
 	keys := make([]TaskKey, 0, len(c.tasks))
 	for k := range c.tasks {
@@ -171,9 +185,13 @@ func (c *Correlator) apply(e SanitizedEvent) []Interval {
 					c.processes[id] = process
 				}
 			} else {
-				// A switch-in without a retained switch-out proves a missing baseline,
-				// not zero off-CPU activity. Revoke coverage through this new boundary.
-				out = append(out, c.invalidate(e.Time, ReasonLoss)...)
+				// A switch-in without a retained switch-out proves a missing baseline
+				// for THIS task (it was already off the CPU when the capture began, or
+				// its state was revoked earlier), not zero off-CPU activity. Only this
+				// task's coverage through the boundary is revoked: every other task's
+				// retained wait is still evidence-complete. Explicit loss, clock,
+				// identity or capacity evidence is what revokes the whole domain.
+				out = append(out, c.unmeasuredBefore(key, e.Time))
 			}
 		}
 		if s.Previous != nil {

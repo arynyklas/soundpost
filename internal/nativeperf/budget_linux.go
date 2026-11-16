@@ -29,17 +29,49 @@ type Reservation struct {
 	lockBytes           uint64
 }
 
+// captureRings is the number of perf rings one capture maps: one per target,
+// plus three per online CPU in off-CPU mode.
+func captureRings(offCPU bool, targets, cpus uint64) uint64 {
+	rings := targets
+	if offCPU {
+		rings += 3 * cpus
+	}
+	return rings
+}
+
+// captureOverhead is the fixed bounded protocol/socket buffers plus the event,
+// decode and export tables of one capture.
+func captureOverhead(targets uint64) uint64 { return uint64(1<<20) + targets*(256<<10) }
+
+// CaptureCharge is the memory Reserve charges one capture against Config.MaxMemory:
+// every ring with its metadata page, the fixed per-target buffers, and the
+// resident sizes of the helper and of its exporting peer. Whatever a consumer (the
+// correlator) is handed out of the same budget has to fit in MaxMemory minus this.
+func CaptureCharge(offCPU bool, targets, cpus uint64, c Config, pageBytes uint64, m MemoryUsage) (uint64, error) {
+	rings := captureRings(offCPU, targets, cpus)
+	per := c.RingBytes + pageBytes
+	if c.Validate() != nil || rings == 0 || rings > c.MaxMemory/per {
+		return 0, ErrResources
+	}
+	memory := rings * per
+	for _, n := range []uint64{captureOverhead(targets), m.HelperRSS, m.ExportRSS} {
+		if n > c.MaxMemory-memory {
+			return 0, ErrResources
+		}
+		memory += n
+	}
+	return memory, nil
+}
+
 func (b *ResourceBudget) Reserve(a AuthorizedTargets, c Config, t Topology, m MemoryUsage) (*Reservation, error) {
 	if c.Validate() != nil || len(a.targets) == 0 || t.CPUs == 0 || t.PageBytes == 0 || t.FDLimit <= 32 || t.OpenFDs > t.FDLimit-32 {
 		return nil, ErrResources
 	}
-	rings := uint64(len(a.targets))
-	if a.mode == ModeCPUOffCPU {
-		if t.CPUs > 256 {
-			return nil, ErrResources
-		}
-		rings += 3 * t.CPUs
+	offCPU := a.mode == ModeCPUOffCPU
+	if offCPU && t.CPUs > 256 {
+		return nil, ErrResources
 	}
+	rings := captureRings(offCPU, uint64(len(a.targets)), t.CPUs)
 	// pidfds, proc dirs, executable metadata, connection, listener, and ring FDs.
 	fds := rings + 3*uint64(len(a.targets)) + 2
 	ceiling := t.FDLimit - 32 - t.OpenFDs
@@ -53,14 +85,9 @@ func (b *ResourceBudget) Reserve(a AuthorizedTargets, c Config, t Topology, m Me
 	if rings > c.MaxMemory/per || t.LockBytes != 0 && rings > t.LockBytes/per {
 		return nil, ErrResources
 	}
-	memory := rings * per
-	// Fixed bounded protocol/socket buffers plus event/decode/export tables.
-	overhead := uint64(1<<20) + uint64(len(a.targets))*(256<<10)
-	for _, n := range []uint64{overhead, m.HelperRSS, m.ExportRSS} {
-		if n > c.MaxMemory-memory {
-			return nil, ErrResources
-		}
-		memory += n
+	memory, e := CaptureCharge(offCPU, uint64(len(a.targets)), t.CPUs, c, t.PageBytes, m)
+	if e != nil {
+		return nil, e
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()

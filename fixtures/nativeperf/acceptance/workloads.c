@@ -192,7 +192,19 @@ static void spawn_threads(int n, int variant, uint64_t ns, int cpu) {
 }
 static void run_threads(void) {
 	atomic_store(&go_flag, 1);
-	while (atomic_load(&finished_workers) < pool_n) usleep(1000);
+	/* The coordinator (this thread) sleeps in 1 ms polls for the whole run. A sleeping thread is blocked
+	   for at least the 1 ms it asked for, so the time each poll overshot that request is an upper bound
+	   on its run-queue delay: a collector that reports the sleeper's blocked time as runnable delay
+	   reports about 1 ms per poll instead of the few tens of microseconds the overshoot allows. */
+	uint64_t polls = 0, overshoot = 0;
+	while (atomic_load(&finished_workers) < pool_n) {
+		uint64_t p0 = now_ns();
+		usleep(1000);
+		uint64_t d = now_ns() - p0;
+		polls++;
+		if (d > 1000 * 1000) overshoot += d - 1000 * 1000;
+	}
+	if (pinned_contention) emit("sleeper_runnable_bound", 0, overshoot, 0, polls);
 	if (pinned_contention) {
 		/* pinned contention: runnable delay is wall minus on-CPU time per thread */
 		for (int i = 0; i < pool_n; i++) {
