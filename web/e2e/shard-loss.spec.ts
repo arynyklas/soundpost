@@ -9,6 +9,12 @@ import {at,createOrg,createProject,createReader,faultControl,field,ingestLog,ing
 test.skip(!faultControl(),'needs a server built with -tags soundpost_faults (E2E_FAULTS=1) and a server of its own: shards are removed for good');
 test.describe.configure({mode:'serial'});
 const SERIES=24,EXPRESSION='{__name__=~"shard_s.+"}';
+// What the console asks after the loss must not be answerable from before it. The server keeps a COMPLETE answer in its result cache for a minute (key: scope, expression,
+// evaluation) and serves a repeat from it without asking a shard, so a repeat of a pre-removal query inside that minute is a cache hit and not a query to the lost shards.
+// Measured (l3w18d1, WebKit): the first post-removal query came 53.7 s after the pre-removal one (the connection-cut test is skipped there), both projects `complete`, 24
+// series, stats.cached=true, 10.8 s after the removal was acknowledged. Chromium and Firefox reach it about 61 s after (the cut test runs, 3.8 s on Chromium): past the minute by luck.
+// Every query after the removal therefore uses an expression no step ran before it (it matches the same 24 series).
+const COLD_EXPRESSION='{__name__=~"shard_s[0-9]+"}';
 const name=(i:number):string=>`shard_s${String(i).padStart(2,'0')}`;
 const hashFor=(org:string,projects:string[]):string=>`#${new URLSearchParams({org,projects:projects.join(','),start:String(at(0)),end:String(at(70)),tz:'UTC',view:'explore'})}`;
 let org:string,p1:string,p2:string,reader:Reader,metric:Record<string,Source>,logSource:Source,admin:Page,api:APIRequestContext,ctx:BrowserContext,readerApi:Page;
@@ -46,6 +52,11 @@ const seriesOf=(json:unknown,project:string):Map<string,string>=>{
 const completeness=(json:unknown,project:string):unknown=>{
  const projects=field(json,'projects');
  for(const p of Array.isArray(projects)?projects:[])if(field(p,'project_id')===project)return field(p,'completeness');
+ return undefined;
+};
+const cachedOf=(json:unknown,project:string):unknown=>{
+ const projects=field(json,'projects');
+ for(const p of Array.isArray(projects)?projects:[])if(field(p,'project_id')===project)return field(field(p,'stats'),'cached');
  return undefined;
 };
 
@@ -202,7 +213,18 @@ test('shards removed under an open live view: the stream ends with a stated erro
  await startLive(page);
  for(let i=0;i<3;i++)await ingestLog(api,logSource,{at:at(i+1),name:`user${i}`});
  await expect(rowsOf(page)).toHaveCount(3);
+ // Why the refusal tests below ask something never asked before: a complete answer computed while every shard answered is served from the result cache after the loss,
+ // labelled as cached, without asking a shard. (Two requests a few milliseconds apart, far inside the cache's minute.)
+ const askCached=():Promise<{status:number;json:unknown}>=>postJson(readerApi,'/api/v1/query',queryBody({org,projects:[p1],expression:EXPRESSION,instant:at(61)}));
+ const before=await askCached();
+ expect(before.status).toBe(200);
+ expect(completeness(before.json,p1)).toBe('complete');
+ expect(cachedOf(before.json,p1),'the first answer is computed, not cached').toBe(false);
  expect(await removeShards(Array.from({length:32},(_,i)=>i))).toBe(32);
+ const afterLoss=await askCached();
+ expect(afterLoss.status).toBe(200);
+ expect(completeness(afterLoss.json,p1)).toBe('complete');
+ expect(cachedOf(afterLoss.json,p1),'the repeat after the loss is the cached answer, no shard was asked').toBe(true);
  // Nothing is committed after the removal: the stream has to notice the missing shard by itself, within its idle fence (10 s),
  // and the server must say so with its own terminal error event before it closes (never as a lost connection, never as a silent "connected").
  const end=page.locator('[data-end="error"]');
@@ -221,17 +243,17 @@ test('half the shards removed: without opt-in the whole query is refused; with o
  test.setTimeout(240_000);
  const page=await openExplore([p1,p2]);
  // No opt-in: refused as a whole, nothing returned, no value and no panel of values.
- await run(page,EXPRESSION);
+ await run(page,COLD_EXPRESSION);
  await expect(page.getByTestId('results').locator('[data-state="error"]')).toBeVisible();
  await expect(page.locator('[data-series]')).toHaveCount(0);
  await expect(page.locator('[data-kind]')).toHaveCount(0);
  // The same refusal at the route: not 200 and no result.
- const refused=await postJson(readerApi,'/api/v1/query',queryBody({org,projects:[p1,p2],expression:EXPRESSION,instant:at(60)}));
+ const refused=await postJson(readerApi,'/api/v1/query',queryBody({org,projects:[p1,p2],expression:COLD_EXPRESSION,instant:at(60)}));
  expect(refused.status).not.toBe(200);
  expect(field(refused.json,'projects'),'a refused read carries no per-project result').toBeUndefined();
  // Opt-in: partial, and what is shown is exactly what was ingested for the series that answered.
  await page.getByLabel('Allow partial results').check();
- await run(page,EXPRESSION);
+ await run(page,COLD_EXPRESSION);
  for(const p of [p1,p2]){
   await expect(panel(page,p)).toHaveAttribute('data-state','incomplete');
   await expect(panel(page,p)).toHaveAttribute('data-completeness','partial');
@@ -246,7 +268,7 @@ test('half the shards removed: without opt-in the whole query is refused; with o
   }
  }
  // The route says the same.
- const partial=await postJson(readerApi,'/api/v1/query',queryBody({org,projects:[p1,p2],expression:EXPRESSION,instant:at(60),allowPartial:true}));
+ const partial=await postJson(readerApi,'/api/v1/query',queryBody({org,projects:[p1,p2],expression:COLD_EXPRESSION,instant:at(60),allowPartial:true}));
  expect(partial.status).toBe(200);
  for(const p of [p1,p2]){
   expect(completeness(partial.json,p)).toBe('partial');
@@ -266,7 +288,7 @@ test('every shard removed: with opt-in the answer is Partial with no series, not
  expect(await removeShards(Array.from({length:64},(_,i)=>i))).toBe(64);
  const page=await openExplore([p1,p2]);
  await page.getByLabel('Allow partial results').check();
- await run(page,EXPRESSION);
+ await run(page,COLD_EXPRESSION);
  for(const p of [p1,p2]){
   await expect(panel(page,p)).toHaveAttribute('data-state','incomplete');
   await expect(panel(page,p).getByTestId('project-state')).toContainText('Partial.');
@@ -274,7 +296,7 @@ test('every shard removed: with opt-in the answer is Partial with no series, not
   await expect(panel(page,p).locator('[data-kind]')).toHaveCount(0);
  }
  await expect(page.getByTestId('results')).not.toContainText('Complete and empty.');
- const api2=await postJson(readerApi,'/api/v1/query',queryBody({org,projects:[p1,p2],expression:EXPRESSION,instant:at(60),allowPartial:true}));
+ const api2=await postJson(readerApi,'/api/v1/query',queryBody({org,projects:[p1,p2],expression:COLD_EXPRESSION,instant:at(60),allowPartial:true}));
  expect(api2.status).toBe(200);
  for(const p of [p1,p2]){expect(completeness(api2.json,p)).toBe('partial');expect(seriesOf(api2.json,p).size).toBe(0);}
 });
