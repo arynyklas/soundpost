@@ -30,18 +30,27 @@ func applyFileHits(t *testing.T, e *Engine, canary string) int {
 	return n
 }
 
+// errCheckRollback ends checkDatabase's transaction without committing anything.
+var errCheckRollback = errors.New("check: roll back")
+
 // checkDatabase fails if bbolt's own structural check finds anything wrong.
 func checkDatabase(t *testing.T, e *Engine) {
 	t.Helper()
 	// Check walks the transaction from a goroutine of its own: drain it before the transaction
-	// ends, or it keeps reading a transaction (and a mapping) that is gone.
+	// ends, or it keeps reading a transaction (and a mapping) that is gone. It runs in a WRITE
+	// transaction (rolled back): bbolt documents Check as safe only there, because it reads the
+	// shared freelist, which the commit of any other writer (the group applying an entry, the
+	// intake of the test itself) rewrites; in a read transaction that is a data race and, measured
+	// in the lane 1 wave 14 evidence (zz_bolt_hammer), a bbolt panic ("mergepgids bad len") within a
+	// minute of a racing writer. The writer lock keeps every committer out until the check is done.
 	var found []error
-	if err := e.db.View(func(tx *bolt.Tx) error {
+	err := e.db.Update(func(tx *bolt.Tx) error {
 		for err := range tx.Check() {
 			found = append(found, err)
 		}
-		return nil
-	}); err != nil {
+		return errCheckRollback
+	})
+	if err != nil && !errors.Is(err, errCheckRollback) {
 		t.Fatalf("bbolt check: %v", err)
 	}
 	if len(found) > 0 {

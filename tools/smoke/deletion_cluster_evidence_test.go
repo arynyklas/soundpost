@@ -172,14 +172,14 @@ func TestDeletionClusterReadsEraseFactsFromApplyDB(t *testing.T) {
 }
 
 func TestDeletionClusterLagNodeList(t *testing.T) {
-	if got, err := dcParseLagNodes("3,2,1"); err != nil || !reflect.DeepEqual(got, []uint64{3, 2, 1}) {
+	if got, err := dcParseNodes("--lag-nodes", "3,2,1"); err != nil || !reflect.DeepEqual(got, []uint64{3, 2, 1}) {
 		t.Fatalf("%v %v", got, err)
 	}
-	if got, err := dcParseLagNodes(" 2 "); err != nil || !reflect.DeepEqual(got, []uint64{2}) {
+	if got, err := dcParseNodes("--lag-nodes", " 2 "); err != nil || !reflect.DeepEqual(got, []uint64{2}) {
 		t.Fatalf("%v %v", got, err)
 	}
-	for _, bad := range []string{"", "0", "4", "1,1", "a", "1,,2", "1 2"} {
-		if got, err := dcParseLagNodes(bad); err == nil {
+	for _, bad := range []string{"", "0", "4", "1,1", "a", "1,,2", "1 2", "none"} {
+		if got, err := dcParseNodes("--lag-nodes", bad); err == nil {
 			t.Errorf("%q accepted: %v", bad, got)
 		}
 	}

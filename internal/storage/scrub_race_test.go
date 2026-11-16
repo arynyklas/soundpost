@@ -79,3 +79,45 @@ func TestFaultHookCanBeReplacedWhileGoroutinesTripIt(t *testing.T) {
 	close(stop)
 	done.Wait()
 }
+
+// [11.04-W4] checkDatabase (bbolt's structural check) is called by tests whose engine can still
+// commit: the group applies entries asynchronously, intake goroutines may not have joined. bbolt
+// documents Tx.Check as safe only on a writable transaction (it reads the shared freelist, which
+// every other writer's commit rewrites); in a read transaction it is a data race and, measured in
+// the lane 1 wave 14 evidence, a bbolt panic ("mergepgids bad len") within a minute. Run under
+// -race this test reports the race for the read-transaction form and is clean for the form that
+// takes the writer lock.
+func TestCheckDatabaseIsSafeBesideACommittingWriter(t *testing.T) {
+	x := newEraseEnv(t)
+	stop, done := make(chan struct{}), make(chan struct{})
+	committed := 0
+	go func() {
+		defer close(done)
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			if err := x.e.db.Update(func(tx *bolt.Tx) error {
+				b, err := tx.CreateBucketIfNotExists([]byte("check_probe"))
+				if err != nil {
+					return err
+				}
+				return b.Put([]byte{byte(i % 17)}, make([]byte, 1+(i*977)%(256<<10)))
+			}); err != nil {
+				t.Errorf("writer: %v", err)
+				return
+			}
+			committed++
+		}
+	}()
+	for range 60 {
+		checkDatabase(t, x.e)
+	}
+	close(stop)
+	<-done
+	if committed == 0 {
+		t.Fatal("fixture invalid: the writer never committed")
+	}
+}

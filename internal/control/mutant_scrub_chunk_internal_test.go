@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
 	"slices"
 	"sync"
 	"testing"
@@ -111,8 +112,7 @@ func TestMutantACancelledScrubZeroesNothingAndStaysOwed(t *testing.T) {
 // still held included) from page 2 to the file's high-water mark, which is returned in pages.
 func (f *installFx) mutantFreePages() (free []uint64, high uint64) {
 	f.t.Helper()
-	pageSize := uint64(f.s.db.Info().PageSize)
-	if err := f.s.db.View(func(tx *bolt.Tx) error {
+	if err := f.s.probeDB(func(tx *bolt.Tx, pageSize uint64) error {
 		high = uint64(tx.Size()) / pageSize
 		for id := uint64(2); id < high; id++ {
 			info, err := tx.Page(int(id))
@@ -161,7 +161,7 @@ const mutantChunkCanary = "CANARYCHUNK0f3a9d61c2b84e7a-the-erased-payload"
 func TestMutantAScrubOfSeveralChunksZeroesEveryFreePage(t *testing.T) {
 	f := newInstallFx(t)
 	f.erasedByTheLeader(true)
-	pageSize := uint64(f.s.db.Info().PageSize)
+	pageSize := f.pageSize()
 	key := []byte("mutant_filler")
 	f.mutantWrite(func(b *bolt.Bucket) error {
 		return b.Put(key, mutantCanaryValue((2*scrubChunkPages+1500)*int(pageSize)))
@@ -193,7 +193,7 @@ func TestMutantAScrubOfSeveralChunksZeroesEveryFreePage(t *testing.T) {
 	if f.owesState() || f.local().owed {
 		t.Errorf("the scrub left the debt owed: %v %+v", f.s.ResidualStores(), f.local())
 	}
-	if err := f.s.db.View(func(tx *bolt.Tx) error {
+	if err := f.s.probeDB(func(tx *bolt.Tx, _ uint64) error { // Check is safe on a writable transaction only
 		for err := range tx.Check() {
 			t.Errorf("bbolt check after the scrub: %v", err)
 		}
@@ -213,7 +213,7 @@ func TestMutantAScrubOfSeveralChunksZeroesEveryFreePage(t *testing.T) {
 func TestMutantAScrubReachesTheLastPageOfTheFile(t *testing.T) {
 	f := newInstallFx(t)
 	f.erasedByTheLeader(true)
-	pageSize := uint64(f.s.db.Info().PageSize)
+	pageSize := f.pageSize()
 	key := []byte("mutant_tail")
 	for _, pages := range []int{40, 80, 160, 320} {
 		f.mutantWrite(func(b *bolt.Bucket) error { return b.Put(key, mutantCanaryValue(pages*int(pageSize)+1000)) })
@@ -251,5 +251,86 @@ func TestMutantALocalOnlyScrubNeedsNoConsensus(t *testing.T) {
 	}
 	if f.dbHolds() || f.owesState() || f.local().owed {
 		t.Fatalf("the scrub left the payload or the debt: holds=%v owes=%v marker=%+v", f.dbHolds(), f.owesState(), f.local())
+	}
+}
+
+// mutantFirstFreePagesFx is a fixture whose pages 2 and 3, the first pages after the meta pages, are
+// free: the erasure's commit has just moved the state out of them. Which state size does that
+// depends on bbolt's allocator, so the fixture searches for it and stops the test, loudly, when none
+// does (it never settles for a layout that cannot tell the mutant from the original). The freelist
+// must not be a two-page run: the scrub's own commit would write it over pages 2 and 3.
+func mutantFirstFreePagesFx(t *testing.T) *installFx {
+	t.Helper()
+	for books := 1; books <= 40; books++ {
+		f := newInstallFxOf(t, books)
+		f.erasedByTheLeader(false) // the log owes a scrub, so does this file
+		// Settle this file's own debt alone (the scrub's commit would take the first free pages): only
+		// the log's debt, which needs consensus, is left.
+		if err := f.s.settleLocalScrub(f.local().generation); err != nil {
+			t.Fatal(err)
+		}
+		free, _ := f.mutantFreePages()
+		freelist := -1
+		if err := f.s.probeDB(func(tx *bolt.Tx, pageSize uint64) error {
+			for id := 2; id < int(uint64(tx.Size())/pageSize); id++ {
+				if info, err := tx.Page(id); err != nil {
+					return err
+				} else if info != nil && info.Type == "freelist" {
+					freelist = info.OverflowCount
+				}
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if slices.Contains(free, 2) && slices.Contains(free, 3) && freelist != 1 && len(owedScrubs(f.state().Audits)) != 0 {
+			return f
+		}
+	}
+	t.Fatal("fixture invalid: no state size leaves pages 2 and 3 free (bbolt's allocator moved?)")
+	return nil
+}
+
+// A scrub zeroes the free pages from page 2 on BEFORE it settles anything: a node whose consensus
+// group is stopped (the settle of the log's debt cannot commit) has still zeroed every free page,
+// the first two included, and reports the debt as owed. With nothing committed after the chunk but
+// its own freelist, a page-2 or page-3 payload that the scrub skipped is still in the file.
+func TestMutantAScrubThatCannotSettleHasZeroedTheFirstFreePages(t *testing.T) {
+	f := mutantFirstFreePagesFx(t)
+	pageSize := f.pageSize()
+	file, err := os.OpenFile(f.s.db.Path(), os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := bytes.Repeat([]byte(mutantChunkCanary), int(pageSize)/len(mutantChunkCanary)+1)[:pageSize]
+	for _, id := range []uint64{2, 3} { // erased payload left behind in the free pages the erasure just made
+		if _, err = file.WriteAt(stale, int64(id*pageSize)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err = file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []uint64{2, 3} {
+		if !bytes.Contains(mutantPage(f.rawFile(), id, pageSize), []byte(mutantChunkCanary)) {
+			t.Fatalf("fixture invalid: page %d does not hold the planted payload", id)
+		}
+	}
+	if err = f.s.ReplicaGroup().Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err = f.s.ScrubErased(f.ctx); mutantCode(err) != model.Unavailable {
+		t.Fatalf("a scrub whose settle cannot commit answered %v, want unavailable", err)
+	}
+
+	raw := f.rawFile()
+	for _, id := range []uint64{2, 3} {
+		if bytes.Contains(mutantPage(raw, id, pageSize), []byte(mutantChunkCanary)) {
+			t.Errorf("the scrub left the erased payload in page %d, one of the first free pages of the file", id)
+		}
+	}
+	if len(owedScrubs(f.state().Audits)) == 0 {
+		t.Error("a scrub that could not commit its settle cleared the log's debt")
 	}
 }

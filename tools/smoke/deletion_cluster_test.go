@@ -9,10 +9,13 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/storage"
 )
 
@@ -212,5 +215,254 @@ func TestDeletionClusterReceiptAndDenialClassifiers(t *testing.T) {
 	}
 	if dcServedLatest(404, []byte(`{}`), 6) || dcServedLatest(200, []byte(`{"projects":[]}`), 6) {
 		t.Fatal("not a served answer")
+	}
+}
+
+// The runs are the lagging-node runs in order, then the replacement runs; "none" drops one kind and
+// a plan with no run, a repeated node or a node that is not a voter is refused. Each run has its own artifact.
+func TestDeletionClusterPlanOrdersLagRunsThenReplaceRuns(t *testing.T) {
+	got, err := dcPlan("3,2,1", "3")
+	want := []dcPlanStep{{3, false}, {2, false}, {1, false}, {3, true}}
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("%v %v", got, err)
+	}
+	if got, err = dcPlan("none", "2,1"); err != nil || !reflect.DeepEqual(got, []dcPlanStep{{2, true}, {1, true}}) {
+		t.Fatalf("%v %v", got, err)
+	}
+	if got, err = dcPlan("1", "none"); err != nil || !reflect.DeepEqual(got, []dcPlanStep{{1, false}}) {
+		t.Fatalf("%v %v", got, err)
+	}
+	for _, bad := range [][2]string{{"none", "none"}, {"1,1", "none"}, {"4", "none"}, {"1", "0"}, {"1", ""}, {"", "none"}} {
+		if got, err = dcPlan(bad[0], bad[1]); err == nil {
+			t.Errorf("%v accepted: %v", bad, got)
+		}
+	}
+	names := map[string]bool{}
+	for _, s := range want {
+		names[dcRunArtifactName(s)] = true
+	}
+	if len(names) != len(want) || !names["deletion-cluster-lag-3.json"] || !names["deletion-cluster-replace-3.json"] {
+		t.Fatalf("artifact names collide or are misnamed: %v", names)
+	}
+}
+
+// A voter is given the authority flags exactly when the run has an authority, and the rest of its
+// command line is the shared process cluster's.
+func TestDeletionClusterServeArgsCarryTheAuthorityOnlyWhenConfigured(t *testing.T) {
+	plain := dcServeArgs(2, "/n/node-2.json", "/d/2", "127.0.0.1:1", nil)
+	want := []string{"serve", "--mode=distributed", "--node-id", "2", "--cluster-config", "/n/node-2.json", "--data-dir", "/d/2", "--listen", "127.0.0.1:1"}
+	if !reflect.DeepEqual(plain, want) {
+		t.Fatalf("%v", plain)
+	}
+	with := dcServeArgs(2, "/n/node-2.json", "/d/2", "127.0.0.1:1", &dcAuthority{Keys: "/k/full", Restricted: "/k/restricted", Dir: "/a/dir"})
+	if !reflect.DeepEqual(with, append(want, "--authority-keys", "/k/full", "--authority-dir", "/a/dir")) {
+		t.Fatalf("%v", with)
+	}
+	for _, arg := range with {
+		if arg == "/k/restricted" {
+			t.Fatal("serve must be given the full keys: restricted keys cannot checkpoint a deletion")
+		}
+	}
+}
+
+// A command that exits 0 returns its stdout alone; one that fails is a typed {stage, command_failed}
+// whose detail is the last stderr line reduced to words that cannot carry a path or a key; a command
+// past its limit fails. The "binary" is a shell script (POSIX hosts only).
+func TestDeletionClusterCLIFailureIsTypedAndSafe(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake binary is a POSIX shell script")
+	}
+	script := func(name, body string) string {
+		p := filepath.Join(t.TempDir(), name)
+		if err := os.WriteFile(p, []byte("#!/bin/sh\n"+body+"\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	ok := script("ok", `printf '{"backup_id":"x"}'; echo "noise on stderr" >&2`)
+	out, line, err := dcCLI(ok, nil, time.Minute, "backup", "create", "--data-dir", "/secret/dir")
+	if err != nil || line != "" || string(out) != `{"backup_id":"x"}` {
+		t.Fatalf("%q %q %v", out, line, err)
+	}
+	fail := script("fail", `echo "an earlier line" >&2; echo 'soundpost backup failed: unavailable (head_unavailable) [retryable] at /tmp/secret/path key=abc123 O:\win\path' >&2; exit 1`)
+	out, line, err = dcCLI(fail, nil, time.Minute, "backup", "restore", "--root", "/secret/root")
+	var typed *smokeFailure
+	if !errors.As(err, &typed) || typed.Code != "command_failed" || typed.Stage != "cli_backup_restore" || out != nil {
+		t.Fatalf("%q %v", out, err)
+	}
+	if line != "soundpost backup failed: unavailable (head_unavailable) [retryable] at" {
+		t.Fatalf("detail %q", line)
+	}
+	slow := script("slow", `exec sleep 30`)
+	started := time.Now()
+	if _, _, err = dcCLI(slow, nil, 200*time.Millisecond, "backup", "create"); err == nil || time.Since(started) > 20*time.Second {
+		t.Fatalf("a command past its limit must fail promptly: %v after %v", err, time.Since(started))
+	}
+	env := script("env", `printf '%s' "$DC_PROBE"`)
+	if out, _, err = dcCLI(env, []string{"DC_PROBE=seen"}, time.Minute, "x"); err != nil || string(out) != "seen" {
+		t.Fatalf("the environment is passed to the command: %q %v", out, err)
+	}
+}
+
+// The reports of backup create, restore and activate are read strictly: a report without a backup id or
+// objects is not a backup, and a malformed one is an error.
+func TestDeletionClusterCLIReportsAreParsedStrictly(t *testing.T) {
+	id := model.NewID().String()
+	created, err := dcParseBackupCreate([]byte(`{"backup_id":"` + id + `","objects":67,"control_revision":"12","authority_sequence":1,"authority_generation":"0","voters":3,"gaps":0}`))
+	if err != nil || created.ID != id || created.Objects != 67 || created.AuthoritySequence != 1 || created.Voters != 3 || created.ControlRevision != 12 {
+		t.Fatalf("%+v %v", created, err)
+	}
+	if _, err = dcParseBackupCreate([]byte(`{"backup_id":"` + id + `","objects":3,"voters":"three"}`)); err == nil {
+		t.Error("a voter count that is not an integer accepted")
+	}
+	for _, bad := range []string{``, `not json`, `{}`, `{"backup_id":"x","objects":3}`, `{"backup_id":"` + id + `","objects":0}`, `{"backup_id":"` + id + `","objects":3,"authority_sequence":-1}`} {
+		if _, err = dcParseBackupCreate([]byte(bad)); err == nil {
+			t.Errorf("backup report %q accepted", bad)
+		}
+		if _, err = dcParseRestore([]byte(bad)); err == nil {
+			t.Errorf("restore report %q accepted", bad)
+		}
+	}
+	restored, err := dcParseRestore([]byte(`{"backup_id":"` + id + `","objects":67,"authority_sequence":"3","authority_generation":1,"tombstones":1,"control_revision":12}`))
+	if err != nil || restored.AuthoritySequence != 3 || restored.Tombstones != 1 || restored.AuthorityGeneration != 1 {
+		t.Fatalf("%+v %v", restored, err)
+	}
+	activated, err := dcParseActivate([]byte(`{"authority_generation":1,"tombstones":1,"ready":true,"cluster_seed":false}`))
+	if err != nil || !activated.Ready || activated.Tombstones != 1 {
+		t.Fatalf("%+v %v", activated, err)
+	}
+	if _, err = dcParseActivate([]byte(`x`)); err == nil {
+		t.Fatal("a malformed activation report accepted")
+	}
+}
+
+// The authority's tombstone of the deletion is found by its operation, and it counts as this smoke's
+// deletion only when it retires exactly the retired project of the organization: a tombstone that
+// also names the sibling, another organization, another mode or no project is not.
+func TestDeletionClusterTombstoneMatching(t *testing.T) {
+	org, project, sibling, op := model.NewID(), model.NewID(), model.NewID(), model.NewID()
+	mine := model.DeletePredicate{Operation: op, Org: org, Mode: model.DeleteRetireProject, Projects: []model.ID{project}}
+	other := model.DeletePredicate{Operation: model.NewID(), Org: org, Mode: model.DeleteRetireProject, Projects: []model.ID{sibling}}
+	if got, ok := dcTombstoneOf([]model.DeletePredicate{other, mine}, op); !ok || got.Operation != op {
+		t.Fatalf("%v %v", got, ok)
+	}
+	if _, ok := dcTombstoneOf([]model.DeletePredicate{other}, op); ok {
+		t.Fatal("a ledger without the operation has no tombstone for it")
+	}
+	if _, ok := dcTombstoneOf(nil, op); ok {
+		t.Fatal("an empty ledger has no tombstone")
+	}
+	if !dcRetiresOnly(mine, org, project) {
+		t.Fatal("the deletion's own tombstone")
+	}
+	for name, bad := range map[string]model.DeletePredicate{
+		"also the sibling":   {Operation: op, Org: org, Mode: model.DeleteRetireProject, Projects: []model.ID{project, sibling}},
+		"the whole org":      {Operation: op, Org: org, Mode: model.DeleteRetireOrg},
+		"another project":    {Operation: op, Org: org, Mode: model.DeleteRetireProject, Projects: []model.ID{sibling}},
+		"another org":        {Operation: op, Org: model.NewID(), Mode: model.DeleteRetireProject, Projects: []model.ID{project}},
+		"a historical range": {Operation: op, Org: org, Mode: model.DeleteHistoricalRange, Projects: []model.ID{project}},
+	} {
+		if dcRetiresOnly(bad, org, project) {
+			t.Errorf("%s accepted", name)
+		}
+	}
+}
+
+// The replacement voter set, the order of "erased before the first clean receipt", and the membership
+// status listing the replacement must produce (every group, exactly the wanted voters, no learner).
+func TestDeletionClusterReplacementMembership(t *testing.T) {
+	if got := dcReplacementMembers([]uint64{1, 2, 3}, 3, 4); !reflect.DeepEqual(got, []uint64{1, 2, 4}) {
+		t.Fatalf("%v", got)
+	}
+	if got := dcReplacementMembers([]uint64{1, 2, 3}, 1, 4); !reflect.DeepEqual(got, []uint64{2, 3, 4}) {
+		t.Fatalf("%v", got)
+	}
+	if got := dcReplacementMembers([]uint64{1, 2, 4}, 3, 4); !reflect.DeepEqual(got, []uint64{1, 2, 4}) {
+		t.Fatalf("a voter already present is not added twice: %v", got)
+	}
+	for _, c := range []struct {
+		lastHit, firstClean int64
+		want                bool
+	}{{0, 5000, true}, {0, 0, true}, {4000, 5000, true}, {5000, 5000, true}, {5001, 5000, false}, {9000, 5000, false}} {
+		if got := dcErasedBefore(c.lastHit, c.firstClean); got != c.want {
+			t.Errorf("last hit %d, first clean %d: %v", c.lastHit, c.firstClean, got)
+		}
+	}
+	line := func(members string) string {
+		return "group 00000000-0000-0000-0000-000000000001 leader=1 term=2 applied=77 failed=false revision=3 members=" + members + "\n"
+	}
+	want := map[uint64]string{1: "node-a", 2: "node-b", 4: "node-d"}
+	good := line("1:voter:node-a,2:voter:node-b,4:voter:node-d") + line("4:voter:node-d,1:voter:node-a,2:voter:node-b") + "groups=2 applied=0\n"
+	if !dcStatusShowsVoters(good, want, 2) {
+		t.Fatal("a status listing exactly the wanted voters in every group")
+	}
+	if dcStatusShowsVoters(good, want, 3) {
+		t.Fatal("fewer groups than required")
+	}
+	for name, bad := range map[string]string{
+		"still lists the removed voter": line("1:voter:node-a,2:voter:node-b,3:voter:node-c,4:voter:node-d"),
+		"a learner":                     line("1:voter:node-a,2:voter:node-b,4:learner:node-d"),
+		"the old voter, not the new":    line("1:voter:node-a,2:voter:node-b,3:voter:node-c"),
+		"a wrong identity":              line("1:voter:node-a,2:voter:node-b,4:voter:node-c"),
+		"a malformed member":            line("1:voter:node-a,2:voter,4:voter:node-d"),
+		"one group off among good":      good + line("1:voter:node-a,2:voter:node-b,3:voter:node-c"),
+		"no group lines":                "groups=0\n",
+	} {
+		if dcStatusShowsVoters(bad, want, 1) {
+			t.Errorf("%s accepted", name)
+		}
+	}
+}
+
+// The authority, its keys and the backup destination are outside every node's data tree, and the
+// check refuses an authority inside a node directory, a node directory inside the authority and an empty input.
+func TestDeletionClusterPathsOutsideEveryNodeDirectory(t *testing.T) {
+	dirs := []string{"/w/node-a", "/w/node-b", "/w/node-c"}
+	if !dcOutsideAll([]string{"/w/authority", "/w/authority.keys", "/w/backups"}, dirs) {
+		t.Fatal("siblings of the node directories are outside")
+	}
+	for name, paths := range map[string][]string{"inside a node directory": {"/w/authority", "/w/node-b/authority"}, "the node directory itself": {"/w/node-a"}, "a parent of the node directories": {"/w"}} {
+		if dcOutsideAll(paths, dirs) {
+			t.Errorf("%s accepted", name)
+		}
+	}
+	if dcOutsideAll(nil, dirs) || dcOutsideAll([]string{"/w/authority"}, nil) {
+		t.Fatal("nothing to compare proves nothing")
+	}
+	if !dcWithin("/w", "/w/a") || !dcWithin("/w", "/w") || dcWithin("/w/a", "/w/ab") || dcWithin("/w/a", "/w") {
+		t.Fatal("dcWithin")
+	}
+}
+
+// A fresh voter's directory is not there yet: it holds nothing. A directory that is there is scanned.
+func TestDeletionClusterScanOfAFreshDirectory(t *testing.T) {
+	dir := t.TempDir()
+	missing, err := dcScanIfPresent(filepath.Join(dir, "node-d"), dcTestCanary)
+	if err != nil || missing.Hits != 0 || missing.Files != 0 || missing.ByStore == nil {
+		t.Fatalf("%+v %v", missing, err)
+	}
+	writeDCFile(t, dir, "node-d/apply.db", []byte("x"+dcTestCanary+"y"))
+	found, err := dcScanIfPresent(filepath.Join(dir, "node-d"), dcTestCanary)
+	if err != nil || found.Hits != 1 || found.ByStore["apply_db"] != 1 {
+		t.Fatalf("%+v %v", found, err)
+	}
+}
+
+// A run states what it does not cover: with an authority it no longer claims "backup mode none", and a
+// replacement run does not claim the restart ending (nor the reverse).
+func TestDeletionClusterNotRunNamesWhatTheRunDoesNotCover(t *testing.T) {
+	join := func(authority, replace bool) string { return strings.Join(dcNotRun(authority, replace), "\n") }
+	if strings.Contains(join(true, false), "backup mode none") || !strings.Contains(join(false, false), "no backup authority is configured") {
+		t.Fatal("authority statement")
+	}
+	if !strings.Contains(join(true, true), "restarting the lagging voter") || !strings.Contains(join(true, false), "replacing the lagging voter") {
+		t.Fatal("ending statement")
+	}
+	for _, authority := range []bool{false, true} {
+		for _, replace := range []bool{false, true} {
+			if !strings.Contains(join(authority, replace), "physical hosts") || !strings.Contains(join(authority, replace), "container host") {
+				t.Fatal("the physical-domain and container caveats stay")
+			}
+		}
 	}
 }

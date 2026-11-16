@@ -3,6 +3,7 @@
 package control_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/arynyklas/soundpost/internal/control"
@@ -187,13 +188,25 @@ func TestAFollowerThatReplayedTheErasureScrubsItsOwnFile(t *testing.T) {
 	v := newControlVoters(t)
 	const gone = "CANARYREPLAYFOLLOWER0d2b86a7c41e"
 	leader := v.fx[1]
-	for range 40 { // the replaced state spans freed pages that later writes do not all reuse
-		leader.seedAll(leader.newSeed(leader.project, gone), 50)
-	}
+	leader.seedAll(leader.newSeed(leader.project, gone), 50)
+	// The precondition of the test is a fact about the follower's file, not about the size of the
+	// state: the erased payload sits in FREE pages of its control.db when it replays the erasure.
+	// Construct it (a copy of the payload planted in the highest free page of each follower, which
+	// the few commits of the replay cannot reach because commits allocate lowest-first) and assert
+	// it at page level before and after the replay.
+	planted := map[uint64]uint64{}
 	for _, id := range []uint64{2, 3} {
 		v.await(id, v.mustRevision(1))
 		if hits := controlDBHits(t, v.dirs[id], gone); len(hits) == 0 {
 			t.Fatalf("fixture invalid: voter %d does not hold the payload in its control.db before the erasure", id)
+		}
+		page, err := v.stores[id].PlantInFreePagesForTest(gone, 64, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		planted[id] = page
+		if free, err := v.stores[id].FreePagesHoldingForTest(gone); err != nil || !slices.Contains(free, page) {
+			t.Fatalf("fixture invalid: voter %d's free pages holding the payload are %v (err %v), want page %d among them", id, free, err, page)
 		}
 	}
 	leader.saga(control.DeleteScope{Mode: model.DeleteRetireProject, Projects: []model.ID{leader.project}})
@@ -207,8 +220,14 @@ func TestAFollowerThatReplayedTheErasureScrubsItsOwnFile(t *testing.T) {
 		if fx.auditsOf("delete.control_scrubbed") != scrubbed || fx.stateHolds(gone) {
 			t.Fatalf("fixture invalid: voter %d did not replay the leader's erasure and scrubbed audit", id)
 		}
-		held := controlDBHits(t, v.dirs[id], gone)
-		if len(held) == 0 {
+		held, err := fx.store.FreePagesHoldingForTest(gone)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Contains(held, planted[id]) {
+			t.Fatalf("fixture invalid: voter %d's free pages holding the erased payload after the replay are %v, page %d (free before it) is gone", id, held, planted[id])
+		}
+		if hits := controlDBHits(t, v.dirs[id], gone); len(hits) == 0 {
 			t.Fatalf("fixture invalid: voter %d's control.db holds no copy of the replaced state", id)
 		}
 		if got := v.stores[id].ResidualStores(); !contains(got, control.ResidualControlState) {

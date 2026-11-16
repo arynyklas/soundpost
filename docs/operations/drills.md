@@ -145,7 +145,14 @@ entry, `facts` and `not_run_items`. No secret or raw telemetry content is writte
    changed the policy epoch got a permanent `403`, because the first attempt left a
    `reserved` reservation bound to the older epoch (`internal/auth/source_reservation.go`).
    **Fixed** (b4263ca); the drills no longer record it. Whether the same reservation could
-   have leaked quota before the fix was not checked.
+   have leaked quota before the fix: by reading `internal/control/quota.go` (not by running the
+   unfixed build), it looks so. `ReserveAdmission` charges the quota before the capacity refusal,
+   which refunds nothing, the only release of a `reserved` row that file contains is
+   `CancelAdmission` with the owner group's proof, and the 403 retry never consumed or cancelled
+   it; so the charge stayed until a cancel. After the fix the retry reuses the same reservation
+   and the quota is unchanged by it
+   (`internal/storage/reservation_epoch_retry_test.go`). `capacity-faults` and
+   `stale-policy-delete-barrier` re-run on the lane 1 wave 14 tree: both `passed`, exit 0.
 2. Post-deletion backups could not be activated in the case below. **Fixed** (dc732a8):
    `restore-authority-unavailable` now runs on a backup taken after a deletion whose erased
    rows carried a series no retained row has, and its restore and activation checks pass

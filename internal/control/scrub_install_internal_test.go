@@ -41,7 +41,11 @@ type installFx struct {
 	keys                    []string
 }
 
-func newInstallFx(t *testing.T) *installFx {
+func newInstallFx(t *testing.T) *installFx { return newInstallFxOf(t, installPayload) }
+
+// newInstallFxOf is newInstallFx with the given number of incident books: a state of a few pages
+// lands at the lowest free pages of a fresh file, which is where a page-2 or page-3 canary needs it.
+func newInstallFxOf(t *testing.T, books int) *installFx {
 	t.Helper()
 	f := &installFx{t: t, ctx: context.Background(), dir: t.TempDir(),
 		org: model.ID{0x10}, project: model.ID{0x11}, operation: model.ID{0xdd}}
@@ -54,8 +58,8 @@ func newInstallFx(t *testing.T) *installFx {
 	if err = s.EnableSingle(f.ctx, filepath.Join(f.dir, "raft-control")); err != nil {
 		t.Fatal(err)
 	}
-	books := map[string]json.RawMessage{}
-	for i := range installPayload {
+	incidentBooks := map[string]json.RawMessage{}
+	for i := range books {
 		incident := model.ID{0xa1, byte(i)}
 		rec, err := json.Marshal(IncidentRecord{Org: f.org, Project: f.project, ID: incident, Version: 1, Digest: model.Hash{7},
 			State: json.RawMessage(`{"incident_id":"` + incident.String() + `","org_id":"` + f.org.String() + `","project_id":"` + f.project.String() + `","version":"1","evidence":"` + installCanary + `","at":"5"}`)})
@@ -63,11 +67,11 @@ func newInstallFx(t *testing.T) *installFx {
 			t.Fatal(err)
 		}
 		key := f.org.String() + ":" + f.project.String() + ":" + incident.String()
-		books[key] = rec
+		incidentBooks[key] = rec
 		f.keys = append(f.keys, key)
 	}
 	if err = s.Update(f.ctx, func(st *State) error {
-		st.IncidentBooks = books
+		st.IncidentBooks = incidentBooks
 		return nil
 	}); err != nil {
 		t.Fatal(err)

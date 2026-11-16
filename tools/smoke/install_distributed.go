@@ -54,7 +54,9 @@ import (
 // not-ready refusal with no acknowledgement; restart and converge again. It also exercises the
 // off-host backup authority gate of internal/config against the real internal/backup authority
 // on a local directory, and (with a container image) the permission separation of the native
-// helper at runtime.
+// helper at runtime. With --binary it also takes a real cluster backup at a stopped follower,
+// restores it into a fresh root, activates it with a cluster seed and starts three NEW voters
+// from it (install_distributed_backup.go).
 //
 // Registered as: case "install-distributed": return RunInstallDistributed(os.Args[2:]).
 func RunInstallDistributed(args []string) (result error) {
@@ -408,6 +410,7 @@ func RunInstallDistributed(args []string) (result error) {
 		return httpSmokeFailure("retry_after_recovery", rstatus, 200, rraw)
 	}
 	ledger.accept(batch)
+	fx.queryTime = fmt.Sprint(time.Now().Add(time.Minute).UnixNano())
 	for _, id := range []uint64{1, 2, 3} {
 		if err = login(id); err != nil {
 			return err
@@ -433,6 +436,14 @@ func RunInstallDistributed(args []string) (result error) {
 	if err != nil {
 		return err
 	}
+	stage = "dist_cluster_backup_restore"
+	if processes, ok := cluster.(*processCluster); ok {
+		if err = distributedBackupRestoreLeg(&backupLegEnv{cluster: processes, sites: sites, fx: fx, ledger: ledger, login: login, nfx: nfx}, report); err != nil {
+			return err
+		}
+	} else {
+		report["cluster_backup_restore"] = "not run in container mode (needs the node directories and the binary on the host)"
+	}
 	stage = "dist_stop_private_modes_logs"
 	if err = cluster.stop(report); err != nil {
 		return err
@@ -455,12 +466,15 @@ func RunInstallDistributed(args []string) (result error) {
 	}
 
 	report["wall_clock_s"] = time.Since(started).Round(time.Second).Seconds()
-	report["not_run"] = []string{
+	notRun := []string{
 		"authorized isolated Kubernetes cluster (the chart is only rendered and statically checked)",
 		"three independent physical hosts, disks, power or network paths",
-		"restore of a backup into a three-voter cluster (not implemented; docs/operations/backup-restore.md) - the single-node backup-restore smoke is separate",
 		"the optional native helper image (not produced) and kernel 6.1 / arm64",
 	}
+	if _, ok := cluster.(*processCluster); !ok {
+		notRun = append(notRun, "cluster backup and restore into three new voters in container mode (the leg runs with --binary: three local processes, restore into three new local processes, no distinct hosts)")
+	}
+	report["not_run"] = notRun
 	stage = "dist_artifact"
 	encoded, _ := json.MarshalIndent(report, "", "  ")
 	return os.WriteFile(filepath.Join(*artifact, "install-distributed.json"), encoded, 0o600)
@@ -729,6 +743,9 @@ func (l *distLedger) write(site *installSite, fx *installFixture, label string) 
 		return &smokeFailure{Stage: "write_" + label, Code: "receipt_decode"}
 	}
 	l.accepted = append(l.accepted, installReceipt{name: label, batch: batch, receipt: receipt})
+	// The instant queries evaluate one minute ahead of the newest row; a smoke that outlasts the
+	// previous evaluation time would otherwise never see its latest write.
+	fx.queryTime = fmt.Sprint(time.Now().Add(time.Minute).UnixNano())
 	return nil
 }
 
