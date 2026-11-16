@@ -1,6 +1,6 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
 import {test,expect,type Locator,type Page} from '@playwright/test';
-import {activate,adminCommand,createOrg,createProject,field,id,login,owner,postJson} from './support/real';
+import {activate,adminCommand,createOrg,createProject,field,id,login,owner,postJson,reopen} from './support/real';
 // The destination settings page over the real served process: POST /api/v1/destinations (list | save). Saving a destination needs organization
 // administration (D30: a destination routes every project of the organization), so an account that holds only policy.write on the project reads the
 // list and is told it cannot change it, and the route itself refuses its save. Every save is an audited command based on the destination's own version:
@@ -16,7 +16,9 @@ async function save(f:Locator,reason:string,button:string):Promise<void>{
  await f.getByRole('button',{name:button,exact:true}).click();
 }
 async function openDestinations(page:Page,org:string,project:string):Promise<Locator>{
- await page.goto(`/${settings(org,project)}`);
+ // A fresh document, not a fragment change of the one on screen: Firefox answers goto(sameDocument#fragment) with a same-document navigation, its late `hashchange`
+ // makes SessionBoundary revalidate and mount the console again, and a settings tab clicked before that falls back to the Project tab (observed in the full suite).
+ await reopen(page,`/${settings(org,project)}`);
  await page.locator('[data-settings-tab="destinations"]').click();
  const content=page.locator('[data-settings-page="destinations"]');
  await expect(content).toBeVisible();

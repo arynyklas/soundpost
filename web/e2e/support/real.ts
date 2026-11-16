@@ -101,13 +101,16 @@ export async function login(page:Page,email:string,password:string):Promise<void
  logins.set(page,{email,password,at:Date.now()});
 }
 /**
- * Opens a console URL as a fresh document, so the console makes every read again. `page.goto` to the URL the page already shows reloads it in
- * Chromium and WebKit but is only a same-document fragment navigation in Firefox (the old document, and everything it read, stays), so a spec that
- * needs the console to read again goes through a blank document first. Never rely on `goto` of the current URL to refresh a page.
+ * Opens a console URL as a fresh document, so the console makes every read again, and waits for the console to settle (`activate`). `page.goto` to the URL the
+ * page already shows reloads it in Chromium and WebKit but is only a same-document fragment navigation in Firefox (the old document, and everything it read,
+ * stays; its late `hashchange` also makes the session boundary mount the console again), so a spec that needs the console to read again goes through a blank
+ * document first. Never rely on `goto` of the current URL to refresh a page. Without the wait, a settings tab clicked right after the load can be undone by the
+ * focus revalidation that remounts the console (observed on Firefox, late in the full suite: destination-settings:34, admin-scope:337).
  */
 export async function reopen(page:Page,path:string):Promise<void>{
  await page.goto('about:blank');
  await page.goto(path);
+ await activate(page);
 }
 /**
  * Brings a freshly opened console page to the front and waits until the console's own focus revalidation has finished before the spec acts. The console's
