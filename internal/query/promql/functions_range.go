@@ -467,13 +467,24 @@ func functionRange(ctx context.Context, call CallPlan, args []value.Result, inde
 					break
 				}
 				sf, tf := functionFloat(args[1].Scalar), functionFloat(args[2].Scalar)
-				level, trend := xs[0], xs[1]-xs[0]
-				for _, observation := range xs[1:] {
-					next := float64(sf*observation) + float64((1-sf)*(level+trend))
-					trend = float64(tf*(next-level)) + float64((1-tf)*trend)
-					level = next
+				// The pinned reference's loop in source order, every operation through the
+				// NaN-bit-pinned helpers: a bare `+` or `-` takes its NaN payload from whichever operand
+				// the compiler placed first, and that differs between builds (the race build swaps the
+				// operands of x+y), so the plain operators made the payload depend on the build.
+				// The pinned compiled x+y returns y's payload when both are NaN (AddSecond), the other
+				// sites return the first source operand's. The explicit conversions in value.Mul keep
+				// the products unfused.
+				s1, b := xs[0], value.Sub(xs[1], xs[0])
+				var s0 float64
+				for i := 1; i < len(xs); i++ {
+					scaled := value.Mul(sf, xs[i])
+					if i > 1 {
+						b = value.Add(value.Mul(tf, value.Sub(s1, s0)), value.Mul(1-tf, b))
+					}
+					y := value.Mul(1-sf, value.Add(s1, b))
+					s0, s1 = s1, value.AddSecond(scaled, y)
 				}
-				x = level
+				x = s1
 			default:
 				return out, diagnostics, functionError(call.Expr, "function.internal-unbound", "unbound range function implementation")
 			}

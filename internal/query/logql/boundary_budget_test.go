@@ -31,7 +31,12 @@ func TestHostileMultiplicityFailsWithTypedQuota(t *testing.T) {
 		if !errors.As(err, &fault) || fault.Code != model.Quota {
 			t.Fatalf("%s: err=%v want typed quota", fn, err)
 		}
-		if elapsed > time.Second {
+		// The product budget is MaxAccumulatorRepetitions steps (a count), not a duration: the
+		// one-second bound is this test's own guard against an unbounded loop. Under -race the
+		// same 2^26 steps cost several times more CPU, so the duration is logged, not asserted.
+		if raceEnabled {
+			t.Logf("%s: typed quota after %s (race build: wall-clock bound not asserted)", fn, elapsed)
+		} else if elapsed > time.Second {
 			t.Fatalf("%s: took %s", fn, elapsed)
 		}
 		account.Release(value.ResultBytes(r))
