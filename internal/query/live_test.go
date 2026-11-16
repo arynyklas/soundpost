@@ -1602,6 +1602,9 @@ func TestLiveRevalidationCostPerEvent(t *testing.T) {
 	if revalidate.N == 0 || deliver.N == 0 {
 		t.Fatal("benchmark did not run")
 	}
+	if raceEnabled {
+		return // the race detector multiplies CPU per operation; the budget is a property of the product build
+	}
 	if c := cpu(revalidate); c > 20 {
 		t.Fatalf("revalidation alone costs %.1f%% of a core at %d events/s", c, eventsPerSecond)
 	}
