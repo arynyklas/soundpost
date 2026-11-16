@@ -112,8 +112,9 @@ func compileTemplateNamed(source string, p profile.Profile, runtime TemplateRunt
 }
 
 type templateBinding struct {
-	name  string
-	value any
+	name   string
+	value  any
+	charge int64 // pinned reservation held for the binding until its scope ends
 }
 
 // Root label-map misses are zero strings; decoded JSON-map misses are nil.
@@ -147,13 +148,17 @@ type templateState struct {
 	template       *Template
 	input          TemplateInput
 	reserved, work int64
-	depth          int
-	vars           []templateBinding
-	output         strings.Builder
-	regex          *regexcompat.Scope
-	fatal          error
-	node           parse.Node
-	tree           *parse.Tree
+	// pinned is the part of reserved that outlives the node that made it: the
+	// output bytes and the live variable bindings. Everything else is scratch and
+	// is returned when the node that needed it retires (LOGQL-M7).
+	pinned int64
+	depth  int
+	vars   []templateBinding
+	output strings.Builder
+	regex  *regexcompat.Scope
+	fatal  error
+	node   parse.Node
+	tree   *parse.Tree
 }
 
 // Regex VM cancellation checkpoints also enforce query-account authorization;
@@ -202,7 +207,7 @@ func (t *Template) Execute(ctx context.Context, input TemplateInput, account val
 	if err != nil {
 		return "", err
 	}
-	s.vars = []templateBinding{{"$", rootData}}
+	s.vars = []templateBinding{{name: "$", value: rootData}}
 	if err = s.walk(t.root.Root, rootData); err != nil {
 		if err == templateBad {
 			err = errors.New("LogQL template internal value contract failure")
@@ -315,23 +320,70 @@ func (s *templateState) outputString(text string) error {
 		return e
 	}
 	s.output.WriteString(text)
+	s.pinned += int64(len(text))
 	return nil
 }
+
+// retire returns every scratch reservation made since scratch stood at mark.
+func (s *templateState) retire(mark int64) {
+	if extra := s.reserved - s.pinned - mark; extra > 0 {
+		s.account.Release(extra)
+		s.reserved -= extra
+	}
+}
+
+// retainedBytes is what a live variable binding holds besides its own header.
+func templateRetainedBytes(v any) int64 {
+	switch x := v.(type) {
+	case string:
+		return int64(len(x))
+	case []byte:
+		return int64(len(x))
+	}
+	return 32
+}
 func (s *templateState) push(name string, v any) error {
-	if e := s.reserve(48); e != nil {
+	charge := 48 + templateRetainedBytes(v)
+	if e := s.reserve(charge); e != nil {
 		return e
 	}
-	s.vars = append(s.vars, templateBinding{name, v})
+	s.pinned += charge
+	s.vars = append(s.vars, templateBinding{name: name, value: v, charge: charge})
 	return nil
 }
 func (s *templateState) assign(name string, v any) error {
 	for i := len(s.vars) - 1; i >= 0; i-- {
-		if s.vars[i].name == name {
-			s.vars[i].value = v
-			return nil
+		if s.vars[i].name != name {
+			continue
 		}
+		if s.vars[i].charge > 0 {
+			charge := 48 + templateRetainedBytes(v)
+			if charge > s.vars[i].charge {
+				if e := s.reserve(charge - s.vars[i].charge); e != nil {
+					return e
+				}
+				s.pinned += charge - s.vars[i].charge
+			} else {
+				s.account.Release(s.vars[i].charge - charge)
+				s.reserved -= s.vars[i].charge - charge
+				s.pinned -= s.vars[i].charge - charge
+			}
+			s.vars[i].charge = charge
+		}
+		s.vars[i].value = v
+		return nil
 	}
 	return s.fail("undefined variable: %s", name)
+}
+
+// dropVars ends the scope of every binding above mark and returns what they held.
+func (s *templateState) dropVars(mark int) {
+	for _, b := range s.vars[mark:] {
+		s.account.Release(b.charge)
+		s.reserved -= b.charge
+		s.pinned -= b.charge
+	}
+	s.vars = s.vars[:mark]
 }
 func (s *templateState) variable(name string) (any, error) {
 	for i := len(s.vars) - 1; i >= 0; i-- {
@@ -355,6 +407,7 @@ func (s *templateState) walk(list *parse.ListNode, dot any) error {
 			return e
 		}
 		s.node = node
+		scratch := s.reserved - s.pinned
 		switch n := node.(type) {
 		case *parse.TextNode:
 			if int64(len(n.Text)) > templateMaxBytes-int64(s.output.Len()) {
@@ -364,6 +417,7 @@ func (s *templateState) walk(list *parse.ListNode, dot any) error {
 				return e
 			}
 			s.output.Write(n.Text)
+			s.pinned += int64(len(n.Text))
 		case *parse.ActionNode:
 			v, e := s.pipe(n.Pipe, dot, true)
 			if e != nil {
@@ -389,7 +443,7 @@ func (s *templateState) walk(list *parse.ListNode, dot any) error {
 			} else {
 				e = s.walk(n.ElseList, dot)
 			}
-			s.vars = s.vars[:mark]
+			s.dropVars(mark)
 			if e != nil {
 				return e
 			}
@@ -404,7 +458,7 @@ func (s *templateState) walk(list *parse.ListNode, dot any) error {
 			} else {
 				e = s.walk(n.ElseList, dot)
 			}
-			s.vars = s.vars[:mark]
+			s.dropVars(mark)
 			if e != nil {
 				return e
 			}
@@ -429,10 +483,11 @@ func (s *templateState) walk(list *parse.ListNode, dot any) error {
 			if e = s.reserve(48); e != nil {
 				return e
 			}
-			s.vars = []templateBinding{{"$", v}}
+			s.vars = []templateBinding{{name: "$", value: v}}
 			s.tree = tree
 			e = s.walk(tree.Root, v)
 			s.tree = oldTree
+			s.dropVars(0)
 			s.vars = saved
 			if e != nil {
 				return e
@@ -440,12 +495,13 @@ func (s *templateState) walk(list *parse.ListNode, dot any) error {
 		default:
 			return templateBad
 		}
+		s.retire(scratch)
 	}
 	return nil
 }
 func (s *templateState) rangeNode(n *parse.RangeNode, dot any) error {
 	mark := len(s.vars)
-	defer func() { s.vars = s.vars[:mark] }()
+	defer func() { s.dropVars(mark) }()
 	v, e := s.pipe(n.Pipe, dot, false)
 	if e != nil {
 		return e
@@ -468,7 +524,7 @@ func (s *templateState) rangeNode(n *parse.RangeNode, dot any) error {
 			return e
 		}
 		count++
-		s.vars = s.vars[:iterMark]
+		s.dropVars(iterMark)
 		for i, d := range declarations {
 			val := v
 			if len(declarations) > 1 && i == 0 {

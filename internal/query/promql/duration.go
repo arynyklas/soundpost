@@ -62,42 +62,41 @@ func (q *parser) gate(name string) {
 
 var durationKeywords = map[string]bool{"step": true, "range": true, "min_of": true, "max_of": true}
 
-// durationGate reports a duration expression that is not enabled, positioned at
-// the start of the construct the pinned parser blames (experimentalDurationExpr).
-func (q *parser) durationGate(pos int) {
+// durationGate reports a duration expression that is not enabled, over the range
+// the pinned parser blames (experimentalDurationExpr).
+func (q *parser) durationGate(r syntax.SourceRange) {
 	if q.p.ID != "promql-prometheus-3.13.5" || !enabled(q.p, "promql-duration-expr") {
-		q.failRange(syntax.Range(q.s, pos, pos), "experimental duration expression is not enabled")
+		q.failRange(r, "experimental duration expression is not enabled")
 	}
 }
 
-// durationStart is the position experimentalDurationExpr reports for e: the
-// leftmost operand of a binary expression, otherwise the node's own start.
-func durationStart(e Expr) int {
+// durationOperand is the range experimentalDurationExpr reports for e: the
+// leftmost operand of a binary expression or parenthesis, otherwise the node's
+// own range.
+func durationOperand(e Expr) syntax.SourceRange {
 	n := e.(*Node)
-	if n.Kind == "binary" && len(n.Children) > 0 {
-		return durationStart(n.Children[0])
+	if (n.Kind == "binary" || n.Kind == "paren") && len(n.Children) > 0 {
+		return durationOperand(n.Children[0])
 	}
-	if n.Kind == "paren" && len(n.Children) > 0 {
-		return durationStart(n.Children[0])
-	}
-	return n.Range.StartByte
+	return n.Range
 }
 
 // durationCall parses the argument list of step(), range(), min_of(a, b) or
 // max_of(a, b); the min/max forms take exactly two duration expressions. A
 // signed keyword (signPos > 0) is reported at its sign, as one grammar rule.
 func (q *parser) durationCall(n *Node, signPos int) {
-	gate := func(pos int) {
+	gate := func(r syntax.SourceRange) {
 		if signPos > 0 {
-			pos = signPos - 1
+			r = syntax.Range(q.s, signPos-1, max(signPos-1, r.EndByte))
 		}
-		q.durationGate(pos)
+		q.durationGate(r)
 	}
 	q.need("(")
 	if n.Text == "step" || n.Text == "range" {
 		q.need(")")
 		if q.err == nil {
-			gate(n.Range.StartByte)
+			// the whole call, up to its closing parenthesis
+			gate(syntax.Range(q.s, n.Range.StartByte, q.ts[q.i-1].end))
 		}
 		return
 	}
@@ -106,7 +105,9 @@ func (q *parser) durationCall(n *Node, signPos int) {
 	n.Children = append(n.Children, q.expr(0))
 	q.need(")")
 	if q.err == nil {
-		gate(durationStart(n.Children[0]))
+		// from the first operand through the end of the second
+		first := durationOperand(n.Children[0])
+		gate(syntax.Range(q.s, first.StartByte, n.Children[1].SourceRange().EndByte))
 	}
 }
 

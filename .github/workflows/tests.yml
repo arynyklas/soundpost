@@ -105,3 +105,49 @@ jobs:
           case "$ARGS" in *./tools/...*) SKIP='^TestCampaignReportsTheRealGateFaithfully$' ;; esac
           # shellcheck disable=SC2086
           go test -count=1 -p 2 -timeout 110m ${SKIP:+-skip "$SKIP"} $ARGS
+
+  # The symbolicate tests that need a real sandbox are skipped everywhere above (no sandbox configuration). This job
+  # runs the package against the native worker inside a hardened transient unit with a delegated cgroup subtree, as
+  # production does (deploy/ci/symbolicate-native.sh), and fails if a required sandbox test was skipped.
+  symbolicate-native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    name: symbolicate (native sandbox)
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Cache the pinned Go toolchain archive
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: .tools/go*.linux-amd64.tar.gz
+          key: go-archive-${{ hashFiles('build/toolchains.json') }}
+
+      - name: Install the pinned Go toolchain (sha256 checked every run)
+        run: |
+          set -eu
+          version=$(jq -r .go.version build/toolchains.json)
+          archive=".tools/go${version}.linux-amd64.tar.gz"
+          mkdir -p .tools/linux
+          test -f "$archive" || curl --fail --location --silent --show-error --output "$archive" "$(jq -r .go.linux_amd64.url build/toolchains.json)"
+          echo "$(jq -r .go.linux_amd64.sha256 build/toolchains.json)  ${archive}" | sha256sum --check --strict -
+          tar -C .tools/linux -xzf "$archive"
+          echo "$PWD/.tools/linux/go/bin" >> "$GITHUB_PATH"
+
+      - name: Cache Go modules and build outputs
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-${{ hashFiles('build/toolchains.json') }}-${{ hashFiles('go.sum') }}-symbolicate-${{ github.sha }}
+          restore-keys: |
+            go-${{ hashFiles('build/toolchains.json') }}-${{ hashFiles('go.sum') }}-symbolicate-
+            go-${{ hashFiles('build/toolchains.json') }}-${{ hashFiles('go.sum') }}-
+
+      - name: Native sandbox tests
+        run: |
+          set -eu
+          go mod download
+          bash deploy/ci/symbolicate-native.sh

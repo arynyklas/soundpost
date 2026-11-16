@@ -131,7 +131,11 @@ func check(e Expr, p profile.Profile) (TypedExpr, error) {
 		}
 	case "aggregate":
 		if (n.Text == "limitk" || n.Text == "limit_ratio") && !enabled(p, "promql-experimental-functions") {
-			return fail("aggregation.feature-disabled", "aggregation requires experimental feature")
+			r := n.GateRange
+			if r == (syntax.SourceRange{}) {
+				r = e.SourceRange()
+			}
+			return v, &syntax.LanguageError{Code: "aggregation.feature-disabled", Category: "type", Range: r, SafeMessage: "aggregation requires experimental feature"}
 		}
 		want := 1
 		if n.Text == "topk" || n.Text == "bottomk" || n.Text == "quantile" || n.Text == "count_values" || n.Text == "limitk" || n.Text == "limit_ratio" {

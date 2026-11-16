@@ -23,7 +23,8 @@ type parser struct {
 	p                        profile.Profile
 	err                      error
 	lexErr                   error
-	signPos                  int // 1 + start of a unary sign owned by the duration keyword about to be parsed
+	signPos                  int  // 1 + start of a unary sign owned by the duration keyword about to be parsed
+	signedParen              bool // the parenthesis about to be parsed follows an offset's sign: "-(5m)" is its own grammar rule, with no gate
 	depth                    int
 	durationMode, allowEmpty bool
 }
@@ -103,6 +104,24 @@ func (q *parser) tooDeep(extra int) bool {
 	t := q.peek()
 	q.failCode(syntax.Range(q.s, t.start, t.end), "syntax.nesting-too-deep", "expression nesting is too deep")
 	return true
+}
+
+// reducedRange is the range the pinned parser reports for an error raised when
+// the aggregation starting at start is reduced. 3.13.5 blames the aggregation
+// itself. 3.1.0 reports up to the last closing parenthesis, bracket or brace the
+// lexer has produced, which includes the one held as the lookahead token
+// (lastClosing).
+func (q *parser) reducedRange(start int) syntax.SourceRange {
+	end := q.ts[q.i-1].end
+	if q.p.ID == "promql-prometheus-3.13.5" {
+		return syntax.Range(q.s, start, end)
+	}
+	for i := 0; i <= q.i && i < len(q.ts); i++ {
+		if t := q.ts[i]; t.text == ")" || t.text == "]" || t.text == "}" {
+			end = max(end, t.end)
+		}
+	}
+	return syntax.Range(q.s, start, end)
 }
 func (q *parser) span(n *Node, start int) {
 	end := start
@@ -208,7 +227,7 @@ func (q *parser) expr(min int) Expr {
 			q.failRange(syntax.Range(q.s, left.SourceRange().StartByte, q.ts[q.i-1].end), "syntax requires enabled feature promql-binop-fill-modifiers")
 		}
 		if q.durationMode && q.err == nil {
-			q.durationGate(durationStart(left))
+			q.durationGate(durationOperand(left))
 			if n.Bool || n.Matching != nil || n.FillLeft != nil || n.FillRight != nil {
 				q.fail("duration operators do not permit vector modifiers")
 			}
@@ -234,6 +253,8 @@ func (q *parser) primary() Expr {
 	t := q.pop()
 	signPos := q.signPos
 	q.signPos = 0
+	signedParen := q.signedParen
+	q.signedParen = false
 	n := &Node{Text: t.value, Range: syntax.Range(q.s, t.start, t.end)}
 	switch {
 	case t.text == "+" || t.text == "-":
@@ -244,8 +265,8 @@ func (q *parser) primary() Expr {
 		n.Kind = "paren"
 		n.Children = []Expr{q.expr(0)}
 		q.need(")")
-		if q.durationMode && q.err == nil {
-			q.durationGate(durationStart(n.Children[0]))
+		if q.durationMode && q.err == nil && !signedParen {
+			q.durationGate(durationOperand(n.Children[0]))
 		}
 	case isNumberToken(t):
 		n = q.number(t)
@@ -276,6 +297,7 @@ func (q *parser) primary() Expr {
 				n.GroupWithout = q.pop().text == "without"
 				n.Labels = q.names()
 			}
+			n.GateRange = q.reducedRange(t.start)
 		} else if q.durationMode && q.p.ID == "promql-prometheus-3.13.5" && durationKeywords[t.text] && q.peek().text == "(" {
 			n.Kind = "duration_call"
 			n.Text = t.text
@@ -458,12 +480,11 @@ func (q *parser) selector(n *Node, opened bool) {
 		}
 		return
 	}
+	twice := false // the metric name was given both outside and inside the braces
 	for q.err == nil {
 		t := q.pop()
 		if t.kind == "string" && q.peek().text != "=" && q.peek().text != "!=" && q.peek().text != "=~" && q.peek().text != "!~" {
-			if n.Text != "" {
-				q.failRange(syntax.Range(q.s, n.Range.StartByte, t.end), "metric name specified twice")
-			}
+			twice = twice || n.Text != ""
 			n.Matchers = append(n.Matchers, Matcher{Name: "__name__", Op: "=", Value: t.value, Range: syntax.Range(q.s, t.start, t.end)})
 			nonempty = nonempty || t.value != ""
 		} else {
@@ -497,9 +518,7 @@ func (q *parser) selector(n *Node, opened bool) {
 			}
 			nonempty = nonempty || !empty
 			n.Matchers = append(n.Matchers, m)
-			if t.value == "__name__" && n.Text != "" {
-				q.failRange(syntax.Range(q.s, n.Range.StartByte, v.end), "metric name specified twice")
-			}
+			twice = twice || t.value == "__name__" && n.Text != ""
 		}
 		if q.eat("}") {
 			break
@@ -508,6 +527,12 @@ func (q *parser) selector(n *Node, opened bool) {
 		if q.eat("}") {
 			break
 		}
+	}
+	if twice && q.err == nil {
+		// The pinned parser raises this when the selector is reduced, so the range
+		// covers the whole selector up to its closing brace and a grammar error in a
+		// later matcher is reported first.
+		q.failRange(syntax.Range(q.s, n.Range.StartByte, q.ts[q.i-1].end), "metric name specified twice")
 	}
 	if !nonempty {
 		q.failRange(syntax.Range(q.s, n.Range.StartByte, q.ts[q.i-1].end), "selector must contain a nonempty matcher")

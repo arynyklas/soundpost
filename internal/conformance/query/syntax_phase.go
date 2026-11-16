@@ -97,7 +97,7 @@ func observeOwnedSyntax(expression string, p profile.Profile) (OwnedSyntaxObserv
 	return result, nil
 }
 func RunSyntaxPhase(ctx context.Context, lock SourceLock, casesPath, profilesPath, runtime string) (SyntaxPhaseReport, error) {
-	report := SyntaxPhaseReport{Phase: "syntax", PositionQualification: "Reference HTTP exposes start line:byte-column only; end ranges are not claimed. Owned exact byte/rune and modifier-end position tests are independent mandatory unit evidence."}
+	report := SyntaxPhaseReport{Phase: "syntax", PositionQualification: "Reference HTTP exposes start line:byte-column only, so this phase compares starts. End ranges are qualified separately against Go-level observations of the pinned parsers (testdata/native-promql-syntax-ranges.json, TestOwnedSyntaxRangesAgainstRecordedGoLevelObservations): every recorded row agrees: rejected rows on start and end, accepted rows on acceptance."}
 	if err := ValidateSourceLock(lock); err != nil {
 		return report, err
 	}

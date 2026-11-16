@@ -12,18 +12,8 @@ import (
 	"github.com/arynyklas/soundpost/internal/query/profile"
 )
 
-// knownEndRangeDivergences are the rejected expressions whose owned error end
-// still differs from the pinned parser's PositionRange.End (02.02-W1): the
-// metric-name-twice check (whole selector incl. the closing brace), the
-// experimental duration gate (the duration operand's own range) and the
-// limitk() gate (the enclosing lastClosing). Lexer errors and the operator-part
-// errors are fixed. Fixing a row removes it from this list: the test fails when
-// a listed row starts to agree.
-var knownEndRangeDivergences = map[string]bool{
-	`1 + sum(limitk(2, rate(foo[5m])))`: true, `foo{__name__="bar"}`: true,
-	`foo[5m + 1m]`: true, `foo[(5m)]`: true, `foo offset min_of(1h, 30m)`: true, `foo[10m:step()]`: true,
-}
-
+// Every rejected expression of the PromQL syntax corpora must report the same
+// start and end as the pinned parser's ParseErrors[0].PositionRange (02.02-W1).
 func TestOwnedSyntaxRangesAgainstRecordedGoLevelObservations(t *testing.T) {
 	raw, err := os.ReadFile("testdata/native-promql-syntax-ranges.json")
 	if err != nil {
@@ -35,20 +25,20 @@ func TestOwnedSyntaxRangesAgainstRecordedGoLevelObservations(t *testing.T) {
 			Enabled    []string `json:"enabled"`
 			ID         string   `json:"id"`
 			Expression string   `json:"expression"`
+			Accepted   bool     `json:"accepted"`
 			Start, End int
 		} `json:"rows"`
 	}
 	if err = json.Unmarshal(raw, &f); err != nil {
 		t.Fatal(err)
 	}
-	if len(f.Rows) < 394 {
+	if len(f.Rows) < 498 {
 		t.Fatalf("recorded range observations shrank to %d rows", len(f.Rows))
 	}
 	registry, err := profile.Load(os.DirFS("../../../profiles/query"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	diverged := map[string]bool{}
 	for _, row := range f.Rows {
 		var manifest profile.Profile
 		if err = ReadJSON("../../../profiles/query/"+row.Profile+".json", &manifest); err != nil {
@@ -69,23 +59,25 @@ func TestOwnedSyntaxRangesAgainstRecordedGoLevelObservations(t *testing.T) {
 			t.Fatal(err)
 		}
 		owned, err := observeOwnedSyntax(row.Expression, p)
-		if err != nil || owned.Accepted {
-			continue // acceptance is the HTTP differential's job
+		if err != nil {
+			t.Errorf("%s %q: owned observation failed: %v", row.Profile, row.Expression, err)
+			continue
+		}
+		if row.Accepted {
+			if !owned.Accepted {
+				t.Errorf("%s %q: the reference accepts it, the owned parser rejects it at %d..%d", row.Profile, row.Expression, owned.StartByte, owned.EndByte)
+			}
+			continue
+		}
+		if owned.Accepted {
+			continue // acceptance of rejected rows is the HTTP differential's job
 		}
 		if owned.StartByte != row.Start {
 			t.Errorf("%s %q: start %d, reference %d", row.Profile, row.Expression, owned.StartByte, row.Start)
 			continue
 		}
 		if owned.EndByte != row.End {
-			diverged[row.Expression] = true
-			if !knownEndRangeDivergences[row.Expression] {
-				t.Errorf("%s %q: end %d, reference %d", row.Profile, row.Expression, owned.EndByte, row.End)
-			}
-		}
-	}
-	for expression := range knownEndRangeDivergences {
-		if !diverged[expression] {
-			t.Errorf("%q: end now agrees under every profile; drop it from knownEndRangeDivergences", expression)
+			t.Errorf("%s %q: end %d, reference %d", row.Profile, row.Expression, owned.EndByte, row.End)
 		}
 	}
 }

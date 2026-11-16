@@ -42,6 +42,9 @@ func (q *parser) offsetValue() Expr {
 	if signed && t.kind == "ident" && durationKeywords[t.text] {
 		q.signPos = sign.start + 1 // "-step()" is a single grammar rule blamed at its sign
 	}
+	if signed && t.text == "(" {
+		q.signedParen = true // "offset -(5m)" is accepted without the experimental gate; "offset (5m)" is not
+	}
 	e := q.primary()
 	if signed {
 		n := &Node{Kind: "unary", Text: sign.text, Children: []Expr{e}, Range: syntax.Range(q.s, sign.start, e.SourceRange().EndByte)}

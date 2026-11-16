@@ -20,6 +20,7 @@ type Expr interface {
 }
 type Node struct {
 	Range, OperatorRange                   syntax.SourceRange
+	GateRange                              syntax.SourceRange // aggregations: the range the pinned parser blames when its reduction is rejected
 	Kind                                   string
 	Text                                   string
 	FloatBits                              uint64

@@ -290,7 +290,7 @@
     "cases/promql-trim-syntax.json": "7101ef52428f6a2f2522bb523ced887abf58dee09c5cff15dcbb5f2c6d094b1a",
     "cases/promql-unicode-syntax.json": "2629cc95a1e084defa046a8a604769618c06a6689761ff0a8dd21dde2d7e1418",
     "cases/logql-syntax-pipeline.json": "88a74606c34f8a8260c09f3fbb246e083224de63be0f6c15da675a0902aadc28",
-    "cases/logql-templates.json": "762bfe4da659abec401a45beb09287766891e5bd787916962efe672cf27ba8c6",
+    "cases/logql-templates.json": "9722b416832e328c26aa7b4c0b39bb53075d7a490eee35bf58871b5d479c6c5e",
     "cases/logql-metrics-order.json": "7c9d0b3bcc9dc40e6c847834a45b6b30cda5b8a1d686fedeb85d07ca650dd0d9",
     "cases/promql-wave6-regex-utf8-syntax.json": "8523e29992d36d66fd3aa5afd2986f3abfbc091c2bac8ef3d9f637699c2150a0",
     "cases/promql-wave6-annotations-nan.json": "d75ae99d3056cd14fbe8090b43ed41569e67b0817e4b7ea5a8598cf583d8387a",
