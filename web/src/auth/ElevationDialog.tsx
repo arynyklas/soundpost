@@ -2,7 +2,7 @@
 import * as React from 'react';
 import { request, type Id, type Session } from './api';
 export interface ElevationState { id:string; expires:string; orgs:Id[] }
-export const SessionContext=React.createContext<{session:Session;refresh:()=>Promise<void>;elevate:(value:ElevationState)=>void;fail:(message:string)=>void}|null>(null);
+export const SessionContext=React.createContext<{session:Session;/** Counts the revalidations that found the session still valid: a view reads again for the same scope, it is not mounted again. */epoch:number;refresh:()=>Promise<void>;elevate:(value:ElevationState)=>void;fail:(message:string)=>void}|null>(null);
 export function ElevationDialog(props:{orgs:Id[];onElevated:()=>void}):React.JSX.Element {
  const context=React.useContext(SessionContext); const [open,setOpen]=React.useState(false);const [busy,setBusy]=React.useState(false);const [error,setError]=React.useState('');const ref=React.useRef<HTMLParagraphElement>(null);
  React.useEffect(()=>{if(error)ref.current?.focus();},[error]);

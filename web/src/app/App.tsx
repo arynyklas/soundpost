@@ -169,6 +169,16 @@ export function App(): React.JSX.Element {
  // Bound during render (an idempotent in-memory assignment) so reads issued by child effects already carry the token.
  bindSession(csrf);
  React.useEffect(() => () => bindSession(''), []);
+ // A revalidation that found the session still valid keeps the console mounted (view state survives) but every view reads its scope again, so access
+ // that was withdrawn meanwhile (a revoked grant) clears what is shown. The first run is the mount itself.
+ const epoch = session?.epoch ?? 0;
+ const seenEpoch = React.useRef(epoch);
+ React.useEffect(() => {
+  if (seenEpoch.current === epoch) return;
+  seenEpoch.current = epoch;
+  generation.current += 1;
+  setNav(decodeHash(window.location.hash, generation.current));
+ }, [epoch]);
  React.useEffect(() => {
   const onHash = (): void => { generation.current += 1; setNav(decodeHash(window.location.hash, generation.current)); };
   window.addEventListener('hashchange', onHash);

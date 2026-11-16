@@ -47,8 +47,8 @@ test('a grant revoked while a trace detail page is open clears the page at the n
  const readsBefore=requests.length;
  // The owner REVOKES the reader's telemetry.read grant for real while the detail stays open.
  await setGrant(w.owners,w.org,w.reader.id,w.project,false);
- // The next revalidation is the console's own (a window focus returning to the open page): it re-reads the scope and remounts the view.
- await page.evaluate(()=>{window.dispatchEvent(new Event('focus'));});
+ // The next revalidation is the console's own (a window focus returning to the open page after it lost focus): it re-reads the scope and remounts the view.
+ await page.evaluate(()=>{window.dispatchEvent(new Event('blur'));window.dispatchEvent(new Event('focus'));});
  await expect(page.getByTestId('critical-path')).toHaveCount(0);
  await expect(page.getByText('Not found').first()).toBeVisible();
  await expect(page.locator('main')).not.toContainText(w.seed.clean.frontend);
