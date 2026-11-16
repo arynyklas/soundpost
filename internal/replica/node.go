@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/arynyklas/soundpost/internal/model"
@@ -81,6 +82,13 @@ func (e Entry) proposed() model.Hash {
 
 // sameProposal reports whether e is a retry of old: the same kind and the same proposed
 // payload, whether or not either side has since been redacted.
+//
+// The identity is the exact payload bytes (or their SHA-256), so it depends on the wire form a
+// caller chose for a command that has more than one (the storage artifact fragment: JSON text or
+// binary envelope). A caller that retries a command under the same ID resends the payload it
+// first proposed, verbatim; re-encoding it in the other form is an ErrConflict. The storage
+// engine mints a fresh ID per proposal and never re-proposes, so its switch between forms
+// (Engine.EnableFragmentEnvelope) cannot produce one (docs/operations/upgrade.md, "Fragment envelope").
 func sameProposal(old, e Entry) bool {
 	if old.Kind != e.Kind {
 		return false
@@ -273,7 +281,10 @@ type Group struct {
 	cadence       Cadence
 	sinceCommands uint64
 	sinceBytes    int64
+	appliedData   uint64 // entry data bytes countApplied has seen (AppliedDataBytes)
 	cadenceWake   chan struct{}
+	cadenceCuts   atomic.Uint64 // cuts the cadence loop completed
+	cadenceLong   atomic.Int64  // nanoseconds the longest of them took
 	domain        *FailDomain
 }
 
@@ -506,16 +517,22 @@ func (g *Group) Step(ctx context.Context, m *pb.Message) (err error) {
 	if m == nil || m.GetTo() != g.id {
 		return ErrInvalid
 	}
-	if g.gate != nil && m.GetType() == pb.MsgSnap {
-		token, advertised := gateToken(m.GetContext())
-		if !advertised {
-			return ErrUnavailable // its sender runs no gate: nothing was ordered before this install
+	if m.GetType() == pb.MsgSnap {
+		context, named := retryCapability(m.GetContext())
+		if !named && digestBearing(m.GetSnapshot().GetData()) {
+			return ErrUnavailable // a retry table kept by digest from a sender that never named the format (10.13-W2)
 		}
-		release, err := g.gate.AdmitSnapshot(token)
-		if err != nil {
-			return ErrUnavailable
+		if g.gate != nil {
+			token, advertised := gateToken(context)
+			if !advertised {
+				return ErrUnavailable // its sender runs no gate: nothing was ordered before this install
+			}
+			release, err := g.gate.AdmitSnapshot(token)
+			if err != nil {
+				return ErrUnavailable
+			}
+			defer release()
 		}
-		defer release()
 	}
 	if err := g.raw.Step(m); err != nil {
 		return err

@@ -84,6 +84,7 @@ func ReduceEvent(current JobState, event model.JobAttemptEvent) (JobState, Outco
 	}
 
 	next := current.clone()
+	next.Provenance = current.withEvidence(event.Observed)
 	if next.Job == (model.ID{}) {
 		next.Job = event.Job
 	}

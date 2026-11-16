@@ -158,6 +158,25 @@ func TestNoCadenceNeverCompacts(t *testing.T) {
 	}
 }
 
+// A wake that arrives while a cut is running is still queued when the cut ends, and the cut has
+// already counted what made it: the loop must look at the counters again and not cut a second time
+// for nothing (measured on three voters: every cut was followed by one more, 10 commands later).
+func TestCadenceLoopDoesNotCutAgainOnAWakeThatIsNoLongerDue(t *testing.T) {
+	g, m := openBounded(t, Config{Cadence: Cadence{Commands: 1000}})
+	first, _ := g.JournalRange()
+	for i := range 3 {
+		putWhole(t, g, m, i)
+	}
+	g.cadenceWake <- struct{}{} // what a command applied during an earlier cut left behind
+	time.Sleep(500 * time.Millisecond)
+	if cuts := g.CadenceCuts(); cuts != 0 {
+		t.Fatalf("3 commands at a cadence of 1000 were cut %d times", cuts)
+	}
+	if now, _ := g.JournalRange(); now != first {
+		t.Fatalf("the journal head moved from %d to %d with 3 commands at a cadence of 1000", first, now)
+	}
+}
+
 // Close stops the cadence loop and waits for a cut in progress: nothing under the group's directory may change after Close
 // returned (a cut still writing snapshot files raced the caller's cleanup: `directory not empty` on CI).
 func TestCloseWaitsForACadenceCut(t *testing.T) {

@@ -19,7 +19,7 @@ type entryWire struct {
 	CommitSet     *CommitSetWatermark `json:"commit_set,omitempty"`
 	Original      *model.Hash         `json:"original,omitempty"`
 	Proposer      *Proposer           `json:"proposer,omitempty"`
-	At            model.Uint64        `json:"at,omitempty"`
+	At            model.Int64         `json:"at,omitempty"`
 }
 
 func (w entryWire) entry() Entry {
@@ -181,16 +181,17 @@ func (r *readyRecord) UnmarshalJSON(raw []byte) error {
 }
 func (s *snapshotEnvelope) UnmarshalJSON(raw []byte) error {
 	var wire struct {
+		Retry       string           `json:"retry,omitempty"`
 		Application model.Uint64     `json:"application"`
 		State       []byte           `json:"state"`
 		Completed   []CommittedEntry `json:"completed"`
 		Members     Members          `json:"members"`
 		Retiring    []Member         `json:"retiring,omitempty"`
 	}
-	if model.StrictJSON(raw, &wire) != nil {
-		return ErrInvalid
+	if model.StrictJSON(raw, &wire) != nil || wire.Retry != "" && wire.Retry != retryDigestTag {
+		return ErrInvalid // a table format this build does not know is refused, not guessed at
 	}
-	*s = snapshotEnvelope{Application: uint64(wire.Application), State: wire.State, Completed: wire.Completed, Members: wire.Members, Retiring: wire.Retiring}
+	*s = snapshotEnvelope{Retry: wire.Retry, Application: uint64(wire.Application), State: wire.State, Completed: wire.Completed, Members: wire.Members, Retiring: wire.Retiring}
 	return nil
 }
 

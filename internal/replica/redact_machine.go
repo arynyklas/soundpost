@@ -152,26 +152,19 @@ const machineRedactUnlockedAttempts = 3
 // errRedactRaced says an unlocked attempt found the group changed between its read and its commit.
 var errRedactRaced = errors.New("replica: the group changed while a redaction pass read it")
 
-// machineInputs is what one attempt of RedactMachineCommands reads from the group, taken with g.mu
-// held: the Control commands the retry table holds a payload for, the retained log, and a handle on
-// the journal and its length. currentLocked says whether the group is still exactly that.
-type machineInputs struct {
-	applied   uint64
-	completed []Entry // by ID
-	log       []*pb.Entry
-	wal       *os.File
-	walInfo   os.FileInfo
-	walSize   int64
+// journalInputs is what an unlocked redaction attempt reads from the group, taken with g.mu held:
+// the applied index, the retained log, and a handle on the journal and its length. currentLocked
+// says whether the group is still exactly that.
+type journalInputs struct {
+	applied uint64
+	log     []*pb.Entry
+	wal     *os.File
+	walInfo os.FileInfo
+	walSize int64
 }
 
-func (g *Group) machineInputsLocked() (*machineInputs, error) {
-	in := &machineInputs{applied: g.applied}
-	for _, c := range g.completed {
-		if c.Entry.Kind == Control && len(c.Entry.Payload) > 0 { // an empty payload is a retry-table entry kept by digest
-			in.completed = append(in.completed, c.Entry)
-		}
-	}
-	sort.Slice(in.completed, func(i, j int) bool { return bytes.Compare(in.completed[i].ID[:], in.completed[j].ID[:]) < 0 })
+func (g *Group) journalInputsLocked() (*journalInputs, error) {
+	in := &journalInputs{applied: g.applied}
 	var err error
 	if in.log, err = g.memoryLogLocked(); err != nil {
 		return nil, err
@@ -187,16 +180,16 @@ func (g *Group) machineInputsLocked() (*machineInputs, error) {
 	return in, nil
 }
 
-func (in *machineInputs) close() { in.wal.Close() }
+func (in *journalInputs) close() { in.wal.Close() }
 
 // journal is the journal as the attempt read it: its first walSize bytes.
-func (in *machineInputs) journal() io.Reader { return io.NewSectionReader(in.wal, 0, in.walSize) }
+func (in *journalInputs) journal() io.Reader { return io.NewSectionReader(in.wal, 0, in.walSize) }
 
 // currentLocked reports whether the group still holds exactly what the attempt read: the same
-// applied index, the same retained log, the same journal file at the same length (a cut or a
-// compaction replaces the file, an append lengthens it) and no backup pin. g.mu is held.
-func (in *machineInputs) currentLocked(g *Group) (bool, error) {
-	if g.applied != in.applied || len(g.pins) != 0 {
+// applied index, the same retained log and the same journal file at the same length (a cut or a
+// compaction replaces the file, an append lengthens it). g.mu is held.
+func (in *journalInputs) currentLocked(g *Group) (bool, error) {
+	if g.applied != in.applied {
 		return false, nil
 	}
 	log, err := g.memoryLogLocked()
@@ -216,6 +209,36 @@ func (in *machineInputs) currentLocked(g *Group) (bool, error) {
 		return false, err
 	}
 	return os.SameFile(now, in.walInfo) && now.Size() == in.walSize, nil
+}
+
+// machineInputs is what one attempt of RedactMachineCommands reads from the group: the journal
+// inputs and the Control commands the retry table holds a payload for. The pass is valid only
+// while the group has no backup pin (pin archives are rewritten under the lock).
+type machineInputs struct {
+	*journalInputs
+	completed []Entry // by ID
+}
+
+func (g *Group) machineInputsLocked() (*machineInputs, error) {
+	ji, err := g.journalInputsLocked()
+	if err != nil {
+		return nil, err
+	}
+	in := &machineInputs{journalInputs: ji}
+	for _, c := range g.completed {
+		if c.Entry.Kind == Control && len(c.Entry.Payload) > 0 { // an empty payload is a retry-table entry kept by digest
+			in.completed = append(in.completed, c.Entry)
+		}
+	}
+	sort.Slice(in.completed, func(i, j int) bool { return bytes.Compare(in.completed[i].ID[:], in.completed[j].ID[:]) < 0 })
+	return in, nil
+}
+
+func (in *machineInputs) currentLocked(g *Group) (bool, error) {
+	if len(g.pins) != 0 {
+		return false, nil
+	}
+	return in.journalInputs.currentLocked(g)
 }
 
 func (g *Group) redactMachineOnce(ruleSet uint64, redact MachineRedaction, locked bool) (MachineRedactResult, error) {
@@ -508,7 +531,13 @@ func scanJournalEntries(in io.Reader, visit func(*pb.Entry) error) error {
 // scanPinArchive calls visit for every entry of one pin archive (a torn tail is ignored as
 // redactPinArchive does). It writes nothing.
 func scanPinArchive(path string, visit func(*pb.Entry) error) error {
-	raw, err := os.ReadFile(path)
+	return scanPinArchivePrefix(path, -1, visit)
+}
+
+// scanPinArchivePrefix is scanPinArchive over the first limit bytes of the archive (the archive as
+// an unlocked attempt saw it: appends after that are not read); a negative limit reads it all.
+func scanPinArchivePrefix(path string, limit int64, visit func(*pb.Entry) error) error {
+	raw, err := readPinPrefix(path, limit)
 	if err != nil {
 		return err
 	}

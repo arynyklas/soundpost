@@ -58,10 +58,12 @@ type UpdateCommand struct {
 }
 
 // UpdateResult is the committed outcome. Replayed means the command ID had
-// already been applied and nothing changed now.
+// already been applied and nothing changed now. Erased means the command
+// committed and a deletion erased the state it produced in the same transition.
 type UpdateResult struct {
 	Version  model.Revision
 	Replayed bool
+	Erased   bool
 }
 
 // Store is the narrow consumer-owned persistence seam. A production binding
@@ -188,6 +190,11 @@ func (s *Service) mutate(ctx context.Context, scope auth.Scope, m mutation) (Job
 				return JobState{}, "", model.Fail(model.Corrupt)
 			}
 			return current, Duplicate, nil
+		}
+		if result.Erased {
+			erased := model.Fail(model.NotFound) // committed, then erased by the deletion that covers its evidence
+			erased.SafeDetail = DetailErased
+			return JobState{}, "", erased
 		}
 		return next, Applied, nil
 	}

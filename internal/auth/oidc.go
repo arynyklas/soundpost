@@ -49,7 +49,7 @@ func (s *Service) OIDCStart(ctx context.Context, cfg OIDCConfig, binding string)
 	source := oidcSource(ctx)
 	st := oidcState{State: randomToken(), Nonce: randomToken(), Verifier: oauth2.GenerateVerifier(), Binding: hashToken(binding), Issuer: cfg.Issuer, Expires: now.Add(5 * time.Minute).Unix(), ClientID: cfg.ClientID, RedirectURL: cfg.RedirectURL, Org: cfg.org, Provider: cfg.provider, Source: source}
 	raw, _ := json.Marshal(st)
-	e = s.store.Update(ctx, func(state *model.ControlState) error {
+	e = s.updatePendingLogin(ctx, now.Unix(), func(state *model.ControlState) error {
 		// The expiry instant is the leader-supplied now above; the transition
 		// reads no clock, so replicas install identical state bytes.
 		sweepExpiredState(state, now.Unix())
@@ -67,7 +67,7 @@ func (s *Service) OIDCStart(ctx context.Context, cfg OIDCConfig, binding string)
 }
 func (s *Service) OIDCCallback(ctx context.Context, cfg OIDCConfig, binding, state, code string) (Session, error) {
 	var pending oidcState
-	e := s.store.Update(ctx, func(st *model.ControlState) error {
+	e := s.updatePendingLogin(ctx, s.now().Unix(), func(st *model.ControlState) error {
 		raw, ok := st.OIDC[hashToken(state)]
 		if !ok {
 			return model.Fail(model.Unauthenticated)
@@ -288,4 +288,22 @@ func (s *Service) SweepExpired(ctx context.Context) (int, error) {
 // without it falls back to Update.
 type expirySweeper interface {
 	UpdateSweepExpired(ctx context.Context, now int64, residentExpired func(key string, raw json.RawMessage) bool, fn func(*model.ControlState) error) error
+}
+
+// pendingLoginWriter is implemented by *control.Store: the commit of a pending-login record (added
+// by OIDCStart, consumed by the OIDCCallback's first step) that does not move the control
+// AuthorityRevision. A pending login authenticates nobody: the callback still needs the provider's
+// verified id token and an enabled mapped user, and its session is a separate write
+// (updateSession). A ControlStore without it falls back to Update.
+type pendingLoginWriter interface {
+	UpdatePendingLogin(ctx context.Context, now int64, pending, residentExpired func(key string, raw json.RawMessage) bool, fn func(*model.ControlState) error) error
+}
+
+func (s *Service) updatePendingLogin(ctx context.Context, now int64, fn func(*model.ControlState) error) error {
+	if u, ok := s.store.(pendingLoginWriter); ok {
+		return u.UpdatePendingLogin(ctx, now,
+			func(k string, raw json.RawMessage) bool { _, ok := pendingOIDCRecord(k, raw); return ok },
+			func(k string, raw json.RawMessage) bool { return expiredOIDC(k, raw, now) }, fn)
+	}
+	return s.store.Update(ctx, fn)
 }

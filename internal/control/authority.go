@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"maps"
+	"slices"
 	"strings"
 
 	"github.com/arynyklas/soundpost/internal/model"
@@ -86,15 +87,24 @@ const (
 	// unclassified writer would. Without this entry every attestation would move AuthorityRevision
 	// and starve a deletion Begin that holds a caller view older than it.
 	writerAttestControl writer = "AttestControl"
-	// writerSessionCreate: a login (password or SSO) that only ADDS a session record. A session
-	// is a credential for a user whose rights are unchanged by it: every access decision is
-	// computed from Users, grants, Orgs and memberships at the time of the request, never from
-	// the session's existence, so a new session cannot widen or narrow what any principal may
-	// read, what is retained, a policy, grant, membership, hold or deletion. What DOES change
-	// authority stays bumping: revocation (Logout), disabling a user, a credential or factor
-	// change (any write to Users, including a consumed TOTP step or recovery code) and the
-	// removal or alteration of an existing session. updateAsGuardedChecked therefore masks the
-	// Sessions map and separately requires every session that existed before to be unchanged.
+	// writerSessionCreate: a login (password or SSO) that ADDS a session record and, for an
+	// account with a second factor, consumes that factor. A session is a credential for a user
+	// whose rights are unchanged by it: every access decision is computed from Users, grants,
+	// Orgs and memberships at the time of the request, never from the session's existence, so a
+	// new session cannot widen or narrow what any principal may read, what is retained, a
+	// policy, grant, membership, hold or deletion. Consuming a factor writes exactly two fields
+	// of the account: User.LastTOTP (the replay floor of the one-time code, only ever raised)
+	// and User.Recovery (a one-time recovery hash, only ever removed). Proof that this moves no
+	// authority: grep of every reader of those fields finds consumeFactor and ConfirmTOTP in
+	// internal/auth/local.go and nothing else, so no read, retention, deletion, grant, policy,
+	// hold or admission decision looks at either; a spent code narrows only what the NEXT login
+	// of that account can present, never what any existing session or principal may do. What
+	// DOES change authority stays bumping: revocation (Logout), disabling a user, a password, a
+	// second-factor secret or enrolment change (any other field of Users), Admin, a lowered
+	// LastTOTP or a recovery list that gained or reordered a hash, and the removal or alteration
+	// of an existing session. updateAsGuardedChecked therefore masks the Sessions map and the two
+	// factor fields, and separately requires every session that existed before to be unchanged,
+	// LastTOTP never lower and Recovery a subsequence of what it was.
 	writerSessionCreate writer = "SessionCreate"
 	// writerArtifactLedger: Reference / Unreference of a published artifact map. It writes the
 	// artifact's reference ledger and its index entry (org Settings artifact_refs: and
@@ -121,6 +131,24 @@ const (
 	// masks Sessions and OIDC and separately requires that nothing was added or altered and
 	// that every removed record was expired; anything else bumps like an unclassified writer.
 	writerSweepExpired writer = "SweepExpired"
+	// writerPendingLogin: the start and the consuming first step of an OIDC login (OIDCStart,
+	// OIDCCallback). A pending login record (st.OIDC, keyed by the hash of its own state) holds
+	// only the nonce, PKCE verifier and cookie binding of one in-flight login; it authenticates
+	// nobody (the callback still needs the provider's verified id token, the org's subject
+	// mapping and an enabled user before ANY session exists, and that session is written by the
+	// SessionCreate writer) and it is read by no authorization decision. Adding one (start),
+	// removing one (the callback consumes it, whether or not it has expired) and the sweep of
+	// expired records OIDCStart folds into its commit therefore change no access state. The
+	// guard masks Sessions and OIDC and requires: no session added or altered, only expired
+	// sessions removed, only pending-login records added, no resident altered, only expired
+	// residents or pending-login records removed. An elevation record (key "elevation:...") is an
+	// access grant, is not a pending-login record, and so keeps bumping.
+	writerPendingLogin writer = "PendingLogin"
+	// writerAuditAppend: a commit whose only effect is to append audit rows (the elevated_read
+	// audit of ElevatedScope). The audit log is evidence, not access state: no decision reads
+	// it back (ExpireControlLog already treats its rows as non-authority). The guard masks
+	// Audits and requires every existing row byte for byte unchanged and none removed.
+	writerAuditAppend writer = "AuditAppend"
 )
 
 // nonAuthorityWriters is the closed allowlist of updateAs writers that leave AuthorityRevision
@@ -138,10 +166,12 @@ var nonAuthorityWriters = map[writer]string{
 	writerRedactNoop:          "empty transition that only moves the applied index",
 	writerReplayIndex:         "replay checkpoint index entry and retention group deadline",
 	writerAttestControl:       "a voter's control residue attestation record (evidence about its own files)",
-	writerSessionCreate:       "a new session record for an existing user (no existing session or user changed)",
+	writerSessionCreate:       "a new session record for an existing user, with the one-time factor it consumed (LastTOTP raised, a recovery hash spent); no other user field and no existing session changed",
 	writerArtifactLedger:      "artifact reference ledger and index entry (retention bookkeeping, not access state)",
 	writerExpireControlLog:    "expired audit rows and applied-command rows (log retention, not access state)",
 	writerSweepExpired:        "expired pending login, elevation and session records (already refused everywhere)",
+	writerPendingLogin:        "a pending OIDC login record added or consumed (authenticates nobody; no access state)",
+	writerAuditAppend:         "appended audit rows only (evidence, never read back by an access decision)",
 }
 
 // nonAuthorityKinds is the closed allowlist of Transact kinds whose commit leaves
@@ -244,11 +274,13 @@ func (s *Store) UpdateReplayIndex(ctx context.Context, fn func(*State) error) er
 }
 
 // UpdateSessionCreate commits fn, a login that adds a session, without moving AuthorityRevision
-// when fn changed nothing but the Sessions map and left every pre-existing session byte for byte
-// as it was. Any other difference (a user record, a membership, a removed or altered session)
-// bumps as an unclassified writer does.
+// when fn changed nothing but the Sessions map (existing sessions byte for byte as they were)
+// and the one-time factor state of existing users: User.LastTOTP never lower and User.Recovery
+// only losing hashes (see writerSessionCreate for the proof). Any other difference (another
+// field of a user, a membership, a removed or altered session) bumps as an unclassified writer
+// does.
 func (s *Store) UpdateSessionCreate(ctx context.Context, fn func(*State) error) error {
-	return s.updateAsGuardedChecked(ctx, writerSessionCreate, stateWithoutSessions, sessionsOnlyGrow, fn)
+	return s.updateAsGuardedChecked(ctx, writerSessionCreate, stateWithoutSessionsAndFactors, sessionsGrowFactorsConsumed, fn)
 }
 
 // UpdateSweepExpired commits fn, the removal of expired sessions and expired OIDC residents,
@@ -257,7 +289,74 @@ func (s *Store) UpdateSessionCreate(ctx context.Context, fn func(*State) error) 
 // other record byte for byte as it was. Any other difference bumps as an unclassified writer
 // does. A commit that removed nothing leaves AuthorityRevision alone as well.
 func (s *Store) UpdateSweepExpired(ctx context.Context, now int64, residentExpired func(key string, raw json.RawMessage) bool, fn func(*State) error) error {
-	preserve := func(st *State) func(*State) bool {
+	return s.updateAsGuardedChecked(ctx, writerSweepExpired, stateWithoutSweepable, residentsPreserve(now, residentExpired, nil), fn)
+}
+
+// UpdatePendingLogin commits fn, the start or the consuming first step of an OIDC login, without
+// moving AuthorityRevision when fn only added pending-login records (pending reports one), removed
+// pending-login records or records expired at now (residentExpired, sessionExpires <= now), and
+// left every other record byte for byte as it was. Any other difference bumps as an unclassified
+// writer does. A nil pending adds and consumes nothing (it degrades to the sweep rule).
+func (s *Store) UpdatePendingLogin(ctx context.Context, now int64, pending, residentExpired func(key string, raw json.RawMessage) bool, fn func(*State) error) error {
+	return s.updateAsGuardedChecked(ctx, writerPendingLogin, stateWithoutSweepable, residentsPreserve(now, residentExpired, pending), fn)
+}
+
+// UpdateAuditAppend commits fn without moving AuthorityRevision when fn changed nothing but
+// appending audit rows: every existing row byte for byte as it was, none removed. Any other
+// difference bumps as an unclassified writer does. Cost: one JSON encoding of every existing
+// audit row per call, besides the two state encodings every guarded writer pays.
+func (s *Store) UpdateAuditAppend(ctx context.Context, fn func(*State) error) error {
+	return s.updateAsGuardedChecked(ctx, writerAuditAppend, stateWithoutAudits, auditsOnlyAppended, fn)
+}
+
+// stateWithoutSweepable is the canonical encoding of st with the Sessions and OIDC maps removed.
+func stateWithoutSweepable(st *State) ([]byte, error) {
+	masked := *st
+	masked.Sessions, masked.OIDC = nil, nil
+	return json.Marshal(masked)
+}
+
+// stateWithoutAudits is the canonical encoding of st with the audit log removed.
+func stateWithoutAudits(st *State) ([]byte, error) {
+	masked := *st
+	masked.Audits = nil
+	return json.Marshal(masked)
+}
+
+// auditsOnlyAppended snapshots the audit rows before fn (each as its own encoding, so an
+// in-place edit of a row cannot hide) and returns the check that all are still there unchanged.
+func auditsOnlyAppended(st *State) func(*State) bool {
+	before := make([][]byte, len(st.Audits))
+	encoded := true
+	for i, row := range st.Audits {
+		raw, err := json.Marshal(row)
+		if err != nil {
+			encoded = false
+			break
+		}
+		before[i] = raw
+	}
+	return func(after *State) bool {
+		if !encoded || len(after.Audits) < len(before) {
+			return false
+		}
+		for i, raw := range before {
+			now, err := json.Marshal(after.Audits[i])
+			if err != nil || !bytes.Equal(raw, now) {
+				return false
+			}
+		}
+		return true
+	}
+}
+
+// residentsPreserve is the preserve check of the writers that touch the Sessions and OIDC maps
+// (stateWithoutSweepable masks both). No session is added or altered and only sessions expired at
+// now are removed. A resident already present is never altered. A resident may be added only if
+// pending reports it, and removed only if expired reports it or pending does. A nil pending adds
+// and consumes nothing.
+func residentsPreserve(now int64, expired, pending func(key string, raw json.RawMessage) bool) func(*State) func(*State) bool {
+	return func(st *State) func(*State) bool {
 		sessions, oidc := maps.Clone(st.Sessions), maps.Clone(st.OIDC)
 		return func(after *State) bool {
 			for k, v := range after.Sessions {
@@ -271,26 +370,22 @@ func (s *Store) UpdateSweepExpired(ctx context.Context, now int64, residentExpir
 				}
 			}
 			for k, v := range after.OIDC {
-				if before, ok := oidc[k]; !ok || !bytes.Equal(before, v) {
+				if before, ok := oidc[k]; ok {
+					if !bytes.Equal(before, v) {
+						return false
+					}
+				} else if pending == nil || !pending(k, v) {
 					return false
 				}
 			}
 			for k, v := range oidc {
-				if _, ok := after.OIDC[k]; !ok && !residentExpired(k, v) {
+				if _, ok := after.OIDC[k]; !ok && !expired(k, v) && (pending == nil || !pending(k, v)) {
 					return false
 				}
 			}
 			return true
 		}
 	}
-	return s.updateAsGuardedChecked(ctx, writerSweepExpired, stateWithoutSweepable, preserve, fn)
-}
-
-// stateWithoutSweepable is the canonical encoding of st with the Sessions and OIDC maps removed.
-func stateWithoutSweepable(st *State) ([]byte, error) {
-	masked := *st
-	masked.Sessions, masked.OIDC = nil, nil
-	return json.Marshal(masked)
 }
 
 // UpdateArtifactReferences commits fn, a reference-ledger write, without moving
@@ -300,25 +395,57 @@ func (s *Store) UpdateArtifactReferences(ctx context.Context, fn func(*State) er
 	return s.updateAsGuarded(ctx, writerArtifactLedger, stateWithoutArtifactLedger, fn)
 }
 
-// stateWithoutSessions is the canonical encoding of st with the Sessions map removed.
-func stateWithoutSessions(st *State) ([]byte, error) {
+// stateWithoutSessionsAndFactors is the canonical encoding of st with the Sessions map removed and
+// the one-time factor state (LastTOTP, Recovery) of every user zeroed.
+func stateWithoutSessionsAndFactors(st *State) ([]byte, error) {
 	masked := *st
 	masked.Sessions = nil
+	masked.Users = make(map[string]model.ControlUser, len(st.Users))
+	for k, u := range st.Users {
+		u.LastTOTP, u.Recovery = 0, nil
+		masked.Users[k] = u
+	}
 	return json.Marshal(masked)
 }
 
-// sessionsOnlyGrow snapshots the sessions before fn and returns the check that every one of them
-// is still present and unchanged afterwards.
-func sessionsOnlyGrow(st *State) func(*State) bool {
-	before := maps.Clone(st.Sessions)
+// sessionsGrowFactorsConsumed snapshots the sessions and every user's factor state before fn and
+// returns the check that every session is still present and unchanged, and that no user's
+// LastTOTP went down or Recovery gained, reordered or replaced a hash (it may only lose some).
+func sessionsGrowFactorsConsumed(st *State) func(*State) bool {
+	type factors struct {
+		last     int64
+		recovery []string
+	}
+	sessions := maps.Clone(st.Sessions)
+	users := make(map[string]factors, len(st.Users))
+	for k, u := range st.Users {
+		users[k] = factors{u.LastTOTP, slices.Clone(u.Recovery)}
+	}
 	return func(after *State) bool {
-		for k, v := range before {
+		for k, v := range sessions {
 			if got, ok := after.Sessions[k]; !ok || got != v {
+				return false
+			}
+		}
+		for k, was := range users {
+			u, ok := after.Users[k]
+			if !ok || u.LastTOTP < was.last || !isSubsequence(u.Recovery, was.recovery) {
 				return false
 			}
 		}
 		return true
 	}
+}
+
+// isSubsequence reports whether sub is of with some elements removed and the rest in order.
+func isSubsequence(sub, of []string) bool {
+	i := 0
+	for _, v := range of {
+		if i < len(sub) && sub[i] == v {
+			i++
+		}
+	}
+	return i == len(sub)
 }
 
 // stateWithoutArtifactLedger is the canonical encoding of st with every organization's artifact

@@ -124,7 +124,12 @@ func decodeFragmentEnvelope(raw []byte) (walEntry, error) {
 
 // EnableFragmentEnvelope makes this engine propose artifact fragments in the binary envelope.
 // Off by default: call it only once every voter of the group runs a build that reads both
-// forms (an older voter refuses the envelope, see the package comment above).
+// forms (an older voter refuses the envelope, see the package comment above); nothing verifies
+// that, and no flag or configuration reaches this method: it is an option of the process that
+// embeds the engine (docs/operations/upgrade.md, "Fragment envelope"). It may be flipped at any
+// time: every proposal has a fresh command ID and one payload, and an upload's retry is
+// recognized by the artifact's receipt, so a flip between the attempts is not a conflict
+// (TestFragmentUploadRetriedAcrossAWireFormFlip).
 func (e *Engine) EnableFragmentEnvelope(on bool) { e.fragmentEnvelope.Store(on) }
 
 // encodeProposal is the wire form of a command about to be proposed.

@@ -534,7 +534,11 @@ func (g *Group) processReady() error {
 				g.sendGatedSnapshot(cloneMessage(m))
 				continue
 			}
-			if err := g.transport.Send(g.group, cloneMessage(m)); err != nil {
+			out := cloneMessage(m)
+			if m.GetType() == pb.MsgSnap {
+				out.Context = g.snapshotContext(out, out.GetContext())
+			}
+			if err := g.transport.Send(g.group, out); err != nil {
 				g.raw.ReportUnreachable(m.GetTo())
 				if m.GetType() == pb.MsgSnap {
 					g.raw.ReportSnapshot(m.GetTo(), raft.SnapshotFailure)
@@ -724,7 +728,12 @@ func (g *Group) completeReads() {
 	}
 }
 
+// snapshotEnvelope is what a Raft snapshot of a group carries. Retry names the format of the retry
+// table when it is not the one every build reads (retryDigestTag: records kept by digest): a reader
+// that predates the field refuses the envelope instead of installing a table it would misread.
+// Retry is first: digestBearing finds it without decoding the envelope.
 type snapshotEnvelope struct {
+	Retry       string           `json:"retry,omitempty"`
 	Application uint64           `json:"application,string"`
 	State       []byte           `json:"state"`
 	Completed   []CommittedEntry `json:"completed"`
@@ -785,6 +794,7 @@ func (g *Group) Snapshot() error {
 	for _, c := range g.completed {
 		e.Completed = append(e.Completed, c)
 	}
+	e.markRetry()
 	raw, err := json.Marshal(e)
 	if err != nil {
 		return err
@@ -815,7 +825,7 @@ func (g *Group) sendGatedSnapshot(m *pb.Message) {
 		token, err := g.gate.BeforeSnapshotSend(ctx, m.GetTo())
 		cancel()
 		if err == nil {
-			m.Context = gateContext(token)
+			m.Context = g.snapshotContext(m, gateContext(token))
 			err = g.transport.Send(g.group, m)
 		}
 		if err != nil {

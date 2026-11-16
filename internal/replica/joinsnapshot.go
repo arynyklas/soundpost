@@ -95,6 +95,7 @@ func (g *Group) membershipSnapshotLocked(stored *pb.Snapshot) (*pb.Snapshot, err
 	for _, c := range g.completed {
 		envelope.Completed = append(envelope.Completed, c)
 	}
+	envelope.markRetry()
 	sort.Slice(envelope.Completed, func(i, j int) bool { return envelope.Completed[i].Index < envelope.Completed[j].Index })
 	raw, err := json.Marshal(envelope)
 	if err != nil {

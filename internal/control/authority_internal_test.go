@@ -51,7 +51,7 @@ func sortedKeys[K ~string, V any](m map[K]V) []string {
 // The tables ARE the review surface of the AuthorityRevision design: this test pins their exact
 // content, so adding or moving a writer is a change a reviewer has to look at in this file too.
 func TestAuthorityClassificationTablesAreExact(t *testing.T) {
-	if got, want := strings.Join(sortedKeys(nonAuthorityWriters), ","), "ArtifactLedger,AttestControl,CancelAdmission,ExpireControlLog,FinalizeAdmission,PublishArtifact,ReconcileAdmissions,RedactNoop,ReplayIndex,ReserveAdmission,ReserveArtifact,SessionCreate,SettleAdmissions,SweepExpired,TransactIssues,TransactJobs"; got != want {
+	if got, want := strings.Join(sortedKeys(nonAuthorityWriters), ","), "ArtifactLedger,AttestControl,AuditAppend,CancelAdmission,ExpireControlLog,FinalizeAdmission,PendingLogin,PublishArtifact,ReconcileAdmissions,RedactNoop,ReplayIndex,ReserveAdmission,ReserveArtifact,SessionCreate,SettleAdmissions,SweepExpired,TransactIssues,TransactJobs"; got != want {
 		t.Fatalf("non-authority writers: %s, want %s", got, want)
 	}
 	if got, want := strings.Join(sortedKeys(nonAuthorityKinds), ","), "ApplyCondition,ApplyIssueEvidence,ApplyRuleEvaluation,ClaimDelivery,CompleteDelivery,IncidentAction,RegisterRelease,SavedView,UpdateJob"; got != want {
@@ -135,8 +135,8 @@ func TestEveryControlWriterIsClassified(t *testing.T) {
 		"healFencedArtifactIntents":     "bump", // retires a published intent under a verified GC fence: artifact readability changes
 		"healLegacyAuthority":           "bump",
 		"Update":                        "bump",
-		// Dispatch by Command kind (nonAuthorityKinds).
-		"Transact": "by kind",
+		// Dispatch by Command kind (nonAuthorityKinds); Transact calls it after its read-first replay check.
+		"transactCommit": "by kind",
 		// Non-authority (updateAs with a writer on nonAuthorityWriters).
 		"ReserveAdmission":    "writerReserveAdmission",
 		"FinalizeAdmission":   "writerFinalizeAdmission",
@@ -148,8 +148,9 @@ func TestEveryControlWriterIsClassified(t *testing.T) {
 		"TransactIssues":      "writerTransactIssues",
 		"TransactJobs":        "writerTransactJobs",
 		"UpdateReplayIndex":   "writerReplayIndex",
-		// A login that only adds a session record (10.29): see writerSessionCreate for why it
-		// cannot change who may read; credential changes, Logout and Bootstrap keep bumping.
+		// A login that adds a session record and consumes the one-time factor it presented
+		// (10.29): see writerSessionCreate for why neither can change who may read; every
+		// other user field, Logout and Bootstrap keep bumping.
 		"UpdateSessionCreate": "writerSessionCreate",
 		// Reference / Unreference ledger bookkeeping (10.29): see writerArtifactLedger; the GC
 		// fence and the retire transition keep bumping.
@@ -160,6 +161,11 @@ func TestEveryControlWriterIsClassified(t *testing.T) {
 		// The auth sweep of expired pending logins, elevations and sessions
 		// (writerSweepExpired).
 		"UpdateSweepExpired": "writerSweepExpired",
+		// OIDC start / callback pending-login record (writerPendingLogin) and the audit-only
+		// commit of ElevatedScope (writerAuditAppend). Elevate (the elevation record is an
+		// access grant) and every other auth writer keep the unclassified Update and bump.
+		"UpdatePendingLogin": "writerPendingLogin",
+		"UpdateAuditAppend":  "writerAuditAppend",
 		// A voter's own attestation record (attest.go): evidence about its files only.
 		"syncAttestation": "writerAttestControl",
 		// The dispatcher itself.

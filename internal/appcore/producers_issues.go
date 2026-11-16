@@ -500,6 +500,9 @@ func (p *incidentProducer) Produce(ctx context.Context, scopes ProducerScopes, l
 			Impact: &incidents.Impact{Condition: derive("condition", org, project, id, 0), Episode: derive("episode", org, project, id, ordinal),
 				Severity: severity, State: incidents.ConditionFiring, Freshness: incidents.FreshnessFresh},
 		}, p.clock.Now())
+		if incidents.IsErased(err) {
+			continue // committed and erased at once by a deletion over its evidence: nothing was opened, and the next pass finds the tombstone
+		}
 		if err != nil {
 			return opened, err
 		}

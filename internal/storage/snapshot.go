@@ -1065,6 +1065,9 @@ func (e *Engine) InstallBackup(ctx context.Context, raftDirectory string, bundle
 		return err
 	}
 	if evidence.Version != bundle.Quota.Version || evidence.Digest != bundle.Quota.Digest {
+		if isLegacyRedactionShape(bundle.Quota, evidence) {
+			return legacyBundleFault() // sealed before the redaction markers: a new backup is the remedy
+		}
 		return model.Fail(model.Corrupt)
 	}
 	return nil

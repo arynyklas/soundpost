@@ -320,6 +320,7 @@ func (g *Group) CreateSnapshot(ctx context.Context, at model.Cursor) (Snapshot, 
 	for _, c := range g.completed {
 		envelope.Completed = append(envelope.Completed, c)
 	}
+	envelope.markRetry()
 	sort.Slice(envelope.Completed, func(i, j int) bool { return envelope.Completed[i].Index < envelope.Completed[j].Index })
 	conf := g.conf
 	cursor := model.Cursor{Group: g.group, Index: model.Uint64(g.application)}

@@ -5,6 +5,7 @@ package replica
 import (
 	"bytes"
 	"encoding/json"
+	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -51,6 +52,11 @@ func TestEncodeEntryMatchesJSONMarshal(t *testing.T) {
 		"redacted":       {ID: model.NewID(), Kind: Data, Payload: []byte("r"), Original: &orig, ApplicationIndex: 3},
 		"max index":      {ID: model.NewID(), Kind: Barrier, Payload: []byte("b"), ApplicationIndex: ^uint64(0), At: 5},
 		"base64 padding": {ID: model.NewID(), Kind: ArtifactGC, Payload: []byte("ab"), ApplicationIndex: 4},
+		// A leader whose clock reads before 1970 stamps a negative At into the entry it orders; its own
+		// applier must be able to read the entry back (Entry.At is signed).
+		"negative at": {ID: model.NewID(), Kind: Data, Payload: []byte("n"), ApplicationIndex: 6, At: -1},
+		"min at":      {ID: model.NewID(), Kind: Data, Payload: []byte("m"), ApplicationIndex: 6, At: math.MinInt64},
+		"max at":      {ID: model.NewID(), Kind: Data, Payload: []byte("x"), ApplicationIndex: 6, At: math.MaxInt64},
 	} {
 		want, err := json.Marshal(e)
 		if err != nil {
@@ -66,6 +72,42 @@ func TestEncodeEntryMatchesJSONMarshal(t *testing.T) {
 		back, err := decodeEntry(got)
 		if err != nil || !reflect.DeepEqual(normalized(back), normalized(e)) {
 			t.Fatalf("%s: encodeEntry output does not decode back: %v", name, err)
+		}
+	}
+}
+
+// Entry.At is a signed Unix-nanosecond stamp: a leader whose clock reads before 1970 (a dead RTC)
+// stamps a negative one into the entry it orders, and its own applier decodes the entry it just
+// committed. The wire bytes of a positive stamp are the ones every journal already holds.
+func TestEntryAtIsSignedOnTheWire(t *testing.T) {
+	id := model.NewID()
+	for _, tc := range []struct {
+		at   int64
+		text string
+	}{
+		{1731600000123456789, `"at":"1731600000123456789"`},
+		{-1, `"at":"-1"`},
+		{math.MinInt64, `"at":"-9223372036854775808"`},
+		{math.MaxInt64, `"at":"9223372036854775807"`},
+	} {
+		e := Entry{ID: id, Kind: Data, Payload: []byte("p"), ApplicationIndex: 1, At: tc.at}
+		raw, err := encodeEntry(e)
+		if err != nil || !bytes.Contains(raw, []byte(tc.text)) || !bytes.HasSuffix(raw, []byte(tc.text+"}")) {
+			t.Fatalf("At %d encodes as %s (%v), want ...%s}", tc.at, raw, err, tc.text)
+		}
+		back, err := decodeEntry(raw)
+		if err != nil || back.At != tc.at {
+			t.Fatalf("At %d does not decode back (got %d, %v)", tc.at, back.At, err)
+		}
+		var viaJSON Entry
+		if err := json.Unmarshal(raw, &viaJSON); err != nil || viaJSON.At != tc.at {
+			t.Fatalf("At %d through Entry.UnmarshalJSON: got %d, %v", tc.at, viaJSON.At, err)
+		}
+	}
+	for _, bad := range []string{`"-0"`, `"-"`, `"-9223372036854775809"`, `"9223372036854775808"`, `-1`} {
+		raw := []byte(`{"id":"` + id.String() + `","kind":"data","payload":"cA==","application_index":"1","at":` + bad + `}`)
+		if _, err := decodeEntry(raw); err == nil {
+			t.Fatalf("At %s was accepted", bad)
 		}
 	}
 }

@@ -422,10 +422,12 @@ func (r *jobRun) drain(ctx context.Context, it storage.RowIterator, from *rowKey
 }
 
 // rejectedForGood reports a reducer verdict that repeating cannot change: the
-// event is invalid, contradicts committed evidence, or exceeds a bound of the
-// job state. Everything else (unavailable, deposed, forbidden, cancelled,
-// corrupt) must stop the call so the row is retried.
+// event is invalid, contradicts committed evidence, exceeds a bound of the
+// job state, or committed and was erased at once by a deletion that covers its
+// evidence (jobs.IsErased: the same command would erase again). Everything else
+// (unavailable, deposed, forbidden, cancelled, corrupt) must stop the call so
+// the row is retried.
 func rejectedForGood(err error) bool {
 	var fault *model.Fault
-	return errors.As(err, &fault) && (fault.Code == model.Invalid || fault.Code == model.Conflict || fault.Code == model.Quota)
+	return errors.As(err, &fault) && (fault.Code == model.Invalid || fault.Code == model.Conflict || fault.Code == model.Quota) || jobs.IsErased(err)
 }

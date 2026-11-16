@@ -63,7 +63,12 @@ func NewService(d AuthDependencies) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Service{store: d.Control, now: d.Now, bearerHashKey: key, throttle: newLoginThrottle(d.Now)}, nil
+	s := &Service{store: d.Control, now: d.Now, bearerHashKey: key, throttle: newLoginThrottle(d.Now)}
+	// The dummy digest stands in for unknown and disabled addresses. It is derived here, once per
+	// process and before any request is served, so the first unknown-address login costs one KDF
+	// run like every other login instead of two.
+	dummyDigest()
+	return s, nil
 }
 
 // kdfRuns counts password-KDF evaluations so tests can assert equal work
@@ -88,7 +93,24 @@ func checkPassword(encoded, p string) bool {
 	}
 	return subtle.ConstantTimeCompare([]byte(b), []byte(password(p, a))) == 1
 }
+
+// bootstrapTokenRefusal is nil only while the install is unbootstrapped and token is its
+// one-time token; every other case (already bootstrapped, wrong token) is the same
+// Unauthenticated.
+func bootstrapTokenRefusal(st model.ControlState, token string) error {
+	if st.BootstrapHash == "" || subtle.ConstantTimeCompare([]byte(st.BootstrapHash), []byte(hashToken(token))) != 1 {
+		return model.Fail(model.Unauthenticated)
+	}
+	return nil
+}
 func (s *Service) Bootstrap(ctx context.Context, token, email, p string) (Session, error) {
+	// This route is unauthenticated and stays mounted for the life of the install, so it
+	// refuses before any password work: a linearizable read of the token comes first and the
+	// 64 MiB KDF runs only for the holder of a valid one. The transition below checks again,
+	// because the state may change between the read and the write.
+	if e := s.store.View(ctx, func(st model.ControlState) error { return bootstrapTokenRefusal(st, token) }); e != nil {
+		return Session{}, e
+	}
 	h, e := hashPassword(p)
 	if e != nil {
 		return Session{}, e
@@ -96,8 +118,8 @@ func (s *Service) Bootstrap(ctx context.Context, token, email, p string) (Sessio
 	id := model.NewID()
 	out := s.newSession(id)
 	e = s.store.Update(ctx, func(st *model.ControlState) error {
-		if st.BootstrapHash == "" || subtle.ConstantTimeCompare([]byte(st.BootstrapHash), []byte(hashToken(token))) != 1 {
-			return model.Fail(model.Unauthenticated)
+		if e := bootstrapTokenRefusal(*st, token); e != nil {
+			return e
 		}
 		if !validEmail(email) {
 			return model.Fail(model.Invalid)
@@ -152,12 +174,18 @@ func (s *Service) Login(ctx context.Context, email, p, code string) (Session, er
 
 // dummyDigest is verified for addresses that do not exist (or are disabled) so
 // a missing account costs the same KDF work as a wrong password.
-var dummyDigest = sync.OnceValue(func() string {
+var dummyDigest = sync.OnceValue(deriveDummyDigest)
+
+func deriveDummyDigest() string {
 	return "soundpost-dummy-salt:" + password("soundpost dummy password", "soundpost-dummy-salt")
-})
+}
 
 // loginStaleBudget bounds how long one login waits for its control write to stop being stale.
 const loginStaleBudget = 15 * time.Second
+
+// loginStaleRetries counts the repeats retryStale made after a typed stale answer, so tests can
+// assert that a login did not need the bounded wait.
+var loginStaleRetries atomic.Int64
 
 // retryStale repeats fn, pausing briefly between attempts, for as long as it fails with the typed
 // retryable Stale fault and ctx is alive. The last Stale is returned when ctx ends; every other
@@ -173,19 +201,55 @@ func retryStale(ctx context.Context, fn func() error) error {
 		case <-ctx.Done():
 			return err
 		case <-time.After(25 * time.Millisecond):
+			loginStaleRetries.Add(1)
 		}
 	}
 }
 
 func (s *Service) login(ctx context.Context, email, p, code string) (Session, error) {
 	out := s.newSession(model.ID{})
-	transition := func(st *model.ControlState) error {
-		for k, u := range st.Users {
-			if u.Email != email || u.Disabled {
-				continue
+	// One attempt is two steps. The password check is a KDF of about 100 ms, so it runs against a
+	// linearizable read of the account BEFORE the control write: a replicated write carries the
+	// revision it was computed from, and any other control commit during the check (every node runs
+	// background writers) makes it lose the race for its index (typed `stale`). Inside the write only
+	// cheap steps remain: the account must still be the record the password was verified against
+	// (same id, enabled, same password hash), a TOTP or recovery code is consumed (it must commit
+	// with the session), and the session is added.
+	var checkedDigest string
+	var checkedOK, checked bool
+	attempt := func(wait context.Context) error {
+		var key string
+		var seen model.ControlUser
+		known := false
+		if err := s.store.View(wait, func(st model.ControlState) error {
+			for k, u := range st.Users {
+				if u.Email == email && !u.Disabled {
+					key, seen, known = k, u, true
+					break
+				}
 			}
-			if !checkPassword(u.Password, p) {
-				return model.Fail(model.Unauthenticated)
+			return nil
+		}); err != nil {
+			return err
+		}
+		// A missing or disabled account costs the same single KDF as a wrong password.
+		digest := dummyDigest()
+		if known {
+			digest = seen.Password
+		}
+		// The KDF result is kept across the retries of this one login: a repeated attempt against
+		// the same password hash never pays it again, so the bounded wait is bounded CPU too.
+		if !checked || checkedDigest != digest {
+			checkedOK, checkedDigest, checked = checkPassword(digest, p), digest, true
+		}
+		if !checkedOK || !known {
+			return model.Fail(model.Unauthenticated)
+		}
+		return s.updateSession(wait, func(st *model.ControlState) error {
+			u, ok := st.Users[key]
+			if !ok || u.Disabled || u.Email != email || u.Password != seen.Password {
+				// The account changed after the password was verified: verify it again.
+				return model.Fail(model.Stale)
 			}
 			if u.TOTP != "" {
 				sealed := u.TOTP
@@ -198,23 +262,21 @@ func (s *Service) login(ctx context.Context, email, p, code string) (Session, er
 					return model.Fail(model.Unauthenticated)
 				}
 				u.TOTP = sealed
-				st.Users[k] = u
+				st.Users[key] = u
 			}
 			out.User = u.ID
 			st.Sessions[hashToken(out.Token)] = model.ControlSession{User: u.ID, CSRF: out.CSRF, Expires: int64(out.Expires), Reauthenticated: s.now().Unix()}
 			return nil
-		}
-		checkPassword(dummyDigest(), p)
-		return model.Fail(model.Unauthenticated)
+		})
 	}
-	// The transition reads only the state it is handed (the session token and CSRF value were drawn
-	// above, outside it), so repeating it against a fresher state is safe; a refused attempt committed
-	// nothing. A write that is stale because the node is still catching up with the cluster (a restart
-	// is the common case) or lost the race for its index to another control write is therefore waited
-	// out for loginStaleBudget instead of being answered to the caller.
+	// The session token and CSRF value were drawn above, and a refused attempt committed nothing, so
+	// repeating the attempt against a fresher state is safe. A write that is stale because the node
+	// is still catching up with the cluster (a restart is the common case) or lost the race for its
+	// index to another control write is therefore waited out for loginStaleBudget instead of being
+	// answered to the caller.
 	wait, cancel := context.WithTimeout(ctx, loginStaleBudget)
 	defer cancel()
-	e := retryStale(wait, func() error { return s.updateSession(wait, transition) })
+	e := retryStale(wait, func() error { return attempt(wait) })
 	return out, e
 }
 func (s *Service) Authenticate(ctx context.Context, token string) (Credential, error) {

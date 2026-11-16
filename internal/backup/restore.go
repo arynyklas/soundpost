@@ -1368,7 +1368,10 @@ func verifyControl(m BackupManifest, b storage.BackupBundle, st model.ControlSta
 }
 
 // installData installs the 64 snapshots into the staged data root and returns
-// the full reservations of batches admitted after the control cut.
+// the full reservations of batches admitted after the control cut. A bundle sealed before the
+// quota evidence marked redacted batches comes back from InstallBackup as the typed refusal
+// storage.LegacyBundleNeedsReseal (model.Unsupported), unchanged: Restore removes the staging
+// directory and the operator takes a new backup (docs/operations/backup-restore.md).
 func (r *Restorer) installData(ctx context.Context, stage, raftData string, b storage.BackupBundle, cert storage.QuotaReconciliation, objects string) (map[model.ID]model.AdmissionReservation, error) {
 	engine, err := storage.Open(filepath.Join(stage, "data"), denyAll{})
 	if err != nil {

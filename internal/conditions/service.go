@@ -295,7 +295,9 @@ func (s *Service) transition(ctx context.Context, scope auth.Scope, project mode
 	return State{}, false, f
 }
 
-// commit submits one transition and returns the state as stored.
+// commit submits one transition and returns the state as stored. A deletion that covers the
+// transition's own evidence erases the state in the same control transaction; that is the typed
+// erased result (DetailErased), not the payload the caller submitted.
 func (s *Service) commit(ctx context.Context, scope auth.Scope, project model.ID, lease replica.FenceToken, expected model.Revision, next State, change string) (State, error) {
 	raw, err := json.Marshal(wire{State: next, Org: scope.OrgID(), Project: project})
 	if err != nil {
@@ -322,6 +324,13 @@ func (s *Service) commit(ctx context.Context, scope auth.Scope, project model.ID
 		if err != nil {
 			return State{}, err
 		}
+		rec, found, err := s.control.Condition(ctx, scope, project, next.Condition)
+		if err != nil {
+			return State{}, err
+		}
+		if found && rec.Erased() {
+			return State{}, fault(model.NotFound, DetailErased)
+		}
 		return decode(control.ConditionRecord{Org: org, Project: project, ID: next.Condition, Version: next.Version, State: raw})
 	}
 	f := model.Fail(model.Unavailable)
@@ -345,6 +354,11 @@ type Report struct {
 	// Observed are the conditions whose freshness changed because of their rule's
 	// newest evaluation.
 	Observed []model.ID
+	// Erased are the outputs (by rule output ID) and observed conditions (by condition ID)
+	// whose command committed and whose state a deletion covering its evidence erased in
+	// that same transition: the payload is gone, so they are neither Applied nor Observed.
+	// An erased output is finalized (a retry could only rebuild the same tombstone).
+	Erased []model.ID
 }
 
 // The closed suppression reasons.
@@ -439,8 +453,12 @@ func (s *Service) consumeOne(ctx context.Context, scope auth.Scope, project mode
 	rule := item.Rule
 	_, changed, err := s.transition(ctx, scope, project, lease, intent.Event.Condition,
 		input{event: &intent.Event, obs: obs, notify: item.Notify && intent.Notify, rule: &rule, ruleVersion: item.Version})
+	// The command committed and a deletion erased its state in that transition: final, so the
+	// output is finalized like any consumed one (a retry could only rebuild the same tombstone)
+	// and reported as Erased, never as Applied.
+	erased := IsErased(err)
 	switch {
-	case err == nil:
+	case err == nil, erased:
 	case faultDetail(err) == DetailEventConflict:
 		return s.suppress(ctx, scope, lease, item, reasonConflict, report)
 	case faultDetail(err) == DetailRecoveryBlocked:
@@ -456,9 +474,12 @@ func (s *Service) consumeOne(ctx context.Context, scope auth.Scope, project mode
 	if err = s.settle(ctx, scope, lease, item, control.RuleOutputApply{To: control.RulePhaseFinalized}); err != nil {
 		return err
 	}
-	if changed {
+	switch {
+	case erased:
+		report.Erased = append(report.Erased, item.ID)
+	case changed:
 		report.Applied = append(report.Applied, item.ID)
-	} else {
+	default:
 		report.NoEffect = append(report.NoEffect, item.ID)
 	}
 	return nil
@@ -571,6 +592,10 @@ func (s *Service) observeRules(ctx context.Context, scope auth.Scope, project mo
 		}
 		for _, id := range byRule[rule] {
 			_, changed, err := s.transition(ctx, scope, project, lease, id, input{obs: obs})
+			if IsErased(err) {
+				report.Erased = append(report.Erased, id) // the observation committed and was erased at once
+				continue
+			}
 			if err != nil {
 				return err
 			}

@@ -82,7 +82,14 @@ func (s *Store) ReserveAdmission(ctx context.Context, scope auth.Scope, b model.
 			if old.State == "reserved" && old.PolicyEpoch != r.PolicyEpoch {
 				// A refused/ambiguous attempt left this charge bound to a retired
 				// epoch. The retry was just revalidated against the current scope
-				// and carries the same batch hash, so re-bind without recharging.
+				// (source enabled, not closing, epoch current) and carries the same
+				// batch hash, so re-bind without recharging. A source whose policy
+				// revision moved on since the batch was normalized is not a legitimate
+				// retry: the batch carries the old revision and policy hash and can
+				// never be admitted, so its charge is not carried into the new epoch.
+				if b.PolicyRevision != st.Sources[r.Source.String()].Policy.Revision {
+					return model.Fail(model.Stale)
+				}
 				old.PolicyEpoch = r.PolicyEpoch
 				st.Reservations[id] = old
 			}

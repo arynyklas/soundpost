@@ -178,6 +178,7 @@ func TestRetryOfAppliedCommandSpendsNoRevision(t *testing.T) {
 // caller gets the same Result.
 func TestConcurrentDoubleSubmissionCommitsOnce(t *testing.T) {
 	f := newFenceFx(t)
+	revBefore, _ := f.revisions()
 	view, _ := f.revisions()
 	id := model.NewID()
 	scope := f.adminScope()
@@ -215,5 +216,47 @@ func TestConcurrentDoubleSubmissionCommitsOnce(t *testing.T) {
 	}
 	if begins != 1 {
 		t.Fatalf("%d begin audits for one command", begins)
+	}
+	// Every caller that raced past the read-first check answered from the other's Result without a
+	// commit: the whole race spent exactly the revision of the one applied command.
+	if revAfter, _ := f.revisions(); revAfter != revBefore+1 {
+		t.Fatalf("%d concurrent submissions of one command spent %d revisions, want 1", n, revAfter-revBefore)
+	}
+}
+
+// A first submission that raced another of the same CommandID past the read-first replay check
+// meets the other's stored Result inside the update (10.11-W1): it is answered with that Result
+// and commits nothing. It used to propose a replacement of the unchanged state, which spent a
+// revision (and the AuthorityRevision of a bumping kind) and made every other caller's view stale.
+func TestAFirstSubmissionThatRacedPastTheReadSpendsNoRevision(t *testing.T) {
+	f := newFenceFx(t)
+	view, _ := f.revisions()
+	id := model.NewID()
+	first, err := f.beginCmd(id, view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.mustIntake()
+	rev, auth := f.revisions()
+	req := control.DeleteScope{Mode: model.DeleteHistoricalRange, Projects: []model.ID{f.project}, Signals: []model.Kind{model.Metric}, End: 100, Reason: "retry", At: model.UnixNano(f.now.UnixNano())}
+	req.PhysicalDeadline = req.At + model.UnixNano(time.Hour)
+	req.BackupDeadline = req.At + model.UnixNano(time.Hour)
+	raw, _ := json.Marshal(req)
+	for _, expected := range []model.Revision{rev, view, 0} {
+		again, err := f.store.TransactAfterReplayRead(f.ctx, f.adminScope(), control.Command{CommandID: id, ExpectedRevision: expected, Kind: string(control.KindDeleteScope), Payload: raw})
+		if err != nil || !reflect.DeepEqual(again, first) {
+			t.Fatalf("racing submission with expected %d: %+v %v, want %+v", expected, again, err, first)
+		}
+	}
+	if rev2, auth2 := f.revisions(); rev2 != rev || auth2 != auth {
+		t.Fatalf("racing submissions spent a revision: revision %d -> %d, authority %d -> %d", rev, rev2, auth, auth2)
+	}
+	// Another binding of the same id is still refused, and commits nothing either.
+	other, _ := json.Marshal(control.PolicyChange{Kind: "hold_place"})
+	if _, err = f.store.TransactAfterReplayRead(f.ctx, f.adminScope(), control.Command{CommandID: id, ExpectedRevision: rev, Kind: string(control.KindPolicyChange), Payload: other}); code(err) != model.NotFound {
+		t.Fatalf("foreign-binding submission: %v, want NotFound", err)
+	}
+	if rev2, _ := f.revisions(); rev2 != rev {
+		t.Fatal("a refused submission spent a revision")
 	}
 }

@@ -275,8 +275,8 @@ type stateRule func(p model.DeletePredicate, org, project model.ID, raw json.Raw
 // stateErased decides whether the opaque state of one record is covered when a
 // deletion begins, completes or is imported (CD-9, decision D3). A retirement
 // covers every record of its projects. A range covers exactly the records whose
-// recorded window (stateWindow: the span from the oldest to the newest evidence
-// time the state names) intersects the range's half-open [start,end), the same
+// recorded window (the span from the oldest to the newest evidence time the state
+// names, see rangeCover) intersects the range's half-open [start,end), the same
 // interval the data rows and the precise books use: a state whose evidence all
 // lies after the end, before the start or at the end is kept, whatever it
 // accumulated later. A state with no recorded window (it names no evidence time,
@@ -284,6 +284,12 @@ type stateRule func(p model.DeletePredicate, org, project model.ID, raw json.Raw
 // whole, fail-closed; the erasure counts those (overErasure) so the receipt can
 // say so. An entity deletion names replay and profile roots, which these records
 // only link by ID: it covers none. A tombstone is never covered again.
+//
+// A state that carries a provenance (provenanceKey: the earliest and the latest
+// record time its producer ever folded into it, 09.08x-W1) is also covered when
+// that interval meets [start,end), whatever times the state still names: that is
+// what closes the evidence that rolled out of a bounded part of the state. It
+// never narrows the window rule.
 func stateErased(p model.DeletePredicate, org, project model.ID, raw json.RawMessage) bool {
 	if !p.CoversProject(org, project) || stateIsTombstone(raw) {
 		return false
@@ -292,8 +298,8 @@ func stateErased(p model.DeletePredicate, org, project model.ID, raw json.RawMes
 	case model.DeleteRetireOrg, model.DeleteRetireProject:
 		return true
 	case model.DeleteHistoricalRange:
-		lo, hi, ok := stateWindow(raw)
-		return !ok || hi >= p.Start && lo < p.End
+		covered, _ := rangeCover(p, raw, false)
+		return covered
 	}
 	return false
 }
@@ -305,8 +311,81 @@ func overErasure(p model.DeletePredicate, raw json.RawMessage) bool {
 	if p.Mode != model.DeleteHistoricalRange {
 		return false
 	}
-	_, _, ok := stateWindow(raw)
-	return !ok
+	_, failClosed := rangeCover(p, raw, false)
+	return failClosed
+}
+
+// rangeCover is the rule of a historical range over one opaque state. covered is
+// the verdict; failClosed says it was reached without an attributable window.
+//
+// The state is attributable by the times it names (zero or negative times and the
+// duration keys are not instants; the provenance member is not read as times) and
+// by its provenance, when it has one. A time that cannot be read, or a provenance
+// that is present but is not one a producer could have written, makes the state
+// unattributable: covered, fail-closed. A provenance that meets [start,end) covers
+// the state. Otherwise the state is covered when its named times do: at begin
+// (late false) when their window, the span from the oldest to the newest, meets
+// the range; in the late pass (late true) only when a named time lies inside
+// [start,end), because a state first committed after the deletion from evidence
+// that merely spans the range is not an accumulation of older evidence. A state
+// that names no time is covered fail-closed unless its provenance attributes it.
+func rangeCover(p model.DeletePredicate, raw json.RawMessage, late bool) (covered, failClosed bool) {
+	prov, present, provOK := stateProvenance(raw)
+	if present && !provOK {
+		return true, true
+	}
+	var lo, hi model.UnixNano
+	named, inside := false, false
+	readable := stateTimes(raw, func(key string, at model.UnixNano) {
+		if at <= 0 || durationKeys[key] {
+			return
+		}
+		if !named || at < lo {
+			lo = at
+		}
+		if !named || at > hi {
+			hi = at
+		}
+		named = true
+		inside = inside || at >= p.Start && at < p.End
+	})
+	switch {
+	case !readable:
+		return true, true
+	case present && prov.Meets(p.Start, p.End):
+		return true, false
+	case !named:
+		return !present, !present
+	case late:
+		return inside, false
+	}
+	return hi >= p.Start && lo < p.End, false
+}
+
+// provenanceKey is the top-level member under which the producers of an opaque
+// state (conditions.State, jobs.JobState) record its model.Provenance.
+const provenanceKey = "provenance"
+
+// stateProvenance reads the provenance of an opaque state. present is false for a
+// state without one (written before the member existed, or not a JSON object): the
+// window of the times it names decides alone. When the member is there but is not a
+// provenance a producer could have written (not an object, an unset or backwards
+// interval, an unknown member), ok is false: the state cannot be attributed and
+// the rule drops it whole, fail-closed.
+func stateProvenance(raw json.RawMessage) (p *model.Provenance, present, ok bool) {
+	var top map[string]json.RawMessage
+	if json.Unmarshal(raw, &top) != nil {
+		return nil, false, false
+	}
+	member, has := top[provenanceKey]
+	if !has || string(member) == "null" {
+		return nil, false, false
+	}
+	var v model.Provenance
+	if model.StrictJSON(member, &v) != nil || v.Validate() != nil {
+		return nil, true, false
+	}
+	return &v, true, true
 }
 
 // stateErasedLate is stateErased for the late re-erasure (eraseLateEffect): the
@@ -324,6 +403,13 @@ func overErasure(p model.DeletePredicate, raw json.RawMessage) bool {
 // projects and an entity deletion none, as in stateErased. The signal list is
 // ignored, as in stateErased: a state does not name the signal its evidence came
 // from.
+//
+// A state that carries a provenance is also covered when its interval (the
+// earliest and the latest record time folded into it) meets [start,end), as at
+// begin: a rolled-out record inside the range still covers it. The interval cannot
+// tell a state that spans the range from one with a record inside it, so a state
+// with a provenance that spans the range is covered here too, where the same state
+// without one is kept.
 func stateErasedLate(p model.DeletePredicate, org, project model.ID, raw json.RawMessage) bool {
 	if !p.CoversProject(org, project) || stateIsTombstone(raw) {
 		return false
@@ -332,15 +418,8 @@ func stateErasedLate(p model.DeletePredicate, org, project model.ID, raw json.Ra
 	case model.DeleteRetireOrg, model.DeleteRetireProject:
 		return true
 	case model.DeleteHistoricalRange:
-		named, inside := false, false
-		readable := stateTimes(raw, func(key string, at model.UnixNano) {
-			if at <= 0 || durationKeys[key] {
-				return
-			}
-			named = true
-			inside = inside || at >= p.Start && at < p.End
-		})
-		return !readable || !named || inside
+		covered, _ := rangeCover(p, raw, true)
+		return covered
 	}
 	return false
 }
@@ -363,28 +442,6 @@ func stateIsTombstone(raw json.RawMessage) bool {
 	return json.Unmarshal(raw, &t) == nil && t.Erased != ""
 }
 
-// stateWindow is the recorded window of an opaque state: the oldest and the
-// newest instant it names (every number or numeric string under a key "at",
-// "*_at" or "*_ns", at any depth, except durations and unset times, which are no
-// evidence of an instant). ok is false when it names none or a time cannot be
-// read: the state has no recorded window.
-func stateWindow(raw json.RawMessage) (lo, hi model.UnixNano, ok bool) {
-	named := false
-	readable := stateTimes(raw, func(key string, at model.UnixNano) {
-		if at <= 0 || durationKeys[key] {
-			return
-		}
-		if !named || at < lo {
-			lo = at
-		}
-		if !named || at > hi {
-			hi = at
-		}
-		named = true
-	})
-	return lo, hi, named && readable
-}
-
 // stateTimes calls visit, in sorted key order, for every time a state names:
 // every number or numeric string under a key "at", "*_at" or "*_ns", at any
 // depth, with that key. readable is false when the state is not JSON or a named
@@ -395,6 +452,10 @@ func stateTimes(raw json.RawMessage, visit func(key string, at model.UnixNano)) 
 	var root any
 	if dec.Decode(&root) != nil {
 		return false
+	}
+	if top, ok := root.(map[string]any); ok {
+		// The provenance is read by stateProvenance, as a closed interval, not as times the state names.
+		delete(top, provenanceKey)
 	}
 	bad := false
 	var walk func(v any)
@@ -816,9 +877,14 @@ func (s *Store) ScrubErased(ctx context.Context) error {
 		return err
 	}
 	defer file.Close()
-	pageSize := uint64(s.db.Info().PageSize)
-	var high uint64
-	if err = s.db.View(func(tx *bolt.Tx) error { high = uint64(tx.Size()) / pageSize; return nil }); err != nil {
+	// The page size is read inside a transaction: Info reads the mapping, which only a transaction
+	// keeps from being remapped (a grow, or a Close) while it is read.
+	var pageSize, high uint64
+	if err = s.db.View(func(tx *bolt.Tx) error {
+		pageSize = uint64(tx.DB().Info().PageSize)
+		high = uint64(tx.Size()) / pageSize
+		return nil
+	}); err != nil {
 		return err
 	}
 	for first := uint64(2); first < high; first += scrubChunkPages {
@@ -882,7 +948,10 @@ func (s *Store) scrubChunk(ctx context.Context, file *os.File, first, last, page
 	for attempt := 0; ; attempt++ {
 		zeroed := uint64(0)
 		err := s.db.Update(func(tx *bolt.Tx) error {
-			if s.db.Stats().OpenTxN > 0 {
+			// bolt counts a reader only after it registered it (and can already be walking pages), so
+			// the stat alone may read zero for a reader about to begin: the store's own count
+			// (trackedDB) is taken before bolt sees the reader.
+			if s.db.openReaders() > 0 || s.db.Stats().OpenTxN > 0 {
 				return errScrubBusy
 			}
 			for id := first; id < last; {

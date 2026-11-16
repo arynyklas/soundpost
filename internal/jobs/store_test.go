@@ -430,7 +430,7 @@ func TestControlStoreHoldsNoTelemetryText(t *testing.T) {
 	}
 	state, _ := rec["state"].(map[string]any)
 	allowed := map[string]bool{"version": true, "org": true, "project": true, "job": true, "definition": true, "history": true, "current_health": true, "latest_schedule_key": true,
-		"occurrences": true, "runs": true, "attempts": true, "incomplete_intervals": true, "observer": true, "compaction": true}
+		"occurrences": true, "runs": true, "attempts": true, "incomplete_intervals": true, "observer": true, "compaction": true, "provenance": true}
 	for k := range state {
 		if !allowed[k] {
 			t.Fatalf("unexpected state key %q", k)

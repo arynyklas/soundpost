@@ -40,6 +40,15 @@ func (c Cadence) Enabled() bool { return c.Commands > 0 || c.Bytes > 0 }
 // Cadence is the cut cadence the group was opened with.
 func (g *Group) Cadence() Cadence { return g.cadence }
 
+// CadenceCuts is how many snapshot cuts the cadence loop has completed (cut, superseded snapshots
+// dropped, journal compacted) since the group was opened.
+func (g *Group) CadenceCuts() uint64 { return g.cadenceCuts.Load() }
+
+// CadenceLongestCut is how long the longest completed cadence cut took, from the start of the
+// snapshot to the end of the compaction. Commands keep being applied while it runs, so it is what
+// the journal can grow past the cadence bound by.
+func (g *Group) CadenceLongestCut() time.Duration { return time.Duration(g.cadenceLong.Load()) }
+
 // trackRetry records an applied command kept by digest and evicts what is out of the window.
 func (g *Group) trackRetry(c CommittedEntry) {
 	if !g.digestKind(c.Entry.Kind) {
@@ -105,12 +114,26 @@ func (g *Group) countApplied(dataBytes int) {
 	}
 	g.sinceCommands++
 	g.sinceBytes += int64(dataBytes)
-	if g.cadence.Commands > 0 && g.sinceCommands >= g.cadence.Commands || g.cadence.Bytes > 0 && g.sinceBytes >= g.cadence.Bytes {
+	g.appliedData += uint64(dataBytes)
+	if g.cutDue() {
 		select {
 		case g.cadenceWake <- struct{}{}:
 		default:
 		}
 	}
+}
+
+// cutDue reports whether a bound of the cadence is reached. g.mu is held.
+func (g *Group) cutDue() bool {
+	return g.cadence.Commands > 0 && g.sinceCommands >= g.cadence.Commands || g.cadence.Bytes > 0 && g.sinceBytes >= g.cadence.Bytes
+}
+
+// AppliedDataBytes is the entry data bytes the cadence has counted since the group was opened (0
+// without a cadence); a cut is due when Cadence.Bytes of them accumulate.
+func (g *Group) AppliedDataBytes() uint64 {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.appliedData
 }
 
 func (g *Group) cadenceLoop() {
@@ -119,6 +142,14 @@ func (g *Group) cadenceLoop() {
 		case <-g.stop:
 			return
 		case <-g.cadenceWake:
+		}
+		// A wake that arrived while a cut was running is still queued when it ends; the cut counted
+		// what made it, so look again before cutting for nothing.
+		g.mu.Lock()
+		due := g.cutDue()
+		g.mu.Unlock()
+		if !due {
+			continue
 		}
 		if g.cutAndCompact() != nil {
 			select { // the machine may be behind its cut for a moment: try again on the next command
@@ -143,6 +174,7 @@ func (g *Group) cutAndCompact() error {
 		case <-ctx.Done():
 		}
 	}()
+	began := time.Now()
 	g.mu.Lock()
 	commands, size := g.sinceCommands, g.sinceBytes
 	cursor := model.Cursor{Group: g.group, Index: model.Uint64(g.application)}
@@ -160,5 +192,12 @@ func (g *Group) cutAndCompact() error {
 	g.sinceCommands -= min(commands, g.sinceCommands)
 	g.sinceBytes -= min(size, g.sinceBytes)
 	g.mu.Unlock()
+	g.cadenceCuts.Add(1)
+	for took := int64(time.Since(began)); ; {
+		old := g.cadenceLong.Load()
+		if took <= old || g.cadenceLong.CompareAndSwap(old, took) {
+			break
+		}
+	}
 	return nil
 }

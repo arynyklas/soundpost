@@ -82,7 +82,18 @@ func (s *ControlStore) Update(ctx context.Context, scope auth.Scope, cmd UpdateC
 	if err != nil {
 		return UpdateResult{}, err
 	}
-	return UpdateResult{Version: model.Revision(res.Cursor.Index), Replayed: res.Phase == "replayed"}, nil
+	out := UpdateResult{Version: model.Revision(res.Cursor.Index), Replayed: res.Phase == "replayed"}
+	if out.Replayed {
+		return out, nil
+	}
+	// The deletion that covers the command's evidence erases the state it produced in the same
+	// control transaction: only a read of the committed record can tell.
+	snap, found, err := s.c.JobBook(ctx, scope, cmd.Project, cmd.Job)
+	if err != nil {
+		return UpdateResult{}, err
+	}
+	out.Erased = found && snap.Erased
+	return out, nil
 }
 
 // Gaps returns the committed evidence gaps of the project.

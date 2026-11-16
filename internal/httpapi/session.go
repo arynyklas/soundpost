@@ -40,16 +40,37 @@ func decode(w http.ResponseWriter, r *http.Request, v any) error {
 	}
 	return nil
 }
+
+// replyRateLimited answers a *auth.RateLimitedError, and reports whether e was
+// one: HTTP 429, the closed rate_limited body carrying the server correlation id
+// (the trusted X-Request-ID the middleware set, a fresh id only when none is
+// set) and Retry-After in whole seconds rounded up, never 0. It is the one
+// mapping of a throttle refusal: reply and queryReply both use it, so a client
+// over a limit is told the same thing by every route. The caller has already set
+// Cache-Control and Content-Type.
+func replyRateLimited(w http.ResponseWriter, e error) bool {
+	var limited *auth.RateLimitedError
+	if !errors.As(e, &limited) {
+		return false
+	}
+	seconds := int((limited.RetryAfter + time.Second - 1) / time.Second)
+	if seconds < 1 {
+		seconds = 1
+	}
+	requestID, err := model.ParseID(w.Header().Get("X-Request-ID"))
+	if err != nil {
+		requestID = model.NewID()
+	}
+	w.Header().Set("Retry-After", strconv.Itoa(seconds))
+	w.WriteHeader(http.StatusTooManyRequests)
+	_ = json.NewEncoder(w).Encode(&model.Fault{Code: "rate_limited", Retryable: true, SafeDetail: "rate_limited", RequestID: requestID})
+	return true
+}
 func reply(w http.ResponseWriter, v any, e error) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "application/json")
 	if e != nil {
-		var limited *auth.RateLimitedError
-		if errors.As(e, &limited) {
-			seconds := int((limited.RetryAfter + time.Second - 1) / time.Second)
-			w.Header().Set("Retry-After", strconv.Itoa(seconds))
-			w.WriteHeader(http.StatusTooManyRequests)
-			_ = json.NewEncoder(w).Encode(&model.Fault{Code: "rate_limited", Retryable: true, SafeDetail: "rate_limited", RequestID: model.NewID()})
+		if replyRateLimited(w, e) {
 			return
 		}
 		var f *model.Fault

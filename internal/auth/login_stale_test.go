@@ -17,18 +17,30 @@ import (
 // staleOnLogin is a control store whose session-creating write answers the typed retryable
 // `stale` for its first `refuse` calls, as a replicated control write does while the node is
 // still catching up with the cluster or has lost the race for its index to another write.
-// Nothing is committed by a refused call.
+// Nothing is committed by a refused call. kdfInside counts the password-KDF runs made while a
+// write's transition runs (the window in which another commit makes the write stale), and
+// beforeWrite, when set, runs once before the first write reaches the store.
 type staleOnLogin struct {
 	*control.Store
-	refuse int32
-	calls  atomic.Int32
+	refuse      int32
+	calls       atomic.Int32
+	kdfInside   atomic.Int64
+	beforeWrite func(context.Context, *control.Store)
 }
 
 func (s *staleOnLogin) UpdateSessionCreate(ctx context.Context, fn func(*model.ControlState) error) error {
 	if s.calls.Add(1) <= s.refuse {
 		return model.Fail(model.Stale)
 	}
-	return s.Store.UpdateSessionCreate(ctx, fn)
+	if hook := s.beforeWrite; hook != nil {
+		s.beforeWrite = nil
+		hook(ctx, s.Store)
+	}
+	return s.Store.UpdateSessionCreate(ctx, func(st *model.ControlState) error {
+		before := auth.KDFRuns()
+		defer func() { s.kdfInside.Add(auth.KDFRuns() - before) }()
+		return fn(st)
+	})
 }
 
 func loginFixture(t *testing.T, refuse int32) (*auth.Service, *staleOnLogin) {
@@ -92,7 +104,73 @@ func TestLoginStaleWaitIsBoundedAndWrongPasswordsAreNotRetried(t *testing.T) {
 	service, store := loginFixture(t, 0)
 	_, err = service.Login(context.Background(), "stale-login@example.test", "not the right password at all", "")
 	assertCode(t, err, model.Unauthenticated)
+	// A wrong password is refused against the read of the account, before any control write: it is
+	// neither written nor retried.
+	if store.calls.Load() != 0 {
+		t.Fatalf("a refused password reached the control write %d times", store.calls.Load())
+	}
+}
+
+// The password KDF (about 100 ms) never runs inside the control write. A replicated write is
+// computed from one revision and proposed with it, so any other control commit while it runs makes
+// it lose the race for its index (`stale`): with the KDF inside, almost every login of a cluster
+// whose nodes run background writers answered stale once and had to be repeated (the
+// install-distributed smoke measured login_stale_retries_before_success of 5 and 6).
+func TestLoginPasswordKDFRunsOutsideTheControlWrite(t *testing.T) {
+	service, store := loginFixture(t, 0)
+	runs := auth.KDFRuns()
+	if _, err := service.Login(context.Background(), "stale-login@example.test", "stale login password 2026", ""); err != nil {
+		t.Fatal(err)
+	}
 	if store.calls.Load() != 1 {
-		t.Fatalf("a refused password was attempted %d times", store.calls.Load())
+		t.Fatalf("%d control write attempts, want 1", store.calls.Load())
+	}
+	if got := auth.KDFRuns() - runs; got != 1 {
+		t.Fatalf("one login ran the password KDF %d times, want exactly 1", got)
+	}
+	if inside := store.kdfInside.Load(); inside != 0 {
+		t.Fatalf("the password KDF ran %d time(s) inside the control write that creates the session", inside)
+	}
+}
+
+// The account is verified against a read and committed later, so a change in between (the account
+// disabled by an administrator) must not let the verified password log in: the write sees the
+// fresher state, refuses to commit a session for a record it was not verified against, and the
+// repeated attempt answers like any login to a disabled account.
+func TestLoginDoesNotCommitASessionForAnAccountChangedAfterItsPasswordWasVerified(t *testing.T) {
+	service, store := loginFixture(t, 0)
+	store.beforeWrite = func(ctx context.Context, s *control.Store) {
+		if err := s.Update(ctx, func(st *model.ControlState) error {
+			for k, u := range st.Users {
+				u.Disabled = true
+				st.Users[k] = u
+			}
+			return nil
+		}); err != nil {
+			t.Error("disabling the account:", err)
+		}
+	}
+	session, err := service.Login(context.Background(), "stale-login@example.test", "stale login password 2026", "")
+	assertCode(t, err, model.Unauthenticated)
+	if session.Token != "" {
+		if _, err = service.Authenticate(context.Background(), session.Token); err == nil {
+			t.Fatal("a session was committed for an account disabled after its password was verified")
+		}
+	}
+}
+
+// The wait is bounded CPU as well as time: the retries of one login against the same password hash
+// run the KDF once, not once per attempt (independent review, wave 11, finding M1).
+func TestLoginRetriesDoNotRepeatThePasswordKDF(t *testing.T) {
+	service, store := loginFixture(t, 5)
+	runs := auth.KDFRuns()
+	if _, err := service.Login(context.Background(), "stale-login@example.test", "stale login password 2026", ""); err != nil {
+		t.Fatal(err)
+	}
+	if store.calls.Load() != 6 {
+		t.Fatalf("%d control write attempts, want 5 refused and 1 committed", store.calls.Load())
+	}
+	if got := auth.KDFRuns() - runs; got != 1 {
+		t.Fatalf("six attempts of one login ran the password KDF %d times, want 1", got)
 	}
 }

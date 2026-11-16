@@ -4,7 +4,6 @@ package storage
 
 import (
 	"bytes"
-	"encoding/json"
 	"reflect"
 	"testing"
 
@@ -32,7 +31,9 @@ func TestFragmentHeadAndTailCoverArtifactFragment(t *testing.T) {
 	}
 }
 
-// The stored form of a fragment command is json.Marshal(entry): the same bytes, assembled once.
+// The stored form of a fragment command is what encoding/json writes for it: the same bytes,
+// assembled once. The reference is oracleWAL (the standard library over a methodless mirror), never
+// json.Marshal(walEntry), which is encodeWAL itself.
 func TestEncodeFragmentJSONMatchesJSONMarshal(t *testing.T) {
 	nilBytes, emptyBytes := fragmentWAL('n', 0), fragmentWAL('e', 0)
 	nilBytes.Artifact.Bytes, emptyBytes.Artifact.Bytes = nil, []byte{}
@@ -43,25 +44,25 @@ func TestEncodeFragmentJSONMatchesJSONMarshal(t *testing.T) {
 		"nil bytes":   nilBytes,
 		"empty bytes": emptyBytes,
 	} {
-		want, err := json.Marshal(e)
+		want, err := oracleWAL(e)
 		if err != nil {
 			t.Fatal(err)
 		}
 		got, ok, err := encodeFragmentJSON(e)
 		if err != nil || !ok || !bytes.Equal(got, want) {
-			t.Fatalf("%s: encodeFragmentJSON differs from json.Marshal (len %d vs %d, ok %v, %v)", name, len(got), len(want), ok, err)
+			t.Fatalf("%s: encodeFragmentJSON differs from encoding/json (len %d vs %d, ok %v, %v)", name, len(got), len(want), ok, err)
 		}
 		if cap(got) != len(got) {
 			t.Fatalf("%s: output buffer is %d for %d bytes of text", name, cap(got), len(got))
 		}
 		generic, err := encodeWAL(e)
 		if err != nil || !bytes.Equal(generic, want) {
-			t.Fatalf("%s: encodeWAL differs from json.Marshal: %v", name, err)
+			t.Fatalf("%s: encodeWAL differs from encoding/json: %v", name, err)
 		}
 	}
 }
 
-// Anything but a plain fragment entry takes the generic path, which already is json.Marshal's bytes.
+// Anything but a plain fragment entry takes the generic path, which is encoding/json's bytes.
 func TestEncodeFragmentJSONLeavesOtherEntriesToTheGenericPath(t *testing.T) {
 	plain := fragmentWAL('a', 64)
 	withProposer := plain
@@ -81,10 +82,10 @@ func TestEncodeFragmentJSONLeavesOtherEntriesToTheGenericPath(t *testing.T) {
 		if _, ok, err := encodeFragmentJSON(e); ok || err != nil {
 			t.Fatalf("%s: encodeFragmentJSON took an entry it does not encode (ok %v, %v)", name, ok, err)
 		}
-		want, wantErr := json.Marshal(e)
+		want, wantErr := oracleWAL(e)
 		got, err := encodeWAL(e)
 		if (wantErr == nil) != (err == nil) || err == nil && !bytes.Equal(got, want) {
-			t.Fatalf("%s: encodeWAL differs from json.Marshal (%v vs %v)", name, err, wantErr)
+			t.Fatalf("%s: encodeWAL differs from encoding/json (%v vs %v)", name, err, wantErr)
 		}
 	}
 }

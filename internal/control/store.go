@@ -22,7 +22,7 @@ import (
 )
 
 type Store struct {
-	db         *bolt.DB
+	db         *trackedDB
 	dir        string
 	registryMu sync.RWMutex
 	keyMu      sync.Mutex
@@ -35,6 +35,8 @@ type Store struct {
 	// ReserveAdmission then asks the owner about a key it has no row for before its first update
 	// instead of after an aborted one. A hint only: the update decides on the state it reads.
 	settledSeen atomic.Bool
+	// boundedGate says whether the bounded-state rules apply (bounded_rules.go); nil: they do.
+	boundedGate atomic.Pointer[func() bool]
 }
 
 // SetClock replaces the wall clock the update funnel dates revisions with (RevisionClock), time.Now
@@ -89,7 +91,7 @@ func Open(dir string) (*Store, error) {
 		db.Close()
 		return nil, e
 	}
-	s := &Store{db: db, dir: dir}
+	s := &Store{db: &trackedDB{DB: db}, dir: dir}
 	e = db.Update(func(tx *bolt.Tx) error {
 		if !fresh {
 			b := tx.Bucket([]byte("control"))
@@ -164,6 +166,13 @@ func (s *Store) View(ctx context.Context, fn func(State) error) error {
 func (s *Store) Update(ctx context.Context, fn func(*State) error) error {
 	return s.update(ctx, true, fn)
 }
+
+// errReplayed is returned by the transition of Transact when the command was already applied
+// (a first submission that raced another of the same id past the read-first check): the stored
+// Result is the answer and nothing is committed, so no revision is spent and AuthorityRevision
+// stays. replicatedUpdate returns a transition's error before it stamps or proposes anything.
+var errReplayed = errors.New("command already applied")
+
 func (s *Store) Transact(ctx context.Context, scope auth.Scope, cmd Command) (Result, error) {
 	if !CommandKind(cmd.Kind).Valid() || cmd.CommandID == (model.ID{}) {
 		return Result{}, model.Fail(model.Invalid)
@@ -197,6 +206,13 @@ func (s *Store) Transact(ctx context.Context, scope auth.Scope, cmd Command) (Re
 	if replayed {
 		return out, nil
 	}
+	return s.transactCommit(ctx, scope, cmd, correlationID)
+}
+
+// transactCommit is the part of Transact after the read-first replay check: the one control
+// transition that applies cmd.
+func (s *Store) transactCommit(ctx context.Context, scope auth.Scope, cmd Command, correlationID model.ID) (Result, error) {
+	var out Result
 	legacy := false
 	e := s.update(ctx, transactBumps(cmd.Kind), func(st *State) error {
 		if err := scope.ValidateControlState(*st); err != nil {
@@ -208,7 +224,7 @@ func (s *Store) Transact(ctx context.Context, scope auth.Scope, cmd Command) (Re
 				return model.Fail(model.NotFound)
 			}
 			out = v
-			return nil
+			return errReplayed
 		}
 		if !expectedRevisionOK(st, cmd.Kind, cmd.ExpectedRevision) {
 			legacy = retentionKinds[CommandKind(cmd.Kind)] && st.AuthorityRevision == 0 && st.Revision > 0
@@ -254,6 +270,9 @@ func (s *Store) Transact(ctx context.Context, scope auth.Scope, cmd Command) (Re
 				return out, err
 			}
 		}
+	}
+	if errors.Is(e, errReplayed) {
+		e = nil
 	}
 	return out, e
 }

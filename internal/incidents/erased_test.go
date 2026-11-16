@@ -196,3 +196,28 @@ func TestIncidentCommittedInsideACompletedRangeIsErasedAndActAnswersNotFound(t *
 		t.Fatalf("the incident reads as %+v", got)
 	}
 }
+
+// An incident opened from evidence inside an already erased range commits (the version moves) and
+// the late pass erases its state in the same transition. The service answers it with the typed
+// erased result, not as an opened incident with a payload that is gone (09.08x-W3): model.NotFound
+// with the SafeDetail incidents.DetailErased, the same answer an action on an erased incident has.
+func TestIncidentOpenedInsideACompletedRangeIsReportedErasedNotApplied(t *testing.T) {
+	f := newFx(t)
+	now := model.UnixNano(f.now.UnixNano())
+	f.completedRange(now-model.UnixNano(time.Hour), now+model.UnixNano(time.Hour))
+	erasing := f.erasingAudits()
+
+	id := model.ID{0x79}
+	got, err := f.act(f.a, incidents.Action{CommandID: model.NewID(), Type: incidents.TypeOpen, Origin: incidents.OriginSystem, Target: f.target(id),
+		Impact: impact(ep1, incidents.SeverityMajor, incidents.ConditionFiring, incidents.FreshnessFresh)})
+	var fault *model.Fault
+	if !errors.As(err, &fault) || fault.Code != model.NotFound || fault.SafeDetail != incidents.DetailErased {
+		t.Fatalf("an incident opened inside an erased range answered %+v, %v; want not_found/%s", got, err, incidents.DetailErased)
+	}
+	if rec := f.record(id); rec.Version != 1 || !rec.Erased() {
+		t.Fatalf("the command did not commit as a tombstone at version 1: %+v", rec)
+	}
+	if n := f.erasingAudits(); n != erasing+1 {
+		t.Fatalf("%d erasing audits for the commit, want exactly one", n-erasing)
+	}
+}

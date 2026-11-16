@@ -203,7 +203,7 @@ func loadJobRecord(st *State, key string) (JobRecord, bool, error) {
 var jobStateKeys = map[string]bool{
 	"version": true, "org": true, "project": true, "job": true, "definition": true, "history": true,
 	"current_health": true, "latest_schedule_key": true, "occurrences": true, "runs": true, "attempts": true,
-	"incomplete_intervals": true, "observer": true, "compaction": true,
+	"incomplete_intervals": true, "observer": true, "compaction": true, "provenance": true,
 }
 
 // jobStateCounts are the sizes of a state's collections.

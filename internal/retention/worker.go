@@ -43,6 +43,13 @@ type WorkerStatus struct {
 	CompletedOps   uint64
 	FencingOps     int
 	PhysicalLagOps int
+	// BackupLagOps counts completed deletion operations whose backup_deadline_ns has passed on
+	// the worker's clock. Nothing here can attest that the destination expired the off-host
+	// backups that predate those erasures (ExpireBackups and the destination's own lifecycle run
+	// outside the worker, and control keeps a completed operation indefinitely), so this is an
+	// upper bound that only grows: the number of operations whose backup promise is due and
+	// unverified, not a measurement of any backup.
+	BackupLagOps int
 	// ErasedBeforeHold counts records and artifact roots a physical pass erased for operations
 	// whose cleanup was then NOT recorded because a legal hold committed after the erasure and
 	// before the record: the bytes are gone, the receipt says "held", never "done".
@@ -250,17 +257,21 @@ func (s *Service) driveDeletions(ctx context.Context) error {
 		errs = append(errs, err)
 	}
 	ops, _ = s.cfg.Control.DeletionOperations(ctx)
-	lag := 0
+	lag, backupLag := 0, 0
+	now := s.timeNow()
 	for _, op := range ops {
 		if op.Phase == model.DeletePhaseComplete {
 			completed++
 			if op.PhysicalAt == 0 {
 				lag++
 			}
+			if op.BackupDeadline > 0 && int64(op.BackupDeadline) < now.UnixNano() {
+				backupLag++
+			}
 		}
 	}
 	s.mu.Lock()
-	s.status.FencingOps, s.status.CompletedOps, s.status.PhysicalLagOps = fencing, completed, lag
+	s.status.FencingOps, s.status.CompletedOps, s.status.PhysicalLagOps, s.status.BackupLagOps = fencing, completed, lag, backupLag
 	s.mu.Unlock()
 	return errors.Join(errs...)
 }

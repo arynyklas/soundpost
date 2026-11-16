@@ -172,10 +172,31 @@ type State struct {
 	// current event.
 	Recent []EventRef `json:"recent"`
 
+	// Provenance is the earliest and the latest record time (event time of an event,
+	// time of an evaluation health) this state was ever folded from, including the
+	// ones that rolled out of Recent (09.08x-W1): a deletion of a historical range
+	// reads it to tell whether the state derives from a deleted record when Recent no
+	// longer names one. A state written before the field existed has none and keeps
+	// none (see withEvidence).
+	Provenance *model.Provenance `json:"provenance,omitempty"`
+
 	// Erased is set on the state Service.Get and List read for a condition whose
 	// state a deletion erased: only Condition and Version are filled and nothing
 	// derived from telemetry remains. It is never stored.
 	Erased bool `json:"-"`
+}
+
+// withEvidence is the provenance of the state derived from s by folding the
+// evidence time at. A state that exists without a provenance was written before
+// the field: the times of what it folded earlier, and of what already rolled out
+// of Recent, are unknown, so a provenance started now would read as complete when
+// it is not. It stays without one, and the erasure keeps reading its window and
+// dropping it fail-closed.
+func (s State) withEvidence(at model.UnixNano) *model.Provenance {
+	if s.Version > 0 && s.Provenance == nil {
+		return nil
+	}
+	return s.Provenance.With(at)
 }
 
 // Recovered reports whether the condition is positively recovered: the source
@@ -201,6 +222,18 @@ const (
 	DetailInvalidEvent    = "condition_event_invalid"
 	DetailVersionRace     = "condition_version_race"
 )
+
+// DetailErased is the SafeDetail of the model.NotFound that reports a transition whose command
+// committed but whose state a completed deletion covering its evidence erased in that same
+// transition: the payload the caller submitted is gone, and the record reads as erased
+// (State.Erased). It is neither success nor storage damage (model.Corrupt), and repeating the
+// command cannot change it. Consume finalizes such an output and reports it in Report.Erased.
+const DetailErased = "condition_erased"
+
+// IsErased reports whether err is the typed erased result of a transition.
+func IsErased(err error) bool {
+	return faultCode(err) == model.NotFound && faultDetail(err) == DetailErased
+}
 
 func fault(code model.Code, detail string) error {
 	f := model.Fail(code)

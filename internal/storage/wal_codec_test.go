@@ -45,7 +45,7 @@ func walCodecCorpus(t *testing.T) map[string][]byte {
 	t.Helper()
 	rej := model.NewID()
 	enc := func(e walEntry) []byte {
-		raw, err := json.Marshal(e) // the pre-change encoding: json.Marshal over MarshalJSON
+		raw, err := oracleWAL(e) // the pre-change encoding: encoding/json over the stored form
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -72,14 +72,14 @@ func walCodecCorpus(t *testing.T) map[string][]byte {
 // The slimmed codec must write the same bytes and accept and refuse the same inputs as the
 // json.Marshal / json.Unmarshal path it replaced, which is how every journal entry on disk was written.
 func TestWALCodecMatchesTheJSONPackagePath(t *testing.T) {
-	for _, e := range []walEntry{fragmentWAL('a', 0), fragmentWAL('b', 256<<10), fragmentWAL(0xff, 1)} {
-		want, err := json.Marshal(e)
+	for _, e := range []walEntry{fragmentWAL('a', 0), fragmentWAL('b', 256<<10), fragmentWAL(0xff, 1), nastyFragment(fillOpts{text: nastyValid, slices: 2}, 100), nastyFragment(fillOpts{text: nastyValid}, 0)} {
+		want, err := oracleWAL(e)
 		if err != nil {
 			t.Fatal(err)
 		}
 		got, err := encodeWAL(e)
 		if err != nil || !bytes.Equal(got, want) {
-			t.Fatalf("encodeWAL differs from json.Marshal (len %d vs %d, %v)", len(got), len(want), err)
+			t.Fatalf("encodeWAL differs from encoding/json (len %d vs %d, %v)", len(got), len(want), err)
 		}
 		back, err := decodeWAL(got)
 		if err != nil || !reflect.DeepEqual(back, e) {

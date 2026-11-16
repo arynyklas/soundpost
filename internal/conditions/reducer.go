@@ -220,6 +220,7 @@ func Reduce(current State, event model.ConditionEvent) (State, error) {
 	next := clone(base)
 	prev := base.Phase
 	next.Version = base.Version + 1
+	next.Provenance = base.withEvidence(ev.At)
 	next.Epoch, next.Sequence, next.EventAt = ev.Epoch, ev.Sequence, ev.At
 	next.Severity, next.Labels, next.Links = ev.Severity, ev.Labels, ev.Links
 	next.Notify = true
@@ -328,6 +329,7 @@ func Observe(current State, obs Observation) (State, error) {
 		return current, nil
 	}
 	next.Version = current.Version + 1
+	next.Provenance = current.withEvidence(obs.At)
 	return next, nil
 }
 

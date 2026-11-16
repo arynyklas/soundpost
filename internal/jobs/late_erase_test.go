@@ -5,6 +5,7 @@ package jobs_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/arynyklas/soundpost/internal/auth"
@@ -101,9 +102,10 @@ func TestJobWithEvidenceInsideACompletedRangeIsErasedAsItCommits(t *testing.T) {
 	h := newRealHFor(t, o.fixture, hm(11, 10, 0), jobID)
 	w := h.writer(t)
 	key := jobsKey(hm(11, 0, 0))
-	st, outcome := apply(t, h.svc, w, record(p, 1, ev(runA, att1, key, 1, 1, "started", hm(11, 0, 5), nil)))
-	if outcome != jobs.Applied || st.Version != 1 {
-		t.Fatalf("the late update was refused: %v %+v", outcome, st)
+	// The command commits and its state is erased in the same transition: the typed erased
+	// result (09.08x-W3), no longer Applied with a payload that is gone.
+	if st, outcome, err := h.svc.ApplyAttempt(context.Background(), w, record(p, 1, ev(runA, att1, key, 1, 1, "started", hm(11, 0, 5), nil))); !jobs.IsErased(err) {
+		t.Fatalf("the late update answered %v %+v %v, want the erased result", outcome, st, err)
 	}
 	if snap, found, err := o.app.Control.JobBook(context.Background(), w, p, jobID); err != nil || !found || !snap.Erased || snap.Version != 1 {
 		t.Fatalf("a job with evidence inside the range must read as erased at its version: %+v found=%v err=%v", snap, found, err)
@@ -112,5 +114,37 @@ func TestJobWithEvidenceInsideACompletedRangeIsErasedAsItCommits(t *testing.T) {
 	page, err := h.svc.List(context.Background(), h.reader(t), p, model.ID{}, 10)
 	if err != nil || len(page.Jobs) != 1 || page.Jobs[0].Job != jobID || !page.Jobs[0].Erased {
 		t.Fatalf("the listing must report the erased job as erased: %+v err=%v", page, err)
+	}
+}
+
+// An update whose evidence lies inside an already erased range commits (the version moves) and the
+// late pass erases its state in the same transition. The service must say so with a typed result
+// callers can tell from success and from corruption, not answer Applied with the state it
+// submitted and no payload behind it (09.08x-W3). The typed answer is model.NotFound with the
+// SafeDetail "job_erased", the shape an action on an erased incident has.
+func TestAttemptInsideACompletedRangeIsReportedErasedNotApplied(t *testing.T) {
+	ctx := context.Background()
+	o := openOwn(t)
+	p := o.project1
+	o.completedRange(t, hm(11, 0, 0), hm(11, 30, 0))
+	h := newRealHFor(t, o.fixture, hm(11, 10, 0), jobID)
+	w := h.writer(t)
+	key := jobsKey(hm(11, 0, 0))
+	erased := func(err error) bool {
+		var f *model.Fault
+		return errors.As(err, &f) && f.Code == model.NotFound && f.SafeDetail == "job_erased"
+	}
+	st, outcome, err := h.svc.ApplyAttempt(ctx, w, record(p, 1, ev(runA, att1, key, 1, 1, "started", hm(11, 0, 5), nil)))
+	if !erased(err) {
+		t.Fatalf("an attempt inside an erased range answered %v %+v, %v; want not_found/job_erased", outcome, st, err)
+	}
+	if snap, found, err := o.app.Control.JobBook(ctx, w, p, jobID); err != nil || !found || !snap.Erased || snap.Version != 1 {
+		t.Fatalf("the command did not commit as a tombstone at version 1: %+v found=%v err=%v", snap, found, err)
+	}
+	// A schedule observation and a correction are write paths of the same store: the same answer.
+	def := hourly()
+	_, err = h.svc.ObserveSchedule(ctx, w, jobs.ScheduleEvidence{CommandID: model.NewID(), Project: p, Job: jobID, Observer: model.ID{7}, ObservedAt: hm(11, 10, 0), CompleteThrough: hm(11, 10, 0), Healthy: true, Definition: &def})
+	if !erased(err) {
+		t.Fatalf("a schedule observation inside an erased range answered %v, want not_found/job_erased", err)
 	}
 }

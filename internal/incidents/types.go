@@ -214,6 +214,16 @@ type State struct {
 // act on. It is not storage damage (model.Corrupt).
 const DetailErased = "incident_erased"
 
+// IsErased reports whether err is the typed erased result of an action: the action
+// committed (or found the incident already erased) and no state is left to return.
+// It covers both a command whose evidence lands in an already erased range, which a
+// deletion erases in the same transition (Service.Act, 09.08x-W3), and an action on
+// an incident erased earlier.
+func IsErased(err error) bool {
+	var f *model.Fault
+	return errors.As(err, &f) && f.Code == model.NotFound && f.SafeDetail == DetailErased
+}
+
 // AckCurrent reports whether the ACK covers the current impact revision.
 func (s State) AckCurrent() bool {
 	return s.Ack != nil && s.Ack.ImpactRevision == s.ImpactRevision

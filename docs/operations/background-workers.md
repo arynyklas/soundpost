@@ -169,6 +169,18 @@ elevation bookkeeping, so both are bounded:
   instant, so removing it widens and narrows no access. The writer is guarded:
   a sweep that removed a live record, added or altered one, or changed anything
   else bumps the revision like an unclassified writer.
+* Which login and elevation writes move `AuthorityRevision` (10.29, each decided
+  from what the commit writes). Not moved, through guarded writers that bump on
+  any other difference: the pending OIDC record a start adds and its callback
+  consumes (`UpdatePendingLogin`; it authenticates nobody, the session is a
+  separate write); the `elevated_read` audit row of an elevated read
+  (`UpdateAuditAppend`; audit rows are never read back by an access decision);
+  and a login that consumes a TOTP step or a recovery code
+  (`UpdateSessionCreate`; only `User.LastTOTP`, raised, and `User.Recovery`,
+  losing a hash, change, and no decision reads either field). Moved, on
+  purpose: `Elevate` itself (the elevation record is the access grant that
+  `ResolveElevation` rebuilds a cross-organization read scope from), logout,
+  and every other write to a user, membership or grant.
 * Audit rows (`elevate`, `elevated_read` and the per-response release audit, about
   300 bytes each) are not collected by this sweep. Decision proposed by lane 1
   wave 7, recommendation: accept: elevation audits have no retention of their own;

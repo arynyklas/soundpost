@@ -365,10 +365,11 @@ func (m *replicatedControl) restore(raw []byte, physical uint64, owe bool) error
 		return model.Fail(model.Corrupt)
 	}
 	s := m.store
-	if err := s.installReplicaKeys(snapshot.Keys); err != nil {
+	keys, err := s.installKeys(snapshot.Keys)
+	if err != nil {
 		return err
 	}
-	return s.db.Update(func(tx *bolt.Tx) error {
+	if err = s.db.Update(func(tx *bolt.Tx) error {
 		if owe {
 			if err := oweInstalledScrub(tx.Bucket([]byte("control")), snapshot.State); err != nil {
 				return err
@@ -394,7 +395,11 @@ func (m *replicatedControl) restore(raw []byte, physical uint64, owe bool) error
 			return err
 		}
 		return finishControlRestore(tx, b, physical)
-	})
+	}); err != nil {
+		// The keys were installed for this state: an install that did not happen leaves none of them.
+		return withCleanup(err, s.undoKeys(keys))
+	}
+	return nil
 }
 
 // ReconcileAdmissions uses the one installed owner's durable outcome proof and
@@ -508,7 +513,7 @@ func OpenSeed(dir string, raw []byte) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Store{db: db, dir: dir}
+	s := &Store{db: &trackedDB{DB: db}, dir: dir}
 	if err = durablefs.SyncFileAndDir(path); err != nil {
 		db.Close()
 		return nil, err
@@ -532,7 +537,8 @@ func OpenSeed(dir string, raw []byte) (*Store, error) {
 	}
 	if err != nil {
 		// The file was created by this call and holds only the seed: a rejected seed must not
-		// leave a settled key (and a state) behind for the next Open to trust.
+		// leave a settled key (and a state) behind for the next Open to trust, nor the seed's
+		// envelope keys (restore removes the ones it wrote).
 		db.Close()
 		if rerr := durablefs.Remove(path); rerr != nil {
 			return nil, errors.Join(err, rerr)
@@ -601,50 +607,127 @@ func (s *Store) replicaKeyFiles() (map[string][]byte, error) {
 	}
 	return out, nil
 }
-func (s *Store) installReplicaKeys(keys map[string][]byte) error {
+
+// keyInstall is what one installKeys call changed in the directory, so that a failure later in the
+// same install can put the directory back as the call found it.
+type keyInstall struct {
+	dir       string
+	created   []string // key files the call created (they did not exist)
+	active    bool     // the call replaced or created envelope.active
+	activeHad bool     // envelope.active existed before, with the content activeOld
+	activeOld []byte
+}
+
+// withCleanup is err with the failure of its cleanup attached; err itself when the cleanup worked.
+func withCleanup(err, cleanup error) error {
+	if cleanup == nil {
+		return err
+	}
+	return errors.Join(err, cleanup)
+}
+
+// replaceActiveKey atomically replaces the envelope.active file at path with value.
+func replaceActiveKey(dir, path string, value []byte) error {
+	temporary := filepath.Join(dir, ".replica-envelope-active")
+	if err := durablefs.Remove(temporary); err != nil {
+		return err
+	}
+	if err := durablefs.Exclusive(temporary, value); err != nil {
+		return withCleanup(err, durablefs.Remove(temporary))
+	}
+	if err := durablefs.Rename(temporary, path); err != nil {
+		return withCleanup(err, durablefs.Remove(temporary))
+	}
+	return nil
+}
+
+// undo removes the key files the install created and puts envelope.active back; the caller holds keyMu.
+func (k *keyInstall) undo() error {
+	var errs []error
+	for _, name := range k.created {
+		errs = append(errs, durablefs.Remove(filepath.Join(k.dir, name)))
+	}
+	if k.active {
+		path := filepath.Join(k.dir, "envelope.active")
+		if k.activeHad {
+			errs = append(errs, replaceActiveKey(k.dir, path, k.activeOld))
+		} else {
+			errs = append(errs, durablefs.Remove(path))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (s *Store) undoKeys(k *keyInstall) error {
 	s.keyMu.Lock()
 	defer s.keyMu.Unlock()
-	for name, value := range keys {
+	return k.undo()
+}
+
+func (s *Store) installReplicaKeys(keys map[string][]byte) error {
+	_, err := s.installKeys(keys)
+	return err
+}
+
+// installKeys writes the key files of a snapshot or a replicated command that this directory does
+// not hold yet and hands back what it changed. It writes all of them or none: every name is
+// checked, and every file already there compared, before the first write, so a snapshot with one
+// bad key writes nothing; a write that fails after others landed removes those.
+func (s *Store) installKeys(keys map[string][]byte) (*keyInstall, error) {
+	s.keyMu.Lock()
+	defer s.keyMu.Unlock()
+	for name := range keys {
 		if !seedFile(name) || filepath.Base(name) != name {
-			return model.Fail(model.Corrupt)
+			return nil, model.Fail(model.Corrupt)
 		}
+	}
+	var missing []string
+	for name, value := range keys {
 		if name == "envelope.active" {
 			continue
 		}
-		path := filepath.Join(s.dir, name)
-		old, err := os.ReadFile(path)
-		if err == nil {
+		old, err := os.ReadFile(filepath.Join(s.dir, name))
+		switch {
+		case err == nil:
 			if !bytes.Equal(old, value) {
-				return model.Fail(model.Conflict)
+				return nil, model.Fail(model.Conflict)
 			}
-			continue
-		}
-		if !os.IsNotExist(err) {
-			return err
-		}
-		if err = durablefs.Exclusive(path, value); err != nil {
-			return err
+		case os.IsNotExist(err):
+			missing = append(missing, name)
+		default:
+			return nil, err
 		}
 	}
-	if value, ok := keys["envelope.active"]; ok {
-		path := filepath.Join(s.dir, "envelope.active")
-		old, err := os.ReadFile(path)
-		if err == nil && bytes.Equal(old, value) {
-			return nil
+	active, hasActive := keys["envelope.active"]
+	var activeOld []byte
+	activeHad := false
+	if hasActive {
+		old, err := os.ReadFile(filepath.Join(s.dir, "envelope.active"))
+		switch {
+		case err == nil:
+			activeOld, activeHad = old, true
+		case !os.IsNotExist(err):
+			return nil, err
 		}
-		if err != nil && !os.IsNotExist(err) {
-			return err
-		}
-		temporary := filepath.Join(s.dir, ".replica-envelope-active")
-		if err = durablefs.Remove(temporary); err != nil {
-			return err
-		}
-		if err = durablefs.Exclusive(temporary, value); err != nil {
-			return err
-		}
-		return durablefs.Rename(temporary, path)
 	}
-	return nil
+	k := &keyInstall{dir: s.dir}
+	for _, name := range missing {
+		path := filepath.Join(s.dir, name)
+		if err := durablefs.Exclusive(path, keys[name]); err != nil {
+			if !os.IsExist(err) { // a file this call created (or half wrote) is its own to remove
+				err = withCleanup(err, durablefs.Remove(path))
+			}
+			return nil, withCleanup(err, k.undo())
+		}
+		k.created = append(k.created, name)
+	}
+	if hasActive && !(activeHad && bytes.Equal(activeOld, active)) {
+		k.active, k.activeHad, k.activeOld = true, activeHad, activeOld
+		if err := replaceActiveKey(s.dir, filepath.Join(s.dir, "envelope.active"), active); err != nil {
+			return nil, withCleanup(err, k.undo())
+		}
+	}
+	return k, nil
 }
 
 func (s *Store) ReplicaGroup() *replica.Group {

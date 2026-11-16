@@ -51,6 +51,13 @@ func (s *fullOIDCStore) Update(ctx context.Context, fn func(*model.ControlState)
 	return s.Store.Update(ctx, fn)
 }
 
+// UpdatePendingLogin is the guarded commit OIDCStart's record goes through; it is a state write
+// and is counted exactly as Update is, so "no write at the cap" still covers it.
+func (s *fullOIDCStore) UpdatePendingLogin(ctx context.Context, now int64, pending, residentExpired func(string, json.RawMessage) bool, fn func(*model.ControlState) error) error {
+	s.updates.Add(1)
+	return s.Store.UpdatePendingLogin(ctx, now, pending, residentExpired, fn)
+}
+
 func TestOIDCStartRefusedAtCapWithoutFetchOrWrite(t *testing.T) {
 	var fetches atomic.Int64
 	provider := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fetches.Add(1); http.Error(w, "no", 500) }))

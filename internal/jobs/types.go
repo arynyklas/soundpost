@@ -13,6 +13,7 @@
 package jobs
 
 import (
+	"errors"
 	"time"
 
 	"github.com/arynyklas/soundpost/internal/model"
@@ -323,6 +324,31 @@ type JobState struct {
 	IncompleteIntervals []Interval   `json:"incomplete_intervals,omitempty"`
 	Observer            *Observation `json:"observer,omitempty"`
 	Compaction          Compaction   `json:"compaction"`
+
+	// Provenance is the earliest and the latest record time (the Observed time of an
+	// attempt event) this state was ever folded from, including the runs that left
+	// through Compaction (09.08x-W1): a deletion of a historical range reads it to
+	// tell whether the state derives from a deleted record when the retained runs
+	// no longer name one. Schedule observations are not recorded: what they leave in
+	// the state (the observer's newest observation, definitions, incomplete
+	// intervals) names its own times and is never rolled out. A state written before
+	// the field existed has none and keeps none (see withEvidence).
+	Provenance *model.Provenance `json:"provenance,omitempty"`
+}
+
+// withEvidence is the provenance of the state derived from s by folding an attempt
+// event observed at at. A state that already holds runs, or has already compacted
+// some, and has no provenance was written before the field: the times of what it
+// folded earlier, and of the runs that already left it, are unknown, so a
+// provenance started now would read as complete when it is not. It stays without
+// one, and the erasure keeps reading its window and dropping it fail-closed. A
+// state that has folded no attempt yet (a new one, or one that only holds
+// schedule observations) starts one.
+func (s JobState) withEvidence(at model.UnixNano) *model.Provenance {
+	if s.Provenance == nil && (len(s.Runs) > 0 || s.Compaction.Runs > 0) {
+		return nil
+	}
+	return s.Provenance.With(at)
 }
 
 // Outcome reports what a reduction did, so callers can tell an applied change
@@ -336,6 +362,19 @@ const (
 	// revision: it cannot change any retained fact.
 	Ignored Outcome = "ignored"
 )
+
+// DetailErased is the SafeDetail of the model.NotFound that reports an update whose command
+// committed but whose state a completed deletion covering its evidence erased in that same
+// transition: the state the caller submitted is gone and the record reads as erased
+// (Store.Load returns an empty state at the version the command committed). It is neither
+// Applied nor storage damage (model.Corrupt), and repeating the command cannot change it.
+const DetailErased = "job_erased"
+
+// IsErased reports whether err is the typed erased result of an update.
+func IsErased(err error) bool {
+	var f *model.Fault
+	return errors.As(err, &f) && f.Code == model.NotFound && f.SafeDetail == DetailErased
+}
 
 // Correction is an audited, authorized later assertion about one terminal
 // attempt. Version must be explicitly newer than the attempt's newest

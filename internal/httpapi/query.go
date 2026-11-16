@@ -214,6 +214,9 @@ func queryReply(w http.ResponseWriter, v any, e error) {
 	w.Header().Set("Content-Type", "application/json")
 	requestID, _ := model.ParseID(w.Header().Get("X-Request-ID"))
 	if e != nil {
+		if replyRateLimited(w, e) {
+			return
+		}
 		var language *syntax.LanguageError
 		if errors.As(e, &language) {
 			body := languageFault{Code: "language", LanguageCode: language.Code, Category: language.Category, Detail: language.SafeMessage, SourceRange: &query.SourceRange{StartByte: language.Range.StartByte, EndByte: language.Range.EndByte, StartRune: language.Range.StartRune, EndRune: language.Range.EndRune}}

@@ -34,13 +34,14 @@ type voterMesh struct {
 	blocked map[uint64]bool
 	gated   map[uint64]bool
 	stash   map[uint64][]voterMsg
+	snaps   map[uint64]int // snapshot messages a voter was handed and did not refuse
 	stop    chan struct{}
 	wg      sync.WaitGroup
 	once    sync.Once
 }
 
 func newVoterMesh() *voterMesh {
-	return &voterMesh{groups: map[uint64]*replica.Group{}, queues: map[uint64]chan voterMsg{}, blocked: map[uint64]bool{}, gated: map[uint64]bool{}, stash: map[uint64][]voterMsg{}, stop: make(chan struct{})}
+	return &voterMesh{groups: map[uint64]*replica.Group{}, queues: map[uint64]chan voterMsg{}, blocked: map[uint64]bool{}, gated: map[uint64]bool{}, stash: map[uint64][]voterMsg{}, snaps: map[uint64]int{}, stop: make(chan struct{})}
 }
 func (m *voterMesh) set(id uint64, g *replica.Group) { m.mu.Lock(); m.groups[id] = g; m.mu.Unlock() }
 func (m *voterMesh) cut(id uint64, down bool)        { m.mu.Lock(); m.blocked[id] = down; m.mu.Unlock() }
@@ -137,6 +138,10 @@ func (m *voterMesh) step(to uint64, in voterMsg) {
 		err = replica.ErrUnavailable
 	} else if stepped := dst.Step(context.Background(), in.m); errors.Is(stepped, replica.ErrUnavailable) {
 		err = stepped
+	} else if in.m.GetType() == pb.MsgSnap {
+		m.mu.Lock()
+		m.snaps[to]++
+		m.mu.Unlock()
 	}
 	if src != nil {
 		src.ReportDelivery(to, in.m.GetType() == pb.MsgSnap, err)
@@ -184,6 +189,13 @@ func newControlVoters(t *testing.T) *controlVoters { t.Helper(); return newContr
 // test that builds a retention.Service over that voter's store gets them from retention.New.
 func newControlVotersWith(t *testing.T, ownRetention ...uint64) *controlVoters {
 	t.Helper()
+	return newControlVotersCadence(t, replica.Cadence{}, ownRetention...)
+}
+
+// newControlVotersCadence opens the voters with the journal cadence the caller chooses (the zero
+// value: control's default, DefaultJournalCadence).
+func newControlVotersCadence(t *testing.T, cadence replica.Cadence, ownRetention ...uint64) *controlVoters {
+	t.Helper()
 	genesis := newEraseFx(t)
 	seed, application, err := genesis.store.ReplicationSeed()
 	if err != nil {
@@ -230,7 +242,7 @@ func newControlVotersWith(t *testing.T, ownRetention ...uint64) *controlVoters {
 		if err = store.View(genesis.ctx, func(st control.State) error { installation = st.Installation; return nil }); err != nil {
 			t.Fatal(err)
 		}
-		group, err := store.EnableReplication(replica.Config{ID: id, Group: installation, Directory: filepath.Join(v.dirs[id], "raft-control"), TickInterval: voterTick(), Members: members,
+		group, err := store.EnableReplication(replica.Config{ID: id, Group: installation, Directory: filepath.Join(v.dirs[id], "raft-control"), TickInterval: voterTick(), Members: members, Cadence: cadence,
 			Transport: voterTransport{mesh: v.mesh, node: id}, Seed: seed, Application: application, SeedIndex: position.Applied + 1, SeedTerm: position.Term + 1})
 		if err != nil {
 			t.Fatal(err)

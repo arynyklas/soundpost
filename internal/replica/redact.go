@@ -43,6 +43,10 @@ const (
 const (
 	journalRedactTemp = "ready.wal.redact"
 	maxEntryPayload   = 16 << 20
+	// redactUnlockedAttempts is how many times RedactCompleted stages its rewrite without the group
+	// lock before it stages it under the lock (a group that commits during every attempt still
+	// gets its redaction).
+	redactUnlockedAttempts = 3
 )
 
 // Redaction names one applied command whose payload this group must stop holding, and the
@@ -65,10 +69,18 @@ type RedactResult struct {
 	Absent   int // requested application indexes this group holds no applied command for
 	Journal  int // journal entries rewritten on disk
 	Pins     int // pin archive entries rewritten on disk
+	// PinsSkipped counts the pin archives this call never opened: a pin archives only commands
+	// with an application index above its After, so a pin whose After is not below the highest
+	// application index of every copy of the commands to redact cannot hold one.
+	PinsSkipped int
 }
 
 type redactTarget struct {
 	replacement []byte
+	// application is the highest application index of any copy of the command that the retry table,
+	// the log index and the retained log know; 0: not known (the command was located in the
+	// retained log or a pin archive), which bounds nothing (pinBound).
+	application uint64
 }
 
 // RedactCompleted replaces the retained payload of the named applied commands by the machine's
@@ -104,6 +116,20 @@ type redactTarget struct {
 // can leave the open journal handle, the retained log and the retry table disagreeing: the group
 // fails until a restart rebuilds it from the journal and the caller repeats the redaction.
 //
+// The group lock is not held while the journal and the pin archives are rewritten: a rewrite over
+// a long journal would stop Propose and ReadIndex for the whole group. The call plans under the
+// lock, stages the rewritten files (temporary files, fsync) without it, and installs them under
+// the lock only when the group is exactly what the plan read (redactCompletedOnce); otherwise it
+// discards them and starts over, and the fourth attempt holds the lock throughout.
+//
+// A pin archive that cannot hold a command to redact is not opened (RedactResult.PinsSkipped): a
+// pin archives only the commands above its After, so one whose After is at or above the highest
+// application index of every copy of every command to redact holds none (pinBound). A command
+// located by application index because the retry table forgot it has no known bound, and then
+// every pin is read. The one copy this cannot see is a second committed copy of an ID that the
+// retry table still holds, with an application index above the pin's After and nowhere but in
+// that pin's archive; Propose refuses such a copy (the table answers the retry).
+//
 // A request that cannot be honoured is refused whole with ErrInvalid before anything is
 // rewritten: an empty or oversized replacement, application index 0, a duplicate application
 // index, or a command that is not telemetry payload (barriers, cancellations, control and
@@ -128,8 +154,32 @@ func (g *Group) RedactCompleted(ctx context.Context, requests []Redaction) (Reda
 	}
 	g.redactMu.Lock() // the journal's temporary file is shared with RedactMachineCommands, which builds it before it takes g.mu
 	defer g.redactMu.Unlock()
+	for attempt := 0; ; attempt++ {
+		res, err := g.redactCompletedOnce(wanted, attempt >= redactUnlockedAttempts)
+		if !errors.Is(err, errRedactRaced) {
+			return res, err
+		}
+	}
+}
+
+// redactCompletedOnce is one attempt of RedactCompleted: it plans under g.mu (the commands to
+// redact in the retry table and the retained log, the journal handle and length, the pin
+// archives and their lengths), stages the rewritten journal and pin archives without it (they
+// are temporary files: nothing of the group changes), and takes g.mu again to install them, but
+// only when the group is exactly what the plan read (same applied index, same retained log, the
+// same journal file at the same length, the same pins with the same archive files at the same
+// lengths): a cut, a compaction, a commit or a pin that came in between would be undone or missed
+// by installing the staged copy, so the attempt discards it and reports errRedactRaced. With
+// locked, the lock is held throughout and nothing can change: the last attempt, so a group that
+// never stops committing still gets its redaction.
+func (g *Group) redactCompletedOnce(wanted map[uint64][]byte, locked bool) (RedactResult, error) {
 	g.mu.Lock()
-	defer g.mu.Unlock()
+	held := true
+	defer func() {
+		if held {
+			g.mu.Unlock()
+		}
+	}()
 	if g.failed || g.closed {
 		return RedactResult{}, ErrUnavailable
 	}
@@ -148,49 +198,159 @@ func (g *Group) RedactCompleted(ctx context.Context, requests []Redaction) (Reda
 			return RedactResult{}, ErrConflict // two retained commands claim one application index
 		}
 		found[c.Entry.ApplicationIndex] = true
-		targets[id] = &redactTarget{replacement: bytes.Clone(replacement)}
+		targets[id] = &redactTarget{replacement: bytes.Clone(replacement), application: g.copyBoundLocked(id, c)}
 	}
-	res.Absent = len(wanted) - len(found)
-	if res.Absent > 0 {
+	loc := &locator{wanted: wanted, found: found, targets: targets, located: map[uint64]bool{}}
+	if loc.pending() > 0 {
 		// The retry table is bounded (DigestRetryMachine): a command it has evicted can still have
 		// a copy in the retained log, the journal file (which mirrors it) or a pin archive. Those
 		// copies are located by their application index, so the redaction does not depend on the
 		// table having kept the command.
-		located, err := g.locateRetainedLocked(wanted, found, targets)
-		if err != nil {
+		if err := g.locateRetainedLocked(loc); err != nil {
 			return RedactResult{}, err
 		}
-		res.Absent -= located
 	}
-	if len(targets) == 0 {
-		return res, nil
-	}
-
-	var table []model.ID
-	for id, t := range targets {
-		if p := g.completed[id].Entry.Payload; len(p) > 0 && !bytes.Equal(p, t.replacement) { // no payload: kept by digest
-			table = append(table, id)
-		}
-	}
-	memory, err := g.redactedLogLocked(targets)
+	pins, err := g.planPinsLocked()
 	if err != nil {
 		return RedactResult{}, err
 	}
-	if len(table) == 0 && len(memory) == 0 && len(g.pins) == 0 {
+	if len(targets) == 0 && (loc.pending() == 0 || len(pins) == 0) {
+		res.Absent = loc.pending()
 		return res, nil
 	}
-	// An error before the journal was replaced (a hook, a read, a temp file, a pin archive: each
-	// replaced whole, atomically, and re-derivable) never started writing: the group is intact,
-	// the caller retries, and the pass is idempotent. Only a failure after the journal rename, or
-	// in the in-memory swap, can leave the group torn.
-	if err = g.trip(HookRedactBegin); err != nil {
+	tableWork := false
+	for id, t := range targets {
+		if p := g.completed[id].Entry.Payload; len(p) > 0 && !bytes.Equal(p, t.replacement) { // no payload: kept by digest
+			tableWork = true
+		}
+	}
+	in, err := g.journalInputsLocked()
+	if err != nil {
 		return RedactResult{}, err
 	}
-	if res.Pins, err = g.redactPinsLocked(targets); err != nil {
+	defer in.close()
+	if !locked {
+		g.mu.Unlock()
+		held = false
+	}
+
+	// Everything from here to relock touches no group state: it reads the plan and writes temporary
+	// files. An error before the journal is replaced (a hook, a read, a temp file, a pin archive:
+	// each replaced whole, atomically, and re-derivable) never started writing: the group is
+	// intact, the caller retries, and the pass is idempotent. Only a failure after the journal
+	// rename, or in the in-memory swap, can leave the group torn.
+	var stagedPins []*stagedPin
+	var stagedWAL *stagedJournal
+	discard := func() {
+		for _, p := range stagedPins {
+			p.discard()
+		}
+		if stagedWAL != nil {
+			stagedWAL.discard()
+		}
+	}
+	fail := func(err error) (RedactResult, error) {
+		discard()
 		return RedactResult{}, err
+	}
+	// relock takes the group lock back before anything is installed and reports errRedactRaced
+	// when the group is no longer what the plan read; the staged copies are discarded then.
+	relock := func() error {
+		if locked {
+			return nil
+		}
+		g.mu.Lock()
+		held = true
+		var err error
+		if g.failed || g.closed {
+			err = ErrUnavailable
+		} else if current, cerr := in.currentLocked(g); cerr != nil {
+			err = cerr
+		} else if !current {
+			err = errRedactRaced
+		} else if current, cerr = pinsCurrentLocked(g, pins); cerr != nil {
+			err = cerr
+		} else if !current {
+			err = errRedactRaced
+		}
+		if err != nil {
+			discard()
+		}
+		return err
+	}
+
+	opened := map[model.ID]bool{} // the pins this attempt read
+	if err = loc.scanPins(pins, opened); err != nil {
+		return fail(err)
+	}
+	if len(targets) == 0 {
+		if err = relock(); err != nil {
+			return RedactResult{}, err
+		}
+		res.Absent, res.PinsSkipped = loc.pending(), len(pins)-len(opened)
+		return res, nil
+	}
+	raiseCopyBounds(in.log, targets)
+	memory, err := redactedLog(in.log, targets)
+	if err != nil {
+		return fail(err)
+	}
+	if !tableWork && len(memory) == 0 && len(pins) == 0 {
+		if err = relock(); err != nil {
+			return RedactResult{}, err
+		}
+		res.Absent = loc.pending()
+		return res, nil
+	}
+	if err = g.trip(HookRedactBegin); err != nil {
+		return fail(err)
+	}
+	bound := pinBound(targets)
+	var toStage []redactPin
+	for _, p := range pins {
+		if p.after < bound { // a pin archives only commands above its After: at or above every copy's index it holds none
+			toStage = append(toStage, p)
+		}
+	}
+	if len(toStage) > 0 {
+		if err = g.trip(HookRedactPins); err != nil {
+			return fail(err)
+		}
+	}
+	for _, p := range toStage {
+		opened[p.id] = true
+		staged, serr := stagePinArchive(p.path, p.size, targets)
+		if serr != nil {
+			return fail(serr)
+		}
+		if staged != nil {
+			stagedPins = append(stagedPins, staged)
+		}
 	}
 	if len(memory) > 0 {
-		if res.Journal, err = g.rewriteJournalRedacted(targets); err != nil {
+		if stagedWAL, err = g.stageRedactedJournal(in.journal(), targets); err != nil {
+			return fail(err)
+		}
+	}
+	if err = relock(); err != nil {
+		return RedactResult{}, err
+	}
+
+	// The group is what the plan read, and g.mu is held: install.
+	for i, staged := range stagedPins {
+		if err = staged.install(); err != nil {
+			for _, rest := range stagedPins[i+1:] {
+				rest.discard()
+			}
+			if stagedWAL != nil {
+				stagedWAL.discard()
+			}
+			return RedactResult{}, err
+		}
+		res.Pins += staged.rewritten
+	}
+	if stagedWAL != nil {
+		if res.Journal, err = g.installRedactedJournal(stagedWAL); err != nil {
 			var torn *tornError
 			if errors.As(err, &torn) {
 				g.failStop(FailMaintenance)
@@ -207,9 +367,11 @@ func (g *Group) RedactCompleted(ctx context.Context, requests []Redaction) (Reda
 			return RedactResult{}, err
 		}
 	}
-	for _, id := range table {
-		t := targets[id]
-		c := g.completed[id]
+	for id, t := range targets {
+		c, ok := g.completed[id]
+		if !ok || len(c.Entry.Payload) == 0 || bytes.Equal(c.Entry.Payload, t.replacement) { // no payload: kept by digest
+			continue
+		}
 		c.Entry = redactedCommand(c.Entry, t.replacement)
 		g.completed[id] = c
 		if l, ok := g.logCommands[id]; ok {
@@ -219,35 +381,115 @@ func (g *Group) RedactCompleted(ctx context.Context, requests []Redaction) (Reda
 		res.Redacted++
 	}
 	g.sendSnap = nil // built from the retry table
+	res.Absent, res.PinsSkipped = loc.pending(), len(pins)-len(opened)
 	return res, nil
 }
 
-// locateRetainedLocked finds the commands of the requested application indexes that the retry
-// table did not hold (found lists those it did), among the entries of the retained log and of the
-// pin archives, adds them to targets and returns how many requested indexes it located. The retained
-// log mirrors the journal file, so a command located there is rewritten in the file too. The log is
-// read only when the application indexes it spans include a requested one the table lacks, so a
-// group whose old redactions lie below its retained log pays nothing for them. g.mu is held.
-func (g *Group) locateRetainedLocked(wanted map[uint64][]byte, found map[uint64]bool, targets map[model.ID]*redactTarget) (int, error) {
-	located := map[uint64]bool{}
-	visit := func(ent *pb.Entry) error {
+// copyBoundLocked is the highest application index any copy of the command c holds that the retry
+// table or the log index knows. g.mu is held.
+func (g *Group) copyBoundLocked(id model.ID, c CommittedEntry) uint64 {
+	bound := c.Entry.ApplicationIndex
+	if l, ok := g.logCommands[id]; ok && l.Entry.ApplicationIndex > bound {
+		bound = l.Entry.ApplicationIndex
+	}
+	return bound
+}
+
+// raiseCopyBounds raises the bound of every target the retry table holds to the highest
+// application index of a copy of it in the retained log.
+func raiseCopyBounds(log []*pb.Entry, targets map[model.ID]*redactTarget) {
+	for _, ent := range log {
 		e, ok := parseEntry(ent)
 		if !ok {
-			return nil
+			continue
 		}
-		replacement, ok := wanted[e.ApplicationIndex]
-		if !ok || found[e.ApplicationIndex] {
-			return nil
+		if t := targets[e.ID]; t != nil && t.application != 0 && e.ApplicationIndex > t.application {
+			t.application = e.ApplicationIndex
 		}
-		if e.Kind != Data && e.Kind != Artifact {
-			return ErrInvalid
+	}
+}
+
+// pinBound is the application index at or above which a pin cannot hold a copy of any target: a
+// pin archives only the commands whose application index is above its After (archiveRangeLocked),
+// so a pin with After at or above the highest application index of every copy of every target
+// holds none. A target whose copies are not all known (application 0: it was located in the
+// retained log or in a pin archive, because the retry table had forgotten it, and a copy of an ID
+// that was applied again after its eviction carries another application index) bounds nothing: no
+// pin is skipped then.
+func pinBound(targets map[model.ID]*redactTarget) uint64 {
+	var bound uint64
+	for _, t := range targets {
+		if t.application == 0 {
+			return ^uint64(0)
 		}
-		if targets[e.ID] == nil {
-			targets[e.ID] = &redactTarget{replacement: bytes.Clone(replacement)}
-		}
-		located[e.ApplicationIndex] = true
+		bound = max(bound, t.application)
+	}
+	return bound
+}
+
+// locator finds the commands of the requested application indexes that the retry table did not
+// hold (found lists those it did), among the entries of the retained log and of the pin archives,
+// and adds them to targets.
+type locator struct {
+	wanted  map[uint64][]byte
+	found   map[uint64]bool
+	targets map[model.ID]*redactTarget
+	located map[uint64]bool
+}
+
+// pending is how many requested application indexes neither the table nor a search found.
+func (l *locator) pending() int { return len(l.wanted) - len(l.found) - len(l.located) }
+
+func (l *locator) visit(ent *pb.Entry) error {
+	e, ok := parseEntry(ent)
+	if !ok {
 		return nil
 	}
+	replacement, ok := l.wanted[e.ApplicationIndex]
+	if !ok || l.found[e.ApplicationIndex] {
+		return nil
+	}
+	if e.Kind != Data && e.Kind != Artifact {
+		return ErrInvalid
+	}
+	if l.targets[e.ID] == nil {
+		l.targets[e.ID] = &redactTarget{replacement: bytes.Clone(replacement)}
+	}
+	l.located[e.ApplicationIndex] = true
+	return nil
+}
+
+// scanPins searches the pin archives for the indexes still pending, each archive as far as it was
+// when the plan was made. A pin whose After is at or above every pending index holds none of them
+// and is not opened. It records the pins it read in opened.
+func (l *locator) scanPins(pins []redactPin, opened map[model.ID]bool) error {
+	var highest uint64
+	for index := range l.wanted {
+		if !l.found[index] && !l.located[index] && index > highest {
+			highest = index
+		}
+	}
+	if highest == 0 {
+		return nil
+	}
+	for _, p := range pins {
+		if p.after >= highest {
+			continue
+		}
+		opened[p.id] = true
+		if err := scanPinArchivePrefix(p.path, p.size, l.visit); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// locateRetainedLocked searches the retained log for the requested indexes the retry table did not
+// hold (the pin archives are read without the lock, locator.scanPins). The retained log mirrors the
+// journal file, so a command located there is rewritten in the file too. The log is read only when
+// the application indexes it spans include a requested one the table lacks, so a group whose old
+// redactions lie below its retained log pays nothing for them. g.mu is held.
+func (g *Group) locateRetainedLocked(l *locator) error {
 	var low uint64
 	errLow := errors.New("replica: first application index found")
 	if err := g.eachMemoryEntryLocked(func(ent *pb.Entry) error {
@@ -257,31 +499,73 @@ func (g *Group) locateRetainedLocked(wanted map[uint64][]byte, found map[uint64]
 		}
 		return nil
 	}); err != nil && !errors.Is(err, errLow) {
-		return 0, err
+		return err
 	}
 	inLog := false
-	for index := range wanted {
-		if !found[index] && low != 0 && index >= low && index <= g.logApplication {
+	for index := range l.wanted {
+		if !l.found[index] && low != 0 && index >= low && index <= g.logApplication {
 			inLog = true
 			break
 		}
 	}
-	if inLog {
-		if err := g.eachMemoryEntryLocked(func(ent *pb.Entry) error {
-			if ent.GetIndex() > g.applied {
-				return nil
-			}
-			return visit(ent)
-		}); err != nil {
-			return 0, err
+	if !inLog {
+		return nil
+	}
+	return g.eachMemoryEntryLocked(func(ent *pb.Entry) error {
+		if ent.GetIndex() > g.applied {
+			return nil
+		}
+		return l.visit(ent)
+	})
+}
+
+// redactPin is one pin archive as a plan read it: the pin, its archive file and the length it had.
+type redactPin struct {
+	id    model.ID
+	pin   *JournalPin
+	path  string
+	after uint64
+	size  int64
+	info  os.FileInfo
+}
+
+// planPinsLocked lists the pins by ID with the file and length of each archive. g.mu is held.
+func (g *Group) planPinsLocked() ([]redactPin, error) {
+	if len(g.pins) == 0 {
+		return nil, nil
+	}
+	out := make([]redactPin, 0, len(g.pins))
+	for id, p := range g.pins {
+		info, err := os.Stat(p.path)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, redactPin{id: id, pin: p, path: p.path, after: p.after, size: info.Size(), info: info})
+	}
+	sort.Slice(out, func(i, j int) bool { return bytes.Compare(out[i].id[:], out[j].id[:]) < 0 })
+	return out, nil
+}
+
+// pinsCurrentLocked reports whether the group still holds exactly the pins the plan read: the same
+// pins, each with the same archive file at the same length (an archived range lengthens it, a
+// rewrite replaces the file). g.mu is held.
+func pinsCurrentLocked(g *Group, pins []redactPin) (bool, error) {
+	if len(g.pins) != len(pins) {
+		return false, nil
+	}
+	for _, p := range pins {
+		if g.pins[p.id] != p.pin {
+			return false, nil
+		}
+		now, err := os.Stat(p.path)
+		if err != nil {
+			return false, err
+		}
+		if !os.SameFile(now, p.info) || now.Size() != p.size {
+			return false, nil
 		}
 	}
-	for _, p := range g.pins {
-		if err := scanPinArchive(p.path, visit); err != nil {
-			return 0, err
-		}
-	}
-	return len(located), nil
+	return true, nil
 }
 
 // redactedCommand is e with its payload replaced; Original keeps the digest of the payload the
@@ -311,16 +595,6 @@ func redactedEntry(ent *pb.Entry, targets map[model.ID]*redactTarget) (*pb.Entry
 	replaced := proto.Clone(ent).(*pb.Entry)
 	replaced.Data = data
 	return replaced, nil
-}
-
-// redactedLogLocked lists the retained log entries (by physical index) that the redaction
-// replaces.
-func (g *Group) redactedLogLocked(targets map[model.ID]*redactTarget) (map[uint64]*pb.Entry, error) {
-	entries, err := g.memoryLogLocked()
-	if err != nil {
-		return nil, err
-	}
-	return redactedLog(entries, targets)
 }
 
 // redactedLog lists the entries (by physical index) that the redaction replaces.
@@ -359,23 +633,6 @@ func (g *Group) swapLogLocked(replaced map[uint64]*pb.Entry) error {
 		}
 	}
 	return g.memory.Append(suffix)
-}
-
-// rewriteJournalRedacted streams the journal into a temporary file with the redacted entries
-// substituted, record by record, and atomically renames it over the journal. Records that
-// carry nothing to redact are copied byte for byte; the snapshot and HardState records are
-// untouched. A crash leaves the complete old or the complete new journal. g.mu is held.
-func (g *Group) rewriteJournalRedacted(targets map[model.ID]*redactTarget) (int, error) {
-	in, err := os.Open(filepath.Join(g.dir, "ready.wal"))
-	if err != nil {
-		return 0, err
-	}
-	defer in.Close()
-	staged, err := g.stageRedactedJournal(in, targets)
-	if err != nil {
-		return 0, err
-	}
-	return g.installRedactedJournal(staged)
 }
 
 // stagedJournal is a redacted copy of the journal, complete and synced in its temporary file, not
@@ -544,23 +801,56 @@ func (g *Group) redactPinsLocked(targets map[model.ID]*redactTarget) (int, error
 	return total, nil
 }
 
-// redactPinArchive streams the archive record by record into a temp file, so memory is one record,
-// not the archive twice. An archive that holds nothing to redact has its temp file removed and
-// stays untouched; otherwise the temp file is fsynced and renamed over it.
-func redactPinArchive(path string, targets map[model.ID]*redactTarget) (rewritten int, err error) {
-	src, err := os.Open(path)
-	if err != nil {
+// redactPinArchive rewrites one pin archive at once: stagePinArchive, then install.
+func redactPinArchive(path string, targets map[model.ID]*redactTarget) (int, error) {
+	staged, err := stagePinArchive(path, -1, targets)
+	if err != nil || staged == nil {
 		return 0, err
 	}
-	defer src.Close()
-	info, err := src.Stat()
+	return staged.rewritten, staged.install()
+}
+
+// stagedPin is a redacted copy of one pin archive, complete and synced in its temporary file, not
+// yet in place.
+type stagedPin struct {
+	path, temp string
+	rewritten  int
+}
+
+// install renames the staged copy over the archive.
+func (s *stagedPin) install() error {
+	if err := durablefs.Rename(s.temp, s.path); err != nil {
+		os.Remove(s.temp)
+		return err
+	}
+	return durablefs.SyncDir(filepath.Dir(s.path))
+}
+
+// discard removes the staged copy; the archive is untouched. A copy it cannot remove is overwritten
+// by the next redaction and removed by the next Open.
+func (s *stagedPin) discard() { _ = os.Remove(s.temp) }
+
+// stagePinArchive streams the first limit bytes of the archive (a negative limit: all of it)
+// record by record into a temp file, so memory is one record, not the archive twice. It touches
+// no group state and renames nothing. An archive that holds nothing to redact has its temp file
+// removed and yields no staged copy and no error; otherwise the temp file is fsynced.
+func stagePinArchive(path string, limit int64, targets map[model.ID]*redactTarget) (*stagedPin, error) {
+	src, err := os.Open(path)
 	if err != nil {
-		return 0, err
+		return nil, err
+	}
+	defer src.Close()
+	if limit < 0 {
+		info, err := src.Stat()
+		if err != nil {
+			return nil, err
+		}
+		limit = info.Size()
 	}
 	temp := path + ".tmp"
 	dst, err := os.OpenFile(temp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	committed := false
 	defer func() {
@@ -569,13 +859,14 @@ func redactPinArchive(path string, targets map[model.ID]*redactTarget) (rewritte
 			os.Remove(temp)
 		}
 	}()
-	in, out := bufio.NewReaderSize(src, 1<<20), bufio.NewWriterSize(dst, 1<<20)
-	remaining := uint64(info.Size())
+	in, out := bufio.NewReaderSize(io.LimitReader(src, limit), 1<<20), bufio.NewWriterSize(dst, 1<<20)
+	remaining := uint64(limit)
+	rewritten := 0
 	var h [8]byte
 	var buf []byte
 	for remaining >= 8 {
 		if _, err = io.ReadFull(in, h[:]); err != nil {
-			return 0, err
+			return nil, err
 		}
 		n := binary.BigEndian.Uint32(h[:4])
 		if uint64(n) > remaining-8 {
@@ -586,7 +877,7 @@ func redactPinArchive(path string, targets map[model.ID]*redactTarget) (rewritte
 		}
 		record := buf[:n]
 		if _, err = io.ReadFull(in, record); err != nil {
-			return 0, err
+			return nil, err
 		}
 		remaining -= 8 + uint64(n)
 		if crc32.Checksum(record, readyCRC) != binary.BigEndian.Uint32(h[4:]) {
@@ -594,23 +885,23 @@ func redactPinArchive(path string, targets map[model.ID]*redactTarget) (rewritte
 		}
 		var r pinRecord
 		if model.StrictJSON(record, &r) != nil {
-			return 0, ErrCorrupt
+			return nil, ErrCorrupt
 		}
 		if r.Entry != nil {
 			ent := &pb.Entry{}
 			if proto.Unmarshal(r.Entry, ent) != nil {
-				return 0, ErrCorrupt
+				return nil, ErrCorrupt
 			}
 			replaced, rerr := redactedEntry(ent, targets)
 			if rerr != nil {
-				return 0, rerr
+				return nil, rerr
 			}
 			if replaced != nil {
 				if r.Entry, rerr = proto.Marshal(replaced); rerr != nil {
-					return 0, rerr
+					return nil, rerr
 				}
 				if record, rerr = json.Marshal(r); rerr != nil {
-					return 0, rerr
+					return nil, rerr
 				}
 				rewritten++
 			}
@@ -618,14 +909,14 @@ func redactPinArchive(path string, targets map[model.ID]*redactTarget) (rewritte
 		binary.BigEndian.PutUint32(h[:4], uint32(len(record)))
 		binary.BigEndian.PutUint32(h[4:], crc32.Checksum(record, readyCRC))
 		if _, err = out.Write(h[:]); err != nil {
-			return 0, err
+			return nil, err
 		}
 		if _, err = out.Write(record); err != nil {
-			return 0, err
+			return nil, err
 		}
 	}
 	if rewritten == 0 {
-		return 0, nil
+		return nil, nil
 	}
 	err = out.Flush()
 	if err == nil {
@@ -635,14 +926,23 @@ func redactPinArchive(path string, targets map[model.ID]*redactTarget) (rewritte
 		err = ce
 	}
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	committed = true
-	if err = durablefs.Rename(temp, path); err != nil {
-		os.Remove(temp)
-		return 0, err
+	return &stagedPin{path: path, temp: temp, rewritten: rewritten}, nil
+}
+
+// readPinPrefix reads the first limit bytes of a pin archive (a negative limit: all of it).
+func readPinPrefix(path string, limit int64) ([]byte, error) {
+	if limit < 0 {
+		return os.ReadFile(path)
 	}
-	return rewritten, durablefs.SyncDir(filepath.Dir(path))
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return io.ReadAll(io.LimitReader(f, limit))
 }
 
 // Residue reports where copies of a payload redacted at or before floor (a physical index at

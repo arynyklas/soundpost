@@ -46,6 +46,14 @@ func (s *Service) Elevate(ctx context.Context, session Session, reason string, o
 	a := model.ControlAudit{ID: model.NewID(), Principal: c.user, Action: "elevate", Reason: reason, Time: s.now().UnixNano(), Targets: append([]model.ID(nil), orgs...), RequestID: model.RequestCorrelationID(ctx, model.ID{}), Outcome: model.AuditAllowed}
 	expires := s.now().Add(15 * time.Minute)
 	record, _ := json.Marshal(elevationRecord{c.user, hashToken(c.token), append([]model.ID(nil), orgs...), a.ID, expires.Unix()})
+	// AuthorityRevision: this write MUST bump (it is the unclassified Update on purpose, and
+	// TestElevateBumpsAuthorityRevision pins it). The elevation record it stores is an access
+	// grant, not bookkeeping: ResolveElevation rebuilds the Elevation (the organizations an
+	// administrator's session may read across tenants, for 15 minutes) from exactly this record,
+	// so committing it widens who may read which organization's data. A retention command whose
+	// caller view predates it would have been decided without it; the revision it carries must
+	// therefore not be accepted as "no older than the last authority change". The audit row
+	// beside it would not bump on its own (see ElevatedScope), the record does.
 	err = s.store.Update(ctx, func(st *model.ControlState) error {
 		if err := s.validateCredentialState(*st, c); err != nil {
 			return err
@@ -116,7 +124,7 @@ func (s *Service) ElevatedScope(ctx context.Context, e Elevation, org model.ID, 
 	checkedAt := s.now()
 	out := Scope{service: s, credential: e.credential, org: org, projects: append([]model.ID(nil), projects...), action: action, elevation: e.audit, lease: &scopeLease{}, elevationExpires: e.expires}
 	a := model.ControlAudit{ID: model.NewID(), Principal: e.credential.user, Action: "elevated_read", Reason: "selected organization read", Time: s.now().UnixNano(), Org: org.String(), RequestID: model.RequestCorrelationID(ctx, model.ID{}), Outcome: model.AuditAllowed}
-	err := s.store.Update(ctx, func(st *model.ControlState) error {
+	err := s.updateAuditAppend(ctx, func(st *model.ControlState) error {
 		if err := s.validateCredentialState(*st, e.credential); err != nil {
 			return err
 		}
@@ -144,4 +152,20 @@ func (s *Service) ElevatedScope(ctx context.Context, e Elevation, org model.ID, 
 		return Scope{}, err
 	}
 	return out, nil
+}
+
+// auditAppender is implemented by *control.Store: the commit that only appends audit rows and does
+// not move the control AuthorityRevision. The elevated_read audit of ElevatedScope is such a
+// write: it validates the credential, reads the organization and projects, and appends one audit
+// row; the scope it releases is not stored. No access decision reads the audit log back. A
+// ControlStore without it falls back to Update.
+type auditAppender interface {
+	UpdateAuditAppend(ctx context.Context, fn func(*model.ControlState) error) error
+}
+
+func (s *Service) updateAuditAppend(ctx context.Context, fn func(*model.ControlState) error) error {
+	if u, ok := s.store.(auditAppender); ok {
+		return u.UpdateAuditAppend(ctx, fn)
+	}
+	return s.store.Update(ctx, fn)
 }

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -25,6 +26,17 @@ func mustWrite(t *testing.T, path string) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// danglingLink makes root/name a symlink whose target does not exist (POSIX symlinks only).
+func danglingLink(t *testing.T, root, name string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX symlinks")
+	}
+	if err := os.Symlink(filepath.Join(root, "gone"), filepath.Join(root, name)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -60,6 +72,10 @@ func TestServeRefusesADataDirectoryOnTheOldVolumeRootLayout(t *testing.T) {
 			mustWrite(t, filepath.Join(root, "lost+found", "x"))
 		}, "data", false},
 		{"a data directory not named data is not judged", func(t *testing.T, root string) { mustWrite(t, filepath.Join(root, "control.db")) }, "state", false},
+		// The guard must see the entry itself, not what it points to: a legacy pointer whose target is
+		// gone is still a trace of the old layout (a member would otherwise start fresh beside it).
+		{"a dangling symlink at control.db", func(t *testing.T, root string) { danglingLink(t, root, "control.db") }, "data", true},
+		{"a dangling symlink at raft", func(t *testing.T, root string) { danglingLink(t, root, "raft") }, "data", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
@@ -156,12 +172,19 @@ func TestChartDataDirIsWhatTheLegacyVolumeLayoutGuardJudges(t *testing.T) {
 	}
 	mount := regexp.MustCompile(`name: data, mountPath: (\S+)\}`).FindStringSubmatch(string(raw))
 	flag := regexp.MustCompile(`- --data-dir=(\S+)`).FindStringSubmatch(string(raw))
-	if mount == nil || flag == nil || !strings.HasPrefix(flag[1], mount[1]+"/") {
-		t.Fatalf("data mount %v or --data-dir flag %v not found, or the flag is not inside the mount", mount, flag)
+	if mount == nil || flag == nil {
+		t.Fatalf("data mount %v or --data-dir flag %v not found", mount, flag)
+	}
+	// refuseLegacyVolumeLayout judges (on the cleaned absolute path) only a directory named data, and
+	// looks for the old files in its parent: the chart's directory must be data/ directly inside the
+	// volume mount, however the chart spells the path.
+	chart := path.Clean(flag[1])
+	if path.Base(chart) != "data" || path.Dir(chart) != path.Clean(mount[1]) {
+		t.Fatalf("the chart's --data-dir=%s is not a directory named data directly inside the volume mounted at %s: the legacy volume layout guard would not judge it", flag[1], mount[1])
 	}
 	root := t.TempDir()
 	mustWrite(t, filepath.Join(root, "control.db"))
-	dir := filepath.Join(root, filepath.FromSlash(strings.TrimPrefix(flag[1], mount[1]+"/")))
+	dir := filepath.Join(root, path.Base(chart))
 	if err = refuseLegacyVolumeLayout(dir); !errors.Is(err, errLegacyVolumeLayout) {
 		t.Fatalf("the chart's --data-dir=%s on a volume mounted at %s is not covered by the guard: %v", flag[1], mount[1], err)
 	}
