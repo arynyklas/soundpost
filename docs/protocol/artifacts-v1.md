@@ -84,9 +84,12 @@ The integration owner runs:
 node fixtures/artifacts/upload-fixture.mjs --artifact-dir <private-fixture-output>
 go test ./internal/artifacts -run TestArtifact -count=1
 go test ./internal/storage -run TestArtifact -count=1
+go run ./tools/smoke artifact-provision --base-dir <private-dir>   # prints <private-config.json>
 go run ./tools/smoke artifact-upload --fixture-config <private-config.json> --artifact-dir <sanitized-output>
 ```
 
 The public fixture entry writes a deterministic generated module, matching TypeScript source, inert v3 map and hash identity fragment outside the repository. Its sanitized mappings span multiple 256-KiB fragments; the parent adds real organization/project/source/build IDs and retention to the private manifest rather than checking credentials into a fixture.
+
+`artifact-provision` creates such a private config from a clean checkout: a fresh state directory below `--base-dir` with an owner, two organizations, one onboarded source, a source-content manifest, a multi-fragment map, artifact-write and artifact-read tokens of the first organization and a live artifact-read token of the second organization only (the denied credential). It prints only the config path.
 
 The private config is outside the repository and contains `state_dir`, `manifest_file`, `map_file`, `uploader_token_file`, `reader_token_file`, `denied_token_file`. It references real preprovisioned project/source/build authority and an unused immutable artifact identity. Tokens are separate files, not command arguments. Use an actual source bearer as the denied credential. The smoke launches an owned child, waits for real durable fragment receipts before reference publication, kills that child, reopens the real app, proves orphan reads are denied, resumes through the canonical HTTPS endpoint, compares exact byte cursors/hashes and tests protected/denied reads. Its public report contains only hashes/cursors/statuses and the explicit single-voter boundary. Source-content fixtures additionally exercise the separate sources read with real extra grants.

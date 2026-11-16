@@ -45,6 +45,9 @@ func run() (err error) {
 		case "artifact-upload-child":
 			smoke, stage = "artifact_upload_child", "artifact_child"
 			return runArtifactUploadChild(os.Args[2:])
+		case "artifact-provision":
+			smoke, stage = "artifact_provision", "artifact_provision_dispatch"
+			return runArtifactProvision(os.Args[2:])
 		case "storage-roundtrip":
 			smoke, stage = "storage_roundtrip", "storage_dispatch"
 			return runStorageRoundtrip(os.Args[2:])
