@@ -1419,3 +1419,49 @@ func TestOutboxThreeNodeMinorityPartition(t *testing.T) {
 		t.Fatalf("the provider saw %d sends, want exactly the majority's one", p.count(open.ID))
 	}
 }
+
+// The outbox decides under the generation the control group declared (control.Store.BoundedRules):
+// with the gate closed a policy state is committed by the rule of the release before the bounded-state
+// protocol (the late memory rolls and never saturates), once it opens the saturating rule applies.
+// This is the wiring of Outbox.Submit, which the reducer tests (DecideRules directly) do not reach.
+func TestOutboxDecidesUnderThePreviousRuleUntilTheGateOpens(t *testing.T) {
+	n := newNode(t)
+	var open atomic.Bool
+	n.store.SetBoundedRulesGate(open.Load)
+	ob := n.outbox()
+	if _, err := ob.Submit(n.ctx, n.scope(), n.lease(), incident, n.destinationEvent(), base); err != nil {
+		t.Fatal(err)
+	}
+	backfill := func() {
+		t.Helper()
+		ev := n.incidentEvent(1, notify.SeverityMajor, 1)
+		ev.Mode = notify.ModeBackfill
+		if _, err := ob.Submit(n.ctx, n.scope(), n.lease(), incident, ev, base); err != nil {
+			t.Fatal(err)
+		}
+	}
+	committed := func() notify.PolicyState {
+		t.Helper()
+		recs, err := n.store.PolicyRecords(n.ctx, n.scope(), n.project)
+		if err != nil || len(recs) != 1 {
+			t.Fatalf("policy records: %d, %v", len(recs), err)
+		}
+		var s notify.PolicyState
+		if err := json.Unmarshal(recs[0].State, &s); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	const sent = notify.MaxLateMarks + 6
+	for range sent {
+		backfill()
+	}
+	if s := committed(); s.Backfilled != sent || s.LateSaturated || len(s.LateSeen) != notify.MaxLateMarks {
+		t.Fatalf("closed gate: backfilled %d (want %d), saturated=%v, memory %d: the previous rule rolls and counts every command", s.Backfilled, sent, s.LateSaturated, len(s.LateSeen))
+	}
+	open.Store(true)
+	backfill()
+	if s := committed(); s.Backfilled != sent || !s.LateSaturated {
+		t.Fatalf("open gate: backfilled %d (want %d, unchanged), saturated=%v", s.Backfilled, sent, s.LateSaturated)
+	}
+}

@@ -43,7 +43,17 @@ func NewState(org, project, policy model.ID, subject Entity) (PolicyState, error
 // already applied returns an unchanged state and no intents, and every intent
 // carries the stable C08 key, so an outbox that sees one twice deduplicates it.
 func Decide(state PolicyState, event PolicyEvent, at model.UnixNano) (PolicyState, []Intent, error) {
-	r := &run{s: state.clone(), ev: event, at: at}
+	return DecideRules(state, event, at, true)
+}
+
+// DecideRules is Decide under one generation of the rules. With bounded false it applies
+// the rule the bounded-state protocol replaced: the memory of counted late and backfill
+// commands rolls (the oldest is forgotten at MaxLateMarks) and LateSaturated is never
+// set, which is what a release without the protocol does. The outbox decides with the
+// generation every member of the replica group declared (control.Store.BoundedRules);
+// everything that only evaluates (the shadow twin) uses Decide.
+func DecideRules(state PolicyState, event PolicyEvent, at model.UnixNano, bounded bool) (PolicyState, []Intent, error) {
+	r := &run{s: state.clone(), ev: event, at: at, bounded: bounded}
 	if err := r.apply(); err != nil {
 		return state, nil, err
 	}
@@ -55,6 +65,8 @@ type run struct {
 	ev  PolicyEvent
 	at  model.UnixNano
 	out []Intent
+	// bounded: the bounded-state rules apply (see DecideRules).
+	bounded bool
 
 	// driving: the evidence came from the canonical owner and decides.
 	driving bool
@@ -365,8 +377,12 @@ func (r *run) late(mode Mode) {
 		return
 	}
 	if len(s.LateSeen) >= MaxLateMarks {
-		s.LateSaturated = true
-		return
+		if r.bounded {
+			s.LateSaturated = true
+			return
+		}
+		// The previous rule: the memory rolls, so a replay of a forgotten command counts again.
+		s.LateSeen = s.LateSeen[len(s.LateSeen)-MaxLateMarks+1:]
 	}
 	s.LateSeen = append(s.LateSeen, r.ev.Command)
 	if mode == ModeBackfill {

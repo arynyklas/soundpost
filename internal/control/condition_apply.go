@@ -100,7 +100,9 @@ const ConditionLeaseStale = "condition_lease_stale"
 // BindConditionApply installs the KindApplyCondition dispatcher on this Store
 // only, like the other Bind* methods; it is a conflict to bind twice.
 func (s *Store) BindConditionApply() error {
-	return s.RegisterHandler(KindApplyCondition, applyCondition)
+	return s.RegisterHandler(KindApplyCondition, func(scope auth.Scope, st *State, cmd Command) (Effect, error) {
+		return applyCondition(scope, st, cmd, s.BoundedRules())
+	})
 }
 
 func conditionKey(org, project, condition model.ID) string {
@@ -119,7 +121,7 @@ func loadCondition(st *State, key string) (ConditionRecord, bool, error) {
 	return r, true, nil
 }
 
-func applyCondition(scope auth.Scope, st *State, cmd Command) (Effect, error) {
+func applyCondition(scope auth.Scope, st *State, cmd Command, bounded bool) (Effect, error) {
 	var c ConditionCommand
 	if err := strictPayload(cmd.Payload, &c); err != nil {
 		return Effect{}, err
@@ -170,7 +172,8 @@ func applyCondition(scope auth.Scope, st *State, cmd Command) (Effect, error) {
 		if n >= MaxConditionsPerProject {
 			return Effect{}, model.Fail(model.Quota)
 		}
-		if over := held + len(c.State) + conditionRecordOverhead - MaxConditionProjectBytes; over > 0 && !collectSettledConditions(st, prefix, c.At, over) {
+		// The previous rule has no byte budget and collects nothing (bounded_rules.go).
+		if over := held + len(c.State) + conditionRecordOverhead - MaxConditionProjectBytes; bounded && over > 0 && !collectSettledConditions(st, prefix, c.At, over) {
 			return Effect{}, model.Fail(model.Quota)
 		}
 		rec = ConditionRecord{Org: org, Project: c.Project, ID: c.Condition}

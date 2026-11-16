@@ -55,6 +55,9 @@ type Store interface {
 	Deliveries(ctx context.Context, scope auth.Scope, project model.ID, phase string, now model.UnixNano, limit int) ([]control.DeliveryRecord, error)
 	PolicyRecord(ctx context.Context, scope auth.Scope, project, policy model.ID, subject string) (control.PolicyRecord, bool, error)
 	PolicyRecords(ctx context.Context, scope auth.Scope, project model.ID) ([]control.PolicyRecord, error)
+	// BoundedRules says whether every member of the control group applies the bounded-state
+	// rules (control.Store.BoundedRules); until then a decision is made under the previous ones.
+	BoundedRules() bool
 }
 
 // Fencer validates a lease against a fresh quorum observation (*replica.Group):
@@ -309,7 +312,7 @@ func (o *Outbox) Submit(ctx context.Context, scope auth.Scope, lease FenceToken,
 		} else if state, err = NewState(scope.OrgID(), project, ev.Policy, subject); err != nil {
 			return Submission{}, err
 		}
-		next, intents, err := Decide(state, ev, at)
+		next, intents, err := DecideRules(state, ev, at, o.store.BoundedRules())
 		if err != nil {
 			return Submission{}, err
 		}

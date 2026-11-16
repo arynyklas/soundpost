@@ -729,7 +729,7 @@ func validIssueShape(scope auth.Scope, c IssueCommand) error {
 	return nil
 }
 
-func applyIssueBook(scope auth.Scope, st *State, cmd Command) (Effect, error) {
+func applyIssueBook(scope auth.Scope, st *State, cmd Command, bounded bool) (Effect, error) {
 	if len(cmd.Payload) > maxIssuePayload {
 		return Effect{}, model.Fail(model.TooLarge)
 	}
@@ -874,7 +874,7 @@ func applyIssueBook(scope auth.Scope, st *State, cmd Command) (Effect, error) {
 		}
 		g := *c.Gap
 		g.Signals = append([]model.Kind(nil), c.Gap.Signals...)
-		gaps, err := appendIssueGap(book.Gaps, g)
+		gaps, err := appendIssueGap(book.Gaps, g, bounded)
 		if err != nil {
 			return Effect{}, err
 		}
@@ -886,12 +886,18 @@ func applyIssueBook(scope auth.Scope, st *State, cmd Command) (Effect, error) {
 			return Effect{}, ruleFault(model.Conflict, "issue_command_exists")
 		}
 		if len(book.Commands) >= maxIssueCommands {
+			if !bounded {
+				return Effect{}, model.Fail(model.Quota)
+			}
 			evictOldestIssueCommand(book.Commands)
 		}
 		if book.Commands == nil {
 			book.Commands = map[string]IssueCommandEntry{}
 		}
-		entry := IssueCommandEntry{Digest: model.Hash(sha256.Sum256(cmd.Payload)), Rev: book.Revision + 1}
+		entry := IssueCommandEntry{Digest: model.Hash(sha256.Sum256(cmd.Payload))}
+		if bounded {
+			entry.Rev = book.Revision + 1
+		}
 		if c.Action != nil {
 			a := *c.Action
 			entry.Action = &a

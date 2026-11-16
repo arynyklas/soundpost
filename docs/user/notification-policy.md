@@ -172,3 +172,7 @@ backfill command once: a replay of a counted command never counts again, however
 much later it arrives. The state remembers the first 64 distinct such commands;
 a further distinct one is not counted and sets `late_saturated`, which makes
 both counters lower bounds (never above the truth).
+
+During a rolling upgrade of a replicated installation the counters' memory rolls
+(the previous rule) until every member declared the protocol:
+`docs/operations/upgrade.md`, "Bounded-state rules across an upgrade".

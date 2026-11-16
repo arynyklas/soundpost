@@ -19,9 +19,13 @@ import (
 // holds its own checkpoint, so one of the existing gaps (or, last, the new gap
 // itself) always shares a group with another, and a refusal is possible only when
 // every gap is of a different group, which the group bound makes unreachable.
-func appendIssueGap(gaps []model.EvidenceGap, g model.EvidenceGap) ([]model.EvidenceGap, error) {
+// Without bounded (the previous rule, bounded_rules.go) a full list is a Quota.
+func appendIssueGap(gaps []model.EvidenceGap, g model.EvidenceGap, bounded bool) ([]model.EvidenceGap, error) {
 	if len(gaps) < maxIssueGaps {
 		return append(gaps, g), nil
+	}
+	if !bounded {
+		return nil, model.Fail(model.Quota)
 	}
 	for i := range gaps {
 		for j := i + 1; j < len(gaps); j++ {

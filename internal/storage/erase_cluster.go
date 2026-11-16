@@ -78,8 +78,18 @@ const (
 	maxEraseAckOps        = 64
 
 	// eraseProtocol is the erase protocol version a binary speaks: 1 is the attributed, epoch
-	// acknowledgement; 2 adds notices, incarnations and the basis of an acknowledgement.
+	// acknowledgement; 2 adds notices, incarnations and the basis of an acknowledgement. The
+	// entries of version 2 are proposed once every member declared at least this.
 	eraseProtocol uint64 = 2
+	// boundsProtocol is the declaration of a binary that also applies the bounded-state rules of
+	// control (control.Store.BoundedRules): the issue book's gap coalescing and command eviction,
+	// pruned-incident stubs, the condition byte budget with collection, and the saturating notify
+	// counters. It rides on the same declaration as the erase protocol (one number per member, a
+	// larger one satisfies every check of a smaller one), so a binary that only knows version 2
+	// still counts a member that declared 3 as ready for the erase entries.
+	boundsProtocol uint64 = 3
+	// declaredProtocol is the version this binary declares.
+	declaredProtocol = boundsProtocol
 	// noticeGrace is how long a voter that applied a notice naming it waits for the announced
 	// snapshot before it stops expecting it (and refuses it if it still arrives).
 	noticeGrace = 2 * time.Minute

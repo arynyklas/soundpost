@@ -39,6 +39,9 @@ person decided never hides what the source is doing, and the other way round.
   opening, and notifying for, a second incident. The project keeps the newest
   4096 stubs; a stub older than those is dropped, and only an episode that is
   still current after that many further prunings would open a new incident.
+  While the members of a replicated installation are being upgraded, a pruned
+  incident is removed instead (the previous rule) until every member declared the
+  protocol: `docs/operations/upgrade.md`, "Bounded-state rules across an upgrade".
 
 ## Snooze and maintenance
 

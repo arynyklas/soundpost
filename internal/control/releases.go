@@ -22,7 +22,9 @@ func (s *Store) BindReleases() error {
 	if e := s.RegisterHandler(KindRegisterRelease, applyReleaseOperation); e != nil {
 		return e
 	}
-	return s.RegisterHandler(KindApplyIssueEvidence, applyIssueOperation)
+	return s.RegisterHandler(KindApplyIssueEvidence, func(scope auth.Scope, st *State, cmd Command) (Effect, error) {
+		return applyIssueOperation(scope, st, cmd, s.BoundedRules())
+	})
 }
 func decodeReleaseCommand(cmd Command) (model.ReleaseCommand, error) {
 	var payload model.ReleaseCommand
@@ -155,9 +157,9 @@ func applyReleaseOperation(scope auth.Scope, st *State, cmd Command) (Effect, er
 	st.Audits = append(st.Audits, model.ControlAudit{ID: cmd.CommandID, Principal: scope.PrincipalID(), Action: "releases.register", Reason: "immutable release registration or display label update", Time: int64(payload.At), Org: scope.OrgID().String(), PolicyEpoch: scope.PolicyEpoch(), Targets: []model.ID{release.ID}, RequestID: payload.RequestID, Outcome: model.AuditAllowed})
 	return Effect{AffectedIDs: []model.ID{release.ID}, Phase: "registered"}, nil
 }
-func applyIssueOperation(scope auth.Scope, st *State, cmd Command) (Effect, error) {
+func applyIssueOperation(scope auth.Scope, st *State, cmd Command, bounded bool) (Effect, error) {
 	if isIssueBookOperation(cmd.Payload) {
-		return applyIssueBook(scope, st, cmd)
+		return applyIssueBook(scope, st, cmd, bounded)
 	}
 	payload, e := decodeReleaseCommand(cmd)
 	if e != nil {

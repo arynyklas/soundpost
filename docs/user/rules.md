@@ -144,5 +144,8 @@ They are not notifications and are not delivered anywhere.
   as erased, and starts anew on the next event, oldest first. With nothing
   settled to collect, the new condition is refused with a quota error. Updates of
   an existing condition are never refused by the byte bound.
+  During a rolling upgrade the byte bound is not enforced until every member
+  declared the protocol (`docs/operations/upgrade.md`, "Bounded-state rules across
+  an upgrade").
 - The most recent 16 accepted events per condition are kept for duplicate and
   conflict detection. A replay of an older sequence is treated as old.

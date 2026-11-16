@@ -196,6 +196,10 @@ func (a *App) enableReplication(dir string, options *replicationOptions, budget 
 	lifecycle.dir = dir
 	cfg.Domain = lifecycle.domain
 	a.replication = lifecycle
+	// The bounded-state rules of control (control.Store.BoundedRules) apply once every member of the
+	// slot-0 group declared the protocol: the gate is in place before the control group can decide a
+	// command, and reads false until storage's replication is up and everyone declared.
+	a.Control.SetBoundedRulesGate(a.Storage.ControlBoundsReady)
 	controlGroup, err := a.Control.EnableReplication(cfg)
 	if err != nil {
 		return err

@@ -50,6 +50,8 @@ type harness struct {
 	cfg notify.Config
 	rev model.Revision
 	n   uint16
+	// previous decides under the rules of the release before the bounded-state protocol.
+	previous bool
 }
 
 func newHarness(t *testing.T, subject notify.Entity) *harness {
@@ -74,7 +76,7 @@ func (h *harness) ev(kind notify.EventKind) notify.PolicyEvent {
 
 func (h *harness) try(ev notify.PolicyEvent, at model.UnixNano) ([]notify.Intent, error) {
 	h.t.Helper()
-	next, in, err := notify.Decide(h.s, ev, at)
+	next, in, err := notify.DecideRules(h.s, ev, at, !h.previous)
 	if err == nil {
 		h.s = next
 	}
@@ -2195,5 +2197,42 @@ func TestPolicyLateCountersNeverCountAReplayAfterTheMemoryFills(t *testing.T) {
 	h.do(backfill, t0+4*min1)
 	if h.s.Backfilled != 0 || !h.s.LateSaturated {
 		t.Fatalf("a backfill past the memory is not counted: %d", h.s.Backfilled)
+	}
+}
+
+// The saturating memory is a bounded-state rule: until every member of the control group declared the
+// protocol the outbox decides under the rule of the release before it, which rolls the memory (the
+// oldest command is forgotten, a replay of it counts again) and never sets LateSaturated. A state
+// that rule left (a full memory) continues under the new rule once it engages.
+func TestPolicyLateMemoryRollsUntilTheBoundedRulesApply(t *testing.T) {
+	h := newHarness(t, issueE)
+	h.previous = true
+	h.dest(rcptA, "", t0)
+	old := t0 - 2*hour
+	late := h.ev(notify.EventIssue)
+	late.Entity = &issueE
+	late.Issue = &notify.IssueEvidence{WindowStart: old - old%notify.ErrorWindow, Occurrences: occ(3, 2), Freshness: notify.FreshnessFresh}
+	h.do(late, t0+min1)
+	for i := 1; i < notify.MaxLateMarks+10; i++ {
+		next := late
+		next.Command = model.ID{0xc8, byte(i >> 8), byte(i)}
+		h.do(next, t0+min1)
+	}
+	if len(h.s.LateSeen) != notify.MaxLateMarks || h.s.LateSaturated || h.s.Late != uint32(notify.MaxLateMarks+10) {
+		t.Fatalf("previous rule: memory %d, late %d, saturated=%v; want a rolling memory of %d, every command counted, never saturated", len(h.s.LateSeen), h.s.Late, h.s.LateSaturated, notify.MaxLateMarks)
+	}
+	// The first command rolled out: its replay counts again (the flaw the bounded rule fixes).
+	before := h.s.Late
+	h.do(late, t0+2*min1)
+	if h.s.Late != before+1 {
+		t.Fatalf("previous rule: a replay of a forgotten command counted %d -> %d, want one more", before, h.s.Late)
+	}
+	// Every member declared: the same full memory saturates instead of rolling.
+	h.previous = false
+	extra := late
+	extra.Command = model.ID{0xc9, 0xff}
+	h.do(extra, t0+3*min1)
+	if h.s.Late != before+1 || !h.s.LateSaturated || len(h.s.LateSeen) != notify.MaxLateMarks {
+		t.Fatalf("bounded rule: late %d (want %d), saturated=%v, memory %d", h.s.Late, before+1, h.s.LateSaturated, len(h.s.LateSeen))
 	}
 }

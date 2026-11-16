@@ -46,7 +46,20 @@ func (e *Engine) Incarnation() string { return e.incarnation }
 // protocolReady reports whether every member of the committed configuration of the slot-0 group has
 // declared the erase protocol this binary speaks, so the entries an older binary cannot decode may
 // be proposed. It reads local replicated state only.
-func (e *Engine) protocolReady() bool {
+func (e *Engine) protocolReady() bool { return e.declaredBy(eraseProtocol) }
+
+// ControlBoundsReady reports whether every member of the committed configuration of the slot-0
+// group has declared boundsProtocol, so control may apply the bounded-state rules
+// (control.Store.SetBoundedRulesGate). Until then every member applies the previous rules, which
+// is what a member of the release before this one does. It is false while replication is not
+// enabled yet. It reads local replicated state only and is evaluated at every use, never cached:
+// declarations are never withdrawn, but a member added to the configuration closes it again until
+// that member declares.
+func (e *Engine) ControlBoundsReady() bool { return e.declaredBy(boundsProtocol) }
+
+// declaredBy reports whether every member of the slot-0 group's committed configuration declared
+// a protocol of at least version.
+func (e *Engine) declaredBy(version uint64) bool {
 	if e.repl == nil {
 		return false
 	}
@@ -59,7 +72,7 @@ func (e *Engine) protocolReady() bool {
 		meta := tx.Bucket([]byte("replica_data"))
 		ready = true
 		for _, m := range members {
-			if capabilityOf(meta, m.ID, m.NodeIdentity) < eraseProtocol {
+			if capabilityOf(meta, m.ID, m.NodeIdentity) < version {
 				ready = false
 			}
 		}
@@ -86,9 +99,9 @@ func (e *Engine) declareErasure(ctx context.Context) error {
 	}); err != nil {
 		return unavailableDB(err)
 	}
-	if declared < eraseProtocol {
+	if declared < declaredProtocol {
 		if err := e.proposeSlotZero(ctx, func(cursor model.Cursor) walEntry {
-			return walEntry{Type: "erase_ack", EraseAck: &eraseAck{Node: model.Uint64(node), Identity: identity, Operations: []model.ID{capabilityOp}, Epoch: model.Uint64(eraseProtocol), Cursor: cursor}}
+			return walEntry{Type: "erase_ack", EraseAck: &eraseAck{Node: model.Uint64(node), Identity: identity, Operations: []model.ID{capabilityOp}, Epoch: model.Uint64(declaredProtocol), Cursor: cursor}}
 		}); err != nil {
 			return err
 		}

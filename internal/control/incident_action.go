@@ -103,7 +103,9 @@ const IncidentVersionConflict = "incident_version_conflict"
 // BindIncidentAction installs the KindIncidentAction dispatcher on this Store
 // only, like the other Bind* methods; it is a conflict to bind twice.
 func (s *Store) BindIncidentAction() error {
-	return s.RegisterHandler(KindIncidentAction, applyIncidentAction)
+	return s.RegisterHandler(KindIncidentAction, func(scope auth.Scope, st *State, cmd Command) (Effect, error) {
+		return applyIncidentAction(scope, st, cmd, s.BoundedRules())
+	})
 }
 
 func incidentKey(org, project, incident model.ID) string {
@@ -160,7 +162,7 @@ func incidentActionScope(scope auth.Scope, st *State, org model.ID, c IncidentCo
 	return issueProjectScope(scope, st, c.Project)
 }
 
-func applyIncidentAction(scope auth.Scope, st *State, cmd Command) (Effect, error) {
+func applyIncidentAction(scope auth.Scope, st *State, cmd Command, bounded bool) (Effect, error) {
 	var c IncidentCommand
 	if err := strictPayload(cmd.Payload, &c); err != nil {
 		return Effect{}, err
@@ -204,17 +206,22 @@ func applyIncidentAction(scope auth.Scope, st *State, cmd Command) (Effect, erro
 		live := 0
 		for k, raw := range st.IncidentBooks {
 			if len(k) > len(prefix) && k[:len(prefix)] == prefix {
-				if _, stub := prunedIncidentAt(raw); !stub {
+				// The previous rule has no stubs: every record of the project counts.
+				if !bounded {
+					live++
+				} else if _, stub := prunedIncidentAt(raw); !stub {
 					live++
 				}
 			}
 		}
 		if live >= maxIncidentsPerProject {
-			live -= pruneResolvedIncidents(st, prefix, c.At, live-maxIncidentsPerProject+1)
+			live -= pruneResolvedIncidents(st, prefix, c.At, live-maxIncidentsPerProject+1, bounded)
 			if live >= maxIncidentsPerProject {
 				return Effect{}, model.Fail(model.Quota)
 			}
-			boundIncidentStubs(st, prefix, maxIncidentStubs)
+			if bounded {
+				boundIncidentStubs(st, prefix, maxIncidentStubs)
+			}
 		}
 		rec = IncidentRecord{Org: org, Project: c.Project, ID: c.Incident}
 	}
@@ -254,7 +261,8 @@ func applyIncidentAction(scope auth.Scope, st *State, cmd Command) (Effect, erro
 // resolution first (key order breaks ties), and returns how many it pruned. It
 // is a pure function of the state and the command's own time, so every replica
 // prunes the same records. A record whose state is a tombstone or does not parse
-// as resolved is never pruned.
+// as resolved is never pruned. Without bounded (the previous rule, see
+// bounded_rules.go) the record is removed instead.
 //
 // A pruned incident is not removed: the incident ID is the idempotence key of the
 // producers that open incidents (they derive it from the episode and open one when
@@ -263,7 +271,7 @@ func applyIncidentAction(scope auth.Scope, st *State, cmd Command) (Effect, erro
 // digest, loses its state and its intents (it reads as erased, see
 // prunedIncidentState) and does not count against maxIncidentsPerProject; the
 // stubs themselves are bounded by boundIncidentStubs.
-func pruneResolvedIncidents(st *State, prefix string, at model.UnixNano, need int) int {
+func pruneResolvedIncidents(st *State, prefix string, at model.UnixNano, need int, bounded bool) int {
 	type candidate struct {
 		key  string
 		when model.UnixNano
@@ -298,6 +306,11 @@ func pruneResolvedIncidents(st *State, prefix string, at model.UnixNano, need in
 	}
 	pruned := 0
 	for _, c := range out {
+		if !bounded {
+			delete(st.IncidentBooks, c.key)
+			pruned++
+			continue
+		}
 		stub := IncidentRecord{Org: c.rec.Org, Project: c.rec.Project, ID: c.rec.ID, Version: c.rec.Version, Digest: c.rec.Digest, State: prunedIncidentState(c.rec, at)}
 		raw, err := json.Marshal(stub)
 		if err != nil {
