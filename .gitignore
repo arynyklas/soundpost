@@ -27,6 +27,8 @@ __pycache__/
 test-results/
 playwright-report/
 /sdk/python/build/
+# Test and run logs left at the repository root
+/*.log
 
 # Isolated implementation and task evidence
 /.worktrees/
