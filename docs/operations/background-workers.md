@@ -54,6 +54,17 @@ a non-leader node returns to `Interval`. A pass is bounded by `PassTimeout`
 (default 2 min). `Run` starts no goroutine of its own and returns after the pass
 in flight observes cancellation.
 
+### Pass time grows with the number of projects
+
+Every stage of every project reads control state, and a control read (`control.Store.View`) decodes the whole committed control state, so the cost of one
+project's turn grows with the number of projects and a pass grows with their square. Measured on an 8-vCPU VM, one voter, idle projects (no evidence,
+every producer, routing and a sender configured; one pass over all of them, `MaxProjects` raised to the project count): 25 projects 0.9 s, 50 projects 3.3 s,
+100 projects 12 s, 200 projects 50 s (about 120 ms and 250 ms per project at 100 and 200). With the default `MaxProjects` of 64 a project is served once
+every `ceil(projects/64)` passes, and each pass takes the pass time plus `Interval`, so with a few hundred projects evidence takes minutes (not seconds) to
+become an issue, a job state or an incident. The bounds above (`MaxProjects`, `PassTimeout`) keep every pass finite; they do not make a large installation
+fast. Reusing the decoded state inside `control.Store.View` while the committed state is unchanged is the measured remedy (a probe cut the 100-project pass
+from 12 s to 2.5 s and the 200-project pass from 50 s to 10 s); it is a change to the control store and is not part of the workers.
+
 ## The worker principal
 
 `soundpost serve` runs the runner under an in-process **system principal per
