@@ -167,25 +167,46 @@ func TestRealHostFilesystemChange(t *testing.T) {
 		t.Fatalf("%s: eight collections in a row: %s", label, miss)
 		return nil
 	}
-	before := read("before the write")
-	f, err := os.Create(filepath.Join(dir, "blob"))
-	if err != nil {
-		t.Fatal(err)
-	}
 	chunk := make([]byte, 1<<20)
 	for i := range chunk {
 		chunk[i] = byte(i*7 + 1)
 	}
-	for range 16 {
-		if _, err := f.Write(chunk); err != nil {
+	// The collector must also see this test's own 16 MiB write: free and available bytes fall by at
+	// least 2 MiB between the two collections. Other writers on the shared filesystem can free as much
+	// as the write takes in the same interval; such an attempt shows no drop in the kernel's numbers
+	// either, so the blob is removed and the write repeated, up to eight times, never skipped.
+	var before, after map[string]float64
+	dropped := ""
+	for attempt := range 8 {
+		before = read("before the write")
+		name := filepath.Join(dir, fmt.Sprintf("blob%d", attempt))
+		f, err := os.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for range 16 {
+			if _, err := f.Write(chunk); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := f.Sync(); err != nil {
+			t.Fatal(err)
+		}
+		f.Close()
+		after = read("after the write")
+		df, da := before[free]-after[free], before[avail]-after[avail]
+		if df >= 2<<20 && da >= 2<<20 {
+			dropped = ""
+			break
+		}
+		dropped = fmt.Sprintf("free fell by %.0f and available by %.0f after a 16 MiB write, want at least 2 MiB each", df, da)
+		if err := os.Remove(name); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := f.Sync(); err != nil {
-		t.Fatal(err)
+	if dropped != "" {
+		t.Fatalf("eight writes in a row: %s", dropped)
 	}
-	f.Close()
-	after := read("after the write")
 
 	if before[size] == 0 || after[size] != before[size] {
 		t.Fatalf("size changed or is zero: %v -> %v", before[size], after[size])
