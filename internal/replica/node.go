@@ -264,7 +264,9 @@ type Group struct {
 	machineFloor uint64
 	owner        model.ID // this instance of the group: stamps the pins it creates
 	pinTTL       time.Duration
-	now          func() time.Time
+	// leaderWait bounds how long a follower that does not know the leader waits for it (propose).
+	leaderWait time.Duration
+	now        func() time.Time
 	// retryDigest is Machine.RetryByDigest when the machine implements DigestRetryMachine.
 	retryDigest func(Kind) bool
 	// gate is Machine.SnapshotGate when the machine implements it; gateCtx bounds the sender-side
@@ -348,7 +350,7 @@ func Open(c Config) (*Group, error) {
 	if err != nil {
 		return nil, err
 	}
-	g := &Group{dir: c.Directory, fault: c.Fault, snaps: snaps, id: c.ID, group: c.Group, disk: disk, memory: memory, machine: c.Machine, transport: c.Transport, members: disk.members, completed: map[model.ID]CommittedEntry{}, known: map[model.ID]map[uint64]struct{}{}, pending: map[model.ID][]chan proposalResult{}, reads: map[string]*readRequest{}, changed: make(chan struct{}), stop: make(chan struct{}), owner: model.NewID(), pinTTL: c.PinTTL, now: c.Now}
+	g := &Group{dir: c.Directory, fault: c.Fault, snaps: snaps, id: c.ID, group: c.Group, disk: disk, memory: memory, machine: c.Machine, transport: c.Transport, members: disk.members, completed: map[model.ID]CommittedEntry{}, known: map[model.ID]map[uint64]struct{}{}, pending: map[model.ID][]chan proposalResult{}, reads: map[string]*readRequest{}, changed: make(chan struct{}), stop: make(chan struct{}), owner: model.NewID(), pinTTL: c.PinTTL, now: c.Now, leaderWait: leaderWaitFor(c.TickInterval)}
 	if g.pinTTL <= 0 {
 		g.pinTTL = DefaultPinTTL
 	}
@@ -405,7 +407,7 @@ func Open(c Config) (*Group, error) {
 		return nil, err
 	}
 	g.loadProof(last)
-	g.raw, err = raft.NewRawNode(&raft.Config{ID: c.ID, ElectionTick: 10, HeartbeatTick: 1, Storage: snapshotSource{MemoryStorage: memory, g: g}, Applied: g.applied, MaxSizePerMsg: 20 << 20, MaxCommittedSizePerReady: 32 << 20, MaxUncommittedEntriesSize: 64 << 20, MaxInflightMsgs: 32, CheckQuorum: true, PreVote: true, ReadOnlyOption: raft.ReadOnlySafe, DisableProposalForwarding: true})
+	g.raw, err = raft.NewRawNode(&raft.Config{ID: c.ID, ElectionTick: electionTicks, HeartbeatTick: 1, Storage: snapshotSource{MemoryStorage: memory, g: g}, Applied: g.applied, MaxSizePerMsg: 20 << 20, MaxCommittedSizePerReady: 32 << 20, MaxUncommittedEntriesSize: 64 << 20, MaxInflightMsgs: 32, CheckQuorum: true, PreVote: true, ReadOnlyOption: raft.ReadOnlySafe, DisableProposalForwarding: true})
 	if err != nil {
 		disk.Close()
 		return nil, err
@@ -566,6 +568,27 @@ func (g *Group) proposerLocked(id uint64) *Proposer {
 	return nil
 }
 
+// proposalForwarder is the optional Transport capability that hands a follower's proposal to the
+// leader (MTLS.ForwardPropose).
+type proposalForwarder interface {
+	ForwardPropose(context.Context, model.ID, Entry) (CommittedEntry, error)
+}
+
+// electionTicks is the raft ElectionTick of every group; a follower's randomized election timeout
+// is between electionTicks and twice that many ticks.
+const electionTicks = 10
+
+// leaderWaitFor is how long a follower that does not know the leader waits for one before it
+// refuses a proposal: two election timeouts' worth of ticks, the longest a leaderless window of a
+// healthy group lasts. A group that is ticked by its owner (tick 0) assumes the 20 ms tick of the
+// tests and the product.
+func leaderWaitFor(tick time.Duration) time.Duration {
+	if tick <= 0 {
+		tick = 20 * time.Millisecond
+	}
+	return 2 * electionTicks * tick
+}
+
 // propose orders e. from is the member whose transport credential authenticated a proposal a
 // follower forwarded to this leader, nil for a proposal made on this node; either way the entry's
 // own Proposer is replaced, so a caller or a forwarder cannot attribute a command to anyone else.
@@ -580,20 +603,44 @@ func (g *Group) propose(ctx context.Context, e Entry, from *Proposer) (Committed
 	if ctx.Err() != nil {
 		return CommittedEntry{}, ctx.Err()
 	}
-	g.mu.Lock()
-	if g.failed || g.closed {
+	_, forwards := g.transport.(proposalForwarder)
+	var wait <-chan time.Time
+	var leader uint64
+	for done := false; !done; {
+		g.mu.Lock()
+		if g.failed || g.closed {
+			g.mu.Unlock()
+			return CommittedEntry{}, ErrUnavailable
+		}
+		leader = g.raw.BasicStatus().Lead
+		if leader == g.id && from == nil {
+			e.Proposer = g.proposerLocked(g.id)
+		}
+		changed := g.changed
 		g.mu.Unlock()
-		return CommittedEntry{}, ErrUnavailable
+		if leader != 0 || from != nil || !forwards {
+			break
+		}
+		// This member does not know the leader yet: an election has just finished and the new
+		// leader's first message has not reached it. ReadIndex waits for the same fact; a
+		// proposal that failed here would be refused although the group is healthy. The wait is
+		// one election round and no more, so a member cut off from every leader still answers
+		// unavailable promptly.
+		if wait == nil {
+			timer := time.NewTimer(g.leaderWait)
+			defer timer.Stop()
+			wait = timer.C
+		}
+		select {
+		case <-changed:
+		case <-wait:
+			done = true
+		case <-ctx.Done():
+			return CommittedEntry{}, ctx.Err()
+		}
 	}
-	leader := g.raw.BasicStatus().Lead
-	if leader == g.id && from == nil {
-		e.Proposer = g.proposerLocked(g.id)
-	}
-	g.mu.Unlock()
 	if leader != g.id {
-		if forward, ok := g.transport.(interface {
-			ForwardPropose(context.Context, model.ID, Entry) (CommittedEntry, error)
-		}); ok && from == nil {
+		if forward, ok := g.transport.(proposalForwarder); ok && from == nil {
 			committed, err := forward.ForwardPropose(ctx, g.group, e)
 			if err != nil {
 				return committed, err

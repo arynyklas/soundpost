@@ -11,6 +11,7 @@ import (
 	"github.com/arynyklas/soundpost/internal/storage"
 	"io"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -22,13 +23,56 @@ type fx struct {
 	t       *testing.T
 	ctx     context.Context
 	store   *control.Store
+	hook    *controlHook // non-nil only for newFxHooked
 	svc     *auth.Service
 	now     atomic.Int64
 	actor   auth.Credential
 	session auth.Session
 }
 
-func newFx(t *testing.T) *fx {
+// controlHook intercepts every control read the auth service makes. before runs
+// ahead of the read and may fail it (a control group that cannot answer) or
+// move the fixture clock (a read that took long); nil passes everything.
+type controlHook struct {
+	mu     sync.Mutex
+	before func() error
+}
+
+func (h *controlHook) set(f func() error) {
+	h.mu.Lock()
+	h.before = f
+	h.mu.Unlock()
+}
+func (h *controlHook) run() error {
+	h.mu.Lock()
+	f := h.before
+	h.mu.Unlock()
+	if f == nil {
+		return nil
+	}
+	return f()
+}
+
+// hookedControl is the control store as the auth service sees it when a test
+// needs to disturb its reads. Overriding View makes the service read through
+// View rather than the store's shared decode (auth.SharedViewer.SharesViewOf).
+type hookedControl struct {
+	*control.Store
+	hook *controlHook
+}
+
+func (h *hookedControl) View(ctx context.Context, fn func(model.ControlState) error) error {
+	if err := h.hook.run(); err != nil {
+		return err
+	}
+	return h.Store.View(ctx, fn)
+}
+
+func newFx(t *testing.T) *fx { return newFxWith(t, false) }
+
+// newFxHooked is newFx with the auth service reading control through hookedControl.
+func newFxHooked(t *testing.T) *fx { return newFxWith(t, true) }
+func newFxWith(t *testing.T, hooked bool) *fx {
 	t.Helper()
 	f := &fx{t: t, ctx: context.Background()}
 	f.now.Store(time.Now().UnixNano())
@@ -38,7 +82,12 @@ func newFx(t *testing.T) *fx {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { f.store.Close() })
-	if f.svc, err = auth.NewService(auth.AuthDependencies{Control: f.store, Now: func() time.Time { return time.Unix(0, f.now.Load()) }}); err != nil {
+	var authority auth.ControlStore = f.store
+	if hooked {
+		f.hook = &controlHook{}
+		authority = &hookedControl{Store: f.store, hook: f.hook}
+	}
+	if f.svc, err = auth.NewService(auth.AuthDependencies{Control: authority, Now: func() time.Time { return time.Unix(0, f.now.Load()) }}); err != nil {
 		t.Fatal(err)
 	}
 	enable, cancel := context.WithTimeout(f.ctx, 10*time.Second)
@@ -150,9 +199,12 @@ type script struct {
 	parked    chan struct{}
 	parkGate  chan struct{}
 	nexts     atomic.Int64
+	scans     atomic.Int64
+	fail      map[int64]error // Next call number -> the error that call returns instead of a page
 }
 
 func (s *script) Scan(ctx context.Context, _ auth.Scope, _ storage.ScanRequest) (storage.RowIterator, error) {
+	s.scans.Add(1)
 	if s.startGate != nil {
 		select {
 		case <-s.startGate:
@@ -170,6 +222,9 @@ type scriptRows struct {
 
 func (r *scriptRows) Next(ctx context.Context) (storage.Page, error) {
 	n := r.s.nexts.Add(1)
+	if err := r.s.fail[n]; err != nil {
+		return storage.Page{}, err
+	}
 	if r.s.parkAt != 0 && n == r.s.parkAt {
 		r.s.parked <- struct{}{}
 		select {

@@ -226,6 +226,12 @@ func (s *Store) RedactControlCommand(payload []byte) (replacement []byte, change
 
 // redactControlPayload is RedactControlCommand against an explicit current state.
 func redactControlPayload(current State, payload []byte) (replacement []byte, changed bool, err error) {
+	return redactControlPayloadWith(current, &liveBooks{state: current}, payload)
+}
+
+// redactControlPayloadWith is redactControlPayload with the reader of the committed state a patch is
+// compared with, so a pass that redacts many commands encodes the state once.
+func redactControlPayloadWith(current State, live *liveBooks, payload []byte) (replacement []byte, changed bool, err error) {
 	cmd, derr := decodeControlCommand(payload)
 	if derr != nil {
 		return nil, false, model.Fail(model.Corrupt)
@@ -234,6 +240,9 @@ func redactControlPayload(current State, payload []byte) (replacement []byte, ch
 		// An audit delta carries audit rows (ids, action, reason), no book a deletion erases: it
 		// is retained as it is. The audit log is append-only evidence (eraseControlText).
 		return payload, false, nil
+	}
+	if cmd.patch != nil {
+		return redactPatch(current, live, *cmd.patch, payload)
 	}
 	next := *cmd.replacement
 	ids := make([]string, 0, len(current.Deletions))

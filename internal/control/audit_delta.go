@@ -54,10 +54,11 @@ type auditDeltaCommand struct {
 
 const auditDeltaKey = "audit_delta"
 
-// controlCommand is a decoded payload of a Control entry: exactly one of the two shapes.
+// controlCommand is a decoded payload of a Control entry: exactly one of the three shapes.
 type controlCommand struct {
 	replacement *controlReplacement
 	delta       *auditDelta
+	patch       *statePatch
 }
 
 // decodeControlCommand decodes a Control payload strictly (no unknown member, no duplicate key, no
@@ -95,6 +96,13 @@ func decodeControlCommand(payload []byte) (controlCommand, error) {
 			}
 		}
 		return controlCommand{delta: &c.AuditDelta}, nil
+	}
+	if name, ok := key.(string); ok && name == statePatchKey {
+		var c statePatchCommand
+		if model.StrictJSON(payload, &c) != nil || validatePatch(c.StatePatch) != nil {
+			return controlCommand{}, model.Fail(model.Invalid)
+		}
+		return controlCommand{patch: &c.StatePatch}, nil
 	}
 	var next controlReplacement
 	if model.StrictJSON(payload, &next) != nil {

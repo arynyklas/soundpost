@@ -131,9 +131,15 @@ func (s *Store) replicatedUpdate(ctx context.Context, bump bool, force *bool, fn
 		return replicaFaultUnder(ctx, err)
 	}
 	var st State
+	var oldRaw []byte // the encoding of the state read, kept only when the command is a patch
+	patch := s.StatePatch()
 	if err := s.db.View(func(tx *bolt.Tx) error {
-		if json.Unmarshal(tx.Bucket([]byte("control")).Get([]byte("state")), &st) != nil {
+		raw := tx.Bucket([]byte("control")).Get([]byte("state"))
+		if json.Unmarshal(raw, &st) != nil {
 			return model.Fail(model.Corrupt)
+		}
+		if patch {
+			oldRaw = bytes.Clone(raw)
 		}
 		return nil
 	}); err != nil {
@@ -161,9 +167,9 @@ func (s *Store) replicatedUpdate(ctx context.Context, bump bool, force *bool, fn
 	if err != nil {
 		return err
 	}
-	payload, err := json.Marshal(controlReplacement{Expected: expected, State: st, Keys: keys})
+	payload, err := s.controlPayload(oldRaw, expected, &st, keys)
 	if err != nil {
-		return model.Fail(model.Invalid)
+		return err
 	}
 	_, err = r.group.Propose(ctx, replica.Entry{ID: model.NewID(), Kind: replica.Control, Payload: payload, ApplicationIndex: uint64(st.Revision)})
 	return replicaFault(err)
@@ -204,9 +210,12 @@ func (m *replicatedControl) Apply(c replica.CommittedEntry) error {
 			if err != nil {
 				return model.Fail(model.Corrupt)
 			}
-			if cmd.delta != nil {
+			switch {
+			case cmd.delta != nil:
 				err = m.verifyCurrentDelta(*cmd.delta)
-			} else {
+			case cmd.patch != nil:
+				err = m.verifyCurrentPatch(*cmd.patch)
+			default:
 				err = m.verifyCurrentState(cmd.replacement.State)
 			}
 			if err != nil {
@@ -219,9 +228,16 @@ func (m *replicatedControl) Apply(c replica.CommittedEntry) error {
 		if err != nil {
 			return model.Fail(model.Corrupt)
 		}
-		// A delta carries no key files: only a replacement installs them.
-		if cmd.replacement != nil {
-			if err := m.store.installReplicaKeys(cmd.replacement.Keys); err != nil {
+		// A delta carries no key files: only a replacement and a patch install them.
+		var keys map[string][]byte
+		switch {
+		case cmd.replacement != nil:
+			keys = cmd.replacement.Keys
+		case cmd.patch != nil:
+			keys = cmd.patch.Keys
+		}
+		if cmd.delta == nil {
+			if err := m.store.installReplicaKeys(keys); err != nil {
 				return err
 			}
 		}
@@ -239,7 +255,8 @@ func (m *replicatedControl) Apply(c replica.CommittedEntry) error {
 		}
 		var current State
 		b := tx.Bucket([]byte("control"))
-		if json.Unmarshal(b.Get([]byte("state")), &current) != nil {
+		rawState := b.Get([]byte("state"))
+		if json.Unmarshal(rawState, &current) != nil {
 			return model.Fail(model.Corrupt)
 		}
 		owe := false
@@ -255,6 +272,8 @@ func (m *replicatedControl) Apply(c replica.CommittedEntry) error {
 			var expected model.Revision
 			if cmd.delta != nil {
 				installation, expected = cmd.delta.Installation, cmd.delta.Expected
+			} else if cmd.patch != nil {
+				installation, expected = cmd.patch.Installation, cmd.patch.Expected
 			} else {
 				if cmd.replacement.State.Revision != cmd.replacement.Expected+1 {
 					return model.Fail(model.Corrupt)
@@ -278,6 +297,13 @@ func (m *replicatedControl) Apply(c replica.CommittedEntry) error {
 				}
 			} else if cmd.delta != nil {
 				owe = applyAuditDelta(&current, *cmd.delta)
+			} else if cmd.patch != nil {
+				next, perr := patchedState(rawState, &current, *cmd.patch)
+				if perr != nil {
+					return perr
+				}
+				owe = erasureCount(next.Audits) > erasureCount(current.Audits)
+				current = next
 			} else {
 				// An erasing audit this commit adds means it frees the pages that held what was
 				// erased: this file owes a scrub whatever any later record says another node did.
@@ -603,6 +629,8 @@ func (m *replicatedControl) Validate(ctx context.Context, command replica.Entry)
 	var expected, revision model.Revision
 	if cmd.delta != nil {
 		installation, expected, revision = cmd.delta.Installation, cmd.delta.Expected, cmd.delta.Expected+1
+	} else if cmd.patch != nil {
+		installation, expected, revision = cmd.patch.Installation, cmd.patch.Expected, cmd.patch.Expected+1
 	} else {
 		if cmd.replacement.State.Revision != cmd.replacement.Expected+1 {
 			return model.Fail(model.Invalid)
@@ -611,11 +639,22 @@ func (m *replicatedControl) Validate(ctx context.Context, command replica.Entry)
 	}
 	return m.store.db.View(func(tx *bolt.Tx) error {
 		var current State
-		if json.Unmarshal(tx.Bucket([]byte("control")).Get([]byte("state")), &current) != nil {
+		raw := tx.Bucket([]byte("control")).Get([]byte("state"))
+		if json.Unmarshal(raw, &current) != nil {
 			return model.Fail(model.Corrupt)
 		}
 		if installation != current.Installation || expected != current.Revision || command.ApplicationIndex != uint64(revision) {
 			return model.Fail(model.Stale)
+		}
+		if cmd.patch != nil {
+			// A proposal names the bytes its ops were computed against, and the leader holds them or
+			// refuses it before it is committed (every voter would refuse it at apply, patchedState).
+			if cmd.patch.Base == "" {
+				return model.Fail(model.Invalid)
+			}
+			if base, err := patchBase(raw); err != nil || base != cmd.patch.Base {
+				return model.Fail(model.Stale)
+			}
 		}
 		return nil
 	})

@@ -7,9 +7,11 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"encoding/hex"
+	"slices"
 	"time"
 
 	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replica"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -64,13 +66,35 @@ func (e *Engine) ControlBoundsReady() bool { return e.declaredBy(boundsProtocol)
 // state only, evaluated at every use, false without replication.
 func (e *Engine) ControlAuditDeltaReady() bool { return e.declaredBy(auditDeltaProtocol) }
 
+// ControlStatePatchReady reports whether every member of the control group's committed
+// configuration (control, as the control group reports it) and of the slot-0 group's has declared
+// statePatchProtocol, so control may propose a command as a state patch
+// (control.Store.SetStatePatchGate). The patch is a wire format of the control group: its members
+// are the ones that decode it, and a membership change that reached the control group but not (yet)
+// the slot-0 group leaves a voter in the first that the second does not list, so declarations are
+// read for the control group's own members, and a member the slot-0 group never listed has none and
+// holds the gate closed. The slot-0 members are checked as well (the declarations live in that
+// group). An empty control configuration is not ready. Until then every control command is the
+// whole-state replacement every release applies, which the replica's entry limit bounds. Same
+// reading rules as ControlBoundsReady: local replicated state only, evaluated at every use, false
+// without replication.
+func (e *Engine) ControlStatePatchReady(control []replica.Member) bool {
+	if len(control) == 0 {
+		return false
+	}
+	return e.declaredByAll(statePatchProtocol, control)
+}
+
 // declaredBy reports whether every member of the slot-0 group's committed configuration declared
 // a protocol of at least version.
-func (e *Engine) declaredBy(version uint64) bool {
+func (e *Engine) declaredBy(version uint64) bool { return e.declaredByAll(version, nil) }
+
+// declaredByAll is declaredBy for the slot-0 members and also for the members of extra.
+func (e *Engine) declaredByAll(version uint64, extra []replica.Member) bool {
 	if e.repl == nil {
 		return false
 	}
-	members := e.repl.groups[eraseAckSlot].Status().Members.Nodes
+	members := slices.Concat(e.repl.groups[eraseAckSlot].Status().Members.Nodes, extra)
 	if len(members) == 0 {
 		return false
 	}

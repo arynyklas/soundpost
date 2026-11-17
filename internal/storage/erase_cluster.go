@@ -93,8 +93,14 @@ const (
 	// fails to decode the entry and stops applying, so it is proposed only once every member
 	// declared at least this (ControlAuditDeltaReady). Same declaration, same rule as the two above.
 	auditDeltaProtocol uint64 = 4
+	// statePatchProtocol is the declaration of a binary that also decodes and applies the state
+	// patch command of control (control.Store.SetStatePatchGate): a command that carries what a
+	// transition changed instead of the whole next state, so that no command grows with the
+	// control state. A binary that does not know it fails to decode the entry and stops applying,
+	// so it is proposed only once every member declared at least this (ControlStatePatchReady).
+	statePatchProtocol uint64 = 5
 	// declaredProtocol is the version this binary declares.
-	declaredProtocol = auditDeltaProtocol
+	declaredProtocol = statePatchProtocol
 	// noticeGrace is how long a voter that applied a notice naming it waits for the announced
 	// snapshot before it stops expecting it (and refuses it if it still arrives).
 	noticeGrace = 2 * time.Minute

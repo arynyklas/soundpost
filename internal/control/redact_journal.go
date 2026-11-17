@@ -74,6 +74,10 @@ type controlRedactor struct {
 	rules   State  // the current state with only the finished deletions
 	live    State
 	canon   []byte
+	books   *liveBooks // the committed state as the members a patch addresses (state_patch_redact.go)
+
+	// rewritten is set once a command of the pass was rewritten: the commands after it lose their patch base.
+	rewritten bool
 }
 
 func (r *controlRedactor) load() error {
@@ -82,6 +86,7 @@ func (r *controlRedactor) load() error {
 		return err
 	}
 	r.live, r.applied = live, applied
+	r.rewritten = false
 	if r.canon, err = model.CanonicalJSON(live); err != nil {
 		return err
 	}
@@ -92,6 +97,7 @@ func (r *controlRedactor) load() error {
 			r.rules.Deletions[id] = op
 		}
 	}
+	r.books = &liveBooks{state: r.rules}
 	r.loaded = true
 	return nil
 }
@@ -106,18 +112,32 @@ func (r *controlRedactor) redact(payload []byte) ([]byte, bool, error) {
 			return nil, false, err
 		}
 	}
-	replacement, changed, err := redactControlPayload(r.rules, payload)
-	if err != nil || !changed {
+	replacement, changed, err := redactControlPayloadWith(r.rules, r.books, payload)
+	if err != nil {
 		return payload, false, err
 	}
+	if !changed {
+		if !r.rewritten {
+			return payload, false, nil
+		}
+		// The voter that applies the rewritten log holds maps the pass erased: a patch after the
+		// first rewritten command cannot name the proposer's bytes any more.
+		return clearPatchBase(payload)
+	}
+	r.rewritten = true
 	// The command that establishes the current state is replayed against it (the machine
 	// compares them): redacting it would change what a replay computes. A deletion only
 	// removes what the current state no longer has, so this refuses a state that still
-	// holds covered payloads instead of rewriting history under it.
-	var original controlReplacement
-	if model.StrictJSON(payload, &original) != nil {
+	// holds covered payloads instead of rewriting history under it. A patch is never changed
+	// where it equals the current state (redactPatch), so only a replacement is compared.
+	cmd, err := decodeControlCommand(payload)
+	if err != nil {
 		return nil, false, model.Fail(model.Corrupt)
 	}
+	if cmd.replacement == nil {
+		return replacement, true, nil
+	}
+	original := *cmd.replacement
 	if original.State.Revision == r.live.Revision {
 		canon, err := model.CanonicalJSON(original.State)
 		if err != nil {

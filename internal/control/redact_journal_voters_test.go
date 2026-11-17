@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -211,6 +212,49 @@ func newControlVotersWith(t *testing.T, ownRetention ...uint64) *controlVoters {
 // value: control's default, DefaultJournalCadence).
 func newControlVotersCadence(t *testing.T, cadence replica.Cadence, ownRetention ...uint64) *controlVoters {
 	t.Helper()
+	return newControlVotersOn(t, nil, cadence, ownRetention...)
+}
+
+// voterNetwork is how the fixture's three voters reach each other: the in-process mesh (nil, the
+// default) or the production mTLS transport over loopback listeners (newMTLSVoterNetwork).
+type voterNetwork interface {
+	members() replica.Members
+	transport(id uint64) replica.Transport
+	// attach is called with each voter's group right after EnableReplication returned it.
+	attach(id uint64, g *replica.Group) error
+}
+
+// meshNetwork is the in-process network of the fixture's mesh.
+type meshNetwork struct{ mesh *voterMesh }
+
+func (n meshNetwork) members() replica.Members {
+	members := replica.Members{Revision: 1}
+	for id := uint64(1); id <= 3; id++ {
+		members.Nodes = append(members.Nodes, replica.Member{ID: id, Address: fmt.Sprintf("https://voter%d.invalid", id), NodeIdentity: fmt.Sprintf("voter-%d", id), FailureDomain: fmt.Sprintf("disk-%d", id)})
+	}
+	return members
+}
+func (n meshNetwork) transport(id uint64) replica.Transport {
+	return voterTransport{mesh: n.mesh, node: id}
+}
+func (n meshNetwork) attach(id uint64, g *replica.Group) error {
+	n.mesh.set(id, g)
+	return nil
+}
+
+// forceStatePatchGate opens the state patch gate of a voter store when SOUNDPOST_FORCE_STATE_PATCH=1,
+// so that the erasure, attestation and redaction voter suites run with every control command
+// proposed as a state patch (a store without a gate proposes whole-state replacements). It is set
+// before the store's group starts, and again by restart.
+func forceStatePatchGate(s *control.Store) {
+	if os.Getenv("SOUNDPOST_FORCE_STATE_PATCH") == "1" {
+		s.SetStatePatchGate(func() bool { return true })
+	}
+}
+
+// newControlVotersOn opens the voters on net (nil: the in-process mesh).
+func newControlVotersOn(t *testing.T, net voterNetwork, cadence replica.Cadence, ownRetention ...uint64) *controlVoters {
+	t.Helper()
 	genesis := newEraseFx(t)
 	seed, application, err := genesis.store.ReplicationSeed()
 	if err != nil {
@@ -221,6 +265,9 @@ func newControlVotersCadence(t *testing.T, cadence replica.Cadence, ownRetention
 		t.Fatal(err)
 	}
 	v := &controlVoters{t: t, mesh: newVoterMesh(), stores: map[uint64]*control.Store{}, dirs: map[uint64]string{}, fx: map[uint64]*eraseFx{}}
+	if net == nil {
+		net = meshNetwork{v.mesh}
+	}
 	v.genesis = voterGenesis{seed: seed, application: application, index: position.Applied + 1, term: position.Term + 1}
 	t.Cleanup(v.checkRetries)
 	t.Cleanup(func() {
@@ -229,10 +276,7 @@ func newControlVotersCadence(t *testing.T, cadence replica.Cadence, ownRetention
 		}
 		v.mesh.close()
 	})
-	members := replica.Members{Revision: 1}
-	for id := uint64(1); id <= 3; id++ {
-		members.Nodes = append(members.Nodes, replica.Member{ID: id, Address: fmt.Sprintf("https://voter%d.invalid", id), NodeIdentity: fmt.Sprintf("voter-%d", id), FailureDomain: fmt.Sprintf("disk-%d", id)})
-	}
+	members := net.members()
 	for id := uint64(1); id <= 3; id++ {
 		v.dirs[id] = t.TempDir()
 		store, err := control.OpenSeed(v.dirs[id], seed)
@@ -258,9 +302,13 @@ func newControlVotersCadence(t *testing.T, cadence replica.Cadence, ownRetention
 		if err = store.View(genesis.ctx, func(st control.State) error { installation = st.Installation; return nil }); err != nil {
 			t.Fatal(err)
 		}
+		forceStatePatchGate(store)
 		group, err := store.EnableReplication(replica.Config{ID: id, Group: installation, Directory: filepath.Join(v.dirs[id], "raft-control"), TickInterval: voterTick(), Members: members, Cadence: cadence,
-			Transport: voterTransport{mesh: v.mesh, node: id}, Seed: seed, Application: application, SeedIndex: position.Applied + 1, SeedTerm: position.Term + 1})
+			Transport: net.transport(id), Seed: seed, Application: application, SeedIndex: position.Applied + 1, SeedTerm: position.Term + 1})
 		if err != nil {
+			t.Fatal(err)
+		}
+		if err = net.attach(id, group); err != nil {
 			t.Fatal(err)
 		}
 		v.mesh.set(id, group)
@@ -482,8 +530,33 @@ func (v *controlVoters) await(id uint64, at model.Revision) {
 // voter that was cut off during the erasure with no copy of what it never received, and its
 // catch-up replays redacted commands to the same state; a voter that has not run the pass still
 // holds, and still names, the residue; each one is clean when it runs its own pass.
-func TestEachControlVoterRedactsItsOwnCopy(t *testing.T) {
+func TestEachControlVoterRedactsItsOwnCopy(t *testing.T) { eachControlVoterRedactsItsOwnCopy(t, false) }
+
+// The same scenario with every command a state patch: the commands that carry the erased payloads
+// are patches of the records they wrote, and the redaction rewrites those records
+// (state_patch_redact.go) instead of a whole state. A voter that was cut off and catches up from the
+// redacted log applies redacted patches and reaches the leader's state.
+func TestEachControlVoterRedactsItsOwnCopyWhenCommandsArePatches(t *testing.T) {
+	eachControlVoterRedactsItsOwnCopy(t, true)
+}
+
+func eachControlVoterRedactsItsOwnCopy(t *testing.T, patches bool) {
 	v := newControlVoters(t)
+	if patches {
+		for _, s := range v.stores {
+			s.SetStatePatchGate(func() bool { return true })
+		}
+		defer func() {
+			var n uint64
+			for _, s := range v.stores {
+				c, _ := s.StatePatchStatsForTest()
+				n += c
+			}
+			if n < 20 {
+				t.Errorf("only %d commands were patches: the scenario did not run on patches", n)
+			}
+		}()
+	}
 	const before, during, kept = "CANARYVOTERBEFORE0d2b86a7c41e", "CANARYVOTERDURING0d2b86a7c41e", "CANARYVOTERKEPT51f0aa93c7d"
 	leader := v.fx[1]
 	leader.seedAll(leader.newSeed(leader.project, before), 50) // on all three voters

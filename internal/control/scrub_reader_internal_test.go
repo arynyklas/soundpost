@@ -11,6 +11,21 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
+// quiesceReaders waits until no read transaction is open on control.db. The store's own background
+// readers (the attestation/withdraw loops and the verification the group starts with) hold short
+// read transactions while the fixture starts; the tests below count readers exactly, so they begin
+// once those have finished. It waits for the readers to end; it never closes or retries anything.
+func (f *installFx) quiesceReaders() {
+	f.t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for f.s.db.openReaders() != 0 || f.s.db.Stats().OpenTxN != 0 {
+		if time.Now().After(deadline) {
+			f.t.Fatalf("fixture invalid: %d store readers and %d bolt readers never ended", f.s.db.openReaders(), f.s.db.Stats().OpenTxN)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 // bolt registers a reader and only then updates Stats().OpenTxN, so a control scrub that trusted
 // the stat could zero pages of a reader that is just beginning (internal/storage fixed the same
 // hazard for apply.db: TestScrubDefersToAReaderBoltHasNotCountedYet). The store counts its
@@ -19,6 +34,7 @@ import (
 func TestScrubDefersToAReaderBoltHasNotCountedYet(t *testing.T) {
 	f := newInstallFx(t)
 	f.install(f.leader(5, true, true)) // this file owes a local scrub: the erased payload sits in free pages
+	f.quiesceReaders()
 	if !f.dbHolds() || !f.owesState() {
 		t.Fatal("fixture invalid: the erased payload is not owed a scrub")
 	}
@@ -62,7 +78,9 @@ func TestScrubDefersToAReaderBoltHasNotCountedYet(t *testing.T) {
 // bolt handle, as tx.DB().View would) is registered by bolt and defers the scrub as well.
 func TestScrubDefersToAReaderOnTheBareBoltHandle(t *testing.T) {
 	f := newInstallFx(t)
+	f.quiesceReaders()
 	f.install(f.leader(5, true, true))
+	f.quiesceReaders()
 	held, stop, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	var once sync.Once
 	open := func() { once.Do(func() { close(stop) }) }

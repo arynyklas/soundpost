@@ -203,6 +203,14 @@ func (a *App) enableReplication(dir string, options *replicationOptions, budget 
 	// The audit delta command of control (control.Store.AppendAudit) is proposed once every member
 	// declared protocol 4; the gate reads false until storage's replication is up and everyone did.
 	a.Control.SetAuditDeltaGate(a.Storage.ControlAuditDeltaReady)
+	// A control command is proposed as a state patch (control.Store.SetStatePatchGate), so that no
+	// command grows with the control state, once every member declared protocol 5. The patch flows
+	// on the control group, so the gate reads that group's own committed configuration (a
+	// membership change that reached it but not slot 0 must not open the gate for its new member).
+	a.Control.SetStatePatchGate(func() bool {
+		group := a.Control.ReplicaGroup()
+		return group != nil && a.Storage.ControlStatePatchReady(group.Status().Members.Nodes)
+	})
 	controlGroup, err := a.Control.EnableReplication(cfg)
 	if err != nil {
 		return err

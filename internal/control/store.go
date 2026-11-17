@@ -42,6 +42,10 @@ type Store struct {
 	// auditDeltas and auditDeltaBytes count the delta commands AppendAudit proposed and their payload
 	// bytes (read by tests and benchmarks through AuditDeltaStatsForTest).
 	auditDeltas, auditDeltaBytes atomic.Uint64
+	// statePatchGate says whether a command may be proposed as a state patch (state_patch.go); nil:
+	// it may not. statePatches and statePatchBytes count the patch commands proposed and their payload bytes.
+	statePatchGate                atomic.Pointer[func() bool]
+	statePatches, statePatchBytes atomic.Uint64
 }
 
 // SetClock replaces the wall clock the update funnel dates revisions with (RevisionClock), time.Now

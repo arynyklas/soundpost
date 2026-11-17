@@ -21,6 +21,15 @@ const (
 	grantTTL     = 10 * time.Minute
 	computeLimit = 2 * time.Minute
 	ticketKind   = "export"
+	// transientChecks is how many consecutive times one authorization check may
+	// fail without an answer from the authority before the export gives up.
+	transientChecks = 4
+	// scanRestarts is how many times a scan that failed for a reason other than
+	// authority is started again from its beginning.
+	scanRestarts = 2
+	// transientBackoff is the first wait between asks of an authority check
+	// that got no answer; it doubles each time.
+	transientBackoff = 100 * time.Millisecond
 )
 
 // Limits bound how many live exports (running, or completed and not yet
@@ -287,13 +296,77 @@ type exportRow struct {
 	Payload  model.Payload  `json:"payload"`
 }
 
-// current reports whether the original authorization is still exactly valid.
-func (s *Service) current(ctx context.Context, scope auth.Scope, e *entry) bool {
-	if s.authority.Revalidate(ctx, scope) != nil || scope.PolicyEpoch() != e.epoch {
+// denied reports whether err is the authority answering "no": the scope,
+// grant, session, organization or project no longer exists for this caller.
+// Every other failure of a read (Stale because the read outlived its lease,
+// Unavailable because the control group could not answer, a cancelled context)
+// is the absence of an answer, never a revocation.
+func denied(err error) bool {
+	var f *model.Fault
+	if !errors.As(err, &f) {
 		return false
 	}
+	switch f.Code {
+	case model.NotFound, model.Forbidden, model.Unauthenticated:
+		return true
+	}
+	return false
+}
+
+// check asks the authority once whether the original authorization is still
+// exactly valid: the scope (credential, grants, organization policy epoch,
+// lease) and the delete generation the export was bound to. valid is false
+// with a nil err only when the authority said no, or the bound epoch or
+// generation moved; err is non-nil when it gave no answer.
+func (s *Service) check(ctx context.Context, scope auth.Scope, e *entry) (valid bool, err error) {
+	if err = s.authority.Revalidate(ctx, scope); err != nil {
+		return false, answer(err)
+	}
+	if scope.PolicyEpoch() != e.epoch {
+		return false, nil
+	}
 	gen, err := s.deletes.DeleteGeneration(ctx, scope.OrgID(), scope.ProjectIDs())
-	return err == nil && gen == e.deletion
+	if err != nil {
+		return false, answer(err)
+	}
+	return gen == e.deletion, nil
+}
+
+// answer is err when it carries no answer and nil when it is a denial.
+func answer(err error) error {
+	if denied(err) {
+		return nil
+	}
+	return err
+}
+
+// current reports whether the original authorization is still exactly valid.
+// A check that gets no answer is asked again, with a short back-off, up to
+// transientChecks times in a row: an export is not revoked because one control
+// read was slow or one leader change swallowed it. When no answer ever comes
+// the reason is the honest one (unavailable or timeout), and the export stops.
+// A change that committed meanwhile is seen by the retry, which re-reads
+// everything.
+func (s *Service) current(ctx context.Context, scope auth.Scope, e *entry) (bool, string) {
+	backoff := transientBackoff
+	for attempt := 1; ; attempt++ {
+		valid, err := s.check(ctx, scope, e)
+		if err == nil {
+			if valid {
+				return true, ""
+			}
+			return false, "revoked"
+		}
+		if attempt == transientChecks || ctx.Err() != nil {
+			return false, reasonFor(err)
+		}
+		select {
+		case <-ctx.Done():
+			return false, "timeout"
+		case <-time.After(backoff):
+		}
+		backoff *= 2
+	}
 }
 func (s *Service) run(scope auth.Scope, r Request, e *entry) {
 	defer s.wg.Done()
@@ -305,52 +378,75 @@ func (s *Service) run(scope auth.Scope, r Request, e *entry) {
 		return
 	}
 	// Completion revalidates: a revoked/deleted/expired export never becomes complete.
-	if !s.current(ctx, scope, e) {
-		e.finish("failed", "revoked", nil)
+	if ok, reason := s.current(ctx, scope, e); !ok {
+		e.finish("failed", reason, nil)
 		return
 	}
 	e.finish("complete", "", chunks)
 }
+
+// collect scans and renders the export. A scan that fails for a reason that is
+// not authority (the read fence is behind, the node is not ready) is started
+// again from its beginning, up to scanRestarts times: its rows are discarded
+// and it reads a fresh cut. Authority failures, partial and oversize scans are
+// final.
 func (s *Service) collect(ctx context.Context, scope auth.Scope, r Request, e *entry) ([][]byte, string) {
+	for restarts := 0; ; restarts++ {
+		chunks, reason, retry := s.scanOnce(ctx, scope, r, e)
+		if !retry || restarts == scanRestarts || ctx.Err() != nil {
+			return chunks, reason
+		}
+		e.mu.Lock()
+		e.op.Progress = 0
+		e.mu.Unlock()
+	}
+}
+
+// transient reports whether err is a failure of the read itself, which a new
+// scan can get past, as opposed to an answer about the caller or the request.
+func transient(err error) bool {
+	var f *model.Fault
+	return errors.As(err, &f) && (f.Code == model.Stale || f.Code == model.Unavailable)
+}
+func (s *Service) scanOnce(ctx context.Context, scope auth.Scope, r Request, e *entry) (chunks [][]byte, reason string, retry bool) {
 	req := storage.ScanRequest{Projects: []model.ID{r.Project}, Signal: r.Signal, Start: model.UnixNano(r.Start), End: model.UnixNano(r.End)}
 	if scope.Permission() == auth.RawRead {
 		req.Selectors = []storage.Matcher{{Target: storage.MatchField, Name: "source_id", Op: storage.MatchEqual, Literal: storage.Literal{Kind: storage.LiteralString, String: r.Source.String()}}}
 	}
 	it, err := s.scanner.Scan(ctx, scope, req)
 	if err != nil {
-		return nil, reasonFor(err)
+		return nil, reasonFor(err), transient(err)
 	}
 	defer it.Close()
-	var chunks [][]byte
 	var current []byte
 	var total uint64
 	for {
-		if !s.current(ctx, scope, e) {
-			return nil, "revoked"
+		if ok, reason := s.current(ctx, scope, e); !ok {
+			return nil, reason, false
 		}
 		page, err := it.Next(ctx)
 		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
-			return nil, reasonFor(err)
+			return nil, reasonFor(err), transient(err)
 		}
 		// A scan that says it is incomplete is never presented as a complete
 		// export, whatever the request asked of the reader. (page.Loss is a
 		// per-row column carrying a stored loss record's own count, which the
 		// payload already exports; it is not a gap signal.)
 		if page.Partial {
-			return nil, "partial"
+			return nil, "partial", false
 		}
 		for i := range page.Len() {
 			line, err := json.Marshal(exportRow{ID: page.IDs[i], Time: model.Int64(page.Times[i]), Project: page.Projects[i], Source: page.Sources[i], Resource: page.Resources[i], Payload: page.Values[i]})
 			if err != nil {
-				return nil, "unavailable"
+				return nil, "unavailable", false
 			}
 			line = append(line, '\n')
 			total += uint64(len(line))
 			if total > MaxBytes {
-				return nil, "too_large"
+				return nil, "too_large", false
 			}
 			if len(current)+len(line) > ChunkBytes && len(current) > 0 {
 				chunks = append(chunks, current)
@@ -365,17 +461,19 @@ func (s *Service) collect(ctx context.Context, scope auth.Scope, r Request, e *e
 	if len(current) > 0 {
 		chunks = append(chunks, current)
 	}
-	return chunks, ""
+	return chunks, "", false
 }
+
+// reasonFor is the safe reason of a failed read: revoked only when the
+// authority denied the caller; a cancelled or expired context is a timeout;
+// everything else, Stale included, is unavailable.
 func reasonFor(err error) string {
+	if denied(err) {
+		return "revoked"
+	}
 	var f *model.Fault
-	if errors.As(err, &f) {
-		switch f.Code {
-		case model.NotFound, model.Forbidden, model.Unauthenticated, model.Stale:
-			return "revoked"
-		case model.Cancelled, model.Timeout:
-			return "timeout"
-		}
+	if errors.As(err, &f) && (f.Code == model.Cancelled || f.Code == model.Timeout) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return "timeout"
 	}
 	return "unavailable"
 }

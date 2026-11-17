@@ -67,6 +67,11 @@ func TestRestoreRejectsForgedWidenedAndUnbackedGaps(t *testing.T) {
 			f.Reason = "different"
 			c.state.EvidenceGaps = map[string]model.EvidenceGap{f.ID.String(): f}
 		},
+		"fact altered in a field the attestation does not name (its digest no longer matches)": func(c *gapCase, _ *[]storage.ReplayInterval) {
+			f := c.fact
+			f.RecordedAt++
+			c.state.EvidenceGaps = map[string]model.EvidenceGap{f.ID.String(): f}
+		},
 		"fact for another group": func(c *gapCase, iv *[]storage.ReplayInterval) {
 			other := model.NewID()
 			c.att.Group = other
