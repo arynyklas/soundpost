@@ -90,6 +90,7 @@ func TestFaultHookCanBeReplacedWhileGoroutinesTripIt(t *testing.T) {
 func TestCheckDatabaseIsSafeBesideACommittingWriter(t *testing.T) {
 	x := newEraseEnv(t)
 	stop, done := make(chan struct{}), make(chan struct{})
+	first := make(chan struct{})
 	committed := 0
 	go func() {
 		defer close(done)
@@ -110,8 +111,15 @@ func TestCheckDatabaseIsSafeBesideACommittingWriter(t *testing.T) {
 				return
 			}
 			committed++
+			if committed == 1 {
+				close(first)
+			}
 		}
 	}()
+	select {
+	case <-first:
+	case <-done:
+	}
 	for range 60 {
 		checkDatabase(t, x.e)
 	}

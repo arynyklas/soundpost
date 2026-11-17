@@ -857,13 +857,22 @@ func (s *privacySession) connect() helperReply {
 func (s *privacySession) capture(d time.Duration) (events []SanitizedEvent, terminal helperReply, ended error) {
 	deadline := time.Now().Add(d)
 	for time.Now().Before(deadline) {
+		// The window only bounds the wait for a frame to START. A read deadline that fires inside a
+		// frame would abandon its tail on the socket and the next read would decode the tail as a
+		// header ("invalid native record"), a fixture desync under load, not a helper fault. Once the
+		// first byte of a frame has arrived the rest is read to completion.
 		s.conn.SetReadDeadline(deadline)
-		reply, e := privacyReadReply(s.env, s.conn)
-		if e != nil {
+		var first [1]byte
+		if _, e := s.conn.Read(first[:]); e != nil {
 			var timeout net.Error
 			if errors.As(e, &timeout) && timeout.Timeout() {
 				return events, terminal, nil
 			}
+			return events, terminal, e
+		}
+		s.conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+		reply, e := privacyReadReply(s.env, io.MultiReader(bytes.NewReader(first[:]), s.conn))
+		if e != nil {
 			return events, terminal, e
 		}
 		if reply.Event != nil {
