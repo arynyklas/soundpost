@@ -376,3 +376,58 @@ func TestStreamCorrelationFoldDurationsKeepsTheSumsAndTheCorrections(t *testing.
 		t.Fatalf("not folded: %d measured intervals for %d keys, %d vs %d intervals, %d vs %d B", measured, len(gs), len(g.Intervals), len(f.Intervals), g.IntervalBytes, f.IntervalBytes)
 	}
 }
+
+// A stream that ends on an identity error ends the correlation with one correction over [provenThrough, end): the intervals
+// returned before it are kept, no final proof is needed, and nothing after the revocation is consumed.
+func TestStreamCorrelationRevokeEndsOnTheUnprovenTail(t *testing.T) {
+	res, _ := longCapture(100, true)
+	base := uint64(10_000_000_000)
+	proven := base + 250_000_000
+	s := NewStreamCorrelation(nativeperf.DefaultConfig(1), fixedShare)
+	next := 0
+	for i, e := range res.Events {
+		if uint64(e.Time) > base+400_000_000 {
+			break
+		}
+		for ; next < len(res.Proofs) && !res.Proofs[next].Final && res.ProofAt[next] <= i; next++ {
+			s.Proof(res.Proofs[next])
+		}
+		s.Event(e)
+	}
+	s.Revoke(proven)
+	s.Proof(res.Proofs[len(res.Proofs)-1]) // the final proof of a stream that already ended is ignored
+	got := s.Result()
+	if got.Err != "" || got.ConsumeErrors != 0 || !got.Revoked || got.RevokedFrom != proven {
+		t.Fatalf("%+v", got)
+	}
+	var corrections []nativeperf.Interval
+	measuredBefore := 0
+	for _, iv := range got.Intervals {
+		if iv.Correction {
+			corrections = append(corrections, iv)
+		} else if uint64(iv.End) <= proven {
+			measuredBefore++
+		}
+	}
+	if len(corrections) != 1 || uint64(corrections[0].Start) > proven || uint64(corrections[0].Start)+10_000_000 < proven || uint64(corrections[0].End) < base+395_000_000 {
+		t.Fatalf("want one correction over [%d, ~%d): %+v", proven, base+400_000_000, corrections)
+	}
+	if measuredBefore == 0 {
+		t.Fatalf("the proven prefix was thrown away: %+v", got.Intervals)
+	}
+
+	// Before the topology proof there is nothing to revoke: the result stays an error.
+	s = NewStreamCorrelation(nativeperf.DefaultConfig(1), fixedShare)
+	s.Revoke(5)
+	if c := s.Result(); c.Err == "" || c.Revoked {
+		t.Fatalf("%+v", c)
+	}
+}
+
+func TestIdentityErrorCodes(t *testing.T) {
+	for code, want := range map[string]bool{"generation_changed": true, "thread_coverage_changed": true, "topology_changed": true, "loss": false, "acquisition_failed": false, "": false} {
+		if IdentityErrorCode(code) != want {
+			t.Fatalf("%q", code)
+		}
+	}
+}

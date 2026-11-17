@@ -32,12 +32,17 @@ type cpuSource struct {
 	sequence  uint64
 	cursor    int
 	lastCheck time.Time
-	// provenAt is the wall-clock time of the last identity check that succeeded: when the stream ends on an identity
-	// error, everything published after it is unproven and a consumer revokes [provenAt, end).
-	provenAt time.Time
+	// provenAt is the wall-clock time of the last identity check that succeeded and provenMono the same instant on the event
+	// clock (CLOCK_MONOTONIC, read before the check began, so everything an event could have published before it is covered):
+	// when the stream ends on an identity error, everything published after it is unproven. The error carries provenMono
+	// (IdentityError) and a consumer revokes [provenMono, end) with Correlator.RevokeFrom.
+	provenAt   time.Time
+	provenMono model.MonoNano
 	// gone reports whether the thread of a task has exited; nil means the task's own perf event is asked (see
 	// taskStillLive). Tests substitute it.
-	gone     func(TaskKey) (bool, error)
+	gone func(TaskKey) (bool, error)
+	// verify replaces the identity verification (verifyIdentity) when non-nil. Tests substitute it.
+	verify   func() error
 	byTask   map[TaskKey]*Ring // built on first use from rings
 	stop     func() bool
 	closeErr error
@@ -211,6 +216,25 @@ func snapshotCPUThreads(a AuthorizedTargets, d ClockDomain) ([]cpuThread, error)
 	return out, nil
 }
 func (s *cpuSource) checkIdentity() error {
+	before, clockErr := schedulerNow()
+	verify := s.verify
+	if verify == nil {
+		verify = s.verifyIdentity
+	}
+	if e := verify(); e != nil {
+		return &IdentityError{Err: e, ProvenThrough: s.provenMono}
+	}
+	if clockErr != nil {
+		// The check passed but its instant on the event clock is unknown: claim nothing was proven from here on.
+		s.provenMono = 0
+	} else {
+		s.provenMono = before
+	}
+	s.lastCheck = time.Now()
+	s.provenAt = s.lastCheck
+	return nil
+}
+func (s *cpuSource) verifyIdentity() error {
 	if e := s.targets.Revalidate(); e != nil {
 		return e
 	}
@@ -221,8 +245,6 @@ func (s *cpuSource) checkIdentity() error {
 	if !reflect.DeepEqual(threads, s.threads) {
 		return ErrThreadCoverageChanged
 	}
-	s.lastCheck = time.Now()
-	s.provenAt = s.lastCheck
 	return nil
 }
 
@@ -242,7 +264,7 @@ func (s *cpuSource) taskStillLive(k TaskKey) error {
 	case e != nil:
 		return e
 	case exited:
-		return ErrThreadCoverageChanged
+		return &IdentityError{Err: ErrThreadCoverageChanged, ProvenThrough: s.provenMono}
 	}
 	return nil
 }

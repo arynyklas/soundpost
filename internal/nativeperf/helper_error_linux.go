@@ -105,6 +105,16 @@ func helperCodeError(code string) error {
 	}
 }
 
+// helperReplyError is helperCodeError for a streamed error reply: an identity error keeps the instant the helper last proved
+// the identity (IdentityError), so the consumer revokes [ProvenThrough, end) rather than everything.
+func helperReplyError(r helperReply) error {
+	e := helperCodeError(r.Error)
+	if r.ProvenThrough != 0 && (errors.Is(e, ErrTargetIdentity) || errors.Is(e, ErrThreadCoverageChanged) || errors.Is(e, ErrTopologyChanged)) {
+		return &IdentityError{Err: e, ProvenThrough: r.ProvenThrough}
+	}
+	return e
+}
+
 // This is the real post-authorization stream, also exercised against actual
 // malformed/generation-change ring sources in tests. There is no EOF success.
 func streamHelperEvents(ctx context.Context, c *net.UnixConn, source EventSource) string {
@@ -122,7 +132,7 @@ func streamHelperEvents(ctx context.Context, c *net.UnixConn, source EventSource
 					return closedComplete
 				}
 				if ctx.Err() == nil {
-					writeMessage(c, helperReply{Error: helperErrorCode(e)})
+					writeMessage(c, helperReply{Error: helperErrorCode(e), ProvenThrough: ProvenThroughOf(e)})
 					return helperErrorCode(e)
 				}
 				return closedCanceled
@@ -139,7 +149,7 @@ func streamHelperEvents(ctx context.Context, c *net.UnixConn, source EventSource
 		event, e := source.Next(ctx)
 		if e != nil {
 			if ctx.Err() == nil {
-				writeMessage(c, helperReply{Error: helperErrorCode(e)})
+				writeMessage(c, helperReply{Error: helperErrorCode(e), ProvenThrough: ProvenThroughOf(e)})
 				return helperErrorCode(e)
 			}
 			return closedCanceled

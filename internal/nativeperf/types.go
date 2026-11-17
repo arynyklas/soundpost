@@ -20,6 +20,27 @@ var (
 	ErrTargetIdentity = errors.New("invalid native target identity")
 )
 
+// IdentityError is a failed identity check of a running acquisition. ProvenThrough is the instant, on the event clock, of the
+// last check that succeeded (zero when none had): everything the stream published after it is unproven, and a consumer revokes
+// [ProvenThrough, end) with Correlator.RevokeFrom. It unwraps to the cause (ErrTargetIdentity, ErrThreadCoverageChanged, ...).
+type IdentityError struct {
+	Err           error
+	ProvenThrough model.MonoNano
+}
+
+func (e *IdentityError) Error() string { return e.Err.Error() }
+func (e *IdentityError) Unwrap() error { return e.Err }
+
+// ProvenThroughOf is the instant an acquisition error says its identity was last proven (see IdentityError), or zero, which
+// revokes everything, when the error carries none.
+func ProvenThroughOf(err error) model.MonoNano {
+	var identity *IdentityError
+	if errors.As(err, &identity) {
+		return identity.ProvenThrough
+	}
+	return 0
+}
+
 type Target struct {
 	CgroupID        model.Uint64   `json:"cgroup_id"`
 	PIDNamespace    model.Uint64   `json:"pid_namespace"`

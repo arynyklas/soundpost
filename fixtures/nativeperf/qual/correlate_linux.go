@@ -8,6 +8,7 @@ package qual
 import (
 	"errors"
 
+	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/nativeperf"
 )
 
@@ -40,6 +41,10 @@ type Correlation struct {
 	Consumed, MaxHeapEvents int
 	// IntervalCounts is how many intervals of each kind the correlator returned, whatever was retained of them.
 	IntervalCounts map[nativeperf.IntervalKind]int
+	// RevokedFrom is set (Revoked) when the stream ended on an identity error: the correlation then ends with a domain-wide
+	// correction over [RevokedFrom, end) instead of a final proof (see Revoke).
+	Revoked     bool
+	RevokedFrom uint64
 }
 
 // StreamCorrelation replays a scheduler capture through the Correlator while the
@@ -196,6 +201,26 @@ func (s *StreamCorrelation) finish(p nativeperf.AcquisitionProof) {
 	s.add(got)
 	if err != nil {
 		s.fail("finalize: " + err.Error())
+	}
+}
+
+// Revoke ends the correlation of a stream that ended on an identity error: the helper last proved the identity at
+// provenThrough (event clock, 0 when it never did), so everything published after it is unproven. The correlator returns one
+// domain-wide correction over [provenThrough, end), the result carries it (and no error: a revoked capture is an explicit,
+// bounded outcome, not a missing final proof), and nothing more is consumed. Without the initial topology proof there is
+// nothing to revoke and the result stays the error it is.
+func (s *StreamCorrelation) Revoke(provenThrough uint64) {
+	if s.failed || s.final || !s.initial {
+		return
+	}
+	s.final = true
+	s.out.Revoked, s.out.RevokedFrom = true, provenThrough
+	s.out.PeakHeapEvents = s.c.Stats().PeakHeapEvents
+	s.out.MaxHeapEvents = s.c.Stats().MaxHeapEvents
+	got, err := s.c.RevokeFrom(model.MonoNano(provenThrough))
+	s.add(got)
+	if err != nil {
+		s.fail("revoke: " + err.Error())
 	}
 }
 

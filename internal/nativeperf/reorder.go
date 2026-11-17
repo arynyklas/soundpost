@@ -214,6 +214,38 @@ func (c *Correlator) ReportCPUFailure(cpu uint32, at model.MonoNano) ([]Interval
 	c.clearHeap()
 	return out, nil
 }
+
+// RevokeFrom is the consumer side of a stream that ended on an identity error: the acquisition proved its identity last at
+// `from` (see IdentityError.ProvenThrough, 0 when it never did), so everything published after it is unproven. It returns one
+// domain-wide correction over [start, end) where end is the latest evidence the correlator holds and start is `from`, or the
+// earliest instant the correlator can no longer vouch for when that is older: a wait still open at `from` and an event still
+// buffered from before it are dropped with the rest, so the proven prefix and the correction leave no hole. Intervals returned
+// earlier are never edited (the correction replaces their completeness where it overlaps them, see invalidate). The stream is
+// over: the correlator takes no further event, and Finalize refuses (a revoked capture has no complete end).
+func (c *Correlator) RevokeFrom(from model.MonoNano) ([]Interval, error) {
+	if !c.ready() {
+		return nil, ErrInvalid
+	}
+	start, end := from, from
+	if len(c.events) > 0 && c.events[0].Time < start {
+		start = c.events[0].Time
+	}
+	for _, state := range c.tasks {
+		if state.out && state.start < start {
+			start = state.start
+		}
+	}
+	for _, at := range []model.MonoNano{c.latest, c.watermark, c.processed} {
+		if at > end {
+			end = at
+		}
+	}
+	clear(c.tasks)
+	clear(c.processes)
+	c.clearHeap()
+	c.closed = true
+	return []Interval{{Domain: c.domain, Kind: IntervalUnknown, Start: start, End: end, Measure: Measure{Unit: UnitNanoseconds, Value: model.Uint64(end - start)}, Reason: ReasonGeneration, Correction: true}}, nil
+}
 func (c *Correlator) clearHeap() {
 	for i := range c.events {
 		c.events[i] = SanitizedEvent{}

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `test/inspect-canary.test.ts` pins the `Bun.inspect` Response summary the D31 probe reads (first line `Response (N bytes | N.NN KB|MB|GB)` for a held body, `Response (0 KB)` for a null/empty/stream/touched/used body and `Response.error()`), one body kind at a time, and a second test proves the canary notices seven kinds of drift. A Bun release that changes the text now fails this file by name instead of silently changing which bodies installServe wraps. `bufferedSummary` is exported from `serve.ts` for it.
+
 - One `AsyncLocalStorage` store per client for trace, job and exporter scopes (it was three), and `installServe` reads `request.headers` once and passes `Bun.inspect` one shared options object. The two native wrappers per request (`request.headers`, `request.signal`) and the `Bun.inspect` summary remain: reading either property is what D31 and the propagation header need, and no cheaper exact probe exists in Bun 1.3.14.
 
 - `installServe`: a span that ends when the handler returns (a buffered `Response`, `undefined`, a thrown error) no longer registers an abort listener, three closures and an in-flight entry per request; only a span that outlives the return (an async handler, a streaming body) is held, ended `cancelled` on abort and `incomplete` when the lease closes, with its listener removed when it ends. D31 behaviour is unchanged and pinned over a body kind x state x init corpus (`test/serve-probe.test.ts`, `test/serve-lifecycle.test.ts`); the `Bun.inspect` summary stays the probe because no cheaper probe is exact in Bun 1.3.14.

@@ -7,7 +7,7 @@ export interface ServeIntegrationConfig {readonly operation:string}
 export type ServeHandler=(request:Request,server:Bun.Server<any>)=>Response|void|Promise<Response|void>;
 // D31: Bun reports a body it already holds in memory (string, ArrayBuffer/typed array, Blob, FormData, URLSearchParams, Bun.file) in its Response summary as "Response (N bytes)" or "Response (N.NN KB|MB|GB)" (one or two decimals); a stream, an already-used or touched body and Response.error() report "(0 KB)". Reading `.body` would create a stream and defeat Bun's native buffered send, so the summary is the probe; anything not recognised is treated as streaming and wrapped.
 // No cheaper probe is exact in Bun 1.3.14 (lane 4 wave 21, evidence l4w21-evidence/bun): `bun:jsc` estimateShallowMemoryUsageOf is fixed at construction (stale once a body is touched or used) and blind to Blob/FormData/URLSearchParams/file bodies; Response.clone() reports the live state but turns a touched body back into a buffered one, so it changes the answer it is asked for; inspecting a clone costs the same as inspecting the Response.
-const bufferedSummary=/^Response \((?:\d+ bytes|\d+\.\d+ (?:KB|MB|GB|TB))\)/;
+export const bufferedSummary=/^Response \((?:\d+ bytes|\d+\.\d+ (?:KB|MB|GB|TB))\)/;
 // One options object for every probe: Bun.inspect reads it and keeps nothing, so a fresh literal per request is garbage for nothing.
 const summaryOptions=Object.freeze({depth:0,colors:false});
 const installed=new WeakMap<Client,ServeLease>();

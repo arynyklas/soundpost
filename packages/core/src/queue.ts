@@ -68,7 +68,7 @@ export class DeliveryQueue {
  /** Builds a lean span's batch form (record ID, wire text, route slot) from the compact store; the entry keeps its slot until the record is frozen into a batch or its safe text is wanted. The size was computed exactly when the span was queued; if it ever differed, the accounting follows the real size and the mismatch is counted. The safe text (spool snapshots, records()) is not built here: a frozen batch never needs it. */
  protected materializeWire(entry:Entry):void{
   const slab=this.leanSlab(),at=entry.lazy;
-  const head='{"id":"'+id()+LEAN_KIND+slab.startWall(at)+'","payload":'+slab.payload(at);
+  const wall=slab.startWall(at),head='{"id":"'+id()+LEAN_KIND+wall+'","payload":'+slab.payload(at,wall);
   entry.wire=head+RESOURCE_OPEN+this.resourceText+'}';
   slab.writeTraceId(at,this.spanRouteTail);entry.slot=routeSlot(this.spanRoute);
   const bytes=head.length+RESOURCE_OPEN.length+this.resourceBytes+1;
@@ -110,13 +110,13 @@ export class DeliveryQueue {
   }}finally{this.materializingLoss=false;}
  }
  signalLossCounters():readonly Readonly<Record<string,string>>[]{this.expire();this.expireSignalLosses();return Object.freeze([...this.lossBuckets].map(([key,b])=>{const pending=this.entries.filter(e=>e.lossKey===key).reduce((n,e)=>n+(e.lossCount??0n),b.unbatched);return Object.freeze({producer_epoch:b.epoch,signal:b.signal,reason:b.reason,observed_count:b.observed.toString(),acknowledged_count:b.acked.toString(),pending_count:pending.toString(),unexported_count:(b.observed-b.acked-pending).toString()});}));}
- protected acknowledgeSignalLosses(batch:FrozenBatch,receipt:Record<string,unknown>):void{const cursor=object(receipt.cursor);this.lastAck={group:canonicalId(cursor.group),index:decimal(cursor.index)};for(const entry of this.entries)if(entry.batch===batch.id&&entry.lossKey){const bucket=this.lossBuckets.get(entry.lossKey);if(!bucket||entry.lossCount===undefined||bucket.acked+entry.lossCount>bucket.observed)throw Error("invalid native loss accounting");bucket.acked+=entry.lossCount;}}
+ protected acknowledgeSignalLosses(batch:FrozenBatch,receipt:Record<string,unknown>):void{const cursor=object(receipt.cursor);this.lastAck={group:canonicalId(cursor.group),index:decimal(cursor.index)};if(this.lossBuckets.size===0)return;for(const entry of this.entries)if(entry.batch===batch.id&&entry.lossKey){const bucket=this.lossBuckets.get(entry.lossKey);if(!bucket||entry.lossCount===undefined||bucket.acked+entry.lossCount>bucket.observed)throw Error("invalid native loss accounting");bucket.acked+=entry.lossCount;}}
  protected loss(reason:string,count=1):void{this.losses+=count;this.counts[reason]=(this.counts[reason]??0)+count;}
  /** True when the signed policy has expired at the queue's wall clock, or when that clock cannot be read (expired is the safe answer). Strings only: canonical UnixNano values compare without BigInt. */
  protected policyExpired():boolean{
   try{const clock=this.config.clockNs,now=clock?clock():(ms=>ms>0?ms+"000000":String(BigInt(ms)*1000000n))(Date.now());return compareNano(unixNano(now),this.policyExpires)>=0;}catch{return true;}
  }
- protected remove(batch:FrozenBatch,reason?:string):void{this.entries=this.entries.filter(e=>{if(e.batch!==batch.id)return true;this.bytes-=e.size;return false;});this.batches=this.batches.filter(s=>s.batch.id!==batch.id);if(reason)this.loss(reason,batch.count);}
+ protected remove(batch:FrozenBatch,reason?:string):void{this.entries=this.entries.filter(e=>{if(e.batch!==batch.id)return true;this.bytes-=e.size;return false;});const index=this.batches.findIndex(s=>s.batch.id===batch.id);if(index>=0)this.batches.splice(index,1);if(reason)this.loss(reason,batch.count);}
  protected expire():void{
   const now=this.now();if(now-this.oldest<300000)return;
   const expired=new Set(this.entries.filter(e=>now-e.at>=300000).map(e=>e.batch).filter((v):v is string=>v!==undefined));for(const b of [...this.batches])if(expired.has(b.batch.id))this.remove(b.batch,'queue_expired');this.entries=this.entries.filter(e=>{if(now-e.at<300000)return true;this.dropped(e);this.bytes-=e.size;this.loss('queue_expired');return false;});

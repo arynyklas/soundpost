@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"github.com/arynyklas/soundpost/internal/model"
 	"io"
 	"net"
 	"os"
@@ -36,6 +37,9 @@ type helperReply struct {
 	Ready    bool              `json:"ready,omitempty"`
 	Proof    *AcquisitionProof `json:"proof,omitempty"`
 	Complete bool              `json:"complete,omitempty"`
+	// ProvenThrough accompanies an identity Error: the event-clock instant of the last identity check that succeeded (see
+	// IdentityError); absent when none had.
+	ProvenThrough model.MonoNano `json:"proven_through,omitempty"`
 }
 
 func writeMessage(w io.Writer, v any) error {

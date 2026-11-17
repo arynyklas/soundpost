@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Server capture cost (lane 4 wave 25): acknowledging a batch skips the scan of the queue's entries when no loss bucket exists, and removing a batch splices the batch list instead of filtering it a second time; a lean span's payload is composed from per-vocabulary fragments and its start-wall text is built once (JavaScriptCore string cells per queued span 33 -> 24 for the payload). Wire bytes unchanged.
+
 - Server capture cost (lane 4 wave 23): a captured error is serialized once (the client's canonical text is the stored form and the batch form is that text with the resource spliced in: `DeliveryQueue.enqueueNative`; a record whose parse removed an empty optional field takes the old path). Wire bytes, routing, privacy and limits unchanged.
 
 - Server capture cost (lane 4 wave 22, collector pressure): a queued span is a slot in a compact typed-array store (`lean_slab.ts`) instead of nine heap objects (about 500 bytes -> one queue entry), trace contexts are recognised by a private brand instead of a WeakSet entry per span, the in-flight lean spans are a linked list instead of a Set, the route slot is read from a hex digest (no ArrayBuffer per span), the batch form of a span is built without its safe text, and the parsed frames of a stack seen again are found by the SHA-256 of the stack (the text is not kept). Wire bytes, routing, privacy and limits unchanged.

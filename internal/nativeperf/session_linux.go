@@ -116,7 +116,7 @@ func (s *socketSource) NextItem(ctx context.Context) (AcquisitionItem, error) {
 		return fail(ErrAcquisitionFailed)
 	}
 	if reply.Error != "" {
-		return fail(helperCodeError(reply.Error))
+		return fail(helperReplyError(reply))
 	}
 	if reply.Complete {
 		if !s.finalSeen {

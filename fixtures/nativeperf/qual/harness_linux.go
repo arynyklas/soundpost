@@ -889,6 +889,12 @@ func (h *HelperProc) Stop() {
 
 // ---- capture ----
 
+// IdentityErrorCode reports whether a closed helper error code says the targets' identity or thread set changed under a
+// running capture: such a stream's tail is unproven, and a sink with a Revoke method ends on it (StreamCorrelation.Revoke).
+func IdentityErrorCode(code string) bool {
+	return code == "generation_changed" || code == "thread_coverage_changed" || code == "topology_changed"
+}
+
 // EventSink consumes a capture as it streams in. Event is given every event in stream order and returns whether the
 // capture result keeps it (the scheduler events a correlator has consumed need not be kept: holding every one of them
 // is memory the aggregate budget has to cover); Proof is given every acquisition proof in stream order.
@@ -936,6 +942,8 @@ type wireReply struct {
 	Event    *nativeperf.SanitizedEvent `json:"event"`
 	Proof    *nativeperf.AcquisitionProof
 	Complete bool `json:"complete"`
+	// ProvenThrough is the event-clock instant the helper last proved the identity of the targets (identity errors only).
+	ProvenThrough uint64 `json:"proven_through"`
 }
 
 func writeFrame(c net.Conn, v any) error {
@@ -1087,6 +1095,9 @@ loop:
 			switch {
 			case reply.Error != "":
 				res.ErrorCode = reply.Error
+				if r, ok := o.Sink.(interface{ Revoke(provenThrough uint64) }); ok && IdentityErrorCode(reply.Error) {
+					r.Revoke(reply.ProvenThrough)
+				}
 				break loop
 			case reply.Complete:
 				res.Complete = true

@@ -106,9 +106,19 @@ const clockText=(raw:RawClock,mono:bigint,wall:string):string=>raw.prefix+String
 export function leanSpanLength(span:LiveSpan):number{
  return FIXED_LENGTH+span.dependency.length+span.operation.length+span.kind.length+span.status.length+(span.parentId===null?4:18)+(span.endWall===null?4:clockLength(span.raw,span.endMono,span.endWall))+clockLength(span.raw,span.startMono,span.startWall);
 }
-/** The canonical payload text of a lean span from its parts: the one place the text is composed, whether the parts come from a LiveSpan or from the queue's compact store (lean_slab.ts). `endWall` null is a span without an end reading. */
+/** The constant text around each variable part of a lean span, joined with the vocabulary value that sits between two variable parts. A queued span's operation, dependency, kind, status and probability come from small closed sets (the queue's compact store keeps them as table indexes), so these are built once per value and not once per span: the payload is then 10 joins of variable and constant parts instead of 20. */
+export const leanDependencyFragment=(dependency:string):string=>S0+dependency+S1;
+export const leanOperationFragment=(operation:string):string=>S2+operation+S3;
+export const leanProbabilityFragment=(probability:string):string=>S4+probability+S5;
+export const leanKindFragment=(kind:string):string=>S6+kind+S7;
+export const leanStatusFragment=(status:string):string=>S8+status+S9;
+/** The canonical payload text of a lean span from its parts and the fragments of its vocabulary values: the one place the text is composed, whether the parts come from a LiveSpan or from the queue's compact store (lean_slab.ts). `endWall` null is a span without an end reading. */
+export function composeLeanFragments(raw:RawClock,dependency:string,operation:string,kind:string,status:string,probability:string,traceId:string,spanId:string,parentId:string|null,startMono:bigint,startWall:string,endMono:bigint,endWall:string|null):string{
+ return dependency+(endWall===null?"null":clockText(raw,endMono,endWall))+operation+(parentId===null?"null":'"'+parentId+'"')+probability+spanId+kind+clockText(raw,startMono,startWall)+status+traceId+S10;
+}
+/** composeLeanFragments from the plain values (a span that is not in the compact store). */
 export function composeLeanPayload(raw:RawClock,dependency:string,operation:string,kind:string,status:string,probability:string,traceId:string,spanId:string,parentId:string|null,startMono:bigint,startWall:string,endMono:bigint,endWall:string|null):string{
- return S0+dependency+S1+(endWall===null?"null":clockText(raw,endMono,endWall))+S2+operation+S3+(parentId===null?"null":'"'+parentId+'"')+S4+probability+S5+spanId+S6+kind+S7+clockText(raw,startMono,startWall)+S8+status+S9+traceId+S10;
+ return composeLeanFragments(raw,leanDependencyFragment(dependency),leanOperationFragment(operation),leanKindFragment(kind),leanStatusFragment(status),leanProbabilityFragment(probability),traceId,spanId,parentId,startMono,startWall,endMono,endWall);
 }
 /** The canonical payload text of an ended lean span. */
 export function leanSpanPayload(span:LiveSpan):string{

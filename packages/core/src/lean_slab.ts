@@ -1,7 +1,8 @@
 // Copyright 2026 Aryn Yklas
 // SPDX-License-Identifier: Apache-2.0
-import {composeLeanPayload,type LiveSpan,type RawClock} from "./tracing.ts";
+import {composeLeanFragments,leanDependencyFragment,leanKindFragment,leanOperationFragment,leanProbabilityFragment,leanStatusFragment,type LiveSpan,type RawClock} from "./tracing.ts";
 const KINDS=["internal","server","client","producer","consumer"] as const,STATUSES=["ok","error","cancelled","incomplete"] as const;
+const KIND_FRAGMENTS=KINDS.map(leanKindFragment),STATUS_FRAGMENTS=STATUSES.map(leanStatusFragment),NO_DEPENDENCY=leanDependencyFragment("");
 const hexCode=Uint8Array.from("0123456789abcdef",character=>character.charCodeAt(0));
 const hexDigits:string[]=Array.from({length:256},(_,value)=>value.toString(16).padStart(2,"0"));
 /** Lowercase hex text into bytes. Every ID reaching the slab was built by randomHex or passed canonicalId / the 16-digit check, so it is lowercase hex of the right length. */
@@ -23,6 +24,8 @@ export class LeanSlab {
  private readonly ids:Uint8Array;private readonly nums:BigUint64Array;private readonly words:Uint32Array;private readonly freeList:Uint32Array;private free:number;
  private readonly hexView:HexSlice|undefined;
  private readonly operations:string[]=[];private readonly dependencies:string[]=[];private readonly probabilities:string[]=[];private readonly raws:RawClock[]=[];
+ /** The constant text around each vocabulary value (see leanOperationFragment), parallel to the tables above and built when a value is first stored. */
+ private readonly operationFragments:string[]=[];private readonly dependencyFragments:string[]=[];private readonly probabilityFragments:string[]=[];
  constructor(readonly capacity:number){
   this.ids=new Uint8Array(capacity*32);this.nums=new BigUint64Array(capacity*4);this.words=new Uint32Array(capacity*2);this.freeList=new Uint32Array(capacity);
   for(let slot=0;slot<capacity;slot++)this.freeList[slot]=capacity-1-slot;this.free=capacity;
@@ -30,9 +33,9 @@ export class LeanSlab {
  }
  /** Slots in use. */
  get used():number{return this.capacity-this.free;}
- private index(table:string[],value:string,limit:number):number{
+ private index(table:string[],fragments:string[],make:(value:string)=>string,value:string,limit:number):number{
   for(let at=0;at<table.length;at++)if(table[at]===value)return at;
-  if(table.length>=limit)return -1;table.push(value);return table.length-1;
+  if(table.length>=limit)return -1;table.push(value);fragments.push(make(value));return table.length-1;
  }
  private rawIndex(raw:RawClock):number{
   for(let at=0;at<this.raws.length;at++)if(this.raws[at]===raw)return at;
@@ -42,8 +45,8 @@ export class LeanSlab {
  put(span:LiveSpan):number{
   if(this.free===0)return -1;
   const kind=KINDS.indexOf(span.kind as typeof KINDS[number]),status=STATUSES.indexOf(span.status as typeof STATUSES[number]);if(kind<0||status<0)return -1;
-  const raw=this.rawIndex(span.raw),probability=this.index(this.probabilities,span.context.probability,255),operation=this.index(this.operations,span.operation,65535);
-  const dependency=span.dependency===""?0:this.index(this.dependencies,span.dependency,65534)+1;
+  const raw=this.rawIndex(span.raw),probability=this.index(this.probabilities,this.probabilityFragments,leanProbabilityFragment,span.context.probability,255),operation=this.index(this.operations,this.operationFragments,leanOperationFragment,span.operation,65535);
+  const dependency=span.dependency===""?0:this.index(this.dependencies,this.dependencyFragments,leanDependencyFragment,span.dependency,65534)+1;
   if(raw<0||probability<0||operation<0||(span.dependency!==""&&dependency===0))return -1;
   const slot=this.freeList[--this.free]!,id=slot*32;
   putHex(span.context.traceId,this.ids,id);putHex(span.context.spanId,this.ids,id+16);
@@ -65,10 +68,10 @@ export class LeanSlab {
   const id=slot*32;
   for(let i=0;i<16;i++){const byte=this.ids[id+i]!;target[2*i]=hexCode[byte>>4]!;target[2*i+1]=hexCode[byte&15]!;}
  }
- /** The canonical payload text of the span in `slot`: byte-identical to leanSpanPayload of the LiveSpan it was copied from. */
- payload(slot:number):string{
+ /** The canonical payload text of the span in `slot`: byte-identical to leanSpanPayload of the LiveSpan it was copied from. `startWall` is the span's start reading as startWall(slot) returns it, for a caller that has it already. */
+ payload(slot:number,startWall:string=this.startWall(slot)):string{
   const w0=this.words[slot*2]!,w1=this.words[slot*2+1]!,id=slot*32,at=slot*4,end=((w0>>>6)&1)===1;
   const dependency=w1>>>16;
-  return composeLeanPayload(this.raws[(w0>>>8)&255]!,dependency===0?"":this.dependencies[dependency-1]!,this.operations[w1&65535]!,KINDS[w0&7]!,STATUSES[(w0>>>3)&3]!,this.probabilities[w0>>>24]!,this.hex(id,16),this.hex(id+16,8),((w0>>>5)&1)===1?this.hex(id+24,8):null,this.nums[at]!,String(this.nums[at+2]!),this.nums[at+1]!,end?String(this.nums[at+3]!):null);
+  return composeLeanFragments(this.raws[(w0>>>8)&255]!,dependency===0?NO_DEPENDENCY:this.dependencyFragments[dependency-1]!,this.operationFragments[w1&65535]!,KIND_FRAGMENTS[w0&7]!,STATUS_FRAGMENTS[(w0>>>3)&3]!,this.probabilityFragments[w0>>>24]!,this.hex(id,16),this.hex(id+16,8),((w0>>>5)&1)===1?this.hex(id+24,8):null,this.nums[at]!,startWall,this.nums[at+1]!,end?String(this.nums[at+3]!):null);
  }
 }
