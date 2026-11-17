@@ -2110,9 +2110,15 @@ func TestCutoverClaimRetriesAfterTheCutoverMovedUnderIt(t *testing.T) {
 		t.Fatalf("a claim that lost the race: %d deliveries, %v", len(got), err)
 	}
 	// (1) lost the control-revision race to the rollback itself, (2) went through
-	// under the stale owner revision and was refused, (3) the re-read claim.
-	if racing.claims != 3 {
-		t.Fatalf("the claim was committed %d times, want 3 (control race, stale owner, re-read)", racing.claims)
+	// under the stale owner revision and was refused; (3) the re-read claim sees the
+	// rollback (nothing may be leased) and the same read proves it would change
+	// nothing, so it is answered without a commit (control.DeliveryClaimIdle). Before
+	// that rule the re-read claim was committed as an empty one: three commits.
+	if racing.claims != 2 {
+		t.Fatalf("the claim was committed %d times, want 2 (control race, stale owner; the re-read is idle)", racing.claims)
+	}
+	if again, err := ob.Claim(fx.ctx, fx.scope(), fx.clock.Now(), fx.lease(), 4); err != nil || len(again) != 0 || racing.claims != 2 {
+		t.Fatalf("a claim under the rollback: %d deliveries, %v, %d commits in all; want none leased and no new commit", len(again), err, racing.claims)
 	}
 	if fx.countBy("", control.DeliveryClaimed) != 0 || fx.sends() != 0 {
 		t.Fatal("a claim survived the rollback")

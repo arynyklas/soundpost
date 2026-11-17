@@ -137,11 +137,12 @@ async function fresh(page:Page):Promise<void>{
 // ---- admin commands --------------------------------------------------------------------------------------------
 /**
  * Sends one command that names the control revision it was read at (`send` is given that revision) and retries a revision race. The revision is the whole
- * control state's, and the server moves it by itself: the notification runner commits one claim per project on every pass, even when nothing is due, and a
- * commit takes a few raft ticks, so a pass over a few dozen projects is a trickle of commits that lasts seconds. `create_user` also hashes the password before it
- * compares. A command can therefore lose to a background commit many times in a row (a fixed handful of immediate retries was exhausted in the full suite, once
- * the earlier specs had made enough projects). A 409 is a race exactly when the revision moved between the two reads; the same revision twice means the command
- * itself was refused (a duplicate, say) and is reported at once. A race is retried for up to a minute. Every fixture that sends such a command goes through here.
+ * control state's, and real work moves it: every intake admission, a login, the notification runner when it leases, settles or closes a delivery. (An idle
+ * runner pass moves nothing: it used to commit one claim per project on every pass even when nothing was due, which made a pass over a few dozen projects a
+ * trickle of commits lasting seconds; `TestAnIdleServeMovesNoControlRevision` pins that it does not any more.) `create_user` also hashes the password before it
+ * compares. A command can therefore lose to a background commit several times in a row while a spec ingests, so a 409 is a race exactly when the revision moved
+ * between the two reads; the same revision twice means the command itself was refused (a duplicate, say) and is reported at once. A race is retried for up
+ * to a minute. Every fixture that sends such a command goes through here.
  */
 export async function sendAtRevision(page:Page,what:string,send:(revision:string)=>Promise<Reply>):Promise<Reply>{
  await fresh(page);

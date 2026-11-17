@@ -345,13 +345,15 @@ func checkSupplyChain(r Reports, m *ReleaseManifest) []Check {
 	sb := Check{Name: checkSBOM}
 	cdx, err1 := GenerateCycloneDX(inv, r.Version, r.Created)
 	spdx, err2 := GenerateSPDX(inv, r.Version, r.Created)
-	genErr := err1
-	if genErr == nil {
-		genErr = err2
+	for _, g := range []struct {
+		format string
+		err    error
+	}{{"cyclonedx", err1}, {"spdx", err2}} {
+		if g.err != nil {
+			sb.Blocking = append(sb.Blocking, "SBOM generation failed ("+g.format+"): "+g.err.Error())
+		}
 	}
-	if genErr != nil {
-		sb.Blocking = append(sb.Blocking, "SBOM generation failed: "+genErr.Error())
-	} else {
+	if len(sb.Blocking) == 0 {
 		m.CycloneDXSHA256, m.SPDXSHA256, m.Components = ManifestDigest(cdx), ManifestDigest(spdx), len(inv.Components)
 		sb.Detail = fmt.Sprintf("%d components; cyclonedx sha256 %s; spdx sha256 %s", len(inv.Components), m.CycloneDXSHA256, m.SPDXSHA256)
 	}

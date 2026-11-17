@@ -901,19 +901,18 @@ func applyDeliveryClaim(st *State, org model.ID, lease replica.FenceToken, c Del
 			a.add(DeliveryOutcomeUnknown, r.ID, DeliveryCodeClaimExpired, c.Now)
 			changed = true
 		}
-		switch v := deliveryGate(st, gate, nil, r); {
-		case v.pause:
-			// A closing deletion pauses derived sends: nothing is claimed or settled.
-		case v.phase != "":
+		v, step := claimStepOf(st, gate, r, c)
+		switch {
+		case step == claimSettle:
 			settleDelivery(r, v.phase, v.code, c.Now)
 			a.add(v.phase, r.ID, v.code, c.Now)
 			changed = true
-		case c.Now-r.Eligible >= DeliveryMaxAge || len(r.Attempts) >= DeliveryMaxAttempts:
+		case step == claimExhaust:
 			phase, code := exhaustedPhase(r)
 			settleDelivery(r, phase, code, c.Now)
 			a.add(phase, r.ID, code, c.Now)
 			changed = true
-		case r.Next <= c.Now && len(claimed) < int(c.Limit):
+		case step == claimLease && len(claimed) < int(c.Limit):
 			r.Attempts = append(r.Attempts, DeliveryAttempt{Number: uint32(len(r.Attempts) + 1), Fence: lease, ClaimedAt: c.Now, Expires: c.Expires, Generation: generation, Owner: gate.revision})
 			r.Phase = DeliveryClaimed
 			claimed = append(claimed, r.ID)
@@ -929,6 +928,36 @@ func applyDeliveryClaim(st *State, org model.ID, lease replica.FenceToken, c Del
 		return Effect{Phase: "empty"}, nil
 	}
 	return Effect{AffectedIDs: claimed, Phase: "claimed"}, nil
+}
+
+// claimStep is what a claim at an instant does to one open delivery whose live claim (if any) has lapsed.
+type claimStep int
+
+const (
+	// claimKeep: nothing is claimed or settled (a closing deletion pauses derived sends, or the delivery is not due yet).
+	claimKeep claimStep = iota
+	// claimSettle: the destination, deletion, cutover or retirement state settles it; the verdict carries the phase and code.
+	claimSettle
+	// claimExhaust: the retry budget or the age horizon is spent.
+	claimExhaust
+	// claimLease: it is due and is leased, while the claim's limit allows.
+	claimLease
+)
+
+// claimStepOf is the one decision both the claim handler and the read-only idleness check (DeliveryClaimIdle) make about an open delivery, so
+// that the check can never call a claim idle that the handler would change something for. The verdict is meaningful for claimSettle.
+func claimStepOf(st *State, gate cutoverGate, r *DeliveryRecord, c DeliveryClaim) (deliveryVerdict, claimStep) {
+	switch v := deliveryGate(st, gate, nil, r); {
+	case v.pause:
+		return v, claimKeep
+	case v.phase != "":
+		return v, claimSettle
+	case c.Now-r.Eligible >= DeliveryMaxAge || len(r.Attempts) >= DeliveryMaxAttempts:
+		return deliveryVerdict{}, claimExhaust
+	case r.Next <= c.Now:
+		return deliveryVerdict{}, claimLease
+	}
+	return deliveryVerdict{}, claimKeep
 }
 
 // validOutcome validates the shape of an attempt outcome: accepted carries

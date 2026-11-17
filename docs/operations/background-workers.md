@@ -37,6 +37,14 @@ each project (at most `MaxProjects` per pass, in rotation):
 7. **Delivery.** If a `Sender` is configured, runs one delivery pass (a batch of
    at most `DeliveryBatch` claims).
 
+A pass over an idle project commits nothing (measured: the delivery claim was the only commit of an idle pass). The claim of the delivery stage is answered from the read that proves nothing is due,
+lapsed, settled or to be erased and that the project's delivery fence already equals the lease (`control.DeliveryClaimIdle`); the claim is committed only when
+it leases, settles or closes something, and for the first claim of a new leader term (it raises the fence that makes a deposed leader's later commit stale).
+An idle node therefore does not move the control revision (`TestAnIdleServeMovesNoControlRevision`: three projects, one-second passes, 0 commits in 20 s;
+before this rule 57). Without it a pass committed once per project, so the global revision that `create_org`, `create_user`, release registration and any other
+command without an organization epoch compare moved about `projects / (Interval + pass time)` times a second on a system doing nothing, and each commit also
+stored a command record in the bounded dedup window (100,000 entries).
+
 The lease is re-proved against a fresh quorum observation at the start of each
 project, and by each stage's constructor before every effect (the delivery worker
 again immediately before each send). A lease that is lost ends the pass

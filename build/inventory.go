@@ -239,26 +239,30 @@ type inventoryOverrides struct {
 // pypiOverride is one reviewed license decision for a pinned PyPI package.
 type pypiOverride struct {
 	License string `json:"license"`
-	// Declared is the metadata-derived value the review covers: NOASSERTION (the default when omitted) for
-	// metadata that names no license, or the free-text value PyPI carries (for example "BSD"). A package whose
-	// metadata later says something else is not covered by the review and keeps what its metadata says.
-	Declared string `json:"declared,omitempty"`
+	// Declared is the metadata-derived value the review covers and is REQUIRED (an explicit binding, never
+	// implied): NOASSERTION for metadata the generator derives no license from, or the free-text value PyPI
+	// carries (for example "BSD"). A package whose metadata later says something else is not covered by the
+	// review and keeps what its metadata says. The explicit NOASSERTION cannot tell "silent then" from
+	// "silent now"; the pin (name@version, lock-hashed artifact) is what bounds that.
+	Declared string `json:"declared"`
 	Evidence string `json:"evidence"`
 	// Sources are the upstream license files the reviewer read, pinned by the sha256 of the fetched bytes.
 	Sources []overrideSource `json:"sources,omitempty"`
 }
 
+const (
+	wheelTextIdentical = "identical"
+	wheelTextDiffers   = "differs"
+)
+
 type overrideSource struct {
 	URL    string `json:"url"`
 	SHA256 string `json:"sha256"`
-}
-
-// coveredDeclared is the metadata-derived license value the review applies to.
-func (o pypiOverride) coveredDeclared() string {
-	if o.Declared == "" {
-		return NoAssertion
-	}
-	return o.Declared
+	// WheelText states how the upstream file relates to the pinned wheel's license text: "identical"
+	// (SHA256 must equal the committed license_text_sha256) or "differs" (whitespace-level differences the
+	// evidence describes). The generator refuses a source without one of the two, and an "identical" source
+	// whose sha256 is not the wheel text's.
+	WheelText string `json:"wheel_text"`
 }
 
 // sourceNote renders the upstream license files the reviewer read, for the inventory's license_source.
@@ -743,7 +747,25 @@ func GeneratePythonInventory(ctx context.Context, src artifactSource, locks map[
 	}
 	for i := range inv.Packages {
 		p := &inv.Packages[i]
-		if o, ok := ov.PyPILicense[p.Name+"@"+p.Version]; ok && p.License == o.coveredDeclared() {
+		o, ok := ov.PyPILicense[p.Name+"@"+p.Version]
+		if !ok {
+			continue
+		}
+		if o.Declared == "" {
+			return inv, nil, fmt.Errorf("%s@%s: license override carries no explicit declared binding", p.Name, p.Version)
+		}
+		for _, s := range o.Sources {
+			switch s.WheelText {
+			case wheelTextIdentical:
+				if s.SHA256 != p.LicenseTextSHA256 {
+					return inv, nil, fmt.Errorf("%s@%s: source %s is marked identical to the wheel text but its sha256 is not license_text_sha256", p.Name, p.Version, s.URL)
+				}
+			case wheelTextDiffers:
+			default:
+				return inv, nil, fmt.Errorf("%s@%s: source %s needs wheel_text %q or %q", p.Name, p.Version, s.URL, wheelTextIdentical, wheelTextDiffers)
+			}
+		}
+		if p.License == o.Declared {
 			p.License, p.LicenseReason, p.LicenseSource = o.License, "", "reviewed override license-overrides.json: "+o.Evidence+o.sourceNote()
 		}
 	}

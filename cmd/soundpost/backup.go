@@ -355,7 +355,7 @@ func backupCreate(args []string) error {
 		*attempts = filepath.Join(*dataDir, "backup-attempts")
 	}
 	// The installation file's backup gate comes first: nothing is opened, written or advanced until it passes.
-	label, err := backupGate(*installConfig, dest, authorityDest, time.Now)
+	label, err := backupGate(*installConfig, dest, authorityDest, *keysPath, time.Now)
 	if err != nil {
 		return err
 	}

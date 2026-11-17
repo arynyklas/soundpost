@@ -20,6 +20,7 @@ const (
 	errInstallConfigMode     = cliError("install_config_mode: an S3 destination needs backup.mode offhost in the installation file; a local or absent backup mode is never taken to a remote store")
 	errInstallConfigMismatch = cliError("install_config_mismatch: the installation file's off-host backup destination and authority store are not the stores named on the command line")
 	errInstallConfigOpen     = cliError("install_config_authority_unopenable: the authority store or its restricted keys named by the installation file cannot be opened (see the secret and key references)")
+	errInstallConfigKeys     = cliError("install_config_authority_keys_mismatch: --authority-keys is not the authority key file the installation file declares (backup.authority.keys)")
 	errBackupGateFailed      = cliError("backup_gate_failed: the backup gate could not be evaluated")
 
 	// labelUnverified is what a run without an installation file may be called: nothing was checked.
@@ -31,7 +32,7 @@ const (
 // With one, the file must validate; an S3 destination needs an off-host backup block; an off-host block must
 // name exactly the stores of the command line; and config.BackupChecker must prove conditional create and a
 // fresh verified authority head now. Every failure is typed and nothing has been written yet.
-func backupGate(path string, dest, authority *destinationFlags, now func() time.Time) (string, error) {
+func backupGate(path string, dest, authority *destinationFlags, keysPath string, now func() time.Time) (string, error) {
 	remote := *dest.endpoint != ""
 	if path == "" {
 		if remote {
@@ -63,6 +64,9 @@ func backupGate(path string, dest, authority *destinationFlags, now func() time.
 	if !sameStore(dest, cfg.Backup.Destination) || !sameStore(authority, cfg.Backup.Authority.Store) {
 		return "", errInstallConfigMismatch
 	}
+	if !sameKeysFile(keysPath, cfg.Backup.Authority.Keys) {
+		return "", errInstallConfigKeys
+	}
 	checker, err := config.OpenBackupChecker(cfg, now)
 	if err != nil {
 		return "", errInstallConfigOpen
@@ -89,7 +93,20 @@ func sameStore(flags *destinationFlags, store config.Store) bool {
 		b, errB := filepath.Abs(store.Path)
 		return errA == nil && errB == nil && filepath.Clean(a) == filepath.Clean(b)
 	case "s3":
-		return *flags.endpoint != "" && *flags.endpoint == string(store.Endpoint) && *flags.bucket == store.Bucket && *flags.prefix == store.Prefix
+		return *flags.endpoint != "" && *flags.endpoint == string(store.Endpoint) && *flags.bucket == store.Bucket && *flags.prefix == store.Prefix &&
+			*flags.region == store.Region
 	}
 	return false
+}
+
+// sameKeysFile reports whether --authority-keys is the file the installation file's backup.authority.keys
+// reference names. A reference that is not a file: path (env:, k8s:) is never the same as a path on the command line.
+func sameKeysFile(keysPath string, declared config.SecretRef) bool {
+	declaredPath, ok := declared.FilePath()
+	if !ok || keysPath == "" {
+		return false
+	}
+	a, errA := filepath.Abs(keysPath)
+	b, errB := filepath.Abs(declaredPath)
+	return errA == nil && errB == nil && filepath.Clean(a) == filepath.Clean(b)
 }

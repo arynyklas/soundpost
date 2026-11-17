@@ -37,7 +37,8 @@
       "sources": [
         {
           "url": "https://raw.githubusercontent.com/celery/py-amqp/v5.4.2/LICENSE",
-          "sha256": "f5ef5f1282eae1931c74645f8719b6c69b3d6a2cf277bfda249a8270cd473af3"
+          "sha256": "f5ef5f1282eae1931c74645f8719b6c69b3d6a2cf277bfda249a8270cd473af3",
+          "wheel_text": "identical"
         }
       ]
     },
@@ -48,48 +49,58 @@
       "sources": [
         {
           "url": "https://raw.githubusercontent.com/celery/billiard/v4.3.2/LICENSE.txt",
-          "sha256": "6632e59acabdbbbec262837d44724a065318949f002efd0602d642711ae3a457"
+          "sha256": "6632e59acabdbbbec262837d44724a065318949f002efd0602d642711ae3a457",
+          "wheel_text": "differs"
         }
       ]
     },
     "click-plugins@1.1.1.2": {
       "license": "BSD-3-Clause",
+      "declared": "NOASSERTION",
       "evidence": "PyPI info.license is the free text 'New BSD' (not an SPDX expression) and the classifier is the ambiguous 'BSD License'. The upstream LICENSE.txt at tag 1.1.1.2 is headed 'New BSD License' and carries the three-clause text (retain notice, reproduce notice, no endorsement); the pinned wheel's license file differs from it only by a final newline (reviewed 2026-11-16)",
       "sources": [
         {
           "url": "https://raw.githubusercontent.com/click-contrib/click-plugins/1.1.1.2/LICENSE.txt",
-          "sha256": "fa1986d06c7d3ba7763524604dbab39faf5b1a89c7812a8d5d932e7dd70036d2"
+          "sha256": "fa1986d06c7d3ba7763524604dbab39faf5b1a89c7812a8d5d932e7dd70036d2",
+          "wheel_text": "differs"
         }
       ]
     },
     "colorama@0.4.6": {
       "license": "BSD-3-Clause",
+      "declared": "NOASSERTION",
       "evidence": "PyPI classifier is the ambiguous 'BSD License'; the wheel's license file is the three-clause BSD text (reviewed 2026-11-14)"
     },
     "itsdangerous@2.2.0": {
       "license": "BSD-3-Clause",
+      "declared": "NOASSERTION",
       "evidence": "PyPI classifier is the ambiguous 'BSD License'; the wheel's license file is the three-clause BSD text (reviewed 2026-11-14)"
     },
     "jinja2@3.1.6": {
       "license": "BSD-3-Clause",
+      "declared": "NOASSERTION",
       "evidence": "PyPI classifier is the ambiguous 'BSD License'; the wheel's license file is the three-clause BSD text (reviewed 2026-11-14)"
     },
     "prompt-toolkit@3.0.53": {
       "license": "BSD-3-Clause",
+      "declared": "NOASSERTION",
       "evidence": "PyPI info.license is empty and the classifier is the ambiguous 'BSD License'. The upstream LICENSE at tag 3.0.53 (Copyright (c) 2014, Jonathan Slenders) carries the three-clause text (retain notice, reproduce notice, no endorsement); the pinned wheel's license file is byte-identical to it (reviewed 2026-11-16)",
       "sources": [
         {
           "url": "https://raw.githubusercontent.com/prompt-toolkit/python-prompt-toolkit/3.0.53/LICENSE",
-          "sha256": "303574d9bdd85c757d6025017942bf17baeedf2778f62bd7f425d07d880f4c4a"
+          "sha256": "303574d9bdd85c757d6025017942bf17baeedf2778f62bd7f425d07d880f4c4a",
+          "wheel_text": "identical"
         }
       ]
     },
     "psycopg@3.2.10": {
       "license": "LGPL-3.0-only",
+      "declared": "NOASSERTION",
       "evidence": "PyPI info.license and classifier both say 'GNU Lesser General Public License v3 (LGPLv3)' with no 'or later'; not in the approved set (reviewed 2026-11-14)"
     },
     "psycopg-binary@3.2.10": {
       "license": "LGPL-3.0-only",
+      "declared": "NOASSERTION",
       "evidence": "PyPI info.license and classifier both say 'GNU Lesser General Public License v3 (LGPLv3)' with no 'or later'; not in the approved set (reviewed 2026-11-14)"
     },
     "vine@5.1.0": {
@@ -99,7 +110,8 @@
       "sources": [
         {
           "url": "https://raw.githubusercontent.com/celery/vine/v5.1.0/LICENSE",
-          "sha256": "177f62f5352b9321f802cead0c2247663d37895304f9c434698446be90c5aaf8"
+          "sha256": "177f62f5352b9321f802cead0c2247663d37895304f9c434698446be90c5aaf8",
+          "wheel_text": "identical"
         }
       ]
     }

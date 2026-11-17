@@ -425,14 +425,28 @@ func (o *Outbox) Claim(ctx context.Context, scope auth.Scope, now model.UnixNano
 	// commits between the read and the claim makes the claim stale (control refuses
 	// it); the next read sees the new phase, which decides whether anything may be
 	// leased at all.
+	//
+	// A claim that the same read proves would change nothing (no delivery is due,
+	// lapsed or settled, the project's fence is already this lease) is not
+	// proposed: it would only spend a control revision and a command record every
+	// pass (control.DeliveryClaimIdle). The check applies the handler's own scope
+	// checks to the state it read, so a scope that may not claim is never idle: the
+	// commit reports it.
 	var res control.Result
 	for attempt := 0; ; attempt++ {
-		var owner model.Revision
-		if err = o.store.View(ctx, func(st control.State) error { owner = control.CutoverRevision(st, scope.OrgID(), project); return nil }); err != nil {
+		claim := control.DeliveryClaim{Project: project, Now: now, Expires: expires, Limit: uint32(limit)}
+		idle := false
+		if err = o.store.View(ctx, func(st control.State) error {
+			claim.OwnerRevision = control.CutoverRevision(st, scope.OrgID(), project)
+			idle = control.DeliveryClaimIdle(scope, st, lease, claim)
+			return nil
+		}); err != nil {
 			return nil, err
 		}
-		res, err = o.transact(ctx, scope, control.KindClaimDelivery, model.NewID(), control.DeliveryCommand{Operation: control.DeliveryOpClaim, Lease: &lease,
-			Claim: &control.DeliveryClaim{Project: project, Now: now, Expires: expires, Limit: uint32(limit), OwnerRevision: owner}})
+		if idle {
+			return []Delivery{}, nil
+		}
+		res, err = o.transact(ctx, scope, control.KindClaimDelivery, model.NewID(), control.DeliveryCommand{Operation: control.DeliveryOpClaim, Lease: &lease, Claim: &claim})
 		if code, detail := faultDetail(err); err != nil && code == model.Stale && detail == control.DeliveryOwnerStale && attempt < maxOwnerRetries {
 			continue
 		}

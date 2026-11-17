@@ -5,12 +5,14 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/arynyklas/soundpost/internal/backup"
 	"github.com/arynyklas/soundpost/internal/config"
@@ -200,5 +202,106 @@ func TestBackupCreateLabelsALocalCopyAndAnUnverifiedRun(t *testing.T) {
 	var message cliError
 	if !errors.As(err, &message) || !strings.Contains(string(message), "install_config_invalid") || strings.Contains(string(message), w.dir) {
 		t.Fatalf("an invalid installation file must be refused without echoing its path: %v", err)
+	}
+}
+
+func gateFlags(t *testing.T, name string, args ...string) *destinationFlags {
+	t.Helper()
+	f := flag.NewFlagSet(name, flag.ContinueOnError)
+	d := newDestinationFlags(f, name)
+	if err := f.Parse(args); err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
+
+// An S3 store is identified by its region too: a gate that verified one location cannot be used to write another.
+func TestBackupGateSameS3StoreComparesTheRegion(t *testing.T) {
+	store := config.Store{Kind: "s3", Endpoint: "https://objects.example.invalid", Region: "eu-west-1", Bucket: "backups", Prefix: "p"}
+	base := []string{"--dest-s3-endpoint", "https://objects.example.invalid", "--dest-s3-bucket", "backups", "--dest-s3-prefix", "p"}
+	if !sameStore(gateFlags(t, "dest", append(append([]string{}, base...), "--dest-s3-region", "eu-west-1")...), store) {
+		t.Fatal("the identical store must match")
+	}
+	for name, args := range map[string][]string{
+		"another region":   append(append([]string{}, base...), "--dest-s3-region", "us-east-1"),
+		"no region flag":   base,
+		"another bucket":   {"--dest-s3-endpoint", "https://objects.example.invalid", "--dest-s3-bucket", "other", "--dest-s3-prefix", "p", "--dest-s3-region", "eu-west-1"},
+		"another endpoint": {"--dest-s3-endpoint", "https://elsewhere.example.invalid", "--dest-s3-bucket", "backups", "--dest-s3-prefix", "p", "--dest-s3-region", "eu-west-1"},
+		"another prefix":   {"--dest-s3-endpoint", "https://objects.example.invalid", "--dest-s3-bucket", "backups", "--dest-s3-prefix", "q", "--dest-s3-region", "eu-west-1"},
+	} {
+		if sameStore(gateFlags(t, "dest", args...), store) {
+			t.Errorf("%s must not match the declared store", name)
+		}
+	}
+	// the file declares no region: only a command line without one is the same store
+	store.Region = ""
+	if !sameStore(gateFlags(t, "dest", base...), store) {
+		t.Fatal("a store without a region matches a command line without one")
+	}
+	if sameStore(gateFlags(t, "dest", append(append([]string{}, base...), "--dest-s3-region", "eu-west-1")...), store) {
+		t.Fatal("a region named only on the command line is another location")
+	}
+}
+
+// The gate refuses an S3 location whose region differs from the installation file's, before the store is opened.
+func TestBackupGateRefusesAnS3RegionTheInstallationFileDoesNotDeclare(t *testing.T) {
+	w := newGateWork(t)
+	dest, authority := filepath.Join(w.dir, "dest"), filepath.Join(w.dir, "authority")
+	text, err := os.ReadFile(w.installFile("dirs.yaml", config.BackupOffhost, dest, authority))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dirBlock := "  destination:\n    kind: dir\n    path: " + dest + "\n    device_id: device-backup\n"
+	s3Block := "  destination:\n    kind: s3\n    endpoint: https://objects.example.invalid\n    region: eu-west-1\n    bucket: backups\n" +
+		"    access_key: env:SOUNDPOST_DEST_S3_ACCESS_KEY\n    secret_key: env:SOUNDPOST_DEST_S3_SECRET_KEY\n"
+	if !strings.Contains(string(text), dirBlock) {
+		t.Fatal("the fixture's destination block changed")
+	}
+	path := filepath.Join(w.dir, "s3.yaml")
+	if err = os.WriteFile(path, []byte(strings.Replace(string(text), dirBlock, s3Block, 1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	d := gateFlags(t, "dest", "--dest-s3-endpoint", "https://objects.example.invalid", "--dest-s3-region", "us-east-1", "--dest-s3-bucket", "backups")
+	a := gateFlags(t, "authority", "--authority-dir", authority)
+	_, err = backupGate(path, d, a, w.keysPath, time.Now)
+	var message cliError
+	if !errors.As(err, &message) || !strings.Contains(string(message), "install_config_mismatch") {
+		t.Fatalf("a region the installation file does not declare must be refused: %v", err)
+	}
+}
+
+// --authority-keys must be the key file the installation file declares; the refusal comes from the gate,
+// before the authority is opened or the backup runs, and its text carries no path.
+func TestBackupCreateRefusesAuthorityKeysTheInstallationFileDoesNotDeclare(t *testing.T) {
+	w := newGateWork(t)
+	dest, authority := filepath.Join(w.dir, "dest"), filepath.Join(w.dir, "authority")
+	w.run("authority-init", "--data-dir", w.live, "--authority-keys", w.keysPath, "--authority-dir", authority)
+	offhost := w.installFile("offhost.yaml", config.BackupOffhost, dest, authority)
+
+	// the restricted keys are valid keys of the same authority, but not the file the installation declares
+	for name, keys := range map[string]string{"restricted keys": w.restrictedAt, "another file": filepath.Join(w.dir, "elsewhere", "authority-keys.json")} {
+		saved := w.keysPath
+		w.keysPath = keys
+		stdout, err := w.create("--install-config", offhost, "--authority-dir", authority, "--dest-dir", dest)
+		w.keysPath = saved
+		var message cliError
+		if !errors.As(err, &message) || !strings.Contains(string(message), "install_config_authority_keys_mismatch") {
+			t.Fatalf("%s: keys the installation file does not declare must be refused by the gate: %v", name, err)
+		}
+		if strings.Contains(string(message), w.dir) || strings.Contains(stdout, `"backup_label"`) {
+			t.Fatalf("%s: the refusal must be static and take no backup: %v\n%s", name, err, stdout)
+		}
+		if names := objects(t, dest); len(names) != 0 {
+			t.Fatalf("%s: a refused backup wrote objects: %v", name, names)
+		}
+	}
+	// an equivalent spelling of the declared path is the same file
+	spelled := filepath.Join(w.dir, "sub", "..", "authority-keys.json")
+	saved := w.keysPath
+	w.keysPath = spelled
+	_, err := w.create("--install-config", offhost, "--authority-dir", authority, "--dest-dir", dest)
+	w.keysPath = saved
+	if err != nil {
+		t.Fatalf("the declared key file under another spelling must pass: %s", backupFailureLine(err))
 	}
 }

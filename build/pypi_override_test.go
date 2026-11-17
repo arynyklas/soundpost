@@ -74,7 +74,7 @@ func pyLicenseOf(t *testing.T, infoLicense string, ov pypiOverride, withOverride
 // which BSD clause set applies; a reviewed override tied to that exact declared value resolves it, and only it.
 func TestPyPIOverrideResolvesAnAmbiguousDeclaredLicenseOnlyWhenTheDeclaredValueMatches(t *testing.T) {
 	ov := pypiOverride{License: "BSD-3-Clause", Declared: "BSD", Evidence: "wheel LICENSE is the three-clause text",
-		Sources: []overrideSource{{URL: "https://example.com/LICENSE", SHA256: strings.Repeat("a", 64)}}}
+		Sources: []overrideSource{{URL: "https://example.com/LICENSE", SHA256: strings.Repeat("a", 64), WheelText: wheelTextDiffers}}}
 	if got := pyLicenseOf(t, "BSD", ov, false); got.License != "BSD" {
 		t.Fatalf("without an override the declared value stays: %+v", got)
 	}
@@ -87,14 +87,14 @@ func TestPyPIOverrideResolvesAnAmbiguousDeclaredLicenseOnlyWhenTheDeclaredValueM
 	if got = pyLicenseOf(t, "GPL-3.0-only", ov, true); got.License != "GPL-3.0-only" {
 		t.Fatalf("an override reviewed for BSD must not rewrite a different declared license: %+v", got)
 	}
-	// an override that names no declared value keeps the old rule: it only resolves NOASSERTION
-	bare := pypiOverride{License: "BSD-3-Clause", Evidence: "reviewed"}
+	// an explicit NOASSERTION binding resolves only an ambiguous record, never a declared license
+	bare := pypiOverride{License: "BSD-3-Clause", Declared: NoAssertion, Evidence: "reviewed"}
 	if got = pyLicenseOf(t, "BSD", bare, true); got.License != "BSD" {
-		t.Fatalf("an override without declared must not rewrite a declared license: %+v", got)
+		t.Fatalf("a NOASSERTION binding must not rewrite a declared license: %+v", got)
 	}
 	long := strings.Repeat("free text ", 8)
 	if got = pyLicenseOf(t, long, bare, true); got.License != "BSD-3-Clause" {
-		t.Fatalf("an override without declared resolves an ambiguous (NOASSERTION) record: %+v", got)
+		t.Fatalf("a NOASSERTION binding resolves an ambiguous (NOASSERTION) record: %+v", got)
 	}
 }
 
@@ -132,7 +132,7 @@ func TestCommittedPyPIOverridesCarryDeclaredEvidenceAndUpstreamSources(t *testin
 		if o.License != "BSD-3-Clause" {
 			t.Errorf("%s: override license %q, want BSD-3-Clause (the upstream LICENSE is the three-clause text)", key, o.License)
 		}
-		if d := o.coveredDeclared(); d != "BSD" && d != NoAssertion {
+		if d := o.Declared; d != "BSD" && d != NoAssertion {
 			t.Errorf("%s: declared %q must name the metadata value the review covers", key, d)
 		}
 	}
