@@ -128,6 +128,18 @@
     "source_allowed_prctl_calls": [
       {"comment": "PR_SET_THP_DISABLE with 1: the helper opts itself out of transparent huge pages (D53)", "option": 41, "arg": 1}
     ],
+    "source_allowed_ppoll_calls": [
+      {"comment": "the ring exit probe (ring_linux.go): one ring fd (nfds 1), zero timeout, NULL signal mask; seccomp pins the same two arguments", "nfds": 1, "sigmask": 0}
+    ],
+    "strace_allowed_prctl": [
+      {"comment": "the helper opts itself out of transparent huge pages (D53): PR_SET_THP_DISABLE with 1, nothing else", "option": "PR_SET_THP_DISABLE", "number": 41, "arg": 1},
+      {"comment": "a thread names itself (the Go runtime and the canary's comm sentinel); changes only the caller's own comm", "option": "PR_SET_NAME", "number": 15},
+      {"comment": "reads the caller's own thread name (the canary verifies its comm)", "option": "PR_GET_NAME", "number": 16},
+      {"comment": "the Go runtime labels its anonymous mappings (PR_SET_VMA_ANON_NAME); the helper's seccomp profile refuses it, the runtime ignores that", "option": "PR_SET_VMA", "number": 1398164801}
+    ],
+    "strace_allowed_ppoll": [
+      {"comment": "the ring exit probe: one fd, NULL signal mask", "nfds": 1, "sigmask": "NULL"}
+    ],
     "source_allowed_syscall_symbol_regex": "^(Open|Openat|Close|Fstat|Dup|Mmap|Munmap|Getrlimit|Umask|GetsockoptUcred|Syscall|Syscall6|Stat_t|Rlimit|Ucred|Timespec|O_[A-Z]+|PROT_(READ|WRITE)|MAP_SHARED|S_IF(REG|MT)|SIG(INT|TERM)|E(PERM|ACCES|NOENT|NOSYS|NODEV|INVAL|INTR|OPNOTSUPP)|SO_PEERCRED|SOL_SOCKET|RLIMIT_NOFILE|SYS_(PERF_EVENT_OPEN|IOCTL|CLOCK_GETTIME|PPOLL|PRCTL))$",
     "source_forbidden_identifiers": [
       "SYS_PTRACE",

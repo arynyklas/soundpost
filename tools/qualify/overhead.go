@@ -31,7 +31,8 @@ type Workloads struct {
 
 	SDKServer struct {
 		RPS           int    `yaml:"requests_per_second"`
-		DurationS     int    `yaml:"duration_s"`
+		WarmupS       int    `yaml:"warmup_s"`
+		SteadyS       int    `yaml:"steady_s"`
 		Runs          int    `yaml:"runs"`
 		Only          string `yaml:"only"`
 		HandlerHashes []int  `yaml:"handler_hashes"`
@@ -86,7 +87,7 @@ func LoadWorkloads(path string) (Workloads, error) {
 			return Workloads{}, fmt.Errorf("workloads %s: budget %s missing or incomplete", path, name)
 		}
 	}
-	if w.SDKServer.RPS <= 0 || w.SDKServer.DurationS <= 0 || w.SDKServer.Runs <= 1 || len(w.SDKServer.HandlerHashes) == 0 ||
+	if w.SDKServer.RPS <= 0 || w.SDKServer.WarmupS <= 0 || w.SDKServer.SteadyS <= 0 || w.SDKServer.Runs <= 1 || len(w.SDKServer.HandlerHashes) == 0 ||
 		w.NativeAcceptance.Duration == "" || w.NativeOverhead.Hz <= 0 || w.NativeOverhead.Seconds <= 0 || w.NativeOverhead.Repeats <= 0 || w.NativePrivacy.Seconds <= 0 {
 		return Workloads{}, fmt.Errorf("workloads %s: a workload parameter is missing", path)
 	}
@@ -136,6 +137,16 @@ type sdkHTTPRow struct {
 	Errors        json.RawMessage `json:"errors"`
 	RPS           float64         `json:"requests_per_second_requested"`
 	QueueFull     []float64       `json:"queue_full_drops"`
+	// Measurement says how the harness measured the row (D54: fixed warm-up discarded, steady-state window of at least 30 s, at least 5 alternating runs).
+	// A row without it, or one the harness itself marks as not conforming, is not evidence for the budget.
+	Measurement *sdkMeasurement `json:"measurement"`
+}
+
+type sdkMeasurement struct {
+	Protocol    string   `json:"protocol"`
+	Conforms    bool     `json:"conforms_d54"`
+	NotConform  []string `json:"not_conforming"`
+	GatedWindow string   `json:"gated_window"`
 }
 
 type modePair struct {
@@ -188,6 +199,25 @@ type sdkOverhead struct {
 	} `json:"rows"`
 }
 
+// overheadArgs is the harness command line of a server overhead run (D54: fixed warm-up, then a steady-state window, alternating runs); extra holds the --only
+// selection and the handler weights.
+func overheadArgs(rps, warmupS, steadyS, runs int, extra ...string) []string {
+	return append([]string{"fixtures/sdk/overhead.mjs", "--requests-per-second", strconv.Itoa(rps), "--warmup-s", strconv.Itoa(warmupS), "--steady-s", strconv.Itoa(steadyS), "--runs", strconv.Itoa(runs)}, extra...)
+}
+
+// notD54 is why a harness row cannot be judged against the budget, or "" when it was measured under D54.
+func notD54(m *sdkHTTPRow) string {
+	switch {
+	case m.Measurement == nil:
+		return "the harness row carries no measurement block: it was not measured under D54 (fixed warm-up, then a steady-state window of at least 30 s)"
+	case !m.Measurement.Conforms:
+		return "the harness row was not measured under D54: " + strings.Join(m.Measurement.NotConform, "; ")
+	case m.Measurement.GatedWindow != "warm":
+		return "the harness row gates the " + m.Measurement.GatedWindow + " window, not the warm steady state (D54)"
+	}
+	return ""
+}
+
 type sdkOverheadRun struct {
 	Result  *sdkOverhead
 	Raw     []byte
@@ -217,7 +247,7 @@ func (rc *runCtx) sdkOverhead(spec RowSpec) (*sdkOverheadRun, *probeResult, stri
 		}
 	}
 	w := rc.workloads.SDKServer
-	args := []string{"fixtures/sdk/overhead.mjs", "--requests-per-second", strconv.Itoa(w.RPS), "--duration-s", strconv.Itoa(w.DurationS), "--runs", strconv.Itoa(w.Runs), "--only", w.Only}
+	args := overheadArgs(w.RPS, w.WarmupS, w.SteadyS, w.Runs, "--only", w.Only)
 	var hashes []string
 	for _, h := range w.HandlerHashes {
 		hashes = append(hashes, strconv.Itoa(h))
@@ -243,8 +273,8 @@ func (rc *runCtx) sdkRowBase(p *probeResult, run *sdkOverheadRun, evidenceName s
 	if len(run.Raw) > 0 {
 		row.Evidence = append(row.Evidence, rc.writeEvidence(evidenceName, run.Raw))
 	}
-	row.Evidence = append(row.Evidence, fmt.Sprintf("overhead harness fixtures/sdk/overhead.mjs: %d alternating runs per mode, %d s measured after 1 s warm-up, open-loop %d req/s from a separate load process",
-		rc.workloads.SDKServer.Runs, rc.workloads.SDKServer.DurationS, rc.workloads.SDKServer.RPS))
+	row.Evidence = append(row.Evidence, fmt.Sprintf("overhead harness fixtures/sdk/overhead.mjs (D54): %d alternating runs per arm, each a fresh server process with %d s warm-up discarded for both arms and then %d s steady state measured (the gated figures; the legacy 1+3 s window of the same processes is reported as cold_window, never gated), open-loop %d req/s from a separate load process",
+		rc.workloads.SDKServer.Runs, rc.workloads.SDKServer.WarmupS, rc.workloads.SDKServer.SteadyS, rc.workloads.SDKServer.RPS))
 	return row
 }
 
@@ -301,6 +331,10 @@ func (rc *runCtx) judgeServerRow(row Row, p *probeResult, run *sdkOverheadRun, h
 	}
 	if len(hr.P95.Baseline.Values) == 0 || len(hr.P95.Capture.Values) == 0 {
 		row.Outcome, row.Failures = OutcomeFailed, []string{"the harness result carries no p95 series"}
+		return row
+	}
+	if why := notD54(hr); why != "" {
+		row.Outcome, row.Failures = OutcomeFailed, []string{why}
 		return row
 	}
 	reqUS := 1e6 / float64(rc.workloads.SDKServer.RPS)
@@ -411,7 +445,7 @@ func (rc *runCtx) runtimeOverhead(spec RowSpec, runtime string) (*sdkOverheadRun
 	for _, h := range w.HandlerHashes {
 		hashes = append(hashes, strconv.Itoa(h))
 	}
-	args := []string{"fixtures/sdk/overhead.mjs", "--requests-per-second", strconv.Itoa(w.RPS), "--duration-s", strconv.Itoa(w.DurationS), "--runs", strconv.Itoa(w.Runs), "--only", runtime, "--handler-hashes", strings.Join(hashes, ",")}
+	args := overheadArgs(w.RPS, w.WarmupS, w.SteadyS, w.Runs, "--only", runtime, "--handler-hashes", strings.Join(hashes, ","))
 	res := rc.exec(45*time.Minute, rc.root, env, nodePath, args...)
 	run := &sdkOverheadRun{Exit: res.Exit, Command: "node " + strings.Join(args, " "), Elapsed: res.Duration}
 	var out sdkOverhead

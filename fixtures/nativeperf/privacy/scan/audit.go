@@ -12,6 +12,7 @@ import (
 	"io"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -176,6 +177,12 @@ type StraceSummary struct {
 	SchedulerOpens   int
 	PerfIoctls       int
 	ForbiddenChecked int
+	// Prctls counts every prctl in the trace, ThpDisables those that are prctl(PR_SET_THP_DISABLE, 1) (the helper's
+	// D53 opt-out), Ppolls every ppoll (the helper's ring exit probe, which exists only in scheduler captures).
+	Prctls, ThpDisables, Ppolls int
+	// Attributes is every perf_event_open attribute struct the audit checked, in trace order, as strace -v printed
+	// it (constants and numbers only). A truncated attribute is a finding and is not listed.
+	Attributes []string
 }
 
 var (
@@ -183,6 +190,9 @@ var (
 	sentinelInTxt = regexp.MustCompile(`SPCNRY-[A-Za-z0-9]+-[0-9a-fA-F]+`)
 	quotedFirst   = regexp.MustCompile(`"((?:[^"\\]|\\.)*)"`)
 	attrField     = regexp.MustCompile(`([a-z_0-9]+)=([^,{}\s]+)`)
+	prctlArgs     = regexp.MustCompile(`^\s*([A-Za-z_0-9]+)\s*(?:,\s*([A-Za-z_0-9]+))?`)
+	ppollArgs     = regexp.MustCompile(`^(?:NULL|0x[0-9a-fA-F]+|\[.*?\])\s*,\s*(-?\d+|0x[0-9a-fA-F]+)\s*,\s*(?:NULL|0x[0-9a-fA-F]+|\{[^}]*\})\s*,\s*([^,\s)]+)`)
+	straceResumed = regexp.MustCompile(`^(?:\[pid\s+)?(\d+)\]?\s+<\.\.\. [a-z_0-9]+ resumed>(.*)$`)
 )
 
 func redact(s string) string { return sentinelInTxt.ReplaceAllString(s, "SPCNRY-redacted") }
@@ -223,24 +233,24 @@ func AuditStrace(p Policy, r io.Reader) ([]Finding, StraceSummary, error) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 64<<10), 4<<20)
 	n := 0
-	for scanner.Scan() {
-		n++
-		line := scanner.Text()
-		sum.Lines++
-		m := straceLine.FindStringSubmatch(line)
-		if m == nil {
-			continue
-		}
+	// audit checks one complete call: m is straceLine's submatches, line the number where the call began.
+	audit := func(line int, m []string) {
 		name, rest := m[2], m[3]
 		sum.ForbiddenChecked++
 		if inSet(p.Syscalls.Forbidden, name) {
-			out = append(out, Finding{"forbidden_syscall", n, name})
-			continue
+			out = append(out, Finding{"forbidden_syscall", line, name})
+			return
 		}
 		switch name {
 		case "perf_event_open":
 			sum.PerfEventOpens++
-			out = append(out, auditPerfAttr(p, n, rest, &sum)...)
+			out = append(out, auditPerfAttr(p, line, rest, &sum)...)
+		case "prctl":
+			sum.Prctls++
+			out = append(out, auditPrctl(p, line, rest, &sum)...)
+		case "ppoll":
+			sum.Ppolls++
+			out = append(out, auditPpoll(p, line, rest)...)
 		case "ioctl":
 			fields := strings.SplitN(rest, ",", 3)
 			if len(fields) >= 2 {
@@ -248,19 +258,19 @@ func AuditStrace(p Policy, r io.Reader) ([]Finding, StraceSummary, error) {
 				if strings.HasPrefix(request, "PERF_EVENT_IOC_") {
 					sum.PerfIoctls++
 					if !inSet(p.Syscalls.IoctlAllow, request) {
-						out = append(out, Finding{"forbidden_perf_ioctl", n, request})
+						out = append(out, Finding{"forbidden_perf_ioctl", line, request})
 					}
 				}
 			}
 		case "open", "openat", "openat2", "creat":
 			q := quotedFirst.FindStringSubmatch(rest)
 			if q == nil {
-				continue
+				return
 			}
 			path := q[1]
 			for _, re := range paths {
 				if re.MatchString(path) {
-					out = append(out, Finding{"forbidden_open_path", n, redact(path)})
+					out = append(out, Finding{"forbidden_open_path", line, redact(path)})
 				}
 			}
 			// A dump is a file the process WRITES; a read-only open or a directory
@@ -268,11 +278,50 @@ func AuditStrace(p Policy, r io.Reader) ([]Finding, StraceSummary, error) {
 			writes := strings.Contains(rest, "O_WRONLY") || strings.Contains(rest, "O_RDWR") || strings.Contains(rest, "O_CREAT") || strings.Contains(rest, "O_TRUNC") || name == "creat"
 			for _, re := range names {
 				if writes && re.MatchString(path) {
-					out = append(out, Finding{"forbidden_dump_file_name", n, redact(path)})
+					out = append(out, Finding{"forbidden_dump_file_name", line, redact(path)})
 				}
 			}
 		}
 	}
+	// `strace -f` prints a call that another thread interrupted as `name(<args so far> <unfinished ...>` and finishes it
+	// on a `<... name resumed>` line of the same pid. The two halves are joined (the perf_event_open attribute is only
+	// on the resumed half); a call that never resumed (killed process) is audited with what was printed.
+	type pendingCall struct {
+		line   int
+		prefix string
+	}
+	pending := map[string]pendingCall{}
+	for scanner.Scan() {
+		n++
+		line := scanner.Text()
+		sum.Lines++
+		if m := straceResumed.FindStringSubmatch(line); m != nil {
+			call, ok := pending[m[1]]
+			if !ok {
+				continue
+			}
+			delete(pending, m[1])
+			if joined := straceLine.FindStringSubmatch(call.prefix + m[2]); joined != nil {
+				audit(call.line, joined)
+			}
+			continue
+		}
+		if head, ok := strings.CutSuffix(line, " <unfinished ...>"); ok {
+			if m := straceLine.FindStringSubmatch(head); m != nil {
+				pending[m[1]] = pendingCall{n, head}
+			}
+			continue
+		}
+		if m := straceLine.FindStringSubmatch(line); m != nil {
+			audit(n, m)
+		}
+	}
+	for _, call := range pending {
+		if m := straceLine.FindStringSubmatch(call.prefix); m != nil {
+			audit(call.line, m)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Line < out[j].Line })
 	return out, sum, scanner.Err()
 }
 
@@ -286,6 +335,7 @@ func auditPerfAttr(p Policy, line int, rest string, sum *StraceSummary) []Findin
 	if strings.Contains(attr, "...") {
 		return []Finding{{"perf_attr_truncated", line, "strace must run with -v so every attribute field is visible"}}
 	}
+	sum.Attributes = append(sum.Attributes, strings.TrimPrefix(strings.TrimSpace(attr), "{"))
 	fields := map[string]string{}
 	for _, f := range attrField.FindAllStringSubmatch(attr, -1) {
 		fields[f[1]] = strings.TrimSpace(f[2])
@@ -327,4 +377,50 @@ func auditPerfAttr(p Policy, line int, rest string, sum *StraceSummary) []Findin
 		}
 	}
 	return out
+}
+
+// auditPrctl admits only the prctl calls the policy lists: the helper's PR_SET_THP_DISABLE with 1 and the naming calls
+// of the runtime and the canary. Any other option (PR_SET_PTRACER, PR_SET_DUMPABLE, PR_SET_MM, THP re-enable, ...) or an
+// unreadable line is a finding. The option may be printed by name or number.
+func auditPrctl(p Policy, line int, rest string, sum *StraceSummary) []Finding {
+	m := prctlArgs.FindStringSubmatch(rest)
+	option, arg := "", ""
+	if m != nil {
+		option, arg = m[1], m[2]
+	}
+	for _, allowed := range p.Syscalls.StraceAllowedPrctl {
+		number, numErr := strconv.ParseInt(option, 0, 64)
+		if option == "" || option != allowed.Option && (numErr != nil || number != allowed.Number) {
+			continue
+		}
+		if allowed.Arg != nil {
+			if v, e := strconv.ParseInt(arg, 0, 64); arg == "" || e != nil || v != *allowed.Arg {
+				continue
+			}
+		}
+		if allowed.Option == "PR_SET_THP_DISABLE" {
+			sum.ThpDisables++
+		}
+		return nil
+	}
+	return []Finding{{"prctl_not_allowlisted", line, option + "," + arg}}
+}
+
+// auditPpoll admits only the allowlisted ppoll shapes (the ring exit probe: nfds 1, NULL sigmask). A line whose
+// arguments cannot be read is a finding: the audit refuses to pass what it could not see.
+func auditPpoll(p Policy, line int, rest string) []Finding {
+	m := ppollArgs.FindStringSubmatch(rest)
+	if m == nil {
+		return []Finding{{"ppoll_unparseable", line, "arguments not readable"}}
+	}
+	nfds, e := strconv.ParseInt(m[1], 0, 64)
+	if e != nil {
+		return []Finding{{"ppoll_unparseable", line, "nfds " + m[1]}}
+	}
+	for _, allowed := range p.Syscalls.StraceAllowedPpoll {
+		if int64(allowed.Nfds) == nfds && allowed.Sigmask == m[2] {
+			return nil
+		}
+	}
+	return []Finding{{"ppoll_not_allowlisted", line, "nfds " + m[1] + " sigmask " + m[2]}}
 }

@@ -1,11 +1,9 @@
 # Copyright 2026 Aryn Yklas
 # SPDX-License-Identifier: Apache-2.0
 import sys
-from contextlib import nullcontext
 from ..propagation import extract
 from ..tracing import SpanContextManager
 
-_NO_CONTEXT = nullcontext()
 def _capture_boundary(client, operation, error):
     if isinstance(error, Exception):
         episode = client.begin_handling_episode()
@@ -23,22 +21,21 @@ class WSGIMiddleware:
         if not self.enabled: return self.app(environ, start_response)
         header = environ.get('HTTP_TRACEPARENT')
         parent = extract({'traceparent': header}) if header is not None else None
-        binding = self.client._trace_context.bind(parent)
-        with binding:
-            span = SpanContextManager(self.client, self.operation, kind='server')
-            span.__enter__()
-            try:
-                def start(status, headers, exc_info=None):
-                    if status[:3].isdigit() and int(status[:3]) >= 500: span.set_error()
-                    return start_response(status, headers, exc_info) if exc_info is not None else start_response(status, headers)
-                body = self.app(environ, start)
-            except BaseException:
-                _capture_boundary(self.client, self.operation, sys.exc_info()[1])
-                span.__exit__(*sys.exc_info())
-                raise
-            # Detach until each streaming iteration; never retain request context
-            # in the application server between iterator calls.
-            span._binding.__exit__(None, None, None)
+        span = SpanContextManager(self.client, self.operation, kind='server')
+        # The request's own context (None for a request without a valid traceparent, never the ambient one) is the parent: handed to the span directly, not bound and read back.
+        span._begin(parent)
+        try:
+            def start(status, headers, exc_info=None):
+                if status[:3].isdigit() and int(status[:3]) >= 500: span.set_error()
+                return start_response(status, headers, exc_info) if exc_info is not None else start_response(status, headers)
+            body = self.app(environ, start)
+        except BaseException:
+            _capture_boundary(self.client, self.operation, sys.exc_info()[1])
+            span.__exit__(*sys.exc_info())
+            raise
+        # Detach until each streaming iteration; never retain request context
+        # in the application server between iterator calls.
+        span._binding.__exit__(None, None, None)
         return _Response(body, span)
 
 class _Response:
@@ -55,7 +52,19 @@ class _Response:
 
     def __next__(self):
         if self.closed: raise StopIteration
-        with (_NO_CONTEXT if self.plain else self.span.client._trace_context.bind(self.span.context)):
+        if self.plain:
+            try:
+                iterator = self.iterator
+                if iterator is None: iterator = self.iterator = iter(self.body)
+                return next(iterator)
+            except StopIteration:
+                self.exhausted = True
+                self.close()
+                raise
+            except BaseException:
+                self._finish(sys.exc_info())
+                raise
+        with self.span.client._trace_context.bind(self.span.context):
             try:
                 if self.iterator is None: self.iterator = iter(self.body)
                 return next(self.iterator)
@@ -70,12 +79,18 @@ class _Response:
     def _finish(self, error):
         if self.closed: return
         self.closed = True
-        with self.span.client._trace_context.bind(self.span.context):
+        span = self.span
+        if error[0] is None and span.client._default_clock:
+            # A normal end of the response: the record is composed from the span's own fields and the default clock, so nothing in it reads the request context and
+            # the context variable is not touched (the middleware already detached the span's binding when the application returned).
+            span._record(None)
+            return
+        with span.client._trace_context.bind(span.context):
             if error[1] is not None:
-                _capture_boundary(self.span.client, self.span.operation, error[1])
-            self.span._binding = self.span.client._trace_context.bind(self.span.context)
-            self.span._binding.__enter__()
-            self.span.__exit__(*error)
+                _capture_boundary(span.client, span.operation, error[1])
+            span._binding = span.client._trace_context.bind(span.context)
+            span._binding.__enter__()
+            span.__exit__(*error)
 
     def close(self):
         if self.body_closed: return

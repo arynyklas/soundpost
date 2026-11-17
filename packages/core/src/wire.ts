@@ -13,7 +13,10 @@ function spec(required:string,optional:string):FieldSpec{
  if(!found){const names=required.split(' ').filter(Boolean),extras=optional.split(' ').filter(Boolean);found={names,extras,allowed:new Set([...names,...extras])};byOptional.set(optional,found);}
  return found;
 }
-function fields(value:unknown,required:string,optional=''):Record<string,unknown>{const o=object(value),{names,extras,allowed}=spec(required,optional);if(names.some(k=>!Object.hasOwn(o,k))||Object.keys(o).some(k=>!allowed.has(k)))throw Error('closed native fields required');for(const k of extras){const v=o[k];if(v===null||Array.isArray(v)&&v.length===0)delete o[k];}return o;}
+let stripped=0;
+/** How many optional null/empty fields `fields` has removed so far (a counter read before and after a parse tells whether the parse changed what the text said). */
+export function strippedFields():number{return stripped;}
+function fields(value:unknown,required:string,optional=''):Record<string,unknown>{const o=object(value),{names,extras,allowed}=spec(required,optional);if(names.some(k=>!Object.hasOwn(o,k))||Object.keys(o).some(k=>!allowed.has(k)))throw Error('closed native fields required');for(const k of extras){const v=o[k];if(v===null||Array.isArray(v)&&v.length===0){delete o[k];stripped++;}}return o;}
 export interface NativeRecord {id:string;kind:string;observed_at_ns:string;policy_revision:string;payload:Record<string,unknown>}
 const payloadFields:Readonly<Record<string,readonly [string,string]>>={
  metric:['name labels sample_kind unit type','value histogram start_timestamp_ns exemplar_trace exemplar_span'],

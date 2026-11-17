@@ -36,6 +36,15 @@ def unix_nano(value: object) -> str:
         raise ValueError("invalid UnixNano")
     return value
 
+def unix_nano_int(value: object) -> int:
+    """`int(unix_nano(value))` with one validation and one conversion."""
+    if type(value) is not str or _UNIX_NANO(value) is None:
+        raise ValueError("invalid UnixNano")
+    number=int(value)
+    if not -9223372036854775808<=number<=9223372036854775807:
+        raise ValueError("invalid UnixNano")
+    return number
+
 def decode(value: str) -> bytes:
     if type(value) is not str or re.fullmatch(r"[A-Za-z0-9_-]+", value) is None:
         raise ValueError("invalid policy encoding")

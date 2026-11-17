@@ -423,7 +423,8 @@ func overheadCtx(t *testing.T) *runCtx {
 func httpRow(hashes int, p95Base, p95Cap, cpuBase, cpuCap []float64) sdkHTTPRow {
 	return sdkHTTPRow{HandlerHashes: hashes,
 		P95: modePair{statBlock{p95Base}, statBlock{p95Cap}}, CPU: modePair{statBlock{cpuBase}, statBlock{cpuCap}},
-		ELU: modePair{statBlock{[]float64{70}}, statBlock{[]float64{90}}}, Achieved: modePair{statBlock{[]float64{995}}, statBlock{[]float64{996}}}, Errors: json.RawMessage("0")}
+		ELU: modePair{statBlock{[]float64{70}}, statBlock{[]float64{90}}}, Achieved: modePair{statBlock{[]float64{995}}, statBlock{[]float64{996}}}, Errors: json.RawMessage("0"),
+		Measurement: &sdkMeasurement{Protocol: "D54", Conforms: true, GatedWindow: "warm"}}
 }
 
 // sdkRun returns a harness result whose delivered-mode rows are rows (the budget is judged on delivered mode).

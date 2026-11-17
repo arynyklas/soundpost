@@ -3,24 +3,27 @@
 import base64
 import hashlib
 import json
-import os
+from .ids import hex16
 from dataclasses import replace
 import random
 from operator import itemgetter
 import secrets
+import struct
 import threading
 import time
-from .types import RoutingDescriptor,FlushReport
+from .types import RoutingDescriptor,FlushReport,wall_clock_ns
 from .policy import decimal,canonical_id,unix_nano
 from .routing import native_canonical,route_record,route_prefix,route_owner,resource_wire,validate_descriptor
 from .transport import FrozenBatch,Outcome,verify_receipt,EXPORTING
 from .wire import parse_safe_record
 
-_SIZE=itemgetter('size')
+_SIZE=itemgetter('size');_KIND=itemgetter('kind');_WALL=itemgetter('wall')
 def retry_delay(attempt,random_value=random.random):
     cap=min(30,.25*2**min(attempt,7))
     return max(.25,min(30,cap*(.5+.5*max(0,min(1,random_value())))))
-def _priority(kind):return 2 if kind in ('error','condition','capability','loss','job_attempt') else 1 if kind=='log' else 0
+_PRIORITY={'error':2,'condition':2,'capability':2,'loss':2,'job_attempt':2,'log':1}
+def _priority(kind):return _PRIORITY.get(kind,0)
+_ORDER=itemgetter('order')
 class DeliveryQueue:
     def __init__(self,config,transport,*,monotonic=time.monotonic,random_value=random.random,spool=None):
         self.config=config;self.transport=transport;self.now=monotonic;self.random=random_value
@@ -29,6 +32,9 @@ class DeliveryQueue:
         if (self.descriptor.org,self.descriptor.project,self.descriptor.source,self.descriptor.policy_revision)!=(config.org,config.project,config.source,self.policy['revision']):raise ValueError('routing identity mismatch')
         self.resource=resource_wire(config.resource,config.build);self.producer=canonical_id(config.producer or secrets.token_hex(16))
         self._resource_tail=',"resource":'+native_canonical(self.resource).decode()+'}';self._span_route=route_prefix(self.descriptor,'span');self._next_expiry=float('inf')
+        self._span_route32=self._span_route+struct.pack('>I',32);self._safe_tail=',"policy_revision":"'+self.descriptor.policy_revision+'"}';self._default_clock=config.clock_ns is wall_clock_ns;self._max_records=config.max_records;self._max_bytes=config.max_bytes
+        # The canonical batch tail of each route slot (keys sorted, so `records` ends at `route_slot`, then `source`, `version`).
+        tail_end=',"source":"'+self.descriptor.source+'","version":1}';self._tails={slot:('],"route_slot":'+str(slot)+tail_end).encode() for slot in range(64)};self._tail_end=tail_end
         try:self._expires=int(unix_nano(self.policy['expires_ns']))
         except Exception:self._expires=float('-inf')  # an unusable expiry reads as expired, as the per-call conversion it replaces did
         self.spool=spool or config.spool;self._entries=[];self._batches=[];self._bytes=0;self._lost=0;self._counts={};self._denied=False;self._closed=False;self._closing=False
@@ -42,6 +48,7 @@ class DeliveryQueue:
             self.release();raise ValueError('invalid encrypted spool state') from None
         finally:self._recovering=False
     def _policy_expired(self):
+        if self._default_clock:return time.time_ns()>=self._expires  # the default clock is always a valid UnixNano, so the checked conversion below would only re-validate it
         try:return int(unix_nano(self.config.clock_ns()))>=self._expires
         except Exception:return True
     def _valid_signal_loss(self,signal,reason):
@@ -90,7 +97,7 @@ class DeliveryQueue:
                 if old:
                     wire={k:record[k] for k in ('id','kind','observed_at_ns','payload')};wire['resource']=self.resource
                     if len(native_canonical(wire))+512>old['size']:continue
-                    old['text']=encoded;old['loss_count']=total
+                    old['text']=encoded;old['wire']=None;old['loss_count']=total
                 else:
                     if not self.enqueue(encoded):continue
                     entry=self._entries[-1];entry['loss_key']=key;entry['loss_count']=total;entry['at']=bucket['at'];entry['wall']=bucket['wall'];self._next_expiry=min(self._next_expiry,entry['at']+300)
@@ -104,7 +111,8 @@ class DeliveryQueue:
                 result.append(dict(producer_epoch=b['epoch'],signal=b['signal'],reason=b['reason'],observed_count=str(b['observed']),acknowledged_count=str(b['acked']),pending_count=str(pending),unexported_count=str(b['observed']-b['acked']-pending)))
             return tuple(result)
     def _acknowledge_signal_losses(self,batch,receipt):
-        cursor=receipt['cursor'];self._last_ack=dict(group=canonical_id(cursor['group']),index=decimal(cursor['index']))
+        # Called only for a receipt `verify_receipt` accepted, which already checked the cursor's group as an opaque ID and its index as a non-zero uint64.
+        cursor=receipt['cursor'];self._last_ack=dict(group=cursor['group'],index=cursor['index'])
         if 'loss' not in batch.kinds:return
         for entry in self._entries:
             if entry['batch']==batch.id and entry.get('loss_key') is not None:
@@ -130,9 +138,13 @@ class DeliveryQueue:
         if key in self._loss_buckets:entry['loss_key']=key;entry['loss_count']=int(decimal(p['count']))
     def _loss(self,reason,count=1):self._lost+=count;self._counts[reason]=self._counts.get(reason,0)+count
     def _remove(self,batch,reason=None):
-        identity=batch.id
-        self._entries=[entry for entry in self._entries if entry['batch']!=identity];self._bytes=sum(map(_SIZE,self._entries))+512*len(self._loss_buckets)
-        self._batches=[state for state in self._batches if state['batch'].id!=identity]
+        identity=batch.id;batches=self._batches;state=None
+        for index,candidate in enumerate(batches):
+            if candidate['batch'] is batch:state=candidate;del batches[index];break
+        self._entries=[entry for entry in self._entries if entry['batch']!=identity]
+        # The frozen batch's own entry bytes were recorded when it was sealed (or recovered), so the total is decremented, not summed over what is left.
+        if state is None:self._bytes=sum(map(_SIZE,self._entries))+512*len(self._loss_buckets)
+        else:self._bytes-=state['bytes']
         if reason:self._loss(reason,batch.count)
     def _expire(self):
         now=self.now()
@@ -169,30 +181,37 @@ class DeliveryQueue:
             record=parse_safe_record(text)
             if not self._recovering and decimal(record['policy_revision'])!=self.descriptor.policy_revision:raise ValueError('policy revision mismatch')
             return self._append(native_canonical(record).decode(),record['kind'],route_record(record,self.descriptor,self.producer))
-    def enqueue_span(self,text,trace_id):
+    def enqueue_span(self,head,trace_id):
         """Enqueues a span record the SDK composed itself in canonical form from identifiers and clock values it generated or validated (tracing.py, Client._admit_span).
-        Skips the parse and re-validation of `enqueue`; every other step (closed, expiry, size, priority eviction, spool) is the shared `_append`. Equality with the
-        validated path is pinned by tests/test_span_fast_path.py."""
+        `head` is that record's text up to and including its payload: the queue appends the policy revision for the stored text and the resource for the wire bytes, so
+        neither is cut out of a finished text again. Skips the parse and re-validation of `enqueue`; every other step (closed, expiry, size, priority eviction, spool) is the
+        shared `_append`. Equality with the validated path is pinned by tests/test_span_fast_path.py."""
         with self._lock:
             if self._closed or self._closing and not self._materializing_loss:self._loss('closed');return False
-            self._expire()
-            return self._append(text,'span',route_owner(self._span_route,trace_id.encode()))
+            now=self.now()
+            if now>=self._next_expiry:self._expire()
+            owner=trace_id.encode()
+            # A trace id is 32 hex digits, so the length frame of the route owner is the constant folded into `_span_route32`.
+            slot=int.from_bytes(hashlib.sha256(self._span_route32+owner).digest()[:8],'big')%64 if len(owner)==32 else route_owner(self._span_route,owner)
+            return self._append(head+self._safe_tail,'span',slot,(head+self._resource_tail).encode(),now)
     def _wire(self,text):
         """The native wire form of a stored record: the canonical text without its policy_revision (always the last key) and with the resource, as bytes."""
         return (text[:text.rindex(',"policy_revision":')]+self._resource_tail).encode()
-    def _append(self,safe,kind,slot):
-        record_bytes=len(self._wire(safe));size=record_bytes+(1024 if kind=='loss' else 512)
+    def _append(self,safe,kind,slot,wire=None,now=None):
+        if wire is None:wire=self._wire(safe)
+        record_bytes=len(wire);size=record_bytes+(1024 if kind=='loss' else 512)
         if record_bytes>(131072 if kind=='replay_chunk' else 262144):
             if not self._materializing_loss:self._loss('record_too_large')
             return False
-        while len(self._entries)>=self.config.max_records or self._bytes+size>self.config.max_bytes:
+        while len(self._entries)>=self._max_records or self._bytes+size>self._max_bytes:
             index=next((i for i,e in enumerate(self._entries) if not e['batch'] and _priority(e['kind'])<_priority(kind)),None)
             if index is None:
                 if not self._materializing_loss:self._loss('queue_full')
                 return False
             old=self._entries.pop(index);self._bytes-=old['size'];self._loss('queue_pressure')
-        at=self.now();self._next_expiry=min(self._next_expiry,at+300)
-        self._entries.append(dict(text=safe,size=size,at=at,wall=time.time(),kind=kind,slot=slot,batch=None,position=None));self._bytes+=size
+        at=self.now() if now is None else now
+        if at+300<self._next_expiry:self._next_expiry=at+300
+        self._entries.append({'text':safe,'wire':wire,'size':size,'at':at,'wall':time.time(),'kind':kind,'slot':slot,'batch':None,'position':None});self._bytes+=size
         if self.spool and not self._recovering and not self._materializing_loss:
             try:self.persist()
             except (OSError,ValueError):self._counts['spool_failed']=self._counts.get('spool_failed',0)+1
@@ -206,13 +225,17 @@ class DeliveryQueue:
                 if not entry['batch']:by_slot.setdefault(entry['slot'],[]).append(entry)
             if by_slot:
                 # The canonical batch header (keys sorted, so `records` sits between `project` and `route_slot`) as text around the batch id and the record array.
-                middle='","policy_revision":"'+self.descriptor.policy_revision+'","producer":"'+self.producer+'","project":"'+self.descriptor.project+'","records":['
+                middle=('","policy_revision":"'+self.descriptor.policy_revision+'","producer":"'+self.producer+'","project":"'+self.descriptor.project+'","records":[').encode()
+                base=7+32+len(middle);tails=self._tails
                 for slot in sorted(by_slot):
-                    tail=('],"route_slot":'+str(slot)+',"source":"'+self.descriptor.source+'","version":1}').encode()
-                    header_bytes=len(('{"id":"'+'0'*32+middle).encode())+len(tail)
+                    tail=tails.get(slot) or ('],"route_slot":'+str(slot)+self._tail_end).encode()
+                    header_bytes=base+len(tail)
+                    group=by_slot[slot]
+                    if len(group)==1:  # the common slot of a short flush interval: one record, which always fits a batch (a record is at most 256 KiB)
+                        entry=group[0];self._seal(slot,group,[entry['wire'] or self._wire(entry['text'])],middle,tail);continue
                     selected=[];wire=[];record_bytes=0
-                    for entry in by_slot[slot]:
-                        encoded=self._wire(entry['text'])
+                    for entry in group:
+                        encoded=entry['wire'] or self._wire(entry['text'])
                         if len(selected)==512 or header_bytes+record_bytes+len(encoded)+len(selected)>1048576:
                             self._seal(slot,selected,wire,middle,tail);selected=[];wire=[];record_bytes=0
                         selected.append(entry);wire.append(encoded);record_bytes+=len(encoded)
@@ -221,10 +244,16 @@ class DeliveryQueue:
     def _seal(self,slot,selected,wire,middle,tail):
         """Turns the selected entries of one route slot into a frozen batch (a fresh random id, the hash of its exact bytes) and marks them as batched."""
         if not selected:return
-        batch_id=os.urandom(16).hex();raw=('{"id":"'+batch_id+middle).encode()+b','.join(wire)+tail
-        batch=FrozenBatch(batch_id,self.descriptor.source,self.producer,slot,hashlib.sha256(raw).hexdigest(),raw,len(selected),tuple(sorted({e['kind'] for e in selected})),min(e['wall'] for e in selected),self.descriptor.policy_revision)
-        for position,entry in enumerate(selected):entry['batch']=batch_id;entry['position']=position;entry['text']=None
-        self._batches.append(dict(batch=batch,ambiguous=False,attempt=0,next=0))
+        batch_id=hex16();raw=b''.join((b'{"id":"',batch_id.encode(),middle,b','.join(wire),tail))
+        if len(selected)==1:
+            entry=selected[0];kind=entry['kind'];kinds=(kind,);first=entry['wall'];size=entry['size'];order=-_priority(kind)
+            batch=FrozenBatch(batch_id,self.descriptor.source,self.producer,slot,hashlib.sha256(raw).hexdigest(),raw,1,kinds,first,self.descriptor.policy_revision)
+            entry['batch']=batch_id;entry['position']=0;entry['text']=None;entry['wire']=None
+        else:
+            kinds=tuple(sorted(set(map(_KIND,selected))));first=min(map(_WALL,selected));size=sum(map(_SIZE,selected));order=-max(map(_priority,kinds))
+            batch=FrozenBatch(batch_id,self.descriptor.source,self.producer,slot,hashlib.sha256(raw).hexdigest(),raw,len(selected),kinds,first,self.descriptor.policy_revision)
+            for position,entry in enumerate(selected):entry['batch']=batch_id;entry['position']=position;entry['text']=None;entry['wire']=None
+        self._batches.append({'batch':batch,'ambiguous':False,'attempt':0,'next':0,'order':order,'bytes':size})
     def persist(self):
         if not self.spool:return
         with self._lock:
@@ -256,7 +285,7 @@ class DeliveryQueue:
             entry=self._entries[-1];entry['wall']=stored['wall'];entry['at']=self.now()-age;entry['batch']=stored['batch'];entry['position']=stored['position'];self._next_expiry=min(self._next_expiry,entry['at']+300)
             self._mark_loss_entry(entry,json.loads(original))
             if stored['batch'] is not None:
-                self._bytes+=native_size-entry['size'];entry['size']=native_size;entry['text']=None
+                self._bytes+=native_size-entry['size'];entry['size']=native_size;entry['text']=None;entry['wire']=None
         if self._bytes>self.config.max_bytes:raise ValueError('spool capacity exceeded')
         for state in value['batches']:
             if not any(e['batch']==state['id'] for e in self._entries):continue
@@ -264,43 +293,51 @@ class DeliveryQueue:
             revision=decimal(state['policy_revision'])
             if hashlib.sha256(raw).hexdigest()!=state['hash'] or wire['id']!=state['id'] or wire['project']!=self.descriptor.project or wire['producer']!=self.producer or wire['source']!=self.descriptor.source or wire['policy_revision']!=revision or wire['route_slot']!=state['route_slot'] or type(state['attempt']) is not int or state['attempt']<0:raise ValueError('invalid frozen spool')
             batch=FrozenBatch(state['id'],state['source'],state['producer'],state['route_slot'],state['hash'],raw,state['count'],tuple(state['kinds']),min(e['wall'] for e in self._entries if e['batch']==state['id']),state['policy_revision'])
-            self._batches.append(dict(batch=batch,ambiguous=True,attempt=state['attempt'],next=0))
+            self._batches.append(dict(batch=batch,ambiguous=True,attempt=state['attempt'],next=0,order=-max(map(_priority,batch.kinds)),bytes=sum(e['size'] for e in self._entries if e['batch']==state['id'])))
         if any(e['batch'] and not any(s['batch'].id==e['batch'] for s in self._batches) for e in self._entries):raise ValueError('orphan frozen spool')
         for key,b in self._loss_buckets.items():
             queued=sum(e.get('loss_count',0) for e in self._entries if e.get('loss_key')==key)
             if queued+b['unbatched']+b['acked']>b['observed']:raise ValueError('invalid native loss accounting')
-    def _report(self,receipts,exceeded=False):return FlushReport(tuple(r['batch_id'] for r in receipts),tuple(r['cursor']['group']+':'+r['cursor']['index'] for r in receipts),self.pending,self.lost,exceeded,tuple(receipts))
+    def _report(self,receipts,exceeded=False):return FlushReport(tuple([r['batch_id'] for r in receipts]),tuple([r['cursor']['group']+':'+r['cursor']['index'] for r in receipts]),self.pending,self.lost,exceeded,tuple(receipts))
     def flush(self,timeout=2.0):
         if type(timeout) not in (int,float) or timeout<0 or timeout!=timeout or timeout==float('inf'):raise ValueError('invalid flush deadline')
-        deadline=self.now()+timeout;wire_deadline=time.monotonic()+timeout;receipts=[]
+        now=self.now;monotonic=time.monotonic;spool=self.spool;deadline=now()+timeout;wire_deadline=monotonic()+timeout;receipts=[]
         if not self._flush_lock.acquire(timeout=max(0,timeout)):return self._report([],True)
         try:
             self.freeze()
-            while not self._denied and not self._closed and self.pending and self.now()<deadline and time.monotonic()<wire_deadline:
+            while not self._denied and not self._closed and self.pending and now()<deadline and monotonic()<wire_deadline:
                 self.freeze()
                 with self._lock:
                     heads=[];slots=set()
                     for state in self._batches:
-                        if state['batch'].route_slot not in slots:heads.append(state);slots.add(state['batch'].route_slot)
-                    heads.sort(key=lambda s:-max(_priority(k) for k in s['batch'].kinds))
+                        slot=state['batch'].route_slot
+                        if slot not in slots:heads.append(state);slots.add(slot)
+                    heads.sort(key=_ORDER)  # highest batch priority first (the order was fixed when the batch was sealed or recovered), stable within a priority
                 attempted=False;wait=float('inf')
                 for state in heads:
-                    if self.now()>=deadline or time.monotonic()>=wire_deadline:break
-                    if state['next']>self.now():wait=min(wait,state['next']-self.now());continue
+                    t=now()
+                    if t>=deadline or monotonic()>=wire_deadline:break
+                    if state['next']>t:wait=min(wait,state['next']-t);continue
                     if not state['ambiguous']:
                         if self._policy_expired():
-                            with self._lock:self._remove(state['batch'],'policy_expired');self.persist()
+                            with self._lock:
+                                self._remove(state['batch'],'policy_expired')
+                                if spool:self.persist()
                             attempted=True;continue
                     attempted=True;lookup=state['ambiguous'];state['ambiguous']=True
-                    try:self.persist()
-                    except (OSError,ValueError):self._counts['spool_failed']=self._counts.get('spool_failed',0)+1;return self._report(receipts,True)
+                    if spool:
+                        try:self.persist()
+                        except (OSError,ValueError):self._counts['spool_failed']=self._counts.get('spool_failed',0)+1;return self._report(receipts,True)
                     token=EXPORTING.set(True)
                     try:out=self.transport.lookup(state['batch'],wire_deadline) if lookup else self.transport.send(state['batch'],wire_deadline)
                     except Exception:out=Outcome('ambiguous')
                     finally:EXPORTING.reset(token)
                     with self._lock:
                         if self._closed:return self._report(receipts,self.pending>0)
-                        if out.kind=='receipt' and verify_receipt(state['batch'],out.receipt,lookup):self._acknowledge_signal_losses(state['batch'],out.receipt);receipts.append(out.receipt);self._remove(state['batch']);self.persist();continue
+                        if out.kind=='receipt' and verify_receipt(state['batch'],out.receipt,lookup):
+                            self._acknowledge_signal_losses(state['batch'],out.receipt);receipts.append(out.receipt);self._remove(state['batch'])
+                            if spool:self.persist()
+                            continue
                         if out.kind=='denied':self._denied=True;self._counts['unauthorized']=self._counts.get('unauthorized',0)+1;break
                         if out.kind=='terminal' and not lookup:self._remove(state['batch'],'terminal_rejected');self.persist();continue
                         if out.kind=='not_found' and lookup:

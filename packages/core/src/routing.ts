@@ -22,9 +22,9 @@ export function hashBytes(value:string):string{
  if(nativeCrypto&&value.length>=128)return nativeCrypto.hash?nativeCrypto.hash('sha256',value,'hex'):nativeCrypto.createHash('sha256').update(value,'utf8').digest('hex');
  return Array.from(sha256(encoder.encode(value)),b=>b.toString(16).padStart(2,'0')).join('');
 }
-/** Byte 7 of SHA-256(input) modulo 64: the route slot of a routing input. */
+/** Byte 7 of SHA-256(input) modulo 64: the route slot of a routing input. The native digest is asked for hex text, a plain string, and byte 7 read from its 15th and 16th digits: a `buffer` result is an ArrayBuffer-backed object per call (a native allocation the collector tracks), once per queued span. */
 export function routeSlot(input:Uint8Array):number{
- if(nativeCrypto?.hash)return nativeCrypto.hash('sha256',input,'buffer')[7]!%64;
+ if(nativeCrypto?.hash){const digest=nativeCrypto.hash('sha256',input,'hex'),hi=digest.charCodeAt(14),lo=digest.charCodeAt(15);return (((hi<=57?hi-48:hi-87)<<4)|(lo<=57?lo-48:lo-87))%64;}
  return sha256(input)[7]!%64;
 }
 const validated=new WeakSet<RoutingDescriptor>();

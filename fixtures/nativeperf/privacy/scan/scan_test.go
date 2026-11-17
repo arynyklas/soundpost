@@ -194,6 +194,13 @@ func TestStraceAuditAcceptsCleanAndFlagsEachForbiddenForm(t *testing.T) {
 	if sum.PerfEventOpens != 1 || sum.CPUOpens != 1 {
 		t.Fatalf("summary does not show the observed open: %+v", sum)
 	}
+	if len(sum.Attributes) != 1 || !strings.HasPrefix(sum.Attributes[0], "type=PERF_TYPE_SOFTWARE, size=PERF_ATTR_SIZE_VER5") || !strings.Contains(sum.Attributes[0], "sample_type=PERF_SAMPLE_IP|PERF_SAMPLE_TID") {
+		t.Fatalf("the audited attribute is not recorded verbatim: %q", sum.Attributes)
+	}
+	// An attribute the audit could not read is a finding and is never listed as audited.
+	if _, trunc, _ := AuditStrace(p, strings.NewReader(strings.Replace(cleanAttr, ", read_format=0,", ", ...", 1)+"\n")); len(trunc.Attributes) != 0 {
+		t.Fatalf("a truncated attribute was recorded as audited: %q", trunc.Attributes)
+	}
 	mutate := map[string]string{
 		"perf_attr_sample_type":  strings.Replace(cleanAttr, "PERF_SAMPLE_PERIOD", "PERF_SAMPLE_PERIOD|PERF_SAMPLE_STACK_USER", 1),
 		"perf_attr_sample_type2": strings.Replace(cleanAttr, "PERF_SAMPLE_PERIOD", "PERF_SAMPLE_PERIOD|PERF_SAMPLE_REGS_USER", 1),
@@ -242,5 +249,175 @@ func TestStraceAuditAcceptsCleanAndFlagsEachForbiddenForm(t *testing.T) {
 		if strings.Contains(f.String(), testNonce) {
 			t.Fatal("finding echoes the sentinel nonce")
 		}
+	}
+}
+
+// The strace audit knows the helper's two newer syscalls: prctl only as the D53 THP opt-out (plus the runtime's and the
+// canary's own thread/VMA naming) and ppoll only as the ring exit probe (one fd, no signal mask).
+func TestStraceAuditPinsPrctlAndPpollShapes(t *testing.T) {
+	p := testPolicy(t)
+	audit := func(s string) ([]Finding, StraceSummary) {
+		t.Helper()
+		f, sum, e := AuditStrace(p, strings.NewReader(s))
+		if e != nil {
+			t.Fatal(e)
+		}
+		return f, sum
+	}
+	clean := strings.Join([]string{
+		`4242 prctl(PR_SET_THP_DISABLE, 1, 0, 0, 0) = 0`,
+		`[pid  4243] prctl(PR_SET_NAME, "worker") = 0`,
+		`4243 prctl(PR_GET_NAME, "worker") = 0`,
+		`4243 prctl(PR_SET_VMA, PR_SET_VMA_ANON_NAME, 0xc000000000, 4194304, "Go: heap") = -1 EPERM (Operation not permitted)`,
+		`4242 ppoll([{fd=7, events=0}], 1, {tv_sec=0, tv_nsec=0}, NULL, 0) = 1 ([{fd=7, revents=POLLHUP}])`,
+		`[pid  4244] ppoll([{fd=9, events=0}], 1, {tv_sec=0, tv_nsec=0}, NULL, 0 <unfinished ...>`,
+	}, "\n") + "\n"
+	f, sum := audit(clean)
+	if len(f) != 0 {
+		t.Fatalf("the helper's own prctl/ppoll calls were flagged: %v", f)
+	}
+	if sum.Prctls != 4 || sum.ThpDisables != 1 || sum.Ppolls != 2 {
+		t.Fatalf("summary does not count what was observed: %+v", sum)
+	}
+	mutants := map[string]string{
+		"prctl_set_ptracer":        `1 prctl(PR_SET_PTRACER, 1, 0, 0, 0) = 0`,
+		"prctl_set_ptracer_number": `1 prctl(0x59616d61, 1, 0, 0, 0) = 0`,
+		"prctl_thp_enable":         `1 prctl(PR_SET_THP_DISABLE, 0, 0, 0, 0) = 0`,
+		"prctl_thp_number_enable":  `1 prctl(0x29, 0, 0, 0, 0) = 0`,
+		"prctl_set_dumpable":       `1 prctl(PR_SET_DUMPABLE, 1) = 0`,
+		"prctl_set_mm":             `1 prctl(PR_SET_MM, PR_SET_MM_MAP, 0x7ffc0000, 104, 0) = -1 EPERM (Operation not permitted)`,
+		"prctl_no_arguments":       `1 prctl() = -1 EFAULT (Bad address)`,
+		"ppoll_64_fds":             `1 ppoll([{fd=7, events=0}, {fd=8, events=0}, ...], 64, {tv_sec=0, tv_nsec=0}, NULL, 0) = 1`,
+		"ppoll_zero_fds":           `1 ppoll(NULL, 0, {tv_sec=0, tv_nsec=0}, NULL, 0) = 0 (Timeout)`,
+		"ppoll_sigmask":            `1 ppoll([{fd=7, events=0}], 1, {tv_sec=0, tv_nsec=0}, [INT], 8) = 1`,
+		"ppoll_sigmask_pointer":    `1 ppoll([{fd=7, events=0}], 1, {tv_sec=0, tv_nsec=0}, 0x7ffe0000, 8) = 1`,
+		"ppoll_unparseable":        `1 ppoll(0x7ffe0000, 1) = -1 EFAULT (Bad address)`,
+	}
+	for name, line := range mutants {
+		if f, _ := audit(line + "\n"); len(f) == 0 {
+			t.Errorf("%s: not flagged", name)
+		}
+	}
+	// A counted-but-refused call must not count as the helper's opt-out.
+	if _, sum := audit(mutants["prctl_thp_enable"] + "\n"); sum.ThpDisables != 0 {
+		t.Errorf("THP re-enable counted as the opt-out: %+v", sum)
+	}
+}
+
+// The static source audit pins the one ppoll call shape of ring_linux.go like it pins the one prctl.
+func TestGoSourceAuditPinsPpollShape(t *testing.T) {
+	p := testPolicy(t)
+	const prelude = "package x\nimport \"syscall\"\nvar _ = syscall.EPERM\nfunc f(fd uintptr) {\n"
+	audit := func(body string) []string { return AuditGoSource(p, "x.go", prelude+body+"}\n", nil) }
+	if got := audit("\tsyscall.Syscall6(syscall.SYS_PPOLL, fd, 1, 0, 0, 0, 0)\n"); len(got) != 0 {
+		t.Fatalf("the ring exit probe's call shape was flagged: %v", got)
+	}
+	mutants := map[string]string{
+		"ppoll_64_fds":            "\tsyscall.Syscall6(syscall.SYS_PPOLL, fd, 64, 0, 0, 0, 0)\n",
+		"ppoll_sigmask":           "\tsyscall.Syscall6(syscall.SYS_PPOLL, fd, 1, 0, 8, 0, 0)\n",
+		"ppoll_computed_nfds":     "\tn := uintptr(1)\n\tsyscall.Syscall6(syscall.SYS_PPOLL, fd, n, 0, 0, 0, 0)\n",
+		"ppoll_computed_sigmask":  "\tm := uintptr(0)\n\tsyscall.Syscall6(syscall.SYS_PPOLL, fd, 1, 0, m, 0, 0)\n",
+		"ppoll_short_form":        "\tsyscall.Syscall(syscall.SYS_PPOLL, fd, 1, 0)\n",
+		"ppoll_no_arguments":      "\tsyscall.Syscall6(syscall.SYS_PPOLL)\n",
+		"ppoll_via_rawsyscall6":   "\tsyscall.RawSyscall6(syscall.SYS_PPOLL, fd, 1, 0, 0, 0, 0)\n",
+		"ppoll_numeric_number":    "\tsyscall.Syscall6(271, fd, 1, 0, 0, 0, 0)\n",
+		"ppoll_computed_selector": "\tsyscall.Syscall6(uintptr(271), fd, 1, 0, 0, 0, 0)\n",
+	}
+	for name, body := range mutants {
+		if got := audit(body); len(got) == 0 {
+			t.Errorf("%s: not flagged", name)
+		}
+	}
+	found := false
+	for _, f := range audit("\tsyscall.Syscall6(syscall.SYS_PPOLL, fd, 64, 0, 0, 0, 0)\n") {
+		found = found || strings.Contains(f, "ppoll_call_not_allowlisted")
+	}
+	if !found {
+		t.Error("a wrong-shape ppoll is not reported as ppoll_call_not_allowlisted")
+	}
+}
+
+// The policy cannot be widened without editing this test: every allowlist the two audits use is pinned here.
+func TestPolicyPinsPrctlAndPpollAllowlists(t *testing.T) {
+	p := testPolicy(t).Syscalls
+	if len(p.SourcePrctl) != 1 || p.SourcePrctl[0].Option != 41 || p.SourcePrctl[0].Arg != 1 {
+		t.Errorf("source prctl allowlist: %+v", p.SourcePrctl)
+	}
+	if len(p.SourcePpoll) != 1 || p.SourcePpoll[0].Nfds != 1 || p.SourcePpoll[0].Sigmask != 0 {
+		t.Errorf("source ppoll allowlist: %+v", p.SourcePpoll)
+	}
+	if len(p.StraceAllowedPpoll) != 1 || p.StraceAllowedPpoll[0].Nfds != 1 || p.StraceAllowedPpoll[0].Sigmask != "NULL" {
+		t.Errorf("strace ppoll allowlist: %+v", p.StraceAllowedPpoll)
+	}
+	got := map[string]string{}
+	for _, c := range p.StraceAllowedPrctl {
+		arg := "any"
+		if c.Arg != nil {
+			arg = strconv.FormatInt(*c.Arg, 10)
+		}
+		got[c.Option] = strconv.FormatInt(c.Number, 10) + "/" + arg
+	}
+	want := map[string]string{"PR_SET_THP_DISABLE": "41/1", "PR_SET_NAME": "15/any", "PR_GET_NAME": "16/any", "PR_SET_VMA": "1398164801/any"}
+	if len(got) != len(want) || len(p.StraceAllowedPrctl) != len(want) {
+		t.Errorf("strace prctl allowlist has %d entries: %v", len(p.StraceAllowedPrctl), got)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("strace prctl %s = %q, want %q", k, got[k], v)
+		}
+	}
+}
+
+// With more syscalls traced, `strace -f` interleaves threads: a call prints as `name( <unfinished ...>` and its
+// arguments (for perf_event_open, the attribute struct) appear on the matching `<... name resumed>` line. The audit
+// must join the two instead of reporting an unreadable attribute (or, worse, skipping the call).
+func TestStraceAuditJoinsUnfinishedAndResumedCalls(t *testing.T) {
+	p := testPolicy(t)
+	audit := func(lines ...string) ([]Finding, StraceSummary) {
+		t.Helper()
+		f, sum, e := AuditStrace(p, strings.NewReader(strings.Join(lines, "\n")+"\n"))
+		if e != nil {
+			t.Fatal(e)
+		}
+		return f, sum
+	}
+	attr := strings.TrimPrefix(strings.SplitN(cleanAttr, ", 7, -1", 2)[0], "1 perf_event_open(")
+	resumed := func(pid int, body string) string {
+		return strconv.Itoa(pid) + " <... perf_event_open resumed>" + body + ", 7, -1, -1, PERF_FLAG_FD_CLOEXEC) = 9"
+	}
+	other := `4243 prctl(PR_SET_NAME, "worker") = 0`
+	f, sum := audit("4242 perf_event_open( <unfinished ...>", other, resumed(4242, attr))
+	if len(f) != 0 {
+		t.Fatalf("an interleaved clean perf_event_open was flagged: %v", f)
+	}
+	if sum.PerfEventOpens != 1 || sum.CPUOpens != 1 || len(sum.Attributes) != 1 || sum.Prctls != 1 {
+		t.Fatalf("the joined call was not counted/recorded: %+v", sum)
+	}
+	// The pid-prefixed form of strace -f -o is joined the same way.
+	if f, sum = audit("[pid  4242] perf_event_open( <unfinished ...>", other, "[pid  4242] <... perf_event_open resumed>"+attr+", 7, -1, -1, PERF_FLAG_FD_CLOEXEC) = 9"); len(f) != 0 || sum.PerfEventOpens != 1 {
+		t.Fatalf("pid-bracket form: %v %+v", f, sum)
+	}
+	// A forbidden attribute on the resumed line is still found, and is reported at the line where the call began.
+	bad := strings.Replace(attr, "PERF_SAMPLE_PERIOD", "PERF_SAMPLE_PERIOD|PERF_SAMPLE_STACK_USER", 1)
+	if f, _ = audit("4242 perf_event_open( <unfinished ...>", other, resumed(4242, bad)); len(f) != 1 || f[0].Rule != "perf_attr_sample_type" || f[0].Line != 1 {
+		t.Fatalf("a forbidden interleaved attribute: %v", f)
+	}
+	// Another thread's resumed call must not complete this thread's call.
+	if f, _ = audit("4242 perf_event_open( <unfinished ...>", resumed(4243, attr)); len(f) == 0 {
+		t.Fatal("a resumed line of another pid completed an unrelated unfinished call")
+	}
+	// A call whose arguments never appear (the process was killed first) is reported, not skipped.
+	if f, _ = audit("4242 perf_event_open( <unfinished ...>", "4242 +++ killed by SIGKILL +++"); len(f) != 1 || f[0].Rule != "perf_attr_unparseable" {
+		t.Fatalf("an unfinished perf_event_open with no attribute passed: %v", f)
+	}
+	// Calls other than perf_event_open join too: a forbidden ptrace and a mis-shaped ppoll started on one line.
+	if f, _ = audit("4242 ptrace(PTRACE_SEIZE, 4243 <unfinished ...>", "4242 <... ptrace resumed>NULL, 0) = 0"); len(f) == 0 {
+		t.Fatal("an unfinished forbidden syscall was not flagged")
+	}
+	if f, _ = audit("4242 ppoll([{fd=7, events=0}], 64, {tv_sec=0, tv_nsec=0}, NULL, 0 <unfinished ...>", "4242 <... ppoll resumed>) = 1"); len(f) != 1 || f[0].Rule != "ppoll_not_allowlisted" {
+		t.Fatalf("an unfinished mis-shaped ppoll: %v", f)
+	}
+	if f, sum = audit("4242 ppoll([{fd=7, events=0}], 1, {tv_sec=0, tv_nsec=0}, NULL, 0 <unfinished ...>", "4242 <... ppoll resumed>) = 1 ([{fd=7, revents=POLLHUP}])"); len(f) != 0 || sum.Ppolls != 1 {
+		t.Fatalf("an unfinished clean ppoll: %v %+v", f, sum)
 	}
 }

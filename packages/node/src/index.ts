@@ -4,15 +4,14 @@ import {createTimerCancellationBoundary} from "@soundpost/core";
 import {RuntimeClient as CoreClient} from "@soundpost/core/runtime";
 import type {Config} from "@soundpost/core/types";
 import {types} from "node:util";
-import {AsyncLocalStorage} from "node:async_hooks";
-import {createMetadataContext} from "./context.ts";
+import {createContexts} from "./context.ts";
 import {setTimeout as timerPromise} from "node:timers/promises";
 const timerCancellation=createTimerCancellationBoundary(
  ()=>timerPromise(0,undefined,{signal:AbortSignal.abort()}),
  ()=>Reflect.apply(timerPromise,undefined,[0,undefined,{signal:7}]),
  error=>!types.isProxy(error)&&types.isNativeError(error));
 export class Client extends CoreClient {
- constructor(config:Config){const scope=new AsyncLocalStorage<boolean>();super(config,{isNativeError:types.isNativeError,isProxy:types.isProxy,timerCancellation},{active:()=>scope.getStore()===true,run:<T>(callback:()=>T):T=>scope.run(true,callback),close:()=>scope.disable()},createMetadataContext(config.clockNs));}
+ constructor(config:Config){const contexts=createContexts(config.clockNs);super(config,{isNativeError:types.isNativeError,isProxy:types.isProxy,timerCancellation},contexts.exporter,contexts.metadata);}
 }
 export function init(config:Config):Client{return new Client(config);}
 export {installHooks,HookLease} from "./hooks.ts";

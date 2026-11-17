@@ -16,21 +16,42 @@ import (
 	"strings"
 
 	"github.com/arynyklas/soundpost/fixtures/nativeperf/privacy/scan"
+	"github.com/arynyklas/soundpost/internal/nativeperf"
 )
 
 type syscallReport struct {
-	Method           string   `json:"method"`
-	Lines            int      `json:"trace_lines,omitempty"`
-	PerfEventOpens   int      `json:"perf_event_open_calls,omitempty"`
-	CPUOpens         int      `json:"cpu_event_opens,omitempty"`
-	SchedulerOpens   int      `json:"scheduler_event_opens,omitempty"`
-	PerfIoctls       int      `json:"perf_event_ioctls,omitempty"`
-	ForbiddenChecked int      `json:"syscall_lines_checked_against_forbidden_list,omitempty"`
-	SourceFiles      int      `json:"source_files_audited,omitempty"`
-	Findings         []string `json:"findings"`
+	Method           string `json:"method"`
+	Lines            int    `json:"trace_lines,omitempty"`
+	PerfEventOpens   int    `json:"perf_event_open_calls,omitempty"`
+	CPUOpens         int    `json:"cpu_event_opens,omitempty"`
+	SchedulerOpens   int    `json:"scheduler_event_opens,omitempty"`
+	PerfIoctls       int    `json:"perf_event_ioctls,omitempty"`
+	ForbiddenChecked int    `json:"syscall_lines_checked_against_forbidden_list,omitempty"`
+	PrctlCalls       int    `json:"prctl_calls"`
+	ThpDisableCalls  int    `json:"prctl_thp_disable_calls"`
+	PpollCalls       int    `json:"ppoll_calls"`
+	// PerfAttributes lists every perf_event_open attribute the audit checked (strace -v rendering, trace order).
+	PerfAttributes []string `json:"perf_event_open_attributes,omitempty"`
+	SourceFiles    int      `json:"source_files_audited,omitempty"`
+	Findings       []string `json:"findings"`
 }
 
-const straceTrace = "trace=%file,perf_event_open,ioctl,ptrace,process_vm_readv,process_vm_writev,bpf,kcmp,userfaultfd,pidfd_getfd,seccomp,mount,setns,unshare,init_module,finit_module,kexec_load,kexec_file_load"
+const straceTrace = "trace=%file,perf_event_open,ioctl,prctl,ppoll,ptrace,process_vm_readv,process_vm_writev,bpf,kcmp,userfaultfd,pidfd_getfd,seccomp,mount,setns,unshare,init_module,finit_module,kexec_load,kexec_file_load"
+
+// vacuityFailure says why a clean trace still proves too little, or "" when it shows the real acquisition and both of
+// the helper's newer syscalls: the perf opens/ioctls, the helper process's prctl(PR_SET_THP_DISABLE, 1) (D53) and, when
+// a scheduler capture ran, the ring exit probe's ppoll (it exists only in scheduler captures).
+func vacuityFailure(sum scan.StraceSummary, schedulerRan bool) string {
+	switch {
+	case sum.CPUOpens < 2 || sum.PerfIoctls < 2:
+		return "the strace log does not show the real perf acquisition (audit would be vacuous)"
+	case sum.ThpDisables < 1:
+		return "the strace log shows no prctl(PR_SET_THP_DISABLE, 1) from the helper process (the D53 opt-out was not exercised, audit would be blind to it)"
+	case schedulerRan && sum.Ppolls < 1:
+		return "a scheduler capture ran but the strace log shows no ppoll (the ring exit probe was not exercised, audit would be blind to it)"
+	}
+	return ""
+}
 
 // runUnderStrace re-runs this whole fixture (acquisition, helper, node, drills)
 // under `strace -f -v` and audits the actual syscall trace against the policy:
@@ -96,7 +117,7 @@ func runUnderStrace(o options) (int, error) {
 	if e != nil {
 		return exitFail, e
 	}
-	sr := &syscallReport{Method: "strace -f -v over the complete fixture run (verifier, in-process helper, helper process, peers, workload)", Lines: sum.Lines, PerfEventOpens: sum.PerfEventOpens, CPUOpens: sum.CPUOpens, SchedulerOpens: sum.SchedulerOpens, PerfIoctls: sum.PerfIoctls, ForbiddenChecked: sum.ForbiddenChecked, Findings: []string{}}
+	sr := &syscallReport{Method: "strace -f -v over the complete fixture run (verifier, in-process helper, helper process, peers, workload)", Lines: sum.Lines, PerfEventOpens: sum.PerfEventOpens, CPUOpens: sum.CPUOpens, SchedulerOpens: sum.SchedulerOpens, PerfIoctls: sum.PerfIoctls, ForbiddenChecked: sum.ForbiddenChecked, PrctlCalls: sum.Prctls, ThpDisableCalls: sum.ThpDisables, PpollCalls: sum.Ppolls, PerfAttributes: sum.Attributes, Findings: []string{}}
 	for _, finding := range findings {
 		sr.Findings = append(sr.Findings, finding.String())
 	}
@@ -106,9 +127,9 @@ func runUnderStrace(o options) (int, error) {
 	case len(findings) > 0:
 		rep.Failures = append(rep.Failures, "forbidden syscall/configuration observed in the real run")
 		code = exitFail
-	case sum.CPUOpens < 2 || sum.PerfIoctls < 2:
+	case vacuityFailure(sum, rep.Scheduler.Status == string(nativeperf.Supported)) != "":
 		// Non-vacuity: a trace without the real acquisition proves nothing.
-		rep.Failures = append(rep.Failures, "the strace log does not show the real perf acquisition (audit would be vacuous)")
+		rep.Failures = append(rep.Failures, vacuityFailure(sum, rep.Scheduler.Status == string(nativeperf.Supported)))
 		code = exitFail
 	}
 	enc := json.NewEncoder(os.Stdout)

@@ -35,12 +35,18 @@ export function probabilityValue(bits:unknown):number {
 }
 const abortState=Object.getOwnPropertyDescriptor(AbortSignal.prototype,"aborted")!.get!;
 export function signalAborted(signal:unknown):boolean{try{return Reflect.apply(abortState,signal,[])===true;}catch{return false;}}
+/** A trace context this module built or validated. The private brand cannot be forged: an object with the same fields, the same prototype or a copied property is not branded, so it is validated again. Checking it is one field probe; remembering each context in a WeakSet instead cost an ephemeron table entry per span, which every collection cycle has to resolve (a measurable share of Bun's collector work) and which V8 resizes as spans come and go. */
+class BuiltContext implements TraceContext {
+ readonly #brand=true;
+ constructor(readonly traceId:string,readonly spanId:string,readonly sampled:boolean,readonly probability:string,readonly clockDomain:ClockDomain){}
+ static is(value:object):boolean{return #brand in value;}
+}
 export function checkedTraceContext(value:unknown):TraceContext {
- if(typeof value==="object"&&value!==null&&builtContexts.has(value))return value as TraceContext;
+ if(typeof value==="object"&&value!==null&&BuiltContext.is(value))return value as TraceContext;
  const descriptors=fields(value,["traceId","spanId","sampled","probability","clockDomain"]),traceId=canonicalId(descriptors.traceId!.value),spanId:unknown=descriptors.spanId!.value,sampled:unknown=descriptors.sampled!.value,probability:unknown=descriptors.probability!.value;
  if(typeof spanId!=="string"||!/^[0-9a-f]{16}$/.test(spanId)||spanId==="0".repeat(16)||typeof sampled!=="boolean")throw Error("invalid_trace_context");const chance=probabilityValue(probability);if(sampled&&chance===0)throw Error("invalid_trace_context");
  const domain=fields(descriptors.clockDomain!.value,["host","boot","runtime"]),clockDomain=Object.freeze({host:canonicalId(domain.host!.value),boot:canonicalId(domain.boot!.value),runtime:canonicalId(domain.runtime!.value)});
- const checked=Object.freeze({traceId,spanId,sampled,probability:probability as string,clockDomain});builtContexts.add(checked);return checked;
+ return Object.freeze(new BuiltContext(traceId,spanId,sampled,probability as string,clockDomain));
 }
 /** Exact binary/rational Bernoulli comparison, including subnormal float64 budgets.
  * A finite random-number bucket would falsely round tiny probabilities upward. */
@@ -56,7 +62,7 @@ const spanKinds:Readonly<Record<string,true>>={internal:true,server:true,client:
 const MAX_U64=18446744073709551615n;
 /** The raw readings behind a clock source this module built: wall time as canonical text, monotonic time as a checked BigInt, plus the canonical text a reading's clock object has around its monotonic and wall values. The lean span path stores these raw values and writes the text only when the span is serialized. */
 export interface RawClock {readonly wall:()=>string;readonly mono:()=>bigint;readonly domain:ClockDomain;readonly prefix:string;readonly tail:string}
-const rawClocks=new WeakMap<object,RawClock>(),builtContexts=new WeakSet<object>(),builtDomains=new WeakSet<object>();
+const rawClocks=new WeakMap<object,RawClock>(),builtDomains=new WeakSet<object>();
 export function createTraceClock(monotonic:()=>bigint,wall?:()=>string,uncertainty="18446744073709551615"):TraceClockSource {
  decimal(uncertainty);const domain=Object.freeze({host:randomHex(16),boot:randomHex(16),runtime:randomHex(16)});
  // The built-in wall clock is whole milliseconds scaled to nanoseconds: canonical by construction, so only a caller-supplied clock needs validating.
@@ -75,6 +81,8 @@ export function createSynchronousMetadataContext(wall?:()=>string):MetadataConte
 /** A span on the lean path: it keeps raw values (IDs, kind, status, wall text, monotonic BigInts) and the queue serializes it later, at flush time, with leanSpanPayload. */
 export class LiveSpan implements ActiveSpan {
  ended=false;endWall:string|null=null;endMono=0n;status:SpanStatus="incomplete";
+ /** Membership in the recorder's list of in-flight lean spans. */
+ linked=false;activePrev:LiveSpan|undefined=undefined;activeNext:LiveSpan|undefined=undefined;
  constructor(readonly context:TraceContext,readonly raw:RawClock,readonly parentId:string|null,readonly kind:string,readonly operation:string,readonly dependency:string,readonly startWall:string,readonly startMono:bigint,readonly enabled:boolean,private readonly recorder:SpanRecorder){}
  run<T>(callback:()=>T):T{return this.recorder.runIn(this.context,callback);}
  end(status:SpanStatus):void{this.recorder.finish(this,status);}
@@ -98,13 +106,17 @@ const clockText=(raw:RawClock,mono:bigint,wall:string):string=>raw.prefix+String
 export function leanSpanLength(span:LiveSpan):number{
  return FIXED_LENGTH+span.dependency.length+span.operation.length+span.kind.length+span.status.length+(span.parentId===null?4:18)+(span.endWall===null?4:clockLength(span.raw,span.endMono,span.endWall))+clockLength(span.raw,span.startMono,span.startWall);
 }
+/** The canonical payload text of a lean span from its parts: the one place the text is composed, whether the parts come from a LiveSpan or from the queue's compact store (lean_slab.ts). `endWall` null is a span without an end reading. */
+export function composeLeanPayload(raw:RawClock,dependency:string,operation:string,kind:string,status:string,probability:string,traceId:string,spanId:string,parentId:string|null,startMono:bigint,startWall:string,endMono:bigint,endWall:string|null):string{
+ return S0+dependency+S1+(endWall===null?"null":clockText(raw,endMono,endWall))+S2+operation+S3+(parentId===null?"null":'"'+parentId+'"')+S4+probability+S5+spanId+S6+kind+S7+clockText(raw,startMono,startWall)+S8+status+S9+traceId+S10;
+}
 /** The canonical payload text of an ended lean span. */
 export function leanSpanPayload(span:LiveSpan):string{
  const context=span.context;
- return S0+span.dependency+S1+(span.endWall===null?"null":clockText(span.raw,span.endMono,span.endWall))+S2+span.operation+S3+(span.parentId===null?"null":'"'+span.parentId+'"')+S4+context.probability+S5+context.spanId+S6+span.kind+S7+clockText(span.raw,span.startMono,span.startWall)+S8+span.status+S9+context.traceId+S10;
+ return composeLeanPayload(span.raw,span.dependency,span.operation,span.kind,span.status,context.probability,context.traceId,context.spanId,span.parentId,span.startMono,span.startWall,span.endMono,span.endWall);
 }
 export class SpanRecorder {
- private readonly active=new Set<ActiveSpan>();private readonly operations:ReadonlySet<string>;private readonly dependencies:ReadonlySet<string>;private readonly probability:string;private readonly chance:number;private readonly always:boolean;
+ private readonly active=new Set<ActiveSpan>();private leanHead:LiveSpan|undefined;private leanCount=0;private readonly operations:ReadonlySet<string>;private readonly dependencies:ReadonlySet<string>;private readonly probability:string;private readonly chance:number;private readonly always:boolean;
  constructor(private readonly context:MetadataContext,operations:readonly string[],dependencies:readonly string[],probability:string|undefined,private readonly enabled:()=>boolean,private readonly emit:(span:NativeSpan)=>void,private readonly emitLean:(span:LiveSpan)=>void,private readonly loss:(reason:string)=>void){if(operations.length>128||dependencies.length>64||[...operations,...dependencies].some(value=>typeof value!=="string"||!/^[a-zA-Z0-9_.-]{1,128}$/.test(value)))throw Error("invalid_trace_aliases");this.operations=new Set(operations);this.dependencies=new Set(dependencies);this.probability=probability??"3ff0000000000000";this.chance=probabilityValue(this.probability);this.always=this.probability==="3ff0000000000000";}
  current():TraceContext|undefined{return this.context.current();}
  run<T>(context:TraceContext|null,callback:()=>T):T{return this.context.run(context===null?undefined:checkedTraceContext(context),callback);}
@@ -121,19 +133,19 @@ export class SpanRecorder {
   const parent=parentValue===null?undefined:parentValue===undefined?this.context.current():checkedTraceContext(parentValue);
   // Contexts whose clock this module built, and parents it built or checked, take the lean path; any other context goes through the generic validated path below.
   const raw=rawClocks.get(this.context.clock);
-  if(raw!==undefined&&raw.domain===this.context.clockDomain&&(parent===undefined||builtContexts.has(parent)))return this.beginLean(raw,operation,dependency,kind,parent);
+  if(raw!==undefined&&raw.domain===this.context.clockDomain&&(parent===undefined||BuiltContext.is(parent)))return this.beginLean(raw,operation,dependency,kind,parent);
   const start=(()=>{try{return this.context.clock();}catch{this.loss("invalid_clock");return undefined;}})(),enabled=this.enabled()&&start!==undefined;
   // A trace's explicit head decision is inherited. A narrower deployment budget
   // never increases an upstream keep probability or resurrects an upstream drop.
   const parentChance=parent?probabilityValue(parent.probability):1,probability=parent&&parentChance<=this.chance?parent.probability:this.probability,sampled=enabled&&(parent?parent.sampled&&sampleTraceDecision(probability,parent.probability):sampleTraceDecision(probability));
-  const context=Object.freeze({traceId:parent?.traceId??randomHex(16),spanId:randomHex(8),sampled,probability,clockDomain:this.context.clockDomain});if((parent===undefined||builtContexts.has(parent))&&builtDomains.has(context.clockDomain))builtContexts.add(context);let ended=false;
+  const trusted=(parent===undefined||BuiltContext.is(parent))&&builtDomains.has(this.context.clockDomain),context=Object.freeze(trusted?new BuiltContext(parent?.traceId??randomHex(16),randomHex(8),sampled,probability,this.context.clockDomain):{traceId:parent?.traceId??randomHex(16),spanId:randomHex(8),sampled,probability,clockDomain:this.context.clockDomain});let ended=false;
   const handle:ActiveSpan={context,run:<T>(callback:()=>T):T=>this.context.run(context,callback),end:(status:SpanStatus):void=>{
    if(ended)return;if(!Object.hasOwn(spanStatuses,status))throw Error("invalid_span_status");ended=true;this.active.delete(handle);
    if(!enabled||!start)return;if(!sampled){this.loss("trace_sampled_out");return;}
    let end:TraceClock|null=null;try{end=this.context.clock();if(end.domain.host!==start.domain.host||end.domain.boot!==start.domain.boot||end.domain.runtime!==start.domain.runtime||compareNano(end.mono_ns,start.mono_ns)<0)throw Error("invalid_span_clock");}catch{this.loss("invalid_clock");status="incomplete";end=null;}
    this.emit({trace_id:context.traceId,span_id:context.spanId,parent_id:parent?.spanId??null,span_kind:kind as NativeSpan["span_kind"],operation,start,end,status,dependency_alias:typeof dependency==="string"?dependency:"",links:[],sample_probability:probability,sample_decision:"keep"});
   }};
-  if(this.active.size>=1024){this.loss("trace_active_limit");handle.end("incomplete");}else this.active.add(handle);return handle;
+  if(this.active.size+this.leanCount>=1024){this.loss("trace_active_limit");handle.end("incomplete");}else this.active.add(handle);return handle;
  }
  private beginLean(raw:RawClock,operation:string,dependency:unknown,kind:string,parent:TraceContext|undefined):ActiveSpan {
   let startWall="0",startMono=0n,readable=true;
@@ -141,16 +153,24 @@ export class SpanRecorder {
   const enabled=this.enabled()&&readable,probability=parent&&probabilityValue(parent.probability)<=this.chance?parent.probability:this.probability;
   // Same inheritance as the generic path: an explicit upstream head decision is kept, a narrower budget never raises an upstream keep probability or resurrects a drop.
   const sampled=enabled&&(parent?parent.sampled&&sampleTraceDecision(probability,parent.probability):this.always||sampleTraceDecision(probability));
-  const context=Object.freeze({traceId:parent?.traceId??randomHex(16),spanId:randomHex(8),sampled,probability,clockDomain:raw.domain});builtContexts.add(context);
+  const context=Object.freeze(new BuiltContext(parent?.traceId??randomHex(16),randomHex(8),sampled,probability,raw.domain));
   const span=new LiveSpan(context,raw,parent?.spanId??null,kind,operation,typeof dependency==="string"?dependency:"",startWall,startMono,enabled,this);
-  if(this.active.size>=1024){this.loss("trace_active_limit");span.end("incomplete");}else this.active.add(span);return span;
+  if(this.active.size+this.leanCount>=1024){this.loss("trace_active_limit");span.end("incomplete");}else this.link(span);return span;
  }
  /** LiveSpan.end: the generic handle's end() for the lean path (same status check, same loss reasons, same incomplete fallback). */
  finish(span:LiveSpan,status:SpanStatus):void {
-  if(span.ended)return;if(!Object.hasOwn(spanStatuses,status))throw Error("invalid_span_status");span.ended=true;this.active.delete(span);
+  if(span.ended)return;if(!Object.hasOwn(spanStatuses,status))throw Error("invalid_span_status");span.ended=true;this.unlink(span);
   if(!span.enabled)return;if(!span.context.sampled){this.loss("trace_sampled_out");return;}
   try{span.endMono=span.raw.mono();span.endWall=span.raw.wall();if(span.endMono<span.startMono)throw Error("invalid_span_clock");}catch{this.loss("invalid_clock");status="incomplete";span.endWall=null;}
   span.status=status;this.emitLean(span);
  }
- close():void{for(const handle of [...this.active])handle.end("incomplete");this.context.close();}
+ close():void{const spans:ActiveSpan[]=[];for(let span=this.leanHead;span!==undefined;span=span.activeNext)spans.push(span);spans.reverse();for(const handle of [...spans,...this.active])handle.end("incomplete");this.context.close();}
+ /** The in-flight lean spans form a doubly linked list through the spans themselves: a Set would insert and delete one hash-table entry per request, and its rehash and shrink steps are allocation and collector work on every request. */
+ private link(span:LiveSpan):void{span.activeNext=this.leanHead;if(this.leanHead!==undefined)this.leanHead.activePrev=span;this.leanHead=span;span.linked=true;this.leanCount++;}
+ private unlink(span:LiveSpan):void{
+  if(!span.linked)return;span.linked=false;this.leanCount--;
+  if(span.activePrev!==undefined)span.activePrev.activeNext=span.activeNext;else this.leanHead=span.activeNext;
+  if(span.activeNext!==undefined)span.activeNext.activePrev=span.activePrev;
+  span.activePrev=undefined;span.activeNext=undefined;
+ }
 }

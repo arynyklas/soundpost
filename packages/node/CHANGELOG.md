@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- A client keeps one `AsyncLocalStorage` store for its trace scope, job scope and exporter-recursion scope (`createContexts`; it was three stores, and the runtime visits every enabled store for each async resource it creates). The three scopes stay independent: each run keeps the other two and restores on exit.
+
+- `installHttp` tracks the requests in flight with a linked list instead of a Set (no hash-table insert and delete per request); the in-flight limit, the oldest-first end of a closing lease and exactly-once settlement are unchanged.
+
 - `startProfile({client})` now delivers the finished report through the client's queue (`captureRuntimeProfile`): a `capability` record (method `runtime_engine_samples`) and, only for a supported run, linked `profile_chunk` records (chunk method `runtime_cpu`, units `samples`; line/column are not sent). `report.ack` is `obtained` (flush cursors), `failed` or `not_available` (`profile_not_admitted` / `no_profile_admission_path`). Needs `deploymentProfiles: true` and a source policy that lists `profile_chunk` and `capability`.
 
 ## 0.1.0 — 2026-11-03

@@ -10,7 +10,7 @@ import threading
 import time
 from email.utils import parsedate_to_datetime
 from urllib.parse import urlsplit
-from .policy import canonical_id, decimal, unix_nano, pairs
+from .policy import canonical_id, decimal, unix_nano, unix_nano_int, pairs
 from .routing import native_canonical
 EXPORTING=contextvars.ContextVar('soundpost_exporting',default=False)
 @dataclass(frozen=True)
@@ -39,16 +39,17 @@ def verify_receipt(batch,value,historical):
     try:
         if type(value) is not dict or value['version']!=1 or type(value['version']) is not int or value['batch_id']!=batch.id or value['hash']!=batch.hash:return False
         if (value.get('historical') is not True) if historical else ('historical' in value):return False
-        canonical_id(value['batch_id']);canonical_id(value['cursor']['group'])
-        if decimal(value['cursor']['index'])=='0':return False
-        minimum=int(unix_nano(value['retain_until_ns']));unix_nano(value['dedup_until_ns'])
+        # `batch_id` equals the SDK's own batch id (checked above), which is an opaque ID by construction: only the cursor group is new text to validate.
+        cursor=value['cursor'];canonical_id(cursor['group'])
+        if decimal(cursor['index'])=='0':return False
+        minimum=unix_nano_int(value['retain_until_ns']);unix_nano_int(value['dedup_until_ns'])
         deadlines=value['signal_deadlines']
         if type(deadlines) is not list or len(deadlines)!=len(batch.kinds):return False
         seen=set();values=[]
         for item in deadlines:
             kind=item['kind']
             if kind not in batch.kinds or kind in seen:return False
-            seen.add(kind);values.append(int(unix_nano(item['retain_until_ns'])))
+            seen.add(kind);values.append(unix_nano_int(item['retain_until_ns']))
         return bool(values) and min(values)==minimum
     except (ValueError,TypeError,KeyError):return False
 

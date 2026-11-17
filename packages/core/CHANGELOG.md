@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Server capture cost (lane 4 wave 23): a captured error is serialized once (the client's canonical text is the stored form and the batch form is that text with the resource spliced in: `DeliveryQueue.enqueueNative`; a record whose parse removed an empty optional field takes the old path). Wire bytes, routing, privacy and limits unchanged.
+
+- Server capture cost (lane 4 wave 22, collector pressure): a queued span is a slot in a compact typed-array store (`lean_slab.ts`) instead of nine heap objects (about 500 bytes -> one queue entry), trace contexts are recognised by a private brand instead of a WeakSet entry per span, the in-flight lean spans are a linked list instead of a Set, the route slot is read from a hex digest (no ArrayBuffer per span), the batch form of a span is built without its safe text, and the parsed frames of a stack seen again are found by the SHA-256 of the stack (the text is not kept). Wire bytes, routing, privacy and limits unchanged.
+
 - Breaking (internal entries): `captureRuntimeProfile` moved off `Client` to the new `@soundpost/core/runtime` entry (`RuntimeClient`, `initRuntime`), and the encrypted-spool persistence/recovery moved off `DeliveryQueue` to `SpoolingDeliveryQueue` (`queue_spool.ts`, installed by `RuntimeClient` through the protected `Client.createDelivery`). The base `Client`/`DeliveryQueue` (what the browser uses, which prohibits a spool) refuse a spool instead of ignoring it. The Node and Bun clients extend `RuntimeClient`. Browser core bundle: 42,603 B -> 40,123 B gzip.
 
 - `Client.captureRuntimeProfile(report)` admits a Node/Bun `runtime_engine_samples` report as a capability record plus linked, size-split `runtime_cpu` chunks (`runtimeProfileWire` in `profile_wire.ts`), with truncated samples recorded as a loss.

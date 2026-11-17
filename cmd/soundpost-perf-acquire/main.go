@@ -68,5 +68,10 @@ func run() error {
 		acquire = nativeperf.NewCyclesAcquisition
 	}
 	h := nativeperf.Helper{Policy: p, Budget: nativeperf.NewResourceBudget(), Acquire: acquire}
-	return h.Serve(ctx, l)
+	// SIGINT/SIGTERM (systemctl stop) is the orderly end of the service: Serve reports the cancelled context, which is
+	// not a failure. Any other Serve error still exits 1.
+	if e = h.Serve(ctx, l); e != nil && ctx.Err() != nil {
+		return nil
+	}
+	return e
 }

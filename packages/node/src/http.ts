@@ -10,22 +10,29 @@ const installed=new WeakMap<Client,HttpLease>();
 const propagationNames:Readonly<Record<string,true>>={baggage:true,traceparent:true,tracestate:true,"x-soundpost-context":true};
 const nativeRequestAbort=Object.getOwnPropertyDescriptor(ClientRequest.prototype,"aborted")?.get;
 const nativeSignalAbort=Object.getOwnPropertyDescriptor(AbortSignal.prototype,"aborted")!.get!;
+interface InflightLink {end:()=>void;prev:InflightLink|undefined;next:InflightLink|undefined;linked:boolean}
+/** The spans still open, as a doubly linked list through the nodes: a Set would insert and delete one hash-table entry per request (allocate, rehash, shrink). `end` ends the span as incomplete when the lease closes. */
+class Inflight {
+ private head:InflightLink|undefined;size=0;
+ add(end:()=>void):InflightLink{const node:InflightLink={end,prev:undefined,next:this.head,linked:true};if(this.head!==undefined)this.head.prev=node;this.head=node;this.size++;return node;}
+ delete(node:InflightLink):void{if(!node.linked)return;node.linked=false;this.size--;if(node.prev!==undefined)node.prev.next=node.next;else this.head=node.next;if(node.next!==undefined)node.next.prev=node.prev;node.prev=undefined;node.next=undefined;}
+ oldestFirst():(()=>void)[]{const ends:(()=>void)[]=[];for(let node=this.head;node!==undefined;node=node.next)ends.push(node.end);return ends.reverse();}
+}
 export class HttpLease {
- private closed=false;private readonly pending=new Set<()=>void>();private readonly origins=new Map<string,string>();private readonly operation:string;
+ private closed=false;private readonly pending=new Inflight();private readonly origins=new Map<string,string>();private readonly operation:string;
  constructor(private readonly client:Client,config:HttpIntegrationConfig){this.operation=config.operation;if(installed.has(client))throw Error("http_already_installed");if(!/^[a-zA-Z0-9_.-]{1,128}$/.test(this.operation)||(config.origins?.length??0)>64)throw Error("invalid_http_config");for(const item of config.origins??[]){const url=new URL(item.origin);if(url.origin!==item.origin||!["http:","https:"].includes(url.protocol)||!/^[a-zA-Z0-9_.-]{1,128}$/.test(item.dependency)||this.origins.has(item.origin))throw Error("invalid_http_origin");this.origins.set(item.origin,item.dependency);}client.ownHookLease(this);installed.set(client,this);}
  listener(handler:RequestListener):RequestListener {
   const lease=this;
   return function(this:unknown,request:IncomingMessage,response:ServerResponse):void{
    if(lease.closed){Reflect.apply(handler,this,[request,response]);return;}
    const parent=requestPropagation(request),span=lease.client.startAdapterSpan(lease.operation,"server",undefined,parent??null);
-   // `close` decides the status on completion and (Node) on connection loss; a runtime whose ServerResponse does not emit `close` for an aborted connection (Bun's node:http) still reports it through the request's `aborted`. The pending set holds `end` itself: three closures per request, no `finish` listener, no listener removal on the normal path.
+   // `close` decides the status on completion and (Node) on connection loss; a runtime whose ServerResponse does not emit `close` for an aborted connection (Bun's node:http) still reports it through the request's `aborted`. Two closures per request and two plain listeners that are never removed: the response and the request are garbage after their last event, and `ended` makes any later event (an `aborted` after `close`, a `close` after the lease closed) a no-op. The pending set holds `settle` itself, so a closing lease ends the span as `incomplete`.
    let ended=false;
-   const end=(status:"ok"|"error"|"cancelled"|"incomplete"="incomplete"):void=>{if(ended)return;ended=true;response.removeListener("close",close);request.removeListener("aborted",cancel);lease.pending.delete(end);span.end(status);};
-   const close=():void=>{if(ended)return;ended=true;request.removeListener("aborted",cancel);lease.pending.delete(end);span.end(response.writableFinished?(response.statusCode>=400?"error":"ok"):"cancelled");};
-   const cancel=():void=>end("cancelled");
+   const settle=():void=>{if(ended)return;ended=true;lease.pending.delete(node);span.end(lease.closed?"incomplete":response.writableFinished?(response.statusCode>=400?"error":"ok"):"cancelled");};
+   const cancel=():void=>{if(ended)return;ended=true;lease.pending.delete(node);span.end("cancelled");};
    if(lease.pending.size>=1024){span.end("incomplete");Reflect.apply(handler,this,[request,response]);return;}
-   lease.pending.add(end);response.once("close",close);request.once("aborted",cancel);
-   try{span.run(()=>Reflect.apply(handler,this,[request,response]));}catch(error){span.run(()=>lease.client.captureException(error));end("error");throw error;}
+   const node=lease.pending.add(settle);response.on("close",settle);request.on("aborted",cancel);
+   try{span.run(()=>Reflect.apply(handler,this,[request,response]));}catch(error){span.run(()=>lease.client.captureException(error));if(!ended){ended=true;lease.pending.delete(node);span.end("error");}throw error;}
    // Do not attach promise rejection/error listeners: native HTTP ignores the return
    // value, and observing it here would change the application's fatal behavior.
   };
@@ -40,7 +47,7 @@ export class HttpLease {
   // Request close is not response-body completion (notably on Bun's HTTP boundary).
   // Error monitors observe both streams without consuming ordinary error behavior.
   if(span){
-   let response:IncomingMessage|undefined,ended=false,abortSeen=false;
+   let response:IncomingMessage|undefined,ended=false,abortSeen=false,tracked:InflightLink|undefined;
    const signal=Object.getOwnPropertyDescriptor(options,"signal")?.value;
    const isCancelled=():boolean=>{
     if(abortSeen)return true;
@@ -53,7 +60,7 @@ export class HttpLease {
     if(ended)return;ended=true;
     request.removeListener("response",onResponse);request.removeListener("close",onRequestClose);request.removeListener("abort",onAbort);request.removeListener(errorMonitor,onError);
     response?.removeListener("end",onEnd);response?.removeListener("close",onResponseClose);response?.removeListener("aborted",onResponseAborted);response?.removeListener(errorMonitor,onError);
-    this.pending.delete(incomplete);span.end(status);
+    if(tracked!==undefined)this.pending.delete(tracked);span.end(status);
    };
    const onEnd=():void=>end((response?.statusCode??0)>=400?"error":"ok");
    const onResponseClose=():void=>end(isCancelled()?"cancelled":"error");
@@ -70,10 +77,10 @@ export class HttpLease {
     if(!applicationObservesResponse)value.resume();
    };
    if(this.pending.size>=1024)span.end("incomplete");
-   else{this.pending.add(incomplete);request.prependOnceListener("response",onResponse);request.once("close",onRequestClose);request.once("abort",onAbort);request.on(errorMonitor,onError);}
+   else{tracked=this.pending.add(incomplete);request.prependOnceListener("response",onResponse);request.once("close",onRequestClose);request.once("abort",onAbort);request.on(errorMonitor,onError);}
   }
   return request;
  }
- close():void{if(this.closed)return;this.closed=true;for(const end of [...this.pending])end();installed.delete(this.client);this.client.releaseHookLease(this);}
+ close():void{if(this.closed)return;this.closed=true;for(const end of this.pending.oldestFirst())end();installed.delete(this.client);this.client.releaseHookLease(this);}
 }
 export function installHttp(client:Client,config:HttpIntegrationConfig):HttpLease{return new HttpLease(client,config);}

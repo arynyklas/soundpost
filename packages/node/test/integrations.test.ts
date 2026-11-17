@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import {test,expect} from "bun:test";
 import {createServer,request as nativeRequest,type Server,type ClientRequest,type IncomingMessage,type ServerResponse} from "node:http";
-import {once} from "node:events";
+import {once,EventEmitter} from "node:events";
 import {createRequire} from "node:module";
 import {init,type Client} from "../src/index.ts";
 import {installHttp} from "../src/http.ts";
@@ -27,7 +27,7 @@ test("HTTP streaming and fetch propagation retain status, body, fanout and pre-b
  const outbound=installFetch(client,{operation:"dependency",origins:[{origin:dependencyOrigin,dependency:"fixture-http"}]});const http=installHttp(client,{operation:"request"});const server=createServer(http.listener(async(_req,res)=>{const replies=await Promise.all([outbound.fetch(dependencyOrigin+"/CANARY_URL?secret=CANARY_QUERY",{headers:{"x-canary":"CANARY_HEADER"}}),outbound.fetch(dependencyOrigin+"/fanout")]);res.writeHead(replies[0]!.status);res.write(await replies[0]!.text());res.end(await replies[1]!.text());}));const origin=await listening(server);
  try{const response=await fetch(origin+"/CANARY_REQUEST");expect(response.status).toBe(207);expect(await response.text()).toBe("firstsecondfirstsecond");expect(traceparent).toMatch(/^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/);const rows=spans(client);expect(rows.filter(s=>s.span_kind==="client")).toHaveLength(2);expect(rows.filter(s=>s.span_kind==="client").every(s=>s.parent_id===rows.find(s=>s.span_kind==="server").span_id)).toBe(true);expect(JSON.stringify({records:client.bufferedRecords(),diagnostics:client.diagnostics()})).not.toContain("CANARY");expect(()=>installFetch(client,{operation:"dependency",origins:[]})).toThrow();outbound.close();expect(()=>outbound.fetch(dependencyOrigin)).toThrow();}finally{http.close();outbound.close();server.closeAllConnections();server.close();dependency.closeAllConnections();dependency.close();await client.close();}
 });
-test("HTTP listener synchronous exceptions retain exact thrown identity",async()=>{const client=init(settings()),lease=installHttp(client,{operation:"request"}),error=new Error("CANARY_SYNC");const listener=lease.listener(()=>{throw error;});try{let caught:unknown;try{listener({headers:{},once(){return this;},removeListener(){return this;}} as never,{once(){return this;},removeListener(){return this;}} as never);}catch(observed){caught=observed;}expect(caught).toBe(error);}finally{lease.close();await client.close();}});
+test("HTTP listener synchronous exceptions retain exact thrown identity",async()=>{const client=init(settings()),lease=installHttp(client,{operation:"request"}),error=new Error("CANARY_SYNC");const listener=lease.listener(()=>{throw error;});try{let caught:unknown;try{listener({headers:{},on(){return this;}} as never,{on(){return this;}} as never);}catch(observed){caught=observed;}expect(caught).toBe(error);}finally{lease.close();await client.close();}});
 test("Express5 and pg8 actual applications retain promise failure, query rows and callback return semantics",async()=>{
  const database=process.env.SOUNDPOST_FIXTURE_DATABASE_URL;if(!database)throw Error("qualification requires SOUNDPOST_FIXTURE_DATABASE_URL (PostgreSQL16)");const express=require("express") as ()=>any;const {Pool}=require("pg") as {Pool:new(options:unknown)=>any};const pool=new Pool({connectionString:database});const client=init(settings()),pg=installPg(client,{operation:"query",dependency:"fixture-pg"}),routes=installExpress(client),app=express();const expected=new Error("CANARY_EXPRESS_MESSAGE");app.get("/ok",routes.handler("request",async(_req:any,res:any)=>{const result=await pg.query(pool,"SELECT $1::integer AS answer /* CANARY_SQL */",[42]);res.status(201).json(result.rows);}));app.get("/failure",routes.handler("request",async()=>{throw expected;}));app.use((error:unknown,_req:any,res:any,_next:any)=>res.status(error===expected?503:500).end("application-error"));const server=createServer(app),origin=await listening(server);
  try{const ok=await fetch(origin+"/ok?CANARY_URL");expect(ok.status).toBe(201);expect(await ok.json()).toEqual([{answer:42}]);expect((await fetch(origin+"/failure")).status).toBe(503);expect(spans(client).find(s=>s.operation==="query").dependency_alias).toBe("fixture-pg");const gate=Promise.withResolvers<any>();const returned=pg.query(pool,"SELECT 7 AS answer",(error:unknown,result:any)=>error?gate.reject(error):gate.resolve(result));expect(returned).toBeUndefined();const rows=await gate.promise;expect(rows.rows).toEqual([{answer:7}]);expect(JSON.stringify({records:client.bufferedRecords(),diagnostics:client.diagnostics()})).not.toContain("CANARY");}finally{server.closeAllConnections();server.close();routes.close();pg.close();await pool.end();await client.close();}
@@ -101,3 +101,34 @@ test("HTTP server listener ends the span from one close listener with the right 
   reply.destroy();second.destroy();
  }finally{lease.close();plain.closeAllConnections();wrapped.closeAllConnections();plain.close();wrapped.close();await client.close();}
 },30000);
+// The listener is two closures and two plain listeners that are never removed (cost work): this pins what that must not change. One close and one aborted listener per request,
+// the first event decides the status, and every later event (and a lease close after the span ended) is a no-op.
+test("HTTP server listener: the first event decides the span status, later events change nothing, and each request holds exactly one close and one aborted listener",()=>{
+ const client=init(settings()),lease=installHttp(client,{operation:"request"});
+ const pair=(finished:boolean,status:number)=>{const request=new EventEmitter() as EventEmitter&{rawHeaders:string[];headers:Record<string,string>},response=new EventEmitter() as EventEmitter&{writableFinished:boolean;statusCode:number};request.rawHeaders=[];request.headers={};response.writableFinished=finished;response.statusCode=status;return {request,response};};
+ const run=(label:string,finished:boolean,status:number,drive:(request:EventEmitter,response:EventEmitter)=>void)=>{
+  const {request,response}=pair(finished,status),before=spans(client).length;let counts:number[]=[];
+  lease.listener((_request,_response)=>{counts=[response.listenerCount("close"),request.listenerCount("aborted"),response.listenerCount("finish")];})(request as never,response as never);
+  expect(counts,label+" listeners while the handler runs").toEqual([1,1,0]);
+  expect(spans(client).length,label+" open").toBe(before);drive(request,response);
+  expect(response.listenerCount("close"),label+" no removal").toBe(1);
+  return spans(client).slice(before).map(s=>s.status);
+ };
+ try{
+  expect(run("finished ok",true,200,(_q,s)=>{s.emit("close");s.emit("close");_q.emit("aborted");})).toEqual(["ok"]);
+  expect(run("finished 500",true,500,(_q,s)=>{s.emit("close");})).toEqual(["error"]);
+  expect(run("unfinished close",false,200,(_q,s)=>{s.emit("close");})).toEqual(["cancelled"]);
+  expect(run("aborted first",false,200,(q,s)=>{q.emit("aborted");s.emit("close");q.emit("aborted");})).toEqual(["cancelled"]);
+  // A lease closed while a request is in flight ends its span incomplete; the request's own later close is then ignored.
+  const flying=pair(false,200);let started=false;lease.listener(()=>{started=true;})(flying.request as never,flying.response as never);expect(started).toBe(true);
+  const before=spans(client).length;lease.close();expect(spans(client).slice(before).map(s=>s.status)).toEqual(["incomplete"]);
+  flying.response.emit("close");flying.request.emit("aborted");expect(spans(client).length).toBe(before+1);
+ }finally{lease.close();}
+ // A handler that throws gets its span ended as error exactly once, the same error object is rethrown, and its response's later close is ignored.
+ const second=installHttp(client,{operation:"request"}),thrown=new Error("CANARY_THROWN"),failing=pair(true,200),count=spans(client).length;
+ try{
+  let caught:unknown;try{second.listener(()=>{throw thrown;})(failing.request as never,failing.response as never);}catch(error){caught=error;}
+  expect(caught).toBe(thrown);failing.response.emit("close");failing.request.emit("aborted");
+  expect(spans(client).slice(count).map(s=>s.status)).toEqual(["error"]);
+ }finally{second.close();}
+});

@@ -1,5 +1,6 @@
 // Copyright 2026 Aryn Yklas
 // SPDX-License-Identifier: Apache-2.0
+import {hashBytes} from "./routing.ts";
 export interface SafeFrame {
  readonly artifact_id:string;readonly module_id:string;readonly function:string;
  readonly line:number;readonly column:number|null;readonly in_app:boolean;readonly async:boolean;
@@ -93,6 +94,9 @@ function engineString(error:object):string|undefined|null{
  return typeof value==="string"?value:null;
 }
 
+/** What a client parsed from the stacks it has seen: sanitized frames only, found again by the SHA-256 of the header and stack text (a repeated error at one site, the common shape of an error storm, is a lookup instead of a parse of every line). The text itself, which carries the error message, is not kept. */
+const stackMemos=new WeakMap<FrameNaming,Map<string,StackRead>>();
+const MEMO_TEXT=16384,MEMO_ENTRIES=16;
 /** Reads the stack of an error the owned boundary already branded native and non-proxy.
  * Never invokes a program-defined getter, Error.prepareStackTrace, name/message accessor or proxy trap. */
 export function readStackFrames(error:object,boundary:StackBoundary,naming:FrameNaming,budget:number):StackRead{
@@ -102,7 +106,14 @@ export function readStackFrames(error:object,boundary:StackBoundary,naming:Frame
  let text:string|null|undefined;
  try{text=engineString(error);}catch{return none(stackNotPlain);}
  if(typeof text!=="string")return none(stackNotPlain);
- return parseStack(text,header,naming,Math.min(budget,MAX_FRAMES));
+ const limit=Math.min(budget,MAX_FRAMES);
+ if(text.length>MEMO_TEXT)return parseStack(text,header,naming,limit);
+ let memo=stackMemos.get(naming);if(memo===undefined){memo=new Map();stackMemos.set(naming,memo);}
+ const key=limit+":"+hashBytes(header+"\n"+text),known=memo.get(key);
+ if(known!==undefined)return known;
+ const read=parseStack(text,header,naming,limit);
+ if(memo.size>=MEMO_ENTRIES)memo.delete(memo.keys().next().value!);
+ memo.set(key,read);return read;
 }
 
 const SAFE_PATH=/^[A-Za-z0-9_./+-]{1,500}$/;

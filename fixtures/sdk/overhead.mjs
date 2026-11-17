@@ -2,17 +2,21 @@
 // SPDX-License-Identifier: Apache-2.0
 // Measures (never asserts aspirational values) the overhead of SDK capture on deterministic workloads, with repeated alternating
 // runs, raw per-run numbers, variance and the machine class. Run under Node 22+:
-//   node fixtures/sdk/overhead.mjs --requests-per-second 1000 [--duration-s 3] [--runs 5] [--profile-runs 7] [--out result.json]
+//   node fixtures/sdk/overhead.mjs --requests-per-second 1000 [--warmup-s 10] [--steady-s 30] [--runs 5] [--profile-runs 7] [--out result.json]
+// Server rows follow D54 (see overhead-lib.mjs): every run is a fresh server process that serves a fixed warm-up (discarded, both arms
+// alike), then a steady-state window of at least 30 s; arms alternate over at least 5 repetitions. The warm figures are the gated ones
+// (top level of each row); the legacy short window of the same processes is reported under `cold_window` and never gated.
 // Budgets come from design section 13 and are only compared against, never edited here. Anything this script cannot measure on this
 // machine is reported as `not_measured` with a reason, never as passed.
 import {spawn,spawnSync} from "node:child_process";
 import {existsSync,mkdtempSync,readFileSync,rmSync,writeFileSync} from "node:fs";
 import http from "node:http";
 import os from "node:os";
-import {dirname,join,resolve} from "node:path";
+import {basename,dirname,join,resolve} from "node:path";
 import {fileURLToPath,pathToFileURL} from "node:url";
 import {gzipSync} from "node:zlib";
 import crypto from "node:crypto";
+import {PROTOCOL,armOrder,compare,d54Row,mean,planPhases,runLoad,stdev,summary} from "./overhead-lib.mjs";
 
 const here=fileURLToPath(import.meta.url),root=resolve(dirname(here),"../..");
 const args=process.argv.slice(2);
@@ -80,24 +84,12 @@ function get(agent,port,path){
  });
 }
 async function roleLoad(){
- const port=Number(option("--port","0")),rps=Number(option("--rps","1000")),seconds=Number(option("--seconds","3")),warm=Number(option("--warmup-s","1"));
+ const port=Number(option("--port","0")),rps=Number(option("--rps","1000")),phases=JSON.parse(option("--plan","[]"));
  const agent=new http.Agent({keepAlive:true,maxSockets:128});
- const run=async(duration)=>{
-  const latencies=[];let errors=0,sent=0;const t0=performance.now(),pending=new Set();
-  while(performance.now()-t0<duration*1000){
-   const due=Math.floor((performance.now()-t0)/1000*rps);
-   while(sent<due){sent++;const p=get(agent,port,"/work/"+sent).then(ms=>latencies.push(ms),()=>{errors++;}).finally(()=>pending.delete(p));pending.add(p);}
-   await sleep(1);
-  }
-  await Promise.all(pending);
-  return {latencies,errors,sent,wall_s:(performance.now()-t0)/1000};
- };
- await run(warm);
- const before=JSON.parse(await new Promise(r=>{http.get({host:"127.0.0.1",port,path:"/__cpu",agent},res=>{let t="";res.on("data",d=>t+=d);res.on("end",()=>r(t));});}));
- const measured=await run(seconds);
- const after=JSON.parse(await new Promise(r=>{http.get({host:"127.0.0.1",port,path:"/__cpu",agent},res=>{let t="";res.on("data",d=>t+=d);res.on("end",()=>r(t));});}));
+ const snapshot=()=>new Promise(r=>{http.get({host:"127.0.0.1",port,path:"/__cpu",agent},res=>{let t="";res.on("data",d=>t+=d);res.on("end",()=>r(JSON.parse(t)));});});
+ const {windows,slices}=await runLoad({phases,rps,send:async i=>Number((await get(agent,port,"/work/"+i)).toFixed(3)),snapshot,now:()=>performance.now(),sleep});
  agent.destroy();
- process.stdout.write(JSON.stringify({latencies_ms:measured.latencies.map(v=>Number(v.toFixed(3))),errors:measured.errors,sent:measured.sent,wall_s:measured.wall_s,server:{requests:after.requests-before.requests,cpu_us:after.user_us+after.system_us-before.user_us-before.system_us,user_us:after.user_us-before.user_us,system_us:after.system_us-before.system_us,elu_active_us:(after.elu_active_ms-before.elu_active_ms)*1000,queue_bytes_end:after.queue_bytes,max_queue_bytes:after.max_queue_bytes,diagnostics:after.diagnostics}})+"\n");
+ process.stdout.write(JSON.stringify({cold:windows.cold,warm:windows.warm,slices})+"\n");
  process.exit(0);
 }
 
@@ -121,14 +113,7 @@ async function roleProfileWork(){
 }
 
 // ---------------------------------------------------------------- statistics
-const mean=v=>v.reduce((a,b)=>a+b,0)/v.length;
-const stdev=v=>v.length<2?0:Math.sqrt(v.reduce((a,b)=>a+(b-mean(v))**2,0)/(v.length-1));
-const quantile=(sorted,q)=>sorted.length?sorted[Math.min(sorted.length-1,Math.ceil(q*sorted.length)-1)]:null;
-function summary(values){return {n:values.length,values:values.map(v=>Number(v.toFixed(4))),mean:Number(mean(values).toFixed(4)),stdev:Number(stdev(values).toFixed(4)),min:Math.min(...values),max:Math.max(...values),cv_percent:Number((100*stdev(values)/mean(values)).toFixed(3))};}
-function compare(base,variant){
- const delta=mean(variant)-mean(base),percent=100*delta/mean(base),se=Math.sqrt(stdev(base)**2/base.length+stdev(variant)**2/variant.length);
- return {delta_percent:Number(percent.toFixed(3)),delta_abs:Number(delta.toFixed(4)),standard_error_abs:Number(se.toFixed(4)),delta_exceeds_two_standard_errors:Math.abs(delta)>2*se};
-}
+// mean, stdev, quantile, summary, compare and latencyStats live in overhead-lib.mjs (arithmetic pinned by overhead.test.ts).
 function machineClass(){
  const cpus=os.cpus(),spin=[];
  for(let i=0;i<15;i++){const t0=performance.now();let x=0;while(performance.now()-t0<50)x+=Math.sqrt(i+x);spin.push(x);}
@@ -145,16 +130,20 @@ function runChild(execPath,argv,{stdinKeep=false}={}){
  const done=new Promise((res,rej)=>{child.on("exit",code=>code===0||stdinKeep?res({code,out,err}):rej(new Error(`child exit ${code}: ${err.slice(0,300)}`)));child.on("error",rej);});
  return {child,done,get out(){return out;},get err(){return err;}};
 }
-// --cpu-prof-dir DIR: every non-baseline server child writes a V8 CPU profile (100 us sampling) there when it ends; profiling
-// perturbs the run, so a profiled run is for attributing cost, never for the budget rows.
-const cpuProfDir=option("--cpu-prof-dir","");
-async function serverScenario(target,mode,rps,seconds,hashes){
+// --cpu-prof-dir DIR: every non-baseline server child (Node, and Bun with its own --cpu-prof) writes a CPU profile there when it ends (Node 100 us, Bun 200 us
+// sampling); --cpu-prof-baseline true profiles the baseline children too, for per-request differences. Profiling perturbs the run, so a profiled run is for
+// attributing cost, never for the budget rows.
+const cpuProfDir=option("--cpu-prof-dir",""),cpuProfBaseline=option("--cpu-prof-baseline","false")==="true";
+async function serverScenario(target,mode,rps,phases,hashes){
  // `target` is a Node SDK bundle path (served by this node binary) or a function (mode,hashes)=>({exec,args}) for another runtime.
- const profiled=typeof target==="string"&&cpuProfDir!==""&&mode!=="baseline";
- const spec=typeof target==="string"?{exec:process.execPath,args:[...(profiled?["--cpu-prof","--cpu-prof-dir="+cpuProfDir,"--cpu-prof-interval=100","--cpu-prof-name=server-"+mode+"-"+hashes+"-"+Date.now()+".cpuprofile"]:[]),here,"--role","server","--mode",mode,"--bundle",target,"--hashes",String(hashes)]}:target(mode,hashes);
+ const wanted=cpuProfDir!==""&&(mode!=="baseline"||cpuProfBaseline),profileName="server-"+mode+"-"+hashes+"-"+Date.now()+".cpuprofile";
+ const spec=typeof target==="string"?{exec:process.execPath,args:[...(wanted?["--cpu-prof","--cpu-prof-dir="+cpuProfDir,"--cpu-prof-interval=100","--cpu-prof-name="+profileName]:[]),here,"--role","server","--mode",mode,"--bundle",target,"--hashes",String(hashes)]}:target(mode,hashes);
+ const bunChild=typeof target!=="string"&&/^bun(\.exe)?$/i.test(basename(spec.exec));
+ if(wanted&&bunChild)spec.args=["--cpu-prof","--cpu-prof-dir="+cpuProfDir,"--cpu-prof-interval=200","--cpu-prof-name="+profileName,...spec.args];
+ const profiled=wanted&&(typeof target==="string"||bunChild);
  const server=runChild(spec.exec,spec.args,{stdinKeep:true});
  const port=await new Promise((res,rej)=>{const t=setTimeout(()=>rej(new Error("server did not start")),20000);const poll=setInterval(()=>{const m=/LISTENING (\d+)/.exec(server.out);if(m){clearInterval(poll);clearTimeout(t);res(Number(m[1]));}},20);});
- const load=runChild(process.execPath,[here,"--role","load","--port",String(port),"--rps",String(rps),"--seconds",String(seconds)]);
+ const load=runChild(process.execPath,[here,"--role","load","--port",String(port),"--rps",String(rps),"--plan",JSON.stringify(phases)]);
  const done=await load.done;
  server.child.stdin.end();
  // A profiled child must exit by itself (process.exit(0) on stdin end) so the profile is written.
@@ -162,34 +151,19 @@ async function serverScenario(target,mode,rps,seconds,hashes){
  server.child.kill();await server.done.catch(()=>{});
  return JSON.parse(done.out.trim().split("\n").at(-1));
 }
-/** Delivered-mode rows for a runtime other than Node: the same deterministic handler, load and alternating baseline/capture runs as node_http_server_delivered_capture, judged on the same budgets. `target` is a function (mode,hashes)=>{exec,args}; the server child prints `LISTENING <port>` and answers /__cpu with its CPU counters. No event-loop series: only Node has eventLoopUtilization. */
-async function deliveredRows(target,weights,rps,seconds,runs,description){
- const rows=[];
+/** One row per handler weight: the same deterministic handler, load and alternating baseline/capture runs (D54: warm gated, cold window reported), judged on the same budgets. `target` is a Node SDK bundle path or a function (mode,hashes)=>{exec,args} for another runtime; the server child prints `LISTENING <port>` and answers /__cpu with its CPU counters. `loop` adds the Node-only event-loop series. */
+async function serverRows(target,weights,rps,{protocol,cold=true,captureMode,loop=false,delivered=false,cpuNote,workload}){
+ const rows=[],phases=planPhases({warmupS:protocol.warmupS,steadyS:protocol.steadyS,cold,sliceS:protocol.sliceS});
+ const budget={p95_percent:BUDGET.server_p95_latency_percent,cpu_percent:BUDGET.server_cpu_percent};
  for(const hashes of weights){
-  const collected={baseline:[],"capture-delivered":[]};
-  for(let run=0;run<runs;run++){
-   for(const mode of run%2===0?["baseline","capture-delivered"]:["capture-delivered","baseline"]){
-    const r=await serverScenario(target,mode,rps,seconds,hashes);
-    collected[mode].push({stats:latencyStats(r.latencies_ms),cpu_us_per_request:r.server.cpu_us/Math.max(1,r.server.requests),achieved_rps:r.sent/r.wall_s,errors:r.errors,server:r.server});
-   }
-  }
-  const series=(mode,pick)=>collected[mode].map(pick);
-  const metric=pick=>({baseline:summary(series("baseline",pick)),capture:summary(series("capture-delivered",pick)),...compare(series("baseline",pick),series("capture-delivered",pick))});
-  const p95=metric(r=>r.stats.p95_ms),cpu=metric(r=>r.cpu_us_per_request),lost=series("capture-delivered",r=>(r.server.diagnostics.queue_full??0));
-  rows.push({
-   workload:`${description}; ${hashes}x sha256 over 1 KiB + JSON of 16 fields per request, open-loop load at ${rps} req/s from a separate process, ${seconds} s measured after 1 s warm-up, ${runs} alternating runs per mode; capture mode flushes every 100 ms through the ACKing receipt transport (batching, hashing, receipts and acknowledgement measured; no TLS or network)`,
-   handler_hashes:hashes,requests_per_second_requested:rps,
-   p95_latency_ms:p95,p99_latency_ms:metric(r=>r.stats.p99_ms),p50_latency_ms:metric(r=>r.stats.p50_ms),
-   process_cpu_us_per_request:cpu,
-   achieved_rps:{baseline:summary(series("baseline",r=>r.achieved_rps)),capture:summary(series("capture-delivered",r=>r.achieved_rps))},
-   queue_full_drops:lost,
-   errors:{baseline:series("baseline",r=>r.errors),capture:series("capture-delivered",r=>r.errors)},
-   budget:{p95_percent:BUDGET.server_p95_latency_percent,cpu_percent:BUDGET.server_cpu_percent},
-   verdict:{p95:p95.delta_percent<=BUDGET.server_p95_latency_percent?"within_budget_point_estimate":"exceeds_budget",process_cpu:cpu.delta_percent<=BUDGET.server_cpu_percent?"within_budget_point_estimate":"exceeds_budget",delivered_without_queue_full:lost.every(n=>n===0)},
-  });
+  const collected={baseline:[],[captureMode]:[]};
+  for(let run=0;run<protocol.runs;run++)for(const mode of armOrder(run,["baseline",captureMode]))collected[mode].push(await serverScenario(target,mode,rps,phases,hashes));
+  rows.push({workload:workload(hashes),handler_hashes:hashes,requests_per_second_requested:rps,...d54Row(collected,{capture:captureMode,protocol,budget,loop,delivered,cpuNote}),budget});
  }
  return rows;
 }
+const windowText=protocol=>`each run a fresh server process: ${protocol.warmupS} s warm-up discarded for both arms, then ${protocol.steadyS} s steady state measured (gated); the first ${PROTOCOL.rampS}+${PROTOCOL.coldS} s window of the same process is reported as cold_window; ${protocol.runs} alternating runs per arm`;
+const deliveredText=(description,rps,protocol)=>hashes=>`${description}; ${hashes}x sha256 over 1 KiB + JSON of 16 fields per request, open-loop load at ${rps} req/s from a separate process, ${windowText(protocol)}; capture mode flushes every 100 ms through the ACKing receipt transport (batching, hashing, receipts and acknowledgement measured; no TLS or network)`;
 /** The SDK bundle entry of a non-Node runtime: the same fixture policy, ACKing in-process transport and operation as the Node bundle, with the runtime package's own init and `installName` integration. */
 function sdkEntry(index,installName){
  return `import {init,${installName}} from ${fwd(index)};
@@ -292,7 +266,7 @@ sys.stdout.write("LISTENING " + str(server.server_address[1]) + chr(10)); sys.st
 server.serve_forever()
 `;
 }
-function latencyStats(latencies){const s=[...latencies].sort((a,b)=>a-b);return {count:s.length,p50_ms:quantile(s,0.5),p95_ms:quantile(s,0.95),p99_ms:quantile(s,0.99),max_ms:s.at(-1)};}
+
 function bunPath(){return [process.env.SOUNDPOST_BUN,join(root,".tools/bun-1.3.14/package/bin/bun.exe"),join(root,".tools/bun-1.3.14/package/bin/bun"),"/opt/bun/bin/bun"].filter(Boolean).find(existsSync);}
 function buildBundle(bun,entrySource,dir,name,target="node",extra=[]){
  const entry=join(dir,name+".entry.ts"),out=join(dir,name+(target==="browser"?".js":".mjs"));
@@ -341,7 +315,9 @@ function recorderQueueFromOutput(stdout,exitCode,stderrTail=""){
 }
 
 async function parentMain(){
- const rps=Number(option("--requests-per-second","1000")),seconds=Number(option("--duration-s","3")),runs=Number(option("--runs","5")),profileRuns=Number(option("--profile-runs","7")),outPath=option("--out",""),only=option("--only","server,bun,python,profile,bundle,recorder,recorder_queue").split(",");
+ if(args.includes("--duration-s"))throw new Error("--duration-s was replaced by --warmup-s and --steady-s (D54: fixed warm-up, then a steady-state window)");
+ const rps=Number(option("--requests-per-second","1000")),runs=Number(option("--runs",String(PROTOCOL.runs))),profileRuns=Number(option("--profile-runs","7")),outPath=option("--out",""),only=option("--only","server,bun,python,profile,bundle,recorder,recorder_queue").split(",");
+ const protocol={warmupS:Number(option("--warmup-s",String(PROTOCOL.warmupS))),steadyS:Number(option("--steady-s",String(PROTOCOL.steadyS))),runs,sliceS:PROTOCOL.sliceS};
  const bun=bunPath();if(!bun)throw new Error("overhead measurement requires SOUNDPOST_BUN or the pinned Bun 1.3.14 to bundle the SDK");
  const dir=mkdtempSync(join(os.tmpdir(),"soundpost-overhead-"));
  const result={fixture:"overhead",schema:1,recorded_at:new Date().toISOString(),command:"node fixtures/sdk/overhead.mjs "+args.join(" "),budgets_from_design_section_13:BUDGET,machine_class:machineClass(),runtimes:{node:process.version,bun:spawnSync(bun,["--version"],{encoding:"utf8"}).stdout.trim()},rows:{}};
@@ -359,62 +335,18 @@ export function makeClient(kind:"acking"|"stalled"){
 export {installHttp};
 `,dir,"sdk");
    const weights=option("--handler-hashes","3,100").split(",").map(Number);
-   result.rows.node_http_server_core_capture=[];
-   for(const hashes of weights){
-    const collected={baseline:[],capture:[]};
-    // Alternate A/B so slow drift hits both equally.
-    for(let run=0;run<runs;run++){
-     for(const mode of run%2===0?["baseline","capture"]:["capture","baseline"]){
-      const r=await serverScenario(sdk,mode,rps,seconds,hashes);
-      collected[mode].push({stats:latencyStats(r.latencies_ms),cpu_us_per_request:r.server.cpu_us/Math.max(1,r.server.requests),loop_active_us_per_request:r.server.elu_active_us/Math.max(1,r.server.requests),achieved_rps:r.sent/r.wall_s,errors:r.errors,server:r.server});
-     }
-    }
-    const series=(mode,pick)=>collected[mode].map(pick);
-    const metric=(pick)=>({baseline:summary(series("baseline",pick)),capture:summary(series("capture",pick)),...compare(series("baseline",pick),series("capture",pick))});
-    const p95=metric(r=>r.stats.p95_ms),cpu=metric(r=>r.cpu_us_per_request),loop=metric(r=>r.loop_active_us_per_request);
-    result.rows.node_http_server_core_capture.push({
-     workload:`node:http loopback server, deterministic handler (${hashes}x sha256 over 1 KiB + JSON of 16 fields), open-loop load at ${rps} req/s from a separate process, ${seconds} s measured after 1 s warm-up, ${runs} alternating runs per mode; capture = Node SDK installHttp listener (root span per request, one handled error per 100 requests); the server never calls flush(), so once the 1024-record queue fills, spans are dropped as queue_full (saturated mode; delivery cost is in node_http_server_delivered_capture)`,
-     handler_hashes:hashes,requests_per_second_requested:rps,
-     p95_latency_ms:p95,p99_latency_ms:metric(r=>r.stats.p99_ms),p50_latency_ms:metric(r=>r.stats.p50_ms),
-     process_cpu_us_per_request:{note:"process.cpuUsage; on Windows its resolution is the ~15.6 ms scheduler tick, so short windows can read 0 (see the raw values); treat as coarse",...cpu},
-     event_loop_active_us_per_request:{note:"performance.eventLoopUtilization active time per request: high-resolution busy time of the single JS thread, a CPU proxy that excludes GC/helper threads",...loop},
-     achieved_rps:{baseline:summary(series("baseline",r=>r.achieved_rps)),capture:summary(series("capture",r=>r.achieved_rps))},
-     errors:{baseline:series("baseline",r=>r.errors),capture:series("capture",r=>r.errors)},
-     budget:{p95_percent:BUDGET.server_p95_latency_percent,cpu_percent:BUDGET.server_cpu_percent},
-     verdict:{p95:p95.delta_percent<=BUDGET.server_p95_latency_percent?"within_budget_point_estimate":"exceeds_budget",loop_active_cpu_proxy:loop.delta_percent<=BUDGET.server_cpu_percent?"within_budget_point_estimate":"exceeds_budget",process_cpu:cpu.delta_percent<=BUDGET.server_cpu_percent?"within_budget_point_estimate":"exceeds_budget",p95_difference_distinguishable_from_run_noise:p95.delta_exceeds_two_standard_errors,loop_difference_distinguishable_from_run_noise:loop.delta_exceeds_two_standard_errors,process_cpu_difference_distinguishable_from_run_noise:cpu.delta_exceeds_two_standard_errors},
-    });
-   }
+   // Saturated mode: the server never calls flush(), so once the 1024-record queue fills, spans are dropped as queue_full. A diagnostic of the
+   // drop path, never gated, so it keeps the short window (D54 governs the delivered rows below).
+   const shortProtocol={warmupS:1,steadyS:3,runs,sliceS:PROTOCOL.sliceS};
+   result.rows.node_http_server_core_capture=await serverRows(sdk,weights,rps,{protocol:shortProtocol,cold:false,captureMode:"capture",loop:true,cpuNote:"process.cpuUsage; on Windows its resolution is the ~15.6 ms scheduler tick, so short windows can read 0 (see the raw values); treat as coarse",
+    workload:hashes=>`node:http loopback server, deterministic handler (${hashes}x sha256 over 1 KiB + JSON of 16 fields), open-loop load at ${rps} req/s from a separate process, ${shortProtocol.warmupS} s warm-up then ${shortProtocol.steadyS} s measured, ${runs} alternating runs per mode; capture = Node SDK installHttp listener (root span per request, one handled error per 100 requests); the server never calls flush(), so once the 1024-record queue fills, spans are dropped as queue_full (saturated mode, short diagnostic window, not D54-gated; delivery cost is in node_http_server_delivered_capture)`});
    // Delivered mode: the same capture plus flush() every 100 ms through the in-process ACKing receipt transport (batching,
    // hashing, receipts and acknowledgement measured; no TLS or network). Same budget; recorded separately, never merged
-   // into the saturated row.
-   result.rows.node_http_server_delivered_capture=[];
-   for(const hashes of weights){
-    const collected={baseline:[],"capture-delivered":[]};
-    for(let run=0;run<runs;run++){
-     for(const mode of run%2===0?["baseline","capture-delivered"]:["capture-delivered","baseline"]){
-      const r=await serverScenario(sdk,mode,rps,seconds,hashes);
-      collected[mode].push({stats:latencyStats(r.latencies_ms),cpu_us_per_request:r.server.cpu_us/Math.max(1,r.server.requests),loop_active_us_per_request:r.server.elu_active_us/Math.max(1,r.server.requests),achieved_rps:r.sent/r.wall_s,errors:r.errors,server:r.server});
-     }
-    }
-    const series=(mode,pick)=>collected[mode].map(pick);
-    const metric=(pick)=>({baseline:summary(series("baseline",pick)),capture:summary(series("capture-delivered",pick)),...compare(series("baseline",pick),series("capture-delivered",pick))});
-    const p95=metric(r=>r.stats.p95_ms),cpu=metric(r=>r.cpu_us_per_request),loop=metric(r=>r.loop_active_us_per_request);
-    const lost=series("capture-delivered",r=>(r.server.diagnostics.queue_full??0));
-    result.rows.node_http_server_delivered_capture.push({
-     workload:`same server and load (${hashes} hashes), capture plus flush() every 100 ms through the ACKing receipt transport`,
-     handler_hashes:hashes,requests_per_second_requested:rps,
-     p95_latency_ms:p95,p99_latency_ms:metric(r=>r.stats.p99_ms),p50_latency_ms:metric(r=>r.stats.p50_ms),
-     process_cpu_us_per_request:cpu,event_loop_active_us_per_request:loop,
-     achieved_rps:{baseline:summary(series("baseline",r=>r.achieved_rps)),capture:summary(series("capture-delivered",r=>r.achieved_rps))},
-     queue_full_drops:lost,
-     errors:{baseline:series("baseline",r=>r.errors),capture:series("capture-delivered",r=>r.errors)},
-     budget:{p95_percent:BUDGET.server_p95_latency_percent,cpu_percent:BUDGET.server_cpu_percent},
-     verdict:{p95:p95.delta_percent<=BUDGET.server_p95_latency_percent?"within_budget_point_estimate":"exceeds_budget",process_cpu:cpu.delta_percent<=BUDGET.server_cpu_percent?"within_budget_point_estimate":"exceeds_budget",delivered_without_queue_full:lost.every(n=>n===0)},
-    });
-   }
-   const sampled=await serverScenario(sdk,"capture-sampled",rps,seconds,weights[0]),stalled=await serverScenario(sdk,"capture-stalled",rps,seconds,weights[0]);
+   // into the saturated row. This is the D54-gated Node row.
+   result.rows.node_http_server_delivered_capture=await serverRows(sdk,weights,rps,{protocol,captureMode:"capture-delivered",loop:true,delivered:true,workload:deliveredText("node:http loopback server (Node SDK installHttp listener: root span per request, one handled error per 100 requests)",rps,protocol)});
+   const shortPlan=planPhases({warmupS:1,steadyS:3,cold:false}),sampled=(await serverScenario(sdk,"capture-sampled",rps,shortPlan,weights[0])).warm,stalled=(await serverScenario(sdk,"capture-stalled",rps,shortPlan,weights[0])).warm;
    result.rows.node_queue_acking_transport={workload:`same server (${weights[0]} hashes), ACKing fake transport, queue sampled every 50 ms`,max_queue_bytes:sampled.server.max_queue_bytes,budget_bytes:BUDGET.queue_bytes,within_budget:sampled.server.max_queue_bytes<=BUDGET.queue_bytes};
-   result.rows.node_queue_cap_stalled_transport={workload:`same server (${weights[0]} hashes), transport never acknowledges (retryable), ${rps} req/s for ${seconds}+1 s`,max_queue_bytes:stalled.server.max_queue_bytes,queue_bytes_end:stalled.server.queue_bytes_end,budget_bytes:BUDGET.queue_bytes,within_budget:stalled.server.max_queue_bytes<=BUDGET.queue_bytes,diagnostics:stalled.server.diagnostics};
+   result.rows.node_queue_cap_stalled_transport={workload:`same server (${weights[0]} hashes), transport never acknowledges (retryable), ${rps} req/s for ${shortProtocol.steadyS}+${shortProtocol.warmupS} s`,max_queue_bytes:stalled.server.max_queue_bytes,queue_bytes_end:stalled.server.queue_bytes_end,budget_bytes:BUDGET.queue_bytes,within_budget:stalled.server.max_queue_bytes<=BUDGET.queue_bytes,diagnostics:stalled.server.diagnostics};
   }
   if(only.includes("profile")){
    const nodeModule=buildBundle(bun,`export {startProfile} from ${fwd(join(root,"packages/node/src/profile.ts"))};\n`,dir,"nodeprofile");
@@ -489,7 +421,7 @@ print(json.dumps({"runtime_version": sys.version.split()[0], "rows": rows}))
   // Bun core server capture: the same deterministic handler and open-loop load against Bun.serve, with and without the Bun SDK's serve integration (installServe), flush() every 100 ms through the in-process ACKing transport.
   if(only.includes("bun")){
    const bunSdk=buildBundle(bun,sdkEntry(join(root,"packages/bun/src/index.ts"),"installServe"),dir,"bunsdk","bun");
-   const rows=await deliveredRows((mode,hashes)=>({exec:bun,args:[here,"--role","server-bun","--mode",mode,"--bundle",bunSdk,"--hashes",String(hashes)]}),option("--handler-hashes","3,100").split(",").map(Number),rps,seconds,runs,"Bun.serve (Bun SDK installServe: root span per request, one handled error per 100 requests)");
+   const rows=await serverRows((mode,hashes)=>({exec:bun,args:[here,"--role","server-bun","--mode",mode,"--bundle",bunSdk,"--hashes",String(hashes)]}),option("--handler-hashes","3,100").split(",").map(Number),rps,{protocol,captureMode:"capture-delivered",delivered:true,workload:deliveredText("Bun.serve (Bun SDK installServe: root span per request, one handled error per 100 requests)",rps,protocol)});
    result.rows.bun_http_server_delivered_capture=rows.map(row=>({runtime:"bun",runtime_version:result.runtimes.bun,...row}));
   }
   // Python core server capture: a WSGI application (stdlib http.server front end, one thread per connection) with and without the Python SDK's WSGI middleware.
@@ -502,7 +434,7 @@ print(json.dumps({"runtime_version": sys.version.split()[0], "rows": rows}))
     const probe=spawnSync(python,["-c","import cryptography"],{encoding:"utf8"});
     if(probe.status!==0)result.rows.python_http_server_delivered_capture={not_measured:"the Python at "+python+" cannot import cryptography (a dependency of the SDK): "+(probe.stderr||"").slice(-200)};
     else{
-     const rows=await deliveredRows((mode,hashes)=>({exec:python,args:[script,"--mode",mode,"--hashes",String(hashes)]}),option("--handler-hashes","3,100").split(",").map(Number),rps,seconds,runs,"WSGI application on http.server (Python SDK WSGIMiddleware: root span per request, one handled error per 100 requests)");
+     const rows=await serverRows((mode,hashes)=>({exec:python,args:[script,"--mode",mode,"--hashes",String(hashes)]}),option("--handler-hashes","3,100").split(",").map(Number),rps,{protocol,captureMode:"capture-delivered",delivered:true,workload:deliveredText("WSGI application on http.server (Python SDK WSGIMiddleware: root span per request, one handled error per 100 requests)",rps,protocol)});
      result.rows.python_http_server_delivered_capture=rows.map(row=>({runtime:"cpython",runtime_version:version,...row}));
     }
    }

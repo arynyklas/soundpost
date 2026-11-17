@@ -47,6 +47,10 @@ func AuditGoSource(p Policy, filename, src string, printOK func(*ast.CallExpr) b
 	for _, c := range sp.SourcePrctl {
 		allowedPrctl[[2]int64{int64(c.Option), int64(c.Arg)}] = true
 	}
+	allowedPpoll := map[[2]int64]bool{}
+	for _, c := range sp.SourcePpoll {
+		allowedPpoll[[2]int64{int64(c.Nfds), int64(c.Sigmask)}] = true
+	}
 	for _, n := range sp.SourceIoctl {
 		allowedIoctl[int64(n)] = true
 	}
@@ -134,6 +138,13 @@ func AuditGoSource(p Policy, filename, src string, printOK func(*ast.CallExpr) b
 								add(x.Pos(), "prctl_call_not_allowlisted", strconv.FormatInt(option, 10)+","+strconv.FormatInt(arg, 10))
 							}
 						}
+						if first.Sel.Name == "SYS_PPOLL" {
+							// ppoll(fds, nfds, timeout, sigmask, sigsetsize): nfds and sigmask must be literals of an allowlisted shape.
+							nfds, sigmask := literalArg(x.Args, 2), literalArg(x.Args, 4)
+							if !allowedPpoll[[2]int64{nfds, sigmask}] {
+								add(x.Pos(), "ppoll_call_not_allowlisted", strconv.FormatInt(nfds, 10)+","+strconv.FormatInt(sigmask, 10))
+							}
+						}
 					case *ast.BasicLit:
 						if v, err := strconv.ParseInt(first.Value, 0, 64); err != nil || !allowedNumber[v] {
 							add(x.Pos(), "raw_numeric_syscall", first.Value)
@@ -156,6 +167,20 @@ func AuditGoSource(p Policy, filename, src string, printOK func(*ast.CallExpr) b
 		return true
 	})
 	return out
+}
+
+// literalArg is the value of argument i when it is an integer literal; -1 when it is absent or not a literal (a
+// computed or aliased value cannot be shown to be the allowlisted one).
+func literalArg(args []ast.Expr, i int) int64 {
+	if i >= len(args) {
+		return -1
+	}
+	if lit, ok := args[i].(*ast.BasicLit); ok {
+		if v, err := strconv.ParseInt(lit.Value, 0, 64); err == nil {
+			return v
+		}
+	}
+	return -1
 }
 
 // HelperMainPrintOK admits only the helper main's single reviewed line, which

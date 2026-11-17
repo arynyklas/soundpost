@@ -90,6 +90,11 @@ type operatorFile struct {
 // runHelperProcess runs the real Helper in its own process for the helper-crash
 // drill, on the private socket given by --socket.
 func runHelperProcess(o options) (int, error) {
+	// Like cmd/soundpost-perf-acquire, the helper process opts out of transparent huge pages before anything else (D53);
+	// the strace audit requires to see this call, so the audited run covers it.
+	if e := nativeperf.DisableTransparentHugePages(); e != nil {
+		return exitFail, errors.New("transparent huge page opt-out failed")
+	}
 	raw, e := os.ReadFile(o.policyBlob)
 	if e != nil {
 		return exitUsage, errors.New("operator file unreadable")

@@ -1,6 +1,6 @@
 # Copyright 2026 Aryn Yklas
 # SPDX-License-Identifier: Apache-2.0
-import os
+from .ids import hex16
 import secrets
 import struct
 import threading
@@ -76,16 +76,16 @@ class Client:
         `_admit` + `normalize_record`, then the queue's trusted entry point; nothing here parses or re-validates the text."""
         with self._lock:
             if self._closed:self._loss("closed");return False
-            if EXPORTING.get() or self._trace_context.is_exporting():self._loss("exporter_recursion");return False
+            if EXPORTING.get() or self._trace_context._exporting.get():self._loss("exporter_recursion");return False
             policy=self._policy
             if int(observed)>=self._expires:self._loss("policy_expired");return False
             if not policy.decision.traces:self._loss("policy_disabled");return False
-            return self._delivery.enqueue_span(f'{{"id":"{event}","kind":"span","observed_at_ns":"{observed}","payload":{payload},"policy_revision":"{policy.decision.revision}"}}',trace_id)
+            return self._delivery.enqueue_span(f'{{"id":"{event}","kind":"span","observed_at_ns":"{observed}","payload":{payload}',trace_id)
     def capture_exception(self,error:BaseException,*,code:str|None=None)->str:
         return self._capture_exception(error,code,"manual",False)
     def _capture_exception(self,error,code,mechanism:ErrorMechanism,fatal:bool):
         if type(mechanism) is not str or mechanism not in ("manual","uncaught_exception","unhandled_rejection","thread_exception","asyncio_exception") or type(fatal) is not bool:raise ValueError("invalid error mechanism")
-        event=secrets.token_hex(16)
+        event=hex16()
         observed=self._read_clock()
         if observed is None:return event
         graph=extract_exception(error,self._policy,project_root=self._project_root)
@@ -122,7 +122,7 @@ class Client:
             with self._lock:self._loss("trace_sampled_out")
             self._record_signal_loss("span","policy",1)
             return False
-        observed=self._read_clock()
+        observed=str(time.time_ns()) if self._default_clock else self._read_clock()
         if observed is None:return False
         status,kind,start=span.status,span.kind,span.start
         if type(status) is not str or status not in _SPAN_STATUSES or type(kind) is not str or kind not in SPAN_KINDS or end[1]<start[1]:
@@ -134,7 +134,7 @@ class Client:
         payload=(f'{{"dependency_alias":"{dependency}","end":{{"domain":{domain},"mono_ns":"{end[1]}","uncertainty_ns":"{uncertainty}","wall_ns":"{end[0]}"}},"links":[],"operation":"{operation}",'
                  f'"parent_id":{"null" if parent is None else chr(34)+parent+chr(34)},"sample_decision":"keep","sample_probability":"{probability}","span_id":"{context.span_id}","span_kind":"{kind}",'
                  f'"start":{{"domain":{domain},"mono_ns":"{start[1]}","uncertainty_ns":"{uncertainty}","wall_ns":"{start[0]}"}},"status":"{status}","trace_id":"{context.trace_id}"}}')
-        return self._admit_span(os.urandom(16).hex(),observed,payload,context.trace_id)
+        return self._admit_span(hex16(),observed,payload,context.trace_id)
     def _capture_profile(self,capability:dict,chunks:list)->bool:
         """Enqueues a finished runtime profile on the ordinary delivery path (same queue, closed wire validation, batching, receipts and loss counters): the capability
         record first and alone as the complete answer for a refusal, then the chunks in order, stopping at the first refusal so a profile never has a hole. Needs
@@ -177,7 +177,7 @@ class Client:
         if type(template) is not str:
             with self._lock:self._loss("unknown_template")
             return None
-        event=secrets.token_hex(16)
+        event=hex16()
         observed=self._read_clock()
         if observed is None:return None
         return event if self._admit({"kind":"log","id":event,"observed_at_ns":observed,"template_id":template,"fields":fields}) else None

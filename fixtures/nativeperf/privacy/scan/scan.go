@@ -56,6 +56,30 @@ type PrctlCall struct {
 	Arg     int    `json:"arg"`
 }
 
+// PpollCall is one ppoll(fds, nfds, timeout, sigmask, ...) shape the acquisition sources may use: the literal nfds and
+// the literal sigmask argument (0 = NULL).
+type PpollCall struct {
+	Comment string `json:"comment"`
+	Nfds    int    `json:"nfds"`
+	Sigmask int    `json:"sigmask"`
+}
+
+// StracePrctl is one prctl a real run may make. Option is the name strace prints (Number is accepted as well, in case
+// a strace does not know the name). A nil Arg admits any second argument (runtime thread/VMA naming); a value pins it.
+type StracePrctl struct {
+	Comment string `json:"comment"`
+	Option  string `json:"option"`
+	Number  int64  `json:"number"`
+	Arg     *int64 `json:"arg,omitempty"`
+}
+
+// StracePpoll is one ppoll shape a real run may make: nfds and the sigmask as strace prints it ("NULL").
+type StracePpoll struct {
+	Comment string `json:"comment"`
+	Nfds    int    `json:"nfds"`
+	Sigmask string `json:"sigmask"`
+}
+
 // SyscallPolicy is the forbidden/allowed syscall and configuration audit policy.
 type SyscallPolicy struct {
 	Forbidden           []string       `json:"forbidden"`
@@ -67,6 +91,9 @@ type SyscallPolicy struct {
 	SourceConstants     []string       `json:"source_allowed_syscall_constants"`
 	SourceIoctl         []int          `json:"source_allowed_ioctl_requests"`
 	SourcePrctl         []PrctlCall    `json:"source_allowed_prctl_calls"`
+	SourcePpoll         []PpollCall    `json:"source_allowed_ppoll_calls"`
+	StraceAllowedPrctl  []StracePrctl  `json:"strace_allowed_prctl"`
+	StraceAllowedPpoll  []StracePpoll  `json:"strace_allowed_ppoll"`
 	SourceSymbolRegex   string         `json:"source_allowed_syscall_symbol_regex"`
 	SourceForbiddenID   []string       `json:"source_forbidden_identifiers"`
 	SourceForbiddenText []string       `json:"source_forbidden_string_regex"`

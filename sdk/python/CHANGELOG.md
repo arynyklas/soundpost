@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased — lane 4 wave 21 delivered-mode warm path (no wire, privacy or API change)
+
+- Flush: one frozen batch per route slot is still the wire shape, but each batch is cheaper: its priority and byte total are recorded when it is sealed (no per-batch lambda/generator sort key, no `sum` over every remaining entry on removal), a one-record batch skips the sort/min/set work, slot tails are precomputed, receipts are validated with one `unix_nano_int` per value and without re-checking the batch id the SDK itself issued, the default clock's policy-expiry check no longer converts clock text, and nothing calls `persist()` without a spool. Python calls per frozen batch 28 -> 19.5, per plain WSGI request 35 -> 28 (`tests/test_hot_path_cost.py`).
+- Request: the span's wire bytes are composed with the record instead of being cut out of the finished text again, the expiry scan runs only when something can have expired, the default clock is read in place, and the exporter gate is one context-variable read. `DeliveryQueue.enqueue_span(head, trace_id)` now takes the record text up to its payload (internal; its only caller is `Client._admit_span`).
+- Queue limits, `queue_full`/eviction behaviour, spool format and the loss counters are unchanged.
+
 ## Unreleased — 03.09 server capture cost (no wire or API change)
 
 - Span capture is composed directly in canonical form (`Client._record_span`, `DeliveryQueue.enqueue_span`) instead of being re-validated by `normalize_span`/`parse_safe_record` and canonicalized twice; the output is byte-identical to the validated path (pinned by `tests/test_span_fast_path.py`, including every refusal and loss reason). `Client._capture_span` is removed (it had no caller left).

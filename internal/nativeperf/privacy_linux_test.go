@@ -1993,7 +1993,7 @@ func TestPrivacyAcquisitionPathStaticAudit(t *testing.T) {
 func TestPrivacyStaticAuditFlagsForbiddenSources(t *testing.T) {
 	env := newPrivacyEnv(t)
 	const prelude = "package x\nimport \"syscall\"\nvar _ = syscall.EPERM\nfunc f(fd uintptr) {\n"
-	control := prelude + "\tsyscall.Syscall(syscall.SYS_IOCTL, fd, 0x2400, 0)\n\tsyscall.Syscall(434, 1, 0, 0)\n\tsyscall.Syscall(syscall.SYS_PRCTL, 41, 1, 0)\n}\n"
+	control := prelude + "\tsyscall.Syscall(syscall.SYS_IOCTL, fd, 0x2400, 0)\n\tsyscall.Syscall(434, 1, 0, 0)\n\tsyscall.Syscall(syscall.SYS_PRCTL, 41, 1, 0)\n\tsyscall.Syscall6(syscall.SYS_PPOLL, fd, 1, 0, 0, 0, 0)\n}\n"
 	if got := privacyAuditSource(env.policy, "x.go", control, nil); len(got) != 0 {
 		t.Fatalf("clean control flagged: %v", got)
 	}
@@ -2012,6 +2012,9 @@ func TestPrivacyStaticAuditFlagsForbiddenSources(t *testing.T) {
 		"prctl_thp_enable":   prelude + "\tsyscall.Syscall(syscall.SYS_PRCTL, 41, 0, 0)\n}\n",
 		"prctl_computed":     prelude + "\to := uintptr(41)\n\tsyscall.Syscall(syscall.SYS_PRCTL, o, 1, 0)\n}\n",
 		"prctl_set_dumpable": prelude + "\tsyscall.Syscall(syscall.SYS_PRCTL, 4, 1, 0)\n}\n",
+		"ppoll_64_fds":       prelude + "\tsyscall.Syscall6(syscall.SYS_PPOLL, fd, 64, 0, 0, 0, 0)\n}\n",
+		"ppoll_sigmask":      prelude + "\tsyscall.Syscall6(syscall.SYS_PPOLL, fd, 1, 0, 8, 0, 0)\n}\n",
+		"ppoll_calc_nfds":    prelude + "\tn := uintptr(1)\n\tsyscall.Syscall6(syscall.SYS_PPOLL, fd, n, 0, 0, 0, 0)\n}\n",
 		"proc_mem_string":    prelude + "\t_ = \"/proc/\" + \"self/mem\"\n\t_ = \"/proc/1234/mem\"\n}\n",
 		"stack_user_flag":    prelude + "\t_ = 1 << 13\n\tvar PERF_SAMPLE_STACK_USER = 1 << 13\n\t_ = PERF_SAMPLE_STACK_USER\n}\n",
 		"exec_import":        "package x\nimport _ \"os/exec\"\n",

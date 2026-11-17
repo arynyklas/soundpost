@@ -390,11 +390,17 @@ func assertAuditedProfile(t testing.TB, profile map[string]any) {
 	if profile["defaultAction"] != "SCMP_ACT_ERRNO" {
 		t.Errorf("seccomp default action %v", profile["defaultAction"])
 	}
-	conditional, prctl := false, false
+	conditional, prctl, ppoll := false, false, false
+	unconstrained := map[string]bool{}
 	for _, r := range asList(profile["syscalls"]) {
 		rule := asMap(r)
 		if rule["action"] != "SCMP_ACT_ALLOW" {
 			continue
+		}
+		if len(asList(rule["args"])) == 0 {
+			names := append([]string(nil), strs(rule["names"])...)
+			sort.Strings(names)
+			unconstrained[strings.Join(names, ",")] = true
 		}
 		for _, name := range strs(rule["names"]) {
 			switch name {
@@ -420,6 +426,23 @@ func assertAuditedProfile(t testing.TB, profile map[string]any) {
 					t.Errorf("prctl must be allowed for exactly option 41 (PR_SET_THP_DISABLE) with argument 1, alone in its rule: %v", rule)
 				}
 				prctl = true
+			case "ppoll":
+				// Review M1: the helper's one ppoll (ring_linux.go: the zero-timeout exit probe on one ring fd) has
+				// nfds == 1 (index 1) and a NULL sigmask (index 3); alone in its rule, never in the bulk rule.
+				got := map[float64]float64{}
+				for _, a := range asList(rule["args"]) {
+					arg := asMap(a)
+					if arg["op"] == "SCMP_CMP_EQ" {
+						idx, _ := arg["index"].(float64)
+						val, _ := arg["value"].(float64)
+						got[idx] = val
+					}
+				}
+				_, hasMask := got[3]
+				if len(asList(rule["args"])) != 2 || len(got) != 2 || got[1] != 1 || !hasMask || got[3] != 0 || len(strs(rule["names"])) != 1 {
+					t.Errorf("ppoll must be allowed for exactly nfds == 1 and a NULL sigmask, alone in its rule: %v", rule)
+				}
+				ppoll = true
 			}
 		}
 	}
@@ -428,6 +451,117 @@ func assertAuditedProfile(t testing.TB, profile map[string]any) {
 	}
 	if !prctl {
 		t.Error("the profile does not allow prctl(PR_SET_THP_DISABLE, 1): the helper could not opt out of transparent huge pages")
+	}
+	if !ppoll {
+		t.Error("the profile does not allow ppoll(nfds 1, NULL sigmask): the helper's per-event exit check would fail with EPERM")
+	}
+	// Review M4: the unconditional allow rules are pinned name for name, so adding a syscall (a ptrace-class name or
+	// anything else) or dropping one (epoll_pwait, ...) fails here and needs a conscious edit of this list.
+	want := map[string]bool{strings.Join(sortedCopy(auditedBulkAllow), ","): true, "execve,fstatfs": true}
+	for set := range unconstrained {
+		if !want[set] {
+			t.Errorf("unconditional allow rule {%s} is not one of the pinned rules (bulk rule or execve+fstatfs); a name was added or removed", set)
+		}
+	}
+	for set := range want {
+		if !unconstrained[set] {
+			t.Errorf("the pinned unconditional allow rule {%s} is missing or changed", set)
+		}
+	}
+}
+
+// auditedBulkAllow is the unconditional allow rule of deploy/seccomp/soundpost-perf.json, name for name (ppoll is NOT in
+// it: it has its own argument-constrained rule). Editing the profile's bulk rule means editing this list in review.
+var auditedBulkAllow = []string{"read", "write", "readv", "writev", "close", "close_range", "fstat", "newfstatat", "statx", "lseek", "pread64", "openat", "readlinkat", "readlink", "getdents64", "fcntl", "ioctl", "mmap", "munmap", "mprotect", "madvise", "brk", "futex", "futex_waitv", "sched_yield", "sched_getaffinity", "clock_gettime", "clock_nanosleep", "nanosleep", "rt_sigaction", "rt_sigprocmask", "rt_sigreturn", "sigaltstack", "getpid", "gettid", "getuid", "geteuid", "getgid", "getegid", "getrlimit", "prlimit64", "set_robust_list", "rseq", "getrandom", "uname", "exit", "exit_group", "tgkill", "restart_syscall", "epoll_create1", "epoll_ctl", "epoll_pwait", "epoll_pwait2", "eventfd2", "pipe2", "accept4", "bind", "listen", "connect", "getsockname", "getpeername", "getsockopt", "setsockopt", "shutdown", "recvfrom", "sendto", "recvmsg", "sendmsg", "unlinkat", "unlink", "umask", "arch_prctl", "set_tid_address"}
+
+func sortedCopy(in []string) []string {
+	out := append([]string(nil), in...)
+	sort.Strings(out)
+	return out
+}
+
+// failureCounter counts what assertAuditedProfile reports without failing the surrounding test.
+type failureCounter struct {
+	testing.TB
+	failures int
+}
+
+func (f *failureCounter) Error(args ...any)                 { f.failures++ }
+func (f *failureCounter) Errorf(format string, args ...any) { f.failures++ }
+
+// The profile test must reject every loosening: a ppoll that is not pinned to nfds 1 + NULL sigmask, a name added to
+// or removed from the bulk rule, and the rules that were approved narrow being widened.
+func TestAuditedProfileRejectsLooseningMutants(t *testing.T) {
+	clean := &failureCounter{TB: t}
+	assertAuditedProfile(clean, loadSeccomp(t))
+	if clean.failures != 0 {
+		t.Fatalf("the shipped profile does not pass its own audit (%d findings)", clean.failures)
+	}
+	rules := func(p map[string]any) []any { return asList(p["syscalls"]) }
+	ruleWith := func(p map[string]any, name string) map[string]any {
+		for _, r := range rules(p) {
+			for _, n := range strs(asMap(r)["names"]) {
+				if n == name {
+					return asMap(r)
+				}
+			}
+		}
+		t.Fatalf("no rule names %s", name)
+		return nil
+	}
+	eq := func(index, value float64) any {
+		return map[string]any{"index": index, "value": value, "op": "SCMP_CMP_EQ"}
+	}
+	mutants := map[string]func(map[string]any){
+		"ppoll back in the bulk rule": func(p map[string]any) {
+			bulk := ruleWith(p, "read")
+			bulk["names"] = append(asList(bulk["names"]), "ppoll")
+		},
+		"ppoll without argument filters": func(p map[string]any) { delete(ruleWith(p, "ppoll"), "args") },
+		"ppoll nfds 64":                  func(p map[string]any) { ruleWith(p, "ppoll")["args"] = []any{eq(1, 64), eq(3, 0)} },
+		"ppoll with a sigmask":           func(p map[string]any) { ruleWith(p, "ppoll")["args"] = []any{eq(1, 1), eq(3, 8)} },
+		"ppoll nfds only":                func(p map[string]any) { ruleWith(p, "ppoll")["args"] = []any{eq(1, 1)} },
+		"ppoll sigmask only":             func(p map[string]any) { ruleWith(p, "ppoll")["args"] = []any{eq(3, 0)} },
+		"ppoll shares its rule":          func(p map[string]any) { r := ruleWith(p, "ppoll"); r["names"] = []any{"ppoll", "poll"} },
+		"ppoll removed":                  func(p map[string]any) { ruleWith(p, "ppoll")["names"] = []any{"poll"} },
+		"ptrace added to the bulk rule": func(p map[string]any) {
+			bulk := ruleWith(p, "read")
+			bulk["names"] = append(asList(bulk["names"]), "ptrace")
+		},
+		"harmless extra name in the bulk rule": func(p map[string]any) {
+			bulk := ruleWith(p, "read")
+			bulk["names"] = append(asList(bulk["names"]), "getppid")
+		},
+		"epoll_pwait removed from the bulk rule": func(p map[string]any) {
+			bulk := ruleWith(p, "read")
+			var kept []any
+			for _, n := range asList(bulk["names"]) {
+				if n != "epoll_pwait" {
+					kept = append(kept, n)
+				}
+			}
+			bulk["names"] = kept
+		},
+		"execve rule widened": func(p map[string]any) {
+			r := ruleWith(p, "execve")
+			r["names"] = append(asList(r["names"]), "getppid")
+		},
+	}
+	for name, mutate := range mutants {
+		raw, err := json.Marshal(loadSeccomp(t))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var p map[string]any
+		if err = json.Unmarshal(raw, &p); err != nil {
+			t.Fatal(err)
+		}
+		mutate(p)
+		got := &failureCounter{TB: t}
+		assertAuditedProfile(got, p)
+		if got.failures == 0 {
+			t.Errorf("mutant %q passes the profile audit", name)
+		}
 	}
 }
 

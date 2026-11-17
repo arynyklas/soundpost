@@ -1,7 +1,8 @@
 // Copyright 2026 Aryn Yklas
 // SPDX-License-Identifier: Apache-2.0
 import type {Config,EventId,Template,PolicyDecision,CaptureInput,CapabilityInput,ProfileInput,HookMechanism,OwnedHookLease,ExportContext} from "./types.ts";
-import {resolve,approveTemplate,normalizeRecord,policyRefusal,canonical,canonicalId,unixNano,type SourcePolicy} from "./policy.ts";
+import {resolve,approveTemplate,normalizeRecord,policyRefusal,canonicalId,unixNano,type SourcePolicy} from "./policy.ts";
+import {nativeCanonical} from "./routing.ts";
 import {object} from "./wire.ts";
 import {extractException,type ErrorBoundary} from "./errors.ts";
 import type {FrameNaming} from "./frames.ts";
@@ -73,7 +74,7 @@ export class Client {
  private admit(input:CaptureInput):boolean{
   if(this.closed){this.loss("closed");return false;}if(this.exportContext.active()){this.loss("exporter_recursion");return false;}const result=normalizeRecord(this.policy,input,this.templates);
   if(!result.record){this.loss(result.reason??"policy_rejected");return false;}
-  return this.delivery.enqueue(canonical(result.record));
+  return this.delivery.enqueueNative(nativeCanonical(result.record));
  }
  /** admit() for a lean span (see LiveSpan): the same closed, recursion and policy refusals in the same order and with the same loss reasons, then the queue, which keeps the raw span and serializes it at flush time. */
  private admitLean(span:LiveSpan):void{
