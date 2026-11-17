@@ -58,6 +58,10 @@ func RegisterUI(mux *http.ServeMux, assets fs.FS) {
 			files.ServeHTTP(w, r)
 			return
 		}
+		if r.URL.Path == noticesPath {
+			serveNotices(w, assets)
+			return
+		}
 		if consolePath(r.URL.Path) {
 			serveConsoleShell(w, assets)
 			return
@@ -80,6 +84,21 @@ func RegisterUI(mux *http.ServeMux, assets fs.FS) {
 		}
 		files.ServeHTTP(w, r)
 	})
+}
+
+// noticesPath is the licence notice web/public/THIRD-PARTY-NOTICES.txt that the build copies to the root of the bundle: the MIT code the
+// bundle contains requires its notice to travel with the distribution, so the origin that serves the bundle serves it too.
+const noticesPath = "/THIRD-PARTY-NOTICES.txt"
+
+// serveNotices answers the notices as plain text under the same headers as every other response; a bundle without the file answers 404.
+func serveNotices(w http.ResponseWriter, assets fs.FS) {
+	text, err := fs.ReadFile(assets, strings.TrimPrefix(noticesPath, "/"))
+	if err != nil {
+		http.Error(w, "404 page not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	_, _ = w.Write(text)
 }
 
 // consoleSections are the console views a path-shaped link may name (web/src/app/context.ts SECTIONS). The value says whether

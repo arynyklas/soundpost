@@ -10,6 +10,12 @@ const HEALTH_WORDS: Record<HealthStatus, string> = {
  failing: 'Failing: at least one open incident is linked to this service.',
 };
 
+/** The investigation reads one page of metric names; when the server says more exist, the page says its list is only the first page. */
+export function MoreNote(props: { view: { more: boolean; metric_names: string[] } }): React.JSX.Element | null {
+ if (!props.view.more) return null;
+ return <p role="status" data-testid="investigate-more">This answer covers only the first {props.view.metric_names.length} metric names of this window; more exist and are not counted or listed here. Open Explore to browse all of them.</p>;
+}
+
 /** The services the active source policies admit (D9: there is no separate registry). Each entry opens its own page; nothing here states health. */
 export function ServiceList(props: { context: ViewContext; open: (id: Id) => void }): React.JSX.Element {
  const state = useInvestigation(props.context, 'service');
@@ -43,6 +49,7 @@ export function ServiceList(props: { context: ViewContext; open: (id: Id) => voi
      {view.projects.map((p) => (
       <p key={p.project_id} data-project={p.project_id}>Project <code>{p.project_id}</code>: {p.sources.length === 0 ? 'no readable source' : `${p.sources.length} readable source${p.sources.length === 1 ? '' : 's'}`}.</p>
      ))}
+     <MoreNote view={view} />
      <SectionList sections={view.sections} />
     </>
    )}
@@ -121,6 +128,7 @@ export function ServicePage(props: { id: Id; context: ViewContext }): React.JSX.
         : <ul>{p.sources.map((s) => <li key={s.id}><code>{s.id}</code> — class {s.class}, kinds {s.kinds.join(', ')}{s.replay ? ', replay' : ''}</li>)}</ul>}
       </div>
      ))}
+     <MoreNote view={view} />
      {view.freshness && <p>Freshness: {view.freshness.completeness}. Window {formatNs(view.window.start, props.context.timezone)} to {formatNs(view.window.end, props.context.timezone)} ({props.context.timezone}).</p>}
     </>
    )}

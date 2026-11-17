@@ -4,7 +4,8 @@ import {test,expect,request as pwRequest,type Browser,type Locator,type Page} fr
 import {mkdirSync,readFileSync,writeFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import {join} from 'node:path';
-import {login,owner} from './support/real';
+import {createReader,id,login,owner,postJson} from './support/real';
+import {deleteEntity,setPermissions} from './support/replay';
 import {focusLinkByKeyboard,tabReachesLinks} from './support/audit';
 import {deepLink,realLink,seedJourney,seedRealJourney,type JourneySeed,type RealJourneySeed} from './support/journey';
 
@@ -22,6 +23,8 @@ import {deepLink,realLink,seedJourney,seedRealJourney,type JourneySeed,type Real
 //  - release: the release the occurrence ran in, registered through the real registration route, with its artifact binding and ancestry;
 //  - job: a run the real Python SDK produced (attempt 1 raises, the retry succeeds), read as recovered with its captured error as the cause.
 //    The SDK records a manual execution (no schedule definition is reported by the SDK); schedule-derived evidence is job-history.spec.ts.
+// Adversarial cases inside the journeys: the owner deletes the replay the keyboard user is viewing (the view ends and releases nothing further),
+// and a schedule observer whose data path lagged leaves a scheduled job Unknown, never Missed, in the same keyboard journey.
 test.describe.configure({mode:'serial'});
 let br:Browser,owners:Page,seed:JourneySeed,real:RealJourneySeed,page:Page,windowText='',scope={org:'',project:'',start:'',end:''};
 const shots=process.env.SOUNDPOST_SHOT_DIR;
@@ -170,6 +173,19 @@ test('replay: the keyboard opens the masked replay and steps it; the viewer repo
  await record('replay',{state:'ready',replay:seed.replays.clean.replay,viewerStatus:await page.getByTestId('viewer-status').getAttribute('data-status'),chunks:'closed format; the real recorder path is replay-profile.spec.ts'});
 });
 
+test('deletion mid-view: the owner deletes the replay while the keyboard user is viewing it; the view ends, the page clears and nothing further is requested',async()=>{
+ const requests:string[]=[];
+ page.on('request',(r)=>requests.push(r.url()));
+ await deleteEntity(owners,seed.explore.org,seed.explore.p1,seed.replays.clean.replay,'replay_chunk');
+ await expect(page.getByTestId('replay-ended')).toBeVisible({timeout:30_000});
+ await expect(page.getByTestId('replay-frame')).toHaveCount(0);
+ await expect(page.getByTestId('replay-host')).toHaveCount(0);
+ const seen=requests.length;
+ await page.waitForTimeout(4500);
+ expect(requests.slice(seen).filter((u)=>!u.endsWith('/api/v1/session'))).toEqual([]);
+ await record('replay-deleted-mid-view',{state:'ended',replay:seed.replays.clean.replay});
+});
+
 test('profile: the keyboard opens the native profile with its measurement kinds kept apart',async()=>{
  await goTo('Profiles');
  await typeInto(page.getByLabel('Profile ID'),seed.profile);
@@ -274,6 +290,36 @@ test('job: a run the real Python SDK produced (attempt 1 raised, the retry succe
  await expect(attempts.nth(1)).toHaveAttribute('data-state','succeeded');
  await expect(page.getByTestId('cause-links')).toContainText(real.job.error);
  await record('job-retry',{state:'ready',job,run,failedAttempt:real.job.failedAttempt,retryAttempt:real.job.retryAttempt});
+});
+
+test('outage: a schedule observer whose data path lagged leaves a scheduled job Unknown, never Missed, and the keyboard reads it so',async()=>{
+ // The observer is its own account holding policy.write only; it speaks through the product's real schedule-evidence route.
+ const observer=await createReader(owners,real.ev.org,[real.ev.project]);
+ await setPermissions(owners,real.ev.org,observer.id,real.ev.project,true,['policy.write']);
+ const ctx=await br.newContext();
+ const op=await ctx.newPage();
+ await login(op,observer.email,observer.password);
+ const job=id();
+ const now=Date.now();
+ const ns=(ms:number):string=>String(BigInt(ms)*1_000_000n);
+ const definition={revision:'1',effective_from_ns:ns(now-24*3600_000),schedule:{cron:'* * * * *',timezone:'UTC'},grace_ns:'60000000000',max_runtime_ns:'0',observer_stale_after_ns:'600000000000',overlap:'allow'};
+ // The observer is fresh (it reported a second ago) but attests the data path only up to three hours ago: absence since then is unproven.
+ const fed=await postJson(op,'/api/v1/jobs/schedule-evidence',{org:real.ev.org,project:real.ev.project,job,command_id:id(),observer:id(),observed_ns:ns(now-1000),complete_through_ns:ns(now-3*3600_000),healthy:true,definition});
+ expect(fed.status,fed.text).toBe(200);
+ // The previous case ended inside the Jobs section: activating the Jobs link there re-reads the section in place (same address, so no route
+ // change to announce and focus stays on the link). The heading is announced when the section changes, so leave and come back.
+ await goTo('Queue');
+ await goTo('Jobs');
+ const row=page.locator(`[data-testid=job-row][data-job="${job}"]`);
+ await expect(row).toContainText('Unknown');
+ await expect(row).not.toContainText('Missed');
+ await activate(row.getByRole('button',{name:`Open job ${job}`}));
+ await expect(page.getByRole('heading',{name:`Job ${job}`})).toBeVisible();
+ await expect(page.getByTestId('job-health')).toContainText('Unknown');
+ await expect(page.getByTestId('job-health')).not.toContainText('Missed');
+ await expect(page.getByTestId('job-observer')).toContainText('Schedule observer: fresh');
+ await record('job-outage-unknown',{state:'unknown',job});
+ await ctx.close();
 });
 
 test('the contextual scope of the real-journey organization never left the screen: the last address carries its organization, project and window',async()=>{

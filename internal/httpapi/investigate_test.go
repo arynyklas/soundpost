@@ -269,14 +269,20 @@ func TestInvestigateKindsReportTruthfulStates(t *testing.T) {
 	read := func(kind httpapi.InvestigationKind, target *model.ID) (httpapi.InvestigationView, error) {
 		return inv.Investigate(e.ctx, scope, httpapi.InvestigationRequest{Kind: kind, Projects: []model.ID{p}, Target: target, Window: win, Limit: 10})
 	}
-	// Nothing for these kinds is built: never an empty success.
+	// With no owner wired (no control store passed to WithHealth) every record kind is an explicit not_available naming its owner,
+	// never an empty success; the kinds that need a target say so when it is missing.
+	wantReason := map[httpapi.InvestigationKind]string{httpapi.KindQueue: httpapi.ReasonIncidentSourceNotWired, httpapi.KindIncident: httpapi.ReasonIncidentSourceNotWired, httpapi.KindIssue: httpapi.ReasonIssueEvidenceAbsent, httpapi.KindRelease: httpapi.ReasonReleasesNotBuilt, httpapi.KindJob: httpapi.ReasonJobServiceNotWired}
 	for _, kind := range []httpapi.InvestigationKind{httpapi.KindQueue, httpapi.KindIncident, httpapi.KindIssue, httpapi.KindRelease, httpapi.KindJob} {
-		v, err := read(kind, nil)
-		if err != nil || v.State != httpapi.StateNotAvailable || v.Reason == "" || v.Kind != kind || v.Org != org || len(v.MetricNames) != 0 || v.Freshness != nil {
-			t.Fatalf("%s: %+v %v", kind, v, err)
+		var target *model.ID
+		if kind != httpapi.KindQueue {
+			target = &trace
+			if _, err := read(kind, nil); faultCode(err) != model.Invalid {
+				t.Fatalf("%s without a target: %v", kind, err)
+			}
 		}
-		if v.State == httpapi.StateEmpty || v.State == httpapi.StateReady {
-			t.Fatalf("%s: unbuilt kind answered as success", kind)
+		v, err := read(kind, target)
+		if err != nil || v.State != httpapi.StateNotAvailable || v.Reason != wantReason[kind] || v.Kind != kind || v.Org != org || len(v.MetricNames) != 0 || v.Freshness != nil {
+			t.Fatalf("%s: %+v %v", kind, v, err)
 		}
 	}
 	// Replay and profile need their own grant: without it (Investigate holds none) the answer is the one typed grant-required view and

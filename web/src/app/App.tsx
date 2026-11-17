@@ -1,7 +1,7 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
 import * as React from 'react';
 import { bindSession } from '../api/client';
-import type { Id, InvestigationKind } from '../api/types';
+import type { Id } from '../api/types';
 import { ExplorePage } from '../explore/ExplorePage';
 import { IncidentPage } from '../incidents/IncidentPage';
 import { IssuePage } from '../issues/IssuePage';
@@ -14,8 +14,7 @@ import { ProjectSettings } from '../settings/ProjectSettings';
 import { SessionContext } from '../auth/ElevationDialog';
 import { ServiceList, ServicePage } from '../services/ServicePage';
 import { JobsPage } from '../jobs/JobsPage';
-import { MAX_PROJECTS, SECTIONS, decodeHash, encodeHash, formatNs, isId, scopeKey, useInvestigation, validTimezone, windowEndingAt, type IncidentRef, type SectionId, type ViewContext } from './context';
-import { SectionList, StatusPanel } from './StatusPanel';
+import { MAX_PROJECTS, SECTIONS, decodeHash, encodeHash, formatNs, isId, scopeKey, validTimezone, windowEndingAt, type IncidentRef, type SectionId, type ViewContext } from './context';
 
 /** Focus is free to move to a heading while it is on the page itself or, when `origin` is given, still on that control and the control is part of the
  * investigation (about to be replaced by what the user asked for). A control outside it (the skip link, which survives the session boundary re-mounting the
@@ -92,18 +91,6 @@ function ScopeBar(props: { context: ViewContext }): React.JSX.Element {
    <dt>Time zone</dt><dd>{c.timezone}</dd>
    <dt>Window</dt><dd>{formatNs(c.start, c.timezone)} to {formatNs(c.end, c.timezone)} (end excluded)</dd>
   </dl>
- );
-}
-
-function KindView(props: { context: ViewContext; kind: InvestigationKind; label: string }): React.JSX.Element {
- const state = useInvestigation(props.context, props.kind);
- const view = 'data' in state ? state.data : undefined;
- return (
-  <section className="panel" aria-labelledby="view-heading">
-   <h2 id="view-heading">{props.label}</h2>
-   <StatusPanel state={state} />
-   {view && <SectionList sections={view.sections} />}
-  </section>
  );
 }
 
@@ -231,7 +218,6 @@ export function App(): React.JSX.Element {
      {section.id === 'profiles' && <TargetEntry context={context} noun="profile" target={nav.target} open={(ref) => go(context, 'profiles', '', null, ref)}>{(ref) => <ProfilePage key={`${ref.project}:${ref.id}`} id={ref.id} project={ref.project} context={context} />}</TargetEntry>}
      {section.id === 'services' && <ServiceEntry key={nav.service} context={context} service={nav.service} open={(id) => go(context, 'services', id)} />}
      {section.id === 'jobs' && <JobsPage key={nav.target ? `${nav.target.project}:${nav.target.id}` : ''} context={context} target={nav.target} />}
-     {section.kind !== null && section.id !== 'services' && section.id !== 'jobs' && section.id !== 'queue' && section.id !== 'incidents' && section.id !== 'issues' && section.id !== 'releases' && section.id !== 'traces' && section.id !== 'replays' && section.id !== 'profiles' && <KindView context={context} kind={section.kind} label={section.label} />}
     </>
    )}
   </div>

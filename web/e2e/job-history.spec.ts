@@ -19,8 +19,9 @@ import {createOrg,createProject,createReader,field,id,ingestJobAttempt,listJobDe
 // POST /api/v1/jobs/correct; one test drives both. One test drives the job API of the real Python SDK (web/e2e/support/sdk_job_retry.py).
 // The schedule definitions come from the product's own catalogue (POST /api/v1/jobs/definitions, authored by a policy.write member); the
 // runner's observer stage feeds them to the reducer, so one test checks the definition text and a Missed verdict derived from the journal.
-// Still not covered here because the real path cannot reproduce it:
-//  - a local time that does not exist (skipped by DST) reported as skipped.
+// A local time that does not exist (skipped by DST) is driven through the observer feed with an observation made on that very day (the reducer
+// judges a schedule at the observer's instant, not at the wall clock of the run); the attempt journal cannot hold a run at an instant that
+// does not exist, so the skipped time is the evidence and a UTC twin of the same cron is the control.
 // KEPT (all through ingest): start -> failure -> retry -> success, the next occurrence, redelivery counted nowhere, a late old completion
 // that never overwrites current health, cancellation never success, ID-only cause links, Refresh keeping the selection, the repeated local
 // time (fold 1) carried by the occurrence key itself, overlap sentences, scope and revocation.
@@ -313,6 +314,38 @@ test('the external schedule observer feed: missed with its evidence, an outage o
  await expect(attempt).toContainText('Original result: Failed');
  await expect(attempt.getByTestId('correction')).toContainText(`Corrected to Succeeded (correction version 1 by ${observer.id}`);
  await expect(attempt.getByTestId('correction')).toContainText(reason);
+});
+
+test('a schedule time that the clock skipped (spring forward) is reported as skipped, in words, never as a missed run',async()=>{
+ const observer=await createReader(owners,org,[p1]);
+ await setPermissions(owners,org,observer.id,p1,true,['policy.write']);
+ const op=await loggedIn(observer);
+ const ny='America/New_York';
+ const instant=(iso:string):string=>ns(Date.parse(iso));
+ const observed=instant('2026-03-08T12:00:00Z');
+ const observerId=id();
+ // Daily at 02:30 local time. On 2026-03-08 the New York clocks go from 02:00 straight to 03:00.
+ const definition=(timezone:string,from:string)=>({revision:'1',effective_from_ns:instant(from),schedule:{cron:'30 2 * * *',timezone},grace_ns:'60000000000',max_runtime_ns:'0',observer_stale_after_ns:'600000000000',overlap:'allow'});
+ const feed=async(job:string,timezone:string,from:string)=>{
+  const r=await postJson(op,'/api/v1/jobs/schedule-evidence',{org,project:p1,job,command_id:id(),observer:observerId,observed_ns:observed,complete_through_ns:observed,healthy:true,definition:definition(timezone,from)});
+  expect(r.status,r.text).toBe(200);
+ };
+ const skipped=id(),control=id();
+ // Effective after the 03-07 occurrence, so the only 02:30 the schedule matches in the observed window is the one that does not exist.
+ await feed(skipped,ny,'2026-03-07T12:00:00Z');
+ await feed(control,'UTC','2026-03-07T01:00:00Z');
+ const page=await rctx.newPage();
+ await open(page);
+ await openJob(page,skipped);
+ await expect(page.getByTestId('job-skipped')).toContainText('Skipped: local time 2026-03-08T02:30 does not exist in America/New_York (clock moved forward); no run was expected then');
+ await expect(page.getByTestId('job-health')).not.toContainText('Missed');
+ await expect(page.getByTestId('job-health')).not.toContainText('Late');
+ await expect(page.getByTestId('job-definition')).toContainText('Time zone: America/New_York');
+ // The control: the same cron in UTC has a 02:30 on that day, no run reached the journal, so its newest closed occurrence is missed and it skips nothing.
+ await open(page);
+ await openJob(page,control);
+ await expect(page.getByTestId('job-health')).toContainText('Missed');
+ await expect(page.getByTestId('job-skipped')).toHaveCount(0);
 });
 
 test('a schedule definition authored over the catalogue route is shown, and the runner reads the job Missed from the product\'s own journal',async()=>{

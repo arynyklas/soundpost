@@ -7,7 +7,7 @@ import { StatusPanel } from '../app/StatusPanel';
 import { newCommandId } from '../incidents/model';
 import type { QueryForm } from './form';
 import type { ProfileInfo } from './profiles';
-import { MAX_NAME_BYTES, MAX_VIEWS_PER_PROJECT, buildDeleteRequest, buildSaveRequest, exportDocument, openView, refusalWords, settleSaved, type SavedOutcome } from './savedModel';
+import { MAX_NAME_BYTES, MAX_VIEWS_PER_PROJECT, buildDeleteRequest, buildSaveRequest, commandForAttempt, exportDocument, heldAfter, openView, refusalWords, settleSaved, type HeldCommand, type SavedOutcome } from './savedModel';
 
 type Lists = Record<Id, LoadState<SavedView[]>>;
 interface Editing { id: Id; revision: string; name: string }
@@ -40,6 +40,7 @@ export function SavedViews(props: { context: ViewContext; registry: readonly Pro
  const [opened, setOpened] = React.useState<{ id: Id; text: string } | null>(null);
  const [outcome, setOutcome] = React.useState<SavedOutcome>({ kind: 'idle' });
  const live = React.useRef<AbortController | null>(null);
+ const held = React.useRef<HeldCommand | null>(null);
  const heldScope = React.useRef(scope);
  heldScope.current = scope;
  const ownerProject = form.projects.includes(owner) ? owner : form.projects[0] ?? '';
@@ -54,16 +55,18 @@ export function SavedViews(props: { context: ViewContext; registry: readonly Pro
   const controller = new AbortController();
   setLists(Object.fromEntries(context.projects.map((p): [Id, LoadState<SavedView[]>] => [p, { kind: 'loading' }])));
   for (const p of context.projects) read(p, controller.signal);
-  return () => { controller.abort(); live.current?.abort(); };
+  return () => { controller.abort(); live.current?.abort(); held.current = null; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
  }, [scope]);
 
  const reload = (project: Id): void => { const c = new AbortController(); live.current?.abort(); live.current = c; read(project, c.signal); };
- const send = async (what: 'save' | 'delete', run: () => Promise<{ kind: 'saved'; view: SavedView; updated: boolean } | { kind: 'deleted'; id: Id; name: string }>, project: Id): Promise<void> => {
+ const send = async (what: 'save' | 'delete', attempt: { held: HeldCommand }, run: () => Promise<{ kind: 'saved'; view: SavedView; updated: boolean } | { kind: 'deleted'; id: Id; name: string }>, project: Id): Promise<void> => {
   setOutcome({ kind: 'pending' });
   const settled = await run().catch((error: unknown) => ({ kind: 'failure' as const, what, error }));
   if (heldScope.current !== scope) return;
   const s = settleSaved(settled);
+  // An unknown outcome is repeated under the same command ID (the server answers it with the first result); every decided outcome releases it.
+  held.current = heldAfter(s, attempt);
   setOutcome(s.outcome);
   if (s.clearName) setName('');
   if (settled.kind === 'saved') setEditing({ id: settled.view.id, revision: settled.view.revision, name: settled.view.name });
@@ -74,13 +77,15 @@ export function SavedViews(props: { context: ViewContext; registry: readonly Pro
   if (outcome.kind === 'pending') return;
   const built = buildSaveRequest(context, form, registry, { name: asUpdate && editing !== null && name.trim() === '' ? editing.name : name, project: ownerProject, commandId: newCommandId(), ...(asUpdate && editing !== null ? { update: { id: editing.id, revision: editing.revision } } : {}) });
   if (!built.ok) { setOutcome({ kind: 'invalid', problems: built.problems }); return; }
-  const request = built.request;
-  void send('save', async () => ({ kind: 'saved', view: await saveSavedView(request, new AbortController().signal), updated: request.id !== undefined }), request.project);
+  const attempt = commandForAttempt(held.current, built.request, newCommandId);
+  const request = attempt.request;
+  void send('save', attempt, async () => ({ kind: 'saved', view: await saveSavedView(request, new AbortController().signal), updated: request.id !== undefined }), request.project);
  };
  const remove = (view: SavedView): void => {
   setConfirming(null);
-  const request = buildDeleteRequest(context, view, newCommandId());
-  void send('delete', async () => { await deleteSavedView(request, new AbortController().signal); return { kind: 'deleted', id: view.id, name: view.name }; }, view.project);
+  const attempt = commandForAttempt(held.current, buildDeleteRequest(context, view, newCommandId()), newCommandId);
+  const request = attempt.request;
+  void send('delete', attempt, async () => { await deleteSavedView(request, new AbortController().signal); return { kind: 'deleted', id: view.id, name: view.name }; }, view.project);
  };
  const open = (view: SavedView): void => {
   const result = openView(context, view, registry);
@@ -114,7 +119,7 @@ export function SavedViews(props: { context: ViewContext; registry: readonly Pro
     {outcome.kind === 'saved' && <p role="status" data-testid="saved-committed"><strong>{outcome.updated ? 'Updated' : 'Saved'}.</strong> &ldquo;{outcome.view.name}&rdquo; is now stored under project <code>{outcome.view.project}</code> at revision {outcome.view.revision}.</p>}
     {outcome.kind === 'deleted' && <p role="status" data-testid="saved-deleted"><strong>Deleted.</strong> &ldquo;{outcome.name}&rdquo; is gone from the server.</p>}
     {outcome.kind === 'conflict' && <p role="alert" className="error" data-testid="saved-conflict"><strong>Not applied.</strong> The view changed or was removed since you read it, or the project is full. Nothing was {outcome.what === 'save' ? 'saved' : 'deleted'}; the list below was read again.</p>}
-    {outcome.kind === 'unknown' && <p role="alert" className="error" data-testid="saved-unknown"><strong>Outcome unknown.</strong> The connection failed after the request was sent, so the {outcome.what} may or may not have happened. The list below was read again; check it before trying again.</p>}
+    {outcome.kind === 'unknown' && <p role="alert" className="error" data-testid="saved-unknown"><strong>Outcome unknown.</strong> The connection failed after the request was sent, so the {outcome.what} may or may not have happened. The list below was read again; check it. Pressing the same button again repeats the same request under the same command, so it cannot be applied twice.</p>}
     {outcome.kind === 'refused' && <p role="alert" className="error" data-testid="saved-refused"><strong>Not applied.</strong> {refusalWords(outcome.status)} Code <code>{outcome.code}</code>.{outcome.requestId && <> Request <code>{outcome.requestId}</code>.</>}</p>}
     {opened !== null && <p role="alert" className="error" data-testid="saved-open-refused"><strong>Not opened.</strong> {opened.text}</p>}
    </div>

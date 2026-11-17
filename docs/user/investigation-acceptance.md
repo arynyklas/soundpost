@@ -104,3 +104,18 @@ individually reviewed by eye. No Firefox or WebKit rendering was seen.
   a `project:id` pair, and the scope is the `org` / `projects` query), and the shell rewrites that path to the equivalent hash route
   without a reload (decision D33). The shell carries no data and every data read behind a link is authenticated. Any other
   unknown path is a 404, never the shell.
+
+## Results recorded after the first acceptance run (waves 15 to 20)
+
+- Full committed e2e suites at wave 19 (HEAD f4fe47b): Chromium, Firefox and WebKit each exited 0 with 133 passed in the ordinary group; the
+  shard-loss group passed 8 on Chromium and Firefox and 7 passed with 1 skipped on WebKit (`shard-loss.spec.ts` lost connection: this Playwright
+  WebKit build shows no TCP cut under a streaming fetch, out of release scope, D10). The investigation journeys and the keyboard specs are inside
+  those suites. WebKit keyboard focus of links is handled by `focusLinkByKeyboard` where the platform's Tab skips links (D51 wording for a cached
+  complete answer is also covered there).
+- Wave 20 additions, each with its own spec case: a save whose outcome is unknown is repeated under the same command ID (`explore.spec.ts`);
+  a schedule time skipped by the spring-forward clock change is reported as skipped (`job-history.spec.ts`); inside the keyboard journeys, a replay
+  deleted while it is viewed ends the view and an observer outage leaves a scheduled job Unknown (`investigation-journeys.spec.ts`); a profile
+  delivered by the real Node SDK and by the real Bun SDK reads as engine-reported samples (`replay-profile.spec.ts`).
+- Still open and not claimed here: no person has looked at the Chromium, Firefox or WebKit artifacts (a human review is an owner action); stale and
+  rate-limited states are produced by the real server only where a route can produce them (the console sends no `min_cursors`), the rest are injected
+  in `accessibility.spec.ts`; the gateway to dependency and frontend to API to PostgreSQL legs use ingested spans because the VMs have no Docker.

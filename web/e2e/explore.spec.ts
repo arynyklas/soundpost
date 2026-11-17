@@ -2,7 +2,7 @@
 import {test,expect,request as pwRequest,type APIRequestContext,type BrowserContext,type Locator,type Page,type Request} from '@playwright/test';
 import {readFileSync,readdirSync} from 'node:fs';
 import {resolve} from 'node:path';
-import {at,createProject,createRawReader,createReader,featureSet,id,ingestLog,ingestRawLog,login,onboardLogSource,onboardRawLogSource,owner,postJson,seedExplore,setGrant,type ExploreSeed} from './support/real';
+import {at,createProject,createRawReader,createReader,featureSet,field,id,ingestLog,ingestRawLog,login,onboardLogSource,onboardRawLogSource,owner,postJson,seedExplore,setGrant,type ExploreSeed} from './support/real';
 // Real server, real Chrome. Every number, nanosecond and label below was admitted through the real ingest route and is
 // read back through the real C06 query, discovery, exemplar, format, investigate and export routes by a real reader who
 // holds telemetry.read on two projects. Nothing in this file fakes a server answer.
@@ -538,6 +538,52 @@ test('a saved view is an explicit project-owned action: stored on the server, li
   await expect(section(last,seed.p1).getByTestId('saved-none')).toBeVisible();
  }finally{
   for(const c of contexts)await c.close();
+ }
+});
+
+test('a save whose outcome is unknown is repeated under the same command ID, so the server holds exactly one view',async({browser})=>{
+ test.setTimeout(240_000);
+ const author=await createReader(owners,seed.org,[seed.p1]);
+ const c=await browser.newContext();
+ try{
+  const page=await c.newPage();
+  await login(page,author.email,author.password);
+  await page.goto(`/${hashFor(seed.org,[seed.p1])}`);
+  await expect(page.getByRole('heading',{name:'Explore',exact:true})).toBeVisible();
+  const NAME='Unknown outcome view';
+  await page.getByLabel('Query expression').fill('explore_gauge{job="api"} # unknown-outcome-canary');
+  await page.getByLabel(/^Name/).fill(NAME);
+  const posts:string[]=[];
+  page.on('request',(r)=>{if(r.url().endsWith('/api/v1/saved-views')&&r.method()==='POST'&&(r.postData()??'').includes('"operation":"save"'))posts.push(r.postData()??'');});
+  // The server commits the first save, then the connection is cut before the browser reads the answer: the outcome is unknown to the page.
+  let cut=true;
+  await page.route('**/api/v1/saved-views',async(route)=>{
+   if(cut&&(route.request().postData()??'').includes('"operation":"save"')){
+    cut=false;
+    const answered=await route.fetch();
+    expect(answered.status()).toBe(200);
+    await route.abort('connectionreset');
+    return;
+   }
+   await route.continue();
+  });
+  await page.getByRole('button',{name:'Save as a new view',exact:true}).click();
+  await expect(page.getByTestId('saved-unknown')).toBeVisible();
+  await expect(page.getByTestId('saved-committed')).toHaveCount(0);
+  // Pressing the same button again repeats the same request.
+  await page.getByRole('button',{name:'Save as a new view',exact:true}).click();
+  await expect(page.getByTestId('saved-committed')).toContainText('Saved.');
+  expect(posts).toHaveLength(2);
+  const ids=posts.map((b)=>(JSON.parse(b) as {command_id:string}).command_id);
+  expect(ids[0]).toMatch(/^[0-9a-f]{32}$/);
+  expect(ids[1]).toBe(ids[0]);
+  // The server holds one view of that name, not two.
+  const listed=await postJson(page,'/api/v1/saved-views',{org:seed.org,project:seed.p1,operation:'list'});
+  const views=(field(listed.json,'views') as {name:string}[]|undefined)??[];
+  expect(views.filter((v)=>v.name===NAME)).toHaveLength(1);
+  await expect(page.locator(`[data-section="saved-views"] [data-project="${seed.p1}"] [data-view][data-name="${NAME}"]`)).toHaveCount(1);
+ }finally{
+  await c.close();
  }
 });
 

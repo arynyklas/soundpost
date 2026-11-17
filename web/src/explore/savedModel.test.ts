@@ -5,7 +5,7 @@ import { describe, expect, test } from 'bun:test';
 import { ApiFault, OutcomeUnknown, type SavedView, type ViewContext } from '../api/types';
 import { defaultForm, type QueryForm } from './form';
 import { featureSetId, profileById } from './profiles';
-import { MAX_NAME_BYTES, MAX_SAVED_EXPRESSION_BYTES, buildDeleteRequest, buildSaveRequest, exportDocument, openView, refusalWords, settleSaved } from './savedModel';
+import { MAX_NAME_BYTES, MAX_SAVED_EXPRESSION_BYTES, buildDeleteRequest, buildSaveRequest, commandForAttempt, exportDocument, heldAfter, openView, refusalWords, settleSaved } from './savedModel';
 import { REGISTRY } from './testRegistry.test';
 
 const A = 'a'.repeat(32), P = '1'.repeat(32), Q = '2'.repeat(32), X = '9'.repeat(32), C = 'c'.repeat(32), V = '4'.repeat(32), U = '5'.repeat(32);
@@ -141,7 +141,7 @@ describe('what each server answer makes of the page', () => {
   }
  });
  test('a transport failure is an unknown outcome, never a success and never a failure', () => {
-  expect(settleSaved({ kind: 'failure', what: 'save', error: new OutcomeUnknown() })).toEqual({ outcome: { kind: 'unknown', what: 'save' }, reload: false, clearName: false });
+  expect(settleSaved({ kind: 'failure', what: 'save', error: new OutcomeUnknown() })).toEqual({ outcome: { kind: 'unknown', what: 'save' }, reload: true, clearName: false });
  });
  test('every other refusal keeps the status, code and request ID and changes nothing', () => {
   expect(settleSaved({ kind: 'failure', what: 'save', error: new ApiFault(404, 'not_found', 'd'.repeat(32), '') })).toEqual({ outcome: { kind: 'refused', status: 404, code: 'not_found', requestId: 'd'.repeat(32) }, reload: false, clearName: false });
@@ -162,5 +162,42 @@ describe('the export is the views exactly as the server holds them', () => {
   const doc = JSON.parse(exportDocument(A, P, [v])) as Record<string, unknown>;
   expect(doc).toEqual({ format: 'soundpost.saved-views', version: 1, org: A, project: P, views: [v] });
   expect(JSON.parse(exportDocument(A, P, []))).toMatchObject({ views: [] });
+ });
+});
+
+describe('an attempt whose outcome is unknown is repeated under the same command ID (05.05 review)', () => {
+ const C2 = 'd'.repeat(32), C3 = 'e'.repeat(32);
+ const save = (over: Partial<QueryForm> = {}) => { const b = buildSaveRequest(ctx, form(over), REGISTRY, input()); if (!b.ok) throw new Error('save'); return b.request; };
+ const del = () => buildDeleteRequest(ctx, view(), C);
+ const unknown = (what: 'save' | 'delete') => settleSaved({ kind: 'failure', what, error: new OutcomeUnknown() });
+ test('the retry of a save that ended unknown carries the first attempt\'s command ID, so the server can answer it from the first commit', () => {
+  const first = commandForAttempt(null, save(), () => C2);
+  expect(first.request.command_id).toBe(C2);
+  const held = heldAfter(unknown('save'), first);
+  expect(held).not.toBeNull();
+  const retry = commandForAttempt(held, save(), () => C3);
+  expect(retry.request.command_id).toBe(C2);
+  expect(retry.request).toEqual(first.request);
+ });
+ test('a retry of a delete that ended unknown carries the same command ID', () => {
+  const first = commandForAttempt(null, del(), () => C2);
+  const held = heldAfter(unknown('delete'), first);
+  expect(commandForAttempt(held, del(), () => C3).request.command_id).toBe(C2);
+ });
+ test('a different request after an unknown outcome is a different command with a fresh ID', () => {
+  const first = commandForAttempt(null, save(), () => C2);
+  const held = heldAfter(unknown('save'), first);
+  expect(commandForAttempt(held, save({ expression: 'up{job="other"}' }), () => C3).request.command_id).toBe(C3);
+  expect(commandForAttempt(held, del(), () => C3).request.command_id).toBe(C3);
+ });
+ test('every outcome the server decided releases the command ID: the next attempt is a new command', () => {
+  const first = commandForAttempt(null, save(), () => C2);
+  const decided = [
+   settleSaved({ kind: 'saved', view: view(), updated: false }),
+   settleSaved({ kind: 'deleted', id: V, name: 'x' }),
+   settleSaved({ kind: 'failure', what: 'save', error: new ApiFault(409, 'conflict', '', '') }),
+   settleSaved({ kind: 'failure', what: 'save', error: new ApiFault(404, 'not_found', '', '') }),
+  ];
+  for (const s of decided) expect(heldAfter(s, first)).toBeNull();
  });
 });

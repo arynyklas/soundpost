@@ -90,6 +90,9 @@ const (
 	// ReasonReleaseRecordsAdmin: release records (labels, ancestry) are read
 	// through the release view with an organization-admin scope.
 	ReasonReleaseRecordsAdmin = "release_records_need_org_admin"
+	// ReasonIncidentSourceNotWired: the committed incident records are not behind this investigator, so the queue and incident
+	// kinds are not stated (never an empty queue).
+	ReasonIncidentSourceNotWired = "incident_source_not_wired"
 )
 
 // ProjectEvidence lists the active sources of one requested project that this
@@ -135,6 +138,60 @@ type InvestigationView struct {
 	Services []auth.VisibleService `json:"services,omitempty"`
 	// Health is the stored-evidence health of the one targeted service.
 	Health *ServiceHealth `json:"health,omitempty"`
+	// Queue (queue kind only) lists the committed, non-erased incidents of the requested projects, open first, then severity,
+	// then most recent activity, then ID, at most Limit; More says further incidents exist (the queue has no cursor). The request
+	// window does not filter the record kinds: they are the committed records as they stand, not the telemetry of a window.
+	Queue []IncidentSummary `json:"queue,omitempty"`
+	// Incident, Issue, Release and Job are the one targeted record of their kind.
+	Incident *IncidentSummary `json:"incident,omitempty"`
+	Issue    *IssueSummary    `json:"issue,omitempty"`
+	Release  *ReleaseSummary  `json:"release,omitempty"`
+	Job      *JobSummary      `json:"job,omitempty"`
+}
+
+// IncidentSummary is the typed summary of one incident: identity, state names and the stored version only. The timeline, owner and
+// reasons are on the incident view (POST /api/v1/incidents/get).
+type IncidentSummary struct {
+	ProjectID    model.ID     `json:"project_id"`
+	ID           model.ID     `json:"incident_id"`
+	Status       string       `json:"status"`
+	Severity     string       `json:"severity"`
+	Version      model.Uint64 `json:"version"`
+	LastActivity model.Int64  `json:"last_activity_ns"`
+}
+
+// IssueSummary is the typed summary of one persisted grouping issue. Occurrences counts the retained evidence plus the compacted
+// evidence, so the count is the full one; Compacted says part of it is only counted.
+type IssueSummary struct {
+	ProjectID       model.ID     `json:"project_id"`
+	ID              model.ID     `json:"issue_id"`
+	Workflow        string       `json:"workflow"`
+	GroupingVersion uint16       `json:"grouping_version"`
+	Revision        model.Uint64 `json:"revision"`
+	Occurrences     model.Uint64 `json:"occurrences"`
+	LateHistory     model.Uint64 `json:"late_history"`
+	Compacted       bool         `json:"compacted"`
+}
+
+// ReleaseSummary is the typed summary of one release record: ids, the revision and the build time. The label is on the release view.
+type ReleaseSummary struct {
+	ProjectID      model.ID     `json:"project_id"`
+	ID             model.ID     `json:"release_id"`
+	BuildID        model.ID     `json:"build_id"`
+	Parents        []model.ID   `json:"parents"`
+	Revision       model.Uint64 `json:"revision"`
+	BuildTime      model.Int64  `json:"build_time_ns"`
+	DebugArtifacts uint32       `json:"debug_artifacts"`
+}
+
+// JobSummary is the typed summary of one committed job book: identity, version and the counts of its runs and attempts. Its health
+// verdict is derived at read time by the job view (POST /api/v1/jobs/view), never copied from the stored book.
+type JobSummary struct {
+	ProjectID model.ID     `json:"project_id"`
+	ID        model.ID     `json:"job_id"`
+	Version   model.Uint64 `json:"version"`
+	Runs      uint32       `json:"runs"`
+	Attempts  uint32       `json:"attempts"`
 }
 
 // HealthStatus is D9: failing = an open incident links the service, degraded =

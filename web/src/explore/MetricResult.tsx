@@ -1,7 +1,7 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
 import * as React from 'react';
 import type { EvaluationWire, Label, NativeHistogram, ProjectResult, Sample, Series, VectorElement } from '../api/types';
-import { histogramView, labelsText, nsToIso, planSeries, sampleText, type FloatKind, type Gap, type SeriesPlan } from './model';
+import { emptyWords, histogramView, labelsText, nsToIso, planSeries, sampleText, type FloatKind, type Gap, type SeriesPlan } from './model';
 
 const PAGE = 200;
 const MAX_SERIES = 50;
@@ -62,9 +62,9 @@ export function SampleValue(props: { sample: Sample }): React.JSX.Element {
  );
 }
 
-function VectorTable(props: { vector: VectorElement[] }): React.JSX.Element {
+function VectorTable(props: { vector: VectorElement[]; result: ProjectResult }): React.JSX.Element {
  const [shown, setShown] = React.useState(PAGE);
- if (props.vector.length === 0) return <p data-result="vector-empty">The query matched no series. Nothing is missing.</p>;
+ if (props.vector.length === 0) return <p data-result="vector-empty">{emptyWords(props.result, 'The query matched no series')}</p>;
  return (
   <>
    <table className="data-table" data-result="vector">
@@ -106,7 +106,9 @@ function SeriesChart(props: { plan: SeriesPlan; samples: Sample[]; evaluation: E
  const span = Number(x1 - x0);
  const xOf = (ns: string): number => (span === 0 ? W / 2 : PAD + (Number(BigInt(ns) - x0) / span) * (W - 2 * PAD));
  const values = plan.segments.flat().map((p) => p.value);
- const lo = values.length > 0 ? Math.min(...values) : 0, hi = values.length > 0 ? Math.max(...values) : 0;
+ // A loop, not Math.min(...values): spreading more samples than the engine's argument limit throws a RangeError and blanks the chart.
+ let lo = 0, hi = 0;
+ for (let i = 0; i < values.length; i++) { const v = values[i] ?? 0; if (i === 0 || v < lo) lo = v; if (i === 0 || v > hi) hi = v; }
  const plotH = H - 2 * PAD - STRIP;
  const yOf = (v: number): number => (hi === lo ? PAD + plotH / 2 : PAD + plotH - ((v - lo) / (hi - lo)) * plotH);
  const stripY = H - PAD - STRIP / 2 + 4;
@@ -184,9 +186,9 @@ export function MetricResult(props: { result: ProjectResult; evaluation?: Evalua
  switch (v.type) {
   case 'scalar': return <p data-result="scalar">Scalar <SampleValue sample={v.scalar} /> at <TimeText ns={v.scalar.time} /></p>;
   case 'string': return <p data-result="string">String: <code data-testid="string-value">{v.string}</code></p>;
-  case 'vector': return <VectorTable vector={v.vector} />;
+  case 'vector': return <VectorTable vector={v.vector} result={props.result} />;
   case 'matrix': return v.matrix.length === 0
-   ? <p data-result="matrix-empty">The query matched no series. Nothing is missing.</p>
+   ? <p data-result="matrix-empty">{emptyWords(props.result, 'The query matched no series')}</p>
    : (
     <div data-result="matrix">
      <p>Range matrix: {v.matrix.length} {v.matrix.length === 1 ? 'series' : 'series'}{v.matrix.length > MAX_SERIES ? `, the first ${MAX_SERIES} are drawn` : ''}.</p>

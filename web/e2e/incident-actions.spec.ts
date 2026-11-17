@@ -1,7 +1,7 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
 import {test,expect,type APIRequestContext,type Page,type BrowserContext} from '@playwright/test';
 import {randomBytes} from 'node:crypto';
-import {field,ingestError,onboardErrorSource,postJson} from './support/real';
+import {adminCommand,field,ingestError,onboardErrorSource,postJson} from './support/real';
 // Two real browsers, one real server, one REAL incident produced the product's own way: an error occurrence ingested through
 // POST /ingest/v1/batches with a real source credential -> the leader-only background runner (`soundpost serve`, issue producer, then
 // incident producer, acting as the in-process system principal) -> a system-origin incident, found through the real POST /api/v1/queue.
@@ -18,18 +18,9 @@ const id=():string=>randomBytes(16).toString('hex');
 const origin=new URL(process.env.SOUNDPOST_TEST_ORIGIN??'').origin;
 interface View{version:string;status:string;owner?:string;ack?:{actor:string;current:boolean};timeline:{type:string;actor:string;origin:string}[];source_firing:boolean}
 async function csrf(page:Page):Promise<string>{return (await (await page.request.get('/api/v1/session')).json() as {csrf:string}).csrf;}
-// The admin revision can move between the read and the command (the background runner commits control state too): retry only that race.
+// The admin revision can move between the read and the command (the background runner commits control state too): the shared fixture retries only that race.
 async function command(page:Page,org:string,kind:string,payload:Record<string,unknown>):Promise<void>{
- for(let attempt=0;;attempt++){
-  const token=await csrf(page);
-  const read=await page.request.post('/api/v1/admin/read',{headers:{'X-CSRF-Token':token,Origin:origin},data:{kind:'organizations'}});
-  expect(read.ok()).toBe(true);
-  const {revision}=await read.json() as {revision:string};
-  const response=await page.request.post('/api/v1/admin/commands',{headers:{'X-CSRF-Token':token,Origin:origin},data:{command_id:id(),expected_revision:revision,org_id:org,kind,payload:{...payload,reason:'Generic incident action acceptance'}}});
-  if(response.status()===409&&attempt<4)continue;
-  expect(response.status(),`${kind}`).toBeLessThan(300);
-  return;
- }
+ await adminCommand(page,org,kind,payload,'Generic incident action acceptance');
 }
 async function login(page:Page,who:string,secret:string):Promise<void>{
  await page.goto('/');await page.getByLabel('Email',{exact:true}).fill(who);await page.getByLabel('Password',{exact:true}).fill(secret);await page.getByRole('button',{name:'Sign in',exact:true}).click();await expect(page.getByRole('heading',{name:'Account access',exact:true})).toBeVisible();

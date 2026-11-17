@@ -27,6 +27,12 @@ import (
 // span link across traces: a link is reported as a reference whose target this
 // scope has not resolved.
 
+// MaxPathEdges is the most edges one trace view carries; the web client refuses a longer list.
+const MaxPathEdges = 100_000
+
+// maxLossScan bounds the loss records one trace view scans.
+const maxLossScan = 50_000
+
 // Reason codes of the trace view.
 const (
 	ReasonSpanSourceNotWired = "span_source_not_wired"
@@ -38,6 +44,8 @@ const (
 	// ReasonTargetsTruncated: more span references than one resolution batch holds; the rest are
 	// neither resolved nor listed.
 	ReasonTargetsTruncated = "targets_truncated"
+	// ReasonEdgesTruncated: the edge list was cut at MaxPathEdges (TraceView.EdgesTruncated).
+	ReasonEdgesTruncated = "edges_truncated"
 )
 
 // SpanSet is what a SpanSource returns for one trace: its spans visible to the
@@ -169,6 +177,7 @@ func (s storageSpans) losses(ctx context.Context, scope auth.Scope, project mode
 	}
 	defer rows.Close()
 	var out []traces.ProducerLoss
+	scanned := 0
 	for {
 		page, err := rows.Next(ctx)
 		if errors.Is(err, io.EOF) {
@@ -182,6 +191,12 @@ func (s storageSpans) losses(ctx context.Context, scope auth.Scope, project mode
 			return nil, model.Fail(model.Corrupt)
 		}
 		for _, v := range page.Values {
+			if scanned++; scanned > maxLossScan {
+				// The loss records of every producer in the window are read to find this trace's
+				// producers; past the bound the read stops and says it is partial.
+				*partial = true
+				return out, nil
+			}
 			l := v.Loss
 			if l == nil || l.Signal != model.SpanKind || !sources[l.Source] {
 				continue
@@ -299,15 +314,17 @@ type TraceBody struct {
 
 // TraceView answers a trace request. Path is present only when spans were read.
 type TraceView struct {
-	Org      model.ID           `json:"org"`
-	Project  model.ID           `json:"project"`
-	Trace    model.ID           `json:"trace"`
-	State    ViewState          `json:"state"`
-	Reason   string             `json:"reason,omitempty"`
-	Partial  bool               `json:"partial"`
-	Path     *traces.PathResult `json:"path,omitempty"`
-	Targets  []SpanTarget       `json:"targets,omitempty"`
-	Sections []ViewSection      `json:"sections"`
+	Org     model.ID           `json:"org"`
+	Project model.ID           `json:"project"`
+	Trace   model.ID           `json:"trace"`
+	State   ViewState          `json:"state"`
+	Reason  string             `json:"reason,omitempty"`
+	Partial bool               `json:"partial"`
+	Path    *traces.PathResult `json:"path,omitempty"`
+	// EdgesTruncated is true when Path.Edges was cut at MaxPathEdges (the bound the client enforces).
+	EdgesTruncated bool          `json:"edges_truncated,omitempty"`
+	Targets        []SpanTarget  `json:"targets,omitempty"`
+	Sections       []ViewSection `json:"sections"`
 }
 
 func traceViewOf(body TraceBody, state ViewState, reason string) TraceView {
@@ -371,8 +388,18 @@ func (t *Traces) View(ctx context.Context, authority *auth.Service, credential a
 		view.State, view.Reason = StateIncomplete, ReasonSpansPartial
 		view.Sections[0] = ViewSection{Name: "spans", State: StateIncomplete, Reason: ReasonSpansPartial}
 	}
-	permits := func(kind string) bool {
-		return holdsTargetGrant(ctx, authority, credential, body.Org, body.Project, kind)
+	if len(path.Edges) > MaxPathEdges {
+		// The wire list is bounded exactly as the client bounds it: the edges past the bound are not
+		// sent, and the view says so instead of presenting a shortened list as the whole one.
+		path.Edges = path.Edges[:MaxPathEdges:MaxPathEdges]
+		view.EdgesTruncated = true
+		if view.State == StateReady {
+			view.State, view.Reason = StateIncomplete, ReasonEdgesTruncated
+		}
+		view.Sections = append(view.Sections, ViewSection{Name: "edges", State: StateIncomplete, Reason: ReasonEdgesTruncated})
+	}
+	permits := func(kind string) (bool, error) {
+		return targetGrant(ctx, authority, credential, body.Org, body.Project, kind)
 	}
 	if view.Targets, err = t.resolveTargets(ctx, scope, body.Project, set, &view, permits); err != nil {
 		return TraceView{}, auth.Scope{}, err
@@ -388,7 +415,7 @@ const maxSpanTargets = 128
 // resolver nothing is resolved and the "links" section says so; it is never reported as
 // unavailable. A resolution that cannot complete (the scope was revoked meanwhile) is the
 // request's not-found, never a partial answer.
-func (t *Traces) resolveTargets(ctx context.Context, scope auth.Scope, project model.ID, set SpanSet, view *TraceView, permits func(kind string) bool) ([]SpanTarget, error) {
+func (t *Traces) resolveTargets(ctx context.Context, scope auth.Scope, project model.ID, set SpanSet, view *TraceView, permits func(kind string) (bool, error)) ([]SpanTarget, error) {
 	if t.links == nil {
 		view.Sections = append(view.Sections, ViewSection{Name: "links", State: StateNotAvailable, Reason: ReasonLinkResolverNotWired})
 		return nil, nil
@@ -435,7 +462,12 @@ func (t *Traces) resolveTargets(ctx context.Context, scope auth.Scope, project m
 	for i, tg := range targets {
 		ok, known := grants[tg.Kind]
 		if !known {
-			ok = permits(tg.Kind)
+			var err error
+			if ok, err = permits(tg.Kind); err != nil {
+				// A grant check that could not be made says nothing about the account: the read fails
+				// and nothing is memoized, so no later link of this request is judged by it.
+				return nil, err
+			}
 			grants[tg.Kind] = ok
 		}
 		if !ok {
@@ -479,10 +511,18 @@ func (t *Traces) resolveTargets(ctx context.Context, scope auth.Scope, project m
 	return targets, nil
 }
 
-// holdsTargetGrant reports whether the caller holds the separate grant a target kind needs on the
-// project: replay.read for a replay, profiles.read for a profile; a job and an error occurrence need
-// nothing beyond the read scope the resolver already checks.
+// holdsTargetGrant is targetGrant with every failure read as "not held" (the investigation view's
+// own contract; the trace view uses targetGrant and fails the read instead).
 func holdsTargetGrant(ctx context.Context, authority *auth.Service, credential auth.Credential, org, project model.ID, kind string) bool {
+	ok, err := targetGrant(ctx, authority, credential, org, project, kind)
+	return err == nil && ok
+}
+
+// targetGrant reports whether the caller holds the separate grant a target kind needs on the
+// project: replay.read for a replay, profiles.read for a profile; a job and an error occurrence need
+// nothing beyond the read scope the resolver already checks. Only the absence of the grant (the one
+// not-found) is an answer; any other authorizer error is a failed read and is returned as such.
+func targetGrant(ctx context.Context, authority *auth.Service, credential auth.Credential, org, project model.ID, kind string) (bool, error) {
 	var permission auth.Permission
 	switch kind {
 	case "replay":
@@ -490,10 +530,16 @@ func holdsTargetGrant(ctx context.Context, authority *auth.Service, credential a
 	case "profile":
 		permission = ProfilesRead
 	default:
-		return true
+		return true, nil
 	}
 	gate, err := authority.Authorize(ctx, credential, org, []model.ID{project}, permission)
-	return err == nil && gate.AllowsProject(project)
+	if err != nil {
+		if faultIs(err, model.NotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return gate.AllowsProject(project), nil
 }
 
 // RegisterTraceRoutes mounts the trace view. The route needs the CSRF binding of

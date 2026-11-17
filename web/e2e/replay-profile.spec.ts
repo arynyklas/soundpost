@@ -390,6 +390,41 @@ test('a profile produced by the real Python SDK (a bounded wall-sampling run of 
  await page.close();
 });
 
+for(const runtime of ['node','bun'] as const){
+ test(`a profile produced by the real ${runtime==='node'?'Node':'Bun'} SDK (a bounded engine-sampling run of a named hot loop) is delivered by the SDK and reads as engine-reported samples, never as OS CPU time`,async()=>{
+  test.setTimeout(240_000);
+  // The SDK samples its own engine through the in-process inspector session, composes the capability and chunk records and delivers them over its own HTTPS
+  // transport (the driver exits non-zero without durable receipts). Nothing is built by the test.
+  const source=await onboardSdkProfileSource(owners,org,p1);
+  const dir=mkdtempSync(join(tmpdir(),`sp-sdk-profile-${runtime}-`));
+  const config=join(dir,'sdk.json');
+  writeFileSync(config,JSON.stringify(sdkConfig(source)),{mode:0o600});
+  const driver=resolve(process.cwd(),'e2e/support/sdk_profile_js.ts');
+  const command=runtime==='node'?[process.env.E2E_NODE??'node',['--experimental-transform-types','--no-warnings',driver,'node']] as const:[process.env.E2E_BUN??'bun',[driver,'bun']] as const;
+  const {stdout}=await promisify(execFile)(command[0],[...command[1]],{env:{...process.env,SOUNDPOST_SDK_CONFIG:config},timeout:120_000});
+  const sdk=JSON.parse(stdout.trim().split('\n').pop()??'{}') as {profile:string;samples:number;chunks:number;method:string;units:string;runtime:string};
+  expect(sdk.method).toBe('runtime_engine_samples');
+  expect(sdk.units).toBe('samples');
+  expect(sdk.runtime.toLowerCase()).toContain(runtime);
+  const now=BigInt(Date.now())*1_000_000n;
+  const page=await ctx.newPage();
+  await page.goto(`/${hash('profiles',sdk.profile,now-3_600n*1_000_000_000n,now+3_600n*1_000_000_000n)}`);
+  await expect(page.getByRole('heading',{name:/^Profile /})).toBeVisible();
+  await expect(page.getByTestId('profile-method')).toContainText('runtime_cpu');
+  const caps=page.getByTestId('capability-row');
+  await expect(caps).toHaveCount(1);
+  await expect(caps).toHaveAttribute('data-method','runtime_engine_samples');
+  await expect(caps).toHaveAttribute('data-status','supported');
+  const engine=await page.getByTestId('unit-engine').innerText();
+  expect(Number(/([\d,. \u202f\u00a0]+) samples, engine-reported/.exec(engine)?.[1]?.replace(/\D/g,'')),engine).toBe(sdk.samples);
+  await expect(page.getByTestId('frame-list')).toContainText('e2e_hot_loop_js');
+  // Engine samples are not OS CPU: no OS on-CPU, blocked or runnable-delay figure is claimed for them.
+  await expect(page.getByTestId('unit-oscpu')).not.toContainText(/\d/);
+  await expect(page.getByTestId('unit-blocked')).not.toContainText(/\d+ ns/);
+  await page.close();
+ });
+}
+
 test('deleting a replay while it is open ends the view, clears the page and releases no further chunk',async()=>{
  test.setTimeout(120_000);
  const own=await seedOwnReplay(api,replaySource,8);

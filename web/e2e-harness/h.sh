@@ -32,7 +32,8 @@ pki() {
 }
 
 prep() {
-	( cd "$ROOT" && pnpm install --frozen-lockfile --filter @soundpost/web... --filter @soundpost/browser... 2>&1 | tail -3 )
+	# The Node and Bun SDK packages are installed too: the SDK profile drivers (web/e2e/support/sdk_profile_js.ts) import them from source.
+	( cd "$ROOT" && pnpm install --frozen-lockfile --filter @soundpost/web... --filter @soundpost/browser... --filter @soundpost/node... --filter @soundpost/bun... 2>&1 | tail -3 )
 	# E2E_WIRE_HEALTH=1 applies, to this run's VM copy only, the one-line wiring the parent applies to internal/appcore/app.go:
 	# investigator.WithHealth(c) right after the investigator is built.
 	if [ "${E2E_WIRE_HEALTH:-}" = 1 ] && ! grep -q 'investigator.WithHealth(c)' "$ROOT/internal/appcore/app.go"; then
@@ -103,7 +104,7 @@ up() {
 	fi
 	i=0
 	until [ "$(curl -s --cacert "$PKI/ca.pem" -o /dev/null -w '%{http_code}' "$ORIGIN/readyz")" = 200 ]; do
-		i=$((i + 1)); [ $i -gt 60 ] && { echo "not ready" >&2; cat "$T/server.log" >&2; exit 1; }; sleep 1
+		i=$((i + 1)); [ $i -gt "${E2E_READY_WAIT:-60}" ] && { echo "not ready" >&2; cat "$T/server.log" >&2; exit 1; }; sleep 1
 	done
 	i=0
 	if [ "${E2E_SANDBOX:-}" = 1 ] && ! grep -q 'symbolicator: ready' "$T/server.log"; then echo "the symbolication sandbox is not ready" >&2; grep symbolicator "$T/server.log" >&2; exit 1; fi

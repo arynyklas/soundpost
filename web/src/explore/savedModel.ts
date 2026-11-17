@@ -89,12 +89,29 @@ export interface SavedSettlement {
  clearName: boolean;
 }
 
-/** A 409 is a lost race, never a merge: the revision moved or the project is full, and the list is re-read so the person sees what is there now. A transport failure is an unknown outcome the same command ID may repeat. Anything else keeps the server's own code. */
+/** A save or delete whose outcome is unknown, kept with the request it carried. */
+export interface HeldCommand { fingerprint: string; commandId: Id }
+type SavedCommand = SavedViewSaveRequest | SavedViewDeleteRequest;
+
+/** The request of one attempt with the command ID it goes out under. The server answers a repeated command ID with the first result,
+ * so repeating a request whose outcome is unknown under the same ID can never commit it twice; any other request is a new command. */
+export function commandForAttempt<T extends SavedCommand>(held: HeldCommand | null, request: T, fresh: () => Id): { request: T; held: HeldCommand } {
+ const fingerprint = JSON.stringify({ ...request, command_id: '' });
+ const commandId = held !== null && held.fingerprint === fingerprint ? held.commandId : fresh();
+ return { request: { ...request, command_id: commandId }, held: { fingerprint, commandId } };
+}
+
+/** The command to remember after an attempt settled: only an unknown outcome is repeated. Every outcome the server decided (committed, conflict, refused) releases the ID. */
+export function heldAfter(settlement: SavedSettlement, attempt: { held: HeldCommand }): HeldCommand | null {
+ return settlement.outcome.kind === 'unknown' ? attempt.held : null;
+}
+
+/** A 409 is a lost race, never a merge: the revision moved or the project is full, and the list is re-read so the person sees what is there now. A transport failure is an unknown outcome: the list is read again (the first attempt may have committed) and the same command ID repeats it. Anything else keeps the server's own code. */
 export function settleSaved(settled: SavedSettled): SavedSettlement {
  if (settled.kind === 'saved') return { outcome: { kind: 'saved', view: settled.view, updated: settled.updated }, reload: true, clearName: true };
  if (settled.kind === 'deleted') return { outcome: { kind: 'deleted', id: settled.id, name: settled.name }, reload: true, clearName: false };
  const error = settled.error;
- if (error instanceof OutcomeUnknown) return { outcome: { kind: 'unknown', what: settled.what }, reload: false, clearName: false };
+ if (error instanceof OutcomeUnknown) return { outcome: { kind: 'unknown', what: settled.what }, reload: true, clearName: false };
  if (error instanceof ApiFault) {
   if (error.status === 409) return { outcome: { kind: 'conflict', what: settled.what }, reload: true, clearName: false };
   return { outcome: { kind: 'refused', status: error.status, code: error.code, requestId: error.requestId }, reload: false, clearName: false };

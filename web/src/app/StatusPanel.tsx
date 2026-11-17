@@ -29,6 +29,10 @@ const REASONS: Record<string, string> = {
  missing_chunk: 'A chunk of this profile is missing between the chunks that arrived.',
  no_observations_in_window: 'No observation of this profile lies in the selected window. That is not zero work.',
  spans_partial: 'Some data did not answer, so spans of this trace may be missing. Missing spans are not proof that no work happened.',
+ edges_truncated: 'The list of path edges was cut at its bound, so the critical path shown covers only part of this trace. The missing edges are not proof that no work happened.',
+ link_resolver_not_wired: 'This installation has no link resolver wired, so no span reference to an error, job, replay or profile is reported. That is not proof that the spans have no references.',
+ targets_truncated: 'More span references exist than one resolution batch holds, so only part of them were resolved. The rest are not reported as unavailable or absent.',
+ incident_source_not_wired: 'This installation has no incident reader wired, so no incident can be shown. That is not an empty queue.',
 };
 export function reasonText(reason: string): string { return REASONS[reason] ?? EVIDENCE_REASON[reason] ?? 'Not available.'; }
 

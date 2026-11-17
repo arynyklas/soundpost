@@ -38,6 +38,7 @@ func uiServer(t *testing.T) *httptest.Server {
 		"assets/replay-frame.html":     file(`<html><style>b{}</style><script>1</script></html>`),
 		"assets/notes.txt":             file(`plain`),
 		"assets/sub/chunk-AbCd1234.js": file(`/* nested */`),
+		"THIRD-PARTY-NOTICES.txt":      file("Soundpost browser distribution - third-party notices\nMIT License\n"),
 	}
 	register, err := httpapi.UIRoutes(bundle)
 	if err != nil {
@@ -211,5 +212,27 @@ func TestUIConsolePathLinksServeTheSamePublicShell(t *testing.T) {
 	response.Body.Close()
 	if response.StatusCode != http.StatusMethodNotAllowed {
 		t.Fatalf("POST to a console path: status %d, want 405", response.StatusCode)
+	}
+}
+
+// The compiled bundle ships web/public/THIRD-PARTY-NOTICES.txt next to index.html: the licence notice the bundled MIT code requires
+// must be reachable from the origin that serves the bundle, not only present in the build output (05.09 review).
+func TestUIServesTheThirdPartyNoticesOfTheBundleAsPlainTextUnderTheSamePolicy(t *testing.T) {
+	server := uiServer(t)
+	response, body := uiGet(t, server, "/THIRD-PARTY-NOTICES.txt")
+	if response.StatusCode != 200 || !strings.Contains(body, "third-party notices") || !strings.Contains(body, "MIT License") {
+		t.Fatalf("notices: status %d body %q", response.StatusCode, body)
+	}
+	if got := response.Header.Get("Content-Type"); !strings.HasPrefix(got, "text/plain") {
+		t.Fatalf("notices Content-Type %q, want text/plain", got)
+	}
+	if response.Header.Get("X-Content-Type-Options") != "nosniff" || !strings.Contains(response.Header.Get("Content-Security-Policy"), "default-src 'none'") || response.Header.Get("Cache-Control") != "no-store" {
+		t.Fatalf("notices headers: %v", response.Header)
+	}
+	// Only that exact path: no other file of the bundle root, no other spelling, no traversal.
+	for _, path := range []string{"/third-party-notices.txt", "/THIRD-PARTY-NOTICES.txt/", "/THIRD-PARTY-NOTICES.txt/x", "/index.html", "/notes.txt"} {
+		if got, _ := uiGet(t, server, path); got.StatusCode == 200 {
+			t.Fatalf("%s answered 200", path)
+		}
 	}
 }

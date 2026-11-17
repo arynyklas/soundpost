@@ -2,7 +2,7 @@
 import {test,expect,type Page} from '@playwright/test';
 import {randomBytes} from 'node:crypto';
 import {barrierProxy} from './support/barrier';
-import {field,onboardMetricSource} from './support/real';
+import {adminCommand,field,onboardMetricSource} from './support/real';
 // Real server, real browser. A real investigate response for organization A is held
 // in the network layer (fetched from the real server, fulfilled late) while the
 // browser navigates to organization B: A's late completion must never paint.
@@ -12,18 +12,9 @@ if(!email||!password)throw new Error('A real provisioned MFA-free instance-admin
 const id=():string=>randomBytes(16).toString('hex');
 const origin=new URL(process.env.SOUNDPOST_TEST_ORIGIN??'').origin;
 // The control revision also advances under the runner's own commits (producers), so a command read at revision N can land
-// at N+1: that 409 is retried with a fresh revision, exactly as support/real.ts adminCommand does; any other status fails.
+// at N+1: the shared fixture (support/real.ts adminCommand) retries that race for up to a minute; any other status fails.
 async function command(page:Page,org:string,kind:string,payload:Record<string,unknown>):Promise<void>{
- for(let attempt=0;;attempt++){
-  const session=await (await page.request.get('/api/v1/session')).json() as {csrf:string};
-  const read=await page.request.post('/api/v1/admin/read',{headers:{'X-CSRF-Token':session.csrf,Origin:origin},data:{kind:'organizations'}});
-  expect(read.ok()).toBe(true);
-  const {revision}=await read.json() as {revision:string};
-  const response=await page.request.post('/api/v1/admin/commands',{headers:{'X-CSRF-Token':session.csrf,Origin:origin},data:{command_id:id(),expected_revision:revision,org_id:org,kind,payload:{...payload,reason:'Generic scope race acceptance'}}});
-  if(response.status()===409&&attempt<4)continue;
-  expect(response.status(),`${kind}`).toBeLessThan(300);
-  return;
- }
+ await adminCommand(page,org,kind,payload,'Generic scope race acceptance');
 }
 // The service list of the selected scope: a service ID chosen at random is no longer "unconfirmable" but not found (D9), and a not-found
 // answer is not the state this spec drives.

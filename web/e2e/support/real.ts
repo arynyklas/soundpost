@@ -136,12 +136,14 @@ async function fresh(page:Page):Promise<void>{
 
 // ---- admin commands --------------------------------------------------------------------------------------------
 /**
- * One real admin command as an org admin: reads the current revision, sends the command and retries a revision race. The revision a command is checked
- * against is the whole control state's, which the server's own background commits move too, and `create_user` hashes the password before it compares, so a
- * command can lose to a background commit several times in a row on a busy or slow host. A 409 is a race exactly when the revision moved between the two
- * reads; the same revision twice means the command itself was refused (a duplicate, say) and is reported at once. A race is retried for up to a minute.
+ * Sends one command that names the control revision it was read at (`send` is given that revision) and retries a revision race. The revision is the whole
+ * control state's, and the server moves it by itself: the notification runner commits one claim per project on every pass, even when nothing is due, and a
+ * commit takes a few raft ticks, so a pass over a few dozen projects is a trickle of commits that lasts seconds. `create_user` also hashes the password before it
+ * compares. A command can therefore lose to a background commit many times in a row (a fixed handful of immediate retries was exhausted in the full suite, once
+ * the earlier specs had made enough projects). A 409 is a race exactly when the revision moved between the two reads; the same revision twice means the command
+ * itself was refused (a duplicate, say) and is reported at once. A race is retried for up to a minute. Every fixture that sends such a command goes through here.
  */
-export async function adminCommand(page:Page,org:string,kind:string,payload:Record<string,unknown>):Promise<unknown>{
+export async function sendAtRevision(page:Page,what:string,send:(revision:string)=>Promise<Reply>):Promise<Reply>{
  await fresh(page);
  const give=Date.now()+60_000;
  let refused:{revision:string;text:string}|undefined;
@@ -149,12 +151,16 @@ export async function adminCommand(page:Page,org:string,kind:string,payload:Reco
   const read=await postJson(page,'/api/v1/admin/read',{kind:'organizations'});
   const revision=field(read.json,'revision');
   if(read.status!==200||typeof revision!=='string')throw Error(`admin read: HTTP ${read.status} ${read.text}`);
-  if(refused!==undefined&&refused.revision===revision)throw Error(`admin ${kind}: HTTP 409 ${refused.text} (the revision did not move, so this is no revision race)`);
-  const r=await postJson(page,'/api/v1/admin/commands',{command_id:id(),expected_revision:revision,org_id:org,kind,payload:{...payload,reason:'Explore e2e fixture'}});
+  if(refused!==undefined&&refused.revision===revision)throw Error(`${what}: HTTP 409 ${refused.text} (the revision did not move, so this is no revision race)`);
+  const r=await send(revision);
   if(r.status===409&&Date.now()<give){refused={revision,text:r.text};continue;}
-  if(r.status>=300)throw Error(`admin ${kind}: HTTP ${r.status} ${r.text}`);
-  return r.json;
+  if(r.status>=300)throw Error(`${what}: HTTP ${r.status} ${r.text}`);
+  return r;
  }
+}
+/** One real admin command as an org admin (see sendAtRevision); `reason` is the audited reason the command carries. */
+export async function adminCommand(page:Page,org:string,kind:string,payload:Record<string,unknown>,reason='Explore e2e fixture'):Promise<unknown>{
+ return (await sendAtRevision(page,`admin ${kind}`,(revision)=>postJson(page,'/api/v1/admin/commands',{command_id:id(),expected_revision:revision,org_id:org,kind,payload:{...payload,reason}}))).json;
 }
 export async function createOrg(page:Page,name='explore e2e org'):Promise<string>{const org=id();await adminCommand(page,org,'create_org',{name});return org;}
 export async function createProject(page:Page,org:string,name='explore e2e project'):Promise<string>{const project=id();await adminCommand(page,org,'create_project',{id:project,name});return project;}

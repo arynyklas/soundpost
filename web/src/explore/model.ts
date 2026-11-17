@@ -95,6 +95,13 @@ export function projectState(pr: ProjectResult): LoadState<ProjectResult> {
  return { kind: 'ready', data: pr };
 }
 
+/** The sentence for an empty value. "Nothing is missing" is a claim about completeness, so it is made only for a project that answered
+ * completely and without failure; a partial, stale or failed project's empty value says what it cannot say. */
+export function emptyWords(pr: ProjectResult, subject: string): string {
+ if (pr.failure === undefined && pr.completeness === 'complete') return `${subject}. Nothing is missing.`;
+ return `${subject} in the data that answered. Some data is missing, so this is not a complete empty result and an absent value is not zero.`;
+}
+
 /** The whole answer is only as good as its worst project: any partial or failed project makes it incomplete, then any stale
  * one makes it stale, and it is empty only when every project is complete and empty. */
 export function resultState(r: QueryResult): LoadState<QueryResult> {

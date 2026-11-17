@@ -17,7 +17,7 @@ import {resolve} from 'node:path';
 import vm from 'node:vm';
 import {request as playwrightRequest} from '@playwright/test';
 import type {Browser,Page} from '@playwright/test';
-import {adminCommand,createOrg,createProject,field,id,ingestBatch,ingestError,ingestSpan,login,origin,postJson,csrf,SECOND,type Source} from './real';
+import {adminCommand,createOrg,createProject,field,id,ingestBatch,ingestError,ingestSpan,login,origin,postJson,csrf,sendAtRevision,SECOND,type Source} from './real';
 
 export interface Member{id:string;email:string;password:string}
 export const MAP_SECRET='PRIVATE-SOURCE-CANARY privateSource = 1;';
@@ -85,17 +85,9 @@ export function issueId(org:string,project:string,fingerprint:string):string{
  return createHash('sha256').update(Buffer.concat([Buffer.from('soundpost.issue.v1'),Buffer.from(org,'hex'),Buffer.from(project,'hex'),version(),Buffer.from(fingerprint,'hex')])).digest('hex').slice(0,32);
 }
 
-/** Register (or rename, with the entity revision) one release as an organization administrator; retries only a control-revision race. */
+/** Register (or rename, with the entity revision) one release as an organization administrator; retries only a control-revision race (sendAtRevision). */
 export async function registerRelease(page:Page,org:string,project:string,release:Record<string,unknown>):Promise<void>{
- for(let attempt=0;;attempt++){
-  const read=await postJson(page,'/api/v1/admin/read',{kind:'organizations'});
-  const revision=field(read.json,'revision');
-  if(read.status!==200||typeof revision!=='string')throw Error(`admin read: HTTP ${read.status} ${read.text}`);
-  const r=await postJson(page,'/api/v1/releases/register',{org,project,command_id:id(),expected_revision:revision,release});
-  if(r.status===409&&attempt<4)continue;
-  if(r.status>=300)throw Error(`release register: HTTP ${r.status} ${r.text}`);
-  return;
- }
+ await sendAtRevision(page,'release register',(revision)=>postJson(page,'/api/v1/releases/register',{org,project,command_id:id(),expected_revision:revision,release}));
 }
 
 /** The application the real bundle is built from. The first line is the private-source canary: it lives only in the map's sourcesContent. */

@@ -178,3 +178,57 @@ describe('a cached complete answer says when it was complete (D51)', () => {
   expect(html).toContain('2.5 ms');
  });
 });
+
+describe('an empty result of a project that did not fully answer never says nothing is missing (05.05 review)', () => {
+ const request = { expression: 'up' } as unknown as QueryRequest;
+ const partial = (value: QueryValue, completeness: ProjectResult['completeness'] = 'partial'): ProjectResult => ({ ...project(value), completeness });
+ const empties: [string, QueryValue][] = [['vector', { type: 'vector', vector: [] }], ['matrix', { type: 'matrix', matrix: [] }], ['streams', { type: 'streams', streams: [] }]];
+ for (const [name, value] of empties) {
+  test(`a partial project with an empty ${name} says data is missing and never "Nothing is missing"`, () => {
+   const html = render(React.createElement(ProjectPanel, { request, result: partial(value) }));
+   expect(html).toContain('data-state="incomplete"');
+   expect(html).not.toContain('Nothing is missing');
+   expect(html).toContain('Some data is missing');
+  });
+  test(`a stale project with an empty ${name} says the data is old and never "Nothing is missing"`, () => {
+   const html = render(React.createElement(ProjectPanel, { request, result: partial(value, 'stale') }));
+   expect(html).not.toContain('Nothing is missing');
+   expect(html).toContain('Some data is missing');
+  });
+  test(`a complete project with an empty ${name} still says nothing is missing`, () => {
+   const html = render(React.createElement(ProjectPanel, { request, result: partial(value, 'complete') }));
+   expect(html).toContain('Nothing is missing');
+  });
+ }
+ test('a failed project with an empty value never says nothing is missing', () => {
+  const failed: ProjectResult = { ...project({ type: 'vector', vector: [] }), failure: { code: 'unavailable', category: 'internal', safe_message: 'The project did not answer.' } as NonNullable<ProjectResult['failure']> };
+  const html = render(React.createElement(ProjectPanel, { request, result: failed }));
+  expect(html).not.toContain('Nothing is missing');
+ });
+});
+
+describe('a chart of more points than a call stack holds still draws (05.05 review)', () => {
+ // V8 refuses Math.min(...array) above roughly 115000 arguments with a RangeError; JavaScriptCore (bun) allows far more. The test makes
+ // every engine refuse above 100000 arguments, so the chart must compute its extent without spreading its samples into a call.
+ const SPREAD_LIMIT = 100_000;
+ test('a range matrix of 150000 samples renders its extent without spreading the samples into Math.min or Math.max', () => {
+  const originalMin = Math.min, originalMax = Math.max;
+  const limited = (original: (...values: number[]) => number) => (...values: number[]): number => {
+   if (values.length > SPREAD_LIMIT) throw new RangeError('Maximum call stack size exceeded.');
+   return original(...values);
+  };
+  const samples: Sample[] = [];
+  for (let i = 0; i < 150_000; i++) samples.push({ time: String(T0 + BigInt(i) * NS), float: bitsOf(i % 97) });
+  const range: EvaluationWire = { instant: false, time: '0', start: String(T0), end: String(T0 + 150_000n * NS), step: String(NS) };
+  Math.min = limited(originalMin);
+  Math.max = limited(originalMax);
+  try {
+   const html = render(React.createElement(MetricResult, { result: project({ type: 'matrix', matrix: [{ labels: [{ name: '__name__', value: 'big' }], samples }] }), evaluation: range }));
+   expect(html).toContain('data-segments="1"');
+   expect(html).toContain('Chart of');
+  } finally {
+   Math.min = originalMin;
+   Math.max = originalMax;
+  }
+ });
+});

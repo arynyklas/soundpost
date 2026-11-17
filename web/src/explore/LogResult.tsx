@@ -1,7 +1,7 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
 import * as React from 'react';
 import type { ProjectResult } from '../api/types';
-import { entriesInOrder, labelsText } from './model';
+import { emptyWords, entriesInOrder, labelsText } from './model';
 import { TimeText } from './MetricResult';
 
 const PAGE = 500;
@@ -15,7 +15,7 @@ export function LogResult(props: { result: ProjectResult }): React.JSX.Element {
  const rows = React.useMemo(() => (v !== null && v.type === 'streams' ? entriesInOrder(v.streams) : []), [v]);
  if (v === null) return <p role="status" data-result="none">No value: this project returned no result.</p>;
  if (v.type !== 'streams') return <p role="status" data-result="not-logs">This result is not a log stream; it is shown as a metric result.</p>;
- if (rows.length === 0) return <p data-result="logs-empty">No log entry matched. Nothing is missing.</p>;
+ if (rows.length === 0) return <p data-result="logs-empty">{emptyWords(props.result, 'No log entry matched')}</p>;
  return (
   <>
    <table className="data-table log-table" data-result="logs">
