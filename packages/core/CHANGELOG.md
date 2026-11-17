@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Server capture cost (lane 4 wave 27): a root span draws its trace and span IDs with one entropy draw and one hex encoding, the queue reads the three IDs of a queued span back with one hex call (was two or three), and a batch draws its ID when its first record is selected (a slot's last batch no longer draws one it never uses): hex encodings per exported span 5 -> 3 plus one per batch instead of two (`test/hex-batching.test.ts`). Wire bytes, routing, privacy and limits unchanged; no effect measurable in process (hot cost per span 1.5 + 5.7 us on Node, 1.5 + 7.3 us on Bun, before and after).
+
 - Server capture cost (lane 4 wave 25): acknowledging a batch skips the scan of the queue's entries when no loss bucket exists, and removing a batch splices the batch list instead of filtering it a second time; a lean span's payload is composed from per-vocabulary fragments and its start-wall text is built once (JavaScriptCore string cells per queued span 33 -> 24 for the payload). Wire bytes unchanged.
 
 - Server capture cost (lane 4 wave 23): a captured error is serialized once (the client's canonical text is the stored form and the batch form is that text with the resource spliced in: `DeliveryQueue.enqueueNative`; a record whose parse removed an empty optional field takes the old path). Wire bytes, routing, privacy and limits unchanged.

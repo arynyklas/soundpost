@@ -32,6 +32,11 @@ class _Pool:
 _POOLS = {16: _Pool(16), 8: _Pool(8)}
 hex16 = _POOLS[16].next
 hex8 = _POOLS[8].next
+# The per-request draws without a Python frame: `popleft` is a C call and an empty pool raises IndexError, which the caller answers with the refilling `hex16`/`hex8`:
+#     try: value = take16()
+#     except IndexError: value = hex16()
+take16 = _POOLS[16].take
+take8 = _POOLS[8].take
 
 def _forget():
     for pool in _POOLS.values():

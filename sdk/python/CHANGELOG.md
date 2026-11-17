@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased — lane 4 wave 27 per-request frames (no wire, privacy or API change)
+
+- The WSGI hook's plain request opens 19 Python frames instead of 28 (`tests/test_hot_path_cost.py`, wave-27 section): the span, record and batch identifiers are drawn with the pool's C-level `popleft` (`ids.take16`/`take8`; a dry pool still refills through `hex16`/`hex8`), the trace context variable is set and reset by the span itself instead of through a `_Binding` object (`bind()` stays for callers), `Client._admit_span` is part of `_record_span` (the gates and their order are unchanged), the normal end of a response skips `_Response._finish`, and `freeze()` builds its batch tuple with an inline list comprehension (one frame per batch less). Hot in-process cost on CPython 3.12: request path 9.4 -> 9.0 us, flush 6.1 -> 6.0 us per request.
+- The ASGI hook begins its span with the request's own parent directly (as the WSGI hook already did) instead of binding the parent around an `async with` scope: a plain request opens 12 SDK frames instead of 20, and a request without a `traceparent` header no longer calls `extract`. Statuses, parents, error capture inside the span and the restored ambient context are pinned (`test_asgi_outcomes_parents_and_the_ambient_context_are_what_they_were`).
+- Queue limits, spool format, loss counters, record bytes and routing are unchanged.
+
 ## Unreleased — lane 4 wave 21 delivered-mode warm path (no wire, privacy or API change)
 
 - Flush: one frozen batch per route slot is still the wire shape, but each batch is cheaper: its priority and byte total are recorded when it is sealed (no per-batch lambda/generator sort key, no `sum` over every remaining entry on removal), a one-record batch skips the sort/min/set work, slot tails are precomputed, receipts are validated with one `unix_nano_int` per value and without re-checking the batch id the SDK itself issued, the default clock's policy-expiry check no longer converts clock text, and nothing calls `persist()` without a spool. Python calls per frozen batch 28 -> 19.5, per plain WSGI request 35 -> 28 (`tests/test_hot_path_cost.py`).

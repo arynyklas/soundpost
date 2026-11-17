@@ -71,7 +71,9 @@ export class LeanSlab {
  /** The canonical payload text of the span in `slot`: byte-identical to leanSpanPayload of the LiveSpan it was copied from. `startWall` is the span's start reading as startWall(slot) returns it, for a caller that has it already. */
  payload(slot:number,startWall:string=this.startWall(slot)):string{
   const w0=this.words[slot*2]!,w1=this.words[slot*2+1]!,id=slot*32,at=slot*4,end=((w0>>>6)&1)===1;
-  const dependency=w1>>>16;
-  return composeLeanFragments(this.raws[(w0>>>8)&255]!,dependency===0?NO_DEPENDENCY:this.dependencyFragments[dependency-1]!,this.operationFragments[w1&65535]!,KIND_FRAGMENTS[w0&7]!,STATUS_FRAGMENTS[(w0>>>3)&3]!,this.probabilityFragments[w0>>>24]!,this.hex(id,16),this.hex(id+16,8),((w0>>>5)&1)===1?this.hex(id+24,8):null,this.nums[at]!,startWall,this.nums[at+1]!,end?String(this.nums[at+3]!):null);
+ const dependency=w1>>>16;
+ // The slot's three IDs (trace 16 bytes, span 8, parent 8: stale bytes when there is no parent, never read then) are encoded by one call and cut apart as strings.
+ const ids=this.hex(id,32);
+ return composeLeanFragments(this.raws[(w0>>>8)&255]!,dependency===0?NO_DEPENDENCY:this.dependencyFragments[dependency-1]!,this.operationFragments[w1&65535]!,KIND_FRAGMENTS[w0&7]!,STATUS_FRAGMENTS[(w0>>>3)&3]!,this.probabilityFragments[w0>>>24]!,ids.slice(0,32),ids.slice(32,48),((w0>>>5)&1)===1?ids.slice(48):null,this.nums[at]!,startWall,this.nums[at+1]!,end?String(this.nums[at+3]!):null);
  }
 }

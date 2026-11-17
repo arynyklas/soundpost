@@ -1,6 +1,6 @@
 # Copyright 2026 Aryn Yklas
 # SPDX-License-Identifier: Apache-2.0
-from .ids import hex16
+from .ids import hex16,take16
 import secrets
 import struct
 import threading
@@ -71,16 +71,6 @@ class Client:
             record,reason=normalize_record(self._policy,capture,self._templates)
             if record is None:self._loss(reason);return False
             return self._delivery.enqueue(record)
-    def _admit_span(self,event,observed,payload,trace_id):
-        """`_admit` for a span record composed by `_record_span` in canonical form: the same gates in the same order (closed, exporter recursion, expiry, permission) as
-        `_admit` + `normalize_record`, then the queue's trusted entry point; nothing here parses or re-validates the text."""
-        with self._lock:
-            if self._closed:self._loss("closed");return False
-            if EXPORTING.get() or self._trace_context._exporting.get():self._loss("exporter_recursion");return False
-            policy=self._policy
-            if int(observed)>=self._expires:self._loss("policy_expired");return False
-            if not policy.decision.traces:self._loss("policy_disabled");return False
-            return self._delivery.enqueue_span(f'{{"id":"{event}","kind":"span","observed_at_ns":"{observed}","payload":{payload}',trace_id)
     def capture_exception(self,error:BaseException,*,code:str|None=None)->str:
         return self._capture_exception(error,code,"manual",False)
     def _capture_exception(self,error,code,mechanism:ErrorMechanism,fatal:bool):
@@ -134,7 +124,16 @@ class Client:
         payload=(f'{{"dependency_alias":"{dependency}","end":{{"domain":{domain},"mono_ns":"{end[1]}","uncertainty_ns":"{uncertainty}","wall_ns":"{end[0]}"}},"links":[],"operation":"{operation}",'
                  f'"parent_id":{"null" if parent is None else chr(34)+parent+chr(34)},"sample_decision":"keep","sample_probability":"{probability}","span_id":"{context.span_id}","span_kind":"{kind}",'
                  f'"start":{{"domain":{domain},"mono_ns":"{start[1]}","uncertainty_ns":"{uncertainty}","wall_ns":"{start[0]}"}},"status":"{status}","trace_id":"{context.trace_id}"}}')
-        return self._admit_span(hex16(),observed,payload,context.trace_id)
+        try:event=take16()
+        except IndexError:event=hex16()
+        # The admission gates of `_admit` in the same order (closed, exporter recursion, expiry, permission) as `_admit` + `normalize_record`, then the queue's trusted entry point;
+        # nothing here parses or re-validates the text.
+        with self._lock:
+            if self._closed:self._loss("closed");return False
+            if EXPORTING.get() or self._trace_context._exporting.get():self._loss("exporter_recursion");return False
+            if int(observed)>=self._expires:self._loss("policy_expired");return False
+            if not self._policy.decision.traces:self._loss("policy_disabled");return False
+            return self._delivery.enqueue_span(f'{{"id":"{event}","kind":"span","observed_at_ns":"{observed}","payload":{payload}',context.trace_id)
     def _capture_profile(self,capability:dict,chunks:list)->bool:
         """Enqueues a finished runtime profile on the ordinary delivery path (same queue, closed wire validation, batching, receipts and loss counters): the capability
         record first and alone as the complete answer for a refusal, then the chunks in order, stopping at the first refusal so a profile never has a hole. Needs

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `installServe` reads the `x-soundpost-context` companion header only when the request carries a `traceparent` (without one there is no parent whatever the companion says): one native header lookup and one string less on every untraced request (`test/serve-wrappers.test.ts`). Behaviour unchanged.
+
 - `test/inspect-canary.test.ts` pins the `Bun.inspect` Response summary the D31 probe reads (first line `Response (N bytes | N.NN KB|MB|GB)` for a held body, `Response (0 KB)` for a null/empty/stream/touched/used body and `Response.error()`), one body kind at a time, and a second test proves the canary notices seven kinds of drift. A Bun release that changes the text now fails this file by name instead of silently changing which bodies installServe wraps. `bufferedSummary` is exported from `serve.ts` for it.
 
 - One `AsyncLocalStorage` store per client for trace, job and exporter scopes (it was three), and `installServe` reads `request.headers` once and passes `Bun.inspect` one shared options object. The two native wrappers per request (`request.headers`, `request.signal`) and the `Bun.inspect` summary remain: reading either property is what D31 and the propagation header need, and no cheaper exact probe exists in Bun 1.3.14.

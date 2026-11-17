@@ -4,7 +4,7 @@ import asyncio
 from time import time_ns as _time_ns, monotonic_ns as _monotonic_ns
 from .context import TraceContext
 from .types import SPAN_KINDS
-from .ids import hex16 as _hex16, hex8 as _hex8
+from .ids import hex16 as _hex16, hex8 as _hex8, take16 as _take16, take8 as _take8
 
 class SpanContextManager:
     """One-use sync/async span scope with token restoration on every exit."""
@@ -55,11 +55,17 @@ class SpanContextManager:
         self._entered = True
         self.parent_id = parent.span_id if parent else None
         # Fresh random identifiers and a validated parent's own fields: nothing for TraceContext's constructor checks to find.
-        self.context = TraceContext.trusted(parent.trace_id if parent else _hex16(), _hex8(), parent.sampled if parent else True, parent.sample_probability if parent else 1.0)
+        if parent: trace_id = parent.trace_id
+        else:
+            try: trace_id = _take16()
+            except IndexError: trace_id = _hex16()
+        try: span_id = _take8()
+        except IndexError: span_id = _hex8()
+        self.context = TraceContext.trusted(trace_id, span_id, parent.sampled if parent else True, parent.sample_probability if parent else 1.0)
         client=self.client
         self.start=(str(_time_ns()),_monotonic_ns()) if client._default_clock else self._stamp()
-        self._binding=client._trace_context.bind(self.context)
-        self._binding.__enter__()
+        # The context variable is set directly (the token is the whole binding): a `_Binding` object and its three calls would only wrap this set and the reset in `__exit__`.
+        self._token=client._trace_context._value.set(self.context)
         return self
 
     def _record(self, exception_type):
@@ -77,7 +83,7 @@ class SpanContextManager:
         try:
             self._record(exception_type)
         finally:
-            self._binding.__exit__(exception_type, exception, traceback)
+            self.client._trace_context._value.reset(self._token)
         return False
 
     async def __aenter__(self): return self.__enter__()

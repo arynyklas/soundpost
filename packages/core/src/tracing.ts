@@ -163,7 +163,10 @@ export class SpanRecorder {
   const enabled=this.enabled()&&readable,probability=parent&&probabilityValue(parent.probability)<=this.chance?parent.probability:this.probability;
   // Same inheritance as the generic path: an explicit upstream head decision is kept, a narrower budget never raises an upstream keep probability or resurrects a drop.
   const sampled=enabled&&(parent?parent.sampled&&sampleTraceDecision(probability,parent.probability):this.always||sampleTraceDecision(probability));
-  const context=Object.freeze(new BuiltContext(parent?.traceId??randomHex(16),randomHex(8),sampled,probability,raw.domain));
+  // A root span's two IDs come from one 24-byte draw and one hex encoding (a child draws only its own span ID).
+  let traceId:string,spanId:string;
+  if(parent===undefined){const draw=randomHex(24);traceId=draw.slice(0,32);spanId=draw.slice(32);}else{traceId=parent.traceId;spanId=randomHex(8);}
+  const context=Object.freeze(new BuiltContext(traceId,spanId,sampled,probability,raw.domain));
   const span=new LiveSpan(context,raw,parent?.spanId??null,kind,operation,typeof dependency==="string"?dependency:"",startWall,startMono,enabled,this);
   if(this.active.size+this.leanCount>=1024){this.loss("trace_active_limit");span.end("incomplete");}else this.link(span);return span;
  }

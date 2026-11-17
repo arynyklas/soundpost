@@ -3,7 +3,7 @@
 import base64
 import hashlib
 import json
-from .ids import hex16
+from .ids import hex16,take16
 from dataclasses import replace
 import random
 from operator import itemgetter
@@ -182,7 +182,7 @@ class DeliveryQueue:
             if not self._recovering and decimal(record['policy_revision'])!=self.descriptor.policy_revision:raise ValueError('policy revision mismatch')
             return self._append(native_canonical(record).decode(),record['kind'],route_record(record,self.descriptor,self.producer))
     def enqueue_span(self,head,trace_id):
-        """Enqueues a span record the SDK composed itself in canonical form from identifiers and clock values it generated or validated (tracing.py, Client._admit_span).
+        """Enqueues a span record the SDK composed itself in canonical form from identifiers and clock values it generated or validated (tracing.py, Client._record_span).
         `head` is that record's text up to and including its payload: the queue appends the policy revision for the stored text and the resource for the wire bytes, so
         neither is cut out of a finished text again. Skips the parse and re-validation of `enqueue`; every other step (closed, expiry, size, priority eviction, spool) is the
         shared `_append`. Equality with the validated path is pinned by tests/test_span_fast_path.py."""
@@ -240,11 +240,13 @@ class DeliveryQueue:
                             self._seal(slot,selected,wire,middle,tail);selected=[];wire=[];record_bytes=0
                         selected.append(entry);wire.append(encoded);record_bytes+=len(encoded)
                     self._seal(slot,selected,wire,middle,tail)
-            return tuple(s['batch'] for s in self._batches)
+            return tuple([s['batch'] for s in self._batches])  # a list comprehension runs inline; a generator would open a frame per batch
     def _seal(self,slot,selected,wire,middle,tail):
         """Turns the selected entries of one route slot into a frozen batch (a fresh random id, the hash of its exact bytes) and marks them as batched."""
         if not selected:return
-        batch_id=hex16();raw=b''.join((b'{"id":"',batch_id.encode(),middle,b','.join(wire),tail))
+        try:batch_id=take16()
+        except IndexError:batch_id=hex16()
+        raw=b''.join((b'{"id":"',batch_id.encode(),middle,b','.join(wire),tail))
         if len(selected)==1:
             entry=selected[0];kind=entry['kind'];kinds=(kind,);first=entry['wall'];size=entry['size'];order=-_priority(kind)
             batch=FrozenBatch(batch_id,self.descriptor.source,self.producer,slot,hashlib.sha256(raw).hexdigest(),raw,1,kinds,first,self.descriptor.policy_revision)

@@ -36,7 +36,7 @@ export class ServeLease {
  handler(handler:ServeHandler):ServeHandler {
   return (request,server)=>{
    if(this.closed)return handler(request,server);
-   const headers=request.headers,parent=parsePropagation(headers.get("traceparent"),headers.get("x-soundpost-context")),span=this.client.startAdapterSpan(this.operation,"server",undefined,parent??null);
+   const headers=request.headers,traceparent=headers.get("traceparent"),parent=traceparent===null?undefined:parsePropagation(traceparent,headers.get("x-soundpost-context")),span=this.client.startAdapterSpan(this.operation,"server",undefined,parent??null);
    if(this.pending.size>=1024){span.end("incomplete");return handler(request,server);}
    // Aborted before the handler ran: the status is decided now, and the handler still runs.
    if(request.signal.aborted)span.end("cancelled");

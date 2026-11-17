@@ -180,10 +180,11 @@ export class DeliveryQueue {
   for(const entry of this.entries)if(!entry.batch){const list=bySlot.get(entry.slot);if(list)list.push(entry);else bySlot.set(entry.slot,[entry]);}
   for(let slot=0;slot<64;slot++){
    const pending=bySlot.get(slot);if(!pending)continue;
-   let selected:Entry[]=[],wire:string[]=[],recordBytes=0,batchId=id();
-   // The batch's canonical key order is id, policy_revision, producer, project, records, route_slot, source, version; every value is a canonical ID, a decimal or a small integer, so none needs escaping.
+   let selected:Entry[]=[],wire:string[]=[],recordBytes=0,batchId="";
+   // The canonical batch key order is id, policy_revision, producer, project, records, route_slot, source, version; every value is a canonical ID, a decimal or a small integer, so none needs escaping.
+   // The batch ID is drawn when the first record of a batch is selected (a slot's last batch no longer draws one it would never use).
    const lead=',"policy_revision":"'+this.descriptor.policy_revision+'","producer":"'+this.producer+'","project":"'+this.descriptor.project+'","records":[',trail='],"route_slot":'+slot+',"source":"'+this.descriptor.source+'","version":1}';
-   const headerBytes=('{"id":"'+batchId+'"'+lead).length+trail.length;
+   const headerBytes='{"id":"'.length+32+'"'.length+lead.length+trail.length;
    const finish=():void=>{
     if(!selected.length)return;
     // Records were serialized when queued; the batch body is that text spliced between the fixed header and trailer.
@@ -191,10 +192,11 @@ export class DeliveryQueue {
     let wall=selected[0]!.wall;const kindSet=new Set<string>();for(const e of selected){if(e.wall<wall)wall=e.wall;kindSet.add(e.kind);}
     const batch:FrozenBatch=Object.freeze({id:batchId,source:this.descriptor.source,producer:this.producer,route_slot:slot,hash:hashBytes(body),body,count:selected.length,kinds:Object.freeze([...kindSet].sort()),firstCapture:wall,policyRevision:this.descriptor.policy_revision});
     for(let position=0;position<selected.length;position++){const e=selected[position]!;e.batch=batchId;e.position=position;e.text='';e.wire='';this.dropped(e);}this.evictable=undefined;
-    let rank=0;for(const kind of kindSet)rank=Math.max(rank,priority(kind));this.batches.push({batch,ambiguous:false,attempt:0,next:0,rank});selected=[];wire=[];recordBytes=0;batchId=id();
+    let rank=0;for(const kind of kindSet)rank=Math.max(rank,priority(kind));this.batches.push({batch,ambiguous:false,attempt:0,next:0,rank});selected=[];wire=[];recordBytes=0;batchId="";
    };
    for(const entry of pending){
     if(selected.length===512||headerBytes+recordBytes+entry.wireBytes+selected.length>1048576)finish();
+    if(batchId==="")batchId=id();
     selected.push(entry);wire.push(entry.wire);recordBytes+=entry.wireBytes;
    }
    finish();

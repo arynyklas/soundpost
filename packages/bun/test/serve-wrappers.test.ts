@@ -61,3 +61,29 @@ test("the D31 probe passes Bun.inspect one shared options object", async()=>{
  }finally{Bun.inspect=inspect;lease.close();await client.close();}
  expect(options.length).toBe(3);expect(options[0]).toEqual({depth:0,colors:false});expect(options[1]).toBe(options[0]);expect(options[2]).toBe(options[0]);
 });
+
+// Wave 27: a request without a traceparent has no parent whatever the companion header says, so the companion is not read (one native header lookup and one string less on every untraced request).
+import {propagationHeaders} from "../src/workers.ts";
+function lookups(values:Record<string,string>){
+ const headers=new Headers(values),names:string[]=[],get=headers.get.bind(headers);
+ headers.get=((name:string)=>{names.push(name);return get(name);}) as Headers["get"];
+ const controller=new AbortController();
+ return {request:{method:"GET",headers,get signal(){return controller.signal;}} as unknown as Request,names};
+}
+const spanRecords=(client:Client)=>client.bufferedRecords().map(text=>JSON.parse(text)).filter(record=>record.kind==="span").map(record=>record.payload as {trace_id:string;span_id:string;parent_id:string|null});
+
+test("a request without a traceparent reads one header, and one with a traceparent still reads the companion",async()=>{
+ const client=init(settings()),lease=installServe(client,{operation:"request"});
+ try{
+  const none=lookups({});lease.handler(()=>new Response("a"))(none.request,server);
+  expect(none.names).toEqual(["traceparent"]);
+  const partial=lookups({traceparent:"00-"+"a".repeat(32)+"-"+"b".repeat(16)+"-01"});lease.handler(()=>new Response("b"))(partial.request,server);
+  expect(partial.names).toEqual(["traceparent","x-soundpost-context"]);
+  const parent=client.startAdapterSpan("request","server",undefined,null),carried=propagationHeaders(parent.context),full=lookups({traceparent:carried.traceparent,"x-soundpost-context":carried.companion});
+  lease.handler(()=>new Response("c"))(full.request,server);parent.end("ok");
+  expect(full.names).toEqual(["traceparent","x-soundpost-context"]);
+  const [first,second,child]=spanRecords(client);
+  expect(first!.parent_id).toBeNull();expect(second!.parent_id).toBeNull();   // a foreign traceparent alone links nothing
+  expect(child!.parent_id).toBe(parent.context.spanId);expect(child!.trace_id).toBe(parent.context.traceId);
+ }finally{lease.close();await client.close();}
+});

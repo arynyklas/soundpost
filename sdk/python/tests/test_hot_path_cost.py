@@ -186,7 +186,8 @@ def python_calls(fn):
 def test_the_request_and_flush_paths_stay_within_their_python_call_budgets():
     """Python function calls are the stable proxy for the interpreter work behind the per-request CPU of the delivered-mode WSGI rows (fixtures/sdk/overhead.mjs):
     before wave 20 a plain request made 51 calls and each frozen batch 45; wave 20 brought them to 35 and 28 and wave 21 to 28 and 19.5 (no per-batch priority lambda, receipt
-    validation, policy-expiry conversion or persist calls, stamps, clock reading and exporter gate read in place); the bounds leave two calls of headroom over the current values."""
+    validation, policy-expiry conversion or persist calls, stamps, clock reading and exporter gate read in place); wave 27 took the request to 19 (identifiers drawn by C calls,
+    the context variable set and reset without a binding object, no `_admit_span` / `_finish` frames on the plain path); the bounds leave one call of headroom over the current values."""
     sent = []
     class Counting(Acking):
         def send(self, batch, deadline):
@@ -206,8 +207,8 @@ def test_the_request_and_flush_paths_stay_within_their_python_call_budgets():
         flush_calls = python_calls(lambda: client.flush(2.0))
         assert len(sent) > 30 and client._delivery.pending == 0
         per_batch = flush_calls / len(sent)
-        assert per_request <= 30, per_request
-        assert per_batch <= 22, per_batch
+        assert per_request <= 20, per_request
+        assert per_batch <= 18, per_batch
     finally:
         client.close()
 
@@ -412,5 +413,149 @@ def test_the_wsgi_stamps_of_a_custom_clock_still_go_through_the_validating_reade
         reads = counted(monkeypatch, type(client), '_read_clock')
         wsgi_request(middleware(client, hello))
         assert stamps.calls == 2 and reads.calls == 3  # start, end and the record's own observation, each through the validating reader
+    finally:
+        client.close()
+
+# ---- lane 4 wave 27: per-request Python frames of the WSGI hook. Each pin below failed on the wave-26 source and passes on the cheaper one.
+
+def frames_by_function(fn):
+    """Python frames `fn` opens, by 'module.py qualified.name'."""
+    import collections
+    counts = collections.Counter()
+    def profiler(frame, event, arg):
+        if event == 'call':
+            code = frame.f_code
+            counts[f'{os.path.basename(code.co_filename)} {code.co_qualname}'] += 1
+    sys.setprofile(profiler)
+    try: fn()
+    finally: sys.setprofile(None)
+    return counts
+
+def test_a_plain_request_draws_its_identifiers_without_opening_a_python_frame():
+    client = default_clock_client()
+    try:
+        app = middleware(client, hello)
+        for _ in range(300): wsgi_request(app)  # fills the pools: a refill is the only Python work a draw may do
+        frames = frames_by_function(lambda: [wsgi_request(app) for _ in range(100)])
+        assert frames['ids.py _Pool.next'] <= 2, frames['ids.py _Pool.next']  # was 3 per request
+        assert len(client._delivery._entries) == 400
+    finally:
+        client.close()
+
+def test_the_identifiers_of_the_hot_path_are_still_unique_well_formed_and_refilled_when_a_pool_runs_dry():
+    from soundpost import ids
+    client = default_clock_client()
+    try:
+        ids._forget()  # empty pools: the first draws must refill, not raise
+        app = middleware(client, hello)
+        for _ in range(700): wsgi_request(app)
+        records = [json.loads(text) for text in client.buffered_records()]
+        trace_ids = [record['payload']['trace_id'] for record in records]
+        span_ids = [record['payload']['span_id'] for record in records]
+        record_ids = [record['id'] for record in records]
+        assert len(set(trace_ids)) == len(set(span_ids)) == len(set(record_ids)) == 700
+        assert all(re.fullmatch(r'[0-9a-f]{32}', value) for value in trace_ids + record_ids)
+        assert all(re.fullmatch(r'[0-9a-f]{16}', value) for value in span_ids)
+    finally:
+        client.close()
+
+def test_a_plain_request_sets_and_resets_its_context_variable_without_a_binding_object():
+    client = default_clock_client()
+    try:
+        counting = CountingVariable(client._trace_context._value)
+        client._trace_context._value = counting
+        app = middleware(client, hello)
+        for _ in range(5): wsgi_request(app)
+        frames = frames_by_function(lambda: [wsgi_request(app) for _ in range(50)])
+        assert {name: count for name, count in frames.items() if name.startswith('context.py ') and 'trusted' not in name} == {}, frames  # was bind, _Binding.__init__, __enter__ and __exit__ for every request
+        assert (counting.sets, counting.resets) == (55, 55)
+        assert client._trace_context.current() is None
+    finally:
+        client.close()
+
+def test_the_context_a_wsgi_request_leaves_behind_is_restored_on_every_outcome():
+    from soundpost.context import TraceContext
+    for clock in (None, wall_clock_ns):
+        client = build(clock=clock)
+        try:
+            ambient = TraceContext('9' * 32, '8' * 16)
+            def failing(environ, start_response): raise ValueError('boom')
+            def breaking_body(environ, start_response):
+                start_response('200 OK', [])
+                def chunks():
+                    yield b'a'
+                    raise RuntimeError('mid-stream')
+                return chunks()
+            with client._trace_context.bind(ambient):
+                with pytest.raises(ValueError): wsgi_request(middleware(client, failing))
+                assert client._trace_context.current() is ambient
+                with pytest.raises(RuntimeError): wsgi_request(middleware(client, breaking_body))
+                assert client._trace_context.current() is ambient
+                wsgi_request(middleware(client, hello))
+                assert client._trace_context.current() is ambient
+            assert client._trace_context.current() is None
+            assert [json.loads(text)['payload']['status'] for text in client.buffered_records() if json.loads(text)['kind'] == 'span'] == ['error', 'error', 'ok']
+        finally:
+            client.close()
+
+def asgi_app(status=200, fail=None):
+    async def app(scope, receive, send):
+        await send({'type': 'http.response.start', 'status': status, 'headers': []})
+        if fail is not None: raise fail
+        await send({'type': 'http.response.body', 'body': b'x'})
+    return app
+
+async def asgi_request(middleware, headers=()):
+    async def receive(): return {'type': 'http.request'}
+    async def send(message): pass
+    await middleware({'type': 'http', 'headers': list(headers)}, receive, send)
+
+def asgi(client, app):
+    from soundpost.integrations.asgi import ASGIMiddleware
+    return ASGIMiddleware(app, client, operation='request')
+
+def test_an_asgi_request_opens_few_sdk_frames_and_binds_nothing_twice():
+    import asyncio
+    client = default_clock_client()
+    try:
+        counting = CountingVariable(client._trace_context._value)
+        client._trace_context._value = counting
+        middleware = asgi(client, asgi_app())
+        async def drive(count):
+            for _ in range(count): await asgi_request(middleware)
+        asyncio.run(drive(20))
+        sdk_files = ('asgi.py', 'tracing.py', 'context.py', 'client.py', 'queue.py', 'ids.py', 'propagation.py')
+        frames = frames_by_function(lambda: asyncio.run(drive(100)))
+        sdk = {name: count for name, count in frames.items() if name.split()[0] in sdk_files}
+        assert sum(sdk.values()) / 100 <= 14, sdk  # was 20: an outer binding object, `current()`, `__aenter__`/`__enter__` and `__aexit__` as well
+        assert {name for name in sdk if name.startswith('context.py ') and 'trusted' not in name} == set(), sdk
+        assert (counting.sets, counting.resets) == (120, 120)
+        assert client._trace_context.current() is None
+    finally:
+        client.close()
+
+def test_asgi_outcomes_parents_and_the_ambient_context_are_what_they_were():
+    import asyncio
+    from soundpost.context import TraceContext
+    client = default_clock_client()
+    ambient = TraceContext('9' * 32, '8' * 16)
+    traceparent = [(b'traceparent', b'00-' + b'a' * 32 + b'-' + b'b' * 16 + b'-01')]
+    try:
+        async def run():
+            with client._trace_context.bind(ambient):
+                await asgi_request(asgi(client, asgi_app()))
+                await asgi_request(asgi(client, asgi_app()), traceparent)
+                await asgi_request(asgi(client, asgi_app(status=503)))
+                with pytest.raises(ValueError): await asgi_request(asgi(client, asgi_app(fail=ValueError('boom'))))
+                with pytest.raises(asyncio.CancelledError): await asgi_request(asgi(client, asgi_app(fail=asyncio.CancelledError())))
+                assert client._trace_context.current() is ambient
+        asyncio.run(run())
+        assert client._trace_context.current() is None
+        spans = [json.loads(text)['payload'] for text in client.buffered_records() if json.loads(text)['kind'] == 'span']
+        assert [span['status'] for span in spans] == ['ok', 'ok', 'error', 'error', 'cancelled']
+        assert [span['parent_id'] for span in spans] == [None, 'b' * 16, None, None, None]
+        assert spans[1]['trace_id'] == 'a' * 32 and all(span['trace_id'] != ambient.trace_id for span in spans)
+        errors = [json.loads(text)['payload'] for text in client.buffered_records() if json.loads(text)['kind'] == 'error']
+        assert len(errors) == 1 and errors[0]['trace_id'] == spans[3]['trace_id'] and errors[0]['span_id'] == spans[3]['span_id']  # captured inside the request's span
     finally:
         client.close()
