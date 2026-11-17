@@ -122,6 +122,7 @@ func TestScrubDefersToAReaderOnTheBareBoltHandle(t *testing.T) {
 func TestEveryControlReadIsCountedBeforeBoltCountsIt(t *testing.T) {
 	f := newInstallFx(t)
 	f.install(f.leader(5, true, true))
+	f.quiesceReaders() // the store's background readers end first: each path below must be the only reader
 	reads := []struct {
 		name string
 		read func()

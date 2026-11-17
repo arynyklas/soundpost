@@ -73,20 +73,30 @@ func investigateInstalled(site *installSite, fx *installFixture) ([]byte, error)
 		window["end"] = fx.queryTime
 	}
 	// state is the exact typed answer the served product gives today: the trace view is ready; the investigate
-	// trace view is incomplete (its sections are not built), job and issue investigations are not_available
-	// (internal/httpapi/investigate.go). A change of any of them is a change the smoke must be told about.
+	// trace view is incomplete (its sections are not built); the job investigation of the ingested job is ready (job
+	// and issue investigations require a target; internal/httpapi/investigate.go); the issue investigation as the
+	// project reader is not_available (issue_evidence_needs_org_admin: the route never derives an admin scope). A
+	// change of any of them is a change the smoke must be told about.
 	reads := []struct {
 		name, path, state string
 		body              map[string]any
 	}{
 		{"investigate_trace", "/api/v1/investigate", "incomplete", map[string]any{"org": fx.org.String(), "kind": "trace", "projects": []string{fx.project.String()}, "target": fx.trace.String(), "window": window, "limit": 50}},
 		{"trace_view", "/api/v1/traces/view", "ready", map[string]any{"org": fx.org.String(), "project": fx.project.String(), "trace": fx.trace.String(), "window": window}},
-		{"investigate_job", "/api/v1/investigate", "not_available", map[string]any{"org": fx.org.String(), "kind": "job", "projects": []string{fx.project.String()}, "window": window, "limit": 50}},
-		{"investigate_issue", "/api/v1/investigate", "not_available", map[string]any{"org": fx.org.String(), "kind": "issue", "projects": []string{fx.project.String()}, "window": window, "limit": 50}},
+		{"investigate_job", "/api/v1/investigate", "ready", map[string]any{"org": fx.org.String(), "kind": "job", "projects": []string{fx.project.String()}, "target": fx.job.String(), "window": window, "limit": 50}},
+		{"investigate_issue", "/api/v1/investigate", "not_available", map[string]any{"org": fx.org.String(), "kind": "issue", "projects": []string{fx.project.String()}, "target": fx.issue.String(), "window": window, "limit": 50}},
 	}
 	var all bytes.Buffer
 	for _, r := range reads {
 		status, raw, err := site.post(r.path, r.body, fx.reader.CSRF, "")
+		if r.name == "investigate_job" {
+			// The job book is committed by the background job producer after the ingest was acknowledged: until
+			// it has, the target is the one NotFound. Wait for that commit, bounded; any other answer ends the wait.
+			for deadline := time.Now().Add(90 * time.Second); err == nil && status == 404 && time.Now().Before(deadline); {
+				time.Sleep(500 * time.Millisecond)
+				status, raw, err = site.post(r.path, r.body, fx.reader.CSRF, "")
+			}
+		}
 		if err = requireSmokeResponse(r.name, status, 200, raw, err); err != nil {
 			return nil, err
 		}

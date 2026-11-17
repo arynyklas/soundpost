@@ -9,6 +9,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,6 +19,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 func realCollect(t *testing.T, p HostPolicy) (HostBatch, Capabilities) {
@@ -112,15 +115,59 @@ func TestRealHostCPULoadDelta(t *testing.T) {
 	}
 }
 
+// kernelFS is what the kernel reports for dir right now (the unit is f_frsize, as statvfs).
+func kernelFS(t *testing.T, dir string) (size, free, avail float64) {
+	t.Helper()
+	var st unix.Statfs_t
+	if err := unix.Statfs(dir, &st); err != nil {
+		t.Fatal(err)
+	}
+	unit := float64(st.Frsize)
+	if st.Frsize == 0 {
+		unit = float64(st.Bsize)
+	}
+	return float64(st.Blocks) * unit, float64(st.Bfree) * unit, float64(st.Bavail) * unit
+}
+
+// The scratch directory lives on a filesystem the machine shares with other writers (a tmpfs /tmp
+// on the test VMs), whose creates and removals move the free bytes between and during the two
+// collections, so a fixed drop after this test's own write is not a property of the collector. What
+// is: a collected value is one the kernel itself reported between the statfs calls that bracket that
+// collection (a constant or a cached first reading falls outside the bracket on every attempt once the
+// 16 MiB write has landed), and the size does not move. A collection whose bracket was crossed by
+// writers that both added and freed space inside it proves nothing and is repeated, up to eight times.
 func TestRealHostFilesystemChange(t *testing.T) {
 	dir := t.TempDir()
 	p := HostPolicy{Allow: []Group{GroupFilesystem}, Filesystems: []FilesystemTarget{{Alias: "scratch", Path: dir}}}
-	read := func() map[string]float64 {
-		b, caps := realCollect(t, p)
-		mustCap(t, caps, GroupFilesystem, "scratch", StatusSupported, ReasonNone)
-		return values(b)
+	free := "host_filesystem_bytes{mount=scratch,state=free,}"
+	avail := "host_filesystem_bytes{mount=scratch,state=available,}"
+	size := "host_filesystem_bytes{mount=scratch,state=size,}"
+	read := func(label string) map[string]float64 {
+		t.Helper()
+		miss := ""
+		for range 8 {
+			ks0, kf0, ka0 := kernelFS(t, dir)
+			b, caps := realCollect(t, p)
+			ks1, kf1, ka1 := kernelFS(t, dir)
+			mustCap(t, caps, GroupFilesystem, "scratch", StatusSupported, ReasonNone)
+			v := values(b)
+			if ks0 != ks1 || v[size] != ks0 {
+				t.Fatalf("%s: size %v, the kernel reports %v then %v", label, v[size], ks0, ks1)
+			}
+			if v[free] < min(kf0, kf1) || v[free] > max(kf0, kf1) {
+				miss = fmt.Sprintf("free bytes %v are outside what the kernel reported around the collection (%v, %v)", v[free], kf0, kf1)
+				continue
+			}
+			if v[avail] < min(ka0, ka1) || v[avail] > max(ka0, ka1) {
+				miss = fmt.Sprintf("available bytes %v are outside what the kernel reported around the collection (%v, %v)", v[avail], ka0, ka1)
+				continue
+			}
+			return v
+		}
+		t.Fatalf("%s: eight collections in a row: %s", label, miss)
+		return nil
 	}
-	before := read()
+	before := read("before the write")
 	f, err := os.Create(filepath.Join(dir, "blob"))
 	if err != nil {
 		t.Fatal(err)
@@ -138,19 +185,10 @@ func TestRealHostFilesystemChange(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.Close()
-	after := read()
+	after := read("after the write")
 
-	free := "host_filesystem_bytes{mount=scratch,state=free,}"
-	avail := "host_filesystem_bytes{mount=scratch,state=available,}"
-	size := "host_filesystem_bytes{mount=scratch,state=size,}"
 	if before[size] == 0 || after[size] != before[size] {
 		t.Fatalf("size changed or is zero: %v -> %v", before[size], after[size])
-	}
-	if d := before[free] - after[free]; d < 2<<20 {
-		t.Fatalf("free bytes fell by %.0f after a 16 MiB write, want at least 2 MiB", d)
-	}
-	if d := before[avail] - after[avail]; d < 2<<20 {
-		t.Fatalf("available bytes fell by %.0f after a 16 MiB write, want at least 2 MiB", d)
 	}
 	if after[avail] > after[free] || after[free] > after[size] {
 		t.Fatalf("inconsistent: avail %v free %v size %v", after[avail], after[free], after[size])

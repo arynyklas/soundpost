@@ -154,10 +154,12 @@ func RunInstallDistributed(args []string) (result error) {
 	if err != nil {
 		return err
 	}
-	if initial.leader != 1 {
-		return &smokeFailure{Stage: stage, Code: "initial_leader_not_member_1"}
-	}
-	report["initial_leadership"] = map[string]any{"leader": initial.leader, "term": initial.term}
+	// The configured initial leader campaigns first but is not guaranteed to win: a member whose election timer fires
+	// first (a slow start) leads instead (docs/operations/drills.md: "initial leader" is the configured initial_leader).
+	// The scenario is about the elected leader, whoever it is.
+	lead, followers := initial.leader, otherMembers(initial.leader)
+	first, second := followers[0], followers[1]
+	report["initial_leadership"] = map[string]any{"leader": initial.leader, "term": initial.term, "configured_initial_leader_won": initial.leader == 1}
 	// Each member has its own reader session (cookie jar and CSRF token).
 	sessions := map[uint64]auth.Session{}
 	login := func(id uint64) error {
@@ -173,34 +175,31 @@ func RunInstallDistributed(args []string) (result error) {
 
 	// ---- ingest through the initial leader, query through a follower ----
 	stage = "dist_ingest_leader"
-	if err = login(1); err != nil {
+	if err = login(lead); err != nil {
 		return err
 	}
 	ledger := &distLedger{}
-	if err = ledger.write(sites[1], fx, "leader_a"); err != nil {
+	if err = ledger.write(sites[lead], fx, "leader_a"); err != nil {
 		return err
 	}
 	stage = "dist_query_follower"
 	fx.queryTime = fmt.Sprint(time.Now().Add(time.Minute).UnixNano())
-	answers := map[uint64][]byte{}
-	for _, id := range []uint64{2, 3, 1} {
+	for _, id := range []uint64{first, second, lead} {
 		if err = login(id); err != nil {
 			return err
 		}
-		if answers[id], err = eventuallyQuery(sites[id], nfx(id), ledger, 60*time.Second); err != nil {
-			return err
-		}
 	}
-	if !bytes.Equal(answers[1], answers[2]) || !bytes.Equal(answers[2], answers[3]) {
-		return &smokeFailure{Stage: stage, Code: "members_answer_differently"}
+	answers, err := agreedAnswers(stage, sites, []uint64{lead, first, second}, nfx, ledger, 60*time.Second, "members_answer_differently")
+	if err != nil {
+		return err
 	}
 	report["query_same_on_leader_and_followers"] = true
 
 	stage = "dist_ingest_follower"
-	if err = ledger.write(sites[2], fx, "follower_b"); err != nil {
+	if err = ledger.write(sites[first], fx, "follower_b"); err != nil {
 		return err
 	}
-	for _, id := range []uint64{1, 3, 2} {
+	for _, id := range []uint64{lead, second, first} {
 		if _, err = eventuallyQuery(sites[id], nfx(id), ledger, 60*time.Second); err != nil {
 			return err
 		}
@@ -209,45 +208,45 @@ func RunInstallDistributed(args []string) (result error) {
 
 	// ---- one member lost: writes still commit ----
 	stage = "dist_kill_initial_leader"
-	if err = cluster.kill(1); err != nil {
+	if err = cluster.kill(lead); err != nil {
 		return err
 	}
 	killedAt := time.Now()
-	if err = ledger.write(sites[2], fx, "after_kill_via_b"); err != nil {
+	if err = ledger.write(sites[first], fx, "after_kill_via_b"); err != nil {
 		return err
 	}
 	report["first_ack_after_kill_s"] = time.Since(killedAt).Round(100 * time.Millisecond).Seconds()
 	report["statuses_seen_before_first_ack"] = ledger.lastStatuses
-	if _, err = eventuallyQuery(sites[3], nfx(3), ledger, 60*time.Second); err != nil {
+	if _, err = eventuallyQuery(sites[second], nfx(second), ledger, 60*time.Second); err != nil {
 		return err
 	}
-	for _, id := range []uint64{2, 3} {
+	for _, id := range followers {
 		if err = waitNodeReady(sites[id], 60*time.Second); err != nil {
 			return err
 		}
 	}
 	report["writes_commit_with_one_member_down"] = true
 	stage = "dist_leader_change_observed"
-	changed, err := leaderChange(sites, []uint64{2, 3}, initial, 90*time.Second)
+	changed, err := leaderChange(sites, followers, initial, 90*time.Second)
 	if err != nil {
 		return err
 	}
 	report["leader_after_kill"] = map[string]any{"leader": changed.leader, "term": changed.term}
 
 	stage = "dist_rejoin_converge"
-	if err = cluster.start(1); err != nil {
+	if err = cluster.start(lead); err != nil {
 		return err
 	}
-	if sites[1], err = cluster.site(1); err != nil {
+	if sites[lead], err = cluster.site(lead); err != nil {
 		return err
 	}
-	if err = waitNodeReady(sites[1], 180*time.Second); err != nil {
+	if err = waitNodeReady(sites[lead], 180*time.Second); err != nil {
 		return err
 	}
-	if err = login(1); err != nil {
+	if err = login(lead); err != nil {
 		return err
 	}
-	if answers[1], err = eventuallyQuery(sites[1], nfx(1), ledger, 90*time.Second); err != nil {
+	if answers[lead], err = eventuallyQuery(sites[lead], nfx(lead), ledger, 90*time.Second); err != nil {
 		return err
 	}
 	if cursors, err := converged(sites, 90*time.Second); err != nil {
@@ -415,12 +414,9 @@ func RunInstallDistributed(args []string) (result error) {
 		if err = login(id); err != nil {
 			return err
 		}
-		if answers[id], err = eventuallyQuery(sites[id], nfx(id), ledger, 90*time.Second); err != nil {
-			return err
-		}
 	}
-	if !bytes.Equal(answers[1], answers[2]) || !bytes.Equal(answers[2], answers[3]) {
-		return &smokeFailure{Stage: stage, Code: "members_answer_differently_after_recovery"}
+	if answers, err = agreedAnswers(stage, sites, []uint64{1, 2, 3}, nfx, ledger, 90*time.Second, "members_answer_differently_after_recovery"); err != nil {
+		return err
 	}
 	if cursors, err := converged(sites, 90*time.Second); err != nil {
 		return err
@@ -605,6 +601,17 @@ func safeToken(s string) string {
 
 type leaderView struct{ leader, term uint64 }
 
+// otherMembers is the two members of the three-member cluster that are not leader, in id order.
+func otherMembers(leader uint64) []uint64 {
+	var out []uint64
+	for _, id := range []uint64{1, 2, 3} {
+		if id != leader {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
 // leadership reads the control group's election state of the given members and requires them
 // to agree on one leader and term, with exactly the leader reporting the leader role.
 func leadership(sites map[uint64]*installSite, ids []uint64, limit time.Duration) (leaderView, error) {
@@ -785,6 +792,34 @@ func queryExpr(site *installSite, fx *installFixture, expression string) (int, [
 		"evaluation": map[string]any{"instant": true, "time": fx.queryTime, "start": "0", "end": "0", "step": "0"},
 		"projects":   []string{fx.project.String()}, "budget": map[string]any{"timeout_ns": "0", "memory_bytes": "0", "max_returned": "0"}, "allow_partial": false}
 	return site.post("/api/v1/query", body, fx.reader.CSRF, "")
+}
+
+// agreedAnswers asks every member (ids[0] is the reference) for the latest acknowledged value until
+// all of them give the same canonical answer, and returns the answers. A member's answer carries the
+// applied watermark of every data group, and a follower can be a few entries behind the leader in a
+// group the query does not read at the moment it answers, so one round of answers is not a
+// comparison; members that keep differing until limit fail with code.
+func agreedAnswers(stage string, sites map[uint64]*installSite, ids []uint64, nfx func(uint64) *installFixture, l *distLedger, limit time.Duration, code string) (map[uint64][]byte, error) {
+	deadline := time.Now().Add(limit)
+	for {
+		answers := map[uint64][]byte{}
+		same := true
+		for _, id := range ids {
+			a, err := eventuallyQuery(sites[id], nfx(id), l, limit)
+			if err != nil {
+				return nil, err
+			}
+			answers[id] = a
+			same = same && bytes.Equal(a, answers[ids[0]])
+		}
+		if same {
+			return answers, nil
+		}
+		if time.Now().After(deadline) {
+			return nil, &smokeFailure{Stage: stage, Code: code}
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
 }
 
 // eventuallyQuery waits until the member serves a COMPLETE answer whose single sample equals the

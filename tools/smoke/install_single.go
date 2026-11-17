@@ -844,6 +844,8 @@ type installFixture struct {
 	service, environment, build model.ID
 	queryTime                   string
 	trace                       model.ID
+	// job is the job of the ingested job attempt; issue names no record (the project reader cannot read issues).
+	job, issue model.ID
 }
 
 func requireNoDefaultAccess(site *installSite, report map[string]any) error {
@@ -967,6 +969,12 @@ func ingestEverySignal(site *installSite, fx *installFixture) ([]installReceipt,
 	if err != nil {
 		return nil, err
 	}
+	for _, r := range extra {
+		if r.record.Kind == model.JobAttempt {
+			fx.job = r.record.Payload.Job.Job
+		}
+	}
+	fx.issue = model.NewID()
 	for _, r := range extra {
 		records = append(records, struct {
 			name   string
