@@ -58,19 +58,22 @@ func mutScenario() *scenResult {
 		add(out+mutPollSleep+mutPollRun, 1, nativeperf.SanitizedEvent{Kind: nativeperf.EventSwitch, Switch: &nativeperf.SchedulerSwitch{Next: &coord}})
 	}
 	sort.SliceStable(evs, func(i, j int) bool { return evs[i].Time < evs[j].Time })
-	res := qual.CaptureResult{Ready: true, Proofs: []nativeperf.AcquisitionProof{{Domain: mutDomain, CPUs: []uint32{0, 1}, Through: 0}}, ProofAt: []int{0}}
+	res := qual.CaptureResult{Ready: true, Proofs: []nativeperf.AcquisitionProof{{Domain: mutDomain, CPUs: []uint32{0, 1, 2, 3, 4, 5, 6, 7}, Through: 0}}, ProofAt: []int{0}}
 	for i := range evs {
 		evs[i].Sequence = model.Uint64(i + 1)
 		res.Events = append(res.Events, evs[i])
-		if (i+1)%40 == 0 {
-			res.Proofs = append(res.Proofs, nativeperf.AcquisitionProof{Domain: mutDomain, CPUs: []uint32{0, 1}, Through: evs[i].Time, Progress: true})
+		if (i+1)%10 == 0 {
+			res.Proofs = append(res.Proofs, nativeperf.AcquisitionProof{Domain: mutDomain, CPUs: []uint32{0, 1, 2, 3, 4, 5, 6, 7}, Through: evs[i].Time, Progress: true})
 			res.ProofAt = append(res.ProofAt, len(res.Events))
 		}
 	}
 	end := evs[len(evs)-1].Time + 1
-	res.Proofs = append(res.Proofs, nativeperf.AcquisitionProof{Domain: mutDomain, CPUs: []uint32{0, 1}, Through: end, Final: true})
+	res.Proofs = append(res.Proofs, nativeperf.AcquisitionProof{Domain: mutDomain, CPUs: []uint32{0, 1, 2, 3, 4, 5, 6, 7}, Through: end, Final: true})
 	res.ProofAt = append(res.ProofAt, len(res.Events))
-	corr := qual.Correlate(res, nativeperf.DefaultConfig(1))
+	// the known stream is 490 events in 0.3 s: it needs the share a 4 MiB helper and a 4 MiB harness leave (D40: the
+	// ProfileSource leases and the consumer allowance come off the 64 MiB first), about 700 buffered events
+	adm := qual.AdmissionMemory{Targets: 1, Threads: 3, HelperRSS: 4_000 << 10, ClientRSS: 4_000 << 10}
+	corr := qual.CorrelateWithin(res, nativeperf.DefaultConfig(1), adm)
 	// CPU samples (kept out of the correlated stream): each hog holds about half of
 	// them, the coordinator a stray one or two
 	for _, k := range []nativeperf.TaskKey{h1, h2, coord} {
@@ -82,12 +85,14 @@ func mutScenario() *scenResult {
 			res.Events = append(res.Events, nativeperf.SanitizedEvent{Kind: nativeperf.EventCPU, Task: k, CPUEvent: &nativeperf.CPUSample{}})
 		}
 	}
-	return giveMemory(&scenResult{Name: "sched_contend", Mode: "contend", TargetTID: 10, Cap: res, Corr: &corr, Extra: map[string]any{
+	sc := giveMemory(&scenResult{Name: "sched_contend", Mode: "contend", TargetTID: 10, Cap: res, Corr: &corr, Extra: map[string]any{
 		// each hog runs 80 ms of the 160 ms and waits for the other the rest
 		"runnable_delay_truth_ns": uint64(mutSlices * mutSlice),
 		// what the workload measures: each poll overshot its requested 1 ms by 60 us
 		"sleeper_runnable_bound_ns": uint64(mutPolls * (mutPollSleep + mutPollRun - 1_000_000)),
 	}})
+	sc.Admission, sc.ClientRSSBeforeKiB, sc.HelperBefore.RSSKiB = adm, 4_000, 4_000
+	return sc
 }
 
 func rowOf(sc *scenResult) qual.Row {

@@ -82,6 +82,7 @@ type scenResult struct {
 	TargetThreads      int    // threads of the target when the capture was admitted (each one gets its own CPU ring)
 	RetainedBytes      uint64 // heap the retained events of the capture hold (qual.EventsFootprint)
 	Admission          qual.AdmissionMemory
+	Cfg                nativeperf.Config // the configuration the capture ran with (its ring size is part of the admission charge)
 	ClientTicks        uint64
 	Threads            int
 	DistinctCPUs       int
@@ -124,7 +125,7 @@ type stall struct {
 
 // runScenario runs one workload under one real helper process and one capture.
 func (a *accept) runScenario(name, mode string, seconds float64, cfg nativeperf.Config, noFile uint64, st *stall, cm nativeperf.CaptureMode) *scenResult {
-	r := &scenResult{Name: name, Mode: mode, Seconds: seconds, Extra: map[string]any{}}
+	r := &scenResult{Name: name, Mode: mode, Seconds: seconds, Cfg: cfg, Extra: map[string]any{}}
 	w, err := qual.LaunchWorkload(qual.LaunchOptions{Bin: a.o.workload, Mode: mode, Seconds: seconds, Dir: a.scratch, Nonce: a.nonce, RunAs: unprivilegedUID, DropToUID: a.dropWorkload})
 	if err != nil {
 		r.Err = "launch: " + err.Error()
@@ -183,6 +184,14 @@ func (a *accept) runScenario(name, mode string, seconds float64, cfg nativeperf.
 		// correlator's bounded buffer, not the whole capture (see qual.MemoryLedger).
 		r.Admission = qual.AdmissionMemory{Targets: uint64(r.TargetCount), Threads: uint64(r.TargetThreads), HelperRSS: r.HelperBefore.RSSKiB << 10, ClientRSS: r.ClientRSSBeforeKiB << 10}
 		stream = qual.NewStreamCorrelation(cfg, func(cpus uint64) (uint64, error) { return qual.CorrelationReservation(cfg, r.Admission, cpus) })
+		// the row judges read the kind and extent of each interval, never its stack (D52: the consumer's own working
+		// set shrinks, the product's 8 KiB correlator slot charge and the 64 MiB budget stay)
+		stream.DropStacks()
+		if mode == "contend" {
+			// the contention row adds up durations by thread and kind (and counts corrections): one summed interval per
+			// thread and kind is all it reads
+			stream.FoldDurations()
+		}
 		opts.Sink = stream
 	}
 	r.Cap = qual.Capture(a.ctx, h, opts)
@@ -298,12 +307,14 @@ func (a *accept) runAll() {
 	a.probeHost()
 	cfg := nativeperf.DefaultConfig(1)
 	// The captures whose admission is charged against the 64 MiB budget run while this process is still lean: the
-	// admission charge includes the exporting peer's (this process's) resident size, and the results of the other
-	// scenarios are retained until the rows are derived. The scheduler scenarios come first, then the runtime columns.
+	// admission charge includes the exporting peer's (this process's) resident size, and D40 counts the product's
+	// 24 MiB of ProfileSource leases against the same budget, so a harness that has retained earlier results leaves the
+	// correlator nothing. The runtime columns (they retain nothing but their rows) come first, then the scheduler
+	// scenarios, then the rest.
+	a.runRuntimes()
 	if a.caps.OffCPU == nativeperf.Supported {
 		a.runSchedulerScenarios(cfg)
 	}
-	a.runRuntimes()
 	for _, sp := range order {
 		secs := a.o.duration.Seconds() * sp.frac
 		if secs < 3 {

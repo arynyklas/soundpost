@@ -240,3 +240,67 @@ func TestNeedleScanFindsTheCanaryAndNothingElse(t *testing.T) {
 		t.Error("no needles must never hit")
 	}
 }
+
+// D40: the exporting peer's resident size is part of the capture's admission charge. A runtime's symbol table (Node's
+// is about 14 MB of heap) is only needed to name sampled frames after the capture, so NewResolver must not hold it
+// while the capture is admitted.
+func TestResolverLoadsItsSymbolTableOnFirstResolve(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Skip(err)
+	}
+	r, err := NewResolver(exe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.fnsReady || len(r.fns) != 0 {
+		t.Fatalf("symbols read right after NewResolver (%d held)", len(r.fns))
+	}
+	r.Resolve(1)
+	if !r.fnsReady {
+		t.Fatal("the symbol table was not read by the first Resolve")
+	}
+}
+
+// A kernel with transparent huge pages "always" (the 6.1 qualification host) backs the Go heap of the harness and of
+// its helper with 2 MiB pages, which doubles their resident size, and that size is part of every capture's admission
+// charge (D40). The harness opts its own process, and through exec its helper, out.
+func TestDisableTransparentHugePagesOptsTheProcessOut(t *testing.T) {
+	thp := func() string {
+		raw, err := os.ReadFile("/proc/self/status")
+		if err != nil {
+			t.Skip(err)
+		}
+		for _, line := range strings.Split(string(raw), "\n") {
+			if f := strings.Fields(line); len(f) == 2 && f[0] == "THP_enabled:" {
+				return f[1]
+			}
+		}
+		t.Skip("no THP_enabled in /proc/self/status")
+		return ""
+	}
+	if thp() != "1" {
+		t.Skip("transparent huge pages already off for this process")
+	}
+	if err := DisableTransparentHugePages(); err != nil {
+		t.Fatal(err)
+	}
+	if got := thp(); got != "0" {
+		t.Fatalf("THP_enabled %s after DisableTransparentHugePages", got)
+	}
+}
+
+// The helper's resident size is reported split into anonymous, file-backed and shared pages (RssAnon/RssFile/RssShmem), the
+// same /proc/<pid>/status text the high-water mark comes from.
+func TestParseStatusReadsTheResidentSplit(t *testing.T) {
+	const status = "Name:\thelper\nVmHWM:\t  21552 kB\nVmRSS:\t  20000 kB\nRssAnon:\t   6000 kB\nRssFile:\t  13000 kB\nRssShmem:\t   1000 kB\nThreads:\t5\n"
+	var u ProcUsage
+	parseStatus(status, &u)
+	if u.HWMKiB != 21552 || u.RSSKiB != 20000 || u.AnonKiB != 6000 || u.FileKiB != 13000 || u.ShmemKiB != 1000 {
+		t.Errorf("%+v", u)
+	}
+	own, err := ReadProc(0)
+	if err != nil || own.RSSKiB == 0 || own.AnonKiB == 0 || own.AnonKiB+own.FileKiB+own.ShmemKiB > own.RSSKiB+64 {
+		t.Errorf("own usage %+v, %v", own, err)
+	}
+}

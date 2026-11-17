@@ -9,6 +9,11 @@ import (
 
 const MaxMemoryBytes uint64 = 64 << 20
 
+// MaxSessionFDs is the installation's fixed file-descriptor ceiling of one capture session (plan 04, Task 2: 256, further
+// bounded by RLIMIT_NOFILE-32): every perf ring, three descriptors per target and two for the socket count against it, so a
+// target with more than MaxSessionFDs-5 threads is refused at admission with resource_limit.
+const MaxSessionFDs uint64 = 256
+
 type Config struct {
 	CPUHz          uint32
 	MaxFrames      uint32

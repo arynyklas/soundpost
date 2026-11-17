@@ -115,3 +115,56 @@ func TestCompareRuntimeWaitBoundaryIsTheApprovedTolerance(t *testing.T) {
 		}
 	}
 }
+
+// The fixtures announce the start of their wait phase on stdout ("wait_begin <ns>", the same monotonic clock as the
+// scheduler events) so the harness can release the loop thread's intervals of the CPU phase at the source instead of
+// returning them to its consumer.
+func TestParseWaitBegin(t *testing.T) {
+	for name, tc := range map[string]struct {
+		out  string
+		want uint64
+		ok   bool
+	}{
+		"announced":       {"wait_begin 10000000000\n", 10_000_000_000, true},
+		"among lines":     {"noise\nwait_begin 42\ndone\n", 42, true},
+		"before the line": {"", 0, false},
+		"partial line":    {"wait_begin 4", 0, false},
+		"not a number":    {"wait_begin x\n", 0, false},
+		"zero":            {"wait_begin 0\n", 0, false},
+	} {
+		if got, ok := ParseWaitBegin(tc.out); got != tc.want || ok != tc.ok {
+			t.Errorf("%s: %d %v", name, got, ok)
+		}
+	}
+}
+
+// KeepWaitWindow is the interval filter of a runtime column: corrections always, the loop thread's intervals only from
+// the announced wait phase on, nothing before the announcement.
+func TestKeepWaitWindowDropsTheCPUPhaseAtTheSource(t *testing.T) {
+	out := ""
+	keep := KeepWaitWindow(4242, func() string { return out })
+	iv := func(tid uint32, end int64, corr bool) nativeperf.Interval {
+		return nativeperf.Interval{Task: nativeperf.TaskKey{TID: tid}, Start: model.MonoNano(end - 10), End: model.MonoNano(end), Correction: corr}
+	}
+	if keep(iv(4242, 5_000, false)) {
+		t.Fatal("an interval before the wait phase was announced was kept")
+	}
+	if !keep(iv(4242, 5_000, true)) {
+		t.Fatal("a coverage correction must always be kept")
+	}
+	out = "wait_begin 10000\n"
+	for name, tc := range map[string]struct {
+		iv   nativeperf.Interval
+		want bool
+	}{
+		"loop thread inside the window":  {iv(4242, 20_000, false), true},
+		"loop thread spanning the start": {iv(4242, 10_005, false), true},
+		"loop thread before the window":  {iv(4242, 9_999, false), false},
+		"other thread inside the window": {iv(7, 20_000, false), false},
+		"correction before the window":   {iv(0, 1, true), true},
+	} {
+		if keep(tc.iv) != tc.want {
+			t.Errorf("%s: want %v", name, tc.want)
+		}
+	}
+}

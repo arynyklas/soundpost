@@ -222,7 +222,7 @@ func (a *accept) runtimeColumn(sp runtimeSpec, scriptDir string) qual.RuntimeCol
 	mode := nativeperf.ModeCPU
 	sched := a.caps.OffCPU == nativeperf.Supported
 	if sched {
-		cfg.RingBytes = 256 << 10
+		cfg.RingBytes = schedulerRingBytes
 		mode = nativeperf.ModeCPUOffCPU
 	}
 	qual.SettleMemory()
@@ -238,10 +238,12 @@ func (a *accept) runtimeColumn(sp runtimeSpec, scriptDir string) qual.RuntimeCol
 	var stream *qual.StreamCorrelation
 	if sched {
 		stream = qual.NewStreamCorrelation(cfg, func(cpus uint64) (uint64, error) { return qual.CorrelationReservation(cfg, adm, cpus) })
-		// The wait row reads the event-loop thread (the process's main thread) only: the intervals of the runtime's
-		// other threads, thousands for a sampler thread that wakes every few milliseconds, are released as they are
-		// returned. Coverage corrections are kept: they say where evidence was revoked.
-		stream.KeepOnly(func(iv nativeperf.Interval) bool { return iv.Correction || iv.Task.TID == uint32(w.PID) })
+		stream.DropStacks()
+		// The wait row reads the event-loop thread (the process's main thread) inside the fixture's wait phase only:
+		// the intervals of the runtime's other threads and the loop thread's own CPU-phase intervals (thousands for
+		// Bun) are released as the correlator returns them, so the consumer never holds more than the evidence.
+		// Coverage corrections are kept: they say where evidence was revoked.
+		stream.KeepOnly(qual.KeepWaitWindow(uint32(w.PID), w.Output))
 		stream.Scope(uint32(w.PID)) // only the event-loop thread's scheduler events reach the correlator
 		opts.Sink = stream
 	}
@@ -332,14 +334,31 @@ func (a *accept) runtimeColumn(sp runtimeSpec, scriptDir string) qual.RuntimeCol
 			c := stream.Result()
 			corr = &c
 		}
-		col.Wait = a.runtimeWaitRow(sp, w, &rep, reportOK, cap, corr, ledgerFor(adm, corr, cap, helperBefore, helperAfter, clientAfter))
+		col.Wait = a.runtimeWaitRow(sp, w, &rep, reportOK, cap, corr, ledgerFor(cfg, adm, corr, cap, helperBefore, helperAfter, clientAfter))
+		if col.Wait.Detail != nil && corr != nil {
+			col.Wait.Detail["capture_rates"] = captureRates(cap, corr, helperBefore, helperAfter)
+		}
 	}
 	return col
 }
 
-// ledgerFor is the memory ledger input of a runtime capture.
-func ledgerFor(adm qual.AdmissionMemory, corr *qual.Correlation, cap qual.CaptureResult, helperBefore, helperAfter, clientAfter qual.ProcUsage) qual.LedgerInput {
-	in := qual.LedgerInput{Config: nativeperf.DefaultConfig(1), Admission: adm, HelperHWM: helperAfter.HWMKiB << 10, ClientHWM: clientAfter.HWMKiB << 10, Retained: qual.EventsFootprint(cap.Events)}
+// captureRates is what the capture cost the helper: scheduler events delivered a second (every switch and wakeup the
+// helper published, before the consumer's scoping), the kernel loss events, and the helper's CPU time.
+func captureRates(cap qual.CaptureResult, corr *qual.Correlation, before, after qual.ProcUsage) map[string]any {
+	secs := float64(cap.EndedNs-cap.StartedNs) / 1e9
+	events := corr.SwitchEvents + corr.WakeupEvents
+	m := map[string]any{"capture_seconds": secs, "scheduler_events": events, "loss_events": corr.LossEvents,
+		"helper_cpu_ms": (after.CPUTicks - before.CPUTicks) * 1000 / qual.ClockTicksPerSecond}
+	if secs > 0 {
+		m["scheduler_events_per_s"] = float64(events) / secs
+		m["helper_cpu_percent"] = float64(after.CPUTicks-before.CPUTicks) * 1000 / qual.ClockTicksPerSecond / (secs * 10)
+	}
+	return m
+}
+
+// ledgerFor is the memory ledger input of a runtime capture that ran with cfg.
+func ledgerFor(cfg nativeperf.Config, adm qual.AdmissionMemory, corr *qual.Correlation, cap qual.CaptureResult, helperBefore, helperAfter, clientAfter qual.ProcUsage) qual.LedgerInput {
+	in := qual.LedgerInput{Config: cfg, Admission: adm, HelperHWM: helperAfter.HWMKiB << 10, ClientHWM: clientAfter.HWMKiB << 10, Retained: qual.EventsFootprint(cap.Events)}
 	if corr != nil {
 		in.CPUs, in.Correlator, in.Intervals = uint64(corr.CPUs), corr.ReservationBytes, corr.IntervalBytes
 	}
@@ -355,7 +374,7 @@ func (a *accept) runtimeWaitRow(sp runtimeSpec, w *qual.Workload, rep *runtimeRe
 		return qual.Unqualified(reason, recorded)
 	}
 	cfgCorr := map[string]any{"error": corr.Err, "consume_errors": corr.ConsumeErrors, "first_consume_error": corr.FirstError, "scheduler_switch_events": corr.SwitchEvents,
-		"scheduler_wakeup_events": corr.WakeupEvents, "loss_events": corr.LossEvents, "progress_proofs_applied": corr.ProgressProofs, "peak_buffered_events": corr.PeakHeapEvents, "cpus": corr.CPUs}
+		"scheduler_wakeup_events": corr.WakeupEvents, "loss_events": corr.LossEvents, "progress_proofs_applied": corr.ProgressProofs, "peak_buffered_events": corr.PeakHeapEvents, "max_buffered_events": corr.MaxHeapEvents, "events_consumed": corr.Consumed, "events_scoped_out": corr.ScopedOut, "cpus": corr.CPUs}
 	recorded["correlation"] = cfgCorr
 	recorded["admission"] = map[string]any{"targets": ledger.Admission.Targets, "target_threads": ledger.Admission.Threads, "helper_rss_bytes": ledger.Admission.HelperRSS, "client_rss_bytes": ledger.Admission.ClientRSS}
 	switch {
@@ -388,6 +407,13 @@ func (a *accept) runtimeWaitRow(sp runtimeSpec, w *qual.Workload, rep *runtimeRe
 	cmp := qual.CompareRuntimeWait(truth, native)
 	recorded["comparison"] = map[string]any{"verdict": cmp.Verdict, "reason": cmp.Reason, "loop_tid": truth.TID, "requests": truth.Requests, "window_ns": truth.EndNs - truth.StartNs,
 		"native_blocked_ns": cmp.NativeNs, "lower_bound_ns": cmp.LowerNs, "upper_bound_ns": cmp.UpperNs, "runnable_ns": cmp.RunnableNs, "unknown_split_ns": cmp.UnknownNs, "censored_ns": cmp.CensoredNs, "tolerance": qual.BlockedTolerance}
+	var corrections []map[string]any
+	for _, iv := range native {
+		if iv.Correction && len(corrections) < 12 {
+			corrections = append(corrections, map[string]any{"tid": iv.Task.TID, "start_ns": uint64(iv.Start), "end_ns": uint64(iv.End), "reason": string(iv.Reason), "kind": string(iv.Kind)})
+		}
+	}
+	recorded["coverage_corrections_in_evidence"] = corrections
 	switch cmp.Verdict {
 	case qual.VerdictPass:
 		return qual.Supported([]string{fmt.Sprintf("%s: native blocked time of the event-loop thread %d ns inside the wait window, between the %d ns the loop was idle on %d requests held %d ns server-side (-%.0f%%) and the %d ns of round trips the runtime observed (+%.0f%%)", sp.label, cmp.NativeNs, cmp.LowerNs, truth.Requests, truth.ServerDelayNs, qual.BlockedTolerance*100, cmp.UpperNs, qual.BlockedTolerance*100)}, recorded)

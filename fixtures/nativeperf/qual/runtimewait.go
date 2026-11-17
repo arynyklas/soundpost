@@ -5,9 +5,48 @@ package qual
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/arynyklas/soundpost/internal/nativeperf"
 )
+
+// ParseWaitBegin reads the "wait_begin <ns>" line a runtime fixture prints when its wait phase starts (CLOCK_MONOTONIC
+// nanoseconds, the clock of the scheduler events). A line that is not complete yet (no newline), not a number or zero
+// is not an announcement.
+func ParseWaitBegin(output string) (uint64, bool) {
+	for _, line := range strings.SplitAfter(output, "\n") {
+		rest, ok := strings.CutPrefix(line, "wait_begin ")
+		if !ok || !strings.HasSuffix(rest, "\n") {
+			continue
+		}
+		if ns, err := strconv.ParseUint(strings.TrimSpace(rest), 10, 64); err == nil && ns != 0 {
+			return ns, true
+		}
+	}
+	return 0, false
+}
+
+// KeepWaitWindow is the interval filter of a runtime column's wait row, applied where the correlator returns an
+// interval so that nothing outside the evidence ever reaches the consumer's allowance: coverage corrections always (they
+// say where evidence was revoked), the event-loop thread's intervals that end at or after the announced start of the
+// wait phase, and nothing else; before the announcement nothing but corrections is kept (the CPU phase of the fixture
+// is not wait evidence). output is the workload's output so far.
+func KeepWaitWindow(loopTID uint32, output func() string) func(nativeperf.Interval) bool {
+	var begin uint64
+	return func(iv nativeperf.Interval) bool {
+		if iv.Correction {
+			return true
+		}
+		if iv.Task.TID != loopTID {
+			return false
+		}
+		if begin == 0 {
+			begin, _ = ParseWaitBegin(output())
+		}
+		return begin != 0 && uint64(iv.End) >= begin
+	}
+}
 
 // MinRuntimeWaitRequests is the fewest loopback requests a runtime column has to
 // have waited on for its wait row to say anything.

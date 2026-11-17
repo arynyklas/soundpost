@@ -9,6 +9,14 @@
 import {createInterface} from "node:readline";
 import {resolve} from "node:path";
 import {startProfile} from "../../../packages/bun/src/profile.ts";
+import {dlopen,FFIType,ptr} from "bun:ffi";
+
+// Bun's process.hrtime.bigint() counts from the start of the process, not from CLOCK_MONOTONIC (the clock of the native
+// scheduler events), so the wait window is read from libc's clock_gettime(CLOCK_MONOTONIC) itself. Opened before the
+// ready line like everything else that may create a thread.
+const libc=dlopen("libc.so.6",{clock_gettime:{args:[FFIType.i32,FFIType.ptr],returns:FFIType.i32}});
+const timespec=new BigInt64Array(2);
+function monotonicNs():bigint{libc.symbols.clock_gettime(1,ptr(timespec));return timespec[0]*1000000000n+timespec[1];}
 
 const root=resolve(import.meta.dir,"../../..");
 const seconds=Number(process.argv[2]);
@@ -31,14 +39,15 @@ jsCpuLoop(seconds*600);
 const cpuSeconds=(performance.now()-t0)/1000;
 const waits:number[]=[];
 const requests=Math.max(4,Math.floor(seconds*0.4/0.06));
-const waitStartNs=process.hrtime.bigint(); // CLOCK_MONOTONIC: the clock of the native scheduler events
+const waitStartNs=monotonicNs(); // CLOCK_MONOTONIC: the clock of the native scheduler events
+console.log(`wait_begin ${waitStartNs}`); // the harness releases the loop thread's CPU-phase intervals at the source from here on
 for(let i=0;i<requests;i++){
  const started=performance.now();
  const response=await fetch(`http://127.0.0.1:${server.port}/`);
  await response.text();
  waits.push(performance.now()-started);
 }
-const waitEndNs=process.hrtime.bigint();
+const waitEndNs=monotonicNs();
 // The supplement may start or stop helper threads when it stops, and the native helper ends a capture when a thread of
 // its target comes or goes. So the report waits: this line tells the runner the measured phase is over, the runner
 // closes the native capture (its final proof needs a live, unchanged target) and then answers "exit".

@@ -197,12 +197,42 @@ func MonotonicNow() uint64 {
 
 // ---- per-process accounting ----
 
-// ProcUsage is a snapshot of one process's resource use.
+// ProcUsage is a snapshot of one process's resource use. AnonKiB/FileKiB/ShmemKiB are the kernel's split of the resident
+// size (RssAnon, RssFile, RssShmem).
 type ProcUsage struct {
 	CPUTicks uint64 // utime+stime in clock ticks
 	RSSKiB   uint64
 	HWMKiB   uint64
+	AnonKiB  uint64
+	FileKiB  uint64
+	ShmemKiB uint64
 	FDs      int
+}
+
+// parseStatus fills the memory fields of u from the text of /proc/<pid>/status.
+func parseStatus(status string, u *ProcUsage) {
+	for _, line := range strings.Split(status, "\n") {
+		kv := strings.Fields(line)
+		if len(kv) < 2 {
+			continue
+		}
+		var dst *uint64
+		switch kv[0] {
+		case "VmRSS:":
+			dst = &u.RSSKiB
+		case "VmHWM:":
+			dst = &u.HWMKiB
+		case "RssAnon:":
+			dst = &u.AnonKiB
+		case "RssFile:":
+			dst = &u.FileKiB
+		case "RssShmem:":
+			dst = &u.ShmemKiB
+		default:
+			continue
+		}
+		*dst, _ = strconv.ParseUint(kv[1], 10, 64)
+	}
 }
 
 // ReadProc reads /proc/<pid>; pid 0 means this process.
@@ -226,17 +256,7 @@ func ReadProc(pid int) (ProcUsage, error) {
 		}
 	}
 	status, _ := os.ReadFile(base + "/status")
-	for _, line := range strings.Split(string(status), "\n") {
-		kv := strings.Fields(line)
-		if len(kv) >= 2 && (kv[0] == "VmRSS:" || kv[0] == "VmHWM:") {
-			n, _ := strconv.ParseUint(kv[1], 10, 64)
-			if kv[0] == "VmRSS:" {
-				u.RSSKiB = n
-			} else {
-				u.HWMKiB = n
-			}
-		}
-	}
+	parseStatus(string(status), &u)
 	if ents, err := os.ReadDir(base + "/fd"); err == nil {
 		u.FDs = len(ents)
 	}
@@ -252,6 +272,14 @@ func SettleMemory() {
 		time.Sleep(20 * time.Millisecond)
 	}
 	os.WriteFile("/proc/self/clear_refs", []byte("5"), 0)
+}
+
+// DisableTransparentHugePages opts this process out of transparent huge pages with prctl(PR_SET_THP_DISABLE); the
+// setting survives execve and fork, so the helper and workloads it starts are out too. On a host with THP "always"
+// the Go heap of the harness and of its helper otherwise sits on 2 MiB pages and its resident size, which every
+// capture's admission charge includes, doubles (D40).
+func DisableTransparentHugePages() error {
+	return nativeperf.DisableTransparentHugePages()
 }
 
 // PerfFDs counts this process's perf event file descriptors.
@@ -569,40 +597,55 @@ type span struct{ start, end, offset uint64 }
 // the mapping that was live for it). Addresses outside the workload executable
 // resolve to the empty string: they are reported unresolved, never invented.
 type Resolver struct {
-	exeBase string
-	fns     []fnSym
-	loads   []*elf.Prog
-	mu      sync.Mutex
-	exe     map[span]bool
-	anyExec map[span]string
+	exePath  string
+	exeBase  string
+	fns      []fnSym
+	fnsReady bool
+	loads    []*elf.Prog
+	mu       sync.Mutex
+	exe      map[span]bool
+	anyExec  map[span]string
 }
 
-// NewResolver reads the symbol table of exe.
+// NewResolver opens exe and keeps its load segments. The symbol table is read on the first Resolve: a runtime's can be
+// tens of MB of heap, and while it is held it is part of the exporting peer's resident size that every capture's
+// admission charge includes (D40).
 func NewResolver(exe string) (*Resolver, error) {
 	f, err := elf.Open(exe)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	syms, err := f.Symbols()
-	if errors.Is(err, elf.ErrNoSymbols) {
-		syms, err = nil, nil // stripped binary: every frame in it is reported unresolved
-	}
-	if err != nil {
-		return nil, err
-	}
-	r := &Resolver{exeBase: "/" + filepath.Base(exe), exe: map[span]bool{}, anyExec: map[span]string{}}
-	for _, s := range syms {
-		if elf.ST_TYPE(s.Info) == elf.STT_FUNC && s.Size > 0 {
-			r.fns = append(r.fns, fnSym{s.Name, s.Value, s.Size})
-		}
-	}
+	r := &Resolver{exePath: exe, exeBase: "/" + filepath.Base(exe), exe: map[span]bool{}, anyExec: map[span]string{}}
 	for _, p := range f.Progs {
 		if p.Type == elf.PT_LOAD {
 			r.loads = append(r.loads, p)
 		}
 	}
 	return r, nil
+}
+
+// loadFns reads the function symbols once; a stripped binary (or one whose symbols cannot be read) has none, so every
+// frame in it is reported unresolved. The caller holds r.mu.
+func (r *Resolver) loadFns() {
+	if r.fnsReady {
+		return
+	}
+	r.fnsReady = true
+	f, err := elf.Open(r.exePath)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	syms, err := f.Symbols()
+	if err != nil {
+		return
+	}
+	for _, s := range syms {
+		if elf.ST_TYPE(s.Info) == elf.STT_FUNC && s.Size > 0 {
+			r.fns = append(r.fns, fnSym{s.Name, s.Value, s.Size})
+		}
+	}
 }
 
 // AddMaps records the executable mappings in one /proc/<pid>/maps snapshot.
@@ -667,6 +710,7 @@ func (r *Resolver) Classify(ip uint64) string {
 func (r *Resolver) Resolve(ip uint64) string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.loadFns()
 	for s := range r.exe {
 		if ip < s.start || ip >= s.end {
 			continue
@@ -702,6 +746,11 @@ type operatorFile struct {
 func HelperRole(args []string) (bool, int) {
 	if len(args) != 4 || args[0] != helperRoleFlag {
 		return false, 0
+	}
+	// the product helper's first action (D53): this role is the helper the runners measure, so it does not rely on the
+	// parent's setting being inherited
+	if nativeperf.DisableTransparentHugePages() != nil {
+		return true, ExitFail
 	}
 	raw, err := os.ReadFile(args[2])
 	if err != nil {

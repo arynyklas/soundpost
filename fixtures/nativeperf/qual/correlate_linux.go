@@ -36,6 +36,10 @@ type Correlation struct {
 	// events of other threads Scope did not hand to the correlator.
 	IntervalsDropped int
 	ScopedOut        int
+	// Consumed is how many events were handed to the correlator (after Scope); MaxHeapEvents is how many it may buffer.
+	Consumed, MaxHeapEvents int
+	// IntervalCounts is how many intervals of each kind the correlator returned, whatever was retained of them.
+	IntervalCounts map[nativeperf.IntervalKind]int
 }
 
 // StreamCorrelation replays a scheduler capture through the Correlator while the
@@ -58,6 +62,18 @@ type StreamCorrelation struct {
 	failed  bool
 	keep    func(nativeperf.Interval) bool
 	scope   uint32
+	// dropStacks retains returned intervals without their switch-out stacks (see DropStacks).
+	dropStacks bool
+	// fold retains the measured intervals as one summed interval per task and kind (see FoldDurations); folded and
+	// foldOrder hold them until Result.
+	fold      bool
+	folded    map[foldKey]*nativeperf.Interval
+	foldOrder []foldKey
+}
+
+type foldKey struct {
+	task nativeperf.TaskKey
+	kind nativeperf.IntervalKind
 }
 
 // NewStreamCorrelation starts a correlation whose Correlator is handed
@@ -77,17 +93,46 @@ func (s *StreamCorrelation) fail(msg string) {
 // all the others, which are memory the aggregate budget has to cover. Call it before the first proof.
 func (s *StreamCorrelation) KeepOnly(keep func(nativeperf.Interval) bool) { s.keep = keep }
 
+// DropStacks makes the correlation retain the returned intervals without their switch-out stacks: the row judges read
+// the kind and the extent of an interval, never its stack, and the stacks are most of what the intervals weigh (the
+// consumer's allowance is memory out of the aggregate budget). Call it before the first proof.
+func (s *StreamCorrelation) DropStacks() { s.dropStacks = true }
+
+// FoldDurations makes the correlation retain the measured (non-correction) intervals as one summed interval per task and
+// kind: for a judge that only adds up durations (the contention row), not for one that places intervals in time. The
+// folded interval starts where the first of its kind started and lasts the sum of them all, so it is not a point in
+// time; coverage corrections are kept as they came. IntervalCounts still says how many intervals of each kind the
+// correlator returned. Call it before the first proof.
+func (s *StreamCorrelation) FoldDurations() {
+	s.fold = true
+	s.folded = map[foldKey]*nativeperf.Interval{}
+}
+
 func (s *StreamCorrelation) add(got []nativeperf.Interval) {
-	if s.keep == nil {
-		s.out.Intervals = append(s.out.Intervals, got...)
-		return
+	if s.out.IntervalCounts == nil {
+		s.out.IntervalCounts = map[nativeperf.IntervalKind]int{}
 	}
 	for _, iv := range got {
-		if s.keep(iv) {
-			s.out.Intervals = append(s.out.Intervals, iv)
-		} else {
+		s.out.IntervalCounts[iv.Kind]++
+		if s.keep != nil && !s.keep(iv) {
 			s.out.IntervalsDropped++
+			continue
 		}
+		if s.dropStacks || s.fold {
+			iv.SwitchOutCallchain = nil
+		}
+		if s.fold && !iv.Correction {
+			k := foldKey{iv.Task, iv.Kind}
+			if f := s.folded[k]; f != nil {
+				f.End += iv.End - iv.Start
+				f.Measure.Value += iv.Measure.Value
+			} else {
+				s.folded[k] = &iv
+				s.foldOrder = append(s.foldOrder, k)
+			}
+			continue
+		}
+		s.out.Intervals = append(s.out.Intervals, iv)
 	}
 }
 
@@ -140,6 +185,7 @@ func (s *StreamCorrelation) finish(p nativeperf.AcquisitionProof) {
 		return
 	}
 	s.out.PeakHeapEvents = s.c.Stats().PeakHeapEvents
+	s.out.MaxHeapEvents = s.c.Stats().MaxHeapEvents
 	for _, cpu := range p.CPUs {
 		if err := s.c.ReportProgress(cpu, p.Through); err != nil {
 			s.fail("report progress: " + err.Error())
@@ -153,12 +199,13 @@ func (s *StreamCorrelation) finish(p nativeperf.AcquisitionProof) {
 	}
 }
 
-// Scope narrows the correlation to one thread: switches that involve it, wakeups that target it and its own CPU
-// samples are consumed, the scheduler events of the process's other threads are not (they are counted in ScopedOut).
-// A task's off-CPU intervals are built from that task's own switch-out, wakeup and switch-in only, so the thread's
-// intervals are unchanged, while the correlator no longer buffers the other threads' events: a runtime with 16
-// busy helper threads emits more scheduler events a second than a 64 MiB budget can reorder. Loss, mapping and
-// generation events are always consumed. Call it before the first proof.
+// Scope narrows the correlation to one thread: switches that involve it (reduced to the thread's own side, see
+// project), wakeups that target it and its own CPU samples are consumed, the scheduler events of the process's other
+// threads are not (they are counted in ScopedOut). A task's off-CPU intervals are built from that task's own
+// switch-out, wakeup and switch-in only, so the thread's intervals are unchanged, while the correlator no longer
+// buffers the other threads' events: a runtime with 16 busy helper threads emits more scheduler events a second than
+// a 64 MiB budget can reorder. Loss, mapping and generation events are always consumed. Call it before the first
+// proof.
 func (s *StreamCorrelation) Scope(tid uint32) { s.scope = tid }
 
 func (s *StreamCorrelation) inScope(e nativeperf.SanitizedEvent) bool {
@@ -171,6 +218,25 @@ func (s *StreamCorrelation) inScope(e nativeperf.SanitizedEvent) bool {
 		return e.Task.TID == s.scope
 	}
 	return true
+}
+
+// project hands the correlator only the judged thread's side of a switch. The thread on the other side has its own
+// history, which Scope does not deliver (its switch-in on another CPU names nobody judged): left in the event, that
+// task would stay "switched out" in the correlator forever and its next switch-out would revoke the coverage of the
+// whole domain (records_lost, from the first such switch on).
+func (s *StreamCorrelation) project(e nativeperf.SanitizedEvent) nativeperf.SanitizedEvent {
+	if e.Switch == nil {
+		return e
+	}
+	sw := *e.Switch
+	if sw.Previous != nil && sw.Previous.TID != s.scope {
+		sw.Previous, sw.PreviousState, sw.PreviousStateUnknown, sw.Preempted, sw.SwitchOutCallchain, sw.MissingCallchain = nil, 0, false, false, nil, ""
+	}
+	if sw.Next != nil && sw.Next.TID != s.scope {
+		sw.Next = nil
+	}
+	e.Switch = &sw
+	return e
 }
 
 // Event consumes one event in stream order and says whether the capture result
@@ -195,10 +261,14 @@ func (s *StreamCorrelation) Event(e nativeperf.SanitizedEvent) bool {
 		s.fail("event before the initial topology proof")
 		return retain
 	}
-	if s.scope != 0 && !s.inScope(e) {
-		s.out.ScopedOut++
-		return retain
+	if s.scope != 0 {
+		if !s.inScope(e) {
+			s.out.ScopedOut++
+			return retain
+		}
+		e = s.project(e)
 	}
+	s.out.Consumed++
 	got, err := s.c.Consume(e)
 	s.add(got)
 	if err != nil {
@@ -216,8 +286,16 @@ func (s *StreamCorrelation) Result() Correlation {
 	if !s.failed && (!s.initial || !s.final) {
 		s.out.Err = "capture has no initial and final acquisition proof"
 	}
-	s.out.IntervalBytes = IntervalsFootprint(s.out.Intervals)
-	return s.out
+	out := s.out
+	if len(s.foldOrder) > 0 {
+		out.Intervals = make([]nativeperf.Interval, 0, len(s.out.Intervals)+len(s.foldOrder))
+		out.Intervals = append(out.Intervals, s.out.Intervals...)
+		for _, k := range s.foldOrder {
+			out.Intervals = append(out.Intervals, *s.folded[k])
+		}
+	}
+	out.IntervalBytes = IntervalsFootprint(out.Intervals)
+	return out
 }
 
 // Correlate replays a finished capture result through a StreamCorrelation with the

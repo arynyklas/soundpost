@@ -32,10 +32,17 @@ type cpuSource struct {
 	sequence  uint64
 	cursor    int
 	lastCheck time.Time
-	stop      func() bool
-	closeErr  error
-	terminal  error
-	timer     *time.Timer
+	// provenAt is the wall-clock time of the last identity check that succeeded: when the stream ends on an identity
+	// error, everything published after it is unproven and a consumer revokes [provenAt, end).
+	provenAt time.Time
+	// gone reports whether the thread of a task has exited; nil means the task's own perf event is asked (see
+	// taskStillLive). Tests substitute it.
+	gone     func(TaskKey) (bool, error)
+	byTask   map[TaskKey]*Ring // built on first use from rings
+	stop     func() bool
+	closeErr error
+	terminal error
+	timer    *time.Timer
 }
 
 // NewCPUAcquisition is the helper's fixed software CPU-clock factory. CgroupID
@@ -215,7 +222,43 @@ func (s *cpuSource) checkIdentity() error {
 		return ErrThreadCoverageChanged
 	}
 	s.lastCheck = time.Now()
+	s.provenAt = s.lastCheck
 	return nil
+}
+
+// taskStillLive proves, for one task named by an event about to be published, that the thread of the target the
+// acquisition snapshot recorded under this TID has not exited: a TID that exited and was handed to another process
+// inside the identity cadence fails here instead of publishing that process's scheduling under the original
+// TaskKey. It asks the task's own perf event (Ring.exited): constant work per published task, independent of the
+// thread count and of the event rate, and no /proc read. A thread that appears after the snapshot is not named here
+// at all: the next cadence snapshot sees it and ends the capture (ErrThreadCoverageChanged).
+func (s *cpuSource) taskStillLive(k TaskKey) error {
+	gone := s.gone
+	if gone == nil {
+		gone = s.ringExited
+	}
+	exited, e := gone(k)
+	switch {
+	case e != nil:
+		return e
+	case exited:
+		return ErrThreadCoverageChanged
+	}
+	return nil
+}
+
+func (s *cpuSource) ringExited(k TaskKey) (bool, error) {
+	if s.byTask == nil {
+		s.byTask = make(map[TaskKey]*Ring, len(s.rings))
+		for _, r := range s.rings {
+			s.byTask[r.task] = r
+		}
+	}
+	r := s.byTask[k]
+	if r == nil {
+		return false, ErrThreadCoverageChanged
+	}
+	return r.exited()
 }
 func (s *cpuSource) Next(ctx context.Context) (SanitizedEvent, error) {
 	s.nextMu.Lock()

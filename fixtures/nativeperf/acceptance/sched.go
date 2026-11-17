@@ -13,6 +13,14 @@ import (
 	"github.com/arynyklas/soundpost/internal/nativeperf"
 )
 
+// schedulerRingBytes is the data size of each scheduler-capture ring the harness asks for. A ring is 3 per online CPU
+// plus the target's, each charged with its metadata page against the 64 MiB budget before the correlator gets what is
+// left (D40/D52: the harness's own admission yields, the product's slot charge and the budget do not move), so every
+// 128 KiB of ring size is about 3 MiB, or 190 correlator slots, on 8 CPUs. The product's default is 256 KiB; a pinned
+// contended CPU emits a few thousand scheduler records a second, a 64 KiB ring overflowed (explicit kernel loss, which
+// revokes coverage) between two reads of one stream, and kernel loss is a row failure here, never hidden.
+const schedulerRingBytes uint64 = 128 << 10
+
 // runSchedulerScenarios runs the blocking and pinned-contention workloads under
 // the real scheduler path (cpu_offcpu mode, sched_switch/sched_wakeup tracepoints
 // through the signed-grant helper) and correlates the captured events with the
@@ -20,10 +28,7 @@ import (
 // says the scheduler tracepoints can be opened.
 func (a *accept) runSchedulerScenarios(base nativeperf.Config) {
 	cfg := base
-	// The product's default ring (256 KiB per stream): a pinned contended CPU emits
-	// several thousand scheduler records a second, and a 64 KiB ring overflows
-	// (explicit kernel loss, which revokes coverage) between two reads of one stream.
-	cfg.RingBytes = 256 << 10
+	cfg.RingBytes = schedulerRingBytes
 	for _, item := range []struct {
 		name string
 		secs float64
@@ -38,13 +43,17 @@ func (a *accept) runSchedulerScenarios(base nativeperf.Config) {
 
 // memoryVerdict computes the memory ledger of a correlated scheduler capture, stores it in d and returns why the
 // capture does not fit the aggregate budget ("" when it does): the nominal sum (admission charge, the target's thread
-// rings, the correlator's reservation and the events and intervals the harness itself holds), the harness's own
-// working sets against their allowance, the measured resident sizes, and that the product's ProfileSource leases
-// are admitted behind the same admission charge. Whether the leases AND the correlator reservation fit together is
-// reported in the ledger but is not a verdict: the product's assembly does not run a correlator.
+// rings, the ProfileSource working leases the product takes, the correlator's reservation and the events and
+// intervals the harness itself holds), the harness's own working sets against their allowance, the measured resident
+// sizes, and that the product's leases are admitted behind the same admission charge (D40: one capture fits the
+// 64 MiB with its leases; the correlator's share is derived after them).
 func memoryVerdict(r *scenResult, d map[string]any, what string) string {
+	cfg := r.Cfg // the ring size is part of the admission charge: the ledger is the one of the capture that ran
+	if cfg.RingBytes == 0 {
+		cfg = nativeperf.DefaultConfig(1)
+	}
 	return ledgerVerdict(qual.LedgerInput{
-		Config: nativeperf.DefaultConfig(1), Admission: r.Admission, CPUs: uint64(r.Corr.CPUs),
+		Config: cfg, Admission: r.Admission, CPUs: uint64(r.Corr.CPUs),
 		HelperHWM: r.HelperPeak.HWMKiB << 10, ClientHWM: r.ClientHWMKiB << 10,
 		Correlator: r.Corr.ReservationBytes, Retained: r.RetainedBytes, Intervals: r.Corr.IntervalBytes,
 	}, d, what)
@@ -58,7 +67,7 @@ func ledgerVerdict(in qual.LedgerInput, d map[string]any, what string) string {
 	case err != nil:
 		return what + ": " + err.Error()
 	case !l.NominalFits:
-		return fmt.Sprintf("%s: the capture's admission charge %d B, its thread rings %d B, the correlation reservation %d B and the %d B of retained events and %d B of returned intervals the harness holds come to %d B, over the %d B aggregate budget", what, l.Charge, l.ExtraRings, l.Correlator, l.Retained, l.Intervals, l.Nominal, l.Budget)
+		return fmt.Sprintf("%s: the capture's admission charge %d B, its thread rings %d B, the ProfileSource leases %d B, the correlation reservation %d B and the %d B of retained events and %d B of returned intervals the harness holds come to %d B, over the %d B aggregate budget", what, l.Charge, l.ExtraRings, l.Leases, l.Correlator, l.Retained, l.Intervals, l.Nominal, l.Budget)
 	case !l.ConsumerFits:
 		return fmt.Sprintf("%s: the harness's retained events (%d B) and the intervals the correlator returned (%d B) outgrew their %d B allowance", what, l.Retained, l.Intervals, qual.ConsumerAllowanceBytes)
 	case !l.ProductAdmits:
@@ -76,9 +85,11 @@ func (a *accept) corrSummary(r *scenResult) map[string]any {
 	}
 	c := r.Corr
 	kinds := map[string]int{}
+	for kind, n := range c.IntervalCounts {
+		kinds[string(kind)] = n
+	}
 	var blocked, runnable, censored, unknown uint64
 	for _, iv := range c.Intervals {
-		kinds[string(iv.Kind)]++
 		d := uint64(iv.End - iv.Start)
 		switch iv.Kind {
 		case nativeperf.IntervalBlocked:
@@ -94,8 +105,11 @@ func (a *accept) corrSummary(r *scenResult) map[string]any {
 	m["correlation"] = map[string]any{
 		"error": c.Err, "consume_errors": c.ConsumeErrors, "first_consume_error": c.FirstError, "scheduler_switch_events": c.SwitchEvents, "scheduler_wakeup_events": c.WakeupEvents,
 		"cpu_samples_in_same_capture": c.CPUSamples, "loss_events": c.LossEvents, "cpus": c.CPUs, "interval_kinds": kinds, "progress_proofs_applied": c.ProgressProofs, "peak_buffered_events": c.PeakHeapEvents,
+		"max_buffered_events": c.MaxHeapEvents, "reservation_bytes": c.ReservationBytes,
 		"blocked_ns_all_authorized_tasks": blocked, "runnable_ns_all_authorized_tasks": runnable, "censored_ns": censored, "unknown_ns": unknown,
 	}
+	// what the correlator's share was derived from: a capture that overflowed has no ledger, and its cause is the admission RSS
+	m["admission"] = map[string]any{"targets": r.Admission.Targets, "target_threads": r.Admission.Threads, "helper_rss_bytes": r.Admission.HelperRSS, "client_rss_bytes": r.Admission.ClientRSS}
 	return m
 }
 

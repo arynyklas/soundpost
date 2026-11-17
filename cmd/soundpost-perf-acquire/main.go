@@ -22,6 +22,9 @@ func main() {
 	}
 }
 func run() error {
+	if e := nativeperf.DisableTransparentHugePages(); e != nil {
+		return e
+	}
 	cycles := flag.Bool("cpu-cycles", false, "Explicitly acquire hardware cycles instead of software CPU-clock (no fallback)")
 	flag.Parse()
 	if flag.NArg() != 0 {

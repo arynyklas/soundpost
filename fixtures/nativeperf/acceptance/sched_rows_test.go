@@ -41,7 +41,12 @@ func giveMemory(sc *scenResult) *scenResult {
 	sc.HelperBefore.RSSKiB, sc.HelperPeak.HWMKiB = 10_000, 24_000
 	sc.Corr.CPUs = 8
 	if sc.Corr.ReservationBytes == 0 {
-		sc.Corr.ReservationBytes = qual.CorrelationReservationBytes
+		// D40: the share the harness is handed once the leases and the allowance are out of the budget
+		share, err := qual.CorrelationReservation(nativeperf.DefaultConfig(1), sc.Admission, 8)
+		if err != nil {
+			panic(err)
+		}
+		sc.Corr.ReservationBytes = share
 	}
 	return sc
 }
@@ -53,7 +58,7 @@ func giveMemory(sc *scenResult) *scenResult {
 // with memory outside the budget.
 func TestSchedulerRowsFailWhenTheCorrelationReservationDoesNotFitTheBudget(t *testing.T) {
 	for name, mutate := range map[string]func(*scenResult){
-		"admission charge plus reservation": func(sc *scenResult) { sc.Admission.ClientRSS = 16_000 << 10 },
+		"admission charge plus reservation": func(sc *scenResult) { sc.Admission.ClientRSS = 20_000 << 10 },
 		"measured resident memory":          func(sc *scenResult) { sc.ClientHWMKiB, sc.HelperPeak.HWMKiB = 30_000, 30_000 },
 	} {
 		a := newAccept()
@@ -100,24 +105,24 @@ func TestSchedulerRowsFailWhenTheHarnessOrTheProductLeasesDoNotFit(t *testing.T)
 	// the same capture inside every allowance passes, and its ledger names the leases
 	a := newAccept()
 	sc := contendScenario(2, 1_000_000, 1_000_000)
-	sc.RetainedBytes, sc.Corr.IntervalBytes, sc.Corr.ReservationBytes = 2<<20, 1<<20, 28<<20
+	sc.RetainedBytes, sc.Corr.IntervalBytes, sc.Corr.ReservationBytes = 1<<20, 1<<20, 4<<20
 	a.results["sched_contend"] = sc
 	a.deriveSchedulerFromCaptures(a.res, map[string]any{})
 	if a.res.RunqueueSplit.State != qual.StateSupported {
 		t.Fatalf("%+v", a.res.RunqueueSplit)
 	}
 	ledger, _ := a.res.RunqueueSplit.Detail["memory_ledger"].(map[string]any)
-	if ledger["profile_source_leases_bytes"] != uint64(24<<20) || ledger["product_admits_leases"] != true || ledger["retained_events_bytes"] != uint64(2<<20) || ledger["returned_intervals_bytes"] != uint64(1<<20) {
+	if ledger["profile_source_leases_bytes"] != uint64(24<<20) || ledger["product_admits_leases"] != true || ledger["retained_events_bytes"] != uint64(1<<20) || ledger["returned_intervals_bytes"] != uint64(1<<20) {
 		t.Fatalf("%+v", ledger)
 	}
 }
 
-// A harness that was 21 MiB resident when the capture was admitted (the 6.1 full
-// acceptance run) leaves less than the 32 MiB cap: the correlator is handed what is
+// A harness that was 9 MiB resident when the capture was admitted leaves less than the 32 MiB cap once the
+// ProfileSource leases and the allowance are out of the budget (D40): the correlator is handed what is
 // left, the ledger adds up to the budget, and the row is judged on its split.
 func TestSchedulerRowsPassWhenTheCorrelatorWasHandedWhatTheChargeLeaves(t *testing.T) {
 	sc := contendScenario(2, 1_000_000, 1_000_000)
-	sc.Admission.ClientRSS, sc.Admission.HelperRSS = 21_000<<10, 11_000<<10
+	sc.Admission.ClientRSS, sc.Admission.HelperRSS = 9_000<<10, 8_000<<10
 	share, err := qual.CorrelationReservation(nativeperf.DefaultConfig(1), sc.Admission, 8)
 	if err != nil || share >= qual.CorrelationReservationBytes {
 		t.Fatalf("%d %v", share, err)

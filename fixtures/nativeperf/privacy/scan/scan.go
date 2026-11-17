@@ -49,6 +49,13 @@ type SourceNumbers struct {
 	Numbers []int  `json:"numbers"`
 }
 
+// PrctlCall is one prctl(option, arg) the acquisition sources may make.
+type PrctlCall struct {
+	Comment string `json:"comment"`
+	Option  int    `json:"option"`
+	Arg     int    `json:"arg"`
+}
+
 // SyscallPolicy is the forbidden/allowed syscall and configuration audit policy.
 type SyscallPolicy struct {
 	Forbidden           []string       `json:"forbidden"`
@@ -59,6 +66,7 @@ type SyscallPolicy struct {
 	SourceNumbers       SourceNumbers  `json:"source_allowed_syscall_numbers"`
 	SourceConstants     []string       `json:"source_allowed_syscall_constants"`
 	SourceIoctl         []int          `json:"source_allowed_ioctl_requests"`
+	SourcePrctl         []PrctlCall    `json:"source_allowed_prctl_calls"`
 	SourceSymbolRegex   string         `json:"source_allowed_syscall_symbol_regex"`
 	SourceForbiddenID   []string       `json:"source_forbidden_identifiers"`
 	SourceForbiddenText []string       `json:"source_forbidden_string_regex"`

@@ -95,6 +95,36 @@ func (r *Ring) Close() error {
 	return first
 }
 
+// exited reports whether the task of a task-scoped event has exited. A task-scoped perf event reports POLLHUP from
+// the moment its task exits (the kernel sets the event's state before the thread is released, so before its TID can
+// be reused). The question is one zero-timeout ppoll on the ring's own descriptor: no /proc read, no extra
+// descriptor and no work that grows with the thread count. Events are not requested: POLLHUP is always reported and
+// readiness of the sample data (POLLIN) is not asked for.
+func (r *Ring) exited() (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed || r.fd == nil {
+		return false, ErrAcquisitionClosed
+	}
+	poll := struct {
+		fd              int32
+		events, revents int16
+	}{fd: int32(r.fd.Fd())}
+	var now syscall.Timespec
+	for {
+		n, _, errno := syscall.Syscall6(syscall.SYS_PPOLL, uintptr(unsafe.Pointer(&poll)), 1, uintptr(unsafe.Pointer(&now)), 0, 0, 0)
+		switch errno {
+		case 0:
+			return n > 0 && poll.revents&pollHangup != 0, nil
+		case syscall.EINTR:
+		default:
+			return false, ErrAcquisitionFailed
+		}
+	}
+}
+
+const pollHangup = 0x10
+
 // drainRing consumes one record, bounding cancellation latency and avoiding a
 // copied event queue. Non-CPU control records are decoded by the source.
 func drainRing(r *Ring, emit func(SanitizedEvent) error) error {

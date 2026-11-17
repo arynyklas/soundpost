@@ -6,10 +6,11 @@ import (
 	"github.com/arynyklas/soundpost/internal/model"
 )
 
-// The charge includes the owned event, its maximum 128-entry switch stack,
-// heap capacity, allocator/map slack and up to two returned interval stacks.
-// Outputs transfer to the caller; retaining multiple outputs is caller memory.
-const correlationSlotBytes uint64 = 16 << 10
+// The charge covers what the correlator itself holds per slot: the owned event with its maximum 128-entry switch
+// stack, heap capacity and allocator/map slack, or a task state with its own stack in its map entries (measured worst
+// case about 3.4 KiB each, TestCorrelatorPhysicalWorstCaseFitsItsReservation, so 8 KiB is about 2.4x). Interval
+// stacks the correlator returns transfer to the caller, who accounts them separately (see Correlator).
+const correlationSlotBytes uint64 = 8 << 10
 const correlationBaseBytes uint64 = 16 << 10
 const correlationCPUBytes uint64 = 256
 const correlationMaxCPUs = 256

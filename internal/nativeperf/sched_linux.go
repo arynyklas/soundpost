@@ -472,14 +472,26 @@ capture:
 	}
 }
 
-// schedulerIdentityInterval is how stale the last successful identity check (the target's process and every thread, a
-// /proc snapshot) may be when an event is published. The CPU stream revalidates every 100 ms and so does the capture
-// loop; a snapshot before every event cost about as much as the event rate a 16-thread runtime reaches.
+// schedulerIdentityInterval is how stale the last successful whole-target identity check (the process and every
+// thread, a /proc snapshot) may be when an event is published. The CPU stream revalidates every 100 ms and so does the
+// capture loop; a snapshot before every event cost about as much as the event rate a 16-thread runtime reaches.
+// What the cadence does not cover is bounded: a TID that exits and is reused inside it is caught per event by
+// taskStillLive (a zero-timeout poll of the named task's own perf event, which hangs up when its thread exits: constant
+// work per event, no /proc read), and the time of the last successful check is kept in cpuSource.provenAt so a
+// consumer can revoke [provenAt, end) on an identity error. A same-file exec is not visible in /proc at any cadence;
+// only the COMM_EXEC control record of the thread's CPU ring ends the capture, and that backstop narrows the window
+// without closing it (the scheduler loop drains the CPU rings one record per pass).
 const schedulerIdentityInterval = 10 * time.Millisecond
 
 func (s *schedulerSource) publish(event SanitizedEvent) (AcquisitionItem, error) {
-	if !s.stopped && time.Since(s.cpu.lastCheck) >= schedulerIdentityInterval {
-		if e := s.identity(); e != nil {
+	if !s.stopped {
+		if time.Since(s.cpu.lastCheck) >= schedulerIdentityInterval {
+			if e := s.identity(); e != nil {
+				s.terminal = e
+				return AcquisitionItem{}, e
+			}
+		}
+		if e := s.eventTasksStillLive(event); e != nil {
 			s.terminal = e
 			return AcquisitionItem{}, e
 		}
@@ -492,6 +504,28 @@ func (s *schedulerSource) publish(event SanitizedEvent) (AcquisitionItem, error)
 		return AcquisitionItem{}, e
 	}
 	return AcquisitionItem{Event: &event}, nil
+}
+
+// eventTasksStillLive checks every task an event names against its own perf event.
+func (s *schedulerSource) eventTasksStillLive(event SanitizedEvent) error {
+	check := func(k *TaskKey) error {
+		if k == nil {
+			return nil
+		}
+		return s.cpu.taskStillLive(*k)
+	}
+	if sw := event.Switch; sw != nil {
+		if e := check(sw.Previous); e != nil {
+			return e
+		}
+		if e := check(sw.Next); e != nil {
+			return e
+		}
+	}
+	if w := event.Wakeup; w != nil {
+		return s.cpu.taskStillLive(w.Target)
+	}
+	return nil
 }
 
 // Stop records the conservative common cutoff BEFORE the first disable. A

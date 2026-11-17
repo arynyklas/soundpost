@@ -111,10 +111,13 @@ func TestCorrelationEventBudgetBoundary(t *testing.T) {
 	if err := c.Configure(correlationDomain, []uint32{0}, 80<<10); err != nil {
 		t.Fatal(err)
 	}
-	if c.Stats().MaxHeapEvents != 1 {
-		t.Fatalf("slots %+v", c.Stats())
+	slots := int((80<<10 - correlationBaseBytes - correlationCPUBytes) / (2 * correlationSlotBytes))
+	if c.Stats().MaxHeapEvents != slots || slots < 2 {
+		t.Fatalf("slots %+v, want %d", c.Stats(), slots)
 	}
-	corrConsume(t, c, correlationOut(10, false))
+	for i := range slots {
+		corrConsume(t, c, correlationOut(uint64(10+i), false))
+	}
 	if _, err := c.Consume(correlationIn(20)); !errors.Is(err, ErrResourceBudget) {
 		t.Fatalf("heap overflow: %v", err)
 	}
@@ -230,16 +233,21 @@ func TestCorrelationConfigureBounds(t *testing.T) {
 	if err := fresh().Configure(correlationDomain, cpus(257), 4<<20); !errors.Is(err, ErrResourceBudget) {
 		t.Fatalf("257 CPUs: %v", err)
 	}
-	// 64 CPUs: base = 16 KiB + 64*256 = 32 KiB, so 64 KiB leaves no room for one 2-slot pair.
-	if err := fresh().Configure(correlationDomain, cpus(64), 64<<10); !errors.Is(err, ErrResourceBudget) {
+	// 256 CPUs: base = 16 KiB + 256*256 = 80 KiB, so base + one 2-slot pair (16 KiB) is no room for a slot and one
+	// byte more is exactly one.
+	if err := fresh().Configure(correlationDomain, cpus(256), correlationBaseBytes+256*correlationCPUBytes+2*correlationSlotBytes); !errors.Is(err, ErrResourceBudget) {
 		t.Fatalf("no room for a slot: %v", err)
 	}
-	// 100 CPUs: the per-CPU charge shrinks the slot count from 31 to 30.
+	one := fresh()
+	if err := one.Configure(correlationDomain, cpus(256), correlationBaseBytes+256*correlationCPUBytes+2*correlationSlotBytes+1); err != nil || one.Stats().MaxHeapEvents != 1 {
+		t.Fatalf("one slot at the boundary: %v %+v", err, one.Stats())
+	}
+	// 100 CPUs: the per-CPU charge shrinks the slot count from 63 to 61.
 	c := fresh()
 	if err := c.Configure(correlationDomain, cpus(100), 1<<20); err != nil {
 		t.Fatal(err)
 	}
-	if s := c.Stats(); s.MaxHeapEvents != 30 || s.MaxTaskStates != 30 {
+	if s := c.Stats(); s.MaxHeapEvents != 61 || s.MaxTaskStates != 61 {
 		t.Fatalf("slots %+v", s)
 	}
 }
@@ -464,11 +472,11 @@ func TestCorrelationLossKeepsItsReason(t *testing.T) {
 // L33: a topology change that needs exactly the reserved bytes is allowed (Configure rounds slots down, so equality is reachable).
 func TestCorrelationTopologyChangeAtExactReservation(t *testing.T) {
 	c := NewCorrelator(DefaultConfig(1))
-	// One CPU: base 16 KiB + 256 B; 2 slots * 2 * 16 KiB = 64 KiB; reservation 82176 B is consumed exactly.
+	// One CPU: base 16 KiB + 256 B; 4 slots * 2 * 8 KiB = 64 KiB; reservation 82176 B is consumed exactly.
 	if err := c.Configure(correlationDomain, []uint32{0}, 82176); err != nil {
 		t.Fatal(err)
 	}
-	if c.Stats().MaxHeapEvents != 2 {
+	if c.Stats().MaxHeapEvents != 4 {
 		t.Fatalf("slots %+v", c.Stats())
 	}
 	if _, err := c.ChangeTopology(10, []uint32{0}); err != nil {

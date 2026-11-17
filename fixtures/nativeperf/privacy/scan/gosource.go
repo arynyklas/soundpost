@@ -43,6 +43,10 @@ func AuditGoSource(p Policy, filename, src string, printOK func(*ast.CallExpr) b
 	for _, n := range sp.SourceNumbers.Numbers {
 		allowedNumber[int64(n)] = true
 	}
+	allowedPrctl := map[[2]int64]bool{}
+	for _, c := range sp.SourcePrctl {
+		allowedPrctl[[2]int64{int64(c.Option), int64(c.Arg)}] = true
+	}
 	for _, n := range sp.SourceIoctl {
 		allowedIoctl[int64(n)] = true
 	}
@@ -110,6 +114,24 @@ func AuditGoSource(p Policy, filename, src string, printOK func(*ast.CallExpr) b
 							}
 							if !allowedIoctl[request] {
 								add(x.Pos(), "ioctl_request_not_allowlisted", strconv.FormatInt(request, 10))
+							}
+						}
+						if first.Sel.Name == "SYS_PRCTL" {
+							option, arg := int64(-1), int64(-1)
+							if len(x.Args) > 2 {
+								if lit, ok := x.Args[1].(*ast.BasicLit); ok {
+									if v, err := strconv.ParseInt(lit.Value, 0, 64); err == nil {
+										option = v
+									}
+								}
+								if lit, ok := x.Args[2].(*ast.BasicLit); ok {
+									if v, err := strconv.ParseInt(lit.Value, 0, 64); err == nil {
+										arg = v
+									}
+								}
+							}
+							if !allowedPrctl[[2]int64{option, arg}] {
+								add(x.Pos(), "prctl_call_not_allowlisted", strconv.FormatInt(option, 10)+","+strconv.FormatInt(arg, 10))
 							}
 						}
 					case *ast.BasicLit:

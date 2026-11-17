@@ -26,9 +26,12 @@ const CorrelationReservationBytes uint64 = 32 << 20
 // everything it holds besides the correlator's reorder buffer: the CPU-sample and
 // loss events it retains for the row judges (it streams every scheduler event
 // through the correlator and keeps none of them) and the intervals the correlator
-// returns. The ledger measures both after the capture and the rows fail when they
-// outgrew this allowance.
-const ConsumerAllowanceBytes uint64 = 4 << 20
+// returns, which it keeps without their stacks (StreamCorrelation.DropStacks) and, for a judge that only adds up
+// durations, folded per thread and kind (FoldDurations). The ledger measures both after the capture and the rows fail
+// when they outgrew this allowance. It was 4 MiB while the harness retained the intervals whole; every byte it does
+// not hold is a byte of the correlator's reorder buffer (D52: the harness's own admission shrinks, the product's
+// 8 KiB slot charge and the 64 MiB budget do not move).
+const ConsumerAllowanceBytes uint64 = 5 << 19
 
 // AdmissionMemory is what one capture's admission charges besides its rings: the
 // targets of the request, the threads they had when it was admitted (each one gets
@@ -59,21 +62,24 @@ func admissionCharge(cfg nativeperf.Config, m AdmissionMemory, cpus uint64) (cha
 }
 
 // CorrelationReservation is the share of the aggregate budget the correlator is
-// handed: CorrelationReservationBytes, but never more than cfg.MaxMemory minus the
-// capture's admission charge (rings with their metadata pages, per-target buffers,
-// the helper's and the exporting peer's resident size, the per-thread rings) and the
-// ConsumerAllowanceBytes. A capture whose charge alone fills the budget has no
-// reservation (an error); one that leaves less than the correlator needs overflows
-// its bounded buffer explicitly and fails its rows.
+// handed (D40): CorrelationReservationBytes, but never more than cfg.MaxMemory minus
+// every other working set of the same capture: its admission charge (rings with their
+// metadata pages, per-target buffers, the helper's and the exporting peer's resident
+// size, the per-thread rings), the product's ProfileSource working leases and the
+// ConsumerAllowanceBytes. A capture whose charge, leases and allowance do not fit the
+// budget is refused here, at admission, with nativeperf.ErrResourceBudget
+// (resource_limit): a measured excess is a defect, never a reported number.
 func CorrelationReservation(cfg nativeperf.Config, m AdmissionMemory, cpus uint64) (uint64, error) {
 	charge, extra, err := admissionCharge(cfg, m, cpus)
 	if err != nil {
 		return 0, err
 	}
-	if cfg.MaxMemory-charge-extra < ConsumerAllowanceBytes {
-		return 0, fmt.Errorf("nothing is left for the correlator after the admission charge and the consumer allowance: %w", nativeperf.ErrResourceBudget)
+	mapping, assembly, export := nativeperf.ProfileWorkingBytes(m.Targets)
+	leases := mapping + assembly + export
+	if cfg.MaxMemory-charge-extra < leases+ConsumerAllowanceBytes {
+		return 0, fmt.Errorf("nothing is left for the correlator after the admission charge, the ProfileSource leases (%d B) and the consumer allowance: %w", leases, nativeperf.ErrResourceBudget)
 	}
-	return min(CorrelationReservationBytes, cfg.MaxMemory-charge-extra-ConsumerAllowanceBytes), nil
+	return min(CorrelationReservationBytes, cfg.MaxMemory-charge-extra-leases-ConsumerAllowanceBytes), nil
 }
 
 // LedgerInput is everything the ledger of one scheduler capture is computed from:
@@ -94,7 +100,7 @@ type LedgerInput struct {
 // Nominal: what the helper's own reservation charges at the moment it admits the
 // capture (every ring with its metadata page, the fixed per-target buffers, the
 // helper's and the exporting peer's resident size then), the CPU rings of the
-// target's other threads, the reservation the correlator was handed and the
+// target's other threads, the ProfileSource working leases (D40), the reservation the correlator was handed and the
 // harness's own working sets measured afterwards: the events it retained and the
 // intervals the correlator returned (both must fit ConsumerAllowanceBytes). This is
 // the sum the aggregate budget must cover.
@@ -110,9 +116,7 @@ type LedgerInput struct {
 // export) that sit on top of the admission charge. ProductHeadroom is what the real
 // Reserve and ReserveWorking leave of the budget; ProductAdmits says the leases fit;
 // CombinedFits says the leases, the correlator reservation and the consumer's own
-// sets all fit together. The product's assembly does not run a correlator today, so
-// only ProductAdmits and the nominal sum gate a row; CombinedFits is reported
-// because wiring the correlator in under the ProfileSource leases would need it.
+// sets all fit together (D40: they have to, CorrelationReservation refuses the capture otherwise).
 type MemoryLedger struct {
 	Charge, ExtraRings, Correlator, Retained, Intervals uint64
 	Nominal                                             uint64
@@ -140,13 +144,13 @@ func CaptureMemoryLedger(in LedgerInput) (MemoryLedger, error) {
 		return l, err
 	}
 	l.Charge, l.ExtraRings = charge, extra
-	l.Nominal = charge + extra + l.Correlator + l.Retained + l.Intervals
+	mapping, assembly, export := nativeperf.ProfileWorkingBytes(m.Targets)
+	l.Leases = mapping + assembly + export
+	l.Nominal = charge + extra + l.Leases + l.Correlator + l.Retained + l.Intervals
 	l.Physical = in.HelperHWM + in.ClientHWM + fixed + extra
 	l.NominalFits = l.Nominal <= l.Budget
 	l.PhysicalFits = l.Physical <= l.Budget
 	l.ConsumerFits = l.Retained+l.Intervals <= ConsumerAllowanceBytes
-	mapping, assembly, export := nativeperf.ProfileWorkingBytes(m.Targets)
-	l.Leases = mapping + assembly + export
 	headroom, err := nativeperf.ProfileAdmissionHeadroom(cfg, true, m.Targets, in.CPUs, page, m.usage())
 	switch {
 	case err != nil:

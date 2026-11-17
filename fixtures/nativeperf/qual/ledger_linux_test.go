@@ -6,6 +6,7 @@
 package qual
 
 import (
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -34,14 +35,19 @@ func TestCaptureMemoryLedgerArithmetic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if l.Charge != fixed+22<<20 || l.ExtraRings != 0 || l.Nominal != l.Charge+32<<20 || l.Physical != fixed+51<<20 || l.Budget != 64<<20 || !l.NominalFits || !l.PhysicalFits || !l.ConsumerFits {
+	// D40: the nominal sum includes the product's 24 MiB of ProfileSource leases, so the 32 MiB cap no longer fits
+	if l.Charge != fixed+22<<20 || l.ExtraRings != 0 || l.Leases != 24<<20 || l.Nominal != l.Charge+24<<20+32<<20 || l.Physical != fixed+51<<20 || l.Budget != 64<<20 || l.NominalFits || !l.PhysicalFits || !l.ConsumerFits {
 		t.Fatalf("%+v", l)
 	}
-	// the same capture with a harness that was 16 MiB resident: a full 32 MiB share no longer fits
 	in := ledgerInput()
+	in.Correlator = 8 << 20
+	if l, err = CaptureMemoryLedger(in); err != nil || !l.NominalFits {
+		t.Fatalf("an 8 MiB correlator fits behind the charge and the leases: %+v %v", l, err)
+	}
+	// the same capture with a harness that was 16 MiB resident: it no longer fits
 	in.Admission.ClientRSS = 16 << 20
 	if l, err = CaptureMemoryLedger(in); err != nil || l.NominalFits {
-		t.Fatalf("a 16 MiB resident harness leaves no room for the 32 MiB reservation: %+v %v", l, err)
+		t.Fatalf("a 16 MiB resident harness leaves no room for the 8 MiB reservation behind the leases: %+v %v", l, err)
 	}
 	in = ledgerInput()
 	in.Admission.HelperRSS, in.Correlator = 64<<20, 0
@@ -55,21 +61,21 @@ func TestCaptureMemoryLedgerArithmetic(t *testing.T) {
 func TestCaptureMemoryLedgerCountsTheHarnessAndThreadRings(t *testing.T) {
 	fixed := ledgerFixed()
 	in := ledgerInput()
-	in.Correlator, in.Retained, in.Intervals = 20<<20, 1<<20, 2<<20
+	in.Correlator, in.Retained, in.Intervals = 20<<20, 1<<20, 1<<20
 	in.Admission.Threads = 3
 	l, err := CaptureMemoryLedger(in)
 	if err != nil {
 		t.Fatal(err)
 	}
 	ring := uint64(256<<10 + os.Getpagesize())
-	if l.ExtraRings != 2*ring || l.Nominal != fixed+22<<20+2*ring+20<<20+1<<20+2<<20 || l.Physical != fixed+51<<20+2*ring || !l.ConsumerFits {
+	if l.ExtraRings != 2*ring || l.Nominal != fixed+22<<20+2*ring+24<<20+20<<20+1<<20+1<<20 || l.Physical != fixed+51<<20+2*ring || !l.ConsumerFits {
 		t.Fatalf("%+v", l)
 	}
-	in.Retained, in.Intervals = 3<<20, 2<<20 // 5 MiB against the 4 MiB allowance
+	in.Retained, in.Intervals = 3<<20, 2<<20 // 5 MiB against the 2.5 MiB allowance
 	if l, err = CaptureMemoryLedger(in); err != nil || l.ConsumerFits {
 		t.Fatalf("retained events and returned intervals over their allowance must not fit: %+v %v", l, err)
 	}
-	in.Retained, in.Intervals, in.Correlator = 4<<20, 0, 33<<20 // the allowance is met, the nominal sum is not
+	in.Retained, in.Intervals, in.Correlator = ConsumerAllowanceBytes, 0, 33<<20 // the allowance is met, the nominal sum is not
 	if l, err = CaptureMemoryLedger(in); err != nil || !l.ConsumerFits || l.NominalFits {
 		t.Fatalf("%+v %v", l, err)
 	}
@@ -104,7 +110,7 @@ func TestCaptureMemoryLedgerReplaysTheProductLeases(t *testing.T) {
 	in = ledgerInput()
 	in.Admission.ClientRSS, in.Correlator = 30<<20, 12<<20
 	l, err = CaptureMemoryLedger(in)
-	if err != nil || l.ProductAdmits || l.ProductRefusal == "" || l.CombinedFits || !l.NominalFits {
+	if err != nil || l.ProductAdmits || l.ProductRefusal == "" || l.CombinedFits || l.NominalFits {
 		t.Fatalf("%+v %v", l, err)
 	}
 	// the target's thread rings come out of what the leases leave
@@ -116,21 +122,25 @@ func TestCaptureMemoryLedgerReplaysTheProductLeases(t *testing.T) {
 	}
 }
 
-// The correlator is handed what the admission charge leaves of the 64 MiB, up to 32
-// MiB, less the allowance for the harness's own sets: a harness that was resident with
-// 21 MiB (the 6.1 full acceptance run: charge 39.6 MB, which with a fixed 32 MiB share
-// is 73 MB) gets the remaining share instead of overrunning the budget.
+// D40: the correlator is handed what the capture's whole nominal charge leaves of the 64 MiB, up to 32
+// MiB: the admission charge, the product's ProfileSource leases (24 MiB for one target) and the allowance
+// for the harness's own sets come first. A capture whose charge, leases and allowance do not fit is
+// refused at admission with resource_limit instead of reporting an excess afterwards.
 func TestCorrelationReservationIsWhatTheAdmissionChargeLeaves(t *testing.T) {
 	cfg := nativeperf.DefaultConfig(1)
 	fixed := ledgerFixed()
-	got, err := CorrelationReservation(cfg, AdmissionMemory{Targets: 1, HelperRSS: 8 << 20, ClientRSS: 4 << 20}, 8)
-	if err != nil || got != CorrelationReservationBytes {
-		t.Fatalf("a small charge leaves more than the cap: %d %v", got, err)
+	got, err := CorrelationReservation(cfg, AdmissionMemory{Targets: 1}, 8)
+	if want := cfg.MaxMemory - fixed - 24<<20 - ConsumerAllowanceBytes; err != nil || got != want || got >= CorrelationReservationBytes {
+		t.Fatalf("with nothing resident the leases and the allowance still come off the budget before the cap: %d, want %d (%v)", got, want, err)
 	}
-	m := AdmissionMemory{Targets: 1, HelperRSS: 11 << 20, ClientRSS: 21 << 20}
+	m := AdmissionMemory{Targets: 1, HelperRSS: 8 << 20, ClientRSS: 8 << 20}
 	got, err = CorrelationReservation(cfg, m, 8)
-	if want := nativeperf.MaxMemoryBytes - (fixed + 32<<20) - ConsumerAllowanceBytes; err != nil || got != want || got >= CorrelationReservationBytes {
+	if want := nativeperf.MaxMemoryBytes - (fixed + 16<<20) - 24<<20 - ConsumerAllowanceBytes; err != nil || got != want || got >= CorrelationReservationBytes {
 		t.Fatalf("got %d, want %d (%v)", got, want, err)
+	}
+	// the product's leases do not fit behind this charge: refused at admission, no reservation
+	if _, err := CorrelationReservation(cfg, AdmissionMemory{Targets: 1, HelperRSS: 10 << 20, ClientRSS: 30 << 20}, 8); !errors.Is(err, nativeperf.ErrResourceBudget) {
+		t.Fatalf("a capture whose leases cannot fit was admitted: %v", err)
 	}
 	// the target's thread rings are charged before the share is derived
 	m.Threads = 3
@@ -146,7 +156,7 @@ func TestCorrelationReservationIsWhatTheAdmissionChargeLeaves(t *testing.T) {
 		t.Fatal("a charge that leaves less than the consumer allowance got a reservation")
 	}
 	// together with the charge the share always fits
-	l, err := CaptureMemoryLedger(LedgerInput{Config: cfg, Admission: AdmissionMemory{Targets: 1, HelperRSS: 11 << 20, ClientRSS: 21 << 20}, CPUs: 8, HelperHWM: 24 << 20, ClientHWM: 27 << 20, Correlator: got})
+	l, err := CaptureMemoryLedger(LedgerInput{Config: cfg, Admission: AdmissionMemory{Targets: 1, HelperRSS: 8 << 20, ClientRSS: 8 << 20}, CPUs: 8, HelperHWM: 24 << 20, ClientHWM: 27 << 20, Correlator: got})
 	if err != nil || !l.NominalFits {
 		t.Fatalf("%+v %v", l, err)
 	}
@@ -155,10 +165,10 @@ func TestCorrelationReservationIsWhatTheAdmissionChargeLeaves(t *testing.T) {
 func TestCorrelateWithinConfiguresTheCorrelatorWithTheRemainingBudget(t *testing.T) {
 	res, cycles := longCapture(200, true)
 	cfg := nativeperf.DefaultConfig(1)
-	c := CorrelateWithin(res, cfg, AdmissionMemory{Targets: 1, HelperRSS: 11 << 20, ClientRSS: 21 << 20})
+	c := CorrelateWithin(res, cfg, AdmissionMemory{Targets: 1, HelperRSS: 8 << 20, ClientRSS: 8 << 20})
 	// longCapture's topology proof has 2 CPUs: 1 target + 6 rings
 	fixed := 7*(256<<10+uint64(os.Getpagesize())) + (1<<20 + 256<<10)
-	if want := nativeperf.MaxMemoryBytes - (fixed + 32<<20) - ConsumerAllowanceBytes; c.Err != "" || c.ReservationBytes != want {
+	if want := nativeperf.MaxMemoryBytes - (fixed + 16<<20) - 24<<20 - ConsumerAllowanceBytes; c.Err != "" || c.ReservationBytes != want {
 		t.Fatalf("reservation %d, want %d: %+v", c.ReservationBytes, want, c)
 	}
 	if blocked, runnable := sumKinds(c); blocked != cycles*1_000_000 || runnable != cycles*1_000_000 {
@@ -169,7 +179,7 @@ func TestCorrelateWithinConfiguresTheCorrelatorWithTheRemainingBudget(t *testing
 	}
 	// a client so large that the budget has nothing left for the correlator: an explicit error, no intervals
 	c = CorrelateWithin(res, cfg, AdmissionMemory{Targets: 1, HelperRSS: 20 << 20, ClientRSS: 43 << 20})
-	if !strings.Contains(c.Err, "configure") && !strings.Contains(c.Err, "reservation") || len(c.Intervals) != 0 {
+	if !strings.Contains(c.Err, "configure") && !strings.Contains(c.Err, "reservation") && !strings.Contains(c.Err, "correlator") || len(c.Intervals) != 0 {
 		t.Fatalf("%+v", c)
 	}
 }

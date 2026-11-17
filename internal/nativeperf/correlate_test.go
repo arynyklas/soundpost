@@ -257,14 +257,23 @@ func TestCorrelationTaskBudgetDoesNotGrowAcrossAdvances(t *testing.T) {
 	if err := c.Configure(correlationDomain, []uint32{0}, 64<<10); err != nil {
 		t.Fatal(err)
 	}
-	feedCorrelation(t, c, correlationOut(0, false))
-	drainCorrelation(t, c, []uint32{0}, 0)
-	other := correlationOut(200000000, false)
-	other.Switch.Previous.TID = 9
-	feedCorrelation(t, c, other)
-	got := drainCorrelation(t, c, []uint32{0}, 200000000)
-	if len(got) != 1 || !got[0].Correction || c.Stats().TaskStates != 0 {
-		t.Fatalf("task overflow silently retained certainty: %+v %+v", got, c.Stats())
+	// the 64 KiB floor buys more than one task slot: fill them all with distinct tasks, then one more overflows
+	tasks := c.Stats().MaxTaskStates
+	for i := range tasks + 1 {
+		at := uint64(i) * 200000000
+		e := correlationOut(at, false)
+		e.Switch.Previous.TID = uint32(100 + i)
+		feedCorrelation(t, c, e)
+		got := drainCorrelation(t, c, []uint32{0}, at)
+		if i < tasks {
+			if len(got) != 0 && got[0].Correction || c.Stats().TaskStates != i+1 {
+				t.Fatalf("task %d of %d: %+v %+v", i+1, tasks, got, c.Stats())
+			}
+			continue
+		}
+		if len(got) != 1 || !got[0].Correction || c.Stats().TaskStates != 0 {
+			t.Fatalf("task overflow silently retained certainty: %+v %+v", got, c.Stats())
+		}
 	}
 }
 

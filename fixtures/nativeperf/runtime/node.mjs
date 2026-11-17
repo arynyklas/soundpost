@@ -57,6 +57,7 @@ const cpuSeconds=(performance.now()-t0)/1000;
 const waits=[];
 const requests=Math.max(4,Math.floor(seconds*0.4/0.06));
 const waitStartNs=process.hrtime.bigint(); // CLOCK_MONOTONIC (uv_hrtime): the clock of the native scheduler events
+console.log(`wait_begin ${waitStartNs}`); // the harness releases the loop thread's CPU-phase intervals at the source from here on
 for(let i=0;i<requests;i++)waits.push(await httpWait(server,port));
 const waitEndNs=process.hrtime.bigint();
 // The supplement's helper thread exits when it stops, and the native helper ends a capture when a thread of its target

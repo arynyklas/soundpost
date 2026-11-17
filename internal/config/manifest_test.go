@@ -390,7 +390,7 @@ func assertAuditedProfile(t testing.TB, profile map[string]any) {
 	if profile["defaultAction"] != "SCMP_ACT_ERRNO" {
 		t.Errorf("seccomp default action %v", profile["defaultAction"])
 	}
-	conditional := false
+	conditional, prctl := false, false
 	for _, r := range asList(profile["syscalls"]) {
 		rule := asMap(r)
 		if rule["action"] != "SCMP_ACT_ALLOW" {
@@ -405,11 +405,29 @@ func assertAuditedProfile(t testing.TB, profile map[string]any) {
 					t.Error("perf_event_open is allowed without an argument constraint")
 				}
 				conditional = true
+			case "prctl":
+				// D53: the helper's one prctl is PR_SET_THP_DISABLE (41) with 1, alone in its rule
+				got := map[float64]float64{}
+				for _, a := range asList(rule["args"]) {
+					arg := asMap(a)
+					if arg["op"] == "SCMP_CMP_EQ" {
+						idx, _ := arg["index"].(float64)
+						val, _ := arg["value"].(float64)
+						got[idx] = val
+					}
+				}
+				if len(got) != 2 || got[0] != 41 || got[1] != 1 || len(strs(rule["names"])) != 1 {
+					t.Errorf("prctl must be allowed for exactly option 41 (PR_SET_THP_DISABLE) with argument 1, alone in its rule: %v", rule)
+				}
+				prctl = true
 			}
 		}
 	}
 	if !conditional {
 		t.Error("the profile does not allow perf_event_open at all: the helper could never run")
+	}
+	if !prctl {
+		t.Error("the profile does not allow prctl(PR_SET_THP_DISABLE, 1): the helper could not opt out of transparent huge pages")
 	}
 }
 

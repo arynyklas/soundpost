@@ -45,6 +45,7 @@ func TestCorrelatorPhysicalWorstCaseFitsItsReservation(t *testing.T) {
 	event := uint64(unsafe.Sizeof(SanitizedEvent{})) + uint64(unsafe.Sizeof(SchedulerSwitch{})) + 2*key + chain
 	// a task state, its map entry (key, pointer, the map's own overhead taken as 2x) and its process entry
 	task := uint64(unsafe.Sizeof(correlationTaskState{})) + chain + 2*(key+8) + 2*(uint64(unsafe.Sizeof(correlationProcess{}))+uint64(unsafe.Sizeof(correlationProcessState{})))
+	t.Logf("worst-case physical slot: event %d B, task state %d B (nominal charge %d B)", event, task, correlationSlotBytes)
 	if event > correlationSlotBytes || task > correlationSlotBytes {
 		t.Fatalf("worst-case event %d B / task state %d B exceed the %d B slot", event, task, correlationSlotBytes)
 	}
@@ -57,5 +58,20 @@ func TestCorrelatorPhysicalWorstCaseFitsItsReservation(t *testing.T) {
 	}
 	if c.maxEvents < 1000 {
 		t.Fatalf("32 MiB must buffer about 1000 events (the 100 ms reorder window of a contended CPU), got %d", c.maxEvents)
+	}
+}
+
+// D40 hands the correlator what the 64 MiB leaves after the capture's charge, the ProfileSource leases and the
+// consumer allowance: about 6.5 MiB on a 10 MiB helper and an 8 MiB harness. That share has to buffer the 100 ms
+// reorder window of a contended CPU (4000 scheduler events a second is 400 events and 400 task states), so one slot
+// is charged at a small multiple of its measured physical worst case (TestCorrelatorPhysicalWorstCaseFitsItsReservation),
+// not at several times that.
+func TestCorrelatorShareBehindTheProfileLeasesBuffersTheReorderWindow(t *testing.T) {
+	c := NewCorrelator(DefaultConfig(1))
+	if err := c.Configure(correlationDomain, []uint32{0, 1, 2, 3, 4, 5, 6, 7}, 6656<<10); err != nil {
+		t.Fatal(err)
+	}
+	if c.maxEvents < 400 || c.maxTasks < 400 {
+		t.Fatalf("a 6.5 MiB share buffers %d events and %d task states, want at least 400 of each", c.maxEvents, c.maxTasks)
 	}
 }

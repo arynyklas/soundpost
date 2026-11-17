@@ -1984,29 +1984,33 @@ func TestPrivacyAcquisitionPathStaticAudit(t *testing.T) {
 func TestPrivacyStaticAuditFlagsForbiddenSources(t *testing.T) {
 	env := newPrivacyEnv(t)
 	const prelude = "package x\nimport \"syscall\"\nvar _ = syscall.EPERM\nfunc f(fd uintptr) {\n"
-	control := prelude + "\tsyscall.Syscall(syscall.SYS_IOCTL, fd, 0x2400, 0)\n\tsyscall.Syscall(434, 1, 0, 0)\n}\n"
+	control := prelude + "\tsyscall.Syscall(syscall.SYS_IOCTL, fd, 0x2400, 0)\n\tsyscall.Syscall(434, 1, 0, 0)\n\tsyscall.Syscall(syscall.SYS_PRCTL, 41, 1, 0)\n}\n"
 	if got := privacyAuditSource(env.policy, "x.go", control, nil); len(got) != 0 {
 		t.Fatalf("clean control flagged: %v", got)
 	}
 	mutants := map[string]string{
-		"ptrace_constant":   prelude + "\tsyscall.Syscall(syscall.SYS_PTRACE, 16, 1, 0)\n}\n",
-		"ptrace_number":     prelude + "\tsyscall.Syscall(101, 16, 1, 0)\n}\n",
-		"process_vm_readv":  prelude + "\tsyscall.Syscall6(310, 1, 0, 0, 0, 0, 0)\n}\n",
-		"bpf_constant":      prelude + "\tsyscall.Syscall(syscall.SYS_BPF, 5, 0, 0)\n}\n",
-		"unlisted_ioctl":    prelude + "\tsyscall.Syscall(syscall.SYS_IOCTL, fd, 0x40042408, 0)\n}\n",
-		"computed_ioctl":    prelude + "\tr := uintptr(0x2400)\n\tsyscall.Syscall(syscall.SYS_IOCTL, fd, r, 0)\n}\n",
-		"computed_number":   prelude + "\tn := uintptr(101)\n\tsyscall.Syscall(n, 16, 1, 0)\n}\n",
-		"raw_syscall":       prelude + "\tsyscall.RawSyscall(syscall.SYS_PERF_EVENT_OPEN, 0, 0, 0)\n}\n",
-		"ptrace_helper":     prelude + "\tsyscall.PtraceAttach(1)\n}\n",
-		"unlisted_package":  prelude + "\tsyscall.Kill(1, 9)\n}\n",
-		"proc_mem_string":   prelude + "\t_ = \"/proc/\" + \"self/mem\"\n\t_ = \"/proc/1234/mem\"\n}\n",
-		"stack_user_flag":   prelude + "\t_ = 1 << 13\n\tvar PERF_SAMPLE_STACK_USER = 1 << 13\n\t_ = PERF_SAMPLE_STACK_USER\n}\n",
-		"exec_import":       "package x\nimport _ \"os/exec\"\n",
-		"log_import":        "package x\nimport _ \"log\"\n",
-		"fixture_import":    "package x\nimport _ \"github.com/arynyklas/soundpost/fixtures/nativeperf/privacy/scan\"\n",
-		"prints_a_value":    "package x\nimport \"fmt\"\nfunc f(v any) { fmt.Println(v) }\n",
-		"prints_to_stderr":  "package x\nimport (\"fmt\"\n\"os\")\nfunc f(v any) { fmt.Fprintf(os.Stderr, \"%v\", v) }\n",
-		"perf_data_literal": "package x\nvar _ = \"/var/lib/perf.data\"\n",
+		"ptrace_constant":    prelude + "\tsyscall.Syscall(syscall.SYS_PTRACE, 16, 1, 0)\n}\n",
+		"ptrace_number":      prelude + "\tsyscall.Syscall(101, 16, 1, 0)\n}\n",
+		"process_vm_readv":   prelude + "\tsyscall.Syscall6(310, 1, 0, 0, 0, 0, 0)\n}\n",
+		"bpf_constant":       prelude + "\tsyscall.Syscall(syscall.SYS_BPF, 5, 0, 0)\n}\n",
+		"unlisted_ioctl":     prelude + "\tsyscall.Syscall(syscall.SYS_IOCTL, fd, 0x40042408, 0)\n}\n",
+		"computed_ioctl":     prelude + "\tr := uintptr(0x2400)\n\tsyscall.Syscall(syscall.SYS_IOCTL, fd, r, 0)\n}\n",
+		"computed_number":    prelude + "\tn := uintptr(101)\n\tsyscall.Syscall(n, 16, 1, 0)\n}\n",
+		"raw_syscall":        prelude + "\tsyscall.RawSyscall(syscall.SYS_PERF_EVENT_OPEN, 0, 0, 0)\n}\n",
+		"ptrace_helper":      prelude + "\tsyscall.PtraceAttach(1)\n}\n",
+		"unlisted_package":   prelude + "\tsyscall.Kill(1, 9)\n}\n",
+		"prctl_other_option": prelude + "\tsyscall.Syscall(syscall.SYS_PRCTL, 15, 0, 0)\n}\n",
+		"prctl_thp_enable":   prelude + "\tsyscall.Syscall(syscall.SYS_PRCTL, 41, 0, 0)\n}\n",
+		"prctl_computed":     prelude + "\to := uintptr(41)\n\tsyscall.Syscall(syscall.SYS_PRCTL, o, 1, 0)\n}\n",
+		"prctl_set_dumpable": prelude + "\tsyscall.Syscall(syscall.SYS_PRCTL, 4, 1, 0)\n}\n",
+		"proc_mem_string":    prelude + "\t_ = \"/proc/\" + \"self/mem\"\n\t_ = \"/proc/1234/mem\"\n}\n",
+		"stack_user_flag":    prelude + "\t_ = 1 << 13\n\tvar PERF_SAMPLE_STACK_USER = 1 << 13\n\t_ = PERF_SAMPLE_STACK_USER\n}\n",
+		"exec_import":        "package x\nimport _ \"os/exec\"\n",
+		"log_import":         "package x\nimport _ \"log\"\n",
+		"fixture_import":     "package x\nimport _ \"github.com/arynyklas/soundpost/fixtures/nativeperf/privacy/scan\"\n",
+		"prints_a_value":     "package x\nimport \"fmt\"\nfunc f(v any) { fmt.Println(v) }\n",
+		"prints_to_stderr":   "package x\nimport (\"fmt\"\n\"os\")\nfunc f(v any) { fmt.Fprintf(os.Stderr, \"%v\", v) }\n",
+		"perf_data_literal":  "package x\nvar _ = \"/var/lib/perf.data\"\n",
 	}
 	for name, src := range mutants {
 		if got := privacyAuditSource(env.policy, "x.go", src, nil); len(got) == 0 {

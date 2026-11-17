@@ -6,6 +6,7 @@
 package qual
 
 import (
+	"reflect"
 	"sort"
 	"testing"
 
@@ -191,5 +192,187 @@ func TestStreamCorrelationScopeLeavesTheThreadsIntervalsUnchangedAndBuffersLess(
 	}
 	if _, _, helperIntervals := of(n, 8); helperIntervals != 0 || n.ScopedOut != 40*3 || w.ScopedOut != 0 {
 		t.Fatalf("the helper thread's events were not scoped out: %+v", n)
+	}
+}
+
+// A switch that involves the judged thread also names the thread on the other side. That other task's own history is
+// scoped out (its switch-in elsewhere never reaches the correlator), so handing the correlator the other side would
+// leave it "switched out" forever and the next switch from it would revoke the coverage of the whole domain. Scope
+// hands the correlator the judged thread's side of the switch only: no domain-wide correction, the same intervals.
+func TestStreamCorrelationScopeDoesNotLeaveTheOtherSideOfASwitchStuckOut(t *testing.T) {
+	domain := nativeperf.ClockDomain{HostID: "host-a", BootID: "boot-a"}
+	loop := nativeperf.TaskKey{BootID: "boot-a", PIDNamespace: 1, TGID: 7, TID: 7, ProcessStart: 1, Generation: 1}
+	other := nativeperf.TaskKey{BootID: "boot-a", PIDNamespace: 1, TGID: 7, TID: 8, ProcessStart: 1, Generation: 1}
+	base := uint64(10_000_000_000)
+	res := CaptureResult{Proofs: []nativeperf.AcquisitionProof{{Domain: domain, CPUs: []uint32{0, 1}, Through: model.MonoNano(base - 1)}}, ProofAt: []int{0}}
+	switchAt := func(at uint64, cpu uint32, prev, next *nativeperf.TaskKey) nativeperf.SanitizedEvent {
+		sw := &nativeperf.SchedulerSwitch{Previous: prev, Next: next}
+		if prev != nil {
+			sw.PreviousState, sw.MissingCallchain = 1, nativeperf.ReasonMissingSwitchCallchain
+		}
+		return nativeperf.SanitizedEvent{Kind: nativeperf.EventSwitch, Time: model.MonoNano(at), CPU: cpu, Domain: domain, Switch: sw}
+	}
+	for i := range 4 {
+		a := base + uint64(i)*100_000_000
+		l, o := loop, other
+		res.Events = append(res.Events,
+			switchAt(a, 0, &l, nil),
+			switchAt(a+5_000_000, 1, &o, &l),   // the other thread leaves, the judged thread runs
+			switchAt(a+10_000_000, 1, nil, &o), // the other thread runs again: not the judged thread's event
+			switchAt(a+20_000_000, 0, &l, nil),
+			switchAt(a+25_000_000, 1, &o, &l), // the other thread leaves again
+			switchAt(a+30_000_000, 1, nil, &o))
+	}
+	for i := range res.Events {
+		res.Events[i].Sequence = model.Uint64(i + 1)
+	}
+	res.Proofs = append(res.Proofs, nativeperf.AcquisitionProof{Domain: domain, CPUs: []uint32{0, 1}, Through: model.MonoNano(base + 5_000_000_000), Final: true})
+	res.ProofAt = append(res.ProofAt, len(res.Events))
+
+	wide := NewStreamCorrelation(nativeperf.DefaultConfig(1), fixedShare)
+	drive(res, wide, false)
+	narrow := NewStreamCorrelation(nativeperf.DefaultConfig(1), fixedShare)
+	narrow.Scope(7)
+	drive(res, narrow, false)
+	w, n := wide.Result(), narrow.Result()
+	if w.Err != "" || n.Err != "" || w.ConsumeErrors != 0 || n.ConsumeErrors != 0 {
+		t.Fatalf("wide %+v\nnarrow %+v", w, n)
+	}
+	loopOf := func(c Correlation) (out []nativeperf.Interval) {
+		for _, iv := range c.Intervals {
+			if iv.Task.TID == 7 || iv.Task == (nativeperf.TaskKey{}) {
+				iv.SwitchOutCallchain = nil
+				out = append(out, iv)
+			}
+		}
+		return out
+	}
+	for _, iv := range n.Intervals {
+		if iv.Correction && iv.Task == (nativeperf.TaskKey{}) {
+			t.Fatalf("the scoped correlation revoked the whole domain: %+v", iv)
+		}
+	}
+	if !reflect.DeepEqual(loopOf(w), loopOf(n)) {
+		t.Fatalf("the judged thread's intervals differ:\nwide   %+v\nnarrow %+v", loopOf(w), loopOf(n))
+	}
+}
+
+// The row judges read the kind and the extent of an interval, never its switch-out stack: DropStacks retains the
+// intervals without them, which is memory the consumer's allowance does not have to cover, and changes nothing else.
+func TestStreamCorrelationDropStacksRetainsTheSameIntervalsWithoutTheirStacks(t *testing.T) {
+	domain := nativeperf.ClockDomain{HostID: "host-a", BootID: "boot-a"}
+	key := nativeperf.TaskKey{BootID: "boot-a", PIDNamespace: 1, TGID: 7, TID: 7, ProcessStart: 1, Generation: 1}
+	base := uint64(10_000_000_000)
+	res := CaptureResult{Proofs: []nativeperf.AcquisitionProof{{Domain: domain, CPUs: []uint32{0}, Through: model.MonoNano(base - 1)}}, ProofAt: []int{0}}
+	chain := make([]nativeperf.CallchainEntry, 64)
+	for i := range chain {
+		chain[i] = nativeperf.CallchainEntry{IP: model.Uint64(0x400000 + i)}
+	}
+	for i := range 30 {
+		a := base + uint64(i)*100_000_000
+		k := key
+		res.Events = append(res.Events,
+			nativeperf.SanitizedEvent{Kind: nativeperf.EventSwitch, Time: model.MonoNano(a), CPU: 0, Domain: domain,
+				Switch: &nativeperf.SchedulerSwitch{Previous: &k, PreviousState: 1, SwitchOutCallchain: chain}},
+			nativeperf.SanitizedEvent{Kind: nativeperf.EventWakeup, Time: model.MonoNano(a + 40_000_000), CPU: 0, Domain: domain, Task: key, Wakeup: &nativeperf.SchedulerWakeup{Target: key}},
+			nativeperf.SanitizedEvent{Kind: nativeperf.EventSwitch, Time: model.MonoNano(a + 55_000_000), CPU: 0, Domain: domain, Switch: &nativeperf.SchedulerSwitch{Next: &k}})
+	}
+	for i := range res.Events {
+		res.Events[i].Sequence = model.Uint64(i + 1)
+	}
+	res.Proofs = append(res.Proofs, nativeperf.AcquisitionProof{Domain: domain, CPUs: []uint32{0}, Through: model.MonoNano(base + 5_000_000_000), Final: true})
+	res.ProofAt = append(res.ProofAt, len(res.Events))
+
+	full := NewStreamCorrelation(nativeperf.DefaultConfig(1), fixedShare)
+	drive(res, full, false)
+	lean := NewStreamCorrelation(nativeperf.DefaultConfig(1), fixedShare)
+	lean.DropStacks()
+	drive(res, lean, false)
+	f, l := full.Result(), lean.Result()
+	if f.Err != "" || l.Err != "" || len(f.Intervals) == 0 || len(f.Intervals) != len(l.Intervals) {
+		t.Fatalf("full %+v\nlean %+v", f, l)
+	}
+	withStacks := 0
+	for i := range f.Intervals {
+		if len(f.Intervals[i].SwitchOutCallchain) != 0 {
+			withStacks++
+		}
+		if len(l.Intervals[i].SwitchOutCallchain) != 0 {
+			t.Fatalf("interval %d kept its stack: %+v", i, l.Intervals[i])
+		}
+		stripped := f.Intervals[i]
+		stripped.SwitchOutCallchain = nil
+		if !reflect.DeepEqual(stripped, l.Intervals[i]) {
+			t.Fatalf("interval %d differs beyond its stack:\nfull %+v\nlean %+v", i, f.Intervals[i], l.Intervals[i])
+		}
+	}
+	if withStacks == 0 || l.IntervalBytes*2 > f.IntervalBytes {
+		t.Fatalf("the stacks were not what the footprint held: %d intervals with stacks, %d B full, %d B lean", withStacks, f.IntervalBytes, l.IntervalBytes)
+	}
+}
+
+// A judge that only adds up durations needs one summed interval per task and kind, not thousands of them: FoldDurations
+// retains exactly that, keeps every coverage correction as it came, and the counts of what the correlator returned.
+func TestStreamCorrelationFoldDurationsKeepsTheSumsAndTheCorrections(t *testing.T) {
+	domain := nativeperf.ClockDomain{HostID: "host-a", BootID: "boot-a"}
+	key := nativeperf.TaskKey{BootID: "boot-a", PIDNamespace: 1, TGID: 7, TID: 7, ProcessStart: 1, Generation: 1}
+	base := uint64(10_000_000_000)
+	res := CaptureResult{Proofs: []nativeperf.AcquisitionProof{{Domain: domain, CPUs: []uint32{0}, Through: model.MonoNano(base - 1)}}, ProofAt: []int{0}}
+	for i := range 30 {
+		a := base + uint64(i)*100_000_000
+		res.Events = append(res.Events, schedEvents(domain, key, a)...)
+	}
+	res.Events = append(res.Events, nativeperf.SanitizedEvent{Kind: nativeperf.EventLoss, Time: model.MonoNano(base + 3_100_000_000), CPU: 0, Domain: domain,
+		Loss: &nativeperf.LossEvent{Count: 1, Reason: nativeperf.ReasonLoss}})
+	for i := range res.Events {
+		res.Events[i].Sequence = model.Uint64(i + 1)
+	}
+	res.Proofs = append(res.Proofs, nativeperf.AcquisitionProof{Domain: domain, CPUs: []uint32{0}, Through: model.MonoNano(base + 5_000_000_000), Final: true})
+	res.ProofAt = append(res.ProofAt, len(res.Events))
+
+	full := NewStreamCorrelation(nativeperf.DefaultConfig(1), fixedShare)
+	drive(res, full, false)
+	folded := NewStreamCorrelation(nativeperf.DefaultConfig(1), fixedShare)
+	folded.FoldDurations()
+	drive(res, folded, false)
+	f, g := full.Result(), folded.Result()
+	if f.Err != "" || g.Err != "" || f.ConsumeErrors != 0 || g.ConsumeErrors != 0 {
+		t.Fatalf("full %+v\nfolded %+v", f, g)
+	}
+	type sum struct {
+		task nativeperf.TaskKey
+		kind nativeperf.IntervalKind
+	}
+	sums := func(c Correlation) (out map[sum]uint64, corrections []nativeperf.Interval) {
+		out = map[sum]uint64{}
+		for _, iv := range c.Intervals {
+			if iv.Correction {
+				iv.SwitchOutCallchain = nil
+				corrections = append(corrections, iv)
+				continue
+			}
+			out[sum{iv.Task, iv.Kind}] += uint64(iv.End - iv.Start)
+		}
+		return out, corrections
+	}
+	fs, fc := sums(f)
+	gs, gc := sums(g)
+	if len(fc) == 0 || !reflect.DeepEqual(fc, gc) {
+		t.Fatalf("the corrections differ: full %+v folded %+v", fc, gc)
+	}
+	if !reflect.DeepEqual(fs, gs) || fs[sum{key, nativeperf.IntervalBlocked}] != 30*40_000_000 || fs[sum{key, nativeperf.IntervalRunnable}] != 30*15_000_000 {
+		t.Fatalf("the summed durations differ: full %v folded %v", fs, gs)
+	}
+	if !reflect.DeepEqual(f.IntervalCounts, g.IntervalCounts) || f.IntervalCounts[nativeperf.IntervalBlocked] != 30 {
+		t.Fatalf("counts of the returned intervals: full %v folded %v", f.IntervalCounts, g.IntervalCounts)
+	}
+	measured := 0
+	for _, iv := range g.Intervals {
+		if !iv.Correction {
+			measured++
+		}
+	}
+	if measured != len(gs) || len(g.Intervals) >= len(f.Intervals) || g.IntervalBytes >= f.IntervalBytes {
+		t.Fatalf("not folded: %d measured intervals for %d keys, %d vs %d intervals, %d vs %d B", measured, len(gs), len(g.Intervals), len(f.Intervals), g.IntervalBytes, f.IntervalBytes)
 	}
 }

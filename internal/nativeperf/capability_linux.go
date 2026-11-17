@@ -133,7 +133,9 @@ func Probe(ctx context.Context, targets []Target) (Capabilities, error) {
 		}
 	}
 	c.Permissions.SchedulerEventOpen = c.OffCPU
-	c.RunqueueSplit = Unsupported
+	// The runnable/blocked split is derived from exactly the three events opened above (switch, wakeup, wakeup_new)
+	// by the correlator, which real 6.1 and 6.6 kernels qualified (D38); its status is the scheduler path's.
+	c.RunqueueSplit = c.OffCPU
 	c.Reasons = append(c.Reasons, ReasonAcquisition)
 	// Even successful opens do not prove correlation or actual frame/thread coverage.
 	if c.CPU != Supported {

@@ -213,8 +213,10 @@ func executableBuildID(f *os.File) (string, error) {
 	return "", ErrAuthorization
 }
 
-// Revalidate is the acquisition boundary check for exec/exit/cgroup changes.
-// Acquisition must additionally bind every emitted event to its generation.
+// Revalidate is the whole-target boundary check for exec/exit/cgroup changes. It does not bind individual events to
+// a generation: the scheduler source publishes events inside a cadence of at most schedulerIdentityInterval after the
+// last successful check and proves each named TID itself (cpuSource.taskStillLive); same-file exec is visible only
+// through the COMM_EXEC control record, never through /proc.
 func (a AuthorizedTargets) Revalidate() error {
 	for _, t := range a.targets {
 		h, e := openCheckedTarget(t)

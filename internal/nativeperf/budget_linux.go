@@ -75,8 +75,8 @@ func (b *ResourceBudget) Reserve(a AuthorizedTargets, c Config, t Topology, m Me
 	// pidfds, proc dirs, executable metadata, connection, listener, and ring FDs.
 	fds := rings + 3*uint64(len(a.targets)) + 2
 	ceiling := t.FDLimit - 32 - t.OpenFDs
-	if ceiling > 256 {
-		ceiling = 256
+	if ceiling > MaxSessionFDs {
+		ceiling = MaxSessionFDs
 	}
 	if fds > ceiling || c.RingBytes > c.MaxMemory || t.PageBytes > c.MaxMemory-c.RingBytes {
 		return nil, ErrResources

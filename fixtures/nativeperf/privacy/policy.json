@@ -120,10 +120,15 @@
     "source_allowed_syscall_constants": [
       "SYS_PERF_EVENT_OPEN",
       "SYS_IOCTL",
-      "SYS_CLOCK_GETTIME"
+      "SYS_CLOCK_GETTIME",
+      "SYS_PPOLL",
+      "SYS_PRCTL"
     ],
     "source_allowed_ioctl_requests": [9216, 9217],
-    "source_allowed_syscall_symbol_regex": "^(Open|Openat|Close|Fstat|Dup|Mmap|Munmap|Getrlimit|Umask|GetsockoptUcred|Syscall|Syscall6|Stat_t|Rlimit|Ucred|Timespec|O_[A-Z]+|PROT_(READ|WRITE)|MAP_SHARED|S_IF(REG|MT)|SIG(INT|TERM)|E(PERM|ACCES|NOENT|NOSYS|NODEV|INVAL|OPNOTSUPP)|SO_PEERCRED|SOL_SOCKET|RLIMIT_NOFILE|SYS_(PERF_EVENT_OPEN|IOCTL|CLOCK_GETTIME))$",
+    "source_allowed_prctl_calls": [
+      {"comment": "PR_SET_THP_DISABLE with 1: the helper opts itself out of transparent huge pages (D53)", "option": 41, "arg": 1}
+    ],
+    "source_allowed_syscall_symbol_regex": "^(Open|Openat|Close|Fstat|Dup|Mmap|Munmap|Getrlimit|Umask|GetsockoptUcred|Syscall|Syscall6|Stat_t|Rlimit|Ucred|Timespec|O_[A-Z]+|PROT_(READ|WRITE)|MAP_SHARED|S_IF(REG|MT)|SIG(INT|TERM)|E(PERM|ACCES|NOENT|NOSYS|NODEV|INVAL|INTR|OPNOTSUPP)|SO_PEERCRED|SOL_SOCKET|RLIMIT_NOFILE|SYS_(PERF_EVENT_OPEN|IOCTL|CLOCK_GETTIME|PPOLL|PRCTL))$",
     "source_forbidden_identifiers": [
       "SYS_PTRACE",
       "SYS_PROCESS_VM_READV",

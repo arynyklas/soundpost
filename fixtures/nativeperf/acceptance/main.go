@@ -55,6 +55,9 @@ func main() {
 	if handled, code := qual.HelperRole(os.Args[1:]); handled {
 		os.Exit(code)
 	}
+	if err := qual.DisableTransparentHugePages(); err != nil {
+		fmt.Fprintln(os.Stderr, "acceptance: transparent huge pages left on:", err)
+	}
 	var o options
 	flag.StringVar(&o.manifest, "manifest", "fixtures/nativeperf/qualification.json", "qualification manifest")
 	flag.StringVar(&o.workload, "workload", "fixtures/nativeperf/acceptance/workloads", "compiled workloads binary")

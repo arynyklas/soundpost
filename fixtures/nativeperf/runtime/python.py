@@ -110,6 +110,7 @@ def main():
     cpu_loop(seconds * 0.6)
     cpu_seconds = time.perf_counter() - t0
     wait_start_ns = time.monotonic_ns()  # CLOCK_MONOTONIC: the clock of the native scheduler events
+    print(f"wait_begin {wait_start_ns}", flush=True)  # the harness releases the loop thread's CPU-phase intervals at the source
     waited = asyncio.run(http_wait(max(4, int(seconds * 0.4 / 0.06)), 0.05))
     wait_end_ns = time.monotonic_ns()
     # The supplement's sampler and timer threads exit when it stops, and the native helper ends a capture when a thread

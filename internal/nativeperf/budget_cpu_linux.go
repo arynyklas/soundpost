@@ -16,7 +16,7 @@ import (
 // charge. On success the caller discards rollback; Reservation.Close owns it all.
 // A reservation has one acquisition owner; extensions must not overlap.
 func (r *Reservation) ReserveCPURings(total uint64, c Config, page uint64) (func(), error) {
-	if r == nil || c.Validate() != nil || page != uint64(os.Getpagesize()) || c.RingBytes < page || c.RingBytes%page != 0 || total == 0 || total > 256 {
+	if r == nil || c.Validate() != nil || page != uint64(os.Getpagesize()) || c.RingBytes < page || c.RingBytes%page != 0 || total == 0 || total > MaxSessionFDs {
 		return nil, ErrResources
 	}
 	var limit syscall.Rlimit
