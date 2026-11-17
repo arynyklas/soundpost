@@ -270,7 +270,7 @@ func (s *Store) CurrentHolds(ctx context.Context, prev HoldSnapshot) (HoldSnapsh
 	}
 	if s.repl != nil {
 		if _, err := s.repl.group.ReadIndex(ctx); err != nil {
-			return prev, replicaFault(err)
+			return prev, replicaFaultUnder(ctx, err)
 		}
 	}
 	return s.AppliedHolds(prev)

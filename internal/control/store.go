@@ -154,7 +154,7 @@ func (s *Store) View(ctx context.Context, fn func(State) error) error {
 	}
 	if s.repl != nil {
 		if _, err := s.repl.group.ReadIndex(ctx); err != nil {
-			return replicaFault(err)
+			return replicaFaultUnder(ctx, err)
 		}
 	}
 	return s.db.View(func(tx *bolt.Tx) error {
@@ -180,7 +180,7 @@ func (s *Store) ViewShared(ctx context.Context, fn func(model.ReadOnlyControl) e
 	}
 	if s.repl != nil {
 		if _, err := s.repl.group.ReadIndex(ctx); err != nil {
-			return replicaFault(err)
+			return replicaFaultUnder(ctx, err)
 		}
 	}
 	return s.db.View(func(tx *bolt.Tx) error {

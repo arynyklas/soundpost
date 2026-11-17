@@ -128,7 +128,7 @@ func (s *Store) replicatedUpdate(ctx context.Context, bump bool, force *bool, fn
 	defer s.updateMu.Unlock()
 	r := s.repl
 	if _, err := r.group.ReadIndex(ctx); err != nil {
-		return replicaFault(err)
+		return replicaFaultUnder(ctx, err)
 	}
 	var st State
 	if err := s.db.View(func(tx *bolt.Tx) error {
