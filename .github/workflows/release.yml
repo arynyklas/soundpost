@@ -72,7 +72,8 @@ jobs:
           go mod download
           go run ./build verify
           go test ./build -count=1
-          go run ./build release --out dist/release --version "$VERSION" --commit "$COMMIT" --reproduce
+          test "$(git rev-parse HEAD)" = "$COMMIT"
+          go run ./build release --out dist/release --version "$VERSION" --reproduce
 
       - name: SBOM and notices
         run: |

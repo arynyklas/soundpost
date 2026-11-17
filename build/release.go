@@ -678,7 +678,7 @@ func runRelease(args []string, out io.Writer) error {
 	root := f.String("root", ".", "repository root")
 	outDir := f.String("out", "", "output directory (created)")
 	version := f.String("version", "", "release version")
-	commit := f.String("commit", "unknown", "source commit recorded in the binaries")
+	commitFlag := f.String("commit", "", "source commit; with a git context it must equal HEAD (derived when omitted); without git the manifest records \"unknown\"")
 	arches := f.String("arch", releaseArches(), "comma-separated linux architectures (default: the release platforms, decision D10)")
 	webDist := f.String("web-dist", "", "built UI bundle (default web/dist)")
 	archive := f.String("archive", "", "pinned Go archive")
@@ -693,6 +693,10 @@ func runRelease(args []string, out io.Writer) error {
 	}
 	if *outDir == "" || *version == "" {
 		return errors.New("--out and --version are required")
+	}
+	commit, err := releaseCommit(absRoot, *commitFlag)
+	if err != nil {
+		return err
 	}
 	inputs, err := verifyInputs(absRoot, *archive)
 	if err != nil {
@@ -710,8 +714,8 @@ func runRelease(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	plan := buildPlan{root: absRoot, goBin: goBinary(absRoot), version: *version, commit: *commit, buildID: "sha256:" + buildID + "+ui:" + uiDigest[:16], arches: strings.Split(*arches, ",")}
-	manifest := Manifest{Version: *version, Commit: *commit, BuildID: plan.buildID, Inputs: inputs, UIDigest: uiDigest, UIFiles: uiFiles, BuildFlags: append([]string{"CGO_ENABLED=0"}, plan.flags()...)}
+	plan := buildPlan{root: absRoot, goBin: goBinary(absRoot), version: *version, commit: commit, buildID: "sha256:" + buildID + "+ui:" + uiDigest[:16], arches: strings.Split(*arches, ",")}
+	manifest := Manifest{Version: *version, Commit: commit, BuildID: plan.buildID, Inputs: inputs, UIDigest: uiDigest, UIFiles: uiFiles, BuildFlags: append([]string{"CGO_ENABLED=0"}, plan.flags()...)}
 	for _, name := range releaseCommands {
 		if _, err := os.Stat(filepath.Join(absRoot, "cmd", name, "main.go")); err == nil {
 			plan.commands = append(plan.commands, name)
@@ -787,6 +791,84 @@ func runRelease(args []string, out io.Writer) error {
 		return errors.New("the two builds are not byte-identical: " + manifest.Reproducibility.Detail)
 	}
 	return nil
+}
+
+// releaseCommit decides the commit a release records. With a git context at root it is HEAD: an
+// explicit commit that differs is refused, and so is a tree with a modified or untracked file in the
+// digested set (cmd/, internal/, profiles/, go.mod, go.sum; see releaseevidence.SourceDigest), because
+// then the digest would describe bytes HEAD does not contain. Without git the commit is "unknown";
+// a typed value is refused since nothing can vouch for it.
+func releaseCommit(root, explicit string) (string, error) {
+	git := func(args ...string) (string, string, error) {
+		cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+		var so, se bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &so, &se
+		err := cmd.Run()
+		return so.String(), se.String(), err
+	}
+	inside, stderr, err := git("rev-parse", "--is-inside-work-tree")
+	if err != nil {
+		if errors.Is(err, exec.ErrNotFound) || strings.Contains(stderr, "not a git repository") {
+			if explicit != "" && explicit != "unknown" {
+				return "", fmt.Errorf("--commit %q refused: %s is not in a git work tree, so the commit cannot be derived or checked (omit --commit; the manifest records \"unknown\")", explicit, root)
+			}
+			return "unknown", nil
+		}
+		return "", fmt.Errorf("git rev-parse: %w: %s", err, strings.TrimSpace(stderr))
+	}
+	if strings.TrimSpace(inside) != "true" {
+		return "", fmt.Errorf("%s is not inside a git work tree", root)
+	}
+	headOut, stderr, err := git("rev-parse", "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("git rev-parse HEAD: %w: %s", err, strings.TrimSpace(stderr))
+	}
+	head := strings.TrimSpace(headOut)
+	if explicit != "" && explicit != head {
+		return "", fmt.Errorf("--commit %q is not HEAD %s of %s: the commit is derived from git, never typed", explicit, head, root)
+	}
+	prefixOut, stderr, err := git("rev-parse", "--show-prefix")
+	if err != nil {
+		return "", fmt.Errorf("git rev-parse --show-prefix: %w: %s", err, strings.TrimSpace(stderr))
+	}
+	prefix := strings.TrimSpace(prefixOut)
+	status, stderr, err := git("status", "--porcelain=v1", "-z", "--untracked-files=all", "--", "cmd", "internal", "profiles", "go.mod", "go.sum")
+	if err != nil {
+		return "", fmt.Errorf("git status: %w: %s", err, strings.TrimSpace(stderr))
+	}
+	var dirty []string
+	entries := strings.Split(status, "\x00")
+	for i := 0; i < len(entries); i++ {
+		e := entries[i]
+		if len(e) < 4 {
+			continue
+		}
+		if e[0] == 'R' || e[0] == 'C' {
+			i++ // the original path follows as its own entry
+		}
+		rel := filepath.ToSlash(strings.TrimPrefix(e[3:], prefix))
+		if inDigestedSet(rel) {
+			dirty = append(dirty, strings.TrimSpace(e[:2])+" "+rel)
+		}
+	}
+	if len(dirty) > 0 {
+		sort.Strings(dirty)
+		return "", fmt.Errorf("refusing to release a dirty tree: %d modified or untracked file(s) under the digested set would make the digest describe bytes HEAD %s does not contain: %s", len(dirty), head, strings.Join(dirty, ", "))
+	}
+	return head, nil
+}
+
+// inDigestedSet mirrors releaseevidence.SourceDigest's inclusion rules for a slash path under root.
+func inDigestedSet(rel string) bool {
+	if rel == "go.mod" || rel == "go.sum" {
+		return true
+	}
+	for _, dir := range []string{"cmd/", "internal/", "profiles/"} {
+		if strings.HasPrefix(rel, dir) {
+			return !strings.HasSuffix(rel, "_test.go") && !strings.HasPrefix(rel, "cmd/soundpost/webdist/")
+		}
+	}
+	return false
 }
 
 // releaseArches lists the linux architectures of releaseevidence.ReleasePlatforms, comma separated.

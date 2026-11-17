@@ -312,6 +312,30 @@ func releaseBuildSource(r Reports) string {
 	return digest
 }
 
+// checkSourceOf recomputes the source digest from Reports.Root and refuses unless it equals the
+// source component of release.json's build_id: the digest recorded at release time is not trusted on
+// its own, so a tree edited after `build release` cannot pass. Every envelope stamp is compared with
+// that same recorded component by checkEvidenceOf, so all of them equal the recomputed digest.
+func checkSourceOf(r Reports) Check {
+	c := Check{Name: "source"}
+	recorded := releaseBuildSource(r)
+	if recorded == "" {
+		c.Blocking = []string{"release.json carries no build_id source digest"}
+		return c
+	}
+	got, err := releaseevidence.SourceDigest(r.Root)
+	if err != nil {
+		c.Blocking = []string{"source digest of --root cannot be computed: " + err.Error()}
+		return c
+	}
+	if got != recorded {
+		c.Blocking = []string{fmt.Sprintf("the tree under --root has source digest %s, not the release's %s (files changed after `build release`)", got, recorded)}
+		return c
+	}
+	c.Detail = "source " + got
+	return c
+}
+
 func summarize(prefix string, items []string, limit int) []string {
 	if len(items) <= limit {
 		return items
@@ -673,7 +697,7 @@ func Release(ctx context.Context, commit string, r Reports) (ReleaseManifest, er
 	if r.NoticesPath == "" {
 		r.NoticesPath = filepath.Join(r.Root, "THIRD_PARTY_NOTICES")
 	}
-	m.Checks = append(m.Checks, checkCoverageOf(r), checkSurfacesOf(r))
+	m.Checks = append(m.Checks, checkCoverageOf(r), checkSurfacesOf(r), checkSourceOf(r))
 	for _, k := range EvidenceKinds {
 		m.Checks = append(m.Checks, checkEvidenceOf(k, r, commit))
 	}

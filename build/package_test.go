@@ -16,11 +16,47 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/arynyklas/soundpost/internal/releaseevidence"
 )
 
 const testCommit = "0123456789abcdef0123456789abcdef01234567"
 const testVersion = "1.2.3"
-const testSource = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+
+// testSource is the source digest of the files writeFixtureSources lays down, so every fixture tree
+// (and the build_id and evidence stamps the tests write) agrees with the gate's recomputation.
+var testSource = func() string {
+	dir, err := os.MkdirTemp("", "soundpost-fixture-src-")
+	if err != nil {
+		panic(err)
+	}
+	defer os.RemoveAll(dir)
+	writeFixtureSources(dir)
+	sum, err := releaseevidence.SourceDigest(dir)
+	if err != nil {
+		panic(err)
+	}
+	return sum
+}()
+
+// writeFixtureSources writes the digested set of a tiny tree: go.mod, go.sum, cmd/, internal/, profiles/.
+func writeFixtureSources(root string) {
+	for rel, body := range map[string]string{
+		"go.mod":                "module example.com/soundpost\n\ngo 1.27.3\n\nrequire example.com/a v1.0.0\n",
+		"go.sum":                "example.com/a v1.0.0 h1:aaa=\nexample.com/a v1.0.0/go.mod h1:bbb=\nexample.org/testonly v0.1.0 h1:ccc=\n",
+		"cmd/soundpost/main.go": "package main\n",
+		"internal/a/a.go":       "package a\n",
+		"profiles/query/p.json": "{}\n",
+	} {
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			panic(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			panic(err)
+		}
+	}
+}
 
 // signFor and approveFor stand in for the owner: the build tool itself has no signing code.
 func signFor(priv ed25519.PrivateKey, manifest []byte) []byte {
@@ -68,8 +104,7 @@ func newFixture(t *testing.T) *fixture {
 	root := t.TempDir()
 	f := &fixture{t: t, root: root, evidence: map[string]string{}}
 	w := func(rel, body string) { write(t, filepath.Join(root, filepath.FromSlash(rel)), body) }
-	w("go.mod", "module example.com/soundpost\n\ngo 1.27.3\n\nrequire example.com/a v1.0.0\n")
-	w("go.sum", "example.com/a v1.0.0 h1:aaa=\nexample.com/a v1.0.0/go.mod h1:bbb=\nexample.org/testonly v0.1.0 h1:ccc=\n")
+	writeFixtureSources(root)
 	w("build/auth-control-dependencies.json", `{"direct":[{"module":"example.com/a","version":"v1.0.0","license":"MIT"}],"runtime_indirect":[]}`)
 	w("third_party/auth-control-NOTICES.txt", "Notices\n\n===== example.com/a@v1.0.0 (MIT) =====\nMIT text\n")
 	w("third_party/config-tooling-NOTICES.txt", "Config notices\n")
