@@ -185,11 +185,18 @@ func buildArtifacts(root, release, dir, arch string) ([]ArtifactSubject, error) 
 			return nil, err
 		}
 	}
-	image, digest, err := buildOCIImage(root, release, arch)
+	image, digest, err := buildOCIImage(release, arch, serverImage)
 	if err != nil {
 		return nil, fmt.Errorf("oci image: %w", err)
 	}
 	if err = add("oci_image", "soundpost-linux-"+arch+".oci.tar", "image/soundpost-linux-"+arch+".oci.tar", digest, image); err != nil {
+		return nil, err
+	}
+	helper, helperDigest, err := buildOCIImage(release, arch, perfHelperImage)
+	if err != nil {
+		return nil, fmt.Errorf("oci image (perf helper, %s): %w", perfHelperImage.binary, err)
+	}
+	if err = add("oci_image_perf_helper", "soundpost-perf-helper-linux-"+arch+".oci.tar", "image/soundpost-perf-helper-linux-"+arch+".oci.tar", helperDigest, helper); err != nil {
 		return nil, err
 	}
 	sort.Slice(subjects, func(i, j int) bool { return subjects[i].Path < subjects[j].Path })
@@ -541,20 +548,70 @@ func blobDigest(b []byte) string {
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
-// buildOCIImage returns an OCI image-layout tar of deploy/Dockerfile's single-layer image and the
+// layerEntry is one member of an image's single layer.
+type layerEntry struct {
+	name     string
+	dir      bool
+	mode     int64
+	uid, gid int
+	body     []byte
+}
+
+// imageDef is one image the release ships: which release binary it carries (its file name in
+// release/linux-<arch>/), the layer it makes of that binary, its config and the Dockerfile
+// instruction text recorded in the layer history.
+type imageDef struct {
+	binary    string
+	layer     func(binary []byte) []layerEntry
+	config    func(version, binarySHA string) ociConfigInner
+	createdBy string
+}
+
+// serverImage is deploy/Dockerfile: soundpost (0555) and the data directory (0700), owned by the
+// unprivileged user like the COPY --chown lines.
+var serverImage = imageDef{
+	binary: "soundpost",
+	layer: func(raw []byte) []layerEntry {
+		return []layerEntry{
+			{"soundpost", false, 0o555, imageUID, imageUID, raw},
+			{"var/", true, 0o755, 0, 0, nil},
+			{"var/lib/", true, 0o755, 0, 0, nil},
+			{"var/lib/soundpost/", true, 0o700, imageUID, imageUID, nil},
+		}
+	},
+	config:    imageSpec,
+	createdBy: "COPY soundpost and data/ (deploy/Dockerfile)",
+}
+
+// perfHelperImage is deploy/Dockerfile.perf-helper: the native acquisition helper alone, root-owned
+// and read-only (the container runs as uid 0 holding only CAP_PERFMON), with no port and no volume.
+var perfHelperImage = imageDef{
+	binary: "soundpost-perf-acquire",
+	layer: func(raw []byte) []layerEntry {
+		return []layerEntry{{"soundpost-perf-acquire", false, 0o555, 0, 0, raw}}
+	},
+	config: func(version, binarySHA string) ociConfigInner {
+		return ociConfigInner{
+			User:       "0:0",
+			Entrypoint: []string{"/soundpost-perf-acquire"},
+			Labels: map[string]string{
+				"org.opencontainers.image.title":    "soundpost-perf-helper",
+				"org.opencontainers.image.licenses": "Apache-2.0",
+				"org.opencontainers.image.version":  version,
+				"org.soundpost.binary.sha256":       binarySHA,
+			},
+			StopSignal: "SIGTERM",
+		}
+	},
+	createdBy: "COPY soundpost-perf-acquire (deploy/Dockerfile.perf-helper)",
+}
+
+// buildOCIImage returns an OCI image-layout tar of one Dockerfile's single-layer image and the
 // image manifest digest. The binary must be the one release/SHA256SUMS lists.
-func buildOCIImage(root, release, arch string) ([]byte, string, error) {
-	binary := filepath.Join(release, "linux-"+arch, "soundpost")
-	sum, err := sha256File(binary)
+func buildOCIImage(release, arch string, def imageDef) ([]byte, string, error) {
+	binary, sum, err := listedBinary(release, arch, def.binary)
 	if err != nil {
 		return nil, "", err
-	}
-	sums, err := os.ReadFile(filepath.Join(release, "SHA256SUMS"))
-	if err != nil {
-		return nil, "", err
-	}
-	if !strings.Contains(string(sums), sum+"  linux-"+arch+"/soundpost\n") {
-		return nil, "", errors.New("the binary is not the one SHA256SUMS lists")
 	}
 	raw, err := os.ReadFile(binary)
 	if err != nil {
@@ -569,26 +626,12 @@ func buildOCIImage(root, release, arch string) ([]byte, string, error) {
 			version = m.Version
 		}
 	}
-	// Layer: soundpost (0555) and the data directory (0700), owned by the unprivileged user like the COPY --chown lines.
 	var layer bytes.Buffer
 	tw := tar.NewWriter(&layer)
-	for _, e := range []struct {
-		name string
-		dir  bool
-		mode int64
-		body []byte
-	}{
-		{"soundpost", false, 0o555, raw},
-		{"var/", true, 0o755, nil},
-		{"var/lib/", true, 0o755, nil},
-		{"var/lib/soundpost/", true, 0o700, nil},
-	} {
-		h := &tar.Header{Name: e.name, Mode: e.mode, Uid: imageUID, Gid: imageUID, Size: int64(len(e.body)), Typeflag: tar.TypeReg, Format: tar.FormatPAX}
+	for _, e := range def.layer(raw) {
+		h := &tar.Header{Name: e.name, Mode: e.mode, Uid: e.uid, Gid: e.gid, Size: int64(len(e.body)), Typeflag: tar.TypeReg, Format: tar.FormatPAX}
 		if e.dir {
 			h.Typeflag = tar.TypeDir
-			if e.name != "var/lib/soundpost/" {
-				h.Uid, h.Gid = 0, 0
-			}
 		}
 		if err := tw.WriteHeader(h); err != nil {
 			return nil, "", err
@@ -609,9 +652,9 @@ func buildOCIImage(root, release, arch string) ([]byte, string, error) {
 	if err = gz.Close(); err != nil {
 		return nil, "", err
 	}
-	cfg := ociConfig{Created: dockerfileEpoch, Architecture: arch, OS: "linux", Config: imageSpec(version, sum)}
+	cfg := ociConfig{Created: dockerfileEpoch, Architecture: arch, OS: "linux", Config: def.config(version, sum)}
 	cfg.RootFS.Type, cfg.RootFS.DiffIDs = "layers", []string{diffID}
-	cfg.History = []ociHistory{{Created: dockerfileEpoch, CreatedBy: "COPY soundpost and data/ (deploy/Dockerfile)"}}
+	cfg.History = []ociHistory{{Created: dockerfileEpoch, CreatedBy: def.createdBy}}
 	cfgRaw, err := json.Marshal(cfg)
 	if err != nil {
 		return nil, "", err

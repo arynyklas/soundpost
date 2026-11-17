@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/arynyklas/soundpost/internal/releaseevidence"
 	"github.com/arynyklas/soundpost/tools/browserevidence"
 )
 
@@ -53,5 +54,26 @@ func TestBrowserEvidenceExpectsEveryEvidenceSmokeRow(t *testing.T) {
 	sort.Strings(want)
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("evidence.go rows\n got %v\nlist %v", got, want)
+	}
+}
+
+// Both browser result files the exporter reads carry the producer's own source digest.
+func TestSmokeResultDocumentsCarryTheSourceStamp(t *testing.T) {
+	want, err := releaseevidence.CurrentSourceDigest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := stampedDocument(map[string]any{"rows": []any{}})
+	if err != nil || doc["source_sha256"] != want || doc["rows"] == nil {
+		t.Fatalf("stamped document %v: %v", doc, err)
+	}
+	for _, file := range []string{"journeys.go", "evidence.go"} {
+		raw, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(raw), "stampedDocument(map[string]any{") {
+			t.Errorf("%s writes its result file without stampedDocument", file)
+		}
 	}
 }

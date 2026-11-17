@@ -79,11 +79,12 @@ func ScopeAccepts(row Row, platforms []string) bool {
 
 // Report is the envelope. Its JSON form is read by the gate with unknown fields rejected.
 type Report struct {
-	Schema   string   `json:"schema"`
-	Kind     string   `json:"kind"`
-	Commit   string   `json:"commit"`
-	Expected []string `json:"expected_rows"`
-	Rows     []Row    `json:"rows"`
+	Schema       string   `json:"schema"`
+	Kind         string   `json:"kind"`
+	Commit       string   `json:"commit"`
+	SourceSHA256 string   `json:"source_sha256"`
+	Expected     []string `json:"expected_rows"`
+	Rows         []Row    `json:"rows"`
 }
 
 // Row is one measured row of a producer.
@@ -96,6 +97,53 @@ type Row struct {
 }
 
 var commitPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
+var sourcePattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+// CheckSource requires a 64-hex lowercase source digest (SourceDigest form).
+func CheckSource(source string) error {
+	if !sourcePattern.MatchString(source) {
+		return errors.New("source_sha256 is not a 64-hex lowercase source digest")
+	}
+	return nil
+}
+
+// Stamp is the source digest one input report carries; Name identifies the report in a refusal.
+type Stamp struct {
+	Name   string
+	Source string
+}
+
+// AgreedSource returns the one source digest every stamp carries. A missing or malformed stamp, or
+// stamps that differ, is refused with static text that names the reports and never quotes a value.
+func AgreedSource(stamps []Stamp) (string, error) {
+	if len(stamps) == 0 {
+		return "", errors.New("no input report carries a source stamp")
+	}
+	var missing, bad []string
+	for _, s := range stamps {
+		if s.Source == "" {
+			missing = append(missing, s.Name)
+		} else if CheckSource(s.Source) != nil {
+			bad = append(bad, s.Name)
+		}
+	}
+	if len(missing) > 0 {
+		return "", fmt.Errorf("report(s) carry no source stamp: %s", strings.Join(missing, ", "))
+	}
+	if len(bad) > 0 {
+		return "", fmt.Errorf("report(s) carry a malformed source stamp: %s", strings.Join(bad, ", "))
+	}
+	var differing []string
+	for _, s := range stamps {
+		if s.Source != stamps[0].Source {
+			differing = append(differing, s.Name)
+		}
+	}
+	if len(differing) > 0 {
+		return "", fmt.Errorf("report(s) were produced against a different source than %s: %s", stamps[0].Name, strings.Join(differing, ", "))
+	}
+	return stamps[0].Source, nil
+}
 
 // CheckCommit requires a full lowercase 40-hex source commit, the form the gate compares by equality.
 func CheckCommit(commit string) error {
@@ -109,8 +157,8 @@ func CheckCommit(commit string) error {
 // deliver, taken from a source independent of the rows themselves (a matrix,
 // a manifest, a fixed list), so a producer that drops a row cannot also drop
 // the expectation.
-func New(kind, commit string, expected []string, rows []Row) (Report, error) {
-	r := Report{Schema: Schema, Kind: kind, Commit: commit, Expected: append([]string{}, expected...), Rows: append([]Row{}, rows...)}
+func New(kind, commit, source string, expected []string, rows []Row) (Report, error) {
+	r := Report{Schema: Schema, Kind: kind, Commit: commit, SourceSHA256: source, Expected: append([]string{}, expected...), Rows: append([]Row{}, rows...)}
 	sort.Strings(r.Expected)
 	return r, r.Validate()
 }
@@ -128,6 +176,9 @@ func (r Report) Validate() error {
 		return fmt.Errorf("kind %q is not one of %s", r.Kind, strings.Join(Kinds, ", "))
 	}
 	if err := CheckCommit(r.Commit); err != nil {
+		return err
+	}
+	if err := CheckSource(r.SourceSHA256); err != nil {
 		return err
 	}
 	if len(r.Expected) == 0 {

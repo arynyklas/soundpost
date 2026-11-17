@@ -15,6 +15,7 @@ import (
 )
 
 const commit = "0123456789abcdef0123456789abcdef01234567"
+const browserSource = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
 
 // pwTestJSON is one Playwright test entry of a given project.
 func pwTestJSON(project, expected, status string, results ...string) string {
@@ -41,8 +42,8 @@ func pwReportJSON(top, nested []string, errs string) string {
 	for i, t := range nested {
 		nestedSpecs = append(nestedSpecs, spec(fmt.Sprintf("nested %d", i), t))
 	}
-	return fmt.Sprintf(`{"config":{},"suites":[{"title":"auth.spec.ts","file":"auth.spec.ts","specs":[%s],"suites":[{"title":"login","file":"auth.spec.ts","specs":[%s]}]}],"errors":[%s]}`,
-		strings.Join(topSpecs, ","), strings.Join(nestedSpecs, ","), errs)
+	return fmt.Sprintf(`{"config":{"metadata":{"source_sha256":%q}},"suites":[{"title":"auth.spec.ts","file":"auth.spec.ts","specs":[%s],"suites":[{"title":"login","file":"auth.spec.ts","specs":[%s]}]}],"errors":[%s]}`,
+		browserSource, strings.Join(topSpecs, ","), strings.Join(nestedSpecs, ","), errs)
 }
 
 func listJSON() string {
@@ -55,7 +56,7 @@ func smokeJSON(key string, rows map[string][3]any) string {
 	for id, v := range rows {
 		parts = append(parts, fmt.Sprintf(`{%q:%q,"required":%v,"satisfied":%v,"reason":%q,"detail":"d"}`, key, id, v[0], v[1], v[2]))
 	}
-	return fmt.Sprintf(`{"rows":[%s]}`, strings.Join(parts, ","))
+	return fmt.Sprintf(`{"source_sha256":%q,"rows":[%s]}`, browserSource, strings.Join(parts, ","))
 }
 
 func allSmokeRows(ids []string, key string, override map[string][3]any) string {
@@ -211,7 +212,7 @@ func TestSmokeRowsAreStrictAboutTheirShape(t *testing.T) {
 		}
 	}
 	// Optional rows do not block the producer and are not exported; contradictions keep the worst outcome.
-	rep, err := Export(Inputs{PlaywrightList: list, Evidence: []byte(`{"rows":[
+	rep, err := Export(Inputs{PlaywrightList: list, Evidence: []byte(`{"source_sha256":"` + browserSource + `","rows":[
 	  {"id":"a","required":false,"satisfied":false,"reason":"limit"},
 	  {"id":"b","required":true,"satisfied":true,"reason":"ok"},
 	  {"id":"b","required":true,"satisfied":false,"reason":"later_failure"}]}`)}, commit)
@@ -224,6 +225,52 @@ func TestSmokeRowsAreStrictAboutTheirShape(t *testing.T) {
 	}
 	if r := rows["evidence/b"]; r.Status != releaseevidence.StatusFailed || !strings.Contains(r.Detail, "later_failure") {
 		t.Errorf("duplicate row must keep the worst outcome: %+v", r)
+	}
+}
+
+func unstamp(doc string) string {
+	return strings.Replace(doc, `"source_sha256"`, `"unrelated"`, 1)
+}
+
+func restamp(doc string) string {
+	return strings.Replace(doc, browserSource, strings.Repeat("1", 64), 1)
+}
+
+// Every present input must carry the stamp and all stamps must be equal; an absent optional input
+// contributes none; the envelope carries the shared stamp.
+func TestExportRequiresOneSharedSourceStamp(t *testing.T) {
+	list := listJSON()
+	results := pwReportJSON([]string{pwTestJSON("chromium", "passed", "expected", "passed")}, nil, "")
+	journeys := allSmokeRows(JourneyRowIDs, "name", nil)
+	evidence := allSmokeRows(EvidenceRowIDs, "id", nil)
+	full := func() Inputs {
+		return Inputs{PlaywrightList: []byte(list), PlaywrightResults: []byte(results), Journeys: []byte(journeys), Evidence: []byte(evidence)}
+	}
+	rep, err := Export(full(), commit)
+	if err != nil || rep.SourceSHA256 != browserSource {
+		t.Fatalf("equal stamps: %v %q", err, rep.SourceSHA256)
+	}
+	if rep, err = Export(Inputs{PlaywrightList: []byte(list)}, commit); err != nil || rep.SourceSHA256 != browserSource {
+		t.Fatalf("list only: %v %q", err, rep.SourceSHA256)
+	}
+	for name, c := range map[string]struct {
+		mut  func(*Inputs)
+		want string
+	}{
+		"list unstamped":         {func(in *Inputs) { in.PlaywrightList = []byte(unstamp(list)) }, "playwright list"},
+		"results unstamped":      {func(in *Inputs) { in.PlaywrightResults = []byte(unstamp(results)) }, "playwright results"},
+		"journeys unstamped":     {func(in *Inputs) { in.Journeys = []byte(unstamp(journeys)) }, "journeys report"},
+		"evidence unstamped":     {func(in *Inputs) { in.Evidence = []byte(unstamp(evidence)) }, "evidence smoke report"},
+		"results differ":         {func(in *Inputs) { in.PlaywrightResults = []byte(restamp(results)) }, "playwright results"},
+		"journeys differ":        {func(in *Inputs) { in.Journeys = []byte(restamp(journeys)) }, "journeys report"},
+		"evidence differs":       {func(in *Inputs) { in.Evidence = []byte(restamp(evidence)) }, "evidence smoke report"},
+		"list differs from rest": {func(in *Inputs) { in.PlaywrightList = []byte(restamp(list)) }, "playwright results"},
+	} {
+		in := full()
+		c.mut(&in)
+		if _, err := Export(in, commit); err == nil || !strings.Contains(err.Error(), c.want) || strings.Contains(err.Error(), strings.Repeat("1", 64)) {
+			t.Errorf("%s: error %v, want it to name %q", name, err, c.want)
+		}
 	}
 }
 
@@ -240,12 +287,12 @@ func TestEnvelopeIsWhatTheGateDecodes(t *testing.T) {
 	if err = json.Unmarshal(raw, &back); err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range []string{"schema", "kind", "commit", "expected_rows", "rows"} {
+	for _, k := range []string{"schema", "kind", "commit", "source_sha256", "expected_rows", "rows"} {
 		if _, ok := back[k]; !ok {
 			t.Errorf("envelope lacks %q", k)
 		}
 	}
-	if len(back) != 5 {
+	if len(back) != 6 {
 		t.Errorf("envelope has extra fields: %v", back)
 	}
 	if _, err := Export(Inputs{PlaywrightList: []byte(listJSON())}, "main"); err == nil {
@@ -274,7 +321,7 @@ func viewReport(status string, drop string) string {
 			specs = append(specs, fmt.Sprintf(`{"title":%q,"file":%q,"tests":[{"projectName":"chromium","expectedStatus":%q,"status":%q,"results":%s}]}`, want[i+3:]+" and more", want[:i], exp, st, res))
 		}
 	}
-	return `{"suites":[{"title":"x","file":"x","specs":[` + strings.Join(specs, ",") + `]}],"errors":[]}`
+	return `{"config":{"metadata":{"source_sha256":"` + browserSource + `"}},"suites":[{"title":"x","file":"x","specs":[` + strings.Join(specs, ",") + `]}],"errors":[]}`
 }
 
 func TestBrowserViewRowsNeedEveryNamedTest(t *testing.T) {

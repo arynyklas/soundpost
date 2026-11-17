@@ -294,18 +294,20 @@ func ValidateRow(r Row) error {
 	return nil
 }
 
-// SuiteReport is the machine report of one suite run.
+// SuiteReport is the machine report of one suite run. SourceSHA256 is
+// releaseevidence.SourceDigest of the tree the suite ran against, stamped when the report is written.
 type SuiteReport struct {
-	Suite       Suite    `json:"suite"`
-	Matrix      string   `json:"matrix"`
-	MatrixSHA   string   `json:"matrix_sha256"`
-	RecordedAt  string   `json:"recorded_at"`
-	Host        HostInfo `json:"host"`
-	Rows        []Row    `json:"rows"`
-	Unqualified []string `json:"unqualified_required_rows"`
-	OutOfScope  []string `json:"out_of_release_scope_rows"`
-	Failed      []string `json:"measured_failures"`
-	ExitCode    int      `json:"exit_code"`
+	Suite        Suite    `json:"suite"`
+	Matrix       string   `json:"matrix"`
+	MatrixSHA    string   `json:"matrix_sha256"`
+	RecordedAt   string   `json:"recorded_at"`
+	Host         HostInfo `json:"host"`
+	Rows         []Row    `json:"rows"`
+	SourceSHA256 string   `json:"source_sha256"`
+	Unqualified  []string `json:"unqualified_required_rows"`
+	OutOfScope   []string `json:"out_of_release_scope_rows"`
+	Failed       []string `json:"measured_failures"`
+	ExitCode     int      `json:"exit_code"`
 }
 
 // HostInfo identifies the machine that produced a report.
@@ -626,6 +628,9 @@ func RunSuite(ctx context.Context, suite Suite, matrixPath, reportDir string) (S
 	rep.Verdict()
 	if len(invalid) > 0 {
 		rep.ExitCode = ExitFail
+	}
+	if rep.SourceSHA256, err = releaseevidence.CurrentSourceDigest(); err != nil {
+		return rep, fmt.Errorf("source digest for the report stamp: %w", err)
 	}
 	out, err := json.MarshalIndent(rep, "", " ")
 	if err != nil {

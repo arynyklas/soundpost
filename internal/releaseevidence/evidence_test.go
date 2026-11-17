@@ -12,6 +12,34 @@ import (
 )
 
 const commit = "0123456789abcdef0123456789abcdef01234567"
+const source = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+
+func TestAgreedSource(t *testing.T) {
+	other := strings.Repeat("1", 64)
+	if got, err := AgreedSource([]Stamp{{"a", source}, {"b", source}}); err != nil || got != source {
+		t.Fatalf("equal stamps: %q %v", got, err)
+	}
+	for name, c := range map[string]struct {
+		stamps []Stamp
+		names  []string
+	}{
+		"none":      {nil, nil},
+		"missing":   {[]Stamp{{"a", source}, {"b", ""}}, []string{"b"}},
+		"malformed": {[]Stamp{{"a", source}, {"b", "XYZ"}}, []string{"b"}},
+		"differing": {[]Stamp{{"a", source}, {"b", other}}, []string{"b"}},
+	} {
+		_, err := AgreedSource(c.stamps)
+		if err == nil {
+			t.Errorf("%s: accepted", name)
+			continue
+		}
+		for _, n := range c.names {
+			if !strings.Contains(err.Error(), n) || strings.Contains(err.Error(), other) {
+				t.Errorf("%s: error %q", name, err)
+			}
+		}
+	}
+}
 
 func TestNewRefusesAVacuousOrMalformedEnvelope(t *testing.T) {
 	ok := []Row{{ID: "a", Status: StatusPassed}}
@@ -30,12 +58,18 @@ func TestNewRefusesAVacuousOrMalformedEnvelope(t *testing.T) {
 		"duplicate row":     {KindBrowser, commit, []string{"a"}, append(ok, ok...)},
 		"row without state": {KindBrowser, commit, []string{"a"}, []Row{{ID: "a"}}},
 	} {
-		if _, err := New(c.kind, c.commit, c.expected, c.rows); err == nil {
+		if _, err := New(c.kind, c.commit, source, c.expected, c.rows); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
 	}
+	if _, err := New(KindBrowser, commit, "", []string{"a"}, ok); err == nil {
+		t.Error("empty source accepted")
+	}
+	if _, err := New(KindBrowser, commit, strings.ToUpper(source), []string{"a"}, ok); err == nil {
+		t.Error("upper-case source accepted")
+	}
 	// Failing and missing rows are valid envelopes: the gate decides.
-	rep, err := New(KindNodeLoss, commit, []string{"a", "b"}, []Row{{ID: "a", Status: StatusFailed, Detail: "boom"}})
+	rep, err := New(KindNodeLoss, commit, source, []string{"a", "b"}, []Row{{ID: "a", Status: StatusFailed, Detail: "boom"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +85,7 @@ func TestNewRefusesAVacuousOrMalformedEnvelope(t *testing.T) {
 }
 
 func TestWriteIsAtomicStrictEnvelopeJSON(t *testing.T) {
-	rep, err := New(KindLanguage, commit, []string{"b", "a"}, []Row{{ID: "a", Status: StatusPassed}, {ID: "b", Status: "not_exercised", Detail: "no runner"}})
+	rep, err := New(KindLanguage, commit, source, []string{"b", "a"}, []Row{{ID: "a", Status: StatusPassed}, {ID: "b", Status: "not_exercised", Detail: "no runner"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +111,7 @@ func TestWriteIsAtomicStrictEnvelopeJSON(t *testing.T) {
 		t.Fatalf("round trip %+v", back)
 	}
 	var fields map[string]json.RawMessage
-	if err = json.Unmarshal(raw, &fields); err != nil || len(fields) != 5 {
+	if err = json.Unmarshal(raw, &fields); err != nil || len(fields) != 6 || back.SourceSHA256 != source {
 		t.Fatalf("fields %v %v", fields, err)
 	}
 	entries, _ := os.ReadDir(filepath.Dir(path))

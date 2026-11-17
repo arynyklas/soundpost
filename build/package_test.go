@@ -20,6 +20,7 @@ import (
 
 const testCommit = "0123456789abcdef0123456789abcdef01234567"
 const testVersion = "1.2.3"
+const testSource = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
 
 // signFor and approveFor stand in for the owner: the build tool itself has no signing code.
 func signFor(priv ed25519.PrivateKey, manifest []byte) []byte {
@@ -110,7 +111,7 @@ func newFixture(t *testing.T) *fixture {
 	bsum := sha256.Sum256([]byte(bin))
 	bhex := hex.EncodeToString(bsum[:])
 	write(t, filepath.Join(f.art, "SHA256SUMS"), bhex+"  linux-amd64/soundpost\n")
-	man, _ := json.Marshal(Manifest{Version: testVersion, Commit: testCommit, Reproducibility: Reproducibility{Checked: true, Equal: true},
+	man, _ := json.Marshal(Manifest{Version: testVersion, Commit: testCommit, BuildID: "sha256:" + testSource + "+ui:0123456789abcdef", Reproducibility: Reproducibility{Checked: true, Equal: true},
 		Binaries: []Binary{{Platform: "linux/amd64", Name: "soundpost", SHA256: bhex}}})
 	write(t, filepath.Join(f.art, "release.json"), string(man))
 	pub, priv, err := ed25519.GenerateKey(nil)
@@ -142,7 +143,7 @@ func (f *fixture) setLedger(states ...string) {
 }
 
 func (f *fixture) writeEvidence(path, kind, status string) {
-	raw, _ := json.Marshal(EvidenceReport{Schema: evidenceSchema, Kind: kind, Commit: testCommit, Expected: []string{"row-1"},
+	raw, _ := json.Marshal(EvidenceReport{Schema: evidenceSchema, Kind: kind, Commit: testCommit, SourceSHA256: testSource, Expected: []string{"row-1"},
 		Rows: []EvidenceRow{{ID: "row-1", Status: status}}})
 	write(f.t, path, string(raw))
 }
@@ -385,17 +386,30 @@ func TestEvidenceReportsAreNamedAndNeverSelfAsserted(t *testing.T) {
 		{"no path", func(f *fixture) { delete(f.evidence, "browser") }, "evidence_browser: browser evidence report missing: no path"},
 		{"skipped row", func(f *fixture) { f.writeEvidence(f.evidence["language"], "language", "skipped") }, "language row row-1 is skipped"},
 		{"wrong commit", func(f *fixture) {
-			raw, _ := json.Marshal(EvidenceReport{Schema: evidenceSchema, Kind: "runtime", Commit: "deadbeef", Expected: []string{"row-1"}, Rows: []EvidenceRow{{ID: "row-1", Status: "passed"}}})
+			raw, _ := json.Marshal(EvidenceReport{Schema: evidenceSchema, Kind: "runtime", Commit: "deadbeef", SourceSHA256: testSource, Expected: []string{"row-1"}, Rows: []EvidenceRow{{ID: "row-1", Status: "passed"}}})
 			write(t, f.evidence["runtime"], string(raw))
 		}, "runtime evidence is for commit"},
 		{"expected row absent", func(f *fixture) {
-			raw, _ := json.Marshal(EvidenceReport{Schema: evidenceSchema, Kind: "node_loss", Commit: testCommit, Expected: []string{"row-1", "row-2"}, Rows: []EvidenceRow{{ID: "row-1", Status: "passed"}}})
+			raw, _ := json.Marshal(EvidenceReport{Schema: evidenceSchema, Kind: "node_loss", Commit: testCommit, SourceSHA256: testSource, Expected: []string{"row-1", "row-2"}, Rows: []EvidenceRow{{ID: "row-1", Status: "passed"}}})
 			write(t, f.evidence["node_loss"], string(raw))
 		}, "node_loss expected row row-2 has no result"},
 		{"no expected rows", func(f *fixture) {
-			raw, _ := json.Marshal(EvidenceReport{Schema: evidenceSchema, Kind: "runtime", Commit: testCommit, Rows: []EvidenceRow{{ID: "row-1", Status: "passed"}}})
+			raw, _ := json.Marshal(EvidenceReport{Schema: evidenceSchema, Kind: "runtime", Commit: testCommit, SourceSHA256: testSource, Rows: []EvidenceRow{{ID: "row-1", Status: "passed"}}})
 			write(t, f.evidence["runtime"], string(raw))
 		}, "runtime evidence declares no expected rows"},
+		{"evidence without source stamp", func(f *fixture) {
+			raw, _ := json.Marshal(EvidenceReport{Schema: evidenceSchema, Kind: "runtime", Commit: testCommit, Expected: []string{"row-1"}, Rows: []EvidenceRow{{ID: "row-1", Status: "passed"}}})
+			write(t, f.evidence["runtime"], string(raw))
+		}, "runtime evidence carries no source stamp"},
+		{"evidence from another source", func(f *fixture) {
+			raw, _ := json.Marshal(EvidenceReport{Schema: evidenceSchema, Kind: "runtime", Commit: testCommit, SourceSHA256: strings.Repeat("e", 64), Expected: []string{"row-1"}, Rows: []EvidenceRow{{ID: "row-1", Status: "passed"}}})
+			write(t, f.evidence["runtime"], string(raw))
+		}, "runtime evidence ran against source " + strings.Repeat("e", 64) + ", not the release's " + testSource},
+		{"release without build_id", func(f *fixture) {
+			man, _ := json.Marshal(Manifest{Version: testVersion, Commit: testCommit, Reproducibility: Reproducibility{Checked: true, Equal: true},
+				Binaries: []Binary{{Platform: "linux/amd64", Name: "soundpost", SHA256: "x"}}})
+			write(t, filepath.Join(f.art, "release.json"), string(man))
+		}, "release.json carries no build_id source digest"},
 		{"kind mismatch", func(f *fixture) { f.writeEvidence(f.evidence["browser"], "privacy", "passed") }, "browser evidence report has schema"},
 		{"self asserted pass field", func(f *fixture) {
 			write(t, f.evidence["browser"], `{"schema":"`+evidenceSchema+`","kind":"browser","commit":"`+testCommit+`","passed":true,"expected_rows":["a"],"rows":[]}`)
@@ -697,7 +711,7 @@ func TestGateAcceptsOutOfReleaseScopeOnlyForPlatformsOutsideTheRelease(t *testin
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFixture(t).signed()
-			raw, _ := json.Marshal(EvidenceReport{Schema: evidenceSchema, Kind: "runtime", Commit: testCommit, Expected: []string{"row-1"}, Rows: []EvidenceRow{tc.row}})
+			raw, _ := json.Marshal(EvidenceReport{Schema: evidenceSchema, Kind: "runtime", Commit: testCommit, SourceSHA256: testSource, Expected: []string{"row-1"}, Rows: []EvidenceRow{tc.row}})
 			write(t, f.evidence["runtime"], string(raw))
 			r := f.reports()
 			r.ApprovalPath = f.approve(testCommit)
@@ -721,7 +735,7 @@ func TestGateAcceptsOutOfReleaseScopeOnlyForPlatformsOutsideTheRelease(t *testin
 func TestReleaseRejectsMissingNativeReplaySSOOrProfileEvidence(t *testing.T) {
 	for _, row := range []string{"runtime.native.linux-6.6.amd64.cpu", "browser.replay.chrome-142", "privacy.sso.oidc", "runtime.profile.view"} {
 		f := newFixture(t).signed()
-		raw, _ := json.Marshal(EvidenceReport{Schema: evidenceSchema, Kind: "runtime", Commit: testCommit, Expected: []string{"row-1", row}, Rows: []EvidenceRow{{ID: "row-1", Status: "passed"}}})
+		raw, _ := json.Marshal(EvidenceReport{Schema: evidenceSchema, Kind: "runtime", Commit: testCommit, SourceSHA256: testSource, Expected: []string{"row-1", row}, Rows: []EvidenceRow{{ID: "row-1", Status: "passed"}}})
 		write(t, f.evidence["runtime"], string(raw))
 		r := f.reports()
 		r.ApprovalPath = f.approve(testCommit)

@@ -1214,7 +1214,10 @@ func (j *journeyRun) finish() error {
 		}
 		fmt.Fprintf(os.Stderr, "  %-13s %-45s %s %s\n", state, r.Name, r.Reason, r.Detail)
 	}
-	out := map[string]any{"observation": j.obs, "rows": j.rows}
+	out, err := stampedDocument(map[string]any{"observation": j.obs, "rows": j.rows})
+	if err != nil {
+		return err
+	}
 	raw, _ := json.MarshalIndent(out, "", "  ")
 	if err := os.WriteFile(filepath.Join(j.artDir, "observed.json"), raw, 0o600); err != nil {
 		return err

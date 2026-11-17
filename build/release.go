@@ -78,12 +78,67 @@ func run(args []string, out io.Writer) error {
 		return runArtifacts(args[1:], out)
 	case "image-context":
 		return runImageContext(args[1:])
+	case "source-digest":
+		return runSourceDigest(args[1:], out)
 	case "inventory":
 		return runInventory(args[1:], out)
 	case "sbom", "notices", "gate", "verify-signature", "handles":
 		return runPackage(args[0], args[1:], out)
 	}
 	return fmt.Errorf("unknown command %q", args[0])
+}
+
+// runSourceDigest prints releaseevidence.SourceDigest of --root: the identity producers stamp in their
+// reports and `release` records as the first component of build_id.
+func runSourceDigest(args []string, out io.Writer) error {
+	f := flag.NewFlagSet("source-digest", flag.ContinueOnError)
+	root := f.String("root", ".", "repository root")
+	if err := f.Parse(args); err != nil {
+		return err
+	}
+	if f.NArg() != 0 {
+		return errors.New("source-digest takes no arguments")
+	}
+	sum, err := releaseevidence.SourceDigest(*root)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(out, sum)
+	return err
+}
+
+// releaseCommands are the shipped commands `release` builds (static, per architecture), in order.
+// soundpost-perf-acquire is the native acquisition helper: it is packaged only by its own
+// image (deploy/Dockerfile.perf-helper), never in the server image.
+var releaseCommands = []string{"soundpost", "soundpost-agent", "soundpost-perf-acquire"}
+
+// imageKind names one image the release packages: the release binary it carries, the Dockerfile
+// that declares it, and whether it needs the (empty, runtime-owned) data directory in its context.
+type imageKind struct {
+	binary, dockerfile string
+	dataDir            bool
+}
+
+var imageKinds = map[string]imageKind{
+	"server":      {binary: "soundpost", dockerfile: "Dockerfile", dataDir: true},
+	"perf-helper": {binary: "soundpost-perf-acquire", dockerfile: "Dockerfile.perf-helper"},
+}
+
+// listedBinary returns the release binary of an architecture and its sha256, only when the
+// release's own SHA256SUMS lists exactly that content.
+func listedBinary(release, arch, name string) (path, sum string, err error) {
+	path = filepath.Join(release, "linux-"+arch, name)
+	if sum, err = sha256File(path); err != nil {
+		return "", "", err
+	}
+	sums, err := os.ReadFile(filepath.Join(release, "SHA256SUMS"))
+	if err != nil {
+		return "", "", err
+	}
+	if !strings.Contains(string(sums), sum+"  linux-"+arch+"/"+name+"\n") {
+		return "", "", fmt.Errorf("the binary %s is not the one SHA256SUMS lists", name)
+	}
+	return path, sum, nil
 }
 
 // pins is the part of build/toolchains.json the release uses; the file is read, never rewritten.
@@ -235,43 +290,46 @@ func verifyArchiveTree(archive, want, goroot string) (int, error) {
 	return len(members), nil
 }
 
-// runImageContext writes the exact build context deploy/Dockerfile expects: the release binary,
-// copied only after its sha256 is found in the release's own SHA256SUMS, and an empty data/.
+// runImageContext writes the exact build context a Dockerfile under deploy/ expects: the release
+// binary, copied only after its sha256 is found in the release's own SHA256SUMS (and, for the
+// server image, an empty data/).
 func runImageContext(args []string) error {
 	f := flag.NewFlagSet("image-context", flag.ContinueOnError)
 	release := f.String("release", "", "release directory")
 	arch := f.String("arch", "amd64", "linux architecture")
 	out := f.String("out", "", "context directory (created)")
-	root := f.String("root", ".", "repository root (for deploy/Dockerfile)")
+	root := f.String("root", ".", "repository root (for the Dockerfile under deploy/)")
+	image := f.String("image", "server", "image to make a context for: server (deploy/Dockerfile) or perf-helper (deploy/Dockerfile.perf-helper)")
 	if err := f.Parse(args); err != nil {
 		return err
 	}
 	if *release == "" || *out == "" {
 		return errors.New("--release and --out are required")
 	}
-	binary := filepath.Join(*release, "linux-"+*arch, "soundpost")
-	sum, err := sha256File(binary)
+	kind, ok := imageKinds[*image]
+	if !ok {
+		return fmt.Errorf("unknown --image %q (server or perf-helper)", *image)
+	}
+	binary, sum, err := listedBinary(*release, *arch, kind.binary)
 	if err != nil {
 		return err
 	}
-	sums, err := os.ReadFile(filepath.Join(*release, "SHA256SUMS"))
-	if err != nil {
+	if err = os.MkdirAll(*out, 0o755); err != nil {
 		return err
 	}
-	if !strings.Contains(string(sums), sum+"  linux-"+*arch+"/soundpost\n") {
-		return errors.New("the binary is not the one SHA256SUMS lists")
-	}
-	if err = os.MkdirAll(filepath.Join(*out, "data"), 0o755); err != nil {
-		return err
+	if kind.dataDir {
+		if err = os.MkdirAll(filepath.Join(*out, "data"), 0o755); err != nil {
+			return err
+		}
 	}
 	raw, err := os.ReadFile(binary)
 	if err != nil {
 		return err
 	}
-	if err = os.WriteFile(filepath.Join(*out, "soundpost"), raw, 0o755); err != nil {
+	if err = os.WriteFile(filepath.Join(*out, kind.binary), raw, 0o755); err != nil {
 		return err
 	}
-	docker, err := os.ReadFile(filepath.Join(*root, "deploy", "Dockerfile"))
+	docker, err := os.ReadFile(filepath.Join(*root, "deploy", kind.dockerfile))
 	if err != nil {
 		return err
 	}
@@ -480,61 +538,6 @@ func verifyPnpmPin(root string, p pins, in *Inputs) error {
 	return nil
 }
 
-// treeDigest hashes a directory deterministically: sorted slash paths with each file's sha256.
-func treeDigest(root string, include func(rel string) bool) (string, int, error) {
-	type entry struct{ rel, sum string }
-	var entries []entry
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return err
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		rel = filepath.ToSlash(rel)
-		if include != nil && !include(rel) {
-			return nil
-		}
-		sum, err := sha256File(path)
-		entries = append(entries, entry{rel, sum})
-		return err
-	})
-	if err != nil {
-		return "", 0, err
-	}
-	sort.Slice(entries, func(i, j int) bool { return entries[i].rel < entries[j].rel })
-	h := sha256.New()
-	for _, e := range entries {
-		fmt.Fprintf(h, "%s %s\n", e.sum, e.rel)
-	}
-	return hex.EncodeToString(h.Sum(nil)), len(entries), nil
-}
-
-// sourceDigest is the build identity input: every non-test Go source and embedded profile of
-// the server plus the module files, independent of version control (a release tree may not be
-// a git checkout) and of the staged UI copy.
-func sourceDigest(root string) (string, error) {
-	h := sha256.New()
-	for _, dir := range []string{"cmd", "internal", "profiles"} {
-		sum, n, err := treeDigest(filepath.Join(root, dir), func(rel string) bool {
-			return !strings.HasSuffix(rel, "_test.go") && !strings.HasPrefix(rel, "soundpost/webdist/")
-		})
-		if err != nil {
-			return "", err
-		}
-		fmt.Fprintf(h, "%s %s %d\n", dir, sum, n)
-	}
-	for _, name := range []string{"go.mod", "go.sum"} {
-		sum, err := sha256File(filepath.Join(root, name))
-		if err != nil {
-			return "", err
-		}
-		fmt.Fprintf(h, "%s %s\n", name, sum)
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
-}
-
 // Binary is one produced artifact.
 type Binary struct {
 	Platform string `json:"platform"`
@@ -610,7 +613,7 @@ func stageUI(root, dist string) (digest string, files int, err error) {
 	if err != nil || !bytes.Contains(index, []byte(`id="root"`)) {
 		return "", 0, errors.New("web dist has no built index.html (build it with the pinned Node and `pnpm --filter @soundpost/web build`)")
 	}
-	if digest, files, err = treeDigest(dist, nil); err != nil {
+	if digest, files, err = releaseevidence.TreeDigest(dist, nil); err != nil {
 		return "", 0, err
 	}
 	staged := filepath.Join(root, "cmd", "soundpost", "webdist")
@@ -703,13 +706,13 @@ func runRelease(args []string, out io.Writer) error {
 		return err
 	}
 	defer os.RemoveAll(filepath.Join(absRoot, "cmd", "soundpost", "webdist"))
-	buildID, err := sourceDigest(absRoot)
+	buildID, err := releaseevidence.SourceDigest(absRoot)
 	if err != nil {
 		return err
 	}
 	plan := buildPlan{root: absRoot, goBin: goBinary(absRoot), version: *version, commit: *commit, buildID: "sha256:" + buildID + "+ui:" + uiDigest[:16], arches: strings.Split(*arches, ",")}
 	manifest := Manifest{Version: *version, Commit: *commit, BuildID: plan.buildID, Inputs: inputs, UIDigest: uiDigest, UIFiles: uiFiles, BuildFlags: append([]string{"CGO_ENABLED=0"}, plan.flags()...)}
-	for _, name := range []string{"soundpost", "soundpost-agent"} {
+	for _, name := range releaseCommands {
 		if _, err := os.Stat(filepath.Join(absRoot, "cmd", name, "main.go")); err == nil {
 			plan.commands = append(plan.commands, name)
 		} else {

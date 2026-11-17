@@ -92,7 +92,8 @@ services:
   # exist, so an unconfigured `--profile native` fails closed instead of starting with host-wide
   # visibility. (Compose interpolates every service, so a required-variable form would break the
   # default three-member stack.)
-  # The helper image is separate from the server image: cmd/soundpost-perf-acquire.
+  # The helper image is separate from the server image: cmd/soundpost-perf-acquire, built from
+  # deploy/Dockerfile.perf-helper (`go run ./build image-context --image perf-helper ...`).
   soundpost-perf-helper:
     profiles: ["native"]
     image: ${SOUNDPOST_PERF_HELPER_IMAGE:-soundpost-perf-helper:unset}

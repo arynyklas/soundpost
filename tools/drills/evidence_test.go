@@ -14,6 +14,7 @@ import (
 )
 
 const drillCommit = "0123456789abcdef0123456789abcdef01234567"
+const drillSource = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
 
 const evidenceManifest = `version: 1
 allowlist:
@@ -39,7 +40,16 @@ scenarios:
     description: d
 `
 
+// writeDrillReport stamps the report with drillSource unless it carries a stamp already.
 func writeDrillReport(t *testing.T, dir string, rep Report) {
+	t.Helper()
+	if rep.SourceSHA256 == "" {
+		rep.SourceSHA256 = drillSource
+	}
+	writeDrillReportRaw(t, dir, rep)
+}
+
+func writeDrillReportRaw(t *testing.T, dir string, rep Report) {
 	t.Helper()
 	raw, err := json.Marshal(rep)
 	if err != nil {
@@ -156,6 +166,36 @@ func TestNodeLossEvidenceNeedsTaggedScenarios(t *testing.T) {
 	}
 	if _, err := ParseManifest([]byte(strings.Replace(evidenceManifest, "evidence: node_loss", "evidence: everything", 1))); err == nil {
 		t.Fatal("an unknown evidence tag was accepted")
+	}
+}
+
+// Every drill report must carry a stamp and all stamps must agree; the envelope carries the shared one.
+func TestNodeLossEvidenceRequiresOneSharedSourceStamp(t *testing.T) {
+	m, _ := ParseManifest([]byte(evidenceManifest))
+	other := strings.Repeat("1", 64)
+	mk := func(name, source string) Report {
+		return Report{Scenario: name, Target: TargetName, Status: StatusFailed, Reason: "x", SourceSHA256: source}
+	}
+	for name, c := range map[string][]Report{
+		"missing stamp":    {mk("kill", drillSource), mk("pause", "")},
+		"differing stamps": {mk("kill", drillSource), mk("pause", other)},
+		"no report":        nil,
+	} {
+		dir := t.TempDir()
+		for _, r := range c {
+			writeDrillReportRaw(t, dir, r)
+		}
+		_, err := NodeLossEvidence(m, dir, drillCommit)
+		if err == nil || strings.Contains(err.Error(), other) || (len(c) > 0 && !strings.Contains(err.Error(), "pause report")) {
+			t.Errorf("%s: error %v", name, err)
+		}
+	}
+	dir := t.TempDir()
+	writeDrillReportRaw(t, dir, mk("kill", drillSource))
+	writeDrillReportRaw(t, dir, mk("pause", drillSource))
+	env, err := NodeLossEvidence(m, dir, drillCommit)
+	if err != nil || env.SourceSHA256 != drillSource {
+		t.Fatalf("equal stamps: %v %q", err, env.SourceSHA256)
 	}
 }
 

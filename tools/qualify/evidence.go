@@ -134,7 +134,11 @@ func QueryCampaignEvidence(m QueryMatrix, rep CampaignReport, commit string) (re
 		d := releaseevidence.Detail(append([]string{"report " + r.Report + " sha256 " + r.ReportSHA256}, r.Failures...)...)
 		rows = append(rows, row(s.id, r.Verified, d))
 	}
-	return releaseevidence.New(releaseevidence.KindLanguage, commit, expected, rows)
+	source, err := releaseevidence.AgreedSource([]releaseevidence.Stamp{{Name: "campaign report", Source: rep.SourceSHA256}})
+	if err != nil {
+		return releaseevidence.Report{}, err
+	}
+	return releaseevidence.New(releaseevidence.KindLanguage, commit, source, expected, rows)
 }
 
 func campaignKey(kind, profile, layout string, seed uint64) string {
@@ -231,7 +235,15 @@ func SuiteEvidence(kind, matrixPath string, reports []SuiteReport, commit string
 		}
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].ID < rows[j].ID })
-	return releaseevidence.New(kind, commit, expected, rows)
+	var stamps []releaseevidence.Stamp
+	for _, rep := range reports {
+		stamps = append(stamps, releaseevidence.Stamp{Name: string(rep.Suite) + " suite report", Source: rep.SourceSHA256})
+	}
+	source, err := releaseevidence.AgreedSource(stamps)
+	if err != nil {
+		return releaseevidence.Report{}, err
+	}
+	return releaseevidence.New(kind, commit, source, expected, rows)
 }
 
 func suiteRow(r Row) releaseevidence.Row {

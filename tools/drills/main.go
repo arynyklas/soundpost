@@ -30,6 +30,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/arynyklas/soundpost/internal/releaseevidence"
 	"gopkg.in/yaml.v3"
 )
 
@@ -213,6 +214,7 @@ const (
 type Report struct {
 	Scenario       string           `json:"scenario"`
 	Target         string           `json:"target"`
+	SourceSHA256   string           `json:"source_sha256"`
 	Status         Status           `json:"status"`
 	Reason         string           `json:"reason,omitempty"`
 	StartedAt      string           `json:"started_at"`
@@ -340,6 +342,11 @@ func Execute(ctx context.Context, m *Manifest, name, target, root, binary, repor
 		if rep.timeline != nil {
 			rep.Notifications = rep.timeline.Events()
 		}
+		digest, err := releaseevidence.CurrentSourceDigest()
+		if err != nil {
+			return rep, fmt.Errorf("source digest for the report stamp: %w", err)
+		}
+		rep.SourceSHA256 = digest
 		encoded, err := json.MarshalIndent(rep, "", "  ")
 		if err != nil {
 			return rep, err

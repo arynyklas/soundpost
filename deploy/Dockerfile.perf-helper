@@ -1,0 +1,34 @@
+# Copyright 2026 Aryn Yklas
+# SPDX-License-Identifier: Apache-2.0
+#
+# Soundpost native acquisition helper image (cmd/soundpost-perf-acquire), separate from the
+# server image: the server never holds CAP_PERFMON and never carries this binary. The build
+# context is made by
+# `go run ./build image-context --image perf-helper --release DIST --arch amd64 --out CTX` and holds exactly:
+#   soundpost-perf-acquire   the verified static binary (its sha256 is checked against DIST/SHA256SUMS)
+# Nothing is downloaded, copied from the network or run during the image build, so it works with
+# `docker build --network=none -f Dockerfile.perf-helper`. FROM scratch pulls no base image.
+#
+# The helper runs as uid 0 holding ONLY CAP_PERFMON (deploy/compose.distributed.yaml profile
+# "native", chart perfHelper): Docker and Kubernetes have no ambient capabilities, so a non-root
+# container process with cap_add PERFMON is still denied. It is started with every other capability
+# dropped, no-new-privileges, the audited seccomp profile (deploy/seccomp/soundpost-perf.json),
+# no network, a read-only root, and an operator policy bind-mounted at /etc/soundpost/perf-policy.json
+# that it refuses unless root-owned and not group/world-writable. It listens on a unix socket in
+# /run/soundpost-perf, which the manifests mount (tmpfs / host path); the image has no such directory,
+# no listener port and no data volume.
+FROM scratch
+
+ARG SOUNDPOST_VERSION=unset
+ARG SOUNDPOST_SHA256=unset
+LABEL org.opencontainers.image.title="soundpost-perf-helper" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.version="${SOUNDPOST_VERSION}" \
+      org.soundpost.binary.sha256="${SOUNDPOST_SHA256}"
+
+COPY --chown=0:0 --chmod=0555 soundpost-perf-acquire /soundpost-perf-acquire
+
+USER 0:0
+
+STOPSIGNAL SIGTERM
+ENTRYPOINT ["/soundpost-perf-acquire"]

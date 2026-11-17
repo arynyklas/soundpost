@@ -15,6 +15,7 @@ import (
 )
 
 const evidenceCommit = "0123456789abcdef0123456789abcdef01234567"
+const evidenceSource = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
 
 func statusOf(rep releaseevidence.Report) map[string]string {
 	m := map[string]string{}
@@ -43,7 +44,7 @@ func campaignFixture(t *testing.T) (QueryMatrix, CampaignReport) {
 	if len(specs) != 8 {
 		t.Fatalf("the locked policy and matrix require %d campaign rows, the fixture assumes 8", len(specs))
 	}
-	rep := CampaignReport{Schema: campaignSchema, Missing: []string{}, Failures: []string{}, Verified: true}
+	rep := CampaignReport{Schema: campaignSchema, Missing: []string{}, Failures: []string{}, Verified: true, SourceSHA256: evidenceSource}
 	for _, s := range specs {
 		rep.Rows = append(rep.Rows, RowResult{ID: "matrix-" + s.id, Kind: s.kind, Profile: s.profile, Seed: s.seed, Layout: s.layout,
 			Report: s.kind + ".json", ReportSHA256: "abc", Verified: true})
@@ -152,6 +153,19 @@ func TestQueryCampaignEvidenceRefusesAForeignReport(t *testing.T) {
 	}
 }
 
+func TestQueryCampaignEvidenceRequiresTheStamp(t *testing.T) {
+	m, rep := campaignFixture(t)
+	rep.SourceSHA256 = ""
+	if _, err := QueryCampaignEvidence(m, rep, evidenceCommit); err == nil || !strings.Contains(err.Error(), "campaign report") {
+		t.Fatalf("an unstamped campaign report was exported: %v", err)
+	}
+	rep.SourceSHA256 = evidenceSource
+	env, err := QueryCampaignEvidence(m, rep, evidenceCommit)
+	if err != nil || env.SourceSHA256 != evidenceSource {
+		t.Fatalf("stamped campaign: %v %q", err, env.SourceSHA256)
+	}
+}
+
 func TestReadCampaignReportIsStrict(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "campaign-report.json")
@@ -213,7 +227,7 @@ func evidenceMatrixFile(t *testing.T) (string, string) {
 
 func TestSuiteEvidenceKeepsEveryRowVerdict(t *testing.T) {
 	path, sum := evidenceMatrixFile(t)
-	runtimeRep := SuiteReport{Suite: SuiteRuntime, MatrixSHA: sum, Rows: []Row{
+	runtimeRep := SuiteReport{Suite: SuiteRuntime, MatrixSHA: sum, SourceSHA256: evidenceSource, Rows: []Row{
 		suiteRowFixture("runtime.pass", SuiteRuntime, true, StateExercised, OutcomePassed),
 		suiteRowFixture("runtime.fail", SuiteRuntime, true, StateExercised, OutcomeFailed),
 		suiteRowFixture("runtime.unexercised", SuiteRuntime, true, StateNotExercised, ""),
@@ -223,7 +237,7 @@ func TestSuiteEvidenceKeepsEveryRowVerdict(t *testing.T) {
 		suiteRowFixture("runtime.optional", SuiteRuntime, false, StateNotExercised, ""),
 		suiteRowFixture("runtime.optional-fail", SuiteRuntime, false, StateExercised, OutcomeFailed),
 	}}
-	overheadRep := SuiteReport{Suite: SuiteOverhead, MatrixSHA: sum, Rows: []Row{suiteRowFixture("overhead.pass", SuiteOverhead, true, StateExercised, OutcomePassed)}}
+	overheadRep := SuiteReport{Suite: SuiteOverhead, MatrixSHA: sum, SourceSHA256: evidenceSource, Rows: []Row{suiteRowFixture("overhead.pass", SuiteOverhead, true, StateExercised, OutcomePassed)}}
 
 	env, err := SuiteEvidence(releaseevidence.KindRuntime, path, []SuiteReport{runtimeRep, overheadRep}, evidenceCommit)
 	if err != nil {
@@ -262,11 +276,11 @@ func TestSuiteEvidenceKeepsEveryRowVerdict(t *testing.T) {
 func TestSuiteEvidenceRefusesReportsThatDoNotBelong(t *testing.T) {
 	path, sum := evidenceMatrixFile(t)
 	good := func() SuiteReport {
-		return SuiteReport{Suite: SuiteRuntime, MatrixSHA: sum, Rows: []Row{suiteRowFixture("runtime.pass", SuiteRuntime, true, StateExercised, OutcomePassed)}}
+		return SuiteReport{Suite: SuiteRuntime, MatrixSHA: sum, SourceSHA256: evidenceSource, Rows: []Row{suiteRowFixture("runtime.pass", SuiteRuntime, true, StateExercised, OutcomePassed)}}
 	}
 	other := good()
 	other.MatrixSHA = strings.Repeat("0", 64)
-	privacy := SuiteReport{Suite: SuitePrivacy, MatrixSHA: sum}
+	privacy := SuiteReport{Suite: SuitePrivacy, MatrixSHA: sum, SourceSHA256: evidenceSource}
 	crossed := good()
 	crossed.Rows[0].Suite = SuitePrivacy
 	for name, c := range map[string]struct {
@@ -285,9 +299,36 @@ func TestSuiteEvidenceRefusesReportsThatDoNotBelong(t *testing.T) {
 		}
 	}
 	// Privacy reports are exported on their own.
-	env, err := SuiteEvidence(releaseevidence.KindPrivacy, path, []SuiteReport{{Suite: SuitePrivacy, MatrixSHA: sum, Rows: []Row{suiteRowFixture("privacy.pass", SuiteRuntime, true, StateExercised, OutcomePassed)}}}, evidenceCommit)
+	env, err := SuiteEvidence(releaseevidence.KindPrivacy, path, []SuiteReport{{Suite: SuitePrivacy, MatrixSHA: sum, SourceSHA256: evidenceSource, Rows: []Row{suiteRowFixture("privacy.pass", SuiteRuntime, true, StateExercised, OutcomePassed)}}}, evidenceCommit)
 	if err == nil {
 		t.Fatalf("a runtime-suite row inside a privacy report was exported: %+v", env)
+	}
+}
+
+// A suite report without a stamp, or two suite reports stamped against different trees, are refused
+// by name; equal stamps export and the envelope carries the shared stamp.
+func TestSuiteEvidenceRequiresOneSharedSourceStamp(t *testing.T) {
+	path, sum := evidenceMatrixFile(t)
+	mk := func(suite Suite, id, source string) SuiteReport {
+		return SuiteReport{Suite: suite, MatrixSHA: sum, SourceSHA256: source, Rows: []Row{suiteRowFixture(id, suite, true, StateExercised, OutcomePassed)}}
+	}
+	other := strings.Repeat("1", 64)
+	for name, c := range map[string]struct {
+		reports []SuiteReport
+		want    string
+	}{
+		"missing stamp":    {[]SuiteReport{mk(SuiteRuntime, "runtime.pass", evidenceSource), mk(SuiteOverhead, "overhead.pass", "")}, "overhead suite report"},
+		"differing stamps": {[]SuiteReport{mk(SuiteRuntime, "runtime.pass", evidenceSource), mk(SuiteOverhead, "overhead.pass", other)}, "overhead suite report"},
+		"no reports":       {nil, "no input report"},
+	} {
+		_, err := SuiteEvidence(releaseevidence.KindRuntime, path, c.reports, evidenceCommit)
+		if err == nil || !strings.Contains(err.Error(), c.want) || strings.Contains(err.Error(), other) {
+			t.Errorf("%s: error %v, want %q", name, err, c.want)
+		}
+	}
+	env, err := SuiteEvidence(releaseevidence.KindRuntime, path, []SuiteReport{mk(SuiteRuntime, "runtime.pass", evidenceSource), mk(SuiteOverhead, "overhead.pass", evidenceSource)}, evidenceCommit)
+	if err != nil || env.SourceSHA256 != evidenceSource {
+		t.Fatalf("equal stamps: %v %q", err, env.SourceSHA256)
 	}
 }
 

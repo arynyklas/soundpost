@@ -55,7 +55,10 @@ func artifactFixture(t *testing.T) (root, release string) {
 	bin := "\x7fELF static binary stand-in\n"
 	sum := sha256.Sum256([]byte(bin))
 	write(release, "linux-amd64/soundpost", bin)
-	write(release, "SHA256SUMS", hex.EncodeToString(sum[:])+"  linux-amd64/soundpost\n")
+	helper := "\x7fELF perf helper stand-in\n"
+	helperSum := sha256.Sum256([]byte(helper))
+	write(release, "linux-amd64/soundpost-perf-acquire", helper)
+	write(release, "SHA256SUMS", hex.EncodeToString(sum[:])+"  linux-amd64/soundpost\n"+hex.EncodeToString(helperSum[:])+"  linux-amd64/soundpost-perf-acquire\n")
 	write(release, "release.json", `{"version": "1.2.3"}`)
 	return root, release
 }
@@ -93,8 +96,8 @@ func TestArtifactsAreByteIdenticalAcrossBuildsDespiteMtimesAndOutputDirs(t *test
 		t.Fatal(err)
 	}
 	da, db := artifactDigests(t, a), artifactDigests(t, b)
-	if len(da) != 1+len(npmWorkspaces)+1 {
-		t.Fatalf("want a wheel, %d npm packages and an image, got %v", len(npmWorkspaces), da)
+	if len(da) != 1+len(npmWorkspaces)+2 {
+		t.Fatalf("want a wheel, %d npm packages and two images (server, perf helper), got %v", len(npmWorkspaces), da)
 	}
 	for p, sum := range da {
 		if db[p] != sum {
@@ -445,5 +448,155 @@ func TestRunArtifactsReproduceWritesManifestAndSums(t *testing.T) {
 	}
 	if err := runArtifacts([]string{"--root", root, "--release", release, "--out", out, "--sbom", filepath.Join(out, "nonexistent")}, &buf); err == nil {
 		t.Fatal("a missing SBOM must be refused")
+	}
+}
+
+// ociParts unpacks an OCI layout tar made by buildArtifacts: its config and its single layer's entries.
+func ociParts(t *testing.T, raw []byte) (ociConfig, map[string]*tar.Header, map[string][]byte) {
+	t.Helper()
+	files := map[string][]byte{}
+	tr := tar.NewReader(bytes.NewReader(raw))
+	for {
+		h, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(tr)
+		files[h.Name] = b
+	}
+	var idx ociIndex
+	if err := json.Unmarshal(files["index.json"], &idx); err != nil || len(idx.Manifests) != 1 {
+		t.Fatalf("index: %v", err)
+	}
+	blob := func(d string) []byte { return files["blobs/sha256/"+strings.TrimPrefix(d, "sha256:")] }
+	var man ociManifest
+	if err := json.Unmarshal(blob(idx.Manifests[0].Digest), &man); err != nil || len(man.Layers) != 1 {
+		t.Fatalf("manifest: %v", err)
+	}
+	var cfg ociConfig
+	if err := json.Unmarshal(blob(man.Config.Digest), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	lz, err := gzip.NewReader(bytes.NewReader(blob(man.Layers[0].Digest)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	layer, _ := io.ReadAll(lz)
+	if blobDigest(layer) != cfg.RootFS.DiffIDs[0] {
+		t.Fatal("diff_id is not the digest of the uncompressed layer")
+	}
+	hdrs, bodies := map[string]*tar.Header{}, map[string][]byte{}
+	lt := tar.NewReader(bytes.NewReader(layer))
+	for {
+		h, err := lt.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		hdrs[h.Name] = h
+		bodies[h.Name], _ = io.ReadAll(lt)
+	}
+	return cfg, hdrs, bodies
+}
+
+// The native acquisition helper (cmd/soundpost-perf-acquire) is shipped as its own image: the
+// server image never carries it, and the helper image carries nothing but the helper.
+func TestPerfHelperImageHoldsOnlyTheReleaseHelperAndMirrorsItsDockerfile(t *testing.T) {
+	root, release := artifactFixture(t)
+	dir := t.TempDir()
+	subjects, err := buildArtifacts(root, release, dir, "amd64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var helper, server *ArtifactSubject
+	for i, s := range subjects {
+		switch s.Kind {
+		case "oci_image_perf_helper":
+			helper = &subjects[i]
+		case "oci_image":
+			server = &subjects[i]
+		}
+	}
+	if helper == nil || helper.Path != "image/soundpost-perf-helper-linux-amd64.oci.tar" || server == nil {
+		t.Fatalf("subjects %+v", subjects)
+	}
+	if helper.SHA256 == server.SHA256 || helper.Detail == server.Detail {
+		t.Fatal("the helper image is the server image")
+	}
+	raw, _ := os.ReadFile(filepath.Join(dir, filepath.FromSlash(helper.Path)))
+	cfg, hdrs, bodies := ociParts(t, raw)
+	if h := hdrs["soundpost-perf-acquire"]; h == nil || h.Mode != 0o555 || h.Uid != 0 || h.Gid != 0 || h.Typeflag != tar.TypeReg {
+		t.Fatalf("helper entry wrong: %+v", h)
+	}
+	if string(bodies["soundpost-perf-acquire"]) != "\x7fELF perf helper stand-in\n" {
+		t.Fatal("the helper image does not hold the release helper binary")
+	}
+	for name, h := range hdrs {
+		if h.Typeflag == tar.TypeReg && name != "soundpost-perf-acquire" {
+			t.Errorf("unexpected file %s in the helper image (the server binary must not be in it)", name)
+		}
+		if h.Uid != 0 || h.Gid != 0 {
+			t.Errorf("%s is owned by %d:%d; the helper image has one user, root with only CAP_PERFMON", name, h.Uid, h.Gid)
+		}
+	}
+	// The server image does not carry the helper.
+	sraw, _ := os.ReadFile(filepath.Join(dir, filepath.FromSlash(server.Path)))
+	if _, shdrs, _ := ociParts(t, sraw); shdrs["soundpost-perf-acquire"] != nil {
+		t.Error("the server image carries the perf helper")
+	}
+	// The config mirrors deploy/Dockerfile.perf-helper.
+	docker, err := os.ReadFile(filepath.Join("..", "deploy", "Dockerfile.perf-helper"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(docker)
+	one := func(instr string) string {
+		m := regexp.MustCompile(`(?m)^` + instr + ` (.+)$`).FindStringSubmatch(text)
+		if m == nil {
+			t.Fatalf("Dockerfile.perf-helper has no %s", instr)
+		}
+		return m[1]
+	}
+	var entry []string
+	if err := json.Unmarshal([]byte(one("ENTRYPOINT")), &entry); err != nil {
+		t.Fatal(err)
+	}
+	c := cfg.Config
+	if strings.Join(c.Entrypoint, "\x00") != strings.Join(entry, "\x00") || len(c.Cmd) != 0 {
+		t.Errorf("entrypoint/cmd %v %v, Dockerfile %v", c.Entrypoint, c.Cmd, entry)
+	}
+	if c.User != one("USER") || c.StopSignal != one("STOPSIGNAL") || c.User != "0:0" {
+		t.Errorf("user/stopsignal %q %q", c.User, c.StopSignal)
+	}
+	if len(c.ExposedPorts) != 0 || len(c.Volumes) != 0 {
+		t.Errorf("the helper listens on a unix socket only: ports %v volumes %v", c.ExposedPorts, c.Volumes)
+	}
+	if c.Labels["org.opencontainers.image.title"] != "soundpost-perf-helper" || c.Labels["org.opencontainers.image.version"] != "1.2.3" || len(c.Labels["org.soundpost.binary.sha256"]) != 64 {
+		t.Errorf("labels %v", c.Labels)
+	}
+	if !regexp.MustCompile(`(?m)^COPY --chown=0:0 --chmod=0555 soundpost-perf-acquire /soundpost-perf-acquire$`).MatchString(text) || !regexp.MustCompile(`(?m)^FROM scratch$`).MatchString(text) {
+		t.Error("Dockerfile.perf-helper must be FROM scratch and copy the read-only helper")
+	}
+	for _, line := range directives(text) {
+		for _, banned := range []string{"ADD ", "RUN ", "curl", "wget", "http://", "https://", "--privileged"} {
+			if strings.Contains(line, banned) {
+				t.Fatalf("the build must not fetch or execute anything: %q", line)
+			}
+		}
+	}
+}
+
+func TestPerfHelperImageRefusesABinarySHA256SUMSDoesNotList(t *testing.T) {
+	root, release := artifactFixture(t)
+	if err := os.WriteFile(filepath.Join(release, "linux-amd64", "soundpost-perf-acquire"), []byte("tampered"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := buildArtifacts(root, release, t.TempDir(), "amd64"); err == nil || !strings.Contains(err.Error(), "soundpost-perf-acquire") || !strings.Contains(err.Error(), "SHA256SUMS") {
+		t.Fatalf("want a SHA256SUMS refusal naming the helper, got %v", err)
 	}
 }

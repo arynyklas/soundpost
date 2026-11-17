@@ -31,6 +31,7 @@ import (
 	"github.com/arynyklas/soundpost/internal/httpapi"
 	"github.com/arynyklas/soundpost/internal/issues"
 	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/releaseevidence"
 	"github.com/arynyklas/soundpost/internal/replays"
 
 	recorderfixtures "github.com/arynyklas/soundpost/fixtures/replays/recorder"
@@ -114,7 +115,11 @@ func RunEvidence(args []string) (result error) {
 		}
 		fmt.Printf("row %-44s %-8s %-13s %s\n", r.ID, kind, state, r.Reason)
 	}
-	raw, err := json.MarshalIndent(map[string]any{"version": 1, "rows": rows.rows, "required_unsatisfied": unsatisfied}, "", "  ")
+	doc, err := stampedDocument(map[string]any{"version": 1, "rows": rows.rows, "required_unsatisfied": unsatisfied})
+	if err != nil {
+		return err
+	}
+	raw, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -125,6 +130,23 @@ func RunEvidence(args []string) (result error) {
 		return &smokeFailure{Stage: "evidence_rows", Code: fmt.Sprintf("%d_required_rows_unsatisfied", unsatisfied)}
 	}
 	return nil
+}
+
+// stampedDocument adds source_sha256, the digest of the source tree this producer runs against
+// (releaseevidence.SourceDigest of the module holding the working directory), to a result document, so
+// the browser exporter can refuse a result produced against other code than the release. It fails
+// closed: no digest, no document.
+func stampedDocument(doc map[string]any) (map[string]any, error) {
+	source, err := releaseevidence.CurrentSourceDigest()
+	if err != nil {
+		return nil, fmt.Errorf("source digest for the result stamp: %w", err)
+	}
+	out := make(map[string]any, len(doc)+1)
+	for k, v := range doc {
+		out[k] = v
+	}
+	out["source_sha256"] = source
+	return out, nil
 }
 
 type evidenceRow struct {

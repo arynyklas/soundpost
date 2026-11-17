@@ -58,6 +58,7 @@ func NodeLossEvidence(m *Manifest, reportDir, commit string) (releaseevidence.Re
 		return releaseevidence.Report{}, errors.New("the manifest tags no scenario for the node_loss report")
 	}
 	var rows []releaseevidence.Row
+	var stamps []releaseevidence.Stamp
 	for _, name := range expected {
 		rep, err := ReadReport(reportDir, name)
 		if errors.Is(err, os.ErrNotExist) {
@@ -69,9 +70,14 @@ func NodeLossEvidence(m *Manifest, reportDir, commit string) (releaseevidence.Re
 		if rep.Scenario != name || rep.Target != TargetName {
 			return releaseevidence.Report{}, fmt.Errorf("%s.json is the report of scenario %q on target %q", name, rep.Scenario, rep.Target)
 		}
+		stamps = append(stamps, releaseevidence.Stamp{Name: name + " report", Source: rep.SourceSHA256})
 		rows = append(rows, drillRow(name, rep))
 	}
-	return releaseevidence.New(releaseevidence.KindNodeLoss, commit, expected, rows)
+	source, err := releaseevidence.AgreedSource(stamps)
+	if err != nil {
+		return releaseevidence.Report{}, err
+	}
+	return releaseevidence.New(releaseevidence.KindNodeLoss, commit, source, expected, rows)
 }
 
 func drillRow(name string, rep Report) releaseevidence.Row {

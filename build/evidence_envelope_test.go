@@ -3,6 +3,8 @@
 package main
 
 import (
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,8 +16,13 @@ import (
 // file, keep a failing row failing, and name a row the exporter could not produce.
 func TestGateReadsWhatTheExportersWrite(t *testing.T) {
 	dir := t.TempDir()
+	man, _ := json.Marshal(Manifest{BuildID: "sha256:" + testSource + "+ui:0123456789abcdef"})
+	manPath := filepath.Join(dir, "release.json")
+	if err := os.WriteFile(manPath, man, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	write := func(kind string, expected []string, rows []releaseevidence.Row) Reports {
-		rep, err := releaseevidence.New(kind, testCommit, expected, rows)
+		rep, err := releaseevidence.New(kind, testCommit, testSource, expected, rows)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -23,7 +30,7 @@ func TestGateReadsWhatTheExportersWrite(t *testing.T) {
 		if err = rep.Write(path); err != nil {
 			t.Fatal(err)
 		}
-		return Reports{Evidence: map[string]string{kind: path}}
+		return Reports{Evidence: map[string]string{kind: path}, ArtifactManifest: manPath}
 	}
 	passed := releaseevidence.Row{ID: "a", Status: releaseevidence.StatusPassed}
 
@@ -45,7 +52,7 @@ func TestGateReadsWhatTheExportersWrite(t *testing.T) {
 		t.Errorf("a report for another commit passes: %v", c.Blocking)
 	}
 	for _, kind := range EvidenceKinds {
-		if _, err := releaseevidence.New(kind, testCommit, []string{"a"}, nil); err != nil {
+		if _, err := releaseevidence.New(kind, testCommit, testSource, []string{"a"}, nil); err != nil {
 			t.Errorf("kind %s: %v", kind, err)
 		}
 	}

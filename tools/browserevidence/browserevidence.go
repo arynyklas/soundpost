@@ -138,11 +138,21 @@ func Export(in Inputs, commit string) (releaseevidence.Report, error) {
 		expected = append(expected, EvidencePrefix+id)
 	}
 	var rows []releaseevidence.Row
+	listStamp, err := playwrightStamp(in.PlaywrightList)
+	if err != nil {
+		return releaseevidence.Report{}, fmt.Errorf("playwright list: %w", err)
+	}
+	stamps := []releaseevidence.Stamp{{Name: "playwright list", Source: listStamp}}
 	if len(in.PlaywrightResults) > 0 {
 		r, err := playwrightRows(in.PlaywrightResults, project)
 		if err != nil {
 			return releaseevidence.Report{}, fmt.Errorf("playwright results: %w", err)
 		}
+		stamp, err := playwrightStamp(in.PlaywrightResults)
+		if err != nil {
+			return releaseevidence.Report{}, fmt.Errorf("playwright results: %w", err)
+		}
+		stamps = append(stamps, releaseevidence.Stamp{Name: "playwright results", Source: stamp})
 		rows = append(rows, r...)
 	}
 	if len(in.Journeys) > 0 {
@@ -150,6 +160,11 @@ func Export(in Inputs, commit string) (releaseevidence.Report, error) {
 		if err != nil {
 			return releaseevidence.Report{}, fmt.Errorf("journeys: %w", err)
 		}
+		stamp, err := smokeStamp(in.Journeys)
+		if err != nil {
+			return releaseevidence.Report{}, fmt.Errorf("journeys: %w", err)
+		}
+		stamps = append(stamps, releaseevidence.Stamp{Name: "journeys report", Source: stamp})
 		rows = append(rows, r...)
 	}
 	if len(in.Evidence) > 0 {
@@ -157,11 +172,20 @@ func Export(in Inputs, commit string) (releaseevidence.Report, error) {
 		if err != nil {
 			return releaseevidence.Report{}, fmt.Errorf("evidence smoke: %w", err)
 		}
+		stamp, err := smokeStamp(in.Evidence)
+		if err != nil {
+			return releaseevidence.Report{}, fmt.Errorf("evidence smoke: %w", err)
+		}
+		stamps = append(stamps, releaseevidence.Stamp{Name: "evidence smoke report", Source: stamp})
 		rows = append(rows, r...)
 	}
 	rows = mergeDuplicates(rows)
 	rows = append(rows, viewRows(listed, rows)...)
-	return releaseevidence.New(releaseevidence.KindBrowser, commit, expected, rows)
+	source, err := releaseevidence.AgreedSource(stamps)
+	if err != nil {
+		return releaseevidence.Report{}, err
+	}
+	return releaseevidence.New(releaseevidence.KindBrowser, commit, source, expected, rows)
 }
 
 // viewRows derives the BrowserViews rows from the Playwright rows. Without any Playwright result the view rows stay
@@ -247,6 +271,11 @@ func ReadFile(path string) ([]byte, error) {
 // ---- Playwright ----
 
 type pwReport struct {
+	Config struct {
+		Metadata struct {
+			SourceSHA256 string `json:"source_sha256"`
+		} `json:"metadata"`
+	} `json:"config"`
 	Suites []pwSuite `json:"suites"`
 	Errors []struct {
 		Message string `json:"message"`
@@ -454,4 +483,24 @@ func smokeRows(raw []byte, prefix, key string) ([]releaseevidence.Row, error) {
 		rows = append(rows, row)
 	}
 	return rows, nil
+}
+
+// smokeStamp reads the source_sha256 a smoke producer stamped on its own result file ("" when absent).
+func smokeStamp(raw []byte) (string, error) {
+	var top struct {
+		Source string `json:"source_sha256"`
+	}
+	if err := json.NewDecoder(bytes.NewReader(raw)).Decode(&top); err != nil {
+		return "", err
+	}
+	return top.Source, nil
+}
+
+// playwrightStamp reads config.metadata.source_sha256 of a Playwright JSON report ("" when absent).
+func playwrightStamp(raw []byte) (string, error) {
+	rep, err := decodePlaywright(raw)
+	if err != nil {
+		return "", err
+	}
+	return rep.Config.Metadata.SourceSHA256, nil
 }

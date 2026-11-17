@@ -61,6 +61,8 @@ go run ./build gate --version "$VERSION" --commit "$COMMIT" --created "$CREATED"
   --evidence node_loss=node_loss.json --evidence browser=browser.json
 ```
 
+Source stamp: every producer (qualify suites, query campaign, drills, the journeys and evidence smokes, and the Playwright run through `web/playwright.config.ts`) stamps its own report with `source_sha256`, the digest `go run ./build source-digest` prints for the tree it ran against. Each exporter refuses input reports whose stamps are missing or differ, and writes the shared stamp into the envelope. The gate compares that stamp with the source component of `release.json` `build_id` (`sha256:<digest>+ui:...`). A producer run on an edited tree therefore needs a rebuilt release (`go run ./build release`), and a release built from an edited tree needs fresh producer runs; `--commit` is still compared by equality.
+
 `release.yml` runs only the packages it names, never `./...`. Tests that self-skip on a runner without the toolchain they need (notably `cmd/soundpost` `TestServeJobDurableRetryJourney`, which skips on Windows or without `python3`) are therefore not covered by CI: run `go test ./...` on a Linux host with `python3` and record that run, with its output, in the release evidence.
 
 PyPI license overrides (`build/dependencies/license-overrides.json`, `pypi_license`) are bound to the metadata they reviewed: every entry carries an explicit `declared` value (`NOASSERTION` when the metadata names no license) and every upstream `sources[]` entry says `wheel_text` `identical` (its sha256 must equal the committed `license_text_sha256`; the generator and `go test ./build` refuse a mismatch) or `differs` (the evidence describes how).

@@ -246,6 +246,16 @@ func checkEvidenceOf(kind string, r Reports, commit string) Check {
 	if e.Commit != commit {
 		c.Blocking = append(c.Blocking, fmt.Sprintf("%s evidence is for commit %q, not %q", kind, e.Commit, commit))
 	}
+	releaseSource := releaseBuildSource(r)
+	if releaseSource == "" {
+		c.Blocking = append(c.Blocking, "release.json carries no build_id source digest")
+	}
+	switch {
+	case e.SourceSHA256 == "":
+		c.Blocking = append(c.Blocking, kind+" evidence carries no source stamp")
+	case releaseSource != "" && e.SourceSHA256 != releaseSource:
+		c.Blocking = append(c.Blocking, fmt.Sprintf("%s evidence ran against source %s, not the release's %s", kind, e.SourceSHA256, releaseSource))
+	}
 	if len(e.Expected) == 0 {
 		c.Blocking = append(c.Blocking, kind+" evidence declares no expected rows")
 	}
@@ -274,6 +284,32 @@ func checkEvidenceOf(kind string, r Reports, commit string) Check {
 		c.Detail += fmt.Sprintf(", %d out of release scope (%s, not passed)", outOfScope, releaseevidence.ScopeDecision)
 	}
 	return c
+}
+
+// releaseBuildSource is the source digest component of release.json's build_id
+// ("sha256:<digest>+ui:<hex>"), or "" when the manifest is unreadable or carries none.
+func releaseBuildSource(r Reports) string {
+	manPath := r.ArtifactManifest
+	if manPath == "" {
+		if r.ArtifactDir == "" {
+			return ""
+		}
+		manPath = filepath.Join(r.ArtifactDir, "release.json")
+	}
+	raw, err := os.ReadFile(manPath)
+	if err != nil {
+		return ""
+	}
+	var man Manifest
+	if json.Unmarshal(raw, &man) != nil {
+		return ""
+	}
+	rest, ok := strings.CutPrefix(man.BuildID, "sha256:")
+	if !ok {
+		return ""
+	}
+	digest, _, _ := strings.Cut(rest, "+")
+	return digest
 }
 
 func summarize(prefix string, items []string, limit int) []string {

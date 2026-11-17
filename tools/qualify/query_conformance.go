@@ -29,6 +29,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	q "github.com/arynyklas/soundpost/internal/conformance/query"
+	"github.com/arynyklas/soundpost/internal/releaseevidence"
 )
 
 // Required layouts of the persisted path.
@@ -152,6 +153,8 @@ type CampaignReport struct {
 	// is written); the adoption readiness gate checks it against the reference
 	// that cites this report.
 	ObservedAt time.Time `json:"observed_at"`
+	// SourceSHA256 is releaseevidence.SourceDigest of the tree that verified the rows, stamped when the report is written.
+	SourceSHA256 string `json:"source_sha256"`
 }
 
 // RunQueryConformance executes the locked smoke (one run per required layout)
@@ -240,6 +243,11 @@ func VerifyQueryEvidence(matrix QueryMatrix, artifactDir string) (CampaignReport
 
 func finish(rep CampaignReport, artifactDir string) (CampaignReport, error) {
 	rep.ObservedAt = time.Now().UTC()
+	source, err := releaseevidence.CurrentSourceDigest()
+	if err != nil {
+		return rep, fmt.Errorf("source digest for the report stamp: %w", err)
+	}
+	rep.SourceSHA256 = source
 	if raw, err := json.MarshalIndent(rep, "", "  "); err == nil {
 		if err = os.WriteFile(filepath.Join(artifactDir, "campaign-report.json"), append(raw, '\n'), 0o644); err != nil {
 			return rep, err

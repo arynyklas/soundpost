@@ -43,8 +43,8 @@ type subjectRecord struct {
 //	--bun PATH       Bun used to import the npm packages (default: bun on PATH)
 //	--python PATH    Python 3.12+ with the cryptography wheel importable (default: python3)
 //
-// Rows: digests (every artifact re-hashed against artifacts.json), image_binary (the image's only
-// executable is the release binary), wheel_fresh_venv (pip install --no-index --no-deps into a new venv, import,
+// Rows: digests (every artifact re-hashed against artifacts.json), image_binary and perf_helper_image_binary (each image's
+// only executable is the release binary it names: soundpost, soundpost-perf-acquire), wheel_fresh_venv (pip install --no-index --no-deps into a new venv, import,
 // version), npm_fresh_project (each tarball unpacked into a new node_modules, the entry imported), install_single and
 // install_distributed (the existing smokes against the release binary; the UI is served from the binary and compared
 // to --web-dist when given). Rows that need an OCI runtime, root, kernels, a network registry or a database
@@ -128,7 +128,7 @@ func RunFreshInstallMatrix(args []string) (result error) {
 		if len(imgs) != 1 {
 			return "", errors.New("artifacts.json lists no single OCI image")
 		}
-		sum, err := imageBinarySHA256(filepath.Join(*artifacts, filepath.FromSlash(imgs[0].Path)))
+		sum, err := imageBinarySHA256(filepath.Join(*artifacts, filepath.FromSlash(imgs[0].Path)), "soundpost")
 		if err != nil {
 			return "", err
 		}
@@ -136,6 +136,25 @@ func RunFreshInstallMatrix(args []string) (result error) {
 			return "", fmt.Errorf("image binary %s is not the release binary %s", sum, binSum)
 		}
 		return "image layer holds exactly the release binary " + sum + "; manifest " + imgs[0].Detail + " (not started: no OCI runtime)", nil
+	})
+	run("perf_helper_image_binary", func() (string, error) {
+		imgs := byKind["oci_image_perf_helper"]
+		if len(imgs) != 1 {
+			return "", errors.New("artifacts.json lists no single perf helper OCI image")
+		}
+		helperSum, err := fileSHA256(filepath.Join(*release, "linux-amd64", "soundpost-perf-acquire"))
+		if err != nil {
+			return "", err
+		}
+		digests["release/linux-amd64/soundpost-perf-acquire"] = helperSum
+		sum, err := imageBinarySHA256(filepath.Join(*artifacts, filepath.FromSlash(imgs[0].Path)), "soundpost-perf-acquire")
+		if err != nil {
+			return "", err
+		}
+		if sum != helperSum {
+			return "", fmt.Errorf("helper image binary %s is not the release helper %s", sum, helperSum)
+		}
+		return "helper image layer holds exactly the release soundpost-perf-acquire " + sum + "; manifest " + imgs[0].Detail + " (not started: no OCI runtime, no root, no CAP_PERFMON)", nil
 	})
 
 	stage = "matrix_wheel"
@@ -243,8 +262,8 @@ func RunFreshInstallMatrix(args []string) (result error) {
 	return nil
 }
 
-// imageBinarySHA256 reads an OCI layout tar and returns the sha256 of the `soundpost` file of its only layer.
-func imageBinarySHA256(path string) (string, error) {
+// imageBinarySHA256 reads an OCI layout tar and returns the sha256 of the file called name, the only file of its only layer.
+func imageBinarySHA256(path, name string) (string, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
@@ -302,7 +321,7 @@ func imageBinarySHA256(path string) (string, error) {
 			return "", err
 		}
 		if h.Typeflag == tar.TypeReg {
-			if h.Name != "soundpost" {
+			if h.Name != name {
 				return "", fmt.Errorf("unexpected file %s in the image layer", h.Name)
 			}
 			b, _ := io.ReadAll(lt)
@@ -311,7 +330,7 @@ func imageBinarySHA256(path string) (string, error) {
 		}
 	}
 	if found == "" {
-		return "", errors.New("the image layer has no soundpost binary")
+		return "", errors.New("the image layer has no " + name + " binary")
 	}
 	return found, nil
 }

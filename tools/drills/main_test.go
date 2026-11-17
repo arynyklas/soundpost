@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/arynyklas/soundpost/internal/releaseevidence"
 )
 
 const goodManifest = `version: 1
@@ -91,5 +93,9 @@ func TestRunRefusesOtherTargetsAndWritesNotRunRows(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join(reports, "b.json"))
 	if err != nil || !bytes.Contains(raw, []byte(`"status": "not_run"`)) || bytes.Contains(raw, []byte(`"status": "passed"`)) {
 		t.Fatalf("not_run report: %v %s", err, raw)
+	}
+	want, err := releaseevidence.CurrentSourceDigest()
+	if err != nil || !bytes.Contains(raw, []byte(`"source_sha256": "`+want+`"`)) {
+		t.Fatalf("the written report must carry the producer's own source digest %s: %v\n%s", want, err, raw)
 	}
 }

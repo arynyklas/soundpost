@@ -12,6 +12,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/arynyklas/soundpost/internal/releaseevidence"
 )
 
 func write(t *testing.T, path, content string) {
@@ -151,6 +153,7 @@ func sourceTree(t *testing.T) string {
 // (the UI has its own digest).
 func TestBuildIdentityTracksSourcesNotTestsOrStagedUI(t *testing.T) {
 	root := sourceTree(t)
+	sourceDigest := releaseevidence.SourceDigest
 	base, err := sourceDigest(root)
 	if err != nil {
 		t.Fatal(err)
@@ -176,6 +179,29 @@ func TestBuildIdentityTracksSourcesNotTestsOrStagedUI(t *testing.T) {
 	differs("go.sum", func() { write(t, filepath.Join(root, "go.sum"), "x v1 h1:abc\n") })
 	base, _ = sourceDigest(root)
 	differs("a new package", func() { write(t, filepath.Join(root, "cmd", "soundpost", "extra.go"), "package main") })
+}
+
+// `build source-digest` prints exactly the identity producers stamp and the release records as the
+// first component of build_id.
+func TestSourceDigestCommandPrintsTheSharedSourceIdentity(t *testing.T) {
+	root := sourceTree(t)
+	want, err := releaseevidence.SourceDigest(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	if err := run([]string{"source-digest", "--root", root}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(out.String()) != want || len(want) != 64 {
+		t.Fatalf("source-digest printed %q, want %q", out.String(), want)
+	}
+	if err := run([]string{"source-digest", "--root", filepath.Join(root, "missing")}, &out); err == nil {
+		t.Fatal("a root with no sources printed a digest")
+	}
+	if err := run([]string{"source-digest", "extra"}, &out); err == nil {
+		t.Fatal("an argument was accepted")
+	}
 }
 
 func TestStageUIRequiresABuiltBundleAndDigestsItsContent(t *testing.T) {
@@ -346,5 +372,53 @@ func TestRepositoryPinsDeclarePnpmIntegrityAndArm64(t *testing.T) {
 	var in Inputs
 	if err = verifyPnpmPin("..", p, &in); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// The release builds every shipped command that has a main package, including the native
+// acquisition helper that the helper image packages.
+func TestReleaseBuildsThePerfHelper(t *testing.T) {
+	found := false
+	for _, name := range releaseCommands {
+		if name == "soundpost-perf-acquire" {
+			found = true
+		}
+		if _, err := os.Stat(filepath.Join("..", "cmd", name, "main.go")); err != nil {
+			t.Errorf("release command %s has no cmd/%s/main.go", name, name)
+		}
+	}
+	if !found {
+		t.Fatalf("release commands %v do not include soundpost-perf-acquire", releaseCommands)
+	}
+}
+
+func TestImageContextForThePerfHelperOnlyTakesTheHelperTheReleaseListed(t *testing.T) {
+	root := t.TempDir()
+	write(t, filepath.Join(root, "deploy", "Dockerfile.perf-helper"), "FROM scratch\n")
+	release := t.TempDir()
+	write(t, filepath.Join(release, "linux-amd64", "soundpost-perf-acquire"), "helper")
+	sum := sha256.Sum256([]byte("helper"))
+	write(t, filepath.Join(release, "SHA256SUMS"), strings.Repeat("0", 64)+"  linux-amd64/soundpost-perf-acquire\n")
+	args := func(out string) []string {
+		return []string{"--image", "perf-helper", "--release", release, "--out", out, "--root", root}
+	}
+	if err := runImageContext(args(filepath.Join(t.TempDir(), "ctx"))); err == nil {
+		t.Fatal("a helper that SHA256SUMS does not list was packaged")
+	}
+	write(t, filepath.Join(release, "SHA256SUMS"), hex.EncodeToString(sum[:])+"  linux-amd64/soundpost-perf-acquire\n")
+	out := filepath.Join(t.TempDir(), "ctx")
+	if err := runImageContext(args(out)); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"soundpost-perf-acquire", "Dockerfile"} {
+		if _, err := os.Stat(filepath.Join(out, name)); err != nil {
+			t.Fatalf("context lacks %s: %v", name, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(out, "data")); err == nil {
+		t.Fatal("the helper context carries a data directory")
+	}
+	if err := runImageContext([]string{"--image", "nonsense", "--release", release, "--out", filepath.Join(t.TempDir(), "x"), "--root", root}); err == nil {
+		t.Fatal("an unknown image was accepted")
 	}
 }
