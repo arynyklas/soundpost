@@ -112,6 +112,9 @@ func (o workerOptions) settings(listen, dir string) (workerSettings, error) {
 		}
 		cfg.SMTP = &appcore.SMTPSettings{Host: *o.smtpHost, Port: *o.smtpPort, TLS: mode, Username: *o.smtpUser, RequireAuth: *o.smtpRequireAuth, From: *o.smtpFrom, ServerName: *o.smtpServerName}
 	}
+	if err := appcore.ValidateNotificationConfig(cfg); err != nil {
+		return workerSettings{}, fmt.Errorf("notification delivery: %w", err)
+	}
 	secret := ""
 	if *o.recordingSource != "" {
 		raw, err := os.ReadFile(*o.recordingSource)

@@ -240,6 +240,24 @@ func (c channelSender) Send(ctx context.Context, scope auth.Scope, d notify.Deli
 	return sender.Send(ctx, scope, d)
 }
 
+// ValidateNotificationConfig checks the Telegram and SMTP delivery environment
+// exactly as NotificationSender builds it, but without a store, a state
+// directory or any I/O, so a bad flag fails startup before storage opens.
+func ValidateNotificationConfig(cfg NotificationConfig) error {
+	registry, err := notify.NewDestinations(controlDestinations{}, controlSecrets{})
+	if err != nil {
+		return err
+	}
+	common := providers.Common{Destinations: registry, PublicOrigin: cfg.PublicOrigin, Egress: cfg.Egress, Timeout: cfg.Timeout}
+	if _, err = providers.NewTelegram(providers.TelegramConfig{Common: common, APIBase: cfg.TelegramAPI}, registry, &http.Client{}); err != nil {
+		return err
+	}
+	if s := cfg.SMTP; s != nil {
+		_, err = providers.NewSMTP(providers.SMTPConfig{Common: common, Host: s.Host, Port: s.Port, TLS: s.TLS, Username: s.Username, RequireAuth: s.RequireAuth, From: s.From, RootCAs: cfg.RootCAs, ServerName: s.ServerName}, registry)
+	}
+	return err
+}
+
 // NotificationSender builds the delivery Sender of a served node: the signed
 // webhook, Telegram Bot API and SMTP providers (internal/notify/providers) behind
 // the organization-scoped destination registry over committed control state and the

@@ -109,6 +109,7 @@ func (w *Workers) submitConditions(ctx context.Context, admin auth.Scope, projec
 		}
 		var st conditions.State
 		if json.Unmarshal(rec.State, &st) != nil {
+			report.Errors = append(report.Errors, StageError{Project: project, Stage: StageNotify, Code: code(model.Fail(model.Corrupt))})
 			continue
 		}
 		evidence, ok := conditionEvidence(st)
@@ -206,6 +207,7 @@ func (w *Workers) submitIncidents(ctx context.Context, admin auth.Scope, project
 		}
 		var st incidents.State
 		if json.Unmarshal(rec.State, &st) != nil {
+			report.Errors = append(report.Errors, StageError{Project: project, Stage: StageNotify, Code: code(model.Fail(model.Corrupt))})
 			continue
 		}
 		evidence, ok := incidentEvidence(st)
