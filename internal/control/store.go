@@ -46,6 +46,9 @@ type Store struct {
 	// it may not. statePatches and statePatchBytes count the patch commands proposed and their payload bytes.
 	statePatchGate                atomic.Pointer[func() bool]
 	statePatches, statePatchBytes atomic.Uint64
+	// rawApplies and decodedApplies count the committed commands this store applied to the bytes of
+	// its state (stateRoot, patchRaw) and the ones it had to decode the state for (Apply).
+	rawApplies, decodedApplies atomic.Uint64
 }
 
 // SetClock replaces the wall clock the update funnel dates revisions with (RevisionClock), time.Now

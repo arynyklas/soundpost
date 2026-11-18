@@ -261,7 +261,7 @@ test('real bundle: the frames of the real failure are mapped by the real source 
  await expect(release.getByTestId('release-artifacts')).toContainText(seed.artifact);
  await expect(release.getByTestId('release-artifacts')).toContainText(seed.debugId);
  const again=await open();
- expect(await again.getByTestId('stored-frames').getByTestId('frame-mapped').allInnerTexts()).toEqual(mapped);
+ await expect.poll(()=>again.getByTestId('stored-frames').getByTestId('frame-mapped').allInnerTexts()).toEqual(mapped);
  // A label is never an identity: it is refused as a frame's artifact before anything is sent.
  await again.getByLabel('Build ID').fill(seed.build);
  await again.getByLabel(/^Frames \(/).fill(`v1.1-label-renamed-again ${bundle.frames[0]?.line} 7 boom`);
@@ -281,7 +281,7 @@ test('real bundle: the frames of the real failure are mapped by the real source 
  expect(upload.status()).toBeLessThan(500);
  expect(await upload.text()).not.toMatch(/"id":"[0-9a-f]{32}"/);
  const last=await open();
- expect(await last.getByTestId('stored-frames').getByTestId('frame-mapped').allInnerTexts()).toEqual(mapped);
+ await expect.poll(()=>last.getByTestId('stored-frames').getByTestId('frame-mapped').allInnerTexts()).toEqual(mapped);
 });
 
 test('stored occurrence: class, mechanism, handled and fatal, code, chain and frames come from the real stored record; the links go to the release and the real trace',async()=>{

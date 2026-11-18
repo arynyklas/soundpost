@@ -30,11 +30,16 @@ import (
 // revision_clock) are arrays, and a change of them is a cut of the oldest rows and an append, so a
 // chunk's audit row or a minute's clock stamp is one row, not the log.
 //
-// A voter applies a patch to the bytes of its committed state (applyPatchRaw), decodes the result
-// strictly as a State, and requires the installation and revision the command names: the same
-// compare-and-swap, the same revision step, the same checks of the state it ends in as a
-// replacement. TestStatePatchEqualsReplacement pins that the state a patch leaves is the state the
-// replacement leaves, on random transitions.
+// A voter applies a patch to the bytes of its committed state, and requires the installation and
+// revision the command names: the same compare-and-swap, the same revision step, the same checks of
+// the state it ends in as a replacement. It does so without decoding the state when it can
+// (patchRaw, state_raw.go: the members the patch does not name are carried over as they are, the
+// values it names are decoded strictly into their type and encoded again, and the result is the
+// bytes the encoder writes for the state); when the splice cannot prove that it does exactly that, it
+// applies the ops to the members (applyPatchRaw), decodes the result strictly as a State and encodes
+// it. TestStatePatchEqualsReplacement pins that the state a patch leaves is the state the
+// replacement leaves, on random transitions; TestRawPatchEqualsDecodeEncode that the two ways of
+// applying it leave the same bytes.
 //
 // It is a wire format an older binary cannot decode (it stops applying a command it does not
 // understand), so it is proposed only once every member of the committed configuration declared
@@ -159,7 +164,25 @@ func sameJSON(a, b []byte) bool {
 	return bytes.Equal(ca.Bytes(), cb.Bytes())
 }
 
+// decodeMembers is the members of the object encoding raw. The values are views of raw (capped, so
+// that an append to one cannot write into its neighbour), not copies: the callers read them, and a
+// state encoding is tens of megabytes. An encoding that is not compact is decoded the slow way.
 func decodeMembers(raw []byte) (map[string]json.RawMessage, error) {
+	if members, ok := scanObject(raw, 0, len(raw), nil); ok {
+		m := make(map[string]json.RawMessage, len(members))
+		named := true
+		for _, mem := range members {
+			name, ok := unquoteMemberName(raw, mem)
+			if !ok {
+				named = false
+				break
+			}
+			m[name] = raw[mem.vs:mem.ve:mem.ve]
+		}
+		if named {
+			return m, nil
+		}
+	}
 	var m map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &m); err != nil || m == nil {
 		return nil, model.Fail(model.Corrupt)
@@ -359,8 +382,12 @@ func (n *patchNode) names() []string {
 }
 
 // apply returns the value this node's path holds once the patch is applied to cur (present says
-// whether the member existed), and whether it exists after.
-func (n *patchNode) apply(cur json.RawMessage, present bool) (json.RawMessage, bool, error) {
+// whether the member existed), and whether it exists after. depth is the node's depth below the root
+// of the state. lenient is for a patch an erasure pass rewrote (it carries no base): a record of a map
+// of records may be written into a map that is absent or null (depth 1), because the pass emptied the
+// whole-map write that created it and an emptied omitted map is not written back, so the voter that
+// replays the rewritten log reaches the next record of the book holding no book at all.
+func (n *patchNode) apply(cur json.RawMessage, present bool, depth int, lenient bool) (json.RawMessage, bool, error) {
 	if n.op != nil {
 		switch n.op.Op {
 		case opSet:
@@ -389,7 +416,11 @@ func (n *patchNode) apply(cur json.RawMessage, present bool) (json.RawMessage, b
 		if n.onlyDeletes() {
 			return cur, present, nil // nothing to delete from what is not a map
 		}
-		return nil, false, model.Fail(model.Corrupt)
+		if lenient && depth == 1 && (!present || string(cur) == "null") {
+			cur = json.RawMessage("{}")
+		} else {
+			return nil, false, model.Fail(model.Corrupt)
+		}
 	}
 	members, err := decodeMembers(cur)
 	if err != nil {
@@ -397,7 +428,7 @@ func (n *patchNode) apply(cur json.RawMessage, present bool) (json.RawMessage, b
 	}
 	for _, name := range n.names() {
 		value, has := members[name]
-		next, exists, err := n.children[name].apply(value, has)
+		next, exists, err := n.children[name].apply(value, has, depth+1, lenient)
 		if err != nil {
 			return nil, false, err
 		}
@@ -469,12 +500,13 @@ func (n *patchNode) verify(cur json.RawMessage, present bool) error {
 }
 
 // applyPatchRaw is the state encoded in raw with the patch applied, as one encoding of a State.
-func applyPatchRaw(raw []byte, ops []patchOp) ([]byte, error) {
+// lenient is true for a patch without a base (see patchNode.apply).
+func applyPatchRaw(raw []byte, ops []patchOp, lenient bool) ([]byte, error) {
 	root, err := newPatchTrie(ops)
 	if err != nil {
 		return nil, err
 	}
-	out, _, err := root.apply(raw, true)
+	out, _, err := root.apply(raw, true, 0, lenient)
 	return out, err
 }
 
@@ -555,7 +587,7 @@ func patchedState(raw []byte, current *State, p statePatch) (State, error) {
 			return State{}, model.Fail(model.Corrupt)
 		}
 	}
-	patched, err := applyPatchRaw(raw, p.Ops)
+	patched, err := applyPatchRaw(raw, p.Ops, p.Base == "")
 	if err != nil {
 		return State{}, err
 	}
@@ -568,6 +600,9 @@ func patchedState(raw []byte, current *State, p statePatch) (State, error) {
 
 // revisionOf is the installation and revision of a state encoding, without decoding the rest.
 func revisionOf(raw []byte) (installation model.ID, revision model.Revision, err error) {
+	if root := scanStateRoot(raw); root.ok {
+		return root.installation, root.revision, nil
+	}
 	var head struct {
 		Installation model.ID
 		Revision     model.Revision

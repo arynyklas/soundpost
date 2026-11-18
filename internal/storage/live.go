@@ -43,6 +43,10 @@ type changeIterator struct {
 	stop             func() bool
 	ctx              context.Context
 	epoch            uint64
+	// queued counts the events put on events, settled the ones the consumer is done with (settledLocked),
+	// and moved is closed and replaced each time settled grows (and when the iterator closes), under e.mu.
+	queued, settled uint64
+	moved           chan struct{}
 }
 
 func (e *Engine) Subscribe(ctx context.Context, scope auth.Scope, req SubscribeRequest) (ChangeIterator, error) {
@@ -77,7 +81,7 @@ func (e *Engine) Subscribe(ctx context.Context, scope auth.Scope, req SubscribeR
 	req.Projects = append([]model.ID(nil), req.Projects...)
 	req.Selectors = append([]Matcher(nil), req.Selectors...)
 	req.After = append([]model.Cursor(nil), req.After...)
-	it := &changeIterator{e: e, scope: scope, req: req, matchers: ms, events: make(chan committedEvent, liveCapacity), marks: marks, ctx: ctx}
+	it := &changeIterator{e: e, scope: scope, req: req, matchers: ms, events: make(chan committedEvent, liveCapacity), moved: make(chan struct{}), marks: marks, ctx: ctx}
 	it.delivered = append([]model.Cursor(nil), it.marks...)
 	if len(req.After) > 0 {
 		gap := false
@@ -162,15 +166,22 @@ func (e *Engine) publishCommittedLocked(slot uint16, index uint64, entry walEntr
 		queued.Epoch = it.epoch
 		select {
 		case it.events <- queued:
+			it.queued++
 		default:
+			dropped := uint64(0)
 		drain:
 			for {
 				select {
 				case <-it.events:
+					dropped++
 				default:
 					break drain
 				}
 			}
+			if it.pending != nil {
+				dropped++
+			}
+			it.settledLocked(dropped)
 			it.pending = nil
 			it.offset = 0
 			it.epoch++
@@ -184,6 +195,7 @@ func (e *Engine) publishCommittedLocked(slot uint16, index uint64, entry walEntr
 			it.gap = &ChangeGap{After: append([]model.Cursor(nil), after...), Through: append([]model.Cursor(nil), it.marks...), Reason: "slow_consumer"}
 			// Wake a blocked receiver without polling or replaying a discarded epoch.
 			it.events <- committedEvent{Epoch: it.epoch}
+			it.queued++
 		}
 	}
 }
@@ -229,6 +241,7 @@ drain:
 		}
 	}
 	close(it.events)
+	it.notifyLocked()
 }
 func (it *changeIterator) Close() error {
 	it.e.mu.Lock()
@@ -243,6 +256,51 @@ func (it *changeIterator) Watermarks() []model.Cursor {
 		return nil
 	}
 	return append([]model.Cursor(nil), it.marks...)
+}
+
+// settledLocked records that n committed events queued for this iterator are done: handed to the
+// consumer page by page and the consumer came back for more, or discarded by an overrun.
+func (it *changeIterator) settledLocked(n uint64) {
+	it.settled += n
+	it.notifyLocked()
+}
+
+// notifyLocked wakes every WaitCaughtUp: moved is closed and replaced, so a waiter that read it before
+// the change sees it closed.
+func (it *changeIterator) notifyLocked() {
+	close(it.moved)
+	it.moved = make(chan struct{})
+}
+
+// WaitCaughtUp returns once the consumer has finished with every committed event this iterator holds
+// for it at the time of the call, once a read fence has made every commit acknowledged before the call
+// visible to it. Finished means the consumer asked for the page after the last page of the event, so
+// whatever it did with the page is done (the live stream's buffer holds the records). A commit that
+// arrives later is not waited for. A closed iterator is caught up.
+func (it *changeIterator) WaitCaughtUp(ctx context.Context) error {
+	e := it.e
+	if _, _, err := e.replicaReadFence(ctx, nil, false); err != nil {
+		return err
+	}
+	e.mu.Lock()
+	target := it.queued
+	e.mu.Unlock()
+	for {
+		e.mu.Lock()
+		if it.closed || it.settled >= target {
+			e.mu.Unlock()
+			return nil
+		}
+		moved := it.moved
+		e.mu.Unlock()
+		select {
+		case <-moved:
+		case <-ctx.Done():
+			return model.Fail(model.Timeout)
+		case <-it.ctx.Done():
+			return model.Fail(model.Cancelled)
+		}
+	}
 }
 func (it *changeIterator) Next(ctx context.Context) (ChangePage, error) {
 	e := it.e
@@ -381,6 +439,7 @@ func (it *changeIterator) Next(ctx context.Context) (ChangePage, error) {
 		}
 		if it.pending != nil {
 			advanceWatermark(it.delivered, it.pending.Cursor)
+			it.settledLocked(1)
 		}
 		it.pending = nil
 		it.offset = 0
@@ -413,6 +472,8 @@ func (it *changeIterator) Next(ctx context.Context) (ChangePage, error) {
 			}
 			if !it.closed && event.Epoch == it.epoch {
 				it.pending = &event
+			} else {
+				it.settledLocked(1)
 			}
 			e.mu.Unlock()
 		case <-ctx.Done():

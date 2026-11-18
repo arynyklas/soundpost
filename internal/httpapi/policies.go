@@ -58,7 +58,7 @@ const (
 // selectors authorization confirms; Operation is read or write. A write names
 // its command (CommandID, replayed idempotently), the organization policy epoch
 // it was based on (ExpectedRevision = the Revision of the PolicyView it read; a
-// stale one is a 409 conflict), why (Reason) and
+// 409 conflict when the targeted setting changed since), why (Reason) and
 // exactly one Change; a read carries none of these.
 type PolicyRequest struct {
 	Org              model.ID       `json:"org"`
@@ -147,7 +147,9 @@ type RetentionView struct {
 
 // PolicyView is the read answer for one project. Revision is the organization's
 // policy epoch, the token a write must be based on: it moves with every
-// administration or settings change of the organization and with nothing else.
+// administration or settings change of the organization, but a write conflicts
+// only when the setting it targets was changed after that epoch (or an
+// untracked change, such as a restore or retirement, moved the epoch).
 // ManageDestinations says whether the caller
 // may change organization destinations (administrators only).
 type PolicyView struct {

@@ -98,7 +98,18 @@ func (l *liveBooks) value(field, key string) (json.RawMessage, bool, error) {
 //
 // The records of a patch are the "set" of a member of a map of records, and the members of a "set"
 // of a whole map (the command that writes the first record of a book writes the book: the state it
-// came from held none). A whole map is rewritten member by member and stays an object.
+// came from held none). A whole map is rewritten member by member and stays an object. When every
+// member of it is erased the object is empty, and a state does not write an emptied omitted book
+// back: the voter that replays the rewritten log then reaches the book's next record, a key-level
+// write that the proposer made when the book existed, holding no book. A patch without a base
+// therefore creates the book (patchNode.apply, lenient); TestAVoterReplayingARewrittenLogThatEmptiesAWholeBookReachesThePassHead.
+//
+// Invariant (the replay window, which carries no base): a rewritten patch only ever (1) drops or
+// narrows a record that the committed state does not hold as written, and (2) leaves a record equal
+// to the committed state untouched, so after the last retained write of every record a replaying voter
+// holds the committed bytes. Deletes may empty an omitted-when-empty map member; the byte-level
+// apply (state_raw.go editMember) refuses such a splice so that the voter decodes and the encoder
+// omits the member, as every other voter's does.
 func redactPatch(rules State, live *liveBooks, p statePatch, payload []byte) (replacement []byte, changed bool, err error) {
 	type candidate struct {
 		op         int

@@ -12,6 +12,7 @@ import (
 
 func activateAuthControl(t *testing.T, store *control.Store, directory string) {
 	t.Helper()
+	store.SetStatePatchGate(func() bool { return true })
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := store.EnableSingle(ctx, filepath.Join(directory, "raft-control")); err != nil {

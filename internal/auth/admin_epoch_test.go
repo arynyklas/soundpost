@@ -100,15 +100,16 @@ func TestAdminCommandCarriesOrganizationEpochPrecondition(t *testing.T) {
 		t.Fatal("the committed membership is not in the organization")
 	}
 
-	// A change to the organization since the read is a lost update: refused, nothing changes.
-	stale := read().Epoch
-	must("org_admin", auth.AdminPayload{UserID: user, Enabled: true})
+	// A change to the SAME object since the read is a lost update: refused, nothing changes. (The contract is per object:
+	// a change to another object of the organization no longer refuses a save, see admin_object_epoch_test.go.)
+	stale, late := read().Epoch, model.NewID()
+	must("create_project", auth.AdminPayload{ID: late, Name: "first writer"})
 	frozen := read()
-	if err := run("create_project", auth.AdminPayload{ID: model.NewID(), Name: "late project"}, &stale); faultCode(err) != model.Conflict {
+	if err := run("create_project", auth.AdminPayload{ID: late, Name: "late project"}, &stale); faultCode(err) != model.Conflict {
 		t.Fatalf("a save on a stale epoch: %v, want conflict", err)
 	}
 	after := read()
-	if after.Epoch != frozen.Epoch || len(after.Organizations[0].Projects) != 0 {
+	if after.Epoch != frozen.Epoch || len(after.Organizations[0].Projects) != 1 || after.Organizations[0].Projects[late.String()] != "first writer" {
 		t.Fatalf("a refused stale save changed the organization: epoch %d -> %d, projects %v", frozen.Epoch, after.Epoch, after.Organizations[0].Projects)
 	}
 

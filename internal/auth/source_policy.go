@@ -81,7 +81,7 @@ func (s *Service) ChangeSourcePolicy(ctx context.Context, c Credential, r Source
 		src.Policy = r.Policy
 		src.Closing = true
 		st.Sources[r.Source.String()] = src
-		org.Epoch++
+		org.TrackChange("source_policy:" + src.ID.String())
 		st.Orgs[src.Org.String()] = org
 		out = model.SourceFence{Operation: r.CommandID, Source: r.Source, Org: src.Org, Epoch: model.Uint64(org.Epoch), Phase: "fencing"}
 		if st.SourceFences == nil {

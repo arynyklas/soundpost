@@ -26,9 +26,10 @@ import (
 // the revision clock stamped with the proposer's clock carried in the command, the rows appended,
 // AuthorityRevision unchanged. TestAuditDeltaApplyEqualsReplacementApply pins the equivalence.
 //
-// What it does not do: it carries no state and no key files (a replacement installs those), so a
-// voter still decodes the whole committed state, appends and encodes it again; only the payload
-// that is proposed, journaled and replicated is small.
+// What it does not do: it carries no state and no key files (a replacement installs those). A voter
+// applies it to the bytes of its committed state (deltaRaw, state_raw.go) without decoding them, as
+// it applies a state patch; only the proposer reads the state, once, to check the caller's
+// precondition.
 //
 // A binary that does not know the shape fails to decode it and stops applying, so it is proposed only
 // once every member of the committed configuration declared protocol 4 (storage.auditDeltaProtocol,
@@ -204,21 +205,31 @@ func applyAuditDelta(current *State, d auditDelta) (owe bool) {
 // very revision its last rows are the delta's.
 func (m *replicatedControl) verifyCurrentDelta(d auditDelta) error {
 	return m.store.db.View(func(tx *bolt.Tx) error {
-		var current State
-		if json.Unmarshal(tx.Bucket([]byte("control")).Get([]byte("state")), &current) != nil {
+		raw := tx.Bucket([]byte("control")).Get([]byte("state"))
+		n := len(d.Audits)
+		// The head and the last rows of the log are read from the bytes; the rest of the state is not
+		// decoded (a restart replays the journal over a state of tens of megabytes).
+		root := scanStateRoot(raw)
+		installation, revision := root.installation, root.revision
+		total, tail, ok := lastAudits(raw, root, n)
+		if !ok {
+			var current State
+			if json.Unmarshal(raw, &current) != nil {
+				return model.Fail(model.Corrupt)
+			}
+			installation, revision = current.Installation, current.Revision
+			total = len(current.Audits)
+			tail = current.Audits[max(total-n, 0):]
+		}
+		if d.Expected == ^model.Revision(0) || installation != d.Installation || revision < d.Expected+1 {
 			return model.Fail(model.Corrupt)
 		}
-		if d.Expected == ^model.Revision(0) || current.Installation != d.Installation || current.Revision < d.Expected+1 {
-			return model.Fail(model.Corrupt)
-		}
-		if current.Revision != d.Expected+1 {
+		if revision != d.Expected+1 {
 			return nil
 		}
-		n := len(d.Audits)
-		if len(current.Audits) < n {
+		if total < n {
 			return model.Fail(model.Corrupt)
 		}
-		tail := current.Audits[len(current.Audits)-n:]
 		for i := range d.Audits {
 			left, err := model.CanonicalJSON(tail[i])
 			if err != nil {

@@ -177,21 +177,31 @@ test('project settings change the notification policy, retention and destination
  await expect(row).toHaveAttribute('data-destination-enabled','false');
  await expect(row).toHaveAttribute('data-destination-secret','set');
 
- // A stale page is told so, nothing is changed, the typed reason survives, and the next save (on the reloaded revision) commits.
- const before=await page.getByTestId('policy-revision').getAttribute('data-revision');
- const other=await postJson(page,'/api/v1/policies',{org,project_id:project,operation:'write',command_id:id(),expected_revision:before,reason:'another administrator',change:{kind:'retention',retention:{signal:'traces',days:11}}});
- expect(other.status,other.text).toBe(200);
+ // Another signal changed elsewhere since the page read is no conflict: a stale page conflicts only on the SAME object (per-object epochs).
+ const unrelatedBase=await page.getByTestId('policy-revision').getAttribute('data-revision');
+ const unrelated=await postJson(page,'/api/v1/policies',{org,project_id:project,operation:'write',command_id:id(),expected_revision:unrelatedBase,reason:'another administrator, other signal',change:{kind:'retention',retention:{signal:'traces',days:11}}});
+ expect(unrelated.status,unrelated.text).toBe(200);
  await r.getByLabel('Signal').selectOption('metrics');
  await r.getByLabel('Days (1 to 3650)').fill('7');
  await save(r,'tighten metrics','Save retention');
- await expect(r.locator('[data-write-result="conflict"]')).toContainText('nothing was changed');
- await expect(r.getByLabel('Reason (kept in the audit record)')).toHaveValue('tighten metrics');
- await expect(page.locator('[data-retention="metrics"]')).toContainText('Not set');
+ await expect(r.locator('[data-write-result="committed"]')).toBeVisible();
+ await expect(page.locator('[data-retention="metrics"]')).toContainText('7');
  await expect(page.locator('[data-retention="traces"]')).toContainText('11');
+
+ // A stale page is told so when the SAME signal changed meanwhile, nothing is changed, the typed reason survives, and the next save (on the reloaded revision) commits.
+ const before=await page.getByTestId('policy-revision').getAttribute('data-revision');
+ const other=await postJson(page,'/api/v1/policies',{org,project_id:project,operation:'write',command_id:id(),expected_revision:before,reason:'another administrator',change:{kind:'retention',retention:{signal:'metrics',days:11}}});
+ expect(other.status,other.text).toBe(200);
+ await r.getByLabel('Signal').selectOption('metrics');
+ await r.getByLabel('Days (1 to 3650)').fill('9');
+ await save(r,'change metrics again','Save retention');
+ await expect(r.locator('[data-write-result="conflict"]')).toContainText('nothing was changed');
+ await expect(r.getByLabel('Reason (kept in the audit record)')).toHaveValue('change metrics again');
+ await expect(page.locator('[data-retention="metrics"]')).toContainText('11');
  expect(await page.getByTestId('policy-revision').getAttribute('data-revision')).not.toBe(before);
  await r.getByRole('button',{name:'Save retention',exact:true}).click();
  await expect(r.locator('[data-write-result="committed"]')).toBeVisible();
- await expect(page.locator('[data-retention="metrics"]')).toContainText('7');
+ await expect(page.locator('[data-retention="metrics"]')).toContainText('9');
 
  // The account that holds only policy.write: its project's retention and policy, not the organization's destinations.
  const ctx=await browser.newContext();
@@ -334,36 +344,38 @@ test('organization settings: projects, members and grants are audited commands, 
  await ctx.close();
 });
 
-test('organization settings: a stale page is refused and changes nothing, while a change elsewhere in the installation is no conflict',async({page})=>{
+test('organization settings: a stale page conflicts only on the same object, a change elsewhere is no conflict',async({page})=>{
  test.setTimeout(180_000);
  const who=owner();
  await login(page,who.email,who.password);
  const org=await createOrg(page,'admin scope lost update');
  const project=await createProject(page,org);
+ const target=await person(page,org,'target',false);
  await openTab(page,org,project,'organization');
- const create=form(page,'create_project');
+ const enrol=form(page,'membership');
  await expect(page.locator('[data-org-project]')).toHaveCount(1);
 
- // The control revision moves under a change made elsewhere in the installation (a new account): the page is not stale for that.
- await person(page,org,'bystander',false);
- await create.getByLabel('Project name').fill('quiet project');
- await save(create,'saved after a change elsewhere','Create project');
- await expect(create.locator('[data-write-result="committed"]')).toBeVisible();
- await expect(page.locator('[data-org-project]')).toHaveCount(2);
-
- // Another administrator changes THIS organization after the page read it: the save is a lost update, refused, nothing changed.
+ // Changes to OTHER objects after the page read: a new account, another project, another user's membership. None is a conflict.
+ const bystander=await person(page,org,'bystander',false);
  await createProject(page,org,'raced project');
- await create.getByLabel('Project name').fill('late project');
- await save(create,'saved on a stale page','Create project');
- await expect(create.locator('[data-write-result="conflict"]')).toContainText(/nothing was changed/i);
- await expect(page.locator('[data-org-project]')).toHaveCount(3);
- await expect(page.locator('[data-org-project]').filter({hasText:'late project'})).toHaveCount(0);
- await expect(create.getByLabel('Project name')).toHaveValue('late project');
+ await adminCommand(page,org,'membership',{user_id:bystander.id,enabled:true});
+ await enrol.getByLabel('User ID').fill(target.id);
+ await save(enrol,'saved after changes elsewhere','Save membership');
+ await expect(enrol.locator('[data-write-result="committed"]')).toBeVisible();
+ await expect(page.locator(`[data-member="${target.id}"]`)).toHaveAttribute('data-member-state','enabled');
+
+ // Another administrator changes THIS user's membership after the page read it: the save is a lost update, refused, nothing changed.
+ await adminCommand(page,org,'membership',{user_id:target.id,enabled:false});
+ await enrol.getByLabel('User ID').fill(target.id);
+ await save(enrol,'saved on a stale page','Save membership');
+ await expect(enrol.locator('[data-write-result="conflict"]')).toContainText(/nothing was changed/i);
+ await expect(page.locator(`[data-member="${target.id}"]`)).toHaveAttribute('data-member-state','disabled');
+ await expect(enrol.getByLabel('User ID')).toHaveValue(target.id);
 
  // The reloaded page carries the new epoch: the same save now commits.
- await save(create,'saved on the reloaded page','Create project');
- await expect(create.locator('[data-write-result="committed"]')).toBeVisible();
- await expect(page.locator('[data-org-project]')).toHaveCount(4);
+ await save(enrol,'saved on the reloaded page','Save membership');
+ await expect(enrol.locator('[data-write-result="committed"]')).toBeVisible();
+ await expect(page.locator(`[data-member="${target.id}"]`)).toHaveAttribute('data-member-state','enabled');
 });
 
 test('single sign-on settings: the mapping is validated, saved and shown, and the client secret is write-only',async({page})=>{

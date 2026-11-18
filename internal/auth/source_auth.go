@@ -264,7 +264,7 @@ func (s *Service) OnboardSource(ctx context.Context, c Credential, r SourceOnboa
 		}
 		st.Sources[r.Source.String()] = model.SourceAuthority{ID: r.Source, Org: r.Org, Project: r.Project, Browser: r.Browser, Origins: append([]string(nil), r.Origins...), Expires: r.Expires, Policy: r.Policy, CredentialID: credentialID}
 		st.SourceCredentials[digest] = r.Source.String()
-		o.Epoch++
+		o.TrackChange("source_policy:" + r.Source.String())
 		st.Orgs[r.Org.String()] = o
 		if st.CommandOwners == nil {
 			st.CommandOwners = map[string]string{}
@@ -316,7 +316,7 @@ func (s *Service) RevokeSource(ctx context.Context, c Credential, source model.I
 		src.Revoked = true
 		src.Closing = true
 		st.Sources[source.String()] = src
-		o.Epoch++
+		o.TrackChange("source_policy:" + source.String())
 		st.Orgs[src.Org.String()] = o
 		if st.SourceFences == nil {
 			st.SourceFences = map[string]model.SourceFence{}

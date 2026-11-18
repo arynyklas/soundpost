@@ -153,7 +153,7 @@ func TestStatePatchOfTwoStatesAppliesToTheSecond(t *testing.T) {
 		if err != nil || decoded.patch == nil {
 			t.Fatalf("step %d: the patch of two states does not decode as a patch: %v\n%s", step, err, payload)
 		}
-		applied, err := applyPatchRaw(oldRaw, decoded.patch.Ops)
+		applied, err := applyPatchRaw(oldRaw, decoded.patch.Ops, false)
 		if err != nil {
 			t.Fatalf("step %d: %v", step, err)
 		}
@@ -268,7 +268,7 @@ func TestStatePatchChangesTheRevisionClockRowWise(t *testing.T) {
 		if len(payload) > 600 {
 			t.Errorf("%s: a patch of one stamp of a %d byte state is %d bytes", name, len(oldRaw), len(payload))
 		}
-		applied, err := applyPatchRaw(oldRaw, decoded.patch.Ops)
+		applied, err := applyPatchRaw(oldRaw, decoded.patch.Ops, false)
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
@@ -334,12 +334,12 @@ func TestStatePatchRefusesAStateItDoesNotFit(t *testing.T) {
 		"record of a missing org": {{Op: opSet, Path: []string{"Orgs", "gone", "Settings", "k"}, Value: json.RawMessage(`{}`)}},
 		"array of a missing log":  {{Op: opArray, Path: []string{"revision_clock"}, Cut: 0, Value: json.RawMessage(`[{"revision":1}]`)}},
 	} {
-		if _, err := applyPatchRaw(raw, ops); err == nil {
+		if _, err := applyPatchRaw(raw, ops, false); err == nil {
 			t.Errorf("%s: applied", name)
 		}
 	}
 	// A delete of what is not there is nothing, not an error (a redacted patch leaves one behind).
-	out, err := applyPatchRaw(raw, []patchOp{{Op: opDelete, Path: []string{"IncidentBooks", "gone"}}})
+	out, err := applyPatchRaw(raw, []patchOp{{Op: opDelete, Path: []string{"IncidentBooks", "gone"}}}, false)
 	if err != nil {
 		t.Fatalf("a delete of an absent record: %v", err)
 	}

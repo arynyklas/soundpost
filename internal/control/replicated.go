@@ -253,12 +253,31 @@ func (m *replicatedControl) Apply(c replica.CommittedEntry) error {
 		if c.Index != physical+1 && physical != 0 {
 			return model.Fail(model.Corrupt)
 		}
-		var current State
 		b := tx.Bucket([]byte("control"))
 		rawState := b.Get([]byte("state"))
-		if json.Unmarshal(rawState, &current) != nil {
-			return model.Fail(model.Corrupt)
+		// The state is decoded only when a command cannot be applied to its bytes (stateRoot, patchRaw):
+		// a patch, an audit delta, a stale rejection and a no-op leave every member they do not name as
+		// it is, and decoding and encoding tens of megabytes for them is what a voter paid per command.
+		root := scanStateRoot(rawState)
+		var current State
+		loaded := false
+		load := func() error {
+			if !loaded {
+				if json.Unmarshal(rawState, &current) != nil {
+					return model.Fail(model.Corrupt)
+				}
+				loaded = true
+			}
+			return nil
 		}
+		installation0, revision0 := root.installation, root.revision
+		if !root.ok {
+			if err := load(); err != nil {
+				return err
+			}
+			installation0, revision0 = current.Installation, current.Revision
+		}
+		revisionAfter := revision0
 		owe := false
 		if c.Entry.Kind != replica.Noop {
 			if c.Entry.Kind != replica.Control {
@@ -280,12 +299,14 @@ func (m *replicatedControl) Apply(c replica.CommittedEntry) error {
 				}
 				installation, expected = cmd.replacement.State.Installation, cmd.replacement.Expected
 			}
-			if installation != current.Installation {
+			if installation != installation0 {
 				return model.Fail(model.Corrupt)
 			}
-			if expected != current.Revision {
+			var next []byte // the encoding of the state this command leaves
+			settled := false
+			if expected != revision0 {
 				rejected = true
-				current.Revision = model.Revision(c.ApplicationCursor.Index)
+				revisionAfter = model.Revision(c.ApplicationCursor.Index)
 				if err := meta.Put([]byte("rejected:"+c.Entry.ID.String()), []byte{1}); err != nil {
 					return err
 				}
@@ -295,38 +316,97 @@ func (m *replicatedControl) Apply(c replica.CommittedEntry) error {
 				if err := meta.Put(staleAppliedKey, watermarkBytes(c.Index)); err != nil {
 					return err
 				}
-			} else if cmd.delta != nil {
-				owe = applyAuditDelta(&current, *cmd.delta)
-			} else if cmd.patch != nil {
-				next, perr := patchedState(rawState, &current, *cmd.patch)
-				if perr != nil {
-					return perr
+				if out, _, ok := patchRaw(rawState, root, []patchOp{revisionOp(revisionAfter)}); ok {
+					next = out
+				} else {
+					if err := load(); err != nil {
+						return err
+					}
+					current.Revision = revisionAfter
 				}
-				owe = erasureCount(next.Audits) > erasureCount(current.Audits)
-				current = next
+			} else if cmd.delta != nil {
+				owe = erasureCount(cmd.delta.Audits) > 0
+				revisionAfter = cmd.delta.Expected + 1
+				settled = root.settled
+				if out, ok := deltaRaw(rawState, root, *cmd.delta); ok {
+					next = out
+				} else {
+					if err := load(); err != nil {
+						return err
+					}
+					owe = applyAuditDelta(&current, *cmd.delta)
+				}
+			} else if cmd.patch != nil {
+				p := *cmd.patch
+				if p.Base != "" {
+					// A voter that holds other bytes than the proposer read has to be resynchronised (a
+					// snapshot install), not given a patch that only names what it changes.
+					base, ok := "", false
+					if root.ok {
+						base, ok = patchBaseRoot(rawState, root)
+					} else {
+						var err error
+						base, err = patchBase(rawState)
+						ok = err == nil
+					}
+					if !ok || base != p.Base {
+						return model.Fail(model.Corrupt)
+					}
+				}
+				if out, eff, ok := patchRaw(rawState, root, p.Ops); ok && eff.revisionSet && eff.revision == p.Expected+1 {
+					next = out
+					owe = eff.erasures > 0
+					settled = eff.settled
+					revisionAfter = eff.revision
+				} else {
+					if err := load(); err != nil {
+						return err
+					}
+					patched, perr := patchedState(rawState, &current, p)
+					if perr != nil {
+						return perr
+					}
+					owe = erasureCount(patched.Audits) > erasureCount(current.Audits)
+					current = patched
+				}
 			} else {
 				// An erasing audit this commit adds means it frees the pages that held what was
 				// erased: this file owes a scrub whatever any later record says another node did.
+				if err := load(); err != nil {
+					return err
+				}
 				owe = erasureCount(cmd.replacement.State.Audits) > erasureCount(current.Audits)
 				current = cmd.replacement.State
 			}
-			if !rejected && current.Settlement != nil {
+			spliced := next != nil
+			if !spliced {
+				// The decoded path: current is the state this command leaves.
+				revisionAfter = current.Revision
+				settled = current.Settlement != nil
+				raw, e := json.Marshal(current)
+				if e != nil {
+					return e
+				}
+				next = raw
+			}
+			if !rejected && settled {
 				m.store.settledSeen.Store(true)
 			}
-			raw, e := json.Marshal(current)
-			if e != nil {
+			if e := putState(b, next); e != nil {
 				return e
 			}
-			if e = putState(b, raw); e != nil {
-				return e
+			if spliced {
+				m.store.rawApplies.Add(1)
+			} else {
+				m.store.decodedApplies.Add(1)
 			}
 			if owe {
-				if e = oweLocalScrub(b); e != nil {
+				if e := oweLocalScrub(b); e != nil {
 					return e
 				}
 			}
 		}
-		if uint64(current.Revision) != uint64(c.ApplicationCursor.Index) {
+		if uint64(revisionAfter) != uint64(c.ApplicationCursor.Index) {
 			return model.Fail(model.Corrupt)
 		}
 		for name, value := range map[string]uint64{"physical": c.Index, "application": uint64(c.ApplicationCursor.Index), "term": c.Term} {
@@ -638,12 +718,17 @@ func (m *replicatedControl) Validate(ctx context.Context, command replica.Entry)
 		installation, expected, revision = cmd.replacement.State.Installation, cmd.replacement.Expected, cmd.replacement.State.Revision
 	}
 	return m.store.db.View(func(tx *bolt.Tx) error {
-		var current State
 		raw := tx.Bucket([]byte("control")).Get([]byte("state"))
-		if json.Unmarshal(raw, &current) != nil {
-			return model.Fail(model.Corrupt)
+		root := scanStateRoot(raw)
+		installation0, revision0 := root.installation, root.revision
+		if !root.ok {
+			var current State
+			if json.Unmarshal(raw, &current) != nil {
+				return model.Fail(model.Corrupt)
+			}
+			installation0, revision0 = current.Installation, current.Revision
 		}
-		if installation != current.Installation || expected != current.Revision || command.ApplicationIndex != uint64(revision) {
+		if installation != installation0 || expected != revision0 || command.ApplicationIndex != uint64(revision) {
 			return model.Fail(model.Stale)
 		}
 		if cmd.patch != nil {
@@ -652,7 +737,15 @@ func (m *replicatedControl) Validate(ctx context.Context, command replica.Entry)
 			if cmd.patch.Base == "" {
 				return model.Fail(model.Invalid)
 			}
-			if base, err := patchBase(raw); err != nil || base != cmd.patch.Base {
+			base, ok := "", false
+			if root.ok {
+				base, ok = patchBaseRoot(raw, root)
+			} else {
+				var err error
+				base, err = patchBase(raw)
+				ok = err == nil
+			}
+			if !ok || base != cmd.patch.Base {
 				return model.Fail(model.Stale)
 			}
 		}

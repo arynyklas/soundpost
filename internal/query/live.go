@@ -346,12 +346,52 @@ func (s *LiveService) Live(ctx context.Context, scope auth.Scope, ticket LiveTic
 			if after != nil {
 				from = *after + 1
 			}
+			st.catchUp(ctx)
 			if it := st.attach(scope, from, true); it != nil {
 				return it, nil
 			}
 		}
 	}
 	return s.start(ctx, scope, tk, after)
+}
+
+// resumeCatchUpWait bounds how long a resumed attach waits for the feed to hand the stream the commits
+// that were acknowledged before the attach.
+const resumeCatchUpWait = 2 * time.Second
+
+// catchUpFeed is implemented by a change iterator that can say when the stream (its only consumer) has
+// absorbed every commit the iterator holds. The storage engine's iterator does; a feed without it is
+// attached to as it is.
+type catchUpFeed interface {
+	WaitCaughtUp(ctx context.Context) error
+}
+
+// catchUp makes the replay buffer reflect every commit acknowledged before this attach: the feed hands
+// a commit to the pump some milliseconds after it was acknowledged (a read fence and a page read per
+// page), and a client that reconnects right after its write must not be told the replay position of a
+// buffer that has not seen it yet (a record where the eviction gap belongs, the evicted record
+// delivered and then evicted behind the client). It only orders: nothing is delivered here. When the
+// feed does not hand everything over in time (the bound, a feed that cannot answer) the buffer's
+// order is uncertain, so the stream records a feed_catch_up gap at its tail before the attach: the
+// client is told that commits up to the feed's watermark may follow out of what it can rely on,
+// never an apparently complete stream (the contract's explicit gap rule for resume).
+func (s *liveStream) catchUp(ctx context.Context) {
+	w, ok := s.iter.(catchUpFeed)
+	if !ok {
+		return
+	}
+	cctx, cancel := context.WithTimeout(ctx, resumeCatchUpWait)
+	defer cancel()
+	if w.WaitCaughtUp(cctx) == nil {
+		return
+	}
+	through := s.iter.Watermarks()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.dead || s.terminal != nil {
+		return
+	}
+	_ = s.appendLocked(LiveEvent{Type: LiveGap, Gap: &LiveGapInfo{Reason: GapFeedCatchUp, After: s.afterLocked(s.nextSeq + 1), Through: through}}, nil, s.svc.now())
 }
 
 func (s *LiveService) deleteGeneration(ctx context.Context, scope auth.Scope, projects []model.ID) (uint64, error) {

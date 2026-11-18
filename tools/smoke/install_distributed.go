@@ -877,6 +877,10 @@ type processCluster struct {
 	keys         []string
 	pki          *processPKI
 	mu           sync.Mutex
+
+	// nodeBinary overrides binary for the members listed (the mixed-release test starts some voters on
+	// the previous release); a member without an entry runs binary. Guarded by mu.
+	nodeBinary map[uint64]string
 }
 
 func newProcessCluster(binary, release, work string, report map[string]any) (distCluster, error) {
@@ -986,9 +990,30 @@ func (c *processCluster) provision(files map[uint64][]byte, seed []byte) error {
 	return os.WriteFile(c.seed, seed, 0o600)
 }
 
+// binaryOf is the binary member id runs: its nodeBinary entry, else the cluster's binary.
+func (c *processCluster) binaryOf(id uint64) string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if b := c.nodeBinary[id]; b != "" {
+		return b
+	}
+	return c.binary
+}
+
+// setBinary makes the next start of member id run the binary at path (the mixed-release tests roll a
+// voter from one release to another with it).
+func (c *processCluster) setBinary(id uint64, path string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.nodeBinary == nil {
+		c.nodeBinary = map[uint64]string{}
+	}
+	c.nodeBinary[id] = path
+}
+
 func (c *processCluster) start(ids ...uint64) error {
 	for _, id := range ids {
-		cmd := exec.Command(c.binary, "serve", "--mode=distributed", "--node-id", strconv.FormatUint(id, 10), "--cluster-config", filepath.Join(c.root, fmt.Sprintf("node-%d.json", id)), "--data-dir", c.data[id], "--listen", c.public[id])
+		cmd := exec.Command(c.binaryOf(id), "serve", "--mode=distributed", "--node-id", strconv.FormatUint(id, 10), "--cluster-config", filepath.Join(c.root, fmt.Sprintf("node-%d.json", id)), "--data-dir", c.data[id], "--listen", c.public[id])
 		cmd.Stdout, cmd.Stderr = c.logs[id], c.logs[id]
 		cmd.Env = []string{"PATH=" + os.Getenv("PATH")}
 		if err := cmd.Start(); err != nil {

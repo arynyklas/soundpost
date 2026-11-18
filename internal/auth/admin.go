@@ -158,10 +158,13 @@ func (s *Service) adminCommand(ctx context.Context, c Credential, r AdminCommand
 		} else if !o.Admins[c.user.String()] {
 			return model.Fail(model.NotFound)
 		}
-		if pw != nil && r.ExpectedRevision != model.Revision(o.Epoch) || r.ExpectedEpoch != nil && *r.ExpectedEpoch != model.Uint64(o.Epoch) {
+		objectKey := adminObjectKey(r.Kind, r.OrgID, p)
+		if pw != nil && o.ObjectChangedAfter(objectKey, uint64(r.ExpectedRevision)) || r.ExpectedEpoch != nil && o.ObjectChangedAfter(objectKey, uint64(*r.ExpectedEpoch)) {
 			// A settings write is based on the organization's policy epoch it read, not
-			// on the global control revision: a login or a background commit elsewhere
-			// is no reason to refuse a person's save, an administration change is.
+			// on the global control revision: a login or a background commit elsewhere,
+			// or a change to another object of the organization, is no reason to refuse
+			// a person's save. Only a change to the same object is (an untracked epoch
+			// bump counts as a change to every object).
 			return model.Fail(model.Conflict)
 		}
 		if _, retired := st.RetiredOrgs[r.OrgID.String()]; retired && r.Kind != "create_user" {
@@ -173,6 +176,7 @@ func (s *Service) adminCommand(ctx context.Context, c Credential, r AdminCommand
 				return model.Fail(model.Conflict)
 			}
 			o = model.ControlOrg{ID: r.OrgID, Name: p.Name, Epoch: 1, Members: map[string]bool{}, Admins: map[string]bool{c.user.String(): true}, Projects: map[string]string{}, Grants: map[string][]string{}, Secrets: map[string]string{}, Settings: map[string]json.RawMessage{}}
+			o.StartObjectRecords()
 		case "create_user":
 			if p.ID == (model.ID{}) || IsSystemPrincipal(p.ID) {
 				return model.Fail(model.Invalid)
@@ -268,7 +272,7 @@ func (s *Service) adminCommand(ctx context.Context, c Credential, r AdminCommand
 					if st.SourceFences == nil {
 						st.SourceFences = map[string]model.SourceFence{}
 					}
-					st.SourceFences[p.ID.String()] = model.SourceFence{Operation: r.CommandID, Source: p.ID, Org: r.OrgID, Epoch: model.Uint64(o.Epoch + 1), Phase: "fencing"}
+					st.SourceFences[p.ID.String()] = model.SourceFence{Operation: r.CommandID, Source: p.ID, Org: r.OrgID, Epoch: model.Uint64(o.Epoch + 1), Phase: "fencing"} // TrackChange below makes exactly this epoch
 					if st.SourceOperations == nil {
 						st.SourceOperations = map[string]model.SourceFence{}
 					}
@@ -290,7 +294,7 @@ func (s *Service) adminCommand(ctx context.Context, c Credential, r AdminCommand
 			return model.Fail(model.Invalid)
 		}
 		if r.Kind != "create_user" {
-			o.Epoch++
+			o.TrackChange(objectKey)
 			st.Orgs[r.OrgID.String()] = o
 		}
 		audit.PolicyEpoch = o.Epoch
@@ -378,4 +382,24 @@ func (s *Service) AdminRead(ctx context.Context, c Credential, r AdminReadReques
 		return nil
 	})
 	return out, err
+}
+
+// adminObjectKey names the organization object an admin command changes: the unit a stale save conflicts on. It is built from the
+// payload alone, so the compare happens before (and independently of) the command's own validation.
+func adminObjectKey(kind string, org model.ID, p AdminPayload) string {
+	switch kind {
+	case "create_org":
+		return "org:" + org.String()
+	case "create_project":
+		return "project:" + p.ID.String()
+	case "membership":
+		return "membership:" + p.UserID.String()
+	case "org_admin":
+		return "org_admin:" + p.UserID.String()
+	case "grant":
+		return "grant:" + p.UserID.String() + ":" + p.ProjectID.String()
+	case "notification_policy":
+		return NotificationPolicySettingKey(p.ID)
+	}
+	return kind + ":" + p.ID.String()
 }

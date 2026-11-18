@@ -4,6 +4,8 @@ package model
 
 import (
 	"encoding/json"
+	"strconv"
+	"strings"
 )
 
 type ControlUser struct {
@@ -37,7 +39,112 @@ type ControlOrg struct {
 	Secrets  map[string]string
 	Settings map[string]json.RawMessage
 	Teams    map[string]ControlTeam
+
+	// Settings also holds the per-object records that make an admin save conflict only with a change to the same object (D56,
+	// D59): ObjEpochKeyPrefix+key maps an object to the Epoch value its last tracked change produced, ObjFloorKey is the Epoch every
+	// older object counts as changed at, ObjSeenKey is the Epoch after the last tracked change. An Epoch bump by code that does not
+	// track objects (the previous release, a restore, a retirement) leaves ObjSeenKey behind, which makes every object count as
+	// changed at the current Epoch (the whole-organization compare). They are Settings keys, not members of this struct, because the
+	// previous release's strict decoder refuses an unknown member but accepts any key of a map, and every code path that walks
+	// Settings reads the keys under a prefix of its own and ignores the others: a state, a replacement, a patch or a snapshot that
+	// carries the records applies on that release and installs, so no protocol gate is needed and a voter can be rolled back at any time.
 }
+
+// The Settings keys of the per-object records of an organization. No other Settings key starts with "obj_".
+const (
+	ObjEpochKeyPrefix = "obj_epoch:"
+	ObjFloorKey       = "obj_floor"
+	ObjSeenKey        = "obj_seen"
+)
+
+// objValue reads a record's value; ok is false when it is absent or not a number.
+func (o ControlOrg) objValue(key string) (v uint64, present, ok bool) {
+	raw, present := o.Settings[key]
+	if !present {
+		return 0, false, true
+	}
+	return v, true, json.Unmarshal(raw, &v) == nil
+}
+
+// objFloor is the epoch every object without a record counts as changed at: the stored floor while the records are current
+// (obj_seen equals Epoch), the current Epoch otherwise, and also when the floor or the seen mark is missing or unreadable (a
+// record that vanished or was altered by code that does not know it can only make saves conflict, never pass).
+func (o ControlOrg) objFloor() uint64 {
+	seen, present, ok := o.objValue(ObjSeenKey)
+	if !present || !ok || seen != o.Epoch {
+		return o.Epoch
+	}
+	floor, present, ok := o.objValue(ObjFloorKey)
+	if !present || !ok {
+		return o.Epoch
+	}
+	return floor
+}
+
+// ObjectChangedAfter reports whether a save based on the organization epoch readEpoch is stale for the object key: the object changed
+// after it, an untracked change moved the epoch past it, or it names an epoch the organization has not reached.
+func (o ControlOrg) ObjectChangedAfter(key string, readEpoch uint64) bool {
+	if readEpoch > o.Epoch {
+		return true
+	}
+	changed := o.objFloor()
+	v, present, ok := o.objValue(ObjEpochKeyPrefix + key)
+	switch {
+	case present && !ok:
+		changed = o.Epoch // a record that cannot be read counts as a change at the current epoch
+	case v > changed:
+		changed = v
+	}
+	return changed > readEpoch
+}
+
+// MaxObjEpochs bounds the object records of an organization.
+const MaxObjEpochs = 4096
+
+// TrackChange advances the organization epoch for a change to the object key and records it, dropping entries the floor covers.
+func (o *ControlOrg) TrackChange(key string) {
+	floor := o.objFloor()
+	if o.Settings == nil {
+		o.Settings = map[string]json.RawMessage{}
+	}
+	tracked := 0
+	for k := range o.Settings {
+		if !strings.HasPrefix(k, ObjEpochKeyPrefix) {
+			continue
+		}
+		if v, _, ok := o.objValue(k); ok && v <= floor {
+			delete(o.Settings, k)
+			continue
+		}
+		tracked++
+	}
+	if tracked >= MaxObjEpochs {
+		// Bound: past MaxObjEpochs tracked objects the floor rises to the current epoch, which counts every
+		// older object as changed (a save based on an older read conflicts, as in the coarse rule).
+		floor = o.Epoch
+		for k := range o.Settings {
+			if strings.HasPrefix(k, ObjEpochKeyPrefix) {
+				delete(o.Settings, k)
+			}
+		}
+	}
+	o.Epoch++
+	o.Settings[ObjFloorKey] = uintRaw(floor)
+	o.Settings[ObjEpochKeyPrefix+key] = uintRaw(o.Epoch)
+	o.Settings[ObjSeenKey] = uintRaw(o.Epoch)
+}
+
+func uintRaw(v uint64) json.RawMessage { return json.RawMessage(strconv.FormatUint(v, 10)) }
+
+// StartObjectRecords makes a new organization's records current: every object counts as changed at its starting Epoch.
+func (o *ControlOrg) StartObjectRecords() {
+	if o.Settings == nil {
+		o.Settings = map[string]json.RawMessage{}
+	}
+	o.Settings[ObjFloorKey] = uintRaw(o.Epoch)
+	o.Settings[ObjSeenKey] = uintRaw(o.Epoch)
+}
+
 type AuditOutcome string
 
 const (

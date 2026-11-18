@@ -79,6 +79,11 @@ func TestRestrictedRawExpiryEndsEveryReadPathAtTheBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("source one second before expiry: %v", err)
 	}
+	// The lease (the renewal-free interval of the scope) is clamped to the window as well: a scope minted one second
+	// before the window closes must not be renewal-free for the default five seconds past it (review m-2, 01.05).
+	if deadline := scope.LeaseDeadline(); deadline.IsZero() || deadline.After(expiry) {
+		t.Fatalf("the scope's lease ends at %v, after the source window at %v", deadline, expiry)
+	}
 	if !visible(t, f, reader, auth.RawRead, source) {
 		t.Fatal("source not discoverable before its window closes")
 	}
