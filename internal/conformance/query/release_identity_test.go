@@ -36,6 +36,8 @@ func TestOracleIdentityIsVerifiedFieldByField(t *testing.T) {
 		{"no revision", prom, answer(prom, "", "3.13.5"), false},
 		{"a revision that is not a prefix of the pin", prom, answer(prom, "e497435", "3.13.5"), false},
 		{"a revision longer than the pin", prom, answer(prom, prom.Commit+"0", "3.13.5"), false},
+		{"a revision from the middle of the pin", prom, answer(prom, prom.Commit[3:12], "3.13.5"), false},
+		{"a revision from the end of the pin", prom, answer(prom, prom.Commit[len(prom.Commit)-9:], "3.13.5"), false},
 		{"another version", prom, answer(prom, "f497435", "3.1.0"), false},
 		{"no version", prom, answer(prom, "f497435", ""), false},
 		{"the v prefix twice", prom, answer(prom, "f497435", "vv3.13.5"), false},
@@ -51,6 +53,30 @@ func TestOracleIdentityIsVerifiedFieldByField(t *testing.T) {
 	} {
 		if got := oracleIdentityOK(c.p, c.r); got != c.accept {
 			t.Errorf("%s: oracleIdentityOK = %v, want %v", c.name, got, c.accept)
+		}
+	}
+}
+
+// A digest is exactly 64 hexadecimal digits: a short, a long or a non-hex string is no digest.
+func TestIsSHA256HexIsExact(t *testing.T) {
+	full := strings.Repeat("ab", 32)
+	for _, c := range []struct {
+		name string
+		in   string
+		want bool
+	}{
+		{"64 lowercase hex digits", full, true},
+		{"64 uppercase hex digits", strings.ToUpper(full), true},
+		{"one digit short", full[:63], false},
+		{"two digits short (still whole bytes)", full[:62], false},
+		{"a single byte", "ab", false},
+		{"one byte too long", full + "ab", false},
+		{"empty", "", false},
+		{"64 characters, one not hex", full[:63] + "g", false},
+		{"63 digits and a space", full[:63] + " ", false},
+	} {
+		if got := isSHA256Hex(c.in); got != c.want {
+			t.Errorf("%s: isSHA256Hex(%q) = %v, want %v", c.name, c.in, got, c.want)
 		}
 	}
 }

@@ -55,6 +55,14 @@ scenario of the policy present and passing, and an empty NOT-satisfied list. A m
 profile or layout, a duplicate, a row bound to a report of another profile, kind, seed or layout, an
 absent or unparsable report, or a digest mismatch fails with the exact evidence named.
 
+The input normalization the gate checks is evidence the smoke run produced, never a claim: every stage of the
+persisted path compares the float samples it sent with the ones storage returned, and, for each native histogram
+feed (direct ingest, remote write v1 and v2), the histograms it sent with the ones storage returned, record for
+record and field for field (`query.HistogramInput`: counts above 2^53 as decimals, floats as their bits, spans,
+bucket deltas, custom bounds, reset hint). The gate fails when the authored inputs hold no stale marker, no
+integer native histogram or no float native histogram, because the loss check of that kind would then never have
+been exercised. The identity over this evidence is pinned in `qualification/query-matrix.yaml`.
+
 The smoke layouts are real installations, not stand-ins. `single` is one node. `distributed` is three
 in-process voters (`internal/smokecluster`, `appcore.OpenDistributed`) on three private directories,
 joined over mTLS peer listeners from one authenticated cluster seed, with the owned ingest, query and

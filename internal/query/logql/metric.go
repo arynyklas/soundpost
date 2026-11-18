@@ -13,6 +13,7 @@ import (
 	"github.com/arynyklas/soundpost/internal/query/value"
 	"io"
 	"math"
+	"sort"
 	"strconv"
 )
 
@@ -370,14 +371,14 @@ func EvaluateLogsInterval(ctx context.Context, plan Plan, src scan.LogSource, or
 		return result, err
 	}
 	// The merge keeps only the prefix of the total order that can still reach the
-	// limit. With an interval each emitted entry stands for one row (multiplicity
-	// is forced to 1 below) and thinning discards rows, so the prefix is measured
-	// in rows and grown, rescanning, until the thinned prefix yields the limit or
-	// covers every match. Forcing multiplicity to 1 is what the pinned Loki does:
-	// its readStreams (pkg/logql/engine.go at 257d2f62) treats every duplicate as
-	// its own entry, emits an entry only when its timestamp is at least `interval`
+	// limit. With an interval each emitted row stands for one entry (multiplicity
+	// is cut to 1 in emitLogs, except after an entry before 1970) and thinning
+	// discards rows, so the prefix is measured in rows and grown, rescanning, until
+	// the thinned prefix yields the limit or covers every match. The pinned Loki
+	// (pkg/logql/engine.go readStreams at 257d2f62) treats every copy of a row as
+	// its own entry and emits one only when its timestamp is at least `interval`
 	// past the last emitted one, so the other copies of a row (same timestamp) are
-	// always thinned away; a row emitted once stands for one entry, never for N.
+	// thinned away; a row emitted once stands for one entry, never for N.
 	bound := logBound{units: limit}
 	if interval > 0 {
 		bound.perRow = true
@@ -395,6 +396,9 @@ func EvaluateLogsInterval(ctx context.Context, plan Plan, src scan.LogSource, or
 		}
 		account.Release(held)
 		if err == nil {
+			presentLogs(result.Logs)
+		}
+		if err == nil {
 			err = account.Check(ctx)
 		}
 		if err == nil {
@@ -402,8 +406,11 @@ func EvaluateLogsInterval(ctx context.Context, plan Plan, src scan.LogSource, or
 		}
 	}()
 	for {
-		// The pinned engine reads streams back without their hash: ties order by label string.
-		merged, err = mergeBounded(ctx, []EntryIterator{input}, order, bound, account, false)
+		// The source merge of the pinned engine orders equal timestamps of different streams by the
+		// hash of the original stream labels, and that order decides which tied entry a limit or an
+		// interval keeps (observed: native-logql-interval-observations.json). Only the grouped result
+		// readStreams returns is label-sorted; presentLogs gives the answer that order.
+		merged, err = mergeBounded(ctx, []EntryIterator{input}, order, bound, account, true)
 		if err != nil {
 			merged = nil
 			return result, err
@@ -449,7 +456,11 @@ func (s *metricState) emitLogs(ctx context.Context, merged *orderedLogs, order L
 		if e != nil {
 			return emitted, e
 		}
-		if interval > 0 && havePrevious {
+		// Loki skips an entry closer than `interval` to the last output entry only while that
+		// entry is at or after 1970: its readStreams tests `lastEntry.Unix() < 0` (meant to find the
+		// first pass) as "output every entry". After an output entry before the epoch nothing is
+		// thinned, and each copy of a pre-epoch row is its own output entry.
+		if interval > 0 && havePrevious && previous >= 0 {
 			distance := uint64(r.Entry.Timestamp) - uint64(previous)
 			if order == Backward {
 				distance = uint64(previous) - uint64(r.Entry.Timestamp)
@@ -459,7 +470,9 @@ func (s *metricState) emitLogs(ctx context.Context, merged *orderedLogs, order L
 				continue
 			}
 		}
-		if interval > 0 {
+		// The output of the first copy sets the last entry to this row: from a row at or after the
+		// epoch on, its other copies (distance 0) are thinned away.
+		if interval > 0 && r.Entry.Timestamp >= 0 {
 			r.Entry.Multiplicity = 1
 		}
 		if limit > 0 && uint64(r.Entry.Multiplicity) > limit-emitted {
@@ -485,6 +498,33 @@ func (s *metricState) emitLogs(ctx context.Context, merged *orderedLogs, order L
 		}
 	}
 	return emitted, nil
+}
+
+// presentLogs puts the answer in the order the pinned engine's grouped result reads back: time as
+// emitted, equal timestamps of different streams by label string, ascending in either direction.
+// Which tied entry was kept was decided before, by the stream hash.
+func presentLogs(logs []value.Log) {
+	type keyed struct {
+		key string
+		log value.Log
+	}
+	for i := 0; i < len(logs); {
+		j := i + 1
+		for j < len(logs) && logs[j].Timestamp == logs[i].Timestamp {
+			j++
+		}
+		if j-i > 1 {
+			run := make([]keyed, 0, j-i)
+			for _, l := range logs[i:j] {
+				run = append(run, keyed{labelString(l.Labels), l})
+			}
+			sort.SliceStable(run, func(a, b int) bool { return run[a].key < run[b].key })
+			for k := range run {
+				logs[i+k] = run[k].log
+			}
+		}
+		i = j
+	}
 }
 
 // The pinned engine label-orders final instant vectors except sample trees

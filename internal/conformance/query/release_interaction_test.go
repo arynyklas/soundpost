@@ -71,6 +71,18 @@ func TestInteractionCoverageIsDerivedFromExecutedAndMatchedRows(t *testing.T) {
 		{"a second row of the carrying case was never observed", func(c *ReleaseConfig) {
 			ownedAnswers(c, secondRow(c), notObserved)
 		}},
+		// The row that disagrees comes first and the one that matches comes last: neither the last row
+		// nor the number of matched rows alone may stand for the case.
+		{"the first of two rows of the carrying case disagreed", func(c *ReleaseConfig) {
+			first := c.Generated[0].Rows[0].Row.ID
+			secondRow(c)
+			ownedAnswers(c, first, errors.New("value: reference 1, owned 2"))
+		}},
+		{"the first of two rows of the carrying case was never observed", func(c *ReleaseConfig) {
+			first := c.Generated[0].Rows[0].Row.ID
+			secondRow(c)
+			ownedAnswers(c, first, notObserved)
+		}},
 		{"the carrying case is a negative case", func(c *ReleaseConfig) { c.Generated[0].Rows[0].Source.Kind = "negative" }},
 		{"the carrying case is a gate probe", func(c *ReleaseConfig) { c.Generated[0].Rows[0].Source.Kind = "gate" }},
 		{"the carrying case belongs to the language's second profile", func(c *ReleaseConfig) {

@@ -296,6 +296,13 @@ func RunPersisted(ctx context.Context, layout Layout, dir, path string) (res Per
 		src := append([]q.InputRecord(nil), authored...)
 		sort.Slice(src, func(i, j int) bool { return canonicalKey(src[i]) < canonicalKey(src[j]) })
 		res.Normalization = append(res.Normalization, q.NormalizationCheck{ID: normalizationID(layout, stage), Profile: "promql-prometheus-3.13.5", Source: src, Normalized: normalized})
+		// The native histograms the feeds sent against the ones storage returns: the histogram
+		// half of the input normalization evidence.
+		for _, h := range hooks {
+			if h.normalization != nil {
+				res.Normalization = append(res.Normalization, h.normalization(stage)...)
+			}
+		}
 		res.Persistence = append(res.Persistence, q.ScenarioOutcome{Name: stage + "-queries", Passed: failures == 0})
 		res.Persistence = append(res.Persistence, q.ScenarioOutcome{Name: stage + "-manifest", Passed: manifestOK})
 	}

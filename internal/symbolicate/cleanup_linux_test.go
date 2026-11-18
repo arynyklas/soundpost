@@ -57,6 +57,14 @@ run)
   late) ( sleep 0.6; touch "$D/containers/$n" ) >/dev/null 2>&1 & exec sleep 30;;
   now) touch "$D/containers/$n"; exec sleep 30;;
   fail) exit 125;;
+  slow)
+    touch "$D/containers/$n"
+    dd bs=1 count=1 of=/dev/null 2>/dev/null
+    cat "$D/hello"
+    sleep 0.15
+    cat >/dev/null
+    echo '[{"reason":"unmapped"}]'
+    exit 0;;
   ok)
     touch "$D/containers/$n"
     dd bs=1 count=1 of=/dev/null 2>/dev/null
@@ -209,23 +217,42 @@ func TestOCIContainerIsRemovedOnEveryExit(t *testing.T) {
 		time.Sleep(900 * time.Millisecond)
 		d.assertRemoved(t)
 	})
+	// The OCI transport allowance is what lets a frame whose reply crosses the
+	// runtime chain answer inside the parent's bound: a reply that lands 150 ms
+	// after the handshake resolves, while a 100 ms bound would kill it.
+	t.Run("oci transport allowance lets a slow frame answer", func(t *testing.T) {
+		d := newFakeDocker(t, "slow")
+		if got := d.service(t).runOne(context.Background(), in); got.Reason != Unmapped {
+			t.Fatalf("fake worker answer: %+v", got)
+		}
+		d.assertRemoved(t)
+	})
 }
 
 func TestSweepRemovesOnlyExactMatchingContainersByID(t *testing.T) {
 	d := newFakeDocker(t, "ok")
 	old := time.Now().Add(-time.Hour).Format("2006-01-02 15:04:05 -0700 MST")
 	young := time.Now().Add(-time.Second).Format("2006-01-02 15:04:05 -0700 MST")
+	age29 := time.Now().Add(-29 * time.Second).Format("2006-01-02 15:04:05 -0700 MST")
+	age30 := time.Now().Add(-30 * time.Second).Format("2006-01-02 15:04:05 -0700 MST")
+	future := time.Now().Add(time.Hour).Format("2006-01-02 15:04:05 -0700 MST")
 	hex := strings.Repeat("ab", 16)
 	rows := []string{
 		"id-exited|soundpost-symbolicate-" + hex + "|exited|" + old + "|" + d.config.OCIImage,
 		"id-created|soundpost-symbolicate-" + hex + "|created|" + old + "|" + d.config.OCIImage,
 		"id-running|soundpost-symbolicate-" + hex + "|running|" + old + "|" + d.config.OCIImage,
 		"id-young|soundpost-symbolicate-" + hex + "|created|" + young + "|" + d.config.OCIImage,
+		"id-age29|soundpost-symbolicate-" + hex + "|exited|" + age29 + "|" + d.config.OCIImage,
+		"id-age30|soundpost-symbolicate-" + hex + "|exited|" + age30 + "|" + d.config.OCIImage,
 		"id-otherimage|soundpost-symbolicate-" + hex + "|exited|" + old + "|sha256:" + strings.Repeat("b", 64),
+		"id-prefiximage|soundpost-symbolicate-" + hex + "|exited|" + old + "|" + d.config.OCIImage + "x",
 		"id-prefix|other-soundpost-symbolicate-" + hex + "|exited|" + old + "|" + d.config.OCIImage,
 		"id-shortname|soundpost-symbolicate-abc|exited|" + old + "|" + d.config.OCIImage,
 		"id-suffix|soundpost-symbolicate-" + hex + "-x|exited|" + old + "|" + d.config.OCIImage,
+		"id-upper|soundpost-symbolicate-" + strings.ToUpper(hex) + "|exited|" + old + "|" + d.config.OCIImage,
 		"id-other|someone-elses-db|exited|" + old + "|" + d.config.OCIImage,
+		"id-future|soundpost-symbolicate-" + hex + "|exited|" + future + "|" + d.config.OCIImage,
+		"id-emptyimage|soundpost-symbolicate-" + hex + "|exited|" + old + "|",
 		"id-baddate|soundpost-symbolicate-" + hex + "|exited|yesterday|" + d.config.OCIImage,
 	}
 	if err := os.WriteFile(filepath.Join(d.dir, "ps.txt"), []byte(strings.Join(rows, "\n")+"\n"), 0o600); err != nil {
@@ -239,7 +266,7 @@ func TestSweepRemovesOnlyExactMatchingContainersByID(t *testing.T) {
 		}
 	}
 	// the fake removes only containers it knows, so success is judged by argv
-	want := []string{"rm id-exited", "rm id-created"}
+	want := []string{"rm id-exited", "rm id-created", "rm id-age30"}
 	if strings.Join(rms, ",") != strings.Join(want, ",") {
 		t.Fatalf("removed %q, want exactly %q (argv %q)", rms, want, d.argv())
 	}
@@ -247,8 +274,33 @@ func TestSweepRemovesOnlyExactMatchingContainersByID(t *testing.T) {
 	if !strings.Contains(ps, "ps -a --no-trunc --filter ancestor="+d.config.OCIImage+" --filter name=soundpost-symbolicate-") || strings.Contains(strings.Join(d.argv(), "\n"), "prune") || strings.Contains(strings.Join(d.argv(), "\n"), "--force") {
 		t.Fatalf("unexpected runtime invocations: %q", d.argv())
 	}
+	// A native-mode configuration that happens to carry OCI fields must not sweep:
+	// only the OCI mode has leftovers to clean.
+	nativeOCI := d.config
+	nativeOCI.Mode = "native"
+	if got := SweepOCI(context.Background(), nativeOCI); got.Ran {
+		t.Fatal("a native-mode configuration swept")
+	}
 	if got := SweepOCI(context.Background(), Config{Mode: "native"}); got.Ran || got.Removed != nil {
 		t.Fatal("native mode swept")
+	}
+}
+
+// The background remove retries at a fixed pace and stops: a retry loop that
+// spins or never ends would flood the runtime or outlive its budget.
+func TestRemoveRetryPaceIsBounded(t *testing.T) {
+	fastRetries(t)
+	d := newFakeDocker(t, "fail") // the run command fails; no container ever appears
+	d.service(t).runOne(context.Background(), workerInput{Version: 1, Positions: []workerPosition{{Line: 1}}, Map: []byte("{}"), MapHash: model.HashCanonical([]byte("{}"))})
+	removeRetries.Wait()
+	attempts := 0
+	for _, l := range d.argv() {
+		if strings.HasPrefix(l, "rm --force ") {
+			attempts++
+		}
+	}
+	if attempts > 150 {
+		t.Fatalf("remove retries ran %d times in one budget: the pace or the bound is gone", attempts)
 	}
 }
 

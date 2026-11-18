@@ -16,12 +16,14 @@ import (
 	"time"
 )
 
-// removeRetryEvery is the pause between background container-remove retries.
 // ociTransportAllowance is added to the parent-side frame wait in OCI mode only.
 const ociTransportAllowance = 400 * time.Millisecond
 
 var (
-	removeRetryEvery  = 200 * time.Millisecond
+	// removeRetryEvery is the pause between background container-remove retries.
+	removeRetryEvery = 200 * time.Millisecond
+	// removeRetryBudget bounds how long a retry loop may start new attempts; an
+	// attempt in flight at the end may take up to ProcessTimeout more.
 	removeRetryBudget = ProcessTimeout
 	// removeRetries lets tests wait for the background retries.
 	removeRetries sync.WaitGroup
@@ -198,7 +200,7 @@ func (s *Service) launch(ctx context.Context, probe bool) (*workerProcess, error
 			// daemon may still be creating the container for a `run` request whose
 			// client was killed (deadline under load). It would appear later as a
 			// never-started `Created` container, so keep removing, off the request's
-			// slot, for at most ProcessTimeout in total.
+			// slot, starting new attempts for at most removeRetryBudget (ProcessTimeout).
 			removeRetries.Add(1)
 			go func() {
 				defer removeRetries.Done()

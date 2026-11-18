@@ -91,6 +91,7 @@ func TestDistributedPersistedPathAnswersAreIdenticalAtEveryStage(t *testing.T) {
 		t.Fatal("no normalization checks")
 	}
 	requirePersistedFamilies(t, res)
+	requireHistogramNormalization(t, res, Distributed)
 }
 
 func TestDistributedRuleSmokeRunsOnThreeVotersWithReplicatedControl(t *testing.T) {

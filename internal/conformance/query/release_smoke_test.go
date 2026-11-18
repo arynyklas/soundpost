@@ -171,6 +171,10 @@ func TestReleaseScenarioOutcomesAreAllHeld(t *testing.T) {
 			*list = append([]ScenarioOutcome{{Name: first, Passed: false, Detail: "layout single"}}, *list...)
 			rep, err := runGate(t, cfg)
 			requireRejected(t, rep, err, f.kind+" scenario "+first+" reported twice")
+			// the failed first outcome and the second report of the name are one failure each
+			if rep.ScenarioFailures != 2 {
+				t.Fatalf("scenario failures %d, want 2 (the failed outcome and the repeat)", rep.ScenarioFailures)
+			}
 		})
 		t.Run(f.kind+" a pass that a later failure contradicts", func(t *testing.T) {
 			cfg := releaseFixture(t)
@@ -179,6 +183,10 @@ func TestReleaseScenarioOutcomesAreAllHeld(t *testing.T) {
 			*list = append(*list, ScenarioOutcome{Name: first, Passed: false, Detail: "layout distributed"})
 			rep, err := runGate(t, cfg)
 			requireRejected(t, rep, err, f.kind+" scenario "+first+" reported twice")
+			// the first outcome passed: only the repeat is a failure
+			if rep.ScenarioFailures != 1 {
+				t.Fatalf("scenario failures %d, want 1 (the repeat)", rep.ScenarioFailures)
+			}
 		})
 	}
 }
@@ -244,5 +252,71 @@ func TestReleaseNormalizationEvidence(t *testing.T) {
 		if rep, err := runGate(t, cfg); err != nil {
 			t.Fatalf("a stale marker in one of two checks was refused: %v %q", err, rep.Failures)
 		}
+	})
+	// The histogram branch of the loss check is only exercised by evidence that holds a native
+	// histogram of each form: a producer that fed it floats alone must fail the gate (GR-21).
+	stale := InputRecord{Kind: "float", Timestamp: "10", Name: "m", Bits: StaleBits}
+	t.Run("no authored input is a native histogram", func(t *testing.T) {
+		cfg := releaseFixture(t)
+		cfg.Smoke.Normalization = []NormalizationCheck{{ID: "floats", Profile: "promql-prometheus-3.13.5", Source: []InputRecord{stale, plain}, Normalized: []InputRecord{stale, plain}}}
+		rep, err := runGate(t, cfg)
+		requireRejected(t, rep, err, "input normalization evidence carries no integer native histogram")
+		if !failureContains(rep, "input normalization evidence carries no float native histogram") {
+			t.Fatalf("the missing float histogram was not reported: %q", rep.Failures)
+		}
+		if rep.NormalizationLoss != 0 {
+			t.Fatalf("normalization loss %d: the inputs are lossless", rep.NormalizationLoss)
+		}
+	})
+	t.Run("only a float histogram", func(t *testing.T) {
+		cfg := releaseFixture(t)
+		cfg.Smoke.Normalization[0].Source = []InputRecord{stale}
+		cfg.Smoke.Normalization[0].Normalized = []InputRecord{stale}
+		rep, err := runGate(t, cfg)
+		requireRejected(t, rep, err, "input normalization evidence carries no integer native histogram")
+		if failureContains(rep, "carries no float native histogram") {
+			t.Fatalf("a float histogram is there: %q", rep.Failures)
+		}
+	})
+	t.Run("only an integer histogram", func(t *testing.T) {
+		cfg := releaseFixture(t)
+		cfg.Smoke.Normalization = cfg.Smoke.Normalization[:1]
+		rep, err := runGate(t, cfg)
+		requireRejected(t, rep, err, "input normalization evidence carries no float native histogram")
+		if failureContains(rep, "carries no integer native histogram") {
+			t.Fatalf("an integer histogram is there: %q", rep.Failures)
+		}
+	})
+	t.Run("histograms in the normalized records only are not authored ones", func(t *testing.T) {
+		cfg := releaseFixture(t)
+		intHist, floatHist := cfg.Smoke.Normalization[0].Normalized[1], cfg.Smoke.Normalization[1].Normalized[0]
+		cfg.Smoke.Normalization = []NormalizationCheck{{ID: "floats", Profile: "promql-prometheus-3.13.5", Source: []InputRecord{stale, plain}, Normalized: []InputRecord{stale, intHist, floatHist}}}
+		rep, err := runGate(t, cfg)
+		requireRejected(t, rep, err, "input normalization evidence carries no integer native histogram")
+		if !failureContains(rep, "input normalization evidence carries no float native histogram") {
+			t.Fatalf("a float histogram in the normalized records counted as an authored one: %q", rep.Failures)
+		}
+	})
+	t.Run("a histogram record without a histogram is not one", func(t *testing.T) {
+		cfg := releaseFixture(t)
+		hollow := InputRecord{Kind: "histogram", Timestamp: "30", Name: "hh"}
+		cfg.Smoke.Normalization = []NormalizationCheck{{ID: "hollow", Profile: "promql-prometheus-3.13.5", Source: []InputRecord{stale, hollow}, Normalized: []InputRecord{stale, hollow}}}
+		rep, err := runGate(t, cfg)
+		requireRejected(t, rep, err, "input normalization evidence carries no integer native histogram")
+	})
+	t.Run("a lossy float histogram is loss", func(t *testing.T) {
+		cfg := releaseFixture(t)
+		cfg.Smoke.Normalization[1].Normalized[0].Histogram.PositiveBucketBits = []string{"4000000000000001"}
+		rep, err := runGate(t, cfg)
+		requireRejected(t, rep, err, "input normalization promql-prometheus-3.13.5/float-histogram: record 0 changed")
+		if rep.NormalizationLoss != 1 {
+			t.Fatalf("normalization loss %d", rep.NormalizationLoss)
+		}
+	})
+	t.Run("a float histogram that became an integer one is loss", func(t *testing.T) {
+		cfg := releaseFixture(t)
+		cfg.Smoke.Normalization[1].Normalized[0].Histogram = &Histogram{Kind: "integer", Count: "3", ZeroCount: "1", PositiveSpans: []HistogramSpan{{Offset: 0, Length: 1}}, NegativeSpans: []HistogramSpan{}, PositiveDeltas: []string{"2"}}
+		rep, err := runGate(t, cfg)
+		requireRejected(t, rep, err, "record 0 changed")
 	})
 }

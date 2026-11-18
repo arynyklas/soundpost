@@ -46,6 +46,7 @@ func TestPersistedPathAnswersAreIdenticalAtEveryStage(t *testing.T) {
 		}
 	}
 	requirePersistedFamilies(t, res)
+	requireHistogramNormalization(t, res, Single)
 	t.Logf("%d steps, %d scenarios, %d normalization checks", len(res.Steps), len(res.Persistence), len(res.Normalization))
 }
 

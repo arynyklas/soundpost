@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/arynyklas/soundpost/internal/adapters/queryinput"
+	q "github.com/arynyklas/soundpost/internal/conformance/query"
 	"github.com/arynyklas/soundpost/internal/ingest"
 	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/query"
@@ -28,6 +29,10 @@ type persistedHook struct {
 	resend func()
 	// check returns the feed's steps for one stage.
 	check func(stage string) []StepResult
+	// normalization returns the input normalization checks of the feed for one
+	// stage (the native histograms it sent against the ones storage returns); nil
+	// when the feed sends none.
+	normalization func(stage string) []q.NormalizationCheck
 	// close releases what the feed holds (a scrape target).
 	close func()
 	// final returns the steps that run once every stage is done.
@@ -415,6 +420,64 @@ func (f *adapterFeed) stored() []rawRow {
 	return out
 }
 
+// histogramNormalization is the input normalization check of the native
+// histograms the feed sends: the histograms as authored (the logical records,
+// not the wire bytes) against the ones storage returns for the feed's source,
+// both rendered by q.HistogramInput. Times are offsets from the run anchor, so
+// the evidence (and the identity the release gate digests) does not depend on
+// the wall clock of the run. nil when the feed sends no native histogram.
+func (f *adapterFeed) histogramNormalization(id string) *q.NormalizationCheck {
+	var source, normalized []q.InputRecord
+	for _, s := range f.spec.Series {
+		ls := make([]string, 0, len(s.Labels))
+		for _, k := range sortedLabelNames(s.Labels) {
+			ls = append(ls, k+"="+s.Labels[k])
+		}
+		for _, sm := range s.Samples {
+			if sm.Histogram == nil {
+				continue
+			}
+			h, err := q.HistogramInput(sm.Histogram)
+			check(err)
+			source = append(source, q.InputRecord{Kind: "histogram", Timestamp: decimal(sm.TMS * 1e6), Name: f.project + "/" + s.Name + "{" + strings.Join(ls, ",") + "}", Histogram: h})
+		}
+	}
+	if len(source) == 0 {
+		return nil
+	}
+	for _, r := range f.stored() {
+		if r.Kind != "integer_histogram" && r.Kind != "float_histogram" {
+			continue
+		}
+		var stored model.NativeHistogram
+		check(json.Unmarshal([]byte(r.Value), &stored))
+		h, err := q.HistogramInput(&stored)
+		check(err)
+		normalized = append(normalized, q.InputRecord{Kind: "histogram", Timestamp: decimal(r.Time - f.anchorNS()), Name: f.project + "/" + r.Series, Histogram: h})
+	}
+	byKey := func(rs []q.InputRecord) {
+		keys := make(map[int]string, len(rs))
+		for i, r := range rs {
+			raw, err := json.Marshal(r)
+			check(err)
+			keys[i] = r.Name + "\x00" + r.Timestamp + "\x00" + string(raw)
+		}
+		idx := make([]int, len(rs))
+		for i := range idx {
+			idx[i] = i
+		}
+		sort.Slice(idx, func(a, b int) bool { return keys[idx[a]] < keys[idx[b]] })
+		out := make([]q.InputRecord, len(rs))
+		for i, j := range idx {
+			out[i] = rs[j]
+		}
+		copy(rs, out)
+	}
+	byKey(source)
+	byKey(normalized)
+	return &q.NormalizationCheck{ID: id, Profile: "promql-prometheus-3.13.5", Source: source, Normalized: normalized}
+}
+
 func (f *adapterFeed) check(stage string, profiles []string) []StepResult {
 	var steps []StepResult
 	run := func(name string, fn func() string) {
@@ -693,6 +756,13 @@ func adapterHooks(env *Env, sec *adaptersSection, profiles []string, kind string
 				f.retried = &r
 			},
 			check: func(stage string) []StepResult { return f.check(stage, profiles) },
+			normalization: func(stage string) []q.NormalizationCheck {
+				c := f.histogramNormalization(normalizationID(env.layout, stage) + "/" + kind + "/" + f.spec.ID)
+				if c == nil {
+					return nil
+				}
+				return []q.NormalizationCheck{*c}
+			},
 			close: f.close,
 		})
 	}

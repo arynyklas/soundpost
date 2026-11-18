@@ -10,7 +10,7 @@ root: ..
 runtime: /usr/bin/docker
 policy: conformance/query/release-policy.json
 profiles_dir: profiles/query
-input_normalization_identity: 6a7d20174e66b42478b90be6c39544dfd68d79fef03541661e12ed947d767f6b
+input_normalization_identity: 73050da51deeee4cb3b46c6c8e56a84b806962523e5f7baed722fe8b24777702
 seeds:
   - 20261110
   - 20270101

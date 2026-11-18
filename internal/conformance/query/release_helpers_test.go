@@ -53,6 +53,9 @@ func validSmokeReport() *SmokeReport {
 	hist := InputRecord{Kind: "histogram", Timestamp: "10", Name: "h", Histogram: &Histogram{Kind: "integer", Schema: 0, Count: "3", ZeroCount: "1", PositiveSpans: []HistogramSpan{{Offset: 0, Length: 1}}, NegativeSpans: []HistogramSpan{}, PositiveDeltas: []string{"2"}}}
 	hist2 := hist
 	hist2.Histogram = &Histogram{Kind: "integer", Schema: 0, Count: "3", ZeroCount: "1", PositiveSpans: []HistogramSpan{{Offset: 0, Length: 1}}, NegativeSpans: []HistogramSpan{}, PositiveDeltas: []string{"2"}}
+	floatHist := InputRecord{Kind: "histogram", Timestamp: "20", Name: "hf", Histogram: &Histogram{Kind: "float", Schema: 0, CountBits: "4008000000000000", ZeroCountBits: "3ff0000000000000", PositiveSpans: []HistogramSpan{{Offset: 0, Length: 1}}, NegativeSpans: []HistogramSpan{}, PositiveBucketBits: []string{"4000000000000000"}}}
+	floatHist2 := floatHist
+	floatHist2.Histogram = &Histogram{Kind: "float", Schema: 0, CountBits: "4008000000000000", ZeroCountBits: "3ff0000000000000", PositiveSpans: []HistogramSpan{{Offset: 0, Length: 1}}, NegativeSpans: []HistogramSpan{}, PositiveBucketBits: []string{"4000000000000000"}}
 	return &SmokeReport{
 		Schema:        "soundpost-smoke-report/1",
 		CaseFiles:     []string{"conformance/query/cases/persisted-path.json", "conformance/query/cases/profile-cross-products.json"},
@@ -62,7 +65,7 @@ func validSmokeReport() *SmokeReport {
 		ModesNotRun:   []string{},
 		Persistence:   passedOutcomes(requiredPersistenceNames()),
 		Isolation:     passedOutcomes(requiredIsolationNames()),
-		Normalization: []NormalizationCheck{{ID: "stale-and-histogram", Profile: "promql-prometheus-3.13.5", Source: []InputRecord{stale, hist}, Normalized: []InputRecord{stale, hist2}}},
+		Normalization: []NormalizationCheck{{ID: "stale-and-histogram", Profile: "promql-prometheus-3.13.5", Source: []InputRecord{stale, hist}, Normalized: []InputRecord{stale, hist2}}, {ID: "float-histogram", Profile: "promql-prometheus-3.13.5", Source: []InputRecord{floatHist}, Normalized: []InputRecord{floatHist2}}},
 		Steps:         []ScenarioOutcome{{Name: "persisted-path.json:hot/promql-prometheus-3.13.5/q1", Passed: true}, {Name: "distributed/persisted-path.json:hot/promql-prometheus-3.13.5/q1", Passed: true}},
 		NotSatisfied:  []string{},
 	}

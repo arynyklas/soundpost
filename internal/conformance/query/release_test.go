@@ -346,6 +346,7 @@ func TestNormalizationLossNamesTheDamage(t *testing.T) {
 	}{
 		{"stale to nan", []InputRecord{stale}, []InputRecord{{Kind: "float", Timestamp: "1", Name: "m", Bits: "7ff8000000000001"}}, "stale marker"},
 		{"histogram to float", []InputRecord{hist}, []InputRecord{{Kind: "float", Timestamp: "1", Name: "h", Bits: "4008000000000000"}}, "native form"},
+		{"histogram emptied", []InputRecord{hist}, []InputRecord{{Kind: "histogram", Timestamp: "1", Name: "h"}}, "native form"},
 		{"count drift", []InputRecord{stale, hist}, []InputRecord{stale}, "record count"},
 		{"lossless", []InputRecord{stale, hist}, []InputRecord{stale, hist}, ""},
 	}

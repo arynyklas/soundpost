@@ -23,12 +23,14 @@ func greenSmoke() q.SmokeReport {
 	}
 	rec := q.InputRecord{Kind: "float", Timestamp: "1", Name: "m", Bits: "3ff0000000000000"}
 	stale := q.InputRecord{Kind: "float", Timestamp: "2", Name: "m", Bits: q.StaleBits}
+	intHist := q.InputRecord{Kind: "histogram", Timestamp: "3", Name: "h", Histogram: &q.Histogram{Kind: "integer", Count: "3", ZeroCount: "1", PositiveSpans: []q.HistogramSpan{{Offset: 0, Length: 1}}, NegativeSpans: []q.HistogramSpan{}, PositiveDeltas: []string{"2"}}}
+	floatHist := q.InputRecord{Kind: "histogram", Timestamp: "4", Name: "hf", Histogram: &q.Histogram{Kind: "float", CountBits: "4008000000000000", ZeroCountBits: "3ff0000000000000", PositiveSpans: []q.HistogramSpan{{Offset: 0, Length: 1}}, NegativeSpans: []q.HistogramSpan{}, PositiveBucketBits: []string{"4000000000000000"}}}
 	return q.SmokeReport{
 		Schema: "soundpost-smoke-report/1", CaseFiles: []string{"conformance/query/cases/persisted-path.json", "conformance/query/cases/profile-cross-products.json"},
 		Storage: "real", Control: "real", Modes: []string{"single", "distributed"}, ModesNotRun: []string{},
 		Persistence:   pass("hot-read", "flush", "compaction", "restart", "receipt-manifest-reconciles"),
 		Isolation:     pass("foreign-project-fails-closed", "revocation-during-compute", "cancellation-releases-everything", "complete-rules-never-use-partial-data", "no-production-path-reaches-an-oracle"),
-		Normalization: []q.NormalizationCheck{{ID: "c", Profile: "promql-prometheus-3.13.5", Source: []q.InputRecord{rec, stale}, Normalized: []q.InputRecord{rec, stale}}},
+		Normalization: []q.NormalizationCheck{{ID: "c", Profile: "promql-prometheus-3.13.5", Source: []q.InputRecord{rec, stale, intHist, floatHist}, Normalized: []q.InputRecord{rec, stale, intHist, floatHist}}},
 		Steps:         pass("persisted-path.json:hot/promql-prometheus-3.13.5/q1"),
 		NotSatisfied:  []string{},
 	}
@@ -149,5 +151,44 @@ func TestCollateIsolationIsDeterministic(t *testing.T) {
 	got := collateIsolation(steps[:4])
 	if len(got) != 4 || !got[0].Passed || got[1].Passed || !got[2].Passed || got[3].Passed {
 		t.Fatalf("a failing step and a step that never ran must each fail their own scenario and nothing else: %v", got)
+	}
+}
+
+// "Complete rules never use partial data" rests on two steps of rule-smoke.json: the unavailable
+// shard must answer unknown, not recovery, AND complete data must recover. Either one alone is not
+// the scenario; the outcome names the one that never ran.
+func TestCollateIsolationNeedsBothStepsOfTheRuleScenario(t *testing.T) {
+	all := []q.ScenarioOutcome{
+		{Name: "persisted-path.json:foreign-project/a", Passed: true},
+		{Name: "live-smoke.json:revocation-during-compute/x", Passed: true},
+		{Name: "live-smoke.json:cancellation-releases-everything/y", Passed: true},
+		{Name: "rule-smoke.json:unavailable-shard-is-unknown-not-recovery", Passed: true},
+		{Name: "rule-smoke.json:complete-data-recovers", Passed: true},
+	}
+	outcome := func(steps []q.ScenarioOutcome) q.ScenarioOutcome {
+		t.Helper()
+		for _, o := range collateIsolation(steps) {
+			if o.Name == "complete-rules-never-use-partial-data" {
+				return o
+			}
+		}
+		t.Fatal("the rule scenario is not collated")
+		return q.ScenarioOutcome{}
+	}
+	if o := outcome(all); !o.Passed {
+		t.Fatalf("both steps ran and passed: %+v", o)
+	}
+	withoutShard := append(append([]q.ScenarioOutcome(nil), all[:3]...), all[4])
+	if o := outcome(withoutShard); o.Passed || !strings.Contains(o.Detail, "unavailable-shard-is-unknown-not-recovery") {
+		t.Fatalf("the unavailable-shard step never ran but the scenario passed or does not name it: %+v", o)
+	}
+	withoutRecovery := all[:4]
+	if o := outcome(withoutRecovery); o.Passed || !strings.Contains(o.Detail, "complete-data-recovers") {
+		t.Fatalf("the recovery step never ran but the scenario passed or does not name it: %+v", o)
+	}
+	failing := append([]q.ScenarioOutcome(nil), all...)
+	failing[3].Passed, failing[3].Detail = false, "answered recovery"
+	if o := outcome(failing); o.Passed || !strings.Contains(o.Detail, "unavailable-shard-is-unknown-not-recovery") {
+		t.Fatalf("a failing unavailable-shard step passed the scenario: %+v", o)
 	}
 }

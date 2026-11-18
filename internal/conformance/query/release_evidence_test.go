@@ -60,6 +60,14 @@ func TestReleaseCountsAnObservationNothingBacksAsUnobserved(t *testing.T) {
 			c.TestEvidence = append(c.TestEvidence, event("skip", c.Tests[0].Name, "example.test/other")...)
 			rehash(c)
 		}, 1, "not backed by a pass event"},
+		{"a line with no action is not a go test event", func(c *ReleaseConfig) {
+			c.TestEvidence = append(c.TestEvidence, `{"Test":"TestAnything"}`+"\n"...)
+			rehash(c)
+		}, 5, "is not a go test event"},
+		{"a line that is the JSON null is not a go test event", func(c *ReleaseConfig) {
+			c.TestEvidence = append(c.TestEvidence, "null\n"...)
+			rehash(c)
+		}, 5, "is not a go test event"},
 		{"events of other tests and outputs change nothing", func(c *ReleaseConfig) {
 			c.TestEvidence = append(c.TestEvidence, event("fail", "TestSomethingElse", "example.test/pkg")...)
 			c.TestEvidence = append(c.TestEvidence, event("output", c.Tests[0].Name, "example.test/pkg")...)
@@ -112,6 +120,11 @@ func TestReleaseCountsAnObservationNothingBacksAsUnobserved(t *testing.T) {
 		requireRejected(t, rep, err, "")
 		if rep.UnobservedTests != 1 {
 			t.Errorf("%s: unobserved %d", name, rep.UnobservedTests)
+		}
+		// A malformed entry is not evidence for or against the stream: it is not counted, and it is
+		// not reported as a digest mismatch or a missing pass either.
+		if failureContains(rep, "does not match the go test stream") || failureContains(rep, "not backed by a pass event") {
+			t.Errorf("%s: a malformed observation was reported as a mismatch with the stream: %q", name, rep.Failures)
 		}
 	}
 }

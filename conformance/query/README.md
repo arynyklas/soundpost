@@ -241,3 +241,16 @@ and records the reference observations to `evidence/native-promql-extended-histo
 `TestOwnedMatchesRecordedNativeExtendedHistogramObservations` from the locked bytes. The probe's first
 run (two mismatching rows, the smoothed mixed-schema divergence fixed in `promql/select.go`) is kept in
 the wave-17 evidence (`l2w17-evidence/lane2/probe-first-run-mismatches.json`).
+
+`author/native-oracle.sh build-loki` builds the pinned Loki 3.5.2 driver (`oracles/logql-native`, go1.24.5,
+`-mod=vendor`, the recipe of `oracles/logql-loki-3.5.2.Dockerfile`; the time zone dataset is the zoneinfo.zip of that
+toolchain) from the sha256-verified source archive; `setup <repo>` points the LogQL adapter and the fake runtime at it
+and `run-logql <cases.json> <report.json>` runs the `logql-metric` phase. The driver serves the logql-metric, pipeline
+and template phases (the syntax phase needs the stock `/usr/bin/loki` of the image). `author/logql-interval-probe.py`
+authors the raw-log interval probe (`cases/logql-interval-multiplicity.json`, 970 comparisons: eight fixture families,
+stored rows of multiplicity > 1, both directions, limits, ties across streams, a line filter, the interval boundary,
+pre-epoch timestamps, a label_format that reorders the visible labels) and records the observations to
+`evidence/native-logql-interval-observations.json` (content-locked in `source-lock.json`), replayed by
+`TestOwnedMatchesRecordedNativeLogQLIntervalObservations` from the locked bytes. The probe's first two runs (152 and 156
+mismatching rows: the tied-entry choice by original stream hash, and the pinned `lastEntry.Unix() < 0` rule after a pre-epoch entry) are
+kept in the wave-18 evidence (`l2w18-evidence/lane2/loki-interval-run*-report.json`).

@@ -116,7 +116,7 @@ func TestGenerateRefusesDeclarationsItCannotImplement(t *testing.T) {
 		}, "bogus"},
 		{"an axis no builder reads", func(s *GenerationSpec) {
 			s.Languages[1].Axes = append(s.Languages[1].Axes, AxisSpec{ID: "weather", Values: []string{"dry", "wet"}})
-		}, "weather"},
+		}, "axis weather of logql is read by no case builder"},
 		{"an axis value no builder knows by that name", func(s *GenerationSpec) {
 			s.Languages[0].Axes[1].Values[0] = "wibble"
 		}, "wibble"},

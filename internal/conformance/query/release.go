@@ -310,6 +310,28 @@ func carriesStaleMarker(checks []NormalizationCheck) bool {
 	return false
 }
 
+// carriesHistograms reports whether the authored inputs of the checks hold a
+// native histogram of the integer form and one of the float form. The histogram
+// branch of normalizationLoss is only a check if the evidence holds them: a
+// producer that fed it floats alone would leave it unexercised without anything
+// failing.
+func carriesHistograms(checks []NormalizationCheck) (integer, float bool) {
+	for _, c := range checks {
+		for _, r := range c.Source {
+			if r.Kind != "histogram" || r.Histogram == nil {
+				continue
+			}
+			switch r.Histogram.Kind {
+			case "integer":
+				integer = true
+			case "float":
+				float = true
+			}
+		}
+	}
+	return integer, float
+}
+
 func bindingFault(o Obligation, b Binding, ok bool, passed map[string]bool) (unbound bool, unobserved int) {
 	if !ok || b.Implementation == "" || strings.HasPrefix(b.Implementation, "pending") || len(b.GoTests) == 0 {
 		return true, 0
@@ -562,6 +584,15 @@ func ReleaseGate(ctx context.Context, cfg ReleaseConfig) (Report, error) {
 	}
 	if len(smoke.Normalization) > 0 && !carriesStaleMarker(smoke.Normalization) {
 		fail("input normalization evidence carries no stale marker: the stale-marker loss check was never exercised")
+	}
+	if len(smoke.Normalization) > 0 {
+		integer, float := carriesHistograms(smoke.Normalization)
+		if !integer {
+			fail("input normalization evidence carries no integer native histogram: the histogram loss check was never exercised")
+		}
+		if !float {
+			fail("input normalization evidence carries no float native histogram: the histogram loss check was never exercised")
+		}
 	}
 	// Provenance, persistence, isolation, interactions.
 	rep.Provenance = cfg.Provenance
