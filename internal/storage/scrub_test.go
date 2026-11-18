@@ -213,10 +213,12 @@ func TestEraseScrubRacesIntakeWithoutLosingAReceipt(t *testing.T) {
 	var mu sync.Mutex
 	var acked []erased
 	stop := make(chan struct{})
+	first, ended := make(chan struct{}), make(chan struct{})
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		defer close(ended)
 		for i := 0; ; i++ {
 			select {
 			case <-stop:
@@ -232,10 +234,20 @@ func TestEraseScrubRacesIntakeWithoutLosingAReceipt(t *testing.T) {
 			if ok {
 				mu.Lock()
 				acked = append(acked, a)
+				if len(acked) == 1 {
+					close(first)
+				}
 				mu.Unlock()
 			}
 		}
 	}()
+	// Nothing else orders the intake goroutine's first ACK before the erasures: under CPU or fsync
+	// load the three of them can finish before it has admitted one batch. The erasures start once
+	// intake is flowing (or has given up, which the check below reports).
+	select {
+	case <-first:
+	case <-ended:
+	}
 	for range 3 {
 		if _, err := x.e.EraseDeleted(context.Background(), []model.DeletePredicate{x.rangePredicate(0, 10, model.Metric)}, nil); err != nil {
 			t.Fatal(err)
