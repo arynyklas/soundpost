@@ -93,7 +93,7 @@ func TestStepMembershipActsOnlyOnTheGroupsThisNodeLeads(t *testing.T) {
 	lagging.err = replica.ErrStale
 	failedGroup.status.Failed = true
 	groups := []MembershipGroup{led, other, done, lagging, failedGroup}
-	got := StepMembership(context.Background(), groups, MembershipChange{Op: MembershipReplace, Remove: 2, Promote: 4})
+	got := StepMembership(context.Background(), groups, nil, MembershipChange{Op: MembershipReplace, Remove: 2, Promote: 4})
 	want := []string{OutcomeApplied, OutcomeNotLeader, OutcomeAlready, OutcomeNotCaughtUp, OutcomeUnavailable}
 	for i, o := range got {
 		if o.Result != want[i] {

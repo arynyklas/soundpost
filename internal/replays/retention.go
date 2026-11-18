@@ -9,7 +9,9 @@ import (
 	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/policy"
 	"github.com/arynyklas/soundpost/internal/storage"
+	"maps"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -25,6 +27,8 @@ const (
 	// sweepGrace is how long an index outlives its group deadline.
 	sweepGrace = 24 * time.Hour
 	maxSweep   = 32
+	// maxSweepVisit bounds the settings keys one write looks at to find expired pins.
+	maxSweepVisit = 512
 )
 
 type checkpointEntry struct {
@@ -66,12 +70,24 @@ func (g group) digest() model.Hash {
 func groupKey(project, replay model.ID) string {
 	return groupPrefix + project.String() + ":" + replay.String()
 }
-func pinKey(project model.ID) string { return pinPrefix + project.String() }
 
-func readPins(settings map[string]json.RawMessage, project model.ID) (map[string]pin, error) {
-	raw, ok := settings[pinKey(project)]
+// pinKey is the Settings key of one replay's pin: one small value per replay, so recording a
+// replay rewrites its own group and pin and nothing that grows with the project's live replays.
+func pinKey(project, replay model.ID) string {
+	return pinPrefix + project.String() + ":" + replay.String()
+}
+
+// legacyPinKey is the key of the one pin map per project that earlier builds wrote (replay ->
+// pin, rewritten whole by every new replay, 16 MiB ceiling near 108k live replays). It is read
+// while present and removed by the first index write of the project (migrateLegacyPins).
+func legacyPinKey(project model.ID) string { return pinPrefix + project.String() }
+
+// readLegacyPins parses the legacy pin map of the project: empty when there is none, Corrupt
+// when it does not parse.
+func readLegacyPins(settings map[string]json.RawMessage, project model.ID) (map[string]pin, error) {
+	raw, ok := settings[legacyPinKey(project)]
 	if !ok {
-		return map[string]pin{}, nil
+		return nil, nil
 	}
 	var pins map[string]pin
 	if model.StrictJSON(raw, &pins) != nil || pins == nil {
@@ -80,15 +96,145 @@ func readPins(settings map[string]json.RawMessage, project model.ID) (map[string
 	return pins, nil
 }
 
+// readPin returns the pin of one replay. A contracted organization (model.IndexesContractedKey)
+// has the replay's own key, else the legacy pin map's entry. Before the contraction (D70) both
+// are kept current, and the previous release (a rolled-back voter) may have written only the
+// map, so the newer of the two answers: the higher Seq, then the later deadline. A value or a
+// legacy map that does not parse is Corrupt, whichever replay is asked about.
+func readPin(settings map[string]json.RawMessage, project, replay model.ID) (pin, bool, error) {
+	legacy, err := readLegacyPins(settings, project)
+	if err != nil {
+		return pin{}, false, err
+	}
+	var own pin
+	hasOwn := false
+	if raw, ok := settings[pinKey(project, replay)]; ok {
+		if model.StrictJSON(raw, &own) != nil {
+			return pin{}, false, model.Fail(model.Corrupt)
+		}
+		hasOwn = true
+	}
+	l, hasLegacy := legacy[replay.String()]
+	_, contracted := settings[model.IndexesContractedKey]
+	switch {
+	case hasOwn && hasLegacy && !contracted && (l.Seq > own.Seq || l.Seq == own.Seq && l.RetainUntil > own.RetainUntil):
+		return l, true, nil
+	case hasOwn:
+		return own, true, nil
+	}
+	return l, hasLegacy, nil
+}
+
+// ContractPins drops the whole-project pin maps of every project of the organization (D70): each
+// entry the replay's own pin does not already carry at least as new is written to its own key, a
+// pin whose group the previous release swept goes with the map, and the map is removed. It does
+// not mark the organization contracted (the caller does, with the ledger index). It reports
+// whether anything changed; a map that does not parse is Corrupt and nothing is changed.
+func ContractPins(o *model.ControlOrg) (bool, error) {
+	next := maps.Clone(o.Settings)
+	changed := false
+	for key := range o.Settings {
+		rest, ok := strings.CutPrefix(key, pinPrefix)
+		if !ok {
+			continue
+		}
+		project, err := model.ParseID(rest)
+		if err != nil {
+			continue
+		}
+		legacy, err := readLegacyPins(o.Settings, project)
+		if err != nil {
+			return false, err
+		}
+		for replay, l := range legacy {
+			id, err := model.ParseID(replay)
+			if err != nil {
+				continue
+			}
+			if raw, ok := o.Settings[pinKey(project, id)]; ok {
+				var own pin
+				if model.StrictJSON(raw, &own) == nil && (own.Seq > l.Seq || own.Seq == l.Seq && own.RetainUntil >= l.RetainUntil) {
+					continue
+				}
+			}
+			raw, err := json.Marshal(l)
+			if err != nil {
+				return false, model.Fail(model.Corrupt)
+			}
+			next[pinKey(project, id)] = raw
+		}
+		prefix := pinPrefix + project.String() + ":"
+		for k := range o.Settings {
+			replay, ok := strings.CutPrefix(k, prefix)
+			if !ok {
+				continue
+			}
+			id, err := model.ParseID(replay)
+			if err != nil {
+				continue
+			}
+			if _, kept := legacy[replay]; !kept {
+				if _, stored := o.Settings[groupKey(project, id)]; !stored {
+					delete(next, k)
+				}
+			}
+		}
+		delete(next, key)
+		changed = true
+	}
+	o.Settings = next
+	return changed, nil
+}
+
+// migrateLegacyPins moves every pin of the legacy pin map to its own key and removes the map.
+// A pin that already has its own key keeps it (the newer record); an entry whose key is not a
+// replay ID names nothing and is dropped.
+func migrateLegacyPins(settings map[string]json.RawMessage, project model.ID) error {
+	legacy, err := readLegacyPins(settings, project)
+	if err != nil || legacy == nil {
+		return err
+	}
+	for key, p := range legacy {
+		id, err := model.ParseID(key)
+		if err != nil {
+			continue
+		}
+		if _, ok := settings[pinKey(project, id)]; ok {
+			continue
+		}
+		raw, err := json.Marshal(p)
+		if err != nil {
+			return model.Fail(model.Corrupt)
+		}
+		settings[pinKey(project, id)] = raw
+	}
+	delete(settings, legacyPinKey(project))
+	return nil
+}
+
 // loadGroup returns the verified index and its pin, nil when the replay has
 // none, and Corrupt for any disagreement between the index and its pin.
-func loadGroup(settings map[string]json.RawMessage, pins map[string]pin, project, replay model.ID) (*group, pin, error) {
-	p, pinned := pins[replay.String()]
+func loadGroup(settings map[string]json.RawMessage, project, replay model.ID) (*group, pin, error) {
+	p, pinned, err := readPin(settings, project, replay)
+	if err != nil {
+		return nil, pin{}, err
+	}
 	raw, stored := settings[groupKey(project, replay)]
 	if !stored && !pinned {
 		return nil, pin{}, nil
 	}
 	if stored != pinned {
+		// Before the contraction an older release that swept a replay removed its group and its
+		// map entry and left the replay's own pin behind: no group, a map without the replay.
+		if !stored {
+			if _, contracted := settings[model.IndexesContractedKey]; !contracted {
+				if legacy, lerr := readLegacyPins(settings, project); lerr == nil && legacy != nil {
+					if _, ok := legacy[replay.String()]; !ok {
+						return nil, pin{}, nil
+					}
+				}
+			}
+		}
 		return nil, pin{}, model.Fail(model.Corrupt)
 	}
 	var g group
@@ -224,11 +370,7 @@ func applyIndex(st *model.ControlState, org, project model.ID, chunk model.Repla
 	if o.Settings == nil {
 		o.Settings = map[string]json.RawMessage{}
 	}
-	pins, err := readPins(o.Settings, project)
-	if err != nil {
-		return false, err
-	}
-	g, p, err := loadGroup(o.Settings, pins, project, chunk.Replay)
+	g, p, err := loadGroup(o.Settings, project, chunk.Replay)
 	if err != nil {
 		return false, err
 	}
@@ -280,32 +422,92 @@ func applyIndex(st *model.ControlState, org, project model.ID, chunk model.Repla
 		}
 		o.Settings[groupKey(project, chunk.Replay)] = raw
 	}
-	pins[chunk.Replay.String()] = pin{Seq: g.Seq, Head: g.Head, RetainUntil: retain}
-	sweep(o.Settings, pins, project, now)
-	raw, err := json.Marshal(pins)
+	rawPin, err := json.Marshal(pin{Seq: g.Seq, Head: g.Head, RetainUntil: retain})
 	if err != nil {
 		return false, model.Fail(model.Corrupt)
 	}
-	o.Settings[pinKey(project)] = raw
+	if o.IndexesContracted() {
+		if err := migrateLegacyPins(o.Settings, project); err != nil {
+			return false, err
+		}
+		o.Settings[pinKey(project, chunk.Replay)] = rawPin
+		sweep(o.Settings, project, now, nil)
+	} else if err := writeBothPins(o.Settings, project, chunk.Replay, pin{Seq: g.Seq, Head: g.Head, RetainUntil: retain}, rawPin, now); err != nil {
+		return false, err
+	}
 	st.Orgs[org.String()] = o
 	return true, nil
 }
 
-// sweep forgets indexes whose whole group deadline passed long ago.
-func sweep(settings map[string]json.RawMessage, pins map[string]pin, project model.ID, now time.Time) {
-	removed := 0
-	for key, p := range pins {
-		if removed == maxSweep {
-			return
-		}
-		if int64(p.RetainUntil)+int64(sweepGrace) < now.UnixNano() {
-			if id, err := model.ParseID(key); err == nil {
-				delete(settings, groupKey(project, id))
+// writeBothPins is the pin write of an organization that is not contracted (D70): the replay's
+// own pin and the whole-project pin map the previous release reads, which costs what a write cost
+// on that release. A project that has pins of its own and no map (written before the map was
+// kept) has the map built from them first.
+func writeBothPins(settings map[string]json.RawMessage, project, replay model.ID, p pin, rawPin json.RawMessage, now time.Time) error {
+	legacy, err := readLegacyPins(settings, project)
+	if err != nil {
+		return err
+	}
+	if legacy == nil {
+		legacy = map[string]pin{}
+		prefix := pinPrefix + project.String() + ":"
+		for key, raw := range settings {
+			if id, ok := strings.CutPrefix(key, prefix); ok {
+				var own pin
+				if model.StrictJSON(raw, &own) != nil {
+					return model.Fail(model.Corrupt)
+				}
+				legacy[id] = own
 			}
-			delete(pins, key)
-			removed++
 		}
 	}
+	legacy[replay.String()] = p
+	settings[pinKey(project, replay)] = rawPin
+	for _, gone := range sweep(settings, project, now, legacy) {
+		delete(legacy, gone)
+	}
+	raw, err := json.Marshal(legacy)
+	if err != nil {
+		return model.Fail(model.Corrupt)
+	}
+	settings[legacyPinKey(project)] = raw
+	return nil
+}
+
+// sweep forgets indexes whose whole group deadline passed long ago and returns their replay
+// IDs. It looks at a bounded number of keys per write (map order is random, so every pin is
+// reached over writes) and drops at most maxSweep: the cost of a write does not grow with the
+// project's live replays. legacy, when not nil, is the whole-project map kept beside the pins: a
+// deadline the previous release extended there keeps the replay.
+func sweep(settings map[string]json.RawMessage, project model.ID, now time.Time, legacy map[string]pin) []string {
+	var gone []string
+	prefix := pinPrefix + project.String() + ":"
+	visited := 0
+	for key, raw := range settings {
+		if len(gone) == maxSweep || visited == maxSweepVisit {
+			return gone
+		}
+		visited++
+		replay, ok := strings.CutPrefix(key, prefix)
+		if !ok {
+			continue
+		}
+		var p pin
+		if json.Unmarshal(raw, &p) != nil {
+			continue
+		}
+		if l, ok := legacy[replay]; ok && l.RetainUntil > p.RetainUntil {
+			p.RetainUntil = l.RetainUntil
+		}
+		if int64(p.RetainUntil)+int64(sweepGrace) < now.UnixNano() {
+			if id, err := model.ParseID(replay); err == nil {
+				delete(settings, groupKey(project, id))
+				delete(settings, key)
+				gone = append(gone, replay)
+			}
+		}
+	}
+	return gone
 }
 
 // deletionCovers reports whether a live deletion saga hides the record.
@@ -335,11 +537,11 @@ func (s *Service) LatestReference(ctx context.Context, c storage.EraseCandidate)
 		if deletionCovers(st, c.Org, c.Project, *c.Record) {
 			return nil
 		}
-		pins, err := readPins(st.Orgs[c.Org.String()].Settings, c.Project)
+		p, _, err := readPin(st.Orgs[c.Org.String()].Settings, c.Project, c.Record.Payload.Replay.Replay)
 		if err != nil {
 			return err
 		}
-		out = pins[c.Record.Payload.Replay.Replay.String()].RetainUntil
+		out = p.RetainUntil
 		return nil
 	})
 	return out, err

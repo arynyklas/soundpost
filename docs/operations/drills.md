@@ -208,10 +208,40 @@ entry, `facts` and `not_run_items`. No secret or raw telemetry content is writte
    bumps `AuthorityRevision`, so heavy traffic of those kinds can still make a Begin retry
    (the drill's writers are intake only). The classification table is the review surface: a
    writer wrongly classified as non-authority would let a deletion commit on an outdated
-   view. `TestDeleteWithViewOlderThanAuthorityChangeStillConflicts` now has a stale-view
-   subtest for every admin kind that reaches `Store.Update` (`create_org`, `create_user`,
-   `create_project`, `membership`, `org_admin`, `grant`, `team`, `source_policy`, `sso`,
-   `destination`, `retention`); `notification_policy` is reached only through
+   view. **Changed (10.05, F-10.05-2):** an organization's admin commands (every
+   kind except `create_user`, which writes the installation-wide user table) no
+   longer move the installation-wide `AuthorityRevision`; they move the
+   organization's own authority revision (`authority_rev` in its Settings), and a
+   retention command of an organization is judged against the later of the two. A
+   tenant's admin commands therefore cannot conflict another tenant's deletion
+   Begin (`TestAnotherOrganizationsAdminCommandsDoNotConflictABegin`). The exemption
+   is verified per commit (`Store.UpdateOrgAuthority`: the state without the
+   organization's record, the audit log and the command books must be byte for byte
+   unchanged, else the commit bumps the installation-wide revision, as a
+   `source_policy` command for a live source does). **Still a limit:** a retention
+   command (deletion Begin, hold, policy change) of one organization still moves the
+   installation-wide revision, as does any other unclassified writer, so an
+   organization admin who issues those at a high rate can still make other
+   tenants' Begins retry; none of them is rate limited today. **Attempted and not
+   shipped (lane 1 wave 26, `l1w26-evidence/perorg-retention-open.txt`):** moving the
+   organization's own revision for the retention-class commands too, after verifying that
+   a commit wrote only that organization's rows. Eighteen cross-org commit shapes
+   (deletion Begin, fence steps, holds, policies, the worker's saga transitions) went from red
+   to green with a masked-verification design, but (1) it makes
+   `TestBeginIsNotRefusedByLostProposalsFromAnyVoterUnderSaturatingIntake` (F-10.05-1)
+   fail (7 to 9 of 12 follower Begins refused as `stale`, 270 to 470 s against 11 s;
+   with the stamp 469 attempts, 20 committed, about 213 ms each, against 159 attempts, 42
+   committed, about 88 ms with the global bump only; a variant that stamped and also bumped
+   the global revision failed the same way, so the cause is the stamp write into the
+   organization's settings on that commit, and it was not found), and (2) a
+   previous-release leader compares only the global revision, so a same-org stale view could
+   be accepted in a mixed group. It was reverted; the retention-class commands keep the
+   installation-wide bump.
+   `TestDeleteWithViewOlderThanAuthorityChangeStillConflicts` has a stale-view
+   subtest for every admin kind that reaches `Store.Update` or
+   `Store.UpdateOrgAuthority` against the organization's own Begin (`create_user`,
+   `create_project`, `membership`, `org_admin`, `grant`, `team`, `source_policy`,
+   `sso`, `destination`, `retention`); `notification_policy` is reached only through
    `PolicyCommand` (a retention-class policy kind) and has no subtest of its own.
 
    **Three voters (independent review of 10.05, F-10.05-1):** the figures above are one voter. In a

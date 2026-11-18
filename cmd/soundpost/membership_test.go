@@ -43,7 +43,7 @@ func threeVoters() replica.Members {
 func TestMembershipSocketDropsAPeerThatIsNotTheOwner(t *testing.T) {
 	dir := t.TempDir()
 	group := &socketGroup{status: replica.Status{Group: model.NewID(), ID: 1, Leader: 1, Revision: 1, Members: threeVoters()}}
-	closer, err := serveMembershipGroups(dir, []appcore.MembershipGroup{group}, func(net.Conn) bool { return false })
+	closer, err := serveMembershipGroups(dir, []appcore.MembershipGroup{group}, nil, func(net.Conn) bool { return false })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestMembershipCommandStepsThroughThePrivateSocket(t *testing.T) {
 	dir := t.TempDir()
 	led := &socketGroup{status: replica.Status{Group: model.NewID(), ID: 1, Leader: 1, Revision: 1, Members: threeVoters()}}
 	other := &socketGroup{status: replica.Status{Group: model.NewID(), ID: 1, Leader: 2, Revision: 1, Members: threeVoters()}}
-	closer, err := serveMembershipGroups(dir, []appcore.MembershipGroup{led, other}, peerIsOwner)
+	closer, err := serveMembershipGroups(dir, []appcore.MembershipGroup{led, other}, nil, peerIsOwner)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,5 +138,47 @@ func TestMembershipCommandStepsThroughThePrivateSocket(t *testing.T) {
 	}
 	if err = runMembership([]string{"status", "--data-dir", t.TempDir()}, &out); err == nil {
 		t.Fatal("a directory without a running node answered")
+	}
+}
+
+// socketLayout is a live layout check that refuses node 4 and reports node n2 as incompatible.
+type socketLayout struct{ control model.ID }
+
+func (l socketLayout) Admit(_ context.Context, m replica.Member) error {
+	if m.ID == 4 {
+		return &model.Fault{Code: model.Unsupported, SafeDetail: "layout_incompatible:" + m.NodeIdentity}
+	}
+	return nil
+}
+func (l socketLayout) Incompatible(context.Context) (model.ID, []string) {
+	return l.control, []string{"layout_incompatible:n2"}
+}
+
+// After the contraction of the indexes the operator sees, through the private socket, which control member cannot read the
+// layout (status), and a step that would add one is refused naming it (exit 1, the group untouched).
+func TestMembershipCommandReportsAndRefusesMembersThatCannotReadTheContractedLayout(t *testing.T) {
+	dir := t.TempDir()
+	control := &socketGroup{status: replica.Status{Group: model.NewID(), ID: 1, Leader: 1, Revision: 1, Members: threeVoters()}}
+	data := &socketGroup{status: replica.Status{Group: model.NewID(), ID: 1, Leader: 1, Revision: 1, Members: threeVoters()}}
+	closer, err := serveMembershipGroups(dir, []appcore.MembershipGroup{control, data}, socketLayout{control: control.status.Group}, peerIsOwner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closer.Close()
+	var out bytes.Buffer
+	if err = runMembership([]string{"status", "--data-dir", dir}, &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 2 || !strings.Contains(lines[0], " reasons=layout_incompatible:n2") || strings.Contains(lines[1], "reasons=") {
+		t.Fatalf("status:\n%s", out.String())
+	}
+	out.Reset()
+	add := []string{"add-learner", "--data-dir", dir, "--id", "4", "--address", "https://d.example", "--identity", "n4", "--failure-domain", "d4"}
+	if err = runMembership(add, &out); !errors.Is(err, errMembershipIncomplete) || len(control.calls)+len(data.calls) != 0 {
+		t.Fatalf("add-learner of a member that cannot read the layout = %v, proposals %d\n%s", err, len(control.calls)+len(data.calls), out.String())
+	}
+	if !strings.Contains(out.String(), "layout_incompatible:n4") || !strings.Contains(out.String(), "layout_incompatible=2") {
+		t.Fatalf("the refusal does not name the member:\n%s", out.String())
 	}
 }

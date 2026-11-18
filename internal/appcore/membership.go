@@ -6,7 +6,9 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 
+	"github.com/arynyklas/soundpost/internal/control"
 	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/replica"
 )
@@ -45,6 +47,10 @@ const (
 	OutcomeUnavailable = "unavailable"
 	// OutcomeRejected: the step does not fit the group's configuration (the group is unchanged).
 	OutcomeRejected = "rejected"
+	// OutcomeLayoutIncompatible: the member to add or promote does not answer, from its RUNNING binary, that
+	// it reads the layout the installation's indexes are in (an organization is contracted, D70); the
+	// group is unchanged and Detail names the member as layout_incompatible:<identity>.
+	OutcomeLayoutIncompatible = "layout_incompatible"
 )
 
 // MembershipOutcome is the result for one group.
@@ -53,6 +59,8 @@ type MembershipOutcome struct {
 	Result   string         `json:"result"`
 	Leader   uint64         `json:"leader,string,omitempty"`
 	Revision model.Revision `json:"revision"`
+	// Detail is the typed reason of a refusal (OutcomeLayoutIncompatible).
+	Detail string `json:"detail,omitempty"`
 }
 
 // MembershipStatus is one group's configuration as this node sees it.
@@ -63,12 +71,29 @@ type MembershipStatus struct {
 	Applied uint64          `json:"applied,string"`
 	Failed  bool            `json:"failed,omitempty"`
 	Members replica.Members `json:"members"`
+	// Reasons are the members of the control group that cannot be used as they are: each control member
+	// other than this node whose running binary does not answer that it reads the contracted index layout
+	// is layout_incompatible:<identity> (a voter put back on the previous release after the contraction).
+	// Only the control group carries them.
+	Reasons []string `json:"reasons,omitempty"`
 }
 
 // MembershipGroup is the part of a replication group the operator steps use.
 type MembershipGroup interface {
 	Status() replica.Status
 	ChangeMembers(ctx context.Context, expected model.Revision, next replica.Members) error
+}
+
+// MembershipLayout is the live check of the layout the installation's indexes are in (D70), asked of the
+// RUNNING binary of a member over the peer connection. Nil where it is a parameter: no check.
+type MembershipLayout interface {
+	// Admit refuses a member that would join the membership (voter or learner) and cannot read the layout:
+	// nil while no organization is contracted or when the member answers; otherwise a typed refusal naming it
+	// (control.LayoutIncompatible), or the error that kept the answer from being known (fail closed).
+	Admit(ctx context.Context, m replica.Member) error
+	// Incompatible names the control group and the control members, other than this node, whose running
+	// binary cannot read the contracted layout, as layout_incompatible:<identity>.
+	Incompatible(ctx context.Context) (control model.ID, reasons []string)
 }
 
 // ErrNoMembership is returned on a node that is not part of a replicated installation.
@@ -139,16 +164,31 @@ func PlanMembership(current replica.Members, change MembershipChange) (next repl
 }
 
 // StepMembership applies change to every group this node leads and reports every group. It never
-// proposes for a group led elsewhere.
-func StepMembership(ctx context.Context, groups []MembershipGroup, change MembershipChange) []MembershipOutcome {
+// proposes for a group led elsewhere. A member that would join a group (the learner added, the learner
+// promoted) is first asked layout.Admit, once per step and only for a group the step would change and
+// this node leads: a refusal proposes nothing and the group reports OutcomeLayoutIncompatible. A nil layout
+// asks nothing.
+func StepMembership(ctx context.Context, groups []MembershipGroup, layout MembershipLayout, change MembershipChange) []MembershipOutcome {
+	asked := map[uint64]error{}
+	admit := func(m replica.Member) error {
+		if layout == nil {
+			return nil
+		}
+		if err, ok := asked[m.ID]; ok {
+			return err
+		}
+		err := layout.Admit(ctx, m)
+		asked[m.ID] = err
+		return err
+	}
 	out := make([]MembershipOutcome, 0, len(groups))
 	for _, g := range groups {
-		out = append(out, stepGroup(ctx, g, change))
+		out = append(out, stepGroup(ctx, g, admit, change))
 	}
 	return out
 }
 
-func stepGroup(ctx context.Context, g MembershipGroup, change MembershipChange) MembershipOutcome {
+func stepGroup(ctx context.Context, g MembershipGroup, admit func(replica.Member) error, change MembershipChange) MembershipOutcome {
 	status := g.Status()
 	outcome := MembershipOutcome{Group: status.Group, Leader: status.Leader, Revision: status.Revision}
 	if status.Failed {
@@ -164,6 +204,25 @@ func stepGroup(ctx context.Context, g MembershipGroup, change MembershipChange) 
 	case status.Leader != status.ID:
 		outcome.Result = OutcomeNotLeader
 	default:
+		var joining replica.Member
+		if change.Op == MembershipAddLearner {
+			joining = change.Member
+		} else {
+			for _, m := range status.Members.Nodes {
+				if m.ID == change.Promote {
+					joining = m
+				}
+			}
+		}
+		if err = admit(joining); err != nil {
+			var fault *model.Fault
+			if errors.As(err, &fault) && fault.Code == model.Unsupported && strings.HasPrefix(fault.SafeDetail, control.LayoutIncompatiblePrefix) {
+				outcome.Result, outcome.Detail = OutcomeLayoutIncompatible, fault.SafeDetail
+			} else {
+				outcome.Result = OutcomeUnavailable
+			}
+			return outcome
+		}
 		switch err = g.ChangeMembers(ctx, status.Members.Revision, next); {
 		case err == nil:
 			outcome.Result = OutcomeApplied
@@ -189,12 +248,53 @@ func MembershipDone(outcomes []MembershipOutcome) bool {
 	return len(outcomes) > 0
 }
 
-// ReportMembership returns this node's view of every group.
-func ReportMembership(groups []MembershipGroup) []MembershipStatus {
+// ReportMembership returns this node's view of every group. The control group, as layout names it, also
+// carries the control members that cannot read the layout (MembershipStatus.Reasons).
+func ReportMembership(ctx context.Context, groups []MembershipGroup, layout MembershipLayout) []MembershipStatus {
+	var controlGroup model.ID
+	var reasons []string
+	if layout != nil {
+		controlGroup, reasons = layout.Incompatible(ctx)
+	}
 	out := make([]MembershipStatus, 0, len(groups))
 	for _, g := range groups {
 		s := g.Status()
-		out = append(out, MembershipStatus{Group: s.Group, Leader: s.Leader, Term: s.Term, Applied: s.Applied, Failed: s.Failed, Members: s.Members})
+		status := MembershipStatus{Group: s.Group, Leader: s.Leader, Term: s.Term, Applied: s.Applied, Failed: s.Failed, Members: s.Members}
+		if s.Group == controlGroup {
+			status.Reasons = reasons
+		}
+		out = append(out, status)
 	}
 	return out
+}
+
+// MembershipLayout is the live layout check of this node's control store (control.Store.CheckMemberLayout,
+// control.Store.MembersIncompatible), the check `soundpost membership` runs before it proposes a member and
+// when it reports. It is nil on a node that is not part of a replicated installation.
+func (a *App) MembershipLayout() MembershipLayout {
+	if a.replication == nil {
+		return nil
+	}
+	return appLayout{a}
+}
+
+type appLayout struct{ app *App }
+
+func (l appLayout) Admit(ctx context.Context, m replica.Member) error {
+	return l.app.Control.CheckMemberLayout(ctx, m)
+}
+
+func (l appLayout) Incompatible(ctx context.Context) (model.ID, []string) {
+	group := l.app.Control.ReplicaGroup()
+	if group == nil {
+		return model.ID{}, nil
+	}
+	status := group.Status()
+	others := make([]replica.Member, 0, len(status.Members.Nodes))
+	for _, m := range status.Members.Nodes {
+		if m.ID != status.ID {
+			others = append(others, m)
+		}
+	}
+	return status.Group, l.app.Control.MembersIncompatible(ctx, others)
 }

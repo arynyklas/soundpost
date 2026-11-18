@@ -54,11 +54,8 @@ func (s *Service) Read(ctx context.Context, scope auth.Scope, replayID model.ID,
 			return model.Fail(model.NotFound)
 		}
 		settings := st.Orgs[scope.OrgID().String()].Settings
-		pins, perr := readPins(settings, found.project)
-		if perr != nil {
-			return perr
-		}
-		group, _, perr = loadGroup(settings, pins, found.project, replayID)
+		var perr error
+		group, _, perr = loadGroup(settings, found.project, replayID)
 		return perr
 	})
 	if err != nil {

@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -166,6 +165,8 @@ type mixedRun struct {
 	saveCount int
 	// lastFacts is what settle observed last, per voter (the three agree, so any one stands for the state).
 	lastFacts map[uint64]memberFact
+	// exp is the account and the writes of the ledger and replay writes (expandSetup); nil until the scenario makes them.
+	exp *mixedExpand
 }
 
 // markPatches remembers the patch counts every voter's journal holds and the saves made so far.
@@ -237,38 +238,46 @@ func (m *mixedRun) others(id uint64) []uint64 {
 	return out
 }
 
-func (m *mixedRun) run(newNode uint64) error {
+// startGroup bootstraps one installation with the previous release's binary, exports its cluster seed, starts the
+// three voters on the release releaseOf names for each ("old" or "new"), and waits until they serve, agree on a
+// leader, declared their protocols and hold one state. The returned cleanup kills the processes and removes the
+// work directory; it is valid whatever the error.
+func (m *mixedRun) startGroup(releaseOf func(uint64) string) (func(), error) {
 	work, err := os.MkdirTemp("", "soundpost-mixed-")
 	if err != nil {
-		return err
+		return func() {}, err
 	}
-	defer os.RemoveAll(work)
+	cleanup := func() {
+		if m.c != nil {
+			m.c.cleanup()
+		}
+		os.RemoveAll(work)
+	}
 	report := map[string]any{}
 	cluster, err := newProcessCluster(m.oldBin, "", work, report)
 	if err != nil {
-		return err
+		return cleanup, err
 	}
 	m.c = cluster.(*processCluster)
-	defer m.c.cleanup()
 	cfg := m.c.installConfig()
 	if err = config.Validate(cfg); err != nil {
-		return err
+		return cleanup, err
 	}
 	files, err := config.NodeConfigs(cfg)
 	if err != nil {
-		return err
+		return cleanup, err
 	}
 	m.say("bootstrap one installation with the OLD binary, export its cluster seed")
 	fx, seed, err := m.c.bootstrap(report)
 	if err != nil {
-		return err
+		return cleanup, err
 	}
 	m.fx = fx
 	if err = m.c.provision(files, seed); err != nil {
-		return err
+		return cleanup, err
 	}
 	for _, id := range []uint64{1, 2, 3} {
-		if id == newNode {
+		if releaseOf(id) == "new" {
 			m.c.setBinary(id, m.newBin)
 			m.release[id] = "new"
 		} else {
@@ -278,34 +287,48 @@ func (m *mixedRun) run(newNode uint64) error {
 	}
 	m.say("start three voters: %s", m.releases())
 	if err = m.c.start(1, 2, 3); err != nil {
-		return err
+		return cleanup, err
 	}
 	m.sites = map[uint64]*installSite{}
 	for _, id := range []uint64{1, 2, 3} {
 		if m.sites[id], err = m.c.site(id); err != nil {
-			return err
+			return cleanup, err
 		}
 	}
 	for _, id := range []uint64{1, 2, 3} {
 		if err = waitNodeReady(m.sites[id], 180*time.Second); err != nil {
-			return m.violate("start_not_ready", fmt.Sprintf("voter %d: %v", id, err))
+			return cleanup, m.violate("start_not_ready", fmt.Sprintf("voter %d: %v", id, err))
 		}
 	}
 	lead, err := leadership(m.sites, []uint64{1, 2, 3}, 60*time.Second)
 	if err != nil {
-		return err
+		return cleanup, err
 	}
 	m.say("leadership leader=%d term=%d", lead.leader, lead.term)
 	if err = m.waitDeclarations(); err != nil {
-		return err
+		return cleanup, err
 	}
 	m.teamID = model.NewID()
 	m.maxSeries = 1000
 	m.retentionDays = 20
 	if err = m.settle("S00 mixed group started, before any save"); err != nil {
-		return err
+		return cleanup, err
 	}
 	m.markPatches()
+	return cleanup, nil
+}
+
+func (m *mixedRun) run(newNode uint64) error {
+	cleanup, err := m.startGroup(func(id uint64) string {
+		if id == newNode {
+			return "new"
+		}
+		return "old"
+	})
+	defer cleanup()
+	if err != nil {
+		return err
+	}
 
 	// ---- phase A: two previous-release voters and one candidate voter ----
 	oldNode := m.others(newNode)[0]
@@ -377,6 +400,11 @@ func (m *mixedRun) run(newNode uint64) error {
 	if err = m.requirePatchGrowth("phase D, all candidate"); err != nil {
 		return err
 	}
+	// Ledgers and replays written by the all-candidate group (D70): the stored state then holds the sharded
+	// index and per-replay pins together with the previous release's per-project values.
+	if err = m.expandD(newNode); err != nil {
+		return err
+	}
 
 	// ---- phase E: the records exist; one voter is rolled BACK to the previous release ----
 	// It restarts on a state, a journal and snapshots that carry the records, and applies what the candidates
@@ -386,6 +414,9 @@ func (m *mixedRun) run(newNode uint64) error {
 		return err
 	}
 	if err = m.requireOrg(fmt.Sprintf("E voter %d rolled back to the previous release", back), true, true); err != nil {
+		return err
+	}
+	if err = m.expandE(back, newNode); err != nil {
 		return err
 	}
 	m.markPatches()
@@ -422,6 +453,9 @@ func (m *mixedRun) run(newNode uint64) error {
 		if err = m.saves(id, fmt.Sprintf("G save on voter %d", id)); err != nil {
 			return err
 		}
+	}
+	if err = m.expandG(); err != nil {
+		return err
 	}
 	return m.settle("H final")
 }
@@ -490,6 +524,36 @@ func (m *mixedRun) conflictChecks(newNode, oldNode uint64) error {
 	read, err := m.epochOf(newNode, sNew)
 	if err != nil {
 		return err
+	}
+	if oldTracksRecords() {
+		// The previous release tracks the records too: its save leaves them current, and a same-object save based on
+		// the earlier read loses on either release.
+		if err = m.adminSave(oldNode, sOld, "team", m.teamPayload()); err != nil {
+			return err
+		}
+		if err = m.settle("C1 after the previous-release voter's team save (it tracks)"); err != nil {
+			return err
+		}
+		if err = m.requireOrg("C1", true, true); err != nil {
+			return err
+		}
+		if err = m.expectStatus("same object, stale", newNode, sNew, "team", m.teamPayload(), read, 409); err != nil {
+			return err
+		}
+		readOld, err := m.epochOf(oldNode, sOld)
+		if err != nil {
+			return err
+		}
+		if err = m.adminSave(newNode, sNew, "team", m.teamPayload()); err != nil {
+			return err
+		}
+		if err = m.settle("C4 after the candidate's team save"); err != nil {
+			return err
+		}
+		if err = m.expectStatus("previous release, same object, stale", oldNode, sOld, "team", m.teamPayload(), readOld, 409); err != nil {
+			return err
+		}
+		return m.settle("C5 after the conflict checks")
 	}
 	// The previous-release voter changes the team (epoch bumped, records left behind).
 	if err = m.adminSave(oldNode, sOld, "team", m.teamPayload()); err != nil {
@@ -671,35 +735,35 @@ func (m *mixedRun) lagThenSnapshot(back, newNode uint64) error {
 	return m.requireOrg("F1", true, true)
 }
 
-// oldLearner adds a learner that runs the PREVIOUS release's binary on an empty directory, through the
-// product's membership path, while the state carries the records: it receives the state (a snapshot or the
-// log, as the leader decides) and must serve and hold exactly the voters' state.
-func (m *mixedRun) oldLearner(through uint64) error {
+// prepareLearner makes the identity, directory and node file of a fresh learner (dcFreshNode) that is
+// not a member yet and starts nothing: the membership is the other voters' node file plus the learner
+// as a learner. It returns the learner as `membership add-learner` is asked to add it.
+func (m *mixedRun) prepareLearner() (replica.Member, error) {
 	id := dcFreshNode.id
 	c := m.c
 	pub, e1 := freeAddress()
 	peer, e2 := freeAddress()
 	if e1 != nil || e2 != nil {
-		return errors.Join(e1, e2)
+		return replica.Member{}, errors.Join(e1, e2)
 	}
 	c.public[id], c.peer[id] = pub, peer
 	c.data[id] = filepath.Join(c.root, "node-"+dcFreshNode.name)
 	c.logs[id] = &syncBuffer{}
 	certPEM, keyPEM, err := c.pki.ca.issue(dcFreshNode, c.pki.nextSerial())
 	if err != nil {
-		return err
+		return replica.Member{}, err
 	}
 	cert, key := filepath.Join(c.pki.dir, dcFreshNode.name+".pem"), filepath.Join(c.pki.dir, dcFreshNode.name+".key")
 	if err = errors.Join(os.WriteFile(cert, certPEM, 0o600), os.WriteFile(key, keyPEM, 0o600)); err != nil {
-		return err
+		return replica.Member{}, err
 	}
 	raw, err := os.ReadFile(filepath.Join(c.root, "node-1.json"))
 	if err != nil {
-		return err
+		return replica.Member{}, err
 	}
 	var node appcore.NodeConfig
 	if err = model.StrictJSON(raw, &node); err != nil {
-		return err
+		return replica.Member{}, err
 	}
 	learner := replica.Member{ID: id, Address: "https://" + peer, NodeIdentity: dcFreshNode.identity, FailureDomain: "process-directory-" + dcFreshNode.name, Learner: true}
 	node.NodeID, node.PeerListen, node.PeerSourceIP = id, peer, ""
@@ -707,11 +771,24 @@ func (m *mixedRun) oldLearner(through uint64) error {
 	node.Members = replica.Members{Revision: node.Members.Revision + 1, Nodes: append(slices.Clone(node.Members.Nodes), learner)}
 	encoded, err := json.MarshalIndent(node, "", "  ")
 	if err != nil {
-		return err
+		return replica.Member{}, err
 	}
 	if err = os.WriteFile(filepath.Join(c.root, fmt.Sprintf("node-%d.json", id)), append(encoded, '\n'), 0o600); err != nil {
+		return replica.Member{}, err
+	}
+	return learner, nil
+}
+
+// oldLearner adds a learner that runs the PREVIOUS release's binary on an empty directory, through the
+// product's membership path, while the state carries the records: it receives the state (a snapshot or the
+// log, as the leader decides) and must serve and hold exactly the voters' state.
+func (m *mixedRun) oldLearner(through uint64) error {
+	learner, err := m.prepareLearner()
+	if err != nil {
 		return err
 	}
+	id := dcFreshNode.id
+	c := m.c
 	m.say("add learner node %d (%s): `membership add-learner` against each voter in turn (every group is led by one of them)", id, dcFreshNode.identity)
 	var out []byte
 	deadline := time.Now().Add(180 * time.Second)
@@ -849,6 +926,9 @@ func (m *mixedRun) saves(id uint64, label string) error {
 // bumps the epoch and knows nothing of the records); records says whether any object is recorded.
 func (m *mixedRun) requireOrg(label string, tracked, records bool) error {
 	o := m.org()
+	if oldTracksRecords() {
+		tracked = true // the previous release (5475ef6) tracks the records itself: every save leaves obj_seen at the epoch
+	}
 	m.say("  %s: org epoch=%d obj_seen=%d obj_floor=%d records=%d (newest %q) tracked=%t", label, o.Epoch, o.Seen, o.Floor, o.Records, o.Newest, o.Tracked)
 	if o.Tracked != tracked {
 		return m.violate("records_state", fmt.Sprintf("%s: the last save left tracked=%t, want %t (obj_seen %d, epoch %d)", label, o.Tracked, tracked, o.Seen, o.Epoch))
@@ -1303,93 +1383,6 @@ func countJournalCommands(raw []byte) (patches, replacements int) {
 		replacements += bytes.Count(dec, []byte(`"payload":"eyJleHBlY3RlZCI6`))
 	}
 	return
-}
-
-func lastLines(s string, n int) string {
-	lines := strings.Split(strings.TrimSpace(s), "\n")
-	if len(lines) > n {
-		lines = lines[len(lines)-n:]
-	}
-	return strings.Join(lines, " ⏎ ")
-}
-
-func trunc(s string, n int) string {
-	if len(s) > n {
-		return s[:n] + "…"
-	}
-	return s
-}
-
-// findDataFile is the first file called name below dir.
-func findDataFile(dir, name string) string {
-	var path string
-	_ = filepath.Walk(dir, func(p string, info os.FileInfo, err error) error {
-		if err == nil && !info.IsDir() && info.Name() == name && path == "" {
-			path = p
-		}
-		return nil
-	})
-	return path
-}
-
-// copyForRead copies a database the voter holds open to a private file and opens the copy read-only.
-func copyForRead(src string) (*bolt.DB, func(), error) {
-	in, err := os.Open(src)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer in.Close()
-	tmp, err := os.CreateTemp("", "soundpost-mixed-db-")
-	if err != nil {
-		return nil, nil, err
-	}
-	if _, err = io.Copy(tmp, in); err != nil {
-		tmp.Close()
-		os.Remove(tmp.Name())
-		return nil, nil, err
-	}
-	tmp.Close()
-	db, err := bolt.Open(tmp.Name(), 0o600, &bolt.Options{ReadOnly: true, Timeout: 5 * time.Second})
-	if err != nil {
-		os.Remove(tmp.Name())
-		return nil, nil, err
-	}
-	return db, func() { db.Close(); os.Remove(tmp.Name()) }, nil
-}
-
-// readControlState is the stored control state and its seal of a voter (read from a copy of control.db; the
-// seal check proves the copy was not torn).
-func readControlState(dir string) (state, seal []byte, err error) {
-	path := findDataFile(dir, "control.db")
-	if path == "" {
-		return nil, nil, errors.New("no control.db")
-	}
-	for range 5 {
-		var db *bolt.DB
-		var closeDB func()
-		if db, closeDB, err = copyForRead(path); err != nil {
-			time.Sleep(100 * time.Millisecond)
-			continue
-		}
-		err = db.View(func(tx *bolt.Tx) error {
-			b := tx.Bucket([]byte("control"))
-			if b == nil {
-				return errors.New("no control bucket")
-			}
-			state, seal = bytes.Clone(b.Get([]byte("state"))), bytes.Clone(b.Get([]byte("state_seal")))
-			return nil
-		})
-		closeDB()
-		if err == nil {
-			sum := sha256.Sum256(state)
-			if bytes.Equal(sum[:], seal) {
-				return state, seal, nil
-			}
-			err = errors.New("state seal does not match the copy")
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	return nil, nil, err
 }
 
 // readDeclarations are the protocol declarations (erase-protocol-1 capability acknowledgements) the voter

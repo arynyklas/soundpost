@@ -530,7 +530,7 @@ func (g *Group) processReady() error {
 			}
 		}
 		for _, m := range rd.Messages {
-			if g.gate != nil && m.GetType() == pb.MsgSnap {
+			if (g.gate != nil || g.guard != nil) && m.GetType() == pb.MsgSnap {
 				g.sendGatedSnapshot(cloneMessage(m))
 				continue
 			}
@@ -814,18 +814,44 @@ func (g *Group) Snapshot() error {
 // a snapshot leaves; a snapshot withheld that long is reported as failed and sent again.
 const snapshotGateTimeout = 15 * time.Second
 
-// sendGatedSnapshot sends a snapshot message once the machine's gate has ordered what the install
-// will invalidate. g.mu is held by the caller and must not be taken by the gate: the gate runs on
-// its own goroutine, and reports a failed delivery the way a failed Send does.
+// sendGatedSnapshot sends a snapshot message once the sender-side checks of the group allow it: the
+// SnapshotGuard (Config.SnapshotGuard: the receiver must be able to use the state) and the machine's
+// gate (which orders what the install will invalidate; its token goes into the Context). g.mu is
+// held by the caller and must not be taken by either: they run on their own goroutine, and a
+// withheld message is reported as a failed delivery the way a failed Send does.
 func (g *Group) sendGatedSnapshot(m *pb.Message) {
+	var to Member
+	listed := false
+	if g.guard != nil {
+		for _, list := range [][]Member{g.members.Nodes, g.retiring} {
+			for _, member := range list {
+				if member.ID == m.GetTo() {
+					to, listed = member, true
+				}
+			}
+		}
+	}
 	g.gateWG.Add(1)
 	go func() {
 		defer g.gateWG.Done()
 		ctx, cancel := context.WithTimeout(g.gateCtx, snapshotGateTimeout)
-		token, err := g.gate.BeforeSnapshotSend(ctx, m.GetTo())
-		cancel()
+		defer cancel()
+		var err error
+		switch {
+		case g.guard != nil && !listed:
+			err = ErrUnavailable // not in the configuration: nothing names it, so nothing is sent
+		case g.guard != nil:
+			err = g.guard(ctx, to)
+		}
+		snapshotContext := m.GetContext()
+		if err == nil && g.gate != nil {
+			var token []byte
+			if token, err = g.gate.BeforeSnapshotSend(ctx, m.GetTo()); err == nil {
+				snapshotContext = gateContext(token)
+			}
+		}
 		if err == nil {
-			m.Context = g.snapshotContext(m, gateContext(token))
+			m.Context = g.snapshotContext(m, snapshotContext)
 			err = g.transport.Send(g.group, m)
 		}
 		if err != nil {

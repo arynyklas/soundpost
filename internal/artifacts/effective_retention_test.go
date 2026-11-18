@@ -246,54 +246,64 @@ func TestLifecycleLedgerAndIndexEntryRemovalIsDetected(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	sameShard := a.ID[0] == b.ID[0] // the anchor of an index shard covers the roots of that shard
 	expectFailClosed := func(name string) {
 		t.Helper()
-		for what, call := range map[string]func() error{
+		calls := map[string]func() error{
 			"LatestReference(removed)": func() error { _, e := f.life.LatestReference(ctx, f.candidate(a)); return e },
-			"LatestReference(sibling)": func() error { _, e := f.life.LatestReference(ctx, f.candidate(b)); return e },
-			"GC":                       func() error { _, e := f.life.GC(ctx, write, a.ID); return e },
-			"Reference": func() error {
-				return f.life.Reference(ctx, write, b.ID, f.origin(artifacts.ReferenceError), f.hours(7))
+			"GC(removed)":              func() error { _, e := f.life.GC(ctx, write, a.ID); return e },
+			"Reference(removed)": func() error {
+				return f.life.Reference(ctx, write, a.ID, f.origin(artifacts.ReferenceError), f.hours(7))
 			},
-			"Unreference": func() error { return f.life.Unreference(ctx, write, b.ID, f.origin(artifacts.ReferenceError), 0) },
-			"Get":         func() error { _, e := f.app.Artifacts.Get(ctx, f.scope(t, auth.ArtifactRead), b.ID); return e },
-			"Lookup":      func() error { _, e := f.app.Artifacts.Lookup(ctx, f.scope(t, auth.ArtifactRead), a.ID); return e },
-		} {
+			"Unreference(removed)": func() error { return f.life.Unreference(ctx, write, a.ID, f.origin(artifacts.ReferenceError), 0) },
+			"Lookup(removed)":      func() error { _, e := f.app.Artifacts.Lookup(ctx, f.scope(t, auth.ArtifactRead), a.ID); return e },
+		}
+		if sameShard {
+			calls["LatestReference(sibling)"] = func() error { _, e := f.life.LatestReference(ctx, f.candidate(b)); return e }
+			calls["Reference(sibling)"] = func() error {
+				return f.life.Reference(ctx, write, b.ID, f.origin(artifacts.ReferenceError), f.hours(7))
+			}
+			calls["Unreference(sibling)"] = func() error {
+				return f.life.Unreference(ctx, write, b.ID, f.origin(artifacts.ReferenceError), 0)
+			}
+			calls["Get(sibling)"] = func() error { _, e := f.app.Artifacts.Get(ctx, f.scope(t, auth.ArtifactRead), b.ID); return e }
+		}
+		for what, call := range calls {
 			if err := call(); codeOf(err) != model.Corrupt {
 				t.Errorf("%s: %s answered %v, want corrupt", name, what, err)
 			}
 		}
 	}
-	indexOf := func(settings map[string]json.RawMessage) map[string]refledger.IndexEntry {
+	shardOf := func(settings map[string]json.RawMessage) map[string]refledger.IndexEntry {
 		var idx map[string]refledger.IndexEntry
-		if err := json.Unmarshal(settings[refledger.IndexKey(f.project)], &idx); err != nil {
+		if err := json.Unmarshal(settings[refledger.ShardIndexKey(f.project, a.ID)], &idx); err != nil {
 			t.Fatal(err)
 		}
 		return idx
 	}
 	set(func(s map[string]json.RawMessage) {
 		delete(s, refledger.LedgerKey(f.project, a.ID))
-		idx := indexOf(s)
+		idx := shardOf(s)
 		delete(idx, a.ID.String())
 		raw, err := json.Marshal(idx)
 		if err != nil {
 			t.Fatal(err)
 		}
-		s[refledger.IndexKey(f.project)] = raw
+		s[refledger.ShardIndexKey(f.project, a.ID)] = raw
 	})
 	expectFailClosed("ledger and its index entry removed")
 
 	set(func(s map[string]json.RawMessage) {
 		delete(s, refledger.LedgerKey(f.project, a.ID))
-		delete(s, refledger.IndexKey(f.project))
+		delete(s, refledger.ShardIndexKey(f.project, a.ID))
 	})
-	expectFailClosed("ledger and the whole index removed")
+	expectFailClosed("ledger and the whole index shard removed")
 
 	set(func(s map[string]json.RawMessage) {
-		idx := indexOf(s)
+		idx := shardOf(s)
 		idx[model.NewID().String()] = refledger.IndexEntry{Seq: 1}
 		raw, _ := json.Marshal(idx)
-		s[refledger.IndexKey(f.project)] = raw
+		s[refledger.ShardIndexKey(f.project, a.ID)] = raw
 	})
 	expectFailClosed("an index entry added by hand")
 

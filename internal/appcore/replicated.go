@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sync/atomic"
 	"time"
 
 	"github.com/arynyklas/soundpost/internal/backup"
@@ -64,6 +65,17 @@ type replicatedApp struct {
 	domain *replica.FailDomain
 	// dir is the data directory this node was opened on.
 	dir string
+	// layoutRefused makes this member answer the live layout question as the previous release does (the
+	// question is not implemented); only LimitLiveLayoutForTest sets it.
+	layoutRefused atomic.Bool
+}
+
+// LimitLiveLayoutForTest makes this member answer the other members' live layout question as the previous
+// release would (the question is not implemented), so that `contract-indexes` is refused naming it.
+func (a *App) LimitLiveLayoutForTest(refuse bool) {
+	if a.replication != nil {
+		a.replication.layoutRefused.Store(refuse)
+	}
 }
 
 // awaitReady waits for one ReadIndex quorum round on a group. Each round has
@@ -211,6 +223,43 @@ func (a *App) enableReplication(dir string, options *replicationOptions, budget 
 		group := a.Control.ReplicaGroup()
 		return group != nil && a.Storage.ControlStatePatchReady(group.Status().Members.Nodes)
 	})
+	// D70: `soundpost upgrade contract-indexes` is refused unless the RUNNING binary of every member
+	// of the control group answers the live layout question over the mesh. A stored declaration
+	// cannot say it (a voter put back on the previous release keeps what it last wrote), and the
+	// previous release does not implement the question, so a member that does not answer, for any
+	// reason, is named and the step is refused.
+	if options != nil {
+		options.transport.SetLayoutSupport(func() (uint64, bool) { return model.IndexLayoutVersion, !lifecycle.layoutRefused.Load() })
+	}
+	self := cfg.ID
+	// readsLayout is the live question to one member: nil when its running binary answers that it reads
+	// the contracted layout. The same question guards a member joining the membership and the snapshot
+	// sent to a member once an organization is contracted (control.Store.CheckMemberLayout).
+	readsLayout := func(ctx context.Context, m replica.Member) error {
+		if options == nil {
+			return model.Fail(model.Unavailable)
+		}
+		got, qerr := options.transport.QueryLayout(ctx, m)
+		if qerr == nil && got < model.IndexLayoutVersion {
+			qerr = model.Fail(model.Unsupported)
+		}
+		return qerr
+	}
+	a.Control.SetMemberLayoutQuery(readsLayout)
+	a.Control.SetLayoutSupportGate(func() []string {
+		group := a.Control.ReplicaGroup()
+		if group == nil || len(group.Status().Members.Nodes) == 0 {
+			return []string{"unknown"}
+		}
+		var lacking []string
+		for _, m := range group.Status().Members.Nodes {
+			if m.ID != self && readsLayout(context.Background(), m) != nil {
+				lacking = append(lacking, m.NodeIdentity)
+			}
+		}
+		return lacking
+	})
+	a.Auth.SetIndexContractor(contractIndexes)
 	controlGroup, err := a.Control.EnableReplication(cfg)
 	if err != nil {
 		return err

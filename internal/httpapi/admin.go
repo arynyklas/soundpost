@@ -47,4 +47,18 @@ func RegisterAdminRoutes(mux *http.ServeMux, s *auth.Service) {
 		v, e := s.AdminRead(r.Context(), c, q)
 		reply(w, v, e)
 	})
+	mux.HandleFunc("POST /api/v1/admin/upgrade/contract-indexes", func(w http.ResponseWriter, r *http.Request) {
+		c, e := protected(s, w, r)
+		if e != nil {
+			reply(w, nil, e)
+			return
+		}
+		var q auth.ContractIndexesRequest
+		if e = decode(w, r, &q); e != nil {
+			reply(w, nil, e)
+			return
+		}
+		v, e := s.ContractIndexes(r.Context(), c, q)
+		reply(w, v, e)
+	})
 }

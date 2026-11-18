@@ -88,10 +88,54 @@ func TestNonAuthorityWriteDoesNotBumpAuthorityRevision(t *testing.T) {
 	if rev1 != rev0+3 || auth1 != auth0 {
 		t.Fatalf("three admissions: revision %d -> %d, authority %d -> %d; the revision must move by 3 and the authority revision not at all", rev0, rev1, auth0, auth1)
 	}
-	f.admin("membership", f.org, auth.AdminPayload{UserID: f.user, Enabled: true, Reason: "an admin command is authority"})
+	f.admin("membership", f.org, auth.AdminPayload{UserID: f.user, Enabled: true, Reason: "an org admin command is authority of its organization"})
 	rev2, auth2 := f.revisions()
-	if rev2 != rev1+1 || auth2 != rev2 {
-		t.Fatalf("admin command: revision %d authority %d (was %d)", rev2, auth2, rev1)
+	if rev2 != rev1+1 || auth2 != auth1 || f.orgAuthority(f.org) != rev2 {
+		t.Fatalf("org admin command: revision %d installation authority %d (was %d) organization authority %d; it must move the organization's own revision only", rev2, auth2, auth1, f.orgAuthority(f.org))
+	}
+	f.admin("create_user", f.org, auth.AdminPayload{ID: model.NewID(), Email: "third@example.test", Password: "a long test password 2026", Reason: "the user table is installation-wide"})
+	rev3, auth3 := f.revisions()
+	if rev3 != rev2+1 || auth3 != rev3 {
+		t.Fatalf("create_user: revision %d authority %d: the installation-wide user table must move AuthorityRevision", rev3, auth3)
+	}
+}
+
+// orgAuthority is the organization's own authority revision (model.OrgAuthorityKey), zero when
+// no organization-scoped command stamped it.
+func (f *fenceFx) orgAuthority(org model.ID) (r model.Revision) {
+	f.t.Helper()
+	if err := f.store.View(f.ctx, func(st control.State) error {
+		if raw, ok := st.Orgs[org.String()].Settings[model.OrgAuthorityKey]; ok {
+			return json.Unmarshal(raw, &r)
+		}
+		return nil
+	}); err != nil {
+		f.t.Fatal(err)
+	}
+	return
+}
+
+// (a') Another organization's admin commands do not invalidate a deletion Begin's view (review
+// F-10.05-2: one tenant's admin commands, not rate limited, kept every other tenant's erasure
+// from committing). The organization's own admin commands still do.
+func TestAnotherOrganizationsAdminCommandsDoNotConflictABegin(t *testing.T) {
+	f := newFenceFx(t)
+	other := model.NewID()
+	f.admin("create_org", other, auth.AdminPayload{Name: "tenant b", Reason: "second tenant"})
+	view, authority := f.revisions()
+	f.admin("create_project", other, auth.AdminPayload{ID: model.NewID(), Name: "b1", Reason: "tenant b project"})
+	f.admin("membership", other, auth.AdminPayload{UserID: f.user, Enabled: true, Reason: "tenant b membership"})
+	f.admin("create_org", model.NewID(), auth.AdminPayload{Name: "tenant c", Reason: "third tenant"})
+	if rev, now := f.revisions(); now != authority || rev != view+3 {
+		t.Fatalf("revision %d -> %d, installation authority %d -> %d: other tenants' admin commands must leave the installation authority alone", view, rev, authority, now)
+	}
+	if err := f.beginAt(view); err != nil {
+		t.Fatalf("Begin on a view taken before another tenant's admin commands: %v", err)
+	}
+	view2, _ := f.revisions()
+	f.admin("membership", f.org, auth.AdminPayload{UserID: f.user, Enabled: true, Reason: "own organization"})
+	if err := f.beginAt(view2); code(err) != model.Conflict {
+		t.Fatalf("Begin on a view older than the organization's own admin command: %v, want Conflict", err)
 	}
 }
 
@@ -143,9 +187,6 @@ func TestDeleteWithViewOlderThanAuthorityChangeStillConflicts(t *testing.T) {
 				t.Fatal(err)
 			}
 		}, false},
-		{"org creation admin command", func(f *fenceFx) {
-			f.admin("create_org", model.NewID(), auth.AdminPayload{Name: "second org", Reason: "new org"})
-		}, true},
 		{"user creation admin command", func(f *fenceFx) {
 			f.admin("create_user", f.org, auth.AdminPayload{ID: model.NewID(), Email: "second@example.test", Password: "a long test password 2026", Reason: "new user"})
 		}, true},
@@ -178,8 +219,9 @@ func TestDeleteWithViewOlderThanAuthorityChangeStillConflicts(t *testing.T) {
 			view, _ := f.revisions()
 			c.change(f)
 			rev, authority := f.revisions()
+			authority = max(authority, f.orgAuthority(f.org)) // what a Begin on this organization is judged against
 			if authority != rev || rev <= view {
-				t.Fatalf("%s: revision %d authority %d (view %d): the change must stamp AuthorityRevision", c.name, rev, authority, view)
+				t.Fatalf("%s: revision %d authority %d (view %d): the change must stamp the authority revision", c.name, rev, authority, view)
 			}
 			if err := f.beginAt(view); code(err) != model.Conflict {
 				t.Fatalf("%s: Begin on a view older than the change: %v, want Conflict", c.name, err)

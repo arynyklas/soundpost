@@ -61,6 +61,8 @@ type Service struct {
 	// (loginStaleWaiters, lowered by tests).
 	staleWaiting atomic.Int32
 	staleLimit   int32
+	// indexContractor is the contraction ContractIndexes applies to an organization (D70); nil: unavailable.
+	indexContractor atomic.Pointer[IndexContractor]
 }
 type Session struct {
 	Token   string      `json:"-"`

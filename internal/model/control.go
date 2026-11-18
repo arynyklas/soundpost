@@ -331,6 +331,33 @@ const (
 	ArtifactLedgerIndexKeyPrefix = "artifact_refs_index:"
 )
 
+// IndexLayoutVersion is what a member answers to the live layout question (replica.MTLS.QueryLayout):
+// 1 means the running binary reads the sharded ledger index and per-replay pins without the
+// per-project values of the previous release.
+const IndexLayoutVersion uint64 = 1
+
+// IndexesContractedKey is the key of an organization's Settings that says the operator ran
+// `soundpost upgrade contract-indexes` for it (D70): the sharded artifact ledger index and the
+// per-replay pins are then the only copy, and the per-project values the previous release reads
+// (artifact_refs_index:<project> with its anchor, replay_pins:<project>) are neither kept nor
+// written. Before it, a write keeps both layouts current so the previous release can still read
+// everything. The key is in the ledger index family, so writing it alone does not move the control
+// AuthorityRevision, and the previous release ignores it.
+const IndexesContractedKey = "artifact_refs_index:contracted"
+
+// IndexesContracted reports whether the organization's indexes are contracted.
+func (o ControlOrg) IndexesContracted() bool {
+	_, ok := o.Settings[IndexesContractedKey]
+	return ok
+}
+
+// OrgAuthorityKey is the key of an organization's Settings that holds the control Revision of the
+// last authority-class transition that changed that organization alone (an admin command of the
+// organization, Store.UpdateOrgAuthority). A retention command of the organization needs a caller
+// view no older than the later of ControlState.AuthorityRevision and this value, so the admin
+// commands of one organization no longer invalidate the views of another's deletions.
+const OrgAuthorityKey = "authority_rev"
+
 // RevisionStamp says that control revision Revision had been committed by At (Unix nanoseconds).
 type RevisionStamp struct {
 	Revision Revision `json:"revision"`

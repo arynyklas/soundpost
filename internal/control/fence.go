@@ -627,7 +627,8 @@ func (s *Store) DeleteGeneration(ctx context.Context, org model.ID) (out uint64,
 }
 
 // forgetReplayIndex drops the replay index (internal/replays: one group per replay under
-// replay_index:<project>:<replay>, one pin map per project under replay_pins:<project>) of every
+// replay_index:<project>:<replay> and one pin per replay under replay_pins:<project>:<replay>, or
+// the whole pin map of an earlier build under replay_pins:<project>) of every
 // project a retirement covers, in the transition that retires it. The groups hold replay and session
 // identifiers and checkpoint digests of data the deletion erases, and the replay service sweeps an
 // index only inside a later write of the same project, which a retired project never has. Retired
@@ -639,7 +640,7 @@ func forgetReplayIndex(settings map[string]json.RawMessage, p model.DeletePredic
 		case strings.HasPrefix(key, model.ReplayIndexKeyPrefix):
 			project, _, _ = strings.Cut(strings.TrimPrefix(key, model.ReplayIndexKeyPrefix), ":")
 		case strings.HasPrefix(key, model.ReplayPinKeyPrefix):
-			project = strings.TrimPrefix(key, model.ReplayPinKeyPrefix)
+			project, _, _ = strings.Cut(strings.TrimPrefix(key, model.ReplayPinKeyPrefix), ":")
 		default:
 			continue
 		}

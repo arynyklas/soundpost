@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/arynyklas/soundpost/internal/appcore"
@@ -44,7 +45,7 @@ func serveMembership(dir string, core *appcore.App) (io.Closer, error) {
 	if errors.Is(err, appcore.ErrNoMembership) {
 		return nil, nil
 	}
-	return serveMembershipGroups(dir, groups, peerIsOwner)
+	return serveMembershipGroups(dir, groups, core.MembershipLayout(), peerIsOwner)
 }
 
 // gatedListener drops every connection the allow function refuses before a byte is read from it.
@@ -63,7 +64,7 @@ func (l *gatedListener) Accept() (net.Conn, error) {
 	}
 }
 
-func serveMembershipGroups(dir string, groups []appcore.MembershipGroup, allow func(net.Conn) bool) (io.Closer, error) {
+func serveMembershipGroups(dir string, groups []appcore.MembershipGroup, layout appcore.MembershipLayout, allow func(net.Conn) bool) (io.Closer, error) {
 	path := filepath.Join(dir, membershipSocket)
 	if len(path) > maxSocketPath {
 		return nil, errors.New("the data directory path is too long for the membership socket")
@@ -79,7 +80,7 @@ func serveMembershipGroups(dir string, groups []appcore.MembershipGroup, allow f
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /status", func(w http.ResponseWriter, r *http.Request) {
-		writeMembershipJSON(w, appcore.ReportMembership(groups))
+		writeMembershipJSON(w, appcore.ReportMembership(r.Context(), groups, layout))
 	})
 	mux.HandleFunc("POST /step", func(w http.ResponseWriter, r *http.Request) {
 		var change appcore.MembershipChange
@@ -90,7 +91,7 @@ func serveMembershipGroups(dir string, groups []appcore.MembershipGroup, allow f
 			http.Error(w, "invalid", http.StatusBadRequest)
 			return
 		}
-		writeMembershipJSON(w, appcore.StepMembership(r.Context(), groups, change))
+		writeMembershipJSON(w, appcore.StepMembership(r.Context(), groups, layout, change))
 	})
 	server := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go func() { _ = server.Serve(&gatedListener{Listener: listener, allow: allow}) }()
@@ -190,6 +191,9 @@ func printMembershipStatus(out io.Writer, status []appcore.MembershipStatus) err
 			}
 			fmt.Fprintf(out, "%d:%s:%s", m.ID, role, m.NodeIdentity)
 		}
+		if len(g.Reasons) > 0 {
+			fmt.Fprintf(out, " reasons=%s", strings.Join(g.Reasons, ","))
+		}
 		fmt.Fprintln(out)
 	}
 	return nil
@@ -204,14 +208,17 @@ func printMembershipOutcomes(out io.Writer, outcomes []appcore.MembershipOutcome
 		if o.Result == appcore.OutcomeApplied || o.Result == appcore.OutcomeAlready {
 			continue
 		}
-		if o.Result == appcore.OutcomeNotLeader {
+		switch {
+		case o.Result == appcore.OutcomeNotLeader:
 			fmt.Fprintf(out, "group %s: %s (led by node %d; run this step there)\n", o.Group, o.Result, o.Leader)
-		} else {
+		case o.Detail != "":
+			fmt.Fprintf(out, "group %s: %s\n", o.Group, o.Detail)
+		default:
 			fmt.Fprintf(out, "group %s: %s\n", o.Group, o.Result)
 		}
 	}
-	fmt.Fprintf(out, "groups=%d applied=%d already=%d not_leader=%d learner_not_caught_up=%d unavailable=%d rejected=%d\n", len(outcomes),
-		counts[appcore.OutcomeApplied], counts[appcore.OutcomeAlready], counts[appcore.OutcomeNotLeader], counts[appcore.OutcomeNotCaughtUp], counts[appcore.OutcomeUnavailable], counts[appcore.OutcomeRejected])
+	fmt.Fprintf(out, "groups=%d applied=%d already=%d not_leader=%d learner_not_caught_up=%d layout_incompatible=%d unavailable=%d rejected=%d\n", len(outcomes),
+		counts[appcore.OutcomeApplied], counts[appcore.OutcomeAlready], counts[appcore.OutcomeNotLeader], counts[appcore.OutcomeNotCaughtUp], counts[appcore.OutcomeLayoutIncompatible], counts[appcore.OutcomeUnavailable], counts[appcore.OutcomeRejected])
 	if !appcore.MembershipDone(outcomes) {
 		return errMembershipIncomplete
 	}

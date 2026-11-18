@@ -47,7 +47,7 @@ func TestMembershipSocketRefusesAProcessOfAnotherUid(t *testing.T) {
 		t.Fatal(err)
 	}
 	group := &socketGroup{status: replica.Status{Group: model.NewID(), ID: 1, Leader: 1, Revision: 1, Members: threeVoters()}}
-	closer, err := serveMembershipGroups(dir, []appcore.MembershipGroup{group}, peerIsOwner)
+	closer, err := serveMembershipGroups(dir, []appcore.MembershipGroup{group}, nil, peerIsOwner)
 	if err != nil {
 		t.Fatal(err)
 	}

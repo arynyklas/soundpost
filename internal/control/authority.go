@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"maps"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -231,12 +232,28 @@ func authorityFloor(st *State) model.Revision {
 	return st.AuthorityRevision
 }
 
-// expectedRevisionOK is the whole Transact revision rule.
-func expectedRevisionOK(st *State, kind string, expected model.Revision) bool {
+// orgAuthority is the control Revision of the last authority-class transition that changed the
+// organization alone (UpdateOrgAuthority stamps it in the organization's Settings): zero when
+// none did, and the current Revision (strict) when the stored value does not parse.
+func orgAuthority(st *State, org model.ID) model.Revision {
+	raw, ok := st.Orgs[org.String()].Settings[model.OrgAuthorityKey]
+	if !ok {
+		return 0
+	}
+	var r model.Revision
+	if model.StrictJSON(raw, &r) != nil {
+		return st.Revision
+	}
+	return r
+}
+
+// expectedRevisionOK is the whole Transact revision rule. A retention command of org needs a view
+// no older than the later of the installation's authority floor and the organization's own.
+func expectedRevisionOK(st *State, org model.ID, kind string, expected model.Revision) bool {
 	if !retentionKinds[CommandKind(kind)] {
 		return st.Revision == expected
 	}
-	return authorityFloor(st) <= expected && expected <= st.Revision
+	return max(authorityFloor(st), orgAuthority(st, org)) <= expected && expected <= st.Revision
 }
 
 // transactBumps says whether committing a Transact of this kind moves AuthorityRevision.
@@ -393,6 +410,112 @@ func residentsPreserve(now int64, expired, pending func(key string, raw json.Raw
 // Settings. The retire transition (intent state, delete generation) is outside the mask and bumps.
 func (s *Store) UpdateArtifactReferences(ctx context.Context, fn func(*State) error) error {
 	return s.updateAsGuarded(ctx, writerArtifactLedger, stateWithoutArtifactLedger, fn)
+}
+
+type orgScopeKey struct{}
+
+// orgScope is what UpdateOrgAuthority tells replicatedUpdateOnce: the organization whose own
+// authority revision the commit moves, and whether the guard proved that nothing else changed.
+type orgScope struct {
+	org      model.ID
+	verified bool
+}
+
+// UpdateOrgAuthority commits fn, an admin command of one organization, moving that organization's
+// own authority revision (model.OrgAuthorityKey) instead of the installation-wide AuthorityRevision.
+// A retention command of another organization keeps a view that predates this commit: the
+// installation-wide scalar made one tenant's admin commands (not rate limited) conflict every other
+// tenant's deletion Begin (review F-10.05-2). The exemption is verified, never trusted: the state
+// is encoded before and after fn without the organization's own record, the audit log and the
+// command books; any difference there, an audit row or a command row that was edited rather than
+// appended, or an attestation change bumps the installation-wide AuthorityRevision exactly as an
+// unclassified writer does. Cost: two canonical encodings of the state per call.
+func (s *Store) UpdateOrgAuthority(ctx context.Context, org model.ID, fn func(*State) error) error {
+	if e := ctx.Err(); e != nil {
+		return e
+	}
+	if s.repl == nil {
+		return model.Fail(model.Unavailable)
+	}
+	fn = guardAttestations(fn)
+	force := false
+	scope := &orgScope{org: org}
+	ctx = context.WithValue(ctx, orgScopeKey{}, scope)
+	return s.replicatedUpdate(ctx, false, &force, func(st *State) error {
+		scope.verified = false
+		before, err := stateWithoutOrg(st, org)
+		holds := booksOnlyAppended(st)
+		if err != nil {
+			force = true
+		}
+		if err = fn(st); err != nil {
+			return err
+		}
+		after, err := stateWithoutOrg(st, org)
+		if err != nil || !bytes.Equal(before, after) || !holds(st) {
+			force = true
+		} else {
+			scope.verified = true
+		}
+		return nil
+	})
+}
+
+// stateWithoutOrg is the canonical encoding of st with the organization's record, the audit log
+// and the command books removed.
+func stateWithoutOrg(st *State, org model.ID) ([]byte, error) {
+	masked := *st
+	masked.Orgs = make(map[string]model.ControlOrg, len(st.Orgs))
+	for id, o := range st.Orgs {
+		if id != org.String() {
+			masked.Orgs[id] = o
+		}
+	}
+	masked.Audits, masked.Commands, masked.CommandOwners = nil, nil, nil
+	return json.Marshal(masked)
+}
+
+// booksOnlyAppended snapshots the audit rows and the command books before fn and returns the check
+// that every row and every command is still there unchanged (new ones may be added).
+func booksOnlyAppended(st *State) func(*State) bool {
+	audits := auditsOnlyAppended(st)
+	commands, owners := maps.Clone(st.Commands), maps.Clone(st.CommandOwners)
+	return func(after *State) bool {
+		if !audits(after) {
+			return false
+		}
+		for k, v := range commands {
+			if got, ok := after.Commands[k]; !ok || !reflect.DeepEqual(got, v) {
+				return false
+			}
+		}
+		for k, v := range owners {
+			if got, ok := after.CommandOwners[k]; !ok || got != v {
+				return false
+			}
+		}
+		return true
+	}
+}
+
+// stampOrgAuthority records revision as the organization's own authority revision. An
+// organization the transition did not leave behind has nothing to stamp: the caller bumps the
+// installation-wide revision instead (reported false).
+func stampOrgAuthority(st *State, org model.ID, revision model.Revision) bool {
+	o, ok := st.Orgs[org.String()]
+	if !ok {
+		return false
+	}
+	raw, err := json.Marshal(revision)
+	if err != nil {
+		return false
+	}
+	settings := make(map[string]json.RawMessage, len(o.Settings)+1)
+	maps.Copy(settings, o.Settings)
+	settings[model.OrgAuthorityKey] = raw
+	o.Settings = settings
+	st.Orgs[org.String()] = o
+	return true
 }
 
 // stateWithoutSessionsAndFactors is the canonical encoding of st with the Sessions map removed and

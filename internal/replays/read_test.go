@@ -269,17 +269,13 @@ func TestReplayTamperedStoredIndexFailsClosed(t *testing.T) {
 		}
 		return f, scope, r
 	}
+	// The pin of a replay is its own key now; the second argument stays for the callers that
+	// ignore it (there is no per-project pin map to edit).
 	mutate := func(f *fx, r *recorder, edit func(map[string]json.RawMessage, map[string]json.RawMessage)) {
 		t := f.t
 		err := f.store.Update(f.ctx, func(st *model.ControlState) error {
 			o := st.Orgs[f.main.org.String()]
-			var pins map[string]json.RawMessage
-			if err := json.Unmarshal(o.Settings[pinKey(f.main.project)], &pins); err != nil {
-				return err
-			}
-			edit(o.Settings, pins)
-			raw, _ := json.Marshal(pins)
-			o.Settings[pinKey(f.main.project)] = raw
+			edit(o.Settings, nil)
 			st.Orgs[f.main.org.String()] = o
 			return nil
 		})
@@ -334,16 +330,19 @@ func TestReplayTamperedStoredIndexFailsClosed(t *testing.T) {
 		f, _, r := setup(t)
 		_ = f.store.Update(f.ctx, func(st *model.ControlState) error {
 			o := st.Orgs[f.main.org.String()]
-			o.Settings[pinKey(f.main.project)] = json.RawMessage(`[1]`)
+			o.Settings[pinKey(f.main.project, r.replay)] = json.RawMessage(`[1]`)
 			st.Orgs[f.main.org.String()] = o
 			return nil
 		})
-		rec := newRecorder(f.wall()).cp()
+		rec := r.cp() // the replay whose pin was damaged: the guard cannot answer for it
 		_, err := f.svc.LatestReference(f.ctx, storage.EraseCandidate{Org: f.main.org, Project: f.main.project, Kind: model.Replay, Record: &model.Record{Kind: model.Replay, Payload: model.Payload{Replay: &rec}}})
 		if code(err) != model.Corrupt {
 			t.Fatalf("%v", err)
 		}
-		_ = r
+		other := newRecorder(f.wall()).cp() // a replay with no pin of its own is unaffected
+		if _, err = f.svc.LatestReference(f.ctx, storage.EraseCandidate{Org: f.main.org, Project: f.main.project, Kind: model.Replay, Record: &model.Record{Kind: model.Replay, Payload: model.Payload{Replay: &other}}}); err != nil {
+			t.Fatalf("an unrelated replay: %v", err)
+		}
 	})
 	t.Run("a forged checkpoint beside the real one loses to the pinned hash", func(t *testing.T) {
 		f, scope, r := setup(t)
@@ -606,9 +605,7 @@ func TestReplayRecordIsImmutableAndBounded(t *testing.T) {
 		_ = f.store.View(f.ctx, func(st control.State) error {
 			s := st.Orgs[f.main.org.String()].Settings
 			_ = json.Unmarshal(s[groupKey(f.main.project, r.replay)], &gr)
-			var pins map[string]pin
-			_ = json.Unmarshal(s[pinKey(f.main.project)], &pins)
-			p = pins[r.replay.String()]
+			_ = json.Unmarshal(s[pinKey(f.main.project, r.replay)], &p)
 			return nil
 		})
 		return gr, p

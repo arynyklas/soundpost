@@ -169,7 +169,7 @@ func TestRetentionKeepsAReplayCheckpointPastItsOwnDeadline(t *testing.T) {
 func TestAReplayReferenceErrorFailsTheWholeExpiryPassClosed(t *testing.T) {
 	r := newRefsRig(t)
 	own, replay := r.replayChain()
-	key := "replay_pins:" + r.project.String()
+	key := "replay_pins:" + r.project.String() + ":" + replay.String()
 	var saved json.RawMessage
 	set := func(raw json.RawMessage, remember bool) {
 		if err := r.app.Control.Update(r.ctx, func(st *model.ControlState) error {
@@ -339,11 +339,11 @@ func TestMixedBlobAndReplayPassFailsClosedWhenOneSourceFails(t *testing.T) {
 	}
 }
 
-// breakReplayState makes the replay reference state of the rig's project unreadable
-// and returns the function that puts the readable state back.
-func (r *refsRig) breakReplayState() (restore func()) {
+// breakReplayState makes the replay reference state of the rig's project (the pin of replay)
+// unreadable and returns the function that puts the readable state back.
+func (r *refsRig) breakReplayState(replay model.ID) (restore func()) {
 	r.t.Helper()
-	key := "replay_pins:" + r.project.String()
+	key := "replay_pins:" + r.project.String() + ":" + replay.String()
 	var saved json.RawMessage
 	set := func(raw json.RawMessage, remember bool) {
 		if err := r.app.Control.Update(r.ctx, func(st *model.ControlState) error {
@@ -409,7 +409,7 @@ func TestRealRetentionPassFailsClosedForBlobAndReplayWhenTheReplaySourceFails(t 
 	}
 	before := r.app.Retention.Status().ExpiryErased
 
-	restore := r.breakReplayState()
+	restore := r.breakReplayState(replay)
 	if err := r.runAt(now); err == nil {
 		t.Fatal("a real pass with unreadable replay reference state succeeded")
 	}

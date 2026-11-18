@@ -16,7 +16,7 @@ func (f *fenceFx) replayKeys(project model.ID) []string {
 	var keys []string
 	if err := f.store.View(f.ctx, func(st control.State) error {
 		for k := range st.Orgs[f.org.String()].Settings {
-			if strings.HasPrefix(k, model.ReplayIndexKeyPrefix+project.String()+":") || k == model.ReplayPinKeyPrefix+project.String() {
+			if strings.HasPrefix(k, model.ReplayIndexKeyPrefix+project.String()+":") || strings.HasPrefix(k, model.ReplayPinKeyPrefix+project.String()+":") || k == model.ReplayPinKeyPrefix+project.String() {
 				keys = append(keys, k)
 			}
 		}
@@ -37,7 +37,9 @@ func (f *fenceFx) seedReplayIndex(projects ...model.ID) {
 		for _, p := range projects {
 			o.Settings[model.ReplayIndexKeyPrefix+p.String()+":"+model.NewID().String()] = json.RawMessage(`{"seq":1}`)
 			o.Settings[model.ReplayIndexKeyPrefix+p.String()+":"+model.NewID().String()] = json.RawMessage(`{"seq":2}`)
-			o.Settings[model.ReplayPinKeyPrefix+p.String()] = json.RawMessage(`{"pin":1}`)
+			o.Settings[model.ReplayPinKeyPrefix+p.String()] = json.RawMessage(`{"pin":1}`) // the pin map of an earlier build
+			o.Settings[model.ReplayPinKeyPrefix+p.String()+":"+model.NewID().String()] = json.RawMessage(`{"Seq":1}`)
+			o.Settings[model.ReplayPinKeyPrefix+p.String()+":"+model.NewID().String()] = json.RawMessage(`{"Seq":2}`)
 		}
 		st.Orgs[f.org.String()] = o
 		return nil
@@ -54,7 +56,7 @@ func (f *fenceFx) seedReplayIndex(projects ...model.ID) {
 func TestRetireProjectForgetsItsReplayIndexAndOnlyIts(t *testing.T) {
 	f := newFenceFx(t)
 	f.seedReplayIndex(f.project, f.otherProject)
-	if n := len(f.replayKeys(f.otherProject)); n != 3 {
+	if n := len(f.replayKeys(f.otherProject)); n != 5 {
 		t.Fatalf("setup: %d keys for the project to retire", n)
 	}
 	if _, _, err := f.del(control.DeleteScope{Mode: model.DeleteRetireProject, Projects: []model.ID{f.otherProject}}); err != nil {
@@ -63,8 +65,8 @@ func TestRetireProjectForgetsItsReplayIndexAndOnlyIts(t *testing.T) {
 	if left := f.replayKeys(f.otherProject); len(left) != 0 {
 		t.Fatalf("the retired project keeps replay index keys: %v", left)
 	}
-	if n := len(f.replayKeys(f.project)); n != 3 {
-		t.Fatalf("the sibling project's replay index changed: %d keys, want 3", n)
+	if n := len(f.replayKeys(f.project)); n != 5 {
+		t.Fatalf("the sibling project's replay index changed: %d keys, want 5", n)
 	}
 }
 

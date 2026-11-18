@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/arynyklas/soundpost/internal/model"
@@ -54,6 +55,8 @@ type MTLS struct {
 	once        sync.Once
 	closing     bool
 	workers     sync.WaitGroup
+	// layoutSupport answers QueryLayout of the other members (layout_query.go); nil: the route is forbidden.
+	layoutSupport atomic.Pointer[func() (uint64, bool)]
 }
 
 func NewMTLS(id uint64, identity string, certificate tls.Certificate, roots *x509.CertPool, sourceIP string) (*MTLS, error) {
@@ -109,6 +112,10 @@ func (t *MTLS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	if strings.HasPrefix(r.URL.Path, proposalPath) {
 		t.serveProposal(w, r)
+		return
+	}
+	if r.URL.Path == layoutPath {
+		t.serveLayout(w, r)
 		return
 	}
 	if strings.HasPrefix(r.URL.Path, readinessPath) {

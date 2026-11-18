@@ -37,7 +37,12 @@ import (
 //     schema_newer / schema_old, stay unready and not acknowledge intake; with the directory restored
 //     from its copy (the marker unchanged) it must be ready again and answer as before;
 //  4. records, without asserting a promise the product does not make, what the OLD binary does on a
-//     directory the NEW binary has written (docs: not supported).
+//     directory the NEW binary has written (docs: not supported);
+//  5. the two-phase layout of the artifact ledger index and the replay pins (D70, runExpandContractStage): the
+//     new binary writes ledgers and replays, the OLD binary on that very directory is ready, reads them with
+//     no corrupt and writes its own, the new binary reads everything again, then `soundpost upgrade
+//     contract-indexes` drops the previous release's per-project values (asserted in the stored control
+//     state), reads and writes continue, and a repeat of the command is a no-op.
 //
 // To register (tools/smoke/main.go is frozen for lanes; the parent adds it): case "upgrade-rollback": return RunUpgradeRollback(os.Args[2:]).
 // Until then it runs through TestUpgradeRollbackOfProducedBinaries (env SOUNDPOST_UPGRADE_*).
@@ -290,6 +295,15 @@ func RunUpgradeRollback(args []string) (result error) {
 	}
 	report["schema_marker_restored_answers_identically"] = true
 	if err = r.stop(); err != nil {
+		return err
+	}
+
+	// ---- 5. the two-phase layout of the ledger index and the replay pins (D70) ----
+	// Between the rolls the candidate writes ledgers and replays, the previous release starts on that very
+	// directory and must read them (and writes its own), the candidate reads everything again, and only then
+	// `soundpost upgrade contract-indexes` drops the per-project values the previous release reads.
+	stage = "expand_contract"
+	if err = runExpandContractStage(oldHost, newHost, site, fx, report); err != nil {
 		return err
 	}
 	stage = "upgrade_artifact"

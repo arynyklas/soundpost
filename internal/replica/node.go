@@ -202,6 +202,13 @@ type Config struct {
 	// installs snapshots cut in another cluster (other voters, other identities). Never set for
 	// a repair or a join, which keep the leader's configuration.
 	RebaseInstalled bool
+	// SnapshotGuard runs on the SENDER of a snapshot message, outside every group lock, before the
+	// message for member `to` leaves; an error withholds it (the delivery is reported as failed and
+	// Raft sends the snapshot again). It is the machine-independent half of SnapshotGate: nothing is
+	// ordered through the log and nothing is added to the message, so a receiver that predates it is
+	// unaffected. The control machine uses it to withhold a snapshot of a state whose layout `to`
+	// cannot read (D70). A node the group does not list is never sent a snapshot.
+	SnapshotGuard func(ctx context.Context, to Member) error
 }
 type proposalResult struct {
 	entry CommittedEntry
@@ -271,10 +278,12 @@ type Group struct {
 	retryDigest func(Kind) bool
 	// gate is Machine.SnapshotGate when the machine implements it; gateCtx bounds the sender-side
 	// goroutines gateWG tracks.
-	gate        SnapshotGate
-	gateCtx     context.Context
-	gateCancel  context.CancelFunc
-	gateWG      sync.WaitGroup
+	gate       SnapshotGate
+	gateCtx    context.Context
+	gateCancel context.CancelFunc
+	gateWG     sync.WaitGroup
+	// guard is Config.SnapshotGuard; it shares gateCtx and gateWG with the gate.
+	guard       func(context.Context, Member) error
 	cadenceWG   sync.WaitGroup // the cadence loop; Close waits so no cut writes after the group closed
 	retryWindow time.Duration
 	retryMax    int
@@ -368,6 +377,12 @@ func Open(c Config) (*Group, error) {
 	if gate, ok := c.Machine.(SnapshotGate); ok {
 		g.gate = gate
 		g.gateCtx, g.gateCancel = context.WithCancel(context.Background())
+	}
+	if c.SnapshotGuard != nil {
+		g.guard = c.SnapshotGuard
+		if g.gateCancel == nil {
+			g.gateCtx, g.gateCancel = context.WithCancel(context.Background())
+		}
 	}
 	g.retryWindow, g.retryMax = c.RetryWindow, c.RetryMax
 	if g.retryWindow <= 0 {

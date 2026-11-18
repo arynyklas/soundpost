@@ -846,6 +846,8 @@ type installFixture struct {
 	trace                       model.ID
 	// job is the job of the ingested job attempt; issue names no record (the project reader cannot read issues).
 	job, issue model.ID
+	// policyRevision is the source policy revision batches carry when a scenario changed the policy (zero: 1).
+	policyRevision model.Revision
 }
 
 func requireNoDefaultAccess(site *installSite, report map[string]any) error {

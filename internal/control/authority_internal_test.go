@@ -148,6 +148,11 @@ func TestEveryControlWriterIsClassified(t *testing.T) {
 		"TransactIssues":      "writerTransactIssues",
 		"TransactJobs":        "writerTransactJobs",
 		"UpdateReplayIndex":   "writerReplayIndex",
+		// An organization's admin command (10.05, F-10.05-2): commits through replicatedUpdate
+		// itself, guarded like the writers above (the organization's own record, the audit log and
+		// the command books are masked, anything else bumps the installation-wide revision) and
+		// moves the organization's own authority revision.
+		"UpdateOrgAuthority": "replicated",
 		// A login that adds a session record and consumes the one-time factor it presented
 		// (10.29): see writerSessionCreate for why neither can change who may read; every
 		// other user field, Logout and Bootstrap keep bumping.
@@ -307,9 +312,42 @@ func TestExpectedRevisionRule(t *testing.T) {
 		{"audit: between", st(100, 10), KindAudit, 50, false},
 	}
 	for _, c := range cases {
-		if got := expectedRevisionOK(c.st, string(c.kind), c.expected); got != c.ok {
+		if got := expectedRevisionOK(c.st, model.ID{}, string(c.kind), c.expected); got != c.ok {
 			t.Errorf("%s: expectedRevisionOK(revision %d, authority %d, %s, %d) = %v, want %v", c.name, c.st.Revision, c.st.AuthorityRevision, c.kind, c.expected, got, c.ok)
 		}
+	}
+}
+
+// A retention command of an organization needs a view no older than the later of the
+// installation's authority floor and that organization's own authority revision; another
+// organization's value never matters.
+func TestExpectedRevisionRuleUsesTheOrganizationsOwnAuthority(t *testing.T) {
+	a, b := model.ID{1}, model.ID{2}
+	stamp := func(org model.ID, r model.Revision) map[string]model.ControlOrg {
+		raw, _ := json.Marshal(r)
+		return map[string]model.ControlOrg{org.String(): {Settings: map[string]json.RawMessage{model.OrgAuthorityKey: raw}}}
+	}
+	st := &State{Revision: 100, AuthorityRevision: 10, Orgs: stamp(a, 60)}
+	for _, c := range []struct {
+		name     string
+		org      model.ID
+		expected model.Revision
+		ok       bool
+	}{
+		{"the organization's own revision is the floor", a, 60, true},
+		{"just below the organization's own revision", a, 59, false},
+		{"between the installation floor and the organization's", a, 30, false},
+		{"another organization ignores it", b, 30, true},
+		{"another organization still has the installation floor", b, 9, false},
+	} {
+		if got := expectedRevisionOK(st, c.org, string(KindDeleteScope), c.expected); got != c.ok {
+			t.Errorf("%s: expectedRevisionOK(org floor 60, installation 10, %d) = %v, want %v", c.name, c.expected, got, c.ok)
+		}
+	}
+	// An unreadable value is strict: only the current revision commits.
+	bad := &State{Revision: 100, AuthorityRevision: 10, Orgs: map[string]model.ControlOrg{a.String(): {Settings: map[string]json.RawMessage{model.OrgAuthorityKey: json.RawMessage(`"x"`)}}}}
+	if expectedRevisionOK(bad, a, string(KindDeleteScope), 99) || !expectedRevisionOK(bad, a, string(KindDeleteScope), 100) {
+		t.Fatal("an unreadable organization authority revision must accept exactly the current revision")
 	}
 }
 
@@ -416,7 +454,7 @@ func TestLegacyStateWithoutAuthorityRevisionIsStrictAndHeals(t *testing.T) {
 		t.Fatalf("legacy fixture: revision %d authority %d", rev, auth)
 	}
 	st := &State{Revision: rev}
-	if expectedRevisionOK(st, string(KindDeleteScope), rev-1) || !expectedRevisionOK(st, string(KindDeleteScope), rev) {
+	if expectedRevisionOK(st, model.ID{}, string(KindDeleteScope), rev-1) || !expectedRevisionOK(st, model.ID{}, string(KindDeleteScope), rev) {
 		t.Fatal("a legacy state must accept exactly the current revision for a retention command")
 	}
 	if err := s.healLegacyAuthority(ctx); err != nil {

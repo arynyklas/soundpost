@@ -221,12 +221,10 @@ func (r *indexRig) indexOf(replay model.ID) (*indexedGroup, indexedPin) {
 				return err
 			}
 		}
-		if raw, ok := settings["replay_pins:"+r.project.String()]; ok {
-			var pins map[string]indexedPin
-			if err := json.Unmarshal(raw, &pins); err != nil {
+		if raw, ok := settings["replay_pins:"+r.project.String()+":"+replay.String()]; ok {
+			if err := json.Unmarshal(raw, &pin); err != nil {
 				return err
 			}
-			pin = pins[replay.String()]
 		}
 		return nil
 	}); err != nil {

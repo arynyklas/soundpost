@@ -59,6 +59,16 @@ func failureLine(args []string, err error) string {
 		}
 		return "soundpost: membership command failed (is the node running and the data directory its own?)"
 	}
+	if len(args) >= 2 && args[1] == "upgrade" {
+		var refused *upgradeRefused
+		switch {
+		case errors.Is(err, errUpgradeUsage):
+			return err.Error()
+		case errors.As(err, &refused):
+			return "soundpost: upgrade " + refused.Error()
+		}
+		return "soundpost: upgrade failed (could not reach the member, log in or read the files named on the command line)"
+	}
 	if len(args) >= 2 && args[1] == "serve" {
 		if reason := startupReason(err); reason != "" {
 			return "soundpost: startup or service failed (reason=" + reason + ")"
@@ -91,6 +101,9 @@ func run() error {
 	}
 	if len(os.Args) >= 2 && os.Args[1] == "membership" {
 		return runMembership(os.Args[2:], os.Stdout)
+	}
+	if len(os.Args) >= 2 && os.Args[1] == "upgrade" {
+		return runUpgrade(os.Args[2:], os.Stdout)
 	}
 	if len(os.Args) < 2 || os.Args[1] != "serve" {
 		return fmt.Errorf("usage: soundpost serve --mode=single --data-dir PATH --listen ADDRESS --tls-cert PATH --tls-key PATH")

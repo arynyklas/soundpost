@@ -13,6 +13,7 @@ import (
 	"github.com/arynyklas/soundpost/internal/auth"
 	"github.com/arynyklas/soundpost/internal/durablefs"
 	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/replica"
 	bolt "go.etcd.io/bbolt"
 	"os"
 	"path/filepath"
@@ -46,6 +47,11 @@ type Store struct {
 	// it may not. statePatches and statePatchBytes count the patch commands proposed and their payload bytes.
 	statePatchGate                atomic.Pointer[func() bool]
 	statePatches, statePatchBytes atomic.Uint64
+	// layoutSupportGate names the members of the control group whose running binary does not read
+	// the contracted index layout (index_layout.go); nil: none is known to.
+	layoutSupportGate atomic.Pointer[func() []string]
+	// memberLayoutQuery is the live question to one member (index_layout.go); nil: none answers.
+	memberLayoutQuery atomic.Pointer[func(context.Context, replica.Member) error]
 	// rawApplies and decodedApplies count the committed commands this store applied to the bytes of
 	// its state (stateRoot, patchRaw) and the ones it had to decode the state for (Apply).
 	rawApplies, decodedApplies atomic.Uint64
@@ -283,7 +289,7 @@ func (s *Store) transactCommit(ctx context.Context, scope auth.Scope, cmd Comman
 			out = v
 			return errReplayed
 		}
-		if !expectedRevisionOK(st, cmd.Kind, cmd.ExpectedRevision) {
+		if !expectedRevisionOK(st, scope.OrgID(), cmd.Kind, cmd.ExpectedRevision) {
 			legacy = retentionKinds[CommandKind(cmd.Kind)] && st.AuthorityRevision == 0 && st.Revision > 0
 			return model.Fail(model.Conflict)
 		}

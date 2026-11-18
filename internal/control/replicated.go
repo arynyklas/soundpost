@@ -81,6 +81,7 @@ func (s *Store) EnableReplication(c replica.Config) (*replica.Group, error) {
 	}
 	c.Machine = m
 	c.Validate = m.Validate
+	c.SnapshotGuard = m.guardSnapshot
 	if !c.Cadence.Enabled() {
 		c.Cadence = DefaultJournalCadence
 	}
@@ -190,10 +191,17 @@ func (s *Store) replicatedUpdateOnce(ctx context.Context, bump bool, force *bool
 	// log is read from it (retention.go, ExpireControlLog).
 	noteRevisionTime(&st, s.clockNow().UnixNano())
 	// Set after fn, never before: fn cannot forge, lower or suppress the field. A writer on the
-	// non-authority allowlist leaves the value it found.
-	if bump || force != nil && *force {
+	// non-authority allowlist leaves the value it found; a writer that UpdateOrgAuthority verified
+	// to have changed one organization alone moves that organization's own revision instead.
+	switch scope, _ := ctx.Value(orgScopeKey{}).(*orgScope); {
+	case bump || force != nil && *force:
 		st.AuthorityRevision = st.Revision
-	} else {
+	case scope != nil && scope.verified:
+		st.AuthorityRevision = priorAuthority
+		if !stampOrgAuthority(&st, scope.org, st.Revision) {
+			st.AuthorityRevision = st.Revision
+		}
+	default:
 		st.AuthorityRevision = priorAuthority
 	}
 	keys, err := s.replicaKeyFiles()

@@ -9,15 +9,79 @@ import (
 	"github.com/arynyklas/soundpost/internal/jobs"
 	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/storage"
+	"log/slog"
 	"sort"
 	"time"
 )
+
+// ExpiryHalt is the visible form of a fail-closed expiry pass. Expiry stays closed on state it
+// cannot verify (one unreadable reference ledger, replay pin state, hold set or processed
+// cursor refuses the candidate and the pass erases nothing, for every organization and kind),
+// and that refusal used to be silent. While Halted, the operator reads here which typed
+// reason (the fault code of the first source error) and which source stopped the pass, since
+// when and for how many consecutive expiry passes. It carries no data of any record. The first
+// expiry pass that completes clears it.
+type ExpiryHalt struct {
+	Halted bool
+	Reason string // the fault code: corrupt, unavailable, ...
+	Source string // references, processed, holds, control or expiry (a failure of the pass itself)
+	Since  model.UnixNano
+	Passes uint64
+}
+
+// haltError tags an error with the source that could not answer; it unwraps to it.
+type haltError struct {
+	source string
+	err    error
+}
+
+func (e *haltError) Error() string { return e.err.Error() }
+func (e *haltError) Unwrap() error { return e.err }
+
+func fromSource(source string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return &haltError{source: source, err: err}
+}
+
+// recordExpiry updates the halt state after one due expiry pass (err is the pass's own error).
+// A change of state is logged: the worker loop has no caller to return an error to.
+func (s *Service) recordExpiry(err error, now model.UnixNano) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err == nil {
+		if s.status.ExpiryHalt.Halted {
+			slog.Info("retention: expiry resumed", "halted_passes", s.status.ExpiryHalt.Passes)
+		}
+		s.status.ExpiryHalt = ExpiryHalt{}
+		return
+	}
+	h := s.status.ExpiryHalt
+	next := ExpiryHalt{Halted: true, Reason: "error", Source: "expiry", Since: h.Since, Passes: h.Passes + 1}
+	var f *model.Fault
+	if errors.As(err, &f) {
+		next.Reason = string(f.Code)
+	}
+	var he *haltError
+	if errors.As(err, &he) {
+		next.Source = he.source
+	}
+	if !h.Halted {
+		next.Since = now
+	}
+	if !h.Halted || h.Reason != next.Reason || h.Source != next.Source {
+		slog.Warn("retention: expiry halted, failing closed", "reason", next.Reason, "source", next.Source, "passes", next.Passes)
+	}
+	s.status.ExpiryHalt = next
+}
 
 // WorkerStatus is the last observable state of the maintenance worker. It
 // carries no telemetry values.
 type WorkerStatus struct {
 	Passes        uint64
 	LastError     string
+	ExpiryHalt    ExpiryHalt // set while an expiry pass fails closed: the typed reason and source
 	Pressure      storage.PressureStatus
 	EvidenceHeld  bool // expired unprocessed evidence is retained because its gap could not commit
 	ErasedRecords uint64
@@ -151,6 +215,7 @@ func (s *Service) RunOnce(ctx context.Context) error {
 		logErr := s.expireControlLog(ctx, now)
 		step(logErr)
 		n, err := s.expire(ctx)
+		s.recordExpiry(err, model.UnixNano(now.UnixNano()))
 		step(err)
 		expired = n > 0
 		if err == nil && logErr == nil {
@@ -479,7 +544,7 @@ func (s *Service) holdGuard(ctx context.Context, extra storage.EraseGuard) (stor
 			holds, err = s.cfg.Control.AppliedHolds(holds)
 		}
 		if err != nil {
-			return false, err // fail closed
+			return false, fromSource("holds", err) // fail closed
 		}
 		for _, h := range holds.Holds {
 			if c.Record != nil && h.CoversRecord(c.Org, c.Project, *c.Record) || c.Blob != nil && h.CoversBlob(*c.Blob) {
@@ -542,7 +607,7 @@ func (s *Service) expire(ctx context.Context) (uint64, error) {
 		if references != nil {
 			ref, err := references.LatestReference(ctx, c)
 			if err != nil {
-				return false, err
+				return false, fromSource("references", err)
 			}
 			if ref > now {
 				return false, nil // a retained dependent still needs it (replay checkpoint, artifact reference)
@@ -553,7 +618,7 @@ func (s *Service) expire(ctx context.Context) (uint64, error) {
 			if s.cfg.Processed != nil {
 				p, err := s.cfg.Processed.Processed(ctx, c.Cursor.Group)
 				if err != nil {
-					return false, err
+					return false, fromSource("processed", err)
 				}
 				processed = p
 			}

@@ -65,6 +65,25 @@ func (s *Service) AdminCommand(ctx context.Context, c Credential, r AdminCommand
 	return s.adminCommand(ctx, c, r, nil)
 }
 
+// orgAuthorityUpdater is implemented by *control.Store: an update that moves the organization's own
+// authority revision instead of the installation-wide one when it changed that organization alone
+// (control.Store.UpdateOrgAuthority). A ControlStore without it, or one that wraps the store and may
+// override Update (SharesUpdateOf, the rule of sessionCreator), falls back to Update, which always
+// bumps the installation-wide revision.
+type orgAuthorityUpdater interface {
+	UpdateOrgAuthority(context.Context, model.ID, func(*model.ControlState) error) error
+	SharesUpdateOf(ControlStore) bool
+}
+
+// updateAdmin commits one admin command. create_user writes the installation-wide user table and
+// keeps the unclassified Update; every other kind is the command of one organization.
+func (s *Service) updateAdmin(ctx context.Context, r AdminCommandRequest, fn func(*model.ControlState) error) error {
+	if u, ok := s.store.(orgAuthorityUpdater); ok && u.SharesUpdateOf(s.store) && r.Kind != "create_user" && r.OrgID != (model.ID{}) {
+		return u.UpdateOrgAuthority(ctx, r.OrgID, fn)
+	}
+	return s.store.Update(ctx, fn)
+}
+
 // adminCommand is the one audited admin transition. pw is nil for an organization
 // administrator's command; a non-nil pw is the narrow policy.write path
 // (PolicyCommand): the same transition, the same revision compare, audit and
@@ -111,7 +130,7 @@ func (s *Service) adminCommand(ctx context.Context, c Credential, r AdminCommand
 		}
 	}
 	var out model.ControlResult
-	e = s.store.Update(ctx, func(st *model.ControlState) error {
+	e = s.updateAdmin(ctx, r, func(st *model.ControlState) error {
 		if err := s.validateCredentialState(*st, c); err != nil {
 			return err
 		}
@@ -177,6 +196,13 @@ func (s *Service) adminCommand(ctx context.Context, c Credential, r AdminCommand
 			}
 			o = model.ControlOrg{ID: r.OrgID, Name: p.Name, Epoch: 1, Members: map[string]bool{}, Admins: map[string]bool{c.user.String(): true}, Projects: map[string]string{}, Grants: map[string][]string{}, Secrets: map[string]string{}, Settings: map[string]json.RawMessage{}}
 			o.StartObjectRecords()
+			for _, other := range st.Orgs {
+				// D70: an organization created after the operator contracted the indexes starts contracted.
+				if other.IndexesContracted() {
+					o.Settings[model.IndexesContractedKey] = json.RawMessage(`true`)
+					break
+				}
+			}
 		case "create_user":
 			if p.ID == (model.ID{}) || IsSystemPrincipal(p.ID) {
 				return model.Fail(model.Invalid)

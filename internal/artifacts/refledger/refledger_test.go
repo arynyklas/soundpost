@@ -30,12 +30,26 @@ type fx struct {
 	org     model.ControlOrg
 }
 
+// newFx is an organization whose indexes are contracted (the sharded layout alone); newExpandedFx is one
+// the operator has not contracted yet (D70), which keeps the previous release's whole-project index too.
 func newFx(t *testing.T) *fx {
+	return &fx{t: t, project: model.NewID(), org: model.ControlOrg{Settings: map[string]json.RawMessage{model.IndexesContractedKey: json.RawMessage(`true`)}}}
+}
+
+func newExpandedFx(t *testing.T) *fx {
 	return &fx{t: t, project: model.NewID(), org: model.ControlOrg{Settings: map[string]json.RawMessage{}}}
 }
 
 func (f *fx) ledger(entries ...Entry) *Ledger {
 	return &Ledger{Project: f.project, Root: model.NewID(), Seq: 1, Entries: entries}
+}
+
+// ledgerIn is a ledger whose root falls in the same index shard as like's: the anchor of a shard
+// covers the roots of that shard only.
+func (f *fx) ledgerIn(like *Ledger, entries ...Entry) *Ledger {
+	l := f.ledger(entries...)
+	l.Root[0] = like.Root[0]
+	return l
 }
 
 func (f *fx) store(ls ...*Ledger) {
@@ -47,11 +61,11 @@ func (f *fx) store(ls ...*Ledger) {
 
 func (f *fx) load(l *Ledger) (*Ledger, error) { return Load(f.org.Settings, f.project, l.Root) }
 
-// index rewrites the stored index with fn, leaving the anchor untouched.
-func (f *fx) index(fn func(map[string]IndexEntry)) {
+// index rewrites the stored index shard of root with fn, leaving its anchor untouched.
+func (f *fx) index(root model.ID, fn func(map[string]IndexEntry)) {
 	f.t.Helper()
 	var idx map[string]IndexEntry
-	if err := json.Unmarshal(f.org.Settings[IndexKey(f.project)], &idx); err != nil {
+	if err := json.Unmarshal(f.org.Settings[ShardIndexKey(f.project, root)], &idx); err != nil {
 		f.t.Fatal(err)
 	}
 	fn(idx)
@@ -59,16 +73,16 @@ func (f *fx) index(fn func(map[string]IndexEntry)) {
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	f.org.Settings[IndexKey(f.project)] = raw
+	f.org.Settings[ShardIndexKey(f.project, root)] = raw
 }
 
-// A ledger together with its own index entry is removed (the index is rewritten without it):
+// A ledger together with its own index entry is removed (the shard is rewritten without it):
 // the ledger and the index agree that the root never had a ledger, and only the anchor over the
-// index tells that an entry is missing. Every root of the project then fails closed.
+// shard tells that an entry is missing. Every root of that shard then fails closed.
 func TestAnchorDetectsRemovedLedgerWithItsIndexEntry(t *testing.T) {
 	f := newFx(t)
 	a := f.ledger(Entry{Kind: KindError, Cursor: cursor(1), RetainUntil: 100})
-	b := f.ledger(Entry{Kind: KindBuild, Cursor: cursor(2), RetainUntil: 200})
+	b := f.ledgerIn(a, Entry{Kind: KindBuild, Cursor: cursor(2), RetainUntil: 200})
 	f.store(a, b)
 	for _, l := range []*Ledger{a, b} {
 		if got, err := f.load(l); err != nil || got == nil {
@@ -76,7 +90,7 @@ func TestAnchorDetectsRemovedLedgerWithItsIndexEntry(t *testing.T) {
 		}
 	}
 	delete(f.org.Settings, LedgerKey(f.project, a.Root))
-	f.index(func(idx map[string]IndexEntry) { delete(idx, a.Root.String()) })
+	f.index(a.Root, func(idx map[string]IndexEntry) { delete(idx, a.Root.String()) })
 	for name, l := range map[string]*Ledger{"the removed root": a, "its sibling": b} {
 		if got, err := f.load(l); code(err) != model.Corrupt {
 			t.Errorf("%s: loaded %v, %v after the ledger and its index entry were removed", name, got, err)
@@ -84,17 +98,18 @@ func TestAnchorDetectsRemovedLedgerWithItsIndexEntry(t *testing.T) {
 	}
 }
 
-// The whole index removed while the ledgers and the anchor stay.
+// The whole shard index removed while the ledgers and the anchor stay.
 func TestAnchorDetectsRemovedIndex(t *testing.T) {
 	f := newFx(t)
 	a := f.ledger(Entry{Kind: KindError, Cursor: cursor(1), RetainUntil: 100})
 	f.store(a)
-	delete(f.org.Settings, IndexKey(f.project))
+	delete(f.org.Settings, ShardIndexKey(f.project, a.Root))
 	if got, err := f.load(a); code(err) != model.Corrupt {
 		t.Fatalf("loaded %v, %v with the index removed", got, err)
 	}
-	// A root with no ledger at all is the same project state: fail closed for every root.
-	if got, err := Load(f.org.Settings, f.project, model.NewID()); code(err) != model.Corrupt {
+	// A root with no ledger at all is the same shard state: fail closed for every root of it.
+	unknown := f.ledgerIn(a)
+	if got, err := f.load(unknown); code(err) != model.Corrupt {
 		t.Fatalf("an unknown root loaded %v, %v under an anchor without an index", got, err)
 	}
 }
@@ -104,30 +119,30 @@ func TestAnchorDetectsAnIndexEntryAddedByHand(t *testing.T) {
 	f := newFx(t)
 	a := f.ledger(Entry{Kind: KindError, Cursor: cursor(1), RetainUntil: 100})
 	f.store(a)
-	f.index(func(idx map[string]IndexEntry) { idx[model.NewID().String()] = IndexEntry{Seq: 1} })
+	f.index(a.Root, func(idx map[string]IndexEntry) { idx[f.ledgerIn(a).Root.String()] = IndexEntry{Seq: 1} })
 	if got, err := f.load(a); code(err) != model.Corrupt {
 		t.Fatalf("loaded %v, %v with a foreign index entry", got, err)
 	}
 }
 
-// A project written before anchors existed (ledgers and index, no anchor) still loads; the next
+// A shard written before anchors existed (ledgers and index, no anchor) still loads; the next
 // write anchors it, after which the same removals are detected.
 func TestProjectWithoutAnchorLoadsAndIsAnchoredByTheNextWrite(t *testing.T) {
 	f := newFx(t)
 	a := f.ledger(Entry{Kind: KindError, Cursor: cursor(1), RetainUntil: 100})
-	b := f.ledger(Entry{Kind: KindBuild, Cursor: cursor(2), RetainUntil: 200})
+	b := f.ledgerIn(a, Entry{Kind: KindBuild, Cursor: cursor(2), RetainUntil: 200})
 	f.store(a, b)
-	delete(f.org.Settings, AnchorKey(f.project))
+	delete(f.org.Settings, ShardAnchorKey(f.project, a.Root))
 	if got, err := f.load(a); err != nil || got == nil {
-		t.Fatalf("a legacy project (no anchor) does not load: %v", err)
+		t.Fatalf("an unanchored project does not load: %v", err)
 	}
-	c := f.ledger(Entry{Kind: KindProfile, Cursor: cursor(3), RetainUntil: 300})
+	c := f.ledgerIn(a, Entry{Kind: KindProfile, Cursor: cursor(3), RetainUntil: 300})
 	f.store(c)
-	if _, ok := f.org.Settings[AnchorKey(f.project)]; !ok {
-		t.Fatal("the write did not anchor the project")
+	if _, ok := f.org.Settings[ShardAnchorKey(f.project, a.Root)]; !ok {
+		t.Fatal("the write did not anchor the shard")
 	}
 	delete(f.org.Settings, LedgerKey(f.project, b.Root))
-	f.index(func(idx map[string]IndexEntry) { delete(idx, b.Root.String()) })
+	f.index(b.Root, func(idx map[string]IndexEntry) { delete(idx, b.Root.String()) })
 	if _, err := f.load(a); code(err) != model.Corrupt {
 		t.Fatalf("removal after anchoring was not detected: %v", err)
 	}
@@ -138,8 +153,8 @@ func TestStoreRefusesToRewriteATamperedIndex(t *testing.T) {
 	f := newFx(t)
 	a := f.ledger(Entry{Kind: KindError, Cursor: cursor(1), RetainUntil: 100})
 	f.store(a)
-	f.index(func(idx map[string]IndexEntry) { idx[model.NewID().String()] = IndexEntry{Seq: 1} })
-	if err := Store(&f.org, f.project, f.ledger(Entry{Kind: KindError, Cursor: cursor(5), RetainUntil: 1})); code(err) != model.Corrupt {
+	f.index(a.Root, func(idx map[string]IndexEntry) { idx[f.ledgerIn(a).Root.String()] = IndexEntry{Seq: 1} })
+	if err := Store(&f.org, f.project, f.ledgerIn(a, Entry{Kind: KindError, Cursor: cursor(5), RetainUntil: 1})); code(err) != model.Corrupt {
 		t.Fatalf("a write over a tampered index: %v", err)
 	}
 }
