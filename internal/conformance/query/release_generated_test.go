@@ -12,9 +12,31 @@ import (
 	"testing"
 )
 
+// fixtureSpec is the smallest generation spec the gate accepts: one language
+// whose axes a and b leave exactly one interaction required (a=x with b=p, every
+// other combination being excluded). The first row of a fixtureGeneratedRun is
+// the valid case that carries it.
+func fixtureSpec() GenerationSpec {
+	const why = "the fixture requires only a=x with b=p"
+	return GenerationSpec{
+		Schema: "soundpost-query-generation/1",
+		Languages: []LanguageSpec{{
+			Language: "promql", Profiles: []string{"promql-prometheus-3.1.0"},
+			Axes: []AxisSpec{{ID: "a", Values: []string{"x", "y"}}, {ID: "b", Values: []string{"p", "q"}}},
+		}},
+		Excluded: []ExcludedCombo{
+			{Language: "promql", Pair: []string{"a=x", "b=q"}, Reason: why},
+			{Language: "promql", Pair: []string{"a=y", "b=p"}, Reason: why},
+			{Language: "promql", Pair: []string{"a=y", "b=q"}, Reason: why},
+		},
+	}
+}
+
 // fixtureGeneratedRun is n generated rows over the three exact profiles with a
 // fake oracle that returns the locked identity and a fake owned engine that
-// agrees. Row i names its expression "e<i>", so a test can poison one row.
+// agrees. Row i names its expression "e<i>", so a test can poison one row. Every
+// row's case is a valid case at the coordinates (a=x, b=p); the row of the first
+// profile carries the one interaction fixtureSpec requires.
 func fixtureGeneratedRun(cfg ReleaseConfig, seed uint64, n int) GeneratedRun {
 	profiles := []string{"promql-prometheus-3.1.0", "promql-prometheus-3.13.5", "logql-loki-3.5.2"}
 	tags := []string{tagPromEvaluation, tagPromSyntax, tagLogMetric}
@@ -25,10 +47,13 @@ func fixtureGeneratedRun(cfg ReleaseConfig, seed uint64, n int) GeneratedRun {
 		run.Rows = append(run.Rows, GeneratedRow{
 			Row:    ReleaseCase{ID: id, Profile: p, Expected: SemanticResult{Kind: "phase-case", Type: tag}},
 			Phase:  tag,
-			Source: Case{ID: id, Language: "promql", Profile: p, Expression: "sum(m) + e" + string(rune('0'+i)), Input: []InputRecord{{Kind: "float", Timestamp: "10"}}},
+			Source: Case{ID: id, Kind: "valid", Language: "promql", Profile: p, Coordinate: map[string]string{"a": "x", "b": "p"}, Expression: "sum(m) + e" + string(rune('0'+i)), Input: []InputRecord{{Kind: "float", Timestamp: "10"}}},
 		})
 	}
 	run.Oracle = func(_ context.Context, p SourceProfile, c ReleaseCase) (SemanticResult, error) {
+		if p.Artifact == nil {
+			return SemanticResult{}, errors.New("the profile has no locked oracle artifact to answer as")
+		}
 		r := c.Expected
 		version := strings.TrimPrefix(strings.TrimPrefix(p.ID, "promql-prometheus-"), "logql-loki-")
 		r.Oracle = &OracleIdentity{Profile: p.ID, Revision: p.Commit, Version: version, ImageSHA256: p.Artifact.SHA256, ConfigurationSHA256: p.Artifact.ConfigurationSHA256}

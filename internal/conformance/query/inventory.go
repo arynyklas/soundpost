@@ -87,22 +87,46 @@ func ReadJSON(path string, target any) error {
 	return json.Unmarshal(b, target)
 }
 
-// ReadLockedJSON binds the bytes actually consumed, including an alternative
-// --cases path, to the named approved inventory artifact.
-func ReadLockedJSON(lock SourceLock, key, path string, target any) error {
+// readLocked returns the bytes at path once they are proven to be the content
+// the lock names for key, so that a caller can only ever decode what was approved.
+func readLocked(lock SourceLock, key, path string) ([]byte, error) {
 	want, ok := lock.InventoryFiles[key]
 	if !ok || len(want) != 64 {
-		return fmt.Errorf("missing content lock for %s", key)
+		return nil, fmt.Errorf("missing content lock for %s", key)
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	hash := sha256.Sum256(raw)
 	if hex.EncodeToString(hash[:]) != want {
-		return fmt.Errorf("locked content changed: %s", key)
+		return nil, fmt.Errorf("locked content changed: %s", key)
+	}
+	return raw, nil
+}
+
+// ReadLockedJSON binds the bytes actually consumed, including an alternative
+// --cases path, to the named approved inventory artifact.
+func ReadLockedJSON(lock SourceLock, key, path string, target any) error {
+	raw, err := readLocked(lock, key, path)
+	if err != nil {
+		return err
 	}
 	return json.Unmarshal(raw, target)
+}
+
+// readLockedStrict is ReadLockedJSON for a document the gate enforces: the
+// approved bytes are decoded with decodeStrict, so a locked document this code
+// can only partly understand is refused instead of partly enforced.
+func readLockedStrict(lock SourceLock, key, path string, target any) error {
+	raw, err := readLocked(lock, key, path)
+	if err != nil {
+		return err
+	}
+	if err = decodeStrict(raw, target); err != nil {
+		return fmt.Errorf("%s: %w", key, err)
+	}
+	return nil
 }
 func validateManifestObligations(profile string, ids []string, ledger Ledger) error {
 	expected := map[string]bool{}

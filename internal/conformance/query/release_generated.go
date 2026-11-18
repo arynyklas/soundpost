@@ -623,6 +623,10 @@ func sameProblem(want, got []string) bool {
 
 func (m GeneratedMinimizer) Minimize(ctx context.Context, gm GeneratedMismatch) (Regression, error) {
 	sets := domainSets(m.Domains)
+	// reproduced holds the problems of the most recent run that still showed the
+	// mismatch. Minimize verifies its result with one last call of the predicate,
+	// so when it returns without an error these are the problems of the final case.
+	var reproduced []string
 	predicate := func(c Case) (bool, error) {
 		rows, err := rowsFor(c, sets)
 		if err != nil || len(rows) == 0 {
@@ -637,6 +641,7 @@ func (m GeneratedMinimizer) Minimize(ctx context.Context, gm GeneratedMismatch) 
 		}
 		for _, r := range rows {
 			if o, ok := res[PhaseKey(r.Row.Profile, r.Row.ID)]; ok && o.Identity != nil && sameProblem(gm.Problems, o.Problems) {
+				reproduced = o.Problems
 				return true, nil
 			}
 		}
@@ -646,18 +651,7 @@ func (m GeneratedMinimizer) Minimize(ctx context.Context, gm GeneratedMismatch) 
 	if err != nil {
 		return Regression{}, err
 	}
-	probs := gm.Problems
-	if rows, e := rowsFor(min, sets); e == nil {
-		if res, e := m.RunRows(ctx, rows); e == nil || len(res) > 0 {
-			for _, r := range rows {
-				if o, ok := res[PhaseKey(r.Row.Profile, r.Row.ID)]; ok && len(o.Problems) > 0 {
-					probs = o.Problems
-					break
-				}
-			}
-		}
-	}
-	return Regression{ID: fmt.Sprintf("%s/seed-%d", gm.Row.Source.ID, gm.Seed), Seed: gm.Seed, Profile: gm.Row.Row.Profile, Phase: gm.Row.Phase, FeatureSet: gm.Row.Source.FeatureSet, Enabled: gm.Row.Enabled, Problems: probs, Original: gm.Row.Source.Expression, Case: min}, nil
+	return Regression{ID: fmt.Sprintf("%s/seed-%d", gm.Row.Source.ID, gm.Seed), Seed: gm.Seed, Profile: gm.Row.Row.Profile, Phase: gm.Row.Phase, FeatureSet: gm.Row.Source.FeatureSet, Enabled: gm.Row.Enabled, Problems: reproduced, Original: gm.Row.Source.Expression, Case: min}, nil
 }
 
 // Minimizer is the production minimizer for this environment.
@@ -719,15 +713,26 @@ func WriteRegressions(dir string, regs []Regression) error {
 	return os.WriteFile(path, append(raw, '\n'), 0o644)
 }
 
+// generatedCase tallies the rows one generated case was expanded into (one per
+// registered feature set, and one per entry of a log pipeline case).
+type generatedCase struct {
+	source  Case
+	rows    int
+	matched int
+}
+
 // gateGenerated judges every generated run. A row is executed only when the
 // pinned oracle was observed with a verified identity AND the owned engine was
 // observed; anything else is unrun. Executed rows are matched or mismatched by
-// the phase runner's own comparison. It never short-circuits.
-func gateGenerated(ctx context.Context, cfg ReleaseConfig, sources map[string]SourceProfile, rep *Report, fail func(string, ...any)) error {
+// the phase runner's own comparison. It never short-circuits. It returns the
+// generated cases whose every row was executed and matched: the only cases the
+// interaction coverage of the release may rest on.
+func gateGenerated(ctx context.Context, cfg ReleaseConfig, sources map[string]SourceProfile, rep *Report, fail func(string, ...any)) ([]Case, error) {
 	if len(cfg.Generated) == 0 {
 		fail("no generated case runs: the generated cases were never executed")
-		return nil
+		return nil, nil
 	}
+	var matchedCases []Case
 	seenSeed := map[uint64]bool{}
 	for _, run := range cfg.Generated {
 		if seenSeed[run.Seed] {
@@ -736,13 +741,22 @@ func gateGenerated(ctx context.Context, cfg ReleaseConfig, sources map[string]So
 		seenSeed[run.Seed] = true
 		sr := GeneratedSeedReport{Seed: run.Seed, ByPhase: map[string]GeneratedCounts{}, MismatchedRows: []string{}, UnrunRows: []string{}, Regressions: []Regression{}}
 		minimized := map[string]bool{}
+		cases := map[string]*generatedCase{}
+		var caseOrder []string
 		for _, row := range run.Rows {
 			if err := ctx.Err(); err != nil {
-				return err
+				return nil, err
 			}
 			counts := sr.ByPhase[row.Phase]
 			counts.Generated++
 			sr.Generated++
+			tally := cases[row.Source.ID]
+			if tally == nil {
+				tally = &generatedCase{source: row.Source}
+				cases[row.Source.ID] = tally
+				caseOrder = append(caseOrder, row.Source.ID)
+			}
+			tally.rows++
 			executed, problems := false, []string(nil)
 			src, known := sources[row.Row.Profile]
 			if run.Oracle != nil && run.Own != nil && known {
@@ -754,7 +768,15 @@ func gateGenerated(ctx context.Context, cfg ReleaseConfig, sources map[string]So
 					switch {
 					case errors.Is(gerr, ErrNotObserved):
 					case gerr != nil:
-						executed, problems = true, []string{gerr.Error()}
+						executed = true
+						// The runner's individual problems, not their joined text:
+						// the minimizer recognises the mismatch by them.
+						var phase PhaseProblems
+						if errors.As(gerr, &phase) && len(phase) > 0 {
+							problems = []string(phase)
+						} else {
+							problems = []string{gerr.Error()}
+						}
 					default:
 						executed = true
 						for _, m := range Compare(row.Row.Expected, ref, row.Row.Ordering) {
@@ -796,8 +818,14 @@ func gateGenerated(ctx context.Context, cfg ReleaseConfig, sources map[string]So
 				sr.Executed++
 				counts.Matched++
 				sr.Matched++
+				tally.matched++
 			}
 			sr.ByPhase[row.Phase] = counts
+		}
+		for _, id := range caseOrder {
+			if t := cases[id]; t.rows == t.matched {
+				matchedCases = append(matchedCases, t.source)
+			}
 		}
 		if sr.Generated == 0 {
 			fail("seed %d: no generated cases", run.Seed)
@@ -806,5 +834,5 @@ func gateGenerated(ctx context.Context, cfg ReleaseConfig, sources map[string]So
 		}
 		rep.Generated = append(rep.Generated, sr)
 	}
-	return nil
+	return matchedCases, nil
 }

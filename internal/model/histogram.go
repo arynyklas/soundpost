@@ -41,11 +41,21 @@ func histogramShape(schema int32, threshold FloatBits, flavor, reset string, bou
 	}
 	for side, spans := range [][]HistogramSpan{positive, negative} {
 		count := uint64(0)
+		index := int64(0) // the bucket index that the next span's offset is counted from
 		for i, span := range spans {
 			if span.Length == 0 || i > 0 && span.Offset < 0 {
 				return errors.New("invalid histogram span")
 			}
 			count += uint64(span.Length)
+			// Readers address a bucket by this index. A custom-bucket histogram has
+			// one bound per bucket but the last (+Inf), so its buckets are
+			// 0..len(bounds); an exponential index has to fit the int32 readers use.
+			index += int64(span.Offset)
+			last := index + int64(span.Length) - 1
+			if schema == -53 && (index < 0 || last > int64(len(bounds))) || index < math.MinInt32 || last > math.MaxInt32 {
+				return errors.New("histogram bucket index out of range")
+			}
+			index = last + 1
 		}
 		want := np
 		if side == 1 {

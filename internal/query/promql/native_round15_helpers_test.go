@@ -19,7 +19,7 @@ import (
 
 // featureProfile resolves the registered feature set of a pinned profile whose
 // enabled gates are exactly the given list.
-func featureProfile(t *testing.T, id string, enabled ...string) profile.Profile {
+func featureProfile(t testing.TB, id string, enabled ...string) profile.Profile {
 	t.Helper()
 	registry, err := profile.Load(os.DirFS("../../../profiles/query"))
 	if err != nil {

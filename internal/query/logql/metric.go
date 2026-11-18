@@ -373,7 +373,11 @@ func EvaluateLogsInterval(ctx context.Context, plan Plan, src scan.LogSource, or
 	// limit. With an interval each emitted entry stands for one row (multiplicity
 	// is forced to 1 below) and thinning discards rows, so the prefix is measured
 	// in rows and grown, rescanning, until the thinned prefix yields the limit or
-	// covers every match.
+	// covers every match. Forcing multiplicity to 1 is what the pinned Loki does:
+	// its readStreams (pkg/logql/engine.go at 257d2f62) treats every duplicate as
+	// its own entry, emits an entry only when its timestamp is at least `interval`
+	// past the last emitted one, so the other copies of a row (same timestamp) are
+	// always thinned away; a row emitted once stands for one entry, never for N.
 	bound := logBound{units: limit}
 	if interval > 0 {
 		bound.perRow = true

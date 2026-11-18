@@ -105,6 +105,12 @@ func (a *BoundedAccount) Release(n int64) {
 }
 func (a *BoundedAccount) Check(ctx context.Context) error { return ctx.Err() }
 func (a *BoundedAccount) Used() int64                     { a.mu.Lock(); defer a.mu.Unlock(); return a.used }
+
+// SampleBytes is the account's charge for one retained sample: a fixed 48 bytes
+// (the 32-byte struct plus append slack; see TestSampleBytesCoversTheStructAndItsAppendSlack),
+// the start timestamp and the histogram payload. Appending into a growing slice
+// is not charged by capacity: the backing array of a large slice is at most 1.25x
+// its length, inside the slack, and the copy made while it grows is transient.
 func SampleBytes(s Sample) int64 {
 	n := int64(48)
 	if s.StartTimestamp != nil {

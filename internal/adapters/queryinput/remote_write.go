@@ -50,7 +50,7 @@ func DecodeRemoteWrite(ctx context.Context, grant policy.SourceGrant, version Wi
 		return nil, err
 	}
 	d := &rwDecoder{ctx: ctx, format: format, v: version, cfg: cfg}
-	a := &assembler{format: format, cfg: cfg, request: requestDigest(format, cfg, plain)}
+	a := newAssembler(ctx, format, cfg, requestDigest(format, cfg, plain))
 	d.a = a
 	if version == RemoteWriteV1 {
 		err = d.parseV1(plain)
@@ -64,7 +64,7 @@ func DecodeRemoteWrite(ctx context.Context, grant policy.SourceGrant, version Wi
 		// Prometheus sends metadata in requests of its own; nothing to admit.
 		return nil, nil
 	}
-	return a.finish(ctx)
+	return a.finish()
 }
 
 func readBounded(format string, r io.Reader, max int64) ([]byte, error) {
@@ -234,6 +234,11 @@ type rwDecoder struct {
 	unusedMD int
 	// metadataOnly marks a v1 request that carries metadata and no series.
 	metadataOnly bool
+	// symbols is the v2 symbol table (index 0 is the empty string); strs holds
+	// each symbol's string once it was validated and converted, so a symbol that
+	// is referenced a thousand times costs one copy, not a thousand.
+	symbols [][]byte
+	strs    []string
 }
 
 func (d *rwDecoder) bad(detail string) error { return fail(d.format, ReasonMalformed, detail) }
@@ -369,28 +374,15 @@ func (d *rwDecoder) parseExemplarV1(b []byte) (rwExemplar, error) {
 	return e, err
 }
 
-func (d *rwDecoder) parseExemplarV2(b []byte, symbols [][]byte) (rwExemplar, error) {
+func (d *rwDecoder) parseExemplarV2(b []byte) (rwExemplar, error) {
 	var e rwExemplar
+	var refs []uint64
 	err := pbWalk(b, func(f pbField) error {
 		switch {
 		case f.num == 1:
-			refs, err := d.refs(f)
-			if err != nil {
-				return err
-			}
-			if len(e.labels)*2+len(refs) > 2*d.cfg.Limits.MaxLabels {
-				return fail(d.format, ReasonLimit, "exemplar_labels")
-			}
-			for i := 0; i+1 < len(refs); i += 2 {
-				if refs[i] >= uint64(len(symbols)) || refs[i+1] >= uint64(len(symbols)) {
-					return d.bad("symbol_ref")
-				}
-				n, v := symbols[refs[i]], symbols[refs[i+1]]
-				if len(n) > d.cfg.Limits.MaxLabelNameBytes || len(v) > d.cfg.Limits.MaxLabelValueBytes {
-					return fail(d.format, ReasonLimit, "exemplar_label_bytes")
-				}
-				e.labels = append(e.labels, model.Label{Name: string(n), Value: string(v)})
-			}
+			var err error
+			refs, err = d.addRefs(refs, f, 2*d.cfg.Limits.MaxLabels, "exemplar_labels")
+			return err
 		case f.num == 2 && f.wt == 1:
 		case f.num == 3 && f.wt == 0:
 			e.ts = int64(f.v)
@@ -401,35 +393,92 @@ func (d *rwDecoder) parseExemplarV2(b []byte, symbols [][]byte) (rwExemplar, err
 		}
 		return nil
 	})
+	if err != nil {
+		return e, err
+	}
+	e.labels, err = d.labelsFromRefs(refs, "exemplar_label_name", "exemplar_label_value")
 	return e, err
 }
 
-// refs decodes a repeated uint32 field, packed or not, bounded by the label limit.
-func (d *rwDecoder) refs(f pbField) ([]uint64, error) {
-	limit := 2*d.cfg.Limits.MaxLabels + 2
-	var out []uint64
+// addRefs appends the references of one occurrence of a repeated uint32 field to
+// refs. The field may arrive packed, unpacked, or split over several occurrences
+// of either form; the caller pairs the accumulated references once the whole
+// message has been read. The total is bounded by limit before any append. A
+// reference that is not an index of the symbol table is refused when it is
+// resolved, whatever its width.
+func (d *rwDecoder) addRefs(refs []uint64, f pbField, limit int, what string) ([]uint64, error) {
+	add := func(v uint64) error {
+		if len(refs) >= limit {
+			return fail(d.format, ReasonLimit, what)
+		}
+		refs = append(refs, v)
+		return nil
+	}
 	switch f.wt {
 	case 0:
-		return []uint64{f.v}, nil
+		if err := add(f.v); err != nil {
+			return nil, err
+		}
 	case 2:
-		b := f.b
-		for len(b) > 0 {
+		for b := f.b; len(b) > 0; {
 			v, n := binary.Uvarint(b)
-			if n <= 0 || v > 1<<32-1 {
+			if n <= 0 {
 				return nil, d.bad("symbol_ref")
 			}
-			if len(out) >= limit {
-				return nil, fail(d.format, ReasonLimit, "label_count")
+			if err := add(v); err != nil {
+				return nil, err
 			}
-			out = append(out, v)
 			b = b[n:]
 		}
-		if len(out)%2 != 0 {
-			return nil, d.bad("symbol_ref_pairs")
-		}
-		return out, nil
+	default:
+		return nil, d.bad("symbol_ref")
 	}
-	return nil, d.bad("symbol_ref")
+	return refs, nil
+}
+
+// labelsFromRefs pairs accumulated symbol references into labels. An odd number
+// of references cannot be paired: it is refused, never ignored.
+func (d *rwDecoder) labelsFromRefs(refs []uint64, nameWhat, valueWhat string) (model.Labels, error) {
+	if len(refs)%2 != 0 {
+		return nil, d.bad("symbol_ref_pairs")
+	}
+	out := make(model.Labels, 0, len(refs)/2)
+	for i := 0; i < len(refs); i += 2 {
+		name, err := d.symbol(refs[i], d.cfg.Limits.MaxLabelNameBytes, nameWhat)
+		if err != nil {
+			return nil, err
+		}
+		value, err := d.symbol(refs[i+1], d.cfg.Limits.MaxLabelValueBytes, valueWhat)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, model.Label{Name: name, Value: value})
+	}
+	return out, nil
+}
+
+// symbol resolves a v2 symbol reference to a string of at most max bytes. A
+// symbol is validated and converted when it is first used and shared by every
+// later reference.
+func (d *rwDecoder) symbol(ref uint64, max int, what string) (string, error) {
+	if ref >= uint64(len(d.symbols)) {
+		return "", d.bad("symbol_ref")
+	}
+	raw := d.symbols[ref]
+	if len(raw) > max {
+		return "", fail(d.format, ReasonLimit, what)
+	}
+	if len(raw) == 0 {
+		return "", nil
+	}
+	if s := d.strs[ref]; s != "" {
+		return s, nil
+	}
+	if !utf8.Valid(raw) {
+		return "", d.bad(what + "_utf8")
+	}
+	d.strs[ref] = string(raw)
+	return d.strs[ref], nil
 }
 
 func (d *rwDecoder) parseSpan(b []byte) (model.HistogramSpan, error) {
@@ -753,8 +802,9 @@ func (d *rwDecoder) parseV2(b []byte) error {
 	if len(rawSeries) > 0 && (len(symbols) == 0 || len(symbols[0]) != 0) {
 		return d.bad("symbols_prefix")
 	}
+	d.symbols, d.strs = symbols, make([]string, len(symbols))
 	for _, raw := range rawSeries {
-		s, err := d.parseSeriesV2(raw, symbols)
+		s, err := d.parseSeriesV2(raw)
 		if err != nil {
 			return err
 		}
@@ -766,43 +816,16 @@ func (d *rwDecoder) parseV2(b []byte) error {
 	return nil
 }
 
-func (d *rwDecoder) parseSeriesV2(b []byte, symbols [][]byte) (rwSeries, error) {
+func (d *rwDecoder) parseSeriesV2(b []byte) (rwSeries, error) {
 	var s rwSeries
 	var haveMeta bool
-	sym := func(ref uint64, max int, what string) (string, error) {
-		if ref >= uint64(len(symbols)) {
-			return "", d.bad("symbol_ref")
-		}
-		if len(symbols[ref]) > max {
-			return "", fail(d.format, ReasonLimit, what)
-		}
-		if !utf8.Valid(symbols[ref]) {
-			return "", d.bad(what + "_utf8")
-		}
-		return string(symbols[ref]), nil
-	}
+	var refs []uint64
 	err := pbWalk(b, func(f pbField) error {
 		switch f.num {
 		case 1:
-			refs, err := d.refs(f)
-			if err != nil {
-				return err
-			}
-			if len(s.labels)+len(refs)/2 > d.cfg.Limits.MaxLabels+1 {
-				return fail(d.format, ReasonLimit, "label_count")
-			}
-			for i := 0; i+1 < len(refs); i += 2 {
-				n, err := sym(refs[i], d.cfg.Limits.MaxLabelNameBytes, "label_name")
-				if err != nil {
-					return err
-				}
-				v, err := sym(refs[i+1], d.cfg.Limits.MaxLabelValueBytes, "label_value")
-				if err != nil {
-					return err
-				}
-				s.labels = append(s.labels, model.Label{Name: n, Value: v})
-			}
-			return nil
+			var err error
+			refs, err = d.addRefs(refs, f, 2*d.cfg.Limits.MaxLabels+2, "label_count")
+			return err
 		case 2:
 			if f.wt != 2 {
 				return d.bad("timeseries")
@@ -830,7 +853,7 @@ func (d *rwDecoder) parseSeriesV2(b []byte, symbols [][]byte) (rwSeries, error) 
 			if len(s.exemplars) >= d.cfg.Limits.MaxBuckets {
 				return fail(d.format, ReasonLimit, "exemplars")
 			}
-			e, err := d.parseExemplarV2(f.b, symbols)
+			e, err := d.parseExemplarV2(f.b)
 			s.exemplars = append(s.exemplars, e)
 			return err
 		case 5:
@@ -845,9 +868,9 @@ func (d *rwDecoder) parseSeriesV2(b []byte, symbols [][]byte) (rwSeries, error) 
 				case m.num == 1 && m.wt == 0:
 					s.mtype = m.v
 				case m.num == 3 && m.wt == 0:
-					s.help, err = sym(m.v, 4096, "metadata_help")
+					s.help, err = d.symbol(m.v, 4096, "metadata_help")
 				case m.num == 4 && m.wt == 0:
-					s.unit, err = sym(m.v, 64, "metadata_unit")
+					s.unit, err = d.symbol(m.v, 64, "metadata_unit")
 				default:
 					return d.unrep("metadata_field")
 				}
@@ -856,6 +879,10 @@ func (d *rwDecoder) parseSeriesV2(b []byte, symbols [][]byte) (rwSeries, error) 
 		}
 		return d.unrep("timeseries_field") // includes reserved field 6
 	})
+	if err != nil {
+		return s, err
+	}
+	s.labels, err = d.labelsFromRefs(refs, "label_name", "label_value")
 	return s, err
 }
 
@@ -1005,7 +1032,9 @@ func (d *rwDecoder) emitSeries(name string, rest model.Labels, s rwSeries) error
 		if err != nil {
 			return err
 		}
-		d.a.add(rec)
+		if err := d.a.add(rec); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -1170,15 +1199,19 @@ func (d *rwDecoder) histogram(m *model.MetricPoint, h rwHist) (bool, error) {
 	return false, nil
 }
 
-// newMetricRecord wraps a point into a record whose ID is derived from the series,
-// timestamp and exact point content, so a retried request regenerates identical
-// IDs and identical duplicates collapse while conflicting ones stay distinct.
+// newMetricRecord wraps a point into a record whose ID is derived from the
+// series, timestamp, exact point content and resource, so a retried request
+// regenerates identical IDs and identical duplicates collapse while conflicting
+// ones stay distinct.
 func newMetricRecord(format string, m model.MetricPoint, ts model.UnixNano, cfg InputProfile) (model.Record, error) {
 	raw, err := model.CanonicalJSON(m)
 	if err != nil {
 		return model.Record{}, fail(format, ReasonMalformed, "metric_encoding")
 	}
-	id := deriveID("metric", []byte(seriesKey(m.Name, m.Labels)), u64bytes(uint64(ts)), raw)
+	id := deriveID("metric", []byte(seriesKey(m.Name, m.Labels)), u64bytes(uint64(ts)), raw, resourceIdentity(cfg.Resource))
+	if cfg.LegacyIdentity {
+		id = deriveID("metric", []byte(legacySeriesKey(m.Name, m.Labels)), u64bytes(uint64(ts)), raw)
+	}
 	res := cfg.Resource
 	if res.Labels == nil {
 		res.Labels = model.Labels{}

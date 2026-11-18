@@ -20,12 +20,18 @@ Every decoder authenticates against the supplied `policy.SourceGrant`: the
 profile's project and source must be exactly what the grant covers, and the org
 comes from the grant. A body can never choose its scope. Returned batches hold
 one canonical-owner virtual slot (`model.OwnerSlot`), at most 512 records and
-3 MiB, and carry deterministic identities: the batch ID derives from the request
-bytes, the profile identity, the slot and the chunk index; metric record IDs
-derive from series, timestamp and exact point content; log record IDs derive
-from the request and the entry ordinal. A retried request therefore regenerates
-identical IDs. Submit through `policy.Normalize` and C03 durable admission; the
-decoder does not bypass either.
+3 MiB (a log record counts as twice its size plus 4 KiB, because admission
+renders the template line into it), and carry deterministic identities: the
+batch ID derives from the request bytes and everything of the profile that
+shapes the records (scope, resource, default unit, Loki template mapping), the
+slot and the chunk index; metric record IDs derive from series, timestamp, exact
+point content and resource; log record IDs derive from the request and the entry
+ordinal. The same bytes under another resource, unit or mapping are therefore
+another request, and a retried request regenerates identical IDs. The labels of
+a series or stream are repeated by each of its records, so a request may not
+expand past 16 times `MaxDecodedBytes` of estimated canonical records: beyond
+that it is `too_large`. Submit through `policy.Normalize` and C03 durable
+admission; the decoder does not bypass either.
 
 ## InputProfile
 
@@ -71,22 +77,32 @@ exemplar that matches no sample or more than one, and exemplar-only series are
 
 OpenMetrics integer sample values that float64 cannot hold exactly are rejected,
 not rounded. Timestamps are exact: seconds with at most nine fractional digits
-become integer nanoseconds, anything finer is `unrepresentable`. Quoted UTF-8
-metric names are not supported.
+become integer nanoseconds, anything finer is `unrepresentable`, and one outside
+the int64 nanosecond range is `timestamp_out_of_range`. Quoted UTF-8 metric names
+are not supported. Declared families (with or without samples) and `_created`
+lines are bounded by `MaxSeries`; a label name written twice in one sample line
+is a duplicate even when one of the copies is empty.
 
-Remote-write decoding rejects unknown protobuf fields, unpacked/packed mixtures
-that exceed limits, empty label values, duplicate labels, a series that mixes
-samples and histograms, and a histogram that fails the native model's shape
-validation. Snappy is the published block format, implemented here; a declared
-decoded length is checked against the profile limit and a 22x expansion bound
-before any allocation.
+Remote-write decoding rejects unknown protobuf fields, empty label values,
+duplicate labels, a series that mixes samples and histograms, and a histogram
+that fails the native model's shape validation, which includes that every bucket
+a span names exists (a custom-bucket histogram has one bucket per bound plus the
+`+Inf` bucket, and no bucket index may leave int32). The v2 label and exemplar
+references of a series may arrive packed, unpacked or split over several fields in
+any mixture; they are paired once the whole series is read, and a total that
+cannot be paired or exceeds the label limit is refused, never ignored. Snappy is
+the published block format, implemented here; a declared decoded length is
+checked against the profile limit and a 22x expansion bound before any
+allocation.
 
 Loki lines enter a registered template: the line fills `LineField`, structured
-metadata keys must be listed in `MetadataFields`, stream labels stay stream
-labels. Lines are capped at 4096 bytes (the native scalar cap). Whether a raw or
-unregistered line is admissible is decided by the source policy when the batch
-goes through `policy.Normalize`: a structured source rejects unregistered values,
-only a restricted-raw source accepts raw lines through its raw template.
+metadata keys must be listed in `MetadataFields` (at most 64 fields), stream
+labels stay stream labels. A JSON `null` line or metadata value is refused, not
+read as an empty string. Lines are capped at 4096 bytes (the native scalar cap).
+Whether a raw or unregistered line is admissible is decided by the source policy:
+a structured source rejects unregistered values, only a restricted-raw source
+accepts raw lines through its raw template (see the bridge below for when that
+decision is made).
 
 ## Errors and report
 
@@ -141,20 +157,42 @@ Prometheus or Loki is promised.
   `Content-Encoding: snappy`; the log template is `X-Soundpost-Template` plus
   `X-Soundpost-Template-Revision` (or the policy's only template),
   `X-Soundpost-Line-Field` (default `line`) and `X-Soundpost-Metadata-Fields`.
-  Conditions: `application/json`. Anything else is 415.
+  Conditions: `application/json`. Anything else is 415, and so is a request that
+  names its `Content-Type` or `Content-Encoding` twice. A source whose policy
+  does not list the route's signal (metric, log, condition) is refused 403
+  before its body is read.
 - **ACK after every child receipt.** The decoded request becomes one-slot child
-  batches (see above); each is admitted under a freshly resolved grant. The sender
-  gets 200 only when every child has a durable receipt. Otherwise the answer is
-  the retryable status (429/503) of the first retryable child failure, or the
-  first failure's final status, with a body naming every child:
+  batches (see above). Before the first child is admitted, every record of every
+  child is checked against the source policy: a refusal that the policy alone
+  decides (an unregistered label value, a line the template does not allow)
+  rejects the whole request with that refusal's status, and nothing is written,
+  so a corrected resend cannot store a line twice. Each child is then admitted
+  under a freshly resolved grant. The sender gets 200 only when every child has
+  a durable receipt. Otherwise the answer is the retryable status (429/503) of
+  the first retryable child failure, or the first failure's final status, with a
+  body naming every child:
   `{"adapter","admitted","failed","children":[{"batch_id","route_slot","records","status":"admitted|failed|not_attempted","receipt","fault"}]}`.
-  A failing child does not stop the others; an authority or cancellation failure
-  does (the remaining children are `not_attempted`).
+  A child that fails for what only the append can see (a storage conflict, a
+  quota, an unavailable store, a lost response) does not stop the others; an
+  authority or cancellation failure does (the remaining children are
+  `not_attempted`).
 - **Partial-retry identity.** Child batch IDs derive from the request body and the
   authenticated scope, so the same request retried after a lost response yields
   the same children and the ledger answers each already-durable child with its
   original receipt: nothing is duplicated, and an identical body from another
   project's source gets different identities and lands only in its own project.
+- **Retry across the identity upgrade.** Batch and record identities moved to
+  `request.v2` (they cover the resource, unit and mapping, which the first release
+  did not). A request that the previous release admitted and the sender retries
+  after the upgrade is not a new request: the bridge decodes the same body a second
+  time under the previous identity, and when the ledger holds a receipt of any of
+  those batches the request is carried on under the previous identifiers (the
+  durable children are answered with their original receipts, the missing ones are
+  appended), so no log line is stored twice. A request with no such receipt is new
+  and is recorded under `request.v2`. The lookup runs for the receipt dedup window,
+  7 days, from the moment the routes are mounted (`LegacyIdentityUntil` overrides
+  the end); a request retried later than that is outside the ledger's dedup
+  guarantee in any case.
 - **Defaults.** Seven days of backfill and one hour of future skew, native
   histograms preserved. Decision D23 (02.08-W6): the served bridge discards HELP
   text (`HelpDiscard`, counted as `help_text_discarded`; `appcore` wires it) so

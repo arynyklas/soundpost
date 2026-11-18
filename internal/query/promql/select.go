@@ -156,9 +156,14 @@ func (s *evaluationState) selectMetric(sel, window *Node, at model.UnixNano, opt
 		if !ok {
 			continue
 		}
-		for i := 1; i < len(series.Samples); i++ {
-			if series.Samples[i].Time <= series.Samples[i-1].Time {
+		for i := range series.Samples {
+			if i > 0 && series.Samples[i].Time <= series.Samples[i-1].Time {
 				return r, model.Fail(model.Corrupt)
+			}
+			if series.Samples[i].Histogram != nil {
+				if e = value.CheckHistogramLayout(*series.Samples[i].Histogram); e != nil {
+					return r, e
+				}
 			}
 		}
 		picked, e := s.pickSamples(series, node, window, bounds, at, opts)
@@ -340,6 +345,12 @@ func (s *evaluationState) smoothInstant(series value.Series, node *Node, b selec
 			result.Float = floatBitsOf(f)
 		}
 	} else if len(chosen) == 2 {
+		// The pinned engine refuses to interpolate between an exponential and a
+		// custom-bucket histogram: no sample and one warning at the selector.
+		if (histogramView(*out[0].Histogram).Schema == -53) != (histogramView(*out[1].Histogram).Schema == -53) {
+			s.annotations = appendAnnotations(s.annotations, rangeDiagnostic(node.Range, "MixedExponentialCustomHistogramsWarning"))
+			return nil, nil
+		}
 		counter := histogramHint(*out[0].Histogram) != "gauge" || histogramHint(*out[1].Histogram) != "gauge"
 		h, reasons, ok := interpolateHistogram(out[0], chosen[0].t, out[1], chosen[1].t, b.target, counter, s.plan.Profile.ID)
 		for _, reason := range reasons {

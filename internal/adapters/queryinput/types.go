@@ -12,6 +12,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
+	"hash"
 	"math"
 	"sort"
 	"strings"
@@ -217,6 +218,32 @@ const (
 	maxRecordBytes     = 256 << 10
 )
 
+// maxMetadataFields is the most structured-metadata fields a Loki mapping may
+// declare: the list comes from a request header and every log line is checked
+// against it.
+const maxMetadataFields = 64
+
+// outputBudgetFactor bounds what one request may expand to. The labels of a
+// series or stream are repeated by every record it yields, so the records of a
+// request are not proportional to the bytes that carried them: the sum of their
+// estimated canonical sizes (recordCost) may not exceed this multiple of
+// Limits.MaxDecodedBytes.
+const outputBudgetFactor = 16
+
+// logAdmissionSlack is what admission may add to a log record beyond a second
+// copy of the record's own size: it renders the template line (at most 4096
+// bytes of template text plus the field values it names) next to the fields it
+// came from.
+const logAdmissionSlack = 4096
+
+// recordOverhead is the canonical JSON a record needs besides its text: record
+// and resource identifiers, timestamps and field names (about 520 bytes for a
+// metric with every optional field present).
+const recordOverhead = 576
+
+// labelOverhead is the JSON syntax around one label: {"name":"","value":""},
+const labelOverhead = 32
+
 // DefaultLimits is a conservative starting point for a bounded migration bridge.
 func DefaultLimits() Limits {
 	return Limits{
@@ -275,6 +302,13 @@ type InputProfile struct {
 	Help       HelpMode
 	Loki       LokiMapping
 
+	// LegacyIdentity derives the batch and record identifiers the way releases
+	// before request.v2 did (see legacyRequestDigest). It exists only so that the
+	// input bridge can find the receipt of a request that one of those releases
+	// admitted and the sender retries after the upgrade: the retry must be
+	// answered from the ledger, not stored again under a new identity.
+	LegacyIdentity bool
+
 	// Report, when set, receives the merged normalization report of a decode.
 	Report func(NormalizationReport)
 }
@@ -332,24 +366,36 @@ func (p InputProfile) validate(format string) error {
 	return nil
 }
 
-func (p InputProfile) validateLoki(format string) error {
+// lokiRules is a validated Loki mapping together with its set of structured
+// metadata fields, built once per request instead of once per record.
+type lokiRules struct {
+	mapping LokiMapping
+	allowed map[string]bool
+}
+
+func (p InputProfile) loki(format string) (lokiRules, error) {
 	m := p.Loki
 	switch m.Encoding {
 	case EncodingJSON, EncodingJSONGzip, EncodingProtobufSnappy:
 	default:
-		return fail(format, ReasonProfile, "loki_encoding")
+		return lokiRules{}, fail(format, ReasonProfile, "loki_encoding")
 	}
 	if m.TemplateID == "" || m.TemplateRevision == 0 || m.LineField == "" {
-		return fail(format, ReasonProfile, "loki_template")
+		return lokiRules{}, fail(format, ReasonProfile, "loki_template")
+	}
+	if len(m.MetadataFields) > maxMetadataFields {
+		return lokiRules{}, fail(format, ReasonProfile, "loki_metadata_fields")
 	}
 	seen := map[string]bool{m.LineField: true}
+	allowed := make(map[string]bool, len(m.MetadataFields))
 	for _, f := range m.MetadataFields {
 		if f == "" || seen[f] {
-			return fail(format, ReasonProfile, "loki_metadata_fields")
+			return lokiRules{}, fail(format, ReasonProfile, "loki_metadata_fields")
 		}
 		seen[f] = true
+		allowed[f] = true
 	}
-	return nil
+	return lokiRules{mapping: m, allowed: allowed}, nil
 }
 
 // bind verifies the grant covers exactly this profile's project and source and
@@ -429,8 +475,10 @@ func validLabelName(s string, mode NameMode, max int) bool {
 
 // cleanLabels validates, drops empty values (absent and empty are the same label
 // in the Prometheus data model), sorts and rejects duplicates and oversize sets.
+// A name sent twice is a duplicate even when one of its copies is empty.
 func cleanLabels(format string, in model.Labels, cfg InputProfile, rep *NormalizationReport) (model.Labels, error) {
 	out := make(model.Labels, 0, len(in))
+	dropped := false
 	for _, l := range in {
 		if !validLabelName(l.Name, cfg.Names, cfg.Limits.MaxLabelNameBytes) || l.Name == "__name__" {
 			return nil, fail(format, ReasonInvalidName, "label_name")
@@ -443,6 +491,7 @@ func cleanLabels(format string, in model.Labels, cfg InputProfile, rep *Normaliz
 		}
 		if l.Value == "" {
 			rep.add(ReportEmptyLabelDropped, 1)
+			dropped = true
 			continue
 		}
 		out = append(out, l)
@@ -459,7 +508,24 @@ func cleanLabels(format string, in model.Labels, cfg InputProfile, rep *Normaliz
 			return nil, fail(format, ReasonDuplicateLabel, "")
 		}
 	}
+	if dropped && repeatsName(in) {
+		return nil, fail(format, ReasonDuplicateLabel, "")
+	}
 	return out, nil
+}
+
+// repeatsName reports whether a name occurs twice in a label list as it was
+// sent, empty-valued labels included: they are dropped from the data model, but
+// a name sent with two values is two statements about one label.
+func repeatsName(in model.Labels) bool {
+	seen := make(map[string]struct{}, len(in))
+	for _, l := range in {
+		if _, dup := seen[l.Name]; dup {
+			return true
+		}
+		seen[l.Name] = struct{}{}
+	}
+	return false
 }
 
 func inBounds(cfg InputProfile, t model.UnixNano) bool {
@@ -479,16 +545,10 @@ const staleBits = 0x7ff0000000000002
 
 func deriveID(domain string, parts ...[]byte) model.ID {
 	h := sha256.New()
-	write := func(b []byte) {
-		var n [4]byte
-		binary.BigEndian.PutUint32(n[:], uint32(len(b)))
-		h.Write(n[:])
-		h.Write(b)
-	}
-	write([]byte("soundpost.queryinput.v1"))
-	write([]byte(domain))
+	lpWrite(h, []byte("soundpost.queryinput.v1"))
+	lpWrite(h, []byte(domain))
 	for _, p := range parts {
-		write(p)
+		lpWrite(h, p)
 	}
 	var id model.ID
 	copy(id[:], h.Sum(nil))
@@ -498,6 +558,15 @@ func deriveID(domain string, parts ...[]byte) model.ID {
 	return id
 }
 
+// lpWrite writes b behind its length, so that no list of parts hashes like a
+// different list, whatever bytes the parts hold.
+func lpWrite(h hash.Hash, b []byte) {
+	var n [4]byte
+	binary.BigEndian.PutUint32(n[:], uint32(len(b)))
+	h.Write(n[:])
+	h.Write(b)
+}
+
 func u64bytes(v uint64) []byte {
 	var b [8]byte
 	binary.BigEndian.PutUint64(b[:], v)
@@ -505,15 +574,76 @@ func u64bytes(v uint64) []byte {
 }
 
 // requestDigest identifies one request for the deterministic batch and record
-// identifiers: the same request body (and scope) is the same request, so a retry
-// is idempotent. An OpenMetrics exposition that is polled (a scrape) is a
-// different request every time even when the exporter's text is unchanged,
-// because a sample without a timestamp takes the scrape time (DefaultTimestamp)
-// as its time: two scrapes must not share a batch identifier while their records
-// carry different times. Formats that never read DefaultTimestamp keep their
-// digest independent of it, so a retried push does not change identity with the
-// time it arrived.
+// identifiers: the same request body under the same scope and the same
+// interpretation is the same request, so a retry is idempotent. What the body
+// turns into is part of its identity, not the bytes alone: the resource every
+// record carries, the default unit and the Loki template mapping. The same bytes
+// under another resource, unit or mapping are other records and must not share a
+// batch identifier (the receipt ledger would answer the second with a conflict).
+// An OpenMetrics exposition that is polled (a scrape) is a different request
+// every time even when the exporter's text is unchanged, because a sample
+// without a timestamp takes the scrape time (DefaultTimestamp) as its time: two
+// scrapes must not share a batch identifier while their records carry different
+// times. Formats that never read DefaultTimestamp keep their digest independent
+// of it, so a retried push does not change identity with the time it arrived.
 func requestDigest(format string, cfg InputProfile, body []byte) [32]byte {
+	if cfg.LegacyIdentity {
+		return legacyRequestDigest(format, cfg, body)
+	}
+	h := sha256.New()
+	h.Write([]byte("soundpost.queryinput.request.v2\x00" + format + "\x00"))
+	h.Write(cfg.Project[:])
+	h.Write(cfg.Source[:])
+	h.Write(cfg.Producer[:])
+	h.Write(u64bytes(uint64(cfg.PolicyRevision)))
+	lpWrite(h, resourceIdentity(cfg.Resource))
+	switch {
+	case format == fmtOpenMetrics:
+		lpWrite(h, []byte(cfg.unit()))
+		h.Write(u64bytes(uint64(cfg.DefaultTimestamp)))
+	case format == fmtRWv1, format == fmtRWv2:
+		lpWrite(h, []byte(cfg.unit()))
+	case strings.HasPrefix(format, fmtLoki+"/"):
+		m := cfg.Loki
+		lpWrite(h, []byte(m.TemplateID))
+		h.Write(u64bytes(uint64(m.TemplateRevision)))
+		lpWrite(h, []byte(m.LineField))
+		fields := append([]string(nil), m.MetadataFields...)
+		sort.Strings(fields) // the field list is a set: its order changes nothing a record holds
+		for _, f := range fields {
+			lpWrite(h, []byte(f))
+		}
+	}
+	lpWrite(h, body) // framed like every other variable part: no two (profile, body) pairs share a byte stream
+	var out [32]byte
+	copy(out[:], h.Sum(nil))
+	return out
+}
+
+// resourceIdentity is the unambiguous byte form of a resource.
+func resourceIdentity(r model.Resource) []byte {
+	b := make([]byte, 0, 3*len(r.Service)+16+len(r.Instance))
+	b = append(b, r.Service[:]...)
+	b = append(b, r.Environment[:]...)
+	b = append(b, r.Build[:]...)
+	b = binary.BigEndian.AppendUint32(b, uint32(len(r.Instance)))
+	b = append(b, r.Instance...)
+	b = binary.BigEndian.AppendUint32(b, uint32(len(r.Labels)))
+	for _, l := range r.Labels {
+		b = binary.BigEndian.AppendUint32(b, uint32(len(l.Name)))
+		b = append(b, l.Name...)
+		b = binary.BigEndian.AppendUint32(b, uint32(len(l.Value)))
+		b = append(b, l.Value...)
+	}
+	return b
+}
+
+// legacyRequestDigest is requestDigest of the releases before request.v2: the
+// scope, the OpenMetrics scrape time and the unframed body, and nothing of the
+// resource, the unit or the Loki mapping. Together with legacySeriesKey and the
+// old log batch budget (LegacyIdentity) it reproduces the identifiers those
+// releases stored, so that a retry of a request they admitted finds its receipt.
+func legacyRequestDigest(format string, cfg InputProfile, body []byte) [32]byte {
 	h := sha256.New()
 	h.Write([]byte("soundpost.queryinput.request.v1\x00" + format + "\x00"))
 	h.Write(cfg.Project[:])
@@ -530,7 +660,9 @@ func requestDigest(format string, cfg InputProfile, body []byte) [32]byte {
 	return out
 }
 
-func seriesKey(name string, labels model.Labels) string {
+// legacySeriesKey is seriesKey of the releases before the NUL escape: the metric
+// record identifiers of those releases were derived from it.
+func legacySeriesKey(name string, labels model.Labels) string {
 	var b strings.Builder
 	b.WriteString(name)
 	for _, l := range labels {
@@ -540,6 +672,39 @@ func seriesKey(name string, labels model.Labels) string {
 		b.WriteString(l.Value)
 	}
 	return b.String()
+}
+
+// seriesKey identifies one series. NUL separates the parts of the key, so the
+// two bytes it uses as syntax (NUL and 0x01) are escaped inside names and
+// values: a label value may hold NUL (it is valid UTF-8) and must not be able to
+// forge the key of another series. Text without those bytes keeps its plain form.
+func seriesKey(name string, labels model.Labels) string {
+	var b strings.Builder
+	keyPart(&b, name)
+	for _, l := range labels {
+		b.WriteByte(0)
+		keyPart(&b, l.Name)
+		b.WriteByte(0)
+		keyPart(&b, l.Value)
+	}
+	return b.String()
+}
+
+func keyPart(b *strings.Builder, s string) {
+	if !strings.ContainsAny(s, "\x00\x01") {
+		b.WriteString(s)
+		return
+	}
+	for i := range len(s) {
+		switch s[i] {
+		case 0:
+			b.WriteString("\x01\x02")
+		case 1:
+			b.WriteString("\x01\x01")
+		default:
+			b.WriteByte(s[i])
+		}
+	}
 }
 
 // ---- normalization ----
@@ -564,7 +729,7 @@ func Normalize(batch ingest.Batch, cfg InputProfile) (ingest.Batch, Normalizatio
 	if len(batch.Records) == 0 || len(batch.Records) > maxRecordsPerBatch {
 		return ingest.Batch{}, rep, fail(fmtNormalize, ReasonLimit, "record_count")
 	}
-	recs, rep, err := normalizeRecords(fmtNormalize, batch.Records, cfg)
+	recs, rep, err := normalizeRecords(context.Background(), fmtNormalize, batch.Records, cfg)
 	if err != nil {
 		return ingest.Batch{}, rep, err
 	}
@@ -587,7 +752,7 @@ type keyedRecord struct {
 	key string
 }
 
-func normalizeRecords(format string, in []model.Record, cfg InputProfile) ([]model.Record, NormalizationReport, error) {
+func normalizeRecords(ctx context.Context, format string, in []model.Record, cfg InputProfile) ([]model.Record, NormalizationReport, error) {
 	var rep NormalizationReport
 	metrics := make([]keyedRecord, 0, len(in))
 	logs := make([]model.Record, 0)
@@ -595,7 +760,13 @@ func normalizeRecords(format string, in []model.Record, cfg InputProfile) ([]mod
 	seenEvent := map[string][]byte{}
 	seenID := map[model.ID][]byte{}
 	seenPoint := map[string][]byte{}
+	var loki *lokiRules
 	for i := range in {
+		if i&255 == 0 {
+			if err := ctxErr(format, ctx); err != nil {
+				return nil, rep, err
+			}
+		}
 		r := in[i]
 		if r.ID == (model.ID{}) {
 			return nil, rep, fail(format, ReasonMalformed, "record_id")
@@ -636,8 +807,15 @@ func normalizeRecords(format string, in []model.Record, cfg InputProfile) ([]mod
 			if r.Payload.Log == nil {
 				return nil, rep, fail(format, ReasonMalformed, "log_payload")
 			}
+			if loki == nil {
+				rules, err := cfg.loki(format)
+				if err != nil {
+					return nil, rep, err
+				}
+				loki = &rules
+			}
 			l := *r.Payload.Log
-			if err := normalizeLog(format, &l, r.ObservedAt, cfg, &rep); err != nil {
+			if err := normalizeLog(format, &l, r.ObservedAt, cfg, loki, &rep); err != nil {
 				return nil, rep, err
 			}
 			r.Payload = model.Payload{Log: &l}
@@ -767,11 +945,8 @@ func normalizeMetric(format string, m *model.MetricPoint, ts model.UnixNano, cfg
 	return nil
 }
 
-func normalizeLog(format string, l *model.LogRecord, ts model.UnixNano, cfg InputProfile, rep *NormalizationReport) error {
-	if err := cfg.validateLoki(format); err != nil {
-		return err
-	}
-	m := cfg.Loki
+func normalizeLog(format string, l *model.LogRecord, ts model.UnixNano, cfg InputProfile, rules *lokiRules, rep *NormalizationReport) error {
+	m := rules.mapping
 	if l.TemplateID != m.TemplateID || l.TemplateRevision != m.TemplateRevision {
 		return fail(format, ReasonScope, "template")
 	}
@@ -793,12 +968,8 @@ func normalizeLog(format string, l *model.LogRecord, ts model.UnixNano, cfg Inpu
 	if len(scalarString(line)) > cfg.Limits.MaxLineBytes {
 		return fail(format, ReasonTooLarge, "line_bytes")
 	}
-	allowed := map[string]bool{}
-	for _, f := range m.MetadataFields {
-		allowed[f] = true
-	}
 	for k := range l.Metadata {
-		if !allowed[k] {
+		if !rules.allowed[k] {
 			return fail(format, ReasonUnrepresentable, "structured_metadata_key")
 		}
 	}
@@ -819,23 +990,105 @@ func newScalar(s string) (model.Scalar, error) {
 // ---- partitioning into one-slot, stable-identity batches ----
 
 type assembler struct {
+	ctx     context.Context
 	format  string
 	cfg     InputProfile
 	request [32]byte
 	recs    []model.Record
 	report  NormalizationReport
+	// budget is what is left of the request's output allowance, in estimated
+	// canonical bytes (see outputBudgetFactor).
+	budget int64
 }
 
-func (a *assembler) add(r model.Record) { a.recs = append(a.recs, r) }
+func newAssembler(ctx context.Context, format string, cfg InputProfile, request [32]byte) *assembler {
+	return &assembler{ctx: ctx, format: format, cfg: cfg, request: request, budget: outputBudgetFactor * cfg.Limits.MaxDecodedBytes}
+}
 
-func (a *assembler) finish(ctx context.Context) ([]ingest.Batch, error) {
+// add takes one decoded record into the request. Every decoder hands its
+// records over here, so this is where the decode phase asks whether the caller
+// is still there (every 1024 records) and where each record is charged against
+// the request's output budget.
+func (a *assembler) add(r model.Record) error {
+	if len(a.recs)&1023 == 0 {
+		if err := ctxErr(a.format, a.ctx); err != nil {
+			return err
+		}
+	}
+	if a.budget -= recordCost(&r); a.budget < 0 {
+		return fail(a.format, ReasonTooLarge, "output_bytes")
+	}
+	a.recs = append(a.recs, r)
+	return nil
+}
+
+// recordCost is an upper-bound estimate of a record's canonical JSON size. It
+// reads lengths and marshals nothing, so a decoder can charge it per record
+// before the work it protects (marshaling, normalizing and admitting that
+// record) has been done. Text counts its raw bytes: JSON escaping can grow
+// pathological text, but the per-record and per-batch limits are enforced on
+// the real encoding.
+func recordCost(r *model.Record) int64 {
+	n := int64(recordOverhead+len(r.Resource.Instance)) + labelsCost(r.Resource.Labels)
+	switch {
+	case r.Payload.Metric != nil:
+		m := r.Payload.Metric
+		n += int64(len(m.Name)+len(m.Unit)+len(m.Type)) + labelsCost(m.Labels)
+		if m.Histogram != nil {
+			n += histogramCost(m.Histogram)
+		}
+	case r.Payload.Log != nil:
+		l := r.Payload.Log
+		n += int64(len(l.TemplateID)+len(l.Line)) + labelsCost(l.StreamLabels) + scalarsCost(l.Fields) + scalarsCost(l.Metadata)
+	case r.Payload.Condition != nil:
+		c := r.Payload.Condition
+		n += labelsCost(c.Labels) + 40*int64(len(c.Links))
+	}
+	return n
+}
+
+func labelsCost(in model.Labels) int64 {
+	var n int64
+	for _, l := range in {
+		n += int64(len(l.Name) + len(l.Value) + labelOverhead)
+	}
+	return n
+}
+
+// scalarsCost sums a field map: each name, the JSON text of its scalar and the
+// syntax around them.
+func scalarsCost(in map[string]model.Scalar) int64 {
+	var n int64
+	for k, v := range in {
+		raw, _ := v.MarshalJSON()
+		n += int64(len(k) + len(raw) + 8)
+	}
+	return n
+}
+
+// histogramCost counts every bucket count, custom bound and span at the most one
+// quoted 64-bit number or a span's two numbers occupy; 320 bytes cover the fixed
+// fields.
+func histogramCost(h *model.NativeHistogram) int64 {
+	switch {
+	case h.Integer != nil:
+		x := h.Integer
+		return 320 + 48*int64(len(x.PositiveSpans)+len(x.NegativeSpans)) + 24*int64(len(x.PositiveBuckets)+len(x.NegativeBuckets)+len(x.PositiveCounts)+len(x.NegativeCounts)+len(x.CustomBounds))
+	case h.Float != nil:
+		x := h.Float
+		return 320 + 48*int64(len(x.PositiveSpans)+len(x.NegativeSpans)) + 24*int64(len(x.PositiveBuckets)+len(x.NegativeBuckets)+len(x.CustomBounds))
+	}
+	return 320
+}
+
+func (a *assembler) finish() ([]ingest.Batch, error) {
 	if len(a.recs) == 0 {
 		return nil, fail(a.format, ReasonMalformed, "empty_request")
 	}
 	slots := map[uint16][]model.Record{}
 	for i := range a.recs {
 		if i&1023 == 0 {
-			if err := ctxErr(a.format, ctx); err != nil {
+			if err := ctxErr(a.format, a.ctx); err != nil {
 				return nil, err
 			}
 		}
@@ -853,13 +1106,19 @@ func (a *assembler) finish(ctx context.Context) ([]ingest.Batch, error) {
 	report := a.report
 	var batches []ingest.Batch
 	for _, s := range order {
-		recs, rep, err := normalizeRecords(a.format, slots[uint16(s)], a.cfg)
+		if err := ctxErr(a.format, a.ctx); err != nil {
+			return nil, err
+		}
+		recs, rep, err := normalizeRecords(a.ctx, a.format, slots[uint16(s)], a.cfg)
 		if err != nil {
 			return nil, err
 		}
 		report.merge(rep)
 		chunk := 0
 		for len(recs) > 0 {
+			if err := ctxErr(a.format, a.ctx); err != nil {
+				return nil, err
+			}
 			n, size := 0, 0
 			for n < len(recs) && n < maxRecordsPerBatch {
 				raw, err := model.CanonicalJSON(recs[n])
@@ -869,10 +1128,15 @@ func (a *assembler) finish(ctx context.Context) ([]ingest.Batch, error) {
 				if len(raw) > maxRecordBytes {
 					return nil, fail(a.format, ReasonTooLarge, "record_bytes")
 				}
-				if n > 0 && size+len(raw) > maxBatchBytes {
+				cost := len(raw)
+				if recs[n].Kind == model.Log && !a.cfg.LegacyIdentity {
+					// Admission renders the template line into the record.
+					cost = 2*cost + logAdmissionSlack
+				}
+				if n > 0 && size+cost > maxBatchBytes {
 					break
 				}
-				size += len(raw)
+				size += cost
 				n++
 			}
 			var idx [6]byte

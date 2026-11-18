@@ -32,10 +32,11 @@ func DecodeLokiPush(ctx context.Context, grant policy.SourceGrant, input io.Read
 	if err := cfg.validate(format); err != nil {
 		return nil, err
 	}
-	if err := cfg.validateLoki(format); err != nil {
+	rules, err := cfg.loki(format)
+	if err != nil {
 		return nil, err
 	}
-	cfg, err := bind(format, grant, cfg)
+	cfg, err = bind(format, grant, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -71,11 +72,8 @@ func DecodeLokiPush(ctx context.Context, grant policy.SourceGrant, input io.Read
 			return nil, err
 		}
 	}
-	l := &lokiDecoder{ctx: ctx, cfg: cfg, allowed: map[string]bool{}}
-	for _, f := range cfg.Loki.MetadataFields {
-		l.allowed[f] = true
-	}
-	l.a = &assembler{format: format, cfg: cfg, request: requestDigest(format+"/"+string(cfg.Loki.Encoding), cfg, plain)}
+	l := &lokiDecoder{cfg: cfg, allowed: rules.allowed}
+	l.a = newAssembler(ctx, format, cfg, requestDigest(format+"/"+string(cfg.Loki.Encoding), cfg, plain))
 	if cfg.Loki.Encoding == EncodingProtobufSnappy {
 		err = l.parseProto(plain)
 	} else {
@@ -84,11 +82,10 @@ func DecodeLokiPush(ctx context.Context, grant policy.SourceGrant, input io.Read
 	if err != nil {
 		return nil, err
 	}
-	return l.a.finish(ctx)
+	return l.a.finish()
 }
 
 type lokiDecoder struct {
-	ctx     context.Context
 	cfg     InputProfile
 	a       *assembler
 	allowed map[string]bool
@@ -137,22 +134,28 @@ func (l *lokiDecoder) parseJSON(body []byte) error {
 			if len(v) < 2 || len(v) > 3 {
 				return l.bad("entry_shape")
 			}
-			var tsStr, line string
-			if json.Unmarshal(v[0], &tsStr) != nil || json.Unmarshal(v[1], &line) != nil {
+			// A JSON null is not a string: decoded into a plain string it would
+			// become the empty string without an error.
+			var tsText, lineText *string
+			if json.Unmarshal(v[0], &tsText) != nil || json.Unmarshal(v[1], &lineText) != nil || tsText == nil || lineText == nil {
 				return l.bad("entry_types")
 			}
-			ts, err := l.nanos(tsStr)
+			line := *lineText
+			ts, err := l.nanos(*tsText)
 			if err != nil {
 				return err
 			}
 			var md []model.Label
 			if len(v) == 3 {
-				var m map[string]string
-				if json.Unmarshal(v[2], &m) != nil {
+				var m map[string]*string
+				if json.Unmarshal(v[2], &m) != nil || m == nil {
 					return l.bad("structured_metadata")
 				}
 				for k, val := range m {
-					md = append(md, model.Label{Name: k, Value: val})
+					if val == nil {
+						return l.bad("structured_metadata")
+					}
+					md = append(md, model.Label{Name: k, Value: *val})
 				}
 				sort.Slice(md, func(i, j int) bool { return md[i].Name < md[j].Name })
 			}
@@ -206,11 +209,6 @@ func (l *lokiDecoder) entry(labels model.Labels, ts int64, line string, md []mod
 	if l.entries > l.cfg.Limits.MaxSamples {
 		return fail(fmtLoki, ReasonLimit, "entries")
 	}
-	if l.entries&1023 == 0 {
-		if err := ctxErr(fmtLoki, l.ctx); err != nil {
-			return err
-		}
-	}
 	at := model.UnixNano(ts)
 	if !inBounds(l.cfg, at) {
 		return fail(fmtLoki, ReasonTimestampRange, "entry_timestamp")
@@ -248,7 +246,7 @@ func (l *lokiDecoder) entry(labels model.Labels, ts int64, line string, md []mod
 	if res.Labels == nil {
 		res.Labels = model.Labels{}
 	}
-	l.a.add(model.Record{
+	return l.a.add(model.Record{
 		ID:         deriveID("log", l.a.request[:], u64bytes(uint64(l.entries))),
 		Kind:       model.Log,
 		ObservedAt: at,
@@ -262,7 +260,6 @@ func (l *lokiDecoder) entry(labels model.Labels, ts int64, line string, md []mod
 			Metadata:         metadata,
 		}},
 	})
-	return nil
 }
 
 func jsonString(s string) ([]byte, error) { return json.Marshal(s) }

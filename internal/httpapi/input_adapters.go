@@ -3,11 +3,14 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"mime"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -16,6 +19,7 @@ import (
 	"github.com/arynyklas/soundpost/internal/auth"
 	"github.com/arynyklas/soundpost/internal/ingest"
 	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/policy"
 )
 
 // Input bridge routes. They are explicitly scoped migration inputs for senders
@@ -39,6 +43,7 @@ const (
 type InputAdmitter interface {
 	ResolveSource(ctx context.Context, c ingest.SourceCredential, b ingest.Batch) (ingest.SourceGrant, error)
 	Admit(ctx context.Context, g ingest.SourceGrant, b ingest.Batch) (ingest.Receipt, error)
+	LookupReceipt(ctx context.Context, c ingest.SourceCredential, q model.ReceiptRequest) (ingest.Receipt, error)
 }
 
 // InputAdapterConfig bounds and pins the bridge. The zero value is valid: the
@@ -53,6 +58,11 @@ type InputAdapterConfig struct {
 	Histograms queryinput.HistogramMode
 	Exemplars  queryinput.ExemplarMode
 	Help       queryinput.HelpMode
+	// LegacyIdentityUntil is the end of the time in which a request is also looked
+	// up under the identity of the releases before request.v2 (see
+	// legacyLineage). Zero: legacyIdentityWindow from the moment the routes are
+	// mounted.
+	LegacyIdentityUntil time.Time
 }
 
 func (c InputAdapterConfig) resolved() InputAdapterConfig {
@@ -77,6 +87,9 @@ func (c InputAdapterConfig) resolved() InputAdapterConfig {
 	if c.Help == "" {
 		c.Help = queryinput.HelpReject
 	}
+	if c.LegacyIdentityUntil.IsZero() {
+		c.LegacyIdentityUntil = c.Now().Add(legacyIdentityWindow)
+	}
 	return c
 }
 
@@ -84,14 +97,17 @@ type inputBridge struct {
 	auth *auth.Service
 	in   InputAdmitter
 	cfg  InputAdapterConfig
+	// legacyOnly makes the bridge mint the identifiers of the releases before
+	// request.v2 and look nothing up: it stands in for such a release in tests.
+	legacyOnly bool
 }
 
 // RegisterInputAdapterRoutes mounts the migration input bridges.
 func RegisterInputAdapterRoutes(mux *http.ServeMux, a *auth.Service, in InputAdmitter, cfg InputAdapterConfig) {
 	b := &inputBridge{auth: a, in: in, cfg: cfg.resolved()}
-	mux.HandleFunc("POST "+adapterPrometheusWritePath, b.handle("prometheus_write", b.decodeRemoteWrite))
-	mux.HandleFunc("POST "+adapterLokiPushPath, b.handle("loki_push", b.decodeLokiPush))
-	mux.HandleFunc("POST "+adapterConditionsPath, b.handle("conditions", b.decodeConditions))
+	mux.HandleFunc("POST "+adapterPrometheusWritePath, b.handle("prometheus_write", model.Metric, b.decodeRemoteWrite))
+	mux.HandleFunc("POST "+adapterLokiPushPath, b.handle("loki_push", model.Log, b.decodeLokiPush))
+	mux.HandleFunc("POST "+adapterConditionsPath, b.handle("conditions", model.Condition, b.decodeConditions))
 }
 
 // adapterChild is the per-child-batch part of a bridge reply. BatchID is the
@@ -142,7 +158,10 @@ func adapterCredential(a *auth.Service, r *http.Request) (auth.SourceCredential,
 	return sourceCredential(a, r)
 }
 
-func (b *inputBridge) handle(adapter string, decode adapterDecoder) http.HandlerFunc {
+// handle serves one bridge route. kind is the signal the route carries: a source
+// whose policy does not permit it gets nothing out of the body, so it is refused
+// before the body is read, decompressed or parsed.
+func (b *inputBridge) handle(adapter string, kind model.Kind, decode adapterDecoder) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		cred, err := adapterCredential(b.auth, r)
 		if err != nil {
@@ -152,6 +171,10 @@ func (b *inputBridge) handle(adapter string, decode adapterDecoder) http.Handler
 		src, err := b.auth.SourceAuthority(r.Context(), cred, true)
 		if err != nil {
 			ingestReply(w, r, nil, err)
+			return
+		}
+		if !slices.Contains(src.Policy.Kinds, kind) {
+			ingestReply(w, r, nil, model.Fail(model.Forbidden))
 			return
 		}
 		profile, err := b.profile(r, src)
@@ -166,10 +189,27 @@ func (b *inputBridge) handle(adapter string, decode adapterDecoder) http.Handler
 			return
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, b.cfg.Limits.MaxCompressedBytes+2)
+		var raw *bytes.Buffer
+		if b.legacyLookup() {
+			// The body is read once by the decoder; keep what it read so that the same
+			// bytes can be decoded again under the previous identity.
+			raw = &bytes.Buffer{}
+			r.Body = teeBody{Reader: io.TeeReader(r.Body, raw), Closer: r.Body}
+		}
 		batches, err := decode(r.Context(), w, r, grant, profile, src)
 		if err != nil {
 			ingestReply(w, r, nil, err)
 			return
+		}
+		if err := preflight(src.Policy, batches); err != nil {
+			ingestReply(w, r, nil, err)
+			return
+		}
+		if raw != nil {
+			if batches, err = b.legacyLineage(r.Context(), w, r, cred, grant, profile, src, decode, raw.Bytes(), batches); err != nil {
+				ingestReply(w, r, nil, err)
+				return
+			}
 		}
 		children, admitted := b.admit(r.Context(), cred, batches)
 		var ack func(http.Header)
@@ -197,7 +237,7 @@ func (b *inputBridge) profile(r *http.Request, src model.SourceAuthority) (query
 		MinTimestamp: model.UnixNano(now.Add(-b.cfg.MaxAge).UnixNano()), MaxTimestamp: model.UnixNano(now.Add(b.cfg.MaxFuture).UnixNano()),
 		DefaultTimestamp: model.UnixNano(now.UnixNano()),
 		Names:            queryinput.NamesStrict, OutOfOrder: queryinput.OutOfOrderSort,
-		Histograms: b.cfg.Histograms, Exemplars: b.cfg.Exemplars, Help: b.cfg.Help,
+		Histograms: b.cfg.Histograms, Exemplars: b.cfg.Exemplars, Help: b.cfg.Help, LegacyIdentity: b.legacyOnly,
 	}, nil
 }
 
@@ -207,14 +247,8 @@ func (b *inputBridge) profile(r *http.Request, src model.SourceAuthority) (query
 // policy registry check at admission still decides what is allowed.
 func adapterResource(r *http.Request, reg model.ResourceRegistry) (model.Resource, error) {
 	one := func(name string) (string, bool, error) {
-		v := r.Header.Values(name)
-		if len(v) > 1 {
-			return "", false, model.Fail(model.Invalid)
-		}
-		if len(v) == 0 || v[0] == "" {
-			return "", false, nil
-		}
-		return v[0], true, nil
+		v, err := headerOnce(r, name, model.Invalid)
+		return v, v != "", err
 	}
 	id := func(name string, registered []model.ID) (model.ID, error) {
 		v, set, err := one(name)
@@ -263,6 +297,8 @@ func adapterResource(r *http.Request, reg model.ResourceRegistry) (model.Resourc
 // freshly resolved grant. A failing child does not stop the others (they are
 // durable progress that a retry will find already admitted); an authority or
 // cancellation failure does, because every later child would fail the same way.
+// What the source policy alone refuses never gets this far: preflight has
+// already rejected the request.
 func (b *inputBridge) admit(ctx context.Context, cred auth.SourceCredential, batches []ingest.Batch) ([]adapterChild, int) {
 	children := make([]adapterChild, len(batches))
 	admitted := 0
@@ -296,6 +332,32 @@ func (b *inputBridge) admit(ctx context.Context, cred auth.SourceCredential, bat
 		children[i] = child
 	}
 	return children, admitted
+}
+
+// preflight checks every record of every child batch against the source policy
+// before the first child is admitted. A refusal that the policy alone decides (an
+// unregistered label value, a line that the template does not allow) rejects the
+// request and writes nothing: the children admitted ahead of the failing one
+// would be durable, and a sender that corrects the request and sends it again
+// would store them twice (log record identities derive from the request body).
+// Only failures that the append alone can see (a storage conflict, a quota, an
+// unavailable store, a lost response) leave an admitted prefix, and those the
+// sender retries unchanged.
+func preflight(p model.SourcePolicy, batches []ingest.Batch) error {
+	for i := range batches {
+		for j := range batches[i].Records {
+			rec := batches[i].Records[j]
+			if rec.Payload.Log != nil {
+				// Validation renders the template into the log record in place.
+				l := *rec.Payload.Log
+				rec.Payload.Log = &l
+			}
+			if err := model.ValidateRecord(&rec, p); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func faultOf(err error) *model.Fault {
@@ -386,9 +448,44 @@ func remoteWriteWritten(batches []ingest.Batch) func(http.Header) {
 	}
 }
 
+// headerOnce returns the value of a request header that may be named once. A
+// header named twice is refused with the given fault: the first line is not what
+// the sender, or an intermediary that split a line, can be assumed to mean.
+func headerOnce(r *http.Request, name string, repeated model.Code) (string, error) {
+	v := r.Header.Values(name)
+	if len(v) > 1 {
+		return "", model.Fail(repeated)
+	}
+	if len(v) == 0 {
+		return "", nil
+	}
+	return v[0], nil
+}
+
+// contentHeaders returns the media type of the body with its parameters and its
+// lower-cased Content-Encoding. Either header named twice is unsupported.
+func contentHeaders(r *http.Request) (string, map[string]string, string, error) {
+	contentType, err := headerOnce(r, "Content-Type", model.Unsupported)
+	if err != nil {
+		return "", nil, "", err
+	}
+	encoding, err := headerOnce(r, "Content-Encoding", model.Unsupported)
+	if err != nil {
+		return "", nil, "", err
+	}
+	mt, params, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return "", nil, "", model.Fail(model.Unsupported)
+	}
+	return mt, params, strings.ToLower(encoding), nil
+}
+
 func (b *inputBridge) decodeRemoteWrite(ctx context.Context, _ http.ResponseWriter, r *http.Request, grant ingest.SourceGrant, p queryinput.InputProfile, _ model.SourceAuthority) ([]ingest.Batch, error) {
-	mt, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-	if err != nil || mt != "application/x-protobuf" || !strings.EqualFold(r.Header.Get("Content-Encoding"), "snappy") {
+	mt, params, encoding, err := contentHeaders(r)
+	if err != nil {
+		return nil, err
+	}
+	if mt != "application/x-protobuf" || encoding != "snappy" {
 		return nil, model.Fail(model.Unsupported)
 	}
 	version := queryinput.RemoteWriteV1
@@ -403,11 +500,10 @@ func (b *inputBridge) decodeRemoteWrite(ctx context.Context, _ http.ResponseWrit
 }
 
 func (b *inputBridge) decodeLokiPush(ctx context.Context, _ http.ResponseWriter, r *http.Request, grant ingest.SourceGrant, p queryinput.InputProfile, src model.SourceAuthority) ([]ingest.Batch, error) {
-	mt, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	mt, _, encoding, err := contentHeaders(r)
 	if err != nil {
-		return nil, model.Fail(model.Unsupported)
+		return nil, err
 	}
-	encoding := strings.ToLower(r.Header.Get("Content-Encoding"))
 	var enc queryinput.Encoding
 	switch {
 	case mt == "application/json" && (encoding == "" || encoding == "identity"):
@@ -431,9 +527,11 @@ func (b *inputBridge) decodeLokiPush(ctx context.Context, _ http.ResponseWriter,
 // see queryinput.DecodeConditions for the schema). It carries condition events,
 // never arbitrary source text, and admits them as C04 condition records.
 func (b *inputBridge) decodeConditions(ctx context.Context, _ http.ResponseWriter, r *http.Request, grant ingest.SourceGrant, p queryinput.InputProfile, _ model.SourceAuthority) ([]ingest.Batch, error) {
-	mt, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-	encoding := strings.ToLower(r.Header.Get("Content-Encoding"))
-	if err != nil || mt != "application/json" || (encoding != "" && encoding != "identity") {
+	mt, _, encoding, err := contentHeaders(r)
+	if err != nil {
+		return nil, err
+	}
+	if mt != "application/json" || (encoding != "" && encoding != "identity") {
 		return nil, model.Fail(model.Unsupported)
 	}
 	return queryinput.DecodeConditions(ctx, grant, r.Body, p)
@@ -446,16 +544,7 @@ func (b *inputBridge) decodeConditions(ctx context.Context, _ http.ResponseWrite
 // by the source policy at admission, so a header can never select what the
 // source is not allowed to emit.
 func lokiMapping(r *http.Request, src model.SourceAuthority, enc queryinput.Encoding) (queryinput.LokiMapping, error) {
-	one := func(name string) (string, error) {
-		v := r.Header.Values(name)
-		if len(v) > 1 {
-			return "", model.Fail(model.Invalid)
-		}
-		if len(v) == 0 {
-			return "", nil
-		}
-		return v[0], nil
-	}
+	one := func(name string) (string, error) { return headerOnce(r, name, model.Invalid) }
 	m := queryinput.LokiMapping{Encoding: enc}
 	id, err := one("X-Soundpost-Template")
 	if err != nil {
@@ -492,4 +581,63 @@ func lokiMapping(r *http.Request, src model.SourceAuthority, enc queryinput.Enco
 		m.MetadataFields = strings.Split(fields, ",")
 	}
 	return m, nil
+}
+
+// legacyIdentityWindow is how long after the routes are mounted a request is
+// also looked up under the identity of the previous release: the receipt dedup
+// window of the ledger (storage DedupUntil, 7 days after admission). A request
+// the previous release admitted was admitted before the routes were mounted, so
+// its receipt stops answering retries 7 days later, and the lookup is moot.
+const legacyIdentityWindow = 7 * 24 * time.Hour
+
+// teeBody is a request body that also copies what is read from it.
+type teeBody struct {
+	io.Reader
+	io.Closer
+}
+
+func (b *inputBridge) legacyLookup() bool {
+	return !b.legacyOnly && b.cfg.Now().Before(b.cfg.LegacyIdentityUntil)
+}
+
+// legacyLineage settles which identity a request is admitted under. Batch and
+// record identifiers moved to request.v2 (they cover the resource, the unit and
+// the Loki mapping, which v1 did not). A request that the previous release
+// admitted and the sender retries after the upgrade must not become a new request:
+// log lines would be stored twice. So the same body is decoded once more under
+// the previous identity, and when the ledger holds a receipt of any of those
+// batches the request belongs to the old lineage: it is carried on under the old
+// identifiers (the ledger answers what is durable with its original receipt and
+// the rest is appended as the previous release would have). A request with no
+// such receipt is a new one and is recorded under v2.
+func (b *inputBridge) legacyLineage(ctx context.Context, w http.ResponseWriter, r *http.Request, cred auth.SourceCredential, grant ingest.SourceGrant, p queryinput.InputProfile, src model.SourceAuthority, decode adapterDecoder, body []byte, current []ingest.Batch) ([]ingest.Batch, error) {
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	p.LegacyIdentity = true
+	legacy, err := decode(ctx, w, r, grant, p, src)
+	if err != nil {
+		// The same bytes decoded under the current identity: nothing of the previous
+		// release can have been stored for what does not decode.
+		return current, nil
+	}
+	for i := range legacy {
+		g, err := b.in.ResolveSource(ctx, cred, legacy[i])
+		if err != nil {
+			return nil, err
+		}
+		n, err := policy.Normalize(g, legacy[i])
+		if err != nil {
+			continue
+		}
+		_, err = b.in.LookupReceipt(ctx, cred, model.ReceiptRequest{Source: legacy[i].Source, Producer: legacy[i].Producer, RouteSlot: legacy[i].RouteSlot, BatchID: legacy[i].ID, OriginalHash: n.Hash})
+		if err == nil {
+			return legacy, nil
+		}
+		switch faultOf(err).Code {
+		case model.NotFound, model.Conflict:
+			// Not stored, or stored for other content: not this request.
+		default:
+			return nil, err
+		}
+	}
+	return current, nil
 }

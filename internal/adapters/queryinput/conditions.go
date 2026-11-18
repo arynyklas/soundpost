@@ -98,20 +98,17 @@ func DecodeConditions(ctx context.Context, grant policy.SourceGrant, input io.Re
 	if len(wire.Events) > cfg.Limits.MaxSamples {
 		return nil, fail(format, ReasonLimit, "events")
 	}
-	a := &assembler{format: format, cfg: cfg, request: requestDigest(format, cfg, body)}
+	a := newAssembler(ctx, format, cfg, requestDigest(format, cfg, body))
 	for i := range wire.Events {
-		if i&255 == 0 {
-			if err := ctxErr(format, ctx); err != nil {
-				return nil, err
-			}
-		}
 		rec, err := conditionRecord(format, cfg, a.request[:], i, wire.Events[i], &a.report)
 		if err != nil {
 			return nil, err
 		}
-		a.add(rec)
+		if err := a.add(rec); err != nil {
+			return nil, err
+		}
 	}
-	return a.finish(ctx)
+	return a.finish()
 }
 
 func safeConditionName(s string) bool {

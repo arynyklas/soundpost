@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"runtime"
 	"runtime/debug"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -36,6 +37,14 @@ type ReleasePolicy struct {
 	RequiredIsolation    []string `json:"required_isolation"`
 }
 
+// The scenarios the plan (Task 12) requires of every release, by the names the
+// smoke runner and the gate agree on. A policy may demand more, never fewer: the
+// floor is enforced here, so editing the policy cannot shrink it.
+var (
+	requiredPersistenceFloor = []string{"hot-read", "flush", "compaction", "restart", "receipt-manifest-reconciles"}
+	requiredIsolationFloor   = []string{"foreign-project-fails-closed", "revocation-during-compute", "cancellation-releases-everything", "complete-rules-never-use-partial-data", "no-production-path-reaches-an-oracle"}
+)
+
 func (p ReleasePolicy) Validate() error {
 	if p.Schema != "soundpost-query-release-policy/1" {
 		return fmt.Errorf("unknown release policy schema")
@@ -43,16 +52,42 @@ func (p ReleasePolicy) Validate() error {
 	if !(p.RequireLocked && p.RequireZeroUnbound && p.RequireZeroSkips && p.RequireZeroMismatch && p.RequireZeroUnrun && p.RequireOracle && p.RequireLosslessInput) {
 		return fmt.Errorf("release policy may not weaken a mandatory requirement")
 	}
-	if len(p.AllProfiles) != len(exactPins) {
-		return fmt.Errorf("release policy must name all three pinned profiles")
-	}
+	named := map[string]bool{}
 	for _, id := range p.AllProfiles {
 		if _, ok := exactPins[id]; !ok {
 			return fmt.Errorf("release policy names unknown profile %s", id)
 		}
+		if named[id] {
+			return fmt.Errorf("release policy names profile %s twice", id)
+		}
+		named[id] = true
 	}
-	if len(p.RequiredPersistence) == 0 || len(p.RequiredIsolation) == 0 {
-		return fmt.Errorf("release policy requires persistence and isolation scenarios")
+	if len(p.AllProfiles) != len(exactPins) {
+		return fmt.Errorf("release policy must name all three pinned profiles")
+	}
+	if err := validateScenarioNames("persistence", p.RequiredPersistence, requiredPersistenceFloor); err != nil {
+		return err
+	}
+	return validateScenarioNames("isolation", p.RequiredIsolation, requiredIsolationFloor)
+}
+
+// validateScenarioNames refuses a scenario list that names a scenario twice or
+// without a name, or that lacks one of the floor scenarios.
+func validateScenarioNames(kind string, names, floor []string) error {
+	listed := map[string]bool{}
+	for _, n := range names {
+		if n == "" {
+			return fmt.Errorf("release policy lists an unnamed %s scenario", kind)
+		}
+		if listed[n] {
+			return fmt.Errorf("release policy lists %s scenario %s twice", kind, n)
+		}
+		listed[n] = true
+	}
+	for _, n := range floor {
+		if !listed[n] {
+			return fmt.Errorf("release policy must require %s scenario %s", kind, n)
+		}
 	}
 	return nil
 }
@@ -78,8 +113,13 @@ func SplitProfileExpectations(id string, profiles []string, input json.RawMessag
 	if len(profiles) == 0 || len(expected) != len(profiles) {
 		return nil, fmt.Errorf("%s: expected observations must be given per declared profile", id)
 	}
+	declared := map[string]bool{}
 	var out []ReleaseCase
 	for _, p := range profiles {
+		if declared[p] {
+			return nil, fmt.Errorf("%s: profile %s is declared twice", id, p)
+		}
+		declared[p] = true
 		e, ok := expected[p]
 		if !ok {
 			return nil, fmt.Errorf("%s: no independent expectation for %s", id, p)
@@ -92,7 +132,7 @@ func SplitProfileExpectations(id string, profiles []string, input json.RawMessag
 		if err = json.Unmarshal(raw, &copyOf); err != nil {
 			return nil, err
 		}
-		out = append(out, ReleaseCase{ID: id, Profile: p, Input: input, Expected: copyOf})
+		out = append(out, ReleaseCase{ID: id, Profile: p, Input: slices.Clone(input), Expected: copyOf})
 	}
 	return out, nil
 }
@@ -157,11 +197,18 @@ type ReleaseConfig struct {
 	Own         OwnFunc
 	Oracle      OracleFunc // nil means no oracle is available
 	Tests       []TestObservation
-	Inputs      []NormalizationCheck
-	Persistence []ScenarioOutcome
-	Isolation   []ScenarioOutcome
-	Provenance  []ProvenanceDecision
-	Interaction InteractionCoverage
+	// TestEvidence is the `go test -json` stream the Tests were observed in. An
+	// observation counts only when that exact stream backs it.
+	TestEvidence []byte
+	// Smoke is what the smoke runner observed on a real persisted path: the
+	// persistence and isolation outcomes and the input normalization checks. nil
+	// means no smoke report was given.
+	Smoke      *SmokeReport
+	Provenance []ProvenanceDecision
+	// Spec is the generation spec the Generated runs were planned from. The gate
+	// derives the interaction coverage of the release from it and from the
+	// generated cases whose rows were executed and matched; it accepts no claim.
+	Spec GenerationSpec
 	// Generated are the concrete-input cases of each generator seed, run through
 	// the differential phase runners. Minimize, when set, shrinks every
 	// mismatching generated case into a Regression.
@@ -248,6 +295,21 @@ func normalizationLoss(c NormalizationCheck) string {
 	return ""
 }
 
+// carriesStaleMarker reports whether any authored input of the checks is a
+// Prometheus stale marker. The stale-marker branch of normalizationLoss is only
+// a check if the evidence holds one: a producer that stopped sending a stale
+// marker would otherwise leave it unexercised without anything failing.
+func carriesStaleMarker(checks []NormalizationCheck) bool {
+	for _, c := range checks {
+		for _, r := range c.Source {
+			if r.Bits == StaleBits {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func bindingFault(o Obligation, b Binding, ok bool, passed map[string]bool) (unbound bool, unobserved int) {
 	if !ok || b.Implementation == "" || strings.HasPrefix(b.Implementation, "pending") || len(b.GoTests) == 0 {
 		return true, 0
@@ -327,7 +389,7 @@ func ReleaseGate(ctx context.Context, cfg ReleaseConfig) (Report, error) {
 	for _, p := range cfg.Lock.Profiles {
 		sources[p.ID] = p
 		rep.Profiles[p.ID] = p.Commit
-		if p.Artifact == nil || p.Artifact.Path != "sha256:"+p.Artifact.SHA256 || p.Artifact.Adapter != "oci-semantic-json-v1" || p.Artifact.Architecture != "linux/amd64" || len(p.Artifact.ConfigurationSHA256) != 64 {
+		if p.Artifact == nil || p.Artifact.Path != "sha256:"+p.Artifact.SHA256 || p.Artifact.Adapter != "oci-semantic-json-v1" || p.Artifact.Architecture != "linux/amd64" || !isSHA256Hex(p.Artifact.SHA256) || !isSHA256Hex(p.Artifact.ConfigurationSHA256) {
 			fail("profile %s lacks a locked oracle artifact", p.ID)
 			continue
 		}
@@ -356,13 +418,9 @@ func ReleaseGate(ctx context.Context, cfg ReleaseConfig) (Report, error) {
 		}
 	}
 	// Obligation bindings.
-	passed := map[string]bool{}
-	for _, t := range cfg.Tests {
-		hash, err := hex.DecodeString(t.EvidenceSHA256)
-		if t.Name == "" || !t.Passed || t.Command == "" || err != nil || len(hash) != 32 {
-			continue
-		}
-		passed[t.Name] = true
+	passed, problems := observedTests(cfg.Tests, cfg.TestEvidence)
+	for _, p := range problems {
+		fail("%s", p)
 	}
 	if !cfg.Ledger.Complete || len(cfg.Ledger.Missing) > 0 || len(cfg.Ledger.Obligations) == 0 {
 		fail("inventory ledger incomplete")
@@ -429,6 +487,11 @@ func ReleaseGate(ctx context.Context, cfg ReleaseConfig) (Report, error) {
 			rep.UnrunCases = append(rep.UnrunCases, k.profile+"/"+k.id)
 			continue
 		}
+		if c.Expected.Kind == "" {
+			fail("case %s/%s declares no expected result", k.profile, k.id)
+			rep.UnrunCases = append(rep.UnrunCases, k.profile+"/"+k.id)
+			continue
+		}
 		ok = true
 		if cfg.Oracle == nil {
 			rep.OracleUnavailable++
@@ -455,7 +518,9 @@ func ReleaseGate(ctx context.Context, cfg ReleaseConfig) (Report, error) {
 		}
 		if cfg.Own == nil {
 			ok = false
-		} else if got, err := cfg.Own(ctx, c); err != nil {
+		} else if got, err := cfg.Own(ctx, c); errors.Is(err, ErrNotObserved) {
+			ok = false // the owned engine never observed the row: unrun, not a mismatch of the engines
+		} else if err != nil {
 			rep.Mismatches = append(rep.Mismatches, MismatchRecord{c.ID, c.Profile, "owned", "error: " + err.Error()})
 			ok = false
 		} else {
@@ -471,19 +536,32 @@ func ReleaseGate(ctx context.Context, cfg ReleaseConfig) (Report, error) {
 		rep.MatchedCaseCount++
 	}
 	sort.Strings(rep.UnrunCases)
-	if err := gateGenerated(ctx, cfg, sources, &rep, fail); err != nil {
+	covered, err := gateGenerated(ctx, cfg, sources, &rep, fail)
+	if err != nil {
 		return rep, err
 	}
-	// Input normalization.
-	rep.InputNormalizationID = sha256Hex(canonical(cfg.Inputs))
-	if len(cfg.Inputs) == 0 {
+	// What the smoke runner observed: input normalization, persistence, isolation.
+	var smoke SmokeReport
+	if cfg.Smoke == nil {
+		fail("no smoke report: the persisted path was never observed")
+	} else {
+		smoke = *cfg.Smoke
+		for _, p := range smoke.problems() {
+			fail("%s", p)
+		}
+	}
+	rep.InputNormalizationID = sha256Hex(canonical(smoke.Normalization))
+	if len(smoke.Normalization) == 0 {
 		fail("no input normalization checks")
 	}
-	for _, c := range cfg.Inputs {
+	for _, c := range smoke.Normalization {
 		if why := normalizationLoss(c); why != "" {
 			rep.NormalizationLoss++
 			fail("input normalization %s/%s: %s", c.Profile, c.ID, why)
 		}
+	}
+	if len(smoke.Normalization) > 0 && !carriesStaleMarker(smoke.Normalization) {
+		fail("input normalization evidence carries no stale marker: the stale-marker loss check was never exercised")
 	}
 	// Provenance, persistence, isolation, interactions.
 	rep.Provenance = cfg.Provenance
@@ -496,12 +574,18 @@ func ReleaseGate(ctx context.Context, cfg ReleaseConfig) (Report, error) {
 			fail("provenance %s rejected: %s", d.File, d.Reason)
 		}
 	}
-	rep.Persistence, rep.Isolation = cfg.Persistence, cfg.Isolation
-	rep.ScenarioFailures += scenarioFailures("persistence", cfg.Policy.RequiredPersistence, cfg.Persistence, fail)
-	rep.ScenarioFailures += scenarioFailures("isolation", cfg.Policy.RequiredIsolation, cfg.Isolation, fail)
-	rep.InteractionRequired, rep.InteractionCovered = cfg.Interaction.Required, cfg.Interaction.Covered
-	if cfg.Interaction.Required == 0 || cfg.Interaction.Covered != cfg.Interaction.Required || len(cfg.Interaction.Missing) > 0 {
-		fail("interaction coverage %d of %d", cfg.Interaction.Covered, cfg.Interaction.Required)
+	rep.Persistence, rep.Isolation = smoke.Persistence, smoke.Isolation
+	rep.ScenarioFailures += scenarioFailures("persistence", cfg.Policy.RequiredPersistence, smoke.Persistence, fail)
+	rep.ScenarioFailures += scenarioFailures("isolation", cfg.Policy.RequiredIsolation, smoke.Isolation, fail)
+	// Interaction coverage is derived from what ran: the interactions carried by
+	// generated cases whose every row was executed and matched. Nothing claims it.
+	if err := cfg.Spec.Validate(); err != nil {
+		fail("generation spec: %v", err)
+	}
+	cov := Coverage(cfg.Spec, covered)
+	rep.InteractionRequired, rep.InteractionCovered = cov.Required, cov.Covered
+	if cov.Required == 0 || cov.Covered != cov.Required {
+		fail("interaction coverage %d of %d%s", cov.Covered, cov.Required, missingInteractions(cov.Missing))
 	}
 	var mem runtime.MemStats
 	runtime.ReadMemStats(&mem)
@@ -520,23 +604,52 @@ func ReleaseGate(ctx context.Context, cfg ReleaseConfig) (Report, error) {
 	return rep, nil
 }
 
+// scenarioFailures holds every outcome of one family to the gate: each required
+// scenario must have been reported, every reported scenario must have passed
+// whether or not the policy names it, and a name reported twice is refused (a
+// later pass must not hide an earlier failure, nor the reverse).
 func scenarioFailures(kind string, required []string, got []ScenarioOutcome, fail func(string, ...any)) int {
-	by := map[string]ScenarioOutcome{}
-	for _, s := range got {
-		by[s.Name] = s
-	}
+	reported := map[string]bool{}
 	n := 0
+	for _, s := range got {
+		if reported[s.Name] {
+			n++
+			fail("%s scenario %s reported twice", kind, s.Name)
+			continue
+		}
+		reported[s.Name] = true
+		if !s.Passed {
+			n++
+			fail("%s scenario %s failed: %s", kind, s.Name, s.Detail)
+		}
+	}
 	for _, name := range required {
-		s, ok := by[name]
-		if !ok {
+		if !reported[name] {
 			n++
 			fail("%s scenario %s did not run", kind, name)
-		} else if !s.Passed {
-			n++
-			fail("%s scenario %s failed: %s", kind, name, s.Detail)
 		}
 	}
 	return n
+}
+
+// isSHA256Hex reports whether s is a 64-digit hexadecimal SHA-256 digest.
+func isSHA256Hex(s string) bool {
+	b, err := hex.DecodeString(s)
+	return err == nil && len(b) == sha256.Size
+}
+
+// missingInteractions names the first few interactions no executed and matched
+// case carried, for the failure text.
+func missingInteractions(missing []string) string {
+	if len(missing) == 0 {
+		return ""
+	}
+	shown := missing[:min(len(missing), 5)]
+	text := ": not carried by an executed and matched case: " + strings.Join(shown, ", ")
+	if len(missing) > len(shown) {
+		text += fmt.Sprintf(" (and %d more)", len(missing)-len(shown))
+	}
+	return text
 }
 
 func sha256Hex(s string) string {

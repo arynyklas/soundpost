@@ -1,0 +1,6 @@
+{
+ "Content-Type": "application/x-protobuf",
+ "X-Scope-OrgID": "soundpost-capture",
+ "method": "POST",
+ "path": "/loki/api/v1/push"
+}

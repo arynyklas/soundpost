@@ -14,24 +14,9 @@ import (
 	"github.com/arynyklas/soundpost/profiles"
 )
 
-// SmokeReport is what the smoke runner observed on a real persisted path. The
-// release gate consumes it; it is never synthesized.
-type SmokeReport struct {
-	Schema        string               `json:"schema"`
-	CaseFiles     []string             `json:"case_files"`
-	Storage       string               `json:"storage"`
-	Control       string               `json:"control"`
-	Modes         []string             `json:"modes"`
-	ModesNotRun   []string             `json:"modes_not_run"`
-	Persistence   []ScenarioOutcome    `json:"persistence"`
-	Isolation     []ScenarioOutcome    `json:"isolation"`
-	Normalization []NormalizationCheck `json:"normalization"`
-	Steps         []ScenarioOutcome    `json:"steps"`
-	NotSatisfied  []string             `json:"not_satisfied"`
-}
-
 // ProvenanceDecisions verifies every accepted audit file named by
-// provenance.json against its recorded digest.
+// provenance.json against its recorded digest. A path that leaves the query
+// directory is refused whatever its digest: the audited bytes live inside it.
 func ProvenanceDecisions(queryDir string) ([]ProvenanceDecision, error) {
 	var manifest struct {
 		Accepted []struct {
@@ -45,7 +30,13 @@ func ProvenanceDecisions(queryDir string) ([]ProvenanceDecision, error) {
 	var out []ProvenanceDecision
 	for _, a := range manifest.Accepted {
 		d := ProvenanceDecision{File: a.Path}
-		raw, err := os.ReadFile(filepath.Join(queryDir, filepath.FromSlash(a.Path)))
+		local := filepath.FromSlash(a.Path)
+		if !filepath.IsLocal(local) {
+			d.Reason = "audit path is outside the query directory"
+			out = append(out, d)
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(queryDir, local))
 		switch {
 		case err != nil:
 			d.Reason = err.Error()
@@ -70,16 +61,18 @@ func sumHex(b []byte) string {
 // LoadReleaseConfig assembles the gate input from the locked repository
 // artifacts. Evidence that does not exist (production bindings, authored case
 // runs, Go test observations, smoke results) is left empty so the gate counts
-// it as unresolved rather than inventing it.
+// it as unresolved rather than inventing it. The policy read is the
+// content-locked release-policy.json of the lock, whatever path policyPath
+// names, and is decoded strictly.
 func LoadReleaseConfig(queryDir, policyPath string, smoke *SmokeReport, seeds []uint64) (ReleaseConfig, error) {
 	if len(seeds) == 0 {
 		return ReleaseConfig{}, fmt.Errorf("at least one generator seed is required")
 	}
 	var cfg ReleaseConfig
-	if err := ReadJSON(policyPath, &cfg.Policy); err != nil {
+	if err := ReadJSON(filepath.Join(queryDir, "source-lock.json"), &cfg.Lock); err != nil {
 		return cfg, err
 	}
-	if err := ReadJSON(filepath.Join(queryDir, "source-lock.json"), &cfg.Lock); err != nil {
+	if err := readLockedStrict(cfg.Lock, "release-policy.json", policyPath, &cfg.Policy); err != nil {
 		return cfg, err
 	}
 	cfg.Lock.LedgerPath = filepath.Join(queryDir, "obligations.json")
@@ -111,6 +104,9 @@ func LoadReleaseConfig(queryDir, policyPath string, smoke *SmokeReport, seeds []
 		cfg.Bindings = append(cfg.Bindings, Binding{ObligationID: b.ObligationID, Implementation: b.Implementation, Cases: b.Cases, GoTests: b.GoTests})
 	}
 	cfg.Tests = acceptance.Tests
+	if cfg.TestEvidence, err = loadGoTestEvidence(queryDir); err != nil {
+		return cfg, err
+	}
 	manifest, err := LoadReleaseCaseManifest(filepath.Join(queryDir, "release-cases.json"))
 	if err != nil {
 		return cfg, err
@@ -121,27 +117,17 @@ func LoadReleaseConfig(queryDir, policyPath string, smoke *SmokeReport, seeds []
 	if cfg.Provenance, err = ProvenanceDecisions(queryDir); err != nil {
 		return cfg, err
 	}
-	spec, err := LoadGenerationSpec(filepath.Join(queryDir, "generation.json"))
-	if err != nil {
+	if cfg.Spec, err = LoadGenerationSpec(filepath.Join(queryDir, "generation.json")); err != nil {
 		return cfg, err
 	}
-	for i, seed := range seeds {
-		cases, err := generateForRelease(spec, ledger, cfg.GateDomains, seed)
-		if err != nil {
-			return cfg, err
-		}
-		if i == 0 {
-			cfg.Interaction = Coverage(spec, cases)
-		}
-		rows, err := PlanGenerated(spec, ledger, cfg.GateDomains, seed)
+	for _, seed := range seeds {
+		rows, err := PlanGenerated(cfg.Spec, ledger, cfg.GateDomains, seed)
 		if err != nil {
 			return cfg, fmt.Errorf("seed %d: %w", seed, err)
 		}
 		cfg.Generated = append(cfg.Generated, GeneratedRun{Seed: seed, Rows: rows})
 	}
-	if smoke != nil {
-		cfg.Persistence, cfg.Isolation, cfg.Inputs = smoke.Persistence, smoke.Isolation, smoke.Normalization
-	}
+	cfg.Smoke = smoke
 	return cfg, nil
 }
 

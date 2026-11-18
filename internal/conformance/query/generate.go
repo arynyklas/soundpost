@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -91,32 +92,222 @@ type CaseMismatch struct {
 	Case Case
 }
 
+// LoadGenerationSpec reads conformance/query/generation.json strictly: a field
+// this code does not know would be a declaration it silently does not honour.
 func LoadGenerationSpec(path string) (GenerationSpec, error) {
 	var spec GenerationSpec
-	if err := ReadJSON(path, &spec); err != nil {
+	if err := readStrictJSON(path, &spec); err != nil {
 		return spec, err
 	}
 	return spec, spec.Validate()
 }
 
+// queryLanguages are the languages the generator builds cases for.
+var queryLanguages = []string{"promql", "logql"}
+
+// Validate refuses every declaration the generator cannot honour. A declaration
+// that is silently dropped (an exclusion of nothing, a negative form for a
+// language nothing generates, a higher-order "tuple" of one coordinate that
+// every case trivially contains) shrinks the coverage the gate believes it
+// demands.
 func (s GenerationSpec) Validate() error {
 	if s.Schema != "soundpost-query-generation/1" || len(s.Languages) == 0 {
 		return fmt.Errorf("invalid generation spec")
 	}
+	axes := map[string]map[string]map[string]bool{} // language -> axis -> declared values
 	for _, l := range s.Languages {
-		seen := map[string]bool{}
+		if !slices.Contains(queryLanguages, l.Language) {
+			return fmt.Errorf("language %s is not a query language", l.Language)
+		}
+		if _, dup := axes[l.Language]; dup {
+			return fmt.Errorf("language %s declared twice", l.Language)
+		}
+		values, err := l.validate()
+		if err != nil {
+			return err
+		}
+		axes[l.Language] = values
+	}
+	// coordinate resolves one "axis=value" of a language to its axis.
+	coordinate := func(language, kv string) (string, error) {
+		axis, value, _ := strings.Cut(kv, "=")
+		if !axes[language][axis][value] {
+			return "", fmt.Errorf("undeclared coordinate %s in %s", kv, language)
+		}
+		return axis, nil
+	}
+	for _, e := range s.Excluded {
+		if _, ok := axes[e.Language]; !ok {
+			return fmt.Errorf("exclusion %v names undeclared language %s", e.Pair, e.Language)
+		}
+		if len(e.Pair) != 2 {
+			return fmt.Errorf("exclusion %v must name exactly two coordinates", e.Pair)
+		}
+		first, err := coordinate(e.Language, e.Pair[0])
+		if err != nil {
+			return err
+		}
+		second, err := coordinate(e.Language, e.Pair[1])
+		if err != nil {
+			return err
+		}
+		if first == second {
+			return fmt.Errorf("exclusion %v names two values of one axis", e.Pair)
+		}
+		if e.Reason == "" {
+			return fmt.Errorf("exclusion %v has no reason", e.Pair)
+		}
+	}
+	for _, h := range s.HigherOrder {
+		if _, ok := axes[h.Language]; !ok {
+			return fmt.Errorf("higher-order tuple %v names undeclared language %s", h.Tuple, h.Language)
+		}
+		if len(h.Tuple) < 3 {
+			return fmt.Errorf("higher-order tuple %v names fewer than three coordinates", h.Tuple)
+		}
+		used := map[string]bool{}
+		for _, kv := range h.Tuple {
+			axis, err := coordinate(h.Language, kv)
+			if err != nil {
+				return err
+			}
+			if used[axis] {
+				return fmt.Errorf("higher-order tuple %v repeats axis %s", h.Tuple, axis)
+			}
+			used[axis] = true
+		}
+	}
+	forms := map[string]bool{}
+	for _, f := range s.NegativeForms {
+		if f.ID == "" {
+			return fmt.Errorf("negative form without an id")
+		}
+		if _, ok := axes[f.Language]; !ok {
+			return fmt.Errorf("negative form %s names undeclared language %s", f.ID, f.Language)
+		}
+		if strings.Count(f.Wrap, "%s") != 1 {
+			return fmt.Errorf("negative form %s must wrap its expression with exactly one %%s", f.ID)
+		}
+		if f.Category == "" {
+			return fmt.Errorf("negative form %s has no category", f.ID)
+		}
+		key := f.Language + "/" + f.ID
+		if forms[key] {
+			return fmt.Errorf("negative form %s of %s declared twice", f.ID, f.Language)
+		}
+		forms[key] = true
+	}
+	probes := map[string]bool{}
+	for _, p := range s.GateProbes {
+		if _, ok := exactPins[p.Profile]; !ok {
+			return fmt.Errorf("gate probe of %s names unknown profile %s", p.Gate, p.Profile)
+		}
+		if p.Gate == "" || p.Expression == "" || p.Category == "" {
+			return fmt.Errorf("gate probe of %s needs a gate, an expression and a category", p.Profile)
+		}
+		key := p.Profile + "/" + p.Gate
+		if probes[key] {
+			return fmt.Errorf("gate probe %s of %s declared twice", p.Gate, p.Profile)
+		}
+		probes[key] = true
+	}
+	return nil
+}
+
+// validate checks the profiles and axes of one language and returns the values
+// each of its axes declares.
+func (l LanguageSpec) validate() (map[string]map[string]bool, error) {
+	if len(l.Profiles) == 0 {
+		return nil, fmt.Errorf("language %s has no profiles", l.Language)
+	}
+	named := map[string]bool{}
+	for _, id := range l.Profiles {
+		if _, ok := exactPins[id]; !ok {
+			return nil, fmt.Errorf("language %s names unknown profile %s", l.Language, id)
+		}
+		if languageOf(id) != l.Language {
+			return nil, fmt.Errorf("profile %s is not a %s profile", id, l.Language)
+		}
+		if named[id] {
+			return nil, fmt.Errorf("language %s names profile %s twice", l.Language, id)
+		}
+		named[id] = true
+	}
+	if len(l.Axes) < 2 {
+		return nil, fmt.Errorf("language %s needs two or more axes", l.Language)
+	}
+	values := map[string]map[string]bool{}
+	for _, a := range l.Axes {
+		switch {
+		case a.ID == "":
+			return nil, fmt.Errorf("axis without an id in language %s", l.Language)
+		case values[a.ID] != nil:
+			return nil, fmt.Errorf("duplicate axis %s of %s", a.ID, l.Language)
+		case len(a.Values) < 2:
+			return nil, fmt.Errorf("axis %s of %s needs two or more distinct values", a.ID, l.Language)
+		}
+		declared := map[string]bool{}
+		for _, v := range a.Values {
+			if v == "" || declared[v] {
+				return nil, fmt.Errorf("empty or duplicate axis value %s.%s", a.ID, v)
+			}
+			declared[v] = true
+		}
+		values[a.ID] = declared
+	}
+	return values, nil
+}
+
+// builderAxes are the axes and values the case builders (promInput,
+// promExpression, logInput and logExpression) implement. A spec may declare any
+// subset; a value outside it would behave as the builders' default while being
+// counted as a covered coordinate.
+var builderAxes = map[string]map[string][]string{
+	"promql": {
+		"sample_kind":       {"float", "native_histogram", "stale", "nan"},
+		"time_window":       {"none", "offset", "at_modifier", "range_window", "subquery"},
+		"metadata_mutation": {"none", "metadata"},
+		"order_duplicates":  {"none", "duplicate_timestamp", "tie_limit", "ordering"},
+	},
+	"logql": {
+		"sample_kind":       {"plain_line", "structured_metadata", "newline_label"},
+		"time_window":       {"none", "offset", "range_window"},
+		"template_parse":    {"none", "template"},
+		"metadata_mutation": {"none", "metadata", "mutation"},
+		"order_duplicates":  {"none", "duplicate_timestamp", "stage_order"},
+	},
+}
+
+// checkBuilders refuses a spec that declares an axis no builder reads or a value
+// of an axis no builder implements.
+func (s GenerationSpec) checkBuilders() error {
+	for _, l := range s.Languages {
 		for _, a := range l.Axes {
-			if a.ID == "" || seen[a.ID] || len(a.Values) < 2 {
-				return fmt.Errorf("axis %s of %s needs two or more distinct values", a.ID, l.Language)
+			implemented, ok := builderAxes[l.Language][a.ID]
+			if !ok {
+				return fmt.Errorf("axis %s of %s is read by no case builder", a.ID, l.Language)
 			}
-			seen[a.ID] = true
-			vs := map[string]bool{}
 			for _, v := range a.Values {
-				if v == "" || vs[v] {
-					return fmt.Errorf("duplicate axis value %s.%s", a.ID, v)
+				if !slices.Contains(implemented, v) {
+					return fmt.Errorf("axis %s of %s declares value %q, which no case builder implements", a.ID, l.Language, v)
 				}
-				vs[v] = true
 			}
+		}
+	}
+	return nil
+}
+
+// checkGateProbes refuses a gate probe whose profile has no registered gate
+// domain or whose gate that domain does not own: such a probe would be dropped
+// without a trace.
+func (s GenerationSpec) checkGateProbes(domains []GateDomain) error {
+	for _, p := range s.GateProbes {
+		i := slices.IndexFunc(domains, func(d GateDomain) bool { return d.Profile == p.Profile })
+		if i < 0 {
+			return fmt.Errorf("gate probe %s: no registered gate domain for %s", p.Gate, p.Profile)
+		}
+		if !slices.Contains(domains[i].Gates, p.Gate) {
+			return fmt.Errorf("gate probe %s: profile %s has no such gate", p.Gate, p.Profile)
 		}
 	}
 	return nil
@@ -342,6 +533,12 @@ func logExpression(c map[string]string, r *splitmix) string {
 // case is emitted.
 func Generate(ctx context.Context, registry profile.Registry, ledger Ledger, seed uint64, budget GenerationBudget) ([]Case, error) {
 	if err := budget.Spec.Validate(); err != nil {
+		return nil, err
+	}
+	if err := budget.Spec.checkBuilders(); err != nil {
+		return nil, err
+	}
+	if err := budget.Spec.checkGateProbes(budget.Domains); err != nil {
 		return nil, err
 	}
 	rng := &splitmix{s: seed}
@@ -619,9 +816,11 @@ func containsAll(have, want []string) bool {
 // Minimize shrinks a mismatching case while predicate keeps reporting that the
 // mismatch persists. Candidates only remove input records or peel trailing
 // characters from the expression at token-ish boundaries; the result is never
-// larger and always still satisfies the predicate. The predicate decides what
-// counts as the same mismatch, so a candidate that merely fails differently is
-// refused by it.
+// larger and always still satisfies the predicate: it is verified once more
+// after the shrinking, and a result that no longer reproduces (a flaky
+// predicate) is an error, never a "minimized mismatch" that does not fail. The
+// predicate decides what counts as the same mismatch, so a candidate that merely
+// fails differently is refused by it.
 func Minimize(ctx context.Context, mismatch CaseMismatch, predicate func(Case) (bool, error)) (Case, error) {
 	best := mismatch.Case
 	if ok, err := predicate(best); err != nil {
@@ -644,6 +843,11 @@ func Minimize(ctx context.Context, mismatch CaseMismatch, predicate func(Case) (
 				break
 			}
 		}
+	}
+	if ok, err := predicate(best); err != nil {
+		return best, err
+	} else if !ok {
+		return best, fmt.Errorf("minimized case no longer reproduces")
 	}
 	return best, nil
 }

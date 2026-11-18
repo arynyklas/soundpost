@@ -196,15 +196,16 @@ func histogramExponentialFraction(lower, upper float64, f model.FloatHistogram, 
 		rank += b.count
 	}
 	// Version gates share one shape: 3.13.5 behavior only for the 3.13.5 pin.
-	// Known corner, unqualified: with a NaN sum and a bucket population ABOVE the
-	// observation count (not producible by the pinned engines' own ingestion, no
-	// recorded reference row) the 3.13.5 reference ceiling is described as the
-	// bucket population, while this code keeps the observation count because the
-	// branch below only lowers the ceiling when the population is smaller.
+	// With a NaN sum 3.13.5 caps every rank at the bucket population, whether it
+	// is below the observation count (NaN observations: the info annotation) or,
+	// for a histogram the pinned ingestion would not store, above it; 3.1.0 has no
+	// NaN branch and always caps at the observation count.
 	ceiling := total
 	reason := ""
-	if population < total && math.IsNaN(math.Float64frombits(uint64(f.Sum))) {
-		reason = "NativeHistogramFractionNaNsInfo"
+	if math.IsNaN(math.Float64frombits(uint64(f.Sum))) {
+		if population < total {
+			reason = "NativeHistogramFractionNaNsInfo"
+		}
 		if profileID == "promql-prometheus-3.13.5" {
 			ceiling = population
 		}

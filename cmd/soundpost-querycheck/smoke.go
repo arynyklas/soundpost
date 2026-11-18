@@ -46,7 +46,7 @@ func runSmoke(args []string) error {
 		return fmt.Errorf("smoke requires --cases")
 	}
 	ctx := context.Background()
-	report := q.SmokeReport{Schema: "soundpost-smoke-report/1", Storage: "real", Control: "real"}
+	report := q.SmokeReport{Schema: q.SmokeReportSchema, Storage: "real", Control: "real"}
 	var layouts []smoke.Layout
 	for _, m := range strings.Split(*modes, ",") {
 		switch layout := smoke.Layout(strings.TrimSpace(m)); layout {
@@ -199,30 +199,44 @@ func runSmoke(args []string) error {
 	return nil
 }
 
-// collateIsolation derives the named isolation scenarios from executed steps.
+// isolationScenarios are the isolation scenarios collated from executed steps, in
+// the order the report lists them. A scenario rests on one or more step-name
+// fragments and passes only if every fragment matched a step that ran and every
+// step it matched passed.
+var isolationScenarios = []struct {
+	name  string
+	steps []string
+}{
+	{"foreign-project-fails-closed", []string{"foreign-project"}},
+	{"revocation-during-compute", []string{"revocation-during-compute"}},
+	{"cancellation-releases-everything", []string{"cancellation-releases-everything"}},
+	{"complete-rules-never-use-partial-data", []string{"unavailable-shard-is-unknown-not-recovery", "complete-data-recovers"}},
+}
+
+// collateIsolation derives the named isolation scenarios from executed steps. A
+// scenario whose steps never ran is not passed, and neither is one with a failing
+// step; the outcome carries which.
 func collateIsolation(steps []q.ScenarioOutcome) []q.ScenarioOutcome {
-	find := func(substr string) (found, passed bool) {
-		passed = true
-		for _, s := range steps {
-			if strings.Contains(s.Name, substr) {
+	out := make([]q.ScenarioOutcome, 0, len(isolationScenarios))
+	for _, scenario := range isolationScenarios {
+		outcome := q.ScenarioOutcome{Name: scenario.name, Passed: true}
+		for _, fragment := range scenario.steps {
+			found := false
+			for _, s := range steps {
+				if !strings.Contains(s.Name, fragment) {
+					continue
+				}
 				found = true
-				passed = passed && s.Passed
+				if !s.Passed && outcome.Passed {
+					outcome.Passed, outcome.Detail = false, "step "+s.Name+" failed: "+s.Detail
+				}
+			}
+			if !found && outcome.Passed {
+				outcome.Passed, outcome.Detail = false, "no step matching "+fragment+" ran"
 			}
 		}
-		return
+		out = append(out, outcome)
 	}
-	var out []q.ScenarioOutcome
-	for scenario, substr := range map[string]string{
-		"foreign-project-fails-closed":     "foreign-project",
-		"revocation-during-compute":        "revocation-during-compute",
-		"cancellation-releases-everything": "cancellation-releases-everything",
-	} {
-		found, passed := find(substr)
-		out = append(out, q.ScenarioOutcome{Name: scenario, Passed: found && passed})
-	}
-	found, passed := find("unavailable-shard-is-unknown-not-recovery")
-	_, passed2 := find("complete-data-recovers")
-	out = append(out, q.ScenarioOutcome{Name: "complete-rules-never-use-partial-data", Passed: found && passed && passed2})
 	return out
 }
 

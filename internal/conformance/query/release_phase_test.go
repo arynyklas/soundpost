@@ -10,8 +10,10 @@ import (
 
 // Every production binding of acceptance.json must cite, for each of its
 // obligation's positive/negative/interaction case IDs, a real row of a
-// content-locked case file in the release manifest, an implementation that is
-// not pending and only Go tests that exist.
+// content-locked case file in the release manifest, and an implementation that
+// is not pending, with at least one Go test name. That the cited Go tests exist
+// and passed is not checked here: TestRealTestObservationsAreBackedByTheRecordedStream
+// holds them to the recorded `go test -json` stream.
 func TestReleaseBindingsResolveToLockedCaseRows(t *testing.T) {
 	here, err := os.Getwd()
 	if err != nil {

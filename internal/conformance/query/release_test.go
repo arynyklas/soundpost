@@ -64,7 +64,8 @@ func releaseFixture(t testing.TB) ReleaseConfig {
 	}
 	cfg := ReleaseConfig{Lock: loadRealLock(t), Ledger: picked, GateDomains: domains.Domains}
 	cfg.Policy = ReleasePolicy{Schema: "soundpost-query-release-policy/1", RequireLocked: true, RequireZeroUnbound: true, RequireZeroSkips: true, RequireZeroMismatch: true, RequireZeroUnrun: true, RequireOracle: true, RequireLosslessInput: true,
-		AllProfiles: []string{"promql-prometheus-3.1.0", "promql-prometheus-3.13.5", "logql-loki-3.5.2"}, RequiredPersistence: []string{"flush"}, RequiredIsolation: []string{"foreign-project"}}
+		AllProfiles: []string{"promql-prometheus-3.1.0", "promql-prometheus-3.13.5", "logql-loki-3.5.2"}, RequiredPersistence: requiredPersistenceNames(), RequiredIsolation: requiredIsolationNames()}
+	var testNames []string
 	for i, o := range picked.Obligations {
 		test := "TestBound" + strings.ReplaceAll(strings.ReplaceAll(o.Kind, "-", ""), "_", "") + string(rune('A'+i))
 		b := Binding{ObligationID: o.ID, Implementation: "internal/query/example.go", GoTests: []string{test}}
@@ -75,7 +76,11 @@ func releaseFixture(t testing.TB) ReleaseConfig {
 			}
 		}
 		cfg.Bindings = append(cfg.Bindings, b)
-		cfg.Tests = append(cfg.Tests, TestObservation{Name: test, Passed: true, Command: "go test", EvidenceSHA256: strings.Repeat("ab", 32)})
+		testNames = append(testNames, test)
+	}
+	cfg.TestEvidence = goTestStream(testNames...)
+	for _, name := range testNames {
+		cfg.Tests = append(cfg.Tests, observationOf(name, cfg.TestEvidence))
 	}
 	fake := func(p SourceProfile, c ReleaseCase) SemanticResult {
 		r := c.Expected
@@ -84,16 +89,15 @@ func releaseFixture(t testing.TB) ReleaseConfig {
 		return r
 	}
 	cfg.Oracle = func(_ context.Context, p SourceProfile, c ReleaseCase) (SemanticResult, error) {
+		if p.Artifact == nil {
+			return SemanticResult{}, errors.New("the profile has no locked oracle artifact to answer as")
+		}
 		return fake(p, c), nil
 	}
 	cfg.Own = func(_ context.Context, c ReleaseCase) (SemanticResult, error) { return c.Expected, nil }
-	stale := InputRecord{Kind: "float", Timestamp: "10", Name: "m", Bits: StaleBits}
-	hist := InputRecord{Kind: "histogram", Timestamp: "10", Name: "h", Histogram: &Histogram{Kind: "integer", Schema: 0, Count: "3", ZeroCount: "1", PositiveSpans: []HistogramSpan{{Offset: 0, Length: 1}}, NegativeSpans: []HistogramSpan{}, PositiveDeltas: []string{"2"}}}
-	cfg.Inputs = []NormalizationCheck{{ID: "stale-and-histogram", Profile: "promql-prometheus-3.13.5", Source: []InputRecord{stale, hist}, Normalized: []InputRecord{stale, hist}}}
-	cfg.Persistence = []ScenarioOutcome{{Name: "flush", Passed: true}}
-	cfg.Isolation = []ScenarioOutcome{{Name: "foreign-project", Passed: true}}
+	cfg.Smoke = validSmokeReport()
 	cfg.Provenance = []ProvenanceDecision{{File: "provenance.json", Accepted: true}}
-	cfg.Interaction = InteractionCoverage{Required: 4, Covered: 4}
+	cfg.Spec = fixtureSpec()
 	cfg.Generated = []GeneratedRun{fixtureGeneratedRun(cfg, 20261110, 3)}
 	return cfg
 }
@@ -194,14 +198,14 @@ func TestReleaseRejectsSkipAndNormalizationLoss(t *testing.T) {
 		"dropped-record":  func(c *NormalizationCheck) { c.Normalized = c.Normalized[:1] },
 	} {
 		cfg := releaseFixture(t)
-		cfg.Inputs[0].Normalized = append([]InputRecord(nil), cfg.Inputs[0].Normalized...)
-		mutate(&cfg.Inputs[0])
+		cfg.Smoke.Normalization[0].Normalized = append([]InputRecord(nil), cfg.Smoke.Normalization[0].Normalized...)
+		mutate(&cfg.Smoke.Normalization[0])
 		if rep, err := ReleaseGate(ctx, cfg); err == nil || rep.NormalizationLoss != 1 {
 			t.Fatalf("%s: normalization loss accepted: %v", name, err)
 		}
 	}
 	cfg := releaseFixture(t)
-	cfg.Inputs = nil
+	cfg.Smoke.Normalization = nil
 	if _, err := ReleaseGate(ctx, cfg); err == nil {
 		t.Fatal("a gate with no normalization evidence passed")
 	}
@@ -220,10 +224,10 @@ func TestReleaseRejectsMismatchPolicyAndScenarioFailures(t *testing.T) {
 	}
 	for name, mutate := range map[string]func(*ReleaseConfig){
 		"policy-weakened":     func(c *ReleaseConfig) { c.Policy.RequireZeroSkips = false },
-		"persistence-missing": func(c *ReleaseConfig) { c.Persistence = nil },
-		"persistence-failed":  func(c *ReleaseConfig) { c.Persistence[0].Passed = false },
-		"isolation-failed":    func(c *ReleaseConfig) { c.Isolation[0].Passed = false },
-		"interaction-short":   func(c *ReleaseConfig) { c.Interaction.Covered-- },
+		"persistence-missing": func(c *ReleaseConfig) { c.Smoke.Persistence = nil },
+		"persistence-failed":  func(c *ReleaseConfig) { c.Smoke.Persistence[0].Passed = false },
+		"isolation-failed":    func(c *ReleaseConfig) { c.Smoke.Isolation[0].Passed = false },
+		"interaction-unrun":   func(c *ReleaseConfig) { c.Generated[0].Rows = c.Generated[0].Rows[1:] },
 		"provenance-rejected": func(c *ReleaseConfig) { c.Provenance[0].Accepted = false },
 		"ledger-incomplete":   func(c *ReleaseConfig) { c.Ledger.Complete = false },
 		"missing-gate-domain": func(c *ReleaseConfig) { c.GateDomains = c.GateDomains[:2] },

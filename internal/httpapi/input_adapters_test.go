@@ -151,6 +151,9 @@ type lossyAdmitter struct {
 func (l *lossyAdmitter) ResolveSource(ctx context.Context, c ingest.SourceCredential, b ingest.Batch) (ingest.SourceGrant, error) {
 	return l.inner.ResolveSource(ctx, c, b)
 }
+func (l *lossyAdmitter) LookupReceipt(ctx context.Context, c ingest.SourceCredential, q model.ReceiptRequest) (ingest.Receipt, error) {
+	return l.inner.LookupReceipt(ctx, c, q)
+}
 func (l *lossyAdmitter) Admit(ctx context.Context, g ingest.SourceGrant, b ingest.Batch) (ingest.Receipt, error) {
 	receipt, err := l.inner.Admit(ctx, g, b)
 	l.mu.Lock()
@@ -686,10 +689,10 @@ func TestInputAdapterRefusesBrowserSources(t *testing.T) {
 	}
 }
 
-// logSlot is the owner slot of a one-label log stream in a project.
-func (e *adapterEnv) logSlot(t *testing.T, project model.ID, source model.ID, shard string) int {
+// metricSlot is the owner slot of the series {job="api"} with the given name in a project.
+func (e *adapterEnv) metricSlot(t *testing.T, project model.ID, source model.ID, name string) int {
 	t.Helper()
-	rec := model.Record{Kind: model.Log, Payload: model.Payload{Log: &model.LogRecord{StreamLabels: model.Labels{{Name: "shard", Value: shard}}}}}
+	rec := model.Record{Kind: model.Metric, Payload: model.Payload{Metric: &model.MetricPoint{Name: name, Labels: model.Labels{{Name: "job", Value: "api"}}}}}
 	slot, err := model.OwnerSlot(e.org, project, source, model.NewID(), rec)
 	if err != nil {
 		t.Fatal(err)
@@ -698,36 +701,54 @@ func (e *adapterEnv) logSlot(t *testing.T, project model.ID, source model.ID, sh
 }
 
 // TestInputAdapterMixedChildFailuresPreferRetryable: when one child fails for a
-// final reason (an unapproved label value) and another only lost its response,
+// final reason that only the append can see (a storage conflict: another value is
+// already stored at the same series and time) and another only lost its response,
 // the sender is told to retry: answering with the final status would make it
-// drop a request whose other child it could still deliver.
+// drop a request whose other child it could still deliver. A refusal that the
+// source policy decides never gets here: it rejects the whole request before the
+// first child is admitted (TestInputAdapterRejectedRequestWritesNothing).
 func TestInputAdapterMixedChildFailuresPreferRetryable(t *testing.T) {
 	e := newAdapterEnv(t, httpapi.InputAdapterConfig{})
-	bogus, bogusSlot := "", 0
-	for i := 0; bogus == ""; i++ {
+	conflict, conflictSlot := "", 0
+	for i := 0; conflict == ""; i++ {
 		if i > 4000 {
-			t.Fatal("no unapproved stream name lands in a low owner slot")
+			t.Fatal("no series name lands in a low owner slot")
 		}
-		name := fmt.Sprintf("bogus%d", i)
-		if slot := e.logSlot(t, e.p1, e.s1.ID, name); slot <= 20 {
-			bogus, bogusSlot = name, slot
+		name := fmt.Sprintf("mixed_conflict_%d", i)
+		if slot := e.metricSlot(t, e.p1, e.s1.ID, name); slot <= 20 {
+			conflict, conflictSlot = name, slot
 		}
 	}
 	var good []string
-	for _, s := range e.shards {
-		if len(good) < 6 && e.logSlot(t, e.p1, e.s1.ID, s) > bogusSlot {
-			good = append(good, s)
+	goodSlots := map[int]bool{}
+	for i := 0; len(goodSlots) < 2; i++ {
+		if i > 4000 {
+			t.Fatalf("only %d owner slots above the conflicting series' slot %d were found", len(goodSlots), conflictSlot)
+		}
+		name := fmt.Sprintf("mixed_ok_%d", i)
+		if slot := e.metricSlot(t, e.p1, e.s1.ID, name); slot > conflictSlot {
+			good = append(good, name)
+			goodSlots[slot] = true
 		}
 	}
-	if len(good) < 6 {
-		t.Fatalf("only %d registered streams sort after the unapproved stream's slot %d", len(good), bogusSlot)
+	nowMS := time.Now().UnixMilli() - 60000
+	if r := e.post(t, "/adapters/v1/prometheus/write", e.s1.Credential, rwHeaders(false), snappyBlock(remoteWriteV1([]string{conflict}, nowMS, 1))); r.Status != 200 {
+		t.Fatalf("storing the first value: %d %s", r.Status, r.Body)
 	}
-	now := time.Now().UnixNano() - int64(time.Minute)
-	body := lokiJSON(t, append([]string{bogus}, good...), now, "alpha")
-	e.adm.arm(2) // child 1 is the unapproved stream (final failure); child 2's response is lost
-	r := e.post(t, "/adapters/v1/loki/push", e.s1.Credential, lokiHeaders(), body)
-	if len(r.Children) < 3 || r.Status != 503 || !r.Retry || r.Failed != 2 || r.Children[0].Fault == nil || r.Children[0].Fault.Retryable || r.Children[1].Fault == nil || !r.Children[1].Fault.Retryable {
+	body := snappyBlock(remoteWriteV1(append([]string{conflict}, good...), nowMS, 2))
+	e.adm.arm(2) // child 1 holds the series with another value (final failure); child 2's response is lost
+	r := e.post(t, "/adapters/v1/prometheus/write", e.s1.Credential, rwHeaders(false), body)
+	if len(r.Children) < 3 || r.Status != 503 || !r.Retry || r.Failed != 2 || r.Children[0].Fault == nil || r.Children[0].Fault.Retryable || r.Children[0].Fault.Code != "conflict" || r.Children[1].Fault == nil || !r.Children[1].Fault.Retryable {
 		t.Fatalf("a retryable child failure must decide the status: %d %s", r.Status, r.Body)
+	}
+	if got := e.count(t, e.p1, model.Metric); got != 1+len(good) {
+		t.Fatalf("the failing child must not stop the others: %d points stored, want %d", got, 1+len(good))
+	}
+	// Once no retryable failure is left, the retry is answered with the final status of the child that conflicts.
+	e.adm.arm()
+	retry := e.post(t, "/adapters/v1/prometheus/write", e.s1.Credential, rwHeaders(false), body)
+	if retry.Status != 409 || retry.Failed != 1 || retry.Admitted != len(retry.Children)-1 || retry.Retry {
+		t.Fatalf("the retry must be final and name only the conflicting child: %d %s", retry.Status, retry.Body)
 	}
 }
 

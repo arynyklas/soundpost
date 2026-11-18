@@ -14,11 +14,22 @@
   "licence": "Loki AGPL-3.0 source is not used; the file is runtime output (exposition of operational metrics) only"
  },
  "loki_push": {
-  "status": "no real Loki push sender (promtail, alloy) is available offline; see lane2-wave4-report.md NOT done"
+  "generated": "2026-11-17 (lane 2 wave 16)",
+  "sender": "the unmodified upstream promtail client (grafana/loki 257d2f62bf8a81b44dea6fe88968d1d28c8e01e7, clients/pkg/promtail/client, source sha256 0db690662744694667c031a81d3e20cdd3a68a387a8050c8096bebbdf2ff8db2) built from the vendored source archive on a worker VM (Go 1.24.5) and run by loki-capture.go.txt against an in-process HTTP capture server; no container runtime. The client marshals logproto.PushRequest (gogo protobuf), snappy-block compresses it and sets its own headers.",
+  "files": "loki-push-NNN.bin (request bodies, verbatim), loki-push-NNN.headers.json, loki-push-sent.json (the entries fed to the client: the expectation), loki-capture.go.txt (the capture program)",
+  "licence": "Loki AGPL-3.0 source is not used or copied; the files are runtime output (the client's wire bytes) only"
  },
  "sha256": {
   "cap.py": "6f754b5c98250c13f36807055e6eb66b3a531410823eddd0b6bfc717021f81c3",
   "fixture-exposition.om": "ad4f88c4094dc68c28f963c74b50a7e92bf2932ab931ce92782529886dfb5090",
+  "loki-capture.go.txt": "898e0d2f09f33d74dd02826ed5e76649f3b352d8b79b2942c0e9ee5f16c05140",
+  "loki-push-001.bin": "637b9efd757b423dbfd1e0dc54abb0880a4d9a74281041b51d89e3b10d5b7507",
+  "loki-push-001.headers.json": "bc0680af82d7dd4a55b5c81aaa7fc8eeda9057a04253ae1f1057cbf60a641a5d",
+  "loki-push-002.bin": "31374253a7e207153eee838d98e08dbcc5cb5a2ff54e7bf9cabd3bc4bf1c320e",
+  "loki-push-002.headers.json": "bc0680af82d7dd4a55b5c81aaa7fc8eeda9057a04253ae1f1057cbf60a641a5d",
+  "loki-push-003.bin": "c6ed639564a273bcbfc430fa9df5647a68a2867b10ca52a531ae26cee272ef60",
+  "loki-push-003.headers.json": "bc0680af82d7dd4a55b5c81aaa7fc8eeda9057a04253ae1f1057cbf60a641a5d",
+  "loki-push-sent.json": "70abf63169909181269b28c48265762633f5ba941f42728e1e6e8dbfc9e98900",
   "loki-3.5.2-self-metrics.om": "2a7515dcefbc1f4eb4d555312839eb7982b4ed049499d212ef7a9e9c29b3f16a",
   "prom.yml": "9632259618c9af69dc35156d5a784a326a0f7c44dcf1f8c0cff6385eb883325b",
   "rw-v1-001.bin": "fa234767b68d7ff79f4676603ed6133e04e5eaa1b8935af0ffeebec54d0c9be4",

@@ -8,6 +8,9 @@ package queryinput
 var (
 	SnappyDecode    = snappyDecode
 	NewMetricRecord = newMetricRecord
+	RecordCost      = recordCost
+	RequestDigest   = requestDigest
+	DeriveID        = deriveID
 )
 
 const FmtNormalize = fmtNormalize

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -41,10 +42,11 @@ type PhaseResults map[string]PhaseOutcome
 
 func PhaseKey(profile, id string) string { return profile + "\x00" + id }
 
-// LoadReleaseCaseManifest reads and validates the manifest.
+// LoadReleaseCaseManifest reads and validates the manifest. It is decoded
+// strictly: a field this code does not know is an error, never silently ignored.
 func LoadReleaseCaseManifest(path string) (ReleaseCaseManifest, error) {
 	var m ReleaseCaseManifest
-	if err := ReadJSON(path, &m); err != nil {
+	if err := readStrictJSON(path, &m); err != nil {
 		return m, err
 	}
 	if m.Schema != "soundpost-query-release-cases/1" || len(m.Files) == 0 {
@@ -132,11 +134,46 @@ func ReleaseCasesFromManifest(lock SourceLock, queryDir string, m ReleaseCaseMan
 	return out, nil
 }
 
+// phaseRunners are the differential runners of each language and phase. Release
+// uses the real ones; the tests of the glue inject observations instead.
+type phaseRunners struct {
+	syntax        func(ctx context.Context, lock SourceLock, casesPath, profilesPath, runtime string) (SyntaxPhaseReport, error)
+	configuration func(ctx context.Context, lock SourceLock, casesPaths []string, runtime string) (ConfigurationPhaseReport, error)
+	evaluation    func(ctx context.Context, lock SourceLock, casesPaths []string, profilesPath, runtime string) (EvaluationPhaseReport, error)
+	logql         func(ctx context.Context, lock SourceLock, casesPath, profilesPath, runtime, phase string) (LogQLPhaseReport, error)
+}
+
+var realPhaseRunners = phaseRunners{syntax: RunSyntaxPhase, configuration: RunConfigurationPhase, evaluation: RunEvaluationPhase, logql: RunLogQLPhase}
+
+// observedByTwoCaseFiles is the problem a row carries when two case files of one
+// run both observed it: the later observation must not replace the earlier one.
+const observedByTwoCaseFiles = "observed by two case files"
+
+// record stores the outcome of one row. A row a second case file also observed
+// keeps the problems of both and one more of its own: whichever file failed, the
+// row fails.
+func (r PhaseResults) record(key string, o PhaseOutcome) {
+	prev, seen := r[key]
+	if !seen {
+		r[key] = o
+		return
+	}
+	prev.Problems = append(slices.Clone(prev.Problems), o.Problems...)
+	if !slices.Contains(prev.Problems, observedByTwoCaseFiles) {
+		prev.Problems = append(prev.Problems, observedByTwoCaseFiles)
+	}
+	r[key] = prev
+}
+
 // RunReleasePhases runs every manifest file through its differential phase runner
 // and collects one outcome per (profile, case). A runner failure that still
 // produced per-case comparisons keeps those comparisons: their mismatches are the
 // evidence. A runner that observed nothing returns its error.
 func RunReleasePhases(ctx context.Context, lock SourceLock, queryDir, profilesDir, runtime string, m ReleaseCaseManifest) (PhaseResults, error) {
+	return runReleasePhases(ctx, realPhaseRunners, lock, queryDir, profilesDir, runtime, m)
+}
+
+func runReleasePhases(ctx context.Context, run phaseRunners, lock SourceLock, queryDir, profilesDir, runtime string, m ReleaseCaseManifest) (PhaseResults, error) {
 	results := PhaseResults{}
 	var failures []string
 	for _, f := range m.Files {
@@ -144,41 +181,41 @@ func RunReleasePhases(ctx context.Context, lock SourceLock, queryDir, profilesDi
 		tag := releasePhaseTag(f)
 		switch {
 		case f.Language == "promql" && f.Phase == "syntax":
-			rep, err := RunSyntaxPhase(ctx, lock, path, profilesDir, runtime)
+			rep, err := run.syntax(ctx, lock, path, profilesDir, runtime)
 			for _, c := range rep.Cases {
-				results[PhaseKey(c.Profile, c.ID)] = PhaseOutcome{Phase: tag, Identity: c.Identity, Problems: c.Mismatches}
+				results.record(PhaseKey(c.Profile, c.ID), PhaseOutcome{Phase: tag, Identity: c.Identity, Problems: c.Mismatches})
 			}
 			if err != nil && len(rep.Cases) == 0 {
 				failures = append(failures, fmt.Sprintf("%s: %v", f.Path, err))
 			}
 		case f.Language == "promql" && f.Phase == "configuration":
-			rep, err := RunConfigurationPhase(ctx, lock, []string{path}, runtime)
+			rep, err := run.configuration(ctx, lock, []string{path}, runtime)
 			for _, c := range rep.Cases {
-				results[PhaseKey(c.Profile, c.ID)] = PhaseOutcome{Phase: tag, Identity: c.Oracle, Problems: c.Mismatches}
+				results.record(PhaseKey(c.Profile, c.ID), PhaseOutcome{Phase: tag, Identity: c.Oracle, Problems: c.Mismatches})
 			}
 			if err != nil && len(rep.Cases) == 0 {
 				failures = append(failures, fmt.Sprintf("%s: %v", f.Path, err))
 			}
 		case f.Language == "promql":
-			rep, err := RunEvaluationPhase(ctx, lock, []string{path}, profilesDir, runtime)
+			rep, err := run.evaluation(ctx, lock, []string{path}, profilesDir, runtime)
 			for _, c := range rep.Cases {
 				var problems []string
 				for _, mm := range c.Mismatches {
 					problems = append(problems, fmt.Sprintf("%s: reference %v, owned %v", mm.Field, mm.Want, mm.Got))
 				}
-				results[PhaseKey(c.Profile, c.ID)] = PhaseOutcome{Phase: tag, Identity: c.Oracle, Problems: problems}
+				results.record(PhaseKey(c.Profile, c.ID), PhaseOutcome{Phase: tag, Identity: c.Oracle, Problems: problems})
 			}
 			if err != nil && len(rep.Cases) == 0 {
 				failures = append(failures, fmt.Sprintf("%s: %v", f.Path, err))
 			}
 		default:
-			rep, err := RunLogQLPhase(ctx, lock, path, profilesDir, runtime, f.Phase)
+			rep, err := run.logql(ctx, lock, path, profilesDir, runtime, f.Phase)
 			for _, c := range rep.Cases {
 				var problems []string
 				for _, mm := range c.Mismatches {
 					problems = append(problems, fmt.Sprintf("%s: reference %v, owned %v", mm.Field, mm.Want, mm.Got))
 				}
-				results[PhaseKey(logQLProfile, c.ID)] = PhaseOutcome{Phase: tag, Identity: c.Oracle, Problems: problems}
+				results.record(PhaseKey(logQLProfile, c.ID), PhaseOutcome{Phase: tag, Identity: c.Oracle, Problems: problems})
 			}
 			if err != nil && len(rep.Cases) == 0 {
 				failures = append(failures, fmt.Sprintf("%s: %v", f.Path, err))
@@ -190,6 +227,14 @@ func RunReleasePhases(ctx context.Context, lock SourceLock, queryDir, profilesDi
 	}
 	return results, nil
 }
+
+// PhaseProblems is the disagreement of one row as the phase runner reported it,
+// one entry per problem. It is the error of the owned side of a row that
+// disagreed, so the gate and the minimizer see the individual problems rather
+// than one joined text.
+type PhaseProblems []string
+
+func (p PhaseProblems) Error() string { return strings.Join(p, "; ") }
 
 // PhaseOracle serves the reference side of the gate from the phase runs: the
 // observation exists only if the pinned oracle was actually run for that row.
@@ -205,7 +250,8 @@ func (r PhaseResults) PhaseOracle() OracleFunc {
 }
 
 // PhaseOwn serves the owned side: any disagreement the runner found (against the
-// reference or against the authored row) is an owned mismatch carrying its text.
+// reference or against the authored row) is an owned mismatch carrying its
+// problems as PhaseProblems.
 func (r PhaseResults) PhaseOwn() OwnFunc {
 	return func(_ context.Context, c ReleaseCase) (SemanticResult, error) {
 		o, ok := r[PhaseKey(c.Profile, c.ID)]
@@ -213,7 +259,7 @@ func (r PhaseResults) PhaseOwn() OwnFunc {
 			return SemanticResult{}, fmt.Errorf("the owned engine was not run for %s: %w", c.ID, ErrNotObserved)
 		}
 		if len(o.Problems) > 0 {
-			return SemanticResult{}, fmt.Errorf("%s", strings.Join(o.Problems, "; "))
+			return SemanticResult{}, PhaseProblems(slices.Clone(o.Problems))
 		}
 		return SemanticResult{Kind: "phase-case", Type: o.Phase}, nil
 	}

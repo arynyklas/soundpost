@@ -39,8 +39,8 @@ func runRelease(args []string) error {
 	}
 	var smoke *q.SmokeReport
 	if *smokePath != "" {
-		smoke = new(q.SmokeReport)
-		if err := q.ReadJSON(*smokePath, smoke); err != nil {
+		var err error
+		if smoke, err = q.LoadSmokeReport(*smokePath); err != nil {
 			return err
 		}
 	}

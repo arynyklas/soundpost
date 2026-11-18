@@ -44,7 +44,7 @@ func DecodeOpenMetrics(ctx context.Context, grant policy.SourceGrant, input io.R
 		return nil, fail(format, ReasonMalformed, "utf8")
 	}
 	p := &omParser{ctx: ctx, cfg: cfg, fams: map[string]*omFamily{}, created: map[string]int64{}, seen: map[string]bool{}}
-	a := &assembler{format: format, cfg: cfg, request: requestDigest(format, cfg, body)}
+	a := newAssembler(ctx, format, cfg, requestDigest(format, cfg, body))
 	p.a = a
 	if err := p.parse(body); err != nil {
 		return nil, err
@@ -52,7 +52,7 @@ func DecodeOpenMetrics(ctx context.Context, grant policy.SourceGrant, input io.R
 	if err := p.emit(); err != nil {
 		return nil, err
 	}
-	return a.finish(ctx)
+	return a.finish()
 }
 
 type omFamily struct {
@@ -160,6 +160,9 @@ func (p *omParser) meta(s string) error {
 		return p.bad("comment")
 	}
 	kind, name := parts[1], parts[2]
+	if strings.HasPrefix(name, "\"") {
+		return p.unrep("quoted_name")
+	}
 	rest := ""
 	if len(parts) == 4 {
 		rest = parts[3]
@@ -176,15 +179,21 @@ func (p *omParser) meta(s string) error {
 		default:
 			return p.bad("metric_type")
 		}
-		f, ok := p.descriptor(name)
-		if !ok || f.declare || f.sampled {
+		f, err := p.descriptor(name)
+		if err != nil {
+			return err
+		}
+		if f == nil || f.declare || f.sampled {
 			return p.bad("family_redeclared")
 		}
 		f.typ = rest
 		f.declare = true
 	case "UNIT":
-		f, ok := p.descriptor(name)
-		if !ok || len(parts) < 3 {
+		f, err := p.descriptor(name)
+		if err != nil {
+			return err
+		}
+		if f == nil || len(parts) < 3 {
 			return p.bad("unit_line")
 		}
 		if rest != "" && !safeUnit(rest) {
@@ -192,7 +201,11 @@ func (p *omParser) meta(s string) error {
 		}
 		f.unit = rest
 	case "HELP":
-		if _, ok := p.descriptor(name); !ok {
+		f, err := p.descriptor(name)
+		if err != nil {
+			return err
+		}
+		if f == nil {
 			return p.bad("help_line")
 		}
 		if p.cfg.Help == HelpReject {
@@ -214,25 +227,39 @@ func (p *omParser) family(name string) (*omFamily, error) {
 		return nil, p.bad("interleaved_family")
 	}
 	f := &omFamily{name: name, typ: "unknown", sampled: true}
-	p.fams[name] = f
-	p.cur = f
+	if err := p.open(f); err != nil {
+		return nil, err
+	}
 	return f, nil
 }
 
-// descriptor returns the family a HELP/UNIT/TYPE line belongs to. The
+// descriptor returns the family a HELP/UNIT/TYPE line belongs to, or nil when
+// the line names a family that an earlier family's lines already closed. The
 // OpenMetrics ABNF allows the descriptors of one family in any order and real
 // producers emit HELP, TYPE, UNIT; the first descriptor opens the family.
-func (p *omParser) descriptor(name string) (*omFamily, bool) {
+func (p *omParser) descriptor(name string) (*omFamily, error) {
 	if p.cur != nil && p.cur.name == name {
-		return p.cur, true
+		return p.cur, nil
 	}
 	if _, exists := p.fams[name]; exists {
-		return nil, false
+		return nil, nil
 	}
 	f := &omFamily{name: name, typ: "unknown"}
-	p.fams[name] = f
+	if err := p.open(f); err != nil {
+		return nil, err
+	}
+	return f, nil
+}
+
+// open makes f the current family. A family costs memory even when it has no
+// sample, so the families of a request are bounded like its series.
+func (p *omParser) open(f *omFamily) error {
+	if len(p.fams) >= p.cfg.Limits.MaxSeries {
+		return fail(fmtOpenMetrics, ReasonLimit, "families")
+	}
+	p.fams[f.name] = f
 	p.cur = f
-	return f, true
+	return nil
 }
 
 func (p *omParser) sample(s string) error {
@@ -241,6 +268,9 @@ func (p *omParser) sample(s string) error {
 		i++
 	}
 	name := s[:i]
+	if strings.HasPrefix(name, "\"") || name == "" && strings.HasPrefix(s, "{\"") {
+		return p.unrep("quoted_name")
+	}
 	if !validMetricName(name, p.cfg.Names, 1024) {
 		return fail(fmtOpenMetrics, ReasonInvalidName, "metric_name")
 	}
@@ -300,6 +330,9 @@ func (p *omParser) sample(s string) error {
 		if _, dup := p.created[key]; dup {
 			return p.bad("duplicate_created")
 		}
+		if len(p.created) >= p.cfg.Limits.MaxSeries {
+			return fail(fmtOpenMetrics, ReasonLimit, "created")
+		}
 		p.created[key] = sec
 		return nil
 	}
@@ -334,25 +367,15 @@ func (p *omParser) sample(s string) error {
 	if len(p.samples) >= p.cfg.Limits.MaxSamples {
 		return fail(fmtOpenMetrics, ReasonLimit, "samples")
 	}
-	if !p.seen[name+"\x00"+labelSig(labels)] {
+	key := seriesKey(name, labels)
+	if !p.seen[key] {
 		if len(p.seen) >= p.cfg.Limits.MaxSeries {
 			return fail(fmtOpenMetrics, ReasonLimit, "series")
 		}
-		p.seen[name+"\x00"+labelSig(labels)] = true
+		p.seen[key] = true
 	}
 	p.samples = append(p.samples, smp)
 	return nil
-}
-
-func labelSig(l model.Labels) string {
-	var b strings.Builder
-	for _, x := range l {
-		b.WriteString(x.Name)
-		b.WriteByte(0)
-		b.WriteString(x.Value)
-		b.WriteByte(1)
-	}
-	return b.String()
 }
 
 func withoutBucketLabels(in model.Labels) model.Labels {
@@ -384,6 +407,9 @@ func (p *omParser) labels(s string) (model.Labels, string, error) {
 			return nil, "", p.bad("label_syntax")
 		}
 		name := s[:eq]
+		if strings.HasPrefix(name, "\"") {
+			return nil, "", p.unrep("quoted_name")
+		}
 		var val strings.Builder
 		j := eq + 2
 		closed := false
@@ -573,19 +599,28 @@ func (p *omParser) seconds(tok string) (int64, error) {
 	if len(frac) > 9 {
 		return 0, p.unrep("timestamp_sub_nanosecond")
 	}
-	sec, err := strconv.ParseInt(whole, 10, 64)
+	sec, err := strconv.ParseUint(whole, 10, 64)
 	if err != nil || sec > math.MaxInt64/1_000_000_000 {
 		return 0, fail(fmtOpenMetrics, ReasonTimestampRange, "timestamp")
 	}
-	var fr int64
+	var fr uint64
 	if frac != "" {
-		fr, _ = strconv.ParseInt(frac+strings.Repeat("0", 9-len(frac)), 10, 64)
+		fr, _ = strconv.ParseUint(frac+strings.Repeat("0", 9-len(frac)), 10, 64)
 	}
-	ns := sec*1_000_000_000 + fr
+	// The magnitude is below 2^63 + 10^9: computed unsigned, it is compared with
+	// the int64 range before the sign is applied, so the last second on either
+	// side of the range is refused instead of wrapping around.
+	mag := sec*1_000_000_000 + fr
 	if neg {
-		ns = -ns
+		if mag > 1<<63 {
+			return 0, fail(fmtOpenMetrics, ReasonTimestampRange, "timestamp")
+		}
+		return int64(-mag), nil
 	}
-	return ns, nil
+	if mag > math.MaxInt64 {
+		return 0, fail(fmtOpenMetrics, ReasonTimestampRange, "timestamp")
+	}
+	return int64(mag), nil
 }
 
 func (p *omParser) emit() error {
@@ -595,11 +630,6 @@ func (p *omParser) emit() error {
 	matched := map[string]bool{}
 	for i := range p.samples {
 		s := &p.samples[i]
-		if i&1023 == 0 {
-			if err := ctxErr(fmtOpenMetrics, p.ctx); err != nil {
-				return err
-			}
-		}
 		labels, err := cleanLabels(fmtOpenMetrics, s.labels, p.cfg, &p.a.report)
 		if err != nil {
 			return err
@@ -633,7 +663,9 @@ func (p *omParser) emit() error {
 		if err != nil {
 			return err
 		}
-		p.a.add(rec)
+		if err := p.a.add(rec); err != nil {
+			return err
+		}
 	}
 	for key := range p.created {
 		if matched[key] {

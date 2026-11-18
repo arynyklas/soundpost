@@ -197,9 +197,24 @@ from the obligation text and IEEE/Go arithmetic, never from an oracle run, and
 they cover what one differential query cannot observe (cancellation, deadline,
 storage failure, budget exhaustion, engine option switches).
 
-Four obligations stay unbound: `configuration/protocols` and
-`configuration/scrape-inheritance` of both PromQL profiles. Their rule states
-that they "change materialized input acquisition, not fixed-input language
-evaluation": the owned product has no scrape-configuration implementation and the
-pinned oracle wrapper has no configuration-parsing phase (it is never rebuilt),
-so no differential row can observe them and none was fabricated.
+The four configuration obligations, `configuration/protocols` and
+`configuration/scrape-inheritance` of both PromQL profiles, are bound like every
+other obligation. Their rule states that they "change materialized input
+acquisition, not fixed-input language evaluation", so the evaluation oracle's
+`/adapter` cannot observe them; the configuration phase below observes them
+against a separately pinned configuration-phase oracle image (D29).
+
+## Evaluation phase without an OCI runtime (native references)
+
+`author/native-oracle.sh build` and `setup <repo>` build the two pinned Prometheus evaluation
+references natively from the sha256-verified upstream archives (the recipe of
+`oracles/promql-prometheus-<v>.Dockerfile`) and write a fake runtime that runs the evaluation
+adapter against them; pass it as `--runtime`. Only the evaluation phase is served. An observation
+made this way is a native build of the pinned source, not the digest-locked image: `record` takes
+`native` or `oci` and writes it into the recorded file. `author/ext-histogram-probe.py` authors the
+extended-selector native-histogram probe (`cases/promql-extended-histograms.json`, 2,860 comparisons)
+and records the reference observations to `evidence/native-promql-extended-histogram-observations.json`
+(content-locked in `source-lock.json`), replayed by
+`TestOwnedMatchesRecordedNativeExtendedHistogramObservations` from the locked bytes. The probe's first
+run (two mismatching rows, the smoothed mixed-schema divergence fixed in `promql/select.go`) is kept in
+the wave-17 evidence (`l2w17-evidence/lane2/probe-first-run-mismatches.json`).

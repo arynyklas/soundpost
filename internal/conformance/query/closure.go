@@ -3,6 +3,7 @@
 package query
 
 import (
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/build"
@@ -10,7 +11,9 @@ import (
 	"go/token"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -30,19 +33,44 @@ var forbiddenIdentifiers = []string{"RunOracle", "ServeAdapter", "ServeLogQLAdap
 // forbiddenLiterals in a production string literal name an oracle runtime or image.
 var forbiddenLiterals = []string{"soundpost-oracle", "/bin/prometheus", "/usr/bin/loki", "oci-semantic-json-v1"}
 
+// forbiddenExecutables are, by base name, the programs a production path may not
+// execute: an OCI runtime or an upstream engine.
+var forbiddenExecutables = []string{"docker", "podman", "prometheus", "loki"}
+
 type ClosureReport struct {
 	Packages  []string `json:"packages"`
 	Files     int      `json:"files"`
 	Violation []string `json:"violations"`
 }
 
+// closureTarget is one build configuration the production scan evaluates.
+type closureTarget struct {
+	goos, goarch string
+	cgo          bool
+}
+
+// closureTargets are the build configurations a production binary can be built
+// for. A file selected by any of them is production code, so every one is
+// scanned: a file only built for another platform or architecture, or only with
+// cgo enabled, must not escape the scan.
+var closureTargets = []closureTarget{
+	{"linux", "amd64", false},
+	{"linux", "amd64", true},
+	{"linux", "arm64", false},
+	{"windows", "amd64", false},
+	{"darwin", "arm64", false},
+	{"freebsd", "amd64", false},
+}
+
 // ProductionClosure proves, from source, that no production path can start or
 // contact an oracle: starting from root packages it follows module-internal
-// imports of non-test files (build constraints evaluated for linux and
-// windows), rejects any import of the conformance harness, an upstream engine
-// or the querycheck command, and scans every reached file for oracle entry
-// points, oracle image names and exec of an OCI runtime. A finite source check
-// complements, and does not replace, the binary symbol check.
+// imports of non-test files (build constraints evaluated for every target of
+// closureTargets), rejects any import of the conformance harness, an upstream
+// engine or the querycheck command, and scans every reached file for oracle entry
+// points, oracle image names and exec of an OCI runtime (exec.Command however
+// os/exec is imported, os.StartProcess, syscall.Exec and syscall.ForkExec). A
+// program named through a non-literal argument is not resolved. A finite source
+// check complements, and does not replace, the binary symbol check.
 func ProductionClosure(moduleRoot, modulePath string, roots []string) (ClosureReport, error) {
 	var report ClosureReport
 	seen := map[string]bool{}
@@ -58,23 +86,20 @@ func ProductionClosure(moduleRoot, modulePath string, roots []string) (ClosureRe
 		dir := filepath.Join(moduleRoot, filepath.FromSlash(rel))
 		var imports []string
 		var files []string
-		for _, goos := range []string{"linux", "windows"} {
+		for _, t := range closureTargets {
 			ctx := build.Default
-			ctx.GOOS, ctx.GOARCH, ctx.CgoEnabled = goos, "amd64", false
+			ctx.GOOS, ctx.GOARCH, ctx.CgoEnabled = t.goos, t.goarch, t.cgo
 			p, err := ctx.ImportDir(dir, 0)
 			if err != nil {
-				if _, none := err.(*build.NoGoError); none {
+				var none *build.NoGoError
+				if errors.As(err, &none) {
 					continue
 				}
 				return report, fmt.Errorf("%s: %w", pkg, err)
 			}
 			imports = append(imports, p.Imports...)
-			for _, f := range p.GoFiles {
-				files = append(files, f)
-			}
-			for _, f := range p.CgoFiles {
-				files = append(files, f)
-			}
+			files = append(files, p.GoFiles...)
+			files = append(files, p.CgoFiles...)
 		}
 		sort.Strings(files)
 		files = dedupe(files)
@@ -120,12 +145,60 @@ func dedupe(in []string) []string {
 	return out
 }
 
-func scanProductionFile(path string) ([]string, error) {
+// importNames returns the names under which f refers to the package importPath
+// (the declared alias, or the package's own name for a plain import) and whether
+// it dot-imports it.
+func importNames(f *ast.File, importPath string) (names []string, dot bool) {
+	for _, imp := range f.Imports {
+		if p, err := strconv.Unquote(imp.Path.Value); err != nil || p != importPath {
+			continue
+		}
+		switch {
+		case imp.Name == nil:
+			names = append(names, path.Base(importPath))
+		case imp.Name.Name == ".":
+			dot = true
+		case imp.Name.Name != "_":
+			names = append(names, imp.Name.Name)
+		}
+	}
+	return names, dot
+}
+
+// forbiddenExecutable reports the program a string literal argument names when it
+// is one of forbiddenExecutables, by base name.
+func forbiddenExecutable(arg ast.Expr) (string, bool) {
+	lit, ok := arg.(*ast.BasicLit)
+	if !ok || lit.Kind != token.STRING {
+		return "", false
+	}
+	text, err := strconv.Unquote(lit.Value)
+	if err != nil {
+		return "", false
+	}
+	base := strings.ToLower(filepath.Base(text))
+	for _, bad := range forbiddenExecutables {
+		if strings.Contains(base, bad) {
+			return base, true
+		}
+	}
+	return "", false
+}
+
+func scanProductionFile(file string) ([]string, error) {
 	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+	f, err := parser.ParseFile(fset, file, nil, parser.SkipObjectResolution)
 	if err != nil {
 		return nil, err
 	}
+	// The packages whose calls start a process, under every name the file gives
+	// them. The package's own name always counts, even without an import.
+	execNames, dotExec := importNames(f, "os/exec")
+	execNames = append(execNames, "exec")
+	osNames, _ := importNames(f, "os")
+	osNames = append(osNames, "os")
+	syscallNames, _ := importNames(f, "syscall")
+	syscallNames = append(syscallNames, "syscall")
 	var out []string
 	ast.Inspect(f, func(n ast.Node) bool {
 		switch v := n.(type) {
@@ -149,22 +222,28 @@ func scanProductionFile(path string) ([]string, error) {
 				}
 			}
 		case *ast.CallExpr:
-			sel, ok := v.Fun.(*ast.SelectorExpr)
-			if !ok || (sel.Sel.Name != "Command" && sel.Sel.Name != "CommandContext") || len(v.Args) == 0 {
-				return true
-			}
-			pkg, ok := sel.X.(*ast.Ident)
-			if !ok || pkg.Name != "exec" {
-				return true
-			}
-			for _, a := range v.Args {
-				lit, ok := a.(*ast.BasicLit)
-				if !ok || lit.Kind != token.STRING {
-					continue
+			var qualifier, fn string
+			switch fun := v.Fun.(type) {
+			case *ast.SelectorExpr:
+				if x, ok := fun.X.(*ast.Ident); ok {
+					qualifier, fn = x.Name, fun.Sel.Name
 				}
-				text, _ := strconv.Unquote(lit.Value)
-				base := strings.ToLower(filepath.Base(text))
-				if strings.Contains(base, "docker") || strings.Contains(base, "podman") || strings.Contains(base, "prometheus") || strings.Contains(base, "loki") {
+			case *ast.Ident:
+				if dotExec {
+					qualifier, fn = "exec", fun.Name // os/exec dot-imported: Command(...)
+				}
+			}
+			var args []ast.Expr
+			switch {
+			case slices.Contains(execNames, qualifier) && (fn == "Command" || fn == "CommandContext"):
+				args = v.Args // any argument may name the program (a wrapper's argument too)
+			case slices.Contains(osNames, qualifier) && fn == "StartProcess", slices.Contains(syscallNames, qualifier) && (fn == "Exec" || fn == "ForkExec"):
+				if len(v.Args) > 0 {
+					args = v.Args[:1] // the program path
+				}
+			}
+			for _, a := range args {
+				if base, bad := forbiddenExecutable(a); bad {
 					out = append(out, "executes "+base)
 				}
 			}
