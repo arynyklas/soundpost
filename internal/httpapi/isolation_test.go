@@ -49,9 +49,10 @@ func (d *isoDeletes) DeleteGeneration(ctx context.Context, org model.ID, project
 // gatedScanner delays the real engine scan so a test can change authority while
 // an export is genuinely pending.
 type gatedScanner struct {
-	inner exports.Scanner
-	mu    sync.Mutex
-	gate  chan struct{}
+	inner  exports.Scanner
+	mu     sync.Mutex
+	gate   chan struct{}
+	parked atomic.Int64 // scans that reached an armed gate, ever: the barrier a test waits on instead of sleeping
 }
 
 func (g *gatedScanner) arm() chan struct{} {
@@ -65,6 +66,7 @@ func (g *gatedScanner) Scan(ctx context.Context, scope auth.Scope, req storage.S
 	gate := g.gate
 	g.mu.Unlock()
 	if gate != nil {
+		g.parked.Add(1)
 		select {
 		case <-gate:
 		case <-ctx.Done():

@@ -116,6 +116,11 @@ individually reviewed by eye. No Firefox or WebKit rendering was seen.
   a schedule time skipped by the spring-forward clock change is reported as skipped (`job-history.spec.ts`); inside the keyboard journeys, a replay
   deleted while it is viewed ends the view and an observer outage leaves a scheduled job Unknown (`investigation-journeys.spec.ts`); a profile
   delivered by the real Node SDK and by the real Bun SDK reads as engine-reported samples (`replay-profile.spec.ts`).
-- Still open and not claimed here: no person has looked at the Chromium, Firefox or WebKit artifacts (a human review is an owner action); stale and
-  rate-limited states are produced by the real server only where a route can produce them (the console sends no `min_cursors`), the rest are injected
-  in `accessibility.spec.ts`; the gateway to dependency and frontend to API to PostgreSQL legs use ingested spans because the VMs have no Docker.
+- Wave 24 (`web/e2e/console-states.spec.ts`, each case on the real server, nothing routed or rewritten): the console's Explore reads carry the audited
+  elevation for a selected organization (refused before the elevation, answered after it with the elevated read said in words, refused again once the
+  view is cleared); the server's own throttle on elevation reads that found nothing (HTTP 429 `rate_limited`) is shown as **Rate limited** with the
+  request ID; a minimum data position the read has not reached is refused by the real query engine and shown as `Error (stale)`, and with partial
+  results the project reads Partial. The engine's completeness `stale` (the **Stale** load state) cannot come out of the shipped storage: its read
+  fence refuses (`stale`) or drops the group (partial) first, so the Stale state remains covered only by `accessibility.spec.ts` and the unit tests.
+- Still open and not claimed here: no person has looked at the Chromium, Firefox or WebKit artifacts (a human review is an owner action); the Stale
+  load state has no real producer (above); the gateway to dependency and frontend to API to PostgreSQL legs use ingested spans because the VMs have no Docker.

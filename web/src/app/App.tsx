@@ -1,6 +1,7 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
 import * as React from 'react';
-import { bindSession } from '../api/client';
+import { bindSession, releaseSession } from '../api/client';
+import { bindElevation, releaseElevation } from '../api/elevation';
 import type { Id } from '../api/types';
 import { ExplorePage } from '../explore/ExplorePage';
 import { IncidentPage } from '../incidents/IncidentPage';
@@ -153,9 +154,14 @@ export function App(): React.JSX.Element {
  const generation = React.useRef(0);
  const [nav, setNav] = React.useState(() => decodeHash(window.location.hash, 0));
  const csrf = session?.session.csrf ?? '';
+ // Both bindings name this console instance as their owner and are released only by it: when the boundary mounts the console again (a new elevation keys
+ // it anew) the new instance renders, and so binds, before the old one's cleanup runs, and the token and elevation may be the very same values.
+ const owner = React.useRef<object>({}).current;
  // Bound during render (an idempotent in-memory assignment) so reads issued by child effects already carry the token.
- bindSession(csrf);
- React.useEffect(() => () => bindSession(''), []);
+ bindSession(csrf, owner);
+ // The audited elevation (D60) rides the same way.
+ bindElevation(session?.elevation ?? null, owner);
+ React.useEffect(() => () => { releaseSession(owner); releaseElevation(owner); }, [owner]);
  // A revalidation that found the session still valid keeps the console mounted (view state survives) but every view reads its scope again, so access
  // that was withdrawn meanwhile (a revoked grant) clears what is shown. The first run is the mount itself.
  const epoch = session?.epoch ?? 0;

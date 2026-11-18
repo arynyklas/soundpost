@@ -8,12 +8,19 @@ import { lineSplitter, parseReplayLine, type ReplayLine } from '../replays/model
 import { parseProfileResponse } from '../profiles/model';
 import type { ProfileResponse } from '../profiles/types';
 import { JOB_ATTEMPT_STATES, JOB_HEALTH_STATUSES, JOB_OBSERVER_STATES, JOB_RUN_STATUSES, type JobAttemptState, type JobAttemptView, type JobDefinition, type JobHealth, type JobObserverEvidence, type JobRunDetail, type JobRunView, type JobsListView, type JobView, type ViewSection as JobViewSection } from './types';
+import { withElevation } from './elevation';
 
 import { HEALTH_STATUSES, type HealthStatus } from './types';
 // The CSRF token lives only here, in memory, handed over by the session
 // boundary. It is never persisted and never placed in a URL.
 let csrf = '';
-export function bindSession(token: string): void { csrf = token; }
+let csrfOwner: object | null = null;
+/** `owner` names the console instance that binds the token, so that an instance can release exactly what it bound (see releaseSession). */
+export function bindSession(token: string, owner: object | null = null): void { csrf = token; csrfOwner = owner; }
+/** Unbinds the token only if `owner` is the instance that bound it. When the console is mounted again (a new elevation keys it anew) the boundary
+ * mounts the new console before it unmounts the old one, and the token is the same string for both: the old one's cleanup must not unbind what
+ * the new one just bound (every read after it would go out without the CSRF header and be refused). */
+export function releaseSession(owner: object): void { if (csrfOwner === owner) { csrf = ''; csrfOwner = null; } }
 
 const VIEW_STATES: readonly ViewState[] = ['ready', 'empty', 'incomplete', 'stale', 'not_available'];
 const SAFE_DETAIL = /^[a-z0-9_ .:-]{0,120}$/i;
@@ -431,11 +438,13 @@ export async function queryFaultOf(response: Response): Promise<QueryFault> {
 
 /** Maps a typed query failure to its load state. A denied project, a foreign scope and a missing one are one state. A budget
  * (HTTP 429 code quota), a deadline, a cancellation and stale data keep their own code: they are errors, never a rate-limit
- * notice and never a shortened answer. */
+ * notice and never a shortened answer. The server's own throttle (429, code rate_limited: too many elevation reads that found
+ * nothing) is the one 429 that is the rate limited state. */
 export function stateOfQueryFault(error: unknown): LoadState<never> {
  if (!(error instanceof ApiFault)) return { kind: 'error', fault: new ApiFault(0, 'network', '', '') };
  switch (error.status) {
   case 401: case 403: case 404: return { kind: 'unauthorized', status: error.status === 401 ? 401 : 404, requestId: error.requestId };
+  case 429: return error.code === 'rate_limited' ? { kind: 'rate_limited', requestId: error.requestId } : { kind: 'error', fault: error };
   case 501: return { kind: 'unsupported', reason: error.code };
   default: return { kind: 'error', fault: error };
  }
@@ -445,7 +454,7 @@ export function jsonPost(path: string, body: unknown, signal: AbortSignal): Prom
  return fetch(path, {
   method: 'POST', credentials: 'same-origin', cache: 'no-store', signal,
   headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...(csrf ? { 'X-CSRF-Token': csrf } : {}) },
-  body: JSON.stringify(body),
+  body: JSON.stringify(withElevation(path, body)),
  });
 }
 

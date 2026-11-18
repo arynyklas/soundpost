@@ -8,9 +8,8 @@ import {auditDom} from './support/audit';
 // real query route refuses a query that does not opt in to partial results with its own non-2xx fault, and the real page says so. Nothing in
 // this spec routes, rewrites or fulfils a request. The removal is irreversible for the server, so this spec owns its server:
 // `E2E_FAULTS=1 h.sh prep; h.sh run pw no e2e/server-states.spec.ts`.
-// `rate_limited` and `stale` are NOT produced here: no committed read route answers 429 to an investigation page (a query budget is 429 on the
-// wire but the console words it as an error on purpose, stateOfQueryFault) and the pages send no minimum cursor, which is what makes the query
-// engine answer stale; they stay as accessibility.spec.ts / accessibility.test.ts record them.
+// `rate_limited` and `stale` are produced from the real server in console-states.spec.ts (the elevation read throttle answers 429 rate_limited; a
+// minimum data position the read has not reached is refused `stale`), which does not remove shards and shares a server.
 test.skip(!faultControl(),'needs a server built with -tags soundpost_faults (E2E_FAULTS=1) and a server of its own: shards are removed for good');
 
 test('with every shard removed the query route refuses and the page says Error in words, announced assertively, with a clean audit and no value',async({browser})=>{

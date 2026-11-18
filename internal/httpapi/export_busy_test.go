@@ -204,7 +204,15 @@ func TestExportSurvivesConcurrentIngest(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		op, steps := b.await(t, grant.Operation.ID, 90*time.Second)
+		// Budget per round: 90 s. Measured on an idle 8-CPU VM the round takes 1.2-2.1 s; with -race
+		// 36-50 s idle, 60-79 s under 16 busy loops, and past 90 s when the package's other parallel
+		// -race tests also compete (wave 24 failure): the race detector's CPU cost, not the export,
+		// which completes with delete-read-errors=0. Under -race the budget is four times larger.
+		budget := 90 * time.Second
+		if raceEnabled {
+			budget *= 4
+		}
+		op, steps := b.await(t, grant.Operation.ID, budget)
 		t.Logf("round %d: phase=%s reason=%q progress=%d chunks=%d progress-steps=%d elapsed=%s ingested-so-far=%d worker-passes=%d delete-generations-seen=%v delete-read-errors=%d", round, op.Phase, op.SafeReason, op.Progress, op.Chunks, steps, time.Since(started).Round(time.Millisecond), ingested.Load(), passes.Load(), b.deletes.distinct(), b.deletes.errs.Load())
 		if op.Phase != "complete" || op.SafeReason != "" {
 			close(stop)

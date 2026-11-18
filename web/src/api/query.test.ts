@@ -1,6 +1,7 @@
 // Copyright 2026 Aryn Yklas; SPDX-License-Identifier: Apache-2.0
 import { afterEach, describe, expect, test } from 'bun:test';
-import { bindSession, createLiveTicket, openLive, parseLiveEvent, parseQueryResult, query, queryFaultOf, stateOfQueryFault } from './client';
+import { bindSession, createLiveTicket, openLive, parseLiveEvent, parseQueryResult, query, queryFaultOf, releaseSession, stateOfQueryFault } from './client';
+import { bindElevation } from './elevation';
 import type { SseFrame } from './sse';
 import { ApiFault, QueryFault, type LiveEvent, type QueryRequest } from './types';
 
@@ -138,6 +139,10 @@ describe('stateOfQueryFault: a budget is a typed error, never a silent rate limi
    expect(s.kind === 'error' && s.fault.code).toBe(code);
   }
  });
+ test('the server throttle (429, code rate_limited) is the rate limited state with its request id; a quota 429 stays an error', () => {
+  expect(stateOfQueryFault(fault(429, 'rate_limited'))).toEqual({ kind: 'rate_limited', requestId: RID });
+  expect(stateOfQueryFault(fault(429, 'quota')).kind).toBe('error');
+ });
  test('unsupported is explicit and a network failure is an error', () => {
   expect(stateOfQueryFault(fault(501, 'unsupported')).kind).toBe('unsupported');
   expect(stateOfQueryFault(new TypeError('x')).kind).toBe('error');
@@ -175,7 +180,7 @@ describe('parseLiveEvent: a frame is one typed event or a protocol fault', () =>
 
 type Fetch = typeof fetch;
 const original = globalThis.fetch;
-afterEach(() => { globalThis.fetch = original; bindSession(''); });
+afterEach(() => { globalThis.fetch = original; bindSession(''); bindElevation(null); });
 function mockFetch(handler: (url: string, init: RequestInit) => Response | Promise<Response>): { calls: { url: string; init: RequestInit }[] } {
  const calls: { url: string; init: RequestInit }[] = [];
  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => { calls.push({ url: String(input), init: init ?? {} }); return handler(String(input), init ?? {}); }) as Fetch;
@@ -195,6 +200,29 @@ describe('query, live tickets and the fetch-based live stream', () => {
   expect((call.init.headers as Record<string, string>)['X-CSRF-Token']).toBe('tok');
   expect(JSON.parse(call.init.body as string)).toEqual(req({ expression: 'secret_metric' }));
   expect(call.url).not.toContain('secret_metric');
+ });
+ test('an old console unmounting after the new one mounted does not unbind the CSRF token the new one bound, even when it is the same token', async () => {
+  const oldConsole = {}, newConsole = {};
+  bindSession('same', oldConsole);
+  bindSession('same', newConsole);
+  releaseSession(oldConsole);
+  const m = mockFetch(() => new Response(JSON.stringify({ projects: [project(P, vector())] }), { status: 200 }));
+  await query(req(), new AbortController().signal);
+  expect((m.calls[0]!.init.headers as Record<string, string>)['X-CSRF-Token']).toBe('same');
+  releaseSession(newConsole);
+  await query(req(), new AbortController().signal);
+  expect('X-CSRF-Token' in (m.calls[1]!.init.headers as Record<string, string>)).toBe(false);
+ });
+ test('under a bound elevation the query body carries the handle for a covered organization only, and a live ticket never does', async () => {
+  bindElevation({ id: 'e'.repeat(32), expires: String(Math.floor(Date.now() / 1000) + 600), orgs: [A] });
+  const m = mockFetch((url) => new Response(JSON.stringify(url.endsWith('live-tickets') ? { ticket: R, expires_at: '1730000060000000000' } : { projects: [project(P, vector())] }), { status: 200 }));
+  await query(req(), new AbortController().signal);
+  expect(JSON.parse(m.calls[0]!.init.body as string)).toEqual({ ...req(), elevation: 'e'.repeat(32) });
+  await createLiveTicket({ org: A, projects: [P], profile: 'logql-loki-3.5.2', feature_set: 'f', expression: '{app="web"}', budget: { timeout_ns: '0', memory_bytes: '0', max_returned: '0' } }, new AbortController().signal);
+  expect('elevation' in JSON.parse(m.calls[1]!.init.body as string)).toBe(false);
+  bindElevation(null);
+  await query(req(), new AbortController().signal);
+  expect('elevation' in JSON.parse(m.calls[2]!.init.body as string)).toBe(false);
  });
  test('a failing query throws the typed fault and never a result', async () => {
   mockFetch(() => new Response(JSON.stringify({ code: 'quota', retryable: false, detail: 'quota', request_id: RID }), { status: 429 }));

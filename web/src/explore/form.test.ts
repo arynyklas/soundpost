@@ -59,6 +59,17 @@ describe('a query request is built from exactly what the form says, and the prof
   expect(on.ok && on.request.allow_partial).toBe(true);
   expect(buildQueryRequest(ctx, form()).ok && (buildQueryRequest(ctx, form()) as { request: { allow_partial: boolean } }).request.allow_partial).toBe(false);
  });
+ test('a minimum data position is sent only when typed: one group:index per line, exact, never defaulted', () => {
+  const plain = buildQueryRequest(ctx, form());
+  expect(plain.ok && 'min_cursors' in plain.request).toBe(false);
+  const G = '9'.repeat(32), H = '8'.repeat(32);
+  const b = buildQueryRequest(ctx, form({ minCursors: ` ${G}:18446744073709551615 \n${H}:0\n\n` }));
+  if (!b.ok) throw new Error(b.problems.join());
+  expect(b.request.min_cursors).toEqual([{ group: G, index: '18446744073709551615' }, { group: H, index: '0' }]);
+  for (const bad of [`${G}`, `${G}:`, `${G}:-1`, `${G}:01`, `${G}:18446744073709551616`, 'xyz:1', `${'A'.repeat(32)}:1`, `${G}:1:2`, `${G}:1\n${G}:2`]) {
+   expect(problems(form({ minCursors: bad })).some((p) => p.includes('minimum data position'))).toBe(true);
+  }
+ });
  test('a named restricted source is raw.read, for exactly one project, and never otherwise', () => {
   const raw = buildQueryRequest(ctx, defaultFormFor('logql', { source: SRC, projects: [P] }));
   if (!raw.ok) throw new Error(raw.problems.join());

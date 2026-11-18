@@ -3,11 +3,13 @@ import * as React from 'react';
 import { formatExpression, isAbort, profileRegistry, query, stateOfFault, stateOfQueryFault } from '../api/client';
 import { ApiFault, QueryFault, type Diagnostic, type FormatResult, type LiveTicketRequest, type LoadState, type ProjectResult, type QueryLanguage, type QueryRequest, type QueryResult, type SourceRange } from '../api/types';
 import { latestOnly, scopeKey, type ViewContext } from '../app/context';
+import { SessionContext } from '../auth/ElevationDialog';
 import { StatusPanel } from '../app/StatusPanel';
 import { Discovery } from './Discovery';
 import { Exemplars } from './Exemplars';
 import { ExportPanel } from './ExportPanel';
 import { MAX_BODY_BYTES, buildLiveRequest, buildQueryRequest, defaultForm, type QueryForm } from './form';
+import { elevationFor } from '../api/elevation';
 import { LiveLogView } from './LiveLogView';
 import { LogResult } from './LogResult';
 import { MetricResult, TimeText } from './MetricResult';
@@ -116,10 +118,11 @@ export function ProjectPanel(props: { result: ProjectResult; request: QueryReque
 const featuresLabel = (features: string[]): string => (features.length === 0 ? 'no optional features' : features.join(', '));
 
 /** What was actually asked, kept with the result it produced, so changing the form never relabels an answer. */
-interface RunView { key: string; request: QueryRequest; features: string[]; state: LoadState<QueryResult>; id: number }
+interface RunView { key: string; request: QueryRequest; features: string[]; state: LoadState<QueryResult>; id: number; elevated: boolean }
 
 function ExploreBody(props: { context: ViewContext; registry: readonly ProfileInfo[] }): React.JSX.Element {
  const { context, registry } = props;
+ const session = React.useContext(SessionContext);
  const scope = `${scopeKey(context)}|${context.generation}`;
  const [form, setForm] = React.useState<QueryForm>(() => defaultForm(context, 'promql', registry));
  const [problems, setProblems] = React.useState<string[]>([]);
@@ -152,10 +155,12 @@ function ExploreBody(props: { context: ViewContext; registry: readonly ProfileIn
   const request = built.request;
   const features = form.features;
   const id = ++runCounter.current;
+  // Whether this read goes out under the elevation is decided where the request is sent (api/elevation.ts withElevation); the same predicate says so here.
+  const elevated = elevationFor(session?.elevation ?? null, context.org, Date.now()) !== undefined;
   void runLatest(latest.current, () => scopeRef.current, scope, (signal) => query(request, signal), (s: RunState<QueryResult>) => {
-   if (s.kind === 'loading') setRun({ key: scope, request, features, state: { kind: 'loading' }, id });
-   else if (s.kind === 'done') setRun({ key: scope, request, features, state: resultState(s.value), id });
-   else setRun({ key: scope, request, features, state: stateOfQueryFault(s.error), id });
+   if (s.kind === 'loading') setRun({ key: scope, request, features, state: { kind: 'loading' }, id, elevated });
+   else if (s.kind === 'done') setRun({ key: scope, request, features, state: resultState(s.value), id, elevated });
+   else setRun({ key: scope, request, features, state: stateOfQueryFault(s.error), id, elevated });
   });
  };
  const cancel = (): void => {
@@ -223,6 +228,7 @@ function ExploreBody(props: { context: ViewContext; registry: readonly ProfileIn
       {form.language === 'logql' && <label>Log order <select value={form.logOrder} onChange={(e) => set({ logOrder: e.target.value === 'forward' ? 'forward' : 'backward' })}><option value="backward">Newest first</option><option value="forward">Oldest first</option></select></label>}
       {form.language === 'logql' && <label>Restricted source ID (raw.read, one project; empty for ordinary telemetry) <input value={form.source} onChange={(e) => set({ source: e.target.value })} autoComplete="off" spellCheck={false} /></label>}
      </div>
+     <label>Minimum data position (optional, one <code>group:index</code> per line, as returned by an ingest receipt); a read that has not reached it is answered stale <textarea value={form.minCursors} onChange={(e) => set({ minCursors: e.target.value })} rows={2} autoComplete="off" spellCheck={false} /></label>
      <label className="check"><input type="checkbox" checked={form.allowPartial} onChange={(e) => set({ allowPartial: e.target.checked })} />Allow partial results. Without this, any missing data or failed project refuses the whole query instead of showing a part.</label>
     </fieldset>
     {problems.length > 0 && <ul role="alert" className="error" data-testid="form-problems">{problems.map((p) => <li key={p}>{p}</li>)}</ul>}
@@ -256,6 +262,7 @@ function ExploreBody(props: { context: ViewContext; registry: readonly ProfileIn
        : <>range <TimeText ns={view.request.evaluation.start} /> to <TimeText ns={view.request.evaluation.end} /> (end excluded), step {String(BigInt(view.request.evaluation.step) / 1_000_000_000n)} s</>}; partial results {view.request.allow_partial ? 'allowed' : 'not allowed'}; budget {view.request.budget.max_returned} samples or entries.
      </p>
     )}
+    {view !== null && view.elevated && data !== undefined && <p role="status" className="banner" data-testid="elevated-read"><strong>Audited elevated read.</strong> This answer was produced under your scoped instance elevation for organization <code>{view.request.org}</code>; the server committed an audit record before returning it. The elevation ends after fifteen minutes, and on navigation or when the window regains focus.</p>}
     {view !== null && view.state.kind === 'loading' && <p role="status" data-state="loading">Running the query…</p>}
     {view !== null && view.state.kind !== 'loading' && data === undefined && <FaultView state={view.state} expression={view.request.expression} />}
     {view !== null && data !== undefined && (

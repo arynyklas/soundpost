@@ -26,6 +26,8 @@ export interface QueryForm {
  logOrder: 'backward' | 'forward';
  /** A named restricted source for a raw.read query; '' for ordinary telemetry. */
  source: string;
+ /** Optional minimum data position, one `group:index` per line; '' sends none (see parseMinCursors). */
+ minCursors: string;
 }
 export type Built<T> = { ok: true; request: T } | { ok: false; problems: string[] };
 /** The server decodes at most this many bytes of a request body. */
@@ -39,8 +41,25 @@ const positive = (v: string, max: bigint): boolean => /^[1-9][0-9]{0,19}$/.test(
 export function defaultForm(context: ViewContext, language: QueryLanguage, registry: readonly ProfileInfo[]): QueryForm {
  return {
   language, profileId: profilesFor(registry, language)[0]?.id ?? '', features: [], expression: '', mode: language === 'logql' ? 'range' : 'instant', instantTime: context.end, stepSeconds: '15',
-  projects: context.projects, allowPartial: false, maxReturned: '10000', logLimit: '1000', logOrder: 'backward', source: '',
+  projects: context.projects, allowPartial: false, maxReturned: '10000', logLimit: '1000', logOrder: 'backward', source: '', minCursors: '',
  };
+}
+
+/**
+ * The minimum data position, one `group:index` per line (the cursor an ingest receipt returns in X-Soundpost-Cursor). A read must reach
+ * it or the server answers stale. Exact: a 32-hex group, a canonical decimal index within uint64; anything else is a stated problem and
+ * nothing is sent. An empty text sends none.
+ */
+export function parseMinCursors(text: string): QueryRequest['min_cursors'] | string {
+ const out: NonNullable<QueryRequest['min_cursors']> = [];
+ for (const raw of text.split('\n')) {
+  const line = raw.trim();
+  if (line === '') continue;
+  const m = /^([0-9a-f]{32}):(0|[1-9][0-9]{0,19})$/.exec(line);
+  if (m === null || BigInt(m[2] ?? '') > UINT64_MAX || out.some((c) => c.group === m[1])) return `Each minimum data position line must be a distinct 32-hex group, a colon and a whole index up to ${UINT64_MAX}: ${line.slice(0, 80)}`;
+  out.push({ group: m[1] ?? '', index: m[2] ?? '' });
+ }
+ return out;
 }
 
 /** The shared selection checks: profile, registered feature set, projects, expression and restricted source. Saving a view uses the same checks as running the query. */
@@ -85,11 +104,14 @@ export function buildQueryRequest(context: ViewContext, form: QueryForm, registr
   else if (budgetOk && BigInt(form.logLimit) > BigInt(form.maxReturned)) problems.push('The log page size cannot exceed the result budget.');
   else logLimit = form.logLimit;
  }
+ const minCursors = parseMinCursors(form.minCursors);
+ if (typeof minCursors === 'string') problems.push(minCursors);
  if (problems.length > 0) return { ok: false, problems };
  const request: QueryRequest = {
   org: context.org, language: form.language, profile: form.profileId, expression: form.expression, feature_set: featureSet, evaluation, projects: [...form.projects],
   budget: { timeout_ns: '0', memory_bytes: '0', max_returned: form.maxReturned }, allow_partial: form.allowPartial,
   ...(form.source !== '' ? { permission: 'raw.read' as const, source: form.source } : {}),
+  ...(Array.isArray(minCursors) && minCursors.length > 0 ? { min_cursors: minCursors } : {}),
   ...(form.language === 'logql' ? { ...(logLimit !== '' ? { log_limit: logLimit } : {}), log_order: form.logOrder } : {}),
  };
  const large = tooLarge(request);

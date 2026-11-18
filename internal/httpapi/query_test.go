@@ -336,17 +336,27 @@ func TestRevocationAndDeletionBeforeRelease(t *testing.T) {
 		raw    []byte
 	}
 	blocked := func() (chan reply, chan struct{}) {
+		before := e.gate.parked.Load()
 		gate := e.gate.arm()
 		out := make(chan reply, 1)
 		go func() {
 			status, raw, _ := e.post(alice, "/api/v1/query", e.request(org, []model.ID{p}, "up", sampleTime+1_000_000))
 			out <- reply{status, raw}
 		}()
-		time.Sleep(100 * time.Millisecond) // the request reaches the held scan
+		// The request is past admission and the delete-generation read, parked at the held scan:
+		// a barrier, not a sleep. A bump or revocation made before that read is simply part of the
+		// state the query starts from (it would run, park forever and never be "stale"); under CPU
+		// stress the old 100 ms sleep let that happen, which is the "kept running" failure.
+		for deadline := time.Now().Add(60 * time.Second); e.gate.parked.Load() == before; time.Sleep(time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatal("the query never reached the held scan")
+			}
+		}
 		return out, gate
 	}
 	// Revoked while the scan is held: the guard stops the work and no value leaves.
 	done, gate := blocked()
+	revokedAt := time.Now()
 	e.grant(org, alice, p, false, auth.Read)
 	select {
 	case r := <-done:
@@ -356,11 +366,13 @@ func TestRevocationAndDeletionBeforeRelease(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("a revoked query kept running")
 	}
+	t.Logf("elapsed=%s revocation to answer", time.Since(revokedAt))
 	close(gate)
 
 	// Deleted while computing: a deletion generation bump is a 409 with no value.
 	e.grant(org, alice, p, true, auth.Read)
 	done, gate = blocked()
+	deletedAt := time.Now()
 	e.deletes.bump.Add(1)
 	select {
 	case r := <-done:
@@ -370,6 +382,7 @@ func TestRevocationAndDeletionBeforeRelease(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("a query over deleted data kept running")
 	}
+	t.Logf("elapsed=%s deletion to answer", time.Since(deletedAt))
 	close(gate)
 	e.gate.mu.Lock()
 	e.gate.gate = nil
