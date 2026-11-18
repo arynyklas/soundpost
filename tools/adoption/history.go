@@ -25,38 +25,40 @@ import (
 type HistoryCode string
 
 const (
-	HistoryCodeEvidenceStale        HistoryCode = "evidence_stale"
-	HistoryCodeEvidenceFuture       HistoryCode = "evidence_future_dated"
-	HistoryCodeOriginNotReadOnly    HistoryCode = "legacy_not_read_only"
-	HistoryCodeWriteAccess          HistoryCode = "legacy_write_access"
-	HistoryCodeAccessInvalid        HistoryCode = "access_invalid"
-	HistoryCodeAccessUnauthorized   HistoryCode = "access_unauthorized"
-	HistoryCodeReaderNotKeyed       HistoryCode = "reader_identity_not_keyed"
-	HistoryCodeRetentionMissing     HistoryCode = "retention_obligation_missing"
-	HistoryCodeExportMissing        HistoryCode = "export_obligation_missing"
-	HistoryCodeRecordMissing        HistoryCode = "obligation_record_missing"
-	HistoryCodeExportRecordMissing  HistoryCode = "export_record_missing"
-	HistoryCodeObligationInvalid    HistoryCode = "obligation_invalid"
-	HistoryCodeObligationDuplicate  HistoryCode = "obligation_duplicate"
-	HistoryCodeRetentionOverdue     HistoryCode = "retention_overdue"
-	HistoryCodeExportOverdue        HistoryCode = "export_overdue"
-	HistoryCodeHoldOverdue          HistoryCode = "hold_overdue"
-	HistoryCodeReminderMissing      HistoryCode = "reminder_missing"
-	HistoryCodeCompletionUnaudited  HistoryCode = "completion_unaudited"
-	HistoryCodeCompletionInvalid    HistoryCode = "completion_invalid"
-	HistoryCodeHistoryRemoved       HistoryCode = "history_removed_before_obligations"
-	HistoryCodeBoundaryMissing      HistoryCode = "boundary_missing"
-	HistoryCodeBoundaryNotVisible   HistoryCode = "boundary_not_visible"
-	HistoryCodeBoundaryNotReadOnly  HistoryCode = "boundary_links_not_read_only"
-	HistoryCodeBoundaryUnauthorized HistoryCode = "boundary_links_not_authorized"
-	HistoryCodeRemovalStep          HistoryCode = "implicit_removal_step"
-	HistoryCodeImportStep           HistoryCode = "mandatory_import_step"
-	HistoryCodeUnsupportedStep      HistoryCode = "unsupported_step"
+	HistoryCodeEvidenceStale         HistoryCode = "evidence_stale"
+	HistoryCodeEvidenceFuture        HistoryCode = "evidence_future_dated"
+	HistoryCodeOriginNotReadOnly     HistoryCode = "legacy_not_read_only"
+	HistoryCodeOriginEvidenceMissing HistoryCode = "origin_evidence_missing"
+	HistoryCodeWriteAccess           HistoryCode = "legacy_write_access"
+	HistoryCodeAccessInvalid         HistoryCode = "access_invalid"
+	HistoryCodeAccessUnauthorized    HistoryCode = "access_unauthorized"
+	HistoryCodeReaderNotKeyed        HistoryCode = "reader_identity_not_keyed"
+	HistoryCodeRetentionMissing      HistoryCode = "retention_obligation_missing"
+	HistoryCodeExportMissing         HistoryCode = "export_obligation_missing"
+	HistoryCodeRecordMissing         HistoryCode = "obligation_record_missing"
+	HistoryCodeExportRecordMissing   HistoryCode = "export_record_missing"
+	HistoryCodeObligationInvalid     HistoryCode = "obligation_invalid"
+	HistoryCodeObligationDuplicate   HistoryCode = "obligation_duplicate"
+	HistoryCodeRetentionOverdue      HistoryCode = "retention_overdue"
+	HistoryCodeExportOverdue         HistoryCode = "export_overdue"
+	HistoryCodeHoldOverdue           HistoryCode = "hold_overdue"
+	HistoryCodeReminderMissing       HistoryCode = "reminder_missing"
+	HistoryCodeCompletionUnaudited   HistoryCode = "completion_unaudited"
+	HistoryCodeCompletionInvalid     HistoryCode = "completion_invalid"
+	HistoryCodeHistoryRemoved        HistoryCode = "history_removed_before_obligations"
+	HistoryCodeBoundaryMissing       HistoryCode = "boundary_missing"
+	HistoryCodeBoundaryNotVisible    HistoryCode = "boundary_not_visible"
+	HistoryCodeBoundaryNotReadOnly   HistoryCode = "boundary_links_not_read_only"
+	HistoryCodeBoundaryUnauthorized  HistoryCode = "boundary_links_not_authorized"
+	HistoryCodeRemovalStep           HistoryCode = "implicit_removal_step"
+	HistoryCodeImportStep            HistoryCode = "mandatory_import_step"
+	HistoryCodeUnsupportedStep       HistoryCode = "unsupported_step"
 )
 
 var historyCodes = map[HistoryCode]bool{
 	HistoryCodeEvidenceStale: true, HistoryCodeEvidenceFuture: true, HistoryCodeOriginNotReadOnly: true,
-	HistoryCodeWriteAccess: true, HistoryCodeAccessInvalid: true, HistoryCodeAccessUnauthorized: true,
+	HistoryCodeOriginEvidenceMissing: true,
+	HistoryCodeWriteAccess:           true, HistoryCodeAccessInvalid: true, HistoryCodeAccessUnauthorized: true,
 	HistoryCodeReaderNotKeyed: true, HistoryCodeRetentionMissing: true, HistoryCodeExportMissing: true,
 	HistoryCodeRecordMissing: true, HistoryCodeExportRecordMissing: true, HistoryCodeObligationInvalid: true,
 	HistoryCodeObligationDuplicate: true, HistoryCodeRetentionOverdue: true, HistoryCodeExportOverdue: true,
@@ -283,9 +285,14 @@ func HistoryStatus(ctx context.Context, in HistoryObligations) (HistoryReport, e
 		block(HistoryCodeEvidenceFuture)
 	}
 
-	// Origin: read-only, and retained until every obligation is complete.
-	if !in.Origin.ReadOnly || !historyDigestOK(in.Origin.EvidenceDigest) {
+	// Origin: read-only, and retained until every obligation is complete. A
+	// missing or malformed evidence reference is its own reason: the origin may
+	// well be read-only and merely undocumented.
+	if !in.Origin.ReadOnly {
 		block(HistoryCodeOriginNotReadOnly)
+	}
+	if !historyDigestOK(in.Origin.EvidenceDigest) {
+		block(HistoryCodeOriginEvidenceMissing)
 	}
 
 	// Access: keyed pseudonyms only; any write access that is not provably

@@ -4,10 +4,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -718,12 +720,14 @@ func (p *policyRun) retained(k notify.Kind) bool {
 	return p.owners[policyClassOf(k)] == policyOwnerCustomer
 }
 
-// covered: the canonical owner already interrupted for this entity at this
-// impact revision or a worse one.
-func (p *policyRun) covered(e notify.Entity, impact uint64) bool {
+// covered: the canonical owner already interrupted for this entity at this impact
+// revision or a worse one, at or before at - the event time of the legacy page
+// being explained. A covering opening that came later is not an explanation for
+// a page the recipient never got in time: it cannot demote lost urgency to noise.
+func (p *policyRun) covered(e notify.Entity, impact uint64, at model.UnixNano) bool {
 	for _, d := range p.canon {
 		x := d.Decision
-		if x.Entity == e && p.delivers(d) && x.ImpactRevision >= impact && (x.Kind == notify.KindOpen || x.Kind == notify.KindWorseImpact || x.Kind == notify.KindCurrent) {
+		if x.Entity == e && d.At <= at && p.delivers(d) && x.ImpactRevision >= impact && (x.Kind == notify.KindOpen || x.Kind == notify.KindWorseImpact || x.Kind == notify.KindCurrent) {
 			return true
 		}
 	}
@@ -797,7 +801,7 @@ func (p *policyRun) classify(m notify.ParityMismatch) (PolicyReason, LedgerTrigg
 			case p.retained(m.Kind):
 				return policyReasonCustomerRetained, e.Trigger
 			case e.Trigger == ledgerTriggerPerOccurrence:
-				if p.covered(e.Entity, e.ImpactRevision) {
+				if p.covered(e.Entity, e.ImpactRevision, e.EventTime) {
 					return policyReasonRepeatOccurrence, e.Trigger
 				}
 			case e.Trigger == ledgerTriggerRateNoDenominator:
@@ -1322,7 +1326,7 @@ func (p *policyRun) ackCheck() PolicyCheckStatus {
 				continue
 			}
 			worsened = true
-			if !p.covered(e.Entity, e.ImpactRevision) {
+			if !p.covered(e.Entity, e.ImpactRevision, e.EventTime) {
 				fail = true
 			}
 		}
@@ -1513,6 +1517,31 @@ func PolicyPublic(r PolicyReport) PolicyPublicSummary {
 	return s
 }
 
+// policyMaxInputBytes bounds one private policy-compare input file. A normalized
+// legacy ledger of a real no-send shadow window carries one entry per delivery
+// attempt (the reduction accepts up to ledgerMaxEntries of them), so it is orders
+// of magnitude larger than the 1 MiB the shared intake reader allows.
+const policyMaxInputBytes = 64 << 20
+
+// policyReadInput strictly decodes one private operator file: unknown fields,
+// trailing data and an over-sized file are all refused.
+func policyReadInput(path string, v any) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	d := json.NewDecoder(io.LimitReader(f, policyMaxInputBytes+1))
+	d.DisallowUnknownFields()
+	if err := d.Decode(v); err != nil {
+		return err
+	}
+	if err := d.Decode(new(any)); err != io.EOF {
+		return errors.New("trailing or oversized JSON")
+	}
+	return nil
+}
+
 // runPolicyCompare is the `policy-compare` subcommand (the parent passes the
 // arguments after the subcommand name). It reads private JSON inputs, writes the
 // private report and the closed public summary exclusively, and fails the
@@ -1540,7 +1569,7 @@ func runPolicyCompare(ctx context.Context, args []string) error {
 	var legacy LegacyEvidence
 	var canonical CanonicalShadowEvidence
 	var approved ApprovedPolicy
-	if readInput(*legacyPath, &legacy) != nil || readInput(*canonicalPath, &canonical) != nil || readInput(*approvedPath, &approved) != nil {
+	if policyReadInput(*legacyPath, &legacy) != nil || policyReadInput(*canonicalPath, &canonical) != nil || policyReadInput(*approvedPath, &approved) != nil {
 		return errors.New("invalid private operator input")
 	}
 	dir, err := privateDirectory(ctx, *output, nil)

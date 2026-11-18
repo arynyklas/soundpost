@@ -16,8 +16,8 @@ DEPENDENCIES = ("api", "postgres", "dependency", "gateway")
 ORIGINS = ("dependency",)
 
 
-def load_client(path):
-    """Initialise the SDK client from the parent-written JSON config."""
+def load_client(path, profiles=False):
+    """Initialise the SDK client from the parent-written JSON config. `profiles` is the deployment opt-in to deliver runtime profiles."""
     from soundpost import Config, Resource, RoutingDescriptor, SignedPolicy, init
 
     data = json.loads(Path(path).read_text(encoding="utf-8"))
@@ -32,7 +32,7 @@ def load_client(path):
         trusted_keys=keys, ca_file=data.get("ca_file"),
         operations=OPERATIONS, dependencies=DEPENDENCIES, origins=ORIGINS,
         job_registry=tuple(sorted(data.get("job_registry", {}).items())),
-        deployment_errors=True, deployment_traces=True, deployment_jobs=True,
+        deployment_errors=True, deployment_traces=True, deployment_jobs=True, deployment_profiles=profiles,
         project_root=REFERENCE_ROOT,
     )
     return init(config), data

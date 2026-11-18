@@ -35,6 +35,7 @@ var JourneyRowIDs = []string{
 	"db_span_safe_operation_only",
 	"replay_masked_interaction_real_recorder",
 	"profile_linkage_with_capability_truth",
+	"runtime_profile_delivered_stored_linked",
 	"actual_ids_equal_expected",
 	"actual_versions_recorded",
 }

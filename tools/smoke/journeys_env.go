@@ -89,6 +89,25 @@ func (p *journeyPKI) client() *http.Client {
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 }
 
+// leafSPKIPin is the base64 SHA-256 of the leaf certificate's SubjectPublicKeyInfo, the form Chrome's
+// --ignore-certificate-errors-spki-list takes.
+func (p *journeyPKI) leafSPKIPin() (string, error) {
+	raw, err := os.ReadFile(p.Cert)
+	if err != nil {
+		return "", err
+	}
+	block, _ := pem.Decode(raw)
+	if block == nil {
+		return "", fmt.Errorf("leaf certificate is not PEM")
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(cert.RawSubjectPublicKeyInfo)
+	return base64.StdEncoding.EncodeToString(sum[:]), nil
+}
+
 // jproc is one real child process with captured output (never printed unfiltered: the logs are
 // scanned for canaries and reported by size only).
 type jproc struct {

@@ -76,33 +76,34 @@ const (
 type ClosureCode string
 
 const (
-	ClosureCodeGateMissing        ClosureCode = "gate_missing"
-	ClosureCodeGateFuture         ClosureCode = "gate_future_dated"
-	ClosureCodeGateStale          ClosureCode = "gate_stale"
-	ClosureCodeCriterionMissing   ClosureCode = "gate_criterion_missing"
-	ClosureCodeCriterionUnknown   ClosureCode = "gate_criterion_unknown"
-	ClosureCodeProofMissing       ClosureCode = "deadman_proof_missing"
-	ClosureCodeProofUnsigned      ClosureCode = "deadman_proof_unsigned"
-	ClosureCodeProofUntrustedKey  ClosureCode = "deadman_proof_untrusted_key"
-	ClosureCodeProofBadSignature  ClosureCode = "deadman_proof_bad_signature"
-	ClosureCodeProofMalformed     ClosureCode = "deadman_proof_malformed"
-	ClosureCodeProofExpired       ClosureCode = "deadman_proof_expired"
-	ClosureCodeProofFuture        ClosureCode = "deadman_proof_future_dated"
-	ClosureCodeProofStale         ClosureCode = "deadman_proof_stale"
-	ClosureCodeProofWrongScope    ClosureCode = "deadman_proof_wrong_scope"
-	ClosureCodeDomainUnrecorded   ClosureCode = "deadman_domain_unrecorded"
-	ClosureCodeSharesProcess      ClosureCode = "deadman_shares_process_domain"
-	ClosureCodeSharesHost         ClosureCode = "deadman_shares_host_domain"
-	ClosureCodeSharesCluster      ClosureCode = "deadman_shares_cluster_domain"
-	ClosureCodeSharesCredential   ClosureCode = "deadman_shares_credential_domain"
-	ClosureCodeOutageWindow       ClosureCode = "outage_window_invalid"
-	ClosureCodeOutageNotAllStop   ClosureCode = "outage_not_all_processes_stopped"
-	ClosureCodeDeliveryMissing    ClosureCode = "deadman_delivery_missing"
-	ClosureCodeRouteNotIndep      ClosureCode = "deadman_route_not_independent"
-	ClosureCodeDeliveryOutside    ClosureCode = "deadman_delivery_outside_outage"
-	ClosureCodeHistoryReadMissing ClosureCode = "outage_history_read_missing"
-	ClosureCodeHistoryReadOutside ClosureCode = "outage_history_read_outside_window"
-	ClosureCodeJourneysNotRecov   ClosureCode = "journeys_not_recovered"
+	ClosureCodeGateMissing         ClosureCode = "gate_missing"
+	ClosureCodeGateFuture          ClosureCode = "gate_future_dated"
+	ClosureCodeGateStale           ClosureCode = "gate_stale"
+	ClosureCodeCriterionMissing    ClosureCode = "gate_criterion_missing"
+	ClosureCodeCriterionUnknown    ClosureCode = "gate_criterion_unknown"
+	ClosureCodeProofMissing        ClosureCode = "deadman_proof_missing"
+	ClosureCodeProofUnsigned       ClosureCode = "deadman_proof_unsigned"
+	ClosureCodeProofUntrustedKey   ClosureCode = "deadman_proof_untrusted_key"
+	ClosureCodeProofBadSignature   ClosureCode = "deadman_proof_bad_signature"
+	ClosureCodeProofMalformed      ClosureCode = "deadman_proof_malformed"
+	ClosureCodeProofExpired        ClosureCode = "deadman_proof_expired"
+	ClosureCodeProofFuture         ClosureCode = "deadman_proof_future_dated"
+	ClosureCodeProofStale          ClosureCode = "deadman_proof_stale"
+	ClosureCodeProofWrongScope     ClosureCode = "deadman_proof_wrong_scope"
+	ClosureCodeDomainUnrecorded    ClosureCode = "deadman_domain_unrecorded"
+	ClosureCodeSharesProcess       ClosureCode = "deadman_shares_process_domain"
+	ClosureCodeSharesHost          ClosureCode = "deadman_shares_host_domain"
+	ClosureCodeSharesCluster       ClosureCode = "deadman_shares_cluster_domain"
+	ClosureCodeSharesCredential    ClosureCode = "deadman_shares_credential_domain"
+	ClosureCodeOutageWindow        ClosureCode = "outage_window_invalid"
+	ClosureCodeOutageBeforeCutover ClosureCode = "outage_before_cutover"
+	ClosureCodeOutageNotAllStop    ClosureCode = "outage_not_all_processes_stopped"
+	ClosureCodeDeliveryMissing     ClosureCode = "deadman_delivery_missing"
+	ClosureCodeRouteNotIndep       ClosureCode = "deadman_route_not_independent"
+	ClosureCodeDeliveryOutside     ClosureCode = "deadman_delivery_outside_outage"
+	ClosureCodeHistoryReadMissing  ClosureCode = "outage_history_read_missing"
+	ClosureCodeHistoryReadOutside  ClosureCode = "outage_history_read_outside_window"
+	ClosureCodeJourneysNotRecov    ClosureCode = "journeys_not_recovered"
 )
 
 var closureCodes = map[ClosureCode]bool{
@@ -112,7 +113,7 @@ var closureCodes = map[ClosureCode]bool{
 	ClosureCodeProofMalformed: true, ClosureCodeProofExpired: true, ClosureCodeProofFuture: true,
 	ClosureCodeProofStale: true, ClosureCodeProofWrongScope: true, ClosureCodeDomainUnrecorded: true,
 	ClosureCodeSharesProcess: true, ClosureCodeSharesHost: true, ClosureCodeSharesCluster: true,
-	ClosureCodeSharesCredential: true, ClosureCodeOutageWindow: true, ClosureCodeOutageNotAllStop: true,
+	ClosureCodeSharesCredential: true, ClosureCodeOutageWindow: true, ClosureCodeOutageBeforeCutover: true, ClosureCodeOutageNotAllStop: true,
 	ClosureCodeDeliveryMissing: true, ClosureCodeRouteNotIndep: true, ClosureCodeDeliveryOutside: true,
 	ClosureCodeHistoryReadMissing: true, ClosureCodeHistoryReadOutside: true, ClosureCodeJourneysNotRecov: true,
 }
@@ -373,6 +374,14 @@ func closureVerifyProof(env *ClosureProofEnvelope, l ClosureLedger, now time.Tim
 		bad(ClosureCodeOutageWindow)
 	} else {
 		facts.outageStart = o.StartedAt
+	}
+	// The drill must be a drill of the adopted system: the ledger records where
+	// legacy history ends and Soundpost begins, and an outage from before that
+	// boundary says nothing about the product owning the normal route. A boundary
+	// history itself refuses (absent, missing, future-dated) blocks there, so the
+	// drill is not blamed twice.
+	if b := l.History.Boundary; windowOK && b != nil && !b.CutoverAt.IsZero() && !b.CutoverAt.After(now) && o.StartedAt.Before(b.CutoverAt) {
+		bad(ClosureCodeOutageBeforeCutover)
 	}
 	if o.ProcessesObserved <= 0 || o.ProcessesStopped != o.ProcessesObserved || !historyDigestOK(o.StopEvidenceDigest) {
 		bad(ClosureCodeOutageNotAllStop)

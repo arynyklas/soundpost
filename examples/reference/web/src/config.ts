@@ -14,6 +14,8 @@ export interface PublicConfig {
   readonly trusted_keys: Readonly<Record<string, string>>;
   readonly resource: Config["resource"];
   readonly descriptor: NonNullable<Config["descriptor"]>;
+  /** The build receipt: shipped asset path -> artifact ID. The SDK puts the ID into the frames of an error it captures. */
+  readonly artifact_ids?: Readonly<Record<string, string>>;
 }
 
 function base64url(value: string): Uint8Array {
@@ -28,6 +30,6 @@ export function sdkConfig(raw: PublicConfig, extra: Partial<Config> = {}): Confi
     org: raw.org, project: raw.project, source: raw.source, credential: raw.credential, build: raw.build, endpoint: raw.endpoint,
     policy: raw.policy, trustedKeys, resource: raw.resource, descriptor: raw.descriptor,
     operations: ["ui.action", "http.call"], dependencies: ["gateway"], origins: ["gateway"],
-    deploymentTraces: true, deploymentErrors: true, ...extra,
+    deploymentTraces: true, deploymentErrors: true, ...(raw.artifact_ids === undefined ? {} : {artifactIds: raw.artifact_ids}), ...extra,
   };
 }

@@ -381,6 +381,8 @@ func TestClosureDeadmanProofScopeAndFreshness(t *testing.T) {
 		l.Gate.VerifiedAt = closureNow.Add(-7 * 24 * time.Hour)
 		l.History.ObservedAt = closureNow.Add(-7 * 24 * time.Hour)
 		l.History.MaxEvidenceAgeSecs = 7 * 24 * 3600
+		// the drill is seven days old, so this ledger's cutover happened before it
+		l.History.Boundary.CutoverAt = closureNow.Add(-8 * 24 * time.Hour)
 		if r := closureClose(t, l); !r.Closed {
 			t.Fatalf("evidence exactly at the age bound must be fresh: %v", r.Blockers)
 		}
@@ -803,7 +805,7 @@ func TestHistoryStatusOriginBoundaryAndSteps(t *testing.T) {
 		want(t, statusOf(func(h *HistoryObligations) { h.Origin.ReadOnly = false }), HistoryCodeOriginNotReadOnly)
 	})
 	t.Run("origin without evidence", func(t *testing.T) {
-		want(t, statusOf(func(h *HistoryObligations) { h.Origin.EvidenceDigest = "" }), HistoryCodeOriginNotReadOnly)
+		want(t, statusOf(func(h *HistoryObligations) { h.Origin.EvidenceDigest = "" }), HistoryCodeOriginEvidenceMissing)
 	})
 	t.Run("history removed while obligations are open", func(t *testing.T) {
 		want(t, statusOf(func(h *HistoryObligations) { h.Origin.Retained = false }), HistoryCodeHistoryRemoved)

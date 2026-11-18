@@ -13,6 +13,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -309,18 +310,22 @@ type CutoverReconciliation struct {
 
 // CutoverReceipt is the private outcome of a Cutover call.
 type CutoverReceipt struct {
-	Version        int                   `json:"version"`
-	RunID          string                `json:"run_id"`
-	Scope          string                `json:"scope"`
-	Environment    string                `json:"environment"`
-	PlanDigest     string                `json:"plan_digest"`
-	StatePath      string                `json:"state_path"`
-	StateVersion   uint64                `json:"state_version"`
-	Phase          string                `json:"phase"`
-	Completed      []string              `json:"completed"`
-	IncompleteCode string                `json:"incomplete_code,omitempty"`
-	EnginePhase    string                `json:"engine_phase,omitempty"`
-	EngineRevision model.Revision        `json:"engine_revision,omitempty"`
+	Version        int            `json:"version"`
+	RunID          string         `json:"run_id"`
+	Scope          string         `json:"scope"`
+	Environment    string         `json:"environment"`
+	PlanDigest     string         `json:"plan_digest"`
+	StatePath      string         `json:"state_path"`
+	StateVersion   uint64         `json:"state_version"`
+	Phase          string         `json:"phase"`
+	Completed      []string       `json:"completed"`
+	IncompleteCode string         `json:"incomplete_code,omitempty"`
+	EnginePhase    string         `json:"engine_phase,omitempty"`
+	EngineRevision model.Revision `json:"engine_revision,omitempty"`
+	// EngineReadable says the engine answered the ownership read this receipt
+	// reports. False means ActiveOwners is empty because the engine could not be
+	// read, not because it reported nobody active.
+	EngineReadable bool                  `json:"engine_readable"`
 	Epoch          uint64                `json:"epoch,omitempty"`
 	ActiveOwners   []model.ID            `json:"active_owners"`
 	Reconciliation CutoverReconciliation `json:"reconciliation"`
@@ -360,6 +365,7 @@ type RollbackReceipt struct {
 	ReasonCode      string           `json:"reason_code"`
 	EnginePhase     string           `json:"engine_phase,omitempty"`
 	EngineRevision  model.Revision   `json:"engine_revision,omitempty"`
+	EngineReadable  bool             `json:"engine_readable"`
 	ActiveOwners    []model.ID       `json:"active_owners"`
 	OldRouteEnabled bool             `json:"old_route_enabled"`
 	DeadmanArmed    bool             `json:"deadman_armed"`
@@ -429,6 +435,11 @@ func cutoverFail(err error) error {
 
 var (
 	cutoverRunIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
+	// cutoverMaxFrontier is control's bound on one transition's frontier
+	// (maxCutoverFrontier, unexported there): a longer frontier is refused by the
+	// engine, so it must be refused as an invalid plan rather than discovered as
+	// an adapter error after the old route is quiesced.
+	cutoverMaxFrontier = 16
 	// cutoverCodePattern is the engine's closed-code shape (lowercase letters,
 	// digits and _ . : -, at most 64): the engine refuses a method outside it,
 	// but only at the barrier, after the old route is quiesced.
@@ -467,6 +478,8 @@ func cutoverValidatePlan(plan OwnershipPlan, gate ReadyGate, rt CutoverRuntime) 
 		return bad("policy generation")
 	case len(plan.Frontier) == 0:
 		return bad("source frontier")
+	case len(plan.Frontier) > cutoverMaxFrontier:
+		return bad("the frontier names more sources than the engine accepts")
 	case !cutoverCodePattern.MatchString(plan.OldQuiescence.Method):
 		return bad("quiescence method")
 	case !cutoverToken(plan.Destination.Destination, 128) || !cutoverToken(plan.Destination.ProbeID, 128):
@@ -481,6 +494,19 @@ func cutoverValidatePlan(plan OwnershipPlan, gate ReadyGate, rt CutoverRuntime) 
 		return bad("the deadman must not share the product's failure domain")
 	case plan.Deadman.Observer == plan.OldOwner || plan.Deadman.Observer == plan.NewOwner:
 		return bad("the deadman is excluded from ownership and cannot be an owner")
+	}
+	// Every shape the engine's own transition check refuses, refused here: a plan
+	// the engine can never accept must not cost a destination test delivery, and
+	// must not surface as an adapter error after the old route is quiesced.
+	sources := map[model.ID]bool{}
+	for _, f := range plan.Frontier {
+		if f.Source == (model.ID{}) || f.Version == 0 || f.Cursor.Group == (model.ID{}) {
+			return bad("a frontier entry needs a source, a source policy version and a cursor group")
+		}
+		if sources[f.Source] {
+			return bad("a frontier source is named twice")
+		}
+		sources[f.Source] = true
 	}
 	if projects := rt.Scope.ProjectIDs(); len(projects) != 1 || projects[0] != plan.Project {
 		return bad("project differs from the engine scope")
@@ -796,6 +822,52 @@ func (d *cutoverDriver) legacyState(s CutoverLegacyState, wantCommand string, no
 	return nil
 }
 
+// quiescenceAck accepts the legacy operator's answer to the run's quiescence
+// command. A resumed run gets the ORIGINAL acknowledgement back: the operator
+// repeats the result of a command ID it has already executed, and by then its
+// observation time has aged out of the freshness bound. That is not a missing
+// acknowledgement, so the tool observes the same normal route afresh and requires
+// the fresh observation to satisfy every check the acknowledgement would have —
+// about the old owner, naming the plan's method, after the quiescing began, fresh,
+// disabled and with nothing pending. Fail-closed either way: neither answer is
+// accepted on trust, and the run stops incomplete when the route cannot be shown
+// quiesced now.
+func (d *cutoverDriver) quiescenceAck(ctx context.Context, ack CutoverLegacyState, id string, notBefore time.Time) error {
+	err := d.legacyState(ack, id, notBefore)
+	if err == nil {
+		return cutoverRouteQuiesced(ack)
+	}
+	if !d.legacyAged(ack, id, notBefore) {
+		return err
+	}
+	fresh, oerr := d.rt.Legacy.Observe(ctx, d.plan.OldOwner)
+	if oerr != nil {
+		return cutoverFail(oerr)
+	}
+	if serr := d.legacyState(fresh, "", notBefore); serr != nil {
+		return serr
+	}
+	return cutoverRouteQuiesced(fresh)
+}
+
+// legacyAged reports whether the ONLY defect of an acknowledgement is its age: it
+// is about the old owner's normal route, echoes the command, names the plan's
+// method, carries a digest and came after the quiescing began, but is older than
+// the evidence bound. Only the replayed acknowledgement of a resumed run is ever
+// like that: anything else — another owner, another command, no digest, an answer
+// from before the quiescing, a route with pending work — stays refused.
+func (d *cutoverDriver) legacyAged(s CutoverLegacyState, wantCommand string, notBefore time.Time) bool {
+	return s.Owner == d.plan.OldOwner && s.CommandID == wantCommand && s.Ref != (model.Hash{}) && s.Method == d.plan.OldQuiescence.Method &&
+		!s.ObservedAt.Before(notBefore) && !cutoverFresh(s.ObservedAt, d.rt.Now(), d.maxAge(control.CutoverMaxEvidenceAge))
+}
+
+func cutoverRouteQuiesced(s CutoverLegacyState) error {
+	if s.Enabled {
+		return cutoverStopErr(CutoverIncompleteQuiescence, "the legacy operator did not disable the normal route", nil)
+	}
+	return nil
+}
+
 // preflightChecks are read-only except for the idempotent destination test
 // delivery. Nothing about the engine or the old route changes here.
 func (d *cutoverDriver) preflightChecks(ctx context.Context) error {
@@ -951,11 +1023,8 @@ func (d *cutoverDriver) quiesce(ctx context.Context) error {
 	if err != nil {
 		return cutoverFail(err)
 	}
-	if err = d.legacyState(ack, id, cutoverQuiesceStart(es)); err != nil {
+	if err = d.quiescenceAck(ctx, ack, id, cutoverQuiesceStart(es)); err != nil {
 		return err
-	}
-	if ack.Enabled {
-		return cutoverStopErr(CutoverIncompleteQuiescence, "the legacy operator did not disable the normal route", nil)
 	}
 	if _, err = d.deadmanProof(ctx); err != nil {
 		return err
@@ -1177,9 +1246,12 @@ func (d *cutoverDriver) receipt(ctx context.Context) CutoverReceipt {
 	if d.st.Reconciliation != nil {
 		r.Reconciliation = *d.st.Reconciliation
 	}
-	if es, found, err := d.rt.Engine.Cutover(context.WithoutCancel(ctx), d.rt.Scope); err == nil && found {
-		r.EnginePhase, r.EngineRevision, r.Epoch = string(es.Phase), es.Revision, es.Epoch
-		r.ActiveOwners = append(r.ActiveOwners, notify.ActiveOwners(es.Phase, d.plan.OldOwner, d.plan.NewOwner)...)
+	if es, found, err := d.rt.Engine.Cutover(context.WithoutCancel(ctx), d.rt.Scope); err == nil {
+		r.EngineReadable = true
+		if found {
+			r.EnginePhase, r.EngineRevision, r.Epoch = string(es.Phase), es.Revision, es.Epoch
+			r.ActiveOwners = append(r.ActiveOwners, notify.ActiveOwners(es.Phase, d.plan.OldOwner, d.plan.NewOwner)...)
+		}
 	}
 	return r
 }
@@ -1214,6 +1286,22 @@ func cutoverStopCodeCtx(ctx context.Context, err error) string {
 		return cutoverClassify(cerr)
 	}
 	return code
+}
+
+// cutoverOutputFailure reports a failure to create an output file without losing
+// the run's own reason for stopping: the private receipt is named after the state
+// version, so two interrupted invocations can want the same name. The operating
+// system's error is NOT echoed: it names the private directory. Only a closed
+// classification of it is.
+func cutoverOutputFailure(what string, cause, runErr error) error {
+	kind := "the file could not be written"
+	if errors.Is(cause, fs.ErrExist) {
+		kind = "a file of that name already exists"
+	}
+	if runErr == nil {
+		return fmt.Errorf("%s: %s", what, kind)
+	}
+	return fmt.Errorf("%s (%s); the run reported: %w", what, kind, runErr)
 }
 
 // errCutoverAlreadyDone is returned, with the original receipt, when a run that
@@ -1321,6 +1409,7 @@ type CutoverPublic struct {
 	PhasesCompleted    int            `json:"phases_completed"`
 	IncompleteCode     string         `json:"incomplete_code"`
 	ActiveOwners       int            `json:"active_owners"`
+	EngineReadable     bool           `json:"engine_readable"`
 	OldRouteQuiesced   bool           `json:"old_route_quiesced"`
 	NewRouteActive     bool           `json:"new_route_active"`
 	Due                int            `json:"due"`
@@ -1338,7 +1427,7 @@ type CutoverPublic struct {
 // CutoverPublicSummary projects a receipt onto the closed public shape.
 func CutoverPublicSummary(r CutoverReceipt) CutoverPublic {
 	p := CutoverPublic{SchemaVersion: 1, Phase: r.Phase, PhasesRequired: len(cutoverSteps), PhasesCompleted: len(r.Completed), IncompleteCode: r.IncompleteCode,
-		ActiveOwners: len(r.ActiveOwners), OldRouteQuiesced: slices.Contains(r.Completed, cutoverStepQuiesce), NewRouteActive: slices.Contains(r.Completed, cutoverStepActivate),
+		ActiveOwners: len(r.ActiveOwners), EngineReadable: r.EngineReadable, OldRouteQuiesced: slices.Contains(r.Completed, cutoverStepQuiesce), NewRouteActive: slices.Contains(r.Completed, cutoverStepActivate),
 		Due: r.Reconciliation.Due, Delivered: r.Reconciliation.Delivered, Gaps: r.Reconciliation.Gaps, UrgentDue: r.Reconciliation.UrgentDue, UrgentGaps: r.Reconciliation.UrgentGaps,
 		Duplicates: r.Reconciliation.Duplicates, Uncertain: r.Reconciliation.Uncertain, Unexpected: r.Reconciliation.Unexpected, BlockerCounts: []CutoverCount{}}
 	for _, code := range cutoverBlockCodes {
@@ -1447,10 +1536,10 @@ func runCutover(ctx context.Context, args []string) error {
 	}
 	out := filepath.Join(resolved, fmt.Sprintf("cutover-%s.receipt-v%d.json", plan.RunID, receipt.StateVersion))
 	if err = writeExclusive(out, receipt); err != nil {
-		return errors.New("private receipt creation failed")
+		return cutoverOutputFailure("private receipt creation failed", err, runErr)
 	}
 	if err = writeExclusive(*summaryPath, CutoverPublicSummary(receipt)); err != nil {
-		return errors.New("summary creation failed; private receipt retained")
+		return cutoverOutputFailure("summary creation failed; private receipt retained", err, runErr)
 	}
 	return runErr
 }

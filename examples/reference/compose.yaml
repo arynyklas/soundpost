@@ -5,8 +5,9 @@
 # pulled: `pull_policy: never`). The Python API, the Bun gateway, the jobs and the web build need
 # the committed SDK source trees and the Soundpost node's per-source configuration, so the
 # acceptance smoke (`go run ./tools/smoke journeys`) runs them as host processes; see README.md.
-# Required environment: REFERENCE_PG_IMAGE (a local PostgreSQL 16 image id), REFERENCE_TLS_DIR
-# (a directory holding leaf.pem and leaf.key for the dependency), REFERENCE_PG_PASSWORD.
+# Required environment: REFERENCE_PG_IMAGE (a local PostgreSQL 16 image id), REFERENCE_PYTHON_IMAGE (a local Python 3.12 image id, for the
+# dependency), REFERENCE_TLS_DIR (a directory holding leaf.pem and leaf.key for the dependency), REFERENCE_PG_PASSWORD. Every image is
+# named by an id the operator supplies: no tag is resolved, so the estate cannot silently run a different image.
 name: soundpost-reference
 services:
   postgres:
@@ -24,7 +25,7 @@ services:
     cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
     security_opt: ["no-new-privileges:true"]
   dependency:
-    image: python:3.12-slim
+    image: ${REFERENCE_PYTHON_IMAGE:?a local Python 3.12 image id}
     pull_policy: never
     command: ["python", "/app/server.py", "--listen", "0.0.0.0:8443", "--cert", "/tls/leaf.pem", "--key", "/tls/leaf.key"]
     ports: ["127.0.0.1:${REFERENCE_DEPENDENCY_PORT:-0}:8443"]

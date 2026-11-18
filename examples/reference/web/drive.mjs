@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Real-browser driver (Linux Node + Playwright + Chrome, headless). Trust for the private CA comes from the caller's
 // NSS database (HOME); certificate errors are never ignored. Playwright is resolved through NODE_PATH, as for web/.
+// On a host without NSS tools the caller passes --spki-pin (base64 SHA-256 of the leaf's SubjectPublicKeyInfo): Chrome then
+// accepts exactly that public key and still reports every other certificate error.
 //   node examples/reference/web/drive.mjs --origin https://127.0.0.1:PORT --chrome PATH \
-//        --scenario order|replay|profile [--item sku-100|sku-404] [--note-env REFERENCE_NOTE]
+//        --scenario order|replay|profile [--item sku-100|sku-404] [--note-env REFERENCE_NOTE] [--spki-pin BASE64]
 // Prints exactly one JSON line. The note comes from the named environment variable and is never printed; error
 // messages are never printed (names and bundle positions only).
 import {createHash} from "node:crypto";
@@ -40,7 +42,9 @@ function frames(stack) {
   return found;
 }
 
-const browser = await chromium.launch({executablePath: args.get("chrome"), headless: true});
+const spkiPin = args.get("spki-pin");
+if (spkiPin !== undefined && !/^[A-Za-z0-9+/]{43}=$/.test(spkiPin)) throw Error("invalid_spki_pin");
+const browser = await chromium.launch({executablePath: args.get("chrome"), headless: true, args: spkiPin === undefined ? [] : ["--ignore-certificate-errors-spki-list=" + spkiPin]});
 const result = {};
 try {
   const context = await browser.newContext();

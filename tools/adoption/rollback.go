@@ -281,9 +281,12 @@ func (d *rollbackDriver) receipt(ctx context.Context) RollbackReceipt {
 	if rb.IncompleteCode == CutoverIncompleteUnknown {
 		r.Blockers = append(r.Blockers, CutoverBlocker{Code: CutoverIncompleteUnknown, Count: int(rb.Unknown.Engine) + len(rb.Unknown.RouteIDs)})
 	}
-	if es, found, err := d.rt.Engine.Cutover(context.WithoutCancel(ctx), d.rt.Scope); err == nil && found {
-		r.EnginePhase, r.EngineRevision = string(es.Phase), es.Revision
-		r.ActiveOwners = append(r.ActiveOwners, notify.ActiveOwners(es.Phase, d.plan.OldOwner, d.plan.NewOwner)...)
+	if es, found, err := d.rt.Engine.Cutover(context.WithoutCancel(ctx), d.rt.Scope); err == nil {
+		r.EngineReadable = true
+		if found {
+			r.EnginePhase, r.EngineRevision = string(es.Phase), es.Revision
+			r.ActiveOwners = append(r.ActiveOwners, notify.ActiveOwners(es.Phase, d.plan.OldOwner, d.plan.NewOwner)...)
+		}
 	}
 	return r
 }
@@ -389,6 +392,7 @@ type RollbackPublic struct {
 	IncompleteCode     string         `json:"incomplete_code"`
 	ReasonCode         string         `json:"reason_code"`
 	ActiveOwners       int            `json:"active_owners"`
+	EngineReadable     bool           `json:"engine_readable"`
 	NewOwnerQuiesced   bool           `json:"new_owner_quiesced"`
 	OldRouteRestored   bool           `json:"old_route_restored"`
 	UnknownOutcomes    int            `json:"unknown_outcomes"`
@@ -401,7 +405,7 @@ type RollbackPublic struct {
 // RollbackPublicSummary projects a receipt onto the closed public shape.
 func RollbackPublicSummary(r RollbackReceipt) RollbackPublic {
 	p := RollbackPublic{SchemaVersion: 1, Phase: r.Phase, PhasesRequired: len(rollbackSteps), PhasesCompleted: len(r.Completed), IncompleteCode: r.IncompleteCode,
-		ReasonCode: r.ReasonCode, ActiveOwners: len(r.ActiveOwners), NewOwnerQuiesced: slices.Contains(r.Completed, rollbackStepNewQuiesced),
+		ReasonCode: r.ReasonCode, ActiveOwners: len(r.ActiveOwners), EngineReadable: r.EngineReadable, NewOwnerQuiesced: slices.Contains(r.Completed, rollbackStepNewQuiesced),
 		OldRouteRestored: slices.Contains(r.Completed, rollbackStepOldRestored), UnknownOutcomes: int(r.Unknown.Engine) + len(r.Unknown.RouteIDs),
 		UnknownReviewed: r.Unknown.Reviewed, DeadmanArmed: r.DeadmanArmed, BlockerCounts: []CutoverCount{}}
 	for _, b := range r.Blockers {
@@ -477,10 +481,10 @@ func runRollback(ctx context.Context, args []string) error {
 	}
 	out := filepath.Join(resolved, fmt.Sprintf("rollback-%s.receipt-v%d.json", rb.RunID, rb.StateVersion))
 	if err = writeExclusive(out, rb); err != nil {
-		return errors.New("private receipt creation failed")
+		return cutoverOutputFailure("private receipt creation failed", err, runErr)
 	}
 	if err = writeExclusive(*summaryPath, RollbackPublicSummary(rb)); err != nil {
-		return errors.New("summary creation failed; private receipt retained")
+		return cutoverOutputFailure("summary creation failed; private receipt retained", err, runErr)
 	}
 	return runErr
 }

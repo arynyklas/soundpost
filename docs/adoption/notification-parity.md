@@ -24,7 +24,7 @@
 | `CanonicalShadowEvidence` | `Replays` (event streams per subject, replayed through `notify.ShadowEvaluator`) and/or recorded `Decisions` with the decision time and optionally the template `Basis`/`Rate`. A refused replayed event decides nothing and is a blocker finding. |
 | `ApprovedPolicy` | The policy `Revision` and `Config` under comparison, `Approvals` and `Controls` dispositions. |
 
-Malformed closed enums, identifiers or ledger fields are refused with an error. Replayed events under another policy revision or configuration than the approved one are blocker findings.
+Malformed closed enums, identifiers or ledger fields are refused with an error. Each file is read strictly (unknown fields, trailing data refused) with a 64 MiB bound: a normalized window of up to the 100 000 delivery attempts the ledger accepts is far larger than one test fixture, and the bound is what the command enforces, not the shape of the examples here. Replayed events under another policy revision or configuration than the approved one are blocker findings.
 
 ## Ledger comparison: attempt, event time, source version
 
@@ -47,7 +47,7 @@ Every difference is one of four classes, each with a closed reason:
 | `intentional` | A noise difference covered by a complete approval within its expected impact. | same as noise |
 | `inert` | Neither side would have interrupted anyone, or a class stays with a customer tool. | `legacy_suppressed_only`, `canonical_suppressed_only`, `customer_retained_class` |
 
-Key rules: repeated exception occurrences are one group, so legacy per-occurrence pages beyond a canonical opening that already covers that impact are noise; a rate legacy computed without a known denominator is never reproduced (`legacy_fake_rate`); an ACK covers reminders for the impact it saw, so later legacy reminders are noise, while a worsened impact must still interrupt (`worse_impact_after_ack` when only canonical does, a blocker when only legacy did); a canonical silence by maintenance or snooze is excused only by a recorded window with a reason and an expiry covering the decision time (the window is half-open); a source recovery and an incident resolution are separate kinds and separate facts.
+Key rules: repeated exception occurrences are one group, so legacy per-occurrence pages beyond a canonical opening that already covers that impact **at or before the page's own event time** are noise — an opening that came later is not an explanation for a page the recipient never got in time, and stays `urgent_not_delivered`; a rate legacy computed without a known denominator is never reproduced (`legacy_fake_rate`); an ACK covers reminders for the impact it saw, so later legacy reminders are noise, while a worsened impact must still interrupt (`worse_impact_after_ack` when only canonical does, a blocker when only legacy did); a canonical silence by maintenance or snooze is excused only by a recorded window with a reason and an expiry covering the decision time (the window is half-open); a source recovery and an incident resolution are separate kinds and separate facts.
 
 ## Intentional differences
 

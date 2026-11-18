@@ -31,8 +31,9 @@ Retention and export are required exactly once each; holds are optional and may 
 | Code | Meaning |
 | --- | --- |
 | `evidence_stale`, `evidence_future_dated` | Snapshot missing, older than the bound, or dated after the caller's clock. |
-| `legacy_not_read_only` | Origin not read-only or no origin evidence. |
-| `legacy_write_access` | Any write grant that is not provably over (expired or revoked at or before now). A grant that has not started yet, is revoked in the future, has no usable window, or has an unknown mode counts as write access. |
+| `legacy_not_read_only` | Origin is not read-only (its own reason; a missing evidence reference is `origin_evidence_missing`). |
+| `legacy_write_access` | Any **write** grant that is not provably over (expired or revoked at or before now). A write grant that has not started yet, is revoked in the future or has no usable window, and any grant whose mode is not `read` or `write`, counts as write access. A **read** grant that has not started yet or is revoked in the future is neither counted active nor blocking; a read grant with no usable window blocks as `access_invalid`. |
+| `origin_evidence_missing` | The origin's `evidence_digest` is absent or is not 64 lowercase hex: the origin may be read-only and simply undocumented. Read-only itself is judged by `legacy_not_read_only`. |
 | `access_invalid`, `access_unauthorized`, `reader_identity_not_keyed` | Grant without a valid window or mode, without an authorization digest, or whose reader is not a keyed hash. |
 | `retention_obligation_missing`, `export_obligation_missing`, `export_record_missing`, `obligation_record_missing` | A required obligation or its record is absent. A missing export record always blocks, also on a completion claim. |
 | `retention_overdue`, `export_overdue`, `hold_overdue` | Due date reached (due time equal to now is overdue) while not completed. |

@@ -30,9 +30,12 @@ signal they produce comes from the committed custom SDKs delivering to a real `s
 The acceptance run is `go run ./tools/smoke journeys --artifact-dir <dir>` (see
 `docs/acceptance/reference-journeys.md` for prerequisites, the rows it evaluates and its recorded
 result). It builds nothing from the network, uses only local images, runs everything on loopback, and
-removes the PostgreSQL container it creates.
+removes the PostgreSQL container it creates. On a host without a container runtime, `--pg-local DIR` starts an unprivileged
+PostgreSQL 16 server from an installation directory instead, and `--symbolicate-cgroup-root DIR` gives the node's native
+symbolication sandbox its delegated cgroup (see `docs/acceptance/reference-journeys.md`).
 
-`compose.yaml` starts only the two backing services (PostgreSQL and the dependency) from local images;
+`compose.yaml` starts only the two backing services (PostgreSQL and the dependency) from local images named by id
+(`REFERENCE_PG_IMAGE`, `REFERENCE_PYTHON_IMAGE`; nothing is pulled);
 the SDK-bearing apps run as host processes because they use the committed SDK source trees and the
 per-source configuration the smoke provisions. Each app takes `--config <json>`: the source's real
 credential, server-signed policy, pinned trusted keys, resource and descriptor as issued by

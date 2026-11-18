@@ -78,3 +78,29 @@ func TestReferenceLockMatchesSDKLocks(t *testing.T) {
 		t.Fatal("empty lock")
 	}
 }
+
+// The estate's backing services run only from images the operator names by a local id and are never pulled: every `image:` of
+// compose.yaml is a required environment reference (no tag, no registry name) and every service says `pull_policy: never`.
+func TestReferenceComposeRunsOnlyNamedLocalImages(t *testing.T) {
+	raw, err := os.ReadFile("../../examples/reference/compose.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	if strings.Contains(text, "\r") {
+		t.Fatal("compose.yaml must use LF line endings")
+	}
+	images := regexp.MustCompile(`(?m)^    image: (.*)$`).FindAllStringSubmatch(text, -1)
+	services := regexp.MustCompile(`(?m)^  [a-z][a-z0-9_-]*:$`).FindAllString(text, -1)
+	if len(images) == 0 || len(images) != len(services) {
+		t.Fatalf("%d image line(s) for %d service(s)", len(images), len(services))
+	}
+	for _, m := range images {
+		if !regexp.MustCompile(`^\$\{REFERENCE_[A-Z0-9_]+_IMAGE:\?[^}]+\}$`).MatchString(m[1]) {
+			t.Errorf("image %q is not a required REFERENCE_*_IMAGE reference: a tag or registry name would be resolved by the runtime", m[1])
+		}
+	}
+	if n := strings.Count(text, "    pull_policy: never\n"); n != len(services) {
+		t.Errorf("%d of %d services say pull_policy: never", n, len(services))
+	}
+}

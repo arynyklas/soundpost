@@ -4,7 +4,9 @@
 
 The scheduler enqueues the deterministic run and retries after a deterministic
 exponential backoff; the worker runs each attempt inside the SDK job-attempt
-API. Exits 0 only when the run finally succeeded and the flush is clean.
+API. With --profile the SDK's runtime profiler (python_wall_samples) samples the
+whole run and delivers the profile. Exits 0 only when the run finally succeeded
+and the flush is clean.
 """
 import argparse
 import json
@@ -18,10 +20,21 @@ import telemetry  # noqa: E402
 
 JOB_ALIAS = "reference.catalog.refresh"
 PROMPT = "Refresh catalog summaries for the reference journey."
+SUMMARY_SECONDS = 0.4
 
 
 class DependencyUnavailable(Exception):
     pass
+
+
+def summarise_catalog(seconds):
+    """The CPU-bound part of the refresh: a named hot loop, so a runtime profile of this process has a function to show."""
+    end = time.perf_counter() + seconds
+    total = 0
+    while time.perf_counter() < end:
+        for i in range(2000):
+            total += i * i
+    return total
 
 
 def work(instruments, dsn, run_id, ordinal):
@@ -31,6 +44,7 @@ def work(instruments, dsn, run_id, ordinal):
     if response.status_code != 200:
         raise DependencyUnavailable
     completion = response.json()["completion"]
+    summarise_catalog(SUMMARY_SECONDS)
     with psycopg.connect(dsn, autocommit=True) as connection:
         instruments.database(connection).execute(
             "INSERT INTO catalog_refresh(run_id, attempt, completion) VALUES (%s, %s, %s)",
@@ -58,6 +72,23 @@ def versions():
             "psycopg": psycopg.__version__, "httpx": httpx.__version__}
 
 
+def begin_profile(client):
+    """Start the SDK's bounded runtime profile of this process; None when the SDK is not configured."""
+    if client is None:
+        return None
+    from soundpost.profile import ProfileOptions, start_profile
+    return start_profile(ProfileOptions(method="python_wall_samples", duration_s=30, interval_ms=2, project_root=telemetry.REFERENCE_ROOT), client)
+
+
+def end_profile(lease):
+    """Stop the profile (the SDK hands its records to the client's own delivery) and report what it says about itself."""
+    if lease is None:
+        return None
+    report = lease.stop()
+    return {"method": report["method"], "status": report["capability"]["status"], "reason": report["capability"]["reason"],
+            "samples": report["sample_count"], "ack": report["ack"]["status"]}
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config")
@@ -66,14 +97,16 @@ def main():
     parser.add_argument("--max-attempts", type=int, default=3)
     parser.add_argument("--backoff-ms", type=int, default=250)
     parser.add_argument("--ca")
+    parser.add_argument("--profile", action="store_true", help="sample this process with the SDK's runtime profiler and deliver the profile")
     args = parser.parse_args()
     dsn = os.environ["REFERENCE_DATABASE_URL"]
 
     client = data = None
     if args.config:
-        client, data = telemetry.load_client(args.config)
+        client, data = telemetry.load_client(args.config, profiles=args.profile)
     http = telemetry.http_client(args.ca or (data or {}).get("ca_file"))
     instruments = telemetry.Instruments(client, http, args.dependency_url)
+    lease = begin_profile(client) if args.profile else None
 
     attempts, succeeded = [], False
     for ordinal in range(1, args.max_attempts + 1):  # scheduler: enqueue, then retry with backoff
@@ -88,9 +121,10 @@ def main():
         succeeded = True
         break
     http.close()
+    profile = end_profile(lease)
     report, clean = telemetry.finish(client, 10.0)
     print(json.dumps({"run_id": args.run_id, "job_alias": JOB_ALIAS, "attempts": attempts,
-                      "flush": report, "versions": versions()}), flush=True)
+                      "flush": report, "profile": profile, "versions": versions()}), flush=True)
     sys.exit(0 if succeeded and clean else 1)
 
 

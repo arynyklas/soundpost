@@ -1839,9 +1839,9 @@ func TestCutoverBlockedReconciliationDiscardsNothingAndResumesToDone(t *testing.
 }
 
 func TestCutoverPublicProjectionsAreClosed(t *testing.T) {
-	cutoverKeys := []string{"schema_version", "phase", "phases_required", "phases_completed", "incomplete_code", "active_owners", "old_route_quiesced", "new_route_active",
+	cutoverKeys := []string{"schema_version", "phase", "phases_required", "phases_completed", "incomplete_code", "active_owners", "engine_readable", "old_route_quiesced", "new_route_active",
 		"due", "delivered", "gaps", "urgent_due", "urgent_gaps", "duplicates", "uncertain", "unexpected", "blocker_counts", "customer_acceptance"}
-	rollbackKeys := []string{"schema_version", "phase", "phases_required", "phases_completed", "incomplete_code", "reason_code", "active_owners", "new_owner_quiesced",
+	rollbackKeys := []string{"schema_version", "phase", "phases_required", "phases_completed", "incomplete_code", "reason_code", "active_owners", "engine_readable", "new_owner_quiesced",
 		"old_route_restored", "unknown_outcomes", "unknown_reviewed", "deadman_armed", "blocker_counts", "customer_acceptance"}
 	hex32 := regexp.MustCompile(`[0-9a-f]{32}`)
 	codes := map[string]bool{}
@@ -1894,7 +1894,7 @@ func TestCutoverPublicProjectionsAreClosed(t *testing.T) {
 	w.observe("legacy.after.QuiesceNormal", func() { w.emit("urgent-gap-7731", true) })
 	blocked, _, _ := w.cutover()
 	f := check(t, "blocked cutover", CutoverPublicSummary(blocked), cutoverKeys, secrets)
-	doneBase := map[string]any{"schema_version": 1.0, "phase": CutoverPhaseDone, "phases_required": 5.0, "phases_completed": 5.0, "incomplete_code": "", "active_owners": 1.0,
+	doneBase := map[string]any{"schema_version": 1.0, "phase": CutoverPhaseDone, "phases_required": 5.0, "phases_completed": 5.0, "incomplete_code": "", "active_owners": 1.0, "engine_readable": true,
 		"old_route_quiesced": true, "new_route_active": true, "due": 0.0, "delivered": 0.0, "gaps": 0.0, "urgent_due": 0.0, "urgent_gaps": 0.0, "duplicates": 0.0, "uncertain": 0.0,
 		"unexpected": 0.0, "blocker_counts": []any{}, "customer_acceptance": false}
 	with := func(base map[string]any, over map[string]any) map[string]any {
@@ -1939,7 +1939,7 @@ func TestCutoverPublicProjectionsAreClosed(t *testing.T) {
 	stopped, _, _ := w.rollback(done, reason)
 	f = check(t, "stopped rollback", RollbackPublicSummary(stopped), rollbackKeys, secrets)
 	rollbackBase := map[string]any{"schema_version": 1.0, "phase": CutoverPhaseDone, "phases_required": 3.0, "phases_completed": 3.0, "incomplete_code": "", "reason_code": RollbackReasonOperator,
-		"active_owners": 1.0, "new_owner_quiesced": true, "old_route_restored": true, "unknown_outcomes": 1.0, "unknown_reviewed": true, "deadman_armed": true, "blocker_counts": []any{},
+		"active_owners": 1.0, "engine_readable": true, "new_owner_quiesced": true, "old_route_restored": true, "unknown_outcomes": 1.0, "unknown_reviewed": true, "deadman_armed": true, "blocker_counts": []any{},
 		"customer_acceptance": false}
 	wantExactly("stopped rollback", f, with(rollbackBase, map[string]any{"phase": CutoverPhaseIncomplete, "phases_completed": 0.0, "incomplete_code": CutoverIncompleteUnknown, "active_owners": 0.0,
 		"new_owner_quiesced": false, "old_route_restored": false, "unknown_reviewed": false, "deadman_armed": false, "blocker_counts": []any{count(CutoverIncompleteUnknown, 1)}}))

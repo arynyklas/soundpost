@@ -6,10 +6,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/arynyklas/soundpost/internal/httpapi"
+	"github.com/arynyklas/soundpost/internal/jobs"
 	"github.com/arynyklas/soundpost/internal/model"
+	"github.com/arynyklas/soundpost/internal/profiles"
 	"github.com/arynyklas/soundpost/internal/traces"
 )
 
@@ -34,6 +37,7 @@ const (
 	rowDBSpanSafe      = "db_span_safe_operation_only"
 	rowReplay          = "replay_masked_interaction_real_recorder"
 	rowProfile         = "profile_linkage_with_capability_truth"
+	rowRuntimeProfile  = "runtime_profile_delivered_stored_linked"
 	rowIDs             = "actual_ids_equal_expected"
 	rowVersions        = "actual_versions_recorded"
 	sourceMapChainSize = 32
@@ -75,14 +79,39 @@ type traceRead struct {
 	Body    json.RawMessage `json:"body"`
 }
 
-type observedError struct {
-	Source model.ID              `json:"source"`
-	Record model.ErrorOccurrence `json:"record"`
+// servedRead is one real answer of a product route: the HTTP status and the unmodified body.
+type servedRead struct {
+	Route  string          `json:"route"`
+	Actor  string          `json:"actor"`
+	Status int             `json:"status"`
+	Body   json.RawMessage `json:"body"`
 }
 
-type observedJob struct {
-	Source model.ID              `json:"source"`
-	Event  model.JobAttemptEvent `json:"event"`
+// observedError is one stored error of the web source read THROUGH the product: the trace view
+// linked the occurrence and its issue, the occurrence route answered for it.
+type observedError struct {
+	Issue      model.ID   `json:"issue"`
+	Occurrence model.ID   `json:"occurrence"`
+	Read       servedRead `json:"read"`
+}
+
+// pageObservation is where the real browser reported the thrown error, in the shipped bundle.
+type pageObservation struct {
+	Found  bool   `json:"found"`
+	Path   string `json:"path"`
+	Line   uint32 `json:"line"`
+	Column uint32 `json:"column"`
+}
+
+// runtimeProfileObservation is the server-side runtime profile: the CPython SDK in the job process samples a named
+// function, delivers it, the product stores it, and the profile route reads it back.
+type runtimeProfileObservation struct {
+	Attempted          bool        `json:"attempted"`
+	Method             string      `json:"method"`
+	StoredChunks       int         `json:"stored_profile_chunks"`
+	StoredCapabilities int         `json:"stored_capability_records"`
+	Profile            model.ID    `json:"profile"`
+	Read               *servedRead `json:"read,omitempty"`
 }
 
 // canaryFlow proves a canary really travelled through the applications, so its absence from
@@ -103,15 +132,6 @@ type artifactObservation struct {
 	DebugID         string   `json:"debug_id"`
 	Artifact        string   `json:"artifact_id"`
 	HasSourceMapRef bool     `json:"bundle_has_sourcemap_reference"`
-}
-
-type symbolObservation struct {
-	Reason   string   `json:"reason"` // symbolicate.Reason, or a harness reason such as "no_page_frame"
-	Source   string   `json:"source"`
-	LineN    uint32   `json:"line"`
-	ColumnN  uint32   `json:"column"`
-	Build    model.ID `json:"build"`
-	FromPage bool     `json:"generated_position_from_real_page_error"`
 }
 
 type replayObservation struct {
@@ -136,20 +156,22 @@ type profileObservation struct {
 }
 
 type journeyObservation struct {
-	Expected      journeyExpected     `json:"expected"`
-	DirectTrace   model.ID            `json:"direct_trace"`
-	UITrace       model.ID            `json:"ui_trace"`
-	Reads         []traceRead         `json:"reads"`
-	Errors        []observedError     `json:"errors"`
-	Jobs          []observedJob       `json:"jobs"`
-	Artifact      artifactObservation `json:"artifact"`
-	Symbol        symbolObservation   `json:"symbolication"`
-	Flows         []canaryFlow        `json:"canary_flows"`
-	Leaks         []leakHit           `json:"canary_leaks"`
-	Replay        replayObservation   `json:"replay"`
-	Profile       profileObservation  `json:"profile"`
-	Versions      map[string]string   `json:"versions"`
-	UnsafeStorage []string            `json:"unsafe_storage_hits"`
+	Expected       journeyExpected           `json:"expected"`
+	DirectTrace    model.ID                  `json:"direct_trace"`
+	UITrace        model.ID                  `json:"ui_trace"`
+	Reads          []traceRead               `json:"reads"`
+	Errors         []observedError           `json:"errors"`
+	JobRun         *servedRead               `json:"job_run,omitempty"`
+	Frames         *servedRead               `json:"frames,omitempty"`
+	Page           pageObservation           `json:"page_error"`
+	Artifact       artifactObservation       `json:"artifact"`
+	Flows          []canaryFlow              `json:"canary_flows"`
+	Leaks          []leakHit                 `json:"canary_leaks"`
+	Replay         replayObservation         `json:"replay"`
+	Profile        profileObservation        `json:"profile"`
+	RuntimeProfile runtimeProfileObservation `json:"runtime_profile"`
+	Versions       map[string]string         `json:"versions"`
+	UnsafeStorage  []string                  `json:"unsafe_storage_hits"`
 }
 
 func (o *journeyObservation) read(actor string, trace model.ID, org, project model.ID) *traceRead {
@@ -177,6 +199,7 @@ func assessJourneys(o journeyObservation) []journeyRow {
 		rowFrom(rowDBSpanSafe, true, dbSpanSafe(o)),
 		rowFrom(rowReplay, true, replayRow(o)),
 		rowFrom(rowProfile, true, profileRow(o)),
+		rowFrom(rowRuntimeProfile, true, runtimeProfileRow(o)),
 		rowFrom(rowIDs, true, idsEqual(o)),
 		rowFrom(rowVersions, true, versionsRecorded(o)),
 	}
@@ -374,40 +397,54 @@ func uiChain(o journeyObservation) verdict {
 	return pass("trace=%s spans=%d", o.UITrace, len(path.Spans))
 }
 
-func webErrors(o journeyObservation) []observedError {
-	var out []observedError
-	for _, e := range o.Errors {
-		if e.Source == o.Expected.WebSource {
-			out = append(out, e)
-		}
+// occurrenceOf decodes the occurrence route's answer for one linked error and demands that the product served it.
+func occurrenceOf(e observedError) (httpapi.ErrorOccurrenceDetail, verdict) {
+	if e.Read.Status != 200 {
+		return httpapi.ErrorOccurrenceDetail{}, fail("occurrence_read_refused", "occurrence %s: the route answered %d", e.Occurrence, e.Read.Status)
 	}
-	return out
+	var v httpapi.ErrorOccurrenceView
+	if err := json.Unmarshal(e.Read.Body, &v); err != nil {
+		return httpapi.ErrorOccurrenceDetail{}, fail("occurrence_view_undecodable", "occurrence %s", e.Occurrence)
+	}
+	if v.Occurrence != e.Occurrence || v.Issue != e.Issue {
+		return httpapi.ErrorOccurrenceDetail{}, fail("occurrence_identity_mismatch", "asked for issue %s occurrence %s, answered issue %s occurrence %s", e.Issue, e.Occurrence, v.Issue, v.Occurrence)
+	}
+	if v.State != httpapi.StateReady || v.Detail == nil {
+		return httpapi.ErrorOccurrenceDetail{}, fail("occurrence_not_ready", "occurrence %s state=%s reason=%s", e.Occurrence, v.State, v.Reason)
+	}
+	return *v.Detail, verdict{ok: true}
 }
 
 func errorBuild(o journeyObservation) verdict {
-	errs := webErrors(o)
-	if len(errs) == 0 {
-		return fail("no_web_error_admitted", "no error record from the web source")
+	if len(o.Errors) == 0 {
+		return fail("no_web_error_admitted", "no stored error is linked to the UI trace")
 	}
-	for _, e := range errs {
-		if e.Record.Build != o.Expected.WebBuild {
-			return fail("wrong_build", "error %s carries build %s, want %s", e.Record.Occurrence, e.Record.Build, o.Expected.WebBuild)
+	for _, e := range o.Errors {
+		d, v := occurrenceOf(e)
+		if !v.ok {
+			return v
+		}
+		if d.Build != o.Expected.WebBuild {
+			return fail("wrong_build", "error %s carries build %s, want %s", e.Occurrence, d.Build, o.Expected.WebBuild)
 		}
 	}
-	return pass("%d error(s) with build %s", len(errs), o.Expected.WebBuild)
+	return pass("%d error(s) with build %s", len(o.Errors), o.Expected.WebBuild)
 }
 
 func errorTrace(o journeyObservation) verdict {
-	errs := webErrors(o)
-	if len(errs) == 0 {
-		return fail("no_web_error_admitted", "no error record from the web source")
+	if len(o.Errors) == 0 {
+		return fail("no_web_error_admitted", "no stored error is linked to the UI trace")
 	}
-	for _, e := range errs {
-		if e.Record.Trace != nil && *e.Record.Trace == o.UITrace && e.Record.Span != nil {
-			return pass("error %s trace %s", e.Record.Occurrence, o.UITrace)
+	for _, e := range o.Errors {
+		d, v := occurrenceOf(e)
+		if !v.ok {
+			return v
+		}
+		if d.Trace != nil && *d.Trace == o.UITrace && d.Span != nil {
+			return pass("error %s trace %s", e.Occurrence, o.UITrace)
 		}
 	}
-	return fail("error_not_linked_to_trace", "no admitted web error carries trace %s and a span", o.UITrace)
+	return fail("error_not_linked_to_trace", "no stored web error carries trace %s and a span", o.UITrace)
 }
 
 func sourceMapUploaded(o journeyObservation) verdict {
@@ -427,92 +464,146 @@ func sourceMapUploaded(o journeyObservation) verdict {
 	return pass("build=%s debug=%s artifact=%s", a.Build, a.DebugID, a.Artifact)
 }
 
+// mappedFrame is the plan-07 journey row for original error frames: the STORED error of the web build carries frames that
+// name the uploaded artifact, and the product's own frame route, asked about exactly those frames, maps the innermost one
+// through the uploaded source map to the known source location. Nothing is mapped by the harness.
 func mappedFrame(o journeyObservation) verdict {
-	s := o.Symbol
-	if s.Reason != "resolved" {
-		return fail(s.Reason, "the generated position could not be mapped (%s)", s.Reason)
+	var stored *httpapi.ErrorOccurrenceDetail
+	var which model.ID
+	for _, e := range o.Errors {
+		d, v := occurrenceOf(e)
+		if !v.ok {
+			return v
+		}
+		if d.Trace != nil && *d.Trace == o.UITrace {
+			stored, which = &d, e.Occurrence
+			break
+		}
 	}
+	if stored == nil {
+		return fail("error_not_linked_to_trace", "no stored web error carries trace %s", o.UITrace)
+	}
+	if len(stored.Frames) == 0 {
+		return fail("stored_error_has_no_frames", "the stored occurrence %s carries no frames", which)
+	}
+	for i, f := range stored.Frames {
+		if f.Artifact != o.Artifact.Artifact {
+			return fail("frame_artifact_unbound", "stored frame %d names artifact %q, the build uploaded %q", i, f.Artifact, o.Artifact.Artifact)
+		}
+	}
+	r := o.Frames
 	switch {
-	case !s.FromPage:
-		return fail("generated_position_not_from_page", "the mapped position was not read from the real page error")
-	case s.Build != o.Expected.WebBuild:
-		return fail("wrong_build", "mapped under build %s, want %s", s.Build, o.Expected.WebBuild)
-	case s.Source != o.Expected.ThrowSource || s.LineN != o.Expected.ThrowLine || s.ColumnN != o.Expected.ThrowColumn:
-		return fail("wrong_source_location", "mapped to %s:%d:%d, want %s:%d:%d", s.Source, s.LineN, s.ColumnN, o.Expected.ThrowSource, o.Expected.ThrowLine, o.Expected.ThrowColumn)
+	case r == nil:
+		return fail("frames_not_read", "the frame route was not asked about the stored frames")
+	case r.Status != 200:
+		return fail("frames_read_refused", "the frame route answered %d", r.Status)
 	}
-	return pass("%s:%d:%d build=%s", s.Source, s.LineN, s.ColumnN, s.Build)
+	var view httpapi.FramesView
+	if err := json.Unmarshal(r.Body, &view); err != nil {
+		return fail("frames_view_undecodable", "the frame route's answer does not decode")
+	}
+	if view.Build != o.Expected.WebBuild {
+		return fail("wrong_build", "frames mapped under build %s, want %s", view.Build, o.Expected.WebBuild)
+	}
+	if len(view.Frames) != len(stored.Frames) {
+		return fail("frames_read_not_the_stored_frames", "asked about %d stored frame(s), answered for %d", len(stored.Frames), len(view.Frames))
+	}
+	for i, f := range view.Frames {
+		s := stored.Frames[i]
+		same := f.Original.Artifact == s.Artifact && f.Original.Line == s.Line && (f.Original.Column == nil) == (s.Column == nil) && (s.Column == nil || *f.Original.Column == *s.Column)
+		if !same {
+			return fail("frames_read_not_the_stored_frames", "frame %d of the answer is not stored frame %d", i, i)
+		}
+	}
+	top := view.Frames[0]
+	if top.Reason != "resolved" || top.Resolved == nil {
+		return fail(top.Reason, "the innermost stored frame could not be mapped (%s)", top.Reason)
+	}
+	r0 := top.Resolved
+	if r0.Source != o.Expected.ThrowSource || r0.Line != o.Expected.ThrowLine || r0.Column != o.Expected.ThrowColumn {
+		return fail("wrong_source_location", "mapped to %s:%d:%d, want %s:%d:%d", r0.Source, r0.Line, r0.Column, o.Expected.ThrowSource, o.Expected.ThrowLine, o.Expected.ThrowColumn)
+	}
+	if o.Page.Found && stored.Frames[0].Line != o.Page.Line {
+		return fail("stored_frame_differs_from_page_error", "the stored innermost frame is at generated line %d, the real browser reported line %d", stored.Frames[0].Line, o.Page.Line)
+	}
+	return pass("%s:%d:%d build=%s via stored occurrence %s", r0.Source, r0.Line, r0.Column, view.Build, which)
 }
 
-type attemptFacts struct {
-	ordinal  uint64
-	started  bool
-	failed   bool
-	ok       bool
-	terminal bool
-	startSeq uint64
-	endSeq   uint64
+// jobViewOf decodes the job route's answer for the expected run and demands that the product served it.
+func jobViewOf(o journeyObservation) (httpapi.JobView, verdict) {
+	r := o.JobRun
+	switch {
+	case r == nil:
+		return httpapi.JobView{}, fail("no_job_read", "the job route was not asked about run %s", o.Expected.Run)
+	case r.Status != 200:
+		return httpapi.JobView{}, fail("job_read_refused", "the job route answered %d", r.Status)
+	}
+	var v httpapi.JobView
+	if err := json.Unmarshal(r.Body, &v); err != nil {
+		return httpapi.JobView{}, fail("job_view_undecodable", "the job route's answer does not decode")
+	}
+	if v.State != httpapi.StateReady {
+		return httpapi.JobView{}, fail("job_not_ready", "state=%s reason=%s", v.State, v.Reason)
+	}
+	if v.Run == nil {
+		return httpapi.JobView{}, fail("run_missing", "the answer carries no run for %s", o.Expected.Run)
+	}
+	return v, verdict{ok: true}
 }
 
+// jobHistory reads the run through the job view: attempt 1 failed and stays in the record, attempt 2 succeeded, and the run is
+// recovered.
 func jobHistory(o journeyObservation) verdict {
-	attempts := map[model.ID]*attemptFacts{}
-	var order []model.ID
-	for _, j := range o.Jobs {
-		e := j.Event
-		if e.Job != o.Expected.Job || e.Run != o.Expected.Run {
-			continue
-		}
-		a := attempts[e.Attempt]
-		if a == nil {
-			a = &attemptFacts{ordinal: uint64(e.Ordinal)}
-			attempts[e.Attempt] = a
-			order = append(order, e.Attempt)
-		}
-		if a.ordinal != uint64(e.Ordinal) {
-			return fail("attempt_ordinal_inconsistent", "attempt %s has two ordinals", e.Attempt)
-		}
-		switch e.State {
-		case "started":
-			a.started, a.startSeq = true, uint64(e.Sequence)
-		case "failed":
-			a.failed, a.terminal, a.endSeq = true, e.Terminal != nil, uint64(e.Sequence)
-		case "succeeded":
-			a.ok, a.terminal, a.endSeq = true, e.Terminal != nil, uint64(e.Sequence)
-		}
+	v, vd := jobViewOf(o)
+	if !vd.ok {
+		return vd
 	}
-	if len(attempts) == 0 {
-		return fail("no_attempts_admitted", "no job attempt for job %s run %s", o.Expected.Job, o.Expected.Run)
+	if v.Job != o.Expected.Job || v.Run.ID != o.Expected.Run {
+		return fail("job_or_run_differs", "answered job %s run %s, want job %s run %s", v.Job, v.Run.ID, o.Expected.Job, o.Expected.Run)
 	}
-	byOrdinal := map[uint64]*attemptFacts{}
-	for _, id := range order {
-		a := attempts[id]
-		if byOrdinal[a.ordinal] != nil {
-			return fail("duplicate_ordinal", "two attempt ids share ordinal %d", a.ordinal)
+	byOrdinal := map[uint64]httpapi.AttemptView{}
+	for _, a := range v.Run.Attempts {
+		if _, dup := byOrdinal[uint64(a.Ordinal)]; dup {
+			return fail("duplicate_ordinal", "two attempts share ordinal %d", a.Ordinal)
 		}
-		byOrdinal[a.ordinal] = a
+		byOrdinal[uint64(a.Ordinal)] = a
 	}
-	first, second := byOrdinal[1], byOrdinal[2]
+	if len(byOrdinal) == 0 {
+		return fail("no_attempts_admitted", "no attempt for job %s run %s", o.Expected.Job, o.Expected.Run)
+	}
+	first, ok1 := byOrdinal[1]
+	second, ok2 := byOrdinal[2]
+	failedTerminal := func(a httpapi.AttemptView) bool {
+		return a.Terminal != nil && a.Terminal.State == jobs.AttemptFailed && a.Effective == jobs.AttemptFailed
+	}
+	succeededTerminal := func(a httpapi.AttemptView) bool {
+		return a.Terminal != nil && a.Terminal.State == jobs.AttemptSucceeded && a.Effective == jobs.AttemptSucceeded
+	}
 	switch {
-	case first == nil:
+	case !ok1:
 		return fail("attempt_1_missing", "no attempt with ordinal 1")
-	case !first.started || !first.failed || !first.terminal || first.ok:
-		return fail("attempt_1_not_failed", "attempt 1 started=%v failed=%v succeeded=%v", first.started, first.failed, first.ok)
-	case second == nil:
+	case !first.Started || !failedTerminal(first):
+		return fail("attempt_1_not_failed", "attempt 1 started=%v effective=%s", first.Started, first.Effective)
+	case !ok2:
 		return fail("attempt_2_missing", "no attempt with ordinal 2")
-	case !second.started || !second.ok || !second.terminal || second.failed:
-		return fail("attempt_2_not_succeeded", "attempt 2 started=%v failed=%v succeeded=%v", second.started, second.failed, second.ok)
+	case !second.Started || !succeededTerminal(second):
+		return fail("attempt_2_not_succeeded", "attempt 2 started=%v effective=%s", second.Started, second.Effective)
 	}
-	for ordinal, a := range byOrdinal {
+	for ordinal := range byOrdinal {
 		if ordinal > 2 {
 			return fail("unexpected_extra_attempt", "attempt %d exists", ordinal)
 		}
-		if a.startSeq >= a.endSeq {
-			return fail("attempt_sequence_disorder", "attempt %d started at sequence %d but ended at %d", ordinal, a.startSeq, a.endSeq)
-		}
 	}
-	if first.endSeq >= second.startSeq {
-		return fail("attempt_sequence_disorder", "attempt 2 started (sequence %d) before attempt 1 ended (%d)", second.startSeq, first.endSeq)
+	if first.Terminal.At > second.Terminal.At || first.ObservedAt > second.ObservedAt || first.ID == second.ID {
+		return fail("attempt_order_disorder", "attempt 1 ended at %d and attempt 2 at %d", first.Terminal.At, second.Terminal.At)
 	}
-	return pass("run=%s attempts=%d", o.Expected.Run, len(attempts))
+	if first.Final || !second.Final {
+		return fail("final_attempt_wrong", "final flags: attempt 1 %v, attempt 2 %v", first.Final, second.Final)
+	}
+	if v.Run.Status != jobs.RunRecovered || !v.Run.Recovered || v.Run.AttemptCount != 2 || v.Run.FailedAttempts != 1 {
+		return fail("run_not_recovered", "run status=%s recovered=%v attempts=%d failed=%d", v.Run.Status, v.Run.Recovered, v.Run.AttemptCount, v.Run.FailedAttempts)
+	}
+	return pass("run=%s attempts=%d recovered", o.Expected.Run, len(byOrdinal))
 }
 
 func containsAny(raw []byte, needles []string) string {
@@ -634,26 +725,85 @@ func profileRow(o journeyObservation) verdict {
 	return pass("capability=%s stored=%d", p.Capability, p.StoredProfile)
 }
 
+const (
+	// runtimeProfileFunction is the named function of the job process the runtime profile must show.
+	runtimeProfileFunction = "summarise_catalog"
+	// runtimeProfileMethod is the SDK's own capability method (the stored chunk method is the closed runtime_cpu vocabulary).
+	runtimeProfileMethod = "python_wall_samples"
+)
+
+// runtimeProfileRow: a Python process profiled by the real SDK delivers a profile the product stores, the profile route reads it
+// back with the real capability record it is linked to, and it shows the named function.
+func runtimeProfileRow(o journeyObservation) verdict {
+	p := o.RuntimeProfile
+	switch {
+	case !p.Attempted:
+		return fail("not_attempted", "the runtime profile scenario did not run")
+	case p.StoredChunks == 0:
+		return fail("runtime_profile_not_stored", "%d capability record(s) stored, no profile chunk", p.StoredCapabilities)
+	case p.Read == nil:
+		return fail("profile_not_read", "profile %s was not read through the profile route", p.Profile)
+	case p.Read.Status != 200:
+		return fail("profile_read_refused", "the profile route answered %d", p.Read.Status)
+	}
+	var resp httpapi.ProfileResponse
+	if err := json.Unmarshal(p.Read.Body, &resp); err != nil {
+		return fail("profile_view_undecodable", "the profile route's answer does not decode")
+	}
+	if resp.Profile != p.Profile {
+		return fail("profile_identity_mismatch", "asked for profile %s, answered %s", p.Profile, resp.Profile)
+	}
+	if resp.View == nil {
+		return fail("profile_not_ready", "state=%s reason=%s", resp.State, resp.Reason)
+	}
+	// A sampling profiler that could not see every thread or tick says so: the view is then `incomplete` with the closed reason
+	// coverage_incomplete AND the loss it declares. That is the product's truth and is accepted; an incomplete view that declares
+	// no loss, any other reason, or any other state is not.
+	declaredLoss := resp.View.LossCount > 0 || len(resp.View.Loss) > 0 || resp.View.Truncated
+	switch {
+	case resp.State == httpapi.StateReady && resp.View.Completeness == "complete":
+	case resp.State == httpapi.StateIncomplete && resp.Reason == profiles.ReasonCoverageIncomplete && resp.View.Completeness == "partial" && declaredLoss:
+	default:
+		return fail("profile_not_ready", "state=%s reason=%s completeness=%s declared_loss=%v", resp.State, resp.Reason, resp.View.Completeness, declaredLoss)
+	}
+	view := resp.View
+	if len(view.Samples) == 0 {
+		return fail("profile_has_no_samples", "the stored profile %s has no sample", p.Profile)
+	}
+	if !slices.ContainsFunc(view.Frames, func(f model.ProfileFrame) bool { return strings.Contains(f.Function, runtimeProfileFunction) }) {
+		return fail("profile_misses_the_sampled_function", "no frame of profile %s names %s", p.Profile, runtimeProfileFunction)
+	}
+	linked := slices.ContainsFunc(view.Capabilities, func(c profiles.CapabilityRecord) bool {
+		return c.Value.Signal == model.Profile && c.Value.Status == "supported" && c.Value.Method == runtimeProfileMethod
+	})
+	if !linked {
+		return fail("profile_capability_not_linked", "profile %s names no supported %s capability record", p.Profile, runtimeProfileMethod)
+	}
+	return pass("profile=%s samples=%d state=%s loss=%d capability=supported/%s", p.Profile, len(view.Samples), resp.State, view.LossCount, runtimeProfileMethod)
+}
+
 func idsEqual(o journeyObservation) verdict {
-	for _, e := range webErrors(o) {
-		if e.Record.Build != o.Expected.WebBuild {
-			return fail("build_id_differs", "admitted build %s expected %s", e.Record.Build, o.Expected.WebBuild)
+	for _, e := range o.Errors {
+		d, v := occurrenceOf(e)
+		if !v.ok {
+			return v
+		}
+		if d.Build != o.Expected.WebBuild {
+			return fail("build_id_differs", "admitted build %s expected %s", d.Build, o.Expected.WebBuild)
 		}
 	}
 	if o.Artifact.Build != o.Expected.WebBuild {
 		return fail("build_id_differs", "uploaded build %s expected %s", o.Artifact.Build, o.Expected.WebBuild)
 	}
-	runs := 0
-	for _, j := range o.Jobs {
-		if j.Event.Run == o.Expected.Run {
-			runs++
-			if j.Event.Job != o.Expected.Job {
-				return fail("job_id_differs", "admitted job %s expected %s", j.Event.Job, o.Expected.Job)
-			}
-		}
+	jv, vd := jobViewOf(o)
+	if !vd.ok {
+		return fail("run_id_missing", "%s", vd.detail)
 	}
-	if runs == 0 {
-		return fail("run_id_missing", "no admitted attempt for run %s", o.Expected.Run)
+	if jv.Job != o.Expected.Job {
+		return fail("job_id_differs", "admitted job %s expected %s", jv.Job, o.Expected.Job)
+	}
+	if jv.Run.ID != o.Expected.Run {
+		return fail("run_id_missing", "answered run %s, expected %s", jv.Run.ID, o.Expected.Run)
 	}
 	for _, t := range []model.ID{o.DirectTrace, o.UITrace} {
 		if _, v := readyTrace(o, t); !v.ok {

@@ -781,9 +781,12 @@ func journeyAssertReplay(link *JourneyReplayLink, org, project, replay model.ID,
 
 // journeyAssertCapability decides one capability row from the product's own
 // capability records and samples. Exercised needs both a supported record and
-// samples of that method; a record alone, an unsupported record or no record is
-// unavailable; a denied record is denied. The observed status must equal the
-// expected one, so neither a missing capability nor an unexpected one passes.
+// samples of that method; a supported record without samples, or a record of any
+// other closed status, is unavailable; a denied record is denied. A profile that
+// holds no record for the row's runtime and method decided nothing at all: the
+// row fails whatever its expectation was, because absence is not an observation
+// of unavailability. The observed status must equal the expected one, so neither
+// a missing capability nor an unexpected one passes.
 func journeyAssertCapability(row JourneyCapabilityExpectation, exp journeyCapabilityExpect, org, project model.ID, profile *httpapi.ProfileResponse, readErr error) (JourneyCheck, JourneyRow) {
 	observed := func(status JourneyRowStatus, reason string) JourneyRow {
 		return JourneyRow{Name: row.Name, Basis: JourneyBasisObserved, Status: status, Reason: reason}
@@ -801,11 +804,13 @@ func journeyAssertCapability(row JourneyCapabilityExpectation, exp journeyCapabi
 		return journeyBad(JourneyCheckCapability, JourneyCodeViewNotReady, "the profile is not available"), observed(JourneyRowUnavailable, "profile_not_readable")
 	}
 	status, reason := JourneyRowUnavailable, "no_capability_record"
+	found := false
 	for _, rec := range profile.View.Capabilities {
 		c := rec.Value
 		if c.Runtime != row.Runtime || c.Method != row.Method || row.OS != "" && c.OS != row.OS || row.Arch != "" && c.Arch != row.Arch {
 			continue
 		}
+		found = true
 		switch {
 		case c.Status == "denied":
 			status, reason = JourneyRowDenied, "capability_denied"
@@ -822,6 +827,9 @@ func journeyAssertCapability(row JourneyCapabilityExpectation, exp journeyCapabi
 				reason = "capability_" + c.Status
 			}
 		}
+	}
+	if !found {
+		return journeyBad(JourneyCheckCapability, JourneyCodeCapabilityMismatch, "the profile holds no capability record for this runtime and method: an absent record is not an observation"), observed(JourneyRowUnavailable, reason)
 	}
 	return journeyCheck(status == exp.expect, JourneyCheckCapability, JourneyCodeCapabilityMismatch, "the observed capability status is not the expected one"), observed(status, reason)
 }

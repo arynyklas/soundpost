@@ -56,7 +56,7 @@ No code path of the rollback or the cutover deletes or reconfigures a legacy sys
 
 ## Receipt, public projection and CLI
 
-`RollbackReceipt` (private) carries the run, state version, phase, completed phases, stop code, reason class, engine phase and active owners, whether the old route was last observed enabled, whether the deadman was armed, the recorded unknown outcomes (including delivery IDs) and blockers. The public `RollbackPublicSummary` is closed: `schema_version`, `phase`, `phases_required`, `phases_completed`, `incomplete_code`, `reason_code`, `active_owners` (a count), `new_owner_quiesced`, `old_route_restored`, `unknown_outcomes` (a count), `unknown_reviewed`, `deadman_armed`, `blocker_counts`, `customer_acceptance` (always `false`).
+`RollbackReceipt` (private) carries the run, state version, phase, completed phases, stop code, reason class, engine phase and active owners, whether the engine answered that read at all (`engine_readable`), whether the old route was last observed enabled, whether the deadman was armed, the recorded unknown outcomes (including delivery IDs) and blockers. The public `RollbackPublicSummary` is closed: `schema_version`, `phase`, `phases_required`, `phases_completed`, `incomplete_code`, `reason_code`, `active_owners` (a count), `engine_readable`, `new_owner_quiesced`, `old_route_restored`, `unknown_outcomes` (a count), `unknown_reviewed`, `deadman_armed`, `blocker_counts`, `customer_acceptance` (always `false`). As in the cutover projection, `active_owners: 0` with `engine_readable: false` means the engine could not be read, not that it reported nobody active.
 
 ```
 adoption rollback --receipt FILE --authorization FILE --reason-code CODE --reason-text TEXT \
@@ -64,7 +64,7 @@ adoption rollback --receipt FILE --authorization FILE --reason-code CODE --reaso
   [--unknown-reviewed] [--timeout 10m]
 ```
 
-`--receipt` is a cutover receipt JSON; its state file must be in `--private-directory`. Each invocation writes `DIRECTORY/rollback-RUNID.receipt-vN.json` and the new public summary and exits non-zero unless the rollback is `done`. The same `--timeout` and exclusive-output rules as the cutover apply; the wait for the new owner to drain ends with the deadline.
+`--receipt` is a cutover receipt JSON; its state file must be in `--private-directory`. Each invocation writes `DIRECTORY/rollback-RUNID.receipt-vN.json` and the new public summary and exits non-zero unless the rollback is `done`. The same `--timeout`, exclusive-output and error-fidelity rules as the cutover apply (a receipt name that is already taken is reported together with the rollback's own coded reason, never instead of it); the wait for the new owner to drain ends with the deadline.
 
 ## NOT done (authorization-blocked)
 

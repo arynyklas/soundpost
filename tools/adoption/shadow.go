@@ -763,11 +763,12 @@ func (d SoundpostDestination) check(m SourceMapping, ids shadowIDs) error {
 // shadowLife is the in-process lifecycle of one source condition: the owned
 // reducer's state and the shadow policy twin that decides on it.
 type shadowLife struct {
-	id     model.ID
-	entity notify.Entity
-	state  conditions.State
-	twin   *notify.ShadowEvaluator
-	at     int64
+	id      model.ID
+	entity  notify.Entity
+	state   conditions.State
+	twin    *notify.ShadowEvaluator
+	at      int64
+	twinSeq uint64 // the highest version the policy twin has been told, always advancing
 }
 
 type shadowRun struct {
@@ -1285,12 +1286,15 @@ func (r *shadowRun) applyCondition(sd shadowDel, ord int, in ShadowConditionInpu
 		drop(shadowReasonLateVersion)
 	}
 	c.state = next
-	r.decide(c, in, event, next)
+	r.decide(c, in, event, next, accepted)
 }
 
 // decide feeds the evidence to the shadow policy twin, late and duplicate
-// evidence included: the twin's own source-version ordering must also hold.
-func (r *shadowRun) decide(c *shadowLife, in ShadowConditionInput, event model.ConditionEvent, st conditions.State) {
+// evidence included: the twin's own source-version ordering must also hold. Every
+// event the reducer accepted is told to the twin as a strictly newer version, so a
+// source that restarts its sequence does not silence the twin; an event it rejected
+// keeps the version the twin already holds and decides nothing new.
+func (r *shadowRun) decide(c *shadowLife, in ShadowConditionInput, event model.ConditionEvent, st conditions.State, accepted bool) {
 	at := max(in.AtNS, c.at)
 	c.at = at
 	if c.twin == nil {
@@ -1315,6 +1319,19 @@ func (r *shadowRun) decide(c *shadowLife, in ShadowConditionInput, event model.C
 	seq := in.Sequence
 	if seq == 0 {
 		seq = uint64(st.Version)
+	}
+	if accepted {
+		// The twin orders one condition on a single strictly advancing version. A
+		// producer epoch restart lowers the source sequence (the reducer supersedes an
+		// old epoch by event time) and a sequence-less feed has no sequence at all, so
+		// an accepted event that cannot advance on its own version advances on what the
+		// twin already holds. Without this the twin would treat every post-restart
+		// event - a recovery included - as late history and decide nothing at all,
+		// while the lifecycle answer says the condition moved.
+		if seq <= c.twinSeq {
+			seq = c.twinSeq + 1
+		}
+		c.twinSeq = seq
 	}
 	freshness := notify.FreshnessFresh
 	if in.Status == "unknown" {
