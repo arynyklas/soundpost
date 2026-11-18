@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -218,30 +219,36 @@ func TestDeletionClusterReceiptAndDenialClassifiers(t *testing.T) {
 	}
 }
 
-// The runs are the lagging-node runs in order, then the replacement runs; "none" drops one kind and
-// a plan with no run, a repeated node or a node that is not a voter is refused. Each run has its own artifact.
+// The runs are the lagging-node runs in order, then the replacement runs, then the early-learner
+// replacement runs; "none" drops one kind and a plan with no run, a repeated node or a node that is
+// not a voter is refused. Each run has its own artifact.
 func TestDeletionClusterPlanOrdersLagRunsThenReplaceRuns(t *testing.T) {
-	got, err := dcPlan("3,2,1", "3")
-	want := []dcPlanStep{{3, false}, {2, false}, {1, false}, {3, true}}
+	got, err := dcPlan("3,2,1", "3", "none")
+	want := []dcPlanStep{{3, false, false}, {2, false, false}, {1, false, false}, {3, true, false}}
 	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("%v %v", got, err)
 	}
-	if got, err = dcPlan("none", "2,1"); err != nil || !reflect.DeepEqual(got, []dcPlanStep{{2, true}, {1, true}}) {
+	if got, err = dcPlan("none", "2,1", "none"); err != nil || !reflect.DeepEqual(got, []dcPlanStep{{2, true, false}, {1, true, false}}) {
 		t.Fatalf("%v %v", got, err)
 	}
-	if got, err = dcPlan("1", "none"); err != nil || !reflect.DeepEqual(got, []dcPlanStep{{1, false}}) {
+	if got, err = dcPlan("1", "none", "none"); err != nil || !reflect.DeepEqual(got, []dcPlanStep{{1, false, false}}) {
 		t.Fatalf("%v %v", got, err)
 	}
-	for _, bad := range [][2]string{{"none", "none"}, {"1,1", "none"}, {"4", "none"}, {"1", "0"}, {"1", ""}, {"", "none"}} {
-		if got, err = dcPlan(bad[0], bad[1]); err == nil {
+	early, err := dcPlan("none", "3", "3,2")
+	wantEarly := []dcPlanStep{{3, true, false}, {3, true, true}, {2, true, true}}
+	if err != nil || !reflect.DeepEqual(early, wantEarly) {
+		t.Fatalf("%v %v", early, err)
+	}
+	for _, bad := range [][3]string{{"none", "none", "none"}, {"1,1", "none", "none"}, {"4", "none", "none"}, {"1", "0", "none"}, {"1", "", "none"}, {"", "none", "none"}, {"none", "none", "3,3"}, {"none", "none", "4"}, {"none", "none", ""}} {
+		if got, err = dcPlan(bad[0], bad[1], bad[2]); err == nil {
 			t.Errorf("%v accepted: %v", bad, got)
 		}
 	}
 	names := map[string]bool{}
-	for _, s := range want {
+	for _, s := range append(slices.Clone(want), dcPlanStep{3, true, true}) {
 		names[dcRunArtifactName(s)] = true
 	}
-	if len(names) != len(want) || !names["deletion-cluster-lag-3.json"] || !names["deletion-cluster-replace-3.json"] {
+	if len(names) != len(want)+1 || !names["deletion-cluster-lag-3.json"] || !names["deletion-cluster-replace-3.json"] || !names["deletion-cluster-replace-early-3.json"] {
 		t.Fatalf("artifact names collide or are misnamed: %v", names)
 	}
 }

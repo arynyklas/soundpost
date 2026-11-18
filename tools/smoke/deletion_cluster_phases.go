@@ -1029,6 +1029,9 @@ func (r *dcRun) membershipUntilDone(track *dcCleanTrack, limit time.Duration, ar
 			if err := r.observeFresh(); err != nil {
 				return out, err
 			}
+			if r.op == (model.ID{}) { // an early learner joins before any deletion exists: no receipt to sample yet
+				continue
+			}
 			if _, err := r.sample(track, r.live...); err != nil {
 				return out, err
 			}
@@ -1056,47 +1059,13 @@ func (r *dcRun) replaceWhilePending(started time.Time) error {
 			}
 		}
 	}
-	r.enter("dc_prepare_fresh_identity")
-	learner, err := r.prepareFresh()
-	if err != nil {
-		return r.wrap(err)
-	}
-	r.watch = fresh
-	track := newDCCleanTrack()
-
-	r.enter("dc_add_learner_while_deletion_pending")
-	out, err := r.membershipUntilDone(track, 120*time.Second, "add-learner", "--id", dcKey(fresh), "--address", learner.Address, "--identity", learner.NodeIdentity, "--failure-domain", learner.FailureDomain)
-	if err != nil {
-		return err
-	}
-	if err = r.check("learner_added_to_every_group", strings.Contains(out, "groups="), "add-learner exits 0 on a surviving voter: every group has the fresh identity as a learner"); err != nil {
-		return err
-	}
-	r.mark("learner_added_ms")
-
-	r.enter("dc_start_fresh_voter")
-	if err = r.start(fresh); err != nil {
-		return r.wrap(err)
-	}
-	if err = r.refreshSites(fresh); err != nil {
-		return err
-	}
-	err = r.until("fresh_voter_ready", 240*time.Second, 10*time.Millisecond, func() (bool, string, error) {
-		if err := r.observeFresh(); err != nil {
-			return false, "", err
+	if !r.early {
+		if err := r.joinFresh(true); err != nil {
+			return err
 		}
-		if _, err := r.sample(track, r.live...); err != nil {
-			return false, "", err
-		}
-		if err := waitNodeReady(r.sites[fresh], time.Second); err != nil {
-			return false, "not_ready", nil
-		}
-		return true, "", nil
-	})
-	if err != nil {
-		return err
 	}
-	r.mark("fresh_voter_ready_ms")
+	track := r.track
+	var err error
 
 	r.enter("dc_replace_lagging_voter_by_fresh_identity")
 	if _, err = r.membershipUntilDone(track, 240*time.Second, "replace", "--remove", dcKey(lag), "--promote", dcKey(fresh)); err != nil {
@@ -1191,4 +1160,80 @@ func (r *dcRun) replaceWhilePending(started time.Time) error {
 		return err
 	}
 	return r.stopRestartVerify(started, "", nil, nil, fresh, false)
+}
+
+// joinFreshEarly is the early-learner run's join: the fresh identity is added and started while the
+// canary is live and the run continues only once the learner's own directory holds the canary.
+func (r *dcRun) joinFreshEarly() error {
+	if err := r.joinFresh(false); err != nil {
+		return err
+	}
+	// The learner replicates the live data: wait until its own directory holds the canary, so the
+	// deletion begins with a replacement that holds it (the case the late join cannot show: by then the
+	// canary is already erased on the leaders and the replacement only ever receives erased state).
+	if err := r.until("fresh_learner_holds_the_canary", 240*time.Second, 250*time.Millisecond, func() (bool, string, error) {
+		if err := r.observeFresh(); err != nil {
+			return false, "", err
+		}
+		return r.fresh.firstHit > 0, "canary_not_on_the_learner_yet", nil
+	}); err != nil {
+		return err
+	}
+	return r.check("replacement_learner_holds_the_canary_before_the_deletion", r.fresh.firstHit > 0, fmt.Sprintf("canary on the fresh learner's directory at %d ms (max %d hits in one scan) while the deletion has not begun", r.fresh.firstHit, r.fresh.maxHits))
+}
+
+// joinFresh prepares the fresh identity (new raft id, node identity, address, certificate, failure
+// domain), adds it as a learner to every group and starts it on an empty directory until it is
+// ready. The receipt of the deletion is sampled meanwhile only when sample says an operation exists.
+func (r *dcRun) joinFresh(sample bool) error {
+	fresh := dcFreshNode.id
+	r.enter("dc_prepare_fresh_identity")
+	learner, err := r.prepareFresh()
+	if err != nil {
+		return r.wrap(err)
+	}
+	r.watch = fresh
+	track := newDCCleanTrack()
+	r.track = track
+
+	if sample {
+		r.enter("dc_add_learner_while_deletion_pending")
+	} else {
+		r.enter("dc_add_learner_before_deletion")
+	}
+	out, err := r.membershipUntilDone(track, 120*time.Second, "add-learner", "--id", dcKey(fresh), "--address", learner.Address, "--identity", learner.NodeIdentity, "--failure-domain", learner.FailureDomain)
+	if err != nil {
+		return err
+	}
+	if err = r.check("learner_added_to_every_group", strings.Contains(out, "groups="), "add-learner exits 0 on a surviving voter: every group has the fresh identity as a learner"); err != nil {
+		return err
+	}
+	r.mark("learner_added_ms")
+
+	r.enter("dc_start_fresh_voter")
+	if err = r.start(fresh); err != nil {
+		return r.wrap(err)
+	}
+	if err = r.refreshSites(fresh); err != nil {
+		return err
+	}
+	err = r.until("fresh_voter_ready", 240*time.Second, 10*time.Millisecond, func() (bool, string, error) {
+		if err := r.observeFresh(); err != nil {
+			return false, "", err
+		}
+		if sample {
+			if _, err := r.sample(track, r.live...); err != nil {
+				return false, "", err
+			}
+		}
+		if err := waitNodeReady(r.sites[fresh], time.Second); err != nil {
+			return false, "not_ready", nil
+		}
+		return true, "", nil
+	})
+	if err != nil {
+		return err
+	}
+	r.mark("fresh_voter_ready_ms")
+	return nil
 }

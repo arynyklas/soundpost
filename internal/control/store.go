@@ -263,6 +263,14 @@ func (s *Store) Transact(ctx context.Context, scope auth.Scope, cmd Command) (Re
 func (s *Store) transactCommit(ctx context.Context, scope auth.Scope, cmd Command, correlationID model.ID) (Result, error) {
 	var out Result
 	legacy := false
+	// A retention command carries the caller's view as a range ([AuthorityRevision, Revision], see
+	// expectedRevisionOK), so a proposal that lost the application-index race to an unrelated write
+	// is judged again against the new state instead of failing the caller: without this a deletion
+	// Begin submitted through a voter that does not lead lost 75-88% of its proposals while intake
+	// ran on every voter (10.05 review, F-10.05-1).
+	if retentionKinds[CommandKind(cmd.Kind)] {
+		ctx = retryLostProposals(ctx)
+	}
 	e := s.update(ctx, transactBumps(cmd.Kind), func(st *State) error {
 		if err := scope.ValidateControlState(*st); err != nil {
 			return err

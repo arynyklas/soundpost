@@ -213,6 +213,16 @@ entry, `facts` and `not_run_items`. No secret or raw telemetry content is writte
    `create_project`, `membership`, `org_admin`, `grant`, `team`, `source_policy`, `sso`,
    `destination`, `retention`); `notification_policy` is reached only through
    `PolicyCommand` (a retention-class policy kind) and has no subtest of its own.
+
+   **Three voters (independent review of 10.05, F-10.05-1):** the figures above are one voter. In a
+   three-voter control group every commit is one application-index compare-and-swap, and with intake on
+   every voter a Begin submitted through a voter that does not lead lost that race on 75 to 88 % of its
+   attempts (35/40 and 30/40; 20 % on the leader; 0/40 on one voter) and answered `stale` (HTTP 409)
+   although no authority-relevant write had moved. The retention commands now read, re-judge and propose
+   again (at most 64 times) when their proposal was refused as stale, so the caller's view is checked against
+   the new state each time (a view that predates an authority-class change still conflicts).
+   `TestBeginIsNotRefusedByLostProposalsFromAnyVoterUnderSaturatingIntake` (`internal/control`) is the
+   three-voter probe: 11, 10 and 6 of 12 Begins refused from voters 3, 2 and 1 before, none after (three runs).
 5. The source label policy admits label values from an allow-list, which bounds
    how many distinct batches the cluster drills can identify (700 pre-declared ids).
 6. **A node whose storage failed kept leading groups (fixed, 11.14).** With every fsync of the initial leader answering EIO, the two healthy members answered 503 for more than 120 s while the failed member stayed up (`/readyz` `state_unavailable`). Cause: only the group that noticed the failed write failed closed; every other group of that node (control and the 64 data groups) kept ticking and answering heartbeats, so the survivors never elected a replacement, while each proposal reaching the zombie leader was refused by its validator (its control state was unreadable) before anything was persisted, so those groups never failed either. The same cause stopped the survivors when member 3's disk vanished after member 3 had become the leader of some groups. Fix: `replica.FailDomain`, see `distributed.md`; red test `TestAStorageFailureInOneGroupFailStopsEveryGroupOfTheNode` (and the engine tests in `internal/storage/failstop_test.go`). The drills no longer exempt the leader phase: the survivors must acknowledge inside the scenario window in every phase.

@@ -209,6 +209,7 @@ func retireScope(st *State, p model.DeletePredicate) {
 		}
 	}
 	if known {
+		forgetReplayIndex(o.Settings, p)
 		st.Orgs[p.Org.String()] = o
 	}
 	for key, src := range st.Sources {
@@ -623,4 +624,27 @@ func (s *Store) DeleteGeneration(ctx context.Context, org model.ID) (out uint64,
 		return nil
 	})
 	return
+}
+
+// forgetReplayIndex drops the replay index (internal/replays: one group per replay under
+// replay_index:<project>:<replay>, one pin map per project under replay_pins:<project>) of every
+// project a retirement covers, in the transition that retires it. The groups hold replay and session
+// identifiers and checkpoint digests of data the deletion erases, and the replay service sweeps an
+// index only inside a later write of the same project, which a retired project never has. Retired
+// projects accept no replay write, so nothing re-creates them.
+func forgetReplayIndex(settings map[string]json.RawMessage, p model.DeletePredicate) {
+	for key := range settings {
+		var project string
+		switch {
+		case strings.HasPrefix(key, model.ReplayIndexKeyPrefix):
+			project, _, _ = strings.Cut(strings.TrimPrefix(key, model.ReplayIndexKeyPrefix), ":")
+		case strings.HasPrefix(key, model.ReplayPinKeyPrefix):
+			project = strings.TrimPrefix(key, model.ReplayPinKeyPrefix)
+		default:
+			continue
+		}
+		if id, err := model.ParseID(project); err == nil && p.CoversProject(p.Org, id) {
+			delete(settings, key)
+		}
+	}
 }

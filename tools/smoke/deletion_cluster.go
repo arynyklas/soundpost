@@ -97,6 +97,13 @@ import (
 // directory (never started again) still holds the canary and is outside every receipt: that is
 // asserted as a fact, not hidden.
 //
+// Early-learner replacement runs (--replace-early-nodes, default none) add the fresh identity as a
+// learner BEFORE the deletion, while the canary is live, and wait until the learner's own directory
+// holds the canary; only then is the lagging voter stopped and the deletion begun. The replacement
+// therefore HOLDS the canary when the deletion is pending (a late join only ever receives erased
+// state): no receipt may read clean while the learner's directory holds it, and the learner must have
+// erased it before the first clean receipt (deletion-cluster-replace-early-<N>.json).
+//
 // Last (with an authority), the OLDER backup is restored: `backup restore` into a clean root
 // against the CURRENT authority (it must verify the head past the backup and carry the tombstone),
 // `backup activate`, and the restored root is served by a real process. The recovery
@@ -129,10 +136,11 @@ func RunDeletionCluster(args []string) error {
 	lagNodes := f.String("lag-nodes", "3,2,1", "comma-separated voters to hold back and restart, one full run each (node 1 is the initial leader); none: no such run")
 	replaceNodes := f.String("replace-nodes", "3", "comma-separated voters to hold back and replace by a fresh identity, one full run each; none: no such run")
 	authority := f.Bool("authority", true, "give every serve process a real restore authority (own directory and keys), take an older backup before the deletion and restore it after")
+	replaceEarlyNodes := f.String("replace-early-nodes", "none", "comma-separated voters to hold back and replace by a fresh identity that joined as a learner BEFORE the deletion and holds the canary, one full run each; none: no such run")
 	if err := f.Parse(args); err != nil {
 		return rec.finish(rec.wrap(err))
 	}
-	plan, err := dcPlan(*lagNodes, *replaceNodes)
+	plan, err := dcPlan(*lagNodes, *replaceNodes, *replaceEarlyNodes)
 	if err != nil {
 		return rec.finish(rec.wrap(err))
 	}
@@ -146,7 +154,7 @@ func RunDeletionCluster(args []string) error {
 		run := newDCRecorder()
 		run.artifactDir, run.file = *artifact, dcRunArtifactName(step)
 		run.art.NotRun = dcNotRun(*authority, step.Replace)
-		r := &dcRun{dcRecorder: run, wait: *wait, hold: *hold, lag: step.Node, replace: step.Replace, withAuthority: *authority, sites: map[uint64]*installSite{}, ownerSite: map[uint64]*installSite{}, owner: map[uint64]auth.Session{}, reader: map[uint64]auth.Session{}}
+		r := &dcRun{dcRecorder: run, wait: *wait, hold: *hold, lag: step.Node, replace: step.Replace, early: step.Early, withAuthority: *authority, sites: map[uint64]*installSite{}, ownerSite: map[uint64]*installSite{}, owner: map[uint64]auth.Session{}, reader: map[uint64]auth.Session{}}
 		if err = run.finish(r.scenario(*binary, *release)); err != nil {
 			return err
 		}
@@ -457,6 +465,8 @@ type dcRun struct {
 	authHead       backup.AuthorityHead
 	authTombstones int
 	fresh          dcFreshWatch // scans of the replacement's directory (replace mode)
+	early          bool         // replace-early: the fresh identity joins as a learner before the deletion, holding the canary
+	track          *dcCleanTrack
 
 	cluster   *processCluster
 	fx        *installFixture
@@ -568,6 +578,7 @@ func (r *dcRun) scenario(binary, release string) (result error) {
 	via := r.live[0]
 	r.art.Evidence["lagging_node"] = lag
 	r.art.Evidence["lagging_voter_ending"] = map[bool]string{false: "restarted on its own directory", true: "replaced by a fresh identity (node 4: new raft id, node identity, peer address, certificate, failure domain, empty directory)"}[r.replace]
+	r.art.Evidence["replacement_joined_before_the_deletion"] = r.early
 	r.art.Evidence["restore_authority_configured"] = r.withAuthority
 	r.art.Evidence["deletion_submitted_through_node"] = via
 	r.art.Evidence["lagging_node_role"] = map[uint64]string{1: "node 1 is the initial leader of every group (initial_leader: 1); current leadership is not probed by this smoke", 2: "a follower of the initial leader", 3: "a follower of the initial leader"}[lag]
@@ -718,6 +729,13 @@ func (r *dcRun) scenario(binary, release string) (result error) {
 			return r.wrap(err)
 		}
 		r.mark("lagging_voter_killed_ms")
+	}
+	// ---- early learner (replace-early runs): after the older backup (a backup names exactly the three
+	// configured voters), the fresh identity joins while the canary is live and holds it when the deletion begins ----
+	if r.early {
+		if err = r.joinFreshEarly(); err != nil {
+			return err
+		}
 	}
 	lagJournal, err := r.journals(lag) // everything the voter will ever have journaled before it is brought back
 	if err != nil {

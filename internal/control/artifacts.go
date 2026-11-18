@@ -191,6 +191,10 @@ func (s *Store) LookupArtifact(ctx context.Context, scope auth.Scope, id model.I
 // root that retention erased (or is about to erase after a crash between fence and
 // erase) does not stop the process. A "published" intent whose blob is missing or
 // corrupt stays Corrupt.
+// A "published" intent covered by a deletion that is not held (model.DeletePredicate.CoversBlob: an
+// entity deletion naming the root, retire_project, retire_org) is treated the same way: a completed
+// deletion erased its bytes, and the read gate already refuses the root, so readiness does not
+// require them. A held deletion keeps its bytes, so its intents are verified as before.
 //
 // Heal (10.09-W5): a "published" intent whose reference ledger verifies and carries the GC fence
 // (Retired) is first moved to "retired". The lifecycle writes the fence and the intent state in
@@ -214,7 +218,10 @@ func (s *Store) ValidateArtifactReferences(ctx context.Context) error {
 				if err := validateArtifactReference(st, key, r); err != nil {
 					return err
 				}
-				if r.State == artifactRetired {
+				// A deletion that is not held (fencing, or complete with its bytes erased) covers the
+				// root: nothing may read it and its bytes are gone or about to be, so a restart must not
+				// demand them (the intent stays "published"; only an expiry or a fence retires it).
+				if r.State == artifactRetired || deletedIntent(st, r) {
 					continue
 				}
 				refs = append(refs, r.Map)
@@ -233,6 +240,16 @@ func (s *Store) ValidateArtifactReferences(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// deletedIntent reports whether a deletion that is not held covers the intent's root.
+func deletedIntent(st State, r model.ArtifactReferenceIntent) bool {
+	for _, op := range st.Deletions {
+		if op.Phase != model.DeletePhaseHeld && op.Predicate.CoversBlob(r.Map.Manifest) {
+			return true
+		}
+	}
+	return false
 }
 
 // fencedIntent reports whether the intent is published under a verified reference ledger that

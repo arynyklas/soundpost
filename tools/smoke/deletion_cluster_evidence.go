@@ -215,20 +215,24 @@ func dcArtifactName(node uint64) string {
 }
 
 // dcPlanStep is one full run of the scenario: a fresh cluster, one voter held back, and what
-// happens to it (it is restarted, or replaced by a fresh identity).
+// happens to it (it is restarted, or replaced by a fresh identity). Early (replacement runs only)
+// adds the fresh identity as a learner BEFORE the deletion, while the canary is live, so the
+// replacement holds the canary when the deletion begins.
 type dcPlanStep struct {
 	Node    uint64
 	Replace bool
+	Early   bool
 }
 
-// dcPlan turns --lag-nodes and --replace-nodes into the runs in order: every lagging-node run,
-// then every replacement run. "none" names no run for that flag; at least one run is required.
-func dcPlan(lag, replace string) ([]dcPlanStep, error) {
+// dcPlan turns --lag-nodes, --replace-nodes and --replace-early-nodes into the runs in order: every
+// lagging-node run, then every replacement run, then every early-learner replacement run. "none"
+// names no run for that flag; at least one run is required.
+func dcPlan(lag, replace, early string) ([]dcPlanStep, error) {
 	var steps []dcPlanStep
 	for _, part := range []struct {
-		flag, value string
-		replace     bool
-	}{{"--lag-nodes", lag, false}, {"--replace-nodes", replace, true}} {
+		flag, value    string
+		replace, early bool
+	}{{"--lag-nodes", lag, false, false}, {"--replace-nodes", replace, true, false}, {"--replace-early-nodes", early, true, true}} {
 		if strings.TrimSpace(part.value) == "none" {
 			continue
 		}
@@ -237,11 +241,11 @@ func dcPlan(lag, replace string) ([]dcPlanStep, error) {
 			return nil, err
 		}
 		for _, n := range nodes {
-			steps = append(steps, dcPlanStep{Node: n, Replace: part.replace})
+			steps = append(steps, dcPlanStep{Node: n, Replace: part.replace, Early: part.early})
 		}
 	}
 	if len(steps) == 0 {
-		return nil, errors.New("--lag-nodes and --replace-nodes name no run")
+		return nil, errors.New("--lag-nodes, --replace-nodes and --replace-early-nodes name no run")
 	}
 	return steps, nil
 }
@@ -261,7 +265,10 @@ func dcParseNodes(flag, s string) ([]uint64, error) {
 
 // dcRunArtifactName is the artifact file of one planned run.
 func dcRunArtifactName(s dcPlanStep) string {
-	if s.Replace {
+	switch {
+	case s.Early:
+		return "deletion-cluster-replace-early-" + strconv.FormatUint(s.Node, 10) + ".json"
+	case s.Replace:
 		return "deletion-cluster-replace-" + strconv.FormatUint(s.Node, 10) + ".json"
 	}
 	return dcArtifactName(s.Node)

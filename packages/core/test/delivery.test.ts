@@ -24,6 +24,17 @@ class Ledger implements ReceiptTransport {
  async lookup(batch:FrozenBatch):Promise<Outcome>{this.lookups++;if(this.revoked)return {kind:'denied'};const old=this.rows.get(batch.id);return old?{kind:'receipt',receipt:{...old,historical:true}}:{kind:'not_found'};}
  close():void{}
 }
+// A clock the test owns: it moves only when the queue sleeps, so a flush's wire deadline is the number of milliseconds the test names and
+// no wall-clock cost (a spool fsync, a loaded CI host) can eat the margin. now, wireNow and sleep share it.
+function stepClock():{now:()=>number;wireNow:()=>number;sleep:(ms:number)=>Promise<void>}{let t=0;const now=()=>t;return {now,wireNow:now,sleep:async(ms:number)=>{t+=ms;}};}
+test('a spool write slower than the flush deadline does not consume the wire deadline (injected clocks)',async()=>{
+ // The backend's real 60 ms write models the measured root cause of 10.34 (a spool fsync inside a 10 ms flush deadline); only a real delay
+ // can show that the injected clocks, not the wall clock, bound the flush.
+ let bytes:Uint8Array|undefined;const backend={read:async()=>bytes,write:async(value:Uint8Array)=>{await new Promise<void>(resolve=>setTimeout(resolve,60));bytes=value.slice();},close(){}};
+ const spool=new EncryptedSpool(backend,new Uint8Array(32),descriptor,'1'),ledger=new Ledger(),q=new SpoolingDeliveryQueue(settings(),ledger,{spool,...stepClock()});
+ q.enqueue(record());const report=await q.flush(10);
+ expect(ledger.sends.length).toBe(1);expect(report.pending).toBe(1);expect(report.deadlineExceeded).toBe(true);expect(q.diagnostics().spool_failed??0).toBe(0);await spool.close();
+});
 test('lost commit uses historical lookup without reappend after restriction/deletion',async()=>{
  const ledger=new Ledger(),q=new DeliveryQueue(settings(),ledger);q.enqueue(record());expect((await q.flush(10)).pending).toBe(1);ledger.restricted=true;
  const report=await q.flush(1000);expect(report.pending).toBe(0);expect(report.receipts[0]?.historical).toBe(true);expect(report.acknowledgedCursors).toEqual(['9'.repeat(32)+':9007199254740993']);expect(ledger.admitted).toBe(1);expect(ledger.sends.length).toBe(1);expect(ledger.lookups).toBe(1);
@@ -112,7 +123,7 @@ test('each concurrent flush owns its own deadline without overlapping a lane',as
  const q=new DeliveryQueue(settings(),ledger);q.enqueue(record());const first=q.flush(1000);await entered.promise;const start=performance.now();const second=await q.flush(10);expect(performance.now()-start).toBeLessThan(200);expect(second.pending).toBe(1);expect(second.deadlineExceeded).toBe(true);gate.resolve();expect((await first).pending).toBe(0);expect(ledger.sends.length).toBe(1);
 });
 test('policy-bound spool recovers original historical identity after restrictive policy restart',async()=>{
- const path=join(await mkdtemp(join(tmpdir(),'soundpost-history-')),'queue'),key=new Uint8Array(32),ledger=new Ledger(),old=settings();const spool=await openEncryptedSpool(path,key,descriptor,'1'),q=new SpoolingDeliveryQueue(old,ledger,{spool});q.enqueue(record());expect((await q.flush(200)).pending).toBe(1);expect(ledger.sends.length).toBe(1);await q.flush(0);await spool.close();ledger.restricted=true;
+ const path=join(await mkdtemp(join(tmpdir(),'soundpost-history-')),'queue'),key=new Uint8Array(32),ledger=new Ledger(),old=settings();const spool=await openEncryptedSpool(path,key,descriptor,'1'),q=new SpoolingDeliveryQueue(old,ledger,{spool,...stepClock()});q.enqueue(record());expect((await q.flush(10)).pending).toBe(1);expect(ledger.sends.length).toBe(1);await q.flush(0);await spool.close();ledger.restricted=true;
  const policyDocument=JSON.parse(atob(old.policy.payload.replace(/-/g,'+').replace(/_/g,'/')));policyDocument.revision='2';const current={...old,policy:signed(nativeCanonical(policyDocument)),descriptor:{...descriptor,policy_revision:'2'}};
  const restored=await openEncryptedSpool(path,key,current.descriptor,'2'),restarted=new SpoolingDeliveryQueue(current,ledger,{spool:restored});const report=await restarted.flush(1000);expect(report.pending).toBe(0);expect(report.receipts[0]?.historical).toBe(true);expect(ledger.admitted).toBe(1);expect(ledger.sends.length).toBe(1);await restarted.close();
 });
@@ -198,7 +209,7 @@ test('native loss permission and bounded pending aggregation never manufacture a
  const q=new DeliveryQueue({...lossSettings(),maxBytes:1024,maxRecords:1},new Ledger());expect(q.recordSignalLoss('span','queue_full',1n,'9007199254740993')).toBe(true);const report=await q.flush(10);expect(report.pending).toBe(1);expect(report.acknowledgedBatchIds).toEqual([]);expect(q.signalLossCounters()[0]!.acknowledged_count).toBe('0');
 });
 test('encrypted restart preserves original loss identity and a distinct new producer epoch',async()=>{
- const path=join(await mkdtemp(join(tmpdir(),'soundpost-native-loss-')),'queue'),key=new Uint8Array(32),ledger=new Ledger(),cfg=lossSettings(),spool=await openEncryptedSpool(path,key,descriptor,'1'),q=new SpoolingDeliveryQueue(cfg,ledger,{spool});await q.flush(0);expect(q.recordSignalLoss('span','policy',1n,'9007199254740993')).toBe(true);expect((await q.flush(200)).pending).toBe(1);expect(ledger.sends.length).toBe(1);const original=ledger.sends[0]!;await q.flush(0);await spool.close();
+ const path=join(await mkdtemp(join(tmpdir(),'soundpost-native-loss-')),'queue'),key=new Uint8Array(32),ledger=new Ledger(),cfg=lossSettings(),spool=await openEncryptedSpool(path,key,descriptor,'1'),q=new SpoolingDeliveryQueue(cfg,ledger,{spool,...stepClock()});await q.flush(0);expect(q.recordSignalLoss('span','policy',1n,'9007199254740993')).toBe(true);expect((await q.flush(10)).pending).toBe(1);expect(ledger.sends.length).toBe(1);const original=ledger.sends[0]!;await q.flush(0);await spool.close();
  const restored=await openEncryptedSpool(path,key,descriptor,'1'),restarted=new SpoolingDeliveryQueue(cfg,ledger,{spool:restored});await restarted.flush(0);expect(restarted.recordSignalLoss('span','policy',1n,'9007199254740994')).toBe(true);expect((await restarted.flush(1500)).pending).toBe(0);expect(ledger.admitted).toBe(2);expect(ledger.sends[0]).toBe(original);const counters=restarted.signalLossCounters();expect(counters.length).toBe(2);expect(counters[0]!.producer_epoch).not.toBe(counters[1]!.producer_epoch);expect(counters.every(c=>c.acknowledged_count==='1'&&c.pending_count==='0')).toBe(true);await restarted.close();
 });
 test('frozen body keeps replacement-pattern characters in record content byte-exact',()=>{

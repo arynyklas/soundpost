@@ -26,16 +26,16 @@ export class DeliveryQueue {
  protected evictable:number[]|undefined;protected oldest=Infinity;
  protected get entries():Entry[]{return this.held;}
  protected set entries(value:Entry[]){this.held=value;this.evictable=undefined;}
- protected readonly now:()=>number;protected readonly random:()=>number;protected readonly descriptor:RoutingDescriptor;protected readonly resource:Record<string,unknown>;protected producer:string;protected readonly policyExpires:string;protected recovering=false;
+ protected readonly now:()=>number;protected readonly wireNow:()=>number;protected readonly sleep:(ms:number)=>Promise<void>;protected readonly random:()=>number;protected readonly descriptor:RoutingDescriptor;protected readonly resource:Record<string,unknown>;protected producer:string;protected readonly policyExpires:string;protected recovering=false;
  protected readonly counts:Record<string,number>=Object.create(null) as Record<string,number>;protected running:Promise<FlushReport>|undefined;protected readonly spool:EncryptedSpool|undefined;protected recovered=false;protected persistChain:Promise<void>=Promise.resolve();
  protected recoveryTask:Promise<void>|undefined;
  protected readonly lossEpoch=canonicalId(id());protected readonly lossBuckets=new Map<string,LossBucket>();protected readonly allowLoss:boolean;protected materializingLoss=false;protected lastAck:{group:string;index:string}|null=null;
- constructor(protected readonly config:Config,protected readonly transport:ReceiptTransport,protected readonly options:{now?:()=>number;random?:()=>number;spool?:EncryptedSpool;context?:ExportContext}={}){
+ constructor(protected readonly config:Config,protected readonly transport:ReceiptTransport,protected readonly options:{now?:()=>number;wireNow?:()=>number;sleep?:(ms:number)=>Promise<void>;random?:()=>number;spool?:EncryptedSpool;context?:ExportContext}={}){
   const envelope=object(JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(config.policy.payload.replace(/-/g,'+').replace(/_/g,'/')),c=>c.charCodeAt(0)))));this.policyExpires=unixNano(envelope.expires_ns);
   const deploymentLoss=object(config).deploymentLoss;this.allowLoss=envelope.loss===true&&(deploymentLoss===undefined||deploymentLoss===true);
   this.descriptor=validateDescriptor(config.descriptor??{version:1,org:config.org,project:config.project,source:config.source,routing_version:1,slots:64,policy_revision:decimal(envelope.revision)});
   if(this.descriptor.org!==config.org||this.descriptor.project!==config.project||this.descriptor.source!==config.source||this.descriptor.policy_revision!==envelope.revision)throw Error('routing identity mismatch');
-  this.resource=resourceWire(config.resource,config.build);this.producer=canonicalId(config.producer??id());this.now=options.now??(()=>performance.now());this.random=options.random??Math.random;this.spool=options.spool??config.spool;
+  this.resource=resourceWire(config.resource,config.build);this.producer=canonicalId(config.producer??id());this.now=options.now??(()=>performance.now());this.wireNow=options.wireNow??(()=>performance.now());this.sleep=options.sleep??(ms=>new Promise<void>(resolve=>{setTimeout(resolve,ms);}));this.random=options.random??Math.random;this.spool=options.spool??config.spool;
  if(this.spool!==undefined&&!this.spoolSupported())throw Error('an encrypted spool needs SpoolingDeliveryQueue');this.spool?.assertBinding(this.descriptor,this.descriptor.policy_revision);this.resourceText=nativeCanonical(this.resource);this.resourceBytes=utf8Size(this.resourceText);
   // routeRecord's input for a span, laid out once: length-prefixed org, project, kind and owner (the 32-character trace ID, written per span at spanRouteAt).
   const org=new TextEncoder().encode(this.descriptor.org),project=new TextEncoder().encode(this.descriptor.project),kind=new TextEncoder().encode("span");
@@ -199,14 +199,14 @@ export class DeliveryQueue {
  }
  protected async freezeSliced():Promise<void>{while(!this.freezeSome(SLICE_MS))await yieldToLoop();}
  protected async deliver(timeout:number):Promise<FlushReport>{
-  const deadline=this.now()+timeout,wireDeadline=performance.now()+timeout,receipts:Record<string,unknown>[]=[];await this.recoverOnce();await this.freezeSliced();try{if(this.spool)await this.persist();}catch{this.counts.spool_failed=(this.counts.spool_failed??0)+1;return this.report(receipts,this.pending>0);}
-  while(!this.denied&&!this.closed&&this.pending&&this.now()<deadline&&performance.now()<wireDeadline){
+  const deadline=this.now()+timeout,wireDeadline=this.wireNow()+timeout,receipts:Record<string,unknown>[]=[];await this.recoverOnce();await this.freezeSliced();try{if(this.spool)await this.persist();}catch{this.counts.spool_failed=(this.counts.spool_failed??0)+1;return this.report(receipts,this.pending>0);}
+  while(!this.denied&&!this.closed&&this.pending&&this.now()<deadline&&this.wireNow()<wireDeadline){
    await this.freezeSliced();
    // The oldest batch of every route slot, highest priority first (a slot's batches go out in order).
    const firstOfSlot=new Map<number,BatchState>();for(const s of this.batches)if(!firstOfSlot.has(s.batch.route_slot))firstOfSlot.set(s.batch.route_slot,s);
    const heads=[...firstOfSlot.values()].sort((a,b)=>b.rank-a.rank);
    let attempted=false;let wait=Infinity;let sliceEnd=performance.now()+SLICE_MS;
-   for(const state of heads){if(performance.now()>=sliceEnd){await yieldToLoop();sliceEnd=performance.now()+SLICE_MS;}if(this.closed||this.now()>=deadline||performance.now()>=wireDeadline)break;if(state.next>this.now()){wait=Math.min(wait,state.next-this.now());continue;}attempted=true;
+   for(const state of heads){if(performance.now()>=sliceEnd){await yieldToLoop();sliceEnd=performance.now()+SLICE_MS;}if(this.closed||this.now()>=deadline||this.wireNow()>=wireDeadline)break;if(state.next>this.now()){wait=Math.min(wait,state.next-this.now());continue;}attempted=true;
     if(!state.ambiguous){if(this.policyExpired()){this.remove(state.batch,'policy_expired');if(this.spool)await this.persist();continue;}}
     // Persist possible-send state BEFORE network: a crash must lookup, not blindly reappend.
     const lookup=state.ambiguous;state.ambiguous=true;
@@ -226,9 +226,9 @@ export class DeliveryQueue {
    if(this.denied||!this.pending)break;
    // Finish ready ordered work; retry waits are bounded by this flush's deadline.
    if(attempted)continue;
-   const delay=Math.min(wait,deadline-this.now(),wireDeadline-performance.now());if(!(delay>0))break;await new Promise(resolve=>setTimeout(resolve,delay));
+   const delay=Math.min(wait,deadline-this.now(),wireDeadline-this.wireNow());if(!(delay>0))break;await this.sleep(delay);
   }
-  return this.report(receipts,this.pending>0&&(this.now()>=deadline||performance.now()>=wireDeadline));
+  return this.report(receipts,this.pending>0&&(this.now()>=deadline||this.wireNow()>=wireDeadline));
  }
  protected report(receipts:Record<string,unknown>[],exceeded:boolean):FlushReport{return Object.freeze({acknowledgedBatchIds:Object.freeze(receipts.map(r=>r.batch_id as string)),acknowledgedCursors:Object.freeze(receipts.map(r=>{const c=r.cursor as {group:string;index:string};return c.group+':'+c.index;})),receipts:Object.freeze(receipts),pending:this.pending,lost:this.lost,deadlineExceeded:exceeded});}
  async close():Promise<void>{if(this.closed)return;this.closing=true;try{await this.flush();}finally{this.closed=true;try{await this.transport.close();}finally{try{await this.persist();}finally{try{await this.spool?.close();}finally{this.options.context?.close();if(!this.spool){this.loss('closed_pending',this.entries.length+[...this.lossBuckets.values()].filter(b=>b.unbatched>0n).length);for(const b of this.lossBuckets.values()){b.unbatched=0n;b.start=null;b.end=null;}this.entries=[];this.batches=[];this.bytes=512*this.lossBuckets.size;}}}}}}

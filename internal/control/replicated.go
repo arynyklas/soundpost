@@ -123,7 +123,40 @@ func (s *Store) ReplicationSeed() ([]byte, uint64, error) {
 	}
 	return raw, uint64(snapshot.State.Revision), nil
 }
+
+// maxLostProposals bounds how often one writer that asked for it (retryLostProposals) reads, computes
+// and proposes again after its proposal lost the application-index race to another writer.
+const maxLostProposals = 64
+
+type lostProposalRetryKey struct{}
+
+// retryLostProposals marks ctx so replicatedUpdate runs a write again, on a fresh read of the state,
+// when its proposal was refused because another command committed first (replica.ErrStale from the
+// proposal itself, never from the read fence). Only a writer whose update function re-judges the
+// state it is given asks for it: the function runs again against the new state, so the retry cannot
+// apply a stale decision. Without it every proposal of a voter that does not lead (the proposal is
+// forwarded) loses most races under saturating intake on every voter.
+func retryLostProposals(ctx context.Context) context.Context {
+	return context.WithValue(ctx, lostProposalRetryKey{}, true)
+}
+
 func (s *Store) replicatedUpdate(ctx context.Context, bump bool, force *bool, fn func(*State) error) error {
+	attempts := 1
+	if ctx.Value(lostProposalRetryKey{}) != nil {
+		attempts = maxLostProposals
+	}
+	for attempt := 1; ; attempt++ {
+		var lost bool
+		err := s.replicatedUpdateOnce(ctx, bump, force, fn, &lost)
+		if !lost || attempt >= attempts || ctx.Err() != nil {
+			return err
+		}
+	}
+}
+
+// replicatedUpdateOnce is one read-compute-propose round; lost reports that the proposal was refused
+// as stale (another command committed since the read).
+func (s *Store) replicatedUpdateOnce(ctx context.Context, bump bool, force *bool, fn func(*State) error, lost *bool) error {
 	s.updateMu.Lock()
 	defer s.updateMu.Unlock()
 	r := s.repl
@@ -172,6 +205,12 @@ func (s *Store) replicatedUpdate(ctx context.Context, bump bool, force *bool, fn
 		return err
 	}
 	_, err = r.group.Propose(ctx, replica.Entry{ID: model.NewID(), Kind: replica.Control, Payload: payload, ApplicationIndex: uint64(st.Revision)})
+	// The leader refuses a proposal naming an old application index with the typed Stale fault
+	// (Validate), a forwarding voter gets it back as replica.ErrStale: both are a lost race.
+	var fault *model.Fault
+	if errors.Is(err, replica.ErrStale) || errors.As(err, &fault) && fault.Code == model.Stale {
+		*lost = true
+	}
 	return replicaFault(err)
 }
 
