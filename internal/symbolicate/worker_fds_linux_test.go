@@ -59,7 +59,7 @@ func plantInheritedFDs(t *testing.T) []int {
 // exec'd worker image with its sandbox installed, blocked reading its request.
 func workerDescriptors(t *testing.T, staged bool) map[int]string {
 	t.Helper()
-	c := sandboxConfig(t)
+	c := nativeSandboxConfig(t)
 	if staged {
 		forceNoClone3(t)
 	} else if !cloneIntoCgroupAvailable() {
@@ -152,7 +152,7 @@ func TestWorkerStartsWithOnlyStdio(t *testing.T) {
 // O_CLOEXEC, so a served process should hold none above fd 2: measured here on the real
 // `soundpost serve` with the native fixture config, scanning /proc/<pid>/fdinfo.
 func TestServeHoldsNoInheritableDescriptors(t *testing.T) {
-	c := sandboxConfig(t)
+	c := nativeSandboxConfig(t)
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)

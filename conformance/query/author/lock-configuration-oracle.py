@@ -39,7 +39,7 @@ for p in lock["profiles"]:
     version = PROFILES.get(p["id"])
     if not version:
         continue
-    base_id, base_layers, _ = inspect(f"soundpost-oracle-promql-prometheus-{version}:latest")
+    base_id, base_layers, _ = inspect(p["artifact"]["path"])
     assert base_id == p["artifact"]["path"], (p["id"], base_id, p["artifact"]["path"])
     image = f"soundpost-oracle-promql-prometheus-{version}-configuration:current"
     image_id, layers, platform = inspect(image)

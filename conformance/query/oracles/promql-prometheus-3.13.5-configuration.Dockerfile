@@ -7,5 +7,5 @@
 # --entrypoint, never through /adapter.
 #   docker build --pull=false -f promql-prometheus-3.13.5-configuration.Dockerfile \
 #     -t soundpost-oracle-promql-prometheus-3.13.5-configuration:current .
-FROM soundpost-oracle-promql-prometheus-3.13.5@sha256:2251b83038a6c0c61c21ed8721cb94a699ceb3bee38c1f115b4efae338fbe453
+FROM soundpost-oracle-promql-prometheus-3.13.5@sha256:1f2f79b4dd8c1d4ecee0d0cec6471f633324eebc01924f8e4fa4c2742ef2bf4f
 COPY --chmod=0444 promql-prometheus-3.13.5-configuration.yaml /etc/prometheus/soundpost-configuration-phase.yaml

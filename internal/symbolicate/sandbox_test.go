@@ -27,6 +27,20 @@ func sandboxConfig(t *testing.T) Config {
 	}
 	return c
 }
+
+// nativeSandboxConfig is sandboxConfig for the tests that only make sense for
+// the native sandbox (staged launch, clone3, delegated cgroup groups, the
+// worker's inherited descriptors, a worker file path). Under an OCI
+// configuration they skip: the same SOUNDPOST_SYMBOLICATE_TEST_CONFIG names one
+// backend, and a native-only test run against an OCI config measures nothing.
+func nativeSandboxConfig(t *testing.T) Config {
+	t.Helper()
+	c := sandboxConfig(t)
+	if c.Mode != "native" {
+		t.Skipf("native-sandbox test: the test configuration selects mode %q", c.Mode)
+	}
+	return c
+}
 func TestActualSandboxDeniesFileNetworkExec(t *testing.T) {
 	c := sandboxConfig(t)
 	for _, k := range []ProbeKind{ProbeFile, ProbeNetwork, ProbeExec} {

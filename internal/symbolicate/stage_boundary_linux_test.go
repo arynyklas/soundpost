@@ -23,7 +23,7 @@ import (
 // re-executed) starts the staged child of the real worker binary through
 // ExtraFiles and SIGKILLs itself without releasing.
 func TestStagedProcessCannotOutliveItsParent(t *testing.T) {
-	c := sandboxConfig(t)
+	c := nativeSandboxConfig(t)
 	if os.Getenv("SOUNDPOST_STAGED_PARENT_HELPER") == "1" {
 		r, w, err := os.Pipe()
 		if err != nil {
@@ -80,7 +80,7 @@ func TestStagedProcessCannotOutliveItsParent(t *testing.T) {
 // that is not the launcher runs WorkerMain/ProbeMain outside a limited group, and
 // those must refuse to run (non-zero exit) rather than serve a request.
 func TestExternalStagedReleaseStopsAtTheBoundary(t *testing.T) {
-	c := sandboxConfig(t)
+	c := nativeSandboxConfig(t)
 	for _, vector := range []string{stageWorkerArg, stageProbeArg} {
 		r, w, err := os.Pipe()
 		if err != nil {

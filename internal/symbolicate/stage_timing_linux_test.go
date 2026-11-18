@@ -30,7 +30,7 @@ func stagedProbe(t *testing.T, c Config) time.Duration {
 // bound asserted is the product's own: a whole staged launch, end to end, must fit
 // well inside ProcessTimeout; the distribution is logged for the report.
 func TestStagedLaunchTimeAndTwoConcurrentWorkers(t *testing.T) {
-	c := sandboxConfig(t)
+	c := nativeSandboxConfig(t)
 	forceNoClone3(t)
 	const runs = 20
 	var seq []time.Duration

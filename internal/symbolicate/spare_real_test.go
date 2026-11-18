@@ -47,14 +47,19 @@ func TestAHandshakenWorkerThatWaitsStillAnswersItsRequest(t *testing.T) {
 func TestWarmSpareOfARealRuntimeServesAfterIdling(t *testing.T) {
 	c := realOCIConfig(t)
 	c.WarmSpare = true
+	// The keep-warm refill (30 s by default, covered by the fake-runtime tests)
+	// would keep replacing expiring spares for the whole check below.
+	keepWarm(t, 0)
 	s, err := New(&unusedReader{}, unusedGenerations{}, c)
 	if err != nil {
 		t.Fatal(err)
 	}
 	before := workerContainers(t, c)
+	cold := time.Now()
 	if got := s.run(context.Background(), batchInput(lineMap(20), 1)); len(got) != 1 {
 		t.Fatalf("cold request: %+v", got)
 	}
+	t.Logf("cold request (its own container start): %s", time.Since(cold))
 	s.spares.started.Wait()
 	time.Sleep(5 * FrameTimeout)
 	start := time.Now()

@@ -12365,19 +12365,19 @@
     "oracles": {
       "promql-prometheus-3.1.0": {
         "image": "soundpost-oracle-promql-prometheus-3.1.0-configuration:current",
-        "image_id": "sha256:9ca7edd54e6ff511a09b1ae02c16675e0d44d673a84e4f81971b5ae742429334",
-        "base_image_id": "sha256:6f238ce554111c3d86b2df22c3bb74e8f293bd0eb194aa38aab0a300ee6e0b79",
+        "image_id": "sha256:d958db557400fc52e8aad82b5fa0cad15d8d270105fd56a4d1615d013778abe3",
+        "base_image_id": "sha256:6234d450fe5c3770af5c0a3d20adff668e4594d3abd626a29d626a73ab69d417",
         "configuration_file_sha256": "506f0ed3aacca3e70650b0c0250dfa3c01ab140af848d8da1bb95611ccd85df3"
       },
       "promql-prometheus-3.13.5": {
         "image": "soundpost-oracle-promql-prometheus-3.13.5-configuration:current",
-        "image_id": "sha256:e419a763d1fc906030d752626ae9029849381410dec90ff6b02045bf0ac74ea4",
-        "base_image_id": "sha256:2251b83038a6c0c61c21ed8721cb94a699ceb3bee38c1f115b4efae338fbe453",
+        "image_id": "sha256:5ce19138fad8f18ecec1fd3517af78daacdfdcce050f38019de835cb71bd953e",
+        "base_image_id": "sha256:1f2f79b4dd8c1d4ecee0d0cec6471f633324eebc01924f8e4fa4c2742ef2bf4f",
         "configuration_file_sha256": "94c7ab81af0f2b3f7736715dfd654805c98fb4af3d5d2c707a09b93cfb23b431"
       }
     },
     "recorded_observations": "internal/conformance/query/testdata/native-configuration-observations.json",
-    "recorded_observations_sha256": "c440c159d74a11d55cd6e18a992e7009f86f63bba6af5759d70660b0287f53fd"
+    "recorded_observations_sha256": "006a42e2322822d8cf71ccc15845fb0518a7becd466b19ab71090c192ab96593"
   },
   "out_of_release_scope": [
     {

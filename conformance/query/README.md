@@ -69,6 +69,17 @@ The PromQL images take `--build-arg EVALUATION_GO_IMAGE=<digest-pinned golang>`
 (1.23.4 for Prometheus 3.1.0, 1.26.10 for 3.13.5). Re-inspect the image id
 before every run; a stale id fails with a Docker "No such image" error.
 
+The image ids in `source-lock.json` are the ids of the daemon that built them. A rebuild
+on another daemon yields other ids (layer timestamps; the pinned upstream images and
+Dockerfiles are unchanged), so it is followed by a repin: the three evaluation ids
+(`profiles[].artifact.path` and `.sha256`), the configuration variants (below), the
+`image_sha256` values of `internal/conformance/query/testdata/native-configuration-observations.json`
+and the `acceptance.json` `configuration_phase` block, then `author/relock.py` for
+`provenance.json` and `acceptance.json` and `go run ./cmd/soundpost-querycheck inventory --check`.
+The last repin is the Debian 13 / Docker 26.1.5 `sp-oci` build of 2026-11-18
+(`.superpowers/sdd/approved-product/l2oci-evidence/`): every recorded reference observation
+(181 configuration scenarios) came out identical on the new images.
+
 ## Running the phases
 
 Run each phase separately; a mixed-phase file silently skips rows of the other
@@ -107,6 +118,18 @@ python3 conformance/query/author/release-author.py --only configuration
 go run ./cmd/soundpost-querycheck compare --phase configuration \
   --cases conformance/query/cases/release-configuration.json --require-locked --runtime docker
 python3 conformance/query/author/record-configuration-observations.py report.json
+```
+
+A daemon with the classic (overlay2) image store cannot resolve the configuration
+Dockerfiles' `FROM <name>@sha256:<image id>` (a local image id is not a registry digest).
+Map the base to the local image with a named build context; the Dockerfile stays as locked:
+
+```sh
+B=$(docker image inspect soundpost-oracle-promql-prometheus-3.1.0:current --format '{{.Id}}')
+docker build --pull=false --provenance=false --sbom=false \
+  --build-context "soundpost-oracle-promql-prometheus-3.1.0@$B=docker-image://soundpost-oracle-promql-prometheus-3.1.0:current" \
+  -f conformance/query/oracles/promql-prometheus-3.1.0-configuration.Dockerfile \
+  -t soundpost-oracle-promql-prometheus-3.1.0-configuration:current conformance/query/oracles
 ```
 
 The owned side is `internal/sources/prometheus_config.go`; its scope (the modelled

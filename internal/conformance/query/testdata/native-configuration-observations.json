@@ -4976,13 +4976,13 @@
  "oracles": {
   "promql-prometheus-3.1.0": {
    "configuration_sha256": "506f0ed3aacca3e70650b0c0250dfa3c01ab140af848d8da1bb95611ccd85df3",
-   "image_sha256": "9ca7edd54e6ff511a09b1ae02c16675e0d44d673a84e4f81971b5ae742429334",
+   "image_sha256": "d958db557400fc52e8aad82b5fa0cad15d8d270105fd56a4d1615d013778abe3",
    "revision": "7086161a93b262aa0949dbf2aba15a5a7b13e0a3",
    "version": "3.1.0"
   },
   "promql-prometheus-3.13.5": {
    "configuration_sha256": "94c7ab81af0f2b3f7736715dfd654805c98fb4af3d5d2c707a09b93cfb23b431",
-   "image_sha256": "e419a763d1fc906030d752626ae9029849381410dec90ff6b02045bf0ac74ea4",
+   "image_sha256": "5ce19138fad8f18ecec1fd3517af78daacdfdcce050f38019de835cb71bd953e",
    "revision": "f497435984d1ca1d84cda5ed309387ac2eb1f8f6",
    "version": "3.13.5"
   }

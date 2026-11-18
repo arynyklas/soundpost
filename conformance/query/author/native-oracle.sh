@@ -72,8 +72,8 @@ shift
 image=\$1
 shift
 case "\$image" in
-  sha256:6f238ce5*) profile=promql-prometheus-3.1.0 ;;
-  sha256:2251b830*) profile=promql-prometheus-3.13.5 ;;
+  sha256:6234d450*) profile=promql-prometheus-3.1.0 ;;
+  sha256:1f2f79b4*) profile=promql-prometheus-3.13.5 ;;
   *) echo "unsupported image \$image" >&2; exit 2 ;;
 esac
 exec env -i $W/qc-adapter adapter \$profile "\$@"

@@ -80,7 +80,7 @@ func TestConfigureSelectsCloneIntoCgroupOrStaging(t *testing.T) {
 // service, the process and the new group's directory.
 func startStaged(t *testing.T) (c Config, p *workerProcess, group string) {
 	t.Helper()
-	c = sandboxConfig(t)
+	c = nativeSandboxConfig(t)
 	forceNoClone3(t)
 	before := groupNames(t, c.CgroupRoot)
 	s := &Service{config: c}
@@ -250,7 +250,7 @@ func TestStagedWorkerMemoryIsChargedToTheLimitedGroup(t *testing.T) {
 
 // Both probes and the denial checks pass through a staged launch.
 func TestStagedProbesPass(t *testing.T) {
-	c := sandboxConfig(t)
+	c := nativeSandboxConfig(t)
 	forceNoClone3(t)
 	for _, k := range []ProbeKind{ProbeFile, ProbeNetwork, ProbeExec} {
 		if r := Probe(context.Background(), c, k); !r.Denied || r.Reason != Resolved {
@@ -262,7 +262,7 @@ func TestStagedProbesPass(t *testing.T) {
 // A staging process that is killed, or whose parent end is closed, without ever being
 // released runs no worker and leaves neither a process nor a group.
 func TestStagedNeverReleasedLeavesNothing(t *testing.T) {
-	c := sandboxConfig(t)
+	c := nativeSandboxConfig(t)
 	t.Run("killed", func(t *testing.T) {
 		_, p, group := startStaged(t)
 		pid := p.cmd.Process.Pid
