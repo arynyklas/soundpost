@@ -218,7 +218,7 @@ func (p *policySmoke) setup() error {
 	issued, err := app.Auth.OnboardSource(p.ctx, actor, auth.SourceOnboarding{CommandID: model.NewID(), Org: p.org, Project: p.project, Source: p.source, Expires: model.UnixNano(time.Now().Add(24 * time.Hour).UnixNano()), Reason: "artifact policy smoke", Policy: model.SourcePolicy{
 		Enabled: true, Revision: 1, Class: "structured", Kinds: []model.Kind{model.ErrorKind},
 		Resources:     model.ResourceRegistry{Services: []model.ID{model.NewID()}, Environments: []model.ID{model.NewID()}, Builds: []model.ID{p.build}, Instances: []string{"artifact-policy"}},
-		RetentionDays: map[model.Kind]uint32{model.ErrorKind: 14}, MaxBytes: 1 << 30, MaxSeries: 1000,
+		RetentionDays: map[model.Kind]uint32{model.ErrorKind: 90}, MaxBytes: 1 << 30, MaxSeries: 1000,
 	}})
 	if err != nil {
 		return err
@@ -337,8 +337,12 @@ func (p *policySmoke) run() error {
 	}); err != nil {
 		return err
 	}
+	// The build record is retained like the error (D21: 90 days from admission), and it was
+	// written after the error was admitted, so by default it would lapse in the same hour as
+	// the error. The stage below needs a build record that outlives the error occurrence.
+	buildDeadline := model.UnixNano(time.Unix(0, int64(errDeadline)).Add(30 * 24 * time.Hour).UnixNano())
 	buildRef := artifacts.OriginCursor{Kind: artifacts.ReferenceBuild, Cursor: buildCursor}
-	if err = p.life.Reference(ctx, write, a.ID, buildRef, 0); err != nil {
+	if err = p.life.Reference(ctx, write, a.ID, buildRef, buildDeadline); err != nil {
 		return err
 	}
 	effective, err := p.life.EffectiveRetention(ctx, read(), a.ID)
