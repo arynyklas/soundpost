@@ -210,7 +210,7 @@ class Recorder implements ReplayRecorder {
    for (const id of fit.suppressed) this.suppressed.add(id);
    this.loss++;
    if (!events.some(event => event.kind === "gap")) emitted = [...events, {at_ns: this.now().mono_ns, kind: "gap", node: "0", x: 0, y: 0}];
-   if (checkpoint) marked = true;
+   marked = true; // a truncated delta is as lossy as a truncated checkpoint: its gap event and its chunk flag agree
   }
   if (this.sequence >= MAX_SEQUENCE || checkpoint && this.checkpoints >= MAX_CHECKPOINTS) { this.exhaust(); return; }
   const sequence = ++this.sequence;

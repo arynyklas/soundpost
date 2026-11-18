@@ -9,8 +9,6 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -18,6 +16,7 @@ import (
 	"fmt"
 	"github.com/arynyklas/soundpost/internal/appcore"
 	"github.com/arynyklas/soundpost/internal/auth"
+	"github.com/arynyklas/soundpost/internal/httpapi"
 	"github.com/arynyklas/soundpost/internal/ingest"
 	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/nativeperf"
@@ -52,22 +51,40 @@ type privateConfig struct {
 	CAFile             string            `json:"ca_file,omitempty"`
 }
 type fixtureResult struct {
-	Samples          int               `json:"genuine_cpu_samples"`
-	CPU              nativeperf.Status `json:"cpu"`
-	Scheduler        nativeperf.Status `json:"scheduler"`
-	Runqueue         nativeperf.Status `json:"runqueue_split"`
-	Units            string            `json:"count_units"`
-	PeriodUnit       string            `json:"period_unit"`
-	Visible          bool              `json:"authorized_profile_visible"`
-	ScopeDenied      bool              `json:"foreign_scope_denied"`
-	ReaderRevoked    bool              `json:"reader_revocation_denied"`
-	Historical       bool              `json:"identical_historical_receipt_after_restriction"`
-	SourceDenied     bool              `json:"revoked_source_receipt_denied"`
-	SourceDenialCode model.Code        `json:"source_denial_code,omitempty"`
-	HTTPReceipt      bool              `json:"verified_tls_receipt"`
-	HTTPProfile      bool              `json:"canonical_http_profile_read"`
-	Mapping          string            `json:"mapping_coverage"`
-	Symbolication    string            `json:"symbolication"`
+	Samples                    int               `json:"genuine_cpu_samples"`
+	CPU                        nativeperf.Status `json:"cpu"`
+	Scheduler                  nativeperf.Status `json:"scheduler"`
+	Runqueue                   nativeperf.Status `json:"runqueue_split"`
+	Units                      string            `json:"count_units"`
+	PeriodUnit                 string            `json:"period_unit"`
+	Visible                    bool              `json:"authorized_profile_visible"`
+	ScopeDenied                bool              `json:"foreign_scope_denied"`
+	ReaderRevoked              bool              `json:"reader_revocation_denied"`
+	ReaderRevokedHTTP          bool              `json:"reader_revocation_http_denied"`
+	ReaderRevocationExercised  bool              `json:"reader_revocation_exercised"`
+	Historical                 bool              `json:"identical_historical_receipt_after_restriction"`
+	ProfileDeleteExercised     bool              `json:"profile_delete_exercised"`
+	DeleteFence                bool              `json:"profile_unreadable_at_delete_fence"`
+	DeleteCompleted            bool              `json:"profile_delete_completed"`
+	DeleteGeneration           bool              `json:"delete_generation_advanced"`
+	HistoricalAfterDelete      bool              `json:"identical_historical_receipt_after_deletion"`
+	NoResurrection             bool              `json:"no_resurrection_after_deletion"`
+	RepostStatus               int               `json:"deleted_batch_repost_status,omitempty"`
+	SourceDenied               bool              `json:"revoked_source_receipt_denied"`
+	SourceDenialCode           model.Code        `json:"source_denial_code,omitempty"`
+	HTTPReceipt                bool              `json:"verified_tls_receipt"`
+	HTTPReceiptExercised       bool              `json:"verified_tls_receipt_exercised"`
+	HTTPProfile                bool              `json:"canonical_http_profile_read"`
+	HTTPProfileExercised       bool              `json:"canonical_http_profile_read_exercised"`
+	Endpoint                   string            `json:"endpoint_kind,omitempty"`
+	SchedulerExercised         bool              `json:"scheduler_exercised"`
+	SchedulerIntervalsReadBack bool              `json:"scheduler_intervals_read_back"`
+	Stream                     *schedulerStats   `json:"scheduler_stream,omitempty"`
+	ReadBack                   *profileSummary   `json:"read_back"`
+	HTTPReadBack               *profileSummary   `json:"http_read_back,omitempty"`
+	ReadBackEqualsAssembled    bool              `json:"read_back_equals_assembled_profile"`
+	Mapping                    string            `json:"mapping_coverage"`
+	Symbolication              string            `json:"symbolication"`
 }
 
 func main() {
@@ -157,19 +174,27 @@ func frameWrite(c *net.UnixConn, v any) error {
 
 type realCapture struct {
 	Events       []nativeperf.SanitizedEvent
+	Intervals    []nativeperf.Interval
+	Mappings     []nativeperf.MappingTable
+	Reservation  nativeperf.WorkingReservation
+	Domain       nativeperf.ClockDomain
+	Scheduler    schedulerStats
 	Source       *nativeperf.ProfileSource
 	Clock        model.TraceClock
 	Capabilities nativeperf.Capabilities
 	close        func()
 }
 
-func acquire(ctx context.Context, cfg privateConfig) (realCapture, error) {
+func acquire(ctx context.Context, cfg privateConfig, scheduler bool) (realCapture, error) {
 	var result realCapture
 	probeTarget := cfg.Target
 	probeTarget.CgroupID = 0 // exact task permission probe, not a wider collector selector
 	caps, probeErr := nativeperf.Probe(ctx, []nativeperf.Target{probeTarget})
 	if caps.CPU != nativeperf.Supported {
 		return result, errors.New("real_cpu_probe_refused")
+	}
+	if scheduler && caps.OffCPU != nativeperf.Supported {
+		return result, errors.New("real_scheduler_probe_refused")
 	}
 	if probeErr != nil && caps.OffCPU == nativeperf.Supported {
 		return result, errors.New("real_probe_failed")
@@ -181,7 +206,11 @@ func acquire(ctx context.Context, cfg privateConfig) (realCapture, error) {
 	}
 	c := nativeperf.DefaultConfig(cfg.Revision)
 	targets := []nativeperf.Target{cfg.Target}
-	signed, e := nativeperf.SignStart(nativeperf.StartAuthorization{Installation: "public-native-export-fixture", UID: uint32(os.Getuid()), Revision: uint64(cfg.Revision), Expires: time.Now().Add(90 * time.Second).Unix(), Targets: targets, Config: c, Mode: nativeperf.ModeCPU}, private)
+	mode := nativeperf.ModeCPU
+	if scheduler {
+		mode = nativeperf.ModeCPUOffCPU
+	}
+	signed, e := nativeperf.SignStart(nativeperf.StartAuthorization{Installation: "public-native-export-fixture", UID: uint32(os.Getuid()), Revision: uint64(cfg.Revision), Expires: time.Now().Add(90 * time.Second).Unix(), Targets: targets, Config: c, Mode: mode}, private)
 	if e != nil {
 		return result, e
 	}
@@ -228,7 +257,7 @@ func acquire(ctx context.Context, cfg privateConfig) (realCapture, error) {
 		return fail(e)
 	}
 	result.Clock = clock
-	if e = frameWrite(conn, nativeperf.CaptureRequest{Authorization: signed, Targets: targets, Config: c, Mode: nativeperf.ModeCPU}); e != nil {
+	if e = frameWrite(conn, nativeperf.CaptureRequest{Authorization: signed, Targets: targets, Config: c, Mode: mode}); e != nil {
 		return fail(errors.New("fixture_capture_request_failed"))
 	}
 	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
@@ -237,6 +266,9 @@ func acquire(ctx context.Context, cfg privateConfig) (realCapture, error) {
 		Error string `json:"error"`
 	}
 	if e = frameRead(conn, &ready); e != nil || !ready.Ready || ready.Error != "" {
+		if ready.Error != "" {
+			return fail(errors.New("real_native_acquisition_refused:" + ready.Error))
+		}
 		return fail(errors.New("real_native_acquisition_refused"))
 	}
 	select {
@@ -246,29 +278,48 @@ func acquire(ctx context.Context, cfg privateConfig) (realCapture, error) {
 	}
 	// Input and output share the already reserved 8MiB assembly working set.
 	// A bounded finite observation window is not a scheduler drain/final proof.
-	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	for len(result.Events) < 128 {
-		var reply struct {
-			Event *nativeperf.SanitizedEvent `json:"event"`
-			Error string                     `json:"error"`
+	if scheduler {
+		if e = readScheduler(conn, c, &result); e != nil {
+			return fail(e)
 		}
-		e = frameRead(conn, &reply)
-		if e != nil {
-			if n, ok := e.(net.Error); ok && n.Timeout() {
-				break
+		result.Reservation = fixtureLease{}
+	} else {
+		conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		for len(result.Events) < 128 {
+			var reply struct {
+				Event *nativeperf.SanitizedEvent `json:"event"`
+				Error string                     `json:"error"`
 			}
-			return fail(errors.New("real_capture_transport_failed"))
+			e = frameRead(conn, &reply)
+			if e != nil {
+				if n, ok := e.(net.Error); ok && n.Timeout() {
+					break
+				}
+				return fail(errors.New("real_capture_transport_failed"))
+			}
+			if reply.Error != "" || reply.Event == nil || reply.Event.Validate() != nil {
+				return fail(errors.New("real_capture_refused_or_invalid"))
+			}
+			result.Events = append(result.Events, *reply.Event)
 		}
-		if reply.Error != "" || reply.Event == nil || reply.Event.Validate() != nil {
-			return fail(errors.New("real_capture_refused_or_invalid"))
-		}
-		result.Events = append(result.Events, *reply.Event)
+	}
+	if !scheduler {
+		result.Mappings, result.Reservation = result.Source.FramesMappings(), result.Source.ExportReservation()
 	}
 	if len(result.Events) == 0 {
 		return fail(errors.New("no_genuine_cpu_observations"))
 	}
-	result.Clock.Domain.Host = fixedClockID("host", result.Events[0].Domain.HostID)
-	result.Clock.Domain.Boot = fixedClockID("boot", result.Events[0].Domain.BootID)
+	for _, event := range result.Events {
+		if event.Domain.HostID != "" && event.Domain.BootID != "" {
+			result.Domain = event.Domain
+			break
+		}
+	}
+	if result.Domain.HostID == "" || result.Domain.BootID == "" {
+		return fail(errors.New("no_clock_domain_in_the_capture"))
+	}
+	result.Clock.Domain.Host = fixedClockID("host", result.Domain.HostID)
+	result.Clock.Domain.Boot = fixedClockID("boot", result.Domain.BootID)
 	result.close = cleanup
 	return result, nil
 }
@@ -277,6 +328,7 @@ type loseReceipt struct {
 	actual        *ingest.Service
 	enabled, lost bool
 	original      model.Receipt
+	batch         model.Batch
 }
 
 func (l *loseReceipt) Admit(ctx context.Context, g policy.SourceGrant, b model.Batch) (model.Receipt, error) {
@@ -289,6 +341,7 @@ func (l *loseReceipt) Admit(ctx context.Context, g policy.SourceGrant, b model.B
 			if row.Kind == model.Profile {
 				l.lost = true
 				l.original = r
+				l.batch = b
 				return model.Receipt{}, errors.New("fixture_lost_durable_response")
 			}
 		}
@@ -343,17 +396,10 @@ func verifyHTTPReceipt(ctx context.Context, endpoint, caFile, sourceKey string, 
 	if e != nil || u.Scheme != "https" || u.Host == "" || u.User != nil {
 		return errors.New("fixture_endpoint_must_be_verified_https")
 	}
-	pool, e := x509.SystemCertPool()
+	client, e := verifiedClient(caFile)
 	if e != nil {
-		return errors.New("fixture_tls_roots_unavailable")
+		return e
 	}
-	if caFile != "" {
-		b, e := os.ReadFile(caFile)
-		if e != nil || len(b) > 1<<20 || !pool.AppendCertsFromPEM(b) {
-			return errors.New("fixture_tls_ca_invalid")
-		}
-	}
-	client := &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: pool}}, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("fixture_redirect_denied") }}
 	raw, _ := json.Marshal(q)
 	u.Path = "/ingest/v1/receipts"
 	u.RawQuery = ""
@@ -380,17 +426,63 @@ func verifyHTTPReceipt(ctx context.Context, endpoint, caFile, sourceKey string, 
 	return nil
 }
 
+// readerBearer is the bearer credential of the canonical HTTP profile read: the
+// configured reader token when it already is a server token, else a server token
+// the fixture administrator issues to the same reader principal.
+func readerBearer(ctx context.Context, app *appcore.App, cfg privateConfig, reader auth.Scope) (string, error) {
+	credential, e := app.Auth.Authenticate(ctx, cfg.ReaderToken)
+	if e == nil && credential.IsServerToken() {
+		return cfg.ReaderToken, nil
+	}
+	admin, e := app.Auth.Authenticate(ctx, cfg.AdminToken)
+	if e != nil {
+		return "", errors.New("fixture_admin_denied")
+	}
+	issued, e := app.Auth.IssueServerToken(ctx, admin, cfg.Org, reader.PrincipalID(), []model.ID{cfg.Project}, []auth.Permission{"profiles.read"}, time.Now().Add(time.Hour).Unix(), "disposable native export fixture reader bearer token")
+	if e != nil {
+		return "", errors.New("fixture_reader_bearer_issue_denied")
+	}
+	return issued.Token, nil
+}
+
+func setReaderGrant(ctx context.Context, app *appcore.App, cfg privateConfig, reader auth.Scope, enabled bool) error {
+	admin, e := app.Auth.Authenticate(ctx, cfg.AdminToken)
+	if e != nil {
+		return errors.New("fixture_admin_denied")
+	}
+	var rev model.Revision
+	if e = app.Control.View(ctx, func(st model.ControlState) error { rev = st.Revision; return nil }); e != nil {
+		return errors.New("fixture_control_revision_unavailable")
+	}
+	payload := auth.AdminPayload{UserID: reader.PrincipalID(), ProjectID: cfg.Project, Enabled: enabled, Reason: "disposable native fixture reader revocation"}
+	if enabled {
+		payload.Reason = "disposable native fixture reader grant restored after the revocation check"
+		payload.Permissions = []string{"profiles.read"}
+	}
+	raw, _ := json.Marshal(payload)
+	if _, e = app.Auth.AdminCommand(ctx, admin, auth.AdminCommandRequest{CommandID: model.NewID(), ExpectedRevision: rev, OrgID: cfg.Org, Kind: "grant", Payload: raw}); e != nil {
+		return errors.New("real_reader_grant_change_failed")
+	}
+	return nil
+}
+
+func isNotFound(e error) bool {
+	var fault *model.Fault
+	return errors.As(e, &fault) && fault.Code == model.NotFound
+}
+
 func run() error {
 	configEnv := flag.String("config-env", "SOUNDPOST_NATIVE_EXPORT_CONFIG", "environment variable naming a private 0600 JSON config file")
-	endpointEnv := flag.String("endpoint-env", "SOUNDPOST_FIXTURE_API", "verified HTTPS endpoint environment for optional receipt probe")
+	endpointEnv := flag.String("endpoint-env", "SOUNDPOST_FIXTURE_API", "environment variable naming a verified HTTPS endpoint that serves this same backend; when unset the fixture serves the product's real HTTP routes itself over TLS with a private CA it generates")
 	targetPID := flag.Int("target-pid", 0, "exact private-config authorized process")
 	scopeDenial := flag.Bool("verify-scope-denial", false, "require real foreign reader denial")
-	revocation := flag.Bool("verify-revocation", false, "revoke disposable fixture reader project grant")
+	revocation := flag.Bool("verify-revocation", false, "revoke disposable fixture reader project grant between two pages (and over HTTP when --require-http-profile-read), then restore it")
 	historical := flag.Bool("verify-historical-restriction", false, "lose durable receipt then restrict fixture source policy")
-	deletion := flag.Bool("verify-historical-policy-delete", false, "also require real historical profile deletion (currently unavailable)")
+	deletion := flag.Bool("verify-historical-policy-delete", false, "lose the durable receipt, restrict the source policy, then run the product's real profile deletion and require the identical historical receipt, an unreadable profile and no resurrection")
 	revokedReceipt := flag.Bool("verify-revoked-receipt", false, "revoke disposable fixture source and require receipt403")
-	httpProbe := flag.Bool("probe-receipts-http", false, "verify identical receipt through actual configured HTTPS C03 route")
-	requireProfileHTTP := flag.Bool("require-http-profile-read", false, "require canonical C11 profile investigation HTTP adapter")
+	httpProbe := flag.Bool("probe-receipts-http", false, "verify identical receipt through the actual HTTPS C03 receipt route (after any deletion)")
+	requireProfileHTTP := flag.Bool("require-http-profile-read", false, "read the export back through the canonical POST /api/v1/profiles/view over verified TLS and require it to equal the C05 read")
+	scheduler := flag.Bool("scheduler", false, "acquire CPU and scheduler evidence, correlate it per session and require the off-CPU/runqueue intervals to read back with their units, loss and coverage")
 	flag.Parse()
 	cfg, e := readPrivateConfig(*configEnv)
 	if e != nil {
@@ -399,8 +491,15 @@ func run() error {
 	if *targetPID <= 0 || uint32(*targetPID) != cfg.Target.TGID {
 		return errors.New("target_pid_must_match_private_operator_config")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Second)
 	defer cancel()
+	// The helper charges this process's resident memory (it is the exporter peer) against its
+	// 64 MiB acquisition budget when it starts, so acquisition runs before the backend is opened.
+	captured, e := acquire(ctx, cfg, *scheduler)
+	if e != nil {
+		return e
+	}
+	defer captured.close()
 	app, e := appcore.Open(cfg.BackendDir)
 	if e != nil {
 		return errors.New("dedicated_fixture_backend_unavailable_or_running")
@@ -414,14 +513,9 @@ func run() error {
 	if e != nil {
 		return errors.New("current_fixture_profile_read_denied")
 	}
-	captured, e := acquire(ctx, cfg)
-	if e != nil {
-		return e
-	}
-	defer captured.close()
 	now := captured.Clock.Wall
 	end := model.UnixNano(time.Now().UnixNano())
-	domain := captured.Events[0].Domain
+	domain := captured.Domain
 	capsRow := model.Record{Kind: model.CapabilityKind, Payload: model.Payload{Capability: &model.Capability{}}}
 	lossRow := model.Record{Kind: model.Loss, Payload: model.Payload{Loss: &model.LossReport{}}}
 	capSlot, _ := model.OwnerSlot(cfg.Org, cfg.Project, cfg.Source, cfg.Producer, capsRow)
@@ -444,14 +538,26 @@ func run() error {
 			return errors.New("fixture_profile_route_ordering_unavailable")
 		}
 	}
-	limits := nativeperf.ProfileLimits{Profile: root, Process: model.NewID(), Capability: model.NewID(), Domain: domain, PolicyRevision: cfg.Revision, Sequence: 1, Start: now, End: end, Clock: captured.Clock, Complete: false, MaxBytes: 8 << 20, MaxSamples: 8192, MaxIntervals: 8192, MaxFrames: 4096, MaxStacks: 4096, Mappings: captured.Source.FramesMappings()}
+	limits := nativeperf.ProfileLimits{Profile: root, Process: model.NewID(), Capability: model.NewID(), Domain: domain, PolicyRevision: cfg.Revision, Sequence: 1, Start: now, End: end, Clock: captured.Clock, Complete: false, MaxBytes: 8 << 20, MaxSamples: 8192, MaxIntervals: 8192, MaxFrames: 4096, MaxStacks: 4096, Mappings: append([]nativeperf.MappingTable(nil), captured.Mappings...)}
 	lose := &loseReceipt{actual: app.Ingest, enabled: *historical || *deletion || *revokedReceipt}
-	exporter, e := nativeperf.NewExporter(lose, actualLookup{app.Ingest, credential}, nativeperf.ExportConfig{Project: cfg.Project, Source: cfg.Source, Producer: cfg.Producer, Resource: cfg.Resource, Limits: limits, Capabilities: captured.Capabilities}, captured.Source.ExportReservation())
+	exporter, e := nativeperf.NewExporter(lose, actualLookup{app.Ingest, credential}, nativeperf.ExportConfig{Project: cfg.Project, Source: cfg.Source, Producer: cfg.Producer, Resource: cfg.Resource, Limits: limits, Capabilities: captured.Capabilities}, captured.Reservation)
 	if e != nil {
-		return errors.New("native_export_composition_failed")
+		switch reservation := captured.Reservation; {
+		case captured.Capabilities.Validate() != nil:
+			return errors.New("native_export_capabilities_invalid")
+		case reservation == nil || reservation.Bytes() < 2<<20:
+			return errors.New("native_export_reservation_unavailable")
+		}
+		return errors.New("native_export_limits_invalid")
 	}
 	defer exporter.Close()
-	input := nativeperf.ProfileChunk{ProfileID: root, PolicyRevision: cfg.Revision, Domain: domain, Events: captured.Events}
+	input := nativeperf.ProfileChunk{ProfileID: root, PolicyRevision: cfg.Revision, Domain: domain, Events: captured.Events, Intervals: captured.Intervals}
+	assembledLimits := limits
+	assembledLimits.Mappings = append([]nativeperf.MappingTable(nil), captured.Mappings...)
+	assembled, e := nativeperf.AssembleProfile(ctx, input.Events, input.Intervals, captured.Capabilities, assembledLimits)
+	if e != nil {
+		return errors.New("native_assembly_failed: " + e.Error())
+	}
 	_, grant, e := sourceConfigGrant(ctx, app, cfg)
 	if e != nil {
 		return errors.New("current_fixture_source_grant_denied")
@@ -465,17 +571,53 @@ func run() error {
 		return errors.New("real_native_export_failed")
 	}
 	service := app.NewNativeProfiles()
-	w := profiles.Window{Start: now, End: end + 1, MaxSamples: 8192}
-	view, e := service.Read(ctx, reader, root, w)
-	if e != nil || len(view.Samples) == 0 || len(view.Capabilities) != 3 {
+	w := profiles.Window{Start: now, End: end + 1, MaxSamples: 512}
+	readService := func(scope auth.Scope) (profileSummary, error) {
+		return readAllPages(func(cursor string) (profiles.ProfileView, error) {
+			page := w
+			page.Cursor = cursor
+			return service.Read(ctx, scope, root, page)
+		})
+	}
+	summary, e := readService(reader)
+	if e != nil || summary.Samples == 0 || len(summary.Capabilities) != 3 {
 		return errors.New("real_native_profile_not_visible")
 	}
-	for _, s := range view.Samples {
-		if s.Native == nil || s.Native.Period == 0 || s.Count != 1 || s.Native.RequestedHz != 99 {
-			return errors.New("native_period_or_unit_lost")
-		}
+	if summary.NativeBad != 0 {
+		return errors.New("native_period_or_unit_lost")
 	}
-	result := fixtureResult{Samples: len(view.Samples), CPU: captured.Capabilities.CPU, Scheduler: captured.Capabilities.OffCPU, Runqueue: captured.Capabilities.RunqueueSplit, Units: view.Units, PeriodUnit: view.Samples[0].Native.Unit, Visible: true, Mapping: "unresolved_pending_mapping_epoch_proof", Symbolication: "artifact_backend_unavailable"}
+	if !summary.sameContent(summarizeChunk(assembled)) {
+		return errors.New("read_back_differs_from_assembled_profile")
+	}
+	result := fixtureResult{Samples: summary.Samples, CPU: captured.Capabilities.CPU, Scheduler: captured.Capabilities.OffCPU, Runqueue: captured.Capabilities.RunqueueSplit, Units: summary.SampleUnits, PeriodUnit: summary.PeriodUnit, Visible: true, ReadBack: &summary, ReadBackEqualsAssembled: true, Mapping: "unresolved_pending_mapping_epoch_proof", Symbolication: "artifact_backend_unavailable"}
+	if *scheduler {
+		stream := captured.Scheduler
+		result.SchedulerExercised, result.Stream = true, &stream
+		if !stream.FinalProof || summary.Intervals == 0 || !summary.IntervalUnitsOK || summary.Capabilities["native_offcpu"] != string(nativeperf.Supported) || summary.Capabilities["native_runqueue_split"] != string(captured.Capabilities.RunqueueSplit) {
+			return errors.New("scheduler_intervals_not_read_back")
+		}
+		if !summary.ThreadsDisjoint || summary.Threads == 0 {
+			return errors.New("scheduler_intervals_overlap_within_a_thread_or_name_no_thread")
+		}
+		result.SchedulerIntervalsReadBack = true
+	}
+	var node *tlsNode
+	defer func() { node.close() }()
+	endpointFor := func() (string, string, error) {
+		if external := os.Getenv(*endpointEnv); external != "" {
+			result.Endpoint = "external_endpoint_from_" + *endpointEnv
+			return external, cfg.CAFile, nil
+		}
+		if node == nil {
+			started, e := startTLSNode(app)
+			if e != nil {
+				return "", "", e
+			}
+			node = started
+		}
+		result.Endpoint = "in_process_real_http_routes_over_tls_with_private_ca"
+		return node.URL, node.CAFile, nil
+	}
 	if *scopeDenial {
 		foreign, e := authorizedReader(ctx, app, cfg.ForeignReaderToken, cfg.ForeignOrg, cfg.ForeignProject)
 		if e != nil {
@@ -488,6 +630,106 @@ func run() error {
 			return errors.New("foreign_profile_denial_not_indistinguishable")
 		}
 		result.ScopeDenied = true
+	}
+	var httpReader *profileHTTP
+	if *requireProfileHTTP {
+		endpoint, ca, e := endpointFor()
+		if e != nil {
+			return e
+		}
+		client, e := verifiedClient(ca)
+		if e != nil {
+			return e
+		}
+		token, e := readerBearer(ctx, app, cfg, reader)
+		if e != nil {
+			return e
+		}
+		httpReader = &profileHTTP{client: client, endpoint: endpoint, token: token, org: cfg.Org, project: cfg.Project, profile: root, start: now, end: end + 1, max: 512}
+		over, e := readAllPages(httpReader.page(ctx))
+		if e != nil {
+			return e
+		}
+		if !over.sameContent(summary) {
+			return errors.New("http_profile_read_differs_from_c05_read")
+		}
+		for _, state := range httpReader.States {
+			if state != "ready" && state != "incomplete" {
+				return errors.New("http_profile_read_state_not_ready_or_incomplete")
+			}
+		}
+		if node != nil {
+			// Verified TLS is real: a client that trusts only the system roots must refuse the node.
+			system, e := verifiedClient("")
+			if e != nil {
+				return e
+			}
+			probe := &profileHTTP{client: system, endpoint: endpoint, token: token, org: cfg.Org, project: cfg.Project, profile: root, start: now, end: end + 1, max: 1}
+			if status, _, perr := probe.post(ctx, ""); perr == nil || status != 0 {
+				return errors.New("tls_not_verified_a_client_without_the_ca_reached_the_route")
+			}
+		}
+		result.HTTPReadBack, result.HTTPProfile, result.HTTPProfileExercised = &over, true, true
+	}
+	if *revocation {
+		reader, e = authorizedReader(ctx, app, cfg.ReaderToken, cfg.Org, cfg.Project)
+		if e != nil {
+			return errors.New("pre_revocation_reader_unavailable")
+		}
+		w.MaxSamples = 1
+		first, e := service.Read(ctx, reader, root, w)
+		if e != nil || first.NextCursor == "" {
+			return errors.New("revocation_fixture_requires_next_chunk")
+		}
+		httpCursor := ""
+		if httpReader != nil {
+			httpReader.max = 1
+			status, raw, e := httpReader.post(ctx, "")
+			var page httpapi.ProfileResponse
+			if e != nil || status != http.StatusOK || model.StrictJSON(raw, &page) != nil || page.View == nil || page.View.NextCursor == "" {
+				return errors.New("revocation_fixture_requires_next_http_page")
+			}
+			httpCursor = page.View.NextCursor
+		}
+		w.Cursor = first.NextCursor
+		if e = setReaderGrant(ctx, app, cfg, reader, false); e != nil {
+			return e
+		}
+		if _, e = service.Read(ctx, reader, root, w); e == nil {
+			return errors.New("revoked_reader_released_next_chunk")
+		}
+		// A scope stale for any administrative change is not proof that the GRANT is gone: a fresh
+		// authorization of the same principal, and a fresh first page over HTTP, must be denied too.
+		if _, e = authorizedReader(ctx, app, cfg.ReaderToken, cfg.Org, cfg.Project); e == nil {
+			return errors.New("revoked_reader_still_authorized_for_a_fresh_scope")
+		}
+		if httpReader != nil {
+			status, raw, e := httpReader.post(ctx, httpCursor)
+			if e != nil || status == http.StatusOK || bytes.Contains(raw, []byte(`"samples"`)) {
+				return errors.New("revoked_reader_released_next_http_page")
+			}
+			status, raw, e = httpReader.post(ctx, "")
+			if e != nil || status == http.StatusOK || bytes.Contains(raw, []byte(`"samples"`)) {
+				return errors.New("revoked_reader_read_a_fresh_page_over_http")
+			}
+			result.ReaderRevokedHTTP = true
+		}
+		result.ReaderRevoked, result.ReaderRevocationExercised = true, true
+		// The disposable grant is restored so the deletion checks below can read as the same reader.
+		if e = setReaderGrant(ctx, app, cfg, reader, true); e != nil {
+			return e
+		}
+		w.Cursor, w.MaxSamples = "", 512
+		if httpReader != nil {
+			httpReader.max = 512
+		}
+		if reader, e = authorizedReader(ctx, app, cfg.ReaderToken, cfg.Org, cfg.Project); e != nil {
+			return errors.New("post_revocation_reader_restore_failed")
+		}
+		again, e := readService(reader)
+		if e != nil || !again.sameContent(summary) {
+			return errors.New("restored_reader_cannot_read_the_profile")
+		}
 	}
 	if lose.enabled {
 		admin, e := app.Auth.Authenticate(ctx, cfg.AdminToken)
@@ -521,41 +763,90 @@ func run() error {
 		}
 		result.Historical = true
 	}
-	if *httpProbe {
-		endpoint := os.Getenv(*endpointEnv)
-		if endpoint == "" {
-			return errors.New("missing_verified_tls_fixture_endpoint")
-		}
-		if e = verifyHTTPReceipt(ctx, endpoint, cfg.CAFile, cfg.SourceCredential, exporter.LastReceiptRequest(), receipt); e != nil {
-			return e
-		}
-		result.HTTPReceipt = true
-	}
-	if *revocation {
-		reader, e = authorizedReader(ctx, app, cfg.ReaderToken, cfg.Org, cfg.Project)
-		if e != nil {
-			return errors.New("pre_revocation_reader_unavailable")
-		}
-		w.MaxSamples = 1
-		first, e := service.Read(ctx, reader, root, w)
-		if e != nil || first.NextCursor == "" {
-			return errors.New("revocation_fixture_requires_next_chunk")
-		}
-		w.Cursor = first.NextCursor
+	if *deletion {
 		admin, e := app.Auth.Authenticate(ctx, cfg.AdminToken)
 		if e != nil {
 			return errors.New("fixture_admin_denied")
 		}
-		var rev model.Revision
-		app.Control.View(ctx, func(st model.ControlState) error { rev = st.Revision; return nil })
-		payload, _ := json.Marshal(auth.AdminPayload{UserID: reader.PrincipalID(), ProjectID: cfg.Project, Enabled: false, Reason: "disposable native fixture reader revocation"})
-		if _, e = app.Auth.AdminCommand(ctx, admin, auth.AdminCommandRequest{CommandID: model.NewID(), ExpectedRevision: rev, OrgID: cfg.Org, Kind: "grant", Payload: payload}); e != nil {
-			return errors.New("real_reader_revocation_failed")
+		unreadable := func() (bool, error) {
+			scope, e := authorizedReader(ctx, app, cfg.ReaderToken, cfg.Org, cfg.Project)
+			if e != nil {
+				return false, errors.New("fixture_reader_unavailable_for_deletion_check")
+			}
+			if _, e = service.Read(ctx, scope, root, w); !isNotFound(e) {
+				return false, nil
+			}
+			if httpReader != nil {
+				status, raw, e := httpReader.post(ctx, "")
+				if e != nil || status != http.StatusNotFound || bytes.Contains(raw, []byte(`"samples"`)) {
+					return false, nil
+				}
+			}
+			return true, nil
 		}
-		if _, e = service.Read(ctx, reader, root, w); e == nil {
-			return errors.New("revoked_reader_released_next_chunk")
+		deleted, e := deleteProfile(ctx, app, admin, cfg, root, unreadable)
+		if e != nil {
+			return e
 		}
-		result.ReaderRevoked = true
+		if !deleted.FenceUnreadable {
+			return errors.New("profile_readable_at_the_deletion_fence")
+		}
+		if !deleted.Completed || !deleted.GenerationAdvanced {
+			return errors.New("real_profile_deletion_incomplete_or_generation_not_advanced")
+		}
+		if gone, e := unreadable(); e != nil || !gone {
+			return errors.New("deleted_profile_still_readable")
+		}
+		before, e := countReservations(ctx, app)
+		if e != nil {
+			return errors.New("fixture_reservation_read_failed")
+		}
+		receipt, e = exporter.Send(ctx, grant, input)
+		if e != nil || !receipt.Historical || !canonicalEqual(receipt, lose.original) {
+			return errors.New("historical_receipt_changed_or_missing_after_deletion")
+		}
+		if after, e := countReservations(ctx, app); e != nil || after != before {
+			return errors.New("historical_lookup_after_deletion_created_admission")
+		}
+		result.HistoricalAfterDelete = true
+		// Nothing is resurrected: the committed batch bytes re-posted through the real route
+		// neither bring the profile back nor reserve anything.
+		endpoint, ca, e := endpointFor()
+		if e != nil {
+			return e
+		}
+		client, e := verifiedClient(ca)
+		if e != nil {
+			return e
+		}
+		status, body, e := postSourceBatch(ctx, client, endpoint, cfg.SourceCredential, lose.batch)
+		if e != nil {
+			return e
+		}
+		if status == http.StatusOK {
+			var again model.Receipt
+			if model.StrictJSON(body, &again) != nil || !canonicalEqual(again, lose.original) {
+				return errors.New("repost_of_deleted_batch_answered_a_different_receipt")
+			}
+		}
+		if after, e := countReservations(ctx, app); e != nil || after != before {
+			return errors.New("repost_of_deleted_batch_reserved_quota")
+		}
+		if gone, e := unreadable(); e != nil || !gone {
+			return errors.New("repost_of_deleted_batch_resurrected_the_profile")
+		}
+		result.ProfileDeleteExercised, result.DeleteFence, result.DeleteCompleted, result.DeleteGeneration = true, deleted.FenceUnreadable, deleted.Completed, deleted.GenerationAdvanced
+		result.NoResurrection, result.RepostStatus = true, status
+	}
+	if *httpProbe {
+		endpoint, ca, e := endpointFor()
+		if e != nil {
+			return e
+		}
+		if e = verifyHTTPReceipt(ctx, endpoint, ca, cfg.SourceCredential, exporter.LastReceiptRequest(), receipt); e != nil {
+			return e
+		}
+		result.HTTPReceipt, result.HTTPReceiptExercised = true, true
 	}
 	var finalError error
 	if *revokedReceipt {
@@ -578,15 +869,8 @@ func run() error {
 			result.SourceDenied = true
 		}
 	}
-	// Report all reachable genuine rows before surfacing missing integration gates.
 	if e = json.NewEncoder(os.Stdout).Encode(result); e != nil {
 		return errors.New("fixture_result_output_failed")
-	}
-	if *deletion {
-		return errors.New("missing_real_profile_delete_operation")
-	}
-	if *requireProfileHTTP {
-		return errors.New("missing_canonical_profile_investigation_http_adapter")
 	}
 	return finalError
 }

@@ -37,7 +37,10 @@ const server=createServer((request,response)=>{
 }).listen(0,"127.0.0.1");
 await new Promise(done=>server.once("listening",done));
 const url="http://127.0.0.1:"+server.address().port+"/";
-const browser=await chromium.launch({executablePath:executable,headless:true,args:["--no-sandbox"]});
+// --engine firefox: stock Firefox through Playwright's WebDriver BiDi channel (fixtures/sdk/firefox/bidi-proxy.ts stands in for the executable).
+const firefox=option("--engine","chromium")==="firefox";
+if(firefox)process.env.SOUNDPOST_FIREFOX_BINARY=executable;
+const browser=firefox?await playwright.firefox.launch({channel:"moz-firefox",executablePath:join(root,"fixtures/sdk/firefox/firefox-bidi"),headless:true}):await chromium.launch({executablePath:executable,headless:true,args:["--no-sandbox"]});
 let outcome,version,userAgent;
 try{
  version=browser.version();

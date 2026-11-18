@@ -586,8 +586,16 @@ func runFixture(o options) (*report, int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
 
-	if preset := os.Getenv(o.endpointEnv); preset != "" {
-		return rep, exitUsage, errors.New("an external endpoint cannot be used: this fixture needs the node's admin and read composition in process; unset " + o.endpointEnv + " to use the real in-process node")
+	external := os.Getenv(o.endpointEnv)
+	var description privnode.External
+	if external != "" {
+		path := os.Getenv(o.nodeEnv)
+		if path == "" {
+			return rep, exitUsage, errors.New(o.endpointEnv + " names an external served node: " + o.nodeEnv + " must name the private description of that node (privnode.External: credentials, ids, its data directory and a stopped copy of it for the source grant)")
+		}
+		if description, e = privnode.LoadExternal(path); e != nil {
+			return rep, exitUsage, e
+		}
 	}
 	if e = probeRealPerf(); e != nil {
 		rep.NotRun = append(rep.NotRun, "real acquisition: "+e.Error())
@@ -654,13 +662,22 @@ func runFixture(o options) (*report, int, error) {
 	}
 	if e == nil {
 		debug.FreeOSMemory()
-		n, nodeErr := privnode.Start(ctx, filepath.Join(w.root, "node"))
+		var n *privnode.Node
+		var nodeErr error
+		if external != "" {
+			n, nodeErr = privnode.Attach(ctx, external, description)
+			rep.Endpoint = "external_served_node_verified_tls (" + o.endpointEnv + " set; batches over POST /ingest/v1/batches, receipts over POST /ingest/v1/receipts, reads over POST /api/v1/profiles/view)"
+		} else {
+			n, nodeErr = privnode.Start(ctx, filepath.Join(w.root, "node"))
+			rep.Endpoint = "in_process_real_node_tls_http (" + o.endpointEnv + " unset; real appcore + httpapi, batches over POST /ingest/v1/batches)"
+		}
 		if nodeErr != nil {
 			failed("%v", nodeErr)
 		} else {
 			defer n.Close()
-			rep.Endpoint = "in_process_real_node_tls_http (" + o.endpointEnv + " unset; real appcore + httpapi, batches over POST /ingest/v1/batches)"
-			os.Setenv(o.endpointEnv, n.Server.URL)
+			if external == "" {
+				os.Setenv(o.endpointEnv, n.URL)
+			}
 			if err := exportAndRead(ctx, env, n, captured, rep, caps); err != nil {
 				failed("export/read: %v", err)
 			}

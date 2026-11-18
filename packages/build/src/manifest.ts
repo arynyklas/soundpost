@@ -41,8 +41,8 @@ export interface BuildOptions {
 }
 
 const ID=/^[0-9a-f]{32}$/,HASH=/^[0-9a-f]{64}$/,DECIMAL=/^[1-9][0-9]{0,18}$/;
-// eslint-disable-next-line no-control-regex
-const UNSAFE_TEXT=/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2064\ufeff]/;
+// Same predicate as the backend safeIdentity (internal/artifacts/manifest.go): every Unicode control (Cc) and format (Cf) rune, plus the line and paragraph separators.
+const UNSAFE_TEXT=/[\p{Cc}\p{Cf}\u2028\u2029]/u;
 export function sha256Hex(bytes:Uint8Array|string):string {return createHash("sha256").update(bytes).digest("hex");}
 
 /** Same rule as the backend path identity: project-relative, clean, no scheme-ish or traversal characters. */

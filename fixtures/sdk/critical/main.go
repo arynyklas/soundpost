@@ -43,13 +43,14 @@ import (
 )
 
 type env struct {
-	binary, root, work, bun, pgImage string
+	binary, root, work, bun, pgImage, pgDSN string
 }
 
 func main() {
 	var e env
-	mode := flag.String("mode", "", "python | gateway | browser | release | jobs | reducer")
+	mode := flag.String("mode", "", "python | gateway | browser | release | jobs | reducer | delivery")
 	pythons := flag.String("python", "", "label=venv,label=venv")
+	nodes := flag.String("nodes", "", "label=node,label=node (delivery mode: Linux Node binaries)")
 	node := flag.String("node", "", "Linux Node 22 (browser mode backend and Playwright)")
 	winNode := flag.String("win-node", "", "Windows node.exe (release mode: owns the installed Vite)")
 	browsers := flag.String("browsers", "", "Target=executable,Target=executable (Chrome, Edge) for browser mode")
@@ -57,6 +58,7 @@ func main() {
 	flag.StringVar(&e.root, "root", ".", "repository root")
 	flag.StringVar(&e.bun, "bun", "", "Linux Bun")
 	flag.StringVar(&e.pgImage, "pg-image", "92620daddcd9", "LOCAL PostgreSQL 16 image (never pulled)")
+	flag.StringVar(&e.pgDSN, "pg-dsn", "", "use this existing PostgreSQL database instead of a throwaway container (hosts without docker; the exact server version goes into the evidence row)")
 	out := flag.String("out", "", "evidence JSON path")
 	flag.Parse()
 	var err error
@@ -83,6 +85,8 @@ func main() {
 		rows = append(rows, e.jobs(*pythons)...)
 	case "release":
 		rows = append(rows, e.release(*winNode, *node))
+	case "delivery":
+		rows = append(rows, e.delivery(*nodes)...)
 	case "browser":
 		for _, b := range strings.Split(*browsers, ",") {
 			target, exe, ok := strings.Cut(b, "=")
@@ -92,7 +96,7 @@ func main() {
 			rows = append(rows, e.browser(target, exe, *node))
 		}
 	default:
-		estate.Fail("--mode python|gateway|browser|release|jobs|reducer")
+		estate.Fail("--mode python|gateway|browser|release|jobs|reducer|delivery")
 	}
 	raw, _ := json.MarshalIndent(map[string]any{"rows": rows}, "", "  ")
 	fmt.Println(string(raw))
@@ -110,6 +114,9 @@ func (e *env) newEstate(name string) *estate.Estate {
 
 // postgres starts a throwaway PostgreSQL container and returns its DSN and a remover keyed by the exact container ID.
 func (e *env) postgres() (string, func()) {
+	if e.pgDSN != "" {
+		return e.pgDSN, func() {}
+	}
 	var rnd [12]byte
 	_, _ = rand.Read(rnd[:])
 	password := hex.EncodeToString(rnd[:])
@@ -143,7 +150,6 @@ func (e *env) python(label, venv string) map[string]any {
 	dsn, removePG := e.postgres()
 	defer removePG()
 	version, _ := estate.RunOut(filepath.Join(venv, "bin", "python"), "--version")
-	pgVersion, _ := estate.RunOut("docker", "ps", "--format", "{{.Image}}", "--filter", "ancestor="+e.pgImage)
 	verifyURL, stop := verifier.Serve(est)
 	defer stop()
 	cfg := est.SDKConfig(est.Builds["main"], "fixture-1")
@@ -165,7 +171,7 @@ func (e *env) python(label, venv string) map[string]any {
 			rc = ee.ExitCode()
 		}
 	}
-	row := map[string]any{"fixture": "fixtures/sdk/python/critical_path.py", "python": version, "postgres_image": pgVersion, "exit_code": rc, "stdout": strings.TrimSpace(stdout.String()), "stderr": estate.Tail(stderr.String()), "verifier_route": "/api/v1/exports"}
+	row := map[string]any{"fixture": "fixtures/sdk/python/critical_path.py", "python": version, "postgres_image": e.postgresSource(), "exit_code": rc, "stdout": strings.TrimSpace(stdout.String()), "stderr": estate.Tail(stderr.String()), "verifier_route": "/api/v1/exports"}
 	if rc != 0 {
 		raw, _ := json.Marshal(row)
 		fmt.Println(string(raw))
@@ -288,6 +294,16 @@ func (e *env) gateway() map[string]any {
 func (e *env) browser(target, executable, node string) map[string]any {
 	est := e.newEstate("browser" + strings.ToLower(target))
 	defer est.Close()
+	if target == "Firefox" {
+		// Stock Firefox has no flag to trust one private CA: its enterprise policy file (distribution/policies.json beside the binary) installs it.
+		// Certificate verification stays on; the file is removed when the run ends.
+		policyDir := filepath.Join(filepath.Dir(executable), "distribution")
+		estate.Must(os.MkdirAll(policyDir, 0o755), "firefox distribution dir")
+		policies, err := json.Marshal(map[string]any{"policies": map[string]any{"Certificates": map[string]any{"Install": []string{est.CA}}}})
+		estate.Must(err, "firefox policies")
+		estate.Must(os.WriteFile(filepath.Join(policyDir, "policies.json"), policies, 0o644), "firefox policies.json")
+		defer os.Remove(filepath.Join(policyDir, "policies.json"))
+	}
 	dsn, removePG := e.postgres()
 	defer removePG()
 	dependencyURL, stopDependency := e.dependency(est)
@@ -388,7 +404,7 @@ func (e *env) browser(target, executable, node string) map[string]any {
 		_ = syscall.Kill(-backend.Process.Pid, syscall.SIGKILL)
 		backendExit = fmt.Errorf("backend did not close")
 	}
-	row := map[string]any{"fixture": "fixtures/sdk/browser/critical-path.spec.ts", "target": target, "backend_runtime": ready.Runtime, "postgres_image": e.pgImage, "verifier_route": "/api/v1/exports", "playwright": estate.Tail(pwOut.String())}
+	row := map[string]any{"fixture": "fixtures/sdk/browser/critical-path.spec.ts", "target": target, "backend_runtime": ready.Runtime, "postgres_image": e.postgresSource(), "verifier_route": "/api/v1/exports", "playwright": estate.Tail(pwOut.String())}
 	if pwErr != nil || backendExit != nil {
 		fmt.Fprintln(os.Stderr, pwOut.String())
 		raw, _ := json.Marshal(row)
@@ -646,4 +662,94 @@ func (e *env) reducer() map[string]any {
 	return map[string]any{"fixture": "fixtures/sdk/jobs/reducer.ts", "bun": func() string { v, _ := estate.RunOut(e.bun, "--version"); return v }(), "route": "/api/v1/jobs/view",
 		"late_older_run_overwrote_newer_health": false, "retry_run_recovered": true, "duplicate_events_checked": len(decode(newer)) + len(decode(older)) + len(decode(retry)), "delivery_order_invariant": true,
 		"runs": v3.TotalRuns, "attempts": v3.TotalAttempts, "health": v3.Health.Status}
+}
+
+// delivery is 03.03-W2: fixtures/sdk/delivery/backend.ts, bundled with Bun for Node, runs under each --nodes label=<node binary> with
+// --native-loss --lost-response against a real product whose source policy is signed for the loss kind (a lost first response, one
+// authenticated historical receipt lookup, exact signal-loss count 9007199254740993 acknowledged). The control run uses a source
+// signed WITHOUT the loss kind: the same fixture must refuse before it sends anything, so the positive run cannot pass vacuously.
+func (e *env) delivery(nodes string) []map[string]any {
+	if e.bun == "" || nodes == "" {
+		estate.Fail("delivery mode needs --bun (bundles backend.ts for Node) and --nodes label=node,label=node")
+	}
+	bundle := filepath.Join(e.work, "delivery-backend.mjs")
+	if out, err := estate.RunOut(e.bun, "build", filepath.Join(e.root, "fixtures/sdk/delivery/backend.ts"), "--target=node", "--outfile", bundle); err != nil {
+		estate.Fail("bun build delivery backend: %v: %s", err, estate.Tail(out))
+	}
+	run := func(name, node string, kinds []model.Kind) (int, string, string) {
+		est := estate.New(estate.Options{Binary: e.binary, Work: filepath.Join(e.work, name), Kinds: kinds, Name: name})
+		defer est.Close()
+		est.Start()
+		est.Provision()
+		cfg := est.SDKConfig(est.Builds["main"], "fixture-1")
+		cfg["ca_file"] = est.CA
+		cfgPath := filepath.Join(e.work, name+".json")
+		estate.WriteJSON(cfgPath, cfg)
+		cmd := exec.Command(node, bundle, "--config", cfgPath, "--native-loss", "--lost-response")
+		cmd.Dir = e.root
+		cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "NODE_EXTRA_CA_CERTS=" + est.CA}
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &stdout, &stderr
+		rc := 0
+		if err := cmd.Run(); err != nil {
+			rc = 1
+			if ee, ok := err.(*exec.ExitError); ok {
+				rc = ee.ExitCode()
+			}
+		}
+		return rc, strings.TrimSpace(stdout.String()), estate.Tail(stderr.String())
+	}
+	var rows []map[string]any
+	for _, n := range strings.Split(nodes, ",") {
+		label, node, ok := strings.Cut(n, "=")
+		if !ok {
+			estate.Fail("--nodes wants label=node")
+		}
+		version, _ := estate.RunOut(node, "--version")
+		controlRC, controlOut, controlErr := run("delivery-noloss-"+label, node, []model.Kind{model.SpanKind, model.ErrorKind})
+		if controlRC == 0 || strings.Contains(controlOut, `"nativeLoss":true`) {
+			estate.Fail("control: a source signed without the loss kind must make the native-loss fixture fail before sending (rc %d): %s", controlRC, controlOut)
+		}
+		rc, out, errTail := run("delivery-loss-"+label, node, []model.Kind{model.SpanKind, model.ErrorKind, model.Loss})
+		row := map[string]any{"fixture": "fixtures/sdk/delivery/backend.ts --native-loss --lost-response", "node": version, "label": label, "exit_code": rc, "stdout": out, "stderr": errTail,
+			"control_without_loss_kind_exit_code": controlRC, "control_stderr": controlErr}
+		if rc != 0 {
+			raw, _ := json.Marshal(row)
+			fmt.Println(string(raw))
+			estate.Fail("native-loss delivery failed under node %s", label)
+		}
+		var got struct {
+			Runtime    string `json:"runtime"`
+			RealGo     bool   `json:"realGoBackend"`
+			TLS        bool   `json:"tlsVerification"`
+			NativeLoss bool   `json:"nativeLoss"`
+			Pending    int    `json:"pending"`
+			Lost       int    `json:"lost"`
+			Sends      int    `json:"sends"`
+			Lookups    int    `json:"lookups"`
+			Receipts   []struct {
+				Historical bool `json:"historical"`
+			} `json:"receipts"`
+			Counters []struct {
+				Observed     string `json:"observed_count"`
+				Acknowledged string `json:"acknowledged_count"`
+			} `json:"counters"`
+		}
+		estate.Must(json.Unmarshal([]byte(out[strings.LastIndex(out, "\n")+1:]), &got), "native-loss result line")
+		if got.Runtime != "node" || !got.RealGo || !got.TLS || !got.NativeLoss || got.Pending != 0 || got.Lost != 0 || got.Sends != 1 || got.Lookups != 1 ||
+			len(got.Receipts) != 1 || !got.Receipts[0].Historical || len(got.Counters) != 1 || got.Counters[0].Observed != "9007199254740993" || got.Counters[0].Acknowledged != "9007199254740993" {
+			estate.Fail("native-loss result is not the required one under node %s: %s", label, out)
+		}
+		row["verified"] = map[string]any{"exact_count_acknowledged": got.Counters[0].Acknowledged, "historical_receipt": true, "sends": got.Sends, "lookups": got.Lookups, "pending": got.Pending, "lost": got.Lost}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+// postgresSource names where the evidence row's PostgreSQL came from: the pinned image, or the operator-supplied server of --pg-dsn.
+func (e *env) postgresSource() string {
+	if e.pgDSN == "" {
+		return e.pgImage
+	}
+	return "operator-supplied server (--pg-dsn), not the pinned image " + e.pgImage
 }

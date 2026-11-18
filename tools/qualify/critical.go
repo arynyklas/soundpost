@@ -73,13 +73,13 @@ func (rc *runCtx) criticalArgs(spec RowSpec, p *probeResult) ([]string, string) 
 		if p.Build.Family == "bun" {
 			return []string{"--mode", "jobs", "--bun", path}, ""
 		}
-		venv, why := pythonVenv(p)
+		venv, why := pythonVenv(rc, p, jobsModules)
 		if why != "" {
 			return nil, why
 		}
 		return []string{"--mode", "jobs", "--python", pythonLabel(p) + "=" + venv}, ""
 	case "python":
-		venv, why := pythonVenv(p)
+		venv, why := pythonVenv(rc, p, httpDBModules)
 		if why != "" {
 			return nil, why
 		}
@@ -94,12 +94,28 @@ func (rc *runCtx) criticalArgs(spec RowSpec, p *probeResult) ([]string, string) 
 	return nil, fmt.Sprintf("unknown critical-path mode %q", mode)
 }
 
+// Modules the committed Python fixtures import from the SDK integration lock (sdk/python/requirements-integrations.lock). A venv that
+// was built from the development lock alone has none of them, and the fixture then dies on its import with the SDK blamed.
+var (
+	jobsModules   = []string{"celery", "kombu"}
+	httpDBModules = []string{"httpx", "psycopg", "uvicorn", "starlette", "fastapi"}
+)
+
 // pythonVenv is the virtual environment root of a pinned Python build: the committed command runs <venv>/bin/python and the fixtures
-// import the SDK's integration dependencies, so a bare system interpreter is not a qualified runner for them.
-func pythonVenv(p *probeResult) (string, string) {
+// import the SDK's integration dependencies, so a bare system interpreter, or a venv without the integration lock installed, is not a
+// qualified runner for them: both are reported as the missing prerequisite instead of running the command.
+func pythonVenv(rc *runCtx, p *probeResult, modules []string) (string, string) {
 	venv := filepath.Dir(filepath.Dir(p.Path))
 	if _, err := os.Stat(filepath.Join(venv, "pyvenv.cfg")); err != nil {
 		return "", fmt.Sprintf("the Python critical path needs a virtual environment (pyvenv.cfg) holding the SDK integration lock for %s, and %s is not inside one", p.Build.Version, p.Path)
+	}
+	probe := "import importlib.util, sys\nprint(' '.join(m for m in sys.argv[1:] if importlib.util.find_spec(m) is None))"
+	res := rc.exec(60*time.Second, rc.root, nil, p.Path, append([]string{"-c", probe}, modules...)...)
+	if res.Exit != 0 {
+		return "", fmt.Sprintf("the pinned Python %s at %s could not be probed for the integration modules (exit %d)", p.Build.Version, p.Path, res.Exit)
+	}
+	if missing := strings.TrimSpace(res.Stdout); missing != "" {
+		return "", fmt.Sprintf("the virtual environment of Python %s lacks %s: install the SDK integration lock (sdk/python/requirements-integrations.lock with --require-hashes) into it", p.Build.Version, strings.ReplaceAll(missing, " ", ", "))
 	}
 	return venv, ""
 }

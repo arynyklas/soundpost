@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/arynyklas/soundpost/internal/model"
@@ -203,8 +204,13 @@ func TestRowStateRulesNeverMakeUnexercisedSupported(t *testing.T) {
 	}
 }
 
+const (
+	build61 = "6.1.0-54-amd64"
+	build66 = "6.6.162-0606162-generic"
+)
+
 func allSupported() *QualificationResult {
-	r := &QualificationResult{Arch: "amd64", KernelBuild: "6.6.99-test"}
+	r := &QualificationResult{Arch: "amd64", KernelBuild: build66, KernelConfig: KernelConfig{SHA256: "cfg66"}}
 	for _, row := range r.Rows() {
 		*row = Supported([]string{"e"}, nil)
 	}
@@ -235,12 +241,18 @@ func TestRequireAllGateExitCodes(t *testing.T) {
 	}
 }
 
-func TestMatrixVerdictArchAndSeriesAreExact(t *testing.T) {
-	rows := []ManifestRow{
-		{KernelSeries: "6.1 LTS", Arch: "amd64"}, {KernelSeries: "6.1 LTS", Arch: "arm64"},
-		{KernelSeries: "6.6 LTS", Arch: "amd64"}, {KernelSeries: "6.6 LTS", Arch: "arm64"},
+func pinnedRows() []ManifestRow {
+	return []ManifestRow{
+		{KernelSeries: "6.1 LTS", Arch: "amd64", KernelBuild: build61 + " (Debian 6.1.190-1)", KernelConfig: ManifestKernelConfig{SHA256: "cfg61"}},
+		{KernelSeries: "6.1 LTS", Arch: "arm64"}, // not run: no pin
+		{KernelSeries: "6.6 LTS", Arch: "amd64", KernelBuild: build66 + " (mainline)", KernelConfig: ManifestKernelConfig{SHA256: "cfg66"}},
+		{KernelSeries: "6.6 LTS", Arch: "arm64"},
 		{KernelSeries: "6.6", Arch: "amd64", KernelBuild: "6.6.87.2-microsoft-standard-WSL2"},
 	}
+}
+
+func TestMatrixVerdictArchAndSeriesAreExact(t *testing.T) {
+	rows := pinnedRows()
 	res := allSupported() // a fully supported 6.6 amd64 result
 	got := MatrixVerdict(rows, []*QualificationResult{res})
 	want := []string{"kernel 6.1 LTS amd64", "kernel 6.1 LTS arm64", "kernel 6.6 LTS arm64"}
@@ -255,6 +267,67 @@ func TestMatrixVerdictArchAndSeriesAreExact(t *testing.T) {
 	res.OffCPU = Unqualified("tracefs_denied", nil)
 	if got := MatrixVerdict(rows, []*QualificationResult{res}); len(got) != 4 {
 		t.Fatalf("a result with an unqualified row qualified a matrix row: %v", got)
+	}
+}
+
+// 04.09 review: any 6.6.x used to be "6.6 LTS", including the WSL2 kernel and vendor builds.
+func TestKernelSeriesIsExactForTheQualifiedBuilds(t *testing.T) {
+	for _, c := range []struct{ in, want string }{
+		{build61, "6.1 LTS"},
+		{"6.1.0-99-arm64", "6.1 LTS"},
+		{build66, "6.6 LTS"},
+		{"6.6.87.2-microsoft-standard-WSL2", ""},
+		{"6.6.30-vendor-custom", ""},
+		{"6.6.0", ""},
+		{"6.6.162-0606162-lowlatency", ""},
+		{"6.1.115", ""},
+		{"6.1", ""},
+		{"6.12.74+deb13+1-amd64", ""},
+		{"", ""},
+	} {
+		in, want := c.in, c.want
+		if got := KernelSeries(in); got != want {
+			t.Errorf("KernelSeries(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestMatrixVerdictBindsTheKernelBuildAndTheManifestConfigPin(t *testing.T) {
+	rows := pinnedRows()
+	qualifies := func(res *QualificationResult) bool {
+		for _, line := range MatrixVerdict(rows, []*QualificationResult{res}) {
+			if strings.HasPrefix(line, "kernel 6.6 LTS amd64") {
+				return false
+			}
+		}
+		return true
+	}
+	if !qualifies(allSupported()) {
+		t.Fatal("the pinned build with the pinned config digest did not qualify")
+	}
+	wsl := allSupported()
+	wsl.KernelBuild = "6.6.87.2-microsoft-standard-WSL2"
+	if qualifies(wsl) {
+		t.Error("the WSL2 kernel qualified the 6.6 LTS row")
+	}
+	other := allSupported()
+	other.KernelBuild = "6.6.99-0606099-generic" // matches the series pattern, is not the pinned build
+	if qualifies(other) {
+		t.Error("an unpinned 6.6 build qualified the 6.6 LTS row")
+	}
+	cfg := allSupported()
+	cfg.KernelConfig.SHA256 = "somethingelse"
+	if qualifies(cfg) {
+		t.Error("a different kernel config digest qualified the row")
+	}
+	none := allSupported()
+	none.KernelConfig = KernelConfig{Source: "unavailable: ENOENT"}
+	if qualifies(none) {
+		t.Error("a result without a config digest qualified the row")
+	}
+	unpinned := []ManifestRow{{KernelSeries: "6.6 LTS", Arch: "amd64"}}
+	if got := MatrixVerdict(unpinned, []*QualificationResult{allSupported()}); len(got) != 1 {
+		t.Errorf("a manifest row with no pins was qualified: %v", got)
 	}
 }
 

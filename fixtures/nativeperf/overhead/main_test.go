@@ -176,3 +176,34 @@ func TestEvaluateReportsTheMemoryLedgerOfTheWorstRun(t *testing.T) {
 		t.Errorf("%+v", l)
 	}
 }
+
+// A scheduler-mode overhead capture counts CPU samples exactly as a CPU capture does, hands every scheduler record to
+// the committed correlator, forwards its proofs and identity revocation, and retains nothing.
+func TestSchedulerCaptureSinkCountsSamplesFeedsTheCorrelatorAndRetainsNothing(t *testing.T) {
+	stats := &captureStats{}
+	corr := qual.NewStreamCorrelation(nativeperf.DefaultConfig(1), func(uint64) (uint64, error) { return qual.CorrelationReservationBytes, nil })
+	sink := &schedStats{stats: stats, corr: corr}
+	sink.Proof(nativeperf.AcquisitionProof{Domain: nativeperf.ClockDomain{HostID: "h", BootID: "b"}, CPUs: []uint32{0, 1}})
+	task := nativeperf.TaskKey{BootID: "b", PIDNamespace: 1, TGID: 7, TID: 7, ProcessStart: 1, Generation: 1}
+	for _, e := range []nativeperf.SanitizedEvent{
+		{Kind: nativeperf.EventCPU, Time: 100, Task: task, CPUEvent: &nativeperf.CPUSample{}},
+		{Kind: nativeperf.EventSwitch, Time: 200, Switch: &nativeperf.SchedulerSwitch{Previous: &task}},
+		{Kind: nativeperf.EventWakeup, Time: 300, Task: task, Wakeup: &nativeperf.SchedulerWakeup{Target: task}},
+		{Kind: nativeperf.EventCPU, Time: 400, Task: task, CPUEvent: &nativeperf.CPUSample{}},
+	} {
+		if sink.Event(e) {
+			t.Errorf("a %s event was retained", e.Kind)
+		}
+	}
+	if stats.samples != 2 || stats.threads() != 1 {
+		t.Errorf("CPU samples %d on %d threads, want 2 on 1", stats.samples, stats.threads())
+	}
+	c := corr.Result()
+	if c.CPUs != 2 || c.Consumed != 4 || c.SwitchEvents != 1 || c.WakeupEvents != 1 || c.CPUSamples != 2 {
+		t.Errorf("the correlator was not fed the whole stream: %+v", c)
+	}
+	sink.Revoke(50)
+	if c := corr.Result(); !c.Revoked || c.RevokedFrom != 50 {
+		t.Errorf("identity revocation was not forwarded: %+v", c)
+	}
+}

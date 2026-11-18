@@ -18,6 +18,8 @@ Staged `acquisition_pending`, empty-success, synthetic and no-op samplers are re
 
 Run as root (sudo) on two real VMs, one kernel series each, work tree based on commit `16c4060` (uncommitted changes on top); raw machine reports, gate output and envelopes are kept with the lane 4 wave 13 evidence. A row passes only on the exact kernel it names; a kernel never qualifies the other series or arm64.
 
+The release gate (`fixtures/nativeperf/qualification`) qualifies a matrix row only for the exact pinned build: the kernel release must be the manifest row's pinned `kernel_build` and match the series' `uname -r` pattern (`6.1.<n>-<abi>-amd64|arm64`, `6.6.<n>-<build id>-generic`), and the result's kernel config digest must equal the row's `kernel_config.sha256`. The WSL2 kernel and any other 6.6 or 6.1 build are unqualified. The overhead report is merged only when its host identity, kernel config digest and run digest match the acceptance result and its own numbers; whether the full 120 s x 5 run was executed is read from the measured fixtures, not from the report's `full_run_executed` flag.
+
 | | Linux 6.1 amd64 | Linux 6.6 amd64 |
 |---|---|---|
 | `uname -r` | 6.1.0-54-amd64 (Debian 6.1.190-1) | 6.6.162-0606162-generic (mainline) |

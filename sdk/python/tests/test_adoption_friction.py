@@ -93,6 +93,51 @@ def test_fresh_process_first_flush_with_slow_first_response_delivers_within_dead
         assert report.pending==0 and len(report.receipts)==1 and not report.deadline_exceeded
     finally:handler.do_POST=post
 
+def cold_server(ingest,handshake_delay):
+    """The HOUND first contact, made deterministic: the server's first TLS handshake is slow (a cold process) and the first request
+    it ever reads is answered `503 Retry-After: 1` (the server maps Unavailable/Timeout to exactly that, internal/httpapi/ingest.go).
+    The first send is abandoned inside the handshake, so the client must ask the receipt route before it may resend: that lookup is
+    the 503, the second lookup is the 404 of a batch the server never saw, and only then is the batch POSTed again."""
+    original=ingest.server.get_request;first=[True]
+    def slow_first_accept():
+        if first[0]:
+            first[0]=False;time.sleep(handshake_delay)
+        return original()
+    ingest.server.get_request=slow_first_accept
+    ingest.script=[(503,{'Retry-After':'1'}),(404,{}),(200,{})]
+    return original
+
+def test_cold_server_first_flush_is_pending_with_no_receipt_and_a_budgeted_close_delivers_it(ingest):
+    """11.06-C3: the original `pending=1, receipts=0` after the first flush is reproduced (slow first handshake, then 503 Retry-After: 1)
+    and the record is not lost: close(timeout=...) keeps retrying the same frozen batch inside its own budget and acknowledges it."""
+    original=cold_server(ingest,2.4)
+    try:
+        instance=init(settings(endpoint=ingest.endpoint,ca_file=ingest.ca,transport=None));instance.capture_exception(ValueError('SECRET'))
+        started=time.monotonic();first=instance.flush(1.0);elapsed=time.monotonic()-started
+        assert first.pending==1 and first.receipts==() and first.deadline_exceeded  # the HOUND observation
+        assert elapsed<1.45,elapsed  # the whole exchange (connect, TLS, request, response) is inside the flush budget
+        with warnings.catch_warnings():
+            warnings.simplefilter('error')
+            report=instance.close(timeout=8.0)
+        assert report.pending==0 and report.dropped==0 and len(report.receipts)==1
+        assert [r['path'] for r in ingest.requests]==['/ingest/v1/receipts','/ingest/v1/receipts','/ingest/v1/batches'] and not ingest.script
+        assert ingest.requests[1]['at']-ingest.requests[0]['at']>=.95  # Retry-After honoured
+    finally:ingest.server.get_request=original
+
+def test_cold_server_with_a_too_short_close_budget_reports_the_loss_instead_of_hiding_it(ingest):
+    """The same cold start with close()'s default 2 s: the batch cannot make it (the handshake plus Retry-After exceed the budget).
+    The old close() destroyed it and returned None; it now returns the report that says so, warns and counts it."""
+    original=cold_server(ingest,2.4)
+    try:
+        instance=init(settings(endpoint=ingest.endpoint,ca_file=ingest.ca,transport=None));instance.capture_exception(ValueError('SECRET'))
+        first=instance.flush(.5)
+        assert first.pending==1 and first.receipts==()
+        with pytest.warns(RuntimeWarning,match=r'1 undelivered record'):
+            report=instance.close()
+        assert type(report) is FlushReport and report.dropped==1 and report.pending==1 and report.receipts==()
+        assert instance.diagnostics()['closed_pending']==1
+    finally:ingest.server.get_request=original
+
 # 2. Span error API ---------------------------------------------------------------------------
 
 def test_span_set_error_and_set_status_are_supported_public_api(client):

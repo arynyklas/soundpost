@@ -48,6 +48,7 @@ type accept struct {
 	results map[string]*scenResult
 
 	injections   map[string]*scenResult
+	schedInject  map[string]*injectionRun
 	caps         nativeperf.Capabilities
 	probeErr     string
 	probeErr2    error
@@ -123,8 +124,19 @@ type stall struct {
 	dur   time.Duration
 }
 
+// scenHooks are the injection points of the scheduler injection rows: a stop condition other than the workload's
+// "done" line, and a wrapper around the correlation sink (drop wakeup records, stall the reader).
+type scenHooks struct {
+	stopWhen func(w *qual.Workload) bool
+	wrapSink func(qual.EventSink) qual.EventSink
+}
+
 // runScenario runs one workload under one real helper process and one capture.
 func (a *accept) runScenario(name, mode string, seconds float64, cfg nativeperf.Config, noFile uint64, st *stall, cm nativeperf.CaptureMode) *scenResult {
+	return a.runScenarioWith(name, mode, seconds, cfg, noFile, st, cm, scenHooks{})
+}
+
+func (a *accept) runScenarioWith(name, mode string, seconds float64, cfg nativeperf.Config, noFile uint64, st *stall, cm nativeperf.CaptureMode, hooks scenHooks) *scenResult {
 	r := &scenResult{Name: name, Mode: mode, Seconds: seconds, Cfg: cfg, Extra: map[string]any{}}
 	w, err := qual.LaunchWorkload(qual.LaunchOptions{Bin: a.o.workload, Mode: mode, Seconds: seconds, Dir: a.scratch, Nonce: a.nonce, RunAs: unprivilegedUID, DropToUID: a.dropWorkload})
 	if err != nil {
@@ -174,7 +186,11 @@ func (a *accept) runScenario(name, mode string, seconds float64, cfg nativeperf.
 			}
 		}
 	}()
-	opts := qual.CaptureOptions{Config: cfg, Mode: cm, Duration: time.Duration(seconds+45) * time.Second, Needles: a.needles(), OnReady: func() { w.Go() }, StopWhen: w.DoneSeen}
+	stop := w.DoneSeen
+	if hooks.stopWhen != nil {
+		stop = func() bool { return hooks.stopWhen(w) }
+	}
+	opts := qual.CaptureOptions{Config: cfg, Mode: cm, Duration: time.Duration(seconds+45) * time.Second, Needles: a.needles(), OnReady: func() { w.Go() }, StopWhen: stop}
 	if st != nil {
 		opts.StallAfter, opts.StallFor = st.after, st.dur
 	}
@@ -193,6 +209,9 @@ func (a *accept) runScenario(name, mode string, seconds float64, cfg nativeperf.
 			stream.FoldDurations()
 		}
 		opts.Sink = stream
+		if hooks.wrapSink != nil {
+			opts.Sink = hooks.wrapSink(stream)
+		}
 	}
 	r.Cap = qual.Capture(a.ctx, h, opts)
 	close(stopSample)
@@ -258,7 +277,7 @@ func (a *accept) runScenario(name, mode string, seconds float64, cfg nativeperf.
 	if spec := findSpec(mode); spec != nil && r.Cap.Ready {
 		r.Stats = qual.Analyze(r.Cap.Events, w.Resolver(), spec.hot, spec.expected, r.Windows)
 	}
-	if r.Cap.Ready && mode != "blocking" {
+	if r.Cap.Ready && mode != "blocking" && mode != "blockhold" {
 		r.CheckErr = qual.CheckCapture(qual.CaptureEvidence{Events: r.Cap.Events, TargetTGID: w.Target.TGID, WorkloadCPUSeconds: r.CPUSeconds, InExecutable: w.Resolver().InAnyExecutable, KnownThread: w.KnownThread})
 	}
 	return r
@@ -314,6 +333,7 @@ func (a *accept) runAll() {
 	a.runRuntimes()
 	if a.caps.OffCPU == nativeperf.Supported {
 		a.runSchedulerScenarios(cfg)
+		a.runSchedulerInjections(cfg)
 	}
 	for _, sp := range order {
 		secs := a.o.duration.Seconds() * sp.frac

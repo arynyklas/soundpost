@@ -234,6 +234,16 @@ test("manifest shape is closed and identities/limits are validated like the back
  expect(await reason(GOOD_MAP,{extra:"field"})).toBe("manifest_invalid");
 });
 
+test("every Unicode format (Cf) rune the backend rejects in a path or debug identity is rejected by the client first (03.06)",async()=>{
+ // internal/artifacts/manifest.go safeIdentity: unicode.IsControl || unicode.Is(unicode.Cf). One member of each Cf block that the old ranges missed.
+ const cf=["\u00ad","\u0600","\u0605","\u061c","\u06dd","\u070f","\u0890","\u08e2","\u180e","\u200b","\u200f","\u202a","\u202e","\u2060","\u2064","\u2066","\u206f","\ufeff","\ufff9","\ufffb","\u{110bd}","\u{13430}","\u{1bca0}","\u{1d173}","\u{e0001}","\u{e0020}","\u{e007f}"];
+ for(const rune of cf){
+  const label="U+"+rune.codePointAt(0)!.toString(16);
+  expect(await reason(GOOD_MAP,{path:"assets/a"+rune+"pp.js"}),"path "+label).toBe("path_invalid");
+  expect(await reason(GOOD_MAP,{debug_id:"a".repeat(31)+rune}),"debug_id "+label).toBe("manifest_invalid");
+ }
+});
+
 test("upload refuses plaintext non-loopback endpoints and invalid credentials before sending",async()=>{
  const generated=encode("export{};"),map=encode(GOOD_MAP),files=()=>iterate({path:"assets/app.js",role:"generated",bytes:generated},{path:"assets/app.js.map",role:"map",bytes:map});
  const code=async(config:()=>unknown)=>{try{await uploadArtifacts(manifestFor(generated,map),files(),config() as never);return "uploaded";}catch(error){const text=String((error as Error).message)+inspect(error,{depth:6});expect(text).not.toContain(CANARY);return (error as ArtifactError).code;}};

@@ -10,9 +10,13 @@
 package qual
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -199,6 +203,7 @@ type RuntimeColumn struct {
 // QualificationResult is the machine report of one acceptance run.
 type QualificationResult struct {
 	KernelBuild    string                  `json:"kernel_build"`
+	HostID         string                  `json:"host_id,omitempty"`
 	KernelConfig   KernelConfig            `json:"kernel_config"`
 	Arch           string                  `json:"arch"`
 	TargetBuild    TargetBuild             `json:"target_build"`
@@ -300,29 +305,56 @@ func QualifiedRuntimes(cols []RuntimeColumn) map[string]bool {
 	return out
 }
 
-// KernelSeries maps a kernel release string to its LTS series ("6.1 LTS",
-// "6.6 LTS") or "" when it is neither.
+// The qualified kernels are named by the uname -r pattern of their pinned builds, not by a version prefix: Debian
+// 6.1.0-<abi>-<arch> and the mainline 6.6.<patch>-<build id>-generic. A WSL2 kernel, a vendor or distribution flavor
+// (-lowlatency, -microsoft-standard-WSL2, a local suffix) or a bare "6.6.x" is not one of them.
+var (
+	series61 = regexp.MustCompile(`^6\.1\.[0-9]+-[0-9]+-(amd64|arm64)$`)
+	series66 = regexp.MustCompile(`^6\.6\.[0-9]+-[0-9]+-generic$`)
+)
+
+// KernelSeries maps a kernel release string (uname -r) to its qualified LTS series ("6.1 LTS", "6.6 LTS") or "" when it
+// is neither. A matching name is necessary, not sufficient: MatrixVerdict also requires the manifest's pinned build and
+// kernel config digest.
 func KernelSeries(release string) string {
-	for _, s := range []string{"6.1", "6.6"} {
-		if release == s || strings.HasPrefix(release, s+".") || strings.HasPrefix(release, s+"-") {
-			return s + " LTS"
-		}
+	switch {
+	case series61.MatchString(release):
+		return "6.1 LTS"
+	case series66.MatchString(release):
+		return "6.6 LTS"
 	}
 	return ""
 }
 
+// ManifestKernelConfig is the pinned kernel configuration of a manifest row.
+type ManifestKernelConfig struct {
+	SHA256 string `json:"sha256"`
+}
+
 // ManifestRow is the subset of a qualification.json row the gate evaluates.
 type ManifestRow struct {
-	KernelSeries string `json:"kernel_series"`
-	Arch         string `json:"arch"`
-	KernelBuild  string `json:"kernel_build"`
-	State        string `json:"state"`
+	KernelSeries string               `json:"kernel_series"`
+	Arch         string               `json:"arch"`
+	KernelBuild  string               `json:"kernel_build"`
+	KernelConfig ManifestKernelConfig `json:"kernel_config"`
+	State        string               `json:"state"`
+}
+
+// pinnedRelease is the uname -r release a manifest kernel_build pins: its first field ("6.1.0-54-amd64 (Debian ...)").
+func (r ManifestRow) pinnedRelease() string {
+	fields := strings.Fields(r.KernelBuild)
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[0]
 }
 
 // MatrixVerdict evaluates the required kernel/arch matrix against the results
-// that exist. A matrix row is qualified only by a result whose arch and kernel
-// series equal the row's, and only when that result passed every required row;
-// the in-between WSL functional row never qualifies an LTS row.
+// that exist. A matrix row is qualified only by a result that passed every
+// required row and whose arch, kernel release (the exact pinned build, of the
+// row's series) and kernel config digest equal the row's pins; a row without
+// pins was never exercised and no result qualifies it. The in-between WSL
+// functional row never qualifies an LTS row.
 func MatrixVerdict(rows []ManifestRow, results []*QualificationResult) []string {
 	var missing []string
 	for _, row := range rows {
@@ -330,8 +362,11 @@ func MatrixVerdict(rows []ManifestRow, results []*QualificationResult) []string 
 			continue // functional-evidence rows are not part of the required matrix
 		}
 		qualified := false
+		pinned := row.pinnedRelease()
 		for _, res := range results {
-			if res.Arch == row.Arch && KernelSeries(res.KernelBuild) == row.KernelSeries && res.ExitCode() == ExitOK {
+			if pinned != "" && row.KernelConfig.SHA256 != "" &&
+				res.Arch == row.Arch && res.KernelBuild == pinned && KernelSeries(res.KernelBuild) == row.KernelSeries &&
+				res.KernelConfig.SHA256 == row.KernelConfig.SHA256 && res.ExitCode() == ExitOK {
 				qualified = true
 			}
 		}
@@ -341,4 +376,35 @@ func MatrixVerdict(rows []ManifestRow, results []*QualificationResult) []string 
 	}
 	sort.Strings(missing)
 	return missing
+}
+
+// OverheadDigestFixture is the part of one measured fixture the overhead run digest covers.
+type OverheadDigestFixture struct {
+	Name          string
+	Seconds       float64
+	Repeats       int
+	Reduced       bool
+	OverheadPct   float64
+	ThroughputPct float64
+	CollectorPct  float64
+	MemoryBytes   uint64
+}
+
+// OverheadRunDigest binds an overhead report to the run that produced it: the host identity, the kernel build and its
+// config digest, the architecture, the command line and every measured number the gate reads. The overhead runner writes
+// it; the gate recomputes it, so a report edited afterwards, or taken from another host or kernel build, does not match.
+func OverheadRunDigest(hostID, kernelBuild, kernelConfigSHA, arch, command string, fixtures []OverheadDigestFixture) string {
+	h := sha256.New()
+	put := func(parts ...string) {
+		for _, p := range parts {
+			fmt.Fprintf(h, "%d:%s|", len(p), p)
+		}
+		h.Write([]byte{'\n'})
+	}
+	f := func(v float64) string { return strconv.FormatFloat(v, 'g', -1, 64) }
+	put("overhead-run-v1", hostID, kernelBuild, kernelConfigSHA, arch, command, strconv.Itoa(len(fixtures)))
+	for _, x := range fixtures {
+		put(x.Name, f(x.Seconds), strconv.Itoa(x.Repeats), strconv.FormatBool(x.Reduced), f(x.OverheadPct), f(x.ThroughputPct), f(x.CollectorPct), strconv.FormatUint(x.MemoryBytes, 10))
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }

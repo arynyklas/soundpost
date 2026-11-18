@@ -67,7 +67,8 @@ func run() error {
 	workload := flag.String("workload", "fixtures/nativeperf/identity/reuse", "frame-pointer controlled ELF")
 	execWorkload := flag.String("exec-workload", "fixtures/nativeperf/identity/exec", "same-file exec controlled ELF")
 	noFP := flag.String("no-fp-workload", "fixtures/nativeperf/identity/reuse-no-fp", "frame-pointer-disabled controlled ELF")
-	attempts := flag.Int("reuse-attempts", 4096, "maximum real PID allocation attempts; no pid_max/ns_last_pid writes")
+	attempts := flag.Int("reuse-attempts", 4096, "maximum real PID allocation attempts; no pid_max/ns_last_pid writes unless -steer-ns-last-pid")
+	steer := flag.Bool("steer-ns-last-pid", false, "pid-reuse only: inside a DISPOSABLE PID namespace (unshare --pid --fork --mount-proc, as root) write the previous child's PID minus one to /proc/sys/kernel/ns_last_pid before each start, so the kernel really hands the same number to a new process; refused in the initial PID namespace")
 	flag.Parse()
 	if *attempts < 2 || *attempts > 16384 {
 		return errors.New("invalid_reuse_attempt_budget")
@@ -82,7 +83,7 @@ func run() error {
 		case "no-frame-pointers":
 			e = capture(*noFP, scenario, true)
 		case "pid-reuse":
-			e = realPIDReuse(*workload, *attempts)
+			e = realPIDReuse(*workload, *attempts, *steer)
 		default:
 			return errors.New("unknown_identity_scenario")
 		}
@@ -389,14 +390,42 @@ complete:
 	}
 	return json.NewEncoder(os.Stdout).Encode(result)
 }
-func realPIDReuse(input string, attempts int) error {
+
+// initPIDNamespaceInode is PROC_PID_INIT_INO.
+const initPIDNamespaceInode = 0xEFFFFFFC
+
+// steerNsLastPID makes the kernel's next PID allocation in this PID namespace start right after pid. It only ever
+// runs inside a non-initial PID namespace: the write is local to that namespace and disappears with it.
+func steerNsLastPID(pid int) error {
+	return os.WriteFile("/proc/sys/kernel/ns_last_pid", []byte(fmt.Sprintf("%d\n", pid-1)), 0)
+}
+
+func realPIDReuse(input string, attempts int, steer bool) error {
+	if steer {
+		info, e := os.Stat("/proc/self/ns/pid")
+		if e != nil {
+			return errors.New("pid_namespace_unreadable")
+		}
+		if st, ok := info.Sys().(*syscall.Stat_t); !ok || st.Ino == initPIDNamespaceInode {
+			return errors.New("ns_last_pid_steering_requires_a_disposable_pid_namespace")
+		}
+	}
 	workload, cleanup, e := copyWorkload(input)
 	if e != nil {
 		return e
 	}
 	defer cleanup()
 	seen := make(map[int]nativeperf.TaskKey)
-	for range attempts {
+	last := 0
+	for attempt := range attempts {
+		if steer && last > 0 {
+			// /proc/<pid>/stat start times have a 10 ms resolution: a steered reuse inside the same tick, of the same
+			// executable, would be identical by construction. A real wrap-around never is.
+			time.Sleep(25 * time.Millisecond)
+			if e := steerNsLastPID(last); e != nil {
+				return errors.New("ns_last_pid_write_failed")
+			}
+		}
 		child := exec.Command(workload)
 		stdout, e := child.StdoutPipe()
 		if e != nil {
@@ -419,6 +448,7 @@ func realPIDReuse(input string, attempts int) error {
 		}
 		key, e := nativeperf.ResolveTask(child.Process.Pid, nativeperf.NamespaceID(target.PIDNamespace))
 		pid := child.Process.Pid
+		last = pid
 		child.Process.Kill()
 		child.Wait()
 		if e != nil {
@@ -431,11 +461,16 @@ func realPIDReuse(input string, attempts int) error {
 			return json.NewEncoder(os.Stdout).Encode(struct {
 				Scenario      string `json:"scenario"`
 				ObservedReuse bool   `json:"actual_numeric_pid_reuse"`
-			}{"pid-reuse", true})
+				Steered       bool   `json:"ns_last_pid_steered"`
+				PID           int    `json:"reused_pid"`
+				Attempt       int    `json:"attempt"`
+				SameProcess   bool   `json:"same_process_start"`
+				SameGen       bool   `json:"same_generation"`
+			}{"pid-reuse", true, steer, pid, attempt + 1, old.ProcessStart == key.ProcessStart, old.Generation == key.Generation})
 		}
 		seen[pid] = key
 	}
-	// An allocation loop is not proof of actual PID reuse. Never write pid_max,
-	// ns_last_pid, unshare/mount or request privilege to manufacture a passing row.
+	// An allocation loop is not proof of actual PID reuse. Without -steer-ns-last-pid nothing is written to pid_max or
+	// ns_last_pid; with it the write is confined to a disposable PID namespace the caller created.
 	return errors.New("actual_numeric_pid_reuse_not_observed_within_budget")
 }

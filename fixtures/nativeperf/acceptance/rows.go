@@ -363,6 +363,7 @@ func (a *accept) deriveSchedulerRows(res *qual.QualificationResult) {
 	}
 	if caps.OffCPU == nativeperf.Supported {
 		a.deriveSchedulerFromCaptures(res, detail)
+		a.applySchedulerOffCPUInjections(res)
 		return
 	}
 	reason, _ := a.schedulerReason()
@@ -445,6 +446,9 @@ func (a *accept) deriveInjectionRows(res *qual.QualificationResult, cpu *scenRes
 		res.Loss = qual.Supported([]string{"injected loss ended the stream with the explicit closed code loss"}, lossDetail)
 	default:
 		res.Loss = qual.Unqualified("loss_not_provoked: the stalled-reader injection produced no loss event or loss code", lossDetail)
+	}
+	if a.caps.OffCPU == nativeperf.Supported {
+		a.applySchedulerLossInjection(res)
 	}
 
 	// FDs

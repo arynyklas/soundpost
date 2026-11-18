@@ -18,6 +18,14 @@ var RequiredNegativeControls = []string{
 	"synthetic_samples_perfect_cadence",
 	"noop_sampler_no_cpu_samples",
 	"noop_sampler_trickle",
+	"scheduler_loss_ignored",
+	"scheduler_loss_interval_straddles_loss",
+	"scheduler_loss_not_provoked_is_not_a_pass",
+	"scheduler_missing_wake_reported_as_blocked",
+	"scheduler_missing_wake_without_evidence_is_not_a_pass",
+	"scheduler_open_interval_completed_as_blocked",
+	"scheduler_open_interval_without_evidence_is_not_a_pass",
+	"scheduler_injection_positive_controls_accepted",
 	"positive_control_plausible_capture_accepted",
 }
 

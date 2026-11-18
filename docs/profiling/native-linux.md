@@ -17,7 +17,7 @@ Run only against an authorized local workload:
 go run ./fixtures/nativeperf/capability --probe-only --target-pid "$TARGET_PID"
 ```
 
-The fixture resolves namespace/process-start identity locally and prints only capability metadata (no samples). Qualification rows in `fixtures/nativeperf/qualification.json` remain `not_run` until exact build/config/permissions/runtime flags, privacy, real samples, blocked intervals, loss, memory and overhead evidence are recorded. WSL is functional evidence only, not Linux LTS production qualification. Public fixtures must never include customer inventory or private process data.
+The fixture resolves namespace/process-start identity locally and prints only capability metadata (no samples). Qualification rows in `fixtures/nativeperf/qualification.json` stay `not_run` (kernel build and configuration null) until a real runner exercised them; once one did, the row pins the exact kernel build, the digest of the configuration it was built with (`/proc/config.gz` or `/boot/config-<release>`), the toolchain and the runtime build flags (the 6.1 and 6.6 LTS amd64 rows are pinned; `TestShippedManifestPinsTheKernelBuildConfigAndFlagsOfEveryExercisedRow` enforces it). WSL is functional evidence only, not Linux LTS production qualification. Public fixtures must never include customer inventory or private process data.
 
 Linux ABI constants/layouts are independently authored from the Linux perf_event_open manual and kernel trace event documentation, linked in the manifest. No GPL scheduler implementation, third-party profiling engine, restricted corpus or raw kernel buffers are redistributed. First-party files are Apache-2.0; the kernel remains an OS prerequisite.
 
@@ -66,4 +66,4 @@ sudo /tmp/helper-e2e --helper /tmp/helper --workload /tmp/loop --policy-template
 ```
 
 It prints one JSON line (kernel, `thp_sysfs_enabled`, `driver_thp_enabled`, `helper_thp_enabled`, `helper_seccomp`, `helper_no_new_privs`, `helper_vmhwm_kb`, `cpu_samples`, loss counters, `helper_exit_code`, `pass`) and exits non-zero when `THP_enabled` is not `0`, no sample arrived or the helper did not exit cleanly. Recorded on a 6.6.162 kernel with THP `always [madvise] never`: `helper_thp_enabled: 0`, driver `1`, about 1980 samples in 10 s, helper exit 0 (`.superpowers/sdd/approved-product/l4w20-evidence/helper-e2e/`).
-* Not run: Linux 6.1/6.6 LTS runners, arm64, PID reuse, CPU hotplug, container/cgroup namespace modes, CPython 3.13/3.14, Node 24, database wait.
+* Not run: arm64 (out of release scope), PID reuse, CPU hotplug, container/cgroup namespace modes, Node 24, database wait. The Linux 6.1 and 6.6 LTS amd64 runners ran (rows pinned in `fixtures/nativeperf/qualification.json`: kernel build, configuration digest read from `/boot/config-<release>`, toolchain and runtime build flags; results in `docs/support/native-linux.md`), with CPython 3.12/3.13/3.14, Node 22 and Bun 1.3.14.

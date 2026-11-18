@@ -261,6 +261,25 @@ test("deltas under a placeholdered subtree are suppressed until a new complete c
  for (const secret of ["late-secret", "brand-new-secret", "head-secret", "section-secret"]) expect(JSON.stringify(r.chunks)).not.toContain(secret);
 });
 
+test("a delta chunk that had to be truncated carries gap:true like a truncated checkpoint (03.07)", () => {
+ const host = el("section", el("p", text("seed")));
+ const root = el("div", host);
+ const r = rig(root); r.recorder.setConsent(true);
+ const observer = r.observer(), base = r.chunks.length;
+ expect(r.chunks[0]!.gap).toBe(false);
+ // A subtree larger than one chunk can hold (MAX_CHUNK_NODES) arrives as a single mutation.
+ const big = el("section", ...Array.from({length: 4500}, () => el("span", text("x"))));
+ host.append(big);
+ observer.callback([new FRecord(host)]);
+ expect(r.chunks).toHaveLength(base + 1);
+ const delta = r.chunks.at(-1)!;
+ expect(delta.checkpoint_sequence).not.toBe(delta.sequence);
+ expect(delta.nodes.length).toBeLessThanOrEqual(4096);
+ expect(delta.events.map(e => e.kind)).toContain("gap");
+ expect(Number(delta.loss)).toBeGreaterThan(0);
+ expect(delta.gap).toBe(true);
+});
+
 test("fitSubtrees collapses the lowest-priority (latest, deepest) whole subtrees first and keeps the head of the page", () => {
  const node = (id: string, parent: string): ReplayNode => ({id, parent, tag: "div", class: "", text: ""});
  const nodes = [node("1", "0"), node("2", "1"), node("3", "2"), node("4", "1"), node("5", "4"), node("6", "4"), node("7", "1"), node("8", "7")];

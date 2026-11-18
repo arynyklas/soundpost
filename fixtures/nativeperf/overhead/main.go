@@ -66,6 +66,12 @@ type run struct {
 	ClientFDs      int     `json:"client_fds,omitempty"`
 	Threads        int     `json:"threads_sampled,omitempty"`
 	StreamEnd      string  `json:"stream_end,omitempty"`
+	// scheduler capture mode (--capture-mode offcpu): what the committed correlator consumed and whether it overflowed
+	SchedulerSwitches   int    `json:"scheduler_switch_events,omitempty"`
+	SchedulerWakeups    int    `json:"scheduler_wakeup_events,omitempty"`
+	SchedulerCPUs       int    `json:"scheduler_cpus,omitempty"`
+	CorrelationOverflow int    `json:"correlation_consume_errors,omitempty"`
+	CorrelationFirstErr string `json:"correlation_first_error,omitempty"`
 }
 
 type stat struct {
@@ -79,6 +85,7 @@ type stat struct {
 type fixtureResult struct {
 	Fixture        string         `json:"fixture"`
 	Mode           string         `json:"workload_mode"`
+	CaptureMode    string         `json:"capture_mode"`
 	Seconds        float64        `json:"seconds_per_run"`
 	Repeats        int            `json:"repeats"`
 	Reduced        bool           `json:"reduced"`
@@ -108,18 +115,22 @@ type fixtureResult struct {
 }
 
 type report struct {
-	Manifest    string          `json:"manifest"`
-	KernelBuild string          `json:"kernel_build"`
-	Arch        string          `json:"arch"`
-	Hz          int             `json:"hz_requested"`
-	Command     string          `json:"command"`
-	FullCommand string          `json:"full_command"`
-	FullRun     bool            `json:"full_run_executed"`
-	Reduction   string          `json:"reduction,omitempty"`
-	Budgets     map[string]any  `json:"budgets"`
-	Fixtures    []fixtureResult `json:"fixtures"`
-	Caveats     []string        `json:"caveats"`
-	Verdict     string          `json:"verdict"`
+	Manifest    string `json:"manifest"`
+	KernelBuild string `json:"kernel_build"`
+	Arch        string `json:"arch"`
+	// HostID, KernelConfigSHA and RunDigest bind the report to the host and kernel build that measured it (qual.OverheadRunDigest).
+	HostID          string          `json:"host_id"`
+	KernelConfigSHA string          `json:"kernel_config_sha256"`
+	RunDigest       string          `json:"run_digest"`
+	Hz              int             `json:"hz_requested"`
+	Command         string          `json:"command"`
+	FullCommand     string          `json:"full_command"`
+	FullRun         bool            `json:"full_run_executed"`
+	Reduction       string          `json:"reduction,omitempty"`
+	Budgets         map[string]any  `json:"budgets"`
+	Fixtures        []fixtureResult `json:"fixtures"`
+	Caveats         []string        `json:"caveats"`
+	Verdict         string          `json:"verdict"`
 }
 
 func main() {
@@ -135,7 +146,8 @@ func main() {
 	seconds := flag.Int("seconds", 120, "seconds per run")
 	repeats := flag.Int("repeats", 5, "baseline/capture pairs")
 	workload := flag.String("workload", "fixtures/nativeperf/acceptance/workloads", "compiled workloads binary")
-	fixtures := flag.String("fixtures", "cpu", "comma separated workload modes to measure (cpu, fanout, fanout16, fanout64, fanout256)")
+	fixtures := flag.String("fixtures", "cpu", "comma separated workload modes to measure (cpu, fanout, fanout16, fanout64, fanout256, contend)")
+	captureMode := flag.String("capture-mode", "cpu", "cpu | offcpu: the capture mode measured; offcpu adds the scheduler tracepoint rings (3 per CPU, 128 KiB each) and consumes every scheduler record through the committed per-session correlator, whose intervals are counted and dropped")
 	out := flag.String("out", "", "write the JSON report here instead of stdout")
 	flag.Parse()
 	if *hz != 99 || *seconds < 3 || *repeats < 1 || flag.NArg() != 0 {
@@ -162,16 +174,27 @@ func main() {
 	ok := true
 	for _, name := range strings.Split(*fixtures, ",") {
 		name = strings.TrimSpace(name)
-		if name != "cpu" && name != "fanout" && name != "fanout16" && name != "fanout64" && name != "fanout256" {
+		if name != "cpu" && name != "fanout" && name != "fanout16" && name != "fanout64" && name != "fanout256" && name != "contend" {
 			fmt.Fprintln(os.Stderr, "usage: unknown fixture", name)
 			os.Exit(qual.ExitUsage)
 		}
-		fmt.Fprintf(os.Stderr, "overhead: fixture %s, %d pairs of %d s\n", name, *repeats, *seconds)
-		fr := measure(*workload, name, float64(*seconds), *repeats)
+		if *captureMode != "cpu" && *captureMode != "offcpu" {
+			fmt.Fprintln(os.Stderr, "usage: --capture-mode is cpu or offcpu")
+			os.Exit(qual.ExitUsage)
+		}
+		fmt.Fprintf(os.Stderr, "overhead: fixture %s (%s capture), %d pairs of %d s\n", name, *captureMode, *repeats, *seconds)
+		fr := measure(*workload, name, *captureMode, float64(*seconds), *repeats)
 		fr.Reduced = !rep.FullRun
 		ok = ok && fixtureOK(&fr)
 		rep.Fixtures = append(rep.Fixtures, fr)
 	}
+	rep.HostID = qual.HostIdentity()
+	rep.KernelConfigSHA = qual.ReadKernelConfig().SHA256
+	digests := make([]qual.OverheadDigestFixture, 0, len(rep.Fixtures))
+	for _, f := range rep.Fixtures {
+		digests = append(digests, qual.OverheadDigestFixture{Name: f.Fixture, Seconds: f.Seconds, Repeats: f.Repeats, Reduced: f.Reduced, OverheadPct: f.OverheadPct, ThroughputPct: f.ThroughputPct, CollectorPct: f.CollectorCPUPc, MemoryBytes: f.MemoryBytes})
+	}
+	rep.RunDigest = qual.OverheadRunDigest(rep.HostID, rep.KernelBuild, rep.KernelConfigSHA, rep.Arch, rep.Command, digests)
 	rep.Verdict = "budgets_met"
 	if !ok {
 		rep.Verdict = "budget_failed_or_run_failed"
@@ -211,8 +234,11 @@ func summarize(v []float64) stat {
 	return s
 }
 
-func measure(workload, mode string, seconds float64, repeats int) fixtureResult {
-	fr := fixtureResult{Fixture: mode, Mode: mode, Seconds: seconds, Repeats: repeats}
+func measure(workload, mode, captureMode string, seconds float64, repeats int) fixtureResult {
+	fr := fixtureResult{Fixture: mode, Mode: mode, CaptureMode: captureMode, Seconds: seconds, Repeats: repeats}
+	if captureMode == "offcpu" {
+		fr.Fixture = mode + "_offcpu"
+	}
 	scratch, err := os.MkdirTemp("", "soundpost-overhead-")
 	if err != nil {
 		fr.Failures = append(fr.Failures, err.Error())
@@ -228,7 +254,7 @@ func measure(workload, mode string, seconds float64, repeats int) fixtureResult 
 			order = []string{"capture", "baseline"}
 		}
 		for _, m := range order {
-			r, err := oneRun(workload, mode, m, seconds, scratch)
+			r, err := oneRun(workload, mode, captureMode, m, seconds, scratch)
 			r.Order = len(base) + len(capt) + 1
 			var refused *refusedError
 			if errors.As(err, &refused) {
@@ -314,7 +340,7 @@ func evaluate(fr *fixtureResult, base, capt []run, seconds float64) {
 	}
 }
 
-func oneRun(workload, mode, which string, seconds float64, scratch string) (run, error) {
+func oneRun(workload, mode, captureMode, which string, seconds float64, scratch string) (run, error) {
 	r := run{Mode: which}
 	w, err := qual.LaunchWorkload(qual.LaunchOptions{Bin: workload, Mode: mode, Seconds: seconds, Dir: scratch})
 	if err != nil {
@@ -355,11 +381,32 @@ func oneRun(workload, mode, which string, seconds float64, scratch string) (run,
 				}
 			}
 		}()
-		cap = qual.Capture(context.Background(), helper, qual.CaptureOptions{Config: nativeperf.DefaultConfig(1), Duration: time.Duration(seconds+60) * time.Second, OnReady: func() { w.Go() }, StopWhen: w.DoneSeen, Sink: &stats})
+		opts := qual.CaptureOptions{Config: nativeperf.DefaultConfig(1), Duration: time.Duration(seconds+60) * time.Second, OnReady: func() { w.Go() }, StopWhen: w.DoneSeen, Sink: &stats}
+		var sched *schedStats
+		if captureMode == "offcpu" {
+			cfg := nativeperf.DefaultConfig(1)
+			cfg.RingBytes = schedulerRingBytes
+			adm := qual.AdmissionMemory{Targets: 1, Threads: uint64(launchThreads), HelperRSS: u.RSSKiB << 10, ClientRSS: clientBefore.RSSKiB << 10}
+			corr := qual.NewStreamCorrelation(cfg, func(cpus uint64) (uint64, error) { return qual.CorrelationReservation(cfg, adm, cpus) })
+			// only the cost of correlating is measured: the intervals are counted by kind and released at once
+			corr.DropStacks()
+			corr.KeepOnly(func(nativeperf.Interval) bool { return false })
+			sched = &schedStats{stats: &stats, corr: corr}
+			opts.Config, opts.Mode, opts.Sink = cfg, nativeperf.ModeCPUOffCPU, sched
+		}
+		cap = qual.Capture(context.Background(), helper, opts)
 		close(stopSample)
 		<-sample
 		if !cap.Ready {
 			return r, &refusedError{code: cap.ErrorCode, threads: launchThreads, msg: fmt.Sprintf("helper refused the capture: %s%s", cap.ErrorCode, cap.ReadError)}
+		}
+		if sched != nil {
+			c := sched.corr.Result()
+			r.SchedulerSwitches, r.SchedulerWakeups, r.SchedulerCPUs = c.SwitchEvents, c.WakeupEvents, c.CPUs
+			r.CorrelationOverflow, r.CorrelationFirstErr = c.ConsumeErrors, c.FirstError
+			if c.Err != "" {
+				return r, fmt.Errorf("scheduler capture could not be correlated: %s (stream end %s%s)", c.Err, cap.ErrorCode, cap.ReadError)
+			}
 		}
 		hu, _ := qual.ReadProc(helper.PID)
 		r.HelperCPUSec = float64(hu.CPUTicks-helperTicks0) / qual.ClockTicksPerSecond
@@ -420,7 +467,14 @@ func oneRun(workload, mode, which string, seconds float64, scratch string) (run,
 		p50, p99 := qual.Percentiles(stats.gaps)
 		r.GapP50Ms, r.GapP99Ms = float64(p50)/1e6, float64(p99)/1e6
 		// the helper opens one ring per thread of the target: those that never ran are charged too
-		r.RingBytes = uint64(max(r.Threads, launchThreads)) * (nativeperf.DefaultConfig(1).RingBytes + uint64(os.Getpagesize()))
+		ring := nativeperf.DefaultConfig(1).RingBytes
+		rings := uint64(max(r.Threads, launchThreads)) * (ring + uint64(os.Getpagesize()))
+		if captureMode == "offcpu" {
+			// three scheduler rings per online CPU on top of the target's thread rings, all at the scheduler ring size
+			ring = schedulerRingBytes
+			rings = (uint64(max(r.Threads, launchThreads)) + 3*uint64(r.SchedulerCPUs)) * (ring + uint64(os.Getpagesize()))
+		}
+		r.RingBytes = rings
 	}
 	return r, nil
 }
@@ -453,6 +507,28 @@ func (s *captureStats) Event(e nativeperf.SanitizedEvent) bool {
 func (s *captureStats) Proof(nativeperf.AcquisitionProof) {}
 
 func (s *captureStats) threads() int { return len(s.last) }
+
+// schedulerRingBytes is the data size of each ring in a scheduler capture, the size the acceptance runner uses
+// (acceptance/sched.go: 3 rings per online CPU plus the target's, each charged with its metadata page against the 64 MiB
+// budget before the correlator gets what is left).
+const schedulerRingBytes uint64 = 128 << 10
+
+// schedStats is the EventSink of a scheduler-mode overhead capture: the CPU samples are counted as in captureStats, every
+// scheduler record goes through the committed per-session correlator, and nothing is retained.
+type schedStats struct {
+	stats *captureStats
+	corr  *qual.StreamCorrelation
+}
+
+func (s *schedStats) Event(e nativeperf.SanitizedEvent) bool {
+	s.stats.Event(e)
+	s.corr.Event(e)
+	return false
+}
+
+func (s *schedStats) Proof(p nativeperf.AcquisitionProof) { s.corr.Proof(p) }
+
+func (s *schedStats) Revoke(through uint64) { s.corr.Revoke(through) }
 
 // countTasks is the number of threads of a live process.
 func countTasks(pid int) int {

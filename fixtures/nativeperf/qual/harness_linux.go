@@ -47,32 +47,67 @@ func KernelRelease() string {
 	return strings.TrimSpace(string(b))
 }
 
-// ReadKernelConfig digests /proc/config.gz (when the kernel exports it) and
-// reads the three options this engine depends on.
-func ReadKernelConfig() KernelConfig {
-	raw, err := os.ReadFile("/proc/config.gz")
-	if err != nil {
-		return KernelConfig{Source: "unavailable: " + errnoName(err)}
-	}
-	sum := sha256.Sum256(raw)
-	out := KernelConfig{Source: "/proc/config.gz", SHA256: hex.EncodeToString(sum[:])}
-	zr, err := gzip.NewReader(bytes.NewReader(raw))
-	if err != nil {
-		return out
-	}
-	sc := bufio.NewScanner(zr)
-	for sc.Scan() {
-		line := sc.Text()
-		switch {
-		case strings.HasPrefix(line, "CONFIG_PERF_EVENTS="):
-			out.PerfEvents = strings.TrimPrefix(line, "CONFIG_PERF_EVENTS=")
-		case strings.HasPrefix(line, "CONFIG_FRAME_POINTER="):
-			out.FramePointer = strings.TrimPrefix(line, "CONFIG_FRAME_POINTER=")
-		case strings.HasPrefix(line, "CONFIG_FTRACE="):
-			out.Ftrace = strings.TrimPrefix(line, "CONFIG_FTRACE=")
+// HostIdentity is a stable identity of this machine for binding reports of one qualification run together: the SHA-256 of
+// the systemd machine id (the hostname when the machine has none), hex. It names the host without exposing its machine id.
+func HostIdentity() string {
+	for _, path := range []string{"/etc/machine-id", "/var/lib/dbus/machine-id"} {
+		if b, err := os.ReadFile(path); err == nil {
+			if id := strings.TrimSpace(string(b)); id != "" {
+				sum := sha256.Sum256([]byte("machine-id:" + id))
+				return hex.EncodeToString(sum[:])
+			}
 		}
 	}
-	return out
+	name, _ := os.Hostname()
+	sum := sha256.Sum256([]byte("hostname:" + name))
+	return hex.EncodeToString(sum[:])
+}
+
+// ReadKernelConfig digests the running kernel's build configuration and reads the three options this engine depends
+// on. The kernel's own export /proc/config.gz is preferred; distributions that do not enable it (Debian, Ubuntu,
+// mainline builds) ship /boot/config-<release>, which is the configuration that kernel was built with.
+func ReadKernelConfig() KernelConfig {
+	return readKernelConfig([]string{"/proc/config.gz", "/boot/config-" + KernelRelease()})
+}
+
+// readKernelConfig reads the first candidate that exists. A missing candidate does not hide a later one; when none
+// can be read the source names the first candidate's errno and carries no digest.
+func readKernelConfig(candidates []string) KernelConfig {
+	var first error
+	for _, path := range candidates {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			if first == nil {
+				first = err
+			}
+			continue
+		}
+		sum := sha256.Sum256(raw)
+		out := KernelConfig{Source: path, SHA256: hex.EncodeToString(sum[:])}
+		text := bytes.NewReader(raw)
+		var in io.Reader = text
+		if len(raw) > 2 && raw[0] == 0x1f && raw[1] == 0x8b {
+			zr, err := gzip.NewReader(text)
+			if err != nil {
+				return out
+			}
+			in = zr
+		}
+		sc := bufio.NewScanner(in)
+		for sc.Scan() {
+			line := sc.Text()
+			switch {
+			case strings.HasPrefix(line, "CONFIG_PERF_EVENTS="):
+				out.PerfEvents = strings.TrimPrefix(line, "CONFIG_PERF_EVENTS=")
+			case strings.HasPrefix(line, "CONFIG_FRAME_POINTER="):
+				out.FramePointer = strings.TrimPrefix(line, "CONFIG_FRAME_POINTER=")
+			case strings.HasPrefix(line, "CONFIG_FTRACE="):
+				out.Ftrace = strings.TrimPrefix(line, "CONFIG_FTRACE=")
+			}
+		}
+		return out
+	}
+	return KernelConfig{Source: "unavailable: " + errnoName(first)}
 }
 
 func errnoName(err error) string {

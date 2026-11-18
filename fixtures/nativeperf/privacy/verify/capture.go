@@ -190,10 +190,9 @@ func exportAndRead(ctx context.Context, env *fixtureEnv, n *privnode.Node, c *ca
 		return errors.New("storage scan failed")
 	}
 	rep.Export.StorageFiles, rep.Export.StorageBytes, rep.Export.StoragePositive = files, octets, positive
-	service := n.App.NewNativeProfiles()
 	cursor := ""
 	for page := 0; page < 64; page++ {
-		view, e := service.Read(ctx, n.Reader, root, profiles.Window{Start: c.wall, End: now + 1, MaxSamples: 64, Cursor: cursor})
+		view, e := n.ReadPage(ctx, root, profiles.Window{Start: c.wall, End: now + 1, MaxSamples: 64, Cursor: cursor})
 		if e != nil {
 			return errors.New("scoped read failed")
 		}

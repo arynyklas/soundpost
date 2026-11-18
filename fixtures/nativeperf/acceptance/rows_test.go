@@ -98,6 +98,17 @@ func TestFrameCoverageRuleReportsPartialNeverInvented(t *testing.T) {
 			r.Stats.ExpectedPresent = map[string]int{"spqual_hot": 900}
 			return r
 		}, goodNoFP, qual.StateFailed},
+		// below the floor while still above the no-frame-pointer coverage: only the floor can fail this one
+		{"fp build resolves half of its chain", func() *scenResult {
+			r := goodCPU()
+			r.Stats.ExpectedPresent = map[string]int{"spqual_hot": 900, "spqual_hash_block": 900}
+			return r
+		}, goodNoFP, qual.StateFailed},
+		{"fp build resolves exactly three quarters of its chain", func() *scenResult {
+			r := goodCPU()
+			r.Stats.ExpectedPresent = map[string]int{"spqual_hot": 900, "spqual_hash_block": 900, "spqual_serve": 900}
+			return r
+		}, goodNoFP, qual.StateSupported},
 		{"invented frame in the no-fp chain", goodCPU, func() *scenResult {
 			r := goodNoFP()
 			r.Failures = []string{"frame spqual_nofp_mid appears as a caller: invented frame"}
@@ -111,6 +122,25 @@ func TestFrameCoverageRuleReportsPartialNeverInvented(t *testing.T) {
 		a.deriveRows()
 		if a.res.FrameCoverage.State != tc.want {
 			t.Errorf("%s: frame_coverage %s (%s), want %s", tc.name, a.res.FrameCoverage.State, a.res.FrameCoverage.Reason, tc.want)
+		}
+	}
+}
+
+// A caller the compiler left no frame pointer for must never appear in a no-frame-pointer chain: it is invented.
+func TestNoFramePointerScenarioFailsOnAnInventedCaller(t *testing.T) {
+	a := newAccept()
+	sp := *findSpec("nofp")
+	r := goodNoFP()
+	a.assert(sp, r)
+	if len(r.Failures) != 0 {
+		t.Fatalf("an honest no-frame-pointer capture failed: %v", r.Failures)
+	}
+	for _, hidden := range []string{"spqual_nofp_mid", "spqual_nofp_serve"} {
+		r := goodNoFP()
+		r.Stats.NonLeaf[hidden] = 1
+		a.assert(sp, r)
+		if got := strings.Join(r.Failures, ";"); !strings.Contains(got, hidden) || !strings.Contains(got, "invented frame") {
+			t.Errorf("%s as a caller in one chain: failures %v", hidden, r.Failures)
 		}
 	}
 }

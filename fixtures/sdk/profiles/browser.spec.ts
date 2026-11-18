@@ -58,6 +58,11 @@ async function open(page: Page, options: {policy: boolean; init?: string} = {pol
  return errors;
 }
 const identity = async (page: Page, browser: Browser): Promise<Record<string, string>> => ({chrome: browser.version(), userAgent: await page.evaluate(() => navigator.userAgent), hasProfiler: String(await page.evaluate(() => typeof Reflect.get(window, "Profiler")))});
+// Stock Firefox has no JS Self-Profiling API (the `Profiler` constructor is absent, nothing to emulate). Only the rows that assert the absence
+// (unsupported, zero samples, the page keeps running; worker scope) apply to it; every row that needs the Chromium API is skipped there.
+test.beforeEach(({browserName}, testInfo) => {
+ testInfo.skip(browserName === "firefox" && !/Profiler removed|dedicated worker/.test(testInfo.title), "Firefox exposes no JS Self-Profiling API; this row asserts the Chromium behavior");
+});
 
 test("with the Document-Policy header: genuine samples from a real busy loop, safe frames, long_task separate, no CPU unit", async ({page, browser}) => {
  const errors = await open(page);

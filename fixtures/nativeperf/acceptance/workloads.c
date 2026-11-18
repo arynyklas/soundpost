@@ -6,7 +6,10 @@
 // Native profiling acceptance workloads (task 04.09). Build:
 //   cc -O2 -pthread -fno-omit-frame-pointer -g -o fixtures/nativeperf/acceptance/workloads fixtures/nativeperf/acceptance/workloads.c
 // Usage: workloads <mode> <ground-truth-file> <seconds> <nonce>
-// Modes: cpu | nofp | fanout (16 hot threads) | fanout16 | fanout64 | fanout256 (16 / 64 / 256 threads, overhead measurement) | blocking | contend | migrate | exec
+// Modes: cpu | nofp | fanout (16 hot threads) | fanout16 | fanout64 | fanout256 (16 / 64 / 256 threads, overhead measurement) | blocking | contend | migrate | exec | blockhold
+// blockhold: after "go" the main thread prints "holding" and sleeps for <seconds> in ONE nanosleep, so a verifier that
+// stops its capture meanwhile ends it inside an open blocked interval (the final-censor row). The one interval is
+// recorded after the sleep, with the start taken before the sleep.
 //
 // The program creates every thread (and, for the blocking mode, the one foreign
 // waker process) BEFORE it prints "ready <pid>": a capture armed afterwards sees
@@ -292,6 +295,15 @@ static void run_blocking(uint64_t ns) {
 	}
 }
 
+static void run_blockhold(uint64_t ns) {
+	struct timespec req = {(time_t)(ns / 1000000000ull), (long)(ns % 1000000000ull)};
+	uint64_t t0 = now_ns();
+	printf("holding\n");
+	fflush(stdout);
+	nanosleep(&req, NULL);
+	interval("block_hold", t0, now_ns(), ns);
+}
+
 static void run_migrate(uint64_t ns) {
 	cpu_set_t all;
 	sched_getaffinity(0, sizeof all, &all);
@@ -356,6 +368,8 @@ int main(int argc, char **argv) {
 		else spawn_threads(1, 0, ns / 2, -1);
 	} else if (!strcmp(mode_name, "blocking")) {
 		start_waker();
+	} else if (!strcmp(mode_name, "blockhold")) {
+		/* no threads, no waker: the main thread is the only task */
 	} else if (strcmp(mode_name, "migrate")) {
 		fprintf(stderr, "unknown mode\n");
 		return 2;
@@ -368,6 +382,7 @@ int main(int argc, char **argv) {
 	}
 	uint64_t t0 = now_ns();
 	if (!strcmp(mode_name, "blocking")) run_blocking(ns);
+	else if (!strcmp(mode_name, "blockhold")) run_blockhold(ns);
 	else if (!strcmp(mode_name, "migrate")) run_migrate(ns);
 	else if (!strcmp(mode_name, "exec") && !after_exec) {
 		run_threads();

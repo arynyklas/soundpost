@@ -43,6 +43,7 @@ const (
 type options struct {
 	workload        string
 	endpointEnv     string
+	nodeEnv         string
 	policyPath      string
 	seconds         int
 	auditSyscalls   bool
@@ -59,7 +60,8 @@ type options struct {
 func main() {
 	var o options
 	flag.StringVar(&o.workload, "workload", "fixtures/nativeperf/privacy/canary", "compiled canary workload")
-	flag.StringVar(&o.endpointEnv, "endpoint-env", "SOUNDPOST_FIXTURE_API", "environment variable that selects/receives the real node endpoint")
+	flag.StringVar(&o.endpointEnv, "endpoint-env", "SOUNDPOST_FIXTURE_API", "environment variable naming the https endpoint of an EXTERNAL served node (then --node-env must name its description); unset, the verifier runs its own real in-process node and publishes its URL here")
+	flag.StringVar(&o.nodeEnv, "node-env", "SOUNDPOST_FIXTURE_NODE", "environment variable naming the private 0600 JSON description of the external node (privnode.External)")
 	flag.StringVar(&o.policyPath, "policy", defaultPolicyPath, "privacy policy file")
 	flag.IntVar(&o.seconds, "seconds", 4, "real capture seconds (1..30)")
 	flag.BoolVar(&o.auditSyscalls, "audit-syscalls", false, "re-run the whole fixture under strace -f -v and audit forbidden syscalls/configuration")

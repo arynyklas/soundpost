@@ -30,6 +30,13 @@ func criticalCtx(t *testing.T, script string) (*runCtx, string) {
 	if err := os.WriteFile(filepath.Join(venv, "pyvenv.cfg"), []byte("home = /usr\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// The pinned interpreter inside the venv reports no missing integration module unless a test says otherwise.
+	if err := os.MkdirAll(filepath.Join(venv, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(venv, "bin", "python"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	rc.matrix.Builds["bun"] = BuildSpec{Family: "bun", Version: "1.3.14", OS: "linux", Arch: "amd64", Absent: "x"}
 	rc.matrix.Builds["py"] = BuildSpec{Family: "python", Version: "3.13", OS: "linux", Arch: "amd64", Absent: "x"}
 	rc.probes["bun"] = &probeResult{Found: true, Path: "/x/bun", Build: Build{Family: "bun", Version: "1.3.14", OS: "linux", Arch: "amd64", ID: "sha256:b"}}
@@ -122,5 +129,46 @@ func TestCriticalPathNeverRunsWithoutItsPrerequisites(t *testing.T) {
 	rc3.probes["bun"] = &probeResult{Reason: "no Bun 1.3.14 linux/amd64 build was found"}
 	if row := runCritical(t, rc3, "bun", "gateway"); row.State != StateNotExercised || !strings.Contains(row.Reason, "no Bun") || marker(tool3) {
 		t.Errorf("absent runner: %+v", row)
+	}
+}
+
+// 03.06-C9: the Python jobs rows failed on the real-kernel VMs because the qualification virtual environments held the development
+// lock, not the integration lock, so the fixture died on `import celery` and the row was reported as a failure of the SDK. A venv
+// that lacks what the committed command imports is a missing prerequisite (stated, with the lock to install), never a pass or a fail.
+func TestPythonCriticalPathNeverRunsInAVenvWithoutTheIntegrationLock(t *testing.T) {
+	marker := func(tool string) bool { _, err := os.Stat(tool + ".args"); return err == nil }
+	missing := func(rc *runCtx, modules string) {
+		python := rc.probes["py"].Path
+		body := "#!/bin/sh\necho " + modules + "\n"
+		if err := os.WriteFile(python, []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rc, tool := criticalCtx(t, okRows)
+	missing(rc, "celery kombu")
+	row := runCritical(t, rc, "py", "jobs")
+	if row.State != StateNotExercised || !strings.Contains(row.Reason, "celery") || !strings.Contains(row.Reason, "requirements-integrations.lock") || marker(tool) {
+		t.Fatalf("a venv without Celery must be not exercised with the lock named, command not run: %+v", row)
+	}
+	old := criticalPGPresent
+	defer func() { criticalPGPresent = old }()
+	criticalPGPresent = func(*runCtx) string { return "" }
+	rc2, tool2 := criticalCtx(t, okRows)
+	missing(rc2, "psycopg")
+	if row := runCritical(t, rc2, "py", "python"); row.State != StateNotExercised || !strings.Contains(row.Reason, "psycopg") || marker(tool2) {
+		t.Fatalf("a venv without the HTTP/DB integration modules must be not exercised: %+v", row)
+	}
+	// An interpreter that cannot even run the probe is reported as such, not as missing modules.
+	rc3, tool3 := criticalCtx(t, okRows)
+	if err := os.WriteFile(rc3.probes["py"].Path, []byte("#!/bin/sh\nexit 7\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if row := runCritical(t, rc3, "py", "jobs"); row.State != StateNotExercised || !strings.Contains(row.Reason, "could not be probed") || marker(tool3) {
+		t.Fatalf("a broken interpreter must be not exercised: %+v", row)
+	}
+	// The pinned Bun has no Python lock to check.
+	rc4, _ := criticalCtx(t, okRows)
+	if row := runCritical(t, rc4, "bun", "jobs"); row.Outcome != OutcomePassed {
+		t.Fatalf("bun jobs: %+v", row)
 	}
 }

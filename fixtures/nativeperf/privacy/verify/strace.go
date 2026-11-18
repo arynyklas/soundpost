@@ -78,7 +78,7 @@ func runUnderStrace(o options) (int, error) {
 		return exitFail, e
 	}
 	args := []string{"-f", "-qq", "-v", "-s", "200", "-o", log, "-e", straceTrace, self, "--role=child",
-		"--workload", o.workload, "--policy", o.policyPath, "--endpoint-env", o.endpointEnv, "--seconds", strconv.Itoa(o.seconds), "--result-file", result}
+		"--workload", o.workload, "--policy", o.policyPath, "--endpoint-env", o.endpointEnv, "--node-env", o.nodeEnv, "--seconds", strconv.Itoa(o.seconds), "--result-file", result}
 	if o.injectPeerDeath {
 		args = append(args, "--inject-peer-death")
 	}

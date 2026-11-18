@@ -44,6 +44,14 @@ type Node struct {
 	Cred      auth.SourceCredential
 	Reader    auth.Scope
 	Resource  model.Resource
+	// OwnerToken is the owner's session token (the fixture administrator).
+	OwnerToken string
+	// URL is the base URL of the node's HTTPS listener; PolicyRevision the source policy
+	// revision the grant resolves; ReaderToken the reader's bearer token when the node is
+	// attached (served by another process), empty for an in-process node.
+	URL            string
+	PolicyRevision model.Revision
+	ReaderToken    string
 
 	actor      auth.Credential
 	readerCred auth.Credential
@@ -56,7 +64,7 @@ func Start(ctx context.Context, dir string) (*Node, error) {
 	if e != nil {
 		return nil, errors.New("real node unavailable")
 	}
-	n := &Node{App: app, Dir: dir, Org: model.NewID(), Project: model.NewID(), Source: model.NewID(), Producer: model.NewID()}
+	n := &Node{App: app, Dir: dir, Org: model.NewID(), Project: model.NewID(), Source: model.NewID(), Producer: model.NewID(), PolicyRevision: 1}
 	fail := func(msg string) (*Node, error) { n.Close(); return nil, errors.New(msg) }
 	boot, e := app.Control.BootstrapToken()
 	if e != nil {
@@ -70,6 +78,7 @@ func Start(ctx context.Context, dir string) (*Node, error) {
 	if e != nil {
 		return fail("owner authentication refused")
 	}
+	n.OwnerToken = session.Token
 	user := model.NewID()
 	command := func(kind string, p auth.AdminPayload) error {
 		var rev model.Revision
@@ -118,6 +127,7 @@ func Start(ctx context.Context, dir string) (*Node, error) {
 	n.Server = httptest.NewTLSServer(httpapi.NewServer("", app.Auth, nil, app.Register).Handler)
 	n.Client = n.Server.Client()
 	n.Client.Timeout = 30 * time.Second
+	n.URL = n.Server.URL
 	return n, nil
 }
 
@@ -141,14 +151,16 @@ func (n *Node) Grant(ctx context.Context) (policy.SourceGrant, error) {
 	if e != nil {
 		return policy.SourceGrant{}, e
 	}
-	return p.ResolveSource(ctx, n.Cred, n.Project, n.Source, 1)
+	return p.ResolveSource(ctx, n.Cred, n.Project, n.Source, n.PolicyRevision)
 }
 
 // PostBatch sends wire (a JSON batch) to the real batch route gzip-compressed,
 // auditing the body at the decompressed and compressed wire stages first. It
 // returns the HTTP status and body (the body is audited as diagnostics).
 func (n *Node) PostBatch(ctx context.Context, audit *scan.PrivacyAudit, wire []byte) (int, []byte, error) {
-	_ = audit.Observe(scan.StageWireDecompressed, wire)
+	if audit != nil {
+		_ = audit.Observe(scan.StageWireDecompressed, wire)
+	}
 	var z bytes.Buffer
 	w := gzip.NewWriter(&z)
 	if _, e := w.Write(wire); e != nil {
@@ -157,8 +169,10 @@ func (n *Node) PostBatch(ctx context.Context, audit *scan.PrivacyAudit, wire []b
 	if e := w.Close(); e != nil {
 		return 0, nil, e
 	}
-	_ = audit.Observe(scan.StageWireCompressed, z.Bytes())
-	request, e := http.NewRequestWithContext(ctx, http.MethodPost, n.Server.URL+"/ingest/v1/batches", bytes.NewReader(z.Bytes()))
+	if audit != nil {
+		_ = audit.Observe(scan.StageWireCompressed, z.Bytes())
+	}
+	request, e := http.NewRequestWithContext(ctx, http.MethodPost, n.URL+"/ingest/v1/batches", bytes.NewReader(z.Bytes()))
 	if e != nil {
 		return 0, nil, e
 	}
@@ -174,7 +188,9 @@ func (n *Node) PostBatch(ctx context.Context, audit *scan.PrivacyAudit, wire []b
 	if e != nil || len(body) > 64<<10 {
 		return response.StatusCode, nil, errors.New("batch route response unreadable")
 	}
-	_ = audit.Observe(scan.StageDiagnostics, append([]byte("batch route response: "), body...))
+	if audit != nil {
+		_ = audit.Observe(scan.StageDiagnostics, append([]byte("batch route response: "), body...))
+	}
 	return response.StatusCode, body, nil
 }
 
@@ -193,7 +209,9 @@ func (a *Admitter) Admit(ctx context.Context, _ policy.SourceGrant, b model.Batc
 	if e != nil {
 		return model.Receipt{}, e
 	}
-	_ = a.Audit.Observe(scan.StageExporterQueue, wire)
+	if a.Audit != nil {
+		_ = a.Audit.Observe(scan.StageExporterQueue, wire)
+	}
 	status, body, e := a.N.PostBatch(ctx, a.Audit, wire)
 	if e != nil {
 		return model.Receipt{}, e
@@ -216,7 +234,7 @@ type Lookup struct{ N *Node }
 // LookupReceipt implements nativeperf.ReceiptLookup.
 func (l Lookup) LookupReceipt(ctx context.Context, q model.ReceiptRequest) (model.Receipt, error) {
 	raw, _ := json.Marshal(q)
-	request, e := http.NewRequestWithContext(ctx, http.MethodPost, l.N.Server.URL+"/ingest/v1/receipts", bytes.NewReader(raw))
+	request, e := http.NewRequestWithContext(ctx, http.MethodPost, l.N.URL+"/ingest/v1/receipts", bytes.NewReader(raw))
 	if e != nil {
 		return model.Receipt{}, e
 	}
@@ -285,7 +303,29 @@ func (n *Node) ScanStorage(audit *scan.PrivacyAudit, positive []byte) (files, oc
 // ForeignReader returns a reader scope for a second, unrelated org/project that
 // the same principal can read, to prove foreign scopes get no oracle.
 func (n *Node) ForeignReader(ctx context.Context) (auth.Scope, error) {
-	org, project := model.NewID(), model.NewID()
+	org, project, e := n.foreignSetup(ctx)
+	if e != nil {
+		return auth.Scope{}, e
+	}
+	return n.App.Auth.Authorize(ctx, n.readerCred, org, []model.ID{project}, auth.Permission("profiles.read"))
+}
+
+// ForeignReaderToken is ForeignReader as a bearer: it creates the second org and
+// project and returns the same principal's server token for them with their IDs.
+func (n *Node) ForeignReaderToken(ctx context.Context) (token string, org, project model.ID, err error) {
+	org, project, err = n.foreignSetup(ctx)
+	if err != nil {
+		return "", model.ID{}, model.ID{}, err
+	}
+	issued, err := n.App.Auth.IssueServerToken(ctx, n.actor, org, n.user, []model.ID{project}, []auth.Permission{"profiles.read"}, time.Now().Add(time.Hour).Unix(), "privacy fixture foreign reader token")
+	if err != nil {
+		return "", model.ID{}, model.ID{}, errors.New("foreign reader token refused")
+	}
+	return issued.Token, org, project, nil
+}
+
+func (n *Node) foreignSetup(ctx context.Context) (org, project model.ID, err error) {
+	org, project = model.NewID(), model.NewID()
 	command := func(kind string, p auth.AdminPayload) error {
 		var rev model.Revision
 		n.App.Control.View(ctx, func(st model.ControlState) error { rev = st.Revision; return nil })
@@ -304,8 +344,65 @@ func (n *Node) ForeignReader(ctx context.Context) (auth.Scope, error) {
 		{"grant", auth.AdminPayload{UserID: n.user, ProjectID: project, Enabled: true, Permissions: []string{"profiles.read"}}},
 	} {
 		if e := command(step.kind, step.p); e != nil {
-			return auth.Scope{}, errors.New("foreign scope setup refused")
+			return model.ID{}, model.ID{}, errors.New("foreign scope setup refused")
 		}
 	}
-	return n.App.Auth.Authorize(ctx, n.readerCred, org, []model.ID{project}, auth.Permission("profiles.read"))
+	return org, project, nil
+}
+
+// AdminScope is the organization-admin scope of the node's owner: the authority
+// the product's deletion operation (retention.Service.Delete) is given.
+func (n *Node) AdminScope(ctx context.Context) (auth.Scope, error) {
+	return n.App.Auth.Authorize(ctx, n.actor, n.Org, nil, auth.OrgAdmin)
+}
+
+// IssueReaderToken issues the real server token (the bearer credential of the
+// canonical HTTP profile read) for the fixture reader, who holds only
+// profiles.read in the node's project.
+func (n *Node) IssueReaderToken(ctx context.Context) (auth.IssuedServerToken, error) {
+	return n.App.Auth.IssueServerToken(ctx, n.actor, n.Org, n.user, []model.ID{n.Project}, []auth.Permission{"profiles.read"}, time.Now().Add(time.Hour).Unix(), "privacy fixture reader token")
+}
+
+// ProfileView posts body to the real POST /api/v1/profiles/view route over the
+// node's TLS listener with the reader's bearer token and returns the HTTP status
+// and the response body.
+func (n *Node) ProfileView(ctx context.Context, token string, body any) (int, []byte, error) {
+	raw, e := json.Marshal(body)
+	if e != nil {
+		return 0, nil, e
+	}
+	request, e := http.NewRequestWithContext(ctx, http.MethodPost, n.URL+"/api/v1/profiles/view", bytes.NewReader(raw))
+	if e != nil {
+		return 0, nil, e
+	}
+	request.Header.Set("Authorization", "Bearer "+token)
+	request.Header.Set("Content-Type", "application/json")
+	response, e := n.Client.Do(request)
+	if e != nil {
+		return 0, nil, errors.New("profile view route unreachable")
+	}
+	defer response.Body.Close()
+	out, e := io.ReadAll(io.LimitReader(response.Body, 8<<20+1))
+	if e != nil || len(out) > 8<<20 {
+		return response.StatusCode, nil, errors.New("profile view response unreadable")
+	}
+	return response.StatusCode, out, nil
+}
+
+// ReaderScope re-authorizes the fixture reader now (a scope taken before a
+// deletion or a revocation is stale by design).
+func (n *Node) ReaderScope(ctx context.Context) (auth.Scope, error) {
+	return n.App.Auth.Authorize(ctx, n.readerCred, n.Org, []model.ID{n.Project}, auth.Permission("profiles.read"))
+}
+
+// RevokeReaderGrant disables the fixture reader's project grant through the
+// product's own admin command (the reader-grant revocation of C12/C18).
+func (n *Node) RevokeReaderGrant(ctx context.Context) error {
+	var rev model.Revision
+	if e := n.App.Control.View(ctx, func(st model.ControlState) error { rev = st.Revision; return nil }); e != nil {
+		return e
+	}
+	raw, _ := json.Marshal(auth.AdminPayload{UserID: n.user, ProjectID: n.Project, Enabled: false, Reason: "privacy fixture reader revocation"})
+	_, e := n.App.Auth.AdminCommand(ctx, n.actor, auth.AdminCommandRequest{CommandID: model.NewID(), ExpectedRevision: rev, OrgID: n.Org, Kind: "grant", Payload: raw})
+	return e
 }

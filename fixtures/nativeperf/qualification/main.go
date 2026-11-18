@@ -54,11 +54,14 @@ type overheadFixture struct {
 }
 
 type overheadReport struct {
-	KernelBuild string            `json:"kernel_build"`
-	Arch        string            `json:"arch"`
-	FullRun     bool              `json:"full_run_executed"`
-	Command     string            `json:"command"`
-	Fixtures    []overheadFixture `json:"fixtures"`
+	KernelBuild     string            `json:"kernel_build"`
+	Arch            string            `json:"arch"`
+	HostID          string            `json:"host_id"`
+	KernelConfigSHA string            `json:"kernel_config_sha256"`
+	RunDigest       string            `json:"run_digest"`
+	FullRun         bool              `json:"full_run_executed"`
+	Command         string            `json:"command"`
+	Fixtures        []overheadFixture `json:"fixtures"`
 }
 
 type matrixRow struct {
@@ -153,8 +156,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	for _, r := range c.Results {
 		for _, o := range overheads {
-			if o.KernelBuild == r.KernelBuild && o.Arch == r.Arch {
-				mergeOverhead(r, o, m.AdvertisedFixtures)
+			if o.KernelBuild != r.KernelBuild || o.Arch != r.Arch {
+				continue
+			}
+			if problem := mergeOverhead(r, o, m.AdvertisedFixtures); problem != "" {
+				c.Problems = append(c.Problems, r.KernelBuild+"/"+r.Arch+": overhead report not bound to this result: "+problem)
 			}
 		}
 		for _, p := range qual.ReleaseProblems(r) {
@@ -244,17 +250,28 @@ func run(args []string, stdout, stderr io.Writer) int {
 	return qual.ExitOK
 }
 
-// mergeOverhead folds a measured overhead report into the acceptance result of
-// the same kernel and architecture. The Overhead row is supported only when the
-// FULL approved run (120 s x 5 repeats) was executed and every advertised
-// fixture met both budgets; a reduced run keeps its measured numbers but is
-// never promoted. A failed budget fails the row (and Memory), as measured.
-func mergeOverhead(r *qual.QualificationResult, o overheadReport, advertised []string) {
-	detail := map[string]any{"command": o.Command, "full_run_executed": o.FullRun, "fixtures": o.Fixtures}
+// mergeOverhead folds a measured overhead report into the acceptance result it is bound to (same host identity, kernel
+// build pin and run digest; otherwise it returns why and changes nothing). The Overhead row is supported only when the
+// FULL approved run (120 s x 5 repeats) is what the report's fixtures measured; the report's own full_run_executed is not
+// trusted. A reduced run keeps its measured numbers but is never promoted. A failed budget fails the row (and Memory),
+// as measured.
+func mergeOverhead(r *qual.QualificationResult, o overheadReport, advertised []string) string {
+	if problem := overheadUnbound(r, o); problem != "" {
+		return problem
+	}
 	byName := map[string]overheadFixture{}
 	for _, f := range o.Fixtures {
 		byName[f.Fixture] = f
 	}
+	// The full run is what the fixtures measured (120 s x 5 repeats, none marked reduced), never the report's own flag.
+	fullRun := len(advertised) > 0
+	for _, name := range advertised {
+		f, ok := byName[name]
+		if !ok || f.Seconds < fullRunSeconds || f.Repeats < fullRunRepeats || f.Reduced {
+			fullRun = false
+		}
+	}
+	detail := map[string]any{"command": o.Command, "full_run_executed": fullRun, "full_run_reported": o.FullRun, "host_id": o.HostID, "kernel_config_sha256": o.KernelConfigSHA, "run_digest": o.RunDigest, "fixtures": o.Fixtures}
 	var failures, evidence []string
 	for _, name := range advertised {
 		f, ok := byName[name]
@@ -275,9 +292,39 @@ func mergeOverhead(r *qual.QualificationResult, o overheadReport, advertised []s
 				r.Memory = qual.Failed(fmt.Sprintf("fixture %s: combined helper+client+ring memory %d bytes exceeds the 64 MiB budget", f.Fixture, f.MemoryBytes), r.Memory.Detail)
 			}
 		}
-	case !o.FullRun:
+	case !fullRun:
 		r.Overhead = qual.Row{State: qual.StateUnqualified, Reason: "reduced_run_only: the budgets held in the measured reduced run but the approved 120 s x 5 repeats run was not executed; " + strings.Join(evidence, "; "), Detail: detail}
 	default:
 		r.Overhead = qual.Supported(evidence, detail)
 	}
+	return ""
+}
+
+// The approved full overhead run (task 04.09): 120 s per run, 5 baseline/capture pairs.
+const (
+	fullRunSeconds = 120
+	fullRunRepeats = 5
+)
+
+// overheadDigest recomputes the run digest the overhead runner wrote (qual.OverheadRunDigest) from the report's own fields.
+func overheadDigest(o overheadReport) string {
+	fixtures := make([]qual.OverheadDigestFixture, 0, len(o.Fixtures))
+	for _, f := range o.Fixtures {
+		fixtures = append(fixtures, qual.OverheadDigestFixture{Name: f.Fixture, Seconds: f.Seconds, Repeats: f.Repeats, Reduced: f.Reduced, OverheadPct: f.OverheadPct, ThroughputPct: f.ThroughputPct, CollectorPct: f.CollectorPct, MemoryBytes: f.MemoryBytes})
+	}
+	return qual.OverheadRunDigest(o.HostID, o.KernelBuild, o.KernelConfigSHA, o.Arch, o.Command, fixtures)
+}
+
+// overheadUnbound says why an overhead report is not the measurement of this acceptance result ("" when it is): the same
+// host, the same kernel build and config pin, and a run digest that matches the report's own numbers.
+func overheadUnbound(r *qual.QualificationResult, o overheadReport) string {
+	switch {
+	case o.HostID == "" || o.HostID != r.HostID:
+		return "host identity differs or is missing"
+	case o.KernelConfigSHA == "" || o.KernelConfigSHA != r.KernelConfig.SHA256:
+		return "kernel build pin (config digest) differs or is missing"
+	case o.RunDigest == "" || o.RunDigest != overheadDigest(o):
+		return "run digest is missing or does not match the report's content"
+	}
+	return ""
 }

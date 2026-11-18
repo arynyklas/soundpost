@@ -97,7 +97,7 @@ func main() {
 
 func run(o options) (*qual.QualificationResult, int) {
 	res := &qual.QualificationResult{
-		KernelBuild: qual.KernelRelease(), KernelConfig: qual.ReadKernelConfig(), Arch: qual.GOARCHName(), PolicyRevision: 1,
+		KernelBuild: qual.KernelRelease(), HostID: qual.HostIdentity(), KernelConfig: qual.ReadKernelConfig(), Arch: qual.GOARCHName(), PolicyRevision: 1,
 		RuntimeBuild: map[string]qual.RuntimeBuild{},
 		Commands:     []qual.Command{{Command: o.commandLine, Ran: true}},
 		Evidence:     []qual.EvidenceRef{},

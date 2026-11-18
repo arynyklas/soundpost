@@ -73,6 +73,7 @@ func RunNegativeControls() []NegativeControl {
 		Loss: &nativeperf.LossEvent{Count: 1, Reason: nativeperf.ReasonLoss}}}
 	record("noop_sampler_no_cpu_samples", ErrNoopSampler, negEvidence(noop))
 	record("noop_sampler_trickle", ErrNoopSampler, negEvidence(synthetic[:5]))
+	out = append(out, runSchedulerInjectionControls()...)
 
 	// positive control: jittered, varying, in-target samples must pass.
 	var genuine []nativeperf.SanitizedEvent
