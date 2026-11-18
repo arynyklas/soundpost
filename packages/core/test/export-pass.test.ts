@@ -7,7 +7,8 @@
 import {test,expect} from "bun:test";
 import {heapStats} from "bun:jsc";
 import type {SignedPolicy} from "../src/types.ts";
-import {Client} from "../src/client.ts";
+import type {Client} from "../src/client.ts";
+import {RuntimeClient} from "../src/runtime_client.ts";
 import {leanSpanPayload,type LiveSpan} from "../src/tracing.ts";
 import type {FrozenBatch,Outcome,ReceiptTransport} from "../src/transport.ts";
 import {config,signed} from "./fixture.ts";
@@ -20,7 +21,7 @@ class Acking implements ReceiptTransport {
  async lookup():Promise<Outcome>{return {kind:"not_found"};}
  close():void{}
 }
-const make=()=>{const transport=new Acking();return {client:new Client({...config(),operations:["op"],dependencies:[],policy:sealed(),transport}),transport};};
+const make=()=>{const transport=new Acking();return {client:new RuntimeClient({...config(),operations:["op"],dependencies:[],policy:sealed(),transport}),transport};};
 /** The queue's protected state, which these tests read and drive directly. */
 interface Internals {entries:unknown[];batches:{batch:FrozenBatch}[];bytes:number;freeze():readonly FrozenBatch[];acknowledgeSignalLosses(batch:FrozenBatch,receipt:Record<string,unknown>):void;remove(batch:FrozenBatch,reason?:string):void}
 const queueOf=(client:Client):Internals=>Reflect.get(client,"delivery") as Internals;

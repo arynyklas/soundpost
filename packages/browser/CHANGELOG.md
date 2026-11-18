@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Core bundle budget restored: the core entry measured 42,239 B gzip (budget 40,960 B, `fixtures/sdk/overhead.mjs --only bundle` on the pinned Bun 1.3.14; 40,184 B at the commit before lane 4 waves 20-27) because the Node/Bun compact span store (`@soundpost/core` `lean_slab.ts`) was reachable from the browser entry through the delivery queue. The core queue no longer carries it (browser spans are serialized when they end, with the same bytes), and the core bundle is now 40,704 B. `test/entries.test.ts` now fails the core entry above 40 KiB and the replay entry above 60 KiB gzip, measured as the qualification row does.
 - Type fix: the SHA-256 round variables in `replay/policy.ts` are annotated `number` (tsc reported TS7022 on the round loop; no behavior change).
 - Replay recorder cost per mutation batch: nodes are sized and canonicalized by the recorder directly (no per-node `JSON.stringify` sizing when the chunk fits, `CanonicalText` for the node array in the hash chain), canonical JSON caches quoted keys and skips an unnecessary sort, SHA-256 reuses one message buffer. Wire bytes and hashes are unchanged (the committed fixtures are byte-identical). Worst per-burst p95 on the real-Chrome spec: 7.2/7.3/6.4 ms -> 4.1/4.7/4.5 ms (budget 5 ms).
 

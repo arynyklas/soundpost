@@ -1,12 +1,48 @@
 // Copyright 2026 Aryn Yklas
 // SPDX-License-Identifier: Apache-2.0
-import {DeliveryQueue,priority,type BatchState,type Entry} from './queue.ts';
+import {DeliveryQueue,priority,LEAN_KIND,RESOURCE_OPEN,type BatchState,type Entry} from './queue.ts';
 import {decimal,unixNano,canonicalId} from './policy.ts';
-import {hashBytes,nativeCanonical} from './routing.ts';
+import {hashBytes,nativeCanonical,routeSlot} from './routing.ts';
 import type {FrozenBatch} from './transport.ts';
 import {object,array,text,parseSafeRecord} from './wire.ts';
-/** The delivery queue plus its encrypted-spool persistence and recovery. It is its own module so a bundle that never has a spool (the browser core entry, which prohibits one) does not carry the recovery code. */
+import {LeanSlab} from './lean_slab.ts';
+import {randomHex,leanSpanLength,type LiveSpan} from './tracing.ts';
+// The fixed text before a span record's payload (its ID, kind and observed_at_ns), whose length a lean span's size adds up instead of building the text.
+const LEAN_HEAD='{"id":"'.length+32+LEAN_KIND.length+'","payload":'.length;
+/** The Node/Bun delivery queue: the base queue plus the compact store of queued lean spans (lean_slab.ts) and the encrypted-spool persistence and recovery. It is its own module so a bundle that never has either (the browser core entry, which prohibits a spool and has no server garbage collector to relieve) does not carry the slab or the recovery code. */
 export class SpoolingDeliveryQueue extends DeliveryQueue {
+ private slab:LeanSlab|undefined;
+ /** The compact store (lean_slab.ts), made when the first span is queued. */
+ protected leanSlab():LeanSlab{return this.slab??=new LeanSlab(this.config.maxRecords??1024);}
+ protected override store(span:LiveSpan):number{return this.leanSlab().put(span);}
+ protected override dropped(entry:Entry):void{if(entry.lazy>=0){this.leanSlab().release(entry.lazy);entry.lazy=-1;}}
+ /** Enqueues an ended lean span without serializing it: the span is copied into the compact store and released, the entry keeps the exact serialized size, and the record ID, text and route slot are produced when the batch is frozen. The bytes and slot match `enqueue` of the same record (pinned by a differential test). */
+ override enqueueLeanSpan(span:LiveSpan,policyRevision:string):boolean{
+  if(this.closed||this.closing&&!this.recovering&&!this.materializingLoss){this.loss("closed");return false;}this.expire();
+  if(!this.recovering&&policyRevision!==this.descriptor.policy_revision)throw Error('policy revision mismatch');
+  return this.place("span","","",LEAN_HEAD+span.startWall.length+leanSpanLength(span)+RESOURCE_OPEN.length+this.resourceBytes+1,-1,span);
+ }
+ /** Builds a lean span's batch form (record ID, wire text, route slot) from the compact store; the entry keeps its slot until the record is frozen into a batch or its safe text is wanted. The size was computed exactly when the span was queued; if it ever differed, the accounting follows the real size and the mismatch is counted. The safe text (spool snapshots, records()) is not built here: a frozen batch never needs it. */
+ protected materializeWire(entry:Entry):void{
+  const slab=this.leanSlab(),at=entry.lazy;
+  const wall=slab.startWall(at),head='{"id":"'+randomHex(16)+LEAN_KIND+wall+'","payload":'+slab.payload(at,wall);
+  entry.wire=head+RESOURCE_OPEN+this.resourceText+'}';
+  slab.writeTraceId(at,this.spanRouteTail);entry.slot=routeSlot(this.spanRoute);
+  const bytes=head.length+RESOURCE_OPEN.length+this.resourceBytes+1;
+  if(bytes!==entry.wireBytes){const size=bytes+512;this.bytes+=size-entry.size;entry.size=size;entry.wireBytes=bytes;this.loss("span_size_mismatch");}
+ }
+ /** Serializes a lean span's entry completely (safe text and batch form); the span's slot in the compact store is released. */
+ protected materialize(entry:Entry):void{
+  if(entry.lazy<0)return;
+  if(entry.wire==='')this.materializeWire(entry);
+  const wire=entry.wire;entry.text=wire.slice(0,wire.length-RESOURCE_OPEN.length-this.resourceText.length-1)+',"policy_revision":"'+this.descriptor.policy_revision+'"}';
+  this.dropped(entry);
+ }
+ protected override materializeAll():void{for(const entry of this.entries)if(entry.lazy>=0)this.materialize(entry);}
+ protected override materializeWires(end:number):boolean{
+  for(const entry of this.entries)if(entry.lazy>=0&&entry.wire===''){this.materializeWire(entry);if(performance.now()>=end)return false;}
+  return true;
+ }
  protected override spoolSupported():boolean{return true;}
  private restoreSignalLosses(value:Record<string,unknown>):void{
   this.lossBuckets.clear();for(const raw of array(value.loss_buckets)){const b=object(raw),epoch=canonicalId(b.producer_epoch),signal=text(b.signal),reason=text(b.reason),revision=decimal(b.policy_revision);if(!this.validSignalLoss(signal,reason))throw Error("invalid native loss state");const observed=BigInt(decimal(b.observed_count)),acked=BigInt(decimal(b.acknowledged_count)),unbatched=BigInt(decimal(b.unbatched_count));if(acked>observed||unbatched>observed-acked||typeof b.wall!=="number"||!Number.isSafeInteger(b.wall))throw Error("invalid native loss state");if(observed===acked&&unbatched===0n)continue;const start=b.start_ns===null?null:unixNano(b.start_ns),end=b.end_ns===null?null:unixNano(b.end_ns);if(unbatched>0n&&(start===null||end===null||BigInt(end)<BigInt(start)))throw Error("invalid native loss interval");const key=this.lossKey(epoch,signal,reason);if(this.lossBuckets.has(key)||this.bytes+512>(this.config.maxBytes??2097152))throw Error("native loss capacity exceeded");this.lossBuckets.set(key,{epoch,signal,reason,revision,observed,acked,unbatched,start,end,wall:b.wall,at:this.now()-(Date.now()-b.wall)});this.bytes+=512;}

@@ -1,13 +1,12 @@
 // Copyright 2026 Aryn Yklas
 // SPDX-License-Identifier: Apache-2.0
 import type {Config,FlushReport,RoutingDescriptor,ExportContext} from './types.ts';
-import {randomHex,leanSpanLength,leanSpanPayload,type LiveSpan} from './tracing.ts';
+import {randomHex,leanSpanPayload,type LiveSpan} from './tracing.ts';
 import {decimal,unixNano,canonicalId,utf8Size,compareNano} from './policy.ts';
 import {hashBytes,nativeCanonical,resourceWire,routeRecord,routeSlot,validateDescriptor,kinds} from './routing.ts';
 import {verifyReceipt,type FrozenBatch,type ReceiptTransport,type Outcome} from './transport.ts';
 import type {EncryptedSpool} from './spool.ts';
 import {object,array,text,parseSafeRecord,strippedFields,type NativeRecord} from './wire.ts';
-import {LeanSlab} from './lean_slab.ts';
 export type Entry={text:string;wire:string;wireBytes:number;size:number;at:number;wall:number;kind:string;slot:number;lazy:number;batch?:string;position?:number;lossKey?:string;lossCount?:bigint};
 export type BatchState={batch:FrozenBatch;ambiguous:boolean;attempt:number;next:number;rank:number};
 type LossBucket={epoch:string;signal:string;reason:string;revision:string;observed:bigint;acked:bigint;unbatched:bigint;start:string|null;end:string|null;at:number;wall:number};
@@ -15,8 +14,8 @@ export function retryDelay(attempt:number,random:()=>number=Math.random):number{
 const routeEncoder=new TextEncoder();
 const id=():string=>randomHex(16);
 export const priority=(kind:string):number=>{switch(kind){case 'error':case 'condition':case 'capability':case 'loss':case 'job_attempt':return 2;case 'log':return 1;default:return 0;}};
-// The fixed parts of a span record's serialization (id, kind and observed_at_ns before the payload, the resource after it), whose lengths the lean path adds up instead of building the text.
-const LEAN_KIND='","kind":"span","observed_at_ns":"',RESOURCE_OPEN=',"resource":',LEAN_HEAD='{"id":"'.length+32+LEAN_KIND.length+'","payload":'.length;
+// The fixed parts of a span record's serialization (id, kind and observed_at_ns before the payload, the resource after it).
+export const LEAN_KIND='","kind":"span","observed_at_ns":"',RESOURCE_OPEN=',"resource":';
 // A flush works for at most SLICE_MS at a time and then gives the event loop a turn, so a host serving requests is never stalled for the whole flush.
 const SLICE_MS=0.5;
 const immediate:((callback:()=>void)=>unknown)|undefined=Reflect.get(globalThis,'setImmediate');
@@ -55,33 +54,20 @@ export class DeliveryQueue {
   const wire=head+',"resource":'+this.resourceText+'}';
   return {safe:head+',"policy_revision":'+JSON.stringify(parsed.policy_revision)+'}',wire,bytes:utf8Size(wire)};
  }
- private slabStore:LeanSlab|undefined;
- protected leanSlab():LeanSlab{return this.slabStore??=new LeanSlab(this.config.maxRecords??1024);}
+ /** The compact-store hooks of queued lean spans (lean_slab.ts), which only the Node/Bun queue (SpoolingDeliveryQueue, through RuntimeClient) implements: it relieves a server's garbage collector, which a browser tab's few spans do not need, and it is its own module so the browser core bundle does not carry it. Without a store, `store` takes no span (-1) and `place` serializes the span at once. */
+ protected store(span:LiveSpan):number{return -1;}
  /** Gives back what a dropped, evicted, expired or frozen entry holds in the compact store. */
- protected dropped(entry:Entry):void{if(entry.lazy>=0){this.slabStore!.release(entry.lazy);entry.lazy=-1;}}
- /** A lean span serialized at once (its store was full): the record ID, both texts and the route slot, from the span itself. */
+ protected dropped(entry:Entry):void{}
+ /** A lean span serialized at once (this queue has no compact store, or its store was full): the record ID, both texts and the route slot, from the span itself. */
  private serializeSpan(span:LiveSpan):{text:string;wire:string;slot:number;bytes:number}{
   const head='{"id":"'+id()+LEAN_KIND+span.startWall+'","payload":'+leanSpanPayload(span);
   routeEncoder.encodeInto(span.context.traceId,this.spanRouteTail);
   return {text:head+',"policy_revision":"'+this.descriptor.policy_revision+'"}',wire:head+RESOURCE_OPEN+this.resourceText+'}',slot:routeSlot(this.spanRoute),bytes:head.length+RESOURCE_OPEN.length+this.resourceBytes+1};
  }
- /** Builds a lean span's batch form (record ID, wire text, route slot) from the compact store; the entry keeps its slot until the record is frozen into a batch or its safe text is wanted. The size was computed exactly when the span was queued; if it ever differed, the accounting follows the real size and the mismatch is counted. The safe text (spool snapshots, records()) is not built here: a frozen batch never needs it. */
- protected materializeWire(entry:Entry):void{
-  const slab=this.leanSlab(),at=entry.lazy;
-  const wall=slab.startWall(at),head='{"id":"'+id()+LEAN_KIND+wall+'","payload":'+slab.payload(at,wall);
-  entry.wire=head+RESOURCE_OPEN+this.resourceText+'}';
-  slab.writeTraceId(at,this.spanRouteTail);entry.slot=routeSlot(this.spanRoute);
-  const bytes=head.length+RESOURCE_OPEN.length+this.resourceBytes+1;
-  if(bytes!==entry.wireBytes){const size=bytes+512;this.bytes+=size-entry.size;entry.size=size;entry.wireBytes=bytes;this.loss("span_size_mismatch");}
- }
- /** Serializes a lean span's entry completely (safe text and batch form); the span's slot in the compact store is released. */
- protected materialize(entry:Entry):void{
-  if(entry.lazy<0)return;
-  if(entry.wire==='')this.materializeWire(entry);
-  const wire=entry.wire;entry.text=wire.slice(0,wire.length-RESOURCE_OPEN.length-this.resourceText.length-1)+',"policy_revision":"'+this.descriptor.policy_revision+'"}';
-  this.dropped(entry);
- }
- protected materializeAll():void{for(const entry of this.entries)if(entry.lazy>=0)this.materialize(entry);}
+ /** Builds the batch form of every queued lean span that has none yet, stopping once performance.now() reaches `end`; false when it stopped early. Nothing to do without a compact store. */
+ protected materializeWires(end:number):boolean{return true;}
+ /** Serializes every lean span still in the compact store completely (safe text and batch form). Nothing to do without one. */
+ protected materializeAll():void{}
  protected lossKey(epoch:string,signal:string,reason:string):string{return epoch+":"+signal+":"+reason;}
  protected validSignalLoss(signal:string,reason:string):boolean{return kinds.some(kind=>kind===signal)&&signal!=="loss"&&["queue_full","expired","policy","unsupported","ring_overflow","reorder_gap","transport","shutdown","truncated"].includes(reason);}
  recordSignalLoss(signal:string,reason:string,count:bigint,atNs:string):boolean{
@@ -151,11 +137,12 @@ export class DeliveryQueue {
   const wire=text.slice(0,text.length-tail.length)+',"resource":'+this.resourceText+'}';
   return {safe:text,wire,bytes:utf8Size(wire)};
  }
- /** Enqueues an ended lean span (see LiveSpan) without serializing it: the span is copied into the queue's compact store (lean_slab.ts) and released, the entry keeps the exact serialized size, and the record ID, text, route slot are produced when the batch is frozen. The bytes and slot match `enqueue` of the same record (pinned by a differential test). Only the span recorder reaches this. */
+ /** Enqueues an ended lean span (see LiveSpan) as `enqueue` would its record: serialized now. The Node/Bun queue (SpoolingDeliveryQueue) overrides this to copy the span into its compact store and serialize it when the batch is frozen. The bytes and slot are the same either way (pinned by a differential test). Only the span recorder reaches this. */
  enqueueLeanSpan(span:LiveSpan,policyRevision:string):boolean{
   if(this.closed||this.closing&&!this.recovering&&!this.materializingLoss){this.loss("closed");return false;}this.expire();
   if(!this.recovering&&policyRevision!==this.descriptor.policy_revision)throw Error('policy revision mismatch');
-  return this.place("span","","",LEAN_HEAD+span.startWall.length+leanSpanLength(span)+RESOURCE_OPEN.length+this.resourceBytes+1,-1,span);
+  const made=this.serializeSpan(span);
+  return this.place("span",made.text,made.wire,made.bytes,made.slot);
  }
  protected place(kind:string,safe:string,wire:string,recordBytes:number,slot:number,lazy?:LiveSpan):boolean{
   const size=recordBytes+(kind==="loss"?1024:512);
@@ -166,7 +153,7 @@ export class DeliveryQueue {
   }
   // A lean span is copied into the compact store and the span itself is released; only if the store cannot take it (no free slot, vocabulary table full) is it serialized at once.
   let handle=-1;
-  if(lazy!==undefined){handle=this.leanSlab().put(lazy);if(handle<0){const made=this.serializeSpan(lazy);safe=made.text;wire=made.wire;slot=made.slot;if(made.bytes!==recordBytes){recordBytes=made.bytes;this.loss("span_size_mismatch");}}}
+  if(lazy!==undefined){handle=this.store(lazy);if(handle<0){const made=this.serializeSpan(lazy);safe=made.text;wire=made.wire;slot=made.slot;if(made.bytes!==recordBytes){recordBytes=made.bytes;this.loss("span_size_mismatch");}}}
   const at=this.now();this.entries.push({text:safe,wire,wireBytes:recordBytes,size:recordBytes+(kind==="loss"?1024:512),at,wall:Date.now(),kind,slot,lazy:handle});if(at<this.oldest)this.oldest=at;if(this.evictable)this.evictable[priority(kind)]!++;this.bytes+=size;if(this.spool&&!this.recovering&&!this.materializingLoss)void this.recoverOnce().then(()=>this.persist()).catch(()=>{this.counts.spool_failed=(this.counts.spool_failed??0)+1;});return true;
  }
  freeze():readonly FrozenBatch[]{this.freezeSome(Infinity);return Object.freeze(this.batches.map(s=>s.batch));}
@@ -175,7 +162,7 @@ export class DeliveryQueue {
   const end=performance.now()+budgetMs;
   this.expire();
   this.expireSignalLosses();this.materializeSignalLosses();
-  for(const entry of this.entries)if(entry.lazy>=0&&entry.wire===''){this.materializeWire(entry);if(performance.now()>=end)return false;}
+  if(!this.materializeWires(end))return false;
   const bySlot=new Map<number,Entry[]>();
   for(const entry of this.entries)if(!entry.batch){const list=bySlot.get(entry.slot);if(list)list.push(entry);else bySlot.set(entry.slot,[entry]);}
   for(let slot=0;slot<64;slot++){
