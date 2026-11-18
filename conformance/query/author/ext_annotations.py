@@ -27,6 +27,9 @@ SNAN = "7ff0000000000001"
 STALE = "7ff0000000000002"
 
 ROWS = []  # (short, query, series, profiles, enabled, kind, grid)
+# Shorts of instant rows whose reference result order is unspecified (count_values emits its groups in Go
+# map-iteration order, promql/engine.go aggregationCountValues in both pins): compared as a set.
+UNORDERED = set()
 
 
 def R(short, query, ser, profiles=BOTH, enabled=(), kind="instant", **grid):
@@ -84,6 +87,53 @@ R("agg/sum-by-two-groups", "sum by (job) (nanp)",
 # nested aggregation: payloads flow through two levels
 R("agg/sum-of-sum", "sum(sum by (job) (nanp))",
   group("nanp", [N1, N2], job="g1") + [series("nanp", [fb(15, N3)], i="c", job="g2"), series("nanp", [fb(15, N4)], i="d", job="g2")])
+
+# --- count_values over NaN-valued samples ---------------------------------------
+# Every NaN payload renders as the label value "NaN" (strconv.FormatFloat of any NaN, sign included) and
+# counts into one group; stale-marker samples are not selected. A result with two or more groups has an
+# unspecified instant order in the references, so those rows are compared as a set (UNORDERED); range
+# results are sorted by labels and stay compared in order.
+
+
+def count_groups(vals, per_job=1):
+    """Distinct label values count_values renders for one group of inputs (stale markers are dropped)."""
+    keys = set()
+    for v in vals:
+        if v == STALE:
+            continue
+        keys.add("NaN" if isinstance(v, str) else repr(v))
+    return len(keys) * per_job
+
+
+def CV(short, query, ser, groups, **kw):
+    R("agg/" + short, query, ser, **kw)
+    if groups >= 2 and kw.get("kind", "instant") == "instant":
+        UNORDERED.add("agg/" + short)
+
+
+for pk, vals in PAYLOADS.items():
+    g = count_groups(vals)
+    CV("count_values/%s" % pk, 'count_values("v", nanp)', group("nanp", vals), g)
+    CV("count_values-by/%s" % pk, 'count_values by (job) ("v", nanp)', group("nanp", vals, job="g"), g)
+    CV("count_values-without/%s" % pk, 'count_values without (i) ("v", nanp)', group("nanp", vals, job="g"), g)
+    CV("count_values-old-label/%s" % pk, 'count_values("v", nanp)', group("nanp", vals, v="old"), g)
+# payloads split across two job groups: NaN counts per group, and the merged count without grouping
+SPLIT = group("nanp", [N1, N2], job="g1") + [series("nanp", [fb(15, N3)], i="c", job="g2"), series("nanp", [fb(15, 2.0)], i="d", job="g2")]
+CV("count_values-by-two-groups", 'count_values by (job) ("v", nanp)', SPLIT, 3)
+CV("count_values-two-groups-merged", 'count_values("v", nanp)', SPLIT, 2)
+CV("count_values-without-two-groups", 'count_values without (i) ("v", nanp)', SPLIT, 3)
+# label value text of the non-NaN specials next to NaN
+CV("count_values/zero-negzero-nan", 'count_values("v", nanp)', group("nanp", [0.0, -0.0, N1, 1e21, 1e-7]), 5)
+# NaN arithmetic feeds count_values
+CV("count_values/nan-literal-arith", 'count_values("v", nanp + NaN)', group("nanp", [N1, N2, 1.0]), 1)
+CV("count_values/self-sub", 'count_values("v", nanp - nanp)', group("nanp", [N1, 1.0, INF]), 2)
+# range queries: one NaN-valued series set evaluated at several steps (result sorted by labels)
+CV("count_values/range-nan-steps", 'count_values("v", nanp)',
+   [series("nanp", [fb(5, N1), fb(10, 1.0), fb(15, N2)], i="a"), series("nanp", [fb(5, 1.0), fb(10, N1), fb(15, N3)], i="b"),
+    series("nanp", [fb(5, N1), fb(10, N1), fb(15, 1.0)], i="c")], 0, kind="range", start=5, end=15, step=5)
+CV("count_values-by/range-nan-steps", 'count_values by (job) ("v", nanp)',
+   [series("nanp", [fb(5, N1), fb(10, 1.0), fb(15, N2)], i="a", job="x"), series("nanp", [fb(5, 1.0), fb(10, N1), fb(15, N3)], i="b", job="y")],
+   0, kind="range", start=5, end=15, step=5)
 
 # --- NaN payload in range functions (same Kahan step as sum()) ---------------------
 RANGE_FNS = ["sum_over_time", "avg_over_time", "stddev_over_time", "stdvar_over_time", "min_over_time", "max_over_time",
@@ -256,4 +306,7 @@ def build(ctx):
     ctx.declare(FILE, "promql", "evaluation", {"phase": "evaluation"})
     for short, query, ser, profiles, enabled, kind, grid in ROWS:
         for p in profiles:
-            ctx.put(FILE, row("%s/wave6/%s" % (p, short), p, query, ser, enabled=enabled, kind=kind, **grid))
+            r = row("%s/wave6/%s" % (p, short), p, query, ser, enabled=enabled, kind=kind, **grid)
+            if short in UNORDERED:
+                r["unordered_vector"] = True
+            ctx.put(FILE, r)

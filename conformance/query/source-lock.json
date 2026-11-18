@@ -300,7 +300,7 @@
     "acceptance.json": "8fa1b72ba378df87c8e542805474062c0365fb3149991f3c622e44c92439f2a7",
     "cases/promql-extended-histograms.json": "da63524dde52fd104c260f68af4c6e965eb0d9b43c1ceb4f9359bcfb1250cafc",
     "cases/promql-wave6-regex-utf8-syntax.json": "8523e29992d36d66fd3aa5afd2986f3abfbc091c2bac8ef3d9f637699c2150a0",
-    "cases/promql-wave6-annotations-nan.json": "d75ae99d3056cd14fbe8090b43ed41569e67b0817e4b7ea5a8598cf583d8387a",
+    "cases/promql-wave6-annotations-nan.json": "442c35b3e3780adb44cbe834f2554648e68f4f57f22aad44e44c8c60682231ff",
     "cases/promql-wave6-regex-utf8.json": "15816d1cfe5567b13c6fda3b7acc4f86075957e40e86085a07dd0057772e423e",
     "cases/release-configuration.json": "39997c81a11a7e9ba506e316a0a2194bdf3192a57596e12449b7d7a4ba5e1148",
     "cases/logql-wave2-divergences.json": "67d7115c64d9cffbcb29193c285ea68ae9b0910fd25149ca7c41064274ad6283",

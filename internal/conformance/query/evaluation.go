@@ -27,19 +27,26 @@ import (
 // EvaluationCase is independently authored fixture input, not a stored oracle
 // answer. Durations and timestamps use canonical decimal nanosecond strings.
 // Float and histogram variants are mutually exclusive, including zero floats.
+//
+// UnorderedVector is a comparison marker, never sent to a reference: it is set
+// only on instant rows whose reference result order is unspecified (count_values
+// emits its groups in Go map-iteration order in both pinned engines). The
+// vector is then compared as a multiset of exact series; labels, sample values
+// and the number of series stay exact, only their order is free.
 type EvaluationCase struct {
-	ID           string             `json:"id"`
-	Profiles     []string           `json:"profiles"`
-	Enabled      []string           `json:"enabled_features"`
-	Query        string             `json:"query"`
-	Kind         string             `json:"kind"`
-	Time         model.UnixNano     `json:"time,omitempty"`
-	Start        model.UnixNano     `json:"start,omitempty"`
-	End          model.UnixNano     `json:"end,omitempty"`
-	Step         int64              `json:"step,string,omitempty"`
-	Lookback     int64              `json:"lookback_ns,string,omitempty"`
-	SubqueryStep int64              `json:"subquery_step_ns,string,omitempty"`
-	Series       []EvaluationSeries `json:"series"`
+	ID              string             `json:"id"`
+	Profiles        []string           `json:"profiles"`
+	Enabled         []string           `json:"enabled_features"`
+	Query           string             `json:"query"`
+	Kind            string             `json:"kind"`
+	Time            model.UnixNano     `json:"time,omitempty"`
+	Start           model.UnixNano     `json:"start,omitempty"`
+	End             model.UnixNano     `json:"end,omitempty"`
+	Step            int64              `json:"step,string,omitempty"`
+	Lookback        int64              `json:"lookback_ns,string,omitempty"`
+	SubqueryStep    int64              `json:"subquery_step_ns,string,omitempty"`
+	UnorderedVector bool               `json:"unordered_vector,omitempty"`
+	Series          []EvaluationSeries `json:"series"`
 }
 type EvaluationSample struct {
 	Time           model.UnixNano         `json:"time"`
@@ -137,6 +144,57 @@ type evaluationInput struct {
 
 var evaluationProject = model.ID{15: 1}
 
+// validateUnorderedVector refuses the unordered_vector marker unless the parsed
+// query's top-level operation (parentheses aside) is count_values, and refuses
+// every explicitly ordered or selecting operation anywhere in the expression: a
+// row whose order is specified or whose selection depends on order must never
+// get order freedom.
+func validateUnorderedVector(c EvaluationCase, p profile.Profile) error {
+	if !c.UnorderedVector {
+		return nil
+	}
+	tree, err := promql.Parse(c.Query, p)
+	if err != nil {
+		return fmt.Errorf("%s: unordered_vector on an unparsable query: %w", c.ID, err)
+	}
+	root := tree
+	for {
+		n, ok := root.(*promql.Node)
+		if !ok || n.Kind != "paren" || len(n.Children) != 1 {
+			break
+		}
+		root = n.Children[0]
+	}
+	if n, ok := root.(*promql.Node); !ok || n.Kind != "aggregate" || n.Text != "count_values" {
+		return fmt.Errorf("%s: unordered_vector requires a top-level count_values", c.ID)
+	}
+	forbidden := map[string]bool{"sort": true, "sort_desc": true, "sort_by_label": true, "sort_by_label_desc": true, "topk": true, "bottomk": true, "limitk": true, "limit_ratio": true}
+	var walk func(e promql.Expr) error
+	walk = func(e promql.Expr) error {
+		n, ok := e.(*promql.Node)
+		if !ok || n == nil {
+			return nil
+		}
+		if (n.Kind == "call" || n.Kind == "aggregate" || n.Kind == "duration_call") && forbidden[n.Text] {
+			return fmt.Errorf("%s: unordered_vector refused, %s orders or selects by order", c.ID, n.Text)
+		}
+		for _, ch := range n.Children {
+			if err := walk(ch); err != nil {
+				return err
+			}
+		}
+		for _, ch := range []promql.Expr{n.RangeExpr, n.StepExpr, n.OffsetExpr} {
+			if ch != nil {
+				if err := walk(ch); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+	return walk(tree)
+}
+
 func validateEvaluationCase(c EvaluationCase) error {
 	if c.ID == "" || len(c.Profiles) == 0 || c.Query == "" {
 		return fmt.Errorf("unscoped or empty evaluation case")
@@ -149,6 +207,9 @@ func validateEvaluationCase(c EvaluationCase) error {
 	}
 	if c.Lookback < 0 || c.SubqueryStep < 0 {
 		return fmt.Errorf("negative evaluation duration")
+	}
+	if c.UnorderedVector && c.Kind != "instant" {
+		return fmt.Errorf("unordered_vector applies only to instant rows: %s", c.ID)
 	}
 	projects := map[model.ID]bool{}
 	for _, s := range c.Series {
@@ -331,6 +392,56 @@ func evaluationSample(s value.Sample) EvaluationSample {
 // genuine native positions remain strict. Input-only ST proof is separate from
 // nonexistent native output ST; its actual function consequences stay exact.
 func CompareEvaluation(want, got EvaluationObservation) []Mismatch {
+	return compareEvaluation(want, got, false)
+}
+
+// CompareEvaluationCase is CompareEvaluation with the ordering freedom the case
+// declares: for an instant row marked UnorderedVector the vectors are compared
+// as multisets of exact series (see EvaluationCase); every other field, and
+// every row that is not marked, stays exact including order.
+func CompareEvaluationCase(c EvaluationCase, want, got EvaluationObservation) []Mismatch {
+	return compareEvaluation(want, got, c.UnorderedVector && c.Kind == "instant")
+}
+
+// canonicalEvaluationSeries returns a copy of the series in a canonical order, so
+// two vectors holding the same multiset of exact series compare equal.
+func canonicalEvaluationSeries(in []EvaluationSeries) []EvaluationSeries {
+	if len(in) == 0 {
+		return in
+	}
+	type keyed struct {
+		key    string
+		series EvaluationSeries
+	}
+	rows := make([]keyed, len(in))
+	for i, s := range in {
+		raw, err := json.Marshal(s)
+		if err != nil {
+			raw = []byte(fmt.Sprintf("%#v", s))
+		}
+		rows[i] = keyed{string(raw), s}
+	}
+	sort.SliceStable(rows, func(i, j int) bool { return rows[i].key < rows[j].key })
+	out := make([]EvaluationSeries, len(in))
+	for i, r := range rows {
+		out[i] = r.series
+	}
+	return out
+}
+
+// withoutComparisonMarkers returns the cases as a reference receives them: the
+// comparison-only markers are dropped, so a pinned reference image never sees a
+// field it does not know.
+func withoutComparisonMarkers(in []EvaluationCase) []EvaluationCase {
+	out := make([]EvaluationCase, len(in))
+	for i, c := range in {
+		c.UnorderedVector = false
+		out[i] = c
+	}
+	return out
+}
+
+func compareEvaluation(want, got EvaluationObservation, unorderedVector bool) []Mismatch {
 	var out []Mismatch
 	add := func(field string, a, b any) {
 		if !reflect.DeepEqual(a, b) {
@@ -340,7 +451,11 @@ func CompareEvaluation(want, got EvaluationObservation) []Mismatch {
 	add("id", want.ID, got.ID)
 	add("type", want.Type, got.Type)
 	add("string", want.String, got.String)
-	add("series", projectEvaluationSeriesHistograms(want.Series), projectEvaluationSeriesHistograms(got.Series))
+	wantSeries, gotSeries := projectEvaluationSeriesHistograms(want.Series), projectEvaluationSeriesHistograms(got.Series)
+	if unorderedVector && want.Type == "vector" && got.Type == "vector" {
+		wantSeries, gotSeries = canonicalEvaluationSeries(wantSeries), canonicalEvaluationSeries(gotSeries)
+	}
+	add("series", wantSeries, gotSeries)
 	add("complete", want.Complete, got.Complete)
 	add("partial", want.Partial, got.Partial)
 	add("watermarks", want.Watermarks, got.Watermarks)

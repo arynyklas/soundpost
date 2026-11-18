@@ -34,8 +34,27 @@ func TestOwnedMatchesRecordedNativeAnnotationAndNaNObservations(t *testing.T) {
 	if err = json.Unmarshal(raw, &f); err != nil {
 		t.Fatal(err)
 	}
-	if len(f.Rows) < 1264 {
+	if len(f.Rows) < 1440 {
 		t.Fatalf("recorded annotation and NaN observations shrank to %d rows", len(f.Rows))
+	}
+	// The count_values rows over NaN-valued samples must stay: 88 rows per pin, none dropped.
+	countValues := map[string]int{}
+	for _, row := range f.Rows {
+		if !strings.Contains(row.Case.Query, "count_values") {
+			continue
+		}
+		countValues[row.Profile]++
+		// A reference vector with two or more count_values groups has an unspecified order and the case
+		// must say so; a single group, an empty result or a range result is compared exactly in order.
+		wantMarker := row.Case.Kind == "instant" && len(row.Reference.Series) >= 2
+		if row.Case.UnorderedVector != wantMarker {
+			t.Errorf("%s: unordered_vector=%v, reference holds %d series (%s)", row.Case.ID, row.Case.UnorderedVector, len(row.Reference.Series), row.Case.Kind)
+		}
+	}
+	for _, id := range []string{"promql-prometheus-3.1.0", "promql-prometheus-3.13.5"} {
+		if countValues[id] < 88 {
+			t.Fatalf("recorded count_values NaN rows for %s shrank to %d", id, countValues[id])
+		}
 	}
 	registry, err := profile.Load(os.DirFS("../../../profiles/query"))
 	if err != nil {
@@ -62,11 +81,14 @@ func TestOwnedMatchesRecordedNativeAnnotationAndNaNObservations(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if err := validateUnorderedVector(row.Case, p); err != nil {
+				t.Fatal(err)
+			}
 			owned, err := observeOwnedEvaluation(context.Background(), row.Case, p)
 			if err != nil {
 				t.Fatalf("owned observation failed: %v", err)
 			}
-			if diff := CompareEvaluation(row.Reference, owned); len(diff) != 0 {
+			if diff := CompareEvaluationCase(row.Case, row.Reference, owned); len(diff) != 0 {
 				t.Fatalf("owned differs from recorded native observation: %#v\nquery: %s", diff, row.Case.Query)
 			}
 		})

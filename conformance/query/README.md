@@ -51,6 +51,17 @@ key to one of the labels in Go map-iteration order. Repeated native runs return
 both assignments. Soundpost resolves this deterministically: the first
 requesting label in request order owns the key. Such rows are not in the corpus.
 
+An instant `count_values` result with two or more groups has no order in the pinned
+PromQL references either: `aggregationCountValues` collects the groups in a Go map and
+emits them in iteration order (`promql/engine.go` in Prometheus 3.1.0 lines 3365-3402 and
+3.13.5 lines 4183-4220; the instant path keeps that order, `rangeEval` "shortcut so as not
+to change sort order", 3.1.0:1265 / 3.13.5:1537). Such rows stay in the corpus and carry
+`"unordered_vector": true`: the evaluation phase compares the instant vector as a multiset
+of exact series, so a wrong label text, count, value or number of series still fails, and
+only the order is free. The marker is comparison-only and is stripped before the case is
+sent to a reference; it is rejected on range rows (range results are sorted by labels,
+`sortMatrixResult`, and stay compared in order). Every other row compares order exactly.
+
 ## Rebuilding the oracles
 
 The oracle images embed the driver and the `soundpost-querycheck` adapter and

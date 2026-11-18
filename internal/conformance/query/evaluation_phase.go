@@ -122,6 +122,9 @@ func prepareEvaluationGroups(cases []EvaluationCase, profilesPath string, source
 				group = &evaluationGroup{p: selected, source: source}
 				groups[key] = group
 			}
+			if err = validateUnorderedVector(c, group.p); err != nil {
+				return nil, err
+			}
 			group.cases = append(group.cases, c)
 		}
 	}
@@ -154,7 +157,7 @@ func evaluationDuration(p profile.Profile, key string) (int64, error) {
 func RunEvaluationPhase(ctx context.Context, lock SourceLock, casesPaths []string, profilesPath, runtime string) (EvaluationPhaseReport, error) {
 	report := EvaluationPhaseReport{Phase: "evaluation", Normalization: []string{
 		"Reference timestamps use its native millisecond domain (promql/engine.go durationMilliseconds and model/timestamp.FromTime in each exact pin); output is checked integer milliseconds * 1000000. Owned timestamps are never rounded or replaced.",
-		"Reference annotations are a map in util/annotations/annotations.go in both exact pins. Comparison canonicalizes only exported annotation identity, severity and exact position; raw reference text and raw owned safe text/order are retained. No vector/matrix/label/histogram/float reordering or tolerance is permitted.",
+		"Reference annotations are a map in util/annotations/annotations.go in both exact pins. Comparison canonicalizes only exported annotation identity, severity and exact position; raw reference text and raw owned safe text/order are retained. No vector/matrix/label/histogram/float reordering or tolerance is permitted, except that an instant row marked unordered_vector (count_values: promql/engine.go aggregationCountValues emits its groups in Go map-iteration order in both exact pins) compares its vector as a multiset of exact series; labels, values and series count stay exact and the marker is never sent to a reference.",
 		"Optional start_timestamp_ns is exact hash-bound input/C05 metadata; native 3.13 AtST observes its declared millisecond conversion, absent maps only to the upstream zero sentinel. PromQL result Sample has no ST field: reference_start_timestamp_exposed is false, owned raw scan_input_start_timestamps are retained separately, and actual gated function consequences are compared exactly. Observed time is never substituted for start metadata.",
 		"Histogram spans/buckets/custom-bound slices with length zero project nil and allocated-empty forms only. Raw own/reference observations remain unchanged; nonempty layouts, variants, flavor/hints, integer counts/deltas and every FloatBits field remain exact. No union nil/non-nil normalization occurs.",
 		"Native ParseErrors exposes a joint parser/checkAST error class, not an independent syntax/type stage; category_exposed is false there. Stable source-proven semantic families are compared with owned typed LanguageError.Code, raw texts retained without prose parity. Unknown family is a hard mismatch; every valid native start/end range remains exact.",
@@ -202,7 +205,7 @@ func RunEvaluationPhase(ctx context.Context, lock SourceLock, casesPaths []strin
 		if e != nil {
 			return report, e
 		}
-		input := evaluationInput{Profile: group.p.ID, Commit: group.p.Commit, ProfileIdentity: group.p.Identity, FeatureSet: group.p.ActiveFeatureSet.ID, ConfigurationHash: group.p.ConfigurationHash, Enabled: group.p.ActiveFeatureSet.Enabled, Lookback: lookback, SubqueryStep: subquery, Cases: group.cases, Configuration: group.p.Configuration, ManifestVersion: group.p.ManifestVersion}
+		input := evaluationInput{Profile: group.p.ID, Commit: group.p.Commit, ProfileIdentity: group.p.Identity, FeatureSet: group.p.ActiveFeatureSet.ID, ConfigurationHash: group.p.ConfigurationHash, Enabled: group.p.ActiveFeatureSet.Enabled, Lookback: lookback, SubqueryStep: subquery, Cases: withoutComparisonMarkers(group.cases), Configuration: group.p.Configuration, ManifestVersion: group.p.ManifestVersion}
 		payload, e := json.Marshal(adapterInput{Phase: "evaluation", EnabledFeatures: group.p.ActiveFeatureSet.Enabled, Evaluation: &input})
 		if e != nil {
 			return report, e
@@ -228,7 +231,7 @@ func RunEvaluationPhase(ctx context.Context, lock SourceLock, casesPaths []strin
 				return report, fmt.Errorf("%s/%s: %w", group.p.ID, c.ID, e)
 			}
 			reference := actual.Evaluation.Observations[i]
-			comparison := EvaluationCaseComparison{ID: c.ID, Profile: group.p.ID, ProfileIdentity: group.p.Identity, FeatureSet: group.p.ActiveFeatureSet.ID, ConfigurationHash: group.p.ConfigurationHash, ReferenceCompiler: actual.Evaluation.Compiler, ReferenceSourceSHA256: actual.Evaluation.SourceSHA256, Oracle: actual.Oracle, Owned: owned, Reference: reference, Mismatches: CompareEvaluation(reference, owned)}
+			comparison := EvaluationCaseComparison{ID: c.ID, Profile: group.p.ID, ProfileIdentity: group.p.Identity, FeatureSet: group.p.ActiveFeatureSet.ID, ConfigurationHash: group.p.ConfigurationHash, ReferenceCompiler: actual.Evaluation.Compiler, ReferenceSourceSHA256: actual.Evaluation.SourceSHA256, Oracle: actual.Oracle, Owned: owned, Reference: reference, Mismatches: CompareEvaluationCase(c, reference, owned)}
 			report.Compared++
 			if len(comparison.Mismatches) > 0 {
 				report.Failed++
