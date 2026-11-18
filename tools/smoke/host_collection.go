@@ -421,6 +421,7 @@ func RunHostCollection(args []string) (result error) {
 	artifact := flags.String("artifact-dir", "", "sanitized artifact directory")
 	binary := flags.String("agent-binary", "", "optional compiled soundpost-agent to run once as a separate process")
 	unitFile := flags.String("agent-unit", "", "optional shipped deploy/systemd/soundpost-agent.service: run --agent-binary as a systemd service built from it (Linux, user manager)")
+	systemUnit := flags.Bool("agent-system-unit", false, "run --agent-binary as the shipped --agent-unit installed byte for byte into the SYSTEM systemd manager as User=soundpost-agent (root, Linux; installs and removes its own account, paths and unit)")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -898,6 +899,19 @@ func RunHostCollection(args []string) (result error) {
 		}
 	} else {
 		report.NotRun["agent_systemd_unit"] = "no --agent-unit given: the shipped unit was not started under systemd"
+	}
+	if *systemUnit {
+		stage = "hc_agent_system_unit"
+		if *unitFile == "" || *binary == "" {
+			return errors.New("--agent-system-unit needs --agent-unit and --agent-binary")
+		}
+		if runtime.GOOS != "linux" {
+			report.NotRun["agent_systemd_system_unit"] = "not Linux"
+		} else if err := hcAgentSystemUnit(*unitFile, *binary, cfg, node, runID, work, &report); err != nil {
+			return err
+		}
+	} else {
+		report.NotRun["agent_systemd_system_unit"] = "no --agent-system-unit given: the shipped unit was not installed into the system manager"
 	}
 
 	report.Rows["host_os"] = runtime.GOOS + "/" + runtime.GOARCH

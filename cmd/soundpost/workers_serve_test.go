@@ -59,6 +59,27 @@ type webhookPost struct {
 // webhookReceiver is a TLS receiver on a private interface; caPath holds its CA.
 func webhookReceiver(t *testing.T, ip netip.Addr, caPath string) (url string, posts func() []webhookPost) {
 	t.Helper()
+	var mu sync.Mutex
+	var got []webhookPost
+	origin := privateTLSServer(t, ip, caPath, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		got = append(got, webhookPost{header: r.Header.Clone(), body: body})
+		mu.Unlock()
+		w.Header().Set("Soundpost-Receipt-ID", "receiver-receipt-1")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	return origin + "/hook", func() []webhookPost {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]webhookPost(nil), got...)
+	}
+}
+
+// privateTLSServer serves handler over TLS on a private interface, with a leaf signed by a fresh test CA written to
+// caPath, and returns the https origin.
+func privateTLSServer(t *testing.T, ip netip.Addr, caPath string, handler http.Handler) string {
+	t.Helper()
 	caKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	caTemplate := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "soundpost serve test CA"}, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour), IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign}
 	caDER, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, &caKey.PublicKey, caKey)
@@ -79,26 +100,13 @@ func webhookReceiver(t *testing.T, ip netip.Addr, caPath string) (url string, po
 	if err != nil {
 		t.Fatal(err)
 	}
-	var mu sync.Mutex
-	var got []webhookPost
-	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		mu.Lock()
-		got = append(got, webhookPost{header: r.Header.Clone(), body: body})
-		mu.Unlock()
-		w.Header().Set("Soundpost-Receipt-ID", "receiver-receipt-1")
-		w.WriteHeader(http.StatusNoContent)
-	}))
+	server := httptest.NewUnstartedServer(handler)
 	server.Listener.Close()
 	server.Listener = listener
 	server.TLS = &tls.Config{Certificates: []tls.Certificate{{Certificate: [][]byte{leafDER}, PrivateKey: leafKey}}}
 	server.StartTLS()
 	t.Cleanup(server.Close)
-	return "https://" + listener.Addr().String() + "/hook", func() []webhookPost {
-		mu.Lock()
-		defer mu.Unlock()
-		return append([]webhookPost(nil), got...)
-	}
+	return "https://" + listener.Addr().String()
 }
 
 func freePort(t *testing.T) int {

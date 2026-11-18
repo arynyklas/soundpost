@@ -64,11 +64,25 @@ gets `unknown / process_visibility_restricted` and no sample, the namespace's ro
 counts (exempt), and a plain `/proc` counts. Only one uid exists in such a namespace, so
 no foreign process was actually hidden: the mount-option branch is real, the hiding is not.
 
-**Not run:** the system-level unit as installed (`User=soundpost-agent`,
-`/usr/local/bin`, `/etc/soundpost`, `ProtectHome=yes` unchanged) because that
-needs root and the VM allows none (`sudo` asks for a password); a root agent
-with real `CAP_SYS_PTRACE`; `hidepid` hosts with several users; cgroup v1 or hybrid
-hosts (the VM is pure cgroup v2); other kernels, bare metal and containers.
+**Run as the system unit, as root, on a cgroup v1/v2 hybrid host** (07.03-W4;
+Debian 12, kernel 6.1.0-54, systemd 252, `stat -fc %T /sys/fs/cgroup` = `tmpfs`
+with the cgroup2 hierarchy mounted at `/sys/fs/cgroup/unified`): `go run
+./tools/smoke host-collection --agent-binary B --agent-unit
+deploy/systemd/soundpost-agent.service --agent-system-unit` (as root) creates the
+`soundpost-agent` account, installs the shipped unit **byte for byte** into the
+system manager (`User=soundpost-agent`, `/usr/local/bin/soundpost-agent`,
+`/etc/soundpost/agent`, `ProtectHome=yes` unchanged) and removes all of it again;
+it refuses to run when any of those paths or the account already exist. Observed:
+`systemd-analyze verify` no finding, active and running with no restart, the node
+stored the service's host samples through the `LoadCredential=` credential,
+`systemctl show` `User=Group=soundpost-agent` and the main process running as that
+uid (not root), `CapEff`/`CapBnd` zero, `NoNewPrivs` 1, seccomp filter on, a clean
+stop (`Result=success`), exposure 1.8, no credential in the journal. On that host
+the `cgroup` group is a typed `unsupported`/`cgroup_v2_required` capability and no
+sample (`/sys/fs/cgroup` is not a cgroup2 mount there), as the table says.
+
+**Not run:** a root agent with real `CAP_SYS_PTRACE`; `hidepid` hosts with
+several users; other kernels, bare metal and containers.
 
 ## Metric catalogue
 

@@ -185,6 +185,18 @@ duplicate recognised); the same for SMTP (same Message-ID on the retry); and one
 real Bot API message when `SOUNDPOST_TEST_TELEGRAM_TOKEN` and
 `SOUNDPOST_TEST_TELEGRAM_CHAT` are set. Without them that case is reported as
 skipped with the missing names; with `SOUNDPOST_REQUIRE_REAL_TELEGRAM=1` it fails
-loudly. No real Telegram account, public SMTP relay or third-party receiver has
-been called by the committed test runs, and no delivery from a served node to an
-external provider has been exercised.
+loudly.
+
+`TestServeDeliversAConditionToARealTelegramChat` (`cmd/soundpost/serve_telegram_real_test.go`)
+drives the same real-provider path through the served process (the re-executed real
+`main`): an administrator saves a Telegram destination (chat in the configuration, bot
+token as the sealed write-only secret) and an alert rule over the routes, the runner opens
+the condition and sends one Bot API message to `api.telegram.org` under the production
+egress policy, and the test reads the committed delivery record (accepted, one attempt,
+not uncertain, the Bot API `message_id` as provider ID). It needs the same two variables and
+the same skip / `SOUNDPOST_REQUIRE_REAL_TELEGRAM=1` contract; it scrubs the token and chat
+from every failure text. `TestServeDeliversAConditionThroughATelegramBotAPIPeer` runs the
+identical flow against a local TLS Bot API peer on every run. One real run (2026-11-18, a
+disposable bot and a private chat of the owner) was accepted with provider message ID 2876.
+No public SMTP relay or third-party receiver has been called by any test run; the real SMTP
+relay acceptance has not been exercised (no relay account was provided).
