@@ -12,6 +12,10 @@
 // Exit codes: 0 every selected scenario passed; 1 a scenario failed; 2 usage or a safety refusal;
 // 10 no scenario failed but at least one was recorded not_run (a not_run row is never a pass).
 //
+// The node-loss-journeys scenario also takes `--journeys-smoke PATH` (the tools/smoke binary), repeatable `--journeys-arg ARG`
+// (forwarded verbatim to `smoke journeys`: --bun, --node-linux, --python, --chrome, --pg-local, ...) and repeatable
+// `--serve-arg ARG` (added to the `soundpost serve` of every cluster member: --symbolicate-cgroup-root).
+//
 // `drills evidence --scenarios drills/scenarios.yaml --reports <dir> --commit <sha> --out <file>` converts
 // the written reports of the scenarios the manifest tags `evidence: node_loss` into the release gate's
 // node_loss envelope; it never runs a drill and never changes a row's status.
@@ -26,6 +30,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -53,6 +58,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 	binary := f.String("binary", "", "produced static soundpost binary (scenarios that run real nodes)")
 	root := f.String("root", ".", "repository root")
 	manifest := f.String("scenarios", "drills/scenarios.yaml", "scenario manifest with the isolated-target allowlist")
+	smoke := f.String("journeys-smoke", "", "tools/smoke binary (the scenarios that run the reference journeys)")
+	var journeysArgs, serveArgs stringList
+	f.Var(&journeysArgs, "journeys-arg", "flag forwarded verbatim to `smoke journeys`, repeatable")
+	f.Var(&serveArgs, "serve-arg", "extra flag for the `soundpost serve` of every cluster member, repeatable")
+	vmState := f.String("vm-reset-state", "", "persistent state directory of the vm-hard-reset scenario (under an allowlisted data root that survives a reboot)")
+	vmHost := f.String("allow-vm-reset", "", "hostname of the machine the vm-hard-reset scenario may reset (must equal this machine's hostname)")
 	if err := f.Parse(args); err != nil {
 		fmt.Fprintln(stderr, "usage:", err)
 		return 2
@@ -87,7 +98,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	absRoot, _ := filepath.Abs(*root)
 	code := 0
 	for _, name := range names {
-		rep, err := Execute(context.Background(), m, name, *target, absRoot, *binary, *reportDir)
+		rep, err := Execute(context.Background(), m, name, *target, absRoot, *binary, *reportDir, WithJourneys(*smoke, journeysArgs), WithServeArgs(serveArgs), WithVMReset(*vmState, *vmHost))
 		switch {
 		case errors.Is(err, ErrRefused):
 			fmt.Fprintf(stderr, "%s: %v\n", name, err)
@@ -122,6 +133,9 @@ type ScenarioSpec struct {
 	NeedsBinary bool `yaml:"needs_binary"`
 	// Evidence names the release gate report this scenario's result belongs to: `node_loss` or empty.
 	Evidence string `yaml:"evidence"`
+	// OptIn marks a scenario that `--scenario all` does not run: it needs inputs or privileges a plain sweep does not
+	// have (the journeys tools, a machine that may be reset). It runs when it is named, and reports not_run without them.
+	OptIn bool `yaml:"opt_in"`
 }
 
 // Manifest is drills/scenarios.yaml.
@@ -170,11 +184,11 @@ func ParseManifest(raw []byte) (*Manifest, error) {
 	return &m, nil
 }
 
-// Select resolves `all` or one name.
+// Select resolves `all` (every scenario that is not opt-in) or one name (an opt-in scenario is selected only by its name).
 func (m *Manifest) Select(name string) ([]string, error) {
 	var names []string
 	for _, s := range m.Scenarios {
-		if name == "all" || s.Name == name {
+		if name == s.Name || name == "all" && !s.OptIn {
 			names = append(names, s.Name)
 		}
 	}
@@ -316,6 +330,18 @@ type Env struct {
 	Work      string
 	Spec      ScenarioSpec
 	Logf      func(format string, args ...any)
+
+	// ReportDir is where the scenario's report is written; a scenario may keep artifacts of its own beside it.
+	ReportDir string
+	// Smoke is the tools/smoke binary and SmokeArgs the flags forwarded verbatim to `smoke journeys` (--journeys-smoke,
+	// --journeys-arg); only the scenarios that run the reference journeys use them.
+	Smoke     string
+	SmokeArgs []string
+	// ServeArgs are extra flags for the `soundpost serve` of every cluster member (--serve-arg).
+	ServeArgs []string
+	// VMResetState and VMAllowHost are the inputs of the vm-hard-reset scenario (--vm-reset-state, --allow-vm-reset).
+	VMResetState string
+	VMAllowHost  string
 }
 
 // Approve checks a concrete target (directories and loopback addresses) against the allowlist.
@@ -327,9 +353,43 @@ var registry = map[string]func(*Env, *Report) error{}
 
 func register(name string, fn func(*Env, *Report) error) { registry[name] = fn }
 
+// ExecOption supplies an input a scenario needs beyond the produced binary.
+type ExecOption func(*Env)
+
+// WithJourneys supplies the tools/smoke binary and the flags forwarded to `smoke journeys`.
+func WithJourneys(smoke string, args []string) ExecOption {
+	return func(e *Env) { e.Smoke, e.SmokeArgs = smoke, slices.Clone(args) }
+}
+
+// WithServeArgs supplies extra `soundpost serve` flags for every cluster member.
+func WithServeArgs(args []string) ExecOption {
+	return func(e *Env) { e.ServeArgs = slices.Clone(args) }
+}
+
+// WithVMReset supplies the state directory and the hostname the vm-hard-reset scenario may reset.
+func WithVMReset(state, host string) ExecOption {
+	return func(e *Env) { e.VMResetState, e.VMAllowHost = state, host }
+}
+
+// errNotRun is how a scenario says that this host cannot exercise it (a tool it needs was not supplied): the report is `not_run` with
+// that reason, never passed and never failed (exit status 10 if nothing else failed).
+type errNotRun string
+
+func (e errNotRun) Error() string { return string(e) }
+
+// stringList is a repeatable string flag.
+type stringList []string
+
+func (l *stringList) String() string { return strings.Join(*l, " ") }
+
+func (l *stringList) Set(v string) error {
+	*l = append(*l, v)
+	return nil
+}
+
 // Execute runs one scenario and writes <report>/<scenario>.json. A safety refusal is returned as
 // an ErrRefused error before anything is created.
-func Execute(ctx context.Context, m *Manifest, name, target, root, binary, reportDir string) (*Report, error) {
+func Execute(ctx context.Context, m *Manifest, name, target, root, binary, reportDir string, opts ...ExecOption) (*Report, error) {
 	spec := m.spec(name)
 	rep := &Report{Scenario: name, Target: target, StartedAt: time.Now().UTC().Format(time.RFC3339), Checks: []Check{}}
 	begin := time.Now()
@@ -382,8 +442,11 @@ func Execute(ctx context.Context, m *Manifest, name, target, root, binary, repor
 		return nil, err
 	}
 	defer os.RemoveAll(work)
-	env := &Env{Ctx: ctx, Allowlist: m.Allowlist, Root: root, Binary: binary, Work: work, Spec: spec,
+	env := &Env{Ctx: ctx, Allowlist: m.Allowlist, Root: root, Binary: binary, Work: work, Spec: spec, ReportDir: reportDir,
 		Logf: func(f string, a ...any) { fmt.Fprintf(os.Stderr, "["+name+"] "+f+"\n", a...) }}
+	for _, opt := range opts {
+		opt(env)
+	}
 	runErr := func() (err error) {
 		defer func() {
 			if p := recover(); p != nil {
@@ -392,9 +455,12 @@ func Execute(ctx context.Context, m *Manifest, name, target, root, binary, repor
 		}()
 		return registry[name](env, rep)
 	}()
+	var notRun errNotRun
 	switch {
 	case errors.Is(runErr, ErrRefused):
 		return nil, runErr
+	case errors.As(runErr, &notRun):
+		rep.Status, rep.Reason = StatusNotRun, string(notRun)
 	case runErr != nil:
 		rep.Status, rep.Reason = StatusFailed, runErr.Error()
 	default:

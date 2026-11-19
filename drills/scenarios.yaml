@@ -9,6 +9,8 @@ version: 1
 allowlist:
   data_roots:
     - /tmp/soundpost-drills
+    # /tmp is cleaned at boot on some distributions (Debian); the vm-hard-reset state directory must survive a reboot.
+    - /var/tmp/soundpost-drills
   hosts:
     - 127.0.0.1
     - localhost
@@ -59,6 +61,14 @@ scenarios:
   - name: membership-replace
     needs_binary: true
     description: Operator replacement of a voter on three real processes of the produced binary through `soundpost membership` (status, add-learner for a fourth node, start it, replace the stopped member 3 by member 4) while a write stream keeps being acknowledged; the new voter serves every acknowledged batch and carries a majority with member 1 while member 2 is stopped; a re-add is idempotent, an add that does not fit is refused, and the socket and its directory are private (a real second uid is not available on the drill host, so that refusal is covered per connection by a unit test and recorded as not run here).
+  - name: node-loss-journeys
+    needs_binary: true
+    opt_in: true
+    description: The node-kill-restart loss (SIGKILL of the initial leader, then of member 3, while a write stream is acknowledged, restart, reconcile) on three real processes of the produced binary, then, only after the recovery is proved (every ACKed id read back identically from every member, every member ready, the control cursors equal, the outage closed), the real reference journeys of tools/smoke against that cluster (reference Bun gateway, Python API and job, the Vite-built web app in headless Chrome, a real PostgreSQL 16, the product's own routes; fifteen rows, all must pass). The applications ingest through different members, some killed and restored; the drill stops the scan member for the smoke's in-process storage scan and starts it again, and every read of the rows goes through that restored member; the drill's own writers keep acknowledging while the applications run, and every ACKed id of the whole run is reconciled on every member afterwards. Needs `--journeys-smoke` (the tools/smoke binary) and `--journeys-arg` flags for the tools the smoke uses (without them it is reported not_run with that reason); not tagged for the node_loss release evidence. Three processes on one host are not three failure domains.
+  - name: vm-hard-reset
+    needs_binary: true
+    opt_in: true
+    description: A real guest hard reset of the machine that holds all three members, in two phases because the harness dies with the machine. Phase 1 (root; `--allow-vm-reset` must name this machine; `--vm-reset-state` under an allowlisted data root that survives a reboot; sysrq writable) bootstraps the three-process cluster with its data under the state directory, streams writes while appending every issued batch and every acknowledgement to a chained, fsynced journal before it counts, writes the boot id and a marker, and writes `b` to /proc/sysrq-trigger while the stream runs (immediate reboot, no sync, no unmount, page cache dropped). Phase 2 (same command after the machine is back) refuses unless the boot id changed and the journals are intact, restarts the members on the same data, retries the batches that were in flight unchanged, and requires every acknowledged id retained with identical semantic data on every member, no unknown id, the original receipt on retry and converged cursors. A guest-level crash reboot, NOT a hypervisor power cut (the host's virtual-disk cache is not exercised); three processes on one machine are not three failure domains; not tagged for the node_loss release evidence; not_run without the two flags.
   # ---- capacity ----
   - name: capacity-faults
     description: Failed sync and slow apply through the replica journal hook and through the running storage.Engine (storage.Engine.SetFaultHook over HTTPS ingest, restart, retry of the same batches), and full disk through the committed storage.DiskMeter admission gate; nothing acknowledged without durability, every ACK reconciled. The real operating-system errors (EIO, ENOSPC) at the engine are the fsync-failure scenario.

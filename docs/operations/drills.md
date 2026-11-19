@@ -83,6 +83,8 @@ entry, `facts` and `not_run_items`. No secret or raw telemetry content is writte
 | `fsync-failure` | same injector; every fsync of one member answers a real errno while writes stream: EIO on the initial leader and on member 3 (a failing disk), ENOSPC on member 2 (a full filesystem); that member fails stop in every group (it stops leading and voting, then exits), the other two keep acknowledging inside the scenario window in all three phases, the member is restarted on its disk and rejoins; every ACK reconciled | run |
 | `disk-disappearance` | same injector; one member's data directory is moved away under the running process and every fsync and path operation on it answers EIO (initial leader, member 3), the survivors keep acknowledging inside the scenario window in both phases; then member 2's disk is replaced with a blank one and finally the original returns; every ACK reconciled | run |
 | `membership-replace` | three real processes plus a fourth; `soundpost membership status`, a refused add of an existing voter, `add-learner` for member 4 (and its idempotent repeat), start member 4, stop member 3, `replace --remove 3 --promote 4`, all while a write stream is acknowledged; members 1, 2 and 4 each retain every acknowledged batch and 1 and 4 acknowledge with 2 stopped | run (the refusal of a real second uid is not run: no second user on the host; unit-tested per connection) |
+| `node-loss-journeys` | the `node-kill-restart` loss (SIGKILL of member 1, then member 3, while writers stream), then, only once the recovery is proved, the real reference journeys of `tools/smoke` against the same three processes (`journeys --cluster-attach`); fifteen rows, all must pass; every ACKed id of the whole run reconciled on every member afterwards | run on a host with the journeys' tools (`--journeys-smoke`, `--journeys-arg`, `--serve-arg`), see "After recovery: the reference journeys" |
+| `vm-hard-reset` | a REAL guest hard reset (`echo b > /proc/sysrq-trigger`: immediate reboot, no sync, no unmount, page cache dropped) of the machine that holds the three processes, while writers stream; two phases because the harness dies with the machine; after the reboot every acknowledged id is retained with identical data on every member | run on a machine that may be rebooted (`--vm-reset-state`, `--allow-vm-reset <hostname>`, root), see "A real guest hard reset" |
 
 ### How the four storage and link drills inject their faults (no host privilege)
 
@@ -272,13 +274,139 @@ Cluster drills run on Linux. `stale-policy-delete-barrier` needs several GiB of
 RAM and several minutes; `node-kill-restart` and `minority-pause` take about three
 minutes each (read-back through the query API dominates).
 
-## After recovery: the reference journeys
+## After recovery: the reference journeys (`node-loss-journeys`, 07.07#16)
 
-`go run ./tools/smoke journeys ...` (a Docker PostgreSQL container, about 70 s) exercises the
-three reference journeys against a recovered system; `docs/acceptance/reference-journeys.md`
-lists the rows and what is satisfied (the replay and profile rows are satisfied since 11.02 and
-10.17; the remaining unsatisfied rows are named there). The smoke needs Docker, a local
-PostgreSQL 16 image, Linux Chrome and a built UI, so it is **not** part of a drills run and was **not**
-re-run against a cluster recovered by these drills (07.07-W3): the drill machine used for the last
-full run (07.07-W4 below) has no Docker. Until it is run there, the claim is limited to what
-the drills themselves reconcile (every ACKed id on every member, through the query API).
+`node-loss-journeys` loses and restores members exactly as `node-kill-restart` does (SIGKILL of member 1, the configured
+initial leader, then of member 3, while writers stream; each phase reconciles every ACKed id on every member), and **only
+after the cluster has recovered** runs the three real reference journeys (`tools/smoke journeys`, rows and applications in
+`docs/acceptance/reference-journeys.md`) against those same three processes. The rows are the smoke's own: the drill copies
+them from the smoke's observation file into its report (`journey_row_<name>` checks and `facts.journeys/rows`) and evaluates nothing itself.
+
+```
+go run ./build release --root . --out /tmp/drill-release --version V --arch amd64 --web-dist DIR   # the produced static binary
+go build -o /tmp/smoke ./tools/smoke
+go run ./tools/drills --scenario node-loss-journeys --target isolated --report /tmp/drill-report \
+    --binary /tmp/drill-release/linux-amd64/soundpost --root . --journeys-smoke /tmp/smoke \
+    --journeys-arg=--bun=/usr/local/bin/bun --journeys-arg=--node-linux=/usr/local/bin/node \
+    --journeys-arg=--python=/usr/local/bin/python3.13 --journeys-arg=--chrome=/path/to/chrome \
+    --journeys-arg=--pg-local=/path/to/postgresql-16 \
+    --serve-arg=--symbolicate-cgroup-root=/delegated/empty/cgroup
+```
+
+`--journeys-arg` flags go verbatim to `smoke journeys` (any flag of a single-node run, for example Docker's `--pg-image` instead of
+`--pg-local`); `--serve-arg` flags are added to the `soundpost serve` of every member. The members run the native
+symbolication sandbox, so run the drill inside a delegated cgroup (`systemd-run --user --wait --pipe -p "Delegate=memory pids" -p
+DelegateSubgroup=main`) and pass that unit's cgroup as the root. Without `--journeys-smoke` (or with a path that is not a file) the
+scenario is reported `not_run` with that reason, as every drill is that cannot be exercised on the host (exit status 10 if nothing
+else failed; `TestJourneysScenarioWithoutTheJourneysToolsIsNotRun`), so `--scenario all` on a host without the tools still
+runs everything else. It is deliberately **not** tagged `evidence: node_loss`: the release gate's node_loss envelope is unchanged.
+
+**The order, and what stops it**
+
+1. Bootstrap one installation, start three members (mTLS between them, one shared public TLS leaf on their HTTPS listeners, so the
+   applications and the browser trust one CA and the browser one public-key pin), the two node losses, the per-phase reconciliation.
+2. **The recovery gate (`dcRecoveryGate`)**. The journeys do not start unless every acknowledged id is read back identically from every
+   member (`recovered_every_acknowledged_id_reconciled`), every member answers ready now (`recovered_member_N_ready`), none is stopped or
+   paused (`recovered_no_member_down`), the control applied cursors are equal (`recovered_applied_cursors_converged`) and the outage
+   timeline is closed with its four failed attempts kept (`recovered_outage_closed`). Each failing part ends the scenario before the
+   journeys (`TestJourneysAfterNodeLossRecoveryDoNotStartBeforeTheClusterRecovered`).
+3. The attach document (`dcJourneyAttachDocument`, read by `smoke journeys --cluster-attach`) names the members, the TLS, the
+   installation's owner (bootstrapped by the drill; the smoke logs in, it does not bootstrap), the members that were killed and
+   restored, and which member each leg uses: the owner's provisioning and the API through member 2 (never killed); the gateway, its page and the web
+   build's artifact upload through member 3 (killed and restored); the job through member 1 (killed and restored); member 1 is
+   also the **scan member**. The drill refuses a document in which a leg names a member that is not answering, or in which the scan
+   member was not killed and restored (`TestJourneysAfterNodeLossRecoveryRefuseLegsOnADeadOrUnrestoredMember`), and the smoke
+   refuses the same again and waits for `/readyz` of every member before it provisions.
+4. The smoke runs as a child of the drill. Its stdin/stdout are a one-request-at-a-time control channel (`dcJourneyOwner`):
+   `phase drive_begin|drive_end` start and stop the drill's own write stream (two writers, a batch every half second, through
+   whichever members answer) around the applications' traffic; between the two the applications ingest through their members
+   and the browser acts on the page. The smoke's collect step scans storage in process, which needs the data directory of a member to itself, so the smoke asks the
+   drill to **shut down the scan member** (SIGTERM, exit status 0 required), opens that member's directory in the smoke process with
+   `appcore.OpenDistributed` and its node file (it joins the two members that keep running and answers once every group has its
+   quorum), scans, closes, and asks the drill to **start the member again** and wait for ready. Every login and every read of the
+   rows after that goes through that restored member. The owner refuses any other member, any request out of order and any
+   request twice (`TestJourneysAfterNodeLossRecoveryOwnerFollowsTheJourneysInOrder`).
+5. Control writes and reads against a recovering cluster retry the answers it documents as retryable (HTTP 400/409 `stale`/`conflict`, the
+   typed 503); every other answer is the row's evidence as it is.
+6. Afterwards the drill takes **all fifteen rows** from `observed.json` (a row that is missing, repeated, not required, not satisfied
+   or not in the closed list fails; `TestJourneysAfterNodeLossRecoveryRowsMustAllPass` runs the verdict on the recorded
+   observation and on five wrong ones), requires every SDK client's final flush to have nothing pending and nothing lost
+   (`journeys_sdk_delivery_acknowledged`: gateway, API, job and the three browser pages), and then, on the whole run, repeats the
+   cursor convergence, the retry of already acknowledged batches on every member (same receipt), the read-back of every member
+   with exact reconciliation of **every** acknowledged id, and requires acknowledged batches in each period of the run
+   (`acks_written_before_during_and_next_to_the_journeys`: the two losses and the writes next to the journeys).
+
+**What the run covers, and what it does not**
+
+* Three processes of the produced binary on one host share a kernel, a disk, a clock and a power supply: **not three failure
+  domains** (`facts.topology` says so). The two node losses happen **before** the journeys; the journeys run on a recovered
+  cluster, they are not run through a failure. The one member stop during the journeys is a clean shutdown for the in-process scan, not a loss.
+* The acknowledged ids of the journeys' own applications are not entries of the drill's ledger: the SDKs hand back counts, not batch
+  ids, and the ledger's exact comparison needs the batch's data back through the query API (which a trace or a job is not).
+  What covers them: each client's final flush (nothing pending, nothing lost), the fifteen rows (traces, errors, job attempts,
+  the profile and the replay read back from what the cluster stored, and the ids compared with the expected ones in
+  `actual_ids_equal_expected`) and the drill's own writes next to them, reconciled exactly.
+* The members of this scenario serve one shared TLS leaf; production nodes do not (the browser pins a single key). The smoke's canary
+  scan reads the members' directories while two of them run (a file that vanishes between listing and reading is skipped and counted,
+  `scan_skipped_vanished_files`), and the scan member's directory is opened in the smoke process as that member (a second process image
+  of one member, never running at the same time as the real one).
+* Evidence of the committed run: `.superpowers/sdd/approved-product/l5w24-evidence/recovered/` (private development ledger, not shipped).
+  The single-node `smoke journeys` is unchanged (`--cluster-attach` is the only addition, and nothing is started or changed without it).
+
+## A real guest hard reset (`vm-hard-reset`, 07.07#7)
+
+`power-loss` is **emulated** (see above): the drill SIGKILLs the members and rolls the unsynced bytes back itself, and the kernel page
+cache is not dropped. `vm-hard-reset` resets the machine for real: it writes `b` to `/proc/sysrq-trigger`, which reboots the kernel at once
+with no sync and no unmount, so the page cache and every write that was not fsynced are gone, as after a crash reboot, while the three
+processes (all on that machine) are being written to. It is **a guest-level crash reboot, not a hypervisor power-off**: a write the guest
+believes flushed but the host still holds in the virtual disk's cache is not exercised, and three processes on one machine are not three
+failure domains. Run it only on a machine that may be rebooted (it is a drill of a throwaway VM, never a host with other work).
+
+```
+go run ./tools/drills --scenario vm-hard-reset --target isolated --report DIR --binary B \
+    --vm-reset-state /var/tmp/soundpost-drills/state --allow-vm-reset "$(hostname)"      # phase 1: resets the machine
+go run ./tools/drills ...same command...                                                   # phase 2, after the machine is back
+```
+
+The same command is both phases: the **marker** file in the state directory says which. Without the two flags the scenario is `not_run`.
+The state directory holds everything phase 2 needs and must survive a reboot: it must be under an allowlisted data root
+(`/var/tmp/soundpost-drills` is one, because `/tmp` is cleaned at boot on Debian), and phase 1 refuses to start in a directory that is not empty.
+
+**Phase 1 refuses unless** it runs as root, `--allow-vm-reset` equals the machine's hostname exactly, the state directory is under the allowlist
+(not a production directory, not the root itself, absolute, no `..`), is empty, and magic sysrq can be enabled and the trigger opened
+(`TestVMHardResetRefusesEveryUnsafeStart`). Then it bootstraps the three-process cluster with its data under the state directory
+(`dcOptions.workDir`), saves the addresses and the fixture (`state.json`), streams writes with four writers, and **journals** them:
+every issued batch (id and exact body) is appended to `issued.jsonl` and fsynced before its first send, every acknowledgement (id, receipt
+cursor, semantic digest) to `ledger.jsonl` and fsynced before the drill counts it (`Ledger.Sink`, `dcWriter.onIssue`). Each journal line
+carries its sequence number and a hash chained to the line before (`vmJournal`). After at least 80 acknowledgements it writes the boot id and
+the **marker** (acknowledgement and issue counts and chain heads, fsynced), writes the phase 1 report (`vm-hard-reset.phase1.json`, fsynced,
+because the harness will not survive to write it), and resets the machine **with the stream still running**, so batches are in flight.
+
+**Phase 2 refuses unless** the boot id differs from the marker's (no reset happened otherwise), the hostname flag matches, and the journals are
+exactly what phase 1 wrote: a marker or journal that is missing, cut short, changed, reordered, or shorter than the marker counted is a refusal
+(`TestVMHardResetResumeRefusesWhatIsNotAResetOrNotWhatPhaseOneLeft`, `TestVMJournalRoundTripAndEveryWayItBreaks`). Then it restarts the three members on
+the same data, PKI and ports, waits for ready, sends the batches that were in flight (issued, never acknowledged) again with the **identical body**
+until they are acknowledged, and runs the verification of the whole-cluster power cut: cursors converge; a retry of acknowledged batches returns the
+**original receipt** on every member (the reloaded ledger refuses a changed receipt); every acknowledged id, those of the journal and those of the
+retries, is retained with identical semantic data on every member, stored once, with no id the drill never issued. The report records both boot ids,
+the uptime after the reboot, the acknowledgements before the reset, the in-flight batches and how many member log lines mention a torn tail
+(`vm_reset/member_log_mentions_torn`: the member prints nothing about decision D16's drop of a torn final frame, so that is observed only as "the members became
+ready and reconciled"). A verification that loses one acknowledged id fails (`TestVMHardResetReloadedLedgerCatchesADroppedACK`).
+
+The scenario is not tagged `evidence: node_loss`. Orchestration of the committed run: `.superpowers/sdd/approved-product/l5w24-evidence/vmreset/orchestrate.sh`
+(private development ledger, not shipped).
+
+**Observed (sp-cg1, Debian 12, kernel 6.1.0-54, ext4 on one virtual disk; `l5w24-evidence/vmreset/`).** Phase 1 journalled 81 acknowledgements and 85 issued
+batches and reset the machine with the stream running; `last -x` shows the new `reboot` record with no `shutdown` record before it, the journal of
+the previous boot ends mid-session with no shutdown sequence, and journald logged `corrupted or uncleanly shut down` for the previous boot's file. Phase 2
+(boot id changed, uptime 20 s) started the three members in under a second, retried the 4 batches that were in flight, and reconciled all 85 acknowledged
+ids exactly on every member, each stored once, with the original receipt on retry. Two earlier real resets failed for reasons that were the harness's own,
+and are fixed: the files the harness itself had written for the members (PKI, node files) were zero-length after the reset because they had never been
+fsynced (phase 1 now fsyncs exactly those, phase 2 refuses with a clear check if one is missing: `TestVMSetupFilesAreTheHarnessOwnFilesAndEmptyOnesAreRefused`),
+and the orchestration's own freshly copied binaries were zero-length (it now `sync`s and verifies their digests across the reset).
+
+**Limits.** The drill's own journal fsyncs commit the filesystem's shared journal, so some data the members wrote without an fsync can be
+persisted as a side effect; what the reset takes away is everything written after the last such commit plus the whole page cache, and what matters for the
+claim (an acknowledged write was fsynced by the member before its acknowledgement) is unaffected. The member logs say nothing about decision D16's drop of a torn
+final frame, so that is not observable here (`vm_reset/member_log_mentions_torn` is 0). One reset on one filesystem, with an ordinary guest disk cache setting,
+is one observation, not a statistical claim. The host's virtual-disk cache is not exercised (see above).

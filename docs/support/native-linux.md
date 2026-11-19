@@ -32,3 +32,17 @@ The release gate (`fixtures/nativeperf/qualification`) qualifies a matrix row on
 | `qualification --require-all` (wave 14, final tree) | exit 10: every native row (cpu, off_cpu, runqueue_split, frame_coverage, loss, overhead, memory, fds, privacy) supported on 6.1.0-54-amd64, matrix 6.1 LTS amd64 qualified; unqualified: runtime python/node/bun columns, the other series and arm64 | exit 10: the same on 6.6.162, matrix 6.6 LTS amd64 qualified; same unqualified runtime columns and other series |
 
 Not exercised on these hosts: the other kernel series (one per host), arm64 (out of release scope, D10), Chrome 142 / Edge / Firefox rows, journeys (no OCI runtime), PID reuse, CPU hotplug, container modes, the Node 22/24 and Python runtime columns of the native acceptance runner (python critical `jobs` rows fail in the VM, see the runtime suite report), single-host and distributed gates.
+
+## Helper under an OCI runtime (07.02#6, lane 5 wave 24)
+
+The release's `soundpost-perf-helper` image was started under Docker through the shipped `soundpost-perf-helper` Compose service and asked for a real capture (`fresh-install-matrix` row `native_profile_install`, `docs/operations/distributed.md`, "Evidence: the helper image under an OCI runtime"). This is a functional row of one host, not a kernel qualification: the kernel below is neither of the pinned 6.1/6.6 LTS builds, so it qualifies nothing in the matrix above.
+
+| | |
+|---|---|
+| Host | Debian 13, `6.12.74+deb13+1-amd64`, amd64, 8 CPUs, unified cgroup v2, AppArmor on, Yama `ptrace_scope` 0 |
+| Runtime | Docker 26.1.5 (classic image store), Compose 2.26.1; the helper image is the release's OCI archive plus the `manifest.json` Docker 26 needs |
+| Container | uid 0, only `CAP_PERFMON`, deny-by-default `deploy/seccomp/soundpost-perf.json`, `no-new-privileges`, read-only root, no network, host cgroup namespace, PID namespace of the workload; audited with `docker inspect` after the run |
+| `perf_event_paranoid=2` (set by the operator for the run, restored after) | 494 software CPU-clock samples in 5.0 s of a Go workload that spins in one function, every sample attributed to the target, 494 resolved to that function; the helper exits 0 on SIGTERM. Without `CAP_PERFMON` the same capture also succeeds (user-space-only events of a same-uid target need no capability at this level), so `CAP_PERFMON` is not what gates this helper's CPU mode here. A target of another uid (nonroot) is the typed denied result. |
+| `perf_event_paranoid=3` (the host's own value) | the typed denied result (`denied` / `permission_denied`, zero samples) for all three cases, with `CAP_PERFMON` too: this Debian kernel gates `perf_event_open` on `CAP_SYS_ADMIN` at level 3, so a PERFMON-only helper cannot work there. The matrix row is `not_run` with that reason; no zero or off-CPU-complete capture is ever reported. |
+
+Not exercised: the off-CPU and runqueue modes in a container (the scheduler tracepoints need the initial PID namespace, see above), the chart, Kubernetes, kernels 6.1/6.6 and arm64 in a container, a non-root workload through a helper that has an extra capability.

@@ -343,10 +343,10 @@ func TestReadSuiteReportRejectsATamperedRow(t *testing.T) {
 	}
 }
 
-// The gate withdraws (D65) a declared server overhead row only when its exported detail is nothing but measured misses
-// of the 5 % budgets. This pins the exporter's detail format to that rule: a budget miss measured by the harness is
-// accepted, a row that failed for any other reason is not.
-func TestFailedServerOverheadRowsExportAWithdrawableDetailOnlyForMeasuredBudgetMisses(t *testing.T) {
+// The gate withdraws (D65) a declared server overhead row only when its exported failure_class is budget_miss. This
+// pins the exporter to that rule: the class comes from the row's structure (a budget that was not met and no other
+// failure), never from the wording of its detail.
+func TestFailedServerOverheadRowsExportBudgetMissOnlyForMeasuredBudgetMisses(t *testing.T) {
 	w := releaseevidence.ClaimWithdrawals()[0]
 	budgets := []BudgetResult{
 		{Name: "server_p95_latency_percent", Source: "design", Unit: "percent", Limit: 5, Observed: 17.3, Within: false},
@@ -355,20 +355,97 @@ func TestFailedServerOverheadRowsExportAWithdrawableDetailOnlyForMeasuredBudgetM
 	missed := suiteRowFixture(w.Row, SuiteOverhead, true, StateExercised, OutcomeFailed)
 	missed.Failures, missed.Budgets = nil, budgets
 	out := suiteRow(missed)
-	if out.Status != releaseevidence.StatusFailed {
-		t.Fatalf("status %q", out.Status)
+	if out.Status != releaseevidence.StatusFailed || out.FailureClass != releaseevidence.FailureBudgetMiss {
+		t.Fatalf("status %q class %q, want failed budget_miss", out.Status, out.FailureClass)
 	}
 	if _, ok := releaseevidence.WithdrawalAccepts(w.Kind, out); !ok {
-		t.Errorf("a measured budget miss is not withdrawable: %q", out.Detail)
+		t.Errorf("a measured budget miss is not withdrawable: %+v", out)
 	}
 	dropped := missed
 	dropped.Failures = []string{"delivered mode dropped 3 records as queue_full: the exporter did not keep up"}
-	if _, ok := releaseevidence.WithdrawalAccepts(w.Kind, suiteRow(dropped)); ok {
+	dropped.FailureClass = releaseevidence.FailureDroppedRecords
+	if out := suiteRow(dropped); out.FailureClass != releaseevidence.FailureDroppedRecords {
+		t.Errorf("a row that also dropped records exports class %q", out.FailureClass)
+	} else if _, ok := releaseevidence.WithdrawalAccepts(w.Kind, out); ok {
 		t.Error("a row that also dropped records was withdrawn")
 	}
 	died := missed
 	died.Failures, died.Budgets = []string{"overhead harness exited 1 without a usable result: boom"}, nil
-	if _, ok := releaseevidence.WithdrawalAccepts(w.Kind, suiteRow(died)); ok {
+	if out := suiteRow(died); out.FailureClass != releaseevidence.FailureHarness {
+		t.Errorf("a row whose harness died exports class %q", out.FailureClass)
+	} else if _, ok := releaseevidence.WithdrawalAccepts(w.Kind, out); ok {
 		t.Error("a row whose harness died was withdrawn")
+	}
+	// A harness failure whose text is word for word what the exporter writes for a measured miss, and a failed
+	// budget next to a failure text, are not budget misses: the text decides nothing.
+	lookalike := missed
+	lookalike.Budgets = nil
+	lookalike.Failures = []string{"server_cpu_percent observed 38.91 percent > limit 5"}
+	for name, row := range map[string]Row{"failure text that reads like a miss": lookalike, "a miss next to failure text": func() Row { r := missed; r.Failures = lookalike.Failures; return r }()} {
+		out := suiteRow(row)
+		if out.FailureClass == releaseevidence.FailureBudgetMiss {
+			t.Errorf("%s exported as budget_miss: %+v", name, out)
+		}
+		if _, ok := releaseevidence.WithdrawalAccepts(w.Kind, out); ok {
+			t.Errorf("%s was withdrawn", name)
+		}
+	}
+}
+
+func TestSuiteRowsOfEveryStateCarryTheirFailureClass(t *testing.T) {
+	for name, c := range map[string]struct {
+		state   State
+		outcome Outcome
+		suite   Suite
+		status  string
+		class   releaseevidence.FailureClass
+	}{
+		"passed":               {StateExercised, OutcomePassed, SuiteRuntime, releaseevidence.StatusPassed, ""},
+		"failed":               {StateExercised, OutcomeFailed, SuiteRuntime, releaseevidence.StatusFailed, releaseevidence.FailureHarness},
+		"failed privacy":       {StateExercised, OutcomeFailed, SuitePrivacy, releaseevidence.StatusFailed, releaseevidence.FailureAssertion},
+		"not exercised":        {StateNotExercised, "", SuiteRuntime, "not_exercised", releaseevidence.FailureNotRun},
+		"unsupported":          {StateUnsupported, "", SuiteRuntime, "unsupported", releaseevidence.FailureUnsupported},
+		"denied":               {StateDenied, "", SuiteRuntime, "denied", releaseevidence.FailureDenied},
+		"out of release scope": {StateOutOfReleaseScope, "", SuiteRuntime, releaseevidence.StatusOutOfReleaseScope, releaseevidence.FailureOutOfScope},
+	} {
+		row := suiteRowFixture("r", c.suite, true, c.state, c.outcome)
+		if c.state == StateOutOfReleaseScope {
+			row.Reason = "D10: arm64 is not in the release"
+		}
+		out := suiteRow(row)
+		if out.Status != c.status || out.FailureClass != c.class {
+			t.Errorf("%s: status %q class %q, want %q %q", name, out.Status, out.FailureClass, c.status, c.class)
+		}
+		if err := out.Validate(); err != nil {
+			t.Errorf("%s: the exported row is not a valid row: %v", name, err)
+		}
+	}
+}
+
+func TestValidateRowRefusesAFailureClassARunnerMayNotSet(t *testing.T) {
+	failed := suiteRowFixture("r", SuiteOverhead, true, StateExercised, OutcomeFailed)
+	for name, c := range map[string]struct {
+		mutate func(*Row)
+		ok     bool
+	}{
+		"harness on a failed row":         {func(r *Row) { r.FailureClass = releaseevidence.FailureHarness }, true},
+		"dropped_records on a failed row": {func(r *Row) { r.FailureClass = releaseevidence.FailureDroppedRecords }, true},
+		"assertion on a failed row":       {func(r *Row) { r.FailureClass = releaseevidence.FailureAssertion }, true},
+		"budget_miss set by the runner":   {func(r *Row) { r.FailureClass = releaseevidence.FailureBudgetMiss }, false},
+		"not_run set by the runner":       {func(r *Row) { r.FailureClass = releaseevidence.FailureNotRun }, false},
+		"harness on a passed row": {func(r *Row) {
+			r.Outcome, r.Failures, r.Budgets = OutcomePassed, nil, nil
+			r.FailureClass = releaseevidence.FailureHarness
+		}, false},
+		"harness on a not_exercised row": {func(r *Row) {
+			*r = suiteRowFixture("r", SuiteOverhead, true, StateNotExercised, "")
+			r.FailureClass = releaseevidence.FailureHarness
+		}, false},
+	} {
+		row := failed
+		c.mutate(&row)
+		if err := ValidateRow(row); (err == nil) != c.ok {
+			t.Errorf("%s: err=%v, want ok=%v", name, err, c.ok)
+		}
 	}
 }

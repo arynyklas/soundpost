@@ -24,26 +24,29 @@ func TestWithdrawalAcceptsOnlyADeclaredFailedMeasurementOfItsOwnKind(t *testing.
 		row  Row
 		want bool
 	}{
-		"declared failed, cpu measured":          {w.Kind, Row{ID: w.Row, Status: StatusFailed, Detail: measured}, true},
-		"declared failed, both budgets measured": {w.Kind, Row{ID: w.Row, Status: StatusFailed, Detail: "server_p95_latency_percent observed 173.9 percent > limit 5; " + measured}, true},
-		"declared failed, miss plus queue_full":  {w.Kind, Row{ID: w.Row, Status: StatusFailed, Detail: "delivered mode dropped 12 records as queue_full: the exporter did not keep up; " + measured}, false},
-		"declared failed, miss plus other text":  {w.Kind, Row{ID: w.Row, Status: StatusFailed, Detail: measured + "; native_cpu_overhead_percent observed 9 percent > limit 3"}, false},
-		"declared failed, p95 measured":          {w.Kind, Row{ID: w.Row, Status: StatusFailed, Detail: "server_p95_latency_percent observed 17.3 percent > limit 5"}, true},
-		"declared failed, no detail":             {w.Kind, Row{ID: w.Row, Status: StatusFailed}, false},
-		"declared failed, harness died":          {w.Kind, Row{ID: w.Row, Status: StatusFailed, Detail: "overhead harness exited 1 without a usable result"}, false},
+		"declared failed budget_miss, cpu":       {w.Kind, Row{ID: w.Row, Status: StatusFailed, FailureClass: FailureBudgetMiss, Detail: measured}, true},
+		"declared failed budget_miss, no detail": {w.Kind, Row{ID: w.Row, Status: StatusFailed, FailureClass: FailureBudgetMiss}, true},
+		"budget_miss, detail says harness":       {w.Kind, Row{ID: w.Row, Status: StatusFailed, FailureClass: FailureBudgetMiss, Detail: "overhead harness exited 1 without a usable result"}, true},
+		"harness, clean looking budget detail":   {w.Kind, Row{ID: w.Row, Status: StatusFailed, FailureClass: FailureHarness, Detail: measured}, false},
+		"harness, p95 detail":                    {w.Kind, Row{ID: w.Row, Status: StatusFailed, FailureClass: FailureHarness, Detail: "server_p95_latency_percent observed 17.3 percent > limit 5"}, false},
+		"dropped_records, clean looking detail":  {w.Kind, Row{ID: w.Row, Status: StatusFailed, FailureClass: FailureDroppedRecords, Detail: measured}, false},
+		"assertion, clean looking detail":        {w.Kind, Row{ID: w.Row, Status: StatusFailed, FailureClass: FailureAssertion, Detail: measured}, false},
+		"failed without a class, clean detail":   {w.Kind, Row{ID: w.Row, Status: StatusFailed, Detail: measured}, false},
+		"budget_miss class on a passed row":      {w.Kind, Row{ID: w.Row, Status: StatusPassed, FailureClass: FailureBudgetMiss, Detail: measured}, false},
+		"budget_miss class on not_run":           {w.Kind, Row{ID: w.Row, Status: StatusNotRun, FailureClass: FailureBudgetMiss, Detail: measured}, false},
+		"not_run, not_run class":                 {w.Kind, Row{ID: w.Row, Status: StatusNotRun, FailureClass: FailureNotRun, Detail: measured}, false},
 		"declared passed":                        {w.Kind, Row{ID: w.Row, Status: StatusPassed, Detail: measured}, false},
-		"declared not_run":                       {w.Kind, Row{ID: w.Row, Status: StatusNotRun, Detail: measured}, false},
-		"declared not_exercised":                 {w.Kind, Row{ID: w.Row, Status: "not_exercised", Detail: measured}, false},
-		"declared out of scope":                  {w.Kind, Row{ID: w.Row, Status: StatusOutOfReleaseScope, Detail: measured, Platform: "linux/arm64"}, false},
-		"declared row, other kind":               {KindBrowser, Row{ID: w.Row, Status: StatusFailed, Detail: measured}, false},
-		"undeclared row":                         {w.Kind, Row{ID: w.Row + ".x", Status: StatusFailed, Detail: measured}, false},
-		"undeclared row citing D65":              {w.Kind, Row{ID: "overhead.sdk.node-22.linux-amd64.queue", Status: StatusFailed, Detail: "D65 " + measured}, false},
+		"not_exercised":                          {w.Kind, Row{ID: w.Row, Status: "not_exercised", FailureClass: FailureNotRun, Detail: measured}, false},
+		"declared out of scope":                  {w.Kind, Row{ID: w.Row, Status: StatusOutOfReleaseScope, FailureClass: FailureOutOfScope, Detail: measured, Platform: "linux/arm64"}, false},
+		"declared row, other kind":               {KindBrowser, Row{ID: w.Row, Status: StatusFailed, FailureClass: FailureBudgetMiss, Detail: measured}, false},
+		"undeclared row":                         {w.Kind, Row{ID: w.Row + ".x", Status: StatusFailed, FailureClass: FailureBudgetMiss, Detail: measured}, false},
+		"undeclared row citing D65":              {w.Kind, Row{ID: "overhead.sdk.node-22.linux-amd64.queue", Status: StatusFailed, FailureClass: FailureBudgetMiss, Detail: "D65 " + measured}, false},
 	} {
 		if _, got := WithdrawalAccepts(c.kind, c.row); got != c.want {
 			t.Errorf("%s: accepted=%v, want %v", name, got, c.want)
 		}
 	}
-	got, _ := WithdrawalAccepts(w.Kind, Row{ID: w.Row, Status: StatusFailed, Detail: measured})
+	got, _ := WithdrawalAccepts(w.Kind, Row{ID: w.Row, Status: StatusFailed, FailureClass: FailureBudgetMiss, Detail: measured})
 	if got != w || got.Decision != WithdrawalDecision {
 		t.Errorf("accepted withdrawal %+v, want %+v citing %s", got, w, WithdrawalDecision)
 	}
@@ -58,7 +61,7 @@ func TestClaimWithdrawalsIsAClosedCopy(t *testing.T) {
 	if b[0].Row == "overhead.sdk.something.else" || len(b) == len(a) {
 		t.Fatal("changing the returned list changed the closed list")
 	}
-	if _, ok := WithdrawalAccepts(KindRuntime, Row{ID: "extra", Status: StatusFailed, Detail: measured}); ok {
+	if _, ok := WithdrawalAccepts(KindRuntime, Row{ID: "extra", Status: StatusFailed, FailureClass: FailureBudgetMiss, Detail: measured}); ok {
 		t.Fatal("an appended entry was accepted")
 	}
 }

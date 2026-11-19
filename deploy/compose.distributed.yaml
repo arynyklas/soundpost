@@ -94,6 +94,14 @@ services:
   # default three-member stack.)
   # The helper image is separate from the server image: cmd/soundpost-perf-acquire, built from
   # deploy/Dockerfile.perf-helper (`go run ./build image-context --image perf-helper ...`).
+  # Observed by running the release's helper image through this service on Docker 26.1.5 / runc,
+  # kernel 6.12, cgroup v2 (docs/operations/distributed.md, "Native acquisition permissions"):
+  # the helper only identifies a target if it sees the host's cgroup namespace (`cgroup: host`: its
+  # `0::/..` private view is refused), reads the host's /etc/machine-id (the FROM scratch image has none),
+  # and a client can only reach its socket when the socket directory is a root-owned 0700 HOST
+  # directory (a private tmpfs is unreachable). The client the operator runs must share the helper's
+  # PID namespace (the helper refuses a peer it cannot see). A target of another uid than the helper
+  # (the nonroot server image) is not visible to a PERFMON-only helper and stays DENIED.
   soundpost-perf-helper:
     profiles: ["native"]
     image: ${SOUNDPOST_PERF_HELPER_IMAGE:-soundpost-perf-helper:unset}
@@ -105,6 +113,9 @@ services:
     read_only: true
     cap_drop: [ALL]
     cap_add: [PERFMON]
+    # the helper identifies a target by the inode of its cgroup directory: only the host cgroup
+    # namespace shows that path (a private namespace shows `0::/../...`, which the helper refuses)
+    cgroup: host
     security_opt:
       - no-new-privileges:true
       - seccomp=${SOUNDPOST_PERF_SECCOMP:-./seccomp/soundpost-perf.json}
@@ -113,8 +124,6 @@ services:
     pids_limit: 16
     mem_limit: 64m
     restart: "no"
-    tmpfs:
-      - /run/soundpost-perf:size=1m,mode=0700,uid=0,gid=0
     volumes:
       # root-owned operator policy: names the exact workload and the signed start authorization
       - type: bind
@@ -123,8 +132,14 @@ services:
         read_only: true
         bind:
           create_host_path: false
-      # The helper names the host in every domain it exports from /etc/machine-id; the scratch helper image has none, and
-      # without it every capture is refused as "invalid native target identity" (observed on sp-oci, kernel 6.12).
+      # the helper's socket directory: a root-owned mode 0700 directory the operator made on the host
+      # (the helper refuses any other); the operator's client connects through it
+      - type: bind
+        source: ${SOUNDPOST_PERF_RUN:-/run/soundpost-perf}
+        target: /run/soundpost-perf
+        bind:
+          create_host_path: false
+      # the host identity the helper stamps into its clock domain; the image has no /etc/machine-id
       - type: bind
         source: /etc/machine-id
         target: /etc/machine-id

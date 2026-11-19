@@ -43,6 +43,10 @@ type Ledger struct {
 	acks     []Ack
 	byID     map[string]int
 	attempts []Attempt
+
+	// Sink, when set, is called with every NEW acknowledgement before Record returns (a repeat of an acknowledged batch is not new):
+	// the vm-hard-reset drill appends it to a file and fsyncs it, so what the drill considers acknowledged survives a reset.
+	Sink func(Ack) error
 }
 
 // Record adds an acknowledgement. A second acknowledgement of the same ID is accepted only when
@@ -67,6 +71,11 @@ func (l *Ledger) Record(a Ack) error {
 	a.Seq = len(l.acks) + 1
 	l.byID[a.ID] = len(l.acks)
 	l.acks = append(l.acks, a)
+	if l.Sink != nil {
+		if err := l.Sink(a); err != nil {
+			return fmt.Errorf("ledger: acknowledgement %s could not be made durable: %w", a.ID, err)
+		}
+	}
 	return nil
 }
 

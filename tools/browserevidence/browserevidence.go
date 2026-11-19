@@ -226,6 +226,7 @@ func viewRows(listed []pwEntry, rows []releaseevidence.Row) []releaseevidence.Ro
 		}
 		if len(bad) > 0 {
 			row.Status = releaseevidence.StatusFailed
+			row.FailureClass = releaseevidence.FailureAssertion
 			row.Detail = releaseevidence.Detail(bad...)
 		} else {
 			row.Detail = fmt.Sprintf("%d named test(s) passed", n)
@@ -250,6 +251,7 @@ func mergeDuplicates(rows []releaseevidence.Row) []releaseevidence.Row {
 		prev := out[i]
 		if prev.Status == releaseevidence.StatusPassed && r.Status != releaseevidence.StatusPassed {
 			prev.Status = r.Status
+			prev.FailureClass = r.FailureClass
 		}
 		prev.Detail = releaseevidence.Detail(prev.Detail, "reported twice: "+r.Detail)
 		out[i] = prev
@@ -389,6 +391,7 @@ func playwrightRows(raw []byte, project string) ([]releaseevidence.Row, error) {
 	run := releaseevidence.Row{ID: PlaywrightRunRow, Status: releaseevidence.StatusPassed, Detail: fmt.Sprintf("%d %s tests reported", len(tests), project)}
 	if len(runErrors) > 0 {
 		run.Status = releaseevidence.StatusFailed
+		run.FailureClass = releaseevidence.FailureHarness
 		run.Detail = releaseevidence.Detail(append([]string{"runner errors"}, runErrors...)...)
 	}
 	rows = append(rows, run)
@@ -408,19 +411,25 @@ func playwrightRows(raw []byte, project string) ([]releaseevidence.Row, error) {
 			row.Detail = fmt.Sprintf("%s: passed in %d attempt(s)", project, len(e.test.Results))
 		case e.test.Status == "expected" && e.test.ExpectedStatus == "passed":
 			row.Status = releaseevidence.StatusNotRun
+			row.FailureClass = releaseevidence.FailureNotRun
 			row.Detail = fmt.Sprintf("no passed result (last result %q)", last)
 		case e.test.Status == "expected":
 			row.Status = "expected_failure"
+			row.FailureClass = releaseevidence.FailureAssertion
 			row.Detail = fmt.Sprintf("expected status %q, last result %q", e.test.ExpectedStatus, last)
 		case e.test.Status == "unexpected":
 			row.Status = releaseevidence.StatusFailed
+			row.FailureClass = releaseevidence.FailureAssertion
 			row.Detail = releaseevidence.Detail("last result "+last, msg)
 		case e.test.Status == "skipped":
 			row.Status = "skipped"
+			row.FailureClass = releaseevidence.FailureNotRun
 		case e.test.Status == "flaky":
 			row.Status = "flaky"
+			row.FailureClass = releaseevidence.FailureAssertion
 		default:
 			row.Status = releaseevidence.StatusNotRun
+			row.FailureClass = releaseevidence.FailureNotRun
 			row.Detail = fmt.Sprintf("test status %q", e.test.Status)
 		}
 		rows = append(rows, row)
@@ -479,6 +488,7 @@ func smokeRows(raw []byte, prefix, key string) ([]releaseevidence.Row, error) {
 			row.Detail = releaseevidence.Detail(r.Detail)
 		} else {
 			row.Status = releaseevidence.StatusFailed
+			row.FailureClass = releaseevidence.FailureAssertion
 			row.Detail = releaseevidence.Detail(r.Reason, r.Detail)
 		}
 		rows = append(rows, row)

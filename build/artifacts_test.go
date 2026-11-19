@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -598,5 +599,89 @@ func TestPerfHelperImageRefusesABinarySHA256SUMSDoesNotList(t *testing.T) {
 	}
 	if _, err := buildArtifacts(root, release, t.TempDir(), "amd64"); err == nil || !strings.Contains(err.Error(), "soundpost-perf-acquire") || !strings.Contains(err.Error(), "SHA256SUMS") {
 		t.Fatalf("want a SHA256SUMS refusal naming the helper, got %v", err)
+	}
+}
+
+// Docker 26 (classic image store) refuses a bare OCI layout (`docker load`: open .../blobs/json: no such file or directory,
+// observed on a real host). Its archive loader reads a manifest.json naming the config and the layers. The produced archive
+// carries exactly that one extra file next to the unchanged OCI members, and stays a valid OCI image layout.
+func TestOCIArchiveCarriesTheDockerLoaderManifestAndStaysAnOCILayout(t *testing.T) {
+	root, release := artifactFixture(t)
+	dir := t.TempDir()
+	subjects, err := buildArtifacts(root, release, dir, "amd64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for kind, repo := range map[string]string{"oci_image": "soundpost", "oci_image_perf_helper": "soundpost-perf-helper"} {
+		var subject ArtifactSubject
+		for _, s := range subjects {
+			if s.Kind == kind {
+				subject = s
+			}
+		}
+		raw, _ := os.ReadFile(filepath.Join(dir, filepath.FromSlash(subject.Path)))
+		files := map[string][]byte{}
+		var names []string
+		tr := tar.NewReader(bytes.NewReader(raw))
+		for {
+			h, err := tr.Next()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if h.ModTime.Unix() != 0 || h.Typeflag != tar.TypeReg {
+				t.Errorf("%s %s: modification time or type", kind, h.Name)
+			}
+			b, _ := io.ReadAll(tr)
+			files[h.Name] = b
+			names = append(names, h.Name)
+		}
+		if !sort.StringsAreSorted(names) {
+			t.Errorf("%s: entries are not sorted: %v", kind, names)
+		}
+		// the OCI layout: unchanged members
+		if string(files["oci-layout"]) != `{"imageLayoutVersion":"1.0.0"}` {
+			t.Errorf("%s: oci-layout %q", kind, files["oci-layout"])
+		}
+		var idx ociIndex
+		if err := json.Unmarshal(files["index.json"], &idx); err != nil || len(idx.Manifests) != 1 || idx.Manifests[0].Digest != subject.Detail {
+			t.Fatalf("%s: index %v %s (manifest digest must stay %s)", kind, err, files["index.json"], subject.Detail)
+		}
+		blob := func(d string) []byte { return files["blobs/sha256/"+strings.TrimPrefix(d, "sha256:")] }
+		var man ociManifest
+		if err := json.Unmarshal(blob(idx.Manifests[0].Digest), &man); err != nil || len(man.Layers) != 1 {
+			t.Fatalf("%s: manifest: %v", kind, err)
+		}
+		// the Docker loader's manifest
+		var docker []struct {
+			Config   string
+			RepoTags []string
+			Layers   []string
+		}
+		if err := json.Unmarshal(files["manifest.json"], &docker); err != nil || len(docker) != 1 {
+			t.Fatalf("%s: manifest.json missing or not one image: %v %q", kind, err, files["manifest.json"])
+		}
+		d := docker[0]
+		if d.Config != "blobs/sha256/"+strings.TrimPrefix(man.Config.Digest, "sha256:") || len(d.Layers) != 1 || d.Layers[0] != "blobs/sha256/"+strings.TrimPrefix(man.Layers[0].Digest, "sha256:") {
+			t.Errorf("%s: manifest.json points at %+v, not at the OCI config %s and layer %s", kind, d, man.Config.Digest, man.Layers[0].Digest)
+		}
+		for path, want := range map[string]string{d.Config: man.Config.Digest, d.Layers[0]: man.Layers[0].Digest} {
+			body, ok := files[path]
+			if !ok || blobDigest(body) != want {
+				t.Errorf("%s: %s is not a blob with digest %s", kind, path, want)
+			}
+		}
+		if len(d.RepoTags) != 1 || d.RepoTags[0] != repo+":1.2.3" {
+			t.Errorf("%s: RepoTags %v, want [%s:1.2.3] (the documented tag of this image)", kind, d.RepoTags, repo)
+		}
+		// no new blob: the only members are the OCI ones and manifest.json
+		want := []string{"blobs/sha256/" + strings.TrimPrefix(man.Config.Digest, "sha256:"), "blobs/sha256/" + strings.TrimPrefix(man.Layers[0].Digest, "sha256:"),
+			"blobs/sha256/" + strings.TrimPrefix(idx.Manifests[0].Digest, "sha256:"), "index.json", "manifest.json", "oci-layout"}
+		sort.Strings(want)
+		if strings.Join(names, ",") != strings.Join(want, ",") {
+			t.Errorf("%s: members %v, want %v", kind, names, want)
+		}
 	}
 }

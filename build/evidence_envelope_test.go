@@ -39,7 +39,7 @@ func TestGateReadsWhatTheExportersWrite(t *testing.T) {
 	}
 	failed := write("node_loss", []string{"a", "b", "c"}, []releaseevidence.Row{
 		passed,
-		{ID: "b", Status: releaseevidence.StatusFailed, Detail: "1 acknowledged id missing"},
+		{ID: "b", Status: releaseevidence.StatusFailed, FailureClass: releaseevidence.FailureAssertion, Detail: "1 acknowledged id missing"},
 	})
 	c := checkEvidenceOf("node_loss", failed, testCommit)
 	got := strings.Join(c.Blocking, "\n")

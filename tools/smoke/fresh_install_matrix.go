@@ -39,20 +39,26 @@ type subjectRecord struct {
 // the digest of each artifact it used (07.08-W4):
 //
 //	--release DIR    `build release` output (binary, SHA256SUMS)
-//	--artifacts DIR  `build artifacts` output (artifacts.json): wheel, npm tarballs, OCI image layout
+//	--artifacts DIR  `build artifacts` output (artifacts.json): wheel, npm tarballs, OCI image layouts
 //	--bun PATH       Bun used to import the npm packages (default: bun on PATH)
 //	--python PATH    Python 3.12+ with the cryptography wheel importable (default: python3)
+//	--chrome PATH, --node-linux PATH, --pg-image ID | --pg-local DIR, --symbolicate-cgroup-root DIR
+//	                 the reference_journeys row's environment (the journeys smoke's own flags)
 //
 // Rows: digests (every artifact re-hashed against artifacts.json), image_binary and perf_helper_image_binary (each image's
 // only executable is the release binary it names: soundpost, soundpost-perf-acquire), wheel_fresh_venv (pip install --no-index --no-deps into a new venv, import,
 // version), npm_fresh_project (each tarball unpacked into a new node_modules, the entry imported), install_single and
 // install_distributed (the existing smokes against the release binary; the UI is served from the binary and compared
-// to --web-dist when given). Rows that need an OCI runtime, root, kernels, a network registry or a database
-// container are recorded not_run with the reason, never passed. There are no published URLs yet: the report records
-// local paths and digests.
+// to --web-dist when given), container_install (the server image is loaded into Docker and install-single runs against
+// the container as nonroot), reference_journeys (the journeys smoke against the produced binary, a PostgreSQL 16
+// backend, Chrome and the node's native symbolication) and native_profile_install (the release helper image run under
+// Docker with CAP_PERFMON against a real CPU-burning container, native_helper_container.go). A row whose
+// prerequisite is missing on the host is recorded not_run with the exact reason, never passed. There are no published
+// URLs yet: published_urls is the only row recorded not_run without trying, and the report records local paths and
+// digests.
 //
-// To register (tools/smoke/main.go is frozen for lanes; the parent adds it): case "fresh-install-matrix": return RunFreshInstallMatrix(os.Args[2:]).
-// Until then it runs through TestFreshInstallMatrixOfProducedArtifacts (env SOUNDPOST_MATRIX_*).
+// Registered in tools/smoke/main.go as `fresh-install-matrix`; TestFreshInstallMatrixOfProducedArtifacts runs it
+// through env SOUNDPOST_MATRIX_* (extra flags: SOUNDPOST_MATRIX_ARGS).
 func RunFreshInstallMatrix(args []string) (result error) {
 	stage := "matrix_flags"
 	defer func() { result = annotateSmokeFailure("fresh_install_matrix", stage, model.ID{}, result) }()
@@ -65,6 +71,11 @@ func RunFreshInstallMatrix(args []string) (result error) {
 	python := f.String("python", "python3", "Python executable")
 	webDist := f.String("web-dist", "", "built UI bundle the served assets must equal")
 	root := f.String("root", ".", "repository root (installed @noble packages are copied from it)")
+	chrome := f.String("chrome", "", "Linux Chrome for the reference_journeys row")
+	nodeLinux := f.String("node-linux", "", "Linux Node 22 for the reference_journeys row")
+	pgImage := f.String("pg-image", "", "LOCAL PostgreSQL 16 image (never pulled) for the reference_journeys row")
+	pgLocal := f.String("pg-local", "", "PostgreSQL 16 installation directory for the reference_journeys row (instead of --pg-image)")
+	cgroupRoot := f.String("symbolicate-cgroup-root", "", "delegated cgroup v2 subtree for the node's native symbolication sandbox (reference_journeys)")
 	if err := f.Parse(args); err != nil {
 		return err
 	}
@@ -79,13 +90,9 @@ func RunFreshInstallMatrix(args []string) (result error) {
 	var failed []string
 	run := func(row string, fn func() (string, error)) {
 		detail, err := fn()
-		switch {
-		case err == nil:
-			record(row, "passed", detail)
-		case strings.HasPrefix(err.Error(), "not_run:"):
-			record(row, "not_run", strings.TrimPrefix(err.Error(), "not_run:"))
-		default:
-			record(row, "failed", err.Error())
+		status, text, bad := classifyMatrixRow(detail, err)
+		record(row, status, text)
+		if bad {
 			failed = append(failed, row)
 		}
 	}
@@ -135,7 +142,7 @@ func RunFreshInstallMatrix(args []string) (result error) {
 		if sum != binSum {
 			return "", fmt.Errorf("image binary %s is not the release binary %s", sum, binSum)
 		}
-		return "image layer holds exactly the release binary " + sum + "; manifest " + imgs[0].Detail + " (not started: no OCI runtime)", nil
+		return "image layer holds exactly the release binary " + sum + "; manifest " + imgs[0].Detail + " (layer content only; container_install starts the image)", nil
 	})
 	run("perf_helper_image_binary", func() (string, error) {
 		imgs := byKind["oci_image_perf_helper"]
@@ -154,7 +161,7 @@ func RunFreshInstallMatrix(args []string) (result error) {
 		if sum != helperSum {
 			return "", fmt.Errorf("helper image binary %s is not the release helper %s", sum, helperSum)
 		}
-		return "helper image layer holds exactly the release soundpost-perf-acquire " + sum + "; manifest " + imgs[0].Detail + " (not started: no OCI runtime, no root, no CAP_PERFMON)", nil
+		return "helper image layer holds exactly the release soundpost-perf-acquire " + sum + "; manifest " + imgs[0].Detail + " (layer content only; native_profile_install starts the image)", nil
 	})
 
 	stage = "matrix_wheel"
@@ -163,31 +170,8 @@ func RunFreshInstallMatrix(args []string) (result error) {
 		if len(wheels) != 1 {
 			return "", errors.New("artifacts.json lists no single wheel")
 		}
-		if _, err := exec.LookPath(*python); err != nil {
-			return "", errors.New("not_run:" + *python + " not found")
-		}
-		dir, err := os.MkdirTemp("", "soundpost-venv-")
-		if err != nil {
-			return "", err
-		}
-		defer os.RemoveAll(dir)
-		if out, err := exec.Command(*python, "-m", "venv", "--system-site-packages", dir).CombinedOutput(); err != nil {
-			return "", errors.New("not_run:python -m venv failed: " + firstLine(string(out)))
-		}
-		py := filepath.Join(dir, "bin", "python")
 		wheel, _ := filepath.Abs(filepath.Join(*artifacts, filepath.FromSlash(wheels[0].Path)))
-		if out, err := exec.Command(py, "-m", "pip", "install", "--no-index", "--no-deps", "--no-cache-dir", wheel).CombinedOutput(); err != nil {
-			return "", fmt.Errorf("pip install: %s", firstLine(string(out)))
-		}
-		cmd := exec.Command(py, "-I", "-c", "import importlib.metadata as m, soundpost; print(m.version('soundpost'), soundpost.__file__)")
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			return "", fmt.Errorf("import: %s", firstLine(string(out)))
-		}
-		if !strings.HasPrefix(string(out), wheels[0].Detail+" "+dir) {
-			return "", fmt.Errorf("installed version or location unexpected: %s", firstLine(string(out)))
-		}
-		return "installed " + wheels[0].Name + " (" + wheels[0].SHA256 + ") into a new venv and imported it: " + strings.TrimSpace(wheels[0].Detail), nil
+		return wheelFreshVenvRow(*python, wheel, wheels[0])
 	})
 
 	stage = "matrix_npm"
@@ -245,9 +229,35 @@ func RunFreshInstallMatrix(args []string) (result error) {
 		}
 		return "install-distributed (process mode) passed against " + binSum, nil
 	})
-	record("container_install", "not_run", "no OCI runtime and no root on the host; the image is verified structurally (image_binary) but not started")
-	record("reference_journeys", "not_run", "tools/smoke journeys needs a PostgreSQL container, Chrome and Windows Vite; no OCI runtime on the host")
-	record("native_profile_install", "not_run", "needs root, the installed helper and Linux kernels 6.1/6.6")
+	stage = "matrix_container_install"
+	run("container_install", func() (string, error) {
+		imgs := byKind["oci_image"]
+		if len(imgs) != 1 {
+			return "", errors.New("artifacts.json lists no single OCI image")
+		}
+		return containerInstallRow(containerInstallOptions{ImageTar: filepath.Join(*artifacts, filepath.FromSlash(imgs[0].Path)), ArtifactDir: filepath.Join(*artifact, "container-install"),
+			DockerErr: probeNativeHost().DockerErr, WebDist: *webDist, Expected: imgs[0].Detail})
+	})
+	stage = "matrix_reference_journeys"
+	run("reference_journeys", func() (string, error) {
+		abs := func(p string) string {
+			if p == "" {
+				return p
+			}
+			a, _ := filepath.Abs(p)
+			return a
+		}
+		return referenceJourneysRow(journeysOptions{ArtifactDir: filepath.Join(*artifact, "reference-journeys"), Root: abs(*root), Release: abs(*release), Binary: abs(binary), Bun: *bun, NodeLinux: *nodeLinux, Python: *python,
+			Chrome: *chrome, PGImage: *pgImage, PGLocal: *pgLocal, CgroupRoot: *cgroupRoot, DockerErr: probeNativeHost().DockerErr})
+	})
+	stage = "matrix_native_profile_install"
+	run("native_profile_install", func() (string, error) {
+		imgs := byKind["oci_image_perf_helper"]
+		if len(imgs) != 1 {
+			return "", errors.New("artifacts.json lists no single perf helper OCI image")
+		}
+		return nativeProfileInstallRow(nativeHelperOptions{Root: *root, HelperTar: filepath.Join(*artifacts, filepath.FromSlash(imgs[0].Path)), ArtifactDir: filepath.Join(*artifact, "native-profile-install")}, probeNativeHost())
+	})
 	record("published_urls", "not_run", "nothing is published; paths and digests are recorded instead")
 
 	stage = "matrix_artifact"

@@ -177,9 +177,24 @@ func (f *fixture) setLedger(states ...string) {
 	write(f.t, f.ledger, string(raw))
 }
 
+// testClass is the failure class an exporter writes for a row of the status.
+func testClass(status string) releaseevidence.FailureClass {
+	switch status {
+	case "passed":
+		return ""
+	case "failed":
+		return releaseevidence.FailureAssertion
+	case "not_run", "not_exercised", "skipped":
+		return releaseevidence.FailureNotRun
+	case "out_of_release_scope":
+		return releaseevidence.FailureOutOfScope
+	}
+	return releaseevidence.FailureHarness
+}
+
 func (f *fixture) writeEvidence(path, kind, status string) {
 	raw, _ := json.Marshal(EvidenceReport{Schema: evidenceSchema, Kind: kind, Commit: testCommit, SourceSHA256: testSource, Expected: []string{"row-1"},
-		Rows: []EvidenceRow{{ID: "row-1", Status: status}}})
+		Rows: []EvidenceRow{{ID: "row-1", Status: status, FailureClass: testClass(status)}}})
 	write(f.t, path, string(raw))
 }
 
@@ -738,11 +753,11 @@ func TestGateAcceptsOutOfReleaseScopeOnlyForPlatformsOutsideTheRelease(t *testin
 		row     EvidenceRow
 		blocked string
 	}{
-		{"arm64 cites D10", EvidenceRow{ID: "row-1", Status: "out_of_release_scope", Platform: "linux/arm64", Detail: "D10: platform linux/arm64 is not in the release"}, ""},
-		{"platform in release", EvidenceRow{ID: "row-1", Status: "out_of_release_scope", Platform: "linux/amd64", Detail: "D10: wrongly scoped out"}, "runtime row row-1 is out_of_release_scope"},
-		{"no D10 reason", EvidenceRow{ID: "row-1", Status: "out_of_release_scope", Platform: "linux/arm64", Detail: "skipped for time"}, "runtime row row-1 is out_of_release_scope"},
-		{"no platform", EvidenceRow{ID: "row-1", Status: "out_of_release_scope", Detail: "D10"}, "runtime row row-1 is out_of_release_scope"},
-		{"not exercised arm64 still blocks", EvidenceRow{ID: "row-1", Status: "not_exercised", Platform: "linux/arm64", Detail: "D10"}, "runtime row row-1 is not_exercised"},
+		{"arm64 cites D10", EvidenceRow{ID: "row-1", Status: "out_of_release_scope", FailureClass: releaseevidence.FailureOutOfScope, Platform: "linux/arm64", Detail: "D10: platform linux/arm64 is not in the release"}, ""},
+		{"platform in release", EvidenceRow{ID: "row-1", Status: "out_of_release_scope", FailureClass: releaseevidence.FailureOutOfScope, Platform: "linux/amd64", Detail: "D10: wrongly scoped out"}, "runtime row row-1 is out_of_release_scope"},
+		{"no D10 reason", EvidenceRow{ID: "row-1", Status: "out_of_release_scope", FailureClass: releaseevidence.FailureOutOfScope, Platform: "linux/arm64", Detail: "skipped for time"}, "runtime row row-1 is out_of_release_scope"},
+		{"no platform", EvidenceRow{ID: "row-1", Status: "out_of_release_scope", FailureClass: releaseevidence.FailureOutOfScope, Detail: "D10"}, "runtime row row-1 is out_of_release_scope"},
+		{"not exercised arm64 still blocks", EvidenceRow{ID: "row-1", Status: "not_exercised", FailureClass: releaseevidence.FailureNotRun, Platform: "linux/arm64", Detail: "D10"}, "runtime row row-1 is not_exercised"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFixture(t).signed()

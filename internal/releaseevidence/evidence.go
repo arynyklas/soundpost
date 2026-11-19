@@ -92,6 +92,9 @@ type Row struct {
 	ID     string `json:"id"`
 	Status string `json:"status"`
 	Detail string `json:"detail,omitempty"`
+	// FailureClass says why a row that did not pass did not pass (failure_class.go). The exporter sets it from the
+	// structure of the producer's result, never from Detail. A passed row carries none, every other row carries one.
+	FailureClass FailureClass `json:"failure_class,omitempty"`
 	// Platform is GOOS/GOARCH of an out_of_release_scope row; empty for every other row.
 	Platform string `json:"platform,omitempty"`
 }
@@ -193,8 +196,8 @@ func (r Report) Validate() error {
 	}
 	rows := map[string]bool{}
 	for _, row := range r.Rows {
-		if row.ID == "" || row.Status == "" {
-			return fmt.Errorf("row %q has an empty id or status", row.ID)
+		if err := row.Validate(); err != nil {
+			return err
 		}
 		if rows[row.ID] {
 			return fmt.Errorf("duplicate row %s", row.ID)

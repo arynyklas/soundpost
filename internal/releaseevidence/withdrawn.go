@@ -3,11 +3,6 @@
 
 package releaseevidence
 
-import (
-	"regexp"
-	"strings"
-)
-
 // WithdrawalDecision is the owner decision that withdraws the claims below (D65, 2026-11-18): the design's 5 %
 // budget for server SDK capture stays unchanged, the measured rows stay FAILED, and the release makes no claim of it.
 const WithdrawalDecision = "D65"
@@ -45,32 +40,15 @@ var claimWithdrawals = []Withdrawal{
 // ClaimWithdrawals returns a copy of the closed list of withdrawn claims.
 func ClaimWithdrawals() []Withdrawal { return append([]Withdrawal(nil), claimWithdrawals...) }
 
-// budgetMiss matches one part of the detail the qualify exporter writes for a server overhead row that was measured
-// and exceeded a budget (tools/qualify/evidence.go suiteRow: "<budget> observed <v> <unit> > limit <l>").
-var budgetMiss = regexp.MustCompile(`^server_(p95_latency|cpu)_percent observed -?[0-9][0-9.e+-]* percent > limit [0-9][0-9.e+-]*$`)
-
-// measuredBudgetMiss reports whether detail consists only of measured misses of the 5 % server budgets: a row that
-// failed for any other reason (the harness died, no p95 series, delivered mode dropped records) was not measured
-// against the budget, so withdrawing the claim does not cover it.
-func measuredBudgetMiss(detail string) bool {
-	if detail == "" {
-		return false
-	}
-	for _, part := range strings.Split(detail, "; ") {
-		if !budgetMiss.MatchString(part) {
-			return false
-		}
-	}
-	return true
-}
-
 // WithdrawalAccepts reports whether row of the report kind is a declared row that FAILED a measured budget, so the
 // gate may take it as a withdrawn claim instead of a blocker. It never makes the row passed: the gate reports it as
-// "claim withdrawn (D65)". A declared row that is not_run, not_exercised, unsupported, denied, out of scope, missing
-// or failed without a measured budget miss is not accepted, because the measurement must exist. A passed row needs
-// no withdrawal and is not accepted here.
+// "claim withdrawn (D65)". The decision rests on the row's structured FailureClass: it must be FailureBudgetMiss, which
+// the exporter sets only for a row that was measured, exceeded a budget and had no other failure. The row's detail is
+// never read, so a row that failed for another reason (harness, dropped records, an assertion) blocks however its detail
+// reads. A declared row that is not_run, not_exercised, unsupported, denied, out of scope, missing or failed for any
+// other class is not accepted, because the measurement must exist. A passed row needs no withdrawal and is not accepted.
 func WithdrawalAccepts(kind string, row Row) (Withdrawal, bool) {
-	if row.Status != StatusFailed || !measuredBudgetMiss(row.Detail) {
+	if row.Status != StatusFailed || row.FailureClass != FailureBudgetMiss {
 		return Withdrawal{}, false
 	}
 	for _, w := range claimWithdrawals {

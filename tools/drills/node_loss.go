@@ -47,10 +47,47 @@ func runNodeKillRestart(env *Env, rep *Report) error {
 		return err
 	}
 	w := newDCWriter(c, rep.Ledger(), 700)
+	victims, err := dcKillRestartPhases(c, w, rep)
+	if err != nil {
+		return err
+	}
+	retained, err := dcVerifyMembers(c, w, rep, "final", 120*time.Second)
+	if err != nil {
+		return err
+	}
+	if err = rep.Reconcile(retained); err != nil {
+		return err
+	}
+	if err = dcRecordCursors(c, rep, "final"); err != nil {
+		return err
+	}
+	events := rep.Timeline().Events()
+	terr := VerifyTimeline(events, 2*len(victims))
+	detail := fmt.Sprintf("%d events, %d failed attempts kept, final state %s", len(events), FailedAttempts(events), rep.Timeline().State())
+	if terr != nil {
+		detail = terr.Error()
+	}
+	if err = rep.Require("outage_timeline_verifies", terr == nil && rep.Timeline().State() == StateRecovered, detail); err != nil {
+		return err
+	}
+	attempts := map[string]int{}
+	for _, a := range rep.Ledger().Attempts() {
+		attempts[a.Outcome]++
+	}
+	rep.Fact("failed_attempts_by_outcome", attempts)
+	rep.Fact("acknowledged_batches", rep.Ledger().Len())
+	return nil
+}
+
+// dcKillRestartPhases is the node loss of node-kill-restart, shared with node-loss-journeys: while a write stream is acknowledged,
+// SIGKILL the configured initial leader (member 1) and restore it, then SIGKILL member 3 and restore it. Each phase reconciles
+// every acknowledged id on every member before the next. It returns the members that were killed and restored.
+func dcKillRestartPhases(c *dcCluster, w *dcWriter, rep *Report) ([]uint64, error) {
 	phases := []struct {
 		name   string
 		victim uint64
 	}{{"kill_initial_leader_member_1", 1}, {"kill_member_3", 3}}
+	var victims []uint64
 	for _, ph := range phases {
 		victim := ph.victim
 		spec := dcFaultSpec{
@@ -68,34 +105,10 @@ func runNodeKillRestart(env *Env, rep *Report) error {
 			},
 			Restore: func() error { return c.start(victim) },
 		}
-		if err = dcRunStreamFault(c, w, rep, spec); err != nil {
-			return err
+		if err := dcRunStreamFault(c, w, rep, spec); err != nil {
+			return nil, err
 		}
+		victims = append(victims, victim)
 	}
-	retained, err := dcVerifyMembers(c, w, rep, "final", 120*time.Second)
-	if err != nil {
-		return err
-	}
-	if err = rep.Reconcile(retained); err != nil {
-		return err
-	}
-	if err = dcRecordCursors(c, rep, "final"); err != nil {
-		return err
-	}
-	events := rep.Timeline().Events()
-	terr := VerifyTimeline(events, 2*len(phases))
-	detail := fmt.Sprintf("%d events, %d failed attempts kept, final state %s", len(events), FailedAttempts(events), rep.Timeline().State())
-	if terr != nil {
-		detail = terr.Error()
-	}
-	if err = rep.Require("outage_timeline_verifies", terr == nil && rep.Timeline().State() == StateRecovered, detail); err != nil {
-		return err
-	}
-	attempts := map[string]int{}
-	for _, a := range rep.Ledger().Attempts() {
-		attempts[a.Outcome]++
-	}
-	rep.Fact("failed_attempts_by_outcome", attempts)
-	rep.Fact("acknowledged_batches", rep.Ledger().Len())
-	return nil
+	return victims, nil
 }

@@ -164,16 +164,17 @@ func TestExportNamesMissingResults(t *testing.T) {
 
 func TestPlaywrightStatusesAreNeverPromoted(t *testing.T) {
 	for name, c := range map[string]struct {
-		test string
-		want string
+		test  string
+		want  string
+		class releaseevidence.FailureClass
 	}{
-		"expected pass":  {pwTestJSON("chromium", "passed", "expected", "passed"), releaseevidence.StatusPassed},
-		"unexpected":     {pwTestJSON("chromium", "passed", "unexpected", "failed"), releaseevidence.StatusFailed},
-		"skipped":        {pwTestJSON("chromium", "skipped", "skipped", "skipped"), "skipped"},
-		"flaky":          {pwTestJSON("chromium", "passed", "flaky", "failed", "passed"), "flaky"},
-		"expected fail":  {pwTestJSON("chromium", "failed", "expected", "failed"), "expected_failure"},
-		"never ran":      {pwTestJSON("chromium", "passed", "expected"), releaseevidence.StatusNotRun},
-		"unknown status": {pwTestJSON("chromium", "passed", "weird", "passed"), releaseevidence.StatusNotRun},
+		"expected pass":  {pwTestJSON("chromium", "passed", "expected", "passed"), releaseevidence.StatusPassed, ""},
+		"unexpected":     {pwTestJSON("chromium", "passed", "unexpected", "failed"), releaseevidence.StatusFailed, releaseevidence.FailureAssertion},
+		"skipped":        {pwTestJSON("chromium", "skipped", "skipped", "skipped"), "skipped", releaseevidence.FailureNotRun},
+		"flaky":          {pwTestJSON("chromium", "passed", "flaky", "failed", "passed"), "flaky", releaseevidence.FailureAssertion},
+		"expected fail":  {pwTestJSON("chromium", "failed", "expected", "failed"), "expected_failure", releaseevidence.FailureAssertion},
+		"never ran":      {pwTestJSON("chromium", "passed", "expected"), releaseevidence.StatusNotRun, releaseevidence.FailureNotRun},
+		"unknown status": {pwTestJSON("chromium", "passed", "weird", "passed"), releaseevidence.StatusNotRun, releaseevidence.FailureNotRun},
 	} {
 		results := pwReportJSON([]string{c.test}, nil, "")
 		list := pwReportJSON([]string{`{"projectName":"chromium","expectedStatus":"passed","status":"expected","results":[]}`}, nil, "")
@@ -181,8 +182,8 @@ func TestPlaywrightStatusesAreNeverPromoted(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
-		if got := rowMap(rep)["playwright/auth.spec.ts > top 0"].Status; got != c.want {
-			t.Errorf("%s: status %q, want %q", name, got, c.want)
+		if got := rowMap(rep)["playwright/auth.spec.ts > top 0"]; got.Status != c.want || got.FailureClass != c.class {
+			t.Errorf("%s: status %q class %q, want %q %q", name, got.Status, got.FailureClass, c.want, c.class)
 		}
 	}
 	// Runner errors fail the run row.
@@ -192,7 +193,7 @@ func TestPlaywrightStatusesAreNeverPromoted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r := rowMap(rep)["playwright/run"]; r.Status != releaseevidence.StatusFailed || !strings.Contains(r.Detail, "global setup failed") {
+	if r := rowMap(rep)["playwright/run"]; r.Status != releaseevidence.StatusFailed || r.FailureClass != releaseevidence.FailureHarness || !strings.Contains(r.Detail, "global setup failed") {
 		t.Errorf("run row %+v", r)
 	}
 }

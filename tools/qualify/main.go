@@ -157,6 +157,11 @@ type Row struct {
 	Loss     string          `json:"loss_and_coverage,omitempty"`
 	Limits   []string        `json:"limits,omitempty"`
 	Evidence []string        `json:"evidence,omitempty"`
+
+	// FailureClass is set by a runner for a failed row only to say that the failure is not a plain budget miss
+	// (harness, dropped_records or assertion). It is never budget_miss: the exporter derives that from the row's
+	// structure (a failed budget and no failure text), see exportedFailureClass.
+	FailureClass releaseevidence.FailureClass `json:"failure_class,omitempty"`
 }
 
 // matches reports whether an observed build is the subject's own build. Only a
@@ -183,6 +188,16 @@ func ValidateRow(r Row) error {
 	}
 	if r.ID == "" || r.Subject.Family == "" || r.Subject.Version == "" && r.Subject.OS == "" && r.Subject.Arch == "" {
 		return bad("row needs an id and a subject")
+	}
+	if r.FailureClass != "" {
+		if r.State != StateExercised || r.Outcome != OutcomeFailed {
+			return bad("failure_class %q on a row that is not an exercised failure", r.FailureClass)
+		}
+		switch r.FailureClass {
+		case releaseevidence.FailureHarness, releaseevidence.FailureDroppedRecords, releaseevidence.FailureAssertion:
+		default:
+			return bad("failure_class %q can not be set by a runner (a budget miss is derived from the budgets)", r.FailureClass)
+		}
 	}
 	// The capability invariant holds in every state.
 	for _, rd := range r.Readings {

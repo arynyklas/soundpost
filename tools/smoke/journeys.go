@@ -25,7 +25,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/arynyklas/soundpost/internal/appcore"
 	"github.com/arynyklas/soundpost/internal/auth"
 	"github.com/arynyklas/soundpost/internal/model"
 	"github.com/arynyklas/soundpost/internal/storage"
@@ -37,6 +36,9 @@ import (
 // real headless Chrome, a job run), then reads the admitted evidence back through the product's own
 // routes and evaluates every journey row (journeys_assert.go). It exits nonzero while any REQUIRED row
 // is unsatisfied.
+//
+// With --cluster-attach FILE no product is started here: the journeys run against the three-member cluster that its owner (tools/drills
+// --scenario node-loss-journeys) bootstrapped, put through a node loss and recovered; see journeys_cluster.go.
 //
 // Registered as: case "journeys": return RunJourneys(os.Args[2:]).
 func RunJourneys(args []string) (result error) {
@@ -54,11 +56,24 @@ func RunJourneys(args []string) (result error) {
 	fs.StringVar(&j.pgLocal, "pg-local", "", "PostgreSQL 16 installation directory (bin/ and lib/): start an unprivileged local server instead of a container")
 	fs.StringVar(&j.cgroupRoot, "symbolicate-cgroup-root", "", "already delegated, empty cgroup v2 subtree for the node's native symbolication sandbox (default: the node's own cgroup)")
 	fs.BoolVar(&j.hold, "hold", false, "provision, write hold.json and wait for SIGINT (for developing the applications)")
+	fs.StringVar(&j.attachPath, "cluster-attach", "", "run against the recovered distributed cluster this JSON document describes (tools/drills --scenario node-loss-journeys) instead of starting a node")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if j.artDir == "" {
 		return errors.New("--artifact-dir is required")
+	}
+	if j.attachPath != "" {
+		if j.hold {
+			return errors.New("--hold cannot be combined with --cluster-attach")
+		}
+		raw, err := os.ReadFile(j.attachPath)
+		if err != nil {
+			return err
+		}
+		if j.attach, err = parseJourneyAttach(raw); err != nil {
+			return err
+		}
 	}
 	j.rep = map[string]any{}
 	j.logs = map[string]*syncBuffer{}
@@ -110,6 +125,13 @@ type journeyRun struct {
 	cookie   map[string]string
 	csrf     map[*installSite]string
 	depStats []byte
+
+	// Attach mode (--cluster-attach), journeys_cluster.go: the recovered cluster the journeys run against, the channel to the
+	// owner that holds its member processes, and the member the logins and reads currently go to.
+	attachPath string
+	attach     *journeyAttach
+	ctl        *journeyControl
+	cur        uint64
 }
 
 type appCfg struct {
@@ -158,11 +180,15 @@ func (j *journeyRun) run() error {
 	if j.chrome == "" {
 		j.chrome = filepath.Join(j.root, ".tools", "chrome-linux156", "chrome-linux64", "chrome")
 	}
+	node := j.startNode
+	if j.attach != nil {
+		node = j.attachCluster
+	}
 	steps := []struct {
 		name string
 		fn   func() error
 	}{
-		{"toolchain", j.toolchain}, {"pki", j.setupPKI}, {"postgres", j.startPostgres}, {"node", j.startNode},
+		{"toolchain", j.toolchain}, {"pki", j.setupPKI}, {"postgres", j.startPostgres}, {"node", node},
 		{"provision", j.provision}, {"web_build", j.buildWeb}, {"estate", j.startEstate},
 		{"journeys", j.drive}, {"stop_estate", j.stopEstate}, {"collect", j.collect}, {"reads", j.readsAfterRestart}, {"verdict", j.verdict},
 	}
@@ -301,11 +327,6 @@ func (j *journeyRun) extractNode() (string, error) {
 
 // ---- PKI, PostgreSQL, node ----
 
-func (j *journeyRun) setupPKI() (err error) {
-	j.pki, err = newJourneyPKI(filepath.Join(j.work, "pki"))
-	return err
-}
-
 func (j *journeyRun) startPostgres() error {
 	if j.localPG() {
 		if err := j.startLocalPostgres(); err != nil {
@@ -422,32 +443,38 @@ var (
 )
 
 func (j *journeyRun) adminCommand(org model.ID, kind string, p auth.AdminPayload) error {
-	status, raw, err := j.site.post("/api/v1/admin/read", map[string]string{"kind": "organizations"}, j.owner.CSRF, "")
-	if err = requireSmokeResponse("admin_read", status, 200, raw, err); err != nil {
-		return err
-	}
-	var view auth.AdminView
-	if err = json.Unmarshal(raw, &view); err != nil {
-		return err
-	}
 	p.Reason = "reference journeys"
 	payload, _ := json.Marshal(p)
-	status, raw, err = j.site.post("/api/v1/admin/commands", auth.AdminCommandRequest{CommandID: model.NewID(), ExpectedRevision: view.Revision, OrgID: org, Kind: kind, Payload: payload}, j.owner.CSRF, "")
-	return requireSmokeResponse("admin_"+kind, status, 200, raw, err)
+	command := model.NewID() // one command id for every repeat of this command
+	for attempt := 0; ; attempt++ {
+		status, raw, err := j.post(j.site, "/api/v1/admin/read", map[string]string{"kind": "organizations"}, j.owner.CSRF, "")
+		if err = requireSmokeResponse("admin_read", status, 200, raw, err); err != nil {
+			return err
+		}
+		var view auth.AdminView
+		if err = json.Unmarshal(raw, &view); err != nil {
+			return err
+		}
+		status, raw, err = j.site.post("/api/v1/admin/commands", auth.AdminCommandRequest{CommandID: command, ExpectedRevision: view.Revision, OrgID: org, Kind: kind, Payload: payload}, j.owner.CSRF, "")
+		// Against a cluster, a command that lost its index race or whose revision moved between the read and the command committed
+		// nothing: read the revision again and send the same command again.
+		if err == nil && j.attach != nil && retryableClusterAnswer(status, raw) && attempt < 40 {
+			time.Sleep(250 * time.Millisecond)
+			continue
+		}
+		return requireSmokeResponse("admin_"+kind, status, 200, raw, err)
+	}
 }
 
 func (j *journeyRun) provision() error {
-	token, err := os.ReadFile(filepath.Join(j.nodeDir, "bootstrap.token"))
-	if err != nil {
+	if err := j.establishOwner(); err != nil {
 		return err
 	}
-	status, raw, err := j.site.post("/api/v1/bootstrap", map[string]string{"Token": string(token), "Email": "owner@journeys.invalid", "Password": "journeys owner password 2026"}, "", "")
-	if err = requireSmokeResponse("bootstrap", status, 200, raw, err); err != nil {
-		return err
-	}
-	if err = json.Unmarshal(raw, &j.owner); err != nil {
-		return err
-	}
+	var (
+		status int
+		raw    []byte
+		err    error
+	)
 	e := &j.exp
 	e.Org, e.Project, e.OtherOrg, e.OtherProject = journeyID("org-a"), journeyID("project-a"), journeyID("org-b"), journeyID("project-b")
 	e.Job, e.Run = journeyID("job/reference.catalog.refresh"), journeyID("run/reference.catalog.refresh/1")
@@ -495,7 +522,7 @@ func (j *journeyRun) provision() error {
 		}
 	}
 	// Artifact-write credential for the build, issued to the builder, scoped to this project only.
-	status, raw, err = j.site.post("/api/v1/admin/tokens/issue", map[string]any{"org_id": e.Org, "principal": builder, "projects": []model.ID{e.Project}, "permissions": []string{"artifacts.write"}, "expires": fmt.Sprint(time.Now().Add(2 * time.Hour).Unix()), "reason": "reference journeys build"}, j.owner.CSRF, "")
+	status, raw, err = j.post(j.site, "/api/v1/admin/tokens/issue", map[string]any{"org_id": e.Org, "principal": builder, "projects": []model.ID{e.Project}, "permissions": []string{"artifacts.write"}, "expires": fmt.Sprint(time.Now().Add(2 * time.Hour).Unix()), "reason": "reference journeys build"}, j.owner.CSRF, "")
 	if err = requireSmokeResponse("token_issue", status, 200, raw, err); err != nil {
 		return err
 	}
@@ -552,7 +579,7 @@ func (j *journeyRun) provision() error {
 		if a.browser {
 			ob.Origins = []string{"https://" + j.gw}
 		}
-		status, raw, err := j.site.post("/api/v1/sources", ob, j.owner.CSRF, "")
+		status, raw, err := j.post(j.site, "/api/v1/sources", ob, j.owner.CSRF, "")
 		if err = requireSmokeResponse("source_onboard_"+a.name, status, 200, raw, err); err != nil {
 			return err
 		}
@@ -571,7 +598,7 @@ func (j *journeyRun) provision() error {
 func (j *journeyRun) writeConfig(c *appCfg, env model.ID) error {
 	cfg := map[string]any{
 		"org": j.exp.Org, "project": j.exp.Project, "source": c.Source, "credential": c.Onboard.Credential, "build": c.Build,
-		"endpoint": "https://" + j.nodeAddr + "/ingest/v1/batches", "ca_file": j.pki.CA,
+		"endpoint": "https://" + j.ingestAddress(c.Name) + "/ingest/v1/batches", "ca_file": j.pki.CA,
 		"policy": c.Onboard.Policy, "trusted_keys": c.Onboard.TrustedKeys, "descriptor": c.Onboard.Descriptor,
 		"resource":     map[string]any{"service_id": c.Service, "environment_id": env, "build_id": c.Build, "instance_pseudonym": c.Resource.Instance},
 		"job_registry": map[string]any{"reference.catalog.refresh": j.exp.Job},
@@ -608,7 +635,7 @@ func (j *journeyRun) buildWeb() error {
 	out := filepath.Join(j.work, "web-dist")
 	web := j.apps["web"]
 	env := []string{"REFERENCE_ORG=" + j.exp.Org.String(), "REFERENCE_PROJECT=" + j.exp.Project.String(), "REFERENCE_SOURCE=" + j.apps["webbuild"].Source.String(),
-		"REFERENCE_BUILD_ID=" + web.Build.String(), "REFERENCE_ENDPOINT=https://" + j.nodeAddr, "REFERENCE_ARTIFACT_TOKEN=" + j.token,
+		"REFERENCE_BUILD_ID=" + web.Build.String(), "REFERENCE_ENDPOINT=https://" + j.ingestAddress("webbuild"), "REFERENCE_ARTIFACT_TOKEN=" + j.token,
 		"REFERENCE_OUT_DIR=" + out, "NODE_EXTRA_CA_CERTS=" + j.pki.CA}
 	stdout, err := runOut(j.root, env, j.nodeLinux, "examples/reference/web/build.mjs")
 	if err != nil {
@@ -719,6 +746,9 @@ type flushLine struct {
 }
 
 func (j *journeyRun) drive() error {
+	if err := j.phase("drive_begin"); err != nil {
+		return err
+	}
 	e := j.exp
 	note := "journey note " + e.Canaries[0]
 	// 1. direct request through the gateway (no browser): gateway -> api -> PostgreSQL + dependency.
@@ -739,6 +769,7 @@ func (j *journeyRun) drive() error {
 		return err
 	}
 	j.order.Drive = order
+	j.rep["order_driver_flush"] = order["flush"] // the page's own delivery report (pending, lost, receipts), like the other clients' in details.json
 	if t, ok := order["trace_id"].(string); ok {
 		if id, perr := model.ParseID(t); perr == nil {
 			j.obs.UITrace = id
@@ -889,9 +920,9 @@ func (j *journeyRun) stopEstate() error {
 // ---- collection (node stopped; storage opened in-process) ----
 
 func (j *journeyRun) loginReader(name, email string) (*installSite, string, error) {
-	s := &installSite{base: "https://" + j.nodeAddr, client: j.pki.client()}
+	s := &installSite{base: j.nodeBase(), client: j.pki.client()}
 	s.client.Jar, _ = cookiejar.New(nil)
-	status, raw, err := s.post("/api/v1/login", map[string]string{"Email": email, "Password": strings.SplitN(email, "@", 2)[0] + " journeys password 2026", "Code": ""}, "", "")
+	status, raw, err := j.post(s, "/api/v1/login", map[string]string{"Email": email, "Password": strings.SplitN(email, "@", 2)[0] + " journeys password 2026", "Code": ""}, "", "")
 	if err = requireSmokeResponse("login_"+name, status, 200, raw, err); err != nil {
 		return nil, "", err
 	}
@@ -908,6 +939,10 @@ func (j *journeyRun) loginReader(name, email string) (*installSite, string, erro
 }
 
 func (j *journeyRun) collect() error {
+	// The applications are done: the owner of an attached cluster ends the writes it ran next to them here.
+	if err := j.phase("drive_end"); err != nil {
+		return err
+	}
 	// Logins need the node up, the scans need it down: log in first, then stop the node.
 	var err error
 	j.reader = map[string]*installSite{}
@@ -921,12 +956,12 @@ func (j *journeyRun) collect() error {
 	}
 	// The dependency's own counters, while it is still up? It was stopped in stopEstate; its
 	// stats were read there. Gather proof that canaries flowed from the surviving evidence.
-	if err = j.stopNode(); err != nil {
+	if err = j.quiesceNode(); err != nil {
 		return err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
-	app, err := appcore.Open(j.nodeDir)
+	app, err := j.openStorage()
 	if err != nil {
 		return err
 	}
@@ -1059,7 +1094,7 @@ func (j *journeyRun) recordPageError() {
 // ---- reads through the real HTTP routes after a restart ----
 
 func (j *journeyRun) readsAfterRestart() error {
-	if err := j.launchNode(); err != nil {
+	if err := j.restartNode(); err != nil {
 		return err
 	}
 	a, _, err := j.loginReader("reader-a", "reader-a@journeys.invalid")
@@ -1083,7 +1118,7 @@ func (j *journeyRun) readsAfterRestart() error {
 	window := map[string]any{"start": "0", "end": fmt.Sprint(now.Add(time.Hour).UnixNano())}
 	read := func(actor string, s *installSite, org, project, trace model.ID) error {
 		csrf := j.csrf[s]
-		status, raw, err := s.post("/api/v1/traces/view", map[string]any{"org": org, "project": project, "trace": trace, "window": window}, csrf, "")
+		status, raw, err := j.post(s, "/api/v1/traces/view", map[string]any{"org": org, "project": project, "trace": trace, "window": window}, csrf, "")
 		if err != nil {
 			return err
 		}
@@ -1108,7 +1143,7 @@ func (j *journeyRun) readsAfterRestart() error {
 	if err = j.readServed(a, analyst, builder, window); err != nil {
 		return err
 	}
-	return j.stopNode()
+	return j.finishReads()
 }
 
 // ---- verdict ----
@@ -1151,7 +1186,7 @@ func (j *journeyRun) verdict() error {
 	// Leak scan: the whole node data dir (any nesting of base64), every process log and output,
 	// every read answer, and the observation itself.
 	ctx := context.Background()
-	hits, files, err := scanTreeForCanaries(ctx, j.nodeDir, e.Canaries)
+	hits, files, err := j.scanNodeData(ctx, e.Canaries)
 	if err != nil {
 		return err
 	}

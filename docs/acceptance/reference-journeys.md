@@ -98,3 +98,26 @@ Notes on that run:
   profile row, which needs root, an OCI runtime and a kernel the helper supports.
 * Job attempts, the error and spans DO reach the backend and are admitted; the 03.06/03.09 doubt about job
   attempts was checked and did not hold for the Python SDK here.
+
+## Against a recovered cluster (`--cluster-attach`, 07.07#16)
+
+`go run ./tools/smoke journeys --cluster-attach FILE ...` runs the same applications, the same drive and the same fifteen rows against a
+three-member distributed cluster that somebody else bootstrapped and put through a node loss, instead of starting a single node. The
+cluster's owner is `tools/drills --scenario node-loss-journeys` (`docs/operations/drills.md`, "After recovery: the reference journeys"),
+which writes the attach document (`tools/smoke/testdata/journeys/attach.json` is a committed sample; the parser, `journeys_cluster.go`,
+is strict) and runs the smoke as its child. What differs from the single node, and nothing else does:
+
+* Nothing is started or bootstrapped: the installation's owner logs in and provisions the journeys' organizations, users and sources
+  through a member; control writes and reads retry the answers a recovering cluster documents as retryable (HTTP 400/409 `stale` or
+  `conflict`, the typed 503); every other answer is the row's evidence.
+* Every application ingests through the member its role in the document names, and the document must name members that were
+  killed and restored; every member must answer `/readyz` ready before anything is provisioned (a leg pointed at a member that does not
+  serve fails the run there). The members serve one TLS leaf, so the browser pins one key as before; the page's `connect-src` names the
+  gateway's ingest origin, so the page's member is the gateway's.
+* The collect step's in-process storage scan needs a data directory to itself: through the control channel (JSON lines on stdin/stdout)
+  the cluster's owner shuts the `scan` member down, the smoke opens that member's directory as that member (`appcore.OpenDistributed`
+  on its node file; it joins the two running members), scans, and asks the owner to start the member again. **Every login and every read of the
+  rows afterwards, the traces, errors, frames, job and profile, is served by that restored member.** The leak scan covers all three members' directories
+  while two of them run (a file that vanishes between listing and reading is skipped and counted).
+* `details.json` carries a `cluster` object (members, roles, recovered members, the member the reads went through) and the order page's flush report
+  (`order_driver_flush`); `observed.json` is the single-node document.

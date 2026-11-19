@@ -22,7 +22,7 @@ const servedSettleLimit = 90 * time.Second
 
 // servedPost asks one product route as the logged-in actor and records the answer untouched.
 func (j *journeyRun) servedPost(actor string, s *installSite, route string, body any) (servedRead, error) {
-	status, raw, err := s.post(route, body, j.csrf[s], "")
+	status, raw, err := j.post(s, route, body, j.csrf[s], "")
 	if err != nil {
 		return servedRead{}, err
 	}

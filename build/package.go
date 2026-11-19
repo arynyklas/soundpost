@@ -271,6 +271,10 @@ func checkEvidenceOf(kind string, r Reports, commit string) Check {
 			c.Blocking = append(c.Blocking, fmt.Sprintf("%s evidence has duplicate row %s", kind, row.ID))
 		}
 		status[row.ID] = row.Status
+		if err := row.Validate(); err != nil {
+			c.Blocking = append(c.Blocking, fmt.Sprintf("%s evidence row malformed: %s", kind, err))
+			continue
+		}
 		if releaseevidence.ScopeAccepts(row, releaseevidence.ReleasePlatforms) {
 			outOfScope++
 			continue

@@ -100,8 +100,14 @@ func TestNodeLossEvidenceKeepsEveryDrillVerdict(t *testing.T) {
 	if rows["pause"].Status != releaseevidence.StatusFailed || !strings.Contains(rows["pause"].Detail, "1 acknowledged id missing") {
 		t.Errorf("failed drill must stay failed with its check text: %+v", rows["pause"])
 	}
-	if rows["partition"].Status != releaseevidence.StatusNotRun || rows["partition"].Detail != "needs CAP_NET_ADMIN" {
+	if rows["pause"].FailureClass != releaseevidence.FailureAssertion {
+		t.Errorf("a drill whose check failed is an assertion failure: %+v", rows["pause"])
+	}
+	if rows["partition"].Status != releaseevidence.StatusNotRun || rows["partition"].Detail != "needs CAP_NET_ADMIN" || rows["partition"].FailureClass != releaseevidence.FailureNotRun {
 		t.Errorf("a not_run drill must stay not_run with its reason: %+v", rows["partition"])
+	}
+	if rows["kill"].FailureClass != "" {
+		t.Errorf("a passed drill carries a failure class: %+v", rows["kill"])
 	}
 	if _, ok := rows["absent"]; ok {
 		t.Error("a drill without a report was given a row")
@@ -123,8 +129,22 @@ func TestNodeLossEvidenceDoesNotTrustAContradictoryPass(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r := exportRows(t, env)["kill"]; r.Status != releaseevidence.StatusFailed || !strings.Contains(r.Detail, "outage_timeline_verifies") {
+	if r := exportRows(t, env)["kill"]; r.Status != releaseevidence.StatusFailed || !strings.Contains(r.Detail, "outage_timeline_verifies") || r.FailureClass != releaseevidence.FailureAssertion {
 		t.Errorf("a passed report with a failed check: %+v", r)
+	}
+}
+
+// A drill that failed without a failed check did not get as far as asserting: the harness failed.
+func TestNodeLossEvidenceClassifiesADrillThatCouldNotRunAsAHarnessFailure(t *testing.T) {
+	m, _ := ParseManifest([]byte(evidenceManifest))
+	dir := t.TempDir()
+	writeDrillReport(t, dir, Report{Scenario: "kill", Target: TargetName, Status: StatusFailed, Reason: "this scenario needs --binary"})
+	env, err := NodeLossEvidence(m, dir, drillCommit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := exportRows(t, env)["kill"]; r.Status != releaseevidence.StatusFailed || r.FailureClass != releaseevidence.FailureHarness {
+		t.Errorf("a drill that could not run: %+v", r)
 	}
 }
 

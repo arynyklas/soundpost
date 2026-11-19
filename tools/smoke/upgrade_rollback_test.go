@@ -80,7 +80,9 @@ func TestFreshInstallMatrixOfProducedArtifacts(t *testing.T) {
 		t.Skip("set SOUNDPOST_MATRIX_RELEASE and SOUNDPOST_MATRIX_ARTIFACTS")
 	}
 	dir := t.TempDir()
-	err := RunFreshInstallMatrix([]string{"--artifact-dir", dir, "--release", rel, "--artifacts", art, "--root", "../.."})
+	args := []string{"--artifact-dir", dir, "--release", rel, "--artifacts", art, "--root", "../.."}
+	args = append(args, strings.Fields(os.Getenv("SOUNDPOST_MATRIX_ARGS"))...)
+	err := RunFreshInstallMatrix(args)
 	if out := os.Getenv("SOUNDPOST_MATRIX_REPORT"); out != "" {
 		raw, _ := os.ReadFile(filepath.Join(dir, "fresh-install-matrix.json"))
 		os.WriteFile(out, raw, 0o644)

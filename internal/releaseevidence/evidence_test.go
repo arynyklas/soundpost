@@ -69,7 +69,7 @@ func TestNewRefusesAVacuousOrMalformedEnvelope(t *testing.T) {
 		t.Error("upper-case source accepted")
 	}
 	// Failing and missing rows are valid envelopes: the gate decides.
-	rep, err := New(KindNodeLoss, commit, source, []string{"a", "b"}, []Row{{ID: "a", Status: StatusFailed, Detail: "boom"}})
+	rep, err := New(KindNodeLoss, commit, source, []string{"a", "b"}, []Row{{ID: "a", Status: StatusFailed, FailureClass: FailureAssertion, Detail: "boom"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestNewRefusesAVacuousOrMalformedEnvelope(t *testing.T) {
 }
 
 func TestWriteIsAtomicStrictEnvelopeJSON(t *testing.T) {
-	rep, err := New(KindLanguage, commit, source, []string{"b", "a"}, []Row{{ID: "a", Status: StatusPassed}, {ID: "b", Status: "not_exercised", Detail: "no runner"}})
+	rep, err := New(KindLanguage, commit, source, []string{"b", "a"}, []Row{{ID: "a", Status: StatusPassed}, {ID: "b", Status: "not_exercised", FailureClass: FailureNotRun, Detail: "no runner"}})
 	if err != nil {
 		t.Fatal(err)
 	}

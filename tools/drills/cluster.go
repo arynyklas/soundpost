@@ -788,6 +788,15 @@ type dcCluster struct {
 type dcOptions struct {
 	proxy  bool // peer traffic runs through the drill's own proxies (link-level partitions)
 	inject bool // members run under the storage fault injector (fsync failure, power loss, vanishing disk)
+
+	// public, when set, is the TLS every member serves on its public listener (--tls-cert/--tls-key) instead of the self-signed
+	// certificate it makes for itself: the journeys' applications and browser trust its CA (cluster_public.go).
+	public *dcPublicTLS
+
+	// workDir, when set, replaces env.Work as the cluster's directory (vm-hard-reset keeps everything under a persistent state
+	// directory); resume restarts the cluster a previous process bootstrapped there: same addresses, PKI, node files and data.
+	workDir string
+	resume  *vmState
 }
 
 // newDCCluster is newDCClusterWith with no extra machinery.
@@ -803,16 +812,19 @@ func newDCClusterWith(env *Env, opts dcOptions) (*dcCluster, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &dcCluster{env: env, binary: binary, work: env.Work, public: map[uint64]string{}, peer: map[uint64]string{}, dial: map[uint64]string{}, data: map[uint64]string{}, opts: opts, disks: map[uint64]*dcDisk{},
+	work := env.Work
+	if opts.workDir != "" {
+		work = opts.workDir
+	}
+	c := &dcCluster{env: env, binary: binary, work: work, public: map[uint64]string{}, peer: map[uint64]string{}, dial: map[uint64]string{}, data: map[uint64]string{}, opts: opts, disks: map[uint64]*dcDisk{},
 		logs: map[uint64]*dcLog{}, procs: map[uint64]*dcProc{}, sites: map[uint64]*dcSite{}, sessions: map[uint64]auth.Session{}, down: map[uint64]bool{}, quit: make(chan struct{})}
 	pki := filepath.Join(c.work, "pki")
 	dirs := []string{pki, filepath.Join(c.work, "bootstrap")}
 	var addrs []string
 	for _, n := range dcMembers {
-		pub, e1 := dcFreeAddress()
-		peer, e2 := dcFreeAddress()
-		if e1 != nil || e2 != nil {
-			return nil, errors.Join(e1, e2)
+		pub, peer, aerr := dcMemberAddresses(opts, n.id)
+		if aerr != nil {
+			return nil, aerr
 		}
 		c.public[n.id], c.peer[n.id], c.dial[n.id] = pub, peer, peer
 		if opts.proxy {
@@ -832,6 +844,11 @@ func newDCClusterWith(env *Env, opts dcOptions) (*dcCluster, error) {
 		return nil, err
 	}
 	c.watchSignals()
+	if opts.resume != nil {
+		// The PKI, the node files and the data are the ones the first process left on disk.
+		c.seed = filepath.Join(c.work, "cluster.seed")
+		return c, nil
+	}
 	if err = os.MkdirAll(pki, 0o700); err != nil {
 		return nil, err
 	}
@@ -1010,7 +1027,7 @@ func (c *dcCluster) start(id uint64) error {
 	if c.procs[id] != nil {
 		return errors.New("member already running")
 	}
-	args := []string{"serve", "--mode=distributed", "--node-id", strconv.FormatUint(id, 10), "--cluster-config", filepath.Join(c.work, fmt.Sprintf("node-%d.json", id)), "--data-dir", c.data[id], "--listen", c.public[id]}
+	args := c.serveArgs(id)
 	c.logs[id].newIncarnation()
 	var cmd *exec.Cmd
 	if c.opts.inject {
@@ -1212,7 +1229,7 @@ func (c *dcCluster) site(id uint64) (*dcSite, error) {
 	if p == nil {
 		return nil, fmt.Errorf("member %d is not running", id)
 	}
-	cert, err := dcWaitCertificate(c.data[id], c.public[id], p.done, 60*time.Second)
+	cert, err := c.memberTrust(id, p.done)
 	if err != nil {
 		return nil, err
 	}
@@ -1498,6 +1515,10 @@ type dcWriter struct {
 
 	claimed atomic.Int64 // batches the running stream has issued
 	allowed atomic.Int64 // batches the running stream may issue
+
+	// onIssue, when set, is told about every batch BEFORE it can be sent (id and exact body): the vm-hard-reset drill writes it
+	// down durably, because a reset leaves exactly the batches that were in flight.
+	onIssue func(id string, body []byte) error
 }
 
 func newDCWriter(c *dcCluster, led *Ledger, max int) *dcWriter {
@@ -1528,6 +1549,11 @@ func (w *dcWriter) next() (model.Batch, error) {
 	body, err := json.Marshal(batch)
 	if err != nil {
 		return batch, err
+	}
+	if w.onIssue != nil {
+		if err = w.onIssue(id.String(), body); err != nil {
+			return batch, err
+		}
 	}
 	w.mu.Lock()
 	w.batches[id.String()], w.bodies[id.String()] = batch, body

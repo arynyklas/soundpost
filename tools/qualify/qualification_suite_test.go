@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/arynyklas/soundpost/fixtures/nativeperf/qual"
+	"github.com/arynyklas/soundpost/internal/releaseevidence"
 )
 
 func exercisedRow(budgets ...BudgetResult) Row {
@@ -505,6 +506,40 @@ func TestQualificationOverheadIsJudgedOnDeliveredMode(t *testing.T) {
 	}
 	if row := runServerRow(t, sdkRun(cheap), "3"); row.Outcome != OutcomePassed {
 		t.Errorf("a delivered run within budget without drops must pass: %+v", row)
+	}
+}
+
+// The exported class follows what the runner observed: only a row that was measured, missed a budget and had nothing else
+// wrong is a budget_miss. A dropped-records row that also missed a budget, a harness that died, a saturated-only result
+// and an unmeasurable ratio are not, whatever their detail text says.
+func TestOverheadServerRowsExportTheFailureClassOfWhatWasObserved(t *testing.T) {
+	cheap := httpRow(3, []float64{1.0}, []float64{1.01}, []float64{100}, []float64{101})
+	slow := httpRow(3, []float64{1.0}, []float64{1.06}, []float64{100}, []float64{150})
+	droppingSlow := slow
+	droppingSlow.QueueFull = []float64{0, 4}
+	droppingCheap := cheap
+	droppingCheap.QueueFull = []float64{0, 12}
+	saturatedOnly := &sdkOverhead{}
+	saturatedOnly.Rows.HTTP = []sdkHTTPRow{cheap}
+	for name, c := range map[string]struct {
+		run  *sdkOverheadRun
+		want releaseevidence.FailureClass
+	}{
+		"measured miss, nothing else": {sdkRun(slow), releaseevidence.FailureBudgetMiss},
+		"miss and dropped records":    {sdkRun(droppingSlow), releaseevidence.FailureDroppedRecords},
+		"cheap but dropped records":   {sdkRun(droppingCheap), releaseevidence.FailureDroppedRecords},
+		"harness exited":              {&sdkOverheadRun{Failure: "harness exited 1", Command: "node overhead.mjs", Exit: 1}, releaseevidence.FailureHarness},
+		"saturated-only result":       {&sdkOverheadRun{Result: saturatedOnly, Raw: []byte(`{}`), Command: "node overhead.mjs"}, releaseevidence.FailureHarness},
+		"zero baseline, no ratio":     {sdkRun(httpRow(3, []float64{1.0}, []float64{1.0}, []float64{0, 0}, []float64{50, 50})), releaseevidence.FailureHarness},
+	} {
+		out := suiteRow(runServerRow(t, c.run, "3"))
+		if out.Status != releaseevidence.StatusFailed || out.FailureClass != c.want {
+			t.Errorf("%s: exported status %q class %q, want failed %q (detail %q)", name, out.Status, out.FailureClass, c.want, out.Detail)
+		}
+		_, withdrawn := releaseevidence.WithdrawalAccepts(releaseevidence.KindRuntime, releaseevidence.Row{ID: releaseevidence.ClaimWithdrawals()[0].Row, Status: out.Status, FailureClass: out.FailureClass, Detail: out.Detail})
+		if withdrawn != (c.want == releaseevidence.FailureBudgetMiss) {
+			t.Errorf("%s: withdrawable=%v with class %q", name, withdrawn, out.FailureClass)
+		}
 	}
 }
 

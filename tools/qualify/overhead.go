@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/arynyklas/soundpost/internal/releaseevidence"
 	"gopkg.in/yaml.v3"
 )
 
@@ -361,6 +362,7 @@ func (rc *runCtx) judgeServerRow(row Row, p *probeResult, run *sdkOverheadRun, h
 	if dropped > 0 {
 		// A capture that keeps up only by dropping spans has not delivered its workload; its cost is not the claim.
 		row.Outcome = OutcomeFailed
+		row.FailureClass = releaseevidence.FailureDroppedRecords
 		row.Failures = append(row.Failures, fmt.Sprintf("delivered mode dropped %.0f records as queue_full: the exporter did not keep up", dropped))
 	}
 	row.Loss = fmt.Sprintf("load error counters (harness-reported): %s; delivered mode: flush() every 100 ms through an in-process ACKing receipt transport, queue_full drops per run %v", string(hr.Errors), hr.QueueFull)

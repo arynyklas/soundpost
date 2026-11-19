@@ -39,7 +39,7 @@ func gateWithRuntimeRows(t *testing.T, expected []string, rows ...EvidenceRow) (
 }
 
 func TestGateWithdrawsTheClaimOfADeclaredFailedRowAndReportsIt(t *testing.T) {
-	m, c := gateWithRuntimeRows(t, []string{withdrawnRow}, EvidenceRow{ID: withdrawnRow, Status: "failed", Detail: measuredDetail})
+	m, c := gateWithRuntimeRows(t, []string{withdrawnRow}, EvidenceRow{ID: withdrawnRow, Status: "failed", FailureClass: releaseevidence.FailureBudgetMiss, Detail: measuredDetail})
 	if c.Status != "pass" || len(c.Blocking) != 0 {
 		t.Fatalf("a declared failed row measured against its budget must not block: %+v", c)
 	}
@@ -60,7 +60,7 @@ func TestGateWithdrawsTheClaimOfADeclaredFailedRowAndReportsIt(t *testing.T) {
 func TestGateTextOutputNamesEveryWithdrawnClaim(t *testing.T) {
 	f := newFixture(t).signed()
 	raw, _ := json.Marshal(EvidenceReport{Schema: evidenceSchema, Kind: "runtime", Commit: testCommit, SourceSHA256: testSource, Expected: []string{withdrawnRow},
-		Rows: []EvidenceRow{{ID: withdrawnRow, Status: "failed", Detail: measuredDetail}}})
+		Rows: []EvidenceRow{{ID: withdrawnRow, Status: "failed", FailureClass: releaseevidence.FailureBudgetMiss, Detail: measuredDetail}}})
 	write(t, f.evidence["runtime"], string(raw))
 	var out bytes.Buffer
 	var args []string
@@ -82,15 +82,23 @@ func TestGateStillBlocksEveryRowThatIsNotExactlyADeclaredFailedMeasurement(t *te
 		row  EvidenceRow
 		want string
 	}{
-		{"undeclared failed row", EvidenceRow{ID: undeclared, Status: "failed", Detail: measuredDetail}, "runtime row " + undeclared + " is failed"},
-		{"undeclared row that cites D65", EvidenceRow{ID: undeclared, Status: "failed", Detail: "D65 claim withdrawn; " + measuredDetail}, "runtime row " + undeclared + " is failed"},
-		{"declared row not_run", EvidenceRow{ID: withdrawnRow, Status: "not_run", Detail: "D65"}, "runtime row " + withdrawnRow + " is not_run"},
-		{"declared row not_exercised", EvidenceRow{ID: withdrawnRow, Status: "not_exercised", Detail: "D65"}, "runtime row " + withdrawnRow + " is not_exercised"},
-		{"declared row unsupported", EvidenceRow{ID: withdrawnRow, Status: "unsupported"}, "runtime row " + withdrawnRow + " is unsupported"},
-		{"declared row denied", EvidenceRow{ID: withdrawnRow, Status: "denied"}, "runtime row " + withdrawnRow + " is denied"},
-		{"declared row out of scope", EvidenceRow{ID: withdrawnRow, Status: "out_of_release_scope", Platform: "linux/amd64", Detail: "D10 D65"}, "runtime row " + withdrawnRow + " is out_of_release_scope"},
-		{"declared row failed without a measurement", EvidenceRow{ID: withdrawnRow, Status: "failed", Detail: "overhead harness exited 1 without a usable result: boom"}, "runtime row " + withdrawnRow + " is failed"},
-		{"declared row failed with no detail", EvidenceRow{ID: withdrawnRow, Status: "failed"}, "runtime row " + withdrawnRow + " is failed"},
+		{"undeclared failed row", EvidenceRow{ID: undeclared, Status: "failed", FailureClass: releaseevidence.FailureBudgetMiss, Detail: measuredDetail}, "runtime row " + undeclared + " is failed"},
+		{"undeclared row that cites D65", EvidenceRow{ID: undeclared, Status: "failed", FailureClass: releaseevidence.FailureBudgetMiss, Detail: "D65 claim withdrawn; " + measuredDetail}, "runtime row " + undeclared + " is failed"},
+		{"declared row not_run", EvidenceRow{ID: withdrawnRow, Status: "not_run", FailureClass: releaseevidence.FailureNotRun, Detail: "D65"}, "runtime row " + withdrawnRow + " is not_run"},
+		{"declared row not_exercised", EvidenceRow{ID: withdrawnRow, Status: "not_exercised", FailureClass: releaseevidence.FailureNotRun, Detail: "D65"}, "runtime row " + withdrawnRow + " is not_exercised"},
+		{"declared row unsupported", EvidenceRow{ID: withdrawnRow, Status: "unsupported", FailureClass: releaseevidence.FailureUnsupported}, "runtime row " + withdrawnRow + " is unsupported"},
+		{"declared row denied", EvidenceRow{ID: withdrawnRow, Status: "denied", FailureClass: releaseevidence.FailureDenied}, "runtime row " + withdrawnRow + " is denied"},
+		{"declared row out of scope", EvidenceRow{ID: withdrawnRow, Status: "out_of_release_scope", FailureClass: releaseevidence.FailureOutOfScope, Platform: "linux/amd64", Detail: "D10 D65"}, "runtime row " + withdrawnRow + " is out_of_release_scope"},
+		{"declared row failed without a measurement", EvidenceRow{ID: withdrawnRow, Status: "failed", FailureClass: releaseevidence.FailureHarness, Detail: "overhead harness exited 1 without a usable result: boom"}, "runtime row " + withdrawnRow + " is failed"},
+		{"declared row failed with no detail", EvidenceRow{ID: withdrawnRow, Status: "failed", FailureClass: releaseevidence.FailureHarness}, "runtime row " + withdrawnRow + " is failed"},
+		// The decision is the structured class, never the detail: a harness failure whose detail reads exactly like a
+		// measured budget miss (the exporter's own wording) still blocks.
+		{"harness failure with a clean-looking budget detail", EvidenceRow{ID: withdrawnRow, Status: "failed", FailureClass: releaseevidence.FailureHarness, Detail: measuredDetail}, "runtime row " + withdrawnRow + " is failed"},
+		{"dropped records with a clean-looking budget detail", EvidenceRow{ID: withdrawnRow, Status: "failed", FailureClass: releaseevidence.FailureDroppedRecords, Detail: measuredDetail}, "runtime row " + withdrawnRow + " is failed"},
+		{"assertion failure with a clean-looking budget detail", EvidenceRow{ID: withdrawnRow, Status: "failed", FailureClass: releaseevidence.FailureAssertion, Detail: measuredDetail}, "runtime row " + withdrawnRow + " is failed"},
+		{"failed row with no failure class and a clean-looking budget detail", EvidenceRow{ID: withdrawnRow, Status: "failed", Detail: measuredDetail}, "evidence row malformed"},
+		{"not_run row that claims budget_miss", EvidenceRow{ID: withdrawnRow, Status: "not_run", FailureClass: releaseevidence.FailureBudgetMiss, Detail: measuredDetail}, "evidence row malformed"},
+		{"passed row that carries a failure class", EvidenceRow{ID: withdrawnRow, Status: "passed", FailureClass: releaseevidence.FailureBudgetMiss}, "evidence row malformed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m, c := gateWithRuntimeRows(t, []string{tc.row.ID}, tc.row)
@@ -114,7 +122,7 @@ func TestGateBlocksADeclaredRowThatHasNoResultAtAll(t *testing.T) {
 func TestGateDoesNotWithdrawADeclaredRowInAnotherReportKind(t *testing.T) {
 	f := newFixture(t).signed()
 	raw, _ := json.Marshal(EvidenceReport{Schema: evidenceSchema, Kind: "browser", Commit: testCommit, SourceSHA256: testSource, Expected: []string{withdrawnRow},
-		Rows: []EvidenceRow{{ID: withdrawnRow, Status: "failed", Detail: measuredDetail}}})
+		Rows: []EvidenceRow{{ID: withdrawnRow, Status: "failed", FailureClass: releaseevidence.FailureBudgetMiss, Detail: measuredDetail}}})
 	write(t, f.evidence["browser"], string(raw))
 	r := f.reports()
 	r.ApprovalPath = f.approve(testCommit)
@@ -129,8 +137,10 @@ func TestGateDoesNotWithdrawADeclaredRowInAnotherReportKind(t *testing.T) {
 func TestWithdrawnClaimsCannotBeDeclaredByAReport(t *testing.T) {
 	f := newFixture(t).signed()
 	for name, body := range map[string]string{
-		"extra envelope field": `{"schema":"` + evidenceSchema + `","kind":"runtime","commit":"` + testCommit + `","source_sha256":"` + testSource + `","claims_withdrawn":["overhead.sdk.node-22.linux-amd64.queue"],"expected_rows":["overhead.sdk.node-22.linux-amd64.queue"],"rows":[{"id":"overhead.sdk.node-22.linux-amd64.queue","status":"failed","detail":"` + measuredDetail + `"}]}`,
-		"extra row field":      `{"schema":"` + evidenceSchema + `","kind":"runtime","commit":"` + testCommit + `","source_sha256":"` + testSource + `","expected_rows":["overhead.sdk.node-22.linux-amd64.queue"],"rows":[{"id":"overhead.sdk.node-22.linux-amd64.queue","status":"failed","withdrawn":"D65","detail":"` + measuredDetail + `"}]}`,
+		"extra envelope field":   `{"schema":"` + evidenceSchema + `","kind":"runtime","commit":"` + testCommit + `","source_sha256":"` + testSource + `","claims_withdrawn":["overhead.sdk.node-22.linux-amd64.queue"],"expected_rows":["overhead.sdk.node-22.linux-amd64.queue"],"rows":[{"id":"overhead.sdk.node-22.linux-amd64.queue","status":"failed","failure_class":"budget_miss","detail":"` + measuredDetail + `"}]}`,
+		"extra row field":        `{"schema":"` + evidenceSchema + `","kind":"runtime","commit":"` + testCommit + `","source_sha256":"` + testSource + `","expected_rows":["overhead.sdk.node-22.linux-amd64.queue"],"rows":[{"id":"overhead.sdk.node-22.linux-amd64.queue","status":"failed","failure_class":"budget_miss","withdrawn":"D65","detail":"` + measuredDetail + `"}]}`,
+		"invented failure class": `{"schema":"` + evidenceSchema + `","kind":"runtime","commit":"` + testCommit + `","source_sha256":"` + testSource + `","expected_rows":["` + withdrawnRow + `"],"rows":[{"id":"` + withdrawnRow + `","status":"failed","failure_class":"pure_budget_miss","detail":"` + measuredDetail + `"}]}`,
+		"null failure class":     `{"schema":"` + evidenceSchema + `","kind":"runtime","commit":"` + testCommit + `","source_sha256":"` + testSource + `","expected_rows":["` + withdrawnRow + `"],"rows":[{"id":"` + withdrawnRow + `","status":"failed","failure_class":null,"detail":"` + measuredDetail + `"}]}`,
 	} {
 		write(t, f.evidence["runtime"], body)
 		r := f.reports()

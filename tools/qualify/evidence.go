@@ -149,7 +149,8 @@ func row(id string, passed bool, detail string) releaseevidence.Row {
 	if passed {
 		return releaseevidence.Row{ID: id, Status: releaseevidence.StatusPassed, Detail: detail}
 	}
-	return releaseevidence.Row{ID: id, Status: releaseevidence.StatusFailed, Detail: detail}
+	// A campaign row fails when a comparison of the owned engine with the pinned oracle failed or a required report is missing.
+	return releaseevidence.Row{ID: id, Status: releaseevidence.StatusFailed, FailureClass: releaseevidence.FailureAssertion, Detail: detail}
 }
 
 // EvidenceSuites names the qualification suites whose rows make up a report kind: the runtime
@@ -246,6 +247,29 @@ func SuiteEvidence(kind, matrixPath string, reports []SuiteReport, commit string
 	return releaseevidence.New(kind, commit, source, expected, rows)
 }
 
+// exportedFailureClass is the failure class of an exercised row that did not pass. It is derived from the row's
+// structure and never from its text: a runner's explicit class (harness, dropped_records, assertion) wins; otherwise a
+// row with any failure text is a harness failure (privacy suite rows: an assertion, a canary check failed), and only a
+// row that carries no failure text and has a measured budget that was not met is a budget_miss. ValidateRow already
+// refuses a failed row with neither.
+func exportedFailureClass(r Row) releaseevidence.FailureClass {
+	if r.FailureClass != "" {
+		return r.FailureClass
+	}
+	if len(r.Failures) > 0 {
+		if r.Suite == SuitePrivacy {
+			return releaseevidence.FailureAssertion
+		}
+		return releaseevidence.FailureHarness
+	}
+	for _, b := range r.Budgets {
+		if !b.Within {
+			return releaseevidence.FailureBudgetMiss
+		}
+	}
+	return releaseevidence.FailureHarness
+}
+
 func suiteRow(r Row) releaseevidence.Row {
 	out := releaseevidence.Row{ID: r.ID}
 	switch r.State {
@@ -256,6 +280,7 @@ func suiteRow(r Row) releaseevidence.Row {
 			return out
 		}
 		out.Status = releaseevidence.StatusFailed
+		out.FailureClass = exportedFailureClass(r)
 		parts := append([]string{}, r.Failures...)
 		for _, b := range r.Budgets {
 			if !b.Within {
@@ -263,15 +288,26 @@ func suiteRow(r Row) releaseevidence.Row {
 			}
 		}
 		out.Detail = releaseevidence.Detail(parts...)
-	case StateNotExercised, StateUnsupported, StateDenied:
+	case StateNotExercised:
 		out.Status = string(r.State)
+		out.FailureClass = releaseevidence.FailureNotRun
+		out.Detail = releaseevidence.Detail(r.Reason)
+	case StateUnsupported:
+		out.Status = string(r.State)
+		out.FailureClass = releaseevidence.FailureUnsupported
+		out.Detail = releaseevidence.Detail(r.Reason)
+	case StateDenied:
+		out.Status = string(r.State)
+		out.FailureClass = releaseevidence.FailureDenied
 		out.Detail = releaseevidence.Detail(r.Reason)
 	case StateOutOfReleaseScope:
 		out.Status = releaseevidence.StatusOutOfReleaseScope
+		out.FailureClass = releaseevidence.FailureOutOfScope
 		out.Platform = r.Subject.OS + "/" + r.Subject.Arch
 		out.Detail = releaseevidence.Detail(r.Reason)
 	default:
 		out.Status = releaseevidence.StatusFailed
+		out.FailureClass = releaseevidence.FailureHarness
 		out.Detail = fmt.Sprintf("unknown state %q", r.State)
 	}
 	return out

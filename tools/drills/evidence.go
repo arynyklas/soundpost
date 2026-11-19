@@ -92,6 +92,7 @@ func drillRow(name string, rep Report) releaseevidence.Row {
 	case StatusPassed:
 		if len(badChecks) > 0 {
 			row.Status = releaseevidence.StatusFailed
+			row.FailureClass = releaseevidence.FailureAssertion
 			row.Detail = releaseevidence.Detail(append([]string{"report says passed but contradicts itself"}, badChecks...)...)
 			return row
 		}
@@ -107,12 +108,20 @@ func drillRow(name string, rep Report) releaseevidence.Row {
 		row.Detail = releaseevidence.Detail(detail)
 	case StatusFailed:
 		row.Status = releaseevidence.StatusFailed
+		// A drill whose own checks failed failed an assertion; a failed drill with no failed check did not get as far as
+		// asserting (the scenario could not be set up or run): the harness failed.
+		row.FailureClass = releaseevidence.FailureHarness
+		if len(badChecks) > 0 {
+			row.FailureClass = releaseevidence.FailureAssertion
+		}
 		row.Detail = releaseevidence.Detail(append([]string{rep.Reason}, badChecks...)...)
 	case StatusNotRun:
 		row.Status = releaseevidence.StatusNotRun
+		row.FailureClass = releaseevidence.FailureNotRun
 		row.Detail = releaseevidence.Detail(rep.Reason)
 	default:
 		row.Status = releaseevidence.StatusFailed
+		row.FailureClass = releaseevidence.FailureHarness
 		row.Detail = fmt.Sprintf("unrecognised report status %q", rep.Status)
 	}
 	return row

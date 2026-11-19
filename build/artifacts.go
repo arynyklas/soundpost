@@ -562,6 +562,7 @@ type layerEntry struct {
 // instruction text recorded in the layer history.
 type imageDef struct {
 	binary    string
+	repo      string // the image's documented repository name (docs/operations: soundpost:<version>), the RepoTags entry of the Docker loader manifest
 	layer     func(binary []byte) []layerEntry
 	config    func(version, binarySHA string) ociConfigInner
 	createdBy string
@@ -571,6 +572,7 @@ type imageDef struct {
 // unprivileged user like the COPY --chown lines.
 var serverImage = imageDef{
 	binary: "soundpost",
+	repo:   "soundpost",
 	layer: func(raw []byte) []layerEntry {
 		return []layerEntry{
 			{"soundpost", false, 0o555, imageUID, imageUID, raw},
@@ -587,6 +589,7 @@ var serverImage = imageDef{
 // and read-only (the container runs as uid 0 holding only CAP_PERFMON), with no port and no volume.
 var perfHelperImage = imageDef{
 	binary: "soundpost-perf-acquire",
+	repo:   "soundpost-perf-helper",
 	layer: func(raw []byte) []layerEntry {
 		return []layerEntry{{"soundpost-perf-acquire", false, 0o555, 0, 0, raw}}
 	},
@@ -606,7 +609,14 @@ var perfHelperImage = imageDef{
 	createdBy: "COPY soundpost-perf-acquire (deploy/Dockerfile.perf-helper)",
 }
 
-// buildOCIImage returns an OCI image-layout tar of one Dockerfile's single-layer image and the
+// dockerLoaderEntry is one element of the manifest.json `docker load` reads from an image archive.
+type dockerLoaderEntry struct {
+	Config   string
+	RepoTags []string
+	Layers   []string
+}
+
+// buildOCIImage returns an OCI image-layout tar (plus the Docker loader manifest.json) of one Dockerfile's single-layer image and the
 // image manifest digest. The binary must be the one release/SHA256SUMS lists.
 func buildOCIImage(release, arch string, def imageDef) ([]byte, string, error) {
 	binary, sum, err := listedBinary(release, arch, def.binary)
@@ -673,7 +683,19 @@ func buildOCIImage(release, arch string, def imageDef) ([]byte, string, error) {
 		return nil, "", err
 	}
 	blob := func(d string) string { return path.Join("blobs", "sha256", strings.TrimPrefix(d, "sha256:")) }
+	// manifest.json is the one file Docker's archive loader needs (Docker 26 with the classic image store refuses a bare OCI
+	// layout: `open .../blobs/json: no such file or directory`). It points at the blobs the OCI manifest already names, so it
+	// adds no blob and changes no digest; index.json and every OCI member are unchanged.
+	tags := []string{}
+	if version != "unset" {
+		tags = append(tags, def.repo+":"+version)
+	}
+	loaderRaw, err := json.Marshal([]dockerLoaderEntry{{Config: blob(man.Config.Digest), RepoTags: tags, Layers: []string{blob(man.Layers[0].Digest)}}})
+	if err != nil {
+		return nil, "", err
+	}
 	entries := []fileEntry{
+		{name: "manifest.json", body: loaderRaw, mode: 0o644},
 		{name: "oci-layout", body: []byte(`{"imageLayoutVersion":"1.0.0"}`), mode: 0o644},
 		{name: "index.json", body: idxRaw, mode: 0o644},
 		{name: blob(man.Config.Digest), body: cfgRaw, mode: 0o644},
