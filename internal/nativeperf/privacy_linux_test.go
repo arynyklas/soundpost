@@ -69,9 +69,19 @@ const (
 )
 
 type privacyEnv struct {
+	t      *testing.T
 	policy scan.Policy
 	nonce  string
 	audit  *PrivacyAudit
+}
+
+// observe audits one buffer at a stage. A *Leak is recorded by the audit (requireClean fails on it, never printing the
+// content); every other error (an uninspectable compressed stage, an unknown stage) fails the test here.
+func (e *privacyEnv) observe(stage Stage, b []byte) {
+	e.t.Helper()
+	if err := scan.NotLeak(e.audit.Observe(stage, b)); err != nil {
+		e.t.Errorf("privacy audit could not inspect a %s buffer: %v", stage, err)
+	}
 }
 
 func newPrivacyEnv(t *testing.T) *privacyEnv {
@@ -89,7 +99,7 @@ func newPrivacyEnv(t *testing.T) *privacyEnv {
 	if e != nil {
 		t.Fatal(e)
 	}
-	return &privacyEnv{policy: p, nonce: nonce, audit: scan.NewPrivacyAudit(d)}
+	return &privacyEnv{t: t, policy: p, nonce: nonce, audit: scan.NewPrivacyAudit(d)}
 }
 func (e *privacyEnv) sentinel(kind string) string {
 	v, err := e.policy.Sentinel(kind, e.nonce)
@@ -121,6 +131,9 @@ func (e *privacyEnv) requireClean(t *testing.T, stages ...Stage) {
 	}
 	if e := e.audit.RequireStages(stages...); e != nil {
 		t.Error(e)
+	}
+	if n := e.audit.Uninspected(); n != 0 {
+		t.Errorf("%d compressed buffers could not be inspected; an uninspected stage is not clean", n)
 	}
 }
 
@@ -301,7 +314,7 @@ func (s *privacyAuditedSource) Next(ctx context.Context) (SanitizedEvent, error)
 	event, e := s.inner.Next(ctx)
 	if e == nil {
 		raw, _ := json.Marshal(event)
-		_ = s.env.audit.Observe(StageStaging, raw) // violations are collected by the audit
+		s.env.observe(StageStaging, raw) // violations are collected by the audit
 	}
 	return event, e
 }
@@ -343,7 +356,7 @@ func privacyReadReply(env *privacyEnv, r io.Reader) (helperReply, error) {
 	var reply helperReply
 	e := readMessage(io.TeeReader(r, &tap), &reply)
 	if tap.Len() > 0 {
-		_ = env.audit.Observe(StageSocket, tap.Bytes())
+		env.observe(StageSocket, tap.Bytes())
 	}
 	return reply, e
 }
@@ -358,7 +371,7 @@ func privacyStreamEvents(t *testing.T, env *privacyEnv, events []SanitizedEvent)
 	defer cancel()
 	for _, event := range events {
 		raw, _ := json.Marshal(event)
-		_ = env.audit.Observe(StageStaging, raw)
+		env.observe(StageStaging, raw)
 	}
 	done := make(chan struct{})
 	go func() { defer close(done); streamHelperEvents(ctx, server, &privacySliceSource{events: events}) }()
@@ -959,7 +972,8 @@ func TestPrivacyAuditNeverSeesRawRing(t *testing.T) {
 			return true
 		}
 		sel, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok || sel.Sel.Name != "Observe" {
+		// Every audited buffer goes through audit.Observe directly or through the test env's observe wrapper (which acts on the error): both are call sites.
+		if !ok || (sel.Sel.Name != "Observe" && sel.Sel.Name != "observe") {
 			return true
 		}
 		calls++
@@ -1033,7 +1047,7 @@ func TestNoContentAtAcquisitionBoundary(t *testing.T) {
 			}
 			// The failure the helper would report contains only a closed code.
 			code := helperErrorCode(e)
-			_ = env.audit.Observe(StageDiagnostics, []byte(code+" "+e.Error()))
+			env.observe(StageDiagnostics, []byte(code+" "+e.Error()))
 		}
 		env.requireClean(t, StageDiagnostics)
 	})
@@ -1068,7 +1082,7 @@ func TestNoContentAtAcquisitionBoundary(t *testing.T) {
 		}
 		for _, v := range []any{table.Mappings(), table.Modules(), table.Process()} {
 			raw, _ := json.Marshal(v)
-			_ = env.audit.Observe(StageStaging, raw)
+			env.observe(StageStaging, raw)
 		}
 		if len(table.Mappings()) == 0 || len(table.Modules()) == 0 {
 			t.Fatal("authorized module identities vanished; an empty table cannot prove privacy")
@@ -1133,14 +1147,14 @@ func TestPrivacyKernelRingTransientlyCarriesCommAndSanitizerSkipsIt(t *testing.T
 							t.Errorf("COMM record was not skipped: ok=%v err=%v", ok, e)
 						}
 						raw, _ := json.Marshal(event)
-						_ = env.audit.Observe(StageStaging, raw)
+						env.observe(StageStaging, raw)
 						sanitizedComm++
 						return nil
 					}
 					event, ok, e := decodeCPURecord(v, ring)
 					if e == nil && ok {
 						raw, _ := json.Marshal(event)
-						_ = env.audit.Observe(StageStaging, raw)
+						env.observe(StageStaging, raw)
 					}
 					return nil
 				})
@@ -1288,12 +1302,12 @@ func privacyLifecycle(t *testing.T, env *privacyEnv, events []SanitizedEvent, in
 	if e != nil {
 		t.Fatal(e)
 	}
-	_ = env.audit.Observe(StageWireDecompressed, wire)
+	env.observe(StageWireDecompressed, wire)
 	var z bytes.Buffer
 	w := gzip.NewWriter(&z)
 	w.Write(wire)
 	w.Close()
-	_ = env.audit.Observe(StageWireCompressed, z.Bytes())
+	env.observe(StageWireCompressed, z.Bytes())
 	// The real ingest decoder accepts both encodings and reproduces the same batch.
 	for _, encoding := range []string{"", "gzip"} {
 		body := wire
@@ -1308,7 +1322,7 @@ func privacyLifecycle(t *testing.T, env *privacyEnv, events []SanitizedEvent, in
 		if !bytes.Equal(again, wire) {
 			t.Fatalf("wire round trip (%q) changed the batch", encoding)
 		}
-		_ = env.audit.Observe(StageWireDecompressed, again)
+		env.observe(StageWireDecompressed, again)
 	}
 	return privacyLifecycleResult{chunk: chunk, wire: wire}
 }
@@ -1366,7 +1380,7 @@ func TestNoContentAcrossProfileLifecycle(t *testing.T) {
 		privacyRequireNumericEvidence(t, r, 3)
 		for _, i := range intervals {
 			raw, _ := json.Marshal(i)
-			_ = env.audit.Observe(StageDiagnostics, raw)
+			env.observe(StageDiagnostics, raw)
 		}
 		env.requireClean(t, StageWireCompressed, StageWireDecompressed, StageDiagnostics)
 	})
@@ -1396,7 +1410,7 @@ func TestNoContentAcrossProfileLifecycle(t *testing.T) {
 		privacyRequireNumericEvidence(t, r, samples)
 		caps, _ := Probe(context.Background(), []Target{{PIDNamespace: s.target.PIDNamespace, TGID: s.target.TGID, ProcessStart: s.target.ProcessStart}})
 		diag, _ := json.Marshal(caps)
-		_ = env.audit.Observe(StageDiagnostics, diag)
+		env.observe(StageDiagnostics, diag)
 		env.requireClean(t, StageStaging, StageSocket, StageWireCompressed, StageWireDecompressed, StageDiagnostics)
 	})
 }
@@ -1472,7 +1486,7 @@ func TestPrivacySocketDecoderRejectsUnknownOversizedTruncatedFrames(t *testing.T
 				if strings.Contains(e.Error(), canary) {
 					t.Fatal("decoder error echoes frame content")
 				}
-				_ = env.audit.Observe(StageDiagnostics, []byte(e.Error()))
+				env.observe(StageDiagnostics, []byte(e.Error()))
 			} else if e != nil || !reply.Ready {
 				t.Fatalf("%s refused: %v", tc.name, e)
 			}
@@ -1560,7 +1574,7 @@ func TestPrivacySocketSourceRejectsMalformedEventSequences(t *testing.T) {
 			if strings.Contains(terminal.Error(), canary) {
 				t.Fatal("terminal error echoes frame content")
 			}
-			_ = env.audit.Observe(StageDiagnostics, []byte(terminal.Error()))
+			env.observe(StageDiagnostics, []byte(terminal.Error()))
 		})
 	}
 	env.requireClean(t, StageDiagnostics)
@@ -1698,7 +1712,7 @@ func TestPrivacyHelperReasonVocabularyIsClosed(t *testing.T) {
 		t.Fatalf("reason vocabulary drifted from policy: have %v want %v", vocabulary, want)
 	}
 	raw := []byte(strings.Join(vocabulary, " "))
-	_ = env.audit.Observe(StageDiagnostics, raw)
+	env.observe(StageDiagnostics, raw)
 	env.requireClean(t, StageDiagnostics)
 }
 func canaryText(env *privacyEnv) string { return "open " + env.sentinel("path") }
@@ -1899,7 +1913,7 @@ func TestPrivacyDrillAcquisitionFailuresUseClosedReasonCounters(t *testing.T) {
 	if total != len(failures) || counters["acquisition_failed"] != 1 {
 		t.Fatalf("counters %v", counters)
 	}
-	_ = env.audit.Observe(StageDiagnostics, privacyJSON(counters))
+	env.observe(StageDiagnostics, privacyJSON(counters))
 	env.requireClean(t, StageStaging, StageSocket, StageDiagnostics)
 }
 
@@ -2098,7 +2112,9 @@ func TestPrivacyEventAttributesMatchPolicy(t *testing.T) {
 		"branch_stack":           func(a *cpuPerfAttr) { a.SampleType |= 1 << 11; a.BranchSampleType = 1 },
 		"raw_payload_on_cpu":     func(a *cpuPerfAttr) { a.SampleType |= 1 << 10 },
 		"data_address":           func(a *cpuPerfAttr) { a.SampleType |= 1 << 3 },
-		"mmap_records":           func(a *cpuPerfAttr) { a.Flags |= 1 << 8 },
+		"mmap_data_records":      func(a *cpuPerfAttr) { a.Flags |= 1 << 17 },
+		"mmap_records_dropped":   func(a *cpuPerfAttr) { a.Flags &^= 1 << 8 },
+		"mmap2_records_dropped":  func(a *cpuPerfAttr) { a.Flags &^= 1 << 23 },
 		"inherit":                func(a *cpuPerfAttr) { a.Flags |= 1 << 1 },
 		"kernel_callchain":       func(a *cpuPerfAttr) { a.Flags &^= 1 << 21 },
 		"sampling_kernel":        func(a *cpuPerfAttr) { a.Flags &^= 1 << 5 },
@@ -2115,6 +2131,14 @@ func TestPrivacyEventAttributesMatchPolicy(t *testing.T) {
 	rawSched.SampleType |= 1 << 13
 	if f := audit(privacyRenderAttr(rawSched)); len(f) == 0 {
 		t.Error("scheduler stack dump not flagged")
+	}
+	// Executable-mapping sideband (MMAP2, path bytes stay in the kernel ring) belongs to the CPU event only.
+	for name, bit := range map[string]uint{"mmap": 8, "mmap2": 23, "build_id": 34} {
+		attr := sched
+		attr.Flags |= 1 << bit
+		if f := audit(privacyRenderAttr(attr)); len(f) == 0 {
+			t.Errorf("%s records on the scheduler tracepoint attribute not flagged", name)
+		}
 	}
 }
 

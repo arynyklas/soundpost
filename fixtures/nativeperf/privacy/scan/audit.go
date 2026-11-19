@@ -70,6 +70,7 @@ type PrivacyAudit struct {
 	detector   *Detector
 	observed   map[Stage]int
 	octets     map[Stage]int
+	uninspect  map[Stage]int
 	violations []Violation
 }
 
@@ -78,7 +79,18 @@ const maxInflated = 4<<20 + 1
 
 // NewPrivacyAudit arms a detector for one run.
 func NewPrivacyAudit(d *Detector) *PrivacyAudit {
-	return &PrivacyAudit{detector: d, observed: map[Stage]int{}, octets: map[Stage]int{}}
+	return &PrivacyAudit{detector: d, observed: map[Stage]int{}, octets: map[Stage]int{}, uninspect: map[Stage]int{}}
+}
+
+// NotLeak returns nil for the *Leak Observe reports (the audit has already recorded the content-free violations, which
+// requireClean/finishReport fail on) and every other Observe error unchanged. A caller that discards Observe's result
+// with `_ =` would also discard ErrUninspectable and ErrUnknownStage; callers act on NotLeak(err) instead.
+func NotLeak(err error) error {
+	var leak *Leak
+	if errors.As(err, &leak) {
+		return nil
+	}
+	return err
 }
 
 func knownStage(s Stage) bool {
@@ -92,7 +104,10 @@ func knownStage(s Stage) bool {
 
 // Observe scans b for sentinels. The compressed wire stage is gunzipped and the
 // decompressed bytes are scanned as well, so compression cannot hide a leak.
-// It returns a *Leak when any sentinel is found.
+// It returns a *Leak when any sentinel is found. A compressed buffer that cannot be
+// inflated (or inflates past the ceiling) was never inspected: it is NOT counted as
+// observed (so RequireStages cannot be satisfied by it), it is counted by Uninspected,
+// and Observe returns ErrUninspectable unless a sentinel was found in the raw bytes.
 func (a *PrivacyAudit) Observe(stage Stage, b []byte) error {
 	if !knownStage(stage) {
 		return ErrUnknownStage
@@ -114,8 +129,12 @@ func (a *PrivacyAudit) Observe(stage Stage, b []byte) error {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.observed[stage]++
-	a.octets[stage] += len(b)
+	if inspectErr != nil {
+		a.uninspect[stage]++
+	} else {
+		a.observed[stage]++
+		a.octets[stage] += len(b)
+	}
 	var violations []Violation
 	for _, h := range hits {
 		v := Violation{Stage: stage, Hit: h}
@@ -126,6 +145,17 @@ func (a *PrivacyAudit) Observe(stage Stage, b []byte) error {
 		return &Leak{Violations: violations}
 	}
 	return inspectErr
+}
+
+// Uninspected reports how many buffers of a compressed stage could not be inspected, over every stage.
+func (a *PrivacyAudit) Uninspected() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	n := 0
+	for _, c := range a.uninspect {
+		n += c
+	}
+	return n
 }
 
 // Violations returns a copy of every violation recorded so far.
@@ -147,15 +177,24 @@ func (a *PrivacyAudit) Observed(stage Stage) (buffers, octets int) {
 func (a *PrivacyAudit) RequireStages(stages ...Stage) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	var missing []string
+	var missing, uninspected []string
 	for _, s := range stages {
 		if a.observed[s] == 0 || a.octets[s] == 0 {
 			missing = append(missing, string(s))
 		}
+		if a.uninspect[s] > 0 {
+			uninspected = append(uninspected, string(s))
+		}
 	}
-	if len(missing) > 0 {
-		sort.Strings(missing)
+	sort.Strings(missing)
+	sort.Strings(uninspected)
+	switch {
+	case len(missing) > 0 && len(uninspected) > 0:
+		return fmt.Errorf("privacy audit: stages never observed: %s; stages with uninspectable buffers: %s", strings.Join(missing, ","), strings.Join(uninspected, ","))
+	case len(missing) > 0:
 		return fmt.Errorf("privacy audit: stages never observed: %s", strings.Join(missing, ","))
+	case len(uninspected) > 0:
+		return fmt.Errorf("privacy audit: stages with uninspectable buffers: %s", strings.Join(uninspected, ","))
 	}
 	return nil
 }
@@ -361,6 +400,11 @@ func auditPerfAttr(p Policy, line int, rest string, sum *StraceSummary) []Findin
 		}
 	}
 	for _, f := range policy.MustZero {
+		if v, ok := fields[f]; ok && v != "0" && v != "0x0" && v != "NULL" && v != "HW_BREAKPOINT_EMPTY" {
+			out = append(out, Finding{"perf_attr_nonzero", line, f})
+		}
+	}
+	for _, f := range rule.MustZero {
 		if v, ok := fields[f]; ok && v != "0" && v != "0x0" && v != "NULL" && v != "HW_BREAKPOINT_EMPTY" {
 			out = append(out, Finding{"perf_attr_nonzero", line, f})
 		}

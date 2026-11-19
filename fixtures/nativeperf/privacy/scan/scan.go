@@ -34,6 +34,8 @@ type PerfAttrRule struct {
 	Types      []string `json:"types"`
 	SampleType []string `json:"sample_type"`
 	MustBeOne  []string `json:"must_be_one_fields"`
+	// MustZero lists fields that are zero for this capture kind only, in addition to the global PerfOpenPolicy.MustZero.
+	MustZero []string `json:"must_be_zero_fields,omitempty"`
 }
 
 // PerfOpenPolicy constrains every perf_event_open attribute observed in a run.

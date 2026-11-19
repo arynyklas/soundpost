@@ -4068,7 +4068,7 @@
       },
       {
         "row": "runtime-supplement-export-through-C03",
-        "reason": "profile/capability records cannot be admitted: core `CaptureInput` has no capability/profile input and internal/model/telemetry_validation.go accepts only runtime_cpu|native_cpu|native_offcpu profile methods, so `ack` is not_available in every report."
+        "reason": "not exercised by this script: its fixtures run without a delivery transport, so every report carries `ack` not_available. The delivery path itself exists (core `CaptureInput` includes capability/profile inputs, `Client.captureProfile` queues them, and internal/model/telemetry_validation.go admits capability records and runtime_cpu samples/events); its end-to-end run is a separate row."
       },
       {
         "row": "recorder-5ms-p95-per-mutation-batch",

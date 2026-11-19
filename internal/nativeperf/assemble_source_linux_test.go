@@ -5,6 +5,7 @@ package nativeperf
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -58,4 +59,42 @@ func TestAssembleSourceRetainsActualDrainProof(t *testing.T) {
 		t.Fatal("producer proof lost or fabricated")
 	}
 	s.Close()
+}
+
+// A capture ended by cancelling the context that owns it reports THAT cancellation. The source closes itself when its
+// owner ends, and a Next the close interrupts used to answer "acquisition closed" or the context error depending on which
+// of the two got there first, so one cancel produced two different verdicts (observed 1 run in ~9 of the real-kernel
+// mapping-epoch test under -race on a 6.6 kernel).
+func TestAssembleSourceEndedByItsOwnerContextReportsThatContext(t *testing.T) {
+	for i := range 300 {
+		raw := &blockedProfileSource{entered: make(chan struct{}), done: make(chan struct{})}
+		owner, cancel := context.WithCancel(context.Background())
+		s := &ProfileSource{source: raw}
+		s.bind(owner)
+		got := make(chan error, 1)
+		go func() { _, e := s.NextItem(context.Background()); got <- e }()
+		<-raw.entered
+		cancel()
+		select {
+		case e := <-got:
+			if !errors.Is(e, context.Canceled) {
+				t.Fatalf("round %d: the owner was cancelled but Next answered %v", i, e)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("round %d: Next not interrupted by the owner's cancellation", i)
+		}
+	}
+	// an explicit Close with an owner that is still alive stays "closed"
+	raw := &blockedProfileSource{entered: make(chan struct{}), done: make(chan struct{})}
+	owner, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := &ProfileSource{source: raw}
+	s.bind(owner)
+	got := make(chan error, 1)
+	go func() { _, e := s.NextItem(context.Background()); got <- e }()
+	<-raw.entered
+	s.Close()
+	if e := <-got; !errors.Is(e, ErrAcquisitionClosed) {
+		t.Fatalf("an explicitly closed source answered %v, want ErrAcquisitionClosed", e)
+	}
 }

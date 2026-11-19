@@ -6,8 +6,10 @@
 package main
 
 import (
+	"encoding/json"
 	"math"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/arynyklas/soundpost/fixtures/nativeperf/qual"
@@ -205,5 +207,24 @@ func TestSchedulerCaptureSinkCountsSamplesFeedsTheCorrelatorAndRetainsNothing(t 
 	sink.Revoke(50)
 	if c := corr.Result(); !c.Revoked || c.RevokedFrom != 50 {
 		t.Errorf("identity revocation was not forwarded: %+v", c)
+	}
+}
+
+// qualification/matrix.yaml files scheduler-mode overhead under the capability blocked_runqueue and CPU-mode overhead
+// under cpu_loop; the report carries that name on every fixture so the row id overhead.native.<series>.<arch>.blocked_runqueue
+// is derivable from the measured result.
+func TestOverheadFixturesCarryTheMatrixCapabilityName(t *testing.T) {
+	if got := overheadCapability("offcpu"); got != "blocked_runqueue" {
+		t.Errorf("offcpu overhead filed under %q, want blocked_runqueue", got)
+	}
+	if got := overheadCapability("cpu"); got != "cpu_loop" {
+		t.Errorf("cpu overhead filed under %q, want cpu_loop", got)
+	}
+	for _, mode := range []string{"cpu", "offcpu"} {
+		fr := fixtureResult{Capability: overheadCapability(mode)}
+		raw, e := json.Marshal(fr)
+		if e != nil || !strings.Contains(string(raw), `"capability":"`+overheadCapability(mode)+`"`) {
+			t.Errorf("%s: the report field is missing: %s %v", mode, raw, e)
+		}
 	}
 }

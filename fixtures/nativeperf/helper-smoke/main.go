@@ -18,6 +18,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -47,6 +48,9 @@ func run() error {
 	if len(base.Targets) != 1 || base.Targets[0].TGID != uint32(*pid) {
 		return errors.New("fixture request target mismatch")
 	}
+	if e := settleRuntimeDescriptors(); e != nil {
+		return e
+	}
 	failed := false
 	for _, scenario := range strings.Split(*scenarios, ",") {
 		r := base
@@ -54,7 +58,7 @@ func run() error {
 		switch scenario {
 		case "authorized":
 		case "denied":
-			r.Authorization.Signature = nil
+			r, _ = requestFor(scenario, base, "")
 		case "expired", "fd-cap":
 			path := *expiredPath
 			if scenario == "fd-cap" {
@@ -69,10 +73,12 @@ func run() error {
 				cancel()
 				return e
 			}
-			if e := readJSONFixture(path, &r); e != nil {
+			loaded, e := requestFor(scenario, base, path)
+			if e != nil {
 				cancel()
 				return e
 			}
+			r = loaded
 			if e := validateSignedCase(scenario, r, base, policy, time.Now()); e != nil {
 				cancel()
 				return e
@@ -83,6 +89,8 @@ func run() error {
 					return e
 				}
 			}
+		case "capture":
+			// the baseline request; the scenario reads real CPU samples for a short while before closing.
 		case "cancel":
 			cancel()
 		default:
@@ -95,7 +103,15 @@ func run() error {
 			return e
 		}
 		session, e := nativeperf.OpenAuthorized(ctx, r)
+		var samples uint64
 		if session != nil {
+			if scenario == "capture" {
+				var readErr error
+				samples, readErr = countSamples(ctx, session, 3*time.Second)
+				if readErr != nil {
+					e = readErr
+				}
+			}
 			session.Close()
 		}
 		cancel()
@@ -124,6 +140,8 @@ func run() error {
 		switch scenario {
 		case "authorized":
 			ok = ok && e == nil
+		case "capture":
+			ok = ok && e == nil && samples > 0
 		case "denied", "expired":
 			ok = ok && errors.Is(e, nativeperf.ErrAuthorization)
 		case "fd-cap":
@@ -131,7 +149,14 @@ func run() error {
 		case "cancel":
 			ok = ok && errors.Is(e, context.Canceled)
 		}
-		if encodeErr := json.NewEncoder(os.Stdout).Encode(map[string]any{"scenario": scenario, "status": status, "fd_before": before, "fd_after": after, "passed": ok, "samples_claimed": 0}); encodeErr != nil {
+		line := map[string]any{"scenario": scenario, "status": status, "fd_before": before, "fd_after": after, "passed": ok, "samples_claimed": 0}
+		if e != nil {
+			line["error"] = e.Error() // nativeperf errors are closed codes; none carries content
+		}
+		if scenario == "capture" {
+			line["samples_claimed"] = samples
+		}
+		if encodeErr := json.NewEncoder(os.Stdout).Encode(line); encodeErr != nil {
 			return encodeErr
 		}
 		failed = failed || !ok
@@ -286,4 +311,62 @@ func requireHelperFDCeiling(pid, targets int) error {
 		return errors.New("observed helper FD ceiling does not independently force admission refusal")
 	}
 	return nil
+}
+
+// settleRuntimeDescriptors makes the Go runtime open its network poller now (an epoll descriptor and an eventfd, created
+// on the first pollable descriptor) so no scenario is charged for descriptors the runtime, not the helper session,
+// owns. A leak of a session's own descriptor still changes the count of the scenario that leaked it.
+func settleRuntimeDescriptors() error {
+	r, w, e := os.Pipe()
+	if e != nil {
+		return e
+	}
+	r.Close()
+	return w.Close()
+}
+
+// countSamples reads real CPU samples from an open session for d, then stops it. The client's own end of the capture
+// surfaces as a closed read, which is not an error.
+func countSamples(ctx context.Context, session *nativeperf.Session, d time.Duration) (uint64, error) {
+	var ending atomic.Bool
+	stop := time.AfterFunc(d, func() {
+		ending.Store(true)
+		session.Stop()
+		session.Close()
+	})
+	defer stop.Stop()
+	var n uint64
+	for {
+		item, e := session.NextItem(ctx)
+		if e != nil {
+			if ending.Load() || errors.Is(e, nativeperf.ErrSourceComplete) {
+				return n, nil
+			}
+			return n, e
+		}
+		if item.Proof == nil && item.Event.CPUEvent != nil {
+			n++
+		}
+	}
+}
+
+// requestFor returns the request one scenario sends and never modifies base. "denied" is the baseline without its
+// signature; "expired" and "fd-cap" are separately signed fixtures read from path. A fixture is decoded into a fresh
+// value: decoding into a copy of base would write through the slices the copy shares with base (Targets,
+// AllowedBuildIDs) and corrupt the baseline for every later scenario ("expired" followed by "authorized" was denied
+// by the real helper).
+func requestFor(scenario string, base nativeperf.CaptureRequest, path string) (nativeperf.CaptureRequest, error) {
+	switch scenario {
+	case "denied":
+		r := base
+		r.Authorization.Signature = nil
+		return r, nil
+	case "expired", "fd-cap":
+		var loaded nativeperf.CaptureRequest
+		if e := readJSONFixture(path, &loaded); e != nil {
+			return nativeperf.CaptureRequest{}, e
+		}
+		return loaded, nil
+	}
+	return base, nil
 }

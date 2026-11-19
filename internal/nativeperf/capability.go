@@ -93,6 +93,10 @@ type Capabilities struct {
 	OffCPU         Status      `json:"off_cpu"`
 	RunqueueSplit  Status      `json:"runqueue_split"`
 	Reasons        []Reason    `json:"reasons"`
+
+	// AcquisitionScope is how far the acquisition reaches (model.AcquisitionScopes): the authorized target only, or the
+	// system-wide scheduler read the operator authorized. Optional: empty means the producer did not say.
+	AcquisitionScope string `json:"acquisition_scope,omitempty"`
 }
 
 func (c Capabilities) Validate() error {
@@ -110,6 +114,16 @@ func (c Capabilities) Validate() error {
 		}
 	}
 	if c.RunqueueSplit == Supported && c.OffCPU != Supported {
+		return ErrInvalid
+	}
+	switch c.AcquisitionScope {
+	case "", model.AcquisitionScopeTargetOnly:
+	case model.AcquisitionScopeSystemWideScheduler:
+		// The system-wide claim is the scheduler path's: it cannot stand without a supported scheduler read.
+		if c.OffCPU != Supported {
+			return ErrInvalid
+		}
+	default:
 		return ErrInvalid
 	}
 	return nil

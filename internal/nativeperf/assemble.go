@@ -28,10 +28,11 @@ type ProfileLimits struct {
 	MaxBytes                                       uint64
 	MaxSamples, MaxIntervals, MaxFrames, MaxStacks uint32
 	Mappings                                       []MappingTable
+	Symbols                                        *SymbolBinding
 }
 
 func (l ProfileLimits) validate() error {
-	if l.Profile == (model.ID{}) || l.Process == (model.ID{}) || l.Capability == (model.ID{}) || !l.Domain.valid() || l.Clock.Domain.Host == (model.ID{}) || l.Clock.Domain.Boot == (model.ID{}) || l.Clock.Domain.Runtime == (model.ID{}) || l.PolicyRevision == 0 || l.Sequence == 0 || l.End < l.Start || l.MaxBytes == 0 || l.MaxBytes > 8<<20 || l.MaxSamples == 0 || l.MaxSamples > 8192 || l.MaxIntervals == 0 || l.MaxIntervals > 8192 || l.MaxFrames == 0 || l.MaxFrames > 4096 || l.MaxStacks == 0 || l.MaxStacks > 4096 || len(l.Mappings) > 64 {
+	if l.Profile == (model.ID{}) || l.Process == (model.ID{}) || l.Capability == (model.ID{}) || !l.Domain.valid() || l.Clock.Domain.Host == (model.ID{}) || l.Clock.Domain.Boot == (model.ID{}) || l.Clock.Domain.Runtime == (model.ID{}) || l.PolicyRevision == 0 || l.Sequence == 0 || l.End < l.Start || l.MaxBytes == 0 || l.MaxBytes > 8<<20 || l.MaxSamples == 0 || l.MaxSamples > 8192 || l.MaxIntervals == 0 || l.MaxIntervals > 8192 || l.MaxFrames == 0 || l.MaxFrames > 4096 || l.MaxStacks == 0 || l.MaxStacks > 4096 || len(l.Mappings) > 64 || l.Symbols.validate() != nil {
 		return ErrInvalid
 	}
 	return nil
@@ -185,9 +186,12 @@ func replaceSchedulerCoverage(input []Interval, domain ClockDomain) ([]Interval,
 
 // AssembleProfile accepts only genuine sanitized CPU observations and finalized
 // scheduler evidence. Native IntervalCPU is deliberately not a second sample.
-// Historical VA ownership is not proved by a current proc snapshot. Until fixed
-// map-mutation controls are available this integration emits unresolved frames.
-// No ambient artifact lookup, host symbols or raw address fallback is allowed.
+// A frame is resolved against the mapping epoch of the instant its sample was
+// taken, rebuilt from the mapping events of the stream (mapping_epoch.go); a
+// current proc snapshot never attributes a delayed address, and a range whose
+// owner the stream cannot prove stays unresolved with a closed reason. Symbol
+// names come only from the artifacts of l.Symbols (authorized C07 reads); there
+// is no ambient artifact lookup, host symbols or raw address fallback.
 func AssembleProfile(ctx context.Context, events []SanitizedEvent, intervals []Interval, capability Capabilities, l ProfileLimits) (model.ProfileChunk, error) {
 	if err := l.validate(); err != nil {
 		return model.ProfileChunk{}, err
@@ -195,14 +199,24 @@ func AssembleProfile(ctx context.Context, events []SanitizedEvent, intervals []I
 	if capability.Validate() != nil {
 		return model.ProfileChunk{}, ErrInvalid
 	}
-	if len(events) > 8192 || len(intervals) > 8192 {
+	mappingEvents := 0
+	for _, e := range events {
+		if e.Kind == EventMapping {
+			mappingEvents++
+		}
+	}
+	if len(events)-mappingEvents > 8192 || len(intervals) > 8192 {
 		return model.ProfileChunk{}, ErrResourceBudget
+	}
+	epochs, err := newMappingEpochs(events)
+	if err != nil {
+		return model.ProfileChunk{}, err
 	}
 	c := model.ProfileChunk{Profile: l.Profile, Process: l.Process, Capability: l.Capability, Method: "native_cpu", Units: "samples", Start: l.Start, End: l.End, Clock: l.Clock, NativeDomain: &model.ProfileNativeDomain{HostID: l.Domain.HostID, BootID: l.Domain.BootID}, PolicyRevision: l.PolicyRevision, Sequence: model.Uint64(l.Sequence), Complete: l.Complete, Frames: []model.ProfileFrame{}, Stacks: []model.ProfileStack{}, Samples: []model.ProfileSample{}, Intervals: []model.ProfileInterval{}}
 	c.NativeCapabilities = nativeCapabilityIDs(l.Capability)
 	frames := map[model.ProfileFrame]uint32{}
 	stacks := map[string]uint32{}
-	charged := uint64(4096) + uint64(len(events)+len(intervals))*(32<<10)
+	charged := uint64(4096) + uint64(len(events)-mappingEvents+len(intervals))*(32<<10) + uint64(mappingEvents)*128
 	charge := func(n uint64) error {
 		if n > l.MaxBytes-charged {
 			return ErrResourceBudget
@@ -258,14 +272,19 @@ func AssembleProfile(ctx context.Context, events []SanitizedEvent, intervals []I
 		c.Stacks = append(c.Stacks, model.ProfileStack{Frames: refs})
 		return index, nil
 	}
-	mapping := func(k TaskKey) MappingTable {
+	// The table of a process at an instant: its mapping epoch from the stream's mapping events (identity-only when the
+	// stream holds no snapshot of the process), under the policy of the symbolication binding.
+	cache := newFrameCache()
+	mapping := func(k TaskKey, at model.MonoNano) MappingTable {
 		p := ProcessKey{BootID: k.BootID, PIDNamespace: k.PIDNamespace, TGID: k.TGID, ProcessStart: k.ProcessStart, Generation: k.Generation}
+		absent := false
 		for _, m := range l.Mappings {
 			if sameFrameProcess(k, m.process) {
-				return MappingTable{process: p, policy: SymbolPolicy{FramePointersAbsent: m.policy.FramePointersAbsent}}
+				absent = m.policy.FramePointersAbsent
+				break
 			}
 		}
-		return MappingTable{process: p}
+		return epochs.tableAt(p, at, l.Symbols.policy(uint64(l.PolicyRevision), absent))
 	}
 	sequences := map[uint64]bool{}
 	for _, event := range events {
@@ -281,7 +300,7 @@ func AssembleProfile(ctx context.Context, events []SanitizedEvent, intervals []I
 			if capability.CPU != Supported || uint32(len(c.Samples)) >= l.MaxSamples {
 				return model.ProfileChunk{}, ErrResourceBudget
 			}
-			observation, err := ResolveCPUObservation(ctx, event.Task, *event.CPUEvent, mapping(event.Task), nil)
+			observation, err := resolveCPUObservation(ctx, event.Task, *event.CPUEvent, mapping(event.Task, event.Time), l.Symbols.resolver(), cache)
 			if err != nil {
 				return model.ProfileChunk{}, err
 			}
@@ -300,6 +319,8 @@ func AssembleProfile(ctx context.Context, events []SanitizedEvent, intervals []I
 			}
 			c.Samples = append(c.Samples, model.ProfileSample{At: event.Time, Stack: stack, Count: 1, Thread: model.Uint64(event.Task.TID), Native: n})
 			c.Truncated = c.Truncated || n.Truncation != "" || n.Coverage != ""
+		case EventMapping:
+			// already folded into the epochs
 		case EventLoss:
 			if c.Loss > math.MaxUint64-event.Loss.Count {
 				return model.ProfileChunk{}, ErrInvalid
@@ -356,7 +377,7 @@ func AssembleProfile(ctx context.Context, events []SanitizedEvent, intervals []I
 				addresses = append(addresses, AddressFrame{Task: i.Task, IP: uint64(entry.IP)})
 			}
 		}
-		resolved, e := ResolveFrames(ctx, addresses, mapping(i.Task), nil)
+		resolved, e := resolveFrames(ctx, addresses, mapping(i.Task, i.Start), l.Symbols.resolver(), cache)
 		if e != nil {
 			return model.ProfileChunk{}, e
 		}

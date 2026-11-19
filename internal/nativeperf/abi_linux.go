@@ -59,9 +59,10 @@ func cpuAttr(method SamplingMethod, maxFrames uint16) (cpuPerfAttr, error) {
 	default:
 		return cpuPerfAttr{}, ErrInvalid
 	}
-	// disabled, exclude_kernel, exclude_hv, comm, freq, task, sample_id_all,
-	// use_clockid, comm_exec, exclude_callchain_kernel. No inheritance.
-	a.Flags = 1 | 1<<5 | 1<<6 | 1<<9 | 1<<10 | 1<<13 | 1<<18 | 1<<21 | 1<<25 | 1<<24
+	// disabled, exclude_kernel, exclude_hv, comm, freq, task, sample_id_all, use_clockid, comm_exec,
+	// exclude_callchain_kernel, and the mapping-epoch sideband: mmap, mmap2 and build_id (executable mappings only;
+	// mmap_data stays off). No inheritance.
+	a.Flags = 1 | 1<<5 | 1<<6 | 1<<8 | 1<<9 | 1<<10 | 1<<13 | 1<<18 | 1<<21 | 1<<23 | 1<<25 | 1<<24 | 1<<34
 	return a, nil
 }
 

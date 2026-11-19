@@ -98,9 +98,16 @@ export function newWalkState(ids: WeakMap<object, number>, allocate: () => numbe
  return {nodes: [], ids, allocate, ...(onOpenShadow === undefined ? {} : {onOpenShadow}), overflow: false, limit, truncated: 0, steps: 0};
 }
 
+/** JSON text of one node with every value empty, plus its separator: a recorded node is exactly this plus the lengths of its five values (ids are decimals, tags and masks come from the closed vocabulary, none needs escaping). */
+export const NODE_FRAME_BYTES = JSON.stringify({id: "", parent: "", tag: "", class: "", text: ""}).length + 1;
+/** Bytes one recorder-built node takes in a chunk (its JSON plus separator), without serializing it. */
+export function nodeBytes(node: ReplayNode): number { return NODE_FRAME_BYTES + node.id.length + node.parent.length + node.tag.length + node.class.length + node.text.length; }
+
+/** A node the replay already holds keeps its id when it is walked again (a re-walked subtree is the same nodes, so churn does not use the id space up); a new node gets a fresh id. */
 function emit(state: WalkState, source: object, node: Omit<ReplayNode, "id">, id: number | undefined): void {
- const assigned = id ?? state.allocate();
- state.ids.set(source, assigned);
+ const known = id === undefined ? state.ids.get(source) : undefined;
+ const assigned = id ?? known ?? state.allocate();
+ if (assigned !== known) state.ids.set(source, assigned);
  state.nodes.push({id: String(assigned), parent: node.parent, tag: node.tag, class: node.class, text: node.text});
 }
 
@@ -157,7 +164,7 @@ export interface FitResult {
  */
 export function fitSubtrees(nodes: readonly ReplayNode[], maxNodes: number, maxBytes: number): FitResult {
  const count = nodes.length;
- const size = nodes.map(node => JSON.stringify(node).length + 1);
+ const size = nodes.map(nodeBytes);
  let totalNodes = count, totalBytes = size.reduce((sum, value) => sum + value, 0);
  if (totalNodes <= maxNodes && totalBytes <= maxBytes) return {nodes, truncated: false, suppressed: []};
  const index = new Map<string, number>();
@@ -173,7 +180,7 @@ export function fitSubtrees(nodes: readonly ReplayNode[], maxNodes: number, maxB
   if (!alive[at] || liveCount[at]! <= 1) continue;
   const original = nodes[at]!;
   const placeholder: ReplayNode = {...original, tag: "masked", class: "masked", text: ""};
-  const placeholderBytes = JSON.stringify(placeholder).length + 1;
+  const placeholderBytes = nodeBytes(placeholder);
   const freedNodes = liveCount[at]! - 1, freedBytes = liveBytes[at]! - placeholderBytes;
   for (let inner = at + 1; inner < at + span[at]!; inner++) if (alive[inner]) { alive[inner] = false; suppressed.push(Number(nodes[inner]!.id)); }
   replaced.set(at, placeholder); suppressed.push(Number(original.id));

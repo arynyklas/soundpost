@@ -7,7 +7,7 @@ import {setReplayConsent, startReplay} from "../src/replay.ts";
 import {createRecorder} from "../src/replay/recorder.ts";
 import {ReplayStream} from "../src/replay/stream.ts";
 import {captureDomAccessors, fitSubtrees} from "../src/replay/tree.ts";
-import {MAX_NODES, canonicalJSON, quantize, sha256Hex} from "../src/replay/policy.ts";
+import {MAX_MUTATION_RECORDS, MAX_NODES, canonicalJSON, quantize, sha256Hex} from "../src/replay/policy.ts";
 import type {ReplayChunk, ReplayConfig, ReplayEventTargetLike, ReplayNode, ReplayTimers} from "../src/replay/types.ts";
 import {config as coreConfig} from "../../core/test/fixture.ts";
 
@@ -261,6 +261,29 @@ test("deltas under a placeholdered subtree are suppressed until a new complete c
  for (const secret of ["late-secret", "brand-new-secret", "head-secret", "section-secret"]) expect(JSON.stringify(r.chunks)).not.toContain(secret);
 });
 
+test("a collapsed subtree that a later delta shows in full is no longer suppressed: its own deltas are recorded again at once, not after the next checkpoint", () => {
+ const {root, sections} = pageOfSections(600);
+ const r = rig(root); r.recorder.setConsent(true);
+ const observer = r.observer(), hidden = sections[599]!;
+ expect(r.chunks[0]!.nodes.filter(n => n.class === "masked").length).toBeGreaterThan(0);
+ const base = r.chunks.length;
+ // while collapsed: nothing is recorded under it
+ hidden.children[0]!.append(text("late-secret"));
+ observer.callback([new FRecord(hidden.children[0]!)]);
+ expect(r.chunks).toHaveLength(base);
+ // the page shrinks and a delta on the root re-walks everything that is left: the formerly collapsed section fits now and is shown in full
+ root.children = [...sections.slice(0, 100), hidden];
+ observer.callback([new FRecord(root)]);
+ expect(r.chunks).toHaveLength(base + 1);
+ expect(isCheckpoint(r.chunks.at(-1)!)).toBe(false);
+ expect(r.chunks.at(-1)!.nodes.some(n => n.class === "masked" && n.text === "")).toBe(false);
+ // so a change inside it is recorded as a delta now
+ observer.callback([new FRecord(hidden.children[0]!)]);
+ expect(r.chunks).toHaveLength(base + 2);
+ expect(r.chunks.at(-1)!.events.map(e => e.kind)).toEqual(["mutation"]);
+ expect(JSON.stringify(r.chunks)).not.toContain("secret");
+});
+
 test("a delta chunk that had to be truncated carries gap:true like a truncated checkpoint (03.07)", () => {
  const host = el("section", el("p", text("seed")));
  const root = el("div", host);
@@ -312,15 +335,122 @@ test("mutation bursts extract masked structure synchronously, never raw text or 
  expect(mutation.nodes.map(n => [n.id === pId, n.tag, n.text])).toEqual([[true, "p", ""], [false, "masked", "[masked]"]]);
  expect(mutation.nodes[0]!.parent).toBe(r.chunks[0]!.nodes[0]!.id);
  expect(mutation.checkpoint_sequence).toBe("1");
- // burst > 512 records => full resnapshot marked as a gap, still masked
+ // Design (docs/superpowers/specs/2026-11-03-soundpost-design.md:162; plans/2026-11-03-03-sdk-capture.md:24,153): a checkpoint is due every 30 s or after a gap, never because a burst was large: 600 records on one known node are one delta
+ const before = r.chunks.length;
  observer.callback(Array.from({length: 600}, () => new FRecord(p)));
+ expect(r.chunks).toHaveLength(before + 1);
+ const burst = r.chunks.at(-1)!;
+ expect(burst.checkpoint_sequence).toBe("1");
+ expect(burst.sequence).not.toBe(burst.checkpoint_sequence);
+ expect(burst.gap).toBe(false);
+ expect(burst.events.map(e => [e.kind, e.node])).toEqual([["mutation", pId]]);
+ // A burst beyond the recorder's work bound is a declared loss: one gap-marked full resnapshot, still masked
+ observer.callback(Array.from({length: MAX_MUTATION_RECORDS + 1}, () => new FRecord(p)));
  const resnap = r.chunks.at(-1)!;
  expect(resnap.checkpoint_sequence).toBe(resnap.sequence);
  expect(resnap.gap).toBe(true);
- // unknown target (detached node) forces a resnapshot instead of guessing
+ // A target that is detached and was never in the replay tree is not in the replay: nothing to record, nothing to guess
+ const count = r.chunks.length;
  observer.callback([new FRecord(el("div"))]);
- expect(r.chunks.at(-1)!.checkpoint_sequence).toBe(r.chunks.at(-1)!.sequence);
+ expect(r.chunks).toHaveLength(count);
  for (const secretText of ["mutated-secret-value-0123456789", "another-secret-longer-than-before"]) expect(JSON.stringify(r.chunks)).not.toContain(secretText);
+});
+
+const isCheckpoint = (chunk: ReplayChunk): boolean => chunk.checkpoint_sequence === chunk.sequence;
+
+test("records on nodes added and removed within one batch are no replay change: the parent's records are the delta and no checkpoint is spent", () => {
+ const container = el("section", el("p", text("seed"))), root = el("div", container);
+ const r = rig(root); r.recorder.setConsent(true);
+ const observer = r.observer(), base = r.chunks.length, containerId = r.chunks[0]!.nodes.find(n => n.tag === "section")!.id;
+ // append a node, rewrite its text, remove it again: records on the container, on the node (detached by now) and on its text (inside the detached node)
+ const gone = el("span", text("added-then-removed-secret")), kept = el("p", text("kept-secret"));
+ container.append(gone); container.append(kept);
+ const inner = gone.children[0]!;
+ container.children = container.children.filter(child => child !== gone); gone.parent = null;
+ observer.callback([new FRecord(container), new FRecord(gone), new FRecord(inner), new FRecord(kept), new FRecord(el("span", text("never-attached")).children[0]!)]);
+ expect(r.chunks).toHaveLength(base + 1);
+ const delta = r.chunks.at(-1)!;
+ expect(isCheckpoint(delta)).toBe(false);
+ expect(delta.gap).toBe(false);
+ expect(delta.events.map(e => [e.kind, e.node])).toEqual([["mutation", containerId]]);
+ expect(delta.nodes.map(n => n.tag)).toEqual(["section", "p", "masked", "p", "masked"]);
+ expect(JSON.stringify(r.chunks)).not.toContain("secret");
+});
+
+test("a node the replay holds that left the tree is not re-hung at the root of the replay by a later record on it", () => {
+ const child = el("p", text("x")), container = el("section", child), root = el("div", container);
+ const r = rig(root); r.recorder.setConsent(true);
+ const observer = r.observer(), base = r.chunks.length, containerId = r.chunks[0]!.nodes.find(n => n.tag === "section")!.id;
+ container.children = []; child.parent = null;
+ // the removal and a change of the removed node in one batch: only the container is re-walked
+ observer.callback([new FRecord(child), new FRecord(container), new FRecord(child.children[0]!)]);
+ expect(r.chunks).toHaveLength(base + 1);
+ expect(r.chunks.at(-1)!.events.map(e => [e.kind, e.node])).toEqual([["mutation", containerId]]);
+ expect(r.chunks.at(-1)!.nodes.map(n => n.id)).toEqual([containerId]);
+ // and in a later batch, where it is the only record: nothing to record
+ observer.callback([new FRecord(child), new FRecord(child.children[0]!)]);
+ expect(r.chunks).toHaveLength(base + 1);
+});
+
+test("a target the recorder cannot account for stays a full checkpoint: a shadow tree it does not hold, a climb cut by the depth bound, a document", () => {
+ const root = el("div", el("p", text("x"))), r = rig(root); r.recorder.setConsent(true);
+ const observer = r.observer();
+ const shadow = new FShadow(), inShadow = el("p", text("s")); shadow.append(inShadow);
+ let deep: FHtml = el("div"); const top = deep;
+ for (let i = 0; i < 1100; i++) { const next = el("div"); deep.append(next); deep = next; }
+ for (const target of [shadow, inShadow, deep, new FComment(), null]) {
+  const before = r.chunks.length;
+  observer.callback([new FRecord(target)]);
+  expect(r.chunks).toHaveLength(before + 1);
+  expect(isCheckpoint(r.chunks.at(-1)!)).toBe(true);
+ }
+ expect(top.parent).toBe(null);
+});
+
+test("checkpoints follow the design cadence, not the batches: churn with detached records and large bursts is deltas, the 30 s timer is the next checkpoint", () => {
+ const burst = el("section", el("p", text("seed"))), root = el("div", burst);
+ const r = rig(root); r.recorder.setConsent(true);
+ const observer = r.observer(), burstId = r.chunks[0]!.nodes.find(n => n.tag === "section")!.id;
+ expect(r.chunks.filter(isCheckpoint)).toHaveLength(1);
+ for (let batch = 0; batch < 90; batch++) {
+  // 3 batches in 4 are small (10 inserts); every 4th is a 400-insert burst of > 512 records. Every 5th insert is removed again, its text rewritten first.
+  const size = batch % 4 === 3 ? 400 : 10, records: FRecord[] = [];
+  for (let i = 0; i < size; i++) {
+   const node = el(i % 2 ? "p" : "span", text("t")); burst.append(node); records.push(new FRecord(burst));
+   if (i % 3 === 0) records.push(new FRecord(node.children[0]!));
+   if (i % 5 === 0) { burst.children = burst.children.filter(child => child !== node); node.parent = null; records.push(new FRecord(node)); }
+  }
+  if (burst.children.length > 300) { for (const child of burst.children) child.parent = null; burst.children = []; records.push(new FRecord(burst)); }
+  if (size === 400) expect(records.length).toBeGreaterThan(512);
+  const before = r.chunks.length;
+  observer.callback(records);
+  expect(r.chunks, `batch ${batch}`).toHaveLength(before + 1);
+  expect(isCheckpoint(r.chunks.at(-1)!), `batch ${batch}`).toBe(false);
+  expect(r.chunks.at(-1)!.events[0]).toMatchObject({kind: "mutation", node: burstId});
+ }
+ expect(r.chunks.filter(isCheckpoint)).toHaveLength(1);
+ r.timers.advance(30000);
+ expect(r.chunks.filter(isCheckpoint)).toHaveLength(2);
+ expect(r.chunks.every(chunk => !chunk.gap)).toBe(true);
+});
+
+test("a re-walked subtree keeps the ids of the nodes it still holds and only new nodes allocate, so churn does not end the id space", () => {
+ const keep = el("p", text("k")), list = el("section", keep), root = el("div", list);
+ const r = rig(root); r.recorder.setConsent(true);
+ const observer = r.observer(), listId = r.chunks[0]!.nodes.find(n => n.tag === "section")!.id, keepId = r.chunks[0]!.nodes.find(n => n.tag === "p")!.id;
+ const idsBefore = new Set(allNodes(r.chunks).map(n => n.id));
+ list.append(el("span", text("n"))); observer.callback([new FRecord(list)]);
+ const first = r.chunks.at(-1)!;
+ const reused = first.nodes.map(n => n.id).filter(id => idsBefore.has(id));
+ expect(reused).toHaveLength(3); // the list, its p and the p's text node: the new span and its text are the only fresh ids
+ expect(reused).toContain(listId); expect(reused).toContain(keepId);
+ expect(first.nodes).toHaveLength(5);
+ // the same list re-walked again: nothing new in it, so no id is allocated and the ids are exactly the previous delta's
+ observer.callback([new FRecord(list)]);
+ expect(r.chunks.at(-1)!.nodes.map(n => n.id)).toEqual(first.nodes.map(n => n.id));
+ // 5000 re-walks of five nodes would be 25000 ids (more than MAX_NODES) if each took fresh ids: they are all deltas
+ for (let i = 0; i < 5000; i++) observer.callback([new FRecord(list)]);
+ expect(r.chunks.filter(isCheckpoint)).toHaveLength(1);
 });
 
 test("mutation inside an opaque widget yields only the opaque node, no content", () => {

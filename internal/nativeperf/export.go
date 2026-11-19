@@ -168,7 +168,15 @@ func (e *Exporter) Send(ctx context.Context, g policy.SourceGrant, c ProfileChun
 	if c.ProfileID != e.cfg.Limits.Profile || c.ProfileID == (model.ID{}) || c.PolicyRevision != e.cfg.Limits.PolicyRevision || c.Domain != e.cfg.Limits.Domain {
 		return model.Receipt{}, ErrInvalid
 	}
-	if uint64(len(c.Events)+len(c.Intervals)) > (8<<20)/(32<<10) {
+	// Mapping events (the snapshot of a process is up to 4096 rows) are not observations: assembly charges them 128
+	// bytes each and bounds their number itself.
+	items := len(c.Intervals)
+	for _, event := range c.Events {
+		if event.Kind != EventMapping {
+			items++
+		}
+	}
+	if uint64(items) > (8<<20)/(32<<10) {
 		e.dropped++
 		return model.Receipt{}, ErrResourceBudget
 	}
@@ -325,6 +333,12 @@ func (e *Exporter) prepare(ctx context.Context, g policy.SourceGrant, input Prof
 		evidence := cap
 		evidence.Method = methods[i]
 		evidence.Status = string(statuses[i])
+		if scope := e.cfg.Capabilities.AcquisitionScope; scope != "" {
+			evidence.AcquisitionScope = model.AcquisitionScopeTargetOnly
+			if i > 0 && scope == model.AcquisitionScopeSystemWideScheduler && statuses[i] == Supported {
+				evidence.AcquisitionScope = model.AcquisitionScopeSystemWideScheduler
+			}
+		}
 		if statuses[i] == Denied {
 			evidence.Reason = string(ReasonPermission)
 		} else if statuses[i] == Unsupported {

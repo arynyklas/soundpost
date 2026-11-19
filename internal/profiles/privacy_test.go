@@ -214,6 +214,12 @@ func (a *capturingAdmitter) Admit(ctx context.Context, g policy.SourceGrant, b m
 // scoped reader, auditing every stage. It returns the paginated views.
 func exportAndRead(t *testing.T, env *privacyEnv, n *privnode.Node, hostLabel string, hold bool) (*lifecycle, *capturingAdmitter, error) {
 	t.Helper()
+	return exportAndReadWith(t, env, n, hostLabel, hold, privacyCapabilities())
+}
+
+// exportAndReadWith is exportAndRead with the capability evidence the producer declares.
+func exportAndReadWith(t *testing.T, env *privacyEnv, n *privnode.Node, hostLabel string, hold bool, caps nativeperf.Capabilities) (*lifecycle, *capturingAdmitter, error) {
+	t.Helper()
 	ctx := context.Background()
 	d, events := captureEvents(hostLabel)
 	intervals := schedulerIntervals(t, d)
@@ -221,7 +227,7 @@ func exportAndRead(t *testing.T, env *privacyEnv, n *privnode.Node, hostLabel st
 	root := model.NewID()
 	limits := nativeperf.ProfileLimits{Profile: root, Process: model.NewID(), Capability: model.NewID(), Domain: d, PolicyRevision: 1, Sequence: 1, Start: wall, End: wall + 2_000_000_000, Clock: model.TraceClock{Wall: wall, Domain: model.ClockDomain{Host: model.ID{4}, Boot: model.ID{5}, Runtime: n.Producer}}, Complete: true, MaxBytes: 8 << 20, MaxSamples: 8192, MaxIntervals: 8192, MaxFrames: 4096, MaxStacks: 4096}
 	admitter := &capturingAdmitter{inner: &privnode.Admitter{N: n, Audit: env.audit}, hold: hold}
-	exporter, e := nativeperf.NewExporter(admitter, privnode.Lookup{N: n}, nativeperf.ExportConfig{Project: n.Project, Source: n.Source, Producer: n.Producer, Resource: n.Resource, Limits: limits, Capabilities: privacyCapabilities()}, lease{})
+	exporter, e := nativeperf.NewExporter(admitter, privnode.Lookup{N: n}, nativeperf.ExportConfig{Project: n.Project, Source: n.Source, Producer: n.Producer, Resource: n.Resource, Limits: limits, Capabilities: caps}, lease{})
 	if e != nil {
 		t.Fatal(e)
 	}

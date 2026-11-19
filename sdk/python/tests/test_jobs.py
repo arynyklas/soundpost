@@ -262,6 +262,34 @@ def test_celery_failure_then_retry_retains_both_attempts_under_one_run():
         instance.close()
 
 
+def test_celery_retry_attempt_links_the_underlying_failure_and_a_later_failure_signal_carrying_the_retry_wrapper_does_not_replace_it():
+    from types import SimpleNamespace
+    from uuid import uuid4
+    from celery import signals
+    from celery.exceptions import Retry
+    NAME = unique_task()
+    instance = init(celery_settings(job_registry=((NAME, JOB),)))
+    rig = CeleryRig(instance, NAME)
+    try:
+        task_id = str(uuid4())
+        wrapper = Retry('Retry in 0s', exc=ValueError('CANARY_TASK_ARGUMENT_MESSAGE'))
+        signals.task_prerun.send(sender=rig.task, task_id=task_id, task=rig.task)
+        signals.task_retry.send(sender=rig.task, request=SimpleNamespace(id=task_id), reason=wrapper, einfo=SimpleNamespace(exception=wrapper))
+        # Celery-side wrappers reach task_failure too (a Retry converted into the failure path); the recorded cause must stay the real error.
+        signals.task_failure.send(sender=rig.task, task_id=task_id, exception=wrapper)
+        signals.task_postrun.send(sender=rig.task, task_id=task_id, state='RETRY')
+        instance.capture_exception(ValueError('reference'))
+        attempts = [event['payload'] for event in records(instance)]
+        assert [event['state'] for event in attempts] == ['started', 'failed']
+        errors = records(instance, 'error')
+        assert len(errors) == 2 and attempts[1]['cause_error'] == errors[0]['id']
+        assert errors[0]['payload']['exception_class'] == errors[1]['payload']['exception_class']
+        assert 'CANARY' not in ''.join(instance.buffered_records())
+    finally:
+        rig.instrumentation.close()
+        instance.close()
+
+
 def test_celery_exhausted_failure_is_failed_and_publisher_trace_is_a_link_not_a_child_span():
     NAME = unique_task()
     instance = init(celery_settings(job_registry=((NAME, JOB),)))

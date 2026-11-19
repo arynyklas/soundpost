@@ -11,7 +11,8 @@ export const MAX_CHUNK_NODES = 4096;
 /** Reserve for the one gap event a truncation adds. */
 export const GAP_EVENT_BYTES = 96;
 export const MAX_MUTATION_ROOTS = 64;
-export const MAX_MUTATION_RECORDS = 512;
+/** Records of one observer callback the recorder will attribute; a larger burst is a declared gap and one full checkpoint (a bound on main-thread work, not a cadence: ordinary bursts, such as a list re-render of a few hundred rows, are deltas). */
+export const MAX_MUTATION_RECORDS = 4096;
 export const CHECKPOINT_INTERVAL_MS = 30000;
 export const EVENT_FLUSH_MS = 1000;
 export const MAX_PENDING_EVENTS = 1024;
@@ -75,11 +76,26 @@ export function sha256Hex(input: string): string {
    w[i] = (w[i - 16]! + (((a >>> 7) | (a << 25)) ^ ((a >>> 18) | (a << 14)) ^ (a >>> 3)) + w[i - 7]! + (((b >>> 17) | (b << 15)) ^ ((b >>> 19) | (b << 13)) ^ (b >>> 10))) | 0;
   }
   let a: number = h[0]!, b: number = h[1]!, c: number = h[2]!, d: number = h[3]!, e: number = h[4]!, f: number = h[5]!, g: number = h[6]!, hh: number = h[7]!;
-  for (let i = 0; i < 64; i++) {
-   const t1 = (hh + (((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7))) + ((e & f) ^ (~e & g)) + K[i]! + w[i]!) | 0;
-   const t2 = ((((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10))) + ((a & b) ^ (a & c) ^ (b & c))) | 0;
-   hh = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;
-  }
+  for (let i = 0; i < 64; i += 8) {
+  // Eight rounds per pass with the working variables renamed instead of shifted (a..h rotate through the eight statements and are back in place after them): no register moves, one loop test per eight rounds.
+  const i1 = i + 1, i2 = i + 2, i3 = i + 3, i4 = i + 4, i5 = i + 5, i6 = i + 6, i7 = i + 7;
+  let t = (hh + (((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7))) + ((e & f) ^ (~e & g)) + K[i]! + w[i]!) | 0;
+  d = (d + t) | 0; hh = (t + (((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10))) + ((a & b) ^ (a & c) ^ (b & c))) | 0;
+  t = (g + (((d >>> 6) | (d << 26)) ^ ((d >>> 11) | (d << 21)) ^ ((d >>> 25) | (d << 7))) + ((d & e) ^ (~d & f)) + K[i1]! + w[i1]!) | 0;
+  c = (c + t) | 0; g = (t + (((hh >>> 2) | (hh << 30)) ^ ((hh >>> 13) | (hh << 19)) ^ ((hh >>> 22) | (hh << 10))) + ((hh & a) ^ (hh & b) ^ (a & b))) | 0;
+  t = (f + (((c >>> 6) | (c << 26)) ^ ((c >>> 11) | (c << 21)) ^ ((c >>> 25) | (c << 7))) + ((c & d) ^ (~c & e)) + K[i2]! + w[i2]!) | 0;
+  b = (b + t) | 0; f = (t + (((g >>> 2) | (g << 30)) ^ ((g >>> 13) | (g << 19)) ^ ((g >>> 22) | (g << 10))) + ((g & hh) ^ (g & a) ^ (hh & a))) | 0;
+  t = (e + (((b >>> 6) | (b << 26)) ^ ((b >>> 11) | (b << 21)) ^ ((b >>> 25) | (b << 7))) + ((b & c) ^ (~b & d)) + K[i3]! + w[i3]!) | 0;
+  a = (a + t) | 0; e = (t + (((f >>> 2) | (f << 30)) ^ ((f >>> 13) | (f << 19)) ^ ((f >>> 22) | (f << 10))) + ((f & g) ^ (f & hh) ^ (g & hh))) | 0;
+  t = (d + (((a >>> 6) | (a << 26)) ^ ((a >>> 11) | (a << 21)) ^ ((a >>> 25) | (a << 7))) + ((a & b) ^ (~a & c)) + K[i4]! + w[i4]!) | 0;
+  hh = (hh + t) | 0; d = (t + (((e >>> 2) | (e << 30)) ^ ((e >>> 13) | (e << 19)) ^ ((e >>> 22) | (e << 10))) + ((e & f) ^ (e & g) ^ (f & g))) | 0;
+  t = (c + (((hh >>> 6) | (hh << 26)) ^ ((hh >>> 11) | (hh << 21)) ^ ((hh >>> 25) | (hh << 7))) + ((hh & a) ^ (~hh & b)) + K[i5]! + w[i5]!) | 0;
+  g = (g + t) | 0; c = (t + (((d >>> 2) | (d << 30)) ^ ((d >>> 13) | (d << 19)) ^ ((d >>> 22) | (d << 10))) + ((d & e) ^ (d & f) ^ (e & f))) | 0;
+  t = (b + (((g >>> 6) | (g << 26)) ^ ((g >>> 11) | (g << 21)) ^ ((g >>> 25) | (g << 7))) + ((g & hh) ^ (~g & a)) + K[i6]! + w[i6]!) | 0;
+  f = (f + t) | 0; b = (t + (((c >>> 2) | (c << 30)) ^ ((c >>> 13) | (c << 19)) ^ ((c >>> 22) | (c << 10))) + ((c & d) ^ (c & e) ^ (d & e))) | 0;
+  t = (a + (((f >>> 6) | (f << 26)) ^ ((f >>> 11) | (f << 21)) ^ ((f >>> 25) | (f << 7))) + ((f & g) ^ (~f & hh)) + K[i7]! + w[i7]!) | 0;
+  e = (e + t) | 0; a = (t + (((b >>> 2) | (b << 30)) ^ ((b >>> 13) | (b << 19)) ^ ((b >>> 22) | (b << 10))) + ((b & c) ^ (b & d) ^ (c & d))) | 0;
+ }
   h[0] = (h[0]! + a) | 0; h[1] = (h[1]! + b) | 0; h[2] = (h[2]! + c) | 0; h[3] = (h[3]! + d) | 0; h[4] = (h[4]! + e) | 0; h[5] = (h[5]! + f) | 0; h[6] = (h[6]! + g) | 0; h[7] = (h[7]! + hh) | 0;
  }
  let out = "";

@@ -1,68 +1,13 @@
 // Copyright 2026 Aryn Yklas
 // SPDX-License-Identifier: Apache-2.0
 import {test, expect, type Frame, type Page} from "@playwright/test";
-import {execFileSync} from "node:child_process";
-import {mkdtempSync, readFileSync, writeFileSync} from "node:fs";
-import {tmpdir} from "node:os";
-import {join, resolve} from "node:path";
+import {ATTRIBUTES, ELEMENTS, b64, csp, directHtml, forbidden, frameHtml, hostHtml, hostileNodes, hostilePayloads, hostileWireNames, origin, vulnerableHtml} from "./viewer-fixture.ts";
 
 /*
  * Real-browser proof for the replay viewer. Every row counts what the browser actually did: requests of the
  * page and the sandboxed frame, navigations, dialogs, console errors (CSP violations are reported there) and
  * messages the frame posts back that are not viewer status. Nothing is assumed from the code.
  */
-const root = resolve(__dirname, "../../..");
-const bun = process.env.SOUNDPOST_BUN ?? "bun";
-const dir = mkdtempSync(join(tmpdir(), "soundpost-viewer-"));
-const origin = "http://soundpost.test";
-const viewerSource = join(root, "packages/replay-viewer/src/index.ts").replaceAll("\\", "/");
-
-writeFileSync(join(dir, "frame-entry.ts"), `import {attachFrameBridge} from ${JSON.stringify(viewerSource)};
-attachFrameBridge(window, document.getElementById("replay") as HTMLElement, {onStatus: status => window.parent.postMessage({soundpost: "status", status}, "*")});
-`);
-// Control: the renderer's tree builder alone, handed hostile typed nodes (decoding bypassed), with NO CSP at all.
-writeFileSync(join(dir, "direct-entry.ts"), `import {renderTree} from ${JSON.stringify(viewerSource)};
-window.addEventListener("message", event => { if (event.source === window.parent) document.getElementById("replay")!.append(renderTree(document, event.data.nodes)); });
-window.parent.postMessage({soundpost: "status", status: "loading"}, "*");
-`);
-const build = (entry: string, out: string, target: string, format: string): void => { execFileSync(bun, ["build", join(dir, entry), "--outfile", join(dir, out), `--target=${target}`, `--format=${format}`], {stdio: "pipe"}); };
-build("frame-entry.ts", "frame.js", "browser", "iife");
-build("direct-entry.ts", "direct.js", "browser", "iife");
-execFileSync(bun, ["build", viewerSource, "--outfile", join(dir, "helper.cjs"), "--target=node", "--format=cjs"], {stdio: "pipe"});
-const helper = require(join(dir, "helper.cjs")) as {VIEWER_STYLE: string; VIEWER_SANDBOX: string; viewerCsp: (script: string, style: string) => string};
-const template = readFileSync(join(root, "fixtures/sdk/replay/viewer.html"), "utf8");
-const fill = (script: string): string => template.replace("/*__VIEWER_STYLE__*/", () => helper.VIEWER_STYLE).replace("/*__VIEWER_SCRIPT__*/", () => script);
-const frameScript = readFileSync(join(dir, "frame.js"), "utf8"), directScript = readFileSync(join(dir, "direct.js"), "utf8");
-const frameHtml = fill(frameScript), directHtml = fill(directScript);
-const csp = helper.viewerCsp(frameScript, helper.VIEWER_STYLE);
-
-/** The deliberately vulnerable renderer used only to prove the counters can see an attack. */
-const vulnerableHtml = `<!doctype html><body><div id="replay"></div><script>
-addEventListener("message", e => { if (e.source === parent) document.getElementById("replay").innerHTML = e.data.html; });
-parent.postMessage({soundpost: "status", status: "loading"}, "*");
-</script></body>`;
-const hostHtml = `<!doctype html><body><iframe id="f" sandbox="${helper.VIEWER_SANDBOX}" src="/frame.html"></iframe><script>
-window.__messages = [];
-addEventListener("message", e => { if (e.source === document.getElementById("f").contentWindow) window.__messages.push(e.data); });
-const toBytes = b64 => Uint8Array.from(atob(b64), c => c.charCodeAt(0)).buffer;
-window.__sendChunk = b64 => document.getElementById("f").contentWindow.postMessage({soundpost: "replay", item: {kind: "chunk", bytes: toBytes(b64)}}, "*");
-window.__sendItem = item => document.getElementById("f").contentWindow.postMessage({soundpost: "replay", item}, "*");
-window.__sendRaw = data => document.getElementById("f").contentWindow.postMessage(data, "*");
-window.__fromSibling = spec => {
-  const message = spec.b64 !== undefined
-    ? "{soundpost: 'replay', item: {kind: 'chunk', bytes: Uint8Array.from(atob(" + JSON.stringify(spec.b64) + "), c => c.charCodeAt(0)).buffer}}"
-    : JSON.stringify({soundpost: "replay", item: spec.item}).replace(/</g, "\\u003c");
-  const sibling = document.createElement("iframe");
-  sibling.setAttribute("sandbox", "allow-scripts");
-  sibling.srcdoc = "<script>parent.frames[0].postMessage(" + message + ", '*');<" + "/script>";
-  document.body.appendChild(sibling);
-};
-</script></body>`;
-
-interface VectorChunk {wire?: string; go: {verdict: string}}
-const vectors = JSON.parse(readFileSync(join(root, "fixtures/sdk/replay/chain-vectors.json"), "utf8")) as {chunks: Record<string, VectorChunk>};
-const b64 = (name: string): string => Buffer.from(vectors.chunks[name]!.wire!, "utf8").toString("base64");
-const forbidden = /evil\.test|soundpost\.test\/(pwn|probe)|PWN/;
 
 type Variant = "production" | "control" | "vulnerable";
 interface Seen { requests: string[]; served: string[]; failed: {url: string; error: string}[]; navigations: string[]; dialogs: string[]; consoleErrors: string[]; pageErrors: string[]; popups: number; websockets: number }
@@ -120,20 +65,6 @@ const snapshot = (frame: Frame): Promise<Snapshot> => frame.evaluate(() => {
   html: document.getElementById("replay")?.innerHTML ?? "",
  };
 });
-const ELEMENTS = ["div", "span", "p", "section", "ol", "li"];
-const ATTRIBUTES = ["id", "data-replay-root", "data-state", "data-replay-status", "role", "data-replay-tree", "inert", "data-tag", "data-opaque", "data-masked", "data-replay-timeline", "data-replay-interactions", "data-kind", "data-sequence"];
-
-const hostileNodes = [
- {id: "1", parent: "0", tag: "img src=x onerror=parent.postMessage('PWN','*')", class: "\"><svg onload=parent.postMessage('PWN','*')>", text: "<img src='http://soundpost.test/pwn-text.png'>"},
- {id: "2", parent: "1", tag: "script", class: "masked", text: "javascript:parent.postMessage('PWN','*')"},
- {id: "3", parent: "1", tag: "a", class: "", text: "[masked]"},
- {id: "4", parent: "3", tag: "iframe", class: "", text: "url(http://evil.test/css)"},
- {id: "5", parent: "4", tag: "input", class: "", text: "[masked]"},
- {id: "6", parent: "6", tag: "div", class: "", text: ""},
- {id: "7", parent: "8", tag: "div", class: "", text: ""},
- {id: "8", parent: "7", tag: "div", class: "", text: ""},
- {id: "9", parent: "1", tag: "style", class: "", text: "@import url(http://evil.test/x.css)"},
-];
 
 test.describe("replay viewer in a real browser", () => {
  test("no network: malicious tag, class, text, URL, CSS and script payloads cause zero requests, script runs and navigations under the production CSP and sandbox", async ({page}) => {
@@ -158,18 +89,12 @@ test.describe("replay viewer in a real browser", () => {
   const baseline = {requests: [...seen.requests], navigations: [...seen.navigations]};
   seen.consoleErrors.length = 0;
   // Hostile wire chunks: every Go-invalid vector (unknown fields, img/html tags, secret text/class, rect/pres) plus raw payload chunks.
-  const hostileWires = Object.entries(vectors.chunks).filter(([, entry]) => entry.go.verdict !== "valid" && entry.wire !== undefined).map(([name]) => name);
+  const hostileWires = hostileWireNames();
   expect(hostileWires.length).toBeGreaterThanOrEqual(18);
   await send(page, "c1");
   await waitState(frame(), "ready");
   for (const name of hostileWires) await send(page, name);
-  const payloadChunk = (mutate: (chunk: Record<string, unknown>) => void): string => { const chunk = JSON.parse(vectors.chunks["c1"]!.wire!) as Record<string, unknown>; mutate(chunk); return Buffer.from(JSON.stringify(chunk), "utf8").toString("base64"); };
-  const rawPayloads = [
-   payloadChunk(chunk => { chunk["nodes"] = hostileNodes; }),
-   payloadChunk(chunk => { chunk["html"] = "<img src=http://soundpost.test/pwn-html.png onerror=parent.postMessage('PWN','*')>"; }),
-   payloadChunk(chunk => { chunk["recorder_version"] = "1<script>parent.postMessage('PWN','*')</script>"; }),
-   payloadChunk(chunk => { chunk["clock"] = {style: "background:url(http://evil.test/bg)", href: "javascript:parent.postMessage('PWN','*')"}; }),
-  ];
+  const rawPayloads = hostilePayloads();
   for (const payload of rawPayloads) await page.evaluate(value => Reflect.get(window, "__sendChunk")(value), payload);
   // Messages that are not well-formed items (bytes that are not bytes, a bare string) are ignored by the bridge.
   await page.evaluate(() => Reflect.get(window, "__sendRaw")({soundpost: "replay", item: {kind: "chunk", bytes: "<img src=http://evil.test/bytes>"}}));

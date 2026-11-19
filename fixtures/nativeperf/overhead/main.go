@@ -83,9 +83,12 @@ type stat struct {
 }
 
 type fixtureResult struct {
-	Fixture        string         `json:"fixture"`
-	Mode           string         `json:"workload_mode"`
-	CaptureMode    string         `json:"capture_mode"`
+	Fixture     string `json:"fixture"`
+	Mode        string `json:"workload_mode"`
+	CaptureMode string `json:"capture_mode"`
+	// Capability is the qualification/matrix.yaml overhead capability this fixture measures: cpu_loop for the CPU capture
+	// mode, blocked_runqueue for the scheduler (off-CPU) capture mode (rows overhead.native.<series>.<arch>.<capability>).
+	Capability     string         `json:"capability"`
 	Seconds        float64        `json:"seconds_per_run"`
 	Repeats        int            `json:"repeats"`
 	Reduced        bool           `json:"reduced"`
@@ -235,7 +238,7 @@ func summarize(v []float64) stat {
 }
 
 func measure(workload, mode, captureMode string, seconds float64, repeats int) fixtureResult {
-	fr := fixtureResult{Fixture: mode, Mode: mode, CaptureMode: captureMode, Seconds: seconds, Repeats: repeats}
+	fr := fixtureResult{Fixture: mode, Mode: mode, Capability: overheadCapability(captureMode), CaptureMode: captureMode, Seconds: seconds, Repeats: repeats}
 	if captureMode == "offcpu" {
 		fr.Fixture = mode + "_offcpu"
 	}
@@ -604,4 +607,12 @@ func ledgerOf(r run) memoryLedger {
 		HelperShmemBytes: r.HelperShmemKiB << 10, ClientHWMBytes: r.ClientHWMKiB << 10, ClientStartBytes: r.ClientStartKiB << 10, RingBytesAccounted: r.RingBytes, BudgetBytes: memoryBudgetBytes}
 	l.ConservativeBytes = l.HelperHWMBytes + l.ClientHWMBytes + l.RingBytesAccounted
 	return l
+}
+
+// overheadCapability names the matrix.yaml capability a capture mode's overhead rows are filed under.
+func overheadCapability(captureMode string) string {
+	if captureMode == "offcpu" {
+		return "blocked_runqueue"
+	}
+	return "cpu_loop"
 }

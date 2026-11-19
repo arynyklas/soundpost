@@ -186,15 +186,21 @@ test("indexed maps follow the backend policy: inline sections accepted, malforme
  expect(await reason({version:3,sections:[section({...GOOD_MAP,sources:["../../etc/passwd"]})]})).toBe("map_path_unsafe");
  expect(await reason({version:3,sections:[section({...GOOD_MAP,sourcesContent:["secret"]})]})).toBe("source_content_unexpected");
  expect(await reason({version:3,sections:Array.from({length:1025},()=>section(GOOD_MAP))})).toBe("too_many_files");
- let deepIndexed:unknown=GOOD_MAP;for(let i=0;i<3;i++)deepIndexed={version:3,sections:[section(deepIndexed)]};
- expect(await reason(deepIndexed)).toBe("map_too_deep");
+ // Map nesting is counted in maps (root = level 1) exactly like the backend (internal/sourcemap Limits.MaxDepth = 8, internal/artifacts
+ // transformDocument depth > 8): eight levels are accepted, the ninth is refused. The raw container nesting of the wrappers must not count.
+ const wrap=(levels:number)=>{let map:unknown=GOOD_MAP;for(let i=1;i<levels;i++)map={version:3,sections:[section(map)]};return map;};
+ expect((await attempt(wrap(8))).uploads).toBe(1);
+ expect(await reason(wrap(9))).toBe("map_too_deep");
  expect(await reason({...GOOD_MAP,sources:["../../etc/passwd"]})).toBe("map_path_unsafe");
  expect(await reason({...GOOD_MAP,sources:["/abs/app.ts"]})).toBe("map_path_unsafe");
  expect(await reason({...GOOD_MAP,sources:["src\\app.ts"]})).toBe("map_path_unsafe");
  expect(await reason(GOOD_MAP,{path:"../escape.js"})).toBe("path_invalid");
  expect(await reason(GOOD_MAP,{path:"/abs/app.js"})).toBe("path_invalid");
+ // Extension keys are dropped by the backend and only bounded by its raw JSON depth (model.ValidateJSON, 64): nine nested objects are accepted.
  let deep:unknown="x";for(let i=0;i<9;i++)deep={n:deep};
- expect(await reason({...GOOD_MAP,x_deep:deep})).toBe("map_too_deep");
+ expect((await attempt({...GOOD_MAP,x_deep:deep})).uploads).toBe(1);
+ let hostile:unknown="x";for(let i=0;i<70;i++)hostile={n:hostile};
+ expect(await reason({...GOOD_MAP,x_deep:hostile})).toBe("map_too_deep");
  const big=encode(JSON.stringify({...GOOD_MAP,x_pad:"a".repeat(32*1024*1024)}));
  expect(await reason(big)).toBe("map_too_large");
  expect(await reason({...GOOD_MAP,sources:Array.from({length:1025},(_,i)=>"src/f"+i+".ts")})).toBe("too_many_files");
@@ -251,6 +257,25 @@ test("upload refuses plaintext non-loopback endpoints and invalid credentials be
  expect(await code(()=>createUploadConfig({endpoint:"https://user:"+CANARY+"@artifacts.example.test",credential:CANARY}))).toBe("endpoint_invalid");
  expect(await code(()=>createUploadConfig({endpoint:"https://artifacts.example.test",credential:CANARY+"\r\nX-Injected: 1"}))).toBe("credential_invalid");
  expect(await code(()=>createUploadConfig({endpoint:"https://artifacts.example.test",credential:""}))).toBe("credential_invalid");
+});
+
+test("a function credential is called exactly once per upload, never at config creation, and a failing provider is the closed credential_invalid with nothing sent",async()=>{
+ const generated=encode("export{};"),map=encode(GOOD_MAP),backend=fakeBackend();
+ const files=()=>iterate({path:"assets/app.js",role:"generated",bytes:generated},{path:"assets/app.js.map",role:"map",bytes:map});
+ try{
+  let calls=0;
+  const minted=createUploadConfig({endpoint:backend.endpoint,credential:()=>{calls++;return "minted-token-"+calls;}});
+  expect(calls).toBe(0);
+  await uploadArtifacts(manifestFor(generated,map),files(),minted);
+  expect(calls).toBe(1);expect(backend.uploads[0]!.authorization).toBe("Bearer minted-token-1");
+  await uploadArtifacts(manifestFor(generated,map),files(),minted);
+  expect(calls).toBe(2);expect(backend.uploads[1]!.authorization).toBe("Bearer minted-token-2");
+  const failing=createUploadConfig({endpoint:backend.endpoint,credential:()=>{throw Error("mint failed "+CANARY);}});
+  const error=await uploadArtifacts(manifestFor(generated,map),files(),failing).then(()=>undefined,(value:unknown)=>value as ArtifactError);
+  expect(error).toBeInstanceOf(ArtifactError);expect(error!.code).toBe("credential_invalid");
+  expect(String(error!.message)+inspect(error,{depth:6})).not.toContain(CANARY);
+  expect(backend.uploads.length).toBe(2);
+ }finally{backend.stop();}
 });
 
 test("redirects are never followed with the credential and transport failures do not echo it",async()=>{

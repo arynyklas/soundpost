@@ -19,6 +19,12 @@ type Ring struct {
 	method              SamplingMethod
 	maxFrames           uint16
 	closed              bool
+	// builds are the GNU build IDs the operator approved for this ring's process: the only identities a mapping
+	// announcement may carry out of the decoder.
+	builds []string
+	// at is the ring offset of the record consume is handing out; sideTaken is the offset below which mapping
+	// announcements and overflows were already handed out by sweepSideband (see mapping_sideband_linux.go).
+	at, sideTaken uint64
 }
 
 func (r *Ring) head() uint64 { return atomic.LoadUint64((*uint64)(unsafe.Pointer(&r.meta[1024]))) }
@@ -48,26 +54,40 @@ func (r *Ring) consume(emit func(KernelRecordView) error) error {
 	if available < 8 {
 		return ErrRingMalformed
 	}
-	at := int(tail % uint64(len(r.data)))
-	view := KernelRecordView{first: r.data[at:]}
-	if at+8 > len(r.data) {
-		view.second = r.data[:8-len(view.first)]
+	view, size, e := r.viewAt(tail, head)
+	if e != nil {
+		return e
 	}
-	size := int(view.u16(6))
-	if size < 8 || uint64(size) > available || size > len(r.data) {
-		return ErrRingMalformed
-	}
-	end := at + size
-	if end <= len(r.data) {
-		view = KernelRecordView{first: r.data[at:end]}
-	} else {
-		view = KernelRecordView{first: r.data[at:], second: r.data[:end-len(r.data)]}
-	}
+	r.at = tail
 	if e := emit(view); e != nil {
 		return e
 	}
 	atomic.StoreUint64((*uint64)(unsafe.Pointer(&r.meta[1032])), tail+uint64(size))
 	return nil
+}
+
+// viewAt borrows the record that starts at ring offset at, which must lie in [tail, head).
+func (r *Ring) viewAt(at, head uint64) (KernelRecordView, int, error) {
+	available := head - at
+	if available < 8 {
+		return KernelRecordView{}, 0, ErrRingMalformed
+	}
+	off := int(at % uint64(len(r.data)))
+	view := KernelRecordView{first: r.data[off:]}
+	if off+8 > len(r.data) {
+		view.second = r.data[:8-len(view.first)]
+	}
+	size := int(view.u16(6))
+	if size < 8 || uint64(size) > available || size > len(r.data) {
+		return KernelRecordView{}, 0, ErrRingMalformed
+	}
+	end := off + size
+	if end <= len(r.data) {
+		view = KernelRecordView{first: r.data[off:end]}
+	} else {
+		view = KernelRecordView{first: r.data[off:], second: r.data[:end-len(r.data)]}
+	}
+	return view, size, nil
 }
 func (r *Ring) Close() error {
 	r.mu.Lock()
@@ -129,6 +149,9 @@ const pollHangup = 0x10
 // copied event queue. Non-CPU control records are decoded by the source.
 func drainRing(r *Ring, emit func(SanitizedEvent) error) error {
 	return r.consume(func(v KernelRecordView) error {
+		if r.sidebandTaken(v) {
+			return nil
+		}
 		event, ok, e := decodeCPURecord(v, r)
 		if e != nil || !ok {
 			return e

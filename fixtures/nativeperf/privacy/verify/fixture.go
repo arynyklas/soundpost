@@ -112,6 +112,8 @@ type fixtureEnv struct {
 	audit  *scan.PrivacyAudit
 	mu     sync.Mutex
 	diag   []string
+	// observeErrs are Observe errors other than a leak (an uninspectable or unknown stage); finishReport fails on them.
+	observeErrs []string
 }
 
 func newFixtureEnv(path string) (*fixtureEnv, error) {
@@ -139,7 +141,13 @@ func (e *fixtureEnv) sentinel(kind string) string {
 }
 
 // observe audits one sanitized buffer; violations are collected (content-free).
-func (e *fixtureEnv) observe(stage scan.Stage, b []byte) { _ = e.audit.Observe(stage, b) }
+func (e *fixtureEnv) observe(stage scan.Stage, b []byte) {
+	if err := scan.NotLeak(e.audit.Observe(stage, b)); err != nil {
+		e.mu.Lock()
+		e.observeErrs = append(e.observeErrs, string(stage)+": "+err.Error())
+		e.mu.Unlock()
+	}
+}
 
 // diagnostic records fixture/product diagnostic text and audits it.
 func (e *fixtureEnv) diagnostic(s string) {
@@ -739,6 +747,15 @@ func finishReport(env *fixtureEnv, rep *report, o options, failed func(string, .
 	rep.Cleanup.FDsAfter = countFDs()
 	if len(rep.Violations) > 0 {
 		return rep, exitCanary, errors.New("canary crossed an owned boundary (content is never printed)")
+	}
+	env.mu.Lock()
+	observeErrs := append([]string(nil), env.observeErrs...)
+	env.mu.Unlock()
+	for _, msg := range observeErrs {
+		failed("privacy audit could not inspect a buffer (%s): the stage is not clean", msg)
+	}
+	if n := env.audit.Uninspected(); n != 0 && len(observeErrs) == 0 {
+		failed("%d compressed buffers could not be inspected: the stage is not clean", n)
 	}
 	if !o.negativeControl {
 		for _, s := range scan.AllStages {

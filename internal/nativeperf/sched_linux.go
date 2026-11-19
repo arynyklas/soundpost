@@ -222,6 +222,7 @@ func newSchedulerAcquisition(ctx context.Context, a AuthorizedTargets, c Config,
 		if e = r.Own(ring); e != nil {
 			return fail(e)
 		}
+		ring.builds = a.approvedBuilds(t.task.TGID)
 		cs.rings = append(cs.rings, ring)
 	}
 	if e = s.identity(); e != nil {

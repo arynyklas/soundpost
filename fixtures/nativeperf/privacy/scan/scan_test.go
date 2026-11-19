@@ -175,7 +175,7 @@ func TestRequireStagesRefusesEmptyOrSkippedStage(t *testing.T) {
 	}
 }
 
-const cleanAttr = `1 perf_event_open({type=PERF_TYPE_SOFTWARE, size=PERF_ATTR_SIZE_VER5, config=PERF_COUNT_SW_CPU_CLOCK, sample_freq=99, sample_type=PERF_SAMPLE_IP|PERF_SAMPLE_TID|PERF_SAMPLE_TIME|PERF_SAMPLE_CALLCHAIN|PERF_SAMPLE_CPU|PERF_SAMPLE_PERIOD, read_format=0, disabled=1, inherit=0, exclude_kernel=1, exclude_hv=1, mmap=0, comm=1, freq=1, task=1, precise_ip=0 /* arbitrary skid */, mmap_data=0, sample_id_all=1, exclude_callchain_kernel=1, mmap2=0, comm_exec=1, use_clockid=1, context_switch=0, wakeup_events=1, bp_type=HW_BREAKPOINT_EMPTY, config1=0, config2=0, branch_sample_type=0, sample_regs_user=0, sample_stack_user=0, clockid=CLOCK_MONOTONIC, sample_regs_intr=0, aux_watermark=0, sample_max_stack=127, aux_sample_size=0}, 7, -1, -1, PERF_FLAG_FD_CLOEXEC) = 17`
+const cleanAttr = `1 perf_event_open({type=PERF_TYPE_SOFTWARE, size=PERF_ATTR_SIZE_VER5, config=PERF_COUNT_SW_CPU_CLOCK, sample_freq=99, sample_type=PERF_SAMPLE_IP|PERF_SAMPLE_TID|PERF_SAMPLE_TIME|PERF_SAMPLE_CALLCHAIN|PERF_SAMPLE_CPU|PERF_SAMPLE_PERIOD, read_format=0, disabled=1, inherit=0, exclude_kernel=1, exclude_hv=1, mmap=1, comm=1, freq=1, task=1, precise_ip=0 /* arbitrary skid */, mmap_data=0, sample_id_all=1, exclude_callchain_kernel=1, mmap2=1, comm_exec=1, use_clockid=1, context_switch=0, wakeup_events=1, bp_type=HW_BREAKPOINT_EMPTY, config1=0, config2=0, branch_sample_type=0, sample_regs_user=0, sample_stack_user=0, clockid=CLOCK_MONOTONIC, sample_regs_intr=0, aux_watermark=0, sample_max_stack=127, aux_sample_size=0}, 7, -1, -1, PERF_FLAG_FD_CLOEXEC) = 17`
 
 func TestStraceAuditAcceptsCleanAndFlagsEachForbiddenForm(t *testing.T) {
 	p := testPolicy(t)
@@ -206,7 +206,9 @@ func TestStraceAuditAcceptsCleanAndFlagsEachForbiddenForm(t *testing.T) {
 		"perf_attr_sample_type2": strings.Replace(cleanAttr, "PERF_SAMPLE_PERIOD", "PERF_SAMPLE_PERIOD|PERF_SAMPLE_REGS_USER", 1),
 		"perf_attr_nonzero":      strings.Replace(cleanAttr, "sample_regs_user=0", "sample_regs_user=0xff", 1),
 		"perf_attr_nonzero2":     strings.Replace(cleanAttr, "sample_stack_user=0", "sample_stack_user=8192", 1),
-		"perf_attr_nonzero3":     strings.Replace(cleanAttr, "mmap=0", "mmap=1", 1),
+		"perf_attr_nonzero3":     strings.Replace(cleanAttr, "mmap_data=0", "mmap_data=1", 1),
+		"perf_attr_required3":    strings.Replace(cleanAttr, "mmap=1", "mmap=0", 1),
+		"perf_attr_required4":    strings.Replace(cleanAttr, "mmap2=1", "mmap2=0", 1),
 		"perf_attr_required":     strings.Replace(cleanAttr, "disabled=1", "disabled=0", 1),
 		"perf_attr_required2":    strings.Replace(cleanAttr, "exclude_callchain_kernel=1, ", "", 1),
 		"perf_attr_type":         strings.Replace(cleanAttr, "PERF_TYPE_SOFTWARE", "PERF_TYPE_BREAKPOINT", 1),
@@ -231,7 +233,12 @@ func TestStraceAuditAcceptsCleanAndFlagsEachForbiddenForm(t *testing.T) {
 	if f := audit(cpuRaw + "\n"); len(f) == 0 {
 		t.Fatal("PERF_SAMPLE_RAW allowed on the CPU event")
 	}
-	sched := strings.NewReplacer("PERF_TYPE_SOFTWARE", "PERF_TYPE_TRACEPOINT", "PERF_SAMPLE_IP|", "", "|PERF_SAMPLE_PERIOD", "|PERF_SAMPLE_RAW").Replace(cleanAttr)
+	sched := strings.NewReplacer("PERF_TYPE_SOFTWARE", "PERF_TYPE_TRACEPOINT", "PERF_SAMPLE_IP|", "", "|PERF_SAMPLE_PERIOD", "|PERF_SAMPLE_RAW", "mmap=1", "mmap=0", "mmap2=1", "mmap2=0").Replace(cleanAttr)
+	for name, bad := range map[string]string{"mmap": "mmap=0", "mmap2": "mmap2=0"} {
+		if f := audit(strings.Replace(sched, bad, strings.Replace(bad, "=0", "=1", 1), 1) + "\n"); len(f) == 0 {
+			t.Fatalf("%s records on the scheduler tracepoint attribute were not flagged", name)
+		}
+	}
 	if f := audit(sched + "\n"); len(f) != 0 {
 		t.Fatalf("scheduler tracepoint attribute refused: %v", f)
 	}
@@ -419,5 +426,51 @@ func TestStraceAuditJoinsUnfinishedAndResumedCalls(t *testing.T) {
 	}
 	if f, sum = audit("4242 ppoll([{fd=7, events=0}], 1, {tv_sec=0, tv_nsec=0}, NULL, 0 <unfinished ...>", "4242 <... ppoll resumed>) = 1 ([{fd=7, revents=POLLHUP}])"); len(f) != 0 || sum.Ppolls != 1 {
 		t.Fatalf("an unfinished clean ppoll: %v %+v", f, sum)
+	}
+}
+
+// 04.08-C20 review Minor 2: a compressed stage that cannot be inflated was never inspected. It must not count as an
+// observed (and therefore clean) stage, the audit must remember it, and discarding Observe's result with `_ =` must
+// not hide it from RequireStages.
+func TestUninspectableCompressedStageIsNeverObservedAndClean(t *testing.T) {
+	p := testPolicy(t)
+	d, _ := NewDetector(p, testNonce)
+	a := NewPrivacyAudit(d)
+	e := a.Observe(StageWireCompressed, []byte("not gzip but not empty either"))
+	if !errors.Is(e, ErrUninspectable) || NotLeak(e) == nil {
+		t.Fatalf("uninspectable stage must surface as an error callers act on: %v", e)
+	}
+	if buffers, octets := a.Observed(StageWireCompressed); buffers != 0 || octets != 0 {
+		t.Fatalf("an uninspectable buffer counted as observed: %d buffers %d bytes", buffers, octets)
+	}
+	if a.Uninspected() != 1 {
+		t.Fatalf("uninspectable buffers remembered: %d", a.Uninspected())
+	}
+	if e := a.RequireStages(StageWireCompressed); e == nil || !strings.Contains(e.Error(), "never observed") {
+		t.Fatalf("an uninspectable stage satisfied RequireStages: %v", e)
+	}
+	// a later good buffer observes the stage, but the uninspected one still fails the audit
+	var z bytes.Buffer
+	w := gzip.NewWriter(&z)
+	w.Write([]byte(`{"records":[]}`))
+	w.Close()
+	if e := a.Observe(StageWireCompressed, z.Bytes()); e != nil {
+		t.Fatal(e)
+	}
+	if e := a.RequireStages(StageWireCompressed); e == nil || !strings.Contains(e.Error(), "uninspectable") {
+		t.Fatalf("a stage with an uninspected buffer passed: %v", e)
+	}
+	// a truncated gzip stream and an inflation bomb are uninspectable too
+	if e := a.Observe(StageWireCompressed, z.Bytes()[:z.Len()-4]); !errors.Is(e, ErrUninspectable) {
+		t.Fatalf("truncated gzip passed: %v", e)
+	}
+	// a leak is still a leak, and NotLeak passes only that error through as nil
+	heap, _ := p.Sentinel("heap", testNonce)
+	var leak *Leak
+	if e := a.Observe(StageSocket, []byte(heap)); !errors.As(e, &leak) || NotLeak(e) != nil {
+		t.Fatalf("a leak must stay a leak recorded by the audit: %v", e)
+	}
+	if NotLeak(nil) != nil || NotLeak(ErrUnknownStage) == nil {
+		t.Fatal("NotLeak must pass nil and every non-leak error")
 	}
 }

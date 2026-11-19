@@ -50,7 +50,7 @@ import type {DomAccessors} from "../src/replay/types.ts";
 
 test("mutation churn never allocates past the node cap: a fresh checkpoint recounts the live tree, with no gap", () => {
  const {stage, chunks} = recording();
- for (let i = 0; i < 400; i++) stage.grow(); // each re-read of <section> allocates its whole subtree again: ~80,000 ids without a recount
+ for (let i = 0; i < 400; i++) stage.churn(100); // every call replaces the section's paragraphs with 100 new ones (a re-read keeps the ids of nodes it still holds, so only new nodes count): 40,000 ids without a recount
  const ids = chunks.flatMap(chunk => chunk.nodes.map(node => Number(node.id)));
  expect(Math.max(...ids)).toBeLessThanOrEqual(MAX_NODES);
  expect(chunks.filter(chunk => chunk.sequence === chunk.checkpoint_sequence).length).toBeGreaterThan(1);

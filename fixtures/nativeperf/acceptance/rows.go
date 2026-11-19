@@ -302,10 +302,16 @@ func (a *accept) deriveRows() {
 	if cpu != nil && cpu.Cap.Ready {
 		evidence = append(evidence, fmt.Sprintf("%d real software_cpu_clock samples through the signed-grant helper process for %.1f s on CPU; hot function %s in %d chains", cpu.Stats.CPUSamples, cpu.CPUSeconds, "spqual_hot", cpu.Stats.ChainsWithHot))
 	}
-	failures = append(failures, permissionFailures(res.Permissions.Cases)...)
-	if len(failures) > 0 {
-		res.CPU = qual.Failed(strings.Join(failures, "; "), detail)
-	} else {
+	permFailures := permissionFailures(res.Permissions.Cases)
+	switch {
+	case cpu == nil && len(failures) == 0:
+		// The scenario never ran: the row is unexercised, whatever the permission cases say about the rest.
+		res.CPU = qual.Row{State: qual.StateNotRun, Reason: "cpu_scenario_not_run: the CPU scenario was not executed in this invocation", Detail: detail}
+	case len(failures)+len(permFailures) > 0:
+		res.CPU = qual.Failed(strings.Join(append(failures, permFailures...), "; "), detail)
+	case len(evidence) == 0:
+		res.CPU = qual.Row{State: qual.StateNotRun, Reason: "cpu_scenario_not_run: the CPU scenario produced no capture", Detail: detail}
+	default:
 		res.CPU = qual.Supported(evidence, detail)
 	}
 

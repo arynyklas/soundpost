@@ -391,6 +391,9 @@ func ValidateRecord(r *Record, p SourcePolicy) error {
 		}
 	case CapabilityKind:
 		c := r.Payload.Capability
+		if c.AcquisitionScope != "" && !oneOf(c.AcquisitionScope, AcquisitionScopes...) {
+			return Fail(Invalid)
+		}
 		if !safeCode(c.Runtime, 128) || !safeCode(c.Version, 128) || !safeCode(c.Build, 256) || !safeCode(c.OS, 64) || !safeCode(c.Arch, 64) || !c.Signal.Valid() || !safeCode(c.Method, 128) || !oneOf(c.Status, "supported", "denied", "unsupported", "error") || !safeCode(c.Reason, 128) || c.Expires <= r.ObservedAt {
 			return Fail(Invalid)
 		}

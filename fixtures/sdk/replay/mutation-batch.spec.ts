@@ -51,9 +51,15 @@ test("recorder p95 per mutation batch stays within the 5 ms budget", async ({pag
  const profilePath = process.env.SOUNDPOST_BATCH_CPUPROFILE;
  const cdp = profilePath ? await page.context().newCDPSession(page) : undefined;
  if (cdp) { await cdp.send("Profiler.enable"); await cdp.send("Profiler.setSamplingInterval", {interval: 100}); await cdp.send("Profiler.start"); }
- const rows: Array<{burst_nodes: number; batches: number; p50_ms: number; p95_ms: number; p99_ms: number; max_ms: number}> = [];
+ const rows: Array<{burst_nodes: number; batches: number; p50_ms: number; p95_ms: number; p99_ms: number; max_ms: number; chunks: number; checkpoints: number; gaps: number}> = [];
+ // What the recorder emitted: one JSON text per chunk (the page keeps them in __chunks). A checkpoint is a chunk that is its own checkpoint_sequence.
+ const emitted = async (): Promise<{chunks: number; checkpoints: number; gaps: number}> => page.evaluate(() => {
+  const all = (Reflect.get(window, "__chunks") as string[]).map(text => JSON.parse(text) as {sequence: string; checkpoint_sequence: string; gap: boolean});
+  return {chunks: all.length, checkpoints: all.filter(chunk => chunk.sequence === chunk.checkpoint_sequence).length, gaps: all.filter(chunk => chunk.gap).length};
+ });
  for (const size of SIZES) {
   await page.evaluate(() => { (Reflect.get(window, "__batchMs") as number[]).length = 0; });
+  const emittedBefore = await emitted(), rowStart = Date.now();
   for (let batch = 0; batch < BATCHES; batch++) {
    await page.evaluate(count => {
     const burst = document.getElementById("burst")!;
@@ -70,7 +76,14 @@ test("recorder p95 per mutation batch stays within the 5 ms budget", async ({pag
   }
   const durations = (await page.evaluate(() => Reflect.get(window, "__batchMs") as number[])).slice().sort((a, b) => a - b);
   expect(durations.length).toBeGreaterThanOrEqual(BATCHES);
-  rows.push({burst_nodes: size, batches: durations.length, p50_ms: +quantile(durations, 0.5).toFixed(3), p95_ms: +quantile(durations, 0.95).toFixed(3), p99_ms: +quantile(durations, 0.99).toFixed(3), max_ms: +durations.at(-1)!.toFixed(3)});
+  const emittedAfter = await emitted(), seconds = (Date.now() - rowStart) / 1000;
+  const row = {burst_nodes: size, batches: durations.length, p50_ms: +quantile(durations, 0.5).toFixed(3), p95_ms: +quantile(durations, 0.95).toFixed(3), p99_ms: +quantile(durations, 0.99).toFixed(3), max_ms: +durations.at(-1)!.toFixed(3), chunks: emittedAfter.chunks - emittedBefore.chunks, checkpoints: emittedAfter.checkpoints - emittedBefore.checkpoints, gaps: emittedAfter.gaps - emittedBefore.gaps};
+  rows.push(row);
+  console.log("MUTATION_BATCH_ROW " + JSON.stringify(row));
+  // Design (soundpost-design.md:162): a checkpoint is due every 30 s or after a gap. A burst that makes the page's list larger than one chunk
+  // can hold (128 KiB) is a gap the recorder declares itself (rows report `gaps`); nothing else here is, so apart from the checkpoints the clock owes
+  // (and the few a long-lived tree's id space or a declared gap may add: fewer than one per 20 batches) every batch is a delta.
+  expect(row.checkpoints, `burst of ${size} nodes: checkpoints in ${seconds.toFixed(1)} s`).toBeLessThanOrEqual(Math.floor(seconds / 30) + Math.floor(BATCHES / 20));
  }
  if (cdp && profilePath) writeFileSync(profilePath, JSON.stringify((await cdp.send("Profiler.stop")).profile));
  const report = JSON.stringify({budget_p95_ms: BUDGET_P95_MS, browser: page.context().browser()?.version(), rows});

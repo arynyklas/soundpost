@@ -15,7 +15,8 @@ import (
 // The perf attribute is the whole capture policy: compare it field by field with the approved fixed ABI, so a changed
 // selector, sample type, flag, rate or stack bound fails here rather than only on a machine that has perf.
 func TestCPUAttrIsExactlyTheApprovedABI(t *testing.T) {
-	const flags = 1 | 1<<5 | 1<<6 | 1<<9 | 1<<10 | 1<<13 | 1<<18 | 1<<21 | 1<<24 | 1<<25
+	// the capture flags, and the mapping-epoch sideband: mmap (8), mmap2 (23) and build_id (34); mmap_data (17) stays off
+	const flags = 1 | 1<<5 | 1<<6 | 1<<8 | 1<<9 | 1<<10 | 1<<13 | 1<<18 | 1<<21 | 1<<23 | 1<<24 | 1<<25 | 1<<34
 	for _, tc := range []struct {
 		method SamplingMethod
 		typ    uint32

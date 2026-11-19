@@ -227,13 +227,48 @@ type SchedulerWakeup struct {
 	Target    TaskKey `json:"target"`
 	TargetCPU uint32  `json:"target_cpu"`
 }
+
+// MappingUpdate is process-scoped and carries no path, device, inode or load-time identity: only the address range, the
+// file offset it maps and, for code of an approved build, that GNU build ID. A range whose code the policy does not name
+// (unapproved build, anonymous/JIT memory, unreadable object) carries Reason instead of a build ID, so a later mapping
+// over the same addresses is still seen to supersede an earlier one. Snapshot rows belong to a reconciliation group, a
+// read of the process's maps: the first group holds the whole snapshot, a later one only the ranges that differ from
+// what the announcements predicted (see mapping_epoch.go). A group is stamped with the instant its read ended
+// (Event.Time) and carries in Since the instant just before it began; Confirm closes the group (no range) and is how a
+// group with no differing range says that everything else matched. The first Since is after every perf event was
+// enabled: the announcements are complete from it.
 type MappingUpdate struct {
-	Process    ProcessKey   `json:"process"`
-	Start      model.Uint64 `json:"start"`
-	End        model.Uint64 `json:"end"`
-	FileOffset model.Uint64 `json:"file_offset"`
-	BuildID    string       `json:"build_id"`
+	Process    ProcessKey     `json:"process"`
+	Start      model.Uint64   `json:"start"`
+	End        model.Uint64   `json:"end"`
+	FileOffset model.Uint64   `json:"file_offset"`
+	BuildID    string         `json:"build_id"`
+	Reason     FrameReason    `json:"reason,omitempty"`
+	Snapshot   bool           `json:"snapshot,omitempty"`
+	Since      model.MonoNano `json:"since,omitempty"`
+	Confirm    bool           `json:"confirm,omitempty"`
 }
+
+func (m MappingUpdate) valid(d ClockDomain, at model.MonoNano) bool {
+	if m.Confirm {
+		return m.Process.valid(d) && m.Snapshot && m.Start == 0 && m.End == 0 && m.FileOffset == 0 && m.BuildID == "" && m.Reason == "" && m.Since != 0 && m.Since <= at
+	}
+	if !m.Process.valid(d) || m.End <= m.Start || uint64(m.End) > 1<<56 || m.FileOffset > ^model.Uint64(0)-(m.End-m.Start) || !m.Reason.valid() {
+		return false
+	}
+	if m.BuildID != "" {
+		if !validBuild(m.BuildID) || m.Reason != "" {
+			return false
+		}
+	} else if m.Reason == "" || m.FileOffset != 0 {
+		return false
+	}
+	if !m.Snapshot {
+		return m.Since == 0
+	}
+	return m.Since != 0 && m.Since <= at
+}
+
 type LossEvent struct {
 	Count    model.Uint64      `json:"count"`
 	Reason   Reason            `json:"reason"`
@@ -315,7 +350,7 @@ func (e SanitizedEvent) Validate() error {
 			return ErrInvalid
 		}
 	case EventMapping:
-		if e.Mapping == nil || e.Task != (TaskKey{}) || !e.Mapping.Process.valid(e.Domain) || e.Mapping.End <= e.Mapping.Start || !validBuild(e.Mapping.BuildID) {
+		if e.Mapping == nil || e.Task != (TaskKey{}) || !e.Mapping.valid(e.Domain, e.Time) {
 			return ErrInvalid
 		}
 	case EventLoss:

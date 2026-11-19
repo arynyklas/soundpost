@@ -9,6 +9,7 @@ import (
 	"github.com/arynyklas/soundpost/internal/auth"
 	"github.com/arynyklas/soundpost/internal/model"
 	"io"
+	"sort"
 	"time"
 )
 
@@ -157,9 +158,25 @@ func sameFrameProcess(k TaskKey, p ProcessKey) bool {
 	return k.BootID == p.BootID && k.PIDNamespace == p.PIDNamespace && k.TGID == p.TGID && k.ProcessStart == p.ProcessStart && k.Generation == p.Generation
 }
 
+// frameCache holds the parsed artifacts of ONE bounded, scope-bound operation (one ResolveFrames call or one profile
+// assembly): never across reads, revocation checks or mapping epochs of another operation. One reusable input buffer
+// avoids per-frame copies and the aggregate artifact bytes and symbols have fixed ceilings.
+type frameCache struct {
+	artifacts     map[string]frameArtifact
+	scratch       []byte
+	artifactBytes uint64
+	symbolCount   uint32
+}
+
+func newFrameCache() *frameCache { return &frameCache{artifacts: make(map[string]frameArtifact)} }
+
 // ResolveFrames never falls back to the host filesystem or a runtime URL when
 // C07 is absent/denies. Each failure still leaves a nonempty safe observation.
 func ResolveFrames(ctx context.Context, samples []AddressFrame, mappings MappingTable, artifacts ArtifactResolver) ([]ResolvedFrame, error) {
+	return resolveFrames(ctx, samples, mappings, artifacts, newFrameCache())
+}
+
+func resolveFrames(ctx context.Context, samples []AddressFrame, mappings MappingTable, artifacts ArtifactResolver, cache *frameCache) ([]ResolvedFrame, error) {
 	if e := ctx.Err(); e != nil {
 		return nil, e
 	}
@@ -180,13 +197,6 @@ func ResolveFrames(ctx context.Context, samples []AddressFrame, mappings Mapping
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	out := make([]ResolvedFrame, 0, len(samples))
-	// Cache only within this bounded scope-bound operation, never across reads,
-	// revocation checks or mapping epochs. One reusable input buffer avoids
-	// per-frame copies and aggregate artifact bytes/symbols have fixed ceilings.
-	cache := make(map[string]frameArtifact)
-	var scratch []byte
-	var artifactBytes uint64
-	var symbolCount uint32
 	for _, sample := range samples {
 		if e := caller.Err(); e != nil {
 			return nil, e
@@ -205,7 +215,9 @@ func ResolveFrames(ctx context.Context, samples []AddressFrame, mappings Mapping
 			out = append(out, frame)
 			continue
 		}
-		for _, entry := range mappings.entries {
+		// entries are sorted and disjoint (checked above): the owner of an address is the first entry that ends after it.
+		index := sort.Search(len(mappings.entries), func(i int) bool { return mappings.entries[i].end > sample.IP })
+		for _, entry := range mappings.entries[index:min(index+1, len(mappings.entries))] {
 			if sample.IP < entry.start || sample.IP >= entry.end {
 				continue
 			}
@@ -236,23 +248,23 @@ func ResolveFrames(ctx context.Context, samples []AddressFrame, mappings Mapping
 				frame.Reason = FrameArtifactDenied
 				break
 			}
-			resolved, exists := cache[module.BuildID]
+			resolved, exists := cache.artifacts[module.BuildID]
 			if !exists {
-				if artifactBytes >= policy.MaxELFBytes || symbolCount >= policy.MaxSymbols {
+				if cache.artifactBytes >= policy.MaxELFBytes || cache.symbolCount >= policy.MaxSymbols {
 					resolved.reason = FrameArtifactUnavailable
 				} else {
-					if scratch == nil {
-						scratch = make([]byte, int(policy.MaxELFBytes)+1)
+					if cache.scratch == nil {
+						cache.scratch = make([]byte, int(policy.MaxELFBytes)+1)
 					}
 					var artifactErr error
-					resolved, artifactErr = readFrameArtifact(caller, ctx, artifacts, ArtifactReference{Scope: policy.ArtifactScope, ProjectID: policy.ProjectID, BuildID: module.BuildID, ArtifactID: id}, scratch, policy.MaxELFBytes-artifactBytes, policy.MaxELFBytes, policy.MaxSymbols-symbolCount)
+					resolved, artifactErr = readFrameArtifact(caller, ctx, artifacts, ArtifactReference{Scope: policy.ArtifactScope, ProjectID: policy.ProjectID, BuildID: module.BuildID, ArtifactID: id}, cache.scratch, policy.MaxELFBytes-cache.artifactBytes, policy.MaxELFBytes, policy.MaxSymbols-cache.symbolCount)
 					if artifactErr != nil {
 						return nil, artifactErr
 					}
-					artifactBytes += resolved.bytes
-					symbolCount += uint32(len(resolved.info.symbols))
+					cache.artifactBytes += resolved.bytes
+					cache.symbolCount += uint32(len(resolved.info.symbols))
 				}
-				cache[module.BuildID] = resolved
+				cache.artifacts[module.BuildID] = resolved
 			}
 			frame.Reason = resolved.reason
 			if frame.Reason == "" {
@@ -338,6 +350,10 @@ type CPUObservation struct {
 }
 
 func ResolveCPUObservation(ctx context.Context, task TaskKey, sample CPUSample, mappings MappingTable, artifacts ArtifactResolver) (CPUObservation, error) {
+	return resolveCPUObservation(ctx, task, sample, mappings, artifacts, newFrameCache())
+}
+
+func resolveCPUObservation(ctx context.Context, task TaskKey, sample CPUSample, mappings MappingTable, artifacts ArtifactResolver, cache *frameCache) (CPUObservation, error) {
 	if e := ctx.Err(); e != nil {
 		return CPUObservation{}, e
 	}
@@ -366,7 +382,7 @@ func ResolveCPUObservation(ctx context.Context, task TaskKey, sample CPUSample, 
 		}
 		frames = append(frames, AddressFrame{Task: task, IP: uint64(entry.IP)})
 	}
-	resolved, e := ResolveFrames(ctx, frames, mappings, artifacts)
+	resolved, e := resolveFrames(ctx, frames, mappings, artifacts, cache)
 	if e != nil {
 		return CPUObservation{}, e
 	}

@@ -68,6 +68,7 @@ spec:
           volumeMounts:
             - {name: socket, mountPath: /run/soundpost-perf}
             - {name: policy, mountPath: /etc/soundpost, readOnly: true}
+            - {name: machine-id, mountPath: /etc/machine-id, readOnly: true}
       volumes:
         - name: socket
           hostPath: {path: /run/soundpost-perf, type: Directory}
@@ -77,4 +78,8 @@ spec:
             defaultMode: 0444
             items:
               - {key: perf-policy.json, path: perf-policy.json}
+        # /etc/machine-id names the host in every exported domain; the helper image has none (without it every capture is
+        # refused as an invalid target identity).
+        - name: machine-id
+          hostPath: {path: /etc/machine-id, type: File}
 {{- end }}

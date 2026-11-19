@@ -278,3 +278,41 @@ func TestPermissionCasesRequireADistinctGenuineDenial(t *testing.T) {
 		}
 	}
 }
+
+// 04.09-C31 Minor 3: a CPU scenario that never ran is an unexercised row (not_run with a reason), never
+// supported with empty evidence, and never a silent validation error.
+func TestCPURowIsNotRunWhenTheCPUScenarioNeverRan(t *testing.T) {
+	passed := []qual.PermissionCase{
+		{Name: "unprivileged_helper_foreign_uid_target", Outcome: "refused", ErrorCode: "permission_denied", FDsReleased: true},
+		{Name: "unprivileged_helper_same_uid_target", Outcome: "captured_genuine_samples", FDsReleased: true},
+	}
+	notReady := goodCPU()
+	notReady.Cap.Ready = false
+	for name, setup := range map[string]func(a *accept){
+		"no scenario at all, permission cases passed": func(a *accept) { a.res.Permissions.Cases = passed },
+		"only the no-frame-pointer scenario ran":      func(a *accept) { a.res.Permissions.Cases = passed; a.results["nofp"] = goodNoFP() },
+		"no scenario and no permission cases":         func(a *accept) {},
+		"cpu scenario recorded but never captured":    func(a *accept) { a.res.Permissions.Cases = passed; a.results["cpu"] = notReady },
+	} {
+		a := newAccept()
+		a.caps.OffCPU = nativeperf.Unsupported
+		setup(a)
+		a.deriveRows()
+		row := a.res.CPU
+		if row.State != qual.StateNotRun || row.Exercised || row.Reason == "" || len(row.Evidence) != 0 {
+			t.Errorf("%s: cpu row %+v, want not_run, unexercised, with a reason and no evidence", name, row)
+		}
+		if err := row.Validate("cpu"); err != nil {
+			t.Errorf("%s: the unexercised cpu row is invalid: %v", name, err)
+		}
+	}
+	// a real failure of another scenario is still a failure, and a ran-and-passed CPU scenario is still supported
+	a := newAccept()
+	a.caps.OffCPU = nativeperf.Unsupported
+	a.res.Permissions.Cases = passed
+	a.results["cpu"] = goodCPU()
+	a.deriveRows()
+	if a.res.CPU.State != qual.StateSupported || len(a.res.CPU.Evidence) == 0 {
+		t.Errorf("a passing cpu scenario: %+v", a.res.CPU)
+	}
+}

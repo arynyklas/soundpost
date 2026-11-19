@@ -9,6 +9,12 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+/* About 0.8 s of CPU per phase on a current core (about 80 samples at 99 Hz, which fit the 8 MiB assembly working set
+ * with both phases): the capture reconciles the mappings every 250 ms, so a phase has to outlast several
+ * reconciliations for samples to be attributable on both sides of the remap. */
+#ifndef PHASE_ITERATIONS
+#define PHASE_ITERATIONS 600000000ULL
+#endif
 /* Independently authored executable-code fixture, not a kernel implementation.
  * No machine-code byte strings, process-memory reads or privilege changes.
  * Each function is page-isolated and uses only its own registers/stack. */
@@ -58,13 +64,13 @@ int main(void) {
     puts("ready"); fflush(stdout);
     if (getchar() != 'a') return 6;
     uint64_t (*hot)(uint64_t) = (uint64_t (*)(uint64_t))first;
-    uint64_t result = hot(200000000);
+    uint64_t result = hot(PHASE_ITERATIONS);
     if (result < 1 || result > 2) return 7;
     puts("phase_a_executed"); fflush(stdout);
     if (getchar() != 'b') return 8;
     void *moved = mremap(second, (size_t)page, (size_t)page, MREMAP_MAYMOVE | MREMAP_FIXED, first);
     if (moved == MAP_FAILED || moved != first) return 9;
-    result = hot(200000000);
+    result = hot(PHASE_ITERATIONS);
     if (result < 3 || result > 4) return 10;
     puts("phase_b_same_va_executed"); fflush(stdout);
     if (getchar() != 'q') return 11;

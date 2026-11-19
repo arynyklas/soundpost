@@ -463,6 +463,19 @@ type Coverage struct {
 	Workers string `json:"workers"`
 	Tasks   string `json:"tasks"`
 }
+
+// AcquisitionScope names how far one capability's acquisition reaches. The vocabulary is closed (AcquisitionScopes).
+const (
+	// AcquisitionScopeTargetOnly: only the authorized target's own threads are observed.
+	AcquisitionScopeTargetOnly = "target_only"
+	// AcquisitionScopeSystemWideScheduler: the scheduler tracepoints are read system-wide (so foreign wakeups of an
+	// authorized task are visible), operator authorized, and filtered to authorized tasks before any export.
+	AcquisitionScopeSystemWideScheduler = "system_wide_scheduler_read_operator_authorized"
+)
+
+// AcquisitionScopes is the closed vocabulary of Capability.AcquisitionScope.
+var AcquisitionScopes = []string{AcquisitionScopeTargetOnly, AcquisitionScopeSystemWideScheduler}
+
 type Capability struct {
 	Runtime  string      `json:"runtime"`
 	Version  string      `json:"version"`
@@ -476,6 +489,9 @@ type Capability struct {
 	Coverage Coverage    `json:"coverage"`
 	Clock    ClockDomain `json:"clock_domain"`
 	Expires  UnixNano    `json:"expires_ns"`
+
+	// AcquisitionScope is optional: absent from records written before it existed and from SDK runtimes.
+	AcquisitionScope string `json:"acquisition_scope,omitempty"`
 }
 type LossReport struct {
 	Source       ID       `json:"source"`

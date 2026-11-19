@@ -39,6 +39,8 @@ Symbolication is a backend concern (C07): a missing or mismatched map yields a v
 
 The upload credential is the private artifact-write credential, never the browser source key. It is held only in a closure: `JSON.stringify`, `util.inspect` and string conversion of the plugin or the upload config cannot echo it; errors carry a code (and an HTTP status), never a response body; redirects are not followed; plaintext endpoints are accepted only for loopback; credentials containing whitespace/control characters are rejected before use. The plugin injects nothing into the bundle.
 
+A function credential is called exactly once per upload, immediately before the request, and never when the plugin or the upload config is created; if it throws or returns an unusable value the upload fails with `credential_invalid` and nothing is sent.
+
 ## Not delivered here
 
 Getter-free creation/throw-site evidence for SDK-captured errors needs a runtime evidence API in `@soundpost/core` plus a build transform; this package assigns the identities that evidence would reference but does not instrument code.

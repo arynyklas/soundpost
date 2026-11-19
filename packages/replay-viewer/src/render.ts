@@ -104,8 +104,8 @@ export function renderTree(doc: Document, nodes: Iterable<TreeInput>): HTMLEleme
 
 type Model = Map<string, ReplayNode>;
 type Entry =
- | {readonly kind: "checkpoint" | "delta"; readonly seq: bigint; readonly nodes: readonly ReplayNode[]; readonly events: readonly ReplayEvent[]}
- | {readonly kind: "gap"; readonly from: bigint; through: bigint; readonly reason: GapReason};
+ | {readonly kind: "checkpoint" | "delta"; readonly seq: bigint; readonly nodes: readonly ReplayNode[]; readonly events: readonly ReplayEvent[]; readonly loss: bigint}
+ | {readonly kind: "gap"; readonly from: bigint; through: bigint; readonly reason: GapReason; loss: bigint | null};
 const startOf = (entry: Entry): bigint => (entry.kind === "gap" ? entry.from : entry.seq);
 const endOf = (entry: Entry): bigint => (entry.kind === "gap" ? entry.through : entry.seq);
 
@@ -248,18 +248,18 @@ class ReplayView implements ReplayViewHandle {
   this.chain = decision.state;
   switch (decision.kind) {
    case "apply":
-    this.entries.push({kind: "delta", seq: BigInt(decoded.sequence), nodes: decoded.nodes, events: decoded.events});
+    this.entries.push({kind: "delta", seq: BigInt(decoded.sequence), nodes: decoded.nodes, events: decoded.events, loss: BigInt(decoded.loss)});
     this.retainedNodes += decoded.nodes.length;
     applyDelta(this.model, decoded.nodes, decoded.events);
     break;
    case "checkpoint":
     if (decision.gap !== null) this.addGap(decision.gap);
     this.openGap = null; this.unsupportedOpen = false;
-    this.entries.push({kind: "checkpoint", seq: BigInt(decoded.sequence), nodes: decoded.nodes, events: decoded.events});
+    this.entries.push({kind: "checkpoint", seq: BigInt(decoded.sequence), nodes: decoded.nodes, events: decoded.events, loss: BigInt(decoded.loss)});
     this.retainedNodes += decoded.nodes.length;
     this.model = new Map(decoded.nodes.map(node => [node.id, node]));
     break;
-   case "gap": this.addGap(decision.gap); break;
+   case "gap": this.addGap(decision.gap, decision.gap.reason === "recorder_gap" ? BigInt(decoded.loss) : null); break;
    case "reject": if (decision.gap !== null) this.addGap(decision.gap); break;
   }
   if (this.model.size > this.maxModel) return this.stop(false);
@@ -267,10 +267,15 @@ class ReplayView implements ReplayViewHandle {
   this.schedule();
  }
 
- private addGap(gap: ChainGap): void {
+ /** `loss` is the recorder's own cumulative loss counter from a chunk whose chain position was verified (a recorder-declared gap); it is shown, never inferred. */
+ private addGap(gap: ChainGap, loss: bigint | null = null): void {
   const from = BigInt(gap.from), through = BigInt(gap.through);
-  if (this.openGap !== null) { if (through > this.openGap.through) this.openGap.through = through; return; }
-  const entry = {kind: "gap" as const, from, through, reason: gap.reason};
+  if (this.openGap !== null) {
+   if (through > this.openGap.through) this.openGap.through = through;
+   if (loss !== null && (this.openGap.loss === null || loss > this.openGap.loss)) this.openGap.loss = loss;
+   return;
+  }
+  const entry = {kind: "gap" as const, from, through, reason: gap.reason, loss};
   this.entries.push(entry);
   this.openGap = entry;
  }
@@ -333,12 +338,12 @@ class ReplayView implements ReplayViewHandle {
   for (const entry of shown.entries) {
    if (entry.kind === "gap") {
     const item = elementWith(this.doc, "li", [["data-kind", "gap"]]);
-    item.textContent = `gap ${entry.from === entry.through ? String(entry.from) : `${entry.from}-${entry.through}`} ${entry.reason}`;
+    item.textContent = `gap ${entry.from === entry.through ? String(entry.from) : `${entry.from}-${entry.through}`} ${entry.reason}${entry.loss !== null && entry.loss > 0n ? ` loss ${entry.loss}` : ""}`;
     lines.push(item);
     continue;
    }
    const item = elementWith(this.doc, "li", [["data-kind", entry.kind], ["data-sequence", String(entry.seq)]]);
-   item.textContent = `${entry.kind} ${entry.seq}`;
+   item.textContent = `${entry.kind} ${entry.seq}${entry.loss > 0n ? ` loss ${entry.loss}` : ""}`;
    lines.push(item);
    for (const event of entry.events) {
     if (!SHOWN_EVENTS.includes(event.kind)) continue;

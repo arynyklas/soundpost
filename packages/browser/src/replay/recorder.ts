@@ -2,10 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import type {DomAccessors, EnqueueResult, MutationObserverLike, ReplayChunk, ReplayConfig, ReplayEvent, ReplayEventTargetLike, ReplayNode, ReplayRecorder, ReplayTimers} from "./types.ts";
 import {CHECKPOINT_INTERVAL_MS, EVENT_FLUSH_MS, GAP_EVENT_BYTES, MAX_CHECKPOINTS, MAX_CHUNK_BYTES, MAX_CHUNK_NODES, MAX_MUTATION_RECORDS, MAX_MUTATION_ROOTS, MAX_NODE_ID, MAX_PENDING_EVENTS, MAX_DEPTH, MAX_NODES, MAX_SEQUENCE, RECORDER_VERSION, ZERO_HASH, CanonicalText, canonicalJSON, captureAllowed, quantize, sha256Hex} from "./policy.ts";
-import {captureDomAccessors, fitSubtrees, newWalkState, walk, type DomGlobals} from "./tree.ts";
+import {captureDomAccessors, fitSubtrees, newWalkState, nodeBytes, walk, type DomGlobals} from "./tree.ts";
 
-/** JSON text of one node with every value empty, plus its separator: a recorded node is exactly this plus the lengths of its five values (ids are decimals, tags and masks come from the closed vocabulary, none needs escaping). */
-const NODE_FRAME_BYTES = JSON.stringify({id: "", parent: "", tag: "", class: "", text: ""}).length + 1;
 /** The canonical JSON (keys in code unit order) of a node array the recorder built: every value is a decimal or a closed-vocabulary string, so no value needs escaping. Equals canonicalJSON(nodes). */
 function canonicalNodes(nodes: readonly ReplayNode[]): string {
  let out = "[";
@@ -158,14 +156,26 @@ class Recorder implements ReplayRecorder {
   this.guard(() => {
    const dom = this.dom!;
    if (records.length > MAX_MUTATION_RECORDS) { this.flushEvents(); this.needGap = true; this.checkpoint(); return; }
-   const dirty = new Map<number, object>();
+   const dirty = new Map<number, object>(), seen = new Set<object>();
    let full = false;
    for (const record of records) {
     let node = dom.mutationTarget(record);
-    if (node !== null && dom.nodeType(node) !== 1) node = dom.nodeType(node) === 3 ? dom.parentNode(node) : null;
-    for (let hops = 0; node !== null && !this.ids.has(node) && hops < MAX_DEPTH * 4; hops++) node = dom.parentNode(node);
-    const id = node === null ? undefined : this.ids.get(node);
-    if (node === null || id === undefined) { full = true; break; }
+    // The outcome of a target is the same however many records name it, so each target is attributed once.
+    if (node !== null) { if (seen.has(node)) continue; seen.add(node); }
+    if (node !== null && dom.nodeType(node) !== 1) {
+     // A text node is its parent element's change; a detached one is not in the replay tree at all. Any other kind (document, shadow root, comment) cannot be attributed.
+     if (dom.nodeType(node) === 3) { node = dom.parentNode(node); if (node === null) continue; } else node = null;
+    }
+    if (node === null) { full = true; break; }
+    // Climb to the nearest node the replay already holds. Reaching the top of an element tree without finding one means the
+    // target is detached (or outside the observed root): it is not in the replay tree, and whatever removed it from the tree is a
+    // record of its own on a node the replay does hold. Only a top the recorder cannot account for (a shadow root, a climb cut
+    // short by the depth bound) is an unknown it must not guess about.
+    let top: object = node, reached: object | null = node, id: number | undefined;
+    for (let hops = 0; reached !== null && (id = this.ids.get(reached)) === undefined && hops < MAX_DEPTH * 4; hops++) { top = reached; reached = dom.parentNode(reached); }
+    if (reached === null) { const topType = dom.nodeType(top); if (topType === 1 || topType === 9) continue; full = true; break; }
+    if (id === undefined) { full = true; break; }
+    node = reached;
     if (this.suppressed.has(id)) continue;
     dirty.set(id, node);
     if (dirty.size > MAX_MUTATION_ROOTS) { full = true; break; }
@@ -182,10 +192,13 @@ class Recorder implements ReplayRecorder {
     for (let up = dom.parentNode(node), hops = 0; up !== null && hops < MAX_DEPTH * 4; up = dom.parentNode(up), hops++) { const upId = this.ids.get(up); if (upId !== undefined && dirty.has(upId)) { covered = true; break; } }
     if (covered) continue;
     const parent = dom.parentNode(node), parentId = parent === null ? undefined : this.ids.get(parent);
+    // A node the replay holds that has left the tree (no parent, and not the root itself) was removed by a record on its old parent; re-walking it would hang it at the root of the replay.
+    if (parent === null && node !== this.config.root) continue;
     events.push({at_ns: at, kind: "mutation", node: String(id), x: 0, y: 0});
     walk(dom, node, parentId === undefined ? "0" : String(parentId), state, 0, id);
    }
    if (state.overflow) { this.flushEvents(); this.checkpoint(); return; }
+   if (events.length === 0) return; // every dirty node had left the tree: nothing the replay shows changed
    this.flushEvents();
    this.write(state.nodes, events, false, false);
   });
@@ -202,10 +215,12 @@ class Recorder implements ReplayRecorder {
   for (const event of events) budget += JSON.stringify(event).length + 1;
   const room = Math.max(0, MAX_CHUNK_BYTES - budget);
  // The recorder builds every node itself, so its JSON size is the frame plus the value lengths: a chunk that fits needs no per-node JSON.stringify sizing.
- let nodeBytes = 0;
- for (const node of nodes) nodeBytes += NODE_FRAME_BYTES + node.id.length + node.parent.length + node.tag.length + node.class.length + node.text.length;
- const fit = nodes.length <= MAX_CHUNK_NODES && nodeBytes <= room ? {nodes, truncated: false, suppressed: []} : fitSubtrees(nodes, MAX_CHUNK_NODES, room);
+ let totalBytes = 0;
+ for (const node of nodes) totalBytes += nodeBytes(node);
+ const fit = nodes.length <= MAX_CHUNK_NODES && totalBytes <= room ? {nodes, truncated: false, suppressed: []} : fitSubtrees(nodes, MAX_CHUNK_NODES, room);
   let emitted = events, marked = gap;
+  // A node this chunk shows again (a re-walked subtree keeps its ids) is no longer collapsed: its deltas count again, unless the fit below collapses it once more.
+  if (this.suppressed.size > 0) for (const node of fit.nodes) this.suppressed.delete(Number(node.id));
   if (fit.truncated) {
    for (const id of fit.suppressed) this.suppressed.add(id);
    this.loss++;

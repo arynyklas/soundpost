@@ -176,6 +176,8 @@ func decodeCPURecord(v KernelRecordView, r *Ring) (SanitizedEvent, bool, error) 
 			return SanitizedEvent{}, false, ErrTargetIdentity
 		}
 		return SanitizedEvent{}, false, nil
+	case perfRecordMmap2:
+		return decodeMmap2(v, r)
 	case perfRecordFork, perfRecordExit:
 		if v.len() != 56 {
 			return SanitizedEvent{}, false, ErrRingMalformed

@@ -83,6 +83,8 @@ export function scriptedPage(ids: {readonly replay: string; readonly session: st
   scroll: () => listeners.get("scroll")?.({}), resize: () => listeners.get("resize")?.({}),
   /** A text-only addition under <section>: the recorder re-reads that subtree. */
   grow: (secret?: string) => { append(section, secret === undefined ? node("p") : node("p", text(secret))); observe!([{target: section}]); },
+  /** Replaces everything under <section> with `count` new text-free paragraphs: the live tree stays small while every call allocates `count` ids. */
+  churn: (count: number) => { section.kids = []; for (let i = 0; i < count; i++) append(section, node("p")); observe!([{target: section}]); },
  };
 }
 

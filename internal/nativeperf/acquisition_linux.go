@@ -104,6 +104,7 @@ func newCPUAcquisition(ctx context.Context, a AuthorizedTargets, c Config, r *Re
 		if e = r.Own(ring); e != nil {
 			return fail(e)
 		}
+		ring.builds = a.approvedBuilds(thread.task.TGID)
 		source.rings = append(source.rings, ring)
 	}
 	if e = ctx.Err(); e != nil {

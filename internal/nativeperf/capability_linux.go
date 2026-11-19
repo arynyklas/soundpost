@@ -58,7 +58,7 @@ func probeStatus(err error) (Status, Reason) {
 	return Error, ReasonEvent
 }
 func Probe(ctx context.Context, targets []Target) (Capabilities, error) {
-	c := Capabilities{Arch: runtime.GOARCH, Config: "unmeasured", CPU: Unsupported, OffCPU: Unsupported, RunqueueSplit: Unsupported, FrameCoverage: Coverage{Reasons: []Reason{ReasonUnmeasured}}, ThreadCoverage: Coverage{Reasons: []Reason{ReasonUnmeasured}}, Reasons: []Reason{ReasonUnmeasured}}
+	c := Capabilities{Arch: runtime.GOARCH, Config: "unmeasured", CPU: Unsupported, OffCPU: Unsupported, RunqueueSplit: Unsupported, FrameCoverage: Coverage{Reasons: []Reason{ReasonUnmeasured}}, ThreadCoverage: Coverage{Reasons: []Reason{ReasonUnmeasured}}, Reasons: []Reason{ReasonUnmeasured}, AcquisitionScope: model.AcquisitionScopeTargetOnly}
 	c.Permissions.CPUEventOpen = Unsupported
 	c.Permissions.SchedulerEventOpen = Unsupported
 	if err := ctx.Err(); err != nil {
@@ -133,6 +133,11 @@ func Probe(ctx context.Context, targets []Target) (Capabilities, error) {
 		}
 	}
 	c.Permissions.SchedulerEventOpen = c.OffCPU
+	if c.OffCPU == Supported {
+		// The scheduler tracepoints are read system-wide (foreign wakeups of an authorized task are only visible there)
+		// and filtered to the operator-authorized tasks before anything leaves the helper.
+		c.AcquisitionScope = model.AcquisitionScopeSystemWideScheduler
+	}
 	// The runnable/blocked split is derived from exactly the three events opened above (switch, wakeup, wakeup_new)
 	// by the correlator, which real 6.1 and 6.6 kernels qualified (D38); its status is the scheduler path's.
 	c.RunqueueSplit = c.OffCPU

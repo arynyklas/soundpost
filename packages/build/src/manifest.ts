@@ -4,7 +4,7 @@ import {createHash} from "node:crypto";
 import {posix,isAbsolute,relative,resolve,dirname} from "node:path";
 
 /** C07 limits, mirrored from the backend so a build fails before any byte leaves the machine. */
-export const LIMITS = Object.freeze({maxBytes:32*1024*1024,maxFiles:1024,maxDepth:8,maxPath:4096,maxDebugId:256});
+export const LIMITS = Object.freeze({maxBytes:32*1024*1024,maxFiles:1024,maxDepth:8,maxJsonDepth:64,maxPath:4096,maxDebugId:256});
 
 export type ArtifactErrorCode=
  |"options_invalid"|"manifest_invalid"|"path_invalid"|"credential_invalid"|"endpoint_invalid"|"endpoint_insecure"
@@ -67,17 +67,23 @@ export function validateManifest(value:unknown):ArtifactManifest {
  return Object.freeze({...record}) as unknown as ArtifactManifest;
 }
 
-/** Raw-text nesting scan: bounds depth before any recursive parser can see the document. */
-function jsonDepth(text:string):number {
- let depth=0,max=0,inString=false;
+/**
+ * Raw-text nesting scan: bounds depth before any recursive parser can see the document. Mirrors the backend's model.ValidateJSON
+ * (internal/model/telemetry.go maxJSONDepth): a value (container, string or scalar) at nesting depth n, the outermost container
+ * being depth 0, is refused when n > LIMITS.maxJsonDepth. This is the raw JSON bound only; the map nesting bound
+ * (LIMITS.maxDepth, counted in maps like internal/sourcemap Limits.MaxDepth) is enforced structurally by forEachLeafMap.
+ */
+function jsonTooDeep(text:string):boolean {
+ let depth=0,inString=false;
  for(let index=0;index<text.length;index++){
   const char=text.charCodeAt(index);
   if(inString){if(char===92)index++;else if(char===34)inString=false;continue;}
-  if(char===34)inString=true;
-  else if(char===123||char===91){depth++;if(depth>max)max=depth;}
+  if(char===34){if(depth>LIMITS.maxJsonDepth)return true;inString=true;}
+  else if(char===123||char===91){if(depth>LIMITS.maxJsonDepth)return true;depth++;}
   else if(char===125||char===93)depth--;
+  else if((char>=48&&char<=57)||char===45||char===116||char===102||char===110){if(depth>LIMITS.maxJsonDepth)return true;}
  }
- return max;
+ return false;
 }
 const SCHEME=/^[A-Za-z][A-Za-z0-9+.-]*:/;
 function safeSourcePath(source:string):boolean {
@@ -90,7 +96,8 @@ export interface SourceMapView {readonly version:3;readonly sources?:string[];re
  * v3 map or itself indexed, recursion bounded by the shared JSON depth limit, at most LIMITS.maxFiles sections per map. A map
  * is either regular (sources+mappings) or indexed (sections), never both. Visits every regular (leaf) map exactly once.
  */
-function forEachLeafMap(map:Record<string,unknown>,visit:(leaf:Record<string,unknown>)=>void):void {
+function forEachLeafMap(map:Record<string,unknown>,visit:(leaf:Record<string,unknown>)=>void,level=1):void {
+ if(level>LIMITS.maxDepth)throw new ArtifactError("map_too_deep");
  if(!Object.hasOwn(map,"sections")){visit(map);return;}
  if(map.version!==3||Object.hasOwn(map,"sources")||Object.hasOwn(map,"mappings")||!Array.isArray(map.sections))throw new ArtifactError("map_invalid");
  if(map.sections.length>LIMITS.maxFiles)throw new ArtifactError("too_many_files");
@@ -98,7 +105,7 @@ function forEachLeafMap(map:Record<string,unknown>,visit:(leaf:Record<string,unk
   if(section===null||typeof section!=="object"||Array.isArray(section))throw new ArtifactError("map_invalid");
   const {offset,map:child}=section as {offset?:unknown;map?:unknown};
   if(offset===null||typeof offset!=="object"||Array.isArray(offset)||child===null||typeof child!=="object"||Array.isArray(child))throw new ArtifactError("map_invalid");
-  forEachLeafMap(child as Record<string,unknown>,visit);
+  forEachLeafMap(child as Record<string,unknown>,visit,level+1);
  }
 }
 function checkLeaf(map:Record<string,unknown>,sourceContent:boolean):number {
@@ -119,7 +126,7 @@ export function inspectSourceMap(bytes:Uint8Array,sourceContent:boolean):SourceM
  if(bytes.length>LIMITS.maxBytes)throw new ArtifactError("map_too_large");
  let text:string;
  try{text=new TextDecoder("utf-8",{fatal:true}).decode(bytes);}catch{throw new ArtifactError("map_invalid");}
- if(jsonDepth(text)>LIMITS.maxDepth)throw new ArtifactError("map_too_deep");
+ if(jsonTooDeep(text))throw new ArtifactError("map_too_deep");
  let parsed:unknown;
  try{parsed=JSON.parse(text);}catch{throw new ArtifactError("map_invalid");}
  if(parsed===null||typeof parsed!=="object"||Array.isArray(parsed))throw new ArtifactError("map_invalid");
@@ -161,7 +168,7 @@ export function prepareArtifact(input:PrepareInput):PreparedArtifact {
  let map:Record<string,unknown>;
  try{
   const text=new TextDecoder("utf-8",{fatal:true}).decode(input.map);
-  if(jsonDepth(text)>LIMITS.maxDepth)throw new ArtifactError("map_too_deep");
+  if(jsonTooDeep(text))throw new ArtifactError("map_too_deep");
   map=JSON.parse(text) as Record<string,unknown>;
  }catch(error){throw error instanceof ArtifactError?error:new ArtifactError("map_invalid");}
  if(map===null||typeof map!=="object"||Array.isArray(map))throw new ArtifactError("map_invalid");

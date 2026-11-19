@@ -28,9 +28,10 @@ export function createUploadConfig(options:UploadOptions):UploadConfig {
  if(url.protocol==="http:"&&!LOOPBACK.has(url.hostname))throw new ArtifactError("endpoint_insecure");
  if(typeof timeout!=="number"||!Number.isInteger(timeout)||timeout<1||timeout>600000)throw new ArtifactError("options_invalid");
  let provider:()=>string;
+ // A function credential is a provider: called exactly once per upload (immediately before the request, so a minted/rotating
+ // token is not produced twice or left idle), never at config creation. Failure of the provider is the closed credential_invalid.
  if(typeof credential==="function"){provider=()=>readCredential(credential as ()=>unknown);}
  else{const value=readCredential(()=>credential);provider=()=>value;}
- if(typeof credential==="function")readCredential(provider);
  const config=Object.freeze({endpoint:url.origin+url.pathname.replace(/\/$/,"")});
  sealed.set(config,Object.freeze({endpoint:config.endpoint,timeoutMs:timeout,credential:provider}));
  return config;

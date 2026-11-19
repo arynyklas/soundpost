@@ -159,7 +159,9 @@ func (n *Node) Grant(ctx context.Context) (policy.SourceGrant, error) {
 // returns the HTTP status and body (the body is audited as diagnostics).
 func (n *Node) PostBatch(ctx context.Context, audit *scan.PrivacyAudit, wire []byte) (int, []byte, error) {
 	if audit != nil {
-		_ = audit.Observe(scan.StageWireDecompressed, wire)
+		if e := scan.NotLeak(audit.Observe(scan.StageWireDecompressed, wire)); e != nil {
+			return 0, nil, e
+		}
 	}
 	var z bytes.Buffer
 	w := gzip.NewWriter(&z)
@@ -170,7 +172,9 @@ func (n *Node) PostBatch(ctx context.Context, audit *scan.PrivacyAudit, wire []b
 		return 0, nil, e
 	}
 	if audit != nil {
-		_ = audit.Observe(scan.StageWireCompressed, z.Bytes())
+		if e := scan.NotLeak(audit.Observe(scan.StageWireCompressed, z.Bytes())); e != nil {
+			return 0, nil, e
+		}
 	}
 	request, e := http.NewRequestWithContext(ctx, http.MethodPost, n.URL+"/ingest/v1/batches", bytes.NewReader(z.Bytes()))
 	if e != nil {
@@ -189,7 +193,9 @@ func (n *Node) PostBatch(ctx context.Context, audit *scan.PrivacyAudit, wire []b
 		return response.StatusCode, nil, errors.New("batch route response unreadable")
 	}
 	if audit != nil {
-		_ = audit.Observe(scan.StageDiagnostics, append([]byte("batch route response: "), body...))
+		if e := scan.NotLeak(audit.Observe(scan.StageDiagnostics, append([]byte("batch route response: "), body...))); e != nil {
+			return response.StatusCode, nil, e
+		}
 	}
 	return response.StatusCode, body, nil
 }
@@ -210,7 +216,9 @@ func (a *Admitter) Admit(ctx context.Context, _ policy.SourceGrant, b model.Batc
 		return model.Receipt{}, e
 	}
 	if a.Audit != nil {
-		_ = a.Audit.Observe(scan.StageExporterQueue, wire)
+		if e := scan.NotLeak(a.Audit.Observe(scan.StageExporterQueue, wire)); e != nil {
+			return model.Receipt{}, e
+		}
 	}
 	status, body, e := a.N.PostBatch(ctx, a.Audit, wire)
 	if e != nil {
@@ -283,7 +291,9 @@ func (n *Node) ScanStorage(audit *scan.PrivacyAudit, positive []byte) (files, oc
 			m, e := f.Read(buf[carry:])
 			if m > 0 {
 				octets += m
-				_ = audit.Observe(scan.StageStorage, buf[:carry+m])
+				if e := scan.NotLeak(audit.Observe(scan.StageStorage, buf[:carry+m])); e != nil {
+					return e
+				}
 				if len(positive) > 0 && bytes.Contains(buf[:carry+m], positive) {
 					positiveSeen = true
 				}

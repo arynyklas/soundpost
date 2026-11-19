@@ -69,7 +69,7 @@
           "PERF_SAMPLE_CPU",
           "PERF_SAMPLE_PERIOD"
         ],
-        "must_be_one_fields": ["disabled", "exclude_kernel", "exclude_hv", "sample_id_all", "use_clockid", "exclude_callchain_kernel"]
+        "must_be_one_fields": ["disabled", "exclude_kernel", "exclude_hv", "sample_id_all", "use_clockid", "exclude_callchain_kernel", "mmap", "mmap2"]
       },
       "scheduler": {
         "types": ["PERF_TYPE_TRACEPOINT"],
@@ -80,12 +80,11 @@
           "PERF_SAMPLE_CPU",
           "PERF_SAMPLE_RAW"
         ],
-        "must_be_one_fields": ["disabled", "sample_id_all", "use_clockid"]
+        "must_be_one_fields": ["disabled", "sample_id_all", "use_clockid"],
+        "must_be_zero_fields": ["mmap", "mmap2", "build_id"]
       },
       "must_be_zero_fields": [
         "inherit",
-        "mmap",
-        "mmap2",
         "mmap_data",
         "inherit_stat",
         "enable_on_exec",
@@ -98,7 +97,6 @@
         "aux_output",
         "cgroup",
         "text_poke",
-        "build_id",
         "sample_regs_user",
         "sample_stack_user",
         "sample_regs_intr",

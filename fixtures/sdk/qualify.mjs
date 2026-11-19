@@ -88,7 +88,7 @@ for(const row of ["chrome-142.0.7444.59 (frozen manifest target; Chrome 156.0 wa
 
 // ------------------------------------------------------------------ rows not exercised by this script
 note("critical-paths-http-db-errors-artifacts-jobs-replay-through-real-backend","fixtures/sdk/{node,bun,python,jobs}/* need private fixture configuration (SOUNDPOST_FIXTURE_*), a PostgreSQL DSN and a running backend; qualify.mjs does not run them. Earlier per-task evidence exists in the 03.0x reports and is not repeated or inferred here.");
-note("runtime-supplement-export-through-C03","profile/capability records cannot be admitted: core `CaptureInput` has no capability/profile input and internal/model/telemetry_validation.go accepts only runtime_cpu|native_cpu|native_offcpu profile methods, so `ack` is not_available in every report.");
+note("runtime-supplement-export-through-C03","not exercised by this script: its fixtures run without a delivery transport, so every report carries `ack` not_available. The delivery path itself exists (core `CaptureInput` includes capability/profile inputs, `Client.captureProfile` queues them, and internal/model/telemetry_validation.go admits capability records and runtime_cpu samples/events); its end-to-end run is a separate row.");
 note("recorder-5ms-p95-per-mutation-batch","no real-browser timing run exists for this budget.");
 note("python-core-server-capture-overhead","no Python HTTP workload overhead run exists.");
 note("platform-runner-matrix","only this one workstation was used; no pinned Linux/macOS/Windows runner class matrix.");

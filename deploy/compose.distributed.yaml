@@ -123,6 +123,14 @@ services:
         read_only: true
         bind:
           create_host_path: false
+      # The helper names the host in every domain it exports from /etc/machine-id; the scratch helper image has none, and
+      # without it every capture is refused as "invalid native target identity" (observed on sp-oci, kernel 6.12).
+      - type: bind
+        source: /etc/machine-id
+        target: /etc/machine-id
+        read_only: true
+        bind:
+          create_host_path: false
 
 networks:
   # The only route between members. internal: no external connectivity at all.

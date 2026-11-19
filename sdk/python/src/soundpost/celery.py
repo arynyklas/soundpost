@@ -90,6 +90,10 @@ class Instrumentation:
         state = self._state(task_id)
         if state is None: return
         if isinstance(exception, _CANCELLED): state['cancelled'] = True
+        # A Retry is Celery's control-flow wrapper; the failure it stands for is its underlying exc. Such a wrapper never replaces a
+        # failure _retry already recorded for this attempt.
+        if isinstance(exception, Retry): exception = exception.exc if isinstance(exception.exc, BaseException) else None
+        if exception is None and state['error'] is not None: return
         state['error'] = exception if isinstance(exception, BaseException) else None
 
     def _revoked(self, request=None, **_):

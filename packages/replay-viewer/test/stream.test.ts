@@ -188,7 +188,7 @@ describe("chain verification", () => {
 // ---- Real recorder output against the same hash and format. ----
 interface Fake {t: number; name: string; kids: Fake[]; parent: Fake | null}
 function fake(name: string, ...kids: Fake[]): Fake { const node: Fake = {t: 1, name, kids, parent: null}; for (const kid of kids) kid.parent = node; return node; }
-function recordReal(): RecorderChunk[] {
+function recordReal(extraNodes = 1): RecorderChunk[] {
  const html = fake("div", fake("p"), fake("section", fake("button")));
  const root = {t: 9, name: "#document", kids: [html], parent: null as Fake | null} as Fake;
  html.parent = root;
@@ -216,7 +216,7 @@ function recordReal(): RecorderChunk[] {
  listeners.get("pointerdown")!({target: html, x: 123, y: 45});
  for (const callback of timers.splice(0)) callback();
  const section = html.kids[1]!;
- section.kids.push(fake("p")); section.kids[1]!.parent = section;
+ section.kids.push(...Array.from({length: extraNodes}, () => fake("p"))); for (const kid of section.kids) kid.parent = section;
  observe!([{target: section}]);
  return chunks;
 }
@@ -360,6 +360,31 @@ describe("renderer", () => {
   expect(shown.tree).toBe("section[canvas:[opaque]]");
   // d4's resize never applied; the pre-gap pointer and the post-resume pointer both show, in order.
   expect(shown.interactions).toEqual(["pointer 64,-8", "pointer 8,8"]);
+ });
+ test("a delta the recorder had to truncate is a visible gap that carries the recorder's loss (03.08 review finding)", async () => {
+  const chunks = recordReal(4500);
+  const truncated = chunks.at(-1)!;
+  expect(truncated.events.map(event => event.kind)).toContain("gap");
+  expect(truncated.gap).toBe(true);
+  expect(Number(truncated.loss)).toBeGreaterThan(0);
+  const {container} = mount();
+  const handle = renderReplay(container as unknown as HTMLElement, gen(chunks.map((chunk): ReplayItem => ({kind: "chunk", bytes: encoder.encode(JSON.stringify(chunk))}))));
+  await handle.done;
+  const shown = view(container);
+  expect(handle.status()).toBe("gap");
+  expect(shown.gaps).toEqual([`gap ${truncated.sequence} recorder_gap loss ${truncated.loss}`]);
+  // The chunks before the truncation were lossless and show no counter.
+  expect(shown.timeline.filter(line => line.startsWith("checkpoint") || line.startsWith("delta")).every(line => !line.includes("loss"))).toBe(true);
+ });
+ test("a verified chunk that reports recorder loss shows the counter in the timeline; a lossless one shows none", async () => {
+  const {container} = mount();
+  const handle = renderReplay(container as unknown as HTMLElement, gen(chunkItems("c1_big_counters")));
+  await handle.done;
+  expect(view(container).timeline.some(line => line.endsWith(" loss 18446744073709551615"))).toBe(true);
+  const lossless = mount();
+  const second = renderReplay(lossless.container as unknown as HTMLElement, gen(chunkItems("c1", "d2")));
+  await second.done;
+  expect(view(lossless.container).timeline.some(line => line.includes("loss"))).toBe(false);
  });
  test("while the gap is open the status is gap and nothing after it applies", async () => {
   const {container} = mount();
