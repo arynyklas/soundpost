@@ -11,29 +11,41 @@ import type {PublicConfig} from "./config.ts";
 export interface ProfileOutcome {
   readonly status: string;
   readonly reason: string;
+  /** The id of the capability truth record the SDK queued for this run (the id of the stored record). */
+  readonly capabilityId: string;
   readonly sampleCount: number;
   readonly stoppedBy: string;
   readonly profilesPolicyAllowed: boolean;
   readonly flush: {readonly pending: number; readonly lost: number; readonly receipts: number};
   readonly bufferedRecords: number;
   readonly diagnostics: Readonly<Record<string, number>>;
+  /** What delivery through the client's queue did with the report: the bounded flush that carried it returned acknowledged cursors (`obtained`) or not. */
+  readonly ack: {readonly status: string; readonly cursors: number};
+  /** What the profiler's own report holds for long tasks (local, never on the wire): the observer state and how many entries it collected. */
+  readonly longTasks: {readonly state: string; readonly entries: number};
 }
 
 // The profile is delivered by the SDK itself: startClientProfile hands the finished report (a refusal included) to this client's queue.
 export async function profileFor(raw: PublicConfig, durationMs: number): Promise<ProfileOutcome> {
   const client = init(sdkConfig(raw, {deploymentProfiles: true}));
   try {
-    const handle = await startClientProfile(client, {durationMs: 5000, intervalUs: 10_000, scope: "main"});
-    const end = performance.now() + durationMs;
-    let spin = 0;
-    while (performance.now() < end) spin = (spin + Math.sqrt(spin + 1)) % 1000003;
+    const handle = await startClientProfile(client, {durationMs: 5000, intervalUs: 10_000, scope: "main", longTasks: true});
+    // The busy loop runs as its own task (a timer callback) so the browser can finish it and report it as a long task before stop().
+    await new Promise<void>(resolve => setTimeout(() => {
+      const end = performance.now() + durationMs;
+      let spin = 0;
+      while (performance.now() < end) spin = (spin + Math.sqrt(spin + 1)) % 1000003;
+      resolve();
+    }, 0));
     const report = await handle.stop();
     const flush = await client.flush(10000);
     return {
-      status: report.capability.status, reason: report.capability.reason, sampleCount: report.sample_count, stoppedBy: report.stopped_by,
+      status: report.capability.status, reason: report.capability.reason, capabilityId: report.capability.id, sampleCount: report.sample_count, stoppedBy: report.stopped_by,
       profilesPolicyAllowed: client.policyDecision.profiles,
       flush: {pending: flush.pending, lost: flush.lost, receipts: flush.receipts.length},
       bufferedRecords: client.bufferedRecords().length, diagnostics: client.diagnostics(),
+      ack: {status: report.ack.status, cursors: report.ack.status === "obtained" ? report.ack.cursors.length : 0},
+      longTasks: {state: String(report.scope["long_tasks"] ?? "none"), entries: report.non_profile.length},
     };
   } finally {
     await client.close();

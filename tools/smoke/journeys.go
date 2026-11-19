@@ -21,6 +21,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -805,6 +806,17 @@ func (j *journeyRun) drive() error {
 	if j.obs.Profile.Attempted, err = j.scenario("profile"); err != nil {
 		return err
 	}
+	// The two refusals of the same SDK path in the same real Chrome: the page served without the Document-Policy header (denied) and a page whose
+	// browser lacks the Profiler API (unsupported). Each delivers its capability truth record alone.
+	for _, name := range []string{"profile-denied", "profile-unsupported"} {
+		attempted, serr := j.scenario(name)
+		if serr != nil {
+			return serr
+		}
+		r := refusalFromDriver(j.rep[name+"_driver"])
+		r.Variant, r.Attempted = strings.TrimPrefix(name, "profile-"), attempted
+		j.obs.Profile.Refusals = append(j.obs.Profile.Refusals, r)
+	}
 	return nil
 }
 
@@ -1030,6 +1042,10 @@ func (j *journeyRun) collect() error {
 			j.obs.Profile.StoredProfile++
 			j.obs.Profile.StoredSamples += len(chunk.Samples)
 			chunks = append(chunks, chunk)
+			if !slices.Contains(j.obs.Profile.ProfileIDs, chunk.Profile) {
+				j.obs.Profile.ProfileIDs = append(j.obs.Profile.ProfileIDs, chunk.Profile)
+			}
+			j.obs.Profile.ChunkCapabilities = append(j.obs.Profile.ChunkCapabilities, chunk.Capability)
 		case j.apps["jobs"].Source:
 			rp.StoredChunks++
 			rp.Profile = chunk.Profile
@@ -1051,6 +1067,10 @@ func (j *journeyRun) collect() error {
 	}); err != nil {
 		return err
 	}
+	for id, c := range capabilities {
+		j.obs.Profile.Capabilities = append(j.obs.Profile.Capabilities, storedCapability{ID: id, Status: c.Status, Reason: c.Reason, Method: c.Method, Signal: c.Signal})
+	}
+	slices.SortFunc(j.obs.Profile.Capabilities, func(a, b storedCapability) int { return bytes.Compare(a.ID[:], b.ID[:]) })
 	j.obs.Profile.CapabilityLinked = len(chunks) > 0
 	for _, chunk := range chunks {
 		c, ok := capabilities[chunk.Capability]
@@ -1239,6 +1259,7 @@ func (j *journeyRun) fillReplayProfile() {
 			p.Capability, _ = pr["status"].(string)
 			p.Reason, _ = pr["reason"].(string)
 		}
+		p.ConsoleErrors = consoleErrorsOf(d)
 		// The delivery is measured, not assumed: stored profile rows and a stored, linked capability record.
 		p.SDKEnqueues = p.StoredProfile > 0 && p.CapabilityLinked
 	}

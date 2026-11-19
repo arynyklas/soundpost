@@ -49,12 +49,34 @@ func (f *fenceFx) mustIntake() {
 	}
 }
 
+// revisions is the revision and the installation floor (control.InstallationFloorForTest: the last
+// authority change that was not a verified commit of one organization, which is what this release
+// judges a retention command against besides the organization's own revision).
 func (f *fenceFx) revisions() (revision, authority model.Revision) {
 	f.t.Helper()
 	if err := f.store.View(f.ctx, func(st control.State) error {
-		revision, authority = st.Revision, st.AuthorityRevision
+		revision, authority = st.Revision, control.InstallationFloorForTest(st)
 		return nil
 	}); err != nil {
+		f.t.Fatal(err)
+	}
+	return
+}
+
+// globalAuthority is the stored AuthorityRevision, the scalar the previous release judges against.
+func (f *fenceFx) globalAuthority() (r model.Revision) {
+	f.t.Helper()
+	if err := f.store.View(f.ctx, func(st control.State) error { r = st.AuthorityRevision; return nil }); err != nil {
+		f.t.Fatal(err)
+	}
+	return
+}
+
+// previousReleaseAccepts says whether a leader of the previous release accepts a retention command
+// whose view is `view` against the committed state.
+func (f *fenceFx) previousReleaseAccepts(view model.Revision) (ok bool) {
+	f.t.Helper()
+	if err := f.store.View(f.ctx, func(st control.State) error { ok = control.PreviousReleaseAcceptsForTest(st, view); return nil }); err != nil {
 		f.t.Fatal(err)
 	}
 	return
@@ -76,7 +98,7 @@ func (f *fenceFx) beginAt(view model.Revision) error {
 // (b) A non-authority write moves the global revision and leaves AuthorityRevision; an admin
 // command moves both.
 func TestNonAuthorityWriteDoesNotBumpAuthorityRevision(t *testing.T) {
-	f := newFenceFx(t)
+	f := newFenceFxPatch(t)
 	rev0, auth0 := f.revisions()
 	if auth0 != rev0 {
 		t.Fatalf("after the fixture's authority writes: revision %d authority %d", rev0, auth0)
@@ -119,7 +141,7 @@ func (f *fenceFx) orgAuthority(org model.ID) (r model.Revision) {
 // F-10.05-2: one tenant's admin commands, not rate limited, kept every other tenant's erasure
 // from committing). The organization's own admin commands still do.
 func TestAnotherOrganizationsAdminCommandsDoNotConflictABegin(t *testing.T) {
-	f := newFenceFx(t)
+	f := newFenceFxPatch(t)
 	other := model.NewID()
 	f.admin("create_org", other, auth.AdminPayload{Name: "tenant b", Reason: "second tenant"})
 	view, authority := f.revisions()
@@ -213,33 +235,38 @@ func TestDeleteWithViewOlderThanAuthorityChangeStillConflicts(t *testing.T) {
 			f.admin("retention", f.org, auth.AdminPayload{ID: model.NewID(), Config: cfg, Reason: "retention"})
 		}, true},
 	}
-	for _, c := range classes {
-		t.Run(c.name, func(t *testing.T) {
-			f := newFenceFx(t)
-			view, _ := f.revisions()
-			c.change(f)
-			rev, authority := f.revisions()
-			authority = max(authority, f.orgAuthority(f.org)) // what a Begin on this organization is judged against
-			if authority != rev || rev <= view {
-				t.Fatalf("%s: revision %d authority %d (view %d): the change must stamp the authority revision", c.name, rev, authority, view)
-			}
-			if err := f.beginAt(view); code(err) != model.Conflict {
-				t.Fatalf("%s: Begin on a view older than the change: %v, want Conflict", c.name, err)
-			}
-			if c.intake {
-				fresh, _ := f.revisions()
-				f.mustIntake()
-				f.mustIntake()
-				if err := f.beginAt(fresh); err != nil {
-					t.Fatalf("%s: Begin on a view taken after the change, with intake since: %v", c.name, err)
+	for _, mode := range []struct {
+		name string
+		fx   func(*testing.T) *fenceFx
+	}{{"replacement", newFenceFx}, {"patch", newFenceFxPatch}} {
+		for _, c := range classes {
+			t.Run(mode.name+"/"+c.name, func(t *testing.T) {
+				f := mode.fx(t)
+				view, _ := f.revisions()
+				c.change(f)
+				rev, authority := f.revisions()
+				authority = max(authority, f.orgAuthority(f.org)) // what a Begin on this organization is judged against
+				if authority != rev || rev <= view {
+					t.Fatalf("%s: revision %d authority %d (view %d): the change must stamp the authority revision", c.name, rev, authority, view)
 				}
-				return
-			}
-			fresh, _ := f.revisions()
-			if err := f.beginAt(fresh); err != nil {
-				t.Fatalf("%s: Begin on a view taken after the change: %v", c.name, err)
-			}
-		})
+				if err := f.beginAt(view); code(err) != model.Conflict {
+					t.Fatalf("%s: Begin on a view older than the change: %v, want Conflict", c.name, err)
+				}
+				if c.intake {
+					fresh, _ := f.revisions()
+					f.mustIntake()
+					f.mustIntake()
+					if err := f.beginAt(fresh); err != nil {
+						t.Fatalf("%s: Begin on a view taken after the change, with intake since: %v", c.name, err)
+					}
+					return
+				}
+				fresh, _ := f.revisions()
+				if err := f.beginAt(fresh); err != nil {
+					t.Fatalf("%s: Begin on a view taken after the change: %v", c.name, err)
+				}
+			})
+		}
 	}
 }
 
@@ -450,7 +477,7 @@ func TestLegacyControlStateIsStrictThenHeals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, authority := f.revisions(); authority != 0 {
+	if authority := f.globalAuthority(); authority != 0 {
 		t.Fatalf("fixture is not legacy: authority %d", authority)
 	}
 	// A view older than the current revision conflicts on a legacy state ...

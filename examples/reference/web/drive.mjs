@@ -23,7 +23,8 @@ for (let index = 2; index < process.argv.length; index += 2) {
 }
 const origin = new URL(args.get("origin") ?? "").origin;
 const scenario = args.get("scenario");
-if (!["order", "replay", "profile"].includes(scenario)) throw Error("invalid_scenario");
+const profileVariants = ["profile", "profile-denied", "profile-unsupported"];
+if (!["order", "replay", ...profileVariants].includes(scenario)) throw Error("invalid_scenario");
 const item = args.get("item") ?? "sku-100";
 if (!["sku-100", "sku-404"].includes(item)) throw Error("invalid_item");
 const note = process.env[args.get("note-env") ?? "REFERENCE_NOTE"] ?? "";
@@ -49,10 +50,28 @@ const result = {};
 try {
   const context = await browser.newContext();
   const page = await context.newPage();
-  const pageErrors = [], ingest = [], orders = [];
+  const pageErrors = [], ingest = [], orders = [], consoleDetails = [], failedResponses = [];
   let consoleErrors = 0, documentPolicy = null;
   page.on("pageerror", error => pageErrors.push({name: error.name, frames: frames(error.stack)}));
-  page.on("console", message => { if (message.type() === "error") consoleErrors++; });
+  // The text of every console error is kept (bounded) so a console error is explained by what the browser said, never guessed. Only the
+  // location's path is kept, never its query; the order scenario's note is never written to the console by the page.
+  page.on("console", message => {
+    if (message.type() !== "error") return;
+    consoleErrors++;
+    if (consoleDetails.length >= 20) return;
+    const where = message.location();
+    let path = "";
+    try { path = new URL(where.url).pathname; } catch { path = ""; }
+    consoleDetails.push({text: message.text().slice(0, 300), path, line: where.lineNumber ?? 0});
+  });
+  if (scenario === "profile-unsupported") {
+    // The browser is real Chrome; the page's own code and the SDK are unchanged. Only the API is absent, as it is in Firefox and WebKit.
+    await context.addInitScript(() => { delete window.Profiler; });
+  }
+  page.on("response", response => {
+    const url = new URL(response.url());
+    if (response.status() >= 400 && failedResponses.length < 20) failedResponses.push({path: url.pathname, status: response.status()});
+  });
   page.on("response", async response => {
     const url = new URL(response.url());
     if (url.pathname === "/" && url.origin === origin && documentPolicy === null) documentPolicy = response.headers()["document-policy"] ?? "";
@@ -67,7 +86,8 @@ try {
   });
   page.on("requestfailed", request => { if (new URL(request.url()).pathname.startsWith("/ingest/")) ingest.push({method: request.method(), path: new URL(request.url()).pathname, status: 0}); });
 
-  await page.goto(origin + "/");
+  // profile-denied: the same page served WITHOUT the Document-Policy header (the gateway omits it for this query), so a real Chrome refuses the Profiler.
+  await page.goto(origin + (scenario === "profile-denied" ? "/?document-policy=off" : "/"));
   await page.waitForFunction(() => Boolean(window.__reference?.ready), undefined, {timeout: 15000});
   Object.assign(result, {chrome: browser.version(), scenario});
 
@@ -92,7 +112,7 @@ try {
       return (clone.outerHTML + clone.textContent + stored + location.href).includes(canary);
     }, CANARY);
     Object.assign(result, reference, {request: orders[0] ?? null, page_errors: pageErrors, flush, console_errors: consoleErrors, canary_in_dom: canaryHit, ingest});
-  } else if (scenario === "profile") {
+  } else if (profileVariants.includes(scenario)) {
     const outcome = await page.evaluate(() => window.__reference.profile(300));
     Object.assign(result, {build_id: await page.evaluate(() => window.__reference.buildId), document_policy_header: documentPolicy, profile: outcome, page_errors: pageErrors, console_errors: consoleErrors, ingest});
   } else {
@@ -106,6 +126,7 @@ try {
     const outcome = await page.evaluate(() => window.__reference.finishReplay());
     Object.assign(result, {build_id: await page.evaluate(() => window.__reference.buildId), replay: outcome, page_errors: pageErrors, console_errors: consoleErrors, ingest});
   }
+  Object.assign(result, {console_error_details: consoleDetails, failed_responses: failedResponses});
 } finally {
   await browser.close();
 }

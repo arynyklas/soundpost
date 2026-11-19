@@ -375,10 +375,24 @@ func (s *ControlState) MarkBornContracted() {
 
 // OrgAuthorityKey is the key of an organization's Settings that holds the control Revision of the
 // last authority-class transition that changed that organization alone (an admin command of the
-// organization, Store.UpdateOrgAuthority). A retention command of the organization needs a caller
-// view no older than the later of ControlState.AuthorityRevision and this value, so the admin
-// commands of one organization no longer invalidate the views of another's deletions.
+// organization, Store.UpdateOrgAuthority, or a retention-class command or worker transition of the
+// organization, which control commits only after verifying that it wrote nothing but the
+// organization's own rows, and only as a state patch). A retention command of the organization needs
+// a caller view no older than the later of the installation's authority floor
+// (control.installationFloor) and this value. Such a commit ALSO moves ControlState.AuthorityRevision,
+// because the previous release judges a retention command against that scalar alone and must keep
+// refusing a same-organization view older than the commit; this release reads the scalar through the
+// floor below, which does not count a verified commit of another organization.
 const OrgAuthorityKey = "authority_rev"
+
+// ScopedAuthorityKey is the key of State.OIDC (a map the previous release carries through every
+// replacement and ignores; the colon keeps the login sweep away from it) that holds
+// {"floor": F, "global": G}: at the commit that moved AuthorityRevision to G, F was the installation
+// floor, the revision of the last authority change that was NOT a verified commit of one
+// organization. The pair is read only while AuthorityRevision == G. A commit of the previous release
+// moves AuthorityRevision past G without touching the pair, which makes the pair void and the floor
+// AuthorityRevision itself, so nothing an older binary committed is ever skipped.
+const ScopedAuthorityKey = "authority:scope"
 
 // RevisionStamp says that control revision Revision had been committed by At (Unix nanoseconds).
 type RevisionStamp struct {

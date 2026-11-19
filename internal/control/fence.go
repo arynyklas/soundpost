@@ -437,16 +437,30 @@ func applyFenceStep(scope auth.Scope, st *State, cmd Command) (Effect, error) {
 
 // ---- in-process (worker) transitions: same pure functions, no scope ----
 
+// updateOperation commits fn, a transition of one deletion operation, as a retention-class
+// transition of the operation's own organization (the class of updateOrgRetention): the organization
+// is read from the operation's record in the very state fn is applied to, so the verified commit moves
+// that organization's authority revision and not the installation's. An operation that does not exist
+// names no organization: fn answers NotFound and nothing commits.
+func (s *Store) updateOperation(ctx context.Context, operation model.ID, fn func(*State) error) error {
+	return s.updateOrgScoped(ctx, orgRetention, func(st *State, name func(model.ID)) error {
+		if op, ok := st.Deletions[operation.String()]; ok {
+			name(op.Predicate.Org)
+		}
+		return fn(st)
+	})
+}
+
 func (s *Store) RecordBarriers(ctx context.Context, operation model.ID, barriers []model.Cursor) (out model.DeletionOperation, err error) {
-	err = s.Update(ctx, func(st *State) (e error) { out, e = recordBarriers(st, operation, barriers); return })
+	err = s.updateOperation(ctx, operation, func(st *State) (e error) { out, e = recordBarriers(st, operation, barriers); return })
 	return
 }
 func (s *Store) CompleteDeletion(ctx context.Context, operation model.ID, at model.UnixNano, authority *model.DeletionAuthority) (out model.DeletionOperation, err error) {
-	err = s.Update(ctx, func(st *State) (e error) { out, e = completeDeletion(st, operation, at, authority); return })
+	err = s.updateOperation(ctx, operation, func(st *State) (e error) { out, e = completeDeletion(st, operation, at, authority); return })
 	return
 }
 func (s *Store) FailDeletion(ctx context.Context, operation model.ID, at model.UnixNano, reason string) (out model.DeletionOperation, err error) {
-	err = s.Update(ctx, func(st *State) (e error) { out, e = failDeletion(st, operation, at, reason); return })
+	err = s.updateOperation(ctx, operation, func(st *State) (e error) { out, e = failDeletion(st, operation, at, reason); return })
 	return
 }
 
@@ -466,7 +480,7 @@ func (s *Store) RecordPhysicalCleanup(ctx context.Context, org model.ID, operati
 	if err = s.ScrubErased(ctx); err != nil {
 		return nil, err
 	}
-	err = s.Update(ctx, func(st *State) error {
+	err = s.updateOrgRetention(ctx, org, func(st *State) error {
 		held = nil
 		if _, ok := st.Orgs[org.String()]; !ok {
 			return model.Fail(model.NotFound)
@@ -498,7 +512,7 @@ func (s *Store) RecordPhysicalCleanup(ctx context.Context, org model.ID, operati
 // AdvanceDeleteGeneration is the seam for every other path that erases readable
 // bytes (retention expiry, artifact GC, hold release followed by erasure).
 func (s *Store) AdvanceDeleteGeneration(ctx context.Context, org model.ID) (out uint64, err error) {
-	err = s.Update(ctx, func(st *State) error {
+	err = s.updateOrgRetention(ctx, org, func(st *State) error {
 		if _, ok := st.Orgs[org.String()]; !ok {
 			return model.Fail(model.NotFound)
 		}

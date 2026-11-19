@@ -168,7 +168,33 @@ func goodObservation(t *testing.T) journeyObservation {
 		o.Flows = append(o.Flows, canaryFlow{Canary: c, Reached: []string{"dependency_prompt_counter"}})
 	}
 	o.Replay = replayObservation{Attempted: true, RecorderChunks: 1, AdmittedChunks: 1, StoredReplayRow: 1}
-	o.Profile = profileObservation{Attempted: true, Capability: "available", StoredProfile: 1, SDKEnqueues: true}
+	// The browser profile the page's SDK delivered (one profile, two samples of the shipped bundle), read back through the profile route, and the two refused
+	// runs of the same page (capability record only, nothing behind its id).
+	bprofile, bcap, capDenied, capUnsupported := jid(0x60), jid(0x61), jid(0x62), jid(0x63)
+	bdomain := model.ClockDomain{Host: jid(0xb1), Boot: jid(0xb2), Runtime: jid(0xb3)}
+	bview := profiles.ProfileView{Profile: bprofile, Process: jid(0x64), Project: exp.Project, Method: "runtime_cpu", Units: "samples", Clock: model.TraceClock{Domain: bdomain},
+		Frames: []model.ProfileFrame{{Module: "assets/index.js", Function: "", Artifact: "assets/index.js", Reason: "not_captured"}}, Stacks: []model.ProfileStack{{Frames: []uint32{0}}}, Samples: []model.ProfileSample{{Stack: 0}, {Stack: 0}},
+		Capabilities: []profiles.CapabilityRecord{{ID: bcap, Value: model.Capability{Runtime: "Chrome/156.0.8078.80", Signal: model.Profile, Method: browserProfileMethod, Status: "supported", Reason: "ok", Clock: bdomain}}}, Completeness: "complete"}
+	// The product's answer for an id that names no profile: its generic not-found, with no profile in it.
+	notFound := func() *servedRead {
+		return &servedRead{Route: "/api/v1/profiles/view", Actor: "analyst", Status: 404, Body: json.RawMessage(`{"code":"not_found","retryable":false,"detail":"not_found"}`)}
+	}
+	o.Profile = profileObservation{Attempted: true, Capability: "supported", Reason: "ok", StoredProfile: 1, StoredCapability: 3, StoredSamples: 2, CapabilityLinked: true, SDKEnqueues: true,
+		ProfileIDs: []model.ID{bprofile}, ChunkCapabilities: []model.ID{bcap},
+		Capabilities: []storedCapability{
+			{ID: bcap, Status: "supported", Reason: "ok", Method: browserProfileMethod, Signal: model.Profile},
+			{ID: capDenied, Status: "denied", Reason: "document_policy_missing", Method: browserProfileMethod, Signal: model.Profile},
+			{ID: capUnsupported, Status: "unsupported", Reason: "js_self_profiling_unavailable", Method: browserProfileMethod, Signal: model.Profile},
+		},
+		Read:          &servedRead{Route: "/api/v1/profiles/view", Actor: "analyst", Status: 200, Body: servedBodyOf(t, httpapi.ProfileResponse{Org: exp.Org, Project: exp.Project, Profile: bprofile, State: httpapi.StateReady, View: &bview})},
+		ConsoleErrors: []consoleError{},
+		Refusals: []profileRefusal{
+			{Variant: "denied", Attempted: true, DriverStatus: "denied", DriverReason: "document_policy_missing", CapabilityID: capDenied, AckStatus: "obtained", AckCursors: 1, Read: notFound(),
+				ConsoleErrors: []consoleError{{Text: browserDocumentPolicyMessage, Path: "/assets/index.js"}}},
+			{Variant: "unsupported", Attempted: true, DriverStatus: "unsupported", DriverReason: "js_self_profiling_unavailable", CapabilityID: capUnsupported, AckStatus: "obtained", AckCursors: 1, Read: notFound(),
+				ConsoleErrors: []consoleError{}},
+		},
+	}
 	// The runtime profile the CPython SDK delivered from the job process, read back through the profile route.
 	profile := jid(0x50)
 	domain := model.ClockDomain{Host: jid(0xa1), Boot: jid(0xa2), Runtime: jid(0xa3)}
@@ -492,7 +518,7 @@ func TestReferenceJourneyAssertions(t *testing.T) {
 			reread(o, o.UITrace, append(spans, extra), false)
 		}, rowUIChain, "causal_edge_issue", nil},
 		{"replay admitted but not stored", func(o *journeyObservation) { o.Replay.StoredReplayRow = 0 }, rowReplay, "recorder_chunks_not_admitted", nil},
-		{"profile enqueued but not stored", func(o *journeyObservation) { o.Profile.StoredProfile = 0 }, rowProfile, "sdk_profile_not_delivered", nil},
+		{"profile enqueued but not stored", func(o *journeyObservation) { o.Profile.StoredProfile = 0 }, rowProfile, "sdk_profile_not_delivered", []string{rowBrowserProfile}},
 		{"same trace readable from the wrong org", func(o *journeyObservation) {
 			for i := range o.Reads {
 				if o.Reads[i].Actor == "reader-b" && o.Reads[i].Trace == o.UITrace && o.Reads[i].OrgSent == o.Expected.OtherOrg {
@@ -573,8 +599,89 @@ func TestReferenceJourneyAssertions(t *testing.T) {
 		}, rowReplay, "recorder_chunks_refused_by_validator", nil},
 		{"replay not attempted", func(o *journeyObservation) { o.Replay = replayObservation{} }, rowReplay, "not_attempted", nil},
 		{"profile never reaches the node", func(o *journeyObservation) {
-			o.Profile = profileObservation{Attempted: true, Capability: "denied", Reason: "document_policy_missing"}
-		}, rowProfile, "sdk_profile_not_delivered", nil},
+			o.Profile = profileObservation{Attempted: true, Capability: "denied", Reason: "document_policy_missing", ConsoleErrors: []consoleError{}}
+		}, rowProfile, "sdk_profile_not_delivered", []string{rowBrowserProfile, rowProfileRefusals, rowProfileConsole}},
+		// ---- the browser profile, read through the profile route ----
+		{"the browser profile scenario did not run", func(o *journeyObservation) { o.Profile = profileObservation{} }, rowBrowserProfile, "not_attempted", []string{rowProfile, rowProfileRefusals, rowProfileConsole}},
+		{"the browser profile never reached storage", func(o *journeyObservation) {
+			o.Profile.StoredProfile, o.Profile.ProfileIDs, o.Profile.ChunkCapabilities, o.Profile.Read = 0, nil, nil, nil
+		}, rowBrowserProfile, "browser_profile_not_stored", []string{rowProfile}},
+		{"the stored chunks name two profiles", func(o *journeyObservation) { o.Profile.ProfileIDs = append(o.Profile.ProfileIDs, jid(0x6f)) }, rowBrowserProfile, "browser_profile_ambiguous", nil},
+		{"the browser profile was never read", func(o *journeyObservation) { o.Profile.Read = nil }, rowBrowserProfile, "profile_not_read", nil},
+		{"the profile route refused the browser profile", func(o *journeyObservation) { o.Profile.Read.Status = 404 }, rowBrowserProfile, "profile_read_refused", nil},
+		{"the profile route answered another profile for the browser profile", func(o *journeyObservation) {
+			rewrite(t, o.Profile.Read, func(v *httpapi.ProfileResponse) { v.Profile = jid(0x6e) })
+		}, rowBrowserProfile, "profile_identity_mismatch", nil},
+		{"the browser profile has fewer samples in the view than in storage", func(o *journeyObservation) {
+			rewrite(t, o.Profile.Read, func(v *httpapi.ProfileResponse) { v.View.Samples = v.View.Samples[:1] })
+		}, rowBrowserProfile, "browser_profile_samples_differ", nil},
+		{"the browser profile view has no samples", func(o *journeyObservation) {
+			rewrite(t, o.Profile.Read, func(v *httpapi.ProfileResponse) { v.View.Samples = nil })
+		}, rowBrowserProfile, "profile_has_no_samples", nil},
+		{"the browser profile frames are not the shipped bundle", func(o *journeyObservation) {
+			rewrite(t, o.Profile.Read, func(v *httpapi.ProfileResponse) { v.View.Frames[0].Module = "external" })
+		}, rowBrowserProfile, "browser_profile_frames_not_the_bundle", nil},
+		{"a browser frame keeps a query", func(o *journeyObservation) {
+			rewrite(t, o.Profile.Read, func(v *httpapi.ProfileResponse) { v.View.Frames[0].Module = "assets/index.js?token=1" })
+		}, rowBrowserProfile, "browser_profile_frames_not_the_bundle", nil},
+		{"the browser profile names no capability record", func(o *journeyObservation) {
+			rewrite(t, o.Profile.Read, func(v *httpapi.ProfileResponse) { v.View.Capabilities = nil })
+		}, rowBrowserProfile, "browser_profile_capability_not_linked", nil},
+		{"the browser profile's capability is not the one its chunks name", func(o *journeyObservation) {
+			rewrite(t, o.Profile.Read, func(v *httpapi.ProfileResponse) { v.View.Capabilities[0].ID = jid(0x6d) })
+		}, rowBrowserProfile, "browser_profile_capability_not_linked", nil},
+		{"the browser profile's capability is denied", func(o *journeyObservation) {
+			rewrite(t, o.Profile.Read, func(v *httpapi.ProfileResponse) { v.View.Capabilities[0].Value.Status = "denied" })
+		}, rowBrowserProfile, "browser_profile_capability_not_linked", nil},
+		{"the browser profile's capability is another method", func(o *journeyObservation) {
+			rewrite(t, o.Profile.Read, func(v *httpapi.ProfileResponse) { v.View.Capabilities[0].Value.Method = runtimeProfileMethod })
+		}, rowBrowserProfile, "browser_profile_capability_not_linked", nil},
+		// ---- the refused runs: capability truth only, stored, with no profile behind it ----
+		{"the denied scenario did not run", func(o *journeyObservation) { o.Profile.Refusals = o.Profile.Refusals[1:] }, rowProfileRefusals, "refusal_not_attempted", []string{rowProfileConsole}},
+		{"the unsupported scenario did not run", func(o *journeyObservation) { o.Profile.Refusals = o.Profile.Refusals[:1] }, rowProfileRefusals, "refusal_not_attempted", []string{rowProfileConsole}},
+		{"a refusal reported no capability id", func(o *journeyObservation) { o.Profile.Refusals[0].CapabilityID = model.ID{} }, rowProfileRefusals, "refusal_capability_id_missing", nil},
+		{"the denied run reported another status", func(o *journeyObservation) { o.Profile.Refusals[0].DriverStatus = "unsupported" }, rowProfileRefusals, "refusal_status_differs", nil},
+		{"the denied run reported another reason", func(o *journeyObservation) { o.Profile.Refusals[0].DriverReason = "permission_denied" }, rowProfileRefusals, "refusal_status_differs", nil},
+		{"the unsupported run reported another reason", func(o *journeyObservation) { o.Profile.Refusals[1].DriverReason = "runtime_unsupported" }, rowProfileRefusals, "refusal_status_differs", nil},
+		{"a refusal was never acknowledged", func(o *journeyObservation) { o.Profile.Refusals[0].AckStatus = "failed" }, rowProfileRefusals, "refusal_not_acknowledged", nil},
+		{"a refusal's acknowledgement has no cursor", func(o *journeyObservation) { o.Profile.Refusals[1].AckCursors = 0 }, rowProfileRefusals, "refusal_not_acknowledged", nil},
+		{"a refusal's flush lost a record", func(o *journeyObservation) { o.Profile.Refusals[0].Lost = 1 }, rowProfileRefusals, "refusal_not_acknowledged", nil},
+		{"a refusal's flush left a record pending", func(o *journeyObservation) { o.Profile.Refusals[1].Pending = 1 }, rowProfileRefusals, "refusal_not_acknowledged", nil},
+		{"a refusal's capability record was never stored", func(o *journeyObservation) {
+			o.Profile.Capabilities = slices.DeleteFunc(o.Profile.Capabilities, func(c storedCapability) bool { return c.ID == jid(0x62) })
+		}, rowProfileRefusals, "refusal_not_stored", nil},
+		{"the stored refusal has another status than the page reported", func(o *journeyObservation) { o.Profile.Capabilities[1].Status = "error" }, rowProfileRefusals, "refusal_stored_differs", nil},
+		{"the stored refusal has another reason", func(o *journeyObservation) { o.Profile.Capabilities[2].Reason = "inspector_error" }, rowProfileRefusals, "refusal_stored_differs", nil},
+		{"the stored refusal is of another method", func(o *journeyObservation) { o.Profile.Capabilities[1].Method = runtimeProfileMethod }, rowProfileRefusals, "refusal_stored_differs", nil},
+		{"the stored refusal is of another signal", func(o *journeyObservation) { o.Profile.Capabilities[2].Signal = model.SpanKind }, rowProfileRefusals, "refusal_stored_differs", nil},
+		{"a stored profile chunk names a refusal's capability", func(o *journeyObservation) {
+			o.Profile.ChunkCapabilities = append(o.Profile.ChunkCapabilities, jid(0x63))
+		}, rowProfileRefusals, "refusal_has_chunks", nil},
+		{"the profile route was never asked about a refusal", func(o *journeyObservation) { o.Profile.Refusals[1].Read = nil }, rowProfileRefusals, "refusal_not_read", nil},
+		{"the profile route shows samples for a refusal's capability id", func(o *journeyObservation) {
+			var sampled httpapi.ProfileResponse
+			if err := json.Unmarshal(o.Profile.Read.Body, &sampled); err != nil {
+				t.Fatal(err)
+			}
+			sampled.Profile = jid(0x62)
+			o.Profile.Refusals[0].Read = &servedRead{Route: "/api/v1/profiles/view", Actor: "analyst", Status: 200, Body: servedBodyOf(t, sampled)}
+		}, rowProfileRefusals, "refusal_read_shows_samples", nil},
+		{"the profile route fails for a refusal's capability id", func(o *journeyObservation) { o.Profile.Refusals[0].Read.Status = 500 }, rowProfileRefusals, "refusal_read_failed", nil},
+		// ---- the console errors of the profile scenarios ----
+		{"the supported run logs a console error", func(o *journeyObservation) {
+			o.Profile.ConsoleErrors = []consoleError{{Text: "Failed to load resource: the server responded with a status of 404 (Not Found)", Path: "/favicon.ico"}}
+		}, rowProfileConsole, "console_error_unexplained", nil},
+		{"the unsupported run logs a console error", func(o *journeyObservation) {
+			o.Profile.Refusals[1].ConsoleErrors = []consoleError{{Text: "boom", Path: "/assets/index.js"}}
+		}, rowProfileConsole, "console_error_unexplained", nil},
+		{"the denied run logs nothing", func(o *journeyObservation) { o.Profile.Refusals[0].ConsoleErrors = []consoleError{} }, rowProfileConsole, "console_error_unexplained", nil},
+		{"the denied run logs another console error beside the policy refusal", func(o *journeyObservation) {
+			o.Profile.Refusals[0].ConsoleErrors = append(o.Profile.Refusals[0].ConsoleErrors, consoleError{Text: "Failed to load resource: the server responded with a status of 404 (Not Found)", Path: "/favicon.ico"})
+		}, rowProfileConsole, "console_error_unexplained", nil},
+		{"the denied run's only console error is not the browser's policy refusal", func(o *journeyObservation) {
+			o.Profile.Refusals[0].ConsoleErrors = []consoleError{{Text: "Uncaught TypeError", Path: "/assets/index.js"}}
+		}, rowProfileConsole, "console_error_unexplained", nil},
+		{"the denied run's policy refusal does not come from the bundle", func(o *journeyObservation) { o.Profile.Refusals[0].ConsoleErrors[0].Path = "/other.js" }, rowProfileConsole, "console_error_unexplained", nil},
 		{"a version is not recorded", func(o *journeyObservation) { delete(o.Versions, "chrome") }, rowVersions, "version_missing", nil},
 	}
 	for _, c := range cases {

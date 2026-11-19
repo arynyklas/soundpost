@@ -21,7 +21,26 @@ import (
 // 35/40 refused from a follower, 0/40 on one voter). The retention commands re-judge the state and
 // propose again when their proposal lost the race, so every Begin is answered, from every voter.
 func TestBeginIsNotRefusedByLostProposalsFromAnyVoterUnderSaturatingIntake(t *testing.T) {
+	beginUnderSaturatingIntake(t, false)
+}
+
+// The same in the mode production runs in once every member declared protocol 5: every command is a state
+// patch, and a retention command of an organization is verified and moves the organization's own
+// authority revision (authority_org.go). A first version of that verification encoded the whole state twice
+// more per attempt in a replacement; each attempt was then several times as long, lost the race more often
+// and refused 7 to 9 of 12 Begins (wave 26, reverted; cause measured in wave 28). Both modes must answer every
+// Begin.
+func TestBeginIsNotRefusedByLostProposalsFromAnyVoterUnderSaturatingIntakeAsAPatch(t *testing.T) {
+	beginUnderSaturatingIntake(t, true)
+}
+
+func beginUnderSaturatingIntake(t *testing.T, patch bool) {
 	v := newControlVoters(t)
+	if patch {
+		for _, s := range v.stores {
+			s.SetStatePatchGate(func() bool { return true })
+		}
+	}
 	for id := uint64(2); id <= 3; id++ {
 		f := v.fx[id]
 		sess, err := f.svc.Login(f.ctx, "owner@example.test", "a long test password 2026", "")

@@ -186,54 +186,11 @@ func (m *mixedRun) runGuard() error {
 	}
 
 	// ---- 2. (a) a previous-release learner is refused; a candidate learner is added ----
-	learner, err := m.prepareLearner()
+	learner, add, err := m.refuseOldLearner("2a")
 	if err != nil {
 		return err
 	}
 	id := learner.ID
-	m.c.setBinary(id, m.oldBin)
-	m.release[id] = "old"
-	if err = m.c.start(id); err != nil {
-		return err
-	}
-	if err = m.peerListening(id, 60*time.Second); err != nil {
-		return err
-	}
-	m.say("2a the learner %s runs the previous release (alive=%t) and listens on %s; `membership add-learner` against every voter", learner.NodeIdentity, m.alive(id), m.c.peer[id])
-	add := func(via uint64) (string, error) {
-		return m.membershipOut(via, "add-learner", "--id", strconv.FormatUint(id, 10), "--address", learner.Address, "--identity", learner.NodeIdentity, "--failure-domain", learner.FailureDomain)
-	}
-	totalIncompatible := 0
-	for _, via := range []uint64{1, 2, 3} {
-		text, aerr := add(via)
-		m.say("  add-learner through voter %d: exit-err=%v\n%s", via, aerr, text)
-		groups, applied, _, incompatible, ok := stepCounts(text)
-		switch {
-		case aerr == nil || !ok:
-			return m.violate("old_learner_not_refused", fmt.Sprintf("voter %d: err=%v output %q", via, aerr, text))
-		case applied != 0:
-			return m.violate("old_learner_applied", fmt.Sprintf("voter %d applied the previous-release learner in %d of %d groups: %s", via, applied, groups, text))
-		case incompatible > 0 && !strings.Contains(text, "layout_incompatible:"+learner.NodeIdentity):
-			return m.violate("refusal_does_not_name_the_member", fmt.Sprintf("voter %d: %s", via, text))
-		}
-		totalIncompatible += incompatible
-	}
-	if totalIncompatible == 0 {
-		return m.violate("old_learner_not_refused", "no group refused the previous-release learner")
-	}
-	if !m.alive(id) {
-		return m.violate("old_learner_not_running", fmt.Sprintf("the previous-release learner stopped before the check ended (log %q)", lastLines(m.c.logs[id].String(), 6)))
-	}
-	for _, via := range []uint64{1, 2, 3} {
-		_, _, status, serr := m.controlReasons(via)
-		if serr != nil || strings.Contains(status, "learner:"+learner.NodeIdentity) {
-			return m.violate("old_learner_listed", fmt.Sprintf("voter %d lists the refused learner (err %v):\n%s", via, serr, status))
-		}
-	}
-	m.say("2a refused in %d groups, applied nowhere, listed by no voter", totalIncompatible)
-	if err = m.expandRequire("2a after the refusals", true); err != nil {
-		return err
-	}
 
 	// The learner on the candidate is admitted (a fresh directory, same identity).
 	if err = m.c.kill(id); err != nil {

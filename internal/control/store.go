@@ -277,7 +277,10 @@ func (s *Store) transactCommit(ctx context.Context, scope auth.Scope, cmd Comman
 	if retentionKinds[CommandKind(cmd.Kind)] {
 		ctx = retryLostProposals(ctx)
 	}
-	e := s.update(ctx, transactBumps(cmd.Kind), func(st *State) error {
+	// apply is the transition of the command. checkpoint is called once every check that only reads
+	// the state has passed and before the first write: a retention command of an organization is
+	// committed through the per-organization writer (updateOrgScoped), which names the organization there.
+	apply := func(st *State, checkpoint func()) error {
 		if err := scope.ValidateControlState(*st); err != nil {
 			return err
 		}
@@ -293,6 +296,7 @@ func (s *Store) transactCommit(ctx context.Context, scope auth.Scope, cmd Comman
 			legacy = retentionKinds[CommandKind(cmd.Kind)] && st.AuthorityRevision == 0 && st.Revision > 0
 			return model.Fail(model.Conflict)
 		}
+		checkpoint()
 		var effect Effect
 		switch cmd.Kind {
 		case "Audit":
@@ -324,7 +328,18 @@ func (s *Store) transactCommit(ctx context.Context, scope auth.Scope, cmd Comman
 		st.CommandOwners[cmd.CommandID.String()] = binding
 		st.Commands[cmd.CommandID.String()] = out
 		return nil
-	})
+	}
+	var e error
+	if retentionKinds[CommandKind(cmd.Kind)] && scope.OrgID() != (model.ID{}) {
+		// The deletion saga, holds and retention policies of one organization write rows it owns: when
+		// that is all the commit changed, it moves the organization's own authority revision and leaves
+		// the installation's alone (F-10.05-2), so another organization's views are not made stale by it.
+		e = s.updateOrgScoped(ctx, orgRetention, func(st *State, name func(model.ID)) error {
+			return apply(st, func() { name(scope.OrgID()) })
+		})
+	} else {
+		e = s.update(ctx, transactBumps(cmd.Kind), func(st *State) error { return apply(st, func() {}) })
+	}
 	if legacy {
 		if f := (*model.Fault)(nil); errors.As(e, &f) && f.Code == model.Conflict {
 			// A state written before AuthorityRevision existed: stamp it so the caller's retry

@@ -558,13 +558,22 @@ func validatePatch(p statePatch) error {
 // patchCommand is the payload of a state patch for a transition from oldRaw (the encoding of the
 // committed state the proposer read) to next.
 func patchCommand(oldRaw []byte, expected model.Revision, next *State, keys map[string][]byte) ([]byte, error) {
+	return patchCommandRaw(oldRaw, nil, expected, next, keys)
+}
+
+// patchCommandRaw is patchCommand for a proposer that already holds the encoding of next (newRaw; nil
+// encodes it here). The verification of a per-organization commit (settleOrgAuthority) is such a
+// proposer: it has to encode the state to judge the commit, and the patch is diffed from the very
+// same bytes.
+func patchCommandRaw(oldRaw, newRaw []byte, expected model.Revision, next *State, keys map[string][]byte) ([]byte, error) {
 	base, err := patchBase(oldRaw)
 	if err != nil {
 		return nil, err
 	}
-	newRaw, err := json.Marshal(next)
-	if err != nil {
-		return nil, model.Fail(model.Invalid)
+	if newRaw == nil {
+		if newRaw, err = json.Marshal(next); err != nil {
+			return nil, model.Fail(model.Invalid)
+		}
 	}
 	ops, err := diffStates(oldRaw, newRaw)
 	if err != nil {
@@ -635,10 +644,11 @@ func (s *Store) StatePatch() bool {
 }
 
 // controlPayload is the payload of the command that takes the committed state encoded in oldRaw
-// (read only when the patch is on, otherwise nil) to next. A command that does not fit the replica's
-// entry limit is refused here with what the replica answers for it (invalid), before anything is
-// proposed.
-func (s *Store) controlPayload(oldRaw []byte, expected model.Revision, next *State, keys map[string][]byte) ([]byte, error) {
+// (read only when the patch is on, otherwise nil) to next; newRaw is the encoding of next when the
+// caller already made one (settleOrgAuthority), nil otherwise. A command that does not fit the
+// replica's entry limit is refused here with what the replica answers for it (invalid), before
+// anything is proposed.
+func (s *Store) controlPayload(oldRaw, newRaw []byte, expected model.Revision, next *State, keys map[string][]byte) ([]byte, error) {
 	if oldRaw == nil {
 		payload, err := json.Marshal(controlReplacement{Expected: expected, State: *next, Keys: keys})
 		if err != nil {
@@ -646,7 +656,7 @@ func (s *Store) controlPayload(oldRaw []byte, expected model.Revision, next *Sta
 		}
 		return payload, nil
 	}
-	payload, err := patchCommand(oldRaw, expected, next, keys)
+	payload, err := patchCommandRaw(oldRaw, newRaw, expected, next, keys)
 	if err != nil {
 		return nil, err
 	}

@@ -101,6 +101,8 @@ async function route(request: Request, server: Bun.Server<undefined>): Promise<R
     if (method !== "GET") return new Response(null, {status: 405, headers: {...security, Allow: "GET"}});
     return new Response(webConfig, {headers: {...security, "content-type": "application/json", "cache-control": "no-store"}});
   }
+  // The reference page ships no icon; a browser asks for /favicon.ico anyway and a 404 shows up as a console error of every scenario page.
+  if (url.pathname === "/favicon.ico" && (method === "GET" || method === "HEAD")) return new Response(null, {status: 204, headers: {...security, "cache-control": "no-store"}});
   if (url.pathname === "/api/orders") {
     if (method !== "POST") return new Response(null, {status: 405, headers: {...security, Allow: "POST"}});
     const response = orders ? await orders(request, server) : await proxyOrder(request);
@@ -118,7 +120,12 @@ async function route(request: Request, server: Bun.Server<undefined>): Promise<R
   if (!(await body.exists())) return new Response(null, {status: 404, headers: security});
   const headers = new Headers(security);
   headers.set("content-type", body.type);
-  if (file.endsWith(".html")) { headers.set("Document-Policy", "js-profiling"); headers.set("cache-control", "no-store"); }
+  if (file.endsWith(".html")) {
+    // `/?document-policy=off` serves the same page without the Document-Policy header, which is how a deployment that never opted in looks to Chrome:
+    // the JS Self-Profiling API then refuses to start (the profile-denied journey scenario).
+    if (url.searchParams.get("document-policy") !== "off") headers.set("Document-Policy", "js-profiling");
+    headers.set("cache-control", "no-store");
+  }
   return new Response(method === "HEAD" ? null : body, {headers});
 }
 

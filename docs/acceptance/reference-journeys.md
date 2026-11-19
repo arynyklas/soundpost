@@ -3,7 +3,7 @@
 
 `go run ./tools/smoke journeys --artifact-dir <dir>` provisions an isolated product and the generic
 reference estate in `examples/reference/`, drives it, reads the admitted evidence back and evaluates
-fifteen rows. It exits **nonzero while any required row is unsatisfied**. A row is never marked
+eighteen rows. It exits **nonzero while any required row is unsatisfied**. A row is never marked
 passed because its prerequisite is missing; the closed reason is printed instead.
 
 ## What it starts (all on loopback, nothing from the network)
@@ -51,6 +51,9 @@ subtree (a systemd service with `Delegate=memory pids` and `DelegateSubgroup=mai
 | `db_span_safe_operation_only` | yes | every database span has only `db.execute`/`postgres`; no SQL text appears in any stored record or trace view |
 | `replay_masked_interaction_real_recorder` | yes | the real recorder's chunks are stored |
 | `profile_linkage_with_capability_truth` | yes | a browser profile is stored and linked, with the real capability status |
+| `browser_profile_read_through_profile_view` | yes | the stored browser profile is read back through `POST /api/v1/profiles/view`: ready (or incomplete with declared loss), the same sample count as storage, frames that are the shipped bundle's origin-relative script paths, a supported `browser_js_self_profile` capability record the chunks name |
+| `browser_profile_refusals_stored_capability_only` | yes | the same page SDK in the same real Chrome, once served without the `js-profiling` Document-Policy (`/?document-policy=off`, denied / `document_policy_missing`) and once with the Profiler API absent (unsupported / `js_self_profiling_unavailable`), delivers the capability record alone: acknowledged, stored with the status and reason the page reported, named by no chunk. The profile route, asked about that record's id, answers 404 (a refused run has no profile id; the route reads chunks) |
+| `browser_profile_scenarios_console_errors_explained` | yes | the profile scenarios log no console error, except the browser's own `Document policy violation: js-profiling is not allowed in this document.` in the denied run. The one 404 console error of every page was the browser's `/favicon.ico` request, which the reference gateway now answers with 204 |
 | `runtime_profile_delivered_stored_linked` | yes | the CPython SDK in the job process samples the run (`python_wall_samples`), delivers the profile, the product stores it, and `POST /api/v1/profiles/view` reads it back: samples present, the sampled function `summarise_catalog` shown, a supported capability record of that method linked. A profiler that could not see every thread or tick declares loss, so the view is `incomplete` with the closed reason `coverage_incomplete` and a non-zero loss; that is accepted, an incomplete view that declares no loss or any other state or reason is not |
 | `actual_ids_equal_expected` | yes | admitted build, job and run ids equal the deterministic expected ones; both traces are admitted |
 | `actual_versions_recorded` | yes | actual versions of every runtime and image |
@@ -65,11 +68,11 @@ Errors, frames, jobs and the runtime profile are observed as the product's own r
 started again on the same data (`readsAfterRestart`, `journeys_served.go`); the harness maps nothing and scans no storage for
 them. Storage is scanned only for what has no read route (replay chunk counts, profile and capability record counts) and for canaries.
 
-The committed smoke ran on a Linux x86-64 worker (Debian 13, kernel 6.12, no container runtime, no root) with PostgreSQL 16.9 from `--pg-local`,
-Node 22.23.4, Bun 1.3.14, CPython 3.13.5 with the locked packages, Chrome 156.0.8078.80 and the release-shaped node built from the tree, inside a
-transient systemd user service with a delegated cgroup. All fifteen rows passed and the exit status was 0. The recorded observation under
-`tools/smoke/testdata/journeys/observed.json` is that run (`TestReferenceJourneyAssertions/recorded` re-assesses it); the run output is
-`.superpowers/sdd/approved-product/l5w21-evidence/journeys/`.
+The recorded observation under `tools/smoke/testdata/journeys/observed.json` (`TestReferenceJourneyAssertions/recorded` re-assesses it) is the
+eighteen-row run of the `node-loss-journeys` drill against a recovered three-member cluster on a Linux x86-64 worker (2026-11-19, all
+eighteen rows required and satisfied, exit status 0); the run output is `.superpowers/sdd/approved-product/l1m-evidence/run1/`. An earlier
+fifteen-row single-node run (Debian 13, kernel 6.12, PostgreSQL 16.9 from `--pg-local`, Node 22.23.4, Bun 1.3.14, CPython 3.13.5, Chrome
+156.0.8078.80, a transient systemd user service with a delegated cgroup) is `.superpowers/sdd/approved-product/l5w21-evidence/journeys/`.
 (That directory is part of the private development ledger, gitignored: **private-ledger evidence, not shipped with the repository.** The smoke itself is committed and repeats the run.)
 
 Notes on that run:
@@ -101,7 +104,7 @@ Notes on that run:
 
 ## Against a recovered cluster (`--cluster-attach`, 07.07#16)
 
-`go run ./tools/smoke journeys --cluster-attach FILE ...` runs the same applications, the same drive and the same fifteen rows against a
+`go run ./tools/smoke journeys --cluster-attach FILE ...` runs the same applications, the same drive and the same eighteen rows against a
 three-member distributed cluster that somebody else bootstrapped and put through a node loss, instead of starting a single node. The
 cluster's owner is `tools/drills --scenario node-loss-journeys` (`docs/operations/drills.md`, "After recovery: the reference journeys"),
 which writes the attach document (`tools/smoke/testdata/journeys/attach.json` is a committed sample; the parser, `journeys_cluster.go`,
@@ -120,4 +123,4 @@ is strict) and runs the smoke as its child. What differs from the single node, a
   rows afterwards, the traces, errors, frames, job and profile, is served by that restored member.** The leak scan covers all three members' directories
   while two of them run (a file that vanishes between listing and reading is skipped and counted).
 * `details.json` carries a `cluster` object (members, roles, recovered members, the member the reads went through) and the order page's flush report
-  (`order_driver_flush`); `observed.json` is the single-node document.
+  (`order_driver_flush`); `observed.json` has the same shape as the single-node document.

@@ -120,12 +120,10 @@ func TestEveryCommandKindIsClassified(t *testing.T) {
 // the exported Update, which always bumps, so they are authority writers by construction.
 func TestEveryControlWriterIsClassified(t *testing.T) {
 	want := map[string]string{
-		// Authority (bump): they change deletions, generations, holds, gaps, audits, keys.
-		"RecordBarriers":                "bump",
-		"CompleteDeletion":              "bump",
-		"FailDeletion":                  "bump",
-		"RecordPhysicalCleanup":         "bump",
-		"AdvanceDeleteGeneration":       "bump",
+		// Authority (bump) that stays installation-wide: ImportDeletions re-installs tombstones of any
+		// number of organizations from the restore authority; settleScrub appends one audit per
+		// operation of every organization whose erasure the one control.db file scrub covered; an evidence
+		// gap is keyed by a hash and bound by the backup attestation; the rest is not about one organization.
 		"ImportDeletions":               "bump",
 		"settleScrub":                   "bump",
 		"RecordEvidenceGap":             "bump",
@@ -135,8 +133,21 @@ func TestEveryControlWriterIsClassified(t *testing.T) {
 		"healFencedArtifactIntents":     "bump", // retires a published intent under a verified GC fence: artifact readability changes
 		"healLegacyAuthority":           "bump",
 		"Update":                        "bump",
-		// Dispatch by Command kind (nonAuthorityKinds); Transact calls it after its read-first replay check.
-		"transactCommit": "by kind",
+		// The retention-class transitions of ONE organization (F-10.05-2 residual): the deletion saga steps
+		// of the worker, the physical cleanup record and the delete generation advance commit through
+		// updateOrgRetention / updateOperation, which verify that only the organization's own rows
+		// changed (verifyOrgTransition, orgRetention) and move its own authority revision.
+		"RecordBarriers":          "orgRetention",
+		"CompleteDeletion":        "orgRetention",
+		"FailDeletion":            "orgRetention",
+		"RecordPhysicalCleanup":   "orgRetention",
+		"AdvanceDeleteGeneration": "orgRetention",
+		"updateOrgRetention":      "orgScoped:orgRetention",
+		"updateOperation":         "orgScoped:orgRetention",
+		// Dispatch by Command kind (nonAuthorityKinds); a retention kind of an organization commits through
+		// the per-organization writer, every other kind through update. Transact calls it after its
+		// read-first replay check.
+		"transactCommit": "orgScoped:orgRetention + by kind",
 		// Non-authority (updateAs with a writer on nonAuthorityWriters).
 		"ReserveAdmission":    "writerReserveAdmission",
 		"FinalizeAdmission":   "writerFinalizeAdmission",
@@ -148,11 +159,13 @@ func TestEveryControlWriterIsClassified(t *testing.T) {
 		"TransactIssues":      "writerTransactIssues",
 		"TransactJobs":        "writerTransactJobs",
 		"UpdateReplayIndex":   "writerReplayIndex",
-		// An organization's admin command (10.05, F-10.05-2): commits through replicatedUpdate
-		// itself, guarded like the writers above (the organization's own record, the audit log and
-		// the command books are masked, anything else bumps the installation-wide revision) and
-		// moves the organization's own authority revision.
-		"UpdateOrgAuthority": "replicated",
+		// An organization's admin command (10.05, F-10.05-2): the per-organization writer, guarded like
+		// the writers above (verifyOrgTransition: the organization's own record, appended audit rows and
+		// added commands, anything else bumps the installation-wide revision); it moves the
+		// organization's own authority revision. updateOrgScoped is the one place that commits it: it
+		// goes through replicatedUpdate itself.
+		"UpdateOrgAuthority": "orgScoped:classAdmin",
+		"updateOrgScoped":    "replicated",
 		// A login that adds a session record and consumes the one-time factor it presented
 		// (10.29): see writerSessionCreate for why neither can change who may read; every
 		// other user field, Logout and Bootstrap keep bumping.
@@ -223,6 +236,14 @@ func TestEveryControlWriterIsClassified(t *testing.T) {
 				switch sel.Sel.Name {
 				case "Update":
 					record("bump")
+				case "updateOrgScoped":
+					if id, ok := call.Args[1].(*ast.Ident); ok {
+						record("orgScoped:" + id.Name)
+					} else {
+						record("orgScoped:?")
+					}
+				case "updateOrgRetention", "updateOperation":
+					record("orgRetention")
 				case "updateAs", "updateAsGuarded", "updateAsGuardedChecked":
 					if id, ok := call.Args[1].(*ast.Ident); ok {
 						record(id.Name)

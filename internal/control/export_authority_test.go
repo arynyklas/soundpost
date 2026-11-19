@@ -29,3 +29,14 @@ func (s *Store) MakeLegacyAuthorityForTest() (model.Revision, error) {
 	}
 	return st.Revision, s.writeStateForTest(raw)
 }
+
+// InstallationFloorForTest is the floor this release judges a retention command against besides the
+// organization's own revision (installationFloor). Test only.
+func InstallationFloorForTest(st State) model.Revision { return installationFloor(&st) }
+
+// PreviousReleaseAcceptsForTest is the revision rule of the previous release (5475ef6) for a
+// retention command: the view is no older than AuthorityRevision alone and no newer than Revision.
+// It knows neither the organization's revision nor the pair of model.ScopedAuthorityKey. Test only.
+func PreviousReleaseAcceptsForTest(st State, expected model.Revision) bool {
+	return authorityFloor(&st) <= expected && expected <= st.Revision
+}

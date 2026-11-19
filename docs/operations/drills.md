@@ -83,7 +83,7 @@ entry, `facts` and `not_run_items`. No secret or raw telemetry content is writte
 | `fsync-failure` | same injector; every fsync of one member answers a real errno while writes stream: EIO on the initial leader and on member 3 (a failing disk), ENOSPC on member 2 (a full filesystem); that member fails stop in every group (it stops leading and voting, then exits), the other two keep acknowledging inside the scenario window in all three phases, the member is restarted on its disk and rejoins; every ACK reconciled | run |
 | `disk-disappearance` | same injector; one member's data directory is moved away under the running process and every fsync and path operation on it answers EIO (initial leader, member 3), the survivors keep acknowledging inside the scenario window in both phases; then member 2's disk is replaced with a blank one and finally the original returns; every ACK reconciled | run |
 | `membership-replace` | three real processes plus a fourth; `soundpost membership status`, a refused add of an existing voter, `add-learner` for member 4 (and its idempotent repeat), start member 4, stop member 3, `replace --remove 3 --promote 4`, all while a write stream is acknowledged; members 1, 2 and 4 each retain every acknowledged batch and 1 and 4 acknowledge with 2 stopped | run (the refusal of a real second uid is not run: no second user on the host; unit-tested per connection) |
-| `node-loss-journeys` | the `node-kill-restart` loss (SIGKILL of member 1, then member 3, while writers stream), then, only once the recovery is proved, the real reference journeys of `tools/smoke` against the same three processes (`journeys --cluster-attach`); fifteen rows, all must pass; every ACKed id of the whole run reconciled on every member afterwards | run on a host with the journeys' tools (`--journeys-smoke`, `--journeys-arg`, `--serve-arg`), see "After recovery: the reference journeys" |
+| `node-loss-journeys` | the `node-kill-restart` loss (SIGKILL of member 1, then member 3, while writers stream), then, only once the recovery is proved, the real reference journeys of `tools/smoke` against the same three processes (`journeys --cluster-attach`); every row of `tools/smoke/journeys_assert.go` (eighteen), all must pass; every ACKed id of the whole run reconciled on every member afterwards | run on a host with the journeys' tools (`--journeys-smoke`, `--journeys-arg`, `--serve-arg`), see "After recovery: the reference journeys" |
 | `vm-hard-reset` | a REAL guest hard reset (`echo b > /proc/sysrq-trigger`: immediate reboot, no sync, no unmount, page cache dropped) of the machine that holds the three processes, while writers stream; two phases because the harness dies with the machine; after the reboot every acknowledged id is retained with identical data on every member | run on a machine that may be rebooted (`--vm-reset-state`, `--allow-vm-reset <hostname>`, root), see "A real guest hard reset" |
 
 ### How the four storage and link drills inject their faults (no host privilege)
@@ -217,28 +217,49 @@ entry, `facts` and `not_run_items`. No secret or raw telemetry content is writte
    retention command of an organization is judged against the later of the two. A
    tenant's admin commands therefore cannot conflict another tenant's deletion
    Begin (`TestAnotherOrganizationsAdminCommandsDoNotConflictABegin`). The exemption
-   is verified per commit (`Store.UpdateOrgAuthority`: the state without the
-   organization's record, the audit log and the command books must be byte for byte
-   unchanged, else the commit bumps the installation-wide revision, as a
-   `source_policy` command for a live source does). **Still a limit:** a retention
-   command (deletion Begin, hold, policy change) of one organization still moves the
-   installation-wide revision, as does any other unclassified writer, so an
-   organization admin who issues those at a high rate can still make other
-   tenants' Begins retry; none of them is rate limited today. **Attempted and not
-   shipped (lane 1 wave 26, `l1w26-evidence/perorg-retention-open.txt`):** moving the
-   organization's own revision for the retention-class commands too, after verifying that
-   a commit wrote only that organization's rows. Eighteen cross-org commit shapes
-   (deletion Begin, fence steps, holds, policies, the worker's saga transitions) went from red
-   to green with a masked-verification design, but (1) it makes
-   `TestBeginIsNotRefusedByLostProposalsFromAnyVoterUnderSaturatingIntake` (F-10.05-1)
-   fail (7 to 9 of 12 follower Begins refused as `stale`, 270 to 470 s against 11 s;
-   with the stamp 469 attempts, 20 committed, about 213 ms each, against 159 attempts, 42
-   committed, about 88 ms with the global bump only; a variant that stamped and also bumped
-   the global revision failed the same way, so the cause is the stamp write into the
-   organization's settings on that commit, and it was not found), and (2) a
-   previous-release leader compares only the global revision, so a same-org stale view could
-   be accepted in a mixed group. It was reverted; the retention-class commands keep the
-   installation-wide bump.
+   is verified per commit (`verifyOrgTransition`: the encodings of the state before and
+   after must differ only in the organization's own record, appended audit rows and added
+   commands, else the commit bumps the installation-wide revision, as a
+   `source_policy` command for a live source does, and as an admin `retention` command does: it
+   appends to `RetentionPolicies`, which the admin class does not own, so both keep the global check
+   on this release too, `TestAdminSourcePolicyAndRetentionKeepTheGlobalCheck`).
+   **Changed (10.05, F-10.05-2 residual):** the retention-class commands of an organization
+   (deletion Begin, hold, retention policy, the fence steps, the worker's saga transitions and
+   delete-generation advances) move the organization's own revision as well, when control has
+   verified that the commit wrote only that organization's rows in the retention tables
+   (`verifyOrgTransition`, `orgRetentionTables` in `internal/control/authority_org.go`, besides
+   appended audit rows and added commands). A new evidence gap (keyed by a hash, bound by the
+   backup attestation), a source fence, a user, a quota or another organization's row keeps the
+   installation-wide bump. Another tenant's retention commands therefore no longer make a Begin
+   retry (`TestAnotherOrganizationsRetentionCommandsDoNotConflictABegin`, 19 commit shapes;
+   `TestOwnRetentionCommandsStillConflictAStaleView`: the organization's own stale view still
+   conflicts). The verification is free only for a command proposed as a state patch (every member of
+   the control group declared protocol 5); a replacement is an ordinary bump. **Both revisions move
+   (decision D75):** a verified commit of an organization moves the installation-wide
+   `AuthorityRevision` as well as the organization's own `authority_rev`, because the previous
+   release (5475ef6 declares protocol 5 but predates the rule) judges a retention command against
+   that scalar alone and has to keep refusing a same-organization view older than the commit.
+   This release checks the organization's revision and the installation floor
+   (`installationFloor`: the last change that was not a verified commit of one organization,
+   kept in `State.OIDC["authority:scope"]` beside the `AuthorityRevision` it belongs to and void
+   when another binary moves that scalar), so no other organization's verified commit conflicts it;
+   a previous-release leader may still refuse a view that is stale only for another organization,
+   as it always did, while it leads
+   (`TestStaleSameOrganizationViewIsRefusedByBothReleaseRules`,
+   `TestAnotherOrganizationsAdminCommandMovesTheScalarButNotTheFloor`,
+   `TestACommitThatDoesNotWriteThePairVoidsTheFloor`,
+   `TestAViewStaleThroughASharedTableStillConflictsOnThisRelease`, and with real binaries
+   `TestMixedBinaryStaleSameOrgCommandsAreRefusedByThePreviousReleaseLeader`).
+   **Why lane 1 wave 26 could not ship it:** the verification encoded the state twice more per
+   attempt inside a whole-state replacement. A Begin that has to be proposed again after losing
+   the application-index race (up to 64 times) then took 24 ms of CPU per attempt against 7 ms
+   (CPU profile: 5.69 s of `json.Marshal` inside `Transact` against 0.27 s), won the race 4 % of
+   the time against 26 %, and was refused as `stale` after 64 losses. The wave-26 bisect pointed at
+   the stamp because only the stamping path ran the extra encodings: the stamp itself, with or
+   without the installation-wide bump, left the test at 10 to 14 s, and two extra
+   `json.Marshal(state)` alone made it fail (186 to 222 s). The verification now reuses the one
+   encoding a state patch makes anyway and is not made in a replacement
+   (`l1w28-evidence/lane/cause-evidence.txt`).
    `TestDeleteWithViewOlderThanAuthorityChangeStillConflicts` has a stale-view
    subtest for every admin kind that reaches `Store.Update` or
    `Store.UpdateOrgAuthority` against the organization's own Begin (`create_user`,
@@ -328,7 +349,7 @@ runs everything else. It is deliberately **not** tagged `evidence: node_loss`: t
    request twice (`TestJourneysAfterNodeLossRecoveryOwnerFollowsTheJourneysInOrder`).
 5. Control writes and reads against a recovering cluster retry the answers it documents as retryable (HTTP 400/409 `stale`/`conflict`, the
    typed 503); every other answer is the row's evidence as it is.
-6. Afterwards the drill takes **all fifteen rows** from `observed.json` (a row that is missing, repeated, not required, not satisfied
+6. Afterwards the drill takes **every row of the smoke's assertion list (eighteen)** from `observed.json` (a row that is missing, repeated, not required, not satisfied
    or not in the closed list fails; `TestJourneysAfterNodeLossRecoveryRowsMustAllPass` runs the verdict on the recorded
    observation and on five wrong ones), requires every SDK client's final flush to have nothing pending and nothing lost
    (`journeys_sdk_delivery_acknowledged`: gateway, API, job and the three browser pages), and then, on the whole run, repeats the
@@ -343,7 +364,7 @@ runs everything else. It is deliberately **not** tagged `evidence: node_loss`: t
   cluster, they are not run through a failure. The one member stop during the journeys is a clean shutdown for the in-process scan, not a loss.
 * The acknowledged ids of the journeys' own applications are not entries of the drill's ledger: the SDKs hand back counts, not batch
   ids, and the ledger's exact comparison needs the batch's data back through the query API (which a trace or a job is not).
-  What covers them: each client's final flush (nothing pending, nothing lost), the fifteen rows (traces, errors, job attempts,
+  What covers them: each client's final flush (nothing pending, nothing lost), the eighteen rows (traces, errors, job attempts,
   the profile and the replay read back from what the cluster stored, and the ids compared with the expected ones in
   `actual_ids_equal_expected`) and the drill's own writes next to them, reconciled exactly.
 * The members of this scenario serve one shared TLS leaf; production nodes do not (the browser pins a single key). The smoke's canary

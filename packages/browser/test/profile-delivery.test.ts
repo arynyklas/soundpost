@@ -406,3 +406,27 @@ test("Client.close: concurrent calls share one shutdown and the second resolves 
  await second;
  expect(sent(ledger).map(record => record.kind).sort()).toEqual(["capability", "profile_chunk"]);
 });
+
+test("long-task entries are collected in the report and are NOT delivered: the wire carries the capability and the chunk only, nothing is dropped or counted", async () => {
+ // Boundary test of the open part of 10.17#13: the SDK has no metric capture path (core CaptureInput has no metric kind, the signed policy has no metrics
+ // switch, and a metric series has no label a browser could use to stay unique: internal/storage/apply.go refuses two values of one series at one instant).
+ // Until the owner decides how a long task is represented, a collected entry is a local report field. This test fails the day delivery is added without a decision.
+ class LongTaskObserver {
+  static get supportedEntryTypes(): string[] { return ["longtask"]; }
+  constructor(readonly callback: unknown) {}
+  observe(): void {}
+  disconnect(): void {}
+  takeRecords(): unknown[] { return [{entryType: "longtask", name: "self", startTime: 1500.4, duration: 120.25}, {entryType: "longtask", name: "self", startTime: 1900, duration: 80}]; }
+ }
+ const {ledger, client} = delivering();
+ const rg = rig();
+ rg.env = {...rg.env, PerformanceObserver: LongTaskObserver};
+ const {report} = await profileRun(rg, client, {...OPTIONS, longTasks: true}, simpleTrace());
+ expect(report?.capability.status).toBe("supported");
+ expect(report?.scope.long_tasks).toBe("observed");
+ expect(report?.non_profile.map(entry => entry.duration_ms)).toEqual([120.3, 80]);
+ expect(sent(ledger).map(record => record.kind).sort()).toEqual(["capability", "profile_chunk"]);
+ expect(ledger.bodies.join("")).not.toContain("long_task");
+ expect(client.diagnostics()).toEqual({});
+ await client.close();
+});

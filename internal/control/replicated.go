@@ -179,7 +179,7 @@ func (s *Store) replicatedUpdateOnce(ctx context.Context, bump bool, force *bool
 	}); err != nil {
 		return err
 	}
-	expected, priorAuthority := st.Revision, st.AuthorityRevision
+	expected, priorAuthority, priorFloor := st.Revision, st.AuthorityRevision, installationFloor(&st)
 	if err := fn(&st); err != nil {
 		return err
 	}
@@ -191,16 +191,20 @@ func (s *Store) replicatedUpdateOnce(ctx context.Context, bump bool, force *bool
 	// log is read from it (retention.go, ExpireControlLog).
 	noteRevisionTime(&st, s.clockNow().UnixNano())
 	// Set after fn, never before: fn cannot forge, lower or suppress the field. A writer on the
-	// non-authority allowlist leaves the value it found; a writer that UpdateOrgAuthority verified
-	// to have changed one organization alone moves that organization's own revision instead.
+	// non-authority allowlist leaves the value it found. A per-organization writer (updateOrgScoped)
+	// that named its organization moves the installation's revision too (the previous release judges
+	// against that scalar alone) and records that the floor this release judges against did not move,
+	// plus the organization's own revision, when the commit is proposed as a state patch and verified
+	// to have changed only what its class owns for it (settleOrgAuthority); every other case, a
+	// replacement included, is an ordinary bump.
+	var newRaw []byte // the encoding of st, when settleOrgAuthority made it
 	switch scope, _ := ctx.Value(orgScopeKey{}).(*orgScope); {
 	case bump || force != nil && *force:
 		st.AuthorityRevision = st.Revision
-	case scope != nil && scope.verified:
-		st.AuthorityRevision = priorAuthority
-		if !stampOrgAuthority(&st, scope.org, st.Revision) {
-			st.AuthorityRevision = st.Revision
-		}
+	case scope != nil && oldRaw != nil && scope.named:
+		newRaw = settleOrgAuthority(&st, oldRaw, scope, priorFloor)
+	case scope != nil:
+		st.AuthorityRevision = st.Revision
 	default:
 		st.AuthorityRevision = priorAuthority
 	}
@@ -208,7 +212,7 @@ func (s *Store) replicatedUpdateOnce(ctx context.Context, bump bool, force *bool
 	if err != nil {
 		return err
 	}
-	payload, err := s.controlPayload(oldRaw, expected, &st, keys)
+	payload, err := s.controlPayload(oldRaw, newRaw, expected, &st, keys)
 	if err != nil {
 		return err
 	}

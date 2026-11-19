@@ -35,8 +35,8 @@ func init() { register("node-loss-journeys", runNodeLossJourneys) }
 // The rows are the smoke's own (journeys_assert.go) and are copied into this report from its observation file; nothing here
 // evaluates them.
 
-// dcJourneyRowNames are the fifteen rows of tools/smoke/journeys_assert.go (TestJourneyRowNamesMatchTheSmokeAssertions keeps the
-// two lists equal). A run counts only when it reports every one of them once, required and satisfied.
+// dcJourneyRowNames are the rows of tools/smoke/journeys_assert.go (TestJourneyRowNamesMatchTheSmokeAssertions keeps the
+// two lists equal and every count in the drill's tests is taken from this list). A run counts only when it reports every one of them once, required and satisfied.
 var dcJourneyRowNames = []string{
 	"gateway_dependency_child_span",
 	"frontend_request_api_db_chain",
@@ -50,6 +50,9 @@ var dcJourneyRowNames = []string{
 	"db_span_safe_operation_only",
 	"replay_masked_interaction_real_recorder",
 	"profile_linkage_with_capability_truth",
+	"browser_profile_read_through_profile_view",
+	"browser_profile_refusals_stored_capability_only",
+	"browser_profile_scenarios_console_errors_explained",
 	"runtime_profile_delivered_stored_linked",
 	"actual_ids_equal_expected",
 	"actual_versions_recorded",

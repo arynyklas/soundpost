@@ -23,7 +23,7 @@ import (
 )
 
 // 07.07#16: the real reference journeys run against the cluster AFTER it lost members and recovered. The criterion's text is the
-// specification of these tests: the journeys' rows are those of the real run and all fifteen must pass; the journeys do not start
+// specification of these tests: the journeys' rows are those of the real run and all of them must pass; the journeys do not start
 // before the recovery is proved (a lost acknowledged batch, a member that is not ready, diverging cursors and an open outage each
 // stop the scenario); no journey leg may point at a member that is not answering and the reads must go through a member that was
 // killed and restored; the acknowledgement ledger of the whole run must be complete.
@@ -42,12 +42,16 @@ func TestJourneysAfterNodeLossRecoveryRowsMustAllPass(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 15 {
-		t.Fatalf("the recorded run has %d rows, want 15", len(rows))
+	n := len(dcJourneyRowNames)
+	if n != 18 { // an explicit pin: a change of the smoke's rows is made here and in dcJourneyRowNames on purpose
+		t.Fatalf("the drill pins %d rows, want 18", n)
+	}
+	if len(rows) != n {
+		t.Fatalf("the recorded run has %d rows, want %d", len(rows), n)
 	}
 	checks := dcJourneyRowChecks(rows)
-	if len(checks) != 15 {
-		t.Fatalf("%d checks for 15 rows", len(checks))
+	if len(checks) != n {
+		t.Fatalf("%d checks for %d rows", len(checks), n)
 	}
 	for i, ch := range checks {
 		if !ch.ok || ch.name != "journey_row_"+dcJourneyRowNames[i] {

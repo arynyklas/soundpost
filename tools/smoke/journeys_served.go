@@ -122,5 +122,66 @@ func (j *journeyRun) readServed(reader, analyst, builder *installSite, window ma
 		}
 		rp.Read = &rd
 	}
+	// Browser profile: the profile the page's SDK delivered, read back through the same profile route. A refused run (denied, unsupported) has a
+	// capability record and no profile id, so the route is asked about the capability's id: it must not answer a profile for it.
+	if bp := &j.obs.Profile; len(bp.ProfileIDs) > 0 {
+		rd, err := j.servedPost("analyst", analyst, "/api/v1/profiles/view", map[string]any{"org": e.Org, "project": e.Project, "profile": bp.ProfileIDs[0], "window": window})
+		if err != nil {
+			return err
+		}
+		bp.Read = &rd
+	}
+	for i := range j.obs.Profile.Refusals {
+		r := &j.obs.Profile.Refusals[i]
+		if r.CapabilityID == (model.ID{}) {
+			continue
+		}
+		rd, err := j.servedPost("analyst", analyst, "/api/v1/profiles/view", map[string]any{"org": e.Org, "project": e.Project, "profile": r.CapabilityID, "window": window})
+		if err != nil {
+			return err
+		}
+		r.Read = &rd
+	}
 	return nil
+}
+
+// refusalFromDriver reads what the page's SDK reported for one profile scenario: the capability truth it delivered, its id (the id of the
+// stored record), the acknowledgement its own bounded flush obtained, what was still unsent afterwards and the console errors the browser logged.
+// It is the page's own claim; the stored record and the product's answers are observed separately.
+func refusalFromDriver(driver any) profileRefusal {
+	var r profileRefusal
+	d, _ := driver.(map[string]any)
+	p, _ := d["profile"].(map[string]any)
+	r.DriverStatus, _ = p["status"].(string)
+	r.DriverReason, _ = p["reason"].(string)
+	if id, _ := p["capabilityId"].(string); id != "" {
+		if parsed, err := model.ParseID(id); err == nil {
+			r.CapabilityID = parsed
+		}
+	}
+	if ack, ok := p["ack"].(map[string]any); ok {
+		r.AckStatus, _ = ack["status"].(string)
+		cursors, _ := ack["cursors"].(float64)
+		r.AckCursors = int(cursors)
+	}
+	if fl, ok := p["flush"].(map[string]any); ok {
+		lost, _ := fl["lost"].(float64)
+		pending, _ := fl["pending"].(float64)
+		r.Lost, r.Pending = int(lost), int(pending)
+	}
+	r.ConsoleErrors = consoleErrorsOf(d)
+	return r
+}
+
+// consoleErrorsOf lists the console errors a driver run reported (the browser's text and the script path it came from).
+func consoleErrorsOf(driver map[string]any) []consoleError {
+	out := []consoleError{}
+	details, _ := driver["console_error_details"].([]any)
+	for _, d := range details {
+		m, _ := d.(map[string]any)
+		text, _ := m["text"].(string)
+		path, _ := m["path"].(string)
+		out = append(out, consoleError{Text: text, Path: path})
+	}
+	return out
 }

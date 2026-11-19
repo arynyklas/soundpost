@@ -37,6 +37,9 @@ const (
 	rowDBSpanSafe      = "db_span_safe_operation_only"
 	rowReplay          = "replay_masked_interaction_real_recorder"
 	rowProfile         = "profile_linkage_with_capability_truth"
+	rowBrowserProfile  = "browser_profile_read_through_profile_view"
+	rowProfileRefusals = "browser_profile_refusals_stored_capability_only"
+	rowProfileConsole  = "browser_profile_scenarios_console_errors_explained"
 	rowRuntimeProfile  = "runtime_profile_delivered_stored_linked"
 	rowIDs             = "actual_ids_equal_expected"
 	rowVersions        = "actual_versions_recorded"
@@ -153,6 +156,47 @@ type profileObservation struct {
 	StoredSamples    int  `json:"stored_profile_samples"`
 	CapabilityLinked bool `json:"capability_linked"`
 	SDKEnqueues      bool `json:"sdk_enqueues_profile"`
+	// ProfileIDs are the distinct profile ids of the stored browser chunks, ChunkCapabilities the capability id each chunk names and
+	// Capabilities every stored browser capability record. Read is the product's profile route asked about ProfileIDs[0].
+	ProfileIDs        []model.ID         `json:"profile_ids"`
+	ChunkCapabilities []model.ID         `json:"chunk_capabilities"`
+	Capabilities      []storedCapability `json:"stored_capabilities"`
+	Read              *servedRead        `json:"read,omitempty"`
+	// ConsoleErrors are the console errors the real browser logged during the supported run (text and script path, as the browser said them).
+	ConsoleErrors []consoleError `json:"console_errors"`
+	// Refusals are the runs the same page SDK delivered while its browser refused to sample: capability truth only.
+	Refusals []profileRefusal `json:"refusals"`
+}
+
+// consoleError is one console error of a driven page, as Chrome reported it.
+type consoleError struct {
+	Text string `json:"text"`
+	Path string `json:"path"`
+}
+
+// storedCapability is one capability record the product stored for the browser source.
+type storedCapability struct {
+	ID     model.ID   `json:"id"`
+	Status string     `json:"status"`
+	Reason string     `json:"reason"`
+	Method string     `json:"method"`
+	Signal model.Kind `json:"signal"`
+}
+
+// profileRefusal is one refused browser profile run: what the page reported (status, reason, the id of the capability record it delivered, the
+// acknowledgement its own flush obtained and what was still unsent after it) and what the product answered when its profile route was asked about that id.
+type profileRefusal struct {
+	Variant       string         `json:"variant"`
+	Attempted     bool           `json:"attempted"`
+	DriverStatus  string         `json:"driver_status"`
+	DriverReason  string         `json:"driver_reason"`
+	CapabilityID  model.ID       `json:"capability_id"`
+	AckStatus     string         `json:"ack_status"`
+	AckCursors    int            `json:"ack_cursors"`
+	Lost          int            `json:"flush_lost"`
+	Pending       int            `json:"flush_pending"`
+	ConsoleErrors []consoleError `json:"console_errors"`
+	Read          *servedRead    `json:"read,omitempty"`
 }
 
 type journeyObservation struct {
@@ -199,6 +243,9 @@ func assessJourneys(o journeyObservation) []journeyRow {
 		rowFrom(rowDBSpanSafe, true, dbSpanSafe(o)),
 		rowFrom(rowReplay, true, replayRow(o)),
 		rowFrom(rowProfile, true, profileRow(o)),
+		rowFrom(rowBrowserProfile, true, browserProfileRow(o)),
+		rowFrom(rowProfileRefusals, true, profileRefusalsRow(o)),
+		rowFrom(rowProfileConsole, true, profileConsoleRow(o)),
 		rowFrom(rowRuntimeProfile, true, runtimeProfileRow(o)),
 		rowFrom(rowIDs, true, idsEqual(o)),
 		rowFrom(rowVersions, true, versionsRecorded(o)),
@@ -732,6 +779,40 @@ const (
 	runtimeProfileMethod = "python_wall_samples"
 )
 
+// profileViewOf checks one answer of the product's profile route for profile `id`: it was asked, it was served and decodes, it answers
+// that profile, and it is a view with samples in a state the product legitimately reports. A sampling profiler that could not see every
+// thread or tick says so: the view is then `incomplete` with the closed reason coverage_incomplete AND the loss it declares. That is the
+// product's truth and is accepted; an incomplete view that declares no loss, any other reason, or any other state is not.
+func profileViewOf(read *servedRead, id model.ID) (httpapi.ProfileResponse, verdict) {
+	var resp httpapi.ProfileResponse
+	switch {
+	case read == nil:
+		return resp, fail("profile_not_read", "profile %s was not read through the profile route", id)
+	case read.Status != 200:
+		return resp, fail("profile_read_refused", "the profile route answered %d", read.Status)
+	}
+	if err := json.Unmarshal(read.Body, &resp); err != nil {
+		return resp, fail("profile_view_undecodable", "the profile route's answer does not decode")
+	}
+	if resp.Profile != id {
+		return resp, fail("profile_identity_mismatch", "asked for profile %s, answered %s", id, resp.Profile)
+	}
+	if resp.View == nil {
+		return resp, fail("profile_not_ready", "state=%s reason=%s", resp.State, resp.Reason)
+	}
+	declaredLoss := resp.View.LossCount > 0 || len(resp.View.Loss) > 0 || resp.View.Truncated
+	switch {
+	case resp.State == httpapi.StateReady && resp.View.Completeness == "complete":
+	case resp.State == httpapi.StateIncomplete && resp.Reason == profiles.ReasonCoverageIncomplete && resp.View.Completeness == "partial" && declaredLoss:
+	default:
+		return resp, fail("profile_not_ready", "state=%s reason=%s completeness=%s declared_loss=%v", resp.State, resp.Reason, resp.View.Completeness, declaredLoss)
+	}
+	if len(resp.View.Samples) == 0 {
+		return resp, fail("profile_has_no_samples", "the stored profile %s has no sample", id)
+	}
+	return resp, verdict{ok: true}
+}
+
 // runtimeProfileRow: a Python process profiled by the real SDK delivers a profile the product stores, the profile route reads it
 // back with the real capability record it is linked to, and it shows the named function.
 func runtimeProfileRow(o journeyObservation) verdict {
@@ -741,35 +822,12 @@ func runtimeProfileRow(o journeyObservation) verdict {
 		return fail("not_attempted", "the runtime profile scenario did not run")
 	case p.StoredChunks == 0:
 		return fail("runtime_profile_not_stored", "%d capability record(s) stored, no profile chunk", p.StoredCapabilities)
-	case p.Read == nil:
-		return fail("profile_not_read", "profile %s was not read through the profile route", p.Profile)
-	case p.Read.Status != 200:
-		return fail("profile_read_refused", "the profile route answered %d", p.Read.Status)
 	}
-	var resp httpapi.ProfileResponse
-	if err := json.Unmarshal(p.Read.Body, &resp); err != nil {
-		return fail("profile_view_undecodable", "the profile route's answer does not decode")
-	}
-	if resp.Profile != p.Profile {
-		return fail("profile_identity_mismatch", "asked for profile %s, answered %s", p.Profile, resp.Profile)
-	}
-	if resp.View == nil {
-		return fail("profile_not_ready", "state=%s reason=%s", resp.State, resp.Reason)
-	}
-	// A sampling profiler that could not see every thread or tick says so: the view is then `incomplete` with the closed reason
-	// coverage_incomplete AND the loss it declares. That is the product's truth and is accepted; an incomplete view that declares
-	// no loss, any other reason, or any other state is not.
-	declaredLoss := resp.View.LossCount > 0 || len(resp.View.Loss) > 0 || resp.View.Truncated
-	switch {
-	case resp.State == httpapi.StateReady && resp.View.Completeness == "complete":
-	case resp.State == httpapi.StateIncomplete && resp.Reason == profiles.ReasonCoverageIncomplete && resp.View.Completeness == "partial" && declaredLoss:
-	default:
-		return fail("profile_not_ready", "state=%s reason=%s completeness=%s declared_loss=%v", resp.State, resp.Reason, resp.View.Completeness, declaredLoss)
+	resp, v := profileViewOf(p.Read, p.Profile)
+	if !v.ok {
+		return v
 	}
 	view := resp.View
-	if len(view.Samples) == 0 {
-		return fail("profile_has_no_samples", "the stored profile %s has no sample", p.Profile)
-	}
 	if !slices.ContainsFunc(view.Frames, func(f model.ProfileFrame) bool { return strings.Contains(f.Function, runtimeProfileFunction) }) {
 		return fail("profile_misses_the_sampled_function", "no frame of profile %s names %s", p.Profile, runtimeProfileFunction)
 	}
@@ -780,6 +838,137 @@ func runtimeProfileRow(o journeyObservation) verdict {
 		return fail("profile_capability_not_linked", "profile %s names no supported %s capability record", p.Profile, runtimeProfileMethod)
 	}
 	return pass("profile=%s samples=%d state=%s loss=%d capability=supported/%s", p.Profile, len(view.Samples), resp.State, view.LossCount, runtimeProfileMethod)
+}
+
+const (
+	// browserProfileMethod is the browser SDK's own capability method (the stored chunk method is the closed runtime_cpu vocabulary).
+	browserProfileMethod = "browser_js_self_profile"
+	// browserProfileScriptPrefix is where the shipped bundle's scripts live: a browser frame is the code identity of a script path (never a URL).
+	browserProfileScriptPrefix = "assets/"
+)
+
+// browserProfileRow: the profile a real browser delivered through the SDK is stored once, and the product's own profile route reads it back
+// with the supported capability record the chunks name, samples, and frames that are the shipped bundle's origin-relative script paths.
+func browserProfileRow(o journeyObservation) verdict {
+	p := o.Profile
+	switch {
+	case !p.Attempted:
+		return fail("not_attempted", "the profile scenario did not run")
+	case p.StoredProfile == 0:
+		return fail("browser_profile_not_stored", "%d capability record(s) stored, no profile chunk", p.StoredCapability)
+	case len(p.ProfileIDs) != 1:
+		return fail("browser_profile_ambiguous", "the stored chunks name %d profiles, want one", len(p.ProfileIDs))
+	}
+	id := p.ProfileIDs[0]
+	resp, v := profileViewOf(p.Read, id)
+	if !v.ok {
+		return v
+	}
+	view := resp.View
+	if len(view.Samples) != p.StoredSamples {
+		return fail("browser_profile_samples_differ", "storage holds %d sample(s) of profile %s, the route shows %d", p.StoredSamples, id, len(view.Samples))
+	}
+	if !slices.ContainsFunc(view.Frames, func(f model.ProfileFrame) bool {
+		return strings.HasPrefix(f.Module, browserProfileScriptPrefix) && !strings.ContainsAny(f.Module+f.Artifact+f.Function, "?#:")
+	}) {
+		return fail("browser_profile_frames_not_the_bundle", "no frame of profile %s is a script path of the shipped bundle", id)
+	}
+	linked := slices.ContainsFunc(view.Capabilities, func(c profiles.CapabilityRecord) bool {
+		return slices.Contains(p.ChunkCapabilities, c.ID) && c.Value.Signal == model.Profile && c.Value.Status == "supported" && c.Value.Method == browserProfileMethod
+	})
+	if !linked {
+		return fail("browser_profile_capability_not_linked", "profile %s names no supported %s capability record", id, browserProfileMethod)
+	}
+	return pass("profile=%s samples=%d state=%s loss=%d capability=supported/%s", id, len(view.Samples), resp.State, view.LossCount, browserProfileMethod)
+}
+
+// browserRefusals are the two refusals a real Chrome gives the SDK, and what each must report: the Document-Policy header absent (the Profiler
+// constructor throws NotAllowedError) and the API absent altogether.
+var browserRefusals = []struct{ variant, status, reason string }{
+	{"denied", "denied", "document_policy_missing"},
+	{"unsupported", "unsupported", "js_self_profiling_unavailable"},
+}
+
+// profileRefusalsRow: a browser that refuses to sample still delivers the capability truth record through the ordinary queue, acknowledged and
+// stored with the status and reason the page reported, and no profile chunk names it. The product's profile route, asked about the record's id,
+// shows no profile (a refused run has no profile id: the route reads chunks).
+func profileRefusalsRow(o journeyObservation) verdict {
+	p := o.Profile
+	var parts []string
+	for _, want := range browserRefusals {
+		var r *profileRefusal
+		for i := range p.Refusals {
+			if p.Refusals[i].Variant == want.variant {
+				r = &p.Refusals[i]
+			}
+		}
+		switch {
+		case r == nil || !r.Attempted:
+			return fail("refusal_not_attempted", "the %s profile scenario did not run", want.variant)
+		case r.CapabilityID == (model.ID{}):
+			return fail("refusal_capability_id_missing", "the %s run reported no capability record id", want.variant)
+		case r.DriverStatus != want.status || r.DriverReason != want.reason:
+			return fail("refusal_status_differs", "the %s run reported %s/%s, want %s/%s", want.variant, r.DriverStatus, r.DriverReason, want.status, want.reason)
+		case r.AckStatus != "obtained" || r.AckCursors == 0 || r.Lost > 0 || r.Pending > 0:
+			return fail("refusal_not_acknowledged", "the %s run's delivery: ack=%s cursors=%d, flush lost=%d pending=%d", want.variant, r.AckStatus, r.AckCursors, r.Lost, r.Pending)
+		}
+		i := slices.IndexFunc(p.Capabilities, func(c storedCapability) bool { return c.ID == r.CapabilityID })
+		if i < 0 {
+			return fail("refusal_not_stored", "no stored capability record %s for the %s run", r.CapabilityID, want.variant)
+		}
+		c := p.Capabilities[i]
+		if c.Status != r.DriverStatus || c.Reason != r.DriverReason || c.Method != browserProfileMethod || c.Signal != model.Profile {
+			return fail("refusal_stored_differs", "stored %s: %s/%s method=%s signal=%s; the page reported %s/%s", r.CapabilityID, c.Status, c.Reason, c.Method, c.Signal, r.DriverStatus, r.DriverReason)
+		}
+		if slices.Contains(p.ChunkCapabilities, r.CapabilityID) {
+			return fail("refusal_has_chunks", "a stored profile chunk names the %s run's capability %s", want.variant, r.CapabilityID)
+		}
+		if r.Read == nil {
+			return fail("refusal_not_read", "the profile route was not asked about the %s run's record %s", want.variant, r.CapabilityID)
+		}
+		switch r.Read.Status {
+		case 404:
+		case 200:
+			var resp httpapi.ProfileResponse
+			if json.Unmarshal(r.Read.Body, &resp) != nil || resp.View != nil && len(resp.View.Samples) > 0 {
+				return fail("refusal_read_shows_samples", "the profile route shows a profile for the %s run's capability record %s", want.variant, r.CapabilityID)
+			}
+		default:
+			return fail("refusal_read_failed", "the profile route answered %d for the %s run's record", r.Read.Status, want.variant)
+		}
+		parts = append(parts, fmt.Sprintf("%s=%s/%s stored as %s, route %d", want.variant, c.Status, c.Reason, r.CapabilityID, r.Read.Status))
+	}
+	return pass("%s; no chunk names either record", strings.Join(parts, "; "))
+}
+
+// browserDocumentPolicyMessage is what Chrome itself logs, as a console error, when a page without the `js-profiling` Document-Policy constructs a
+// Profiler. The SDK catches the refusal and reports it as capability truth; the browser's own log line is not the page's to suppress.
+const browserDocumentPolicyMessage = "Document policy violation: js-profiling is not allowed in this document."
+
+// profileConsoleRow: the browser's console errors in the profile scenarios are all accounted for. The supported run and the unsupported run log none
+// (the reference gateway answers the browser's /favicon.ico request, which used to be the one 404 console error of every page); the denied run logs
+// exactly the browser's own Document-Policy refusal, raised from the shipped bundle's script.
+func profileConsoleRow(o journeyObservation) verdict {
+	p := o.Profile
+	if !p.Attempted || len(p.Refusals) != len(browserRefusals) {
+		return fail("not_attempted", "the profile scenarios did not all run")
+	}
+	if len(p.ConsoleErrors) > 0 {
+		return fail("console_error_unexplained", "the supported run logged %q from %s", p.ConsoleErrors[0].Text, p.ConsoleErrors[0].Path)
+	}
+	for _, r := range p.Refusals {
+		switch r.Variant {
+		case "denied":
+			if len(r.ConsoleErrors) != 1 || r.ConsoleErrors[0].Text != browserDocumentPolicyMessage || !strings.HasPrefix(r.ConsoleErrors[0].Path, "/"+browserProfileScriptPrefix) {
+				return fail("console_error_unexplained", "the denied run logged %d console error(s), want exactly the browser's Document-Policy refusal from the bundle: %+v", len(r.ConsoleErrors), r.ConsoleErrors)
+			}
+		default:
+			if len(r.ConsoleErrors) > 0 {
+				return fail("console_error_unexplained", "the %s run logged %q from %s", r.Variant, r.ConsoleErrors[0].Text, r.ConsoleErrors[0].Path)
+			}
+		}
+	}
+	return pass("supported and unsupported runs log no console error; the denied run logs only the browser's own Document-Policy refusal")
 }
 
 func idsEqual(o journeyObservation) verdict {

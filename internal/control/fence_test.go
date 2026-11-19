@@ -48,7 +48,18 @@ func (f *fenceFx) write(attempt func() error) error {
 	return f.retry(attempt)
 }
 
-func newFenceFx(t *testing.T) *fenceFx {
+func newFenceFx(t *testing.T) *fenceFx { return newFenceFxWith(t, true, false) }
+
+// newFenceFxPatch is newFenceFx proposing every command as a state patch (the gate of a group whose
+// members all declared protocol 5 is open): the mode in which the per-organization authority revision
+// applies (authority_org.go).
+func newFenceFxPatch(t *testing.T) *fenceFx { return newFenceFxWith(t, true, true) }
+
+// newFenceFxUnbound is newFenceFxPatch without the retention handlers: a test that registers its own
+// handler for a retention kind needs the kind free (RegisterHandler refuses a second one).
+func newFenceFxUnbound(t *testing.T) *fenceFx { return newFenceFxWith(t, false, true) }
+
+func newFenceFxWith(t *testing.T, bindRetention, patch bool) *fenceFx {
 	t.Helper()
 	f := &fenceFx{t: t, ctx: context.Background(), now: time.Unix(1_800_000_000, 0)}
 	dir := t.TempDir()
@@ -57,6 +68,9 @@ func newFenceFx(t *testing.T) *fenceFx {
 	if f.store, err = control.Open(dir); err != nil {
 		t.Fatal(err)
 	}
+	if patch {
+		f.store.SetStatePatchGate(func() bool { return true })
+	}
 	t.Cleanup(func() { f.store.Close() })
 	if f.svc, err = auth.NewService(auth.AuthDependencies{Control: f.store, Now: func() time.Time { return f.now }}); err != nil {
 		t.Fatal(err)
@@ -64,8 +78,10 @@ func newFenceFx(t *testing.T) *fenceFx {
 	if err = f.store.EnableSingle(f.ctx, filepath.Join(dir, "raft-control")); err != nil {
 		t.Fatal(err)
 	}
-	if err = f.store.BindRetention(); err != nil {
-		t.Fatal(err)
+	if bindRetention {
+		if err = f.store.BindRetention(); err != nil {
+			t.Fatal(err)
+		}
 	}
 	boot, _ := f.store.BootstrapToken()
 	s, err := f.svc.Bootstrap(f.ctx, boot, "owner@example.test", "a long test password 2026")

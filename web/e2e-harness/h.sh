@@ -121,7 +121,8 @@ up() {
 	[ "$code" = 200 ] || { echo "bootstrap failed: HTTP $code" >&2; cat "$T/bootstrap.json" >&2; exit 1; }
 	rm -f "$T/bootstrap.json"
 	cfgs
-	SOUNDPOST_OIDC_ISSUER=$issuer PROVISION_OUT=$T/provision.env pw_env exec_pw -c zz-pw.provision.config.ts e2e-provision/provision.spec.ts
+	# The provisioning spec is Chromium-only (it runs with the leaf's SPKI pin), whatever browser the run is for: never inside the WebKit trust namespace.
+	E2E_BROWSER=chromium SOUNDPOST_OIDC_ISSUER=$issuer PROVISION_OUT=$T/provision.env pw_env exec_pw -c zz-pw.provision.config.ts e2e-provision/provision.spec.ts
 	echo "up pid $(cat "$T/server.pid") origin $ORIGIN"
 }
 
@@ -133,13 +134,14 @@ const args=['--ignore-certificate-errors-spki-list='+process.env.E2E_SPKI];
 const headed=process.env.E2E_HEADED==='1';
 export default {...base,outputDir:process.env.E2E_OUT_DIR||'test-results',use:{...base.use,...(headed?{headless:false,screenshot:'on',trace:'on'}:{})},projects:base.projects.filter((p)=>p.name==='chromium').map((p)=>({...p,use:{...p.use,launchOptions:{executablePath:process.env.CHROME,args,...(headed?{slowMo:120}:{})}}}))};
 XX
-	# E2E_BROWSER=firefox|webkit selects the Playwright-bundled browser (PLAYWRIGHT_BROWSERS_PATH); neither takes Chrome's SPKI pin flag, so the
-	# loopback private-CA origin is trusted with ignoreHTTPSErrors (the origin is 127.0.0.1 and the CA is this run's own).
+	# E2E_BROWSER=firefox|webkit selects the Playwright-bundled browser (PLAYWRIGHT_BROWSERS_PATH). Neither takes Chrome's SPKI pin flag, and neither runs with
+	# ignoreHTTPSErrors: they verify the loopback origin's certificate against the CA THIS run generated, which pw_env makes them trust (trust_files):
+	# Firefox through an enterprise policy (Certificates.Install) and WebKit through a private mount namespace whose CA bundle also lists the run CA.
 	cat >zz-pw.other.config.ts <<'XX'
 import base from './playwright.config';
 const headed=process.env.E2E_HEADED==='1';
 const name=process.env.E2E_BROWSER||'firefox';
-export default {...base,outputDir:process.env.E2E_OUT_DIR||'test-results',use:{...base.use,ignoreHTTPSErrors:true,...(headed?{headless:false,screenshot:'on',trace:'on'}:{})},projects:base.projects.filter((p)=>p.name===name).map((p)=>({...p,use:{...p.use,launchOptions:{...(headed?{slowMo:120}:{})}}}))};
+export default {...base,outputDir:process.env.E2E_OUT_DIR||'test-results',use:{...base.use,...(headed?{headless:false,screenshot:'on',trace:'on'}:{})},projects:base.projects.filter((p)=>p.name===name).map((p)=>({...p,use:{...p.use,launchOptions:{...(headed?{slowMo:120}:{})}}}))};
 XX
 	cat >zz-pw.provision.config.ts <<'XX'
 import base from './playwright.provision.config';
@@ -149,20 +151,39 @@ XX
 	cd "$ROOT"
 }
 
+# trust_files: what Firefox and WebKit need to verify this run's private CA (Chromium has the leaf's SPKI pin instead). Firefox reads the policy file named by
+# PLAYWRIGHT_FIREFOX_POLICIES_JSON (a Playwright Firefox feature) and installs the CA into its own store. WebKit has no certificate switch and reads the system
+# CA bundle; with no root to change it, in-trust-ns.sh runs the test runner (and so the browser) in a private user+mount namespace where the bundle's directory is
+# overlaid with one that also lists the run CA. Nothing outside that namespace changes, and the overlay dies with the run.
+trust_files() {
+	printf '{"policies":{"Certificates":{"Install":["%s"]}}}\n' "$PKI/ca.pem" >"$PKI/firefox-policies.json"
+	export PLAYWRIGHT_FIREFOX_POLICIES_JSON=$PKI/firefox-policies.json
+	for bundle in /etc/ssl/certs/ca-certificates.crt /etc/pki/tls/certs/ca-bundle.crt /etc/ssl/ca-bundle.pem; do [ -r "$bundle" ] && break; bundle=""; done
+	if [ -n "$bundle" ] && [ "${E2E_WEBKIT_TRUST:-ns}" = ns ]; then
+		rm -rf "$PKI/trust-overlay"; mkdir -p "$PKI/trust-overlay"
+		cat "$bundle" "$PKI/ca.pem" >"$PKI/trust-overlay/$(basename "$bundle")"
+		export E2E_TRUST_OVERLAY=$PKI/trust-overlay E2E_TRUST_DIR=$(dirname "$bundle")
+	else
+		# E2E_WEBKIT_TRUST=system: the host's own CA bundle already lists the run CA (installed by an administrator).
+		unset E2E_TRUST_OVERLAY E2E_TRUST_DIR
+	fi
+}
+
 pw_env() {
 	export NODE_EXTRA_CA_CERTS=$PKI/ca.pem SOUNDPOST_TEST_ORIGIN=$ORIGIN SOUNDPOST_SCOPE_EMAIL=e2e-owner@example.test SOUNDPOST_SCOPE_PASSWORD='e2e instance owner password 2026'
 	export E2E_FAULT_DIR=$T/fault E2E_SPKI=$(cat "$PKI/spki.txt") CHROME E2E_SERVER_LOG=$T/server.log E2E_DATA_DIR=$DATA E2E_BIN=$BIN E2E_ORIGIN_PORT=$PORT E2E_PKI=$PKI E2E_NATIVE_PROFILE=$T/native-profile.json E2E_OUT_DIR=${E2E_OUT_DIR:-$OUT/test-results} E2E_EVIDENCE_DIR=${E2E_EVIDENCE_DIR:-$OUT/evidence}
 	[ -f "$T/provision.env" ] && . "$T/provision.env"
+	trust_files
 	"$@"
 }
-exec_pw() { ( cd "$ROOT/web" && exec node node_modules/@playwright/test/cli.js test "$@" ); }
+exec_pw() { ( cd "$ROOT/web" && exec sh "$ROOT/web/e2e-harness/in-trust-ns.sh" node node_modules/@playwright/test/cli.js test "$@" ); }
 
 case "${1:-}" in
 prep) prep ;;
 up) shift; up "$@" ;;
 down) down ;;
 pw) shift; cfgs; b=${E2E_BROWSER:-chromium}; cfg=zz-pw.local.config.ts; [ "$b" = chromium ] || cfg=zz-pw.other.config.ts; case " $* " in *" --project"*) ;; *) set -- --project=$b "$@" ;; esac; pw_env exec_pw -c $cfg "$@" ;;
-headed) shift; cfgs; b=${E2E_BROWSER:-chromium}; cfg=zz-pw.local.config.ts; [ "$b" = chromium ] || cfg=zz-pw.other.config.ts; E2E_HEADED=1 pw_env xvfb-run -a -s "-screen 0 1440x1000x24" sh -c "cd '$ROOT/web' && exec node node_modules/@playwright/test/cli.js test -c $cfg --project=$b \"\$@\"" sh "$@" ;;
+headed) shift; cfgs; b=${E2E_BROWSER:-chromium}; cfg=zz-pw.local.config.ts; [ "$b" = chromium ] || cfg=zz-pw.other.config.ts; E2E_HEADED=1 pw_env xvfb-run -a -s "-screen 0 1440x1000x24" sh -c "cd '$ROOT/web' && exec sh '$ROOT/web/e2e-harness/in-trust-ns.sh' node node_modules/@playwright/test/cli.js test -c $cfg --project=$b \"\$@\"" sh "$@" ;;
 run) shift; mode=$1; shift; oidc=$1; shift; [ "$oidc" = oidc ] || oidc=""; rc=0; up $oidc && sh "$0" "$mode" "$@" || rc=$?; down >/dev/null; exit $rc ;;
 # suite ARGS: the whole committed suite (every spec but restore.spec.ts, which needs restore.sh) with the OIDC fixture. The fault specs remove shards
 # of the server FOR GOOD (server-states removes all 64, shard-loss half and all of them) and say they need a server of their own: every spec after
