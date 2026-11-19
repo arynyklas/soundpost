@@ -57,7 +57,7 @@ func main() {
 	flag.StringVar(&e.binary, "binary", "", "linux soundpost binary")
 	flag.StringVar(&e.root, "root", ".", "repository root")
 	flag.StringVar(&e.bun, "bun", "", "Linux Bun")
-	flag.StringVar(&e.pgImage, "pg-image", "92620daddcd9", "LOCAL PostgreSQL 16 image (never pulled)")
+	flag.StringVar(&e.pgImage, "pg-image", "postgres@sha256:92620daddcd947f8d5ab5ba66e848702fe443d87fed30c4cea8e389fd78dfc55", "LOCAL PostgreSQL 16 image (never pulled): the digest fixtures/sdk/compose.yaml pins")
 	flag.StringVar(&e.pgDSN, "pg-dsn", "", "use this existing PostgreSQL database instead of a throwaway container (hosts without docker; the exact server version goes into the evidence row)")
 	out := flag.String("out", "", "evidence JSON path")
 	flag.Parse()

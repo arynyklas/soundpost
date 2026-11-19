@@ -102,6 +102,8 @@ docker image inspect --format '{{.Id}}' soundpost-symbolicate:qualification
 
 Keep the build context private and limited to that binary; configure the returned immutable ID and observed binary hash. Arm64 needs its own actual build and qualification. No image publication is needed or authorized by this procedure.
 
+**More than one Docker daemon.** The immutable ID is local to the daemon that built the image: building the same tree and Dockerfile on two hosts gives the same worker SHA-256 (`go build -trimpath` is reproducible) but different image IDs (layer timestamps), and a configuration naming one daemon's ID fails closed on another (`sandbox_unavailable`; the image is not found). Either build and configure on each daemon, or move the image with `docker save` on the first host and `docker load` on the second: `docker load` keeps the ID, so one configuration file is then valid on both. The sweep and the container removal act on one daemon only (the runtime named in `oci_runtime`); two services on two hosts never see each other's containers. Observed on two Docker 26.1.5 hosts (overlay2, cgroup v2): `.superpowers/sdd/approved-product/l2w19-evidence/`.
+
 ## Parent qualification and actual fixture
 
 The worker implementation author did not run tests/builds/formatters/probes. A skipped environment-gated test is not qualification. Set the private operator-config file and actual Vite fixture directory, then the parent runs:

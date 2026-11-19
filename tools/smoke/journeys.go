@@ -53,7 +53,7 @@ func RunJourneys(args []string) (result error) {
 	fs.StringVar(&j.nodeLinux, "node-linux", "", "Linux Node 22 (default: extracted from /tmp/node22.tar.xz after its sha256 check)")
 	fs.StringVar(&j.python, "python", "python3", "Python 3")
 	fs.StringVar(&j.chrome, "chrome", "", "Linux Chrome (default: <root>/.tools/chrome-linux156/chrome-linux64/chrome)")
-	fs.StringVar(&j.pgImage, "pg-image", "92620daddcd9", "LOCAL PostgreSQL 16 image (never pulled)")
+	fs.StringVar(&j.pgImage, "pg-image", "postgres@sha256:92620daddcd947f8d5ab5ba66e848702fe443d87fed30c4cea8e389fd78dfc55", "LOCAL PostgreSQL 16 image (never pulled): the digest fixtures/sdk/compose.yaml pins")
 	fs.StringVar(&j.pgLocal, "pg-local", "", "PostgreSQL 16 installation directory (bin/ and lib/): start an unprivileged local server instead of a container")
 	fs.StringVar(&j.cgroupRoot, "symbolicate-cgroup-root", "", "already delegated, empty cgroup v2 subtree for the node's native symbolication sandbox (default: the node's own cgroup)")
 	fs.BoolVar(&j.hold, "hold", false, "provision, write hold.json and wait for SIGINT (for developing the applications)")

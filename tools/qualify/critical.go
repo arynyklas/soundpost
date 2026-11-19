@@ -14,9 +14,10 @@ import (
 	"time"
 )
 
-// criticalPGImage is the local PostgreSQL 16 image the committed critical-path command starts for the database paths (its --pg-image
-// default). It is only ever inspected here, never pulled, rebuilt or retagged.
-const criticalPGImage = "92620daddcd9"
+// criticalPGImage is the PostgreSQL 16 image the committed critical-path command starts for the database paths (its --pg-image
+// default), named by the manifest digest fixtures/sdk/compose.yaml pins. A digest reference resolves on a containerd image store and on
+// a classic overlay2 one alike; a bare id prefix does not. It is only ever inspected here, never pulled, rebuilt or retagged.
+const criticalPGImage = "postgres@sha256:92620daddcd947f8d5ab5ba66e848702fe443d87fed30c4cea8e389fd78dfc55"
 
 // criticalPGPresent says why the PostgreSQL critical paths cannot start on this host, or "" when Docker and the pinned image exist.
 // It is a variable so a test can stand in for the host without a Docker daemon.

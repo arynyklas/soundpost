@@ -172,3 +172,38 @@ func TestPythonCriticalPathNeverRunsInAVenvWithoutTheIntegrationLock(t *testing.
 		t.Fatalf("bun jobs: %+v", row)
 	}
 }
+
+// The database paths name the PostgreSQL 16 image by its manifest digest, the same pin fixtures/sdk/compose.yaml carries. A bare id
+// prefix (92620daddcd9) is the digest only on a containerd image store; on a classic overlay2 daemon (Docker 26 on the second host)
+// the pulled pin has image id 67d1da22... and `docker image inspect 92620daddcd9` finds nothing, so the rows were never exercised there.
+// Every place that defaults the image must carry the same digest reference.
+func TestCriticalPostgresImageIsTheCommittedDigestPin(t *testing.T) {
+	compose, err := os.ReadFile(filepath.Join("..", "..", "fixtures", "sdk", "compose.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pin string
+	for _, line := range strings.Split(string(compose), "\n") {
+		if rest, ok := strings.CutPrefix(strings.TrimSpace(line), "image: postgres@sha256:"); ok {
+			pin = "postgres@sha256:" + strings.TrimSpace(rest)
+		}
+	}
+	if len(pin) != len("postgres@sha256:")+64 {
+		t.Fatalf("fixtures/sdk/compose.yaml carries no full postgres digest pin: %q", pin)
+	}
+	if criticalPGImage != pin {
+		t.Errorf("criticalPGImage = %q, want the committed pin %q (a bare id prefix does not resolve on a classic image store)", criticalPGImage, pin)
+	}
+	for _, file := range []string{
+		filepath.Join("..", "..", "fixtures", "sdk", "critical", "main.go"),
+		filepath.Join("..", "smoke", "journeys.go"),
+	} {
+		src, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(src), `"pg-image", "`+pin+`"`) {
+			t.Errorf("%s: the --pg-image default is not the committed digest pin %s", file, pin)
+		}
+	}
+}
