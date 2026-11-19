@@ -31,6 +31,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -43,7 +44,8 @@ import (
 )
 
 type env struct {
-	binary, root, work, bun, pgImage, pgDSN string
+	binary, root, work, bun, pgImage, pgDSN, pgDSNImage string
+	pgRecord                                            map[string]string // postgresRecord: the identity every evidence row carries for its PostgreSQL
 }
 
 func main() {
@@ -58,12 +60,15 @@ func main() {
 	flag.StringVar(&e.root, "root", ".", "repository root")
 	flag.StringVar(&e.bun, "bun", "", "Linux Bun")
 	flag.StringVar(&e.pgImage, "pg-image", "postgres@sha256:92620daddcd947f8d5ab5ba66e848702fe443d87fed30c4cea8e389fd78dfc55", "LOCAL PostgreSQL 16 image (never pulled): the digest fixtures/sdk/compose.yaml pins")
-	flag.StringVar(&e.pgDSN, "pg-dsn", "", "use this existing PostgreSQL database instead of a throwaway container (hosts without docker; the exact server version goes into the evidence row)")
+	flag.StringVar(&e.pgDSN, "pg-dsn", "", "use this existing PostgreSQL database instead of a throwaway container (hosts without docker); needs --pg-dsn-image")
+	flag.StringVar(&e.pgDSNImage, "pg-dsn-image", "", "with --pg-dsn: the digest reference of the image the DSN's server was started from (must be the --pg-image pin); the evidence rows record this digest, never a free-text string")
 	out := flag.String("out", "", "evidence JSON path")
 	flag.Parse()
 	var err error
 	e.root, err = filepath.Abs(e.root)
 	estate.Must(err, "root")
+	e.pgRecord, err = postgresRecord(e.pgImage, e.pgDSN, e.pgDSNImage)
+	estate.Must(err, "postgres image")
 	e.work, err = os.MkdirTemp(filepath.Join(e.root, ".tools"), "critical-")
 	estate.Must(err, "work")
 	defer os.RemoveAll(e.work)
@@ -171,7 +176,8 @@ func (e *env) python(label, venv string) map[string]any {
 			rc = ee.ExitCode()
 		}
 	}
-	row := map[string]any{"fixture": "fixtures/sdk/python/critical_path.py", "python": version, "postgres_image": e.postgresSource(), "exit_code": rc, "stdout": strings.TrimSpace(stdout.String()), "stderr": estate.Tail(stderr.String()), "verifier_route": "/api/v1/exports"}
+	row := map[string]any{"fixture": "fixtures/sdk/python/critical_path.py", "python": version, "exit_code": rc, "stdout": strings.TrimSpace(stdout.String()), "stderr": estate.Tail(stderr.String()), "verifier_route": "/api/v1/exports"}
+	e.stampPostgres(row)
 	if rc != 0 {
 		raw, _ := json.Marshal(row)
 		fmt.Println(string(raw))
@@ -404,7 +410,8 @@ func (e *env) browser(target, executable, node string) map[string]any {
 		_ = syscall.Kill(-backend.Process.Pid, syscall.SIGKILL)
 		backendExit = fmt.Errorf("backend did not close")
 	}
-	row := map[string]any{"fixture": "fixtures/sdk/browser/critical-path.spec.ts", "target": target, "backend_runtime": ready.Runtime, "postgres_image": e.postgresSource(), "verifier_route": "/api/v1/exports", "playwright": estate.Tail(pwOut.String())}
+	row := map[string]any{"fixture": "fixtures/sdk/browser/critical-path.spec.ts", "target": target, "backend_runtime": ready.Runtime, "verifier_route": "/api/v1/exports", "playwright": estate.Tail(pwOut.String())}
+	e.stampPostgres(row)
 	if pwErr != nil || backendExit != nil {
 		fmt.Fprintln(os.Stderr, pwOut.String())
 		raw, _ := json.Marshal(row)
@@ -746,10 +753,32 @@ func (e *env) delivery(nodes string) []map[string]any {
 	return rows
 }
 
-// postgresSource names where the evidence row's PostgreSQL came from: the pinned image, or the operator-supplied server of --pg-dsn.
-func (e *env) postgresSource() string {
-	if e.pgDSN == "" {
-		return e.pgImage
+var pgDigestRef = regexp.MustCompile(`^postgres@sha256:[0-9a-f]{64}$`)
+
+// postgresRecord is the PostgreSQL identity every database evidence row carries: always the digest of the pinned image, plus how that
+// server was provided. A container the tool starts is the pinned image by construction. A server reached by --pg-dsn is the operator's:
+// the tool cannot inspect an image behind a DSN, so the operator states the digest it was started from (--pg-dsn-image), that statement
+// must be the pin, and the row says it is an operator attestation ("postgres_image_attestation": "operator") rather than a start by the
+// tool. A tag, a bare id prefix, another digest or a free-text sentence is refused.
+func postgresRecord(pinned, dsn, dsnImage string) (map[string]string, error) {
+	if !pgDigestRef.MatchString(pinned) {
+		return nil, fmt.Errorf("--pg-image %q is not a digest reference postgres@sha256:<64 hex> (a tag or id prefix names no fixed image)", pinned)
 	}
-	return "operator-supplied server (--pg-dsn), not the pinned image " + e.pgImage
+	if dsn == "" {
+		if dsnImage != "" {
+			return nil, fmt.Errorf("--pg-dsn-image without --pg-dsn: the tool starts the pinned container itself")
+		}
+		return map[string]string{"postgres_image": pinned, "postgres_server": "container_started_by_tool"}, nil
+	}
+	if dsnImage != pinned {
+		return nil, fmt.Errorf("--pg-dsn needs --pg-dsn-image %s: the digest of the image the server was started from must be the pinned one (got %q)", pinned, dsnImage)
+	}
+	return map[string]string{"postgres_image": pinned, "postgres_server": "dsn", "postgres_image_attestation": "operator"}, nil
+}
+
+// stampPostgres adds the PostgreSQL identity to an evidence row.
+func (e *env) stampPostgres(row map[string]any) {
+	for k, v := range e.pgRecord {
+		row[k] = v
+	}
 }

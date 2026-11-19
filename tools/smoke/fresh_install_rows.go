@@ -158,7 +158,7 @@ func referenceJourneysRow(j journeysOptions) (string, error) {
 	if required == 0 || satisfied != required {
 		return "", fmt.Errorf("%d of %d required journey rows satisfied", satisfied, required)
 	}
-	backend := "PostgreSQL 16 container from local image " + j.PGImage
+	backend := "the compose backing services (PostgreSQL 16 and the dependency) of examples/reference/compose.yaml, image " + j.PGImage
 	if j.PGLocal != "" {
 		backend = "unprivileged PostgreSQL 16 from " + j.PGLocal
 	}

@@ -73,7 +73,7 @@ func RunFreshInstallMatrix(args []string) (result error) {
 	root := f.String("root", ".", "repository root (installed @noble packages are copied from it)")
 	chrome := f.String("chrome", "", "Linux Chrome for the reference_journeys row")
 	nodeLinux := f.String("node-linux", "", "Linux Node 22 for the reference_journeys row")
-	pgImage := f.String("pg-image", "", "LOCAL PostgreSQL 16 image (never pulled) for the reference_journeys row")
+	pgImage := f.String("pg-image", "", "PostgreSQL 16 image pinned by id (sha256:<64 hex>) or digest (name@sha256:<64 hex>), never pulled, for the reference_journeys row's compose backing services")
 	pgLocal := f.String("pg-local", "", "PostgreSQL 16 installation directory for the reference_journeys row (instead of --pg-image)")
 	cgroupRoot := f.String("symbolicate-cgroup-root", "", "delegated cgroup v2 subtree for the node's native symbolication sandbox (reference_journeys)")
 	if err := f.Parse(args); err != nil {

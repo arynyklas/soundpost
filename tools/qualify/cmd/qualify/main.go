@@ -17,7 +17,12 @@
 //
 //	qualify evidence --kind runtime|privacy --matrix <file> --commit <sha> --out <file> --report <suite-report.json> ...
 //
-// which only converts the written rows into the soundpost-release-evidence/1 envelope.
+// which only converts the written rows into the soundpost-release-evidence/1 envelope. The suites of one matrix run on several hosts
+// (a host holds the Node builds installed on it) are combined first, row by row, bound to the run that observed each row:
+//
+//	qualify merge --out <merged-report.json> [--source <64-hex>] --report <suite-report.json> [--report ...]
+//
+// A report stamped against another source digest than the merged report is built for refuses the merge.
 package main
 
 import (
@@ -33,6 +38,9 @@ import (
 func main() { os.Exit(run(os.Args[1:])) }
 
 func run(args []string) int {
+	if len(args) > 0 && args[0] == "merge" {
+		return runMerge(args[1:], os.Stdout, os.Stderr)
+	}
 	if len(args) > 0 && args[0] == "evidence" {
 		return runEvidence(args[1:], os.Stdout, os.Stderr)
 	}

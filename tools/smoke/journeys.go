@@ -5,9 +5,7 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -53,8 +51,9 @@ func RunJourneys(args []string) (result error) {
 	fs.StringVar(&j.nodeLinux, "node-linux", "", "Linux Node 22 (default: extracted from /tmp/node22.tar.xz after its sha256 check)")
 	fs.StringVar(&j.python, "python", "python3", "Python 3")
 	fs.StringVar(&j.chrome, "chrome", "", "Linux Chrome (default: <root>/.tools/chrome-linux156/chrome-linux64/chrome)")
-	fs.StringVar(&j.pgImage, "pg-image", "postgres@sha256:92620daddcd947f8d5ab5ba66e848702fe443d87fed30c4cea8e389fd78dfc55", "LOCAL PostgreSQL 16 image (never pulled): the digest fixtures/sdk/compose.yaml pins")
-	fs.StringVar(&j.pgLocal, "pg-local", "", "PostgreSQL 16 installation directory (bin/ and lib/): start an unprivileged local server instead of a container")
+	fs.StringVar(&j.pgImage, "pg-image", "", "container mode: PostgreSQL 16 image pinned by id (sha256:<64 hex>) or digest (name@sha256:<64 hex>); never pulled; default: the digest in "+referenceComposeRel)
+	fs.StringVar(&j.dependencyImage, "dependency-image", "", "container mode: Python image of the dependency, pinned like --pg-image; default: the digest in "+referenceComposeRel)
+	fs.StringVar(&j.pgLocal, "pg-local", "", "PostgreSQL 16 installation directory (bin/ and lib/): start an unprivileged local server (and the dependency as a host process) instead of the compose backing services")
 	fs.StringVar(&j.cgroupRoot, "symbolicate-cgroup-root", "", "already delegated, empty cgroup v2 subtree for the node's native symbolication sandbox (default: the node's own cgroup)")
 	fs.BoolVar(&j.hold, "hold", false, "provision, write hold.json and wait for SIGINT (for developing the applications)")
 	fs.StringVar(&j.attachPath, "cluster-attach", "", "run against the recovered distributed cluster this JSON document describes (tools/drills --scenario node-loss-journeys) instead of starting a node")
@@ -89,25 +88,26 @@ func RunJourneys(args []string) (result error) {
 }
 
 type journeyRun struct {
-	artDir, root, binary, release, bun, nodeLinux, python, chrome, pgImage, pgLocal, cgroupRoot string
-	spkiPin                                                                                     string
-	hold                                                                                        bool
+	artDir, root, binary, release, bun, nodeLinux, python, chrome, pgImage, dependencyImage, pgLocal, cgroupRoot string
+	spkiPin                                                                                                      string
+	hold                                                                                                         bool
 
-	work     string
-	pki      *journeyPKI
-	rep      map[string]any
-	logs     map[string]*syncBuffer
-	procs    []*jproc
-	pgName   string
-	pgDir    string
-	pgLog    string
-	pgPort   string
-	pgPass   string
-	nodeDir  string
-	nodeAddr string
-	node     *jproc
-	site     *installSite
-	owner    auth.Session
+	work       string
+	pki        *journeyPKI
+	rep        map[string]any
+	logs       map[string]*syncBuffer
+	procs      []*jproc
+	compose    *referenceCompose // container mode: the backing services of examples/reference/compose.yaml (nil with --pg-local)
+	composeEnv []string
+	pgDir      string
+	pgLog      string
+	pgPort     string
+	pgPass     string
+	nodeDir    string
+	nodeAddr   string
+	node       *jproc
+	site       *installSite
+	owner      auth.Session
 
 	exp   journeyExpected
 	obs   journeyObservation
@@ -254,10 +254,25 @@ func (j *journeyRun) toolchain() error {
 		if v["docker_server"], err = runOut(j.root, nil, "docker", "version", "--format", "{{.Server.Version}}"); err != nil {
 			return err
 		}
-		if id, err := runOut(j.root, nil, "docker", "image", "inspect", "--format", "{{.Id}}", j.pgImage); err == nil {
-			v["postgres_image_id"] = id
-		} else {
-			return fmt.Errorf("local PostgreSQL image %s is not available: %w", j.pgImage, err)
+		if v["docker_compose"], err = runOut(j.root, nil, "docker", "compose", "version", "--short"); err != nil {
+			return err
+		}
+		// The compose file's own variables name the same images; a run started by something that cannot pass flags (the drills, the
+		// fresh-install matrix) exports them, and they are held to the same pin as the flags.
+		if j.pgImage == "" {
+			j.pgImage = os.Getenv("REFERENCE_PG_IMAGE")
+		}
+		if j.dependencyImage == "" {
+			j.dependencyImage = os.Getenv("REFERENCE_PYTHON_IMAGE")
+		}
+		// An image the operator names is checked before anything starts; the compose file's own digests are pinned by construction.
+		for name, ref := range map[string]string{"--pg-image": j.pgImage, "--dependency-image": j.dependencyImage} {
+			if ref == "" {
+				continue
+			}
+			if err = pinnedImageRef(ref); err != nil {
+				return fmt.Errorf("%s: %w", name, err)
+			}
 		}
 	}
 	v["kernel"], _ = runOut(j.root, nil, "uname", "-r")
@@ -343,52 +358,14 @@ func (j *journeyRun) startPostgres() error {
 		j.obs.Versions["postgres"] = v
 		return nil
 	}
-	var rnd [12]byte
-	_, _ = rand.Read(rnd[:])
-	j.pgPass = hex.EncodeToString(rnd[:])
-	j.pgName = "soundpost-journeys-pg-" + hex.EncodeToString(rnd[:4])
-	// log_statement=all lets the smoke prove the SQL text (with its canary literal) really reached
-	// PostgreSQL; the statement log is PostgreSQL's own and never stored by the product.
-	if _, err := runOut(j.root, nil, "docker", "run", "-d", "--name", j.pgName, "--tmpfs", "/var/lib/postgresql/data", "-p", "127.0.0.1::5432",
-		"-e", "POSTGRES_PASSWORD="+j.pgPass, "-e", "POSTGRES_DB=reference", j.pgImage, "-c", "log_statement=all"); err != nil {
-		return err
-	}
-	out, err := runOut(j.root, nil, "docker", "port", j.pgName, "5432/tcp")
-	if err != nil {
-		return err
-	}
-	j.pgPort = out[strings.LastIndex(out, ":")+1:]
-	for i := 0; ; i++ {
-		if _, err = runOut(j.root, nil, "docker", "exec", j.pgName, "psql", "-U", "postgres", "-d", "reference", "-Atc", "select 1"); err == nil {
-			break
-		}
-		if i > 100 {
-			return errors.New("postgres did not become ready")
-		}
-		time.Sleep(300 * time.Millisecond)
-	}
-	schema, err := os.ReadFile(filepath.Join(j.root, "examples/reference/api/schema.sql"))
-	if err != nil {
-		return err
-	}
-	cmd := exec.Command("docker", "exec", "-i", j.pgName, "psql", "-U", "postgres", "-d", "reference", "-v", "ON_ERROR_STOP=1", "-q")
-	cmd.Stdin = bytes.NewReader(schema)
-	if b, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("schema: %w: %s", err, firstLine(string(b)))
-	}
-	v, err := j.psql("select version()")
-	if err != nil {
-		return err
-	}
-	j.obs.Versions["postgres"] = v
-	return nil
+	return j.startComposePostgres()
 }
 
 func (j *journeyRun) psql(q string) (string, error) {
 	if j.localPG() {
 		return j.pgRun("reference", q)
 	}
-	return runOut(j.root, nil, "docker", "exec", j.pgName, "psql", "-U", "postgres", "-d", "reference", "-Atc", q)
+	return runOut(j.root, j.composeEnv, j.compose.command("exec", "-T", "postgres", "psql", "-U", "postgres", "-d", "reference", "-Atc", q)...)
 }
 
 func (j *journeyRun) dsn() string {
@@ -614,7 +591,10 @@ func (j *journeyRun) writeConfig(c *appCfg, env model.ID) error {
 
 func (j *journeyRun) holdFile() error {
 	h := map[string]any{"work": j.work, "node": "https://" + j.nodeAddr, "ca": j.pki.CA, "cert": j.pki.Cert, "key": j.pki.Key, "gateway_listen": j.gw,
-		"database_url": j.dsn(), "artifact_token": j.token, "configs": map[string]string{}, "binary": j.binary, "python_path": j.pyPath, "postgres_container": j.pgName}
+		"database_url": j.dsn(), "artifact_token": j.token, "configs": map[string]string{}, "binary": j.binary, "python_path": j.pyPath}
+	if j.compose != nil {
+		h["compose_project"], h["compose_file"] = j.compose.Project, j.compose.File
+	}
 	for n, a := range j.apps {
 		h["configs"].(map[string]string)[n] = a.Path
 	}
@@ -698,8 +678,11 @@ func (j *journeyRun) buildWeb() error {
 // ---- the estate ----
 
 func (j *journeyRun) startEstate() error {
-	dep, err := freeAddress()
-	if err != nil {
+	var dep string
+	var err error
+	if j.compose != nil {
+		dep = "127.0.0.1:" + j.compose.DependencyPort
+	} else if dep, err = freeAddress(); err != nil {
 		return err
 	}
 	api, err := freeAddress()
@@ -717,8 +700,19 @@ func (j *journeyRun) startEstate() error {
 		return waitHTTPS(j.pki.client(), "https://"+addr+"/healthz", p, 60*time.Second)
 	}
 	j.rep["dependency_url"], j.rep["api_url"] = "https://"+dep, "https://"+api
-	if err = start("dependency", dep, pyEnv, j.python, filepath.Join(ref, "dependency/server.py"), "--listen", dep, "--cert", j.pki.Cert, "--key", j.pki.Key); err != nil {
+	if j.compose != nil {
+		// Container mode: the dependency is the compose service; `up` stays in the foreground, so the process' output is the container's log.
+		err = start("dependency", dep, append(os.Environ(), j.composeEnv...), j.compose.command("up", "--no-log-prefix", "dependency")...)
+	} else {
+		err = start("dependency", dep, pyEnv, j.python, filepath.Join(ref, "dependency/server.py"), "--listen", dep, "--cert", j.pki.Cert, "--key", j.pki.Key)
+	}
+	if err != nil {
 		return err
+	}
+	if j.compose != nil {
+		if j.obs.Versions["dependency_image_id"], err = j.composeImageID("dependency"); err != nil {
+			return err
+		}
 	}
 	if err = start("api", api, pyEnv, j.python, filepath.Join(ref, "api/serve.py"), "--listen", api, "--cert", j.pki.Cert, "--key", j.pki.Key, "--config", j.apps["api"].Path, "--ca", j.pki.CA, "--dependency-url", "https://"+dep); err != nil {
 		return err

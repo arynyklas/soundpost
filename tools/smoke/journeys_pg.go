@@ -110,17 +110,20 @@ func (j *journeyRun) applyLocalSchema(schemaPath string) error {
 	return nil
 }
 
-// postgresStatementLog is the server's own statement log (docker logs, or the local server's log file).
+// postgresStatementLog is the server's own statement log (the compose service's log, or the local server's log file).
 func (j *journeyRun) postgresStatementLog() (string, error) {
 	if j.localPG() {
 		raw, err := os.ReadFile(j.pgLog)
 		return string(raw), err
 	}
-	out, err := exec.Command("docker", "logs", j.pgName).CombinedOutput()
+	argv := j.compose.command("logs", "--no-color", "--no-log-prefix", "postgres")
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Dir, cmd.Env = j.root, append(os.Environ(), j.composeEnv...)
+	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
 
-// stopPostgres removes the database server of the run; errors are not reported (best effort at teardown).
+// stopPostgres removes the backing services of the run; errors are not reported (best effort at teardown).
 func (j *journeyRun) stopPostgres() {
 	if j.localPG() {
 		if j.pgDir != "" {
@@ -128,8 +131,9 @@ func (j *journeyRun) stopPostgres() {
 		}
 		return
 	}
-	if j.pgName != "" {
-		_ = exec.Command("docker", "rm", "-f", "-v", j.pgName).Run()
+	if j.compose != nil {
+		// Containers, anonymous volumes and the project's network; the pinned images stay (the run never pulled them).
+		_, _ = runOut(j.root, j.composeEnv, j.compose.command("down", "--volumes", "--remove-orphans", "--timeout", "5")...)
 	}
 }
 

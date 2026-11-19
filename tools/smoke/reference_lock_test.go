@@ -79,9 +79,10 @@ func TestReferenceLockMatchesSDKLocks(t *testing.T) {
 	}
 }
 
-// The estate's backing services run only from images the operator names by a local id and are never pulled: every `image:` of
-// compose.yaml is a required environment reference (no tag, no registry name) and every service says `pull_policy: never`.
-func TestReferenceComposeRunsOnlyNamedLocalImages(t *testing.T) {
+// The estate's backing services run only from content-addressed images the run never pulls: every `image:` of compose.yaml is
+// `${REFERENCE_*_IMAGE:-name@sha256:<full digest>}` (the digest is the default; an operator may name another pinned image through
+// the variable, and the smoke refuses an unpinned one), never a tag a registry could move, and every service says `pull_policy: never`.
+func TestReferenceComposeRunsOnlyDigestPinnedImages(t *testing.T) {
 	raw, err := os.ReadFile("../../examples/reference/compose.yaml")
 	if err != nil {
 		t.Fatal(err)
@@ -96,8 +97,8 @@ func TestReferenceComposeRunsOnlyNamedLocalImages(t *testing.T) {
 		t.Fatalf("%d image line(s) for %d service(s)", len(images), len(services))
 	}
 	for _, m := range images {
-		if !regexp.MustCompile(`^\$\{REFERENCE_[A-Z0-9_]+_IMAGE:\?[^}]+\}$`).MatchString(m[1]) {
-			t.Errorf("image %q is not a required REFERENCE_*_IMAGE reference: a tag or registry name would be resolved by the runtime", m[1])
+		if !regexp.MustCompile(`^\$\{REFERENCE_[A-Z0-9_]+_IMAGE:-[a-z0-9][a-z0-9._/-]*@sha256:[0-9a-f]{64}\}$`).MatchString(m[1]) {
+			t.Errorf("image %q is not ${REFERENCE_*_IMAGE:-name@sha256:<digest>}: a tag or an abbreviated reference would be resolved by the runtime", m[1])
 		}
 	}
 	if n := strings.Count(text, "    pull_policy: never\n"); n != len(services) {

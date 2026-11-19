@@ -1,8 +1,14 @@
 // Copyright 2026 Aryn Yklas
 // SPDX-License-Identifier: Apache-2.0
-// Composes MEASURED runtime-supplement evidence into the SDK qualification manifest. It runs the four real runtime fixtures
+// Composes MEASURED runtime-supplement evidence into the SDK qualification manifest. It runs the real runtime fixtures
 // (Node, Bun, CPython, real Chrome) with their own exit codes and records what they observed; it never copies expectations.
-//   node fixtures/sdk/qualify.mjs --manifest fixtures/sdk/qualification.json [--overhead result.json] [--skip node,bun,python,browser] [--dry-run]
+// One run observes one Node (the one it runs under) on one host, so the manifest is built from several runs:
+//   node fixtures/sdk/qualify.mjs --run-out run.node22.json --run-only [--overhead result.json] [--skip node,bun,python,browser]   one sealed run, manifest untouched
+//   node fixtures/sdk/qualify.mjs --merge run.node22.json,run.node24.json [--manifest fixtures/sdk/qualification.json] [--dry-run]   merge sealed runs
+//   node fixtures/sdk/qualify.mjs [--manifest fixtures/sdk/qualification.json] [--run-out run.json]                                run, then merge that run
+// Every run is stamped with the source digest of this tree (`go run ./build source-digest`) and sealed with a digest over its content and
+// host; every merged row is bound to {run digest, runtime, host id, source stamp}; a run built against another source is refused; a rerun
+// replaces exactly the rows it produced (rules and reasons: fixtures/sdk/qualify-merge.mjs).
 // Only the top-level `measured_evidence` object is written; the pre-existing frozen dependency/target rows are never flipped.
 // A row that cannot be run here is recorded as `unqualified` with its reason, never as passed.
 import {spawnSync} from "node:child_process";
@@ -11,11 +17,14 @@ import os from "node:os";
 import {dirname,join,resolve} from "node:path";
 import {fileURLToPath} from "node:url";
 import {createHash} from "node:crypto";
+import {MergeError,RUN_SCHEMA,makeHost,mergeRuns,sealRun} from "./qualify-merge.mjs";
 
 const here=fileURLToPath(import.meta.url),root=resolve(dirname(here),"../..");
 const args=process.argv.slice(2);
 const option=(name,fallback)=>{const i=args.indexOf(name);return i>=0&&i+1<args.length?args[i+1]:fallback;};
 const manifestPath=resolve(root,option("--manifest","fixtures/sdk/qualification.json")),overheadPath=option("--overhead",""),skip=option("--skip","").split(",").filter(Boolean),dryRun=args.includes("--dry-run");
+const runOut=option("--run-out",""),runOnly=args.includes("--run-only"),mergeFiles=option("--merge","").split(",").filter(Boolean);
+if(runOnly&&!runOut||runOnly&&mergeFiles.length||mergeFiles.length&&(runOut||overheadPath||skip.length)){process.stderr.write("qualify: --run-only needs --run-out and cannot be combined with --merge; --merge takes no --run-out, --overhead or --skip (it runs nothing)\n");process.exit(2);}
 const LINUX_NODE_SHA256="1805bcd35e6815559bd2eb97db438d3fdb0eb3a5e6a977b7c1badca76337e9ce";// node-v22.23.4-linux-x64.tar.xz, nodejs.org SHASUMS256.txt
 const clean=text=>String(text??"").replaceAll(root,"<repo>").replaceAll(root.replaceAll("\\","/"),"<repo>").replaceAll(os.homedir(),"<home>");
 const rel=p=>clean(p);
@@ -32,33 +41,39 @@ function run(id,command,argv,{prefix="",env={},timeout=600000}={}){
  return {id,command:[rel(command),...argv.map(rel)].join(" "),exit_code:r.status,signal:r.signal,duration_ms:Date.now()-started,evidence,stderr_tail:clean((r.stderr||"").slice(-400)),stdout:r.stdout||""};
 }
 function version(command,flag="--version"){const r=spawnSync(command,[flag],{encoding:"utf8"});return (r.stdout||r.stderr||"").trim().split("\n")[0];}
+/** The identity of the tree this run belongs to. It fails closed: without a digest nothing is run and nothing is written. */
+function sourceDigest(){
+ const r=spawnSync("go",["run","./build","source-digest","--root",root],{cwd:root,encoding:"utf8"}),out=(r.stdout||"").trim();
+ if(r.status!==0||!/^[0-9a-f]{64}$/.test(out)){process.stderr.write(`qualify: cannot compute the source stamp: \`go run ./build source-digest\` failed in ${root}\n${clean((r.stderr||"").slice(-400))}\n`);process.exit(2);}
+ return out;
+}
+
+/** Runs every fixture this host can and returns what it observed and what it could not run. */
+function collect(){
 
 const rows=[],unqualified=[];
-const note=(row,reason)=>unqualified.push({row,reason});
+// A note about a runtime that could not be run here is answered by an observed row of that runtime from another run.
+const NOTE_KIND={"node-runtime_engine_samples":"runtime:node","bun-runtime_engine_samples":"runtime:bun","cpython-python_monitoring+python_wall_samples":"runtime:cpython","chrome-js_self_profile":"runtime:chrome"};
+const note=(row,reason)=>unqualified.push({row,reason,...(NOTE_KIND[row]?{kind:NOTE_KIND[row]}:{})});
 
 // ------------------------------------------------------------------ Node
 if(!skip.includes("node")){
  const r=run("node",process.execPath,[join(root,"fixtures/sdk/profiles/node.mjs")]);
  rows.push({id:`node-${process.version}-${process.platform}-${process.arch}-runtime_engine_samples`,runtime:"node",version:process.version,v8:process.versions.v8,platform:process.platform,arch:process.arch,method:"runtime_engine_samples",fixture:"fixtures/sdk/profiles/node.mjs",command:r.command,exit_code:r.exit_code,duration_ms:r.duration_ms,status:r.exit_code===0&&r.evidence&&r.evidence.failed?.length===0?"observed":"failed",failed_checks:r.evidence?.failed??null,check_count:r.evidence?.checks?.length??null,stderr_tail:r.stderr_tail,evidence:r.evidence?.results??null});
 }else note("node-runtime_engine_samples","skipped by --skip");
-note("node-24.x-runtime_engine_samples","Node 24 is not installed on this machine; the frozen manifest rows Node 22.21.1 / 24.11.0 are different patch levels than the executed Node and stay not_run.");
-note("node-linux-macos-runtime_engine_samples","only the Windows x64 host was available; no Linux/macOS Node run.");
 
 // ------------------------------------------------------------------ Bun
 if(!skip.includes("bun")&&bun){
  const r=run("bun",bun,[join(root,"fixtures/sdk/profiles/bun.ts")]);
  rows.push({id:`bun-${r.evidence?.runtime?.version??version(bun)}-${process.platform}-${process.arch}-runtime_engine_samples`,runtime:"bun",version:r.evidence?.runtime?.version??version(bun),revision:r.evidence?.runtime?.revision??null,platform:process.platform,arch:process.arch,method:"runtime_engine_samples",fixture:"fixtures/sdk/profiles/bun.ts",command:r.command,exit_code:r.exit_code,duration_ms:r.duration_ms,status:r.exit_code===0&&r.evidence&&r.evidence.failed?.length===0?"observed":"failed",failed_checks:r.evidence?.failed??null,check_count:r.evidence?.checks?.length??null,stderr_tail:r.stderr_tail,evidence:r.evidence?.results??null});
 }else note("bun-runtime_engine_samples",skip.includes("bun")?"skipped by --skip":"pinned Bun 1.3.14 not found; advertised Bun profiling stays blocked.");
-note("bun-linux-macos-runtime_engine_samples","only the Windows x64 host was available; no Linux/macOS Bun run.");
 
 // ------------------------------------------------------------------ Python
 if(!skip.includes("python")&&python){
  const r=run("python",python,[join(root,"fixtures/sdk/profiles/python.py")]);
  rows.push({id:`cpython-${r.evidence?.python??version(python)}-${process.platform}-${process.arch}-python_monitoring+python_wall_samples`,runtime:"cpython",version:r.evidence?.python??null,platform:process.platform,arch:process.arch,methods:["python_monitoring","python_wall_samples"],fixture:"fixtures/sdk/profiles/python.py",command:r.command,exit_code:r.exit_code,duration_ms:r.duration_ms,status:r.exit_code===0&&r.evidence?"observed":"failed",stderr_tail:r.stderr_tail,evidence:r.evidence?.results??null});
 }else note("cpython-python_monitoring+python_wall_samples",skip.includes("python")?"skipped by --skip":"repo venv Python not found.");
-note("cpython-3.12-3.13-profiles","only CPython 3.14.x is installed here; 3.12 and 3.13 rows were not run.");
 note("cpython-free-threaded-jit-subinterpreters-pypy","start unqualified by design and were not exercised (the free-threaded refusal is covered only by a monkeypatched unit test, not a real free-threaded build).");
-note("cpython-linux-macos-profiles","only the Windows x64 host was available.");
 
 // ------------------------------------------------------------------ Browser (real Chrome through Playwright)
 if(!skip.includes("browser")){
@@ -99,23 +114,30 @@ if(overheadPath&&existsSync(resolve(root,overheadPath))){
  const text=readFileSync(resolve(root,overheadPath),"utf8"),data=JSON.parse(text);
  overhead={source:"fixtures/sdk/overhead.mjs",recorded_at:data.recorded_at,command:data.command,sha256_of_result:createHash("sha256").update(text).digest("hex"),machine_class:data.machine_class,runtimes:data.runtimes,budgets:data.budgets_from_design_section_13,rows:data.rows};
 }
+return {rows,unqualified,overhead};
+}
 
-// ------------------------------------------------------------------ compose
-const manifest=JSON.parse(readFileSync(manifestPath,"utf8"));
-const machine={platform:os.platform(),release:os.release(),arch:os.arch(),cpu_model:os.cpus()[0]?.model??"unknown",logical_cpus:os.cpus().length,total_memory_mib:Math.round(os.totalmem()/1048576),node:process.version,bun:bun?version(bun):null,python:python?version(python):null};
-manifest.measured_evidence={
- schema:1,
- recorded_at:new Date().toISOString(),
- tool:"fixtures/sdk/qualify.mjs",
- command:"node fixtures/sdk/qualify.mjs "+args.map(a=>a.includes("\\")||a.includes("/")?rel(resolve(root,a)):a).join(" "),
- meaning:"Rows record what the real runtime fixtures OBSERVED on the machine below (exit code 0 plus their own assertions), not a release qualification. `observed` is valid only for the exact runtime version/platform in the row; frozen dependency/runtime/browser targets elsewhere in this manifest keep their own status (not_run unless stated). Nothing here is a `passed` row for an unlisted combination.",
- machine,
- runtime_supplement_rows:rows,
- overhead,
- unqualified_rows:unqualified,
-};
-const text=JSON.stringify(manifest,null,2)+"\n";
-if(!dryRun)writeFileSync(manifestPath,text);
-const summary=rows.map(r=>`${r.status.padEnd(8)} ${r.id} (exit ${r.exit_code})`).join("\n");
-process.stdout.write(summary+"\n"+`${unqualified.length} rows recorded as unqualified; manifest ${dryRun?"NOT written (--dry-run)":"written"}: ${rel(manifestPath)}\n`);
-process.exit(rows.length>0&&rows.every(r=>r.status==="observed")?0:1);
+// ------------------------------------------------------------------ run, seal, merge, write
+const sourceSha256=sourceDigest();
+const machine={platform:os.platform(),release:os.release(),arch:os.arch(),cpu_model:os.cpus()[0]?.model??"unknown",logical_cpus:os.cpus().length,total_memory_mib:Math.round(os.totalmem()/1048576),hostname:os.hostname()};
+let runs,summary="",allObserved=true;
+if(mergeFiles.length)runs=mergeFiles.map(file=>JSON.parse(readFileSync(resolve(root,file),"utf8")));
+else{
+ const got=collect();
+ const record=sealRun({schema:RUN_SCHEMA,tool:"fixtures/sdk/qualify.mjs",recorded_at:new Date().toISOString(),source_sha256:sourceSha256,host:makeHost(machine),
+  runtimes:{node:process.version,bun:bun?version(bun):null,python:python?version(python):null},
+  command:"node fixtures/sdk/qualify.mjs "+args.map(a=>a.includes("\\")||a.includes("/")?rel(resolve(root,a)):a).join(" "),
+  rows:got.rows,overhead:got.overhead,unqualified:got.unqualified});
+ if(runOut)writeFileSync(resolve(root,runOut),JSON.stringify(record,null,2)+"\n");
+ runs=[record];
+ summary=got.rows.map(r=>`${r.status.padEnd(8)} ${r.id} (exit ${r.exit_code})`).join("\n")+"\n"+`run ${record.run_digest} on ${record.host.hostname} (host ${record.host.id}), source ${sourceSha256}${runOut?`, written: ${rel(resolve(root,runOut))}`:""}\n`;
+ allObserved=got.rows.length>0&&got.rows.every(r=>r.status==="observed");
+}
+if(runOnly){process.stdout.write(summary);process.exit(allObserved?0:1);}
+let merged;
+try{merged=mergeRuns(JSON.parse(readFileSync(manifestPath,"utf8")),runs,{sourceSha256});}
+catch(error){if(error instanceof MergeError){process.stderr.write(`qualify: ${error.message}\n`);process.exit(2);}throw error;}
+if(!dryRun)writeFileSync(manifestPath,JSON.stringify(merged,null,2)+"\n");
+const evidence=merged.measured_evidence;
+process.stdout.write(summary+`merged ${runs.length} run(s): ${evidence.runtime_supplement_rows.length} rows from ${evidence.runs.length} run(s), ${evidence.unqualified_rows.length} rows recorded as unqualified, ${evidence.retired_evidence.length} retired entries; manifest ${dryRun?"NOT written (--dry-run)":"written"}: ${rel(manifestPath)}\n`);
+process.exit(allObserved?0:1);

@@ -14,7 +14,7 @@ go run ./build sbom --version 1.0.0 --created 2026-11-19T00:00:00Z --out dist/sb
 go run ./build artifacts --release dist/release --out dist/art --sbom dist/sbom > dist/art.json
 go run ./tools/smoke fresh-install-matrix --artifact-dir out --release dist/release --artifacts dist/art --web-dist web/dist \
   --root . --bun bun --python python3 \
-  --chrome <chrome-for-testing>/chrome --node-linux <node22>/bin/node --pg-image <local postgres:16 image id> \
+  --chrome <chrome-for-testing>/chrome --node-linux <node22>/bin/node --pg-image <postgres:16 image id or name@sha256:digest> \
   --symbolicate-cgroup-root <delegated cgroup v2 subtree>
 ```
 

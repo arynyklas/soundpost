@@ -11,18 +11,24 @@ passed because its prerequisite is missing; the closed reason is printed instead
 | Part | How |
 | --- | --- |
 | Soundpost node | the static binary from `go run ./build release` (`--binary` or `--release DIR`), `serve --mode single` over HTTPS with a private CA; later restarted on the same data directory to read |
-| PostgreSQL | a real PostgreSQL 16 server with `log_statement=all` and a random password, removed when the run ends. Default: a container of the LOCAL image `postgres@sha256:92620daddcd947f8d5ab5ba66e848702fe443d87fed30c4cea8e389fd78dfc55` (16.14, the digest `fixtures/sdk/compose.yaml` pins; a digest reference resolves on classic and containerd image stores alike, a bare id prefix only on the latter; tmpfs data; the shared `soundpost-sdk-pg16-local` container is not touched). With `--pg-local DIR` (a PostgreSQL installation holding `bin/{initdb,pg_ctl,postgres}` and `lib/`) an unprivileged server is started from that directory on loopback instead, for a host without a container runtime; the applications reach either through the same psycopg driver, and the canary proof reads the server's own statement log in both cases |
-| Dependency | `examples/reference/dependency/server.py` (Python stdlib HTTPS, uninstrumented) |
+| PostgreSQL | a real PostgreSQL 16 server with `log_statement=all` and a random password, removed when the run ends. With a container runtime (the default) it is the `postgres` service of `examples/reference/compose.yaml`, a compose project of the run's own (`soundpost-journeys-<random>`, torn down with `down --volumes`), from the image the file pins by digest (`postgres@sha256:92620dad...`, 16.14, tmpfs data) or the pinned `--pg-image`; the entrypoint applies `api/schema.sql` and the service's healthcheck gates the run. With `--pg-local DIR` (a PostgreSQL installation holding `bin/{initdb,pg_ctl,postgres}` and `lib/`) an unprivileged server is started from that directory on loopback instead, for a host without a container runtime; the applications reach either through the same psycopg driver, and the canary proof reads the server's own statement log in both cases |
+| Dependency | `examples/reference/dependency/server.py` (Python stdlib HTTPS, uninstrumented): the `dependency` service of the same compose project (digest-pinned `python` image, read-only, uid 65534, the run's leaf mounted read-only, its log is the process output the leak scan reads) with a container runtime; a host process with `--pg-local` |
 | API | `examples/reference/api/serve.py` (Python WSGI, SDK WSGI/psycopg/httpx integrations) |
 | Gateway | `examples/reference/gateway/server.ts` under Bun (`packages/bun` serve/fetch) |
 | Web | `examples/reference/web/` built by Vite 7 with `packages/build` (the real source map is uploaded to `POST /api/v1/artifacts`), served by the gateway, driven by headless Linux Chrome 156 through Playwright against the real HTTPS origin |
 | Jobs | `examples/reference/jobs/run.py` (scheduler + worker, SDK job attempts) |
 
-Compose is used only for the two backing services (`examples/reference/compose.yaml`); the SDK-bearing
-apps are host processes because they use the committed SDK source trees and the per-source configuration the
-smoke provisions. Every compose image is a required `REFERENCE_*_IMAGE` environment reference (a local image id; `pull_policy: never`),
-pinned by `TestReferenceComposeRunsOnlyNamedLocalImages`. Compose was validated with `docker compose config` only,
-it was not started by the smoke.
+Compose is used for the **backing services only** (PostgreSQL and the dependency in `examples/reference/compose.yaml`). The product node
+and the SDK-bearing apps (API, jobs, gateway, web build) are **host processes** of the smoke, by decision (07.04#12): they use the
+committed SDK source trees and the per-source credential, signed policy and trusted keys that only the running node issues
+(`POST /api/v1/sources`), which only the smoke provisions; the plan assigns this provisioning to `tools/smoke journeys` and the
+SDK fixtures' compose (`fixtures/sdk/compose.yaml`) is likewise the database only. The node's own container recipes are
+`deploy/compose.single.yaml` and `deploy/compose.distributed.yaml` (installed and run by the install smokes and the fresh-install
+matrix). Every compose image is named by a content digest (`${REFERENCE_*_IMAGE:-name@sha256:<digest>}`, `pull_policy: never`: a
+run never reaches a registry); an image named on the command line (`--pg-image`, `--dependency-image`) must be an id `sha256:<64 hex>`
+or `name@sha256:<64 hex>` and is refused otherwise. `TestReferenceComposeRunsOnlyDigestPinnedImages`,
+`TestReferenceComposeStartsOnlyBackingServices` (the service set is exactly `postgres` and `dependency`, and the docs say so) and
+`TestPinnedImageRef` pin this; the versions record lists the images compose resolved and the ids of the running ones.
 
 Platform notes: everything runs on Linux, including the web build (Linux Node 22 with the Vite from the pnpm workspace:
 `examples/reference/web` is a workspace member, so `pnpm install --frozen-lockfile` installs its pinned dependencies).
@@ -101,6 +107,17 @@ Notes on that run:
   profile row, which needs root, an OCI runtime and a kernel the helper supports.
 * Job attempts, the error and spans DO reach the backend and are admitted; the 03.06/03.09 doubt about job
   attempts was checked and did not hold for the Python SDK here.
+
+## With the compose backing services (07.04#12)
+
+On a host with Docker (sp-oci: Debian 13, kernel 6.12, Docker 26.1.5, Compose 2.26.1) the same smoke takes PostgreSQL and the dependency from
+`examples/reference/compose.yaml`: `smoke journeys ... --dependency-image sha256:78976a69...` (the pinned python image loaded offline; the
+compose file's own digest `python@sha256:5e2bdb1b...` cannot be resolved on a host that never pulled it, and `pull_policy: never` makes that an
+error instead of a pull) with PostgreSQL from the file's pinned digest `postgres@sha256:92620dad...` (image id `sha256:67d1da22...`, 16.14).
+Result: **exit 0, eighteen of eighteen rows PASS**, the `soundpost-journeys-<random>` project (containers and network) gone afterwards;
+`observed.json` records `compose_images`, `postgres_image_id` and `dependency_image_id`. An unpinned image is refused before anything starts
+(`--pg-image postgres:16`: `image "postgres:16" is not pinned`). Evidence (private development ledger, not shipped):
+`.superpowers/sdd/approved-product/l5w25-evidence/` (`journeys-compose/g2.log`, `journeys-compose/g2/{observed,details}.json`, `red-unpinned-image.txt`, `red-default-digest-not-local.txt`).
 
 ## Against a recovered cluster (`--cluster-attach`, 07.07#16)
 

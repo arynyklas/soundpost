@@ -162,6 +162,9 @@ type Row struct {
 	// (harness, dropped_records or assertion). It is never budget_miss: the exporter derives that from the row's
 	// structure (a failed budget and no failure text), see exportedFailureClass.
 	FailureClass releaseevidence.FailureClass `json:"failure_class,omitempty"`
+
+	// Run binds a row of a merged report to the run that observed it (see MergeSuiteReports); a report written by one run has none.
+	Run *RowRun `json:"run,omitempty"`
 }
 
 // matches reports whether an observed build is the subject's own build. Only a
@@ -323,6 +326,9 @@ type SuiteReport struct {
 	OutOfScope   []string `json:"out_of_release_scope_rows"`
 	Failed       []string `json:"measured_failures"`
 	ExitCode     int      `json:"exit_code"`
+
+	// Runs lists the runs a merged report's rows come from; a report written by one run has none.
+	Runs []RunRecord `json:"runs,omitempty"`
 }
 
 // HostInfo identifies the machine that produced a report.

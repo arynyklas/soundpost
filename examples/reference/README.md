@@ -29,14 +29,23 @@ signal they produce comes from the committed custom SDKs delivering to a real `s
 
 The acceptance run is `go run ./tools/smoke journeys --artifact-dir <dir>` (see
 `docs/acceptance/reference-journeys.md` for prerequisites, the rows it evaluates and its recorded
-result). It builds nothing from the network, uses only local images, runs everything on loopback, and
-removes the PostgreSQL container it creates. On a host without a container runtime, `--pg-local DIR` starts an unprivileged
-PostgreSQL 16 server from an installation directory instead, and `--symbolicate-cgroup-root DIR` gives the node's native
-symbolication sandbox its delegated cgroup (see `docs/acceptance/reference-journeys.md`).
+result). It builds nothing from the network, runs everything on loopback, and removes what it creates. With a container runtime
+(`--pg-image`/`--dependency-image` optional) PostgreSQL and the dependency come from `compose.yaml`; on a host without one,
+`--pg-local DIR` starts an unprivileged PostgreSQL 16 server from an installation directory and the dependency runs as a host
+process, and `--symbolicate-cgroup-root DIR` gives the node's native symbolication sandbox its delegated cgroup (see
+`docs/acceptance/reference-journeys.md`).
 
-`compose.yaml` starts only the two backing services (PostgreSQL and the dependency) from local images named by id
-(`REFERENCE_PG_IMAGE`, `REFERENCE_PYTHON_IMAGE`; nothing is pulled);
-the SDK-bearing apps run as host processes because they use the committed SDK source trees and the
-per-source configuration the smoke provisions. Each app takes `--config <json>`: the source's real
-credential, server-signed policy, pinned trusted keys, resource and descriptor as issued by
-`POST /api/v1/sources`. `pysite.sh` assembles the private pure-Python site directory the Python apps use.
+## What `compose.yaml` is (and is not)
+
+`compose.yaml` is the **backing services only**: PostgreSQL 16 and the uninstrumented dependency, each from a content-pinned image
+(`name@sha256:<digest>` defaults; `REFERENCE_PG_IMAGE`/`REFERENCE_PYTHON_IMAGE` may name another image by id or digest, never a tag;
+`pull_policy: never`, so a run never reaches a registry). It does **not** start the product node or the SDK-bearing apps: those are
+host processes of the acceptance smoke, because they use the committed SDK source trees and the per-source configuration the smoke
+provisions. Each app takes `--config <json>`: the source's real credential, server-signed policy, pinned trusted keys, resource
+and descriptor as issued by `POST /api/v1/sources` by the running node, which only the smoke provisions. `pysite.sh` assembles the
+private hash-locked Python site directory the Python apps use. The node's own container recipes are `deploy/compose.single.yaml`
+and `deploy/compose.distributed.yaml`.
+
+To start the two services by hand: put a leaf certificate and key in a directory (`leaf.pem`, `leaf.key`, readable by uid 65534) and run
+`REFERENCE_PG_PASSWORD=<random> REFERENCE_TLS_DIR=<dir> docker compose -f examples/reference/compose.yaml up --detach --wait`
+after loading the two images (`docker pull postgres@sha256:92620dad...` and the python digest named in the file, or `docker load`).

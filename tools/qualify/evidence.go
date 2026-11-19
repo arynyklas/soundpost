@@ -276,7 +276,11 @@ func suiteRow(r Row) releaseevidence.Row {
 	case StateExercised:
 		if r.Outcome == OutcomePassed {
 			out.Status = releaseevidence.StatusPassed
-			out.Detail = releaseevidence.Detail(r.Build.Family+" "+r.Build.Version+" "+r.Build.OS+"/"+r.Build.Arch+" build "+r.Build.ID, strings.Join(r.Evidence, ", "))
+			parts := []string{r.Build.Family + " " + r.Build.Version + " " + r.Build.OS + "/" + r.Build.Arch + " build " + r.Build.ID, strings.Join(r.Evidence, ", ")}
+			if r.Run != nil {
+				parts = append(parts, "run "+r.Run.Digest[:min(12, len(r.Run.Digest))]+" host "+r.Run.HostID)
+			}
+			out.Detail = releaseevidence.Detail(parts...)
 			return out
 		}
 		out.Status = releaseevidence.StatusFailed

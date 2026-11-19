@@ -1,17 +1,24 @@
 # Copyright 2026 Aryn Yklas
 # SPDX-License-Identifier: Apache-2.0
 #
-# The two backing services of the reference estate, from images that are already local (nothing is
-# pulled: `pull_policy: never`). The Python API, the Bun gateway, the jobs and the web build need
-# the committed SDK source trees and the Soundpost node's per-source configuration, so the
-# acceptance smoke (`go run ./tools/smoke journeys`) runs them as host processes; see README.md.
-# Required environment: REFERENCE_PG_IMAGE (a local PostgreSQL 16 image id), REFERENCE_PYTHON_IMAGE (a local Python 3.12 image id, for the
-# dependency), REFERENCE_TLS_DIR (a directory holding leaf.pem and leaf.key for the dependency), REFERENCE_PG_PASSWORD. Every image is
-# named by an id the operator supplies: no tag is resolved, so the estate cannot silently run a different image.
+# The BACKING services of the reference estate, and nothing else: PostgreSQL 16 and the uninstrumented HTTPS dependency. The
+# product node and the SDK-bearing applications (Python API and jobs, Bun gateway, the Vite-built web app) are host processes of
+# the acceptance smoke (`go run ./tools/smoke journeys --pg-image ...`), which alone holds the per-source credentials, signed
+# policies and trusted keys the running node issues; see README.md and docs/acceptance/reference-journeys.md.
+#
+# Every image is named by a content digest, never a tag: the default of each variable below is `name@sha256:<digest>` (PostgreSQL
+# 16.14; python 3.12-slim index of 2026-11-19), and the smoke refuses an operator-named image that is not itself pinned (an image
+# id `sha256:<64 hex>`, or `name@sha256:<64 hex>`). `pull_policy: never`: a run never reaches a registry; load the pinned images
+# once (`docker pull <image>@sha256:<digest>`, or `docker load`) and name the loaded image's id in the variable when the runtime
+# cannot resolve the digest of a loaded image.
+#
+# Required environment: REFERENCE_PG_PASSWORD (random), REFERENCE_TLS_DIR (a directory holding leaf.pem and leaf.key for the
+# dependency, readable by uid 65534). Optional: REFERENCE_PG_PORT, REFERENCE_DEPENDENCY_PORT (loopback ports; 0 lets Docker choose),
+# REFERENCE_PG_IMAGE, REFERENCE_PYTHON_IMAGE (pinned references that replace the digests below).
 name: soundpost-reference
 services:
   postgres:
-    image: ${REFERENCE_PG_IMAGE:?a local PostgreSQL 16 image id}
+    image: ${REFERENCE_PG_IMAGE:-postgres@sha256:92620daddcd947f8d5ab5ba66e848702fe443d87fed30c4cea8e389fd78dfc55}
     pull_policy: never
     command: ["-c", "log_statement=all"]
     environment:
@@ -21,17 +28,32 @@ services:
     tmpfs: ["/var/lib/postgresql/data"]
     volumes:
       - ./api/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+    healthcheck:
+      # TCP on the loopback address: the entrypoint's temporary initialisation server listens on a socket only, so this is
+      # healthy only once the real server (with the schema applied) accepts connections.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d reference"]
+      interval: 1s
+      timeout: 3s
+      retries: 120
     cap_drop: [ALL]
     cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
     security_opt: ["no-new-privileges:true"]
   dependency:
-    image: ${REFERENCE_PYTHON_IMAGE:?a local Python 3.12 image id}
+    image: ${REFERENCE_PYTHON_IMAGE:-python@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b}
     pull_policy: never
     command: ["python", "/app/server.py", "--listen", "0.0.0.0:8443", "--cert", "/tls/leaf.pem", "--key", "/tls/leaf.key"]
+    stop_grace_period: 2s
     ports: ["127.0.0.1:${REFERENCE_DEPENDENCY_PORT:-0}:8443"]
     volumes:
       - ./dependency/server.py:/app/server.py:ro
       - ${REFERENCE_TLS_DIR:?directory with leaf.pem and leaf.key}:/tls:ro
+    healthcheck:
+      # Inside the container the answer is read from the loopback address, whose leaf is the run's private one: the check asks only
+      # whether the server answers, so it does not verify the certificate chain.
+      test: ["CMD", "python", "-c", "import ssl, urllib.request; c = ssl.create_default_context(); c.check_hostname = False; c.verify_mode = ssl.CERT_NONE; urllib.request.urlopen('https://127.0.0.1:8443/healthz', context=c, timeout=3)"]
+      interval: 1s
+      timeout: 5s
+      retries: 60
     read_only: true
     user: "65534:65534"
     cap_drop: [ALL]

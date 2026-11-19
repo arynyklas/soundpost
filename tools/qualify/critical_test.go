@@ -194,16 +194,27 @@ func TestCriticalPostgresImageIsTheCommittedDigestPin(t *testing.T) {
 	if criticalPGImage != pin {
 		t.Errorf("criticalPGImage = %q, want the committed pin %q (a bare id prefix does not resolve on a classic image store)", criticalPGImage, pin)
 	}
-	for _, file := range []string{
-		filepath.Join("..", "..", "fixtures", "sdk", "critical", "main.go"),
-		filepath.Join("..", "smoke", "journeys.go"),
-	} {
-		src, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !strings.Contains(string(src), `"pg-image", "`+pin+`"`) {
-			t.Errorf("%s: the --pg-image default is not the committed digest pin %s", file, pin)
-		}
+	src, err := os.ReadFile(filepath.Join("..", "..", "fixtures", "sdk", "critical", "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(src), `"pg-image", "`+pin+`"`) {
+		t.Errorf("fixtures/sdk/critical/main.go: the --pg-image default is not the committed digest pin %s", pin)
+	}
+	// The journeys smoke has no default of its own: an empty --pg-image leaves the digest examples/reference/compose.yaml names, which must be
+	// this pin, and the smoke's own flag must not carry a short id again.
+	refCompose, err := os.ReadFile(filepath.Join("..", "..", "examples", "reference", "compose.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(refCompose), "${REFERENCE_PG_IMAGE:-"+pin+"}") {
+		t.Errorf("examples/reference/compose.yaml: the PostgreSQL image default is not the committed digest pin %s", pin)
+	}
+	journeys, err := os.ReadFile(filepath.Join("..", "smoke", "journeys.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(journeys), "92620daddcd9\"") {
+		t.Error("tools/smoke/journeys.go carries the short id 92620daddcd9 again")
 	}
 }
