@@ -146,13 +146,28 @@ func contractRead(t *testing.T, app *appcore.App, org, project model.ID, roots [
 	return v
 }
 
-func bootstrapOwner(t *testing.T, app *appcore.App) {
+// bootstrapFreshOwner is the first start of an installation on this release: Bootstrap and nothing else.
+func bootstrapFreshOwner(t *testing.T, app *appcore.App) {
 	t.Helper()
 	token, err := app.Control.BootstrapToken()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err = app.Auth.Bootstrap(context.Background(), token, contractEmail, contractSecret); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// bootstrapOwner makes an installation that the PREVIOUS release bootstrapped and this release was then started on
+// (D70, D72): the state a previous release wrote has no born-contracted mark, so the helper takes the one Bootstrap
+// of this release writes out again. The installation is expanded until contract-indexes.
+func bootstrapOwner(t *testing.T, app *appcore.App) {
+	t.Helper()
+	bootstrapFreshOwner(t, app)
+	if err := app.Control.Update(context.Background(), func(st *model.ControlState) error {
+		delete(st.OIDC, model.IndexesContractedKey)
+		return nil
+	}); err != nil {
 		t.Fatal(err)
 	}
 }

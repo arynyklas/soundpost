@@ -18,6 +18,13 @@ import (
 // fresh administrator credential on voter 1 (the initial leader of every group).
 func contractCluster(t *testing.T) (*smokecluster.Cluster, auth.Credential) {
 	t.Helper()
+	return contractClusterOf(t, bootstrapOwner)
+}
+
+// contractClusterOf is contractCluster for an installation that bootstrap prepares: a fresh one (bootstrapFreshOwner)
+// or one the previous release bootstrapped (bootstrapOwner).
+func contractClusterOf(t *testing.T, bootstrap func(*testing.T, *appcore.App)) (*smokecluster.Cluster, auth.Credential) {
+	t.Helper()
 	work := t.TempDir()
 	live := filepath.Join(work, "live")
 	if err := os.MkdirAll(live, 0o700); err != nil {
@@ -27,7 +34,7 @@ func contractCluster(t *testing.T) (*smokecluster.Cluster, auth.Credential) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bootstrapOwner(t, app)
+	bootstrap(t, app)
 	seed := filepath.Join(work, "cluster.seed")
 	if err = app.WriteClusterSeed(seed); err != nil {
 		t.Fatal(err)

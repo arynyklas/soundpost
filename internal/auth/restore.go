@@ -148,8 +148,13 @@ func QuarantineRestoredState(st *model.ControlState, in RestoreInput) (RestoreSu
 	}
 	sum.Sessions = len(st.Sessions)
 	st.Sessions = map[string]model.ControlSession{}
-	// Elevations and in-flight OIDC logins live in the same map; none survives.
+	// Elevations and in-flight OIDC logins live in the same map; none survives. The installation's phase
+	// (born contracted, D72) is not one of them: the backup's phase is the restored installation's.
+	born := st.BornContracted()
 	st.OIDC = map[string]json.RawMessage{}
+	if born {
+		st.MarkBornContracted()
+	}
 	for key, token := range st.ServerTokens {
 		if !token.Revoked {
 			token.Revoked = true

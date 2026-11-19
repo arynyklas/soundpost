@@ -252,6 +252,14 @@ func forceStatePatchGate(s *control.Store) {
 	}
 }
 
+// answerLayoutQuestion is what appcore wires for a voter of this release: every member runs a binary that
+// reads the contracted index layout. An installation bootstrapped by this release carries the born-contracted
+// mark from its first command (D72), so the snapshot guard asks the question of the voter it sends to; without
+// an answer it fails closed and a lagging voter would never be sent its snapshot.
+func answerLayoutQuestion(s *control.Store) {
+	s.SetMemberLayoutQuery(func(context.Context, replica.Member) error { return nil })
+}
+
 // newControlVotersOn opens the voters on net (nil: the in-process mesh).
 func newControlVotersOn(t *testing.T, net voterNetwork, cadence replica.Cadence, ownRetention ...uint64) *controlVoters {
 	t.Helper()
@@ -303,6 +311,7 @@ func newControlVotersOn(t *testing.T, net voterNetwork, cadence replica.Cadence,
 			t.Fatal(err)
 		}
 		forceStatePatchGate(store)
+		answerLayoutQuestion(store)
 		group, err := store.EnableReplication(replica.Config{ID: id, Group: installation, Directory: filepath.Join(v.dirs[id], "raft-control"), TickInterval: voterTick(), Members: members, Cadence: cadence,
 			Transport: net.transport(id), Seed: seed, Application: application, SeedIndex: position.Applied + 1, SeedTerm: position.Term + 1})
 		if err != nil {

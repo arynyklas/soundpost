@@ -196,12 +196,17 @@ func (s *Service) adminCommand(ctx context.Context, c Credential, r AdminCommand
 			}
 			o = model.ControlOrg{ID: r.OrgID, Name: p.Name, Epoch: 1, Members: map[string]bool{}, Admins: map[string]bool{c.user.String(): true}, Projects: map[string]string{}, Grants: map[string][]string{}, Secrets: map[string]string{}, Settings: map[string]json.RawMessage{}}
 			o.StartObjectRecords()
+			// D72: an organization of an installation this release bootstrapped is contracted from its first write.
+			// D70: an organization created after the operator contracted the indexes starts contracted.
+			contracted := st.BornContracted()
 			for _, other := range st.Orgs {
-				// D70: an organization created after the operator contracted the indexes starts contracted.
 				if other.IndexesContracted() {
-					o.Settings[model.IndexesContractedKey] = json.RawMessage(`true`)
+					contracted = true
 					break
 				}
+			}
+			if contracted {
+				o.Settings[model.IndexesContractedKey] = json.RawMessage(`true`)
 			}
 		case "create_user":
 			if p.ID == (model.ID{}) || IsSystemPrincipal(p.ID) {

@@ -154,6 +154,14 @@ func (s *Service) Bootstrap(ctx context.Context, token, email, p string) (Sessio
 		if !validEmail(email) {
 			return model.Fail(model.Invalid)
 		}
+		if len(st.Users) == 0 && len(st.Orgs) == 0 {
+			// D72: the first Bootstrap of an installation that holds no user and no organization is the start
+			// of an installation of this release; no previous release's data exists to roll back to, so it is
+			// contracted from its first write. The mark is part of this command, so every voter holds it. A
+			// Bootstrap after a restore finds the restored users and organizations and leaves the phase of the
+			// backup as it is (QuarantineRestoredState keeps the mark a backup of a fresh installation carries).
+			st.MarkBornContracted()
+		}
 		st.Users[id.String()] = model.ControlUser{ID: id, Email: email, Password: h, Admin: true}
 		st.BootstrapHash = ""
 		st.Sessions[hashToken(out.Token)] = model.ControlSession{User: id, CSRF: out.CSRF, Expires: int64(out.Expires), Reauthenticated: s.now().Unix()}

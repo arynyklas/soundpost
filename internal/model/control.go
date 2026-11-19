@@ -337,7 +337,8 @@ const (
 const IndexLayoutVersion uint64 = 1
 
 // IndexesContractedKey is the key of an organization's Settings that says the operator ran
-// `soundpost upgrade contract-indexes` for it (D70): the sharded artifact ledger index and the
+// `soundpost upgrade contract-indexes` for it (D70) or that it was created on an installation this
+// release bootstrapped (D72, see ControlState.BornContracted): the sharded artifact ledger index and the
 // per-replay pins are then the only copy, and the per-project values the previous release reads
 // (artifact_refs_index:<project> with its anchor, replay_pins:<project>) are neither kept nor
 // written. Before it, a write keeps both layouts current so the previous release can still read
@@ -349,6 +350,27 @@ const IndexesContractedKey = "artifact_refs_index:contracted"
 func (o ControlOrg) IndexesContracted() bool {
 	_, ok := o.Settings[IndexesContractedKey]
 	return ok
+}
+
+// BornContracted reports whether the installation was bootstrapped by a release that has no previous
+// release to roll back to (D72): `auth.Service.Bootstrap` wrote IndexesContractedKey into the
+// replicated State.OIDC map in the very command that created the first administrator, so every voter
+// holds the same mark and an organization created on the installation is contracted from its first
+// write. An installation the previous release bootstrapped never carries it (that release does not
+// write it); it stays expanded until the operator runs contract-indexes (D70). The key is the one the
+// organizations use, so the stored-state scan of control.Store.indexesContracted finds it too and the
+// layout guards of a contracted installation hold from the first start.
+func (s ControlState) BornContracted() bool {
+	_, ok := s.OIDC[IndexesContractedKey]
+	return ok
+}
+
+// MarkBornContracted records the mark BornContracted reports.
+func (s *ControlState) MarkBornContracted() {
+	if s.OIDC == nil {
+		s.OIDC = map[string]json.RawMessage{}
+	}
+	s.OIDC[IndexesContractedKey] = json.RawMessage(`true`)
 }
 
 // OrgAuthorityKey is the key of an organization's Settings that holds the control Revision of the

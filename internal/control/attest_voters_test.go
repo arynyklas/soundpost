@@ -649,6 +649,7 @@ func (v *controlVoters) restart(id uint64) {
 		}
 	}
 	forceStatePatchGate(store)
+	answerLayoutQuestion(store)
 	group, err := store.EnableReplication(replica.Config{ID: id, Group: position.Group, Directory: filepath.Join(v.dirs[id], "raft-control"), TickInterval: voterTick(), Members: position.Members,
 		Transport: voterTransport{mesh: v.mesh, node: id}, Seed: seed, Application: application})
 	if err != nil {
@@ -779,6 +780,7 @@ func TestAJoinedVoterMustAttestAndARemovedOneNoLongerCounts(t *testing.T) {
 		}
 	}
 	forceStatePatchGate(store)
+	answerLayoutQuestion(store)
 	group, err := store.EnableReplication(replica.Config{ID: 4, Group: position.Group, Directory: filepath.Join(dir, "raft-control"), TickInterval: voterTick(), Members: learner,
 		Transport: voterTransport{mesh: v.mesh, node: 4}, Seed: genesis.seed, Application: genesis.application, SeedIndex: genesis.index, SeedTerm: genesis.term})
 	if err != nil {
