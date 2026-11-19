@@ -145,7 +145,8 @@ function uaIdentity(userAgent: string | undefined): {name: string; version: stri
 const platformOs = (platform: unknown): string | undefined => {
  if (typeof platform !== "string") return undefined;
  const known: Record<string, string> = {windows: "windows", macos: "macos", linux: "linux", android: "android", ios: "ios", "chrome os": "chromeos", chromeos: "chromeos"};
- return known[platform.toLowerCase()];
+ const key = platform.toLowerCase();
+ return Object.hasOwn(known, key) ? known[key] : undefined;
 };
 async function identify(env: ProfilerEnv): Promise<Identity> {
  let {name, version, os, arch} = uaIdentity(safeCall(env.userAgent));
@@ -166,7 +167,7 @@ async function identify(env: ProfilerEnv): Promise<Identity> {
     let best: {name: string; version: string; rank: number} | undefined;
     if (Array.isArray(list)) for (const entry of list.slice(0, 16) as unknown[]) {
      const brand: unknown = typeof entry === "object" && entry !== null ? Reflect.get(entry, "brand") : undefined, v: unknown = typeof entry === "object" && entry !== null ? Reflect.get(entry, "version") : undefined;
-     const mapped = typeof brand === "string" ? brands[brand] : undefined;
+     const mapped = typeof brand === "string" && Object.hasOwn(brands, brand) ? brands[brand] : undefined;
      if (mapped === undefined || typeof v !== "string" || !new RegExp("^" + VERSION + "$").test(v)) continue;
      const rank = mapped === "Chromium" ? 0 : 1;
      if (!best || rank > best.rank) best = {name: mapped, version: v, rank};

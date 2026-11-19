@@ -55,6 +55,13 @@ prep() {
 	# E2E_FAULTS=1 builds the server with the soundpost_faults tag: it then reads shard-removal requests from $T/fault (cmd/soundpost/faultcontrol.go).
 	( cd "$ROOT" && go build ${E2E_FAULTS:+-tags soundpost_faults} -o "$BIN" ./cmd/soundpost )
 	( cd "$ROOT/web" && node node_modules/typescript/bin/tsc -p tsconfig.json && node node_modules/vite/bin/vite.js build 2>&1 | tail -2 )
+	# The suite's native profile is a REAL capture (fixtures/nativeperf/e2eprofile: perf_event_open software CPU-clock samples of the compiled
+	# fixtures/nativeperf/cpu/loop.c through the in-process native helper, assembled by nativeperf.AssembleProfile). No fallback: a host that
+	# cannot capture (perf_event_paranoid > 1, a refused start, no sample) fails prep with the helper's reason. 1730000000000000000 is T0 of
+	# web/e2e/support/real.ts: only the wall anchor of the clock pair is mapped to it so every spec's T0-based window contains the profile.
+	( cd "$ROOT" && cc -O2 -g -fno-pie -no-pie -fno-omit-frame-pointer -pthread -Wl,--build-id -o "$T/native-loop" fixtures/nativeperf/cpu/loop.c \
+		&& go build -o "$T/native-capture" ./fixtures/nativeperf/e2eprofile \
+		&& "$T/native-capture" -workload "$T/native-loop" -out "$T/native-profile.json" -wall-ns 1730000000000000000 -seconds 6 ) || { echo "the real native capture failed (see above): no synthetic profile is substituted" >&2; exit 1; }
 	echo prep-ok
 }
 
@@ -144,7 +151,7 @@ XX
 
 pw_env() {
 	export NODE_EXTRA_CA_CERTS=$PKI/ca.pem SOUNDPOST_TEST_ORIGIN=$ORIGIN SOUNDPOST_SCOPE_EMAIL=e2e-owner@example.test SOUNDPOST_SCOPE_PASSWORD='e2e instance owner password 2026'
-	export E2E_FAULT_DIR=$T/fault E2E_SPKI=$(cat "$PKI/spki.txt") CHROME E2E_SERVER_LOG=$T/server.log E2E_DATA_DIR=$DATA E2E_BIN=$BIN E2E_ORIGIN_PORT=$PORT E2E_PKI=$PKI E2E_OUT_DIR=${E2E_OUT_DIR:-$OUT/test-results} E2E_EVIDENCE_DIR=${E2E_EVIDENCE_DIR:-$OUT/evidence}
+	export E2E_FAULT_DIR=$T/fault E2E_SPKI=$(cat "$PKI/spki.txt") CHROME E2E_SERVER_LOG=$T/server.log E2E_DATA_DIR=$DATA E2E_BIN=$BIN E2E_ORIGIN_PORT=$PORT E2E_PKI=$PKI E2E_NATIVE_PROFILE=$T/native-profile.json E2E_OUT_DIR=${E2E_OUT_DIR:-$OUT/test-results} E2E_EVIDENCE_DIR=${E2E_EVIDENCE_DIR:-$OUT/evidence}
 	[ -f "$T/provision.env" ] && . "$T/provision.env"
 	"$@"
 }

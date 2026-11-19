@@ -416,6 +416,25 @@ type InvestigateBody struct {
 	InvestigationRequest
 }
 
+// investigateScope derives the one scope a typed request runs under. Every kind runs under queryScope (the caller's project-read
+// scope) except release and issue, whose registries need organization administration: a plain request for those (no elevation, no
+// source, read permission) first asks for the caller's own administrator scope, exactly as POST /api/v1/evidence/release and
+// /issue do (evidenceScope), and only when she holds none falls back to queryScope, so a non-administrator is told the registries
+// need an administrator (Investigator.adminState answers that before any state is read) and nothing about the target. An
+// elevation, a source or a raw permission never combines with administration: such a request keeps queryScope's scope, and
+// the refusals queryScope owns for them.
+func investigateScope(ctx context.Context, authority *auth.Service, credential auth.Credential, body InvestigateBody) (auth.Scope, error) {
+	if (body.Kind == KindRelease || body.Kind == KindIssue) && body.Org != (model.ID{}) && len(body.Projects) > 0 && body.Elevation == nil && body.Source == nil {
+		if permission, err := parsePermission(body.Permission); err == nil && permission == auth.Read {
+			scope, err := authority.Authorize(ctx, credential, body.Org, body.Projects, auth.OrgAdmin)
+			if err == nil || !faultIs(err, model.NotFound) {
+				return scope, err
+			}
+		}
+	}
+	return queryScope(ctx, authority, credential, body.ScopeFields, body.Projects, body.Source)
+}
+
 // RegisterInvestigateRoutes mounts POST /api/v1/investigate. The scope is
 // derived from the caller's own credential before any service is touched, and
 // revalidated before a single byte of the view is written.
@@ -431,7 +450,7 @@ func RegisterInvestigateRoutes(mux *http.ServeMux, authority *auth.Service, inve
 			queryReply(w, nil, err)
 			return
 		}
-		scope, err := queryScope(r.Context(), authority, credential, body.ScopeFields, body.Projects, body.Source)
+		scope, err := investigateScope(r.Context(), authority, credential, body)
 		if err != nil {
 			queryReply(w, nil, err)
 			return

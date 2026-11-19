@@ -110,7 +110,8 @@ function frameOf(call:unknown,root:string|undefined):ProfileFrame|null{
  const c=(typeof call==="object"&&call!==null?call:{}) as Record<string,unknown>,name=typeof c.functionName==="string"?c.functionName:"",url=typeof c.url==="string"?c.url:"";
  if(url===""){
   if(name==="(root)")return null;
-  const pseudo=ENGINE_PSEUDO[name];return pseudo?{module_id:"engine",function:pseudo,artifact_id:"",line:null,column:null,offset:"0",reason:""}:EXTERNAL;
+  // Own names only: a plain lookup answered Object.prototype members (constructor, toString, ...) for builtins of those names, and a function is not a frame name.
+  return Object.hasOwn(ENGINE_PSEUDO,name)?{module_id:"engine",function:ENGINE_PSEUDO[name]!,artifact_id:"",line:null,column:null,offset:"0",reason:""}:EXTERNAL;
  }
  const relative=root===undefined?undefined:projectRelative(url,root);
  if(relative===undefined)return EXTERNAL;

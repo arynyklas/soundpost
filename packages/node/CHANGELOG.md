@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fix: a sampled builtin whose name is an `Object.prototype` member (`constructor`, `toString`, `valueOf`, `hasOwnProperty`, `__proto__`, ...) made the engine pseudo-frame lookup answer a function, so the profile chunk was refused by the client as an invalid record and the whole profile read `profile_not_admitted`, at random. The lookup is now by own name; such a builtin is the external placeholder frame (`test/profile.test.ts`, "an empty-URL builtin named like an Object.prototype member").
+
 - A client keeps one `AsyncLocalStorage` store for its trace scope, job scope and exporter-recursion scope (`createContexts`; it was three stores, and the runtime visits every enabled store for each async resource it creates). The three scopes stay independent: each run keeps the other two and restores on exit.
 
 - `installHttp` tracks the requests in flight with a linked list instead of a Set (no hash-table insert and delete per request); the in-flight limit, the oldest-first end of a closing lease and exactly-once settlement are unchanged.

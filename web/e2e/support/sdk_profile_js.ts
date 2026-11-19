@@ -51,7 +51,8 @@ async function main(): Promise<void> {
     await sleep(200);
     const report = await handle.stop();
     if (report.sample_count < 20) throw new Error(`too_few_samples: ${report.sample_count}`);
-    if (report.ack.status !== 'obtained' || handed.length !== 1 || handed[0]?.chunks.length === 0) throw new Error(`sdk_did_not_deliver_profile: ${JSON.stringify(report.ack)}`);
+    // The client counts every refusal by reason (diagnostics()): a profile the queue refused says why in the error, never only "not admitted".
+    if (report.ack.status !== 'obtained' || handed.length !== 1 || handed[0]?.chunks.length === 0) throw new Error(`sdk_did_not_deliver_profile: ${JSON.stringify(report.ack)} chunks=${handed[0]?.chunks.length} diagnostics=${JSON.stringify(client.diagnostics())} capability=${JSON.stringify(handed[0]?.capability)}`);
     const flushed = await client.flush(30_000);
     if (flushed.pending !== 0 || flushed.lost !== 0) throw new Error('durable_delivery_incomplete');
     const first = handed[0]?.chunks[0]?.payload;
@@ -64,6 +65,6 @@ async function main(): Promise<void> {
 try {
   await main();
 } catch (e) {
-  console.error(`sdk_profile_js_failed: ${e instanceof Error ? e.message : String(e)}`.slice(0, 400));
+  console.error(`sdk_profile_js_failed: ${e instanceof Error ? e.message : String(e)}`.slice(0, 1600));
   process.exit(1);
 }

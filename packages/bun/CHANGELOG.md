@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fix: a sampled builtin whose name is an `Object.prototype` member (`constructor`, `toString`, `valueOf`, `hasOwnProperty`, `__proto__`, ...) made the engine pseudo-frame lookup answer a function, so the profile chunk was refused by the client as an invalid record and the whole profile read `profile_not_admitted`, at random (seen in the real-Bun UI end-to-end run, about one run in thirty). The lookup is now by own name; such a builtin is the external placeholder frame (`test/profile.test.ts`, "an empty-URL builtin named like an Object.prototype member").
+
 - `installServe` reads the `x-soundpost-context` companion header only when the request carries a `traceparent` (without one there is no parent whatever the companion says): one native header lookup and one string less on every untraced request (`test/serve-wrappers.test.ts`). Behaviour unchanged.
 
 - `test/inspect-canary.test.ts` pins the `Bun.inspect` Response summary the D31 probe reads (first line `Response (N bytes | N.NN KB|MB|GB)` for a held body, `Response (0 KB)` for a null/empty/stream/touched/used body and `Response.error()`), one body kind at a time, and a second test proves the canary notices seven kinds of drift. A Bun release that changes the text now fails this file by name instead of silently changing which bodies installServe wraps. `bufferedSummary` is exported from `serve.ts` for it.

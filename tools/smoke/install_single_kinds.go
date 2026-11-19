@@ -75,8 +75,8 @@ func investigateInstalled(site *installSite, fx *installFixture) ([]byte, error)
 	// state is the exact typed answer the served product gives today: the trace view is ready; the investigate
 	// trace view is incomplete (its sections are not built); the job investigation of the ingested job is ready (job
 	// and issue investigations require a target; internal/httpapi/investigate.go); the issue investigation as the
-	// project reader is not_available (issue_evidence_needs_org_admin: the route never derives an admin scope). A
-	// change of any of them is a change the smoke must be told about.
+	// project reader is not_available (issue_evidence_needs_org_admin: the route derives the administrator scope only for an organization
+	// administrator, and the reader is not one). A change of any of them is a change the smoke must be told about.
 	reads := []struct {
 		name, path, state string
 		body              map[string]any

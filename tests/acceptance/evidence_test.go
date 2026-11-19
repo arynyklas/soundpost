@@ -26,6 +26,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/arynyklas/soundpost/fixtures/nativeperf/realcapture"
 	recorderfixtures "github.com/arynyklas/soundpost/fixtures/replays/recorder"
 	"github.com/arynyklas/soundpost/internal/appcore"
 	"github.com/arynyklas/soundpost/internal/auth"
@@ -53,9 +54,10 @@ import (
 // the Go validator accepts and the real ingest route, the nativeperf assembler and
 // exporter, the retention deletion saga, the backup/restore/authority drill.
 //
-// What is NOT real, and each is recorded as an unsatisfied row (never as success):
-//   - an SDK profile (no SDK profile reaches the backend); the profile is the real
-//     assembler/exporter fed constructed sanitized events, not perf-captured samples.
+// The profile_assembler_export_view row runs the real assembler/exporter over constructed sanitized events (scheduler intervals included); the
+// profile_real_capture_or_sdk row is a REAL perf_event_open capture of a real process (evRealCapture, fixtures/nativeperf/realcapture) through
+// the same exporter, ingest and profile view, satisfied exactly on a host that can capture (evNeedsCapture) and otherwise unsatisfied with the
+// reason. The Python, Node and Bun SDK profiles are delivered by web/e2e/replay-profile.spec.ts, not by this in-process node.
 //
 // The fixture directory comes from SOUNDPOST_SOURCEMAP_FIXTURE_DIR (the output of
 // `node fixtures/artifacts/generate.mjs <dir>`): a missing fixture is a failure,
@@ -86,7 +88,7 @@ func TestEvidenceRealFrameReplayAndScopeLifecycle(t *testing.T) {
 	n.restoreProbeRow(r)
 	n.canaryRows(r, &logs)
 	// The rows are a verdict, not a log: the run fails unless every one comes to the outcome evExpected writes down.
-	if p := r.problems(n.sandboxWhy == ""); len(p) > 0 {
+	if p := r.problems(evHost{SandboxUsable: n.sandboxWhy == "", CaptureUsable: n.captureWhy == ""}); len(p) > 0 {
 		t.Errorf("the acceptance rows do not come to what they must (%d):\n  %s", len(p), strings.Join(p, "\n  "))
 	}
 }
@@ -137,6 +139,10 @@ const (
 	// evNeedsSandbox: satisfied exactly when the OCI symbolication sandbox is usable on the host; without it the row must be unsatisfied and
 	// the frames must be the typed sandbox_unavailable (the frame code checks that), never a mapped position.
 	evNeedsSandbox
+	// evNeedsCapture: satisfied exactly when this host can take a REAL native CPU capture (a C compiler, Linux, perf_event_open of the
+	// workload's own CPU-clock event allowed): the row is then the perf-captured samples through the real exporter, ingest and profile view.
+	// Without that ability the row must be unsatisfied and say why; constructed events never satisfy it.
+	evNeedsCapture
 )
 
 // evExpected lists every row a complete run adds, and what each must come to. A row that is not listed, listed twice or missing fails the run:
@@ -152,7 +158,7 @@ var evExpected = map[string]evOutcome{
 	"replay_closed_format_stream_and_gap":      evSatisfied,
 	"replay_admission_enforces_closed_format":  evSatisfied,
 	"profile_assembler_export_view":            evSatisfied,
-	"profile_real_capture_or_sdk":              evUnsatisfiedByDesign,
+	"profile_real_capture_or_sdk":              evNeedsCapture,
 	"isolation_same_ids_other_org":             evSatisfied,
 	"backup_before_deletion":                   evSatisfied,
 	"lifecycle_grant_revoke_halts_stream":      evSatisfied,
@@ -167,8 +173,11 @@ var evExpected = map[string]evOutcome{
 	"investigate_replay_profile_links":         evSatisfied,
 }
 
+// evHost is what this host can do: the rows that depend on it come to what it allows and nothing else.
+type evHost struct{ SandboxUsable, CaptureUsable bool }
+
 // problems compares the report with evExpected and returns one line per disagreement (none: the run is acceptable).
-func (r *evReport) problems(sandboxUsable bool) []string {
+func (r *evReport) problems(host evHost) []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	var out []string
@@ -195,8 +204,12 @@ func (r *evReport) problems(sandboxUsable bool) []string {
 				out = append(out, fmt.Sprintf("row %q is NOT SATISFIED by design here but came out satisfied: %s", row.ID, row.Reason))
 			}
 		case evNeedsSandbox:
-			if row.Satisfied != sandboxUsable {
-				out = append(out, fmt.Sprintf("row %q must be satisfied exactly when the sandbox is usable (usable=%v) but satisfied=%v: %s", row.ID, sandboxUsable, row.Satisfied, row.Reason))
+			if row.Satisfied != host.SandboxUsable {
+				out = append(out, fmt.Sprintf("row %q must be satisfied exactly when the sandbox is usable (usable=%v) but satisfied=%v: %s", row.ID, host.SandboxUsable, row.Satisfied, row.Reason))
+			}
+		case evNeedsCapture:
+			if row.Satisfied != host.CaptureUsable {
+				out = append(out, fmt.Sprintf("row %q must be satisfied exactly when a real native CPU capture is possible on this host (possible=%v) but satisfied=%v: %s", row.ID, host.CaptureUsable, row.Satisfied, row.Reason))
 			}
 		}
 	}
@@ -263,6 +276,8 @@ type evNode struct {
 
 	sandbox       symbolicate.Config
 	sandboxWhy    string
+	captureWhy    string // why this host cannot take a real native CPU capture ("" when it can)
+	capture       realcapture.Result
 	fixtureDir    string
 	mapBytes      []byte // what was uploaded (sourcesContent canary included)
 	generated     []byte
@@ -344,6 +359,7 @@ func newEvNode(t *testing.T) *evNode {
 	n.debugID = evHex("evidence-debug-")
 
 	n.sandbox, n.sandboxWhy = evSandboxConfig()
+	n.capture, n.captureWhy = evRealCapture(t, t.TempDir())
 	n.app, err = appcore.Open(filepath.Join(n.dir, "live"))
 	if err != nil {
 		t.Fatal(err)
@@ -413,7 +429,7 @@ func (n *evNode) cmd(org model.ID, kind string, p auth.AdminPayload) {
 	}
 	p.Reason = "evidence acceptance"
 	raw, _ := json.Marshal(p)
-	if _, err := n.app.Auth.AdminCommand(n.ctx, n.owner.cred, auth.AdminCommandRequest{CommandID: model.NewID(), ExpectedRevision: revision, OrgID: org, Kind: kind, Payload: raw}); err != nil {
+	if _, err := n.app.Auth.AdminCommand(n.ctx, n.ownerCred(), auth.AdminCommandRequest{CommandID: model.NewID(), ExpectedRevision: revision, OrgID: org, Kind: kind, Payload: raw}); err != nil {
 		n.t.Fatalf("admin %s: %v", kind, err)
 	}
 }
@@ -499,7 +515,7 @@ func (n *evNode) setupTenants() {
 	if err != nil {
 		n.t.Fatal(err)
 	}
-	s, err := n.app.Auth.Bootstrap(n.ctx, boot, "evidence-owner@example.test", "evidence owner password 2026")
+	s, err := n.app.Auth.Bootstrap(n.ctx, boot, "evidence-owner@example.test", evOwnerPassword)
 	if err != nil {
 		n.t.Fatal(err)
 	}
@@ -1319,7 +1335,7 @@ func (n *evNode) profileRows(r *evReport) {
 		t.Fatalf("a reader without profiles.read opened the profile: %d", status)
 	}
 	r.add("profile_assembler_export_view", true, true, "real nativeperf assembler + exporter, admitted over the real HTTPS route, read through /profiles/view; reader without profiles.read refused")
-	r.add("profile_real_capture_or_sdk", true, false, "the events are constructed sanitized events fed to the real assembler: no perf-captured sample (native acquisition is a separate qualification) and no SDK profile reaches the backend (03.09 finding)")
+	n.realCaptureRow(r)
 }
 
 func evSchedulerIntervals(t *testing.T, d nativeperf.ClockDomain, k nativeperf.TaskKey) []nativeperf.Interval {
@@ -1471,7 +1487,7 @@ func (n *evNode) streamStatus(who evPerson, org, project, replay model.ID) evRes
 func (n *evNode) backupRow(r *evReport) {
 	t := n.t
 	t.Helper()
-	scope, err := n.app.Auth.InstanceScope(n.ctx, n.owner.cred, "evidence acceptance backup")
+	scope, err := n.app.Auth.InstanceScope(n.ctx, n.ownerCred(), "evidence acceptance backup")
 	if err != nil {
 		t.Fatalf("instance scope: %v", err)
 	}
@@ -1939,7 +1955,7 @@ func evMiniRestore(t *testing.T, withMetric bool) error {
 		value := model.FloatBits(math.Float64bits(1))
 		admit(model.Record{ID: model.NewID(), Kind: model.Metric, ObservedAt: model.UnixNano(now - int64(2*time.Second)), Resource: n.res, Payload: model.Payload{Metric: &model.MetricPoint{Name: "evidence_probe", Labels: model.Labels{}, SampleKind: "float", Value: &value, Unit: "1", Type: "gauge"}}})
 	}
-	scope, err := n.app.Auth.InstanceScope(n.ctx, n.owner.cred, "evidence restore probe")
+	scope, err := n.app.Auth.InstanceScope(n.ctx, n.ownerCred(), "evidence restore probe")
 	if err != nil {
 		t.Fatal(err)
 	}

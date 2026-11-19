@@ -300,6 +300,20 @@ test("a client that admits profiles receives the capability and a linked runtime
  expect(chunk.payload.capability_id).toBe(report.capability.id);expect((chunk.payload.samples as unknown[]).length).toBe(report.sample_count);
  await client.close();
 });
+test("an empty-URL builtin named like an Object.prototype member is an external frame, and the whole profile is still admitted by the client",async()=>{
+ // A plain-object lookup of the engine pseudo-frame names answered Object.prototype.constructor/toString/... for these names, so the frame's function was a FUNCTION,
+ // the wire mapping dropped it and the core client refused the whole profile chunk as invalid (profile_not_admitted), at random: whenever such a builtin was sampled.
+ const names=["constructor","toString","valueOf","hasOwnProperty","isPrototypeOf","propertyIsEnumerable","toLocaleString","__proto__","__defineGetter__"];
+ const nodes=[{id:1,callFrame:frame("(root)","",-1,-1),children:[2,...names.map((_,i)=>i+3)]},{id:2,callFrame:frame("busyWork","file:///proj/src/work.js",9,4)},...names.map((name,i)=>({id:i+3,callFrame:frame(name,"",-1,-1)}))];
+ const ids=nodes.slice(1).map(n=>n.id),profile={nodes,startTime:5_000_000,endTime:5_010_000,samples:ids,timeDeltas:ids.map(()=>1000)};
+ const {client,records}=deliveringClient(true),report=await (await createProfiler(deps(fake({profile}))).startProfile({...options,client})).stop();
+ expect(report.frames.every((f:{function:unknown})=>typeof f.function==="string")).toBe(true);
+ expect(report.frames.filter((f:{module_id:string})=>f.module_id==="external")).toHaveLength(1);
+ expect(report.ack.status).toBe("obtained");
+ const chunk=records().find(r=>r.kind==="profile_chunk")!;
+ expect((chunk.payload.frames as {function:unknown}[]).every(f=>typeof f.function==="string")).toBe(true);
+ await client.close();
+});
 test("a refusal is delivered as the capability record alone; a client without profile admission leaves the documented not-admitted ack",async()=>{
  const {client,records}=deliveringClient(true),refused=await (await createProfiler(deps(fake())).startProfile({...options,isolate:"worker",client})).stop();
  expect(refused.capability.status).toBe("denied");expect(refused.ack.status).toBe("obtained");expect(records().map(r=>r.kind)).toEqual(["capability"]);await client.close();

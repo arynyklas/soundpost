@@ -77,8 +77,8 @@ function nativeProfile(p:Record<string,unknown>,revision:string):void{
 const structureStrings:Readonly<Record<string,readonly string[]>>={metric:'name sample_kind unit type'.split(' '),log:'severity template_id line source_class'.split(' '),span:'span_kind operation status dependency_alias sample_decision'.split(' '),error:'exception_class mechanism'.split(' '),job_attempt:'schedule_occurrence state'.split(' '),replay_chunk:['recorder_version'],profile_chunk:'method units'.split(' '),capability:'runtime version build os arch signal method status reason'.split(' '),loss:'signal reason'.split(' '),condition:'status severity'.split(' ')};
 const structureIds:Readonly<Record<string,readonly string[]>>={metric:['exemplar_trace'],log:'trace_id run_id'.split(' '),span:'trace_id job_id replay_id profile_id'.split(' '),error:'occurrence_id build_id release_id trace_id replay_id profile_id run_id'.split(' '),job_attempt:'job_id run_id attempt_id producer_epoch cause_trace cause_error'.split(' '),replay_chunk:'replay_id session_id'.split(' '),profile_chunk:'profile_id process_id capability_id'.split(' '),loss:'source producer producer_epoch'.split(' '),condition:'condition_id epoch'.split(' ')};
 function structures(kind:string,p:Record<string,unknown>,revision:string):void{
- for(const key of structureStrings[kind]??[])text(p[key]);if(kind==='error'){if(p.code!==null)text(p.code);if(p.template_id!==undefined)text(p.template_id);}if(kind==='log'&&p.timestamp_ns!==undefined)unixNano(p.timestamp_ns);
- for(const key of structureIds[kind]??[])if(p[key]!==undefined)canonicalId(p[key]);
+ for(const key of Object.hasOwn(structureStrings,kind)?structureStrings[kind]!:[])text(p[key]);if(kind==='error'){if(p.code!==null)text(p.code);if(p.template_id!==undefined)text(p.template_id);}if(kind==='log'&&p.timestamp_ns!==undefined)unixNano(p.timestamp_ns);
+ for(const key of Object.hasOwn(structureIds,kind)?structureIds[kind]!:[])if(p[key]!==undefined)canonicalId(p[key]);
  for(const key of ['span_id','exemplar_span'])if(p[key]!==undefined){bits(p[key]);if(text(p[key])==='0'.repeat(16))throw Error('invalid span ID');}
  if(kind==='metric'){
   labels(p.labels);if(p.value!==undefined)bits(p.value);
@@ -119,7 +119,7 @@ function structures(kind:string,p:Record<string,unknown>,revision:string):void{
  if(kind==='condition'){decimal(p.sequence);unixNano(p.event_ns);labels(p.labels);array(p.links).forEach(canonicalId);}
 }
 export function parseSafeRecord(serialized:string):NativeRecord{
- const r=fields(JSON.parse(serialized),'id kind observed_at_ns policy_revision payload');canonicalId(r.id);unixNano(r.observed_at_ns);decimal(r.policy_revision);const kind=text(r.kind),schema=payloadFields[kind];if(!schema)throw Error('invalid signal');const p=fields(r.payload,schema[0],schema[1]);
+ const r=fields(JSON.parse(serialized),'id kind observed_at_ns policy_revision payload');canonicalId(r.id);unixNano(r.observed_at_ns);decimal(r.policy_revision);const kind=text(r.kind),schema=Object.hasOwn(payloadFields,kind)?payloadFields[kind]:undefined;if(!schema)throw Error('invalid signal');const p=fields(r.payload,schema[0],schema[1]);
  structures(kind,p,decimal(r.policy_revision));
  // Closed current capture graph: no raw object, message, stack or unknown field can enter native bytes.
  if(kind==='error'){

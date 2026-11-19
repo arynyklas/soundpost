@@ -8,7 +8,7 @@ import {join,resolve} from 'node:path';
 import {promisify} from 'node:util';
 import {test,expect,request as pwRequest,type APIRequestContext,type Response,type Browser,type BrowserContext,type FrameLocator,type Page} from '@playwright/test';
 import {activate,at,createOrg,createProject,createReader,login,onboardSdkProfileSource,origin,owner,id,sdkConfig,type Reader,type Source} from './support/real';
-import {NATIVE_PROFILE,PROFILE_WINDOW,UNSUPPORTED_PROFILE,deleteEntity,onboardReplaySource,seedOwnProfile,seedOwnReplay,seedProfiles,seedReplays,setPermissions,type ReplaySeed} from './support/replay';
+import {NATIVE_CAPTURE,NATIVE_PROFILE,PROFILE_WINDOW,SCHEDULER_PROFILE,UNSUPPORTED_PROFILE,deleteEntity,onboardReplaySource,seedOwnProfile,seedOwnReplay,seedProfiles,seedReplays,setPermissions,type ReplaySeed} from './support/replay';
 import {PAGE_CANARIES,onboardBrowserReplaySource,record,recorderApp} from './support/recorder';
 
 // Real server, real Chrome. Every replay chunk and profile record below was admitted through the real ingest route with a real
@@ -16,7 +16,7 @@ import {PAGE_CANARIES,onboardBrowserReplaySource,record,recorderApp} from './sup
 // POST /api/v1/profiles/view routes by real readers. Nothing here fakes a server answer. The seeded replays use the closed chunk format
 // built by support/replay.ts (so gaps can be made on purpose); two tests at the end instead run the REAL browser SDK recorder
 // (packages/browser, support/recorder.ts) in the real Chrome over a page of canary text, delivered by the SDK's own transport. NOT covered, on purpose and stated:
-//  - live perf: the native profile is the real nativeperf assembler over sanitized synthetic events (no perf privileges here).
+//  - scheduler events: this host cannot capture them (the probe reports scheduler_event_open unsupported, tracefs_unavailable, without CAP_PERFMON), so the blocked/runnable/unknown-split display is checked on SCHEDULER_PROFILE, nativeperf.AssembleProfile over synthetic intervals. The CPU profile (NATIVE_PROFILE) is a real perf capture.
 test.describe.configure({mode:'serial'});
 const ALL=['telemetry.read','replay.read','profiles.read'];
 let br:Browser,ctx:BrowserContext,owners:Page,api:APIRequestContext,org:string,p1:string,reader:Reader,telemetryOnly:Reader,seed:ReplaySeed,replaySource:Source;
@@ -211,9 +211,37 @@ test('revoking replay.read while the replay is open clears it and nothing furthe
  await page.context().close();
 });
 
-test('a native CPU profile keeps OS on-CPU samples, blocked time, runnable delay and the unknown split apart',async()=>{
+test('a native CPU profile keeps OS on-CPU samples, as really captured, and reads the scheduler units this host cannot measure as their capability word, never zero',async()=>{
+ const c=NATIVE_CAPTURE;
+ const group=(n:number):string=>String(n).replace(/\B(?=(\d{3})+(?!\d))/g,',');
  const page=await ctx.newPage();
  await openProfile(page,NATIVE_PROFILE);
+ await expect(page.getByTestId('profile-method')).toContainText('native_cpu');
+ const cpu=page.getByTestId('unit-oscpu');
+ await expect(cpu).toHaveAttribute('data-state','measured');
+ await expect(cpu).toContainText(`${group(c.cpu_samples)} on-CPU samples`);
+ await expect(cpu).toContainText(`period ${group(c.period)}`);
+ await expect(cpu).toContainText('requested 99 Hz');
+ // The scheduler units read what the probe of this host reported for native_offcpu ('supported' without intervals: not measured), never a duration.
+ const scheduler=c.off_cpu==='supported'?'not_measured':c.off_cpu;
+ for(const unit of ['unit-blocked','unit-runnable','unit-unknown-split']){
+  await expect(page.getByTestId(unit)).toHaveAttribute('data-state',scheduler);
+  await expect(page.getByTestId(unit)).not.toContainText(/\b\d+ ns\b/);
+ }
+ const rows=page.getByTestId('capability-row');
+ await expect(rows).toHaveCount(3);
+ // The server lists capability records in no promised order: each method is checked by name, against what the probe reported.
+ await expect(rows.filter({hasText:'native_cpu'})).toHaveAttribute('data-status',c.cpu);
+ await expect(rows.filter({hasText:'native_offcpu'})).toHaveAttribute('data-status',c.off_cpu);
+ await expect(rows.filter({hasText:'native_runqueue_split'})).toHaveAttribute('data-status',c.runqueue_split);
+ await expect(page.getByTestId('frame-list')).toContainText('unresolved frame');
+ await expect(page.getByTestId('profile-correlation')).toContainText('no request link');
+ await expect(page.getByTestId('profile-correlation')).toContainText('is not counted against any request');
+});
+
+test('the scheduler units of a native profile (a SYNTHETIC profile: this host cannot capture scheduler events) keep blocked time, runnable delay and the unknown split apart',async()=>{
+ const page=await ctx.newPage();
+ await openProfile(page,SCHEDULER_PROFILE);
  await expect(page.getByTestId('profile-method')).toContainText('native_cpu');
  const cpu=page.getByTestId('unit-oscpu');
  await expect(cpu).toContainText('3');
@@ -225,13 +253,10 @@ test('a native CPU profile keeps OS on-CPU samples, blocked time, runnable delay
  await expect(page.locator('body')).not.toContainText(/\b(90|93|96|99) ns\b/);
  const rows=page.getByTestId('capability-row');
  await expect(rows).toHaveCount(3);
- // The server lists capability records in no promised order: each method is checked by name.
  await expect(rows.filter({hasText:'native_cpu'})).toHaveAttribute('data-status','supported');
  await expect(rows.filter({hasText:'native_offcpu'})).toHaveAttribute('data-status','supported');
  await expect(rows.filter({hasText:'native_runqueue_split'})).toHaveAttribute('data-status','denied');
  await expect(page.getByTestId('frame-list')).toContainText('unresolved frame');
- await expect(page.getByTestId('profile-correlation')).toContainText('no request link');
- await expect(page.getByTestId('profile-correlation')).toContainText('is not counted against any request');
 });
 
 test('an unavailable browser sampling method reads unsupported, never zero',async()=>{

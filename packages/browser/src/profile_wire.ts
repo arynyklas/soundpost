@@ -52,7 +52,7 @@ export function profileWire(report: ProfileReport, ids: WireIds): ProfileWire {
    return {module_id: f.module_id, function: f.function, artifact_id: f.artifact_id, offset: f.offset, reason: f.reason};
   });
   const known = current.stackIndex.has(sample.stack);
-  const wireSample = (local: number): Sample => ({at_ns: (BigInt(sample.at_us) * 1000n).toString(), stack: local, count: "1", thread: THREADS[sample.thread] ?? "0"});
+  const wireSample = (local: number): Sample => ({at_ns: (BigInt(sample.at_us) * 1000n).toString(), stack: local, count: "1", thread: Object.hasOwn(THREADS, sample.thread) ? THREADS[sample.thread]! : "0"});
   const cost = wireFrames.reduce((n, f) => n + size(f), 0) + (known ? 0 : size({frames: stack.frames}) + 8) + size(wireSample(0));
   if (current.samples.length > 0 && current.bytes + cost > CHUNK_BYTES) { chunks.push(current); current = fresh(); return add(sample); }
   const localFrames = (): void => { for (const [i, index] of newFrames.entries()) { current.frameIndex.set(index, current.frames.length); current.frames.push(wireFrames[i]!); } };

@@ -4,7 +4,8 @@
 // the source through the real POST /api/v1/sources, and every chunk through the real POST /ingest/v1/batches with that source's
 // credential. These replay chunks are built through the closed format the Go validator accepts, so a test can make gaps on purpose; chunks of the REAL
 // browser SDK recorder (which now emits that same closed schema, decision D2) are produced by support/recorder.ts instead. The native profile chunk is
-// produced by the real nativeperf assembler over sanitized SYNTHETIC kernel events (no perf privileges exist on the test host); see profile-fixture.json.
+// a REAL capture (fixtures/nativeperf/e2eprofile, run by `h.sh prep` into E2E_NATIVE_PROFILE: perf_event_open CPU-clock samples of a real process through the
+// native helper, assembled by nativeperf.AssembleProfile); profile-fixture.json stays only as the SYNTHETIC scheduler-interval profile (see SCHEDULER_PROFILE).
 // Profiles of the real SDKs are produced by support/sdk_profile.py.
 import {createHash,randomBytes} from 'node:crypto';
 import {readFileSync} from 'node:fs';
@@ -119,28 +120,43 @@ export async function setPermissions(page:Page,org:string,userId:string,project:
 }
 
 // ---- profiles ---------------------------------------------------------------------------------------------------
-interface Fixture{chunk:Record<string,unknown>;capabilities:{id:string;value:Record<string,unknown>}[]}
-const fixture=JSON.parse(readFileSync(fileURLToPath(new URL('./profile-fixture.json',import.meta.url)),'utf8')) as Fixture;
-export const NATIVE_PROFILE=String(fixture.chunk.profile_id);
+interface Capture{cpu_samples:number;hot_loop_samples:number;threads:number;period:number;loss:number;frames:number;kernel:string;cpu:string;off_cpu:string;runqueue_split:string;reasons:string[]}
+interface Chunk{profile_id:string;clock:{wall_ns:string;domain:unknown};[field:string]:unknown}
+interface Fixture{chunk:Chunk;capabilities:{id:string;value:Record<string,unknown>}[];capture?:Capture}
+const readFixture=(path:string):Fixture=>JSON.parse(readFileSync(path,'utf8')) as Fixture;
 export const T0_NS=at(0);
+// The real capture. No fallback: without it (the harness's `h.sh prep` failed or was not run) nothing here may pretend to be a native profile.
+const nativePath=process.env.E2E_NATIVE_PROFILE??'';
+if(nativePath==='')throw Error('E2E_NATIVE_PROFILE is not set: run `h.sh prep` (it captures the real native profile with fixtures/nativeperf/e2eprofile)');
+const fixture=readFixture(nativePath);
+if(fixture.capture===undefined||fixture.chunk.clock.wall_ns!==T0_NS.toString())throw Error(`${nativePath} is not an e2eprofile capture anchored at T0`);
+/** What the real capture measured: the figures the UI must show for NATIVE_PROFILE. */
+export const NATIVE_CAPTURE:Capture=fixture.capture;
+export const NATIVE_PROFILE=String(fixture.chunk.profile_id);
+// The SYNTHETIC scheduler profile: nativeperf.AssembleProfile over constructed blocked/runnable intervals (internal/httpapi TestWriteProfileFixture). It exists
+// only because the e2e hosts cannot capture scheduler events (the probe reports scheduler_event_open unsupported, tracefs_unavailable, without CAP_PERFMON).
+const scheduler=readFixture(fileURLToPath(new URL('./profile-fixture.json',import.meta.url)));
+export const SCHEDULER_PROFILE=String(scheduler.chunk.profile_id);
 /** The window every profile page of the spec opens: it contains the whole fixture. */
 export const PROFILE_WINDOW={start:T0_NS-SECOND,end:T0_NS+10n*SECOND};
 
 const BROWSER_PROFILE='5b010000000000000000000000000000',BROWSER_PROCESS='5b020000000000000000000000000000',BROWSER_CAP='5b030000000000000000000000000000';
 export const UNSUPPORTED_PROFILE=BROWSER_PROFILE;
 
-/** Admit the native profile (real assembler output) and an unsupported browser-sampling profile through the real ingest route. */
+/** Admit the real native profile, the synthetic scheduler profile and an unsupported browser-sampling profile through the real ingest route. */
 export async function seedProfiles(request:APIRequestContext,s:Source):Promise<void>{
  const observed=T0_NS.toString();
- for(const c of fixture.capabilities){
-  const st=await ingestBatchRaw(request,s,[{id:c.id,kind:'capability',observed_at_ns:observed,resource:resource(s),payload:c.value}]);
-  if(st!==200)throw Error(`capability refused: HTTP ${st}`);
+ for(const f of [fixture,scheduler]){
+  for(const c of f.capabilities){
+   const st=await ingestBatchRaw(request,s,[{id:c.id,kind:'capability',observed_at_ns:observed,resource:resource(s),payload:c.value}]);
+   if(st!==200)throw Error(`capability refused: HTTP ${st}`);
+  }
+  const st=await ingestBatchRaw(request,s,[{id:id(),kind:'profile_chunk',observed_at_ns:observed,resource:resource(s),payload:f.chunk}]);
+  if(st!==200)throw Error(`native profile chunk refused: HTTP ${st}`);
  }
- let st=await ingestBatchRaw(request,s,[{id:id(),kind:'profile_chunk',observed_at_ns:observed,resource:resource(s),payload:fixture.chunk}]);
- if(st!==200)throw Error(`native profile chunk refused: HTTP ${st}`);
  const clock=fixture.chunk.clock;
- const unsupported={runtime:'firefox',version:'130',build:'release',os:'linux',arch:'amd64',signal:'profile_chunk',method:'browser_js_self_profile',status:'unsupported',reason:'api_unavailable',coverage:{frames:'none',threads:'none',workers:'none',tasks:'none'},clock_domain:(clock as {domain:unknown}).domain,expires_ns:(T0_NS+86_400n*SECOND).toString()};
- st=await ingestBatchRaw(request,s,[{id:BROWSER_CAP,kind:'capability',observed_at_ns:observed,resource:resource(s),payload:unsupported}]);
+ const unsupported={runtime:'firefox',version:'130',build:'release',os:'linux',arch:'amd64',signal:'profile_chunk',method:'browser_js_self_profile',status:'unsupported',reason:'api_unavailable',coverage:{frames:'none',threads:'none',workers:'none',tasks:'none'},clock_domain:clock.domain,expires_ns:(T0_NS+86_400n*SECOND).toString()};
+ let st=await ingestBatchRaw(request,s,[{id:BROWSER_CAP,kind:'capability',observed_at_ns:observed,resource:resource(s),payload:unsupported}]);
  if(st!==200)throw Error(`browser capability refused: HTTP ${st}`);
  const chunk={profile_id:BROWSER_PROFILE,process_id:BROWSER_PROCESS,capability_id:BROWSER_CAP,method:'runtime_cpu',units:'samples',start_ns:observed,end_ns:(T0_NS+SECOND).toString(),clock,frames:[],stacks:[],samples:[],intervals:[],loss:'0',truncated:false};
  st=await ingestBatchRaw(request,s,[{id:id(),kind:'profile_chunk',observed_at_ns:observed,resource:resource(s),payload:chunk}]);

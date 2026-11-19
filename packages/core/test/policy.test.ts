@@ -1,6 +1,7 @@
 // Copyright 2026 Aryn Yklas
 // SPDX-License-Identifier: Apache-2.0
 import {test, expect} from "bun:test";
+import {parseSafeRecord} from "../src/wire.ts";
 import {init} from "../src/client.ts";
 import {config,signed,OTHER_PROJECT} from "./fixture.ts";
 test("policy precedes queue without evaluating hostile values",()=>{
@@ -12,6 +13,10 @@ test("policy precedes queue without evaluating hostile values",()=>{
  expect(data).toContain("9007199254740993"); expect(data).toContain("operation failed: 503");
  for(const x of ["SECRET","password","getter","toJSON"]) expect(data).not.toContain(x);
  expect(c.policyDecision.replay).toBe(false); expect(c.policyDecision.bodies).toBe(false);
+});
+test("a record kind that is an Object.prototype member is an invalid signal, never a schema",()=>{
+ for(const kind of ["constructor","__proto__","hasOwnProperty","toString"])
+  expect(()=>parseSafeRecord(JSON.stringify({id:"1".repeat(32),kind,observed_at_ns:"1",policy_revision:"1",payload:{}}))).toThrow("invalid signal");
 });
 test("templates are immutable history and clients independent",()=>{
  const c=init(config()),d=init(config(OTHER_PROJECT)); c.captureLog("operation.failed",{status:503}); const before=c.bufferedRecords();

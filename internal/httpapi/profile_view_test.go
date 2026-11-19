@@ -377,10 +377,13 @@ func TestProfileViewRealComposition(t *testing.T) {
 // TestWriteProfileFixture regenerates web/e2e/support/profile-fixture.json with the
 // real nativeperf assembler when SOUNDPOST_WRITE_PROFILE_FIXTURE names the output
 // file (cd to the repository root is not needed: the path is used as given). The
-// events are sanitized SYNTHETIC kernel events: no perf privileges exist on this
-// host, so the assembler, the ingest validators, storage and the C10 read are real
-// and the kernel acquisition is not. Without the variable it only proves the
-// fixture still assembles and the read path's scheduler/CPU units stay separate.
+// events are sanitized SYNTHETIC kernel events: the scheduler intervals (blocked time,
+// runnable delay) cannot be captured on the e2e hosts (tracefs unavailable, no
+// CAP_PERFMON), so the e2e uses this fixture only as its SCHEDULER profile; the
+// native CPU profile of the e2e is a real capture (fixtures/nativeperf/e2eprofile).
+// The assembler, the ingest validators, storage and the C10 read are real here and
+// the kernel acquisition is not. Without the variable it only proves the fixture
+// still assembles and the read path's scheduler/CPU units stay separate.
 func TestWriteProfileFixture(t *testing.T) {
 	d := nativeperf.ClockDomain{HostID: "host", BootID: "boot"}
 	k := nativeperf.TaskKey{BootID: "boot", PIDNamespace: 1, TGID: 7, TID: 8, ProcessStart: 1, Generation: 1}

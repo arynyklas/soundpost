@@ -474,6 +474,15 @@ test("browser identity: high-entropy brands give an exact build token; fallbacks
  expect((await run(throwing, {durationMs: 100})).capability.runtime).toBe("Chrome/156.0.0.0");
 });
 
+test("browser identity: platform and brand names that are Object.prototype members are unknown, never a function", async () => {
+ for (const name of ["constructor", "__proto__", "hasOwnProperty", "toString"]) {
+  const h = harness({uaData: {platform: name, getHighEntropyValues: async () => ({fullVersionList: [{brand: name, version: "156.0.1.2"}, {brand: "Chromium", version: "156.0.1.2"}], architecture: "x86", bitness: "64", platform: name})}});
+  const report = await run(h, {durationMs: 100});
+  expect(report.capability).toMatchObject({runtime: "Chromium/156.0.1.2"});
+  expect(typeof report.capability.os).toBe("string"); expect(report.capability.os).not.toBe(name);
+ }
+});
+
 test("a high-entropy lookup that never settles cannot hold the profile open: bounded fallback to the user agent token", async () => {
  const h = harness({uaData: {platform: "Linux", getHighEntropyValues: () => new Promise(() => {})}});
  const handle = await h.api.startProfile({durationMs: 5000});
