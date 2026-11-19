@@ -94,10 +94,17 @@ export function durationText(ns: bigint): string {
  if (n < 1_000_000_000n) return `${sign}${scaled(n, 1_000_000n, 'ms')}`;
  return `${sign}${scaled(n, 1_000_000_000n, 's')}`;
 }
+/** The wire contract (packages/core/README.md, "maximum uncertainty") defines the largest uint64 as the conservative bound of a clock whose error is not known: not a measurement. The server clamps every stated uncertainty to 2^62 ns, so at or above that value the uncertainty is unknown, never a duration. */
+const UNBOUNDED_NS = 1n << 62n;
+/** A stated clock uncertainty in words: a duration, or that no bound was stated. */
+export function uncertaintyText(ns: bigint): string {
+ return ns >= UNBOUNDED_NS ? 'unknown (no bound stated)' : durationText(ns);
+}
 /** An interval in words. Never a single figure unless the two bounds are equal. */
 export function boundsText(b: DurationBounds): string {
  if (!b.known) return 'not measured';
  const lo = BigInt(b.min_ns), hi = BigInt(b.max_ns);
+ if (hi >= UNBOUNDED_NS) return `at least ${durationText(lo)}, no upper bound stated`;
  return lo === hi ? `exactly ${durationText(lo)}` : `between ${durationText(lo)} and ${durationText(hi)}`;
 }
 export function basisWords(b: DurationBounds): string {
@@ -156,7 +163,7 @@ export function limits(path: PathResult, partial: boolean): Limit[] {
    default: add(reason, `The analysis reported a limit this page does not recognise (${reason}); treat the trace as incomplete.`);
   }
  }
- if (path.unlike_clock_domains) add('unlike_clock_domains', `Spans were recorded on unlike clock domains (largest stated uncertainty ${durationText(BigInt(path.max_uncertainty_ns))}). Monotonic readings of different domains are never subtracted; across domains only wall clocks with that uncertainty are used.`);
+ if (path.unlike_clock_domains) add('unlike_clock_domains', `Spans were recorded on unlike clock domains (largest stated uncertainty: ${uncertaintyText(BigInt(path.max_uncertainty_ns))}). Monotonic readings of different domains are never subtracted; across domains only wall clocks with that uncertainty are used.`);
  const boundary = flagCount(path, 'dependency_boundary');
  if (boundary > 0) add('dependency_boundary', `${plural(boundary, 'dependency call ends', 'dependency calls end')} at the dependency boundary: the dependency's internals were not captured, so none are shown. That is a visibility limit, not proof of no work inside it.`);
  const cancelled = flagCount(path, 'cancelled');
@@ -215,7 +222,7 @@ export function detailsOf(path: PathResult, id: SpanId | null): Detail[] | null 
  if (s.flags.length) d.push({ label: 'Limits of this span', value: s.flags.map(flagWords).join('; ') });
  for (const l of s.links) d.push({ label: 'Link', value: `${l.span_id} in ${l.same_trace ? 'this trace' : `trace ${l.trace_id}`}: ${l.resolved ? 'target span is in this trace' : 'target not readable here'} (asynchronous reference, not part of the duration)` });
  const clock = path.clock_issues.filter((c) => c.span_id === s.span_id);
- for (const c of clock) d.push({ label: 'Clock', value: `${c.kind === 'starts_before_parent' ? 'starts before its parent' : 'ends after its parent'}: ${c.certain ? 'cannot be explained by clock uncertainty' : `may be clock skew within ${durationText(BigInt(c.uncertainty_ns))}`}${c.cross_domain ? ' (unlike clock domains)' : ''}` });
+ for (const c of clock) d.push({ label: 'Clock', value: `${c.kind === 'starts_before_parent' ? 'starts before its parent' : 'ends after its parent'}: ${c.certain ? 'cannot be explained by clock uncertainty' : `may be clock skew within ${uncertaintyText(BigInt(c.uncertainty_ns))}`}${c.cross_domain ? ' (unlike clock domains)' : ''}` });
  return d;
 }
 

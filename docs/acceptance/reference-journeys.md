@@ -124,3 +124,23 @@ is strict) and runs the smoke as its child. What differs from the single node, a
   while two of them run (a file that vanishes between listing and reading is skipped and counted).
 * `details.json` carries a `cluster` object (members, roles, recovered members, the member the reads went through) and the order page's flush report
   (`order_driver_flush`); `observed.json` has the same shape as the single-node document.
+
+## The same estate under the UI end-to-end suite (acceptance 05.06 and 05.09)
+
+`web/e2e/support/estate.ts` (`seedEstate`) starts the same programs as host processes for the investigation UI specs: the Bun gateway (twice: one in
+front of the instrumented API, one in front of the same API code started without `--config`, an unavailable producer), the Python API over a PostgreSQL 16
+database that the run creates and drops, the uninstrumented dependency, and the order page built by Vite with `packages/build` (its source map uploaded
+through `POST /api/v1/artifacts`). Sources, the builder's artifact token and the investigator are made through the public admin and source routes. The
+page runs in the browser under test (Chromium, Firefox or WebKit project) and places three orders: priced, unpriced (the page throws `UnpricedOrderError`
+in its real minified bundle) and priced through the second gateway. Each program is stopped with SIGTERM and must report nothing pending or lost.
+Nothing is composed by the suite: every span, error and mapped frame the UI shows was delivered by an SDK to the real ingest route.
+
+| Spec | What it reads |
+| --- | --- |
+| `web/e2e/estate-traces.spec.ts` (pointer and keyboard) | the priced trace (eight spans in one tree: page action, page-to-gateway call, gateway request, gateway-to-API call, API request, two database calls, the dependency call; three dependency boundaries; the path's self times add up to the root's observed duration), the dark trace (four spans, the call to the API is the boundary, none of the API's spans exist), the span-to-Explore link carrying the span's own recorded window, the page's failure as an error occurrence on the action span linked to its issue |
+| `web/e2e/investigation-journeys.spec.ts`, organization C (keyboard only) | the same traces, and trace -> failure -> issue -> frame mapped by the real source map of the real build (`src/receipt.ts:24:`), with the map's source text never shown |
+
+Host requirements, none substituted: `E2E_ESTATE_DATABASE_URL` (an admin DSN of a PostgreSQL 16 server, for example a container on a Docker host:
+`postgresql://postgres:PASSWORD@HOST:PORT/postgres`), `E2E_PYTHON` (3.12 to 3.14 with the locked psycopg, httpx and cryptography), Bun 1.3.14
+(`E2E_BUN`, default `bun`), the harness's `E2E_PKI`, and `h.sh prep` (which now also installs `@soundpost/reference-web` and `@soundpost/build`).
+The symbolication sandbox (`E2E_SANDBOX=1`) maps the frame. Durations differ on every run; the specs assert structure and the page's own arithmetic.

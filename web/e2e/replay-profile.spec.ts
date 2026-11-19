@@ -73,22 +73,25 @@ test('a missing middle chunk pauses the viewer at the gap and playback resumes o
  await expect(page.getByTestId('replay-frame')).toHaveAttribute('sandbox','allow-scripts');
  for(let n=1;n<=3;n++){await step(page);await expect(hostStatus(page)).toContainText(`Events delivered to the viewer: ${n}`);}
  await expect(hostStatus(page)).toHaveAttribute('data-status','ready');
- await expect(timeline(page)).toHaveText(['checkpoint 1','delta 2','delta 3']);
+ await expect(timeline(page)).toHaveText(['checkpoint 1','delta 2 loss 3','delta 3']);
+ // The recorder's own loss counter (03.08-C12) is named on the chunk that reports it, and only there.
+ await expect(frameOf(page).locator('[data-replay-timeline] li[data-sequence="2"]')).toContainText('loss 3');
+ await expect(frameOf(page).locator('[data-replay-timeline] li[data-sequence="3"]')).not.toContainText('loss');
  // The server's typed gap (sequences 4 to 5 never arrived) is the next event: the viewer pauses.
  await step(page);
  await expect(hostStatus(page)).toHaveAttribute('data-status','gap');
  await expect(hostStatus(page)).toContainText('paused at a history gap');
  await expect(frameOf(page).locator('[data-replay-status]')).toHaveText('History gap');
  await expect(frameOf(page).locator('[data-replay-root]')).toHaveAttribute('data-state','gap');
- await expect(timeline(page)).toHaveText(['checkpoint 1','delta 2','delta 3','gap 4-5 missing_chunk']);
+ await expect(timeline(page)).toHaveText(['checkpoint 1','delta 2 loss 3','delta 3','gap 4-5 missing_chunk']);
  // Only the checkpoint resumes it.
  await step(page);
  await expect(hostStatus(page)).toHaveAttribute('data-status','ready');
- await expect(timeline(page)).toHaveText(['checkpoint 1','delta 2','delta 3','gap 4-5 missing_chunk','checkpoint 6']);
+ await expect(timeline(page)).toHaveText(['checkpoint 1','delta 2 loss 3','delta 3','gap 4-5 missing_chunk','checkpoint 6']);
  await expect(page.getByTestId('replay-gaps')).toContainText('In this recording playback resumes only at checkpoint 6; nothing between is shown.');
  await page.getByRole('button',{name:'Play',exact:true}).click();
  await expect(hostStatus(page)).toContainText('All received events were delivered.');
- await expect(timeline(page)).toHaveText(['checkpoint 1','delta 2','delta 3','gap 4-5 missing_chunk','checkpoint 6','delta 7','delta 8']);
+ await expect(timeline(page)).toHaveText(['checkpoint 1','delta 2 loss 3','delta 3','gap 4-5 missing_chunk','checkpoint 6','delta 7','delta 8']);
  const log=await page.getByTestId('viewer-status-log').locator('li').allTextContents();
  expect(log.indexOf('gap')).toBeGreaterThan(0);
  expect(log.slice(log.indexOf('gap')+1)).toContain('ready');
@@ -195,7 +198,7 @@ test('revoking replay.read while the replay is open clears it and nothing furthe
  await waitStarted(page);
  await step(page);await expect(hostStatus(page)).toContainText('Events delivered to the viewer: 1');
  await step(page);await expect(hostStatus(page)).toContainText('Events delivered to the viewer: 2');
- await expect(timeline(page)).toHaveText(['checkpoint 1','delta 2']);
+ await expect(timeline(page)).toHaveText(['checkpoint 1','delta 2 loss 3']);
  await setPermissions(owners,org,victim.id,p1,true,['telemetry.read','profiles.read']); // replay.read withdrawn
  await expect(page.getByTestId('replay-ended')).toBeVisible({timeout:20_000});
  await expect(page.getByTestId('replay-frame')).toHaveCount(0);

@@ -2,7 +2,7 @@
 import { describe, expect, test } from 'bun:test';
 import { ApiFault, type PathResult, type TraceView } from '../api/types';
 import { MS, ORG, PROJECT, TRACE, bounds, cleanPath, segment, sid, span, tree, unknownBounds, viewOf } from './fixture';
-import { basisWords, boundsText, detailsOf, durationText, exploreWindow, flagWords, gapWords, limits, observedWords, offPath, parseTraceView, rows, targetsOf } from './model';
+import { basisWords, boundsText, detailsOf, durationText, exploreWindow, flagWords, gapWords, limits, observedWords, offPath, parseTraceView, rows, targetsOf, uncertaintyText } from './model';
 
 const want = { org: ORG, project: PROJECT, trace: TRACE };
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
@@ -79,6 +79,27 @@ describe('durations are exact and never a lone total when bounds differ', () => 
   const unknown = observedWords(cleanPath({ observed: unknownBounds() }));
   expect(unknown).toContain('not measured');
   expect(unknown).not.toMatch(/\b0 ns\b/);
+ });
+ test('a clamped unbounded uncertainty (2^62 ns, a producer that stated no bound) is worded as not stated, never as seconds', () => {
+  const UNBOUNDED = String(1n << 62n);
+  const path = (over: Partial<PathResult>): PathResult => cleanPath({ complete: false, ...over });
+  const sentence = (p: PathResult, code: string): string => limits(p, false).find((l) => l.code === code)?.text ?? '';
+  const p = path({ reasons: ['clock_uncertain'], unlike_clock_domains: true, max_uncertainty_ns: UNBOUNDED });
+  const text = sentence(p, 'unlike_clock_domains');
+  expect(text).toContain('largest stated uncertainty: unknown (no bound stated)');
+  expect(text).not.toContain('4611686018');
+  const issue = { span_id: sid(2), parent_id: sid(1), kind: 'starts_before_parent' as const, certain: false, cross_domain: true, uncertainty_ns: UNBOUNDED };
+  const value = detailsOf(cleanPath({ clock_issues: [issue] }), sid(2))!.find((d) => d.label === 'Clock')!.value;
+  expect(value).toContain('may be clock skew within unknown (no bound stated)');
+  expect(value).not.toContain('4611686018');
+  // the exact sentinel, the raw wire maximum, and the largest real (bounded) value
+  expect(uncertaintyText(1n << 62n)).toBe('unknown (no bound stated)');
+  expect(uncertaintyText(18446744073709551615n)).toBe('unknown (no bound stated)');
+  expect(uncertaintyText((1n << 62n) - 1n)).toBe('4611686018.427 s');
+  expect(uncertaintyText(10n * MS)).toBe('10 ms');
+  expect(uncertaintyText(0n)).toBe('0 ns');
+  expect(boundsText(bounds(100n * MS, 1n << 62n, 'wall_clock_with_uncertainty'))).toBe('at least 100 ms, no upper bound stated');
+  expect(boundsText(bounds(100n * MS, (1n << 62n) - 1n, 'wall_clock_with_uncertainty'))).toContain('between 100 ms and');
  });
  test('the derivation of a bound is stated: monotonic of one domain, or wall clocks widened by uncertainty', () => {
   expect(basisWords(bounds(1n))).toContain('monotonic readings of one clock domain');

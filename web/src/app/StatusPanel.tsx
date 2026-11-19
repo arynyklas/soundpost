@@ -33,6 +33,10 @@ const REASONS: Record<string, string> = {
  link_resolver_not_wired: 'This installation has no link resolver wired, so no span reference to an error, job, replay or profile is reported. That is not proof that the spans have no references.',
  targets_truncated: 'More span references exist than one resolution batch holds, so only part of them were resolved. The rest are not reported as unavailable or absent.',
  incident_source_not_wired: 'This installation has no incident reader wired, so no incident can be shown. That is not an empty queue.',
+ job_evidence_incomplete: 'Evidence the health of this job needs is missing, so the verdict is not conclusive.',
+ schedule_observer_stale: "The external schedule observer's newest report is older than its stale-after limit, so the schedule health is unknown rather than last observed.",
+ no_schedule_observer: 'No external schedule observer has reported for this scheduled job, so a missed run cannot be established.',
+ evidence_loss_recorded: 'Producer or evidence loss is recorded for this job. It is reported separately from the job outcome.',
 };
 export function reasonText(reason: string): string { return REASONS[reason] ?? EVIDENCE_REASON[reason] ?? 'Not available.'; }
 

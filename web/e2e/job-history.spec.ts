@@ -283,15 +283,32 @@ test('the external schedule observer feed: missed with its evidence, an outage o
  await openJob(page,jobMissed);
  await expect(page.getByTestId('job-health')).toContainText('Missed (external schedule observer evidence)');
  await expect(page.getByTestId('job-observer')).toContainText('Schedule observer: fresh');
+ // The server's own part states, in words, beside the page's observer block: a fresh observer is a Ready part, never a stale one.
+ const part=(name:string)=>page.locator(`ul[aria-label="Parts of this view"] li[data-section="${name}"]`);
+ await expect(part('observer')).toHaveAttribute('data-state','ready');
+ await expect(part('observer')).toContainText('Ready');
+ await expect(part('observer')).not.toContainText('Stale');
  await expect(page.getByTestId('job-observer')).toContainText('Observer reports itself healthy');
  await open(page);
  await openJob(page,jobOutage);
  await expect(page.getByTestId('job-health')).toContainText('Unknown');
  await expect(page.getByTestId('job-health')).not.toContainText('Missed');
  await expect(page.getByTestId('job-observer')).toContainText('Schedule observer: fresh');
+ await expect(part('observer')).toHaveAttribute('data-state','ready');
  await open(page);
  await openJob(page,jobStale);
  await expect(page.getByTestId('job-observer')).toContainText('Schedule observer: stale');
+ // The server marks the observer part stale (schedule_observer_stale): the part list says Stale and what that means, not a bare "Not available".
+ await expect(part('observer')).toHaveAttribute('data-state','stale');
+ await expect(part('observer')).toContainText('Stale');
+ await expect(part('observer')).toContainText('newest report is older than its stale-after limit');
+ await expect(part('observer')).toContainText('unknown rather than last observed');
+ await expect(part('observer')).not.toContainText('Not available');
+ await expect(part('observer')).not.toContainText('Ready');
+ // The other parts keep their own states: a stale observer does not turn them stale.
+ await expect(part('attempts')).toHaveAttribute('data-state','ready');
+ await expect(part('health')).toHaveAttribute('data-state','incomplete');
+ await expect(part('loss')).toHaveAttribute('data-state','ready');
  // The silent observer's last word is passed through but labelled: incomplete evidence, and the stale-observer sentence.
  await expect(page.getByTestId('job-health')).toContainText('Incomplete evidence');
  await expect(page.getByTestId('job-health')).toContainText('has not reported recently enough');
@@ -308,6 +325,9 @@ test('the external schedule observer feed: missed with its evidence, an outage o
  expect(fix.status,fix.text).toBe(200);
  await open(page);
  await openJob(page,C.job);
+ // An unscheduled job (manual attempts only, no observer expected) shows no stale part.
+ await expect(part('observer')).toHaveAttribute('data-state','ready');
+ await expect(page.locator('ul[aria-label="Parts of this view"] li[data-state="stale"]')).toHaveCount(0);
  await run(page,C.run).getByRole('button',{name:`Open run ${C.run}`}).click();
  const attempt=page.locator(`[data-testid=attempt-row][data-attempt="${C.att}"]`);
  await expect(attempt).toContainText('Attempt 1: Succeeded');

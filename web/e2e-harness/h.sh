@@ -33,7 +33,8 @@ pki() {
 
 prep() {
 	# The Node and Bun SDK packages are installed too: the SDK profile drivers (web/e2e/support/sdk_profile_js.ts) import them from source.
-	( cd "$ROOT" && pnpm install --frozen-lockfile --filter @soundpost/web... --filter @soundpost/browser... --filter @soundpost/node... --filter @soundpost/bun... 2>&1 | tail -3 )
+	# The reference estate's page (examples/reference/web, Vite) and packages/build are installed for web/e2e/support/estate.ts.
+	( cd "$ROOT" && pnpm install --frozen-lockfile --filter @soundpost/web... --filter @soundpost/browser... --filter @soundpost/node... --filter @soundpost/bun... --filter @soundpost/reference-web... --filter @soundpost/build... 2>&1 | tail -3 )
 	# E2E_WIRE_HEALTH=1 applies, to this run's VM copy only, the one-line wiring the parent applies to internal/appcore/app.go:
 	# investigator.WithHealth(c) right after the investigator is built.
 	if [ "${E2E_WIRE_HEALTH:-}" = 1 ] && ! grep -q 'investigator.WithHealth(c)' "$ROOT/internal/appcore/app.go"; then

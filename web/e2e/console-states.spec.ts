@@ -9,13 +9,15 @@ import {at,createOrg,createProject,createReader,field,id,ingestMetric,login,onbo
 //  - rate_limited: the server throttles an elevation that found nothing, per credential (30 misses in five minutes). The misses are real
 //    reads of the real route with handles the server never issued; the console's next elevated query meets the server's own 429 body.
 //  - stale: the query engine answers stale when a read has not reached a minimum cursor the caller names. The console's minimum-data-position
-//    field sends one just beyond the cursor the previous answer reported reading through.
+//    field sends one no group can have reached (the largest index the field accepts) for a group of the previous answer: the shared server's groups
+//    keep moving while a person types, so a position "just beyond" the one read is reached by any other writer of that group.
 const admin=process.env.SOUNDPOST_ELEVATION_EMAIL;
 const password=process.env.SOUNDPOST_ELEVATION_PASSWORD;
 const selected=process.env.SOUNDPOST_TEST_ORG;
 if(!admin||!password||!selected)throw new Error('A real separate MFA-free instance-admin fixture and administered organization are required for the console elevation acceptance');
 
 const linkFor=(org:string,project:string):string=>`/#${new URLSearchParams({org,projects:project,start:String(at(0)),end:String(at(70)),tz:'UTC',view:'explore'})}`;
+const UINT64_MAX='18446744073709551615';
 async function run(page:Page,expression:string):Promise<void>{
  await page.getByLabel('Query expression').fill(expression);
  await page.getByRole('button',{name:'Run query',exact:true}).click();
@@ -163,7 +165,18 @@ test('a minimum data position the read has not reached is refused by the real qu
  const cursor=(await panel.locator('.cursor-list code').first().innerText()).trim();
  const [group,index]=cursor.split(':');
  expect(group).toMatch(/^[0-9a-f]{32}$/);
- const beyond=`${group}:${(BigInt(index as string)+1n).toString()}`;
+ // The server is shared: while a person reads and types, other writers ingest into this group too (the first cursor of the answer is only the first of the
+ // 64 groups, not the group this test wrote to, so the suite's other specs move it all the time). Make that happen here, deterministically: fresh series of
+ // this source (each is routed to a slot by its own identity, one batch per series) are ingested until a receipt names this group; its cursor is then past
+ // the one just read. A minimum of "one beyond what was read" is reached from then on and answered; the minimum named below is one no group can have reached.
+ let landed=false;
+ for(let n=0;n<600&&!landed;n++){
+  const receipt=field(await ingestMetric(api,source,{name:`${metric}_other_${n}`,at:at(20),value:1}),'cursor');
+  landed=field(receipt,'group')===group;
+  if(landed)expect(BigInt(String(field(receipt,'index')))).toBeGreaterThan(BigInt(index as string));
+ }
+ expect(landed,`no fresh series was routed to the group ${group} within 600 batches`).toBe(true);
+ const beyond=`${group}:${UINT64_MAX}`;
  // Without partial results the engine refuses the whole query: the console says Error (stale) in words and shows no value.
  await page.getByLabel(/Minimum data position/).fill(beyond);
  await run(page,`{__name__=~"${metric}"}`);

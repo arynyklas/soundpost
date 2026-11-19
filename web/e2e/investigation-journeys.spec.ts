@@ -8,13 +8,13 @@ import {createReader,id,login,owner,postJson} from './support/real';
 import {deleteEntity,setPermissions} from './support/replay';
 import {focusLinkByKeyboard,tabReachesLinks} from './support/audit';
 import {deepLink,realLink,seedJourney,seedRealJourney,type JourneySeed,type RealJourneySeed} from './support/journey';
+import {ESTATE_WINDOW,estateLink,seedEstate,type Estate} from './support/estate';
 
-// Real server, real Chrome, real data. Two readers work through the investigation with the KEYBOARD ONLY (real Tab, Space, Enter and
+// Real server, real Chrome, real data. Three readers work through the investigation with the KEYBOARD ONLY (real Tab, Space, Enter and
 // typed characters; the only non-keyboard navigation is the first address of a leg group, which is how a person opens a pasted deep link).
 // The organization, project and time window stay visible on every leg and are compared to the window the deep link carried.
 //
-// Organization A (a telemetry/replay/profile reader): sign-in form, trace (frontend -> API -> database, overlapping branches), trace
-// (gateway -> dependency), log, metric, replay, profile.
+// Organization A (a telemetry/replay/profile reader): sign-in form, log, metric, replay, profile.
 // Organization B (an organization administrator who also holds telemetry and artifact reads; every record is made by a real route):
 //  - queue -> incident: the incident the leader-only runner opened from an ingested error is a link in the queue, and the keyboard follows it;
 //  - trace -> failure -> issue -> mapped frame: three real spans (frontend, API, PostgreSQL), the real failure of a real minified bundle
@@ -23,10 +23,15 @@ import {deepLink,realLink,seedJourney,seedRealJourney,type JourneySeed,type Real
 //  - release: the release the occurrence ran in, registered through the real registration route, with its artifact binding and ancestry;
 //  - job: a run the real Python SDK produced (attempt 1 raises, the retry succeeds), read as recovered with its captured error as the cause.
 //    The SDK records a manual execution (no schedule definition is reported by the SDK); schedule-derived evidence is job-history.spec.ts.
+// Organization C (the REAL reference estate, examples/reference, produced by support/estate.ts: a Bun gateway, a Python API over PostgreSQL 16,
+// an uninstrumented dependency, the Vite-built order page run in this browser, all through the committed SDKs; this needs E2E_ESTATE_DATABASE_URL):
+//  - trace (page -> gateway -> API -> PostgreSQL and the dependency): eight real spans in one tree, three dependency boundaries;
+//  - trace (gateway -> dependency): the boundary of the uninstrumented dependency, and of an API whose producer reported nothing;
+//  - trace -> failure -> issue -> mapped frame: the failure the real page threw, its issue, its frames mapped by the real source map.
 // Adversarial cases inside the journeys: the owner deletes the replay the keyboard user is viewing (the view ends and releases nothing further),
 // and a schedule observer whose data path lagged leaves a scheduled job Unknown, never Missed, in the same keyboard journey.
 test.describe.configure({mode:'serial'});
-let br:Browser,owners:Page,seed:JourneySeed,real:RealJourneySeed,page:Page,windowText='',scope={org:'',project:'',start:'',end:''};
+let br:Browser,owners:Page,seed:JourneySeed,real:RealJourneySeed,estate:Estate,page:Page,windowText='',scope={org:'',project:'',start:'',end:''};
 const shots=process.env.SOUNDPOST_SHOT_DIR;
 const evidenceFile=process.env.SOUNDPOST_EVIDENCE_FILE;
 const evidence:Record<string,unknown>[]=[];
@@ -95,11 +100,14 @@ test.beforeAll(async({browser})=>{
  const api=await pwRequest.newContext();
  seed=await seedJourney(owners,api);
  real=await seedRealJourney(owners,browser,api);
+ estate=await seedEstate(owners,browser);
  if(shots)mkdirSync(shots,{recursive:true});
 });
-test.afterAll(()=>{
- if(evidenceFile)writeFileSync(evidenceFile,JSON.stringify({ids:{org:seed.explore.org,project:seed.explore.p1,otherProject:seed.explore.p2,reader:seed.explore.reader.id,cleanTrace:seed.traces.clean.trace,gatewayTrace:seed.traces.gateway.trace,replay:seed.replays.clean.replay,profile:seed.profile,metricSource:seed.explore.metricP1.id,logSource:seed.explore.logP1.id,policyRevisions:{metric:seed.explore.metricP1.policyRevision,log:seed.explore.logP1.policyRevision},
-  real:{org:real.ev.org,project:real.ev.project,reader:real.reader.id,incident:real.incident,trace:real.trace.trace,occurrence:real.trace.occurrence,issue:real.ev.real.issue,release:real.ev.real.release,artifact:real.ev.artifact,job:real.job.job,run:real.job.run}},legs:evidence},null,1));
+test.afterAll(async()=>{
+ if(evidenceFile)writeFileSync(evidenceFile,JSON.stringify({ids:{org:seed.explore.org,project:seed.explore.p1,otherProject:seed.explore.p2,reader:seed.explore.reader.id,replay:seed.replays.clean.replay,profile:seed.profile,metricSource:seed.explore.metricP1.id,logSource:seed.explore.logP1.id,policyRevisions:{metric:seed.explore.metricP1.policyRevision,log:seed.explore.logP1.policyRevision},
+  real:{org:real.ev.org,project:real.ev.project,reader:real.reader.id,incident:real.incident,trace:real.trace.trace,occurrence:real.trace.occurrence,issue:real.ev.real.issue,release:real.ev.real.release,artifact:real.ev.artifact,job:real.job.job,run:real.job.run},
+  estate:{org:estate.org,project:estate.project,reader:estate.analyst.id,pricedTrace:estate.priced.trace,unpricedTrace:estate.unpriced.trace,darkTrace:estate.dark.trace,build:estate.web.build,artifact:estate.web.artifact,mapSha256:estate.web.mapSha256,flushed:estate.flushed}},legs:evidence},null,1));
+ await estate?.close();
 });
 
 test('sign in with the keyboard alone, then open a native deep link: the scope is on screen',async()=>{
@@ -112,25 +120,6 @@ test('sign in with the keyboard alone, then open a native deep link: the scope i
  await page.goto(deepLink(seed,'queue'));
  await expect(page.getByRole('heading',{level:2,name:'Investigation: Queue'})).toBeFocused();
  await scopeVisible();
-});
-
-test('trace (frontend to API to database): overlapping branches give an exact duration and the dependency boundary is stated',async()=>{
- await goTo('Traces');
- await typeInto(page.getByLabel('Trace ID'),seed.traces.clean.trace);
- await page.keyboard.press('Enter');
- await expect(page.getByRole('heading',{level:2,name:`Trace ${seed.traces.clean.trace}`})).toBeFocused();
- await expect(page.getByTestId('observed-duration')).toHaveText('Observed duration of this trace: exactly 100 ms.');
- await expect(page.getByTestId('limits').locator('[data-limit="dependency_boundary"]')).toContainText('dependency boundary');
- await record('trace-frontend-api-database',{state:'ready',trace:seed.traces.clean.trace});
-});
-
-test('trace (gateway to dependency): the dependency call ends at the boundary, stated in words',async()=>{
- await typeInto(page.getByLabel('Trace ID'),seed.traces.gateway.trace);
- await page.keyboard.press('Enter');
- await expect(page.getByRole('heading',{level:2,name:`Trace ${seed.traces.gateway.trace}`})).toBeFocused();
- await expect(page.locator('table.path-table tbody tr[data-span]')).toHaveCount(2);
- await expect(page.getByTestId('limits').locator('[data-limit="dependency_boundary"]')).toContainText('1 dependency call ends at the dependency boundary');
- await record('trace-gateway-dependency',{state:'ready',trace:seed.traces.gateway.trace});
 });
 
 test('log: Explore with LogQL chosen by the keyboard returns the real ingested lines',async()=>{
@@ -328,6 +317,91 @@ test('the contextual scope of the real-journey organization never left the scree
  expect(hash.get('projects')).toBe(real.ev.project);
  expect(hash.get('start')).toBe(real.start);
  expect(hash.get('end')).toBe(real.end);
+});
+
+// ---- organization C: the reference estate. Every span, error and frame below was made by the real programs of examples/reference (a Bun gateway,
+// a Python API over PostgreSQL 16, an uninstrumented HTTPS dependency, the Vite-built order page run in this browser) through the committed SDKs;
+// the symbolication worker maps the real page's real minified bundle with the source map the real build uploaded (support/estate.ts). ----
+
+test('the investigator of the reference estate signs in with the keyboard alone and opens the queue of its organization',async()=>{
+ const ctx=await br.newContext();
+ page=await ctx.newPage();
+ windowText='';
+ scope={org:estate.org,project:estate.project,start:ESTATE_WINDOW.start,end:ESTATE_WINDOW.end};
+ await page.goto('/');
+ await signIn(estate.analyst.email,estate.analyst.password);
+ await page.goto(estateLink(estate,'queue'));
+ await expect(page.getByRole('heading',{level:2,name:'Investigation: Queue'})).toBeFocused();
+ await scopeVisible();
+});
+
+test('trace (page to gateway to API to PostgreSQL and the dependency): eight real spans in one tree, three dependency boundaries, stated in words',async()=>{
+ await goTo('Traces');
+ await typeInto(page.getByLabel('Trace ID'),estate.priced.trace);
+ await page.keyboard.press('Enter');
+ await expect(page.getByRole('heading',{level:2,name:`Trace ${estate.priced.trace}`})).toBeFocused();
+ await expect(page.locator('table.path-table tbody tr[data-span]')).toHaveCount(8);
+ await expect(page.getByTestId('observed-duration')).toContainText('Observed duration of this trace: exactly');
+ await expect(page.getByTestId('limits').locator('[data-limit="dependency_boundary"]')).toContainText('3 dependency calls end at the dependency boundary');
+ await record('trace-frontend-api-database',{state:'ready',trace:estate.priced.trace,spans:8});
+});
+
+test('trace (gateway to dependency): the call to the uninstrumented dependency ends at the boundary, and so does the call to an API that reported nothing',async()=>{
+ const call=page.getByRole('button',{name:'Show details of span http.call, client, level 6'});
+ await activate(call.first());
+ const details=page.getByTestId('span-details');
+ await expect(details).toContainText('Limits of this span');
+ await expect(details).toContainText('dependency boundary: internals not captured');
+ await typeInto(page.getByLabel('Trace ID'),estate.dark.trace);
+ await page.keyboard.press('Enter');
+ await expect(page.getByRole('heading',{level:2,name:`Trace ${estate.dark.trace}`})).toBeFocused();
+ await expect(page.locator('table.path-table tbody tr[data-span]')).toHaveCount(4);
+ await expect(page.getByTestId('limits').locator('[data-limit="dependency_boundary"]')).toContainText('1 dependency call ends at the dependency boundary');
+ await record('trace-gateway-dependency',{state:'ready',trace:estate.dark.trace,spans:4});
+});
+
+test('trace to source: the failure the real page threw, its issue and its frames mapped by the real source map of the real build',async()=>{
+ await typeInto(page.getByLabel('Trace ID'),estate.unpriced.trace);
+ await page.keyboard.press('Enter');
+ await expect(page.getByRole('heading',{level:2,name:`Trace ${estate.unpriced.trace}`})).toBeFocused();
+ await expect(page.locator('table.path-table tbody tr[data-span]')).toHaveCount(8);
+ await activate(page.getByRole('button',{name:'Show details of span ui.action, internal, level 1'}));
+ const details=page.getByTestId('span-details');
+ const target=details.locator('[data-target-kind="error"][data-target-available="yes"]');
+ await expect(target).toHaveCount(1);
+ const occurrence=/Error occurrence ([0-9a-f]{32})/.exec(await target.innerText())?.[1]??'';
+ expect(occurrence).toBe(estate.occurrence);
+ await activate(details.getByRole('link',{name:'Open the issue holding this occurrence'}));
+ await expect(page.getByRole('heading',{level:2,name:/^Issue [0-9a-f]{32}$/})).toBeFocused();
+ await activate(page.getByRole('button',{name:`Show stored detail of occurrence ${occurrence}`}));
+ const frames=page.getByTestId('stored-frames').getByRole('article');
+ await expect(frames.first()).toBeVisible();
+ // Every frame of the real stack names the uploaded artifact and is mapped by that build's map; WHICH frames the stack holds is the engine's (V8 starts at
+ // the throw site, Gecko and WebKit also list the error's constructor), so the throw site is looked for among them: src/receipt.ts line 24.
+ const count=await frames.count();
+ expect(count).toBeGreaterThanOrEqual(1);
+ const mapped:string[]=[];
+ for(let i=0;i<count;i++){
+  const f=frames.nth(i);
+  // The server's typed reason first (resolved, deadline, worker_failure, artifact_unavailable ...): a frame that is not mapped says WHY in the failure.
+  await expect(f,`frame ${i+1} of ${count}`).toHaveAttribute('data-reason','resolved');
+  await expect(f.getByTestId('frame-state')).toHaveText('Mapped');
+  await expect(f.getByTestId('frame-original')).toContainText(estate.web.artifact);
+  await expect(f.getByTestId('frame-mapped')).toContainText(estate.web.mapSha256);
+  mapped.push(await f.getByTestId('frame-mapped').innerText());
+ }
+ expect(mapped.some((m)=>m.includes('src/receipt.ts:24:')),`the throw site is among ${JSON.stringify(mapped)}`).toBe(true);
+ // The source text the map carries is never shown to a reader without the sources grant.
+ await expect(page.locator('body')).not.toContainText('cannot be rendered as a receipt');
+ await record('trace-to-mapped-frame',{state:'ready',trace:estate.unpriced.trace,occurrence,artifact:estate.web.artifact,mapped:await frames.getByTestId('frame-mapped').allInnerTexts()});
+});
+
+test('the contextual scope of the estate organization never left the screen: the last address carries its organization, project and window',async()=>{
+ const hash=new URLSearchParams(new URL(page.url()).hash.slice(1));
+ expect(hash.get('org')).toBe(estate.org);
+ expect(hash.get('projects')).toBe(estate.project);
+ expect(hash.get('start')).toBe(ESTATE_WINDOW.start);
+ expect(hash.get('end')).toBe(ESTATE_WINDOW.end);
 });
 
 test('this spec drives the page with the keyboard only: no pointer or fill call appears outside the fixture',()=>{
