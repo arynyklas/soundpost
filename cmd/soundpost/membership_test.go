@@ -150,6 +150,9 @@ func (l socketLayout) Admit(_ context.Context, m replica.Member) error {
 	}
 	return nil
 }
+func (l socketLayout) AdmitLearner(ctx context.Context, m replica.Member) error {
+	return l.Admit(ctx, m)
+}
 func (l socketLayout) Incompatible(context.Context) (model.ID, []string) {
 	return l.control, []string{"layout_incompatible:n2"}
 }

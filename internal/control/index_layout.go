@@ -5,6 +5,7 @@ package control
 import (
 	"bytes"
 	"context"
+	"errors"
 	"sync"
 
 	bolt "go.etcd.io/bbolt"
@@ -93,11 +94,35 @@ func (s *Store) memberReadsLayout(ctx context.Context, m replica.Member) bool {
 // binary answers the live question. Every other outcome, including a state that cannot be read, is a
 // refusal; the one that names the member is LayoutIncompatible.
 func (s *Store) CheckMemberLayout(ctx context.Context, m replica.Member) error {
+	return s.checkMemberLayout(ctx, m, false)
+}
+
+// CheckLearnerLayout is the guard of `membership add-learner`: CheckMemberLayout, except that a
+// learner nothing is running for yet (replica.ErrMemberNotRunning: the operator adds the member to the
+// configuration, then starts it, and its binary cannot be asked before it runs) is admitted. A binary
+// that is running and does not answer that it reads the layout (the previous release) is refused as
+// before; so is a member that is up but whose answer cannot be had. What admitting an unstarted learner
+// leaves to the other guards: promoting it to voter asks again (CheckMemberLayout), the leader sends it
+// no snapshot of the contracted state unless it answers (guardSnapshot), and `membership status` names it
+// while it does not (MembersIncompatible).
+func (s *Store) CheckLearnerLayout(ctx context.Context, m replica.Member) error {
+	return s.checkMemberLayout(ctx, m, true)
+}
+
+func (s *Store) checkMemberLayout(ctx context.Context, m replica.Member, notYetRunningIsAdmitted bool) error {
 	contracted, err := s.indexesContracted(ctx)
 	if err != nil {
 		return err
 	}
-	if !contracted || s.memberReadsLayout(ctx, m) {
+	if !contracted {
+		return nil
+	}
+	query := s.memberLayoutQuery.Load()
+	if query == nil {
+		return LayoutIncompatible(m)
+	}
+	switch err = (*query)(ctx, m); {
+	case err == nil, notYetRunningIsAdmitted && errors.Is(err, replica.ErrMemberNotRunning):
 		return nil
 	}
 	return LayoutIncompatible(m)

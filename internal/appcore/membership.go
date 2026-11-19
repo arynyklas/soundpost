@@ -87,10 +87,14 @@ type MembershipGroup interface {
 // MembershipLayout is the live check of the layout the installation's indexes are in (D70), asked of the
 // RUNNING binary of a member over the peer connection. Nil where it is a parameter: no check.
 type MembershipLayout interface {
-	// Admit refuses a member that would join the membership (voter or learner) and cannot read the layout:
+	// Admit refuses a member that would join the voters and cannot read the layout:
 	// nil while no organization is contracted or when the member answers; otherwise a typed refusal naming it
 	// (control.LayoutIncompatible), or the error that kept the answer from being known (fail closed).
 	Admit(ctx context.Context, m replica.Member) error
+	// AdmitLearner is Admit for a member added as a learner: it also admits one nothing is running for yet
+	// (replica.ErrMemberNotRunning; the member is started after it is added), and refuses a running binary
+	// that does not answer that it reads the layout.
+	AdmitLearner(ctx context.Context, m replica.Member) error
 	// Incompatible names the control group and the control members, other than this node, whose running
 	// binary cannot read the contracted layout, as layout_incompatible:<identity>.
 	Incompatible(ctx context.Context) (control model.ID, reasons []string)
@@ -164,10 +168,10 @@ func PlanMembership(current replica.Members, change MembershipChange) (next repl
 }
 
 // StepMembership applies change to every group this node leads and reports every group. It never
-// proposes for a group led elsewhere. A member that would join a group (the learner added, the learner
-// promoted) is first asked layout.Admit, once per step and only for a group the step would change and
-// this node leads: a refusal proposes nothing and the group reports OutcomeLayoutIncompatible. A nil layout
-// asks nothing.
+// proposes for a group led elsewhere. A member that would join a group is first asked the layout
+// question (layout.AdmitLearner for the learner added, layout.Admit for the learner promoted), once per
+// step and only for a group the step would change and this node leads: a refusal proposes nothing and
+// the group reports OutcomeLayoutIncompatible. A nil layout asks nothing.
 func StepMembership(ctx context.Context, groups []MembershipGroup, layout MembershipLayout, change MembershipChange) []MembershipOutcome {
 	asked := map[uint64]error{}
 	admit := func(m replica.Member) error {
@@ -177,7 +181,12 @@ func StepMembership(ctx context.Context, groups []MembershipGroup, layout Member
 		if err, ok := asked[m.ID]; ok {
 			return err
 		}
-		err := layout.Admit(ctx, m)
+		var err error
+		if change.Op == MembershipAddLearner {
+			err = layout.AdmitLearner(ctx, m)
+		} else {
+			err = layout.Admit(ctx, m)
+		}
 		asked[m.ID] = err
 		return err
 	}
@@ -282,6 +291,10 @@ type appLayout struct{ app *App }
 
 func (l appLayout) Admit(ctx context.Context, m replica.Member) error {
 	return l.app.Control.CheckMemberLayout(ctx, m)
+}
+
+func (l appLayout) AdmitLearner(ctx context.Context, m replica.Member) error {
+	return l.app.Control.CheckLearnerLayout(ctx, m)
 }
 
 func (l appLayout) Incompatible(ctx context.Context) (model.ID, []string) {

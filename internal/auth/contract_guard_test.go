@@ -5,6 +5,7 @@ package auth_test
 import (
 	"context"
 	"errors"
+	"net"
 	"testing"
 	"time"
 
@@ -44,7 +45,10 @@ func controlReasons(t *testing.T, cluster *smokecluster.Cluster, id uint64) []st
 // (a) Once an organization is contracted, a member whose RUNNING binary does not answer the live layout
 // question is not admitted to the membership (voter or learner): the refusal is typed and names it, the
 // configuration of every group is unchanged, and a member that answers is admitted. Before the contraction
-// nobody is refused (the previous release reads the expanded layout).
+// nobody is refused (the previous release reads the expanded layout). A learner nothing runs for yet is the
+// one exception, and only as a learner: the operator adds it and then starts it (`membership add-learner`,
+// start the node, `replace`), so its binary cannot be asked at that time. It joins as a learner, a running
+// previous-release binary is still refused, and promoting it to voter asks again.
 func TestMembershipRefusesAMemberThatCannotReadTheContractedLayout(t *testing.T) {
 	cluster, c := contractCluster(t)
 	leader := cluster.App(1)
@@ -54,23 +58,54 @@ func TestMembershipRefusesAMemberThatCannotReadTheContractedLayout(t *testing.T)
 	layout := leader.MembershipLayout()
 	absent := replica.Member{ID: 9, Address: "https://127.0.0.1:1", NodeIdentity: "node-9", FailureDomain: "disk-9", Learner: true}
 	voter2 := cluster.Members().Nodes[1]
+	// A learner whose address is alive (a process accepts the connection) but does not answer the layout question: it
+	// closes every connection, as a running binary that does not speak the peer protocol would. Refused as a learner too.
+	// The real previous release alive on its peer port is TestMixedBinaryPostContractGuard.
+	alive, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer alive.Close()
+	go func() {
+		for {
+			conn, aerr := alive.Accept()
+			if aerr != nil {
+				return
+			}
+			conn.Close()
+		}
+	}()
+	previous := replica.Member{ID: 8, Address: "https://" + alive.Addr().String(), NodeIdentity: "node-8", FailureDomain: "disk-8", Learner: true}
 	if err := layout.Admit(ctx, absent); err != nil {
 		t.Fatalf("before the contraction a member was refused: %v", err)
+	}
+	if err := layout.AdmitLearner(ctx, absent); err != nil {
+		t.Fatalf("before the contraction a learner was refused: %v", err)
 	}
 	contractNow(t, leader, c, "guard test")
 	if err := layout.Admit(ctx, absent); !layoutRefusal(err, "node-9") {
 		t.Fatalf("a member that does not answer, after the contraction: %v", err)
 	}
-	if err := layout.Admit(ctx, voter2); err != nil {
-		t.Fatalf("a member that answers was refused: %v", err)
+	if err := layout.AdmitLearner(ctx, absent); err != nil {
+		t.Fatalf("a learner nothing runs for yet, after the contraction, must be added before it is started: %v", err)
+	}
+	for _, ask := range []func(context.Context, replica.Member) error{layout.Admit, layout.AdmitLearner} {
+		if err := ask(ctx, voter2); err != nil {
+			t.Fatalf("a member that answers was refused: %v", err)
+		}
 	}
 	cluster.App(2).LimitLiveLayoutForTest(true)
-	if err := layout.Admit(ctx, voter2); !layoutRefusal(err, "node-2") {
-		t.Fatalf("a member that answers as the previous release does: %v", err)
+	for _, ask := range []func(context.Context, replica.Member) error{layout.Admit, layout.AdmitLearner} {
+		if err := ask(ctx, voter2); !layoutRefusal(err, "node-2") {
+			t.Fatalf("a member that answers as the previous release does: %v", err)
+		}
+		if err := ask(ctx, previous); !layoutRefusal(err, "node-8") {
+			t.Fatalf("a running previous-release binary as a learner: %v", err)
+		}
 	}
 	cluster.App(2).LimitLiveLayoutForTest(false)
 
-	// The operator step: refused in every group this node leads, nothing proposed.
+	// The operator step: a running previous-release binary is refused in every group this node leads, nothing proposed.
 	groups, err := leader.MembershipGroups()
 	if err != nil {
 		t.Fatal(err)
@@ -83,27 +118,65 @@ func TestMembershipRefusesAMemberThatCannotReadTheContractedLayout(t *testing.T)
 			time.Sleep(100 * time.Millisecond)
 		}
 	}
-	for _, change := range []appcore.MembershipChange{{Op: appcore.MembershipAddLearner, Member: absent}} {
-		refused := 0
-		for i, o := range appcore.StepMembership(ctx, groups, layout, change) {
-			switch o.Result {
-			case appcore.OutcomeLayoutIncompatible:
-				refused++
-				if o.Detail != "layout_incompatible:node-9" {
-					t.Fatalf("group %d: refusal detail %q does not name the member", i, o.Detail)
-				}
-			case appcore.OutcomeNotLeader:
-			default:
-				t.Fatalf("group %d: %q, want a refusal naming the member", i, o.Result)
+	cluster.App(2).LimitLiveLayoutForTest(true)
+	refused := 0
+	for i, o := range appcore.StepMembership(ctx, groups, layout, appcore.MembershipChange{Op: appcore.MembershipAddLearner, Member: previous}) {
+		switch o.Result {
+		case appcore.OutcomeLayoutIncompatible:
+			refused++
+			if o.Detail != "layout_incompatible:node-8" {
+				t.Fatalf("group %d: refusal detail %q does not name the member", i, o.Detail)
 			}
+		case appcore.OutcomeNotLeader:
+		default:
+			t.Fatalf("group %d: %q, want a refusal naming the member", i, o.Result)
 		}
-		if refused == 0 {
-			t.Fatal("no group refused the member")
-		}
+	}
+	cluster.App(2).LimitLiveLayoutForTest(false)
+	if refused == 0 {
+		t.Fatal("no group refused the running previous-release member")
 	}
 	for i, s := range leader.ReplicationStatus() {
 		if len(s.Members.Nodes) != 3 || s.Members.Revision != 1 {
 			t.Fatalf("group %d: the configuration changed: %+v", i, s.Members)
+		}
+	}
+
+	// A learner nothing runs for is added in every group this node leads (the red of the membership-replace drill:
+	// every new installation is contracted from its first write, so every add-learner before the start was refused),
+	// and promoting it is refused while nothing runs for it.
+	added := 0
+	for i, o := range appcore.StepMembership(ctx, groups, layout, appcore.MembershipChange{Op: appcore.MembershipAddLearner, Member: absent}) {
+		switch o.Result {
+		case appcore.OutcomeApplied:
+			added++
+		case appcore.OutcomeNotLeader:
+		default:
+			t.Fatalf("group %d: %q, want the learner nothing runs for added", i, o.Result)
+		}
+	}
+	if added == 0 {
+		t.Fatal("no group added the learner nothing runs for yet")
+	}
+	for i, o := range appcore.StepMembership(ctx, groups, layout, appcore.MembershipChange{Op: appcore.MembershipReplace, Remove: 3, Promote: 9}) {
+		switch o.Result {
+		case appcore.OutcomeLayoutIncompatible:
+			if o.Detail != "layout_incompatible:node-9" {
+				t.Fatalf("group %d: promotion refusal detail %q does not name the member", i, o.Detail)
+			}
+		case appcore.OutcomeNotLeader:
+		default:
+			t.Fatalf("group %d: promotion of a learner nothing runs for: %q, want a refusal naming it", i, o.Result)
+		}
+	}
+	for i, s := range leader.ReplicationStatus() {
+		for _, m := range s.Members.Nodes {
+			if m.ID != 9 && m.Learner {
+				t.Fatalf("group %d: member %d is a learner", i, m.ID)
+			}
+			if m.ID == 9 && !m.Learner {
+				t.Fatalf("group %d: learner 9 was promoted while nothing runs for it", i)
+			}
 		}
 	}
 }

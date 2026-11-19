@@ -13,15 +13,30 @@ import (
 )
 
 // fakeLayout is a MembershipLayout that refuses the members listed in refuse and records every question.
+// A member in notRunning has nothing listening at its address: only the learner question (AdmitLearner)
+// admits it, as the real check does.
 type fakeLayout struct {
-	refuse  map[uint64]error
-	asked   []replica.Member
-	control model.ID
-	reasons []string
+	refuse     map[uint64]error
+	notRunning map[uint64]bool
+	asked      []replica.Member
+	learners   []uint64 // ids asked through AdmitLearner
+	control    model.ID
+	reasons    []string
 }
 
 func (f *fakeLayout) Admit(_ context.Context, m replica.Member) error {
 	f.asked = append(f.asked, m)
+	if f.notRunning[m.ID] {
+		return layoutRefusalOf(m.NodeIdentity)
+	}
+	return f.refuse[m.ID]
+}
+func (f *fakeLayout) AdmitLearner(_ context.Context, m replica.Member) error {
+	f.asked = append(f.asked, m)
+	f.learners = append(f.learners, m.ID)
+	if f.notRunning[m.ID] {
+		return nil
+	}
 	return f.refuse[m.ID]
 }
 func (f *fakeLayout) Incompatible(context.Context) (model.ID, []string) { return f.control, f.reasons }
@@ -105,5 +120,27 @@ func TestReportMembershipAttachesTheReasonsToTheControlGroupOnly(t *testing.T) {
 	}
 	if got = ReportMembership(context.Background(), []MembershipGroup{control}, nil); len(got[0].Reasons) != 0 {
 		t.Fatalf("without a layout: %v", got[0].Reasons)
+	}
+}
+
+// A learner that is not running yet is added before it is started (the operator's order: add-learner, start
+// the node, replace) and is asked again, strictly, when it is promoted: add-learner uses the learner question,
+// replace the voter question, so a member that never started answering cannot become a voter.
+func TestStepMembershipAddsALearnerNothingRunsForYetButPromotesOnlyOneThatAnswers(t *testing.T) {
+	led := &fakeGroup{status: replica.Status{Group: model.NewID(), ID: 1, Leader: 1, Revision: voters().Revision, Members: voters()}}
+	layout := &fakeLayout{notRunning: map[uint64]bool{4: true}}
+	got := StepMembership(context.Background(), []MembershipGroup{led}, layout, MembershipChange{Op: MembershipAddLearner, Member: learner4})
+	if got[0].Result != OutcomeApplied || len(led.calls) != 1 {
+		t.Fatalf("add-learner of a member nothing runs for yet: %+v, %d proposals", got[0], len(led.calls))
+	}
+	if !slices.Equal(layout.learners, []uint64{4}) {
+		t.Fatalf("add-learner asked the learner question for %v, want [4]", layout.learners)
+	}
+	withLearner, _, _ := PlanMembership(voters(), MembershipChange{Op: MembershipAddLearner, Member: learner4})
+	promoted := &fakeGroup{status: replica.Status{Group: model.NewID(), ID: 1, Leader: 1, Revision: withLearner.Revision, Members: withLearner}}
+	layout = &fakeLayout{notRunning: map[uint64]bool{4: true}}
+	got = StepMembership(context.Background(), []MembershipGroup{promoted}, layout, MembershipChange{Op: MembershipReplace, Remove: 2, Promote: 4})
+	if got[0].Result != OutcomeLayoutIncompatible || len(promoted.calls) != 0 || len(layout.learners) != 0 {
+		t.Fatalf("promotion of a member nothing runs for: %+v, %d proposals, learner questions %v", got[0], len(promoted.calls), layout.learners)
 	}
 }

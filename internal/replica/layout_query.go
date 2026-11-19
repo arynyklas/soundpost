@@ -5,13 +5,22 @@ package replica
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/arynyklas/soundpost/internal/model"
 )
+
+// ErrMemberNotRunning is what QueryLayout reports (also an ErrUnavailable) when no connection could be
+// made to the member's peer address: no process listens there yet, or the address cannot be reached.
+// It is not the answer of a binary that does not implement the question (the previous release
+// answers the route with a refusal, which is plain ErrUnavailable): a member that is not running has
+// no binary to be incompatible, so a learner that is about to be started can be added before it runs.
+var ErrMemberNotRunning = errors.Join(ErrUnavailable, errors.New("nothing listens at the member's peer address"))
 
 // layoutPath is the member-to-member question "does your RUNNING binary read the sharded artifact
 // ledger index and the per-replay pins without the per-project values?" (D70). Nothing stored can
@@ -39,7 +48,8 @@ func (t *MTLS) SetLayoutSupport(answer func() (uint64, bool)) {
 
 // QueryLayout asks target, over the authenticated peer connection, for the highest index layout its
 // running binary reads. A member that does not answer 200 with its own node id (the previous release,
-// a member that is down) is reported as ErrUnavailable.
+// a member whose connection fails after it was made) is reported as ErrUnavailable; a member nothing
+// could be connected to is ErrMemberNotRunning.
 func (t *MTLS) QueryLayout(ctx context.Context, target Member) (uint64, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -53,6 +63,10 @@ func (t *MTLS) QueryLayout(ctx context.Context, target Member) (uint64, error) {
 	}
 	response, err := client.Do(request)
 	if err != nil {
+		var op *net.OpError
+		if errors.As(err, &op) && op.Op == "dial" {
+			return 0, ErrMemberNotRunning
+		}
 		return 0, ErrUnavailable
 	}
 	defer response.Body.Close()
