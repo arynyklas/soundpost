@@ -342,3 +342,33 @@ func TestReadSuiteReportRejectsATamperedRow(t *testing.T) {
 		t.Fatal("an exercised row without build, evidence or outcome was read as valid")
 	}
 }
+
+// The gate withdraws (D65) a declared server overhead row only when its exported detail is nothing but measured misses
+// of the 5 % budgets. This pins the exporter's detail format to that rule: a budget miss measured by the harness is
+// accepted, a row that failed for any other reason is not.
+func TestFailedServerOverheadRowsExportAWithdrawableDetailOnlyForMeasuredBudgetMisses(t *testing.T) {
+	w := releaseevidence.ClaimWithdrawals()[0]
+	budgets := []BudgetResult{
+		{Name: "server_p95_latency_percent", Source: "design", Unit: "percent", Limit: 5, Observed: 17.3, Within: false},
+		{Name: "server_cpu_percent", Source: "design", Unit: "percent", Limit: 5, Observed: 38.9123456, Within: false},
+	}
+	missed := suiteRowFixture(w.Row, SuiteOverhead, true, StateExercised, OutcomeFailed)
+	missed.Failures, missed.Budgets = nil, budgets
+	out := suiteRow(missed)
+	if out.Status != releaseevidence.StatusFailed {
+		t.Fatalf("status %q", out.Status)
+	}
+	if _, ok := releaseevidence.WithdrawalAccepts(w.Kind, out); !ok {
+		t.Errorf("a measured budget miss is not withdrawable: %q", out.Detail)
+	}
+	dropped := missed
+	dropped.Failures = []string{"delivered mode dropped 3 records as queue_full: the exporter did not keep up"}
+	if _, ok := releaseevidence.WithdrawalAccepts(w.Kind, suiteRow(dropped)); ok {
+		t.Error("a row that also dropped records was withdrawn")
+	}
+	died := missed
+	died.Failures, died.Budgets = []string{"overhead harness exited 1 without a usable result: boom"}, nil
+	if _, ok := releaseevidence.WithdrawalAccepts(w.Kind, suiteRow(died)); ok {
+		t.Error("a row whose harness died was withdrawn")
+	}
+}

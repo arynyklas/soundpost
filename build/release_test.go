@@ -321,16 +321,19 @@ func TestPnpmPinNeedsIntegrityMatchingVersionAndArm64Statement(t *testing.T) {
 	if err != nil || !validIntegrity(good) {
 		t.Fatalf("%q %v", good, err)
 	}
-	write(t, filepath.Join(root, "package.json"), `{"packageManager":"pnpm@10.20.0"}`)
+	pmJSON := `{"packageManager":"pnpm@10.20.0+sha512.` + integrityHex(good) + `"}`
+	write(t, filepath.Join(root, "package.json"), pmJSON)
 
 	var in Inputs
 	if err = verifyPnpmPin(root, pnpmPins(good), &in); err != nil || in.PnpmTarball != "verified" || in.PnpmIntegrity != good || in.GoARM64 == "" {
 		t.Fatalf("good pin: %+v %v", in, err)
 	}
 	other, _ := fileIntegrity(filepath.Join(root, "package.json"))
+	write(t, filepath.Join(root, "package.json"), `{"packageManager":"pnpm@10.20.0+sha512.`+integrityHex(other)+`"}`)
 	if err = verifyPnpmPin(root, pnpmPins(other), &in); err == nil || !strings.Contains(err.Error(), "does not match the pin") {
 		t.Fatalf("a tarball that differs from the pin was accepted: %v", err)
 	}
+	write(t, filepath.Join(root, "package.json"), pmJSON)
 	if err = verifyPnpmPin(root, pnpmPins("sha512-short"), &in); err == nil || !strings.Contains(err.Error(), "integrity") {
 		t.Fatalf("a short integrity was accepted: %v", err)
 	}
@@ -343,6 +346,19 @@ func TestPnpmPinNeedsIntegrityMatchingVersionAndArm64Statement(t *testing.T) {
 	if err = verifyPnpmPin(root, pnpmPins(good), &in); err == nil || !strings.Contains(err.Error(), "packageManager") {
 		t.Fatalf("a drifted packageManager was accepted: %v", err)
 	}
+	// corepack verifies the hash only if package.json carries it: a bare version, another hash or another digest form is refused.
+	for name, pm := range map[string]string{
+		"bare version":   "pnpm@10.20.0",
+		"another hash":   "pnpm@10.20.0+sha512." + strings.Repeat("0", 128),
+		"sha256 form":    "pnpm@10.20.0+sha256." + integrityHex(good)[:64],
+		"uppercase hash": "pnpm@10.20.0+sha512." + strings.ToUpper(integrityHex(good)),
+		"wrong version":  "pnpm@10.19.0+sha512." + integrityHex(good),
+	} {
+		write(t, filepath.Join(root, "package.json"), `{"packageManager":"`+pm+`"}`)
+		if err = verifyPnpmPin(root, pnpmPins(good), &in); err == nil || !strings.Contains(err.Error(), "packageManager") {
+			t.Fatalf("%s: a packageManager without the pinned integrity was accepted: %v", name, err)
+		}
+	}
 	// A supplied arm64 archive must match its pin.
 	write(t, filepath.Join(root, ".tools", "go1.27.3.linux-arm64.tar.gz"), "not the arm64 archive")
 	armPins := pnpmPins(good)
@@ -354,7 +370,7 @@ func TestPnpmPinNeedsIntegrityMatchingVersionAndArm64Statement(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Without the tarball the pin is still checked, and the record says it was not content-verified.
-	write(t, filepath.Join(root, "package.json"), `{"packageManager":"pnpm@10.20.0"}`)
+	write(t, filepath.Join(root, "package.json"), pmJSON)
 	t.Setenv("SOUNDPOST_PNPM_TARBALL", filepath.Join(root, "absent.tgz"))
 	in = Inputs{}
 	if err = verifyPnpmPin(root, pnpmPins(good), &in); err != nil || in.PnpmTarball != "pin_only" {

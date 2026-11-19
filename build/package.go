@@ -90,6 +90,9 @@ type Check struct {
 	Blocking []string `json:"blocking,omitempty"`
 	// Items is the unabridged blocking list when Blocking is summarized.
 	Items []string `json:"items,omitempty"`
+	// Withdrawn lists the failed rows whose claim the release withdraws by owner decision (releaseevidence.ClaimWithdrawals).
+	// They are not passed; the gate reports each of them in the manifest and the text output.
+	Withdrawn []string `json:"claims_withdrawn,omitempty"`
 }
 
 // ReleaseManifest is the gate verdict. Ready is true only when every check passes.
@@ -104,6 +107,7 @@ type ReleaseManifest struct {
 	CycloneDXSHA256        string   `json:"sbom_cyclonedx_sha256,omitempty"`
 	SPDXSHA256             string   `json:"sbom_spdx_sha256,omitempty"`
 	Components             int      `json:"sbom_components"`
+	ClaimsWithdrawn        []string `json:"claims_withdrawn"`
 }
 
 // BlockedError is returned with the manifest when the gate does not pass.
@@ -261,6 +265,7 @@ func checkEvidenceOf(kind string, r Reports, commit string) Check {
 	}
 	status := map[string]string{}
 	outOfScope := 0
+	var withdrawnIDs []string
 	for _, row := range e.Rows {
 		if _, dup := status[row.ID]; dup {
 			c.Blocking = append(c.Blocking, fmt.Sprintf("%s evidence has duplicate row %s", kind, row.ID))
@@ -268,6 +273,13 @@ func checkEvidenceOf(kind string, r Reports, commit string) Check {
 		status[row.ID] = row.Status
 		if releaseevidence.ScopeAccepts(row, releaseevidence.ReleasePlatforms) {
 			outOfScope++
+			continue
+		}
+		// A declared failed measurement is a withdrawn claim (D65), reported as such and never as passed; any other
+		// non-passed row, including a declared one that was not measured, blocks.
+		if w, ok := releaseevidence.WithdrawalAccepts(kind, row); ok {
+			withdrawnIDs = append(withdrawnIDs, row.ID)
+			c.Withdrawn = append(c.Withdrawn, fmt.Sprintf("%s row %s: claim withdrawn (%s), %s: %s", kind, row.ID, w.Decision, row.Status, row.Detail))
 			continue
 		}
 		if row.Status != "passed" {
@@ -282,6 +294,9 @@ func checkEvidenceOf(kind string, r Reports, commit string) Check {
 	c.Detail = fmt.Sprintf("%d rows, %d expected", len(e.Rows), len(e.Expected))
 	if outOfScope > 0 {
 		c.Detail += fmt.Sprintf(", %d out of release scope (%s, not passed)", outOfScope, releaseevidence.ScopeDecision)
+	}
+	if len(withdrawnIDs) > 0 {
+		c.Detail += fmt.Sprintf(", claim withdrawn (%s) for %d row(s), failed, not passed (list %s): %s", releaseevidence.WithdrawalDecision, len(withdrawnIDs), releaseevidence.WithdrawalsList, strings.Join(withdrawnIDs, ", "))
 	}
 	return c
 }
@@ -681,7 +696,7 @@ func loadOwnedHandles(root string) (map[Handle]bool, error) {
 // Release runs every gate check. The returned manifest is always populated; the error is a
 // *BlockedError naming every blocking item unless the release is fully approved and ready.
 func Release(ctx context.Context, commit string, r Reports) (ReleaseManifest, error) {
-	m := ReleaseManifest{Schema: gateSchema, Version: r.Version, Commit: commit, Blocking: []string{}}
+	m := ReleaseManifest{Schema: gateSchema, Version: r.Version, Commit: commit, Blocking: []string{}, ClaimsWithdrawn: []string{}}
 	if err := ctx.Err(); err != nil {
 		return m, err
 	}
@@ -706,6 +721,7 @@ func Release(ctx context.Context, commit string, r Reports) (ReleaseManifest, er
 	m.Checks = append(m.Checks, checkArtifacts(r, commit, &m), checkSignatureOf(r, &m), checkHandlesOf(r), checkApprovalOf(r, commit))
 	for i := range m.Checks {
 		c := &m.Checks[i]
+		m.ClaimsWithdrawn = append(m.ClaimsWithdrawn, c.Withdrawn...)
 		if len(c.Blocking) == 0 {
 			c.Status = "pass"
 			continue
@@ -1040,6 +1056,9 @@ func runPackage(cmd string, args []string, out io.Writer) error {
 	} else {
 		for _, b := range m.Blocking {
 			fmt.Fprintln(out, "BLOCKING", b)
+		}
+		for _, w := range m.ClaimsWithdrawn {
+			fmt.Fprintln(out, "CLAIM WITHDRAWN ("+releaseevidence.WithdrawalDecision+")", w)
 		}
 		fmt.Fprintf(out, "release gate: ready=%v blocking=%d\n", m.Ready, len(m.Blocking))
 	}

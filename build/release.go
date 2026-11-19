@@ -481,8 +481,18 @@ func validIntegrity(s string) bool {
 	return err == nil && len(b) == sha512.Size
 }
 
-// verifyPnpmPin proves the pnpm pin: the pinned version is the one package.json's
-// packageManager names, the pin carries a full sha512 integrity of the registry tarball, and
+// integrityHex is the lowercase hex of a validIntegrity value: the form corepack takes after "+sha512." in
+// package.json packageManager (the npm registry's dist.integrity is the same digest in base64).
+func integrityHex(s string) string {
+	b, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(s, "sha512-"))
+	if err != nil {
+		return ""
+	}
+	return hex.EncodeToString(b)
+}
+
+// verifyPnpmPin proves the pnpm pin: package.json's packageManager is exactly the pinned version plus the sha512 of
+// the pinned registry tarball (pnpm@<version>+sha512.<hex>, the form corepack verifies), the pin carries a full sha512 integrity of the registry tarball, and
 // the linux/arm64 archive is pinned by sha256 (verified when present at
 // .tools/go<version>.linux-arm64.tar.gz) and arm64 is declared cross-built from the pinned amd64 toolchain. When the tarball is present (SOUNDPOST_PNPM_TARBALL or
 // .tools/pnpm-<version>.tgz) its integrity must equal the pin; the record says which it was.
@@ -516,8 +526,8 @@ func verifyPnpmPin(root string, p pins, in *Inputs) error {
 	if err = json.Unmarshal(raw, &pkg); err != nil {
 		return err
 	}
-	if pkg.PackageManager != "pnpm@"+p.Pnpm {
-		return fmt.Errorf("package.json packageManager %q does not match the pnpm pin %q", pkg.PackageManager, p.Pnpm)
+	if want := "pnpm@" + p.Pnpm + "+sha512." + integrityHex(p.PnpmTarball.Integrity); pkg.PackageManager != want {
+		return fmt.Errorf("package.json packageManager %q does not match the pnpm pin %q (exact version plus the sha512 of the pinned tarball, which corepack verifies)", pkg.PackageManager, want)
 	}
 	in.PnpmVersion, in.PnpmIntegrity, in.PnpmTarball = p.Pnpm, p.PnpmTarball.Integrity, "pin_only"
 	tarball := os.Getenv("SOUNDPOST_PNPM_TARBALL")
