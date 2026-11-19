@@ -66,6 +66,23 @@ jobs:
           tar -C .tools/linux -xzf "$archive"
           echo "$PWD/.tools/linux/go/bin" >> "$GITHUB_PATH"
 
+      - name: Install the pinned Node
+        run: |
+          set -eu
+          url=$(jq -r .node.linux_22.url build/toolchains.json)
+          sum=$(jq -r .node.linux_22.sha256 build/toolchains.json)
+          curl --fail --location --silent --show-error --output node.tar.gz "$url"
+          echo "${sum}  node.tar.gz" | sha256sum --check --strict -
+          mkdir -p .tools/node && tar -C .tools/node --strip-components=1 -xzf node.tar.gz
+          echo "$PWD/.tools/node/bin" >> "$GITHUB_PATH"
+
+      - name: Build the UI from the locked inputs (build release embeds web/dist and refuses to run without it)
+        run: |
+          set -eu
+          corepack enable
+          pnpm install --frozen-lockfile --ignore-scripts
+          pnpm --filter @soundpost/web build
+
       - name: Prove the inputs and build reproducibly
         run: |
           set -eu
