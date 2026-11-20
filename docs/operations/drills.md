@@ -431,3 +431,74 @@ persisted as a side effect; what the reset takes away is everything written afte
 claim (an acknowledged write was fsynced by the member before its acknowledgement) is unaffected. The member logs say nothing about decision D16's drop of a torn
 final frame, so that is not observable here (`vm_reset/member_log_mentions_torn` is 0). One reset on one filesystem, with an ordinary guest disk cache setting,
 is one observation, not a statistical claim. The host's virtual-disk cache is not exercised (see above).
+
+## A real hypervisor power cut of one voter (`tools/pcut`, 07.07#7)
+
+`vm-hard-reset` resets a guest that holds all three members. This drill is the other half of 07.07#7: **three voters on three machines**, one of
+them powered off by the **hypervisor** (`qm stop` of its VM, no guest shutdown, no `sysrq`), left down for about two minutes and started again, under a
+continuous ingest load with a durable-ACK proof. It is operator-driven (the cut is the hypervisor operator's act on a throwaway VM), so it is not a
+`tools/drills` scenario; `tools/pcut` is its load, journal, prober and verifier.
+
+| command | what it does |
+|---|---|
+| `pcut bootstrap` | one-time bootstrap of the single installation the cluster seed is made from (owner, organization, project, reader, one source); writes the fixture the other commands read (it holds the source credential: never commit or copy it) |
+| `pcut gen` | the continuous ingest. Each batch is `--records` samples of ONE series (label `w`), the value of a sample is its per-series sequence number, observed times 1 ms apart. The journal line `issue` is fsynced before the first send and the line `ack` (with the receipt) before the writer counts the acknowledgement or sends the next batch; an unacknowledged batch is resent with the identical body to the voters in turn (the original dedup identity makes the answer the original receipt). The journal is hash-chained; a reader refuses a cut, changed, dropped or swapped line. A stop request (`--stop-file`, SIGTERM) drains: every in-flight batch is resent until acknowledged |
+| `pcut probe` | from a host that is never cut: every second each voter's `/readyz`, and on its own loop one complete PromQL read per voter as the project reader (`--query-interval`, `--query-timeout`); one JSON line per probe |
+| `pcut verify` | after the cut: waits until every voter is ready with one control leader, keeps the load running a little, stops the generator (drain), reads **every series of every voter**, and judges the data against the journal |
+
+**The verdict** (`pcut-verdict.json`, `PASS` only when every required check passes): every acknowledged record is read back on every voter with its exact observed time
+and value (0 missing); the three voters retain byte-identical data (a SHA-256 over the sorted `(series, time, value)` lines), so the cut voter has caught up; no record is stored
+twice, no sample is a record the generator never issued, none has a changed time, and no batch is retained in part (a batch is atomic); the outage of the cut voter
+is observed in the probe log for at least `--min-outage`; during it (after `--grace` for the survivors to elect leaders) each surviving voter is ready and answers complete reads for at
+least `--min-availability` of its probes, and acknowledgements continue with no gap longer than `--max-ack-gap`. A batch issued and never acknowledged may be retained or absent; it is
+counted, not judged. `--rehearsal` runs the same judgement against the live load without a cut (only batches older than 30 s, no outage checks) to prove the tooling.
+
+**Setup used** (`pcut-evidence/scripts/`, private development ledger): the release built with `go run ./build release` from a `git archive` of the commit on one VM, the same binary on
+every voter, a cluster CA and one leaf per voter (URI SAN `spiffe://soundpost/node/<identity>`, IP SAN of the VM), the installation file rendered by `soundpost-config`, the seed
+exported from one single installation, a systemd unit **enabled** on every voter so a powered-off voter serves again after power-on without an operator, and `sync` plus a page-cache drop
+before the cut with the binary's digest read back from the disk (a power-off loses unsynced writes: the first real guest reset left zero-length binaries that had just been copied).
+The placement is attested `simulated`: three VMs of one hypervisor cluster are not an attestation of independent hardware, power or storage.
+
+**Load shape.** Measured on this build: every acknowledged batch costs about two control-group commits (4.3 commits/s at 2 batches/s), and a query scans every record of its time range whatever its
+selector (a 5-minute window took 1.3 s with about 4,800 records retained, a 10-second window 0.28 s, and so did a query for a metric that does not exist), so the cost of a read is the data volume of its
+window. A first run with one-record batches at 20/s and three 5-minute reads per second fell to about 5 acknowledgements/s within four minutes while the leader wrote about 28 MB/s of disk. The load is
+therefore a bounded number of multi-record batches (default 1 batch/s of 16 records, one series per batch), the probe reads only the last 15 seconds, and the verifier's full read-back (one query over the whole run,
+or per series when that fails) must finish inside the service's 30 s query cap: at the measured scan rate (about 3,700 records/s) that is an estimated run of about an hour and a half at this load, not a measured one.
+
+**Limits.** One cut of one voter of three, with the survivors keeping the quorum; the cut guest's virtual-disk cache at the hypervisor is what a power-off exercises, and it is one observation, not a
+statistical claim. Losing two voters, a whole-site power loss and the hypervisor host's own loss are not exercised.
+
+**How to run.** Hosts, paths and the cut voter are all flags; nothing is built in. (1) Bring up three voters on three machines from one seed (the installation
+`pcut bootstrap` bootstrapped) with a systemd unit that is enabled. (2) `pcut bootstrap --url … --trust … --token-file … --ca … --endpoints name=id=https://host:port,… --out fixture.json`.
+(3) On a host that is never cut: `pcut probe --fixture fixture.json --log probe.log --pid-file probe.pid` and
+`pcut gen --fixture fixture.json --journal ack-journal.jsonl --stop-file STOP --pid-file gen.pid --rate 1 --records 16`, both detached; wait until every voter is ready and the load is
+acknowledged. (3b) `pcut verify --rehearsal …` proves the tooling against the live load. (4) Within about half an hour order the hypervisor to hard-stop the voter's VM, keep it down for
+about two minutes, start it. (5) `pcut verify --fixture fixture.json --journal ack-journal.jsonl --probe-log probe.log --out DIR --gen-pid-file gen.pid --stop-file STOP --cut NAME`
+(`--cut` is the endpoint name from `--endpoints`); it waits for the recovery itself and exits 0 only on `PASS`. Also keep the cut guest's boot id from before and after (it must change)
+and its `last -x` (a reboot record with no shutdown record before it): the hypervisor's act is the operator's evidence, not the verifier's. The unit tests of the checks
+(`go test ./tools/pcut`) feed each check crafted bad input and need no cluster.
+
+**What each check proves.**
+
+| check | proves | fails on |
+|---|---|---|
+| `membership_healthy` | after the cut every voter is ready with one control leader and one term | a voter that does not come back, split or absent leader |
+| `generator_drained`, `journal_intact` | the generator resent every in-flight batch and ended cleanly; the journal's hash chain is whole, so the claims below are made against an untampered record | a cut, changed, dropped, swapped or torn journal; a generator still running |
+| `generator_no_rejects`, `some_acks_to_verify` | no batch was refused as non-retryable; the run acknowledged something | rejected batches; an empty run |
+| `acked_all_readable_on_<voter>` | every acknowledged record is read back with its exact value on this voter | one missing acknowledged record |
+| `no_duplicate_records_on_<voter>` | no record, and no series timestamp, is stored twice | a duplicate |
+| `no_torn_or_unknown_records_on_<voter>` | every retained sample is a record the generator issued, with its issued time, and every batch is retained whole | garbage or foreign value, changed time, half a batch |
+| `voters_digests_equal` | the voters retain byte-identical data (SHA-256 over sorted series, time, value) | any difference between voters, or an unreadable voter |
+| `cut_voter_caught_up` | the cut voter holds everything acknowledged and equals the others | a cut voter that is behind |
+| `outage_observed` | the probe log shows the cut voter not ready for at least `--min-outage` and back inside the log | no outage, a short one, one that never ended |
+| `survivors_ready_and_reading_during_outage` | both survivors stay ready and answer complete reads in at least `--min-availability` of probes after `--grace` | a survivor that stops serving, or fewer than two survivors probed |
+| `cluster_acknowledged_writes_during_outage` | the cluster kept acknowledging writes with no gap over `--max-ack-gap` | no acknowledgement, or a longer gap |
+| `cut_voter_really_down` | no readiness probe of the cut voter succeeded inside the outage window | a voter that answered during the "outage" |
+| `control_applied_cursors_equal`, `acked_after_recovery` (not required) | the control states agree; the load was acknowledged after the recovery | reported as a warning only |
+
+**Recorded run (2026-11-20).** Three voters on three VMs of one hypervisor cluster (placement `simulated`), one ingest of 1 batch/s of 16 records over 4 writers for about eleven minutes before the verdict,
+the prober at 1 s readiness and a read every 2 s. The hypervisor hard-stopped one voter's VM at 23:05:09 UTC and started it at 23:07:16 UTC; the prober saw it not ready for 153.6 s (115 probes
+in that window, none ready) and the boot id changed with no shutdown record. The generator issued and had acknowledged 652 batches (10,432 records; 0 lost, 0 rejected, 433 resent attempts);
+156 acknowledgements came during the outage (first one 1.6 s after the first failed probe, longest gap after the grace 3.9 s). Every voter was ready with one control leader 2 s after the verifier started; the load ran 60 s
+longer and drained. The read-back took 6 to 8 s per voter: 10,432 samples retained on each, 0 acknowledged missing, 0 duplicate, 0 torn or foreign, 0 partial batches, one identical digest on all three.
+After the 30 s grace both survivors were ready in 124 of 124 probes and answered 62 of 62 complete reads (slowest 1.1 s). Verdict `PASS` (every required check; the two advisory ones passed too).
