@@ -21,6 +21,13 @@ const view = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
 const bad = (raw: unknown): void => { expect(() => parseCutoverView(raw, want)).toThrow(ApiFault); };
 
 describe('the decoder', () => {
+ test('the creating step of a cutover has no previous phase: the server sends an empty `from`, and the decoder keeps it as the creation step', () => {
+  const first = { revision: '1', from: '', to: 'shadow', epoch: '0', at_ns: '1700000000000000000', command: hx('5'), principal: hx('6'), digest: H('e') };
+  const v = parseCutoverView(view({ cutover: state({ phase: 'shadow', timeline: [first] }) }), want);
+  expect(v.cutover?.timeline[0]?.from).toBe('');
+  expect(v.cutover?.timeline[0]?.to).toBe('shadow');
+  bad(view({ cutover: state({ timeline: [{ ...first, from: 'nowhere' }] }) }));
+ });
  test('accepts the real shape and keeps decimal strings', () => {
   const v = parseCutoverView(view(), want);
   expect(v.cutover?.phase).toBe('shadow');

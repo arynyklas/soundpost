@@ -27,6 +27,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -40,6 +42,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -99,8 +102,13 @@ type config struct {
 	allowed     map[string]bool
 	allowLocal  bool
 	maxAttempts int
+	retryCap    time.Duration
 	pollToken   string
 	delivToken  string
+	// readyz names the polled components that are the product's own /readyz (no heartbeat contract, no credential).
+	readyz       map[string]bool
+	caFile       string
+	allowPrivate bool
 }
 
 func main() {
@@ -110,35 +118,64 @@ func main() {
 	}
 }
 
-func parse() (config, error) {
+func parse() (config, error) { return parseArgs(os.Args[1:], os.Getenv) }
+
+func parseArgs(args []string, getenv func(string) string) (config, error) {
 	var c config
-	var polls, allowed string
-	flag.StringVar(&c.state, "state", "", "the observer's own storage directory")
-	flag.StringVar(&c.id, "id", "observer", "the observer's identity")
-	flag.StringVar(&polls, "poll", "", "name=url,name=url heartbeat endpoints")
-	flag.DurationVar(&c.interval, "interval", 200*time.Millisecond, "poll interval")
-	flag.DurationVar(&c.missing, "missing-after", time.Second, "no healthy heartbeat for this long is a missing heartbeat")
-	flag.DurationVar(&c.timeout, "timeout", 300*time.Millisecond, "per request timeout")
-	flag.StringVar(&c.destination, "destination", "", "delivery destination URL")
-	flag.StringVar(&allowed, "authorized-destination", "", "host:port,host:port the observer may deliver to")
-	flag.BoolVar(&c.allowLocal, "test-allow-loopback", false, "TEST ONLY: permit a loopback destination")
-	flag.IntVar(&c.maxAttempts, "max-attempts", 8, "delivery attempts per notice")
-	flag.Parse()
-	c.pollToken, c.delivToken = os.Getenv("OBSERVER_POLL_TOKEN"), os.Getenv("OBSERVER_DELIVERY_TOKEN")
-	c.polls, c.allowed = map[string]string{}, map[string]bool{}
+	var polls, readyz, allowed string
+	fs := flag.NewFlagSet("observer", flag.ContinueOnError)
+	fs.StringVar(&c.state, "state", "", "the observer's own storage directory")
+	fs.StringVar(&c.id, "id", "observer", "the observer's identity")
+	fs.StringVar(&polls, "poll", "", "name=url,name=url heartbeat endpoints (the heartbeat contract; sends the poll credential)")
+	fs.StringVar(&readyz, "poll-readyz", "", "name=origin,name=origin: the product's own unauthenticated GET <origin>/readyz, healthy only when it answers 200 with ready=true; no credential is sent")
+	fs.DurationVar(&c.interval, "interval", 200*time.Millisecond, "poll interval")
+	fs.DurationVar(&c.missing, "missing-after", time.Second, "no healthy heartbeat for this long is a missing heartbeat")
+	fs.DurationVar(&c.timeout, "timeout", 300*time.Millisecond, "per request timeout")
+	fs.StringVar(&c.destination, "destination", "", "delivery destination URL")
+	fs.StringVar(&allowed, "authorized-destination", "", "host:port,host:port the observer may deliver to")
+	fs.StringVar(&c.caFile, "ca-file", "", "PEM trust roots for https polls and the destination (system roots otherwise); verification is never disabled")
+	fs.BoolVar(&c.allowPrivate, "allow-private-destination", false, "permit an authorized destination in a private (RFC 1918, unique-local) range; loopback and link-local still need -test-allow-loopback")
+	fs.BoolVar(&c.allowLocal, "test-allow-loopback", false, "TEST ONLY: permit a loopback destination")
+	fs.IntVar(&c.maxAttempts, "max-attempts", 8, "delivery attempts per notice")
+	fs.DurationVar(&c.retryCap, "retry-max-interval", 30*time.Second, "retries of one notice back off (the poll interval, doubled each attempt) up to this wait")
+	if err := fs.Parse(args); err != nil {
+		return c, err
+	}
+	c.pollToken, c.delivToken = getenv("OBSERVER_POLL_TOKEN"), getenv("OBSERVER_DELIVERY_TOKEN")
+	c.polls, c.allowed, c.readyz = map[string]string{}, map[string]bool{}, map[string]bool{}
+	contract := 0
 	for _, p := range strings.Split(polls, ",") {
 		if name, u, ok := strings.Cut(p, "="); ok && name != "" && u != "" {
 			c.polls[name] = u
+			contract++
 		}
+	}
+	for _, p := range strings.Split(readyz, ",") {
+		name, u, ok := strings.Cut(p, "=")
+		if !ok || name == "" || u == "" {
+			continue
+		}
+		if _, dup := c.polls[name]; dup {
+			return c, errors.New("a component is polled twice")
+		}
+		if o, err := url.Parse(u); err != nil || o.Scheme != "https" || o.Hostname() == "" || o.User != nil || (o.Path != "" && o.Path != "/") || o.RawQuery != "" || o.Fragment != "" {
+			return c, errors.New("-poll-readyz needs an https origin")
+		}
+		c.polls[name], c.readyz[name] = u, true
 	}
 	for _, a := range strings.Split(allowed, ",") {
 		if a != "" {
 			c.allowed[a] = true
 		}
 	}
+	if c.retryCap < c.interval {
+		c.retryCap = c.interval
+	}
 	switch {
-	case c.state == "" || len(c.polls) == 0 || c.destination == "" || c.pollToken == "" || c.delivToken == "":
-		return c, errors.New("-state, -poll, -destination and both credentials are required")
+	case c.state == "" || len(c.polls) == 0 || c.destination == "" || c.delivToken == "":
+		return c, errors.New("-state, -poll or -poll-readyz, -destination and the delivery credential are required")
+	case contract > 0 && c.pollToken == "":
+		return c, errors.New("-poll endpoints need the poll credential")
 	case c.interval <= 0 || c.missing < c.interval || c.timeout <= 0 || c.maxAttempts < 1:
 		return c, errors.New("invalid schedule")
 	}
@@ -146,8 +183,9 @@ func parse() (config, error) {
 }
 
 // authorize refuses a destination that is not explicitly authorized: only a
-// listed host:port is ever delivered to, and a loopback or private address only
-// when the test allowance is given.
+// listed host:port is ever delivered to; a private address additionally needs
+// -allow-private-destination, and a loopback or link-local address the test
+// allowance.
 func authorize(c config) error {
 	u, err := url.Parse(c.destination)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
@@ -156,11 +194,34 @@ func authorize(c config) error {
 	if !c.allowed[u.Host] {
 		return errors.New("destination is not authorized")
 	}
-	ip := net.ParseIP(u.Hostname())
-	if ip != nil && (ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()) && !c.allowLocal {
-		return errors.New("destination is a local address and the test allowance is not set")
+	if ip := net.ParseIP(u.Hostname()); ip != nil && !c.allowLocal {
+		switch {
+		case ip.IsLoopback() || ip.IsLinkLocalUnicast():
+			return errors.New("destination is a local address and the test allowance is not set")
+		case ip.IsPrivate() && !c.allowPrivate:
+			return errors.New("destination is a private address and -allow-private-destination is not set")
+		}
 	}
 	return nil
+}
+
+// newClient is the observer's one HTTP client: no proxy, no redirect, a fresh
+// connection per request (a dead peer is noticed at once), TLS 1.2 or later with
+// the system roots or the -ca-file roots; certificate verification is never disabled.
+func newClient(c config) (*http.Client, error) {
+	tr := &http.Transport{DisableKeepAlives: true, TLSHandshakeTimeout: c.timeout, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}}
+	if c.caFile != "" {
+		pem, err := os.ReadFile(c.caFile)
+		if err != nil {
+			return nil, errors.New("-ca-file is unreadable")
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(pem) {
+			return nil, errors.New("-ca-file holds no certificate")
+		}
+		tr.TLSClientConfig.RootCAs = pool
+	}
+	return &http.Client{Timeout: c.timeout, Transport: tr, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, nil
 }
 
 func run() error {
@@ -177,7 +238,10 @@ func run() error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	client := &http.Client{Timeout: c.timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	client, err := newClient(c)
+	if err != nil {
+		return err
+	}
 	tick := time.NewTicker(c.interval)
 	defer tick.Stop()
 	logEvent("started", map[string]any{"observer": c.id, "components": len(c.polls)})
@@ -279,6 +343,9 @@ type beat struct {
 }
 
 func poll(ctx context.Context, c config, client *http.Client, name, target string) (uint64, bool) {
+	if c.readyz[name] {
+		return pollReadyz(ctx, client, target)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
 		return 0, false
@@ -298,6 +365,39 @@ func poll(ctx context.Context, c config, client *http.Client, name, target strin
 		return 0, false
 	}
 	return b.Seq, true
+}
+
+// pollReadyz asks the product's own unauthenticated GET <origin>/readyz: the node's
+// quorum/apply/disk/policy/schema decision. It is a heartbeat only when the answer is
+// 200 with ready=true; the sequence is the node's applied cursor index when it states one.
+func pollReadyz(ctx context.Context, client *http.Client, origin string) (uint64, bool) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSuffix(origin, "/")+"/readyz", nil)
+	if err != nil {
+		return 0, false
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, false
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		return 0, false
+	}
+	var r struct {
+		Ready   bool `json:"ready"`
+		Applied *struct {
+			Index string `json:"index"`
+		} `json:"applied_cursor"`
+	}
+	if json.Unmarshal(body, &r) != nil || !r.Ready {
+		return 0, false
+	}
+	var seq uint64
+	if r.Applied != nil {
+		seq, _ = strconv.ParseUint(r.Applied.Index, 10, 64)
+	}
+	return seq, true
 }
 
 func outageID(component string, lastOK int64, detected int64) string {
@@ -374,6 +474,27 @@ func deliver(ctx context.Context, c config, client *http.Client, o *Outage, now 
 	}
 	if n >= c.maxAttempts {
 		return
+	}
+	// Retries back off: the wait after attempt n is the poll interval doubled n-1 times, capped at -retry-max-interval, counted from that
+	// attempt. A destination that is down for minutes (a mail or chat outage) is still reached within the attempt budget; a budget
+	// spent in a few seconds would lose the one alert the human is waiting for.
+	if n > 0 {
+		last := int64(0)
+		for _, a := range o.Attempts {
+			if a.Kind == kind && a.AtNS > last {
+				last = a.AtNS
+			}
+		}
+		wait := c.interval
+		for i := 1; i < n && wait < c.retryCap; i++ {
+			wait *= 2
+		}
+		if wait > c.retryCap {
+			wait = c.retryCap
+		}
+		if time.Duration(now-last) < wait {
+			return
+		}
 	}
 	body, _ := json.Marshal(map[string]any{"observer": c.id, "kind": kind, "outage": o.ID, "component": o.Component, "last_ok_ns": o.LastOKNS, "detected_ns": o.DetectedNS, "recovered_ns": o.RecoveredNS})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.destination, bytes.NewReader(body))

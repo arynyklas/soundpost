@@ -92,13 +92,30 @@ func TestServeDeliversAConditionThroughATelegramBotAPIPeer(t *testing.T) {
 	}
 }
 
-// serveTelegramDelivery runs the whole served path against the organization's Telegram destination (chat and
-// sealed token as given; serveArgs point the node at a Bot API peer, none means the public API) and returns the
-// provider message id of the one accepted delivery. Nothing it fails with contains the token or the chat.
+// realDestination is the organization destination one served-delivery acceptance sends to: the channel type, the
+// address (a Telegram chat, an e-mail recipient), the write-only sealed secret (bot token, SMTP password) and the check
+// of the provider identity the one accepted delivery must carry.
+type realDestination struct {
+	Type, Address, Secret string
+	CheckProvider         func(id string) error
+}
+
 func serveTelegramDelivery(t *testing.T, token, chat string, serveArgs ...string) string {
 	t.Helper()
+	return serveDelivery(t, realDestination{Type: "telegram", Address: chat, Secret: token, CheckProvider: func(id string) error {
+		_, err := strconv.ParseInt(id, 10, 64)
+		return err
+	}}, serveArgs...)
+}
+
+// serveDelivery runs the whole served path against the organization's destination (type, address and sealed secret
+// as given; serveArgs point the node at the provider under test) and returns the provider identity of the one accepted
+// delivery. Nothing it fails with contains the secret or the address.
+func serveDelivery(t *testing.T, dest realDestination, serveArgs ...string) string {
+	t.Helper()
+	token, chat := dest.Secret, dest.Address
 	scrub := func(s string) string {
-		return strings.ReplaceAll(strings.ReplaceAll(s, token, "<token>"), chat, "<chat>")
+		return strings.ReplaceAll(strings.ReplaceAll(s, token, "<secret>"), chat, "<address>")
 	}
 	fatalf := func(format string, args ...any) {
 		t.Helper()
@@ -154,11 +171,11 @@ func serveTelegramDelivery(t *testing.T, token, chat string, serveArgs ...string
 		t.Fatalf("bootstrap %d: %s", code, raw)
 	}
 	a.csrf = session.CSRF
-	org, project, dest := model.NewID(), model.NewID(), model.NewID()
+	org, project, destID := model.NewID(), model.NewID(), model.NewID()
 	a.command(org, "create_org", auth.AdminPayload{Name: "serve telegram acceptance"})
 	a.command(org, "create_project", auth.AdminPayload{ID: project, Name: "serve telegram acceptance project"})
-	destination, _ := json.Marshal(auth.DestinationConfig{Type: "telegram", Address: chat, Enabled: true})
-	a.command(org, "destination", auth.AdminPayload{ID: dest, Config: destination, Secret: token})
+	destination, _ := json.Marshal(auth.DestinationConfig{Type: dest.Type, Address: chat, Enabled: true})
+	a.command(org, "destination", auth.AdminPayload{ID: destID, Config: destination, Secret: token})
 
 	code, raw = a.do("POST", "/api/v1/rules", map[string]any{"org": org, "project_id": project, "operation": "list"}, nil)
 	var listed struct {
@@ -228,7 +245,7 @@ func serveTelegramDelivery(t *testing.T, token, chat string, serveArgs ...string
 		fatalf("serve did not exit cleanly: %v\n%s", err, errOut.String())
 	}
 	if strings.Contains(errOut.String(), token) {
-		t.Fatal("the served process wrote the bot token to its error output")
+		t.Fatal("the served process wrote the destination secret to its error output")
 	}
 
 	// The node is stopped: read the committed delivery records from its data and record the provider's
@@ -261,8 +278,8 @@ func serveTelegramDelivery(t *testing.T, token, chat string, serveArgs ...string
 			continue
 		}
 		accepted++
-		if _, err := strconv.ParseInt(r.Provider, 10, 64); err != nil {
-			t.Fatalf("the accepted delivery %s carries no Bot API message id: %q", r.ID, r.Provider)
+		if err := dest.CheckProvider(r.Provider); err != nil {
+			t.Fatalf("the accepted delivery %s carries no usable provider identity: %q", r.ID, r.Provider)
 		}
 		if r.Uncertain || r.PossibleDuplicate {
 			t.Fatalf("the accepted delivery %s is uncertain=%v possible_duplicate=%v", r.ID, r.Uncertain, r.PossibleDuplicate)

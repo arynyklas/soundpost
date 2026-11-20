@@ -198,5 +198,14 @@ the same skip / `SOUNDPOST_REQUIRE_REAL_TELEGRAM=1` contract; it scrubs the toke
 from every failure text. `TestServeDeliversAConditionThroughATelegramBotAPIPeer` runs the
 identical flow against a local TLS Bot API peer on every run. One real run (2026-11-18, a
 disposable bot and a private chat of the owner) was accepted with provider message ID 2876.
-No public SMTP relay or third-party receiver has been called by any test run; the real SMTP
-relay acceptance has not been exercised (no relay account was provided).
+
+`TestServeDeliversAConditionToARealSMTPRelay` (`cmd/soundpost/serve_smtp_real_test.go`) is the same served flow against a REAL
+submission relay and mailbox. The operator provisions them and names them in
+`SOUNDPOST_TEST_SMTP_HOST`, `_PORT`, `_TLS`, `_USER`, `_PASSWORD` (the destination's sealed secret, never printed), `_FROM`, `_TO`,
+`_CA_FILE`, `_SERVER_NAME` and `_EGRESS_ALLOW` (the private range a lab relay lives in); without them it is skipped with the missing
+names, and with `SOUNDPOST_REQUIRE_REAL_SMTP=1` it fails. It requires the one accepted delivery to carry the relay's own queue
+identity as provider ID and scrubs the password and recipient from every failure text. Verification of the message itself is the
+mailbox owner's: read the raw message from the mailbox and match the queue ID (the relay's `Received` header), the
+`X-Soundpost-Delivery-ID` and the `Message-ID` derived from the delivery ID. One real run (2026-11-20, a Postfix relay with STARTTLS and
+SASL AUTH and a local mailbox on a separate lab host, node on another) was accepted and the message read raw from the mailbox
+(`with ESMTPSA`: TLS and authenticated); the relay was a lab relay, not a public one. No public relay or third-party receiver has been called by any test run.

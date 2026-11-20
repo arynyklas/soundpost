@@ -72,7 +72,7 @@ function CutoverBody(props: { view: CutoverView; tz: string }): React.JSX.Elemen
       <tbody>
        {c.timeline.length === 0 && <tr><td colSpan={9}>No transition has been committed yet.</td></tr>}
        {c.timeline.map((s) => (
-        <tr key={s.revision}><td>{s.revision}</td><td>{PHASE_WORDS[s.from]}</td><td>{PHASE_WORDS[s.to]}</td><td>{s.epoch}</td><td>{when(s.at_ns, tz)}</td><td><code>{s.principal}</code></td><td><code>{s.command}</code></td><td><code>{s.digest}</code></td><td>{s.evidence_digest ? <code>{s.evidence_digest}</code> : 'none'}</td></tr>
+        <tr key={s.revision}><td>{s.revision}</td><td>{s.from === '' ? 'Created (no previous phase)' : PHASE_WORDS[s.from]}</td><td>{PHASE_WORDS[s.to]}</td><td>{s.epoch}</td><td>{when(s.at_ns, tz)}</td><td><code>{s.principal}</code></td><td><code>{s.command}</code></td><td><code>{s.digest}</code></td><td>{s.evidence_digest ? <code>{s.evidence_digest}</code> : 'none'}</td></tr>
        ))}
       </tbody>
      </table>

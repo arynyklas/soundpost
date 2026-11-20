@@ -51,6 +51,33 @@ observer was allowlisted for with a test-only flag (`-test-allow-loopback`), and
 observer refuses to start for a destination that is not on its allowlist or that is a
 local address without that flag.
 
+## A deployment on a separate host (lab qualification)
+
+The same observer, unmodified in mechanism, was run on a **separate host from the product cluster**, polling the product's real `/readyz`
+and delivering to a real mailbox: this is the independent deployment the previous section asks for, qualified on the lab network, with
+these limits stated first.
+
+* The cluster was three real `soundpost serve --mode=distributed` voters with mTLS between them on three hosts; the observer ran on a
+  fourth host, which runs no Soundpost node (no cluster listener) and shares no disk,
+  kernel, address, supervisor, credential or clock with them. It runs under its own systemd units (`Restart=always`) as its own
+  system user with its own state directory.
+* **Not shown:** the four hosts are KVM guests on one lab network; nothing here establishes that they sit on different hypervisors,
+  racks or power feeds, so "separately provisioned host" is met at the operating-system, disk, address and supervisor level, not at the
+  hardware level. The alert route (below) runs on the observer's host too, so a failure of that host takes both down; **who watches the
+  observer** remains the operator's routine.
+* The observer polled `-poll-readyz node-1=…,node-2=…,node-3=…` with `-ca-file` of the cluster CA, `-interval 1s`, `-missing-after 10s`.
+  Its alert route is `tools/fixtures/deadman/alert-mail-bridge.py` (HTTPS webhook, delivery credential, idempotent) handing each notice to
+  Postfix, which delivers to a real mailbox. Telegram was not used for this route (its credential is held outside this repository).
+* Observed (the drill's own log and the raw mailbox are kept in the project's evidence ledger): 30 s healthy polling opened no outage and sent no
+  mail; with all three voters stopped, each node's outage was detected 10.0 s after its last healthy heartbeat and one alert per node
+  was delivered within 9 s of the last stop; a SIGKILLed and restarted observer (during the outage) repeated nothing; with the voters
+  started again, one recovery message per node arrived and no second alert; with one voter killed the other two stayed ready and only that
+  node was reported; with the alert route stopped the failed attempts were recorded with growing spacing and the alert was delivered once,
+  by the retry after the route came back, and its recovery followed. Ten messages for five outages (five alerts, five recoveries) were in
+  the mailbox at the end.
+* The first run of this drill exposed a defect now fixed: with a fixed one-second retry spacing and eight attempts the whole budget was
+  spent in nine seconds of alert-route downtime and the alert was never delivered (the first run's log is kept in the same ledger).
+
 ## Heartbeat semantics
 
 The observer polls three components separately; each can fail alone, and a failure
@@ -68,9 +95,14 @@ The contract the observer relies on: `GET <url>` with
 status, a timeout, a refused connection, a malformed body, the wrong component
 name) is **no heartbeat**. `seq` increases, so a replayed or cached answer is
 distinguishable from a live one. The acceptance fixture serves exactly these three
-from the real node (`tests/acceptance/notification_outage_test.go`); the product's
-own readiness endpoints are the distribution work's and must satisfy the same
-contract before an operator points an observer at them.
+from the real node (`tests/acceptance/notification_outage_test.go`). A running node
+serves no such contract endpoint itself; what it serves is the unauthenticated
+`GET /readyz` (200 with `ready=true` only with quorum and the backlog applied).
+`-poll-readyz` makes the observer treat exactly that as the heartbeat of one node
+(component = node, no credential sent), which is what the separate-host deployment
+below polls. The ingest-canary and notification-worker heartbeats above remain
+requirements on the distribution work; until a node serves them, an observer cannot
+watch ingest or the notification pipeline separately from the node's readiness.
 
 A component is **missing** when no healthy heartbeat arrived for the configured
 `missing-after` (default one second in the fixture; an operator chooses it from the
@@ -83,7 +115,10 @@ started, and then it is declared missing with `never_seen`.
 For each component, once per `interval`: poll; track the last healthy time; on the
 transition to missing open **one** outage (identity, last healthy time, detection
 time); deliver one alert per outage with a stable idempotency key, retrying on a
-bounded budget (each attempt is recorded with its time and its status code or closed
+bounded budget with backoff (the wait after each failed attempt doubles from the poll
+interval up to `-retry-max-interval`, default 30 s, so a destination that is down for
+minutes is still reached; with the default 40 attempts the budget covers well over ten
+minutes; each attempt is recorded with its time and its status code or closed
 error class, never a response body); when the heartbeat returns, record the
 recovery and deliver **one** recovery notice, which is not an emergency. State is
 written atomically (write, fsync, rename) every cycle and every attempt is appended

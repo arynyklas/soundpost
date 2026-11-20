@@ -24,6 +24,8 @@ it the same way and shows what the mechanism does while every Soundpost componen
 | --- | --- |
 | `run-observer.sh` | POSIX `sh` launcher: validates the settings, builds the observer if asked to, starts it with only its own two credentials. `--check` validates and prints the command with the credentials redacted. |
 | `observer.env.example` | The settings, with obviously fake credentials. Copy to `observer.env`, edit, `chmod 600`. |
+| `alert-mail-bridge.py` | A reference alert route: an authenticated HTTPS webhook that turns each notice into one e-mail through the local mail system (`sendmail`), so the alert lands in a mailbox a person reads and the product is not on the path. A repeated `Idempotency-Key` sends no second message; a notice the mail system refuses is answered 503 and retried by the observer. Standard library only. |
+| `test_alert_mail_bridge.py` | Unit tests for the bridge (stand-in mail command, loopback HTTP): `python3 -m unittest tools/fixtures/deadman/test_alert_mail_bridge.py -v`. |
 
 ## The observer
 
@@ -39,18 +41,26 @@ recovery notice. It imports nothing of the product and shares only the heartbeat
 heartbeat. The contract and the three components (`product`, `ingest`, `notification`) are defined in
 [`docs/operations/external-deadman.md`](../../../docs/operations/external-deadman.md).
 
+**Polling the product's own `/readyz`.** A running `soundpost serve` node answers the unauthenticated `GET /readyz` with
+`{"ready":true,...}` and HTTP 200 only when it has quorum and has applied its backlog. `-poll-readyz name=https://host:port,...` makes the observer
+treat exactly that as the heartbeat (no credential is sent; anything but 200 with `ready=true` is no heartbeat), one component per node. Use
+`-ca-file` for the certificate authority that signed the nodes' public certificates; verification is never disabled.
+
 Flags (`go run ./tests/acceptance/observer -h`):
 
 | Flag | Meaning |
 | --- | --- |
 | `-state DIR` | the observer's own storage: `state.json` (atomic, fsynced every cycle) and `attempts.jsonl` (append-only) |
 | `-id NAME` | identity; a state directory belongs to one identity |
-| `-poll name=url,...` | heartbeat endpoints |
+| `-poll name=url,...` | heartbeat-contract endpoints (send the poll credential) |
+| `-poll-readyz name=origin,...` | the product's own `/readyz` of each node (no credential) |
+| `-ca-file PEM` | trust roots for https polls and the destination (system roots otherwise) |
 | `-interval`, `-missing-after`, `-timeout` | poll interval, missing threshold, per-request timeout |
 | `-destination URL` | where notices are delivered |
 | `-authorized-destination host:port,...` | the only hosts it may deliver to; anything else is refused at start |
-| `-test-allow-loopback` | **test only**: permit a loopback or private destination |
-| `-max-attempts N` | delivery attempts per notice |
+| `-allow-private-destination` | permit an authorized destination in a private (RFC 1918, unique-local) range; loopback and link-local still need the test flag |
+| `-test-allow-loopback` | **test only**: permit a loopback destination |
+| `-max-attempts N`, `-retry-max-interval D` | delivery attempts per notice; the wait between attempts of one notice doubles from the poll interval up to this cap (default 30 s), so a destination that is down for minutes is still reached |
 
 Credentials come **only** from the environment, `OBSERVER_POLL_TOKEN` and
 `OBSERVER_DELIVERY_TOKEN`, never from arguments, and are never logged or stored.

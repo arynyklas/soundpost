@@ -13,7 +13,7 @@ export type CutoverPhase = (typeof CUTOVER_PHASES)[number];
 export const SPAN_SIDES = ['legacy', 'product', 'handover'] as const;
 export type SpanSide = (typeof SPAN_SIDES)[number];
 
-export interface CutoverStep { revision: string; from: CutoverPhase; to: CutoverPhase; epoch: string; at_ns: string; command: Id; principal: Id; digest: string; evidence_digest?: string }
+export interface CutoverStep { revision: string; from: CutoverPhase | ''; to: CutoverPhase; epoch: string; at_ns: string; command: Id; principal: Id; digest: string; evidence_digest?: string }
 export interface CutoverFrontier { source: Id; version: string; cursor: { group: Id; index: string } }
 export interface CutoverState {
  id: Id; revision: string; phase: CutoverPhase; epoch: string; entered_at_ns: string; old_owner: Id; new_owner: Id; active_owners: Id[];
@@ -57,7 +57,7 @@ function list(v: unknown, max = MAX_ROWS): unknown[] { return Array.isArray(v) &
 
 function step(raw: unknown): CutoverStep {
  const r = shape(raw, ['revision', 'from', 'to', 'epoch', 'at_ns', 'command', 'principal', 'digest'], ['evidence_digest']);
- const out: CutoverStep = { revision: dec(r.revision), from: phase(r.from), to: phase(r.to), epoch: dec(r.epoch), at_ns: dec(r.at_ns), command: id(r.command), principal: id(r.principal), digest: hash(r.digest) };
+ const out: CutoverStep = { revision: dec(r.revision), from: r.from === '' ? '' : phase(r.from), to: phase(r.to), epoch: dec(r.epoch), at_ns: dec(r.at_ns), command: id(r.command), principal: id(r.principal), digest: hash(r.digest) };
  if (r.evidence_digest !== undefined) out.evidence_digest = hash(r.evidence_digest);
  return out;
 }

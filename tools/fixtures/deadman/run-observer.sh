@@ -43,13 +43,18 @@ need() {
 	eval "value=\${$1:-}"
 	[ -n "$value" ] || die "$1 is required"
 }
-for name in OBSERVER_ID OBSERVER_STATE_DIR OBSERVER_POLL OBSERVER_DESTINATION OBSERVER_AUTHORIZED_DESTINATION OBSERVER_POLL_TOKEN OBSERVER_DELIVERY_TOKEN; do
+for name in OBSERVER_ID OBSERVER_STATE_DIR OBSERVER_DESTINATION OBSERVER_AUTHORIZED_DESTINATION OBSERVER_DELIVERY_TOKEN; do
 	need "$name"
 done
-case "$OBSERVER_POLL_TOKEN$OBSERVER_DELIVERY_TOKEN" in
+# At least one thing to watch: heartbeat-contract endpoints (they need the poll credential) and/or the product's own /readyz origins (no credential).
+[ -n "${OBSERVER_POLL:-}" ] || [ -n "${OBSERVER_POLL_READYZ:-}" ] || die "OBSERVER_POLL or OBSERVER_POLL_READYZ is required"
+if [ -n "${OBSERVER_POLL:-}" ]; then
+	need OBSERVER_POLL_TOKEN
+	[ "$OBSERVER_POLL_TOKEN" != "$OBSERVER_DELIVERY_TOKEN" ] || die "the poll credential and the delivery credential must be two different credentials"
+fi
+case "${OBSERVER_POLL_TOKEN:-}$OBSERVER_DELIVERY_TOKEN" in
 *replace-me*) die "a credential still holds the example placeholder" ;;
 esac
-[ "$OBSERVER_POLL_TOKEN" != "$OBSERVER_DELIVERY_TOKEN" ] || die "the poll credential and the delivery credential must be two different credentials"
 
 # The observer's state must not live where the product keeps its own.
 case "$OBSERVER_STATE_DIR" in
@@ -72,10 +77,22 @@ if [ ! -x "$bin" ]; then
 	(cd "$repo" && go build -o "$(cd "$(dirname "$bin")" && pwd)/$(basename "$bin")" ./tests/acceptance/observer) || die "building the observer failed"
 fi
 
-set -- -state "$state" -id "$OBSERVER_ID" -poll "$OBSERVER_POLL" \
+set -- -state "$state" -id "$OBSERVER_ID" \
 	-interval "${OBSERVER_INTERVAL:-1s}" -missing-after "${OBSERVER_MISSING_AFTER:-30s}" -timeout "${OBSERVER_TIMEOUT:-5s}" \
-	-max-attempts "${OBSERVER_MAX_ATTEMPTS:-8}" \
+	-max-attempts "${OBSERVER_MAX_ATTEMPTS:-40}" -retry-max-interval "${OBSERVER_RETRY_MAX_INTERVAL:-30s}" \
 	-destination "$OBSERVER_DESTINATION" -authorized-destination "$OBSERVER_AUTHORIZED_DESTINATION"
+if [ -n "${OBSERVER_POLL:-}" ]; then
+	set -- "$@" -poll "$OBSERVER_POLL"
+fi
+if [ -n "${OBSERVER_POLL_READYZ:-}" ]; then
+	set -- "$@" -poll-readyz "$OBSERVER_POLL_READYZ"
+fi
+if [ -n "${OBSERVER_CA_FILE:-}" ]; then
+	set -- "$@" -ca-file "$OBSERVER_CA_FILE"
+fi
+if [ "${OBSERVER_ALLOW_PRIVATE_DESTINATION:-}" = "1" ]; then
+	set -- "$@" -allow-private-destination
+fi
 if [ "${OBSERVER_TEST_ALLOW_LOOPBACK:-}" = "1" ]; then
 	set -- "$@" -test-allow-loopback
 fi
@@ -92,4 +109,4 @@ fi
 mkdir -p "$state"
 chmod 700 "$state"
 # The observer gets its two credentials and PATH, and nothing else of this environment.
-exec env -i PATH="$PATH" OBSERVER_POLL_TOKEN="$OBSERVER_POLL_TOKEN" OBSERVER_DELIVERY_TOKEN="$OBSERVER_DELIVERY_TOKEN" "$bin" "$@"
+exec env -i PATH="$PATH" OBSERVER_POLL_TOKEN="${OBSERVER_POLL_TOKEN:-}" OBSERVER_DELIVERY_TOKEN="$OBSERVER_DELIVERY_TOKEN" "$bin" "$@"

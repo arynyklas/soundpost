@@ -186,12 +186,12 @@ down) down ;;
 pw) shift; cfgs; b=${E2E_BROWSER:-chromium}; cfg=zz-pw.local.config.ts; [ "$b" = chromium ] || cfg=zz-pw.other.config.ts; case " $* " in *" --project"*) ;; *) set -- --project=$b "$@" ;; esac; pw_env exec_pw -c $cfg "$@" ;;
 headed) shift; cfgs; b=${E2E_BROWSER:-chromium}; cfg=zz-pw.local.config.ts; [ "$b" = chromium ] || cfg=zz-pw.other.config.ts; E2E_HEADED=1 pw_env xvfb-run -a -s "-screen 0 1440x1000x24" sh -c "cd '$ROOT/web' && exec sh '$ROOT/web/e2e-harness/in-trust-ns.sh' node node_modules/@playwright/test/cli.js test -c $cfg --project=$b \"\$@\"" sh "$@" ;;
 run) shift; mode=$1; shift; oidc=$1; shift; [ "$oidc" = oidc ] || oidc=""; rc=0; up $oidc && sh "$0" "$mode" "$@" || rc=$?; down >/dev/null; exit $rc ;;
-# suite ARGS: the whole committed suite (every spec but restore.spec.ts, which needs restore.sh) with the OIDC fixture. The fault specs remove shards
+# suite ARGS: the whole committed suite (every spec but restore.spec.ts, which needs restore.sh, and cutover-real.spec.ts, which needs cutover.sh) with the OIDC fixture. The fault specs remove shards
 # of the server FOR GOOD (server-states removes all 64, shard-loss half and all of them) and say they need a server of their own: every spec after
 # one of them, on the same server, would meet a server whose data groups are gone (ingest answers 503). So the ordinary specs share one server and
 # each fault spec gets a fresh one. The exit code is the first failing run's.
 suite) shift; rc=0
-	rest=$(cd "$ROOT/web" && ls e2e/*.spec.ts | grep -v -e '/restore.spec.ts$' -e '/server-states.spec.ts$' -e '/shard-loss.spec.ts$' | tr '\n' ' ')
+	rest=$(cd "$ROOT/web" && ls e2e/*.spec.ts | grep -v -e '/restore.spec.ts$' -e '/cutover-real.spec.ts$' -e '/server-states.spec.ts$' -e '/shard-loss.spec.ts$' | tr '\n' ' ')
 	# shellcheck disable=SC2086
 	sh "$0" run pw oidc "$@" $rest || rc=$?
 	for f in e2e/server-states.spec.ts e2e/shard-loss.spec.ts; do sh "$0" run pw oidc "$@" $f || { [ $rc -ne 0 ] || rc=$?; }; done
