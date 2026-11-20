@@ -1,22 +1,75 @@
 # Copyright 2026 Aryn Yklas
 # SPDX-License-Identifier: Apache-2.0
 #
-# The BACKING services of the reference estate, and nothing else: PostgreSQL 16 and the uninstrumented HTTPS dependency. The
-# product node and the SDK-bearing applications (Python API and jobs, Bun gateway, the Vite-built web app) are host processes of
-# the acceptance smoke (`go run ./tools/smoke journeys --pg-image ...`), which alone holds the per-source credentials, signed
-# policies and trusted keys the running node issues; see README.md and docs/acceptance/reference-journeys.md.
+# The WHOLE reference estate: the Soundpost node, the SDK-bearing applications (Python API and jobs, Bun gateway, the Vite-built web
+# app), PostgreSQL 16 and the uninstrumented HTTPS dependency, each from a content-pinned image and none reaching a registry
+# (`pull_policy: never`). Per-source credentials are provisioned at runtime: `provision` waits for the node, bootstraps its owner,
+# creates the organizations, users and sources the journeys need and writes every application's source configuration (the
+# credential, signed policy and trusted keys the running node issued) to the `cfg` volume, which only the applications mount; the
+# applications start after it, `webbuild` builds the page and uploads its source map under the build's own artifact source.
 #
-# Every image is named by a content digest, never a tag: the default of each variable below is `name@sha256:<digest>` (PostgreSQL
-# 16.14; python 3.12-slim index of 2026-11-19), and the smoke refuses an operator-named image that is not itself pinned (an image
-# id `sha256:<64 hex>`, or `name@sha256:<64 hex>`). `pull_policy: never`: a run never reaches a registry; load the pinned images
-# once (`docker pull <image>@sha256:<digest>`, or `docker load`) and name the loaded image's id in the variable when the runtime
-# cannot resolve the digest of a loaded image.
+#   init -> node -> provision -> webbuild -> gateway          postgres, dependency -> api -> gateway          jobs (on demand)
 #
-# Required environment: REFERENCE_PG_PASSWORD (random), REFERENCE_TLS_DIR (a directory holding leaf.pem and leaf.key for the
-# dependency, readable by uid 65534). Optional: REFERENCE_PG_PORT, REFERENCE_DEPENDENCY_PORT (loopback ports; 0 lets Docker choose),
-# REFERENCE_PG_IMAGE, REFERENCE_PYTHON_IMAGE (pinned references that replace the digests below).
+# Images. Third-party images (PostgreSQL 16.14; the python 3.12-slim index of 2026-11-19) default to `name@sha256:<digest>`. The
+# first-party ones are BUILT FROM THIS TREE and have no digest until they are built, so a run names each by the id of the image it
+# built (`sha256:<64 hex>`): REFERENCE_NODE_IMAGE (deploy/Dockerfile over the release `soundpost` binary), REFERENCE_ESTATE_IMAGE
+# (Dockerfile.estate: the applications, Node 22, Bun and the hash-locked Python packages) and REFERENCE_TOOLS_IMAGE (Dockerfile.tools:
+# the provisioning binary). `go run ./tools/smoke journeys` builds all three offline and runs this file; it refuses an unpinned image.
+# A host that holds a pinned image only by id (a loaded archive) names it in REFERENCE_PG_IMAGE / REFERENCE_PYTHON_IMAGE.
+#
+# The node runs as container uid 0 WITHOUT capabilities (cap_drop ALL, read-only root, no-new-privileges), in the host's cgroup
+# namespace with the cgroup v2 subtree REFERENCE_CGROUP_ROOT mounted at the same path: its native symbolication sandbox creates
+# private child groups there and must move its worker into them, which the kernel allows only a writer that may write the common
+# ancestor of the node's own container cgroup and that subtree; a nonroot container user cannot (measured: EACCES on cgroup.procs).
+# Root without capabilities writes only what root owns, so point it at an EMPTY subtree OWNED BY ROOT with the memory and pids
+# controllers available (`mkdir /sys/fs/cgroup/<name>` as root, or a root service with Delegate=memory pids); the smoke refuses any other.
+#
+# Required environment: REFERENCE_PG_PASSWORD (random), REFERENCE_TLS_DIR (a directory holding ca.pem, leaf.pem and leaf.key, world
+# readable, the leaf naming 127.0.0.1, localhost, node, api, gateway and dependency), REFERENCE_NODE_PORT and REFERENCE_GATEWAY_PORT
+# (loopback ports the node and the gateway are published on; the browser reaches them there), REFERENCE_CGROUP_ROOT and the three
+# images above. Optional: REFERENCE_PG_PORT, REFERENCE_DEPENDENCY_PORT (0 lets Docker choose), REFERENCE_NODE_DATA (a host directory
+# or a named volume holding the node's data, default the volume `node-data`), REFERENCE_HANDOVER_UID/GID (the owner `handover` gives
+# the node's data directory to, for an operator who opens it in-process), REFERENCE_JOB_RUN_ID (the run the `jobs` service executes),
+# REFERENCE_PG_IMAGE, REFERENCE_PYTHON_IMAGE.
 name: soundpost-reference
+x-estate: &estate
+  image: ${REFERENCE_ESTATE_IMAGE:?id of the estate image built from this tree (sha256:<64 hex>)}
+  pull_policy: never
+  user: "65534:65534"
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  tmpfs: ["/tmp:size=64m,mode=1777"]
 services:
+  init:
+    image: ${REFERENCE_PYTHON_IMAGE:-python@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b}
+    pull_policy: never
+    command: ["python", "/app/init.py", "init"]
+    user: "0:0"
+    read_only: true
+    volumes:
+      - ./init.py:/app/init.py:ro
+      - ${REFERENCE_TLS_DIR:?directory with ca.pem, leaf.pem and leaf.key}:/in:ro
+      - tls-node:/out/tls-node
+      - ${REFERENCE_NODE_DATA:-node-data}:/node-data
+      - web:/web
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER]
+    security_opt: ["no-new-privileges:true"]
+  handover:
+    # Operator step, not part of `up`: gives the node's data directory to REFERENCE_HANDOVER_UID/GID once the node is stopped.
+    profiles: ["handover"]
+    image: ${REFERENCE_PYTHON_IMAGE:-python@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b}
+    pull_policy: never
+    command: ["python", "/app/init.py", "handover", "${REFERENCE_HANDOVER_UID:-0}", "${REFERENCE_HANDOVER_GID:-0}"]
+    user: "0:0"
+    read_only: true
+    volumes:
+      - ./init.py:/app/init.py:ro
+      - ${REFERENCE_NODE_DATA:-node-data}:/node-data
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER]
+    security_opt: ["no-new-privileges:true"]
   postgres:
     image: ${REFERENCE_PG_IMAGE:-postgres@sha256:92620daddcd947f8d5ab5ba66e848702fe443d87fed30c4cea8e389fd78dfc55}
     pull_policy: never
@@ -46,7 +99,7 @@ services:
     ports: ["127.0.0.1:${REFERENCE_DEPENDENCY_PORT:-0}:8443"]
     volumes:
       - ./dependency/server.py:/app/server.py:ro
-      - ${REFERENCE_TLS_DIR:?directory with leaf.pem and leaf.key}:/tls:ro
+      - ${REFERENCE_TLS_DIR:?directory with ca.pem, leaf.pem and leaf.key}:/tls:ro
     healthcheck:
       # Inside the container the answer is read from the loopback address, whose leaf is the run's private one: the check asks only
       # whether the server answers, so it does not verify the certificate chain.
@@ -58,3 +111,132 @@ services:
     user: "65534:65534"
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
+  node:
+    image: ${REFERENCE_NODE_IMAGE:?id of the node image built from this tree (sha256:<64 hex>)}
+    pull_policy: never
+    depends_on:
+      init: {condition: service_completed_successfully}
+    command:
+      - serve
+      - --mode=single
+      - --data-dir=/var/lib/soundpost
+      - --listen=0.0.0.0:8443
+      - --tls-cert=/tls/leaf.pem
+      - --tls-key=/tls/leaf.key
+      - --symbolicate-cgroup-root=${REFERENCE_CGROUP_ROOT:?an empty delegated cgroup v2 subtree}
+    user: "0:0"
+    cgroup: host
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 512
+    stop_grace_period: 30s
+    ports: ["127.0.0.1:${REFERENCE_NODE_PORT:?loopback port the node is published on}:8443"]
+    volumes:
+      - ${REFERENCE_NODE_DATA:-node-data}:/var/lib/soundpost
+      - tls-node:/tls:ro
+      - ${REFERENCE_CGROUP_ROOT}:${REFERENCE_CGROUP_ROOT}
+    tmpfs: ["/tmp:size=64m,mode=0700"]
+    healthcheck:
+      test: ["CMD", "/soundpost", "ready", "--ca-cert", "/tls/ca.pem", "--url", "https://127.0.0.1:8443", "--timeout", "5s"]
+      interval: 1s
+      timeout: 6s
+      retries: 120
+  provision:
+    image: ${REFERENCE_TOOLS_IMAGE:?id of the provisioning image built from this tree (sha256:<64 hex>)}
+    pull_policy: never
+    depends_on:
+      node: {condition: service_healthy}
+    command:
+      - journeys
+      - --provision-service
+      - --node-url=https://node:8443
+      - --tls-dir=/tls
+      - --node-data=/node-data
+      - --cfg-dir=/cfg
+      - --gateway-origin=127.0.0.1:${REFERENCE_GATEWAY_PORT:?loopback port the gateway is published on}
+      - --browser-ingest=127.0.0.1:${REFERENCE_NODE_PORT}
+      - --server-ingest=node:8443
+    restart: "no"
+    user: "0:0"
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [CHOWN]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: ["/tmp:size=16m,mode=0700"]
+    volumes:
+      - ${REFERENCE_TLS_DIR}:/tls:ro
+      - ${REFERENCE_NODE_DATA:-node-data}:/node-data:ro
+      - cfg:/cfg
+  webbuild:
+    <<: *estate
+    depends_on:
+      provision: {condition: service_completed_successfully}
+    command: ["/opt/node/bin/node", "/app/examples/reference/web/stage.mjs"]
+    restart: "no"
+    environment:
+      NODE_EXTRA_CA_CERTS: /tls/ca.pem
+      REFERENCE_CFG: /cfg
+      REFERENCE_WEB_ROOT: /web
+    volumes:
+      - ${REFERENCE_TLS_DIR}:/tls:ro
+      - cfg:/cfg:ro
+      - web:/web
+  api:
+    <<: *estate
+    depends_on:
+      provision: {condition: service_completed_successfully}
+      postgres: {condition: service_healthy}
+      dependency: {condition: service_healthy}
+    command: ["python", "/app/examples/reference/api/serve.py", "--listen", "0.0.0.0:8443", "--cert", "/tls/leaf.pem", "--key", "/tls/leaf.key",
+      "--config", "/cfg/api.json", "--ca", "/tls/ca.pem", "--dependency-url", "https://dependency:8443"]
+    environment:
+      REFERENCE_DATABASE_URL: postgresql://postgres:${REFERENCE_PG_PASSWORD}@postgres:5432/reference
+    stop_grace_period: 30s
+    volumes:
+      - ${REFERENCE_TLS_DIR}:/tls:ro
+      - cfg:/cfg:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import ssl, urllib.request; c = ssl.create_default_context(); c.check_hostname = False; c.verify_mode = ssl.CERT_NONE; urllib.request.urlopen('https://127.0.0.1:8443/healthz', context=c, timeout=3)"]
+      interval: 1s
+      timeout: 5s
+      retries: 120
+  gateway:
+    <<: *estate
+    depends_on:
+      webbuild: {condition: service_completed_successfully}
+      api: {condition: service_healthy}
+    command: ["/opt/bun/bin/bun", "/app/examples/reference/gateway/server.ts", "--listen", "0.0.0.0:8443", "--cert", "/tls/leaf.pem", "--key", "/tls/leaf.key",
+      "--config", "/cfg/gateway.json", "--ca", "/tls/ca.pem", "--api-url", "https://api:8443", "--web-dir", "/web/dist", "--web-config", "/web/config.json"]
+    stop_grace_period: 30s
+    ports: ["127.0.0.1:${REFERENCE_GATEWAY_PORT}:8443"]
+    volumes:
+      - ${REFERENCE_TLS_DIR}:/tls:ro
+      - cfg:/cfg:ro
+      - web:/web:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import ssl, urllib.request; c = ssl.create_default_context(); c.check_hostname = False; c.verify_mode = ssl.CERT_NONE; urllib.request.urlopen('https://127.0.0.1:8443/healthz', context=c, timeout=3)"]
+      interval: 1s
+      timeout: 5s
+      retries: 120
+  jobs:
+    # On demand: `docker compose run --rm jobs` runs the scheduler and worker once for REFERENCE_JOB_RUN_ID (attempt 1 fails, attempt 2
+    # succeeds) and prints its result and the SDK's delivery report on stdout.
+    <<: *estate
+    profiles: ["jobs"]
+    depends_on:
+      provision: {condition: service_completed_successfully}
+      postgres: {condition: service_healthy}
+      dependency: {condition: service_healthy}
+    command: ["python", "/app/examples/reference/jobs/run.py", "--config", "/cfg/jobs.json", "--ca", "/tls/ca.pem", "--dependency-url", "https://dependency:8443",
+      "--run-id", "${REFERENCE_JOB_RUN_ID:-}", "--profile"]
+    environment:
+      REFERENCE_DATABASE_URL: postgresql://postgres:${REFERENCE_PG_PASSWORD}@postgres:5432/reference
+    volumes:
+      - ${REFERENCE_TLS_DIR}:/tls:ro
+      - cfg:/cfg:ro
+volumes:
+  node-data: {}
+  tls-node: {}
+  cfg: {}
+  web: {}

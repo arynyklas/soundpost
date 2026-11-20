@@ -8,38 +8,56 @@ passed because its prerequisite is missing; the closed reason is printed instead
 
 ## What it starts (all on loopback, nothing from the network)
 
-| Part | How |
+There are two ways to run the same estate, and the same eighteen rows:
+
+* **Container mode (the default, `compose.yaml`).** The **whole reference estate** runs as the services of `examples/reference/compose.yaml`
+  (criterion 07.04#12): the node, the Python API and jobs, the Bun gateway, the Vite web build, PostgreSQL 16 and the dependency, in a
+  compose project of the run's own (`soundpost-journeys-<random>`, torn down with `down --volumes`). The smoke builds the three first-party
+  images from this tree, offline, and gives compose their ids (`sha256:<64 hex>`: the node image is `deploy/Dockerfile` over the release
+  binary, the provisioning image is the smoke binary itself, the estate image is `examples/reference/Dockerfile.estate`: the applications,
+  Node 22, Bun and the hash-locked Python packages of `requirements.lock`, installed with `pip --require-hashes` from `--estate-wheels DIR`
+  or pip's index). PostgreSQL and the python image default to the digests the file pins (`postgres@sha256:92620dad...`, 16.14; `python`
+  3.12-slim); `--pg-image` and `--dependency-image` name another pinned image (an id `sha256:<64 hex>` or `name@sha256:<64 hex>`, never a tag).
+  Every service says `pull_policy: never`: a run never reaches a registry. `compose up` starts `init` (the node's private TLS copy and data
+  directory, the web volume), `node`, then the **`provision`** service, which is the smoke binary itself (`smoke journeys --provision-service`):
+  it waits for the node, bootstraps the owner, creates the organizations, users and sources and writes each application's source
+  configuration (the credential, signed policy and trusted keys the running node issued) to the `cfg` volume that only the applications mount,
+  read-only. `webbuild` (Vite build, private source-map upload, staged page) runs after it, then `postgres`, `dependency`, `api` and
+  `gateway`; `jobs` runs on demand (`docker compose run --rm jobs`). The host process drives the real Chrome against the gateway's published
+  loopback port, reads the evidence through the node's published port, stops services (each must exit 0 after delivering its last batch) and,
+  with the node stopped and its data directory handed over to the operator (`handover`), scans the node's storage in-process. The node runs as
+  **uid 0 without any capability** (read-only root, `no-new-privileges`, the host's cgroup namespace) because its native symbolication sandbox must
+  move its worker into the delegated cgroup subtree (`--symbolicate-cgroup-root`, mounted into the container), which a nonroot container user
+  cannot (`EACCES` on `cgroup.procs`, measured); every other service is unprivileged and nothing is privileged. Structure and limits are pinned on
+  the parsed file by `TestReferenceComposeCoversTheWholeEstate`, `TestReferenceComposeContainersAreLimited`, `TestReferenceComposeRunsOnlyDigestPinnedImages`
+  and `TestPinnedImageRef`; the versions record lists the images compose resolved and the ids of the running ones.
+* **Host-process mode (`--pg-local DIR`, kept for a host without a container runtime).** A real PostgreSQL 16 server (an unprivileged one
+  started from the installation directory `DIR`, holding `bin/{initdb,pg_ctl,postgres}` and `lib/`), the dependency, API, jobs, gateway and web
+  build are host processes of the smoke, which provisions the sources itself. `--cluster-attach` (below) also runs the applications as host
+  processes, against a cluster somebody else owns; it takes PostgreSQL and the dependency from the same compose file.
+
+| Part | Source |
 | --- | --- |
 | Soundpost node | the static binary from `go run ./build release` (`--binary` or `--release DIR`), `serve --mode single` over HTTPS with a private CA; later restarted on the same data directory to read |
-| PostgreSQL | a real PostgreSQL 16 server with `log_statement=all` and a random password, removed when the run ends. With a container runtime (the default) it is the `postgres` service of `examples/reference/compose.yaml`, a compose project of the run's own (`soundpost-journeys-<random>`, torn down with `down --volumes`), from the image the file pins by digest (`postgres@sha256:92620dad...`, 16.14, tmpfs data) or the pinned `--pg-image`; the entrypoint applies `api/schema.sql` and the service's healthcheck gates the run. With `--pg-local DIR` (a PostgreSQL installation holding `bin/{initdb,pg_ctl,postgres}` and `lib/`) an unprivileged server is started from that directory on loopback instead, for a host without a container runtime; the applications reach either through the same psycopg driver, and the canary proof reads the server's own statement log in both cases |
-| Dependency | `examples/reference/dependency/server.py` (Python stdlib HTTPS, uninstrumented): the `dependency` service of the same compose project (digest-pinned `python` image, read-only, uid 65534, the run's leaf mounted read-only, its log is the process output the leak scan reads) with a container runtime; a host process with `--pg-local` |
+| PostgreSQL | a real PostgreSQL 16 server with `log_statement=all` and a random password; the `postgres` service (tmpfs data; the entrypoint applies `api/schema.sql` and the healthcheck gates the run), or the local server of `--pg-local` |
+| Dependency | `examples/reference/dependency/server.py` (Python stdlib HTTPS, uninstrumented): the `dependency` service (read-only, uid 65534; its log is the process output the leak scan reads), or a host process |
 | API | `examples/reference/api/serve.py` (Python WSGI, SDK WSGI/psycopg/httpx integrations) |
 | Gateway | `examples/reference/gateway/server.ts` under Bun (`packages/bun` serve/fetch) |
 | Web | `examples/reference/web/` built by Vite 7 with `packages/build` (the real source map is uploaded to `POST /api/v1/artifacts`), served by the gateway, driven by headless Linux Chrome 156 through Playwright against the real HTTPS origin |
 | Jobs | `examples/reference/jobs/run.py` (scheduler + worker, SDK job attempts) |
 
-Compose is used for the **backing services only** (PostgreSQL and the dependency in `examples/reference/compose.yaml`). The product node
-and the SDK-bearing apps (API, jobs, gateway, web build) are **host processes** of the smoke, by decision (07.04#12): they use the
-committed SDK source trees and the per-source credential, signed policy and trusted keys that only the running node issues
-(`POST /api/v1/sources`), which only the smoke provisions; the plan assigns this provisioning to `tools/smoke journeys` and the
-SDK fixtures' compose (`fixtures/sdk/compose.yaml`) is likewise the database only. The node's own container recipes are
-`deploy/compose.single.yaml` and `deploy/compose.distributed.yaml` (installed and run by the install smokes and the fresh-install
-matrix). Every compose image is named by a content digest (`${REFERENCE_*_IMAGE:-name@sha256:<digest>}`, `pull_policy: never`: a
-run never reaches a registry); an image named on the command line (`--pg-image`, `--dependency-image`) must be an id `sha256:<64 hex>`
-or `name@sha256:<64 hex>` and is refused otherwise. `TestReferenceComposeRunsOnlyDigestPinnedImages`,
-`TestReferenceComposeStartsOnlyBackingServices` (the service set is exactly `postgres` and `dependency`, and the docs say so) and
-`TestPinnedImageRef` pin this; the versions record lists the images compose resolved and the ids of the running ones.
-
 Platform notes: everything runs on Linux, including the web build (Linux Node 22 with the Vite from the pnpm workspace:
 `examples/reference/web` is a workspace member, so `pnpm install --frozen-lockfile` installs its pinned dependencies).
-Python is the system interpreter with the hash-locked packages of `examples/reference/requirements.lock` (the pins of
-`sdk/python/requirements-*.lock`, including cryptography 50.0.0) installed by `examples/reference/pysite.sh` with
-`pip --require-hashes`; `tools/smoke` `TestReferenceLockMatchesSDKLocks` keeps that file equal to the SDK locks.
+Python is the interpreter with the hash-locked packages of `examples/reference/requirements.lock` (the pins of
+`sdk/python/requirements-*.lock`, including cryptography 50.0.0): installed by `examples/reference/pysite.sh` with `pip --require-hashes`
+in host-process mode, and by the same `pip --require-hashes` into the estate image in container mode; `tools/smoke`
+`TestReferenceLockMatchesSDKLocks` keeps that file equal to the SDK locks.
 The headless browser trusts the run's private CA through an NSS database when `certutil` exists; on a host without it the
 smoke passes the run's own leaf by its public-key pin (`--ignore-certificate-errors-spki-list`, nothing else is ignored).
 The server-side symbolication sandbox is the node's own native sandbox: run the smoke where the node has a delegated cgroup v2
 subtree (a systemd service with `Delegate=memory pids` and `DelegateSubgroup=main`) and pass its parent with
-`--symbolicate-cgroup-root`; no container runtime is needed anywhere.
+`--symbolicate-cgroup-root` (required in container mode, where the node container gets it mounted; the host-process mode needs no container
+runtime anywhere).
 
 ## Rows
 
@@ -108,16 +126,30 @@ Notes on that run:
 * Job attempts, the error and spans DO reach the backend and are admitted; the 03.06/03.09 doubt about job
   attempts was checked and did not hold for the Python SDK here.
 
-## With the compose backing services (07.04#12)
+## The whole estate under compose (07.04#12)
 
-On a host with Docker (sp-oci: Debian 13, kernel 6.12, Docker 26.1.5, Compose 2.26.1) the same smoke takes PostgreSQL and the dependency from
-`examples/reference/compose.yaml`: `smoke journeys ... --dependency-image sha256:78976a69...` (the pinned python image loaded offline; the
-compose file's own digest `python@sha256:5e2bdb1b...` cannot be resolved on a host that never pulled it, and `pull_policy: never` makes that an
-error instead of a pull) with PostgreSQL from the file's pinned digest `postgres@sha256:92620dad...` (image id `sha256:67d1da22...`, 16.14).
-Result: **exit 0, eighteen of eighteen rows PASS**, the `soundpost-journeys-<random>` project (containers and network) gone afterwards;
-`observed.json` records `compose_images`, `postgres_image_id` and `dependency_image_id`. An unpinned image is refused before anything starts
-(`--pg-image postgres:16`: `image "postgres:16" is not pinned`). Evidence (private development ledger, not shipped):
-`.superpowers/sdd/approved-product/l5w25-evidence/` (`journeys-compose/g2.log`, `journeys-compose/g2/{observed,details}.json`, `red-unpinned-image.txt`, `red-default-digest-not-local.txt`).
+On a host with Docker (sp-oci: Debian 13, kernel 6.12, Docker 26.1.5, Compose 2.26.1; no internet, so the pinned python image was loaded
+offline and is named by id, `--dependency-image sha256:78976a69...`, and the hash-locked cp312 wheels come from `--estate-wheels DIR`) the smoke
+builds the node, provisioning and estate images from the tree and runs `examples/reference/compose.yaml` whole, as described under "What it
+starts". The cgroup subtree is made by root before the run (`mkdir /sys/fs/cgroup/<name>`, empty, with `memory`/`pids`) and passed as
+`--symbolicate-cgroup-root`; the smoke refuses one that is not a cgroup v2 directory, not owned by root, or not empty.
+
+Why the node container is uid 0 without capabilities, and what isolation holds: the sandbox moves its worker into a child cgroup of that
+subtree, and the kernel allows that only to a writer that may write `cgroup.procs` of the common ancestor of the node's container cgroup (under
+`system.slice`) and the destination. A nonroot container user fails with `EACCES` (measured; with a private cgroup namespace the worker's own
+cgroup path contains `..` and its resource-boundary check refuses it). Root with every capability dropped writes only root-owned files, hence the
+root-owned subtree. Everything else stays restricted: read-only root, `no-new-privileges`, not privileged, no Docker socket, no shared pid or
+network namespace, loopback-only ports, only the node's data, its TLS copy and the one cgroup subtree mounted, and the worker's own seccomp,
+memory/pid limits and file/network/exec denial. Applications run as uid 65534 with no capability. `TestReferenceComposeContainersAreLimited` pins it.
+
+Result: see "Recorded runs" below; an unpinned image is refused before anything starts (`--pg-image postgres:16`: `image "postgres:16" is not pinned`).
+
+### Recorded runs (private development ledger, not shipped: `.superpowers/sdd/approved-product/l5w27-evidence/`)
+
+* 2026-11-20, sp-oci, node binary from `go build ./cmd/soundpost`: exit 0, 18 of 18 rows (`run9.log`).
+* 2026-11-20, sp-oci, node binary from `go run ./build release` (version 1.0.0, embedded static UI page: the web app's dependencies cannot be
+  installed offline there): exit 0, 18 of 18 rows (`run10/run10.log`); the same release feeds the fresh-install matrix, whose
+  `reference_journeys` row passed 18 of 18 on the compose estate (`matrix/`).
 
 ## Against a recovered cluster (`--cluster-attach`, 07.07#16)
 

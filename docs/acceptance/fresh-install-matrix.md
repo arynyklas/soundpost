@@ -15,7 +15,7 @@ go run ./build artifacts --release dist/release --out dist/art --sbom dist/sbom 
 go run ./tools/smoke fresh-install-matrix --artifact-dir out --release dist/release --artifacts dist/art --web-dist web/dist \
   --root . --bun bun --python python3 \
   --chrome <chrome-for-testing>/chrome --node-linux <node22>/bin/node --pg-image <postgres:16 image id or name@sha256:digest> \
-  --symbolicate-cgroup-root <delegated cgroup v2 subtree>
+  --symbolicate-cgroup-root <empty cgroup v2 subtree owned by root> --estate-wheels <dir of hash-locked wheels>
 ```
 
 | Row | What it does | `not_run` when |
@@ -31,7 +31,9 @@ go run ./tools/smoke fresh-install-matrix --artifact-dir out --release dist/rele
 | `published_urls` | nothing is published: always `not_run`; paths and digests are recorded instead | always |
 
 Host setup the rows assume (none of it is changed by the smoke): `kernel.perf_event_paranoid` of 2 or lower for the
-helper's positive capture (the operator sets it; the smoke reads it), the matrix started inside a transient systemd unit
-with `Delegate=memory pids DelegateSubgroup=main` for the node's symbolication sandbox, and the user in the `docker`
-group. The module cache must hold every module of `go.sum` (`go run ./build release` runs the Go tool with
-`GOPROXY=off`, `GOENV=off` and a `GOPATH` under `$HOME`).
+helper's positive capture (the operator sets it; the smoke reads it), and the user in the `docker` group. The
+`reference_journeys` row runs the whole compose estate (`examples/reference/compose.yaml`; `docs/acceptance/reference-journeys.md`): its node
+container runs as uid 0 without capabilities, so `--symbolicate-cgroup-root` must be an EMPTY cgroup v2 subtree OWNED BY ROOT with the
+`memory` and `pids` controllers (`mkdir /sys/fs/cgroup/<name>` as root; the row refuses any other) and `--estate-wheels` names the
+hash-locked wheels for the estate image's interpreter on a host without network. The module cache must hold every module of `go.sum`
+(`go run ./build release` runs the Go tool with `GOPROXY=off`, `GOENV=off` and a `GOPATH` under `$HOME`).

@@ -11,15 +11,14 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
-// The reference estate's compose file (examples/reference/compose.yaml) runs the BACKING services only: PostgreSQL 16 and the
-// uninstrumented HTTPS dependency. The product node and the SDK-bearing applications (Python API and jobs, Bun gateway, Vite web
-// build) are started by the journeys smoke itself, because they take the per-source credential, signed policy and trusted keys that
-// only the running node issues (`POST /api/v1/sources`). A container run of the journeys smoke therefore takes its PostgreSQL and
-// its dependency from this compose file, project-scoped and removed at the end; a host without a container runtime uses
-// `--pg-local` and runs the dependency as a host process too.
+// The reference estate's compose file (examples/reference/compose.yaml) covers the WHOLE estate: the node, the SDK-bearing applications,
+// PostgreSQL and the dependency (journeys_estate.go drives it). The attached-cluster mode (--cluster-attach) has a node of its own and
+// takes only PostgreSQL and the dependency from the same file, with host-process applications; `--pg-local` runs everything as host
+// processes on a host without a container runtime.
 
 // referenceComposeRel is the reference estate's compose file, relative to the repository root.
 const referenceComposeRel = "examples/reference/compose.yaml"
@@ -43,13 +42,25 @@ func pinnedImageRef(ref string) error {
 type referenceCompose struct {
 	File           string // absolute path of compose.yaml
 	Project        string // compose project of this run (never the file's own name, so concurrent runs and other stacks stay apart)
-	TLSDir         string // directory holding leaf.pem and leaf.key for the dependency (see writeComposeTLS)
+	TLSDir         string // directory holding ca.pem, leaf.pem and leaf.key (see writeComposeTLS)
 	PGPassword     string
 	PGPort         string // loopback port PostgreSQL is published on
 	DependencyPort string // loopback port the dependency is published on
 	// PGImage and DependencyImage are optional: empty leaves the digest the compose file itself names.
 	PGImage, DependencyImage string
+	// The rest is the whole estate (a run that starts only the backing services leaves it empty, and compose is given inert values the
+	// services it does not start never use). NodeImage, ToolsImage and EstateImage are the ids of images built from this tree.
+	NodeImage, ToolsImage, EstateImage string
+	NodePort, GatewayPort              string // loopback ports the node and the gateway are published on
+	NodeData                           string // host directory holding the node's data (empty: the compose file's own volume)
+	CgroupRoot                         string // the delegated, empty cgroup v2 subtree mounted into the node container
+	HandoverUID, HandoverGID           int
+	JobRunID                           string
 }
+
+// inertImage is an image id no image has: compose needs every variable of the file to interpolate, and a run that starts only the backing
+// services gives the images it never starts this id (they are never pulled: `pull_policy: never`).
+const inertImage = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
 
 // env is the environment of every compose invocation of the run; an image named by the operator must be pinned.
 func (c referenceCompose) env() ([]string, error) {
@@ -69,6 +80,33 @@ func (c referenceCompose) env() ([]string, error) {
 		}
 		env = append(env, img.variable+"="+img.ref)
 	}
+	estate := c.NodeImage != "" || c.ToolsImage != "" || c.EstateImage != ""
+	if estate {
+		for _, f := range []struct{ name, v string }{{"node image", c.NodeImage}, {"provisioning image", c.ToolsImage}, {"estate image", c.EstateImage}, {"node port", c.NodePort},
+			{"gateway port", c.GatewayPort}, {"delegated cgroup root", c.CgroupRoot}} {
+			if f.v == "" {
+				return nil, errors.New("reference compose: no " + f.name)
+			}
+		}
+	}
+	for _, img := range []struct{ name, variable, ref string }{{"node", "REFERENCE_NODE_IMAGE", c.NodeImage}, {"provisioning", "REFERENCE_TOOLS_IMAGE", c.ToolsImage}, {"estate", "REFERENCE_ESTATE_IMAGE", c.EstateImage}} {
+		ref := img.ref
+		if ref == "" {
+			ref = inertImage
+		} else if err := pinnedImageRef(ref); err != nil {
+			return nil, fmt.Errorf("%s image: %w", img.name, err)
+		}
+		env = append(env, img.variable+"="+ref)
+	}
+	nodePort, gatewayPort, cgroup := c.NodePort, c.GatewayPort, c.CgroupRoot
+	if !estate {
+		nodePort, gatewayPort, cgroup = "0", "0", "/nonexistent"
+	}
+	env = append(env, "REFERENCE_NODE_PORT="+nodePort, "REFERENCE_GATEWAY_PORT="+gatewayPort, "REFERENCE_CGROUP_ROOT="+cgroup,
+		"REFERENCE_HANDOVER_UID="+strconv.Itoa(c.HandoverUID), "REFERENCE_HANDOVER_GID="+strconv.Itoa(c.HandoverGID), "REFERENCE_JOB_RUN_ID="+c.JobRunID)
+	if c.NodeData != "" {
+		env = append(env, "REFERENCE_NODE_DATA="+c.NodeData)
+	}
 	return env, nil
 }
 
@@ -77,10 +115,10 @@ func (c referenceCompose) command(rest ...string) []string {
 	return append([]string{"docker", "compose", "-p", c.Project, "-f", c.File}, rest...)
 }
 
-// writeComposeTLS puts the run's leaf certificate and key into a directory of their own for the dependency container, which
-// reads them as uid 65534 through a read-only bind mount: the directory and the two files are world-readable, and the directory
-// lives inside the run's private (0700) work directory, so no other user of the host reaches it. The CA's key is never written
-// anywhere (the run keeps only the CA certificate).
+// writeComposeTLS puts the run's CA certificate, leaf certificate and leaf key into a directory of their own for the containers, which
+// read them as uid 65534 (or, for the provision service and the node's own copy, as root) through a read-only bind mount: the directory
+// and the three files are world-readable, and the directory lives inside the run's private (0700) work directory, so no other user of the
+// host reaches it. The CA's key is never written anywhere (the run keeps only the CA certificate).
 func writeComposeTLS(pki *journeyPKI, dir string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
@@ -88,7 +126,7 @@ func writeComposeTLS(pki *journeyPKI, dir string) error {
 	if err := os.Chmod(dir, 0o755); err != nil {
 		return err
 	}
-	for src, name := range map[string]string{pki.Cert: "leaf.pem", pki.Key: "leaf.key"} {
+	for src, name := range map[string]string{pki.CA: "ca.pem", pki.Cert: "leaf.pem", pki.Key: "leaf.key"} {
 		raw, err := os.ReadFile(src)
 		if err != nil {
 			return err

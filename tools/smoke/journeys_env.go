@@ -65,7 +65,7 @@ func newJourneyPKI(dir string) (*journeyPKI, error) {
 	if err != nil {
 		return nil, err
 	}
-	leafTpl := &x509.Certificate{SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: "localhost"}, DNSNames: []string{"localhost"}, IPAddresses: []net.IP{net.ParseIP("127.0.0.1")}, NotBefore: now.Add(-time.Minute), NotAfter: now.Add(48 * time.Hour), KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}, BasicConstraintsValid: true}
+	leafTpl := &x509.Certificate{SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: "localhost"}, DNSNames: journeyLeafNames, IPAddresses: []net.IP{net.ParseIP("127.0.0.1")}, NotBefore: now.Add(-time.Minute), NotAfter: now.Add(48 * time.Hour), KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}, BasicConstraintsValid: true}
 	leafDER, err := x509.CreateCertificate(rand.Reader, leafTpl, caCert, &leafKey.PublicKey, caKey)
 	if err != nil {
 		return nil, err
@@ -195,7 +195,12 @@ func runOut(dir string, env []string, argv ...string) (string, error) {
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	err := cmd.Run()
 	if err != nil {
-		return strings.TrimSpace(out.String()), fmt.Errorf("%s: %w: %s", argv[0], err, firstLine(errb.String()))
+		first, last := firstLine(errb.String()), lastLine(errb.String())
+		if first != last {
+			// compose and docker print progress first and the failure last.
+			first += " … " + last
+		}
+		return strings.TrimSpace(out.String()), fmt.Errorf("%s: %w: %s", argv[0], err, first)
 	}
 	return strings.TrimSpace(out.String()), nil
 }

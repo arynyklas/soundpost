@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -127,8 +126,9 @@ func TestReferenceComposeCommandIsScopedToItsProject(t *testing.T) {
 	}
 }
 
-// The leaf key reaches the dependency container (uid 65534) through a bind mount of a directory of its own: readable by that
-// user, holding the leaf and its key and nothing else (never the CA's private key, which the run does not even write).
+// The CA certificate, the leaf and its key reach the estate's containers (uid 65534; root for the provision service and the node's own
+// copy) through a bind mount of a directory of its own: readable by them, holding those three files and nothing else (never the CA's
+// private key, which the run does not even write).
 func TestWriteComposeTLS(t *testing.T) {
 	pki, err := newJourneyPKI(filepath.Join(t.TempDir(), "pki"))
 	if err != nil {
@@ -147,10 +147,10 @@ func TestWriteComposeTLS(t *testing.T) {
 		names = append(names, e.Name())
 	}
 	slices.Sort(names)
-	if !reflect.DeepEqual(names, []string{"leaf.key", "leaf.pem"}) {
+	if !reflect.DeepEqual(names, []string{"ca.pem", "leaf.key", "leaf.pem"}) {
 		t.Fatalf("files %v", names)
 	}
-	for src, name := range map[string]string{pki.Cert: "leaf.pem", pki.Key: "leaf.key"} {
+	for src, name := range map[string]string{pki.CA: "ca.pem", pki.Cert: "leaf.pem", pki.Key: "leaf.key"} {
 		want, _ := os.ReadFile(src)
 		got, err := os.ReadFile(filepath.Join(dir, name))
 		if err != nil || string(got) != string(want) {
@@ -164,36 +164,5 @@ func TestWriteComposeTLS(t *testing.T) {
 	fi, _ := os.Stat(dir)
 	if fi.Mode().Perm()&0o055 != 0o055 {
 		t.Errorf("directory mode %v cannot be entered by the container user", fi.Mode().Perm())
-	}
-}
-
-// Decision (07.04#12): the estate's compose file runs the BACKING services (PostgreSQL and the uninstrumented dependency)
-// and nothing else. The SDK-bearing applications and the product node are launched by the acceptance smoke, which alone
-// holds the per-source credentials the node issues; this test pins that limit and the places that state it, so that
-// neither the file nor the documentation can drift into claiming a whole-estate compose.
-func TestReferenceComposeStartsOnlyBackingServices(t *testing.T) {
-	raw, err := os.ReadFile("../../examples/reference/compose.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var services []string
-	for _, m := range regexp.MustCompile(`(?m)^  ([a-z][a-z0-9_-]*):$`).FindAllStringSubmatch(string(raw), -1) {
-		services = append(services, m[1])
-	}
-	slices.Sort(services)
-	if !reflect.DeepEqual(services, []string{"dependency", "postgres"}) {
-		t.Fatalf("compose services %v: the estate's compose file is the backing services only (postgres, dependency); a whole-estate compose is a different decision", services)
-	}
-	for _, f := range []string{"../../examples/reference/README.md", "../../docs/acceptance/reference-journeys.md"} {
-		doc, err := os.ReadFile(f)
-		if err != nil {
-			t.Fatal(err)
-		}
-		text := strings.Join(strings.Fields(string(doc)), " ")
-		for _, must := range []string{"backing services only", "host processes"} {
-			if !strings.Contains(text, must) {
-				t.Errorf("%s does not state %q", f, must)
-			}
-		}
 	}
 }

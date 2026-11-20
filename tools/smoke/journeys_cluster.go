@@ -439,6 +439,9 @@ func (j *journeyRun) ingestAddress(app string) string {
 	if j.attach != nil {
 		return j.attach.roleAddress(app)
 	}
+	if j.svc != nil {
+		return j.svc.ingestAddress(app)
+	}
 	return j.nodeAddr
 }
 

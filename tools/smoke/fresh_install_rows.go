@@ -89,8 +89,8 @@ func containerInstallRow(o containerInstallOptions) (string, error) {
 }
 
 type journeysOptions struct {
-	ArtifactDir, Root, Release, Binary, Bun, NodeLinux, Python, Chrome, PGImage, PGLocal, CgroupRoot string
-	DockerErr                                                                                        string
+	ArtifactDir, Root, Release, Binary, Bun, NodeLinux, Python, Chrome, PGImage, PGLocal, CgroupRoot, EstateWheels string
+	DockerErr                                                                                                      string
 }
 
 // referenceJourneysRow runs the journeys smoke (the reference estate against the produced binary, a real PostgreSQL 16,
@@ -128,6 +128,9 @@ func referenceJourneysRow(j journeysOptions) (string, error) {
 	}
 	if j.CgroupRoot != "" {
 		args = append(args, "--symbolicate-cgroup-root", j.CgroupRoot)
+	}
+	if j.EstateWheels != "" {
+		args = append(args, "--estate-wheels", j.EstateWheels)
 	}
 	if err := RunJourneys(args); err != nil {
 		return "", err

@@ -75,7 +75,8 @@ func RunFreshInstallMatrix(args []string) (result error) {
 	nodeLinux := f.String("node-linux", "", "Linux Node 22 for the reference_journeys row")
 	pgImage := f.String("pg-image", "", "PostgreSQL 16 image pinned by id (sha256:<64 hex>) or digest (name@sha256:<64 hex>), never pulled, for the reference_journeys row's compose backing services")
 	pgLocal := f.String("pg-local", "", "PostgreSQL 16 installation directory for the reference_journeys row (instead of --pg-image)")
-	cgroupRoot := f.String("symbolicate-cgroup-root", "", "delegated cgroup v2 subtree for the node's native symbolication sandbox (reference_journeys)")
+	cgroupRoot := f.String("symbolicate-cgroup-root", "", "cgroup v2 subtree for the node's native symbolication sandbox (reference_journeys; with --pg-image the node container gets it: empty, owned by root)")
+	estateWheels := f.String("estate-wheels", "", "directory of the hash-locked wheels for the estate image's interpreter (reference_journeys in container mode; default: pip's index)")
 	if err := f.Parse(args); err != nil {
 		return err
 	}
@@ -248,7 +249,7 @@ func RunFreshInstallMatrix(args []string) (result error) {
 			return a
 		}
 		return referenceJourneysRow(journeysOptions{ArtifactDir: filepath.Join(*artifact, "reference-journeys"), Root: abs(*root), Release: abs(*release), Binary: abs(binary), Bun: *bun, NodeLinux: *nodeLinux, Python: *python,
-			Chrome: *chrome, PGImage: *pgImage, PGLocal: *pgLocal, CgroupRoot: *cgroupRoot, DockerErr: probeNativeHost().DockerErr})
+			Chrome: *chrome, PGImage: *pgImage, PGLocal: *pgLocal, CgroupRoot: *cgroupRoot, EstateWheels: *estateWheels, DockerErr: probeNativeHost().DockerErr})
 	})
 	stage = "matrix_native_profile_install"
 	run("native_profile_install", func() (string, error) {

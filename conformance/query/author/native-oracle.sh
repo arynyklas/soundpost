@@ -11,6 +11,7 @@
 #
 #   conformance/query/author/native-oracle.sh build              # download, verify, build both Prometheus references
 #   conformance/query/author/native-oracle.sh build-loki         # download, verify, build the Loki 3.5.2 driver
+#   conformance/query/author/native-oracle.sh build-loki-shard-probe   # build conformance/query/author/logql-shard-probe (shard mapper / replica merge probe) in the same verified Loki tree
 #   conformance/query/author/native-oracle.sh setup <repo-dir>   # copy of querycheck using them + a fake runtime
 #   go run ./cmd/soundpost-querycheck compare --phase evaluation --cases ... \
 #       --profiles promql-prometheus-3.1.0,promql-prometheus-3.13.5 --require-locked \
@@ -71,6 +72,28 @@ build_loki() {
   sha256sum "$W/logql-reference" "$W/oracle-zoneinfo.zip"
 }
 
+# The shard/replica probe (author/logql-shard-probe) is compiled inside the same sha256-verified Loki
+# source tree as the oracle driver (go1.24.5, -mod=vendor), in a directory of its own so the driver
+# sources and bridge files stay untouched. It reads authored cases on stdin and writes observations.
+build_loki_shard_probe() {
+  LC=257d2f62bf8a81b44dea6fe88968d1d28c8e01e7
+  LS=0db690662744694667c031a81d3e20cdd3a68a387a8050c8096bebbdf2ff8db2
+  if [ ! -d "$W/loki" ]; then
+    curl -fsSL -o "$W/loki.tgz" "https://codeload.github.com/grafana/loki/tar.gz/$LC"
+    echo "$LS  $W/loki.tgz" | sha256sum -c -
+    mkdir -p "$W/loki" && tar -xzf "$W/loki.tgz" -C "$W/loki" --strip-components=1
+  fi
+  rm -rf "$W/loki/_soundpost_shard_probe" && mkdir -p "$W/loki/_soundpost_shard_probe"
+  for f in "$REPO"/conformance/query/author/logql-shard-probe/*.go; do
+    case $f in *_test.go) ;; *) cp "$f" "$W/loki/_soundpost_shard_probe/" ;; esac
+  done
+  (cd "$W/loki" && GOTOOLCHAIN=go1.24.5 GOWORK=off CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOMAXPROCS=4 GOFLAGS="-mod=vendor -p=2" \
+    go build -tags=soundpost_logql_shard_probe -trimpath \
+    -ldflags="-X main.compiledProfile=logql-loki-3.5.2 -X main.compiledCommit=$LC -X main.compiledSourceSHA256=$LS" \
+    -o "$W/logql-shard-probe" ./_soundpost_shard_probe)
+  sha256sum "$W/logql-shard-probe"
+}
+
 case "${1:-}" in
 build)
   REPO=$(cd "$(dirname "$0")/../../.." && pwd)
@@ -81,6 +104,10 @@ build)
 build-loki)
   REPO=$(cd "$(dirname "$0")/../../.." && pwd)
   build_loki
+  ;;
+build-loki-shard-probe)
+  REPO=$(cd "$(dirname "$0")/../../.." && pwd)
+  build_loki_shard_probe
   ;;
 run-logql)
   # run-logql <cases.json> <report.json>: the logql-metric phase of querycheck against the native Loki driver.

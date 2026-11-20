@@ -56,8 +56,10 @@ function sdkConfig(raw: RawConfig): Config {
   return {...config, transport: new HttpsReceiptTransport(config, (url, options) => tlsFetch(url, options))};
 }
 const raw: RawConfig | undefined = configPath ? JSON.parse(readFileSync(configPath, "utf8")) : undefined;
-// The page's connect-src must name the Soundpost node origin, taken from the same config the SDK uses.
-const nodeOrigin = raw ? new URL(raw.endpoint).origin : undefined;
+// The page's connect-src must name the Soundpost node origin the PAGE sends to: the endpoint of the page's own configuration (under compose
+// the browser reaches the node at its published address, the gateway's SDK at the node's service name).
+const pageEndpoint: unknown = JSON.parse(webConfig.toString("utf8")).endpoint;
+const nodeOrigin = typeof pageEndpoint === "string" ? new URL(pageEndpoint).origin : undefined;
 const csp = [
   "default-src 'none'", "script-src 'self'", "style-src 'self'", "img-src 'self'",
   "connect-src 'self'" + (nodeOrigin ? " " + nodeOrigin : ""),

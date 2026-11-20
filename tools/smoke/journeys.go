@@ -52,13 +52,33 @@ func RunJourneys(args []string) (result error) {
 	fs.StringVar(&j.python, "python", "python3", "Python 3")
 	fs.StringVar(&j.chrome, "chrome", "", "Linux Chrome (default: <root>/.tools/chrome-linux156/chrome-linux64/chrome)")
 	fs.StringVar(&j.pgImage, "pg-image", "", "container mode: PostgreSQL 16 image pinned by id (sha256:<64 hex>) or digest (name@sha256:<64 hex>); never pulled; default: the digest in "+referenceComposeRel)
-	fs.StringVar(&j.dependencyImage, "dependency-image", "", "container mode: Python image of the dependency, pinned like --pg-image; default: the digest in "+referenceComposeRel)
-	fs.StringVar(&j.pgLocal, "pg-local", "", "PostgreSQL 16 installation directory (bin/ and lib/): start an unprivileged local server (and the dependency as a host process) instead of the compose backing services")
-	fs.StringVar(&j.cgroupRoot, "symbolicate-cgroup-root", "", "already delegated, empty cgroup v2 subtree for the node's native symbolication sandbox (default: the node's own cgroup)")
-	fs.BoolVar(&j.hold, "hold", false, "provision, write hold.json and wait for SIGINT (for developing the applications)")
+	fs.StringVar(&j.dependencyImage, "dependency-image", "", "container mode: Python image of the dependency (and the base of the estate image), pinned like --pg-image; default: the digest in "+referenceComposeRel)
+	fs.StringVar(&j.nodeImage, "node-image", "", "container mode: use this node image (sha256:<64 hex>) instead of building deploy/Dockerfile over --binary")
+	fs.StringVar(&j.estateImage, "estate-image", "", "container mode: use this estate image (sha256:<64 hex>) instead of building examples/reference/Dockerfile.estate")
+	fs.StringVar(&j.toolsImage, "tools-image", "", "container mode: use this provisioning image (sha256:<64 hex>) instead of building examples/reference/Dockerfile.tools")
+	fs.StringVar(&j.wheelDir, "estate-wheels", "", "container mode: directory of the hash-locked wheels for the estate image's interpreter (default: the image build reaches pip's index; the lock's hashes decide)")
+	fs.StringVar(&j.pgLocal, "pg-local", "", "PostgreSQL 16 installation directory (bin/ and lib/): start an unprivileged local server and run the whole estate as host processes instead of the compose estate")
+	fs.StringVar(&j.cgroupRoot, "symbolicate-cgroup-root", "", "already delegated, empty cgroup v2 subtree for the node's native symbolication sandbox (default: the node's own cgroup; REQUIRED in container mode, where the node container gets it mounted)")
+	fs.BoolVar(&j.hold, "hold", false, "provision, write hold.json and wait for SIGINT (for developing the applications; host-process mode)")
 	fs.StringVar(&j.attachPath, "cluster-attach", "", "run against the recovered distributed cluster this JSON document describes (tools/drills --scenario node-loss-journeys) instead of starting a node")
+	var svc provisionService
+	fs.BoolVar(&svc.enabled, "provision-service", false, "INTERNAL (the compose service `provision`): wait for the node, bootstrap it, create the journeys' organizations, users and sources and write each application's source configuration")
+	fs.StringVar(&svc.nodeURL, "node-url", "", "provision service: the node's HTTPS origin")
+	fs.StringVar(&svc.tlsDir, "tls-dir", "", "provision service: directory with ca.pem, leaf.pem and leaf.key")
+	fs.StringVar(&svc.nodeData, "node-data", "", "provision service: the node's data directory (read-only; holds the one-time bootstrap token)")
+	fs.StringVar(&svc.cfgDir, "cfg-dir", "", "provision service: the directory the source configurations are written to")
+	fs.StringVar(&svc.gatewayOrigin, "gateway-origin", "", "provision service: host:port the browser reaches the gateway at (the browser source's allowed origin)")
+	fs.StringVar(&svc.browserIngest, "browser-ingest", "", "provision service: host:port the browser sends telemetry to")
+	fs.StringVar(&svc.serverIngest, "server-ingest", "", "provision service: host:port the applications send telemetry to")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if svc.enabled {
+		j.svc = &svc
+		if err := svc.validate(); err != nil {
+			return err
+		}
+		return j.runProvisionService()
 	}
 	if j.artDir == "" {
 		return errors.New("--artifact-dir is required")
@@ -75,6 +95,14 @@ func RunJourneys(args []string) (result error) {
 			return err
 		}
 	}
+	// With a container runtime (no --pg-local) and no attached cluster the whole estate runs under compose.
+	j.estate = !j.localPG() && j.attach == nil
+	if j.estate && j.hold {
+		return errors.New("--hold needs host processes: use --pg-local")
+	}
+	if j.estate && j.cgroupRoot == "" {
+		return errors.New("container mode needs --symbolicate-cgroup-root: the node container gets that delegated, empty cgroup v2 subtree mounted for its native symbolication sandbox")
+	}
 	j.rep = map[string]any{}
 	j.logs = map[string]*syncBuffer{}
 	j.csrf = map[*installSite]string{}
@@ -89,8 +117,16 @@ func RunJourneys(args []string) (result error) {
 
 type journeyRun struct {
 	artDir, root, binary, release, bun, nodeLinux, python, chrome, pgImage, dependencyImage, pgLocal, cgroupRoot string
+	nodeImage, estateImage, toolsImage, wheelDir                                                                 string
 	spkiPin                                                                                                      string
 	hold                                                                                                         bool
+
+	// The compose estate (journeys_estate.go): in container mode without --cluster-attach the node, the applications, PostgreSQL and
+	// the dependency all run as the services of examples/reference/compose.yaml (j.estate); svc is set only inside the `provision`
+	// service, which is this same binary.
+	estate      bool
+	builtImages []string // images this run built from the tree (removed at the end)
+	svc         *provisionService
 
 	work       string
 	pki        *journeyPKI
@@ -154,6 +190,7 @@ func (j *journeyRun) cleanup() {
 			_ = j.procs[i].cmd.Process.Kill()
 		}
 	}
+	j.cleanupEstate()
 	j.stopPostgres()
 	if j.work != "" {
 		os.RemoveAll(j.work)
@@ -192,6 +229,17 @@ func (j *journeyRun) run() error {
 		{"toolchain", j.toolchain}, {"pki", j.setupPKI}, {"postgres", j.startPostgres}, {"node", node},
 		{"provision", j.provision}, {"web_build", j.buildWeb}, {"estate", j.startEstate},
 		{"journeys", j.drive}, {"stop_estate", j.stopEstate}, {"collect", j.collect}, {"reads", j.readsAfterRestart}, {"verdict", j.verdict},
+	}
+	if j.estate {
+		// The whole estate under compose: images built from this tree, then one `compose up` (init, node, provision, web build,
+		// PostgreSQL, dependency, API, gateway); the node's credentials never leave the provision service's volume.
+		steps = []struct {
+			name string
+			fn   func() error
+		}{
+			{"toolchain", j.toolchain}, {"pki", j.setupPKI}, {"images", j.buildImages}, {"estate", j.estateUp},
+			{"journeys", j.drive}, {"stop_estate", j.stopEstate}, {"collect", j.collect}, {"reads", j.readsAfterRestart}, {"verdict", j.verdict},
+		}
 	}
 	for _, s := range steps {
 		if s.name == "web_build" && j.hold {
@@ -232,8 +280,10 @@ func (j *journeyRun) toolchain() error {
 		v["go"] = out
 	}
 	var err error
-	if v["bun"], err = runOut(j.root, nil, j.bun, "--version"); err != nil {
-		return err
+	if !j.estate {
+		if v["bun"], err = runOut(j.root, nil, j.bun, "--version"); err != nil {
+			return err
+		}
 	}
 	if j.nodeLinux == "" {
 		if j.nodeLinux, err = j.extractNode(); err != nil {
@@ -243,8 +293,10 @@ func (j *journeyRun) toolchain() error {
 	if v["node_linux"], err = runOut(j.root, nil, j.nodeLinux, "--version"); err != nil {
 		return err
 	}
-	if v["python"], err = runOut(j.root, nil, j.python, "--version"); err != nil {
-		return err
+	if !j.estate {
+		if v["python"], err = runOut(j.root, nil, j.python, "--version"); err != nil {
+			return err
+		}
 	}
 	if j.localPG() {
 		if v["postgres_server_binary"], err = j.localPostgresBinaryVersion(); err != nil {
@@ -266,7 +318,7 @@ func (j *journeyRun) toolchain() error {
 			j.dependencyImage = os.Getenv("REFERENCE_PYTHON_IMAGE")
 		}
 		// An image the operator names is checked before anything starts; the compose file's own digests are pinned by construction.
-		for name, ref := range map[string]string{"--pg-image": j.pgImage, "--dependency-image": j.dependencyImage} {
+		for name, ref := range map[string]string{"--pg-image": j.pgImage, "--dependency-image": j.dependencyImage, "--node-image": j.nodeImage, "--estate-image": j.estateImage, "--tools-image": j.toolsImage} {
 			if ref == "" {
 				continue
 			}
@@ -293,6 +345,10 @@ func (j *journeyRun) toolchain() error {
 	v["soundpost_binary_sha256"] = sum
 	if ok, err := installStaticELF(j.binary); err != nil || !ok {
 		return &smokeFailure{Stage: "binary_static", Code: "not_static_elf"}
+	}
+	if j.estate {
+		// The estate's Python packages are installed in the estate image (hash-locked); the host runs none of the applications.
+		return nil
 	}
 	pysite := filepath.Join(j.root, "examples/reference/pysite.sh")
 	if out, err = runOut(j.root, []string{"REFERENCE_PYTHON=" + j.python}, "sh", pysite, filepath.Join(j.work, "pysite")); err != nil {
@@ -378,6 +434,9 @@ func (j *journeyRun) startNode() error {
 }
 
 func (j *journeyRun) launchNode() error {
+	if j.estate {
+		return j.estateStartNode()
+	}
 	if j.nodeAddr == "" {
 		addr, err := freeAddress()
 		if err != nil {
@@ -403,6 +462,9 @@ func (j *journeyRun) launchNode() error {
 }
 
 func (j *journeyRun) stopNode() error {
+	if j.estate {
+		return j.estateStopNode()
+	}
 	err := j.node.stop(30 * time.Second)
 	if err != nil {
 		var ee *exec.ExitError
@@ -453,20 +515,7 @@ func (j *journeyRun) provision() error {
 		raw    []byte
 		err    error
 	)
-	e := &j.exp
-	e.Org, e.Project, e.OtherOrg, e.OtherProject = journeyID("org-a"), journeyID("project-a"), journeyID("org-b"), journeyID("project-b")
-	e.Job, e.Run = journeyID("job/reference.catalog.refresh"), journeyID("run/reference.catalog.refresh/1")
-	e.WebBuild = journeyID("build/web")
-	e.UnpricedItem = "sku-404"
-	e.Canaries = []string{"CANARY_BODY_7f3a", "CANARY_PROMPT_9b2f", "CANARY_SQL_LITERAL_5d1e"}
-	e.RequiredVersionIDs = []string{"go", "bun", "node_linux", "python", "chrome", "postgres", "soundpost"}
-	if j.localPG() {
-		e.RequiredVersionIDs = append(e.RequiredVersionIDs, "postgres_server_binary")
-	} else {
-		e.RequiredVersionIDs = append(e.RequiredVersionIDs, "docker_server")
-	}
-	// Where the unpriced order's failure is thrown (src/receipt.ts); set by the web app, see README.
-	e.ThrowSource, e.ThrowLine, e.ThrowColumn = journeyThrowSource, journeyThrowLine, journeyThrowColumn
+	e := j.setExpectations()
 	readerA, readerB, builder, analyst := journeyID("user/reader-a"), journeyID("user/reader-b"), journeyID("user/builder"), journeyID("user/analyst")
 	pwd := func(n string) string { return n + " journeys password 2026" }
 	for _, c := range []struct {
@@ -510,42 +559,24 @@ func (j *journeyRun) provision() error {
 	}
 	j.token = issued.Token
 	// Sources.
-	gwAddr, err := freeAddress()
-	if err != nil {
-		return err
+	if j.svc != nil {
+		// Inside the provision service the browser's origin and the configuration volume are given.
+		j.gw, j.cfgs = j.svc.gatewayOrigin, j.svc.cfgDir
+	} else {
+		gwAddr, err := freeAddress()
+		if err != nil {
+			return err
+		}
+		j.gw = gwAddr
+		j.cfgs = filepath.Join(j.work, "cfg")
 	}
-	j.gw = gwAddr
-	j.cfgs = filepath.Join(j.work, "cfg")
 	if err = os.MkdirAll(j.cfgs, 0o700); err != nil {
 		return err
 	}
 	j.apps = map[string]*appCfg{}
 	env := journeyID("environment/reference")
-	for _, a := range []struct {
-		name    string
-		kinds   []model.Kind
-		browser bool
-		replay  bool
-	}{
-		{"gateway", []model.Kind{model.SpanKind, model.ErrorKind}, false, false},
-		{"api", []model.Kind{model.SpanKind, model.ErrorKind}, false, false},
-		// The job process also runs the SDK's runtime profiler: its profile and capability records need the kinds in the policy.
-		{"jobs", []model.Kind{model.SpanKind, model.ErrorKind, model.JobAttempt, model.Profile, model.CapabilityKind}, false, false},
-		// profile_chunk and capability are both listed: the browser SDK delivers the capability truth record with every profile run,
-		// and the server admits only kinds the source policy names.
-		{"web", []model.Kind{model.SpanKind, model.ErrorKind, model.Replay, model.Profile, model.CapabilityKind}, true, true},
-		// The build's private artifact source: the artifact service refuses browser sources, so the
-		// source map is uploaded under a private source whose policy registers the web build.
-		{"webbuild", []model.Kind{model.SpanKind}, false, false},
-	} {
-		c := &appCfg{Name: a.name, Source: journeyID("source/" + a.name), Service: journeyID("service/" + a.name), Build: journeyID("build/" + a.name), Browser: a.browser}
-		if a.name == "web" || a.name == "webbuild" {
-			c.Build = e.WebBuild
-		}
-		if a.name == "web" {
-			e.WebSource = c.Source
-		}
-		c.Resource = model.Resource{Service: c.Service, Environment: env, Build: c.Build, Instance: a.name + "-1", Labels: model.Labels{}}
+	for _, a := range journeyAppSpecs {
+		c := journeyAppIdentity(a.name, e.WebBuild)
 		retention := map[model.Kind]uint32{}
 		for _, k := range a.kinds {
 			retention[k] = 14
@@ -586,7 +617,7 @@ func (j *journeyRun) writeConfig(c *appCfg, env model.ID) error {
 		return err
 	}
 	c.Path = filepath.Join(j.cfgs, c.Name+".json")
-	return os.WriteFile(c.Path, raw, 0o600)
+	return j.writePrivateConfig(c.Path, raw)
 }
 
 func (j *journeyRun) holdFile() error {
@@ -771,8 +802,7 @@ func (j *journeyRun) drive() error {
 		}
 	}
 	// 3. the job: attempt 1 fails (dependency warming up), attempt 2 succeeds.
-	jobsOut, err := runOut(j.root, []string{"PYTHONPATH=" + j.pyPath, "REFERENCE_DATABASE_URL=" + j.dsn(), "PYTHONDONTWRITEBYTECODE=1"},
-		j.python, filepath.Join(j.root, "examples/reference/jobs/run.py"), "--config", j.apps["jobs"].Path, "--ca", j.pki.CA, "--dependency-url", j.rep["dependency_url"].(string), "--run-id", e.Run.String(), "--profile")
+	jobsOut, err := j.runJobs()
 	if err != nil {
 		return fmt.Errorf("jobs: %w", err)
 	}
@@ -902,12 +932,22 @@ func (j *journeyRun) stopEstate() error {
 		problems = append(problems, "dependency stats unreadable")
 	}
 	for _, n := range []string{"gateway", "api", "dependency"} {
-		p := j.proc(n)
-		if err := p.stop(30 * time.Second); err != nil && n != "dependency" {
-			problems = append(problems, n+": "+err.Error())
+		var stdout string
+		if j.estate {
+			out, err := j.estateStop(n)
+			if err != nil && n != "dependency" {
+				problems = append(problems, n+": "+err.Error())
+			}
+			stdout = out
+		} else {
+			p := j.proc(n)
+			if err := p.stop(30 * time.Second); err != nil && n != "dependency" {
+				problems = append(problems, n+": "+err.Error())
+			}
+			stdout = p.out.String()
 		}
 		var fl flushLine
-		if json.Unmarshal([]byte(lastJSONLine(p.out.String())), &fl) == nil && n != "dependency" {
+		if json.Unmarshal([]byte(lastJSONLine(stdout)), &fl) == nil && n != "dependency" {
 			j.rep[n+"_flush"] = fl.Flush
 			if fl.Flush.Pending != 0 || fl.Flush.Lost != 0 || fl.Flush.Receipts == 0 {
 				problems = append(problems, fmt.Sprintf("%s flush pending=%d lost=%d receipts=%d", n, fl.Flush.Pending, fl.Flush.Lost, fl.Flush.Receipts))
@@ -1093,7 +1133,7 @@ func (j *journeyRun) recordPageError() {
 			}
 		}
 	}
-	if fi, err := os.ReadDir(filepath.Join(j.built.out, "assets")); err == nil {
+	if fi, err := os.ReadDir(filepath.Join(j.built.out, "assets")); j.built.out != "" && err == nil {
 		sizes := map[string]int64{}
 		for _, f := range fi {
 			if info, err := f.Info(); err == nil {

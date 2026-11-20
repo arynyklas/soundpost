@@ -1,0 +1,11 @@
+# Copyright 2026 Aryn Yklas
+# SPDX-License-Identifier: Apache-2.0
+#
+# The estate's provisioning service (compose service `provision`): the acceptance smoke itself, a static binary built from THIS tree
+# (`CGO_ENABLED=0 go build ./tools/smoke`), run as `smoke journeys --provision-service ...`. It waits for the node, bootstraps its owner,
+# creates the organizations, users and sources the journeys need and writes each application's source configuration (the credential,
+# signed policy and trusted keys the running node issued) to the estate's shared configuration volume. `go run ./tools/smoke journeys`
+# builds this image from a context holding exactly the binary; nothing is downloaded and nothing runs during the build.
+FROM scratch
+COPY smoke /smoke
+ENTRYPOINT ["/smoke"]

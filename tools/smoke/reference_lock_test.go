@@ -79,29 +79,27 @@ func TestReferenceLockMatchesSDKLocks(t *testing.T) {
 	}
 }
 
-// The estate's backing services run only from content-addressed images the run never pulls: every `image:` of compose.yaml is
-// `${REFERENCE_*_IMAGE:-name@sha256:<full digest>}` (the digest is the default; an operator may name another pinned image through
-// the variable, and the smoke refuses an unpinned one), never a tag a registry could move, and every service says `pull_policy: never`.
+// The estate runs only from content-addressed images the run never pulls. A third-party image is
+// `${REFERENCE_*_IMAGE:-name@sha256:<full digest>}` (the digest is the default; an operator may name another pinned image through the
+// variable, and the smoke refuses an unpinned one). A first-party image is built from this tree, so it has no digest until it is built:
+// it is `${REFERENCE_{NODE,TOOLS,ESTATE}_IMAGE:?...}`, a variable with no default that the run sets to the id of the image it built
+// (the smoke refuses anything that is not `sha256:<64 hex>`). Never a tag a registry could move; every service says `pull_policy: never`.
 func TestReferenceComposeRunsOnlyDigestPinnedImages(t *testing.T) {
-	raw, err := os.ReadFile("../../examples/reference/compose.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(raw)
+	c, text := readReferenceCompose(t)
 	if strings.Contains(text, "\r") {
 		t.Fatal("compose.yaml must use LF line endings")
 	}
-	images := regexp.MustCompile(`(?m)^    image: (.*)$`).FindAllStringSubmatch(text, -1)
-	services := regexp.MustCompile(`(?m)^  [a-z][a-z0-9_-]*:$`).FindAllString(text, -1)
-	if len(images) == 0 || len(images) != len(services) {
-		t.Fatalf("%d image line(s) for %d service(s)", len(images), len(services))
+	if len(c.Services) == 0 {
+		t.Fatal("no services")
 	}
-	for _, m := range images {
-		if !regexp.MustCompile(`^\$\{REFERENCE_[A-Z0-9_]+_IMAGE:-[a-z0-9][a-z0-9._/-]*@sha256:[0-9a-f]{64}\}$`).MatchString(m[1]) {
-			t.Errorf("image %q is not ${REFERENCE_*_IMAGE:-name@sha256:<digest>}: a tag or an abbreviated reference would be resolved by the runtime", m[1])
+	thirdParty := regexp.MustCompile(`^\$\{REFERENCE_[A-Z0-9_]+_IMAGE:-[a-z0-9][a-z0-9._/-]*@sha256:[0-9a-f]{64}\}$`)
+	builtHere := regexp.MustCompile(`^\$\{REFERENCE_(NODE|TOOLS|ESTATE)_IMAGE:\?[^}]+\}$`)
+	for name, s := range c.Services {
+		if !thirdParty.MatchString(s.Image) && !builtHere.MatchString(s.Image) {
+			t.Errorf("%s image %q is neither ${REFERENCE_*_IMAGE:-name@sha256:<digest>} nor a required ${REFERENCE_{NODE,TOOLS,ESTATE}_IMAGE:?...}: a tag or an abbreviated reference would be resolved by the runtime", name, s.Image)
 		}
-	}
-	if n := strings.Count(text, "    pull_policy: never\n"); n != len(services) {
-		t.Errorf("%d of %d services say pull_policy: never", n, len(services))
+		if s.PullPolicy != "never" {
+			t.Errorf("%s does not say pull_policy: never", name)
+		}
 	}
 }

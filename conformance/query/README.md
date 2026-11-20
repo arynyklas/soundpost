@@ -265,3 +265,19 @@ pre-epoch timestamps, a label_format that reorders the visible labels) and recor
 `TestOwnedMatchesRecordedNativeLogQLIntervalObservations` from the locked bytes. The probe's first two runs (152 and 156
 mismatching rows: the tied-entry choice by original stream hash, and the pinned `lastEntry.Unix() < 0` rule after a pre-epoch entry) are
 kept in the wave-18 evidence (`l2w18-evidence/lane2/loki-interval-run*-report.json`).
+
+`author/native-oracle.sh build-loki-shard-probe` builds `author/logql-shard-probe` inside the same verified Loki tree
+(a nested module, build tag `soundpost_logql_shard_probe`, so it is outside the product module). The oracle driver feeds
+the engine one iterator below every merge and never shards; the probe drives what that cannot reach: the shard mapper's
+`shard_aggregations` string switch (`NewShardMapper`), the real sharded evaluation (shard mapper plus downstream engine)
+over two or three shard inputs that deliver the same entries, and the querier-side merge iterators
+(`NewMergeEntryIterator`, `NewMergeSampleIterator`, the sort iterators). `author/logql-shard-probe.py generate` authors
+`cases/logql-shard-replica-probe.json` (40 string lists x 5 queries, 10 log fixtures, 7 sample fixtures); the probe reads it
+on stdin; `author/logql-shard-probe.py record <observed.json>` writes `evidence/native-logql-shard-replica-observations.json`
+(content-locked). `TestOwnedMatchesRecordedNativeShardAggregationSwitch`, `TestOwnedMatchesRecordedNativeShardedReplicaInputs`,
+`TestRecordedNativeEntryMergeCollapseIsDeclaredAgainstOwned` and `TestRecordedNativeSampleMergeCollapseIsDeclaredAgainstOwned`
+replay them from the locked bytes and are the bound Go tests of `shard-capability-domain`, `iterator-entry-merge` and
+`iterator-sample-merge` (the `=` prefix of a name in `author/ext_logql.py` marks a full test name outside the
+implementation package). Regenerating `evidence/release-go-tests.jsonl` while its own lock entry is present fails the
+two bound tests that read the inventory (the file is being rewritten): remove the entry from `source-lock.json`, run
+`observe-go-tests.sh` and `release-author.py --observe`, then relock `acceptance.json` and the evidence file.

@@ -116,6 +116,42 @@ behaviour on 3.1.0 and 3.13.5):
 - Not probed: label values that are invalid UTF-8 (the case format carries JSON strings only), and Loki
   stream-selector regexes.
 
+## Shard strings and replica merges (02.12-W2, 07.05#10)
+
+The OCI oracle feeds the engine one iterator below every merge and never shards, so no release row can
+observe the `shard_aggregations` string switch, what a sharded evaluation does with an entry that two
+shard inputs both deliver, or what the querier-side merge iterators collapse. `conformance/query/author/logql-shard-probe`
+drives the pinned Loki 3.5.2 sources directly (a native build of the sha256-verified source archive, as
+`native-oracle.sh build-loki-shard-probe`; the recorded file says so) over inputs authored in
+`conformance/query/cases/logql-shard-replica-probe.json`. Its observations
+(`conformance/query/evidence/native-logql-shard-replica-observations.json`, content-locked) are replayed
+without a container runtime by Go tests bound to `shard-capability-domain`, `iterator-entry-merge` and
+`iterator-sample-merge`; a bound test that is removed, renamed or unlisted fails
+`TestShardReplicaProbeIsBoundToItsObligations` and, once the evidence is regenerated, the release gate
+(an unobserved bound test is an unresolved obligation). What the pinned sources do:
+
+- The shard mapper recognizes exactly `first_over_time`, `last_over_time`, `quantile_over_time` and
+  `approx_topk`. Each enables its own capability and no other; a name listed twice enables it once;
+  every other string (another case or spelling, surrounding space or newline, a `shard-` prefix, two names
+  joined by a comma, the empty string, an unrelated name) enables nothing and does not affect its
+  neighbours. `approx_topk` is refused with `approx_topk is not enabled. See -limits.shard_aggregations`
+  unless its own name is listed, whatever else is. `internal/query/logql.ShardAggregationGates` gives the
+  same answer on all 200 observed (string list, query) rows.
+- The sharded evaluation (shard mapper plus downstream engine) keeps every copy of an entry that several
+  shard inputs deliver; the owned query path over the same entries as stored rows gives the same answer
+  group by group, ties between streams included (label text order on both sides, not the original stream
+  hash that the iterators below use).
+- The querier-side merge iterators do collapse: `NewMergeEntryIterator` returns one entry per distinct
+  (timestamp, stream, line) of its inputs, whether the copies come from several inputs or from one;
+  `NewMergeSampleIterator` suppresses a sample whose non-zero hash equals another's at one timestamp and
+  stream (zero hashes and equal values never collapse). The owned engine has no such layer: equal text
+  never identifies a record, a row of multiplicity n is n entries, and a replica is a further row (the
+  locked rule text of `iterator-entry-merge`: normalization must distinguish owned multiplicity from
+  upstream replica merging and cannot globally deduplicate input). This is a declared divergence, not a
+  silent one: the per-fixture counts of both sides are pinned in
+  `internal/conformance/query/logql_native_shard_replica_test.go`, so a fixture that stops diverging, a
+  new divergence or a changed collapse rule fails a test.
+
 ## What it proves, and what it does not
 
 It proves that the locked release gate and smoke runner were executed for all three pinned
@@ -136,9 +172,16 @@ It does not prove:
 
 ## State on this tree
 
-The campaign fails, and must. The locked release gate rejects with `3141 unresolved (unbound 785,
-unrun 2355, 1 rejected provenance audit)` with the single-layout smoke report supplied (`3152` without it): none of the 785 obligations is bound to an implementation, case set and observed test,
-and none of the 2355 required cases ran against the owned engine and an oracle. Distributed smoke is
-not run (no multi-node harness for the owned query paths) and single-layout smoke records its
-unsatisfied requirements. The workflow `.github/workflows/conformance.yml` runs the campaign in CI
-and is verification-only; it has not been executed.
+All 785 obligations are bound to an implementation, their case sets and an observed Go test, and the
+campaign was last run to completion against the real pinned oracle images (lane 2 wave 7, WSL Docker,
+1266 s): all 8 required rows verified, every row exit 0. The images are local, digest-locked artifacts
+(`source-lock.json` `artifact.path`); a host that does not hold them records zero oracle runs and the
+campaign fails by design. The Docker-free replays (recorded native observations, content locks,
+bindings) run in `go test` on every host.
+
+The workflow `.github/workflows/conformance.yml` runs on every pull request. Its runs up to commit
+`4bd8897` (run 44730760321) all failed in the `Campaign tests (race)` step: under `-race` on a two-core
+hosted runner the persisted-path smoke tests exceed `go test`'s default 10 minute limit (`panic: test
+timed out after 10m0s`); the step now sets `-timeout 100m`. No run has reached the `Query language
+campaign` step, and a hosted runner does not hold the locked oracle images, so that step cannot pass
+there until the images are provided to the runner (or relocked to images a runner can build) by the owner.

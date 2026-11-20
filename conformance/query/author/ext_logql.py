@@ -300,11 +300,13 @@ def build(ctx):
         "binary-matching": ["BinaryMatchingAndSetOperators"], "set-operators": ["BinaryMatchingAndSetOperators"],
         "vector": ["VectorAndLabelReplace"], "label-replace": ["VectorAndLabelReplace"],
         "range-time": ["RangeWindowsAndTimeGrid"],
-        "first-last-ties": ["FirstLastAndSampleIdentity"], "iterator-sample-merge": ["FirstLastAndSampleIdentity", "MergeLogsNeverCollapsesReplicasAcrossInputs"],
+        "first-last-ties": ["FirstLastAndSampleIdentity"], "iterator-sample-merge": ["FirstLastAndSampleIdentity", "MergeLogsNeverCollapsesReplicasAcrossInputs", "=TestRecordedNativeSampleMergeCollapseIsDeclaredAgainstOwned"],
         "log-order-limit": ["LogOrderLimitAndInterval"],
-        "iterator-entry-merge": ["EntryMergeKeepsEncounterOrderOfTies", "EntryMergeTieBreaksByStreamHash", "EntryMergeInEnginePathOrdersTiesByLabels", "MergeLogsNeverCollapsesReplicasAcrossInputs"],
+        "iterator-entry-merge": ["EntryMergeKeepsEncounterOrderOfTies", "EntryMergeTieBreaksByStreamHash", "EntryMergeInEnginePathOrdersTiesByLabels", "MergeLogsNeverCollapsesReplicasAcrossInputs",
+                                 "=TestOwnedMatchesRecordedNativeShardedReplicaInputs", "=TestRecordedNativeEntryMergeCollapseIsDeclaredAgainstOwned"],
         "variants": ["VariantsAndShardCapabilityDomain", "VariantsDisabledIsFeatureCategory"],
-        "shard-capability-domain": ["VariantsAndShardCapabilityDomain", "ApproxTopkParameterIsFunctionArguments", "ShardAggregationSwitchSemantics", "ShardAggregationSwitchSelectsRegisteredFeatureSets", "ShardAggregationSwitchDrivesApproxTopK"],
+        "shard-capability-domain": ["VariantsAndShardCapabilityDomain", "ApproxTopkParameterIsFunctionArguments", "ShardAggregationSwitchSemantics", "ShardAggregationSwitchSelectsRegisteredFeatureSets", "ShardAggregationSwitchDrivesApproxTopK",
+                                    "=TestOwnedMatchesRecordedNativeShardAggregationSwitch"],
         "template-capabilities": ["TemplateCapabilities"],
         "primitive/numeric-string-stdlib-version": ["PrimitiveNumericAndStringSemantics"],
         "primitive/regexp-engine-identity": ["PrimitiveRegexpEngineIdentity"],
@@ -313,4 +315,6 @@ def build(ctx):
         "primitive/unicode-case-version": ["PrimitiveUnicodeEdition"],
     }
     for name in bound:
-        ctx.bind(f"{LOGQL}/{name}", "internal/query/logql", [T + t for t in tests[name]])
+        # A name that starts with "=" is a full Go test name (the replay tests of the shard/replica probe live in
+        # internal/conformance/query); every other name is a TestReleaseLogQL test of the implementation package.
+        ctx.bind(f"{LOGQL}/{name}", "internal/query/logql", [t[1:] if t.startswith("=") else T + t for t in tests[name]])
