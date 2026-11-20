@@ -71,8 +71,16 @@ func (rc *runCtx) criticalArgs(spec RowSpec, p *probeResult) ([]string, string) 
 		}
 		return []string{"--mode", "release", "--node", path}, ""
 	case "jobs":
-		if p.Build.Family == "bun" {
+		switch p.Build.Family {
+		case "bun":
 			return []string{"--mode", "jobs", "--bun", path}, ""
+		case "node":
+			// The Node SDK sources are TypeScript: the pinned Bun bundles the job journey, the row's own Node runs it.
+			bun := needs["bun"]
+			if bun == nil {
+				return nil, "the Node job-attempt path is bundled by the pinned Bun, and this row's needs name no Bun build"
+			}
+			return []string{"--mode", "jobs", "--node", path, "--bun", bun.Path}, ""
 		}
 		venv, why := pythonVenv(rc, p, jobsModules)
 		if why != "" {
@@ -86,11 +94,16 @@ func (rc *runCtx) criticalArgs(spec RowSpec, p *probeResult) ([]string, string) 
 		}
 		return []string{"--mode", "python", "--python", pythonLabel(p) + "=" + venv}, ""
 	case "browser":
-		node, bun := needs["node"], needs["bun"]
-		if node == nil || bun == nil {
-			return nil, "the browser critical path needs a Node and a Bun build in the row's needs"
+		// A browser row runs its backend under the Node of its needs; a Node row runs the same path as the backend and takes the browser from
+		// its needs. Either way the command is told every interpreter explicitly.
+		node, browser, bun := needs["node"], p, needs["bun"]
+		if p.Build.Family == "node" {
+			node, browser = p, needs[strings.ToLower(spec.Params["target"])]
 		}
-		return []string{"--mode", "browser", "--browsers", spec.Params["target"] + "=" + path, "--node", node.Path, "--bun", bun.Path}, ""
+		if node == nil || browser == nil || bun == nil {
+			return nil, "the browser critical path needs a Node, a browser and a Bun build among the row's build and needs"
+		}
+		return []string{"--mode", "browser", "--browsers", spec.Params["target"] + "=" + rc.nativePath(browser.Build.OS, browser.Path), "--node", node.Path, "--bun", bun.Path}, ""
 	}
 	return nil, fmt.Sprintf("unknown critical-path mode %q", mode)
 }

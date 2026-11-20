@@ -218,3 +218,62 @@ func TestCriticalPostgresImageIsTheCommittedDigestPin(t *testing.T) {
 		t.Error("tools/smoke/journeys.go carries the short id 92620daddcd9 again")
 	}
 }
+
+// 03.09-C11: a Node row's critical path runs under THAT Node. The browser path (real browser to an Express backend to a dependency and
+// PostgreSQL 16) used to be reachable only through a browser row with a Node 22 backend, and the Node job-attempt journey through no row,
+// so Node 24 had neither. A Node row names its own interpreter as the backend (--node) and the browser or the bundler as its needs.
+func TestCriticalPathNodeRowsRunTheBrowserAndJobPathsUnderTheirOwnNode(t *testing.T) {
+	old := criticalPGPresent
+	defer func() { criticalPGPresent = old }()
+	criticalPGPresent = func(*runCtx) string { return "" }
+	rc, tool := criticalCtx(t, okRows)
+	rc.matrix.Builds["chrome"] = BuildSpec{Family: "chrome", Version: "142.0.7444.59", OS: "linux", Arch: "amd64", Absent: "x"}
+	rc.probes["chrome"] = &probeResult{Found: true, Path: "/x/chrome", Build: Build{Family: "chrome", Version: "142.0.7444.59", OS: "linux", Arch: "amd64", ID: "sha256:c"}}
+	run := func(rc *runCtx, spec RowSpec) Row {
+		t.Helper()
+		row := runSDKCriticalPath(rc, spec)
+		row.ID, row.Suite, row.Required, row.Subject = spec.ID, spec.Suite, true, rc.subject(spec)
+		if err := ValidateRow(row); err != nil {
+			t.Fatalf("critical-path runner produced an invalid row: %v", err)
+		}
+		return row
+	}
+	browser := RowSpec{ID: "runtime.critical.node-24.linux-amd64.http_db_errors", Suite: SuiteRuntime, Build: "node", Needs: []string{"chrome", "bun"}, Params: map[string]string{"mode": "browser", "target": "Chrome"}}
+	if row := run(rc, browser); row.Outcome != OutcomePassed {
+		t.Fatalf("a Node row's browser path runs: %+v", row)
+	}
+	args, _ := os.ReadFile(tool + ".args")
+	for _, want := range []string{"--mode browser", "--browsers Chrome=/x/chrome", "--node /x/node", "--bun /x/bun"} {
+		if !strings.Contains(string(args), want) {
+			t.Errorf("the Node row's backend is its own Node and the browser is its need: want %q in %s", want, args)
+		}
+	}
+	jobs := RowSpec{ID: "runtime.critical.node-24.linux-amd64.jobs", Suite: SuiteRuntime, Build: "node", Needs: []string{"bun"}, Params: map[string]string{"mode": "jobs"}}
+	if row := run(rc, jobs); row.Outcome != OutcomePassed {
+		t.Fatalf("a Node row's job-attempt path runs: %+v", row)
+	}
+	args, _ = os.ReadFile(tool + ".args")
+	for _, want := range []string{"--mode jobs", "--node /x/node", "--bun /x/bun"} {
+		if !strings.Contains(string(args), want) {
+			t.Errorf("the Node job path runs the Node SDK under the row's Node, bundled by the pinned Bun: want %q in %s", want, args)
+		}
+	}
+	// The existing shape (a browser row with a Node and a Bun in its needs) is unchanged.
+	legacy := RowSpec{ID: "runtime.browser.chrome-142.linux-amd64.core", Suite: SuiteRuntime, Build: "chrome", Needs: []string{"node", "bun"}, Params: map[string]string{"mode": "browser", "target": "Chrome"}}
+	if row := run(rc, legacy); row.Outcome != OutcomePassed {
+		t.Fatalf("a browser row with a Node backend need runs: %+v", row)
+	}
+	args, _ = os.ReadFile(tool + ".args")
+	if !strings.Contains(string(args), "--browsers Chrome=/x/chrome") || !strings.Contains(string(args), "--node /x/node") {
+		t.Errorf("browser row arguments: %s", args)
+	}
+	// Without its Bun a Node row names what is missing and runs nothing.
+	rc2, tool2 := criticalCtx(t, okRows)
+	rc2.probes["bun"] = &probeResult{Reason: "no Bun 1.3.14 linux/amd64 build was found"}
+	if row := run(rc2, jobs); row.State != StateNotExercised || !strings.Contains(row.Reason, "no Bun") {
+		t.Errorf("a Node job row without Bun: %+v", row)
+	}
+	if _, err := os.Stat(tool2 + ".args"); err == nil {
+		t.Error("the command must not run without the Bun that bundles the Node SDK")
+	}
+}

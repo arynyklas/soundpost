@@ -144,3 +144,8 @@ export function d54Row(collected,{capture,protocol,budget,loop=false,delivered=f
  row.measurement={protocol:c.conforms_d54?"D54":"shortened diagnostic window, not D54",...protocol,...c,gated_window:"warm",arm_order:Array.from({length:protocol.runs},(_,run)=>armOrder(run,["baseline",capture]))};
  return row;
 }
+
+/** Environment of the recorder-batch Playwright run. The spec drives Chromium: a SOUNDPOST_FIREFOX inherited from the host (the frozen tool bundle exports it for the Firefox rows) would make fixtures/sdk/firefox/project.ts turn the run into a Firefox run, so it is emptied here. */
+export function recorderBatchEnv(env,bunPathValue,root){
+ return {...env,SOUNDPOST_FIREFOX:"",SOUNDPOST_BUN:bunPathValue,NODE_PATH:root+"/web/node_modules"};
+}

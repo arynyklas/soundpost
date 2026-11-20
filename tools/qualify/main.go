@@ -14,6 +14,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -581,6 +582,18 @@ func hostInfo() HostInfo {
 // runner produces the row for one spec. It never validates: RunSuite does.
 type runner func(rc *runCtx, spec RowSpec) Row
 
+// RunOptions narrows a run to some rows of the matrix. A host holds some of the builds and privileges a matrix needs and not others (the
+// native rows need root, a browser refuses to run as root), so the suite is run in parts and the parts are combined with `qualify merge`:
+// a row a part did not select is absent from its report, never reported as not exercised.
+type RunOptions struct {
+	Only   *regexp.Regexp // when set, only rows whose id matches
+	Except *regexp.Regexp // when set, rows whose id matches are skipped
+}
+
+func (o RunOptions) selects(id string) bool {
+	return (o.Only == nil || o.Only.MatchString(id)) && (o.Except == nil || !o.Except.MatchString(id))
+}
+
 // RunSuite runs every matrix row of one suite against the builds actually
 // installed on this host, validates every row, writes <suite>-report.json and
 // the raw evidence under reportDir, and returns the report with its verdict.
@@ -588,6 +601,11 @@ type runner func(rc *runCtx, spec RowSpec) Row
 // runner) or a cancelled context; a failed budget is NOT an error but a
 // non-zero ExitCode with the row marked failed.
 func RunSuite(ctx context.Context, suite Suite, matrixPath, reportDir string) (SuiteReport, error) {
+	return RunSuiteWith(ctx, suite, matrixPath, reportDir, RunOptions{})
+}
+
+// RunSuiteWith is RunSuite for the rows the options select.
+func RunSuiteWith(ctx context.Context, suite Suite, matrixPath, reportDir string, opt RunOptions) (SuiteReport, error) {
 	m, err := LoadMatrix(matrixPath)
 	if err != nil {
 		return SuiteReport{}, err
@@ -614,13 +632,14 @@ func RunSuite(ctx context.Context, suite Suite, matrixPath, reportDir string) (S
 		return SuiteReport{}, err
 	}
 	rc := &runCtx{ctx: ctx, root: root, reportDir: reportDir, work: work, matrix: m, workloads: wl, host: hostInfo(), probes: map[string]*probeResult{}, cache: map[string]any{}}
+	defer rc.cleanup()
 	rep := SuiteReport{
 		Suite: suite, Matrix: filepath.ToSlash(matrixPath), MatrixSHA: hex.EncodeToString(sum[:]),
 		RecordedAt: time.Now().UTC().Format(time.RFC3339), Host: rc.host, Rows: []Row{},
 	}
 	var invalid []error
 	for _, spec := range m.Rows {
-		if spec.Suite != suite {
+		if spec.Suite != suite || !opt.selects(spec.ID) {
 			continue
 		}
 		if err := ctx.Err(); err != nil {

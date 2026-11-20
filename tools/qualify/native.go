@@ -594,8 +594,34 @@ func runNativeIdentity(rc *runCtx, spec RowSpec) Row {
 	if why != "" {
 		return notExercised(why)
 	}
-	res := rc.exec(10*time.Minute, rc.root, nil, smoke, "--scenario", scenario, "--workload", reuse, "--exec-workload", execBin, "--no-fp-workload", noFP)
-	return rc.identityRow(build, scenario, res)
+	args := []string{"--scenario", scenario, "--workload", reuse, "--exec-workload", execBin, "--no-fp-workload", noFP}
+	mutate, _ := hostMutation()
+	name, argv, steered, why := identityInvocation(scenario, smoke, args, mutate, exec.LookPath)
+	if why != "" {
+		return notExercised(why)
+	}
+	res := rc.exec(10*time.Minute, rc.root, nil, name, argv...)
+	if steered && res.Exit != 0 && strings.Contains(res.Stderr, "unshare failed") {
+		return notExercised("the disposable PID namespace for forcing PID reuse could not be created: " + tail(rc.rel(res.Stderr), 200))
+	}
+	return rc.identityRow(build, scenario, steered, res)
+}
+
+// identityInvocation is the command that runs one identity scenario. Numeric PID reuse needs pid_max allocations in a
+// row on the host, far beyond any attempt budget, so PID reuse is the one scenario that can be forced, and only with the
+// explicit opt-in (mutate: root and SOUNDPOST_QUALIFY_HOST_MUTATION=1): the smoke then steers ns_last_pid inside a
+// disposable PID namespace. Every other scenario, and every run without the opt-in, starts the smoke itself. why is set
+// when the opt-in was given but the tool the forcing needs is missing: the unforced run is not substituted for it.
+func identityInvocation(scenario, smoke string, args []string, mutate bool, lookPath func(string) (string, error)) (name string, argv []string, steered bool, why string) {
+	if scenario != "pid-reuse" || !mutate {
+		return smoke, args, false, ""
+	}
+	unshare, err := lookPath("unshare")
+	if err != nil {
+		return "", nil, false, "PID reuse was to be forced by steering /proc/sys/kernel/ns_last_pid (" + hostMutationEnv + "=1, root), which needs unshare (util-linux) on PATH to start a disposable PID namespace, and there is none; the unforced run is not substituted"
+	}
+	name, argv = steeredPIDReuseCommand(unshare, smoke, args)
+	return name, argv, true, ""
 }
 
 // pidReuseNotObserved is the smoke's closed code when the kernel never handed
@@ -604,33 +630,72 @@ const pidReuseNotObserved = "actual_numeric_pid_reuse_not_observed_within_budget
 
 // identityRow turns one identity smoke run into a row. A PID-reuse scenario
 // whose precondition never occurred was not exercised: it is neither a pass
-// nor a failure of the product.
-func (rc *runCtx) identityRow(build *Build, scenario string, res execResult) Row {
+// nor a failure of the product. steered says the smoke was started to force the reuse (see runNativeIdentity).
+func (rc *runCtx) identityRow(build *Build, scenario string, steered bool, res execResult) Row {
 	if scenario == "pid-reuse" && res.Exit != 0 && strings.Contains(res.Stderr, pidReuseNotObserved) {
-		return notExercised("real PID reuse was not observed within the smoke's allocation-attempt budget (it may not write pid_max or ns_last_pid), so the scenario's precondition never occurred; this is not a pass")
+		if steered {
+			return notExercised("PID reuse was forced by steering /proc/sys/kernel/ns_last_pid in a disposable PID namespace, but the smoke still did not observe a recycled number within its attempt budget, so the scenario's precondition never occurred; this is not a pass")
+		}
+		return notExercised("real PID reuse was not observed within the smoke's allocation-attempt budget (the PID space wraps only after pid_max allocations and the unforced run writes neither pid_max nor ns_last_pid), so the scenario's precondition never occurred; this is not a pass; as root with " + hostMutationEnv + "=1 the run forces it by steering ns_last_pid inside a disposable PID namespace")
 	}
-	row := Row{State: StateExercised, Build: build, Command: &CommandRun{Command: "identity/smoke --scenario " + scenario, ExitCode: res.Exit, DurationMS: res.Duration.Milliseconds()}}
-	row.Evidence = []string{fmt.Sprintf("real %s scenario of fixtures/nativeperf/identity/smoke: exit %d", scenario, res.Exit)}
-	if obj, raw := lastJSONObjectMultiline(res.Stdout); obj != nil {
+	command := "identity/smoke --scenario " + scenario
+	description := fmt.Sprintf("real %s scenario of fixtures/nativeperf/identity/smoke: exit %d", scenario, res.Exit)
+	if steered {
+		command = "unshare --pid --fork --mount-proc identity/smoke --steer-ns-last-pid --scenario " + scenario
+		description = fmt.Sprintf("real pid-reuse scenario of fixtures/nativeperf/identity/smoke with ns_last_pid steered inside a disposable PID namespace (unshare --pid --fork --mount-proc; %s=1, root): exit %d", hostMutationEnv, res.Exit)
+	}
+	row := Row{State: StateExercised, Build: build, Command: &CommandRun{Command: command, ExitCode: res.Exit, DurationMS: res.Duration.Milliseconds()}}
+	row.Evidence = []string{description}
+	obj, raw := lastJSONObjectMultiline(res.Stdout)
+	if obj != nil {
 		row.Evidence = append(row.Evidence, rc.writeEvidence("native-identity-"+scenario+".json", raw))
 		flattenNumbers("", any(obj), &row.Series, 0)
 	}
-	if res.Exit == 0 && res.Err == nil {
-		row.Outcome = OutcomePassed
-	} else {
+	switch {
+	case res.Exit != 0 || res.Err != nil:
 		row.Outcome = OutcomeFailed
 		row.Failures = []string{fmt.Sprintf("identity scenario %s exited %d: %s", scenario, res.Exit, tail(rc.rel(res.Stderr), 240))}
+	case steered && steeredReuseProblem(obj) != "":
+		// the smoke must itself say it forced the cursor and saw a recycled number resolve to a different process start
+		row.Outcome = OutcomeFailed
+		row.Failures = []string{"the PID-reuse smoke exited 0 without proving a forced, observed reuse: " + steeredReuseProblem(obj)}
+	default:
+		row.Outcome = OutcomePassed
 	}
-	row.Limits = []string{"PID reuse is a real allocation race within the smoke's attempt budget (no pid_max or ns_last_pid writes), not a forced collision"}
+	switch {
+	case steered:
+		row.Limits = []string{"numeric PID reuse was forced, not waited for: the smoke wrote the previous child's PID minus one to /proc/sys/kernel/ns_last_pid (the allocation cursor and nothing else; pid_max is untouched) inside a disposable PID namespace it was started in, so the host PID namespace and its cursor were not changed; the recycled number was then handed out by the real kernel allocator and the product resolved it to a different process start (a mutant that drops the process start joins the two generations: real_pid_reuse_joined)"}
+	case scenario == "pid-reuse":
+		row.Limits = []string{"PID reuse is a real allocation race within the smoke's attempt budget (no pid_max or ns_last_pid writes), not a forced collision"}
+	}
 	return row
 }
 
-// nativeGaps are required native cases for which no harness exists or which
-// cannot be exercised without changing the host.
-var nativeGaps = map[string]string{
-	"cpu_hotplug":     "the committed harness (fixtures/nativeperf/acceptance --host-scenarios cpu_hotplug, scenario_hotplug.go) takes a CPU offline and back online under live captures, which writes /sys/devices/system/cpu/cpuN/online, a host configuration change this qualification must not make; an operator who accepts that runs the harness as root on that host and its acceptance report is the evidence, not this run",
-	"container_modes": "no container/cgroup-restricted or seccomp-restricted capture fixture exists (design 13 requires audited Compose/Kubernetes recipes and denied-permission rows); only the host-process helper is exercised",
+// steeredReuseProblem is what is wrong with the report of a steered PID-reuse run, or "" when it says the cursor was
+// steered, a recycled number was observed and it resolved to a different process start.
+func steeredReuseProblem(obj map[string]any) string {
+	switch {
+	case obj == nil:
+		return "no JSON report"
+	case obj["ns_last_pid_steered"] != true:
+		return "ns_last_pid_steered is not true"
+	case obj["actual_numeric_pid_reuse"] != true:
+		return "actual_numeric_pid_reuse is not true"
+	case obj["same_process_start"] != false:
+		return "the recycled number kept the same process start"
+	}
+	return ""
 }
+
+// steeredPIDReuseCommand starts the smoke as PID 1 of a disposable PID namespace with its own /proc (unshare --pid --fork
+// --mount-proc) and asks it to steer ns_last_pid there: the write is local to that namespace and disappears with it.
+func steeredPIDReuseCommand(unshare, smoke string, args []string) (string, []string) {
+	return unshare, append([]string{"--pid", "--fork", "--mount-proc", smoke, "--steer-ns-last-pid"}, args...)
+}
+
+// nativeGaps are required native cases for which no harness exists or which cannot be exercised without changing the
+// host. None is left: CPU hotplug has its harness (native_hotplug.go) and container modes theirs (native_container.go).
+var nativeGaps = map[string]string{}
 
 // runNativeGap is a required native case with no harness: always not_exercised,
 // with the gate reason first when the host could not run it anyway.

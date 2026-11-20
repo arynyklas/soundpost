@@ -107,11 +107,22 @@ func (rc *runCtx) bunForBundling() (string, string) {
 	return shim, ""
 }
 
-// playwright runs one spec file once per RunSuite and caches the result.
-func (rc *runCtx) playwright(config, specFile, chromePath string) (*pwRun, string) {
-	key := "pw:" + chromePath + ":" + config + ":" + specFile
+// playwright runs one spec file once per RunSuite and caches the result. A Chromium-family build (Chrome, Edge) is named by SOUNDPOST_CHROME;
+// a stock Firefox is named by SOUNDPOST_FIREFOX, which makes the config run ONLY the Firefox WebDriver-BiDi project (fixtures/sdk/firefox), so a
+// Firefox row can never be satisfied by a Chromium result. The launcher that stands in for the Firefox executable must be executable.
+func (rc *runCtx) playwright(config, specFile string, p *probeResult) (*pwRun, string) {
+	key := "pw:" + p.Path + ":" + config + ":" + specFile
 	if v, ok := rc.cache[key]; ok {
 		return v.(*pwRun), ""
+	}
+	// The configs read BOTH variables and a set SOUNDPOST_FIREFOX makes them run ONLY the Firefox project: a variable inherited from the
+	// environment must never turn a Chromium row into a Firefox run (or the reverse), so the other one is set empty.
+	browserVar, otherVar := "SOUNDPOST_CHROME", "SOUNDPOST_FIREFOX"
+	if p.Build.Family == "firefox" {
+		browserVar, otherVar = "SOUNDPOST_FIREFOX", "SOUNDPOST_CHROME"
+		if err := os.Chmod(filepath.Join(rc.root, "fixtures", "sdk", "firefox", "firefox-bidi"), 0o755); err != nil {
+			return nil, "the Firefox WebDriver-BiDi launcher (fixtures/sdk/firefox/firefox-bidi) cannot be made executable: " + err.Error()
+		}
 	}
 	node := rc.probe("node-22-linux-amd64")
 	if !node.Found {
@@ -127,7 +138,7 @@ func (rc *runCtx) playwright(config, specFile, chromePath string) (*pwRun, strin
 	}
 	home := filepath.Join(rc.work, "home")
 	_ = os.MkdirAll(home, 0o755)
-	env := []string{"HOME=" + home, "SOUNDPOST_BUN=" + bun, "SOUNDPOST_CHROME=" + chromePath, "NODE_PATH=" + filepath.Join(rc.root, "web", "node_modules")}
+	env := []string{"HOME=" + home, "SOUNDPOST_BUN=" + bun, browserVar + "=" + p.Path, otherVar + "=", "NODE_PATH=" + filepath.Join(rc.root, "web", "node_modules")}
 	args := []string{cli, "test", "-c", filepath.Join(rc.root, filepath.FromSlash(config)), "--reporter=json", specFile}
 	res := rc.exec(10*time.Minute, filepath.Join(rc.root, "web"), env, node.Path, args...)
 	run := &pwRun{Exit: res.Exit, Duration: res.Duration, Command: fmt.Sprintf("node playwright test -c %s --reporter=json %s", config, specFile)}
@@ -149,7 +160,7 @@ func runPlaywrightTest(rc *runCtx, spec RowSpec) Row {
 	if !p.Found {
 		return notExercised(p.Reason)
 	}
-	run, why := rc.playwright(spec.Params["config"], spec.Params["spec"], p.Path)
+	run, why := rc.playwright(spec.Params["config"], spec.Params["spec"], p)
 	if why != "" {
 		return notExercised(why)
 	}
@@ -211,6 +222,11 @@ func runPlaywrightTest(rc *runCtx, spec RowSpec) Row {
 		row.Series, row.Interval, row.Loss = nil, nil, ""
 	default:
 		row.State, row.Outcome = StateExercised, OutcomePassed
+		// A row that EXERCISED the feature detection of a browser without the capability (stock Firefox has no JS Self-Profiling API): the
+		// harness ran and every assertion held, and the observed capability is unsupported. The reading carries the reason and no number.
+		if why := spec.Params["observed_unsupported"]; why != "" {
+			row.Readings = append(row.Readings, Reading{Name: "profile_samples", Unit: "samples", Availability: AvailUnsupported, Reason: why})
+		}
 	}
 	return row
 }

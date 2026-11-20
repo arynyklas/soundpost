@@ -16,7 +16,7 @@ import {basename,dirname,join,resolve} from "node:path";
 import {fileURLToPath,pathToFileURL} from "node:url";
 import {gzipSync} from "node:zlib";
 import crypto from "node:crypto";
-import {PROTOCOL,armOrder,compare,d54Row,mean,planPhases,runLoad,stdev,summary} from "./overhead-lib.mjs";
+import {PROTOCOL,armOrder,compare,d54Row,mean,planPhases,recorderBatchEnv,runLoad,stdev,summary} from "./overhead-lib.mjs";
 
 const here=fileURLToPath(import.meta.url),root=resolve(dirname(here),"../..");
 const args=process.argv.slice(2);
@@ -281,7 +281,7 @@ const fwd=p=>JSON.stringify(p.replaceAll("\\","/"));
 function recorderBatchRow(bunPathValue){
  const cli=join(root,"web/node_modules/@playwright/test/cli.js");
  if(!existsSync(cli))return {not_measured:"Playwright (web/node_modules/@playwright/test) is not installed in this checkout"};
- const r=spawnSync(process.execPath,[cli,"test","-c",join(root,"fixtures/sdk/replay/budget.config.ts"),"--reporter=json","mutation-batch.spec.ts"],{cwd:join(root,"web"),encoding:"utf8",timeout:600000,maxBuffer:64*1024*1024,env:{...process.env,SOUNDPOST_BUN:bunPathValue,NODE_PATH:join(root,"web/node_modules")}});
+ const r=spawnSync(process.execPath,[cli,"test","-c",join(root,"fixtures/sdk/replay/budget.config.ts"),"--reporter=json","mutation-batch.spec.ts"],{cwd:join(root,"web"),encoding:"utf8",timeout:600000,maxBuffer:64*1024*1024,env:recorderBatchEnv(process.env,bunPathValue,root)});
  return recorderBatchFromReport(r.stdout||"",r.status,(r.stderr||"").slice(-300));
 }
 /** Pure part of recorderBatchRow: report JSON text from `playwright test --reporter=json` -> the overhead row. The budget is compared here, never edited. */

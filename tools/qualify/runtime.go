@@ -35,6 +35,15 @@ type runCtx struct {
 	host      HostInfo
 	probes    map[string]*probeResult
 	cache     map[string]any
+	cleanups  []func() // run when the suite ends: state a runner left outside the work directory
+}
+
+// cleanup runs the registered cleanups, newest first.
+func (rc *runCtx) cleanup() {
+	for i := len(rc.cleanups) - 1; i >= 0; i-- {
+		rc.cleanups[i]()
+	}
+	rc.cleanups = nil
 }
 
 // probeResult is the outcome of looking for one build on this host.
@@ -53,8 +62,11 @@ var runners = map[string]runner{
 	"native_capability":           runNativeCapability,
 	"native_identity":             runNativeIdentity,
 	"native_gap":                  runNativeGap,
+	"native_hotplug":              runNativeHotplug,
+	"native_container":            runNativeContainer,
 	"native_controls":             runNativeControls,
 	"playwright_test":             runPlaywrightTest,
+	"web_e2e":                     runWebE2E,
 	"privacy_scanner_controls":    runPrivacyScannerControls,
 	"privacy_native":              runPrivacyNative,
 	"overhead_sdk_server":         runOverheadSDKServer,
@@ -65,6 +77,7 @@ var runners = map[string]runner{
 	"overhead_recorder_queue":     runOverheadRecorderQueue,
 	"sdk_critical_path":           runSDKCriticalPath,
 	"overhead_native":             runOverheadNative,
+	"overhead_single_host":        runOverheadSingleHost,
 }
 
 // subject is what the row claims to qualify, taken from its build or inline.

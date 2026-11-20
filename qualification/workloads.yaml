@@ -26,6 +26,12 @@ budgets:
     {limit: 3, unit: percent, source: "design 13 Native profiler: <=3% CPU overhead per profiled target workload"}
   native_memory_bytes:
     {limit: 67108864, unit: bytes, source: "design 13 Native profiler: bounded 64-MiB acquisition/export memory"}
+  single_host_ack_p95_ms:
+    {limit: 250, unit: ms, source: "design 13 Single-host: p95 durable ACK <250 ms (10 orgs, 100 projects, 100k active metric series, 2k mixed records/s for 1 hour)"}
+  single_host_rss_bytes:
+    {limit: 12884901888, unit: bytes, source: "design 13 Single-host: steady RSS <12 GiB"}
+  single_host_missing_acked_records:
+    {limit: 0, unit: records, source: "design 13 Single-host: no loss of ACKed records across process restart"}
 
 # Server SDK overhead: committed harness fixtures/sdk/overhead.mjs (03.09, measurement per D54): an open-loop load process at 1000 req/s
 # against a deterministic node:http handler. Every run is a fresh server process: a fixed warm-up (discarded for both arms) and then a

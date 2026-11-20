@@ -53,7 +53,7 @@ func main() {
 	mode := flag.String("mode", "", "python | gateway | browser | release | jobs | reducer | delivery")
 	pythons := flag.String("python", "", "label=venv,label=venv")
 	nodes := flag.String("nodes", "", "label=node,label=node (delivery mode: Linux Node binaries)")
-	node := flag.String("node", "", "Linux Node 22 (browser mode backend and Playwright)")
+	node := flag.String("node", "", "Linux Node (browser mode backend and Playwright; jobs mode: runs the Node job-attempt journey, bundled by --bun)")
 	winNode := flag.String("win-node", "", "Windows node.exe (release mode: owns the installed Vite)")
 	browsers := flag.String("browsers", "", "Target=executable,Target=executable (Chrome, Edge) for browser mode")
 	flag.StringVar(&e.binary, "binary", "", "linux soundpost binary")
@@ -87,7 +87,7 @@ func main() {
 	case "reducer":
 		rows = append(rows, e.reducer())
 	case "jobs":
-		rows = append(rows, e.jobs(*pythons)...)
+		rows = append(rows, e.jobs(*pythons, *node)...)
 	case "release":
 		rows = append(rows, e.release(*winNode, *node))
 	case "delivery":
@@ -309,6 +309,8 @@ func (e *env) browser(target, executable, node string) map[string]any {
 		estate.Must(err, "firefox policies")
 		estate.Must(os.WriteFile(filepath.Join(policyDir, "policies.json"), policies, 0o644), "firefox policies.json")
 		defer os.Remove(filepath.Join(policyDir, "policies.json"))
+		// The committed launcher (fixtures/sdk/firefox/firefox-bidi) is mode 100644; Playwright spawns it, so it must be executable.
+		estate.Must(os.Chmod(filepath.Join(e.root, "fixtures", "sdk", "firefox", "firefox-bidi"), 0o755), "firefox-bidi launcher executable")
 	}
 	dsn, removePG := e.postgres()
 	defer removePG()
@@ -399,6 +401,9 @@ func (e *env) browser(target, executable, node string) map[string]any {
 		"SOUNDPOST_FIXTURE_BROWSER_EXECUTABLE=" + executable, "SOUNDPOST_FIXTURE_BROWSER_SPKI=" + est.LeafSPKIPin(), "SOUNDPOST_FIXTURE_BROWSER_TARGET=" + target,
 		"SOUNDPOST_FIXTURE_BROWSER_URL=" + pageOrigin + "/index.html", "SOUNDPOST_FIXTURE_BACKEND_URL=" + ready.Origin, fmt.Sprintf("SOUNDPOST_FIXTURE_FOREIGN_URL=http://127.0.0.1:%d/foreign", foreignPort),
 		"SOUNDPOST_FIXTURE_BROWSER_CONFIG=" + browserConfig, "SOUNDPOST_FIXTURE_VERIFY=" + verifyURL, "SOUNDPOST_FIXTURE_READ_CREDENTIAL=" + est.Reader}
+	if e.bun != "" { // the stock-Firefox WebDriver-BiDi launcher (fixtures/sdk/firefox/firefox-bidi) runs under Bun
+		pw.Env = append(pw.Env, "SOUNDPOST_BUN="+e.bun)
+	}
 	var pwOut bytes.Buffer
 	pw.Stdout, pw.Stderr = &pwOut, &pwOut
 	pwErr := pw.Run()
@@ -472,9 +477,10 @@ func (e *env) release(winNode, linuxNode string) map[string]any {
 }
 
 // jobs is 03.06-W4: fixtures/sdk/jobs/python_attempts.py (explicit attempts plus a real Celery worker process on a kombu
-// filesystem broker, one venv per --python label=venv) and fixtures/sdk/jobs/bun-attempts.ts against a real product whose source
-// is signed for job_attempt, verified through the D8 verifier (the caller's own reader bearer on the product's export route).
-func (e *env) jobs(pythons string) []map[string]any {
+// filesystem broker, one venv per --python label=venv), fixtures/sdk/jobs/bun-attempts.ts (--bun) and fixtures/sdk/node/job-attempts.mjs
+// (--node, bundled by --bun, which then only bundles) against a real product whose source is signed for job_attempt, verified through
+// the D8 verifier (the caller's own reader bearer on the product's export route).
+func (e *env) jobs(pythons, node string) []map[string]any {
 	var rows []map[string]any
 	run := func(name string, build func(est *estate.Estate, cfgPath, verifyURL, jobID string) *exec.Cmd) map[string]any {
 		est := estate.New(estate.Options{Binary: e.binary, Work: filepath.Join(e.work, "jobs-"+name), Kinds: []model.Kind{model.SpanKind, model.ErrorKind, model.Loss, model.JobAttempt}, Name: "jobs-" + name})
@@ -511,9 +517,23 @@ func (e *env) jobs(pythons string) []map[string]any {
 		return []string{"PATH=" + os.Getenv("PATH"), "SOUNDPOST_FIXTURE_CONFIG=" + cfgPath, "SOUNDPOST_FIXTURE_INGEST=https://" + est.Addr + "/ingest/v1/batches", "SOUNDPOST_FIXTURE_VERIFY=" + verifyURL,
 			"SOUNDPOST_FIXTURE_READ_CREDENTIAL=" + est.Reader, "SOUNDPOST_FIXTURE_JOB_ID=" + jobID, "SOUNDPOST_FIXTURE_CA_FILE=" + est.CA, "NODE_EXTRA_CA_CERTS=" + est.CA, "SSL_CERT_FILE=" + est.CA, "PYTHONDONTWRITEBYTECODE=1"}
 	}
-	if e.bun != "" {
+	if e.bun != "" && node == "" {
 		rows = append(rows, run("fixtures/sdk/jobs/bun-attempts.ts", func(est *estate.Estate, cfgPath, verifyURL, jobID string) *exec.Cmd {
 			cmd := exec.Command(e.bun, filepath.Join(e.root, "fixtures/sdk/jobs/bun-attempts.ts"))
+			cmd.Env = baseEnv(est, cfgPath, verifyURL, jobID)
+			return cmd
+		}))
+	}
+	if node != "" {
+		if e.bun == "" {
+			estate.Fail("jobs mode with --node needs --bun: the Node SDK sources are TypeScript and the pinned Bun bundles them")
+		}
+		bundle := filepath.Join(e.work, "node-job-attempts.mjs")
+		if out, err := estate.RunOut(e.bun, "build", filepath.Join(e.root, "fixtures/sdk/node/job-attempts.mjs"), "--target=node", "--outfile", bundle); err != nil {
+			estate.Fail("bun build node job attempts: %v: %s", err, estate.Tail(out))
+		}
+		rows = append(rows, run("fixtures/sdk/node/job-attempts.mjs", func(est *estate.Estate, cfgPath, verifyURL, jobID string) *exec.Cmd {
+			cmd := exec.Command(node, bundle)
 			cmd.Env = baseEnv(est, cfgPath, verifyURL, jobID)
 			return cmd
 		}))

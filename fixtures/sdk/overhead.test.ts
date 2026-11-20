@@ -4,7 +4,7 @@
 // Run: bun test fixtures/sdk/overhead.test.ts
 import {describe,expect,test} from "bun:test";
 // @ts-ignore the library is plain ESM shared with the Node harness
-import {PROTOCOL,armOrder,compare,compareArms,conformance,counterDelta,d54Row,figures,latencyStats,mean,planPhases,quantile,runLoad,stdev,summary} from "./overhead-lib.mjs";
+import {PROTOCOL,armOrder,compare,compareArms,conformance,counterDelta,d54Row,figures,latencyStats,mean,planPhases,quantile,recorderBatchEnv,runLoad,stdev,summary} from "./overhead-lib.mjs";
 
 const BUDGET={p95_percent:5,cpu_percent:5};
 
@@ -209,5 +209,16 @@ describe("the D54 row", () => {
   expect(out.process_cpu_us_per_request.delta_percent).toBe(20);
   expect(out.verdict.process_cpu).toBe("exceeds_budget");
   expect(out.event_loop_active_us_per_request).toBeUndefined();
+ });
+});
+
+describe("recorder batch browser environment", () => {
+ test("an inherited SOUNDPOST_FIREFOX never turns the Chromium recorder row into a Firefox run", () => {
+  const env=recorderBatchEnv({PATH:"/bin",SOUNDPOST_FIREFOX:"/opt/firefox/firefox",SOUNDPOST_CHROME:"/opt/chrome/chrome"},"/opt/bun","/repo");
+  expect(env.SOUNDPOST_FIREFOX).toBe("");
+  expect(env.SOUNDPOST_CHROME).toBe("/opt/chrome/chrome");
+  expect(env.SOUNDPOST_BUN).toBe("/opt/bun");
+  expect(env.NODE_PATH).toMatch(/web[\\/]node_modules$/);
+  expect(env.PATH).toBe("/bin");
  });
 });

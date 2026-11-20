@@ -971,6 +971,7 @@ type wireReply struct {
 	Proof    *nativeperf.AcquisitionProof
 	Complete bool `json:"complete"`
 	// ProvenThrough is the event-clock instant the helper last proved the identity of the targets (identity errors only).
+	// The product encodes a MonoNano as a decimal string (model.Uint64), so this is not a plain uint64.
 	ProvenThrough model.MonoNano `json:"proven_through"`
 }
 
