@@ -435,7 +435,13 @@ func (e *Engine) EnableReplication(c replica.Config, seed *ReplicationSeed, auth
 	}
 	r := &replicatedEngine{}
 	out := make([]*replica.Group, 0, 64)
+	for _, m := range c.Members.Nodes {
+		if m.ID == c.ID {
+			e.self.Store(&selfRef{node: m.ID, identity: m.NodeIdentity}) // before any group can receive a snapshot
+		}
+	}
 	fail := func(err error) ([]*replica.Group, error) {
+		e.self.Store(nil)
 		for _, group := range out {
 			group.Close()
 		}

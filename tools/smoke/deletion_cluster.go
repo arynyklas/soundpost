@@ -446,6 +446,42 @@ func dcServedLatest(status int, raw []byte, want float64) bool {
 	return math.Float64frombits(uint64(*p.Value.Vector[0].Sample.Float)) == want
 }
 
+// dcServedWhat is the closed-vocabulary account of why an answer was not (or was) the complete
+// single sample wanted: it is the progress text of the polls that wait for such an answer, so a
+// timeout names what the last answer was (status, failure code, completeness, sample count, value).
+func dcServedWhat(status int, raw []byte) string {
+	what := "status_" + strconv.Itoa(status)
+	var result query.Result
+	if status != http.StatusOK || json.Unmarshal(raw, &result) != nil {
+		return what + "_code_" + dcFaultCode(raw)
+	}
+	what += "_projects_" + strconv.Itoa(len(result.Projects))
+	if len(result.Projects) != 1 {
+		return what
+	}
+	p := result.Projects[0]
+	if p.Failure != nil {
+		return what + "_project_failure"
+	}
+	what += "_completeness_" + safeToken(string(p.Completeness))
+	if p.Value == nil {
+		return what + "_no_value"
+	}
+	what += "_samples_" + strconv.Itoa(len(p.Value.Vector))
+	if len(p.Value.Vector) == 1 && p.Value.Vector[0].Sample.Float != nil {
+		what += "_value_" + strconv.FormatFloat(math.Float64frombits(uint64(*p.Value.Vector[0].Sample.Float)), 'f', -1, 64)
+	}
+	return what
+}
+
+// restoredSiblingTime is the evaluation time of the sibling query against the restored installation:
+// just after the sample the older backup holds (backupAt), never the wall clock and never the time of a
+// later ingest. The restored data ends at the backup, and an instant query sees a sample only when it is
+// younger than the engine's five minute lookback, so a time taken from the clock reads an empty vector
+// as soon as the run lasted longer than the lookback allows: a loaded default run did, after 253 s of
+// a 314 s run, and timed out at timeout_restored_sibling_data on a healthy restore.
+func (r *dcRun) restoredSiblingTime() string { return r.backupAt }
+
 // ---- the scenario ----
 
 type dcRun struct {
@@ -462,6 +498,7 @@ type dcRun struct {
 	auth           *dcAuthority
 	backup         dcBackupInfo // the older backup, taken before the deletion
 	backupSibling  float64      // the sibling's latest value when that backup was taken
+	backupAt       string       // the evaluation time of the sibling's query when that backup was taken: just after the sample it holds
 	authHead       backup.AuthorityHead
 	authTombstones int
 	fresh          dcFreshWatch // scans of the replacement's directory (replace mode)
@@ -678,7 +715,7 @@ func (r *dcRun) scenario(binary, release string) (result error) {
 				return false, "transport", nil
 			}
 			body = raw
-			return dcServedLatest(status, raw, dcBatches), "status_" + strconv.Itoa(status), nil
+			return dcServedLatest(status, raw, dcBatches), dcServedWhat(status, raw), nil
 		})
 		if err != nil {
 			return err
@@ -898,6 +935,26 @@ func (r *dcRun) scenario(binary, release string) (result error) {
 		return err
 	}
 	r.art.Evidence["live_scan_live_voters_before_lagging_voter_restart"] = liveDown
+	// Files without the canary are not yet journals cut onto the snapshot: a voter redacts its journal
+	// first and compacts it onto the verified cut in its own pass, and its receipt keeps naming
+	// `raft_journal` until it did (docs/privacy/retention.md, ResidualStores). One read straight after
+	// the files were clean found node 2 not yet cut (0 of 65) while node 1 was (64 of 65), 2.5 s after
+	// node 2's receipt still named raft_journal: wait for every live voter, bounded like every wait.
+	err = r.until("live_voters_cut_journals_past_lagging_voter", r.wait, dcPollInterval, func() (bool, string, error) {
+		journals := map[uint64]map[string]dcJournal{}
+		for _, id := range r.live {
+			jr, err := r.journals(id)
+			if err != nil {
+				return false, "", err
+			}
+			journals[id] = jr
+		}
+		waiting := dcNotCutPast(lagJournal, journals)
+		return len(waiting) == 0, "waiting_for_" + strings.Join(waiting, "_"), nil
+	})
+	if err != nil {
+		return err
+	}
 	cut := map[string]dcJournal{} // per journal, the lowest cut among the live voters that cut past the lagging voter
 	for _, id := range r.live {
 		jr, err := r.journals(id)

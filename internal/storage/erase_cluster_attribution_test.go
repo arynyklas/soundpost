@@ -234,6 +234,7 @@ func TestWithdrawalVoidsOnlyAcknowledgementsOfEarlierEpochs(t *testing.T) {
 // byte) names the data store until the voter re-acknowledges.
 func TestAnUnattributedEraseAckWrittenByThePreviousVersionDoesNotCount(t *testing.T) {
 	x := newCheckpointEnv(t)
+	x.v1declare(t)
 	e := x.e
 	ctx := context.Background()
 	x.appendMixed(eraseCanary, bothDeadlines)
@@ -289,8 +290,8 @@ func TestAnUnattributedEraseAckWrittenByThePreviousVersionDoesNotCount(t *testin
 	if err = e.db.View(func(tx *bolt.Tx) error {
 		value = bytes.Clone(tx.Bucket([]byte("replica_data")).Get(eraseAckKey(pred.Operation, 1, "single")))
 		return nil
-	}); err != nil || len(value) != 8 {
-		t.Fatalf("the re-acknowledgement did not replace the old key: %v %v", value, err)
+	}); err != nil || len(value) != 32 {
+		t.Fatalf("the re-acknowledgement did not replace the old key with an acknowledgement under the declared protocol (32 bytes): %v %v", value, err)
 	}
 	// And a restart does not turn it back into proof of anything else.
 	x.reopenDelete()
@@ -363,6 +364,7 @@ func (x *eraseEnv) eraseMarkAck(pred model.DeletePredicate) {
 // erase and an acknowledgement made after the install make the receipt clean again.
 func TestAnInstallClearsTheMarkerAndWithdrawsTheAcknowledgement(t *testing.T) {
 	x := newCheckpointEnv(t)
+	x.v1declare(t)
 	e := x.e
 	ctx := context.Background()
 	x.appendMixed(eraseCanary, bothDeadlines)
@@ -419,6 +421,7 @@ func TestAnInstallClearsTheMarkerAndWithdrawsTheAcknowledgement(t *testing.T) {
 // had not proposed yet when it stopped is proposed after the restart.
 func TestAWithdrawalOwedAtShutdownIsProposedAfterARestart(t *testing.T) {
 	x := newCheckpointEnv(t)
+	x.v1declare(t)
 	e := x.e
 	x.appendMixed(eraseCanary, bothDeadlines)
 	pred := x.rangePredicate(0, 10, model.Metric)
@@ -459,7 +462,7 @@ func TestAWithdrawalOwedAtShutdownIsProposedAfterARestart(t *testing.T) {
 	if err := e.db.View(func(tx *bolt.Tx) error {
 		value = bytes.Clone(tx.Bucket([]byte("replica_data")).Get(eraseAckKey(pred.Operation, 1, "single")))
 		return nil
-	}); err != nil || len(value) != 8 || binary.BigEndian.Uint64(value) < owed {
+	}); err != nil || len(value) != 32 || binary.BigEndian.Uint64(value[:8]) < owed {
 		t.Fatalf("the new acknowledgement does not carry an epoch at or above the withdrawal: %v %v", value, err)
 	}
 }
@@ -470,6 +473,7 @@ func TestAWithdrawalOwedAtShutdownIsProposedAfterARestart(t *testing.T) {
 // acknowledgement make the receipt clean.
 func TestAStandingAcknowledgementThatItsStoresNoLongerBackIsWithdrawn(t *testing.T) {
 	x := newCheckpointEnv(t)
+	x.v1declare(t)
 	e := x.e
 	ctx := context.Background()
 	x.appendMixed(eraseCanary, bothDeadlines)
@@ -520,6 +524,7 @@ func TestAStandingAcknowledgementThatItsStoresNoLongerBackIsWithdrawn(t *testing
 // install can put erased rows back after the erase read them.
 func TestMarkErasedRefusesAnErasureAnInstallInterrupted(t *testing.T) {
 	x := newCheckpointEnv(t)
+	x.v1declare(t)
 	e := x.e
 	ctx := context.Background()
 	x.appendMixed(eraseCanary, bothDeadlines)

@@ -134,6 +134,23 @@ func dcStranded(lagging, live map[string]dcJournal) []string {
 	return out
 }
 
+// dcNotCutPast names (as node_<id>, in node order) the live voters none of whose journals has a
+// snapshot cut past everything the lagging voter journaled: their journals are not compacted yet.
+func dcNotCutPast(lagging map[string]dcJournal, live map[uint64]map[string]dcJournal) []string {
+	ids := make([]uint64, 0, len(live))
+	for id := range live {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	var out []string
+	for _, id := range ids {
+		if len(dcStranded(lagging, live[id])) == 0 {
+			out = append(out, "node_"+dcKey(id))
+		}
+	}
+	return out
+}
+
 // dcInstalledPast names, of the stranded journals, those the lagging voter's own journal now
 // starts beyond the live node's cut: it moved past the gap, which only an installed snapshot can do.
 func dcInstalledPast(stranded []string, live, after map[string]dcJournal) []string {

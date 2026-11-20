@@ -21,7 +21,17 @@ type withdrawFixture struct {
 	credential auth.SourceCredential
 }
 
+// newWithdrawFixture is the fixture of three voters that declared the erase protocol and their
+// disks (every voter of a running cluster does; a receipt counts no acknowledgement otherwise).
 func newWithdrawFixture(t *testing.T) *withdrawFixture {
+	t.Helper()
+	f := newWithdrawFixtureUndeclared(t)
+	f.v.declareProtocol(t)
+	return f
+}
+
+// newWithdrawFixtureUndeclared is the same before any voter declared anything.
+func newWithdrawFixtureUndeclared(t *testing.T) *withdrawFixture {
 	t.Helper()
 	store, service, credential, descriptor := fixture(t)
 	f := &maintenanceFixture{t: t, store: store, service: service, descriptor: descriptor, acks: &ackLog{}}

@@ -53,8 +53,19 @@ func canaryBatch(t *testing.T, store *control.Store, a *auth.Service, c auth.Sou
 	return scope, n
 }
 
-// canaryVoters opens three voters led by node 1 and ACKs n canary batches.
+// canaryVoters opens three voters led by node 1 and ACKs n canary batches. The voters declared the
+// erase protocol and their disks, as every voter of a running cluster does (a receipt counts no
+// acknowledgement otherwise, see ErasureResidual).
 func canaryVoters(t *testing.T, n int) *maintenanceFixture {
+	t.Helper()
+	f := canaryVotersUndeclared(t, n)
+	f.v.declareProtocol(t)
+	return f
+}
+
+// canaryVotersUndeclared is canaryVoters before any voter declared the protocol (the state of a
+// cluster that has just started, or one with a member of an older release).
+func canaryVotersUndeclared(t *testing.T, n int) *maintenanceFixture {
 	t.Helper()
 	store, service, credential, descriptor := fixture(t)
 	f := &maintenanceFixture{t: t, store: store, service: service, descriptor: descriptor, acks: &ackLog{}}
@@ -251,6 +262,9 @@ func TestStoppedVoterKeepsTheResidueNamedUntilItCatchesUp(t *testing.T) {
 		t.Fatal("fixture invalid: node 3 lost the canary without erasing")
 	}
 	f.v.mesh.partition(3, false)
+	// The voter is repaired by snapshots the leaders announce (a notice committed in slot 0 before each
+	// leaves): the test mesh cannot forward a proposal, so the leaders stay where they are until it caught up.
+	f.v.converge(t, f.acks.perSlot())
 	f.voterErase(3, pred)
 	f.ackErasure(3)
 	for node := uint64(1); node <= 3; node++ {

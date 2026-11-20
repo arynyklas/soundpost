@@ -247,8 +247,12 @@ func TestASnapshotAnnouncedByAnAbandonedNoticeIsRefused(t *testing.T) {
 	if _, err := e.admitSnapshot(token(11)); err == nil {
 		t.Fatal("a second snapshot under an already settled notice was admitted after the voter stamped an acknowledgement")
 	}
-	if release, err := e.admitSnapshot(nil); err != nil || release == nil {
-		t.Fatalf("an unannounced snapshot (an older sender) must be admitted: %v", err)
+	// A snapshot with no token comes from a sender whose own view said the protocol was not declared
+	// by every member: this voter declared its disk, its acknowledgements count on every voter and
+	// nothing was committed before the install, so it is refused (10.35#12).
+	if release, err := e.admitSnapshot(nil); err == nil {
+		release()
+		t.Fatal("an unannounced snapshot was admitted by a voter that declared its disk")
 	}
 }
 
@@ -514,7 +518,7 @@ func TestAVoterThatErasedBeforeItAppliedTheTombstoneAndCaughtUpByLogAppendIsNotC
 // configuration declared the protocol: until then a snapshot leaves with no notice and an
 // acknowledgement is the previous shape (eight bytes); after it, the new shapes.
 func TestNothingNewIsProposedUntilEveryMemberDeclaredTheProtocol(t *testing.T) {
-	f := newWithdrawFixture(t)
+	f := newWithdrawFixtureUndeclared(t)
 	ctx := context.Background()
 	e1 := f.v.engines[1]
 	f.v.leadSlotZero(t, 1)

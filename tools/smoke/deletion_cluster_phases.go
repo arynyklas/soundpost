@@ -219,7 +219,7 @@ func (r *dcRun) checkSibling(label string, ids ...uint64) error {
 				return false, "transport", nil
 			}
 			body = raw
-			return dcServedLatest(status, raw, r.sib.last), "status_" + strconv.Itoa(status), nil
+			return dcServedLatest(status, raw, r.sib.last), dcServedWhat(status, raw), nil
 		})
 		if err != nil {
 			return err
@@ -428,14 +428,40 @@ func (r *dcRun) stopRestartVerify(started time.Time, who string, stranded []stri
 		if err = r.check("ingest_denied_after_restart_node_"+key, istatus >= 400 && istatus < 500, fmt.Sprintf("status %d code %s", istatus, dcFaultCode(iraw))); err != nil {
 			return err
 		}
+		// A restart may leave a receipt naming a store for a moment without anything being wrong: a voter
+		// whose control.db was replaced by an installed snapshot while the cluster went down owes one more
+		// scrub, and a restarted voter judges itself unproven until its first worker pass has attested again
+		// (control.Store.ClusterOperationResidual: its own record AND `settled`; docs/privacy/retention.md,
+		// the control stores' install interval). That is the conservative direction and the receipt must be
+		// clean once the pass ran, so it is waited for, bounded like every wait; what is never waited out is a
+		// receipt that is not complete and done. One run in 30 named control_state on node 1 0.9 s after
+		// the restart of all three nodes; the files of every stopped node had been scanned clean before.
 		op, err := r.poll(id)
 		if err != nil {
 			return r.wrap(err)
 		}
-		if err = r.check("receipt_still_clean_after_restart_node_"+key, op.Phase == model.DeletePhaseComplete && op.Physical == "done" && len(op.ResidualStores) == 0, fmt.Sprintf("phase %s physical %s residual %v", safeToken(op.Phase), safeToken(op.Physical), op.ResidualStores)); err != nil {
+		notClean := 0
+		err = r.until("receipt_clean_after_restart_node_"+key, r.wait, dcPollInterval, func() (bool, string, error) {
+			if notClean > 0 {
+				o, err := r.poll(id)
+				if err != nil {
+					return false, "", err
+				}
+				op = o
+			}
+			complete := op.Phase == model.DeletePhaseComplete && op.Physical == "done"
+			if complete && len(op.ResidualStores) != 0 {
+				notClean++
+			}
+			return !complete || len(op.ResidualStores) == 0, fmt.Sprintf("phase %s physical %s residual %v", safeToken(op.Phase), safeToken(op.Physical), op.ResidualStores), nil
+		})
+		if err != nil {
 			return err
 		}
-		denied[key] = map[string]any{"read_status": status, "read_code": dcFaultCode(raw), "ingest_status": istatus, "ingest_code": dcFaultCode(iraw)}
+		if err = r.check("receipt_still_clean_after_restart_node_"+key, op.Phase == model.DeletePhaseComplete && op.Physical == "done" && len(op.ResidualStores) == 0, fmt.Sprintf("phase %s physical %s residual %v after %d answer(s) that named a store", safeToken(op.Phase), safeToken(op.Physical), op.ResidualStores, notClean)); err != nil {
+			return err
+		}
+		denied[key] = map[string]any{"read_status": status, "read_code": dcFaultCode(raw), "ingest_status": istatus, "ingest_code": dcFaultCode(iraw), "receipt_answers_naming_a_store": notClean}
 	}
 	r.art.Evidence["denied_after_restart"] = denied
 	r.enter("dc_sibling_untouched_after_restart")
@@ -618,7 +644,7 @@ func (r *dcRun) backupWhileDown(lag uint64) error {
 		r.detail = dcSafeLine(err.Error())
 		return r.wrap(err)
 	}
-	r.backup, r.backupSibling = info, r.sib.last
+	r.backup, r.backupSibling, r.backupAt = info, r.sib.last, r.sib.queryTime
 	r.art.Evidence["backup_before_deletion"] = map[string]any{"backup_id": info.ID, "taken_through_voter": lag, "voters": info.Voters, "objects": info.Objects, "control_revision": info.ControlRevision,
 		"authority_sequence": info.AuthoritySequence, "authority_generation": info.AuthorityGeneration, "duration_ms": time.Since(started).Milliseconds(), "canary_ingested_before": true}
 	r.mark("older_backup_taken_ms")
@@ -903,7 +929,7 @@ func (r *dcRun) reconcileAndRead(site *installSite, token string) error {
 	}
 	denied["ingest_status"], denied["ingest_code"] = istatus, dcFaultCode(iraw)
 	r.art.Evidence["restored_installation_denial"] = denied
-	rfx.project = r.sib.project
+	rfx.project, rfx.queryTime = r.sib.project, r.restoredSiblingTime()
 	var body []byte
 	err = r.until("restored_sibling_data", 60*time.Second, time.Second, func() (bool, string, error) {
 		status, raw, err := queryExpr(readerSite, &rfx, r.sib.marker)
@@ -911,7 +937,7 @@ func (r *dcRun) reconcileAndRead(site *installSite, token string) error {
 			return false, "transport", nil
 		}
 		body = raw
-		return dcServedLatest(status, raw, r.backupSibling), "status_" + strconv.Itoa(status), nil
+		return dcServedLatest(status, raw, r.backupSibling), dcServedWhat(status, raw), nil
 	})
 	if err != nil {
 		return err

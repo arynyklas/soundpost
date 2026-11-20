@@ -16,7 +16,7 @@ import (
 // release before the bounded-state rules) does not hold the erase entries back, and holds the control
 // rules back until it declares the newer version too.
 func TestControlBoundsWaitForEveryMemberToDeclareTheirProtocol(t *testing.T) {
-	f := newWithdrawFixture(t)
+	f := newWithdrawFixtureUndeclared(t)
 	ctx := context.Background()
 	declared := func(node uint64) uint64 {
 		var got uint64

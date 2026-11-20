@@ -14,7 +14,7 @@ import (
 // its own declaration, protocol 4: a member that declared only the bounded-state protocol (the
 // release before this one) holds the delta back while it does not hold the bounded rules back.
 func TestControlAuditDeltaWaitsForEveryMemberToDeclareProtocolFour(t *testing.T) {
-	f := newWithdrawFixture(t)
+	f := newWithdrawFixtureUndeclared(t)
 	ctx := context.Background()
 	for node := uint64(1); node <= 3; node++ {
 		if f.v.engines[node].ControlAuditDeltaReady() {

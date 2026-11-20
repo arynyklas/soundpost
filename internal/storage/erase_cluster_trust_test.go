@@ -103,6 +103,7 @@ func TestLaggingVoterThatMarkedBeforeItsCatchUpLeavesNoLiveCanaryBehindACleanRec
 	store, service, credential, descriptor := fixture(t)
 	f := &maintenanceFixture{t: t, store: store, service: service, descriptor: descriptor, acks: &ackLog{}}
 	f.v = openVotersWith(t, service, acceptBarriers{store})
+	f.v.declareProtocol(t)
 	f.v.lead(t, func(int) uint64 { return 1 })
 	f.v.mesh.partition(3, true) // voter 3 applies nothing from here on
 	var batches []model.NormalizedBatch

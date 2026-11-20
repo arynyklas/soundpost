@@ -3,6 +3,7 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/binary"
@@ -43,7 +44,13 @@ func (e *Engine) ensureIncarnation() error {
 }
 
 // Incarnation is the id of this voter's disk (see ensureIncarnation).
-func (e *Engine) Incarnation() string { return e.incarnation }
+func (e *Engine) Incarnation() string { return e.disk() }
+
+func (e *Engine) disk() string {
+	e.incMu.RLock()
+	defer e.incMu.RUnlock()
+	return e.incarnation
+}
 
 // protocolReady reports whether every member of the committed configuration of the slot-0 group has
 // declared the erase protocol this binary speaks, so the entries an older binary cannot decode may
@@ -150,11 +157,11 @@ func (e *Engine) declareErasure(ctx context.Context) error {
 	}); err != nil {
 		return unavailableDB(err)
 	}
-	if current == e.incarnation {
+	if current == e.disk() {
 		return nil
 	}
 	return e.proposeSlotZero(ctx, func(cursor model.Cursor) walEntry {
-		return walEntry{Type: "erase_unack", EraseUnack: &eraseUnack{Node: model.Uint64(node), Identity: identity, Epoch: model.Uint64(epoch), Incarnation: e.incarnation, Cursor: cursor}}
+		return walEntry{Type: "erase_unack", EraseUnack: &eraseUnack{Node: model.Uint64(node), Identity: identity, Epoch: model.Uint64(epoch), Incarnation: e.disk(), Cursor: cursor}}
 	})
 }
 
@@ -270,11 +277,65 @@ func (e *Engine) beforeSnapshotSend(ctx context.Context, to uint64) ([]byte, err
 	return token, nil
 }
 
+// selfRef names this voter's own member in the configuration it was enabled with.
+type selfRef struct {
+	node     uint64
+	identity string
+}
+
+// diskDeclared reports whether this voter holds acknowledgements that stand on every voter: the
+// replicated state lists an incarnation for its own member (its node id and identity from
+// EnableReplication), whichever disk that incarnation was. A replaced disk is not the declared one
+// until it declares itself, but the acknowledgements its predecessor made still count on every
+// voter until then, so it is held to the same rule. A member with nothing recorded (a fresh
+// learner, a new member) holds none and is repairable by any snapshot. It reads local state only
+// and takes no group lock, because it runs while the group that receives a snapshot holds its own.
+func (e *Engine) diskDeclared() bool {
+	incarnation := e.disk()
+	self := e.self.Load()
+	if incarnation == "" && self == nil {
+		return false
+	}
+	declared := false
+	if err := e.db.View(func(tx *bolt.Tx) error {
+		meta := tx.Bucket([]byte("replica_data"))
+		if self != nil && len(meta.Get(eraseIncKey(self.node, self.identity))) != 0 {
+			declared = true
+			return nil
+		}
+		if incarnation == "" {
+			return nil
+		}
+		prefix := metaKey(eraseAckSlot, "erase-inc:")
+		c := meta.Cursor()
+		for k, v := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = c.Next() {
+			if string(v) == incarnation {
+				declared = true
+				return nil
+			}
+		}
+		return nil
+	}); err != nil {
+		return true // cannot tell: refuse, the sender sends again
+	}
+	return declared
+}
+
 // admitSnapshot is replica.SnapshotGate on the receiver: it refuses a snapshot announced by a
 // notice this voter already gave up or acknowledged past, and otherwise marks a step in progress
 // until release, after which the notice is settled.
+//
+// A snapshot that carries no token (a gated sender whose own view said the protocol was not
+// declared by every member yet, so it committed no notice) is refused by a voter that declared its
+// disk: its acknowledgements made under that declaration count on every voter, and nothing was
+// committed before this install that could void them (10.35#12). The sender sends again, with a
+// token once its view caught up. A voter with nothing recorded for its own member (a fresh or new
+// member) holds no acknowledgement a receipt can count and admits it.
 func (e *Engine) admitSnapshot(token []byte) (func(), error) {
 	if len(token) == 0 {
+		if e.diskDeclared() {
+			return nil, model.Fail(model.Unavailable)
+		}
 		return func() {}, nil
 	}
 	if len(token) != 8 {

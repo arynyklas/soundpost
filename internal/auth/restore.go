@@ -494,16 +494,25 @@ func (s *Service) InstanceScope(ctx context.Context, c Credential, reason string
 	at := s.now()
 	out := Scope{service: s, credential: c, action: InstanceAdmin, lease: &scopeLease{}, expiresAt: at.Add(15 * time.Minute)}
 	audit := model.ControlAudit{ID: model.NewID(), Principal: c.user, Action: "instance.scope", Reason: reason, Time: at.UnixNano(), RequestID: model.RequestCorrelationID(ctx, model.ID{}), Outcome: model.AuditAllowed}
-	err := s.store.Update(ctx, func(st *model.ControlState) error {
-		if err := s.validateCredentialState(*st, c); err != nil {
-			return err
-		}
-		if !st.Users[c.user.String()].Admin {
-			return model.Fail(model.Forbidden)
-		}
-		st.Audits = append(st.Audits, audit)
-		return nil
-	})
+	// The scope is granted by one control write. A write that lost the race for its index to another
+	// control commit answers the typed retryable stale, which Login waits out (retryStale): a one-shot
+	// caller such as `soundpost backup create` has nobody to repeat it, so the scope waits the same
+	// bounded way. A refused attempt committed nothing and the audit entry is built once, so the
+	// retry records the grant once.
+	wait, cancel := context.WithTimeout(ctx, loginStaleBudget)
+	defer cancel()
+	err := retryStale(wait, func() error {
+		return s.store.Update(wait, func(st *model.ControlState) error {
+			if err := s.validateCredentialState(*st, c); err != nil {
+				return err
+			}
+			if !st.Users[c.user.String()].Admin {
+				return model.Fail(model.Forbidden)
+			}
+			st.Audits = append(st.Audits, audit)
+			return nil
+		})
+	}, s.admitStaleWaiter)
 	if err != nil {
 		return Scope{}, err
 	}

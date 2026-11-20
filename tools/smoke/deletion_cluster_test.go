@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -216,6 +217,55 @@ func TestDeletionClusterReceiptAndDenialClassifiers(t *testing.T) {
 	}
 	if dcServedLatest(404, []byte(`{}`), 6) || dcServedLatest(200, []byte(`{"projects":[]}`), 6) {
 		t.Fatal("not a served answer")
+	}
+}
+
+// The restored sibling is read as of the older backup, not at a time taken from the clock: the restored
+// data ends at the backup and an instant query sees a sample only inside the five minute lookback, so a
+// clock-relative time reads an empty vector in a default run that lasted past it (a loaded run did:
+// timeout_restored_sibling_data on a healthy restore). A later ingest moving the live query time does not
+// move it either.
+func TestRestoredSiblingIsReadAsOfTheBackupNotTheClock(t *testing.T) {
+	sample := time.Unix(1_800_000_000, 0)
+	r := &dcRun{}
+	r.sib.queryTime = strconv.FormatInt(sample.Add(time.Minute).UnixNano(), 10)
+	r.backupAt = r.sib.queryTime
+	r.sib.queryTime = strconv.FormatInt(sample.Add(250*time.Second).UnixNano(), 10)
+	at, err := strconv.ParseInt(r.restoredSiblingTime(), 10, 64)
+	if err != nil {
+		t.Fatalf("the restored sibling query time is not an instant: %v", err)
+	}
+	if age := time.Duration(at - sample.UnixNano()); age <= 0 || age >= 5*time.Minute {
+		t.Fatalf("the restored sibling is read %v after its sample: outside (0, 5m), the lookback of the engine", age)
+	}
+}
+
+// A poll that waits for a served sample names what the last answer was, not just the status.
+func TestDeletionClusterServedWhatNamesTheLastAnswer(t *testing.T) {
+	empty := []byte(`{"projects":[{"completeness":"complete","value":{"type":"vector","vector":[]}}]}`)
+	if got := dcServedWhat(200, empty); got != "status_200_projects_1_completeness_complete_samples_0" {
+		t.Errorf("an empty vector: %q", got)
+	}
+	if got := dcServedWhat(503, []byte(`{"code":"unavailable"}`)); got != "status_503_code_unavailable" {
+		t.Errorf("a refusal: %q", got)
+	}
+	if got := dcServedWhat(200, []byte(`{"projects":[{"failure":{"code":"not_found"}}]}`)); got != "status_200_projects_1_project_failure" {
+		t.Errorf("a project failure: %q", got)
+	}
+}
+
+// A live voter whose journals are not compacted past the lagging voter yet is named, so the smoke waits
+// for it instead of judging one read taken right after its files were clean (node 2: 0 of 65 while node 1
+// had 64 of 65).
+func TestDeletionClusterNotCutPastNamesTheVotersStillToCompact(t *testing.T) {
+	lagging := map[string]dcJournal{"raft/data/slot-1/ready.wal": {Snapshot: 4, Last: 5}, "raft/control/ready.wal": {Snapshot: 14, Last: 45}}
+	cut := map[string]dcJournal{"raft/data/slot-1/ready.wal": {Snapshot: 9, Last: 12}, "raft/control/ready.wal": {Snapshot: 50, Last: 52}}
+	uncut := map[string]dcJournal{"raft/data/slot-1/ready.wal": {Snapshot: 4, Last: 12}, "raft/control/ready.wal": {Snapshot: 14, Last: 52}}
+	if got := dcNotCutPast(lagging, map[uint64]map[string]dcJournal{1: cut, 2: uncut}); !slices.Equal(got, []string{"node_2"}) {
+		t.Fatalf("one voter still to compact: %v", got)
+	}
+	if got := dcNotCutPast(lagging, map[uint64]map[string]dcJournal{1: cut, 2: cut}); len(got) != 0 {
+		t.Fatalf("both compacted: %v", got)
 	}
 }
 

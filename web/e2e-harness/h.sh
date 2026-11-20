@@ -170,11 +170,29 @@ trust_files() {
 	fi
 }
 
+# firefox_fonts: Firefox's content-process sandbox reads fonts only from the SYSTEM font directories and $XDG_DATA_HOME/fonts. A host whose fonts live anywhere
+# else (a user-space extraction, no root, no /usr/share/fonts) leaves the sandboxed process with none: the first text shaping of a page then takes ~9 s
+# (measured on sp-w1: native profile view 9084 ms against 69 ms) and the 5 s expectations of accessibility.spec.ts and replay-profile.spec.ts fail while the
+# same specs pass headed. HOST REQUIREMENT (docs/user/investigation-acceptance.md): a font directory with at least one .ttf/.otf/.pfb/.pcf file, named by
+# E2E_FONT_DIR (default /usr/share/fonts). The harness copies it to $PKI/xdg/fonts and points XDG_DATA_HOME there, so the fonts Firefox sees are the same on
+# every host; a host without any font is refused here instead of failing later as a timeout.
+firefox_fonts() {
+	src=${E2E_FONT_DIR:-/usr/share/fonts}
+	if [ -z "$(find -L "$src" -type f \( -name '*.ttf' -o -name '*.otf' -o -name '*.pfb' -o -name '*.pcf*' \) 2>/dev/null | head -1)" ]; then
+		echo "firefox needs a font directory: E2E_FONT_DIR (default /usr/share/fonts) '$src' holds no font file" >&2
+		exit 1
+	fi
+	rm -rf "$PKI/xdg"; mkdir -p "$PKI/xdg/fonts"
+	cp -RL "$src"/. "$PKI/xdg/fonts/"
+	export XDG_DATA_HOME=$PKI/xdg
+}
+
 pw_env() {
 	export NODE_EXTRA_CA_CERTS=$PKI/ca.pem SOUNDPOST_TEST_ORIGIN=$ORIGIN SOUNDPOST_SCOPE_EMAIL=e2e-owner@example.test SOUNDPOST_SCOPE_PASSWORD='e2e instance owner password 2026'
 	export E2E_FAULT_DIR=$T/fault E2E_SPKI=$(cat "$PKI/spki.txt") CHROME E2E_SERVER_LOG=$T/server.log E2E_DATA_DIR=$DATA E2E_BIN=$BIN E2E_ORIGIN_PORT=$PORT E2E_PKI=$PKI E2E_NATIVE_PROFILE=$T/native-profile.json E2E_OUT_DIR=${E2E_OUT_DIR:-$OUT/test-results} E2E_EVIDENCE_DIR=${E2E_EVIDENCE_DIR:-$OUT/evidence}
 	[ -f "$T/provision.env" ] && . "$T/provision.env"
 	trust_files
+	[ "${E2E_BROWSER:-chromium}" = firefox ] && firefox_fonts
 	"$@"
 }
 exec_pw() { ( cd "$ROOT/web" && exec sh "$ROOT/web/e2e-harness/in-trust-ns.sh" node node_modules/@playwright/test/cli.js test "$@" ); }

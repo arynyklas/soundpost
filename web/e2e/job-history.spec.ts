@@ -16,7 +16,8 @@ import {createOrg,createProject,createReader,field,id,ingestJobAttempt,listJobDe
 // The test waits (polls the real /api/v1/jobs/view) until the runner has applied every ingested event; nothing writes a job book but the runner.
 //
 // The external schedule observer speaks through its own route (POST /api/v1/jobs/schedule-evidence) and corrections through
-// POST /api/v1/jobs/correct; one test drives both. One test drives the job API of the real Python SDK (web/e2e/support/sdk_job_retry.py).
+// POST /api/v1/jobs/correct; one test drives both. Four tests drive the job API of the real SDKs: Python twice (web/e2e/support/sdk_job_retry.py and
+// sdk_job_interrupted.py) and, through client.withJobAttempt of packages/core/src/jobs.ts, the real Node and Bun adapters (web/e2e/support/sdk_job_js.ts).
 // The schedule definitions come from the product's own catalogue (POST /api/v1/jobs/definitions, authored by a policy.write member); the
 // runner's observer stage feeds them to the reducer, so one test checks the definition text and a Missed verdict derived from the journal.
 // A local time that does not exist (skipped by DST) is driven through the observer feed with an observation made on that very day (the reducer
@@ -446,6 +447,43 @@ test('a run produced by the real Python SDK job API (first attempt raises, the r
  await expect(page.getByTestId('run-dedup')).toContainText('4 events accepted');
  await expect(page.getByTestId('cause-links')).toContainText(sdk.error);
 });
+
+for(const runtime of ['node','bun'] as const){
+ test(`a run produced by the real ${runtime==='node'?'Node':'Bun'} SDK job API (client.withJobAttempt: first attempt throws, the retry succeeds) reads as recovered with its captured error as the cause`,async()=>{
+  // The TypeScript twin of the Python test above (packages/core/src/jobs.ts through the ${runtime} adapter): the SDK reads its own clock, allocates its own
+  // IDs, epoch and sequence, captures the thrown error and delivers over its own HTTPS transport; the test only waits for durable receipts (the driver
+  // exits non-zero without them) and then reads the product's own views.
+  const sdkSource=await onboardSdkJobSource(owners,org,p1);
+  const job=id();
+  const dir=mkdtempSync(join(tmpdir(),`sp-sdk-job-${runtime}-`));
+  const config=join(dir,'sdk.json');
+  writeFileSync(config,JSON.stringify(sdkConfig(sdkSource)),{mode:0o600});
+  const driver=resolve(process.cwd(),'e2e/support/sdk_job_js.ts');
+  const command=runtime==='node'?[process.env.E2E_NODE??'node',['--experimental-transform-types','--no-warnings',driver,'node']] as const:[process.env.E2E_BUN??'bun',[driver,'bun']] as const;
+  const {stdout}=await promisify(execFile)(command[0],[...command[1]],{env:{...process.env,SOUNDPOST_SDK_CONFIG:config,SOUNDPOST_SDK_JOB:job},timeout:90_000});
+  const sdk=JSON.parse(stdout.trim().split('\n').pop()??'{}') as {run:string;failed_attempt:string;retry_attempt:string;error:string;events:number};
+  expect(sdk.events).toBe(4);
+  await applied(job,{[sdk.run]:4});
+
+  const page=await rctx.newPage();
+  await open(page);
+  await expect(row(page,job)).toContainText('Succeeded');
+  await openJob(page,job);
+  await expect(page.getByTestId('job-health')).toContainText('Current job health: Succeeded');
+  await expect(run(page,sdk.run)).toContainText('Run recovery: Recovered after retry');
+  await expect(run(page,sdk.run)).toContainText('1 failed of 2 attempts');
+  await run(page,sdk.run).getByRole('button',{name:`Open run ${sdk.run}`}).click();
+  const attempts=page.locator('[data-testid=attempt-row]');
+  await expect(attempts).toHaveCount(2);
+  await expect(attempts.nth(0)).toHaveAttribute('data-attempt',sdk.failed_attempt);
+  await expect(attempts.nth(0)).toHaveAttribute('data-state','failed');
+  await expect(attempts.nth(1)).toHaveAttribute('data-attempt',sdk.retry_attempt);
+  await expect(attempts.nth(1)).toHaveAttribute('data-state','succeeded');
+  await expect(page.getByTestId('run-dedup')).toContainText('2 distinct attempts counted');
+  await expect(page.getByTestId('run-dedup')).toContainText('4 events accepted');
+  await expect(page.getByTestId('cause-links')).toContainText(sdk.error);
+ });
+}
 
 test('an exporter interrupted mid-run (the first attempt fails and the process dies with nothing delivered) leaves no trace, then the retry process recovers the spool and the run reads as recovered with no attempt left started',async()=>{
  // The real Python SDK in two processes sharing one encrypted spool. The path to the product is a real TCP relay that refuses every connection while the

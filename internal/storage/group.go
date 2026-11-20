@@ -42,7 +42,9 @@ type Engine struct {
 	db           *trackedDB
 	dir          string
 	identity     model.ID
-	incarnation  string // hex; the random id of this disk's data directory (ensureIncarnation)
+	incarnation  string // hex; the random id of this disk's data directory (ensureIncarnation); read through disk()
+	incMu        sync.RWMutex
+	self         atomic.Pointer[selfRef] // this voter's own member, recorded by EnableReplication
 	files        [64]*os.File
 	indexes      [64]uint64
 	validator    Revalidator

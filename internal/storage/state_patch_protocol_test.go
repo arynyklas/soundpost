@@ -18,7 +18,7 @@ import (
 // gate stays closed for it, where a gate that read only the slot-0 configuration opened and let an
 // old voter stop on a command it cannot decode.
 func TestControlStatePatchGateReadsTheControlGroupsOwnMembers(t *testing.T) {
-	f := newWithdrawFixture(t)
+	f := newWithdrawFixtureUndeclared(t)
 	ctx := context.Background()
 	for node := uint64(1); node <= 3; node++ {
 		f.v.leadSlotZero(t, node)

@@ -789,7 +789,7 @@ func (e *Engine) AckErasure(ctx context.Context) error {
 	return e.proposeSlotZero(ctx, func(cursor model.Cursor) walEntry {
 		ack := &eraseAck{Node: model.Uint64(node), Identity: identity, Operations: owed, Epoch: model.Uint64(epoch), Cursor: cursor}
 		if ready {
-			ack.Basis, ack.Incarnation = model.Uint64(basis), e.incarnation
+			ack.Basis, ack.Incarnation = model.Uint64(basis), e.disk()
 		}
 		return walEntry{Type: "erase_ack", EraseAck: ack}
 	})
@@ -810,6 +810,16 @@ func (e *Engine) AckErasure(ctx context.Context) error {
 // answer is decided from local state alone and costs nothing; only a would-be clean one pays the
 // read, so a receipt poll on a healthy group adds one quorum round. A configuration that cannot be
 // read is reported as owed.
+//
+// The window between a snapshot install on one voter and the commit of that voter's withdrawal is
+// closed (10.35#12): the install is local and not in the log, so a receipt may count an
+// acknowledgement only if everything that could install under it was ordered before the install.
+// That holds for an acknowledgement made under the protocol (the sender's notice precedes the
+// snapshot, and a voter that declared its disk refuses a snapshot with no notice,
+// admitSnapshot), not for the first protocol's acknowledgement (no notice voids it, and its
+// sender states nothing). A receipt therefore counts an acknowledgement only when every member of
+// the committed configuration declared the protocol and every acknowledgement carries the disk
+// its voter declared. Until then it is dirty, however many voters acknowledged.
 func (e *Engine) ErasureResidual(op model.ID) []string {
 	if !e.ErasedLocally(op) {
 		return []string{ResidualApplyDB}
@@ -826,7 +836,8 @@ func (e *Engine) ErasureResidual(op model.ID) []string {
 }
 
 // acknowledgedByEveryMember reports, from this voter's applied state, that every member of the
-// slot-0 group's committed configuration holds an acknowledgement of op that stands.
+// slot-0 group's committed configuration declared the erase protocol and holds an acknowledgement
+// of op that stands under the disk it declared.
 func (e *Engine) acknowledgedByEveryMember(op model.ID) bool {
 	members := e.repl.groups[eraseAckSlot].Status().Members.Nodes
 	if len(members) == 0 {
@@ -836,7 +847,7 @@ func (e *Engine) acknowledgedByEveryMember(op model.ID) bool {
 	if err := e.db.View(func(tx *bolt.Tx) error {
 		meta := tx.Bucket([]byte("replica_data"))
 		for _, m := range members {
-			if !ackStands(meta, op, m.ID, m.NodeIdentity) {
+			if capabilityOf(meta, m.ID, m.NodeIdentity) < eraseProtocol || len(meta.Get(eraseIncKey(m.ID, m.NodeIdentity))) == 0 || !ackStands(meta, op, m.ID, m.NodeIdentity) {
 				all = false
 			}
 		}
