@@ -20,11 +20,11 @@ import (
 	"github.com/arynyklas/soundpost/internal/model"
 )
 
-//go:embed session recovery
+//go:embed session recovery append
 var files embed.FS
 
 // Names lists the recorded scenarios.
-var Names = []string{"session", "recovery"}
+var Names = []string{"session", "recovery", "append"}
 
 // Scenario is one recorded replay: Wire[i] is the exact JSON the recorder emitted
 // as chunk i+1. Delivered[i] is false for a chunk the recorder's sink refused, so

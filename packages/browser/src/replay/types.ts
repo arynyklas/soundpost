@@ -45,6 +45,8 @@ export interface DomAccessors {
  nodeType(node: object): number;
  firstChild(node: object): object | null;
  nextSibling(node: object): object | null;
+ lastChild(node: object): object | null;
+ previousSibling(node: object): object | null;
  parentNode(node: object): object | null;
  localName(element: object): string;
  /** Open shadow root or null. Closed roots are invisible to page script and become opaque only when closedShadow reports them. */
@@ -55,6 +57,11 @@ export interface DomAccessors {
  release?(): void;
  editable(element: object): boolean;
  mutationTarget(record: object): object | null;
+ /**
+  * What a child-list record added and removed (snapshots, in order), or null for any other record (attributes, character data) and for a
+  * record the platform cannot describe within the recorder's bound: such a record only names its target, which is then re-read whole.
+  */
+ childListChange(record: object): { readonly added: readonly object[]; readonly removed: readonly object[] } | null;
  eventTarget(event: object): object | null;
  clientX(event: object): number;
  clientY(event: object): number;

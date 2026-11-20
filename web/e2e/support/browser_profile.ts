@@ -50,18 +50,21 @@ export async function profileApp(documentPolicy:string|undefined='js-profiling')
  return {origin:`https://127.0.0.1:${port}`,close:()=>new Promise<void>((ok)=>{server.close(()=>ok());server.closeAllConnections();})};
 }
 
-/** A BROWSER source for profile records whose CORS allow-list is exactly `appOrigin`; returns what the SDK is configured from (the public part of the onboarding). */
-export async function onboardBrowserProfileSource(page:Page,org:string,project:string,appOrigin:string):Promise<Record<string,unknown>>{
+/**
+ * A BROWSER source for profile records whose CORS allow-list is exactly `appOrigin`; returns what the SDK is configured from (the public part of the onboarding).
+ * `longTasks` also admits spans of the operation `long_task` (the only operation the source's signed policy lists), which is how a page delivers Long Tasks.
+ */
+export async function onboardBrowserProfileSource(page:Page,org:string,project:string,appOrigin:string,longTasks=false):Promise<Record<string,unknown>>{
  const source=id(),service=id(),environment=id(),build=id(),instance='browser-instance';
- const kinds=['profile_chunk','capability','loss'];
- const policy={revision:'1',enabled:true,class:'structured',kinds,templates:[],resources:{service_id:[service],environment_id:[environment],build_id:[build],instance_pseudonym:[instance]},labels:{},operations:[],dependencies:[],codes:[],retention_days:{profile_chunk:7,capability:30,loss:30},max_bytes:'1073741824',max_series:'1000',replay:false,expires_ns:'0'};
+ const kinds=longTasks?['profile_chunk','capability','loss','span']:['profile_chunk','capability','loss'],operations=longTasks?['long_task']:[];
+ const policy={revision:'1',enabled:true,class:'structured',kinds,templates:[],resources:{service_id:[service],environment_id:[environment],build_id:[build],instance_pseudonym:[instance]},labels:{},operations,dependencies:[],codes:operations,retention_days:{profile_chunk:7,capability:30,loss:30,...(longTasks?{span:14}:{})},max_bytes:'1073741824',max_series:'1000',replay:false,expires_ns:'0'};
  const r=await postJson(page,'/api/v1/sources',{command_id:id(),org,project,source,browser:true,origins:[appOrigin],expires_ns:(BigInt(Date.now())*1_000_000n+24n*3600n*SECOND).toString(),policy,reason:'Browser profiler capability e2e'});
  const credential=field(r.json,'credential'),descriptor=field(r.json,'descriptor');
  if(r.status!==200||typeof credential!=='string')throw Error(`browser profile source onboarding: HTTP ${r.status} ${r.text}`);
  return {org,project,source,credential,build,endpoint:`${origin()}/ingest/v1/batches`,policy:field(r.json,'policy'),trusted_keys:field(r.json,'trusted_keys'),descriptor,resource:{service_id:service,environment_id:environment,build_id:build,instance_pseudonym:instance,labels:[]}};
 }
 
-interface PageApi{run(config:unknown,workMs:number):Promise<ProfileOutcome>}
+interface PageApi{run(config:unknown,workMs:number,longTasks:boolean):Promise<ProfileOutcome>}
 async function deliveryOf(response:Response):Promise<Delivery|undefined>{
  const request=response.request();
  if(request.method()!=='POST'||!new URL(request.url()).pathname.endsWith('/ingest/v1/batches'))return undefined;
@@ -76,14 +79,14 @@ async function deliveryOf(response:Response):Promise<Delivery|undefined>{
  * what the browser actually sent to the ingest route (`deliveries`, each with the status the real server answered). `requestOrigins` is the origin of
  * every request the page made, so a caller can assert that the page only talked to its own origin and the real server.
  */
-export async function runProfile(page:Page,app:ProfileApp,config:Record<string,unknown>,workMs=800):Promise<ProfileRun>{
+export async function runProfile(page:Page,app:ProfileApp,config:Record<string,unknown>,workMs=800,longTasks=false):Promise<ProfileRun>{
  const pending:Promise<Delivery|undefined>[]=[];
  const requestOrigins:string[]=[];
  page.on('request',(request)=>{requestOrigins.push(new URL(request.url()).origin);});
  page.on('response',(response)=>{pending.push(deliveryOf(response));});
  await page.goto(`${app.origin}/`);
  await page.waitForFunction(()=>Reflect.get(window,'__ready')===true);
- const outcome=await page.evaluate(({c,ms})=>{const api:PageApi=Reflect.get(window,'__soundpostProfile');return api.run(c,ms);},{c:config,ms:workMs});
+ const outcome=await page.evaluate(({c,ms,lt})=>{const api:PageApi=Reflect.get(window,'__soundpostProfile');return api.run(c,ms,lt);},{c:config,ms:workMs,lt:longTasks});
  const deliveries=(await Promise.all(pending)).filter((d):d is Delivery=>d!==undefined);
  return {outcome,deliveries,requestOrigins:[...new Set(requestOrigins)]};
 }

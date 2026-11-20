@@ -5,14 +5,32 @@
 // carry the same clock domain. A refused or failed run is the capability truth record alone: never a chunk, never samples.
 //
 // Everything on the wire already exists in the report (code identities: origin-relative script path, a conservative-regex function name or
-// `external`; relative sample offsets; counts). Line and column are NOT sent (the closed server frame has no such field) and long-task
-// entries are not sent (they are metrics, not profile samples). Nothing here reads a URL, an argument or a local.
+// `external`; relative sample offsets; counts). Line and column are NOT sent (the closed server frame has no such field). Long Tasks are not profile
+// samples: they are delivered as spans (profile.ts), with a capability record of their own (longTaskCapability). Nothing here reads a URL, an argument or a local.
 import type {CapabilityInput, ProfileInput} from "@soundpost/core/types";
 import type {ProfileReport} from "./profile.ts";
 
 /** Payload budget per chunk. The queue refuses a record over 262,144 bytes (resource included) and a batch over 1 MiB, so a larger profile is split. */
 const CHUNK_BYTES = 180_000;
 const THREADS: Readonly<Record<string, string>> = {main: "1", worker: "2"};
+
+/**
+ * The capability record of a run's Long Task observation (signal `span`, method `long_task`): what the observation could do on this page, in the profile run's own identity and clock domain.
+ * It carries no frames (a Long Task has no stack), covers the observing thread only and no workers, and says nothing about CPU: a Long Task is an elapsed interval of the main thread, delivered as
+ * spans of the `long_task` operation. `supported` means those spans are being queued for this page, `unsupported` that the browser has no Long Tasks API, `denied` that the span path is closed to the operation.
+ */
+export function longTaskCapability(report: ProfileReport, id: string, status: "supported" | "unsupported" | "denied", reason: string): CapabilityInput {
+ const c = report.capability;
+ const wallEnd = BigInt(report.clock.wall_end_ns) >= BigInt(report.clock.wall_start_ns) ? report.clock.wall_end_ns : report.clock.wall_start_ns;
+ return {
+  kind: "capability", id, observed_at_ns: wallEnd,
+  payload: {
+   runtime: c.runtime, version: c.version, build: c.build, os: c.os, arch: c.arch, signal: "span", method: "long_task", status, reason,
+   coverage: {frames: "none", threads: "partial", workers: "none", tasks: "none"},
+   clock_domain: {host: c.clock_domain.host, boot: c.clock_domain.boot, runtime: c.clock_domain.runtime}, expires_ns: c.expires_ns,
+  },
+ };
+}
 const MAX_UINT64 = 18446744073709551615n;
 
 export interface ProfileWire {readonly capability: CapabilityInput; readonly chunks: readonly ProfileInput[]}

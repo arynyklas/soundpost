@@ -13,6 +13,8 @@ export const GAP_EVENT_BYTES = 96;
 export const MAX_MUTATION_ROOTS = 64;
 /** Records of one observer callback the recorder will attribute; a larger burst is a declared gap and one full checkpoint (a bound on main-thread work, not a cadence: ordinary bursts, such as a list re-render of a few hundred rows, are deltas). */
 export const MAX_MUTATION_RECORDS = 4096;
+/** Nodes one child-list record may name (added or removed) for the recorder to read them; a longer list is read as "the target changed" and re-walked, which is also what such a record cost before append deltas. */
+export const MAX_RECORD_NODES = 4096;
 export const CHECKPOINT_INTERVAL_MS = 30000;
 export const EVENT_FLUSH_MS = 1000;
 export const MAX_PENDING_EVENTS = 1024;

@@ -4,7 +4,7 @@
 // validation, receipts). The Profiler, clocks, timers and trace below are FAKES built in this file (bun has no DOM or JS
 // Self-Profiling API); the transport is a recording ledger that issues genuine receipts for the batches the queue freezes.
 // What the real server stores for these records is observed by the journeys smoke on Linux Chrome, not here.
-import {test, expect} from "bun:test";
+import {test, expect, describe, beforeEach, afterEach} from "bun:test";
 import {init, type Client, type Config} from "../src/index.ts";
 import {createProfiler, startClientProfile, submitProfile, type ProfileOptions, type ProfileReport, type ProfilerEnv} from "../src/profile.ts";
 import {config as coreConfig, signed, ORG, PROJECT, SOURCE} from "../../core/test/fixture.ts";
@@ -407,26 +407,110 @@ test("Client.close: concurrent calls share one shutdown and the second resolves 
  expect(sent(ledger).map(record => record.kind).sort()).toEqual(["capability", "profile_chunk"]);
 });
 
-test("long-task entries are collected in the report and are NOT delivered: the wire carries the capability and the chunk only, nothing is dropped or counted", async () => {
- // Boundary test of the open part of 10.17#13: the SDK has no metric capture path (core CaptureInput has no metric kind, the signed policy has no metrics
- // switch, and a metric series has no label a browser could use to stay unique: internal/storage/apply.go refuses two values of one series at one instant).
- // Until the owner decides how a long task is represented, a collected entry is a local report field. This test fails the day delivery is added without a decision.
- class LongTaskObserver {
-  static get supportedEntryTypes(): string[] { return ["longtask"]; }
+// ---- Long Tasks (10.17#13): delivered as elapsed-time spans of operation `long_task` plus a capability record of their own. ----
+import {canonical} from "../../core/src/policy.ts";
+
+function longTaskObserver(entries: unknown[], supported = true) {
+ return class LongTaskObserver {
+  static get supportedEntryTypes(): string[] { return supported ? ["longtask"] : ["paint"]; }
   constructor(readonly callback: unknown) {}
   observe(): void {}
   disconnect(): void {}
-  takeRecords(): unknown[] { return [{entryType: "longtask", name: "self", startTime: 1500.4, duration: 120.25}, {entryType: "longtask", name: "self", startTime: 1900, duration: 80}]; }
- }
- const {ledger, client} = delivering();
+  takeRecords(): unknown[] { return entries; }
+ };
+}
+/** A client whose span path is open for the given operations and trace switch, with the real queue and the receipt ledger. */
+function deliveringSpans(over: {operations?: string[]; traces?: boolean} = {}) {
+ const base = coreConfig(), ledger = new Ledger();
+ const policy = signed(canonical({version: 1, org: base.org, project: base.project, source: base.source, revision: "1", expires_ns: "9223372036854775807", errors: true, logs: true, replay: true, bodies: true, traces: over.traces ?? true, jobs: false}));
+ const client = init({...base, policy, operations: over.operations ?? ["long_task"], deploymentTraces: true, deploymentProfiles: true, transport: ledger});
+ return {ledger, client};
+}
+// The page's performance clock is the client's monotonic clock; a finished task is always in its past, so the long-task tests pin it well past the entries' end times.
+const realPerformanceNow = performance.now;
+describe("long tasks (10.17#13)", () => {
+beforeEach(() => { performance.now = () => 10_000; });
+afterEach(() => { performance.now = realPerformanceNow; });
+const taskEntries = (): unknown[] => [
+ {entryType: "longtask", name: "self", startTime: 20.5, duration: 120.25, attribution: [{name: "unknown", containerSrc: "https://x.example/CANARY_SRC", containerId: "CANARY_ID", containerName: "CANARY_NAME"}]},
+ {entryType: "longtask", name: "self", startTime: 40, duration: 80},
+];
+
+test("long tasks are delivered as root spans of operation long_task beside the profile, with a capability record stating the observation is supported; nothing else of the entry is read", async () => {
+ const {ledger, client} = deliveringSpans();
  const rg = rig();
- rg.env = {...rg.env, PerformanceObserver: LongTaskObserver};
- const {report} = await profileRun(rg, client, {...OPTIONS, longTasks: true}, simpleTrace());
+ rg.env = {...rg.env, PerformanceObserver: longTaskObserver(taskEntries())};
+ const {report, flush} = await profileRun(rg, client, {...OPTIONS, longTasks: true}, simpleTrace());
  expect(report?.capability.status).toBe("supported");
  expect(report?.scope.long_tasks).toBe("observed");
- expect(report?.non_profile.map(entry => entry.duration_ms)).toEqual([120.3, 80]);
- expect(sent(ledger).map(record => record.kind).sort()).toEqual(["capability", "profile_chunk"]);
- expect(ledger.bodies.join("")).not.toContain("long_task");
- expect(client.diagnostics()).toEqual({});
+ expect(report?.non_profile.map(entry => [entry.signal, entry.duration_ms, entry.start_mono_ns, entry.end_mono_ns])).toEqual([["span", 120.3, "20500000", "140750000"], ["span", 80, "40000000", "120000000"]]);
+ expect(flush.pending).toBe(0); expect(flush.lost).toBe(0);
+ const records = sent(ledger);
+ expect(records.map(record => record.kind).sort()).toEqual(["capability", "capability", "profile_chunk", "span", "span"]);
+ const capabilities = records.filter(record => record.kind === "capability");
+ const profile = capabilities.find(record => record.payload.method === "browser_js_self_profile")!, longTask = capabilities.find(record => record.payload.method === "long_task")!;
+ expect(longTask.id).not.toBe(profile.id);
+ expect(longTask.payload).toMatchObject({signal: "span", method: "long_task", status: "supported", reason: "ok", coverage: {frames: "none", threads: "partial", workers: "none", tasks: "none"}});
+ for (const key of ["runtime", "version", "build", "os", "arch", "expires_ns", "clock_domain"]) expect(longTask.payload[key]).toEqual(profile.payload[key]);
+ expect(records.find(record => record.kind === "profile_chunk")!.payload.capability_id).toBe(profile.id); // the profile still names its own capability
+ const spans = records.filter(record => record.kind === "span").map(record => record.payload as {operation: string; span_kind: string; status: string; parent_id: string | null; dependency_alias: string; start: {mono_ns: string; wall_ns: string}; end: {mono_ns: string; wall_ns: string}; trace_id: string});
+ expect(spans.map(span => [span.operation, span.span_kind, span.status, span.parent_id, span.dependency_alias])).toEqual([["long_task", "internal", "ok", null, ""], ["long_task", "internal", "ok", null, ""]]);
+ expect(spans.map(span => [span.start.mono_ns, span.end.mono_ns]).sort()).toEqual([["20500000", "140750000"], ["40000000", "120000000"]]);
+ for (const span of spans) expect(BigInt(span.end.wall_ns) - BigInt(span.start.wall_ns)).toBe(BigInt(span.end.mono_ns) - BigInt(span.start.mono_ns)); // one clock: a task's wall length is its monotonic length
+ expect(new Set(spans.map(span => span.trace_id)).size).toBe(2);
+ // Privacy: the entry's attribution (container source, id, name) is never read, let alone sent.
+ expect(ledger.bodies.join("")).not.toMatch(/CANARY|x\.example/);
  await client.close();
+});
+
+test("long tasks are bounded: past the run's 256-entry cap nothing more is retained, delivered or queued", async () => {
+ const {ledger, client} = deliveringSpans();
+ const rg = rig();
+ const many = Array.from({length: 300}, (_, i) => ({entryType: "longtask", name: "self", startTime: 10 + i, duration: 55}));
+ rg.env = {...rg.env, PerformanceObserver: longTaskObserver(many)};
+ const {report} = await profileRun(rg, client, {...OPTIONS, longTasks: true}, simpleTrace());
+ expect(report?.non_profile).toHaveLength(256);
+ expect(report?.scope.long_tasks_dropped).toBe(44);
+ expect(sent(ledger).filter(record => record.kind === "span")).toHaveLength(256);
+ await client.close();
+});
+
+test("the span path decides: an operation the client does not list, or a signed policy without traces, is a denied capability and no span", async () => {
+ for (const [over, reason] of [[{operations: ["other"]}, "unregistered_operation"], [{traces: false}, "traces_not_allowed"]] as const) {
+  const {ledger, client} = deliveringSpans(over);
+  const rg = rig();
+  rg.env = {...rg.env, PerformanceObserver: longTaskObserver(taskEntries())};
+  const {report} = await profileRun(rg, client, {...OPTIONS, longTasks: true}, simpleTrace());
+  expect(report?.capability.status).toBe("supported"); // the profile itself is unaffected
+  const records = sent(ledger);
+  expect(records.filter(record => record.kind === "span")).toHaveLength(0);
+  const longTask = records.find(record => record.kind === "capability" && record.payload.method === "long_task")!;
+  expect([longTask.payload.status, longTask.payload.reason]).toEqual(["denied", reason]);
+  expect(records.some(record => record.kind === "profile_chunk")).toBe(true);
+  await client.close();
+ }
+});
+
+test("a browser without the Long Tasks API delivers an unsupported capability and no span: no spans is then not 'no long tasks'", async () => {
+ const {ledger, client} = deliveringSpans();
+ const rg = rig();
+ rg.env = {...rg.env, PerformanceObserver: longTaskObserver([], false)};
+ const {report} = await profileRun(rg, client, {...OPTIONS, longTasks: true}, simpleTrace());
+ expect(report?.scope.long_tasks).toBe("unsupported");
+ const records = sent(ledger);
+ expect(records.filter(record => record.kind === "span")).toHaveLength(0);
+ const longTask = records.find(record => record.kind === "capability" && record.payload.method === "long_task")!;
+ expect([longTask.payload.signal, longTask.payload.status, longTask.payload.reason]).toEqual(["span", "unsupported", "long_task_unavailable"]);
+ await client.close();
+});
+
+test("long tasks that were not asked for are neither observed nor delivered: no capability, no span", async () => {
+ const {ledger, client} = deliveringSpans();
+ const rg = rig();
+ rg.env = {...rg.env, PerformanceObserver: longTaskObserver(taskEntries())};
+ const {report} = await profileRun(rg, client, OPTIONS, simpleTrace());
+ expect(report?.scope.long_tasks).toBe("not_requested");
+ expect(sent(ledger).map(record => record.kind).sort()).toEqual(["capability", "profile_chunk"]);
+ await client.close();
+});
 });

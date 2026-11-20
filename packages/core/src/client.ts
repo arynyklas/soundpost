@@ -37,12 +37,13 @@ type RuntimeErrorBoundary=ErrorBoundary&{readonly timerCancellation?:(error:unkn
 export class Client {
  private readonly delivery:DeliveryQueue;
  private readonly counts:Record<string,number>=Object.create(null) as Record<string,number>;
- private readonly policy:SourcePolicy;
+ readonly policy:SourcePolicy;
  private readonly templates=new Map<string,Template>();
  private readonly clock:()=>string;
  private readonly build:string;private readonly frameNaming:FrameNaming;private readonly codes:ReadonlySet<string>;private closed=false;
  private readonly hookLeases=new Set<OwnedHookLease>();
- private readonly spans:SpanRecorder;
+ /** Read by elapsed_span.ts (`policy` too): the Long Task code lives in its own entry, not in the core bundle. */
+ readonly spans:SpanRecorder;
  private readonly jobs:JobRecorder;
  constructor(config:Config,private readonly errorBoundary?:RuntimeErrorBoundary,private readonly exportContext:ExportContext=(()=>{let depth=0;return {active:()=>depth>0,run<T>(callback:()=>T):T{depth++;try{return callback();}finally{depth--;}},close(){}};})(),private readonly metadataContext:MetadataContext=createSynchronousMetadataContext(config.clockNs)){
   const records=config.maxRecords??1024,bytes=config.maxBytes??2097152;

@@ -12,7 +12,11 @@
 
 import type {Client} from "./index.ts";
 import type {OwnedHookLease} from "@soundpost/core/types";
-import {profileWire} from "./profile_wire.ts";
+import {captureElapsedSpan, spanRefusal} from "@soundpost/core/elapsed";
+import {longTaskCapability, profileWire} from "./profile_wire.ts";
+
+/** The span operation a Long Task is delivered as: a project opts in by listing it in the client's `operations` and in the signed policy. */
+export const LONG_TASK_OPERATION = "long_task";
 
 export const profileReasons = [
  "ok", "profiler_owned", "isolate_scope_mismatch", "monitoring_tool_ids_occupied", "document_policy_missing", "permission_denied", "invalid_options",
@@ -31,7 +35,7 @@ export interface ProfileOptions {
  readonly scope?: "main" | "worker";
  /** Page origin used to reduce script URLs to origin-relative paths (default: the global's own origin). Never echoed in the report. */
  readonly origin?: string;
- /** Also record `long_task` entries (duration and start only) as separate non-profile metric entries. */
+ /** Also observe Long Tasks during the run. Each is delivered, bounded, as an elapsed-time span of operation `long_task` (never a profile sample and never CPU time) when the client's `operations` and the signed policy allow that operation and traces; a capability record states whether the observation was supported. Only start and duration are read. */
  readonly longTasks?: boolean;
  /** Upper bound of retained samples and of the browser's sample buffer, 1..8192 (default 8192). */
  readonly maxSamples?: number;
@@ -45,7 +49,8 @@ export interface ProfileCapability {
 }
 export interface ProfileFrame {readonly module_id: string; readonly function: string; readonly artifact_id: string; readonly line: number; readonly column: number; readonly offset: "0"; readonly reason: "" | "not_captured"}
 export interface ProfileSample {readonly at_us: string; readonly stack: number; readonly count: "1"; readonly thread: string}
-export interface ProfileLongTask {readonly method: "long_task"; readonly profile: false; readonly signal: "metric"; readonly unit: "milliseconds"; readonly duration_ms: number; readonly start_ms: number}
+/** One Long Task the browser reported: only its start and duration (the attribution the entry carries is never read). `start_mono_ns`/`end_mono_ns` are on the page's performance timeline, which is the browser client's monotonic clock. */
+export interface ProfileLongTask {readonly method: "long_task"; readonly profile: false; readonly signal: "span"; readonly unit: "milliseconds"; readonly duration_ms: number; readonly start_ms: number; readonly start_mono_ns: string; readonly end_mono_ns: string}
 export interface ProfileLoss {readonly reason: "truncated" | "sample_gap" | "foreign_state" | "timeout_cleanup"; readonly count: string}
 export interface ProfileReport {
  readonly version: 1; readonly method: "browser_js_self_profile"; readonly profile: true; readonly units: "samples"; readonly time_delta_unit: null;
@@ -372,7 +377,10 @@ export function createProfiler(env: ProfilerEnv, deliver?: (report: ProfileRepor
     const duration = e && safeCall(() => Reflect.get(e, "duration")), start = e && safeCall(() => Reflect.get(e, "startTime"));
     if (!e || safeCall(() => Reflect.get(e, "entryType")) !== "longtask" || typeof duration !== "number" || !Number.isFinite(duration) || duration < 0 || typeof start !== "number" || !Number.isFinite(start)) continue;
     if (longTasks.length >= MAX_LONG_TASKS) { longTasksDropped++; continue; }
-    longTasks.push({method: "long_task", profile: false, signal: "metric", unit: "milliseconds", duration_ms: Math.round(duration * 10) / 10, start_ms: Math.round((start - startedAt) * 10) / 10});
+    longTasks.push({
+     method: "long_task", profile: false, signal: "span", unit: "milliseconds", duration_ms: Math.round(duration * 10) / 10, start_ms: Math.round((start - startedAt) * 10) / 10,
+     start_mono_ns: String(BigInt(Math.round(start * 1e6))), end_mono_ns: String(BigInt(Math.round((start + duration) * 1e6))),
+    });
    }
   };
   if (options.longTasks) {
@@ -463,7 +471,7 @@ export function startProfile(options: ProfileOptions): Promise<ProfileHandle> { 
 const processIds = new WeakMap<Client, string>();
 function randomId(): string { for (;;) { const id = Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, "0")).join(""); if (id !== "0".repeat(32)) return id; } }
 
-/** Maps a finished report to wire records and enqueues them on `client`. Returns true only when everything was queued. */
+/** Maps a finished report to wire records and enqueues them on `client`. Returns true only when the profile's own records were queued (Long Tasks have their own accounting). */
 export function submitProfile(client: Client, report: ProfileReport): boolean {
  let queued: boolean;
  try { const wire = profileWire(report, {process: processIds.get(client) ?? (processIds.set(client, randomId()), processIds.get(client)!), id: randomId}); queued = client.captureProfile(wire.capability, wire.chunks); }
@@ -473,7 +481,26 @@ export function submitProfile(client: Client, report: ProfileReport): boolean {
   let truncated = 0n; for (const loss of report.losses) if (loss.reason === "truncated") truncated += BigInt(loss.count);
   if (truncated > 0n) client.captureProfileLoss(truncated, BigInt(report.clock.wall_end_ns) >= BigInt(report.clock.wall_start_ns) ? report.clock.wall_end_ns : report.clock.wall_start_ns);
  } catch { client.profileFailed(); }
+ if (queued) submitLongTasks(client, report);
  return queued;
+}
+
+/**
+ * Long Tasks the run observed (only when `longTasks: true` asked for them): a capability record of its own (signal `span`, method `long_task`) that states what the observation
+ * could do (supported, unsupported by the browser, or denied because the span path is closed to the operation), then one elapsed-time span of operation LONG_TASK_OPERATION per task
+ * through the client's ordinary span path (allowlist, signed-policy trace switch, sampling, queue bounds). A browser without the Long Tasks API delivers the unsupported capability and no
+ * span: absence of spans is then not "no long tasks". Never throws.
+ */
+function submitLongTasks(client: Client, report: ProfileReport): void {
+ const observed = report.scope["long_tasks"];
+ if (observed !== "observed" && observed !== "unsupported") return;
+ try {
+  const refusal = spanRefusal(client, LONG_TASK_OPERATION);
+  const answer = observed === "unsupported" ? {status: "unsupported", reason: "long_task_unavailable"} as const : refusal === undefined ? {status: "supported", reason: "ok"} as const : {status: "denied", reason: refusal === "policy" ? "traces_not_allowed" : refusal} as const;
+  if (!client.captureProfile(longTaskCapability(report, randomId(), answer.status, answer.reason))) return;
+  if (answer.status !== "supported") return;
+  for (const task of report.non_profile) captureElapsedSpan(client, LONG_TASK_OPERATION, BigInt(task.start_mono_ns), BigInt(task.end_mono_ns));
+ } catch { client.profileFailed(); }
 }
 
 /** Bound on the flush that acknowledges one finished profile run. */

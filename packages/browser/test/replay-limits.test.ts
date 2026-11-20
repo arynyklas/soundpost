@@ -63,8 +63,10 @@ function wideDom(): DomAccessors {
  return {
   nodeType: n => (n as Fake).t, firstChild: n => (n as Fake).kids[0] ?? null,
   nextSibling: n => { const parent = (n as Fake).parent; return parent === null ? null : parent.kids[parent.kids.indexOf(n as Fake) + 1] ?? null; },
+  lastChild: n => (n as Fake).kids.at(-1) ?? null,
+  previousSibling: n => { const parent = (n as Fake).parent; return parent === null ? null : parent.kids[parent.kids.indexOf(n as Fake) - 1] ?? null; },
   parentNode: n => (n as Fake).parent, localName: n => (n as Fake).name, openShadowRoot: () => null, editable: () => false,
-  mutationTarget: record => (record as {target: object}).target, eventTarget: () => null, clientX: () => 0, clientY: () => 0,
+  mutationTarget: record => (record as {target: object}).target, childListChange: () => null, eventTarget: () => null, clientX: () => 0, clientY: () => 0,
  };
 }
 
@@ -99,6 +101,7 @@ import {captureDomAccessors, newWalkState, walk} from "../src/replay/tree.ts";
 class PNode {
  parent: PNode | null = null; kids: PNode[] = [];
  get nodeType() { return 1; } get parentNode() { return this.parent; } get firstChild() { return this.kids[0] ?? null; }
+ get lastChild() { return this.kids.at(-1) ?? null; } get previousSibling() { return this.parent === null ? null : this.parent.kids[this.parent.kids.indexOf(this) - 1] ?? null; }
  get nextSibling() { return this.parent === null ? null : this.parent.kids[this.parent.kids.indexOf(this) + 1] ?? null; }
  add(kid: PNode): PNode { kid.parent = this; this.kids.push(kid); return kid; }
 }

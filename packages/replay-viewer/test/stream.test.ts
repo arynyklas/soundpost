@@ -195,8 +195,10 @@ function recordReal(extraNodes = 1): RecorderChunk[] {
  const dom: DomAccessors = {
   nodeType: node => (node as Fake).t, firstChild: node => (node as Fake).kids[0] ?? null,
   nextSibling: node => { const parent = (node as Fake).parent; return parent === null ? null : parent.kids[parent.kids.indexOf(node as Fake) + 1] ?? null; },
+  lastChild: node => (node as Fake).kids.at(-1) ?? null,
+  previousSibling: node => { const parent = (node as Fake).parent; return parent === null ? null : parent.kids[parent.kids.indexOf(node as Fake) - 1] ?? null; },
   parentNode: node => (node as Fake).parent, localName: node => (node as Fake).name, openShadowRoot: () => null, editable: () => false,
-  mutationTarget: record => (record as {target: object}).target, eventTarget: event => (event as {target: object}).target,
+  mutationTarget: record => (record as {target: object}).target, childListChange: () => null, eventTarget: event => (event as {target: object}).target,
   clientX: event => (event as {x: number}).x, clientY: event => (event as {y: number}).y,
  };
  let observe: ((records: readonly object[]) => void) | undefined;

@@ -428,7 +428,7 @@ test("script paths use the page origin by default and an explicit origin option;
  expect(opaque.frames.every(f => f.module_id === "external")).toBe(true);
 });
 
-test("long tasks: separate non_profile metric entries with only duration/start, bounded, never in samples; observer disconnected", async () => {
+test("long tasks: separate non_profile span entries with only duration/start, bounded, never in samples; observer disconnected", async () => {
  const h = harness(); const handle = await h.api.startProfile({durationMs: 5000, longTasks: true});
  expect(h.observers.length).toBe(1); expect(h.observers[0]!.observed).toEqual([{type: "longtask"}]);
  const task = (i: number, extra: Record<string, unknown> = {}): Record<string, unknown> => ({entryType: "longtask", name: "self", startTime: 1500.4 + i, duration: 120.25, attribution: [{name: "unknown", containerSrc: "https://x.example/CANARY_SRC", containerId: "CANARY_ID", containerName: "CANARY_NAME"}], ...extra});
@@ -439,8 +439,8 @@ test("long tasks: separate non_profile metric entries with only duration/start, 
  h.trace = realisticTrace();
  const report = await handle.stop();
  expect(report.non_profile.length).toBe(256);
- expect(report.non_profile[0]).toEqual({method: "long_task", profile: false, signal: "metric", unit: "milliseconds", duration_ms: 120.3, start_ms: 500.4});
- for (const entry of report.non_profile) expect(Object.keys(entry).sort()).toEqual(["duration_ms", "method", "profile", "signal", "start_ms", "unit"]);
+ expect(report.non_profile[0]).toEqual({method: "long_task", profile: false, signal: "span", unit: "milliseconds", duration_ms: 120.3, start_ms: 500.4, start_mono_ns: "1500400000", end_mono_ns: "1620650000"});
+ for (const entry of report.non_profile) expect(Object.keys(entry).sort()).toEqual(["duration_ms", "end_mono_ns", "method", "profile", "signal", "start_mono_ns", "start_ms", "unit"]);
  expect(report.scope.long_tasks).toBe("observed"); expect(report.scope.long_tasks_dropped).toBe(45); // 300 delivered + 1 queued = 301 valid entries, 256 kept; the paint entry and the NaN duration are ignored, not counted
  expect(JSON.stringify(report)).not.toMatch(/CANARY_(SRC|ID|NAME|PAINT)/);
  expect(report.sample_count).toBe(11); expect(report.samples.every(s => "stack" in s && !("duration_ms" in s))).toBe(true);

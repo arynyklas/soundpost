@@ -41,6 +41,9 @@ test("the core entry bundle carries neither the spool recovery nor the runtime p
  expect(built.stderr).toBe("");
  expect(built.status).toBe(0);
  const text = readFileSync(out, "utf8");
+ // Long Tasks reach the span path through core/src/elapsed_span.ts, which only the profile entry imports: the core entry (at its size budget) must not carry it.
+ expect(text).not.toContain("captureElapsedSpan");
+ expect(text).not.toContain("spanRefusal");
  expect(text).not.toContain("invalid frozen spool");
  expect(text).not.toContain("runtime_cpu");
  expect(text).toContain("delivery"); // sanity: the queue itself is still in the bundle

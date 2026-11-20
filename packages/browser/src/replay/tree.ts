@@ -1,14 +1,15 @@
 // Copyright 2026 Aryn Yklas
 // SPDX-License-Identifier: Apache-2.0
 import type {DomAccessors, ReplayNode} from "./types.ts";
-import {MASK, MAX_DEPTH, MAX_NODES, isOpaqueWidget, isSkipped, tagFor} from "./policy.ts";
+import {MASK, MAX_DEPTH, MAX_NODES, MAX_RECORD_NODES, isOpaqueWidget, isSkipped, tagFor} from "./policy.ts";
 
 type Proto = {readonly prototype: object};
 export interface DomGlobals {
- readonly Node: Proto; readonly Element: Proto; readonly HTMLElement?: Proto; readonly MouseEvent?: Proto; readonly Event?: Proto; readonly MutationRecord?: Proto;
+ readonly Node: Proto; readonly Element: Proto; readonly HTMLElement?: Proto; readonly MouseEvent?: Proto; readonly Event?: Proto; readonly MutationRecord?: Proto; readonly NodeList?: Proto;
 }
 type Read = (self: object) => unknown;
 const NO_ARGS: readonly unknown[] = Object.freeze([]);
+const NO_NODES: readonly object[] = Object.freeze([]);
 function getter(proto: object | undefined, name: string): Read | undefined {
  const fn = proto === undefined ? undefined : Object.getOwnPropertyDescriptor(proto, name)?.get;
  return fn === undefined ? undefined : (self: object) => Reflect.apply(fn, self, NO_ARGS);
@@ -63,11 +64,25 @@ export function captureDomAccessors(g: DomGlobals): DomAccessors {
  const localName = required(elementP, "localName"), shadow = required(elementP, "shadowRoot"), editable = getter(htmlP, "isContentEditable");
  const closedShadows = watchClosedShadows(elementP, shadow);
  const target = required(g.MutationRecord?.prototype, "target"), eventTarget = required(g.Event?.prototype, "target");
+ const recordType = getter(g.MutationRecord?.prototype, "type"), recordAdded = getter(g.MutationRecord?.prototype, "addedNodes"), recordRemoved = getter(g.MutationRecord?.prototype, "removedNodes"), listLength = getter(g.NodeList?.prototype, "length");
+ const last = required(nodeP, "lastChild"), previous = required(nodeP, "previousSibling");
+ /** The members of a record's node list (indexed reads of a platform list run no page code), or null for a list the recorder will not attribute: unreadable or longer than MAX_RECORD_NODES. */
+ const members = (list: unknown): readonly object[] | null => {
+  if (typeof list !== "object" || list === null || listLength === undefined) return null;
+  const length = listLength(list);
+  if (typeof length !== "number" || !(length >= 0) || length > MAX_RECORD_NODES) return null;
+  if (length === 0) return NO_NODES;
+  const out: object[] = [];
+  for (let i = 0; i < length; i++) { const member = asObject((list as ArrayLike<unknown>)[i]); if (member === null) return null; out.push(member); }
+  return out;
+ };
  const clientX = required(g.MouseEvent?.prototype, "clientX"), clientY = required(g.MouseEvent?.prototype, "clientY");
  return {
   nodeType: node => asNumber(nodeType(node)),
   firstChild: node => asObject(first(node)),
   nextSibling: node => asObject(next(node)),
+  lastChild: node => asObject(last(node)),
+  previousSibling: node => asObject(previous(node)),
   parentNode: node => asObject(parent(node)),
   localName: element => { const name = localName(element); return typeof name === "string" ? name.toLowerCase() : ""; },
   openShadowRoot: element => asObject(shadow(element)),
@@ -76,6 +91,11 @@ export function captureDomAccessors(g: DomGlobals): DomAccessors {
   // The HTMLElement getter throws "Illegal invocation" on SVG/MathML elements, which cannot be contenteditable.
   editable: element => { try { return editable?.(element) === true; } catch { return false; } },
   mutationTarget: record => asObject(target(record)),
+  childListChange: record => {
+   if (recordType === undefined || recordAdded === undefined || recordRemoved === undefined || recordType(record) !== "childList") return null;
+   const added = members(recordAdded(record)), removed = members(recordRemoved(record));
+   return added === null || removed === null ? null : {added, removed};
+  },
   eventTarget: event => asObject(eventTarget(event)),
   clientX: event => asNumber(clientX(event)),
   clientY: event => asNumber(clientY(event)),

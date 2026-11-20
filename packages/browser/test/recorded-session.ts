@@ -48,19 +48,23 @@ export const FLUSH_MS = 1000, CHECKPOINT_MS = 30000;
 const IDS = {
  session: {replay: "11111111111111111111111111111111", session: "22222222222222222222222222222222"},
  recovery: {replay: "66666666666666666666666666666666", session: "77777777777777777777777777777777"},
+ append: {replay: "88888888888888888888888888888888", session: "99999999999999999999999999999999"},
 } as const;
 
 export type SessionName = keyof typeof IDS;
-export const SESSION_NAMES: readonly SessionName[] = ["session", "recovery"];
+export const SESSION_NAMES: readonly SessionName[] = ["session", "recovery", "append"];
 
 /** A scripted page plus every seam the recorder needs, all driven by hand: events, mutation records and timers. */
 export function scriptedPage(ids: {readonly replay: string; readonly session: string} = IDS.session, revision = "1") {
  const {document, html, button, section} = page();
  const dom: DomAccessors = {
-  nodeType: n => (n as Fake).t, firstChild: n => (n as Fake).kids[0] ?? null,
+  nodeType: n => (n as Fake).t, firstChild: n => (n as Fake).kids[0] ?? null, lastChild: n => (n as Fake).kids.at(-1) ?? null,
   nextSibling: n => { const parent = (n as Fake).parent; return parent === null ? null : parent.kids[parent.kids.indexOf(n as Fake) + 1] ?? null; },
+  previousSibling: n => { const parent = (n as Fake).parent; return parent === null ? null : parent.kids[parent.kids.indexOf(n as Fake) - 1] ?? null; },
   parentNode: n => (n as Fake).parent, localName: n => (n as Fake).name, openShadowRoot: () => null, editable: () => false,
-  mutationTarget: record => (record as {target: object}).target, eventTarget: event => (event as {target: object}).target,
+  mutationTarget: record => (record as {target: object}).target,
+  childListChange: record => { const r = record as {added?: object[]; removed?: object[]}; return r.added === undefined && r.removed === undefined ? null : {added: r.added ?? [], removed: r.removed ?? []}; },
+  eventTarget: event => (event as {target: object}).target,
   clientX: event => (event as {x: number}).x, clientY: event => (event as {y: number}).y,
  };
  let observe: ((records: readonly object[]) => void) | undefined;
@@ -85,6 +89,18 @@ export function scriptedPage(ids: {readonly replay: string; readonly session: st
   grow: (secret?: string) => { append(section, secret === undefined ? node("p") : node("p", text(secret))); observe!([{target: section}]); },
   /** Replaces everything under <section> with `count` new text-free paragraphs: the live tree stays small while every call allocates `count` ids. */
   churn: (count: number) => { section.kids = []; for (let i = 0; i < count; i++) append(section, node("p")); observe!([{target: section}]); },
+  /** New <p> elements (each with a text child when a secret is given) added under <section> in one batch, each reported as the platform reports it; `first` puts the first one before <section>'s first child instead of at the end. */
+  attach: (secret: string, second?: string, first = false) => {
+   const records: object[] = [];
+   for (const value of second === undefined ? [secret] : [secret, second]) {
+    const child = node("p", text(value));
+    if (first) { child.parent = section; section.kids.unshift(child); } else append(section, child);
+    records.push({target: section, added: [child], removed: []});
+   }
+   observe!(records);
+  },
+  /** Removes <section>'s first child and reports it. */
+  detachFirst: () => { const gone = section.kids.shift()!; gone.parent = null; observe!([{target: section, added: [], removed: [gone]}]); },
  };
 }
 
@@ -104,6 +120,17 @@ export function recordSession(name: SessionName): {wire: string[]; delivered: bo
   stage.fire(FLUSH_MS); // chunk 3: gap checkpoint (loss 1, gap true)
   stage.scroll();
   stage.fire(FLUSH_MS); // chunk 4: scroll delta on the healed checkpoint
+  recorder.close();
+  return {wire, delivered};
+ }
+ if (name === "append") {
+  // Child-list records as the platform reports them. A pure append is recorded once; an insertion before a known sibling and a removal re-walk the parent.
+  stage.attach(SESSION_SECRETS[4]); // chunk 2: one new <p> with its text under <section>, nothing re-sent
+  stage.attach(SESSION_SECRETS[4], SESSION_SECRETS[4]); // chunk 3: two new <p> in one batch
+  stage.attach(SESSION_SECRETS[4], undefined, true); // chunk 4: inserted before the first child: <section> read again
+  stage.detachFirst(); // chunk 5: removed known child: <section> read again
+  stage.fire(CHECKPOINT_MS); // chunk 6: second checkpoint
+  stage.attach(SESSION_SECRETS[4]); // chunk 7: append on checkpoint 6
   recorder.close();
   return {wire, delivered};
  }

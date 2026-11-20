@@ -24,6 +24,8 @@ export interface ProfileOutcome {
   readonly frameFunctions: readonly string[];
   readonly workMs: number;
   readonly diagnostics: Readonly<Record<string, number>>;
+  /** The Long Task observation of the run: its state (`not_requested`, `observed`, `unsupported`; "undefined" when the run was refused before observing) and each task the browser reported. */
+  readonly longTasks: {readonly state: string; readonly dropped: number; readonly entries: readonly {readonly durationMs: number; readonly startMonoNs: string; readonly endMonoNs: string}[]};
 }
 
 function base64url(value: string): Uint8Array {
@@ -45,15 +47,22 @@ function e2eBrowserHotLoop(ms: number): number {
 let started = false;
 const api = {
   /** One bounded profile run of this page's own busy loop through the SDK, delivered by the SDK, then its report summarized for the test. */
-  async run(raw: PublicConfig, workMs: number): Promise<ProfileOutcome> {
+  async run(raw: PublicConfig, workMs: number, longTasks = false): Promise<ProfileOutcome> {
     if (started) throw Error("already_started");
     started = true;
     const trustedKeys = Object.fromEntries(Object.entries(raw.trusted_keys).map(([id, value]) => [id, base64url(value)]));
-    const client = init({org: raw.org, project: raw.project, source: raw.source, credential: raw.credential, build: raw.build, endpoint: raw.endpoint, policy: raw.policy, trustedKeys, resource: raw.resource, descriptor: raw.descriptor, deploymentProfiles: true});
+    // Long Tasks are delivered as spans of the operation `long_task`: the page lists it in its operations (the signed policy of its source lists it too) and the deployment allows traces.
+    const client = init({
+      org: raw.org, project: raw.project, source: raw.source, credential: raw.credential, build: raw.build, endpoint: raw.endpoint, policy: raw.policy, trustedKeys, resource: raw.resource, descriptor: raw.descriptor,
+      deploymentProfiles: true, ...(longTasks ? {operations: ["long_task"], deploymentTraces: true} : {}),
+    });
     const profilerGlobal = typeof Reflect.get(window, "Profiler");
     try {
-      const handle = await startClientProfile(client, {durationMs: 10_000, intervalUs: 1000, scope: "main"});
-      e2eBrowserHotLoop(workMs);
+      const handle = await startClientProfile(client, {durationMs: 10_000, intervalUs: 1000, scope: "main", ...(longTasks ? {longTasks: true} : {})});
+      // The default run is one busy loop. For Long Tasks the page runs two busy loops, each as a real timer task of its own (a call evaluated by the test driver is not a scheduler task and is never
+      // reported as a Long Task), each longer than the 50 ms the Long Tasks API reports, then idles briefly so the engine has reported them before the run stops.
+      const inTask = (work: () => void): Promise<void> => new Promise<void>(resolve => setTimeout(() => { work(); resolve(); }, 0));
+      if (longTasks) { await inTask(() => e2eBrowserHotLoop(workMs)); await new Promise<void>(resolve => setTimeout(resolve, 100)); await inTask(() => e2eBrowserHotLoop(workMs)); await new Promise<void>(resolve => setTimeout(resolve, 300)); } else e2eBrowserHotLoop(workMs);
       const report = await handle.stop();
       await client.flush(15_000);
       const functions = [...new Set(report.frames.map(frame => frame.function))].slice(0, 64);
@@ -64,6 +73,7 @@ const api = {
         coverage: {...report.capability.coverage}, sampleCount: report.sample_count, stoppedBy: report.stopped_by, intervalAchievedUs: report.interval.achieved_us,
         ack: ack.status === "obtained" ? {status: ack.status, cursors: ack.cursors.length} : ack.status === "failed" ? {status: ack.status, reason: ack.reason} : {status: ack.status, ...(ack.reason === undefined ? {} : {reason: ack.reason})},
         frameFunctions: functions, workMs, diagnostics: client.diagnostics(),
+        longTasks: {state: String(report.scope["long_tasks"]), dropped: Number(report.scope["long_tasks_dropped"]), entries: report.non_profile.map(task => ({durationMs: task.duration_ms, startMonoNs: task.start_mono_ns, endMonoNs: task.end_mono_ns}))},
       };
     } finally {
       await client.close();

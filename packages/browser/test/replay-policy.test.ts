@@ -21,6 +21,8 @@ class FNode {
  get parentNode() { return this.parent; }
  get firstChild() { return this.children[0] ?? null; }
  get nextSibling() { const i = this.parent?.children.indexOf(this) ?? -1; return i < 0 ? null : this.parent!.children[i + 1] ?? null; }
+ get lastChild() { return this.children.at(-1) ?? null; }
+ get previousSibling() { const i = this.parent?.children.indexOf(this) ?? -1; return i <= 0 ? null : this.parent!.children[i - 1] ?? null; }
  get textContent() { reads.text++; return "x"; }
  get nodeValue() { reads.data++; return "x"; }
  append(child: FNode): FNode { child.parent = this; this.children.push(child); return child; }

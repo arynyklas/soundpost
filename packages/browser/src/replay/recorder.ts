@@ -1,7 +1,7 @@
 // Copyright 2026 Aryn Yklas
 // SPDX-License-Identifier: Apache-2.0
 import type {DomAccessors, EnqueueResult, MutationObserverLike, ReplayChunk, ReplayConfig, ReplayEvent, ReplayEventTargetLike, ReplayNode, ReplayRecorder, ReplayTimers} from "./types.ts";
-import {CHECKPOINT_INTERVAL_MS, EVENT_FLUSH_MS, GAP_EVENT_BYTES, MAX_CHECKPOINTS, MAX_CHUNK_BYTES, MAX_CHUNK_NODES, MAX_MUTATION_RECORDS, MAX_MUTATION_ROOTS, MAX_NODE_ID, MAX_PENDING_EVENTS, MAX_DEPTH, MAX_NODES, MAX_SEQUENCE, RECORDER_VERSION, ZERO_HASH, CanonicalText, canonicalJSON, captureAllowed, quantize, sha256Hex} from "./policy.ts";
+import {CHECKPOINT_INTERVAL_MS, EVENT_FLUSH_MS, GAP_EVENT_BYTES, MAX_CHECKPOINTS, MAX_CHUNK_BYTES, MAX_CHUNK_NODES, MAX_MUTATION_RECORDS, MAX_MUTATION_ROOTS, MAX_NODE_ID, MAX_PENDING_EVENTS, MAX_DEPTH, MAX_NODES, MAX_SEQUENCE, RECORDER_VERSION, ZERO_HASH, CanonicalText, canonicalJSON, captureAllowed, isOpaqueWidget, quantize, sha256Hex} from "./policy.ts";
 import {captureDomAccessors, fitSubtrees, newWalkState, nodeBytes, walk, type DomGlobals} from "./tree.ts";
 
 /** The canonical JSON (keys in code unit order) of a node array the recorder built: every value is a decimal or a closed-vocabulary string, so no value needs escaping. Equals canonicalJSON(nodes). */
@@ -9,6 +9,14 @@ function canonicalNodes(nodes: readonly ReplayNode[]): string {
  let out = "[";
  for (let i = 0; i < nodes.length; i++) { const n = nodes[i]!; out += (i === 0 ? "" : ",") + '{"class":"' + n.class + '","id":"' + n.id + '","parent":"' + n.parent + '","tag":"' + n.tag + '","text":"' + n.text + '"}'; }
  return out + "]";
+}
+/** The new children an append delta records under one node the replay holds: `born` is every node a child-list record added to it in the batch, `roots` the ones still attached, in document order. */
+interface Appended { readonly id: number; readonly born: Set<object>; roots: readonly object[] }
+/** Bytes of a chunk left for nodes beside these events and the one gap event a truncation adds. */
+function chunkRoom(events: readonly ReplayEvent[]): number {
+ let budget = GAP_EVENT_BYTES;
+ for (const event of events) budget += JSON.stringify(event).length + 1;
+ return Math.max(0, MAX_CHUNK_BYTES - budget);
 }
 const OBSERVE = {childList: true, characterData: true, attributes: true, subtree: true} as const;
 const LISTEN = {capture: true, passive: true} as const;
@@ -152,16 +160,24 @@ class Recorder implements ReplayRecorder {
   this.write(state.nodes, events, true, gap);
  }
 
+ /**
+  * One observer callback. A node the replay holds that only gained new children (child-list records naming nothing the replay holds, the new
+  * nodes ending the parent's children) is an append: the chunk carries the new subtrees once, each under its parent's id, and one `mutation`
+  * event on the first of them (a node the viewer has never held, so it deletes nothing). Every other change is the re-walk of the nearest node
+  * the replay holds: its chunk carries the whole subtree and its `mutation` event makes the viewer drop the old descendants first. Both are
+  * recorder_version "1" chunks; no field or vocabulary of the wire changed.
+  */
  private mutations(records: readonly object[]): void {
   this.guard(() => {
    const dom = this.dom!;
    if (records.length > MAX_MUTATION_RECORDS) { this.flushEvents(); this.needGap = true; this.checkpoint(); return; }
-   const dirty = new Map<number, object>(), seen = new Set<object>();
+   const rewalk = new Map<number, object>(), appended = new Map<object, Appended>(), fresh = new Set<object>(), seen = new Set<object>(), below: object[] = [];
    let full = false;
    for (const record of records) {
+    const change = dom.childListChange(record);
     let node = dom.mutationTarget(record);
-    // The outcome of a target is the same however many records name it, so each target is attributed once.
-    if (node !== null) { if (seen.has(node)) continue; seen.add(node); }
+    // The outcome of a record that only names its target is the same however many records name it, so each such target is attributed once.
+    if (change === null && node !== null) { if (seen.has(node)) continue; seen.add(node); }
     if (node !== null && dom.nodeType(node) !== 1) {
      // A text node is its parent element's change; a detached one is not in the replay tree at all. Any other kind (document, shadow root, comment) cannot be attributed.
      if (dom.nodeType(node) === 3) { node = dom.parentNode(node); if (node === null) continue; } else node = null;
@@ -175,33 +191,126 @@ class Recorder implements ReplayRecorder {
     for (let hops = 0; reached !== null && (id = this.ids.get(reached)) === undefined && hops < MAX_DEPTH * 4; hops++) { top = reached; reached = dom.parentNode(reached); }
     if (reached === null) { const topType = dom.nodeType(top); if (topType === 1 || topType === 9) continue; full = true; break; }
     if (id === undefined) { full = true; break; }
-    node = reached;
     if (this.suppressed.has(id)) continue;
-    dirty.set(id, node);
-    if (dirty.size > MAX_MUTATION_ROOTS) { full = true; break; }
+    // The target is unknown to the replay: `top` hangs directly under the node the replay holds. If `top` is one of the new nodes of an append, whatever happened below it is part of that subtree (read at the end of the batch).
+    if (reached !== node) { below.push(top, reached); continue; }
+    if (rewalk.has(id)) continue;
+    if (change === null) { rewalk.set(id, node); }
+    else if (!this.appendable(dom, node, appended, change)) { rewalk.set(id, node); appended.delete(node); }
+    else {
+     let group = appended.get(node);
+     if (group === undefined) { group = {id, born: new Set(), roots: []}; appended.set(node, group); }
+     for (const born of change.added) { group.born.add(born); fresh.add(born); }
+    }
+    if (rewalk.size + appended.size > MAX_MUTATION_ROOTS) { full = true; break; }
+   }
+   if (!full) {
+    for (let i = 0; i < below.length && !full; i += 2) {
+     if (fresh.has(below[i]!)) continue;
+     const container = below[i + 1]!, id = this.ids.get(container)!;
+     rewalk.set(id, container);
+     if (rewalk.size + appended.size > MAX_MUTATION_ROOTS) full = true;
+    }
+   }
+   if (!full) {
+    // The new nodes must be exactly the trailing run of the parent's children, or the viewer (which adds new nodes after the ones it holds) would show another order.
+    for (const [parent, group] of appended) {
+     if (rewalk.has(group.id)) { appended.delete(parent); continue; }
+     let live = 0;
+     for (const born of group.born) if (dom.parentNode(born) === parent) live++;
+     if (live === 0) { appended.delete(parent); continue; }
+     const run: object[] = [];
+     for (let child = dom.lastChild(parent); child !== null && group.born.has(child); child = dom.previousSibling(child)) run.push(child);
+     if (run.length !== live) { rewalk.set(group.id, parent); appended.delete(parent); } else group.roots = run.reverse();
+    }
    }
    if (full) { this.flushEvents(); this.checkpoint(); return; }
-   if (dirty.size === 0) return;
-   // Running total: ids come from one counter that restarts only at a checkpoint, so every node of the live tree was allocated
-   // since then and a delta may add at most MAX_NODES minus what the counter already holds. A delta that would pass the cap is
-   // discarded for a fresh checkpoint, which recounts the live tree exactly (replaced and removed nodes no longer count): only a
-   // live tree that itself reaches the cap ends up as an opaque placeholder plus a gap (walk's last-slot rule).
-   const state = newWalkState(this.ids, this.allocate, this.observeShadow, Math.max(1, MAX_NODES - this.counter)), events: ReplayEvent[] = [], at = this.now().mono_ns;
-   for (const [id, node] of dirty) {
-    let covered = false;
-    for (let up = dom.parentNode(node), hops = 0; up !== null && hops < MAX_DEPTH * 4; up = dom.parentNode(up), hops++) { const upId = this.ids.get(up); if (upId !== undefined && dirty.has(upId)) { covered = true; break; } }
-    if (covered) continue;
-    const parent = dom.parentNode(node), parentId = parent === null ? undefined : this.ids.get(parent);
-    // A node the replay holds that has left the tree (no parent, and not the root itself) was removed by a record on its old parent; re-walking it would hang it at the root of the replay.
-    if (parent === null && node !== this.config.root) continue;
-    events.push({at_ns: at, kind: "mutation", node: String(id), x: 0, y: 0});
-    walk(dom, node, parentId === undefined ? "0" : String(parentId), state, 0, id);
+   if (rewalk.size === 0 && appended.size === 0) return;
+   let built = this.delta(dom, rewalk, appended, fresh);
+   // An append the chunk cannot hold is the re-walk of its parent, which the chunk fit collapses into a declared gap (an append has no parent node in the chunk to collapse).
+   if (!built.restart && appended.size > 0 && !this.fits(built.nodes, built.events)) {
+    for (const [parent, group] of appended) rewalk.set(group.id, parent);
+    appended.clear();
+    built = this.delta(dom, rewalk, appended, fresh);
    }
-   if (state.overflow) { this.flushEvents(); this.checkpoint(); return; }
-   if (events.length === 0) return; // every dirty node had left the tree: nothing the replay shows changed
+   if (built.restart) { this.flushEvents(); this.checkpoint(); return; }
+   if (built.events.length === 0) return; // every changed node had left the tree: nothing the replay shows changed
    this.flushEvents();
-   this.write(state.nodes, events, false, false);
+   this.write(built.nodes, built.events, false, false);
   });
+ }
+
+ /** A node the replay holds whose new children may be recorded alone: it shows its children (no widget, input, editable or shadow root), and the record names nothing the replay holds (no removal, no move, no re-added node). */
+ private appendable(dom: DomAccessors, node: object, appended: ReadonlyMap<object, Appended>, change: {readonly added: readonly object[]; readonly removed: readonly object[]}): boolean {
+  for (const gone of change.removed) if (this.ids.has(gone)) return false;
+  for (const born of change.added) if (this.ids.has(born)) return false;
+  if (appended.has(node)) return true;
+  return this.showsChildren(dom, node) && dom.openShadowRoot(node) === null;
+ }
+
+ /** An element the replay holds shows its children unless it is an input, a widget, editable or a closed shadow host: those are one node with nothing below it. */
+ private showsChildren(dom: DomAccessors, element: object): boolean {
+  const name = dom.localName(element);
+  return name !== "input" && !isOpaqueWidget(name) && !dom.editable(element) && dom.closedShadow?.(element) !== true;
+ }
+
+ /** The nodes and events of the batch: the re-walks and then the appended subtrees. A node inside an ancestor's re-walk or inside a new subtree (a node the replay holds that was moved into one) is part of that walk. */
+ private delta(dom: DomAccessors, rewalk: ReadonlyMap<number, object>, appended: ReadonlyMap<object, Appended>, fresh: ReadonlySet<object>): {readonly nodes: ReplayNode[]; readonly events: ReplayEvent[]; readonly restart: boolean} {
+  // Running total: ids come from one counter that restarts only at a checkpoint, so every node of the live tree was allocated
+  // since then and a delta may add at most MAX_NODES minus what the counter already holds. A delta that would pass the cap is
+  // discarded for a fresh checkpoint, which recounts the live tree exactly (replaced and removed nodes no longer count): only a
+  // live tree that itself reaches the cap ends up as an opaque placeholder plus a gap (walk's last-slot rule).
+  const state = newWalkState(this.ids, this.allocate, this.observeShadow, Math.max(1, MAX_NODES - this.counter)), events: ReplayEvent[] = [], at = this.now().mono_ns;
+  const covered = (node: object): boolean => {
+   for (let up = dom.parentNode(node), hops = 0; up !== null && hops < MAX_DEPTH * 4; up = dom.parentNode(up), hops++) {
+    const upId = this.ids.get(up);
+    if (fresh.has(up) || upId !== undefined && rewalk.has(upId)) return true;
+   }
+   return false;
+  };
+  let unplaced = false;
+  for (const [id, node] of rewalk) {
+   if (covered(node)) continue;
+   const parentId = this.placement(dom, node);
+   if (parentId === undefined) continue;
+   if (parentId === null) { unplaced = true; continue; }
+   events.push({at_ns: at, kind: "mutation", node: String(id), x: 0, y: 0});
+   walk(dom, node, parentId, state, 0, id);
+  }
+  for (const [parent, group] of appended) {
+   if (rewalk.has(group.id) || covered(parent)) continue;
+   const parentId = this.placement(dom, parent);
+   if (parentId === undefined) continue;
+   if (parentId === null) { unplaced = true; continue; }
+   const first = state.nodes.length;
+   for (const root of group.roots) walk(dom, root, String(group.id), state);
+   if (state.nodes.length > first) events.push({at_ns: at, kind: "mutation", node: state.nodes[first]!.id, x: 0, y: 0});
+  }
+  return {nodes: state.nodes, events, restart: state.overflow || unplaced};
+ }
+
+ /**
+  * The parent id a node the replay holds is shown under: "0" for the observed root and for the children of a document root; undefined when the node is not in
+  * the replay tree (it left the tree, so a record on its old parent covers it, or it sits inside a region the replay shows nothing of: below a widget, an input or a placeholder);
+  * null when the recorder cannot say (its parent is a shadow root, whose host the platform accessors do not name), which is a full checkpoint.
+  */
+ private placement(dom: DomAccessors, node: object): string | undefined | null {
+  if (node === this.config.root) return "0";
+  const parent = dom.parentNode(node);
+  if (parent === null) return undefined;
+  const id = this.ids.get(parent);
+  if (id !== undefined) return this.showsChildren(dom, parent) ? String(id) : undefined;
+  if (parent === this.config.root) return "0";
+  return dom.nodeType(parent) === 11 ? null : undefined;
+ }
+
+ /** True when one chunk can hold these nodes and events without the chunk fit having to collapse anything. */
+ private fits(nodes: readonly ReplayNode[], events: readonly ReplayEvent[]): boolean {
+  if (nodes.length > MAX_CHUNK_NODES) return false;
+  const room = chunkRoom(events);
+  let total = 0;
+  for (const node of nodes) total += nodeBytes(node);
+  return total <= room;
  }
 
  /**
@@ -211,9 +320,7 @@ class Recorder implements ReplayRecorder {
   * until a new complete checkpoint.
   */
  private write(nodes: readonly ReplayNode[], events: readonly ReplayEvent[], checkpoint: boolean, gap: boolean): void {
-  let budget = GAP_EVENT_BYTES;
-  for (const event of events) budget += JSON.stringify(event).length + 1;
-  const room = Math.max(0, MAX_CHUNK_BYTES - budget);
+  const room = chunkRoom(events);
  // The recorder builds every node itself, so its JSON size is the frame plus the value lengths: a chunk that fits needs no per-node JSON.stringify sizing.
  let totalBytes = 0;
  for (const node of nodes) totalBytes += nodeBytes(node);

@@ -99,7 +99,7 @@ test("with the Document-Policy header: genuine samples from a real busy loop, sa
  expect(report.capability.coverage).toEqual({frames: "partial", threads: "partial", workers: "none", tasks: "none"});
  expect(report.clock.source).toContain("DOMHighResTimeStamp"); expect(report.clock.uncertainty_ns).toBe("18446744073709551615");
  expect(report.non_profile.length).toBeGreaterThan(0);
- for (const entry of report.non_profile) { expect(Object.keys(entry).sort()).toEqual(["duration_ms", "method", "profile", "signal", "start_ms", "unit"]); expect(entry.method).toBe("long_task"); expect(entry.signal).toBe("metric"); }
+ for (const entry of report.non_profile) { expect(Object.keys(entry).sort()).toEqual(["duration_ms", "end_mono_ns", "method", "profile", "signal", "start_mono_ns", "start_ms", "unit"]); expect(entry.method).toBe("long_task"); expect(entry.signal).toBe("span"); expect(BigInt(String(entry.end_mono_ns)) - BigInt(String(entry.start_mono_ns))).toBeGreaterThanOrEqual(50_000_000n); }
  expect(Math.max(...report.non_profile.map(e => Number(e.duration_ms)))).toBeGreaterThanOrEqual(50);
  expect(report.scope.long_tasks).toBe("observed");
  expect(JSON.parse(wire)).toEqual(report);

@@ -8,6 +8,7 @@
   "exports": {
     ".": "./src/client.ts",
     "./types": "./src/types.ts",
+    "./elapsed": "./src/elapsed_span.ts",
     "./runtime": "./src/runtime_client.ts",
     "./spool": "./src/spool.ts"
   },
